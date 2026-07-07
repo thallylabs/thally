@@ -1,0 +1,62 @@
+---
+title: "Frame"
+description: "Un contenedor de imagen estilizado con título opcional y zoom al hacer clic."
+---
+
+`<Frame>` envuelve imágenes y otros medios en un contenedor redondeado y con borde. Por defecto, las imágenes son ampliables — haz clic para verlas a tamaño completo.
+
+## Uso básico
+
+<Frame>
+  <img src="/images/image1.jpg" alt="Vista general del panel" />
+</Frame>
+
+```mdx
+<Frame>
+  <img src="/images/dashboard.png" alt="Dashboard overview" />
+</Frame>
+```
+
+## Con título
+
+<Frame caption="Una vista panorámica — añade cualquier descripción debajo de tu imagen.">
+  <img src="/images/image2.jpg" alt="Panel de análisis" />
+</Frame>
+
+```mdx
+<Frame caption="The analytics dashboard showing daily active users.">
+  <img src="/images/analytics.png" alt="Analytics dashboard" />
+</Frame>
+```
+
+## Desactivar zoom
+
+Establece `zoom={false}` cuando la imagen sea meramente decorativa o quieras evitar que se abra el visor:
+
+<Frame zoom={false}>
+  <img src="/images/image3.jpg" alt="Diagrama de arquitectura" />
+</Frame>
+
+```mdx
+<Frame zoom={false}>
+  <img src="/images/diagram.png" alt="Architecture diagram" />
+</Frame>
+```
+
+## Variantes claro/oscuro
+
+Envuelve dos imágenes con `className` condicional para alternar entre modo claro y oscuro:
+
+```mdx
+<Frame>
+  <img className="block dark:hidden" src="/images/light.png" alt="Light mode" />
+  <img className="hidden dark:block" src="/images/dark.png" alt="Dark mode" />
+</Frame>
+```
+
+## Propiedades
+
+| Propiedad | Tipo | Valor por defecto | Descripción |
+|---|---|---|---|
+| `caption` | `string` | — | Texto mostrado debajo del marco |
+| `zoom` | `boolean` | `true` | Activar zoom al hacer clic sobre el contenido |

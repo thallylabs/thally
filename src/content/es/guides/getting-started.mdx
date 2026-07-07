@@ -1,0 +1,109 @@
+---
+title: Comenzando con Dox
+description: Configura Dox y crea tu primera página de documentación en menos de cinco minutos.
+---
+
+## Requisitos previos
+
+- **Node.js 18+** y npm (o pnpm/yarn)
+- Una terminal y un editor de código
+- Una especificación OpenAPI (opcional — se incluye un ejemplo de Pet Store)
+
+<Frame caption="Desde la configuración hasta el despliegue en minutos" zoom={false}>
+
+![Horizonte de la ciudad de noche](/images/image3.jpg)
+
+</Frame>
+
+<Steps>
+
+<Step title="Crea tu proyecto">
+
+Usa la CLI (recomendado):
+
+```bash
+npx create-dox my-docs
+```
+
+La CLI te guía a través de una configuración interactiva:
+
+- **Nombre del proyecto** — se muestra en el encabezado y los metadatos
+- **Descripción** — se usa para SEO y etiquetas OpenGraph
+- **Preset de marca** — `primary` (verde) o `secondary` (morado)
+- **URL del repositorio de GitHub** — conecta automáticamente los enlaces de Soporte y GitHub
+- **Instalar dependencias** — ejecuta `npm install` por ti
+
+También puedes omitir las preguntas y aceptar todos los valores predeterminados:
+
+```bash
+npx create-dox my-docs --yes
+```
+
+O clonar manualmente:
+
+```bash
+git clone https://github.com/kenny-io/Dox.git my-docs
+cd my-docs
+rm -rf .git
+npm install
+```
+
+</Step>
+
+<Step title="Inicia el servidor de desarrollo">
+
+```bash
+cd my-docs
+npm run dev
+```
+
+Abre [http://localhost:3040](http://localhost:3040) para ver el sitio de documentación predeterminado.
+
+</Step>
+
+<Step title="Crea tu primera página">
+
+Crea un nuevo archivo en `src/content/my-first-page.mdx`:
+
+```mdx
+---
+title: My First Page
+description: A quick test page to verify everything works.
+---
+
+Welcome to my documentation! This page was created with Dox.
+
+## Next steps
+
+- Edit `docs.json` to add this page to the sidebar.
+- Replace the example content with your own.
+```
+
+</Step>
+
+<Step title="Agrégala a la navegación">
+
+Abre `docs.json` y añade tu página a un grupo:
+
+```json
+{
+  "group": "Getting Started",
+  "pages": ["introduction", "quickstart", "my-first-page"]
+}
+```
+
+Guarda el archivo y la barra lateral se actualiza automáticamente — no se requiere reinicio.
+
+</Step>
+
+<Step title="Despliega">
+
+```bash
+npm run build
+```
+
+Despliega la salida en cualquier plataforma que soporte Next.js — Vercel, Netlify, Cloudflare o un contenedor Docker.
+
+</Step>
+
+</Steps>

@@ -1,0 +1,51 @@
+---
+title: "Steps"
+description: "Numbered step-by-step guides for setup and tutorial content."
+---
+
+Use `<Steps>` and `<Step>` to structure sequential instructions. Each step renders as a numbered item with a connector line between steps.
+
+## Example
+
+<Steps>
+  <Step title="Install the package">
+    ```bash
+    npm install @company/sdk
+    ```
+  </Step>
+  <Step title="Add your API key">
+    Create a `.env` file at the root of your project:
+
+    ```bash
+    API_KEY=sk-your-key-here
+    ```
+  </Step>
+  <Step title="Make your first request">
+    ```typescript
+    import { ApiClient } from '@company/sdk'
+
+    const client = new ApiClient({ apiKey: process.env.API_KEY })
+    const result = await client.pets.list()
+    console.log(result)
+    ```
+  </Step>
+</Steps>
+
+```mdx
+<Steps>
+  <Step title="Step one">
+    Content for step one.
+  </Step>
+  <Step title="Step two">
+    Content for step two.
+  </Step>
+</Steps>
+```
+
+## Props
+
+### `<Step>`
+
+| Prop | Type | Description |
+|---|---|---|
+| `title` | `string` | Step heading displayed next to the number |

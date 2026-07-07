@@ -1,0 +1,120 @@
+---
+title: "Columns"
+description: "Coloca contenido lado a lado en un diseño de varias columnas responsivo."
+---
+
+`<Columns>` crea una cuadrícula CSS con un número de columnas configurable. A diferencia de `<CardGroup>`, no hay borde de tarjeta — es únicamente un primitivo de diseño que colapsa a una sola columna en dispositivos móviles.
+
+## Dos columnas
+
+<Columns cols={2}>
+  <div>
+    **Columna izquierda**
+
+    Úsala para tablas de comparación, fragmentos de código lado a lado o diagramas de múltiples paneles. Ambas columnas se apilan verticalmente en dispositivos móviles.
+  </div>
+  <div>
+    **Columna derecha**
+
+    Cada columna puede contener cualquier contenido MDX — párrafos, listas, bloques de código, llamadas de atención o componentes anidados.
+  </div>
+</Columns>
+
+```mdx
+<Columns cols={2}>
+  <div>Left content</div>
+  <div>Right content</div>
+</Columns>
+```
+
+## Tres columnas
+
+<Columns cols={3}>
+  <div>
+    **Configuración**
+
+    Instala el paquete, agrega tu clave API y ejecuta `npm run dev`.
+  </div>
+  <div>
+    **Configurar**
+
+    Edita `docs.json` para definir tu navegación, marca e integraciones.
+  </div>
+  <div>
+    **Desplegar**
+
+    Haz push a GitHub y conecta tu repositorio a Vercel o cualquier host estático.
+  </div>
+</Columns>
+
+```mdx
+<Columns cols={3}>
+  <div>**Setup** — Install and run.</div>
+  <div>**Configure** — Edit docs.json.</div>
+  <div>**Deploy** — Push to GitHub.</div>
+</Columns>
+```
+
+## Cuatro columnas
+
+<Columns cols={4}>
+  <div>
+    **TypeScript**
+
+    SDK con tipado estricto y soporte completo de IntelliSense.
+  </div>
+  <div>
+    **Python**
+
+    Cliente con async como prioridad, compatible con FastAPI y Django.
+  </div>
+  <div>
+    **Go**
+
+    Módulo ligero y sin dependencias para Go 1.21+.
+  </div>
+  <div>
+    **Ruby**
+
+    Gema idiomática con extensiones de ActiveSupport.
+  </div>
+</Columns>
+
+```mdx
+<Columns cols={4}>
+  <div>**TypeScript**</div>
+  <div>**Python**</div>
+  <div>**Go**</div>
+  <div>**Ruby**</div>
+</Columns>
+```
+
+## Combinación con otros componentes
+
+Las columnas funcionan bien con `<Frame>` para comparaciones de imágenes lado a lado:
+
+<Columns cols={2}>
+  <Frame caption="Antes">
+    <img src="/images/image1.jpg" alt="Before" />
+  </Frame>
+  <Frame caption="Después">
+    <img src="/images/image2.jpg" alt="After" />
+  </Frame>
+</Columns>
+
+```mdx
+<Columns cols={2}>
+  <Frame caption="Before">
+    <img src="/images/before.png" alt="Before" />
+  </Frame>
+  <Frame caption="After">
+    <img src="/images/after.png" alt="After" />
+  </Frame>
+</Columns>
+```
+
+## Props
+
+| Prop | Tipo | Por defecto | Descripción |
+|---|---|---|---|
+| `cols` | `1 \| 2 \| 3 \| 4` | `2` | Número de columnas |

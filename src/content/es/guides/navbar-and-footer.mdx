@@ -1,0 +1,148 @@
+---
+title: Navbar y Footer
+description: Configura enlaces de navegación personalizados, un botón CTA, enlaces de pie de página en múltiples columnas e íconos sociales desde docs.json.
+---
+
+La barra de navegación superior y el pie de página son configurables desde `docs.json`. No se requieren cambios de código — agrega un bloque `navbar` o `footer` y Dox lo detecta automáticamente.
+
+## Navbar
+
+Agrega un bloque `navbar` a `docs.json` para controlar los enlaces y el botón CTA en la barra superior.
+
+```json
+"navbar": {
+  "links": [
+    { "label": "GitHub", "href": "https://github.com/your-org/repo", "type": "github" },
+    { "label": "Support", "href": "https://support.example.com" }
+  ],
+  "primary": { "label": "Get started", "href": "/quickstart" }
+}
+```
+
+### `navbar.links`
+
+Un arreglo de enlaces de navegación renderizados a la izquierda del botón CTA.
+
+| Campo | Tipo | Descripción |
+| --- | --- | --- |
+| `label` | `string` | Texto del enlace |
+| `href` | `string` | URL de destino (interna o externa) |
+| `type` | `"github"` _(opcional)_ | Establece en `"github"` para renderizar el ícono de GitHub junto a la etiqueta |
+
+Cuando se establece `type: "github"`, la marca de GitHub se muestra a la izquierda de la etiqueta:
+
+```json
+{ "label": "GitHub", "href": "https://github.com/your-org/repo", "type": "github" }
+```
+
+Los enlaces externos se abren en una pestaña nueva automáticamente.
+
+### `navbar.primary`
+
+El botón CTA principal — renderizado como una píldora de acento rellena en la barra superior. Cuando se establece, reemplaza el CTA detectado automáticamente desde `siteConfig.links`.
+
+```json
+"primary": { "label": "Get started", "href": "/quickstart" }
+```
+
+<Note type="info" title="Alternativa">
+Cuando `navbar` no está definido en `docs.json`, Dox recurre a detectar automáticamente un enlace de soporte y CTA desde `siteConfig.links` en `src/data/site.ts`. Define `navbar` en `docs.json` cuando quieras un control explícito.
+</Note>
+
+---
+
+## Footer
+
+Agrega un bloque `footer` a `docs.json` para renderizar una cuadrícula de enlaces en múltiples columnas e íconos sociales en la parte inferior de cada página.
+
+```json
+"footer": {
+  "socials": {
+    "github": "https://github.com/your-org",
+    "twitter": "https://twitter.com/yourhandle",
+    "discord": "https://discord.gg/invite"
+  },
+  "links": [
+    {
+      "heading": "Documentation",
+      "items": [
+        { "label": "Quick Start", "href": "/quickstart" },
+        { "label": "Guides", "href": "/guides/getting-started" }
+      ]
+    },
+    {
+      "heading": "Tooling",
+      "items": [
+        { "label": "CLI Reference", "href": "/guides/cli-reference" },
+        { "label": "MCP Server", "href": "/guides/mcp-server" }
+      ]
+    }
+  ]
+}
+```
+
+### `footer.socials`
+
+Un mapa de claves de plataformas sociales a URLs. Claves compatibles con íconos:
+
+| Clave | Ícono |
+| --- | --- |
+| `github` | Marca de GitHub |
+| `twitter` o `x` | Marca de X (Twitter) |
+| `discord` | Logo de Discord |
+| `linkedin` | Logo de LinkedIn |
+
+Cualquier otra clave se renderiza como un enlace de texto simple.
+
+### `footer.links`
+
+Un arreglo de columnas de enlaces. Cada columna tiene:
+
+| Campo | Tipo | Descripción |
+| --- | --- | --- |
+| `heading` | `string` | Encabezado de columna (renderizado en versalitas) |
+| `items` | `Array<{ label, href }>` | Enlaces en esta columna |
+
+Las columnas se muestran en una cuadrícula responsiva — 2 columnas en móvil, 3 en tableta, 4 en escritorio.
+
+<Note type="info" title="Pie de página predeterminado">
+Cuando `footer` no está definido en `docs.json`, Dox renderiza un pie de página mínimo de una sola línea con el nombre del sitio y `siteConfig.links`.
+</Note>
+
+---
+
+## Ejemplo completo
+
+```json
+{
+  "navbar": {
+    "links": [
+      { "label": "GitHub", "href": "https://github.com/your-org/repo", "type": "github" }
+    ],
+    "primary": { "label": "Get started", "href": "/quickstart" }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/your-org",
+      "twitter": "https://twitter.com/yourhandle"
+    },
+    "links": [
+      {
+        "heading": "Product",
+        "items": [
+          { "label": "Overview", "href": "/" },
+          { "label": "Quick Start", "href": "/quickstart" },
+          { "label": "Changelog", "href": "/changelog" }
+        ]
+      },
+      {
+        "heading": "Developers",
+        "items": [
+          { "label": "API Reference", "href": "/api" },
+          { "label": "CLI", "href": "/guides/cli-reference" }
+        ]
+      }
+    ]
+  }
+}
+```

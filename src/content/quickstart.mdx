@@ -1,0 +1,86 @@
+---
+title: Quickstart
+description: Get a Dox documentation site running locally in under five minutes.
+---
+
+Follow these steps to go from zero to a running docs site.
+
+![HTML browser window](/images/image2.jpg)
+
+<Steps>
+
+<Step title="Create your project">
+
+```bash
+npx create-dox my-docs
+cd my-docs
+npm run dev
+```
+
+Open [http://localhost:3040](http://localhost:3040) to see your new docs site.
+
+</Step>
+
+<Step title="Add a page">
+
+Create `src/content/my-page.mdx`:
+
+```mdx
+---
+title: My Page
+description: A new documentation page.
+---
+
+Write your content here using Markdown and JSX components.
+```
+
+</Step>
+
+<Step title="Register it in navigation">
+
+Open `docs.json` and add the page to a group:
+
+```json
+{
+  "group": "Getting Started",
+  "pages": ["introduction", "quickstart", "my-page"]
+}
+```
+
+The sidebar updates automatically — no restart required.
+
+</Step>
+
+<Step title="Add an API reference">
+
+Drop an OpenAPI spec (YAML or JSON) into the project root and reference it in `docs.json`:
+
+```json
+{
+  "tab": "API Reference",
+  "api": {
+    "source": "openapi.yaml"
+  }
+}
+```
+
+Dox generates interactive endpoint pages with parameter tables, schemas, code samples, and a "Try It" console.
+
+</Step>
+
+<Step title="Deploy">
+
+```bash
+npm run build
+```
+
+Deploy to any platform that supports Next.js — Vercel, Netlify, Cloudflare, or a Docker container.
+
+<Note type="info" title="Environment variables">
+Set `DOX_SITE_URL` in your hosting dashboard for correct OpenGraph URLs and metadata.
+</Note>
+
+</Step>
+
+</Steps>
+

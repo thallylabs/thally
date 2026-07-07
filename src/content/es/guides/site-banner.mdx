@@ -1,0 +1,45 @@
+---
+title: Banner del Sitio
+description: Muestra un banner de anuncio descartable en la parte superior de cada página.
+---
+
+Un banner del sitio aparece encima de la barra de navegación en cada página — útil para anuncios de lanzamiento, avisos de obsolescencia o alertas importantes. Los usuarios pueden descartarlo y no volverá a aparecer (almacenado en `localStorage`).
+
+## Configuración
+
+Agrega un bloque `banner` en `docs.json`:
+
+```json
+"banner": {
+  "content": "We just launched v2! [Read the announcement →](/changelog)",
+  "dismissible": true
+}
+```
+
+El banner se renderiza de inmediato — no se necesitan cambios en el código, solo vuelve a desplegar después de actualizar `docs.json`.
+
+## Campos
+
+| Campo | Tipo | Predeterminado | Descripción |
+| --- | --- | --- | --- |
+| `content` | `string` | — | Texto del banner. Admite enlaces markdown con formato `[etiqueta](url)`. |
+| `dismissible` | `boolean` | `true` | Si se debe mostrar un botón × para ocultar el banner |
+
+## Enlaces en markdown
+
+El campo `content` admite la sintaxis de enlace markdown en línea: `[text](url)`. Tanto los enlaces internos como los externos funcionan.
+
+```json
+"banner": {
+  "content": "New: [Multi-language docs](/guides/multi-language) are now available",
+  "dismissible": true
+}
+```
+
+## Eliminar el banner
+
+Elimina la clave `banner` de `docs.json` y vuelve a desplegar. Los usuarios que anteriormente lo descartaron no notarán ningún cambio; los usuarios que no lo habían descartado dejarán de verlo.
+
+<Note type="info" title="Consejo">
+Para forzar a los usuarios a ver un banner actualizado aunque hayan descartado uno anterior, cambia el texto de `content`. El descarte está vinculado a la cadena de contenido exacta.
+</Note>

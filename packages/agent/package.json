@@ -1,0 +1,51 @@
+{
+  "name": "@doxlabs/agent",
+  "version": "0.1.0",
+  "description": "The Dox docs agent — turns a task (a PR, a diff, or an instruction) into a reviewed documentation pull request.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@doxlabs/mcp": "*",
+    "create-dox": "*",
+    "zod-to-json-schema": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "zod": "^3.0.0"
+  },
+  "license": "MIT",
+  "keywords": [
+    "dox",
+    "documentation",
+    "agent",
+    "ai",
+    "claude",
+    "docs-as-code"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kenny-io/Dox.git",
+    "directory": "packages/agent"
+  },
+  "private": true
+}

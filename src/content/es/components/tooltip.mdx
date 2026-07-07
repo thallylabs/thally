@@ -1,0 +1,24 @@
+---
+title: "Tooltip"
+description: "Tooltip en línea al pasar el cursor para definir términos o proporcionar contexto."
+---
+
+`<Tooltip>` agrega un tooltip al pasar el cursor sobre cualquier texto en línea. El texto envuelto obtiene un subrayado punteado que indica que es interactivo.
+
+## Ejemplo
+
+El <Tooltip tip="A JSON Web Token used for authentication">JWT</Tooltip> se envía en el encabezado `Authorization` con cada solicitud.
+
+```mdx
+The <Tooltip tip="A JSON Web Token used for authentication">JWT</Tooltip> is sent in the `Authorization` header.
+```
+
+## Props
+
+| Prop | Tipo | Descripción |
+|---|---|---|
+| `tip` | `string` | Texto que se muestra en el tooltip al pasar el cursor |
+
+<Note>
+  `<Tooltip>` utiliza el atributo nativo `title` para máxima compatibilidad. Para tooltips más ricos con contenido interactivo o soporte de markdown, usa un componente React personalizado.
+</Note>

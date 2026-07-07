@@ -1,0 +1,189 @@
+---
+title: Escritura de Contenido
+description: Cómo escribir páginas de documentación usando MDX, frontmatter y componentes integrados.
+---
+
+## Conceptos básicos de MDX
+
+Cada página en Dox es un archivo `.mdx` — Markdown con soporte para JSX. Puedes usar la sintaxis estándar de Markdown además de componentes React en línea.
+
+```mdx
+# Encabezado
+
+Párrafo normal con **negrita**, *cursiva* y `código en línea`.
+
+- Listas con viñetas
+- Funcionan como se espera
+
+1. Las listas numeradas también
+```
+
+## Frontmatter
+
+Cada página necesita un bloque de frontmatter al inicio:
+
+```yaml
+---
+title: Título de la Página
+description: Un breve resumen para los resultados de búsqueda y las metaetiquetas.
+---
+```
+
+| Campo | Requerido | Propósito |
+| --- | --- | --- |
+| `title` | Sí | Encabezado de la página y etiqueta en la barra lateral |
+| `description` | Sí | Meta descripción y fragmento de búsqueda |
+
+El título del frontmatter se renderiza automáticamente como el encabezado de la página — no es necesario agregar un `# H1` en el cuerpo.
+
+## Bloques de código
+
+Los bloques de código delimitados obtienen resaltado de sintaxis automáticamente:
+
+````mdx
+```javascript
+const greeting = 'Hello from Dox!'
+console.log(greeting)
+```
+````
+
+Usa `bash`, `typescript`, `python`, `json`, u cualquier otro identificador de lenguaje compatible con Shiki.
+
+## Avisos y notas
+
+Usa el componente `<Note>` para destacar información importante:
+
+```mdx
+<Note type="info" title="Good to know">
+  Notes support **Markdown** inside them.
+</Note>
+
+<Note type="warning" title="Heads up">
+  This is a warning callout.
+</Note>
+```
+
+Tipos disponibles: `info`, `warning`, `danger`, `tip`.
+
+## Enlaces
+
+Los enlaces estándar de Markdown funcionan tanto para páginas internas como externas:
+
+```mdx
+Check the [Quickstart](/quickstart) guide or visit [GitHub](https://github.com).
+```
+
+## Pestañas
+
+Usa `<Tabs>` y `<Tab>` para mostrar contenido específico por plataforma o variantes sin bloques de código:
+
+```mdx
+<Tabs>
+
+<Tab title="macOS">
+Install with Homebrew:
+\`\`\`bash
+brew install your-cli
+\`\`\`
+</Tab>
+
+<Tab title="Linux">
+Install with apt:
+\`\`\`bash
+sudo apt install your-cli
+\`\`\`
+</Tab>
+
+</Tabs>
+```
+
+Cada `<Tab>` admite contenido MDX completo en su interior — bloques de código, listas, avisos y más.
+
+## Pasos
+
+Usa `<Steps>` y `<Step>` para instrucciones secuenciales con círculos numerados y líneas conectoras:
+
+```mdx
+<Steps>
+
+<Step title="Install">
+Run the installer:
+\`\`\`bash
+npm install your-package
+\`\`\`
+</Step>
+
+<Step title="Configure">
+Create a config file and add your API key.
+</Step>
+
+</Steps>
+```
+
+## Tarjetas
+
+Usa `<CardGroup>` y `<Card>` para crear cuadrículas de tarjetas clicables para páginas de inicio o secciones de "próximos pasos":
+
+```mdx
+<CardGroup cols={2}>
+
+<Card title="Quickstart" href="/quickstart" icon="book-open">
+Get up and running in five minutes.
+</Card>
+
+<Card title="API Reference" href="/api" icon="code-simple">
+Explore the full API.
+</Card>
+
+</CardGroup>
+```
+
+Iconos disponibles: `book-open`, `code-simple`, `grid-round`, `link-simple`, `wrench`, `party-horn`, `telegram`, `envelope`, `x-twitter`, `message`.
+
+## Imágenes y marcos
+
+Coloca las imágenes en la carpeta `public/` y referéncialas con una barra diagonal al inicio:
+
+```mdx
+![Screenshot](/images/image1.jpg)
+```
+
+Envuelve las imágenes en un `<Frame>` para obtener un borde estilizado con un pie de foto opcional. Los marcos tienen zoom al hacer clic por defecto:
+
+```mdx
+<Frame caption="System architecture overview">
+  ![Screenshot](/images/image1.jpg)
+</Frame>
+```
+
+Desactiva el zoom con `<Frame zoom={false}>`.
+
+## Enlaces ancla en encabezados
+
+Cada encabezado `h2` y `h3` obtiene automáticamente un enlace ancla `#`. Al pasar el cursor sobre un encabezado se revela el símbolo `#`, y al hacer clic en él se copia la URL completa al portapapeles. Esto facilita compartir enlaces a secciones específicas.
+
+## Tablas
+
+Las tablas estándar de Markdown se renderizan con el estilo adecuado:
+
+```mdx
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | /pets | List all pets |
+| POST | /pets | Create a pet |
+```
+
+## Organización de archivos
+
+Todo el contenido se encuentra en `src/content/`. Puedes usar subdirectorios para organizar páginas relacionadas:
+
+```
+src/content/
+  introduction.mdx          → /introduction (or / for the root)
+  quickstart.mdx             → /quickstart
+  guides/
+    getting-started.mdx      → /guides/getting-started
+    writing-content.mdx      → /guides/writing-content
+```
+
+La ruta URL coincide con la ruta del archivo relativa a `src/content/`, sin la extensión `.mdx`.

@@ -1,0 +1,264 @@
+---
+title: Servidor MCP
+description: Usa @doxlabs/mcp para gestionar proyectos Dox con Claude, Cursor o cualquier herramienta de IA compatible con MCP.
+---
+
+`@doxlabs/mcp` es un servidor [Model Context Protocol](https://modelcontextprotocol.io) que permite a las herramientas de IA — Claude Code, Claude Desktop, Cursor, Windsurf — crear, leer, actualizar y migrar proyectos de documentación Dox mediante lenguaje natural.
+
+## Configuración
+
+Agrega `@doxlabs/mcp` a tu configuración de Claude Code o Claude Desktop:
+
+<Tabs>
+
+<Tab title="Claude Code">
+
+```bash
+claude mcp add dox -- npx -y @doxlabs/mcp
+```
+
+</Tab>
+
+<Tab title="Claude Desktop">
+
+Agrega a `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "dox": {
+      "command": "npx",
+      "args": ["-y", "@doxlabs/mcp"]
+    }
+  }
+}
+```
+
+</Tab>
+
+<Tab title="Cursor / Windsurf">
+
+Agrega a tu configuración de MCP:
+
+```json
+{
+  "mcpServers": {
+    "dox": {
+      "command": "npx",
+      "args": ["-y", "@doxlabs/mcp"]
+    }
+  }
+}
+```
+
+</Tab>
+
+</Tabs>
+
+Una vez conectado, puedes hablarle a tu documentación como a un colaborador: *"Agrega una página sobre webhooks a la pestaña Guías"* o *"Migra la documentación de Stripe a un nuevo proyecto"*.
+
+---
+
+## Herramientas
+
+### Gestión de proyectos
+
+#### `create_project`
+
+Genera un nuevo proyecto Dox a partir de la plantilla de GitHub.
+
+```
+Create a new Dox project at ~/dev/my-docs with the name "Acme Docs"
+```
+
+| Parámetro | Requerido | Descripción |
+|-----------|----------|-------------|
+| `projectDir` | Sí | Ruta para el nuevo proyecto |
+| `projectName` | No | Se muestra en el encabezado y metadatos |
+| `description` | No | Usado para SEO y OpenGraph |
+| `brandPreset` | No | `primary` o `secondary` |
+| `repoUrl` | No | URL de GitHub para los enlaces "Editar en GitHub" |
+| `install` | No | Ejecutar `npm install` después de generar el proyecto (predeterminado: `true`) |
+
+---
+
+#### `add_page`
+
+Crea una nueva página MDX y la registra en `docs.json`.
+
+```
+Add a page called "Authentication" to the Guides tab under a "Security" group
+```
+
+| Parámetro | Requerido | Descripción |
+|-----------|----------|-------------|
+| `projectDir` | Sí | Ruta al proyecto Dox |
+| `pageId` | Sí | p. ej. `guides/authentication` — sin extensión `.mdx` |
+| `title` | Sí | Título de la página (frontmatter) |
+| `description` | No | Descripción de la página (frontmatter) |
+| `content` | No | Cuerpo MDX (se usa un marcador de posición si se omite) |
+| `tab` | No | Nombre de la pestaña (predeterminado: primera pestaña) |
+| `group` | No | Nombre del grupo (predeterminado: primer grupo) |
+| `position` | No | `start` o `end` (predeterminado: `end`) |
+
+---
+
+#### `add_tab`
+
+Agrega una nueva pestaña de nivel superior a la navegación.
+
+```
+Add a "SDK Reference" tab to the project
+```
+
+| Parámetro | Requerido | Descripción |
+|-----------|----------|-------------|
+| `projectDir` | Sí | Ruta al proyecto Dox |
+| `tabName` | Sí | Etiqueta de la pestaña |
+| `href` | No | Si se define, crea una pestaña con enlace de redirección (p. ej. `/changelog`) |
+| `position` | No | `start` o `end` (predeterminado: `end`) |
+
+---
+
+#### `update_page`
+
+Actualiza el frontmatter o el cuerpo de una página existente.
+
+```
+Update the "Getting Started" page to mention the new --yes flag
+```
+
+| Parámetro | Requerido | Descripción |
+|-----------|----------|-------------|
+| `projectDir` | Sí | Ruta al proyecto Dox |
+| `pageId` | Sí | Página a actualizar |
+| `title` | No | Nuevo título |
+| `description` | No | Nueva descripción |
+| `content` | No | Reemplaza el cuerpo existente |
+| `mergeFrontmatter` | No | Campos adicionales de frontmatter para combinar |
+
+---
+
+#### `list_pages`
+
+Lista todas las páginas de un proyecto, organizadas por pestaña y grupo.
+
+```
+Show me all the pages in my docs project
+```
+
+---
+
+### Migración
+
+#### `migrate_docs`
+
+Clona un repositorio de documentación de GitHub y migra su contenido a un proyecto Dox.
+
+```
+Migrate the Mintlify starter into a new project at /tmp/my-docs
+```
+
+| Parámetro | Requerido | Descripción |
+|-----------|----------|-------------|
+| `sourceUrl` | Sí | URL de GitHub del repositorio fuente |
+| `projectDir` | Sí | Ruta de destino (proyecto nuevo o existente) |
+| `into` | No | Migrar a un proyecto existente (predeterminado: `false`) |
+| `branch` | No | Rama de Git a clonar (se detecta automáticamente por defecto) |
+| `docsDir` | No | Subdirectorio de documentación en el repositorio (se detecta automáticamente) |
+| `apiKey` | No | Clave de API de Anthropic para conversión de contenido no Markdown |
+
+---
+
+### Lectura y búsqueda
+
+Estas herramientas permiten a los agentes de IA consultar tu documentación como contexto — útil para construir funciones de IA sobre tu documentación.
+
+#### `search_docs`
+
+Busca en todas las páginas por palabra clave y devuelve resultados ordenados por relevancia.
+
+```
+Search the docs for anything about rate limiting
+```
+
+| Parámetro | Requerido | Descripción |
+|-----------|----------|-------------|
+| `projectDir` | Sí | Ruta al proyecto Dox |
+| `query` | Sí | Consulta de búsqueda |
+| `limit` | No | Número máximo de resultados a devolver (predeterminado: `5`) |
+
+---
+
+#### `read_page`
+
+Lee el contenido completo de una sola página por ID.
+
+```
+Read the "guides/authentication" page
+```
+
+| Parámetro | Requerido | Descripción |
+|-----------|----------|-------------|
+| `projectDir` | Sí | Ruta al proyecto Dox |
+| `pageId` | Sí | p. ej. `guides/authentication` |
+
+---
+
+#### `get_context`
+
+Devuelve el contenido de documentación más relevante para un tema, dentro de un presupuesto de tokens. Ideal para fundamentar las respuestas de la IA en tu documentación.
+
+```
+Get context about the authentication flow for up to 4000 tokens
+```
+
+| Parámetro | Requerido | Descripción |
+|-----------|----------|-------------|
+| `projectDir` | Sí | Ruta al proyecto Dox |
+| `topic` | Sí | Tema o pregunta |
+| `maxTokens` | No | Presupuesto de tokens (predeterminado: `4000`) |
+
+---
+
+### Calidad
+
+#### `lint_project`
+
+Comprueba un proyecto en busca de errores y advertencias: referencias de navegación rotas, archivos huérfanos, frontmatter faltante.
+
+```
+Check my docs project for any issues
+```
+
+| Parámetro | Requerido | Descripción |
+|-----------|----------|-------------|
+| `projectDir` | Sí | Ruta al proyecto Dox |
+| `fix` | No | Agrega automáticamente páginas huérfanas a la navegación (predeterminado: `false`) |
+
+---
+
+### Internacionalización
+
+#### `translate_docs`
+
+Traduce páginas de documentación a una configuración regional secundaria usando Claude AI. Requiere un bloque `i18n` en el `docs.json` del proyecto. Los archivos MDX traducidos se escriben en `src/content/{locale}/` y se confirman en tu repositorio.
+
+```
+Translate my docs to Spanish
+```
+
+```
+Translate only the introduction and quickstart pages to French
+```
+
+| Parámetro | Requerido | Descripción |
+|-----------|----------|-------------|
+| `projectDir` | Sí | Ruta al proyecto Dox |
+| `locale` | Sí | Código de configuración regional de destino, p. ej. `"es"`, `"fr"` |
+| `pages` | No | Array de IDs de página a traducir (omitir para todas las páginas) |
+| `force` | No | Sobreescribir archivos de traducción existentes (predeterminado: `false`) |
+| `apiKey` | No | Clave de API de Anthropic (recurre a `ANTHROPIC_API_KEY`) |
+| `model` | No | Modelo Claude a usar (predeterminado: `claude-sonnet-4-6`) |
+
+Consulta [Soporte multiidioma](/guides/multi-language) para obtener instrucciones completas de configuración.

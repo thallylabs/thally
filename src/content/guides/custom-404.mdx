@@ -1,0 +1,52 @@
+---
+title: Custom 404 Page
+description: Replace the default 404 page with branded content written in MDX.
+---
+
+By default, Dox shows a built-in "Page not found" screen when a URL doesn't match any content. You can replace it with your own branded 404 page written in MDX.
+
+## Creating a custom 404
+
+Create a file at `src/content/404.mdx`:
+
+```mdx
+---
+title: Page Not Found
+description: We couldn't find what you were looking for.
+---
+
+# 404 — Page not found
+
+Looks like this page has moved or no longer exists.
+
+<CardGroup>
+  <Card title="Go home" href="/" icon="book-open">
+    Return to the documentation home.
+  </Card>
+  <Card title="Search" href="/quickstart" icon="grid-round">
+    Try searching for what you need.
+  </Card>
+</CardGroup>
+```
+
+Dox automatically detects this file and renders it through the standard MDX pipeline — so all components (`<Card>`, `<Note>`, etc.) work normally.
+
+## Fallback behavior
+
+If `src/content/404.mdx` does not exist, Dox renders its built-in 404 UI. You can always delete or rename `404.mdx` to revert to the default.
+
+## Frontmatter
+
+The `title` and `description` frontmatter fields are used for the page `<title>` and OG metadata. The `mode` field also works — use `mode: "center"` for a clean centered layout.
+
+```mdx
+---
+title: Page Not Found
+description: We couldn't find that page.
+mode: center
+---
+```
+
+<Note type="info">
+The 404 page does not appear in the sidebar or sitemap. It is automatically given a `noindex` robots tag.
+</Note>

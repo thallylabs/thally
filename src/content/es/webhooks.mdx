@@ -1,0 +1,86 @@
+---
+title: Referencia de API
+description: Genera documentación interactiva de API a partir de una especificación OpenAPI.
+---
+
+Dox genera automáticamente una referencia de API completa a partir de una especificación OpenAPI 3.x. Aquí se explica cómo configurarla.
+
+<Steps>
+
+<Step title="Agrega tu especificación OpenAPI">
+
+Coloca tu archivo de especificación OpenAPI 3.x (YAML o JSON) en la raíz del proyecto:
+
+```bash
+cp path/to/your/openapi.yaml ./openapi.yaml
+```
+
+Dox incluye una especificación de ejemplo de Pet Store que puedes usar como punto de partida.
+
+</Step>
+
+<Step title="Configura la pestaña de API">
+
+Agrega una pestaña de Referencia de API en `docs.json`:
+
+```json
+{
+  "tab": "API Reference",
+  "api": {
+    "source": "openapi.yaml",
+    "tagsOrder": ["Pets", "Store"],
+    "defaultGroup": "General"
+  }
+}
+```
+
+Dox analiza la especificación y genera páginas de endpoints interactivas automáticamente.
+
+</Step>
+
+<Step title="Personaliza los metadatos de los endpoints">
+
+Usa `overrides` para ajustar títulos, descripciones o insignias para operaciones específicas:
+
+```json
+{
+  "overrides": {
+    "GET /pets": {
+      "title": "List pets",
+      "description": "Custom description for this endpoint.",
+      "badge": "Stable"
+    }
+  }
+}
+```
+
+El formato de la clave es `METHOD /path` (p. ej., `GET /pets`, `POST /store/orders`).
+
+</Step>
+
+</Steps>
+
+## Opciones de configuración
+
+| Opción | Descripción |
+| --- | --- |
+| `source` | Ruta al archivo de especificación OpenAPI (YAML o JSON) |
+| `tagsOrder` | Orden de los grupos de etiquetas en la barra lateral |
+| `defaultGroup` | Nombre del grupo para operaciones sin etiqueta |
+| `overrides` | Sobreescrituras de título, descripción e insignia por endpoint |
+
+## Características de especificación compatibles
+
+- Parámetros de ruta, consulta, encabezado y cookie
+- Esquemas del cuerpo de la solicitud con ejemplos
+- Múltiples códigos de respuesta con visores de esquema
+- Selección de URL del servidor
+- Documentación del esquema de seguridad
+
+## Consola de prueba
+
+Cada página de endpoint generada incluye un botón **Try It** que abre una consola interactiva. Los usuarios pueden completar parámetros, editar el cuerpo de la solicitud y enviar solicitudes en vivo directamente desde la documentación.
+
+<Note type="info" title="Página de ejemplo">
+Este es contenido de ejemplo que se incluye con la plantilla Dox. Reemplázalo con la documentación de tu propio producto.
+</Note>

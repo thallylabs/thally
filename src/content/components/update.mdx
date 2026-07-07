@@ -1,0 +1,39 @@
+---
+title: "Update"
+description: "A styled changelog entry block with an optional label and date."
+---
+
+Use `<Update>` on changelog pages to render versioned release entries with a left-accent border.
+
+## Example
+
+<Update label="v2.0.0" date="2025-01-15">
+  Major release with breaking changes. See the [migration guide](/guides/migrating) for details.
+
+  - Redesigned sidebar with collapsible groups
+  - New `<Steps>` component for guided workflows
+  - Performance improvements across all routes
+</Update>
+
+<Update label="v1.4.0" date="2024-11-20">
+  Minor release with new features and bug fixes.
+
+  - Added multi-language support
+  - Fixed sidebar scroll position on navigation
+</Update>
+
+```mdx
+<Update label="v2.0.0" date="2025-01-15">
+  Major release with breaking changes.
+
+  - Redesigned sidebar
+  - New Steps component
+</Update>
+```
+
+## Props
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `label` | `string` | — | Version label or tag shown as a pill |
+| `date` | `string` | — | Release date string (any format) |

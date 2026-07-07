@@ -1,0 +1,183 @@
+# Dox
+
+The first agent-native documentation platform — every page is served to humans as polished HTML and to AI agents as structured JSON, JSON-LD, and Markdown from the same URL. Built on Next.js: self-hosted, open, extensible, and free to commercialize.
+
+Dox is **agent-native**: every page is served to humans as pre-rendered HTML and to AI agents as structured JSON / JSON-LD / Markdown from the same URL.
+
+## Features
+
+- **MDX content** — write docs in Markdown with React components
+- **Unified content engine** — each page is parsed once into a typed content graph; HTML, JSON, JSON-LD, Markdown, search, and embeddings are projections of that single source of truth
+- **Auto-generated API reference** — drop in an OpenAPI spec and get interactive docs with a "Try It" console
+- **Sidebar & tabs** — configured from a single `docs.json` file
+- **Hybrid search** — instant client-side command palette plus a server-side full-text + vector `/api/search`
+- **Retrieval-grounded AI chat** — Claude-powered Q&A with RAG retrieval and inline citations; works out of the box on a rate-limited trial key, then on your own `ANTHROPIC_API_KEY`
+- **Agent endpoints** — `/llms.txt`, `/ai.txt`, `/api/docs-index`, `/api/docs/{slug}`, and an **Agent Readiness Score** at `/api/agent-readiness`
+- **Remote MCP server** — every deployed site is an MCP endpoint at `/api/mcp`; attach with `claude mcp add --transport http <site>/api/mcp`
+- **Docs agent** — `dox agent "…"` (or `@dox` on a product PR) drafts docs as a **reviewed pull request**, self-checked with `dox check`; it never merges
+- **Provenance & drift** — machine-legible `lastVerified` dates + `dox check --drift` to catch pages stale against the code they document
+- **Team accounts & roles** — Google/Microsoft OIDC sign-in + Owner/Editor/Viewer from a git-committed roster in `docs.json` (no database, no per-seat)
+- **Unified `dox` CLI + `@doxlabs/mcp`** — one toolchain to scaffold, develop, deploy, check, and drive your docs from any MCP client
+- **TOC, dark mode, responsive** — built-in with zero config; persistent sidebar, mobile drawer, command palette
+- **Syntax highlighting** — Shiki with CSS variables for theme-aware code blocks
+
+## Quick Start
+
+```bash
+# Scaffold a new project (recommended)
+npx create-dox my-docs
+cd my-docs
+npm run dev
+```
+
+Or use the repo directly:
+
+```bash
+npx degit kenny-io/Dox my-docs
+cd my-docs
+npm install
+npm run dev
+```
+
+Open [http://localhost:3040](http://localhost:3040).
+
+## Project Structure
+
+```
+docs.json              # Navigation config — tabs, groups, page order, API reference
+openapi.yaml           # Your OpenAPI spec (auto-generates the API Reference tab)
+src/
+  content/             # MDX documentation pages (flat folder)
+    introduction.mdx
+    quickstart.mdx
+    ...
+  app/                 # Next.js App Router
+  components/          # Layout, navigation, MDX, and UI primitives
+  data/
+    docs.ts            # Reads docs.json + frontmatter to build navigation
+    site.ts            # Site name, description, links, brand colors
+  config/
+    api-reference.ts   # Reads API config from docs.json
+```
+
+## Adding a Page
+
+1. Create `src/content/my-page.mdx`:
+   ```mdx
+   ---
+   title: My Page
+   description: A short description for search and meta tags.
+   ---
+
+   Your content here. Use any MDX — headings, code blocks, callouts, etc.
+   ```
+
+2. Add `"my-page"` to a group in `docs.json`:
+   ```json
+   {
+     "group": "Getting Started",
+     "pages": ["introduction", "quickstart", "my-page"]
+   }
+   ```
+
+3. Done. Sidebar, search, and navigation update automatically.
+
+## Configuring Navigation (`docs.json`)
+
+```json
+{
+  "tabs": [
+    {
+      "tab": "Overview",
+      "groups": [
+        { "group": "Getting Started", "pages": ["introduction", "quickstart"] },
+        { "group": "Core Concepts", "pages": ["authentication", "pagination"] }
+      ]
+    },
+    {
+      "tab": "API Reference",
+      "api": {
+        "source": "openapi.yaml",
+        "tagsOrder": ["Pets", "Store"],
+        "defaultGroup": "General"
+      }
+    },
+    {
+      "tab": "Changelog",
+      "href": "/changelog"
+    }
+  ]
+}
+```
+
+- **`tab`** — label shown in the top navigation bar
+- **`groups`** — sidebar sections, each with a title and ordered page list
+- **`api`** — auto-generates API reference from an OpenAPI spec
+- **`href`** — links to an internal route or external URL
+
+## API Reference
+
+Drop your OpenAPI 3.x spec as `openapi.yaml` in the project root and configure it in `docs.json`:
+
+```json
+{
+  "tab": "API Reference",
+  "api": {
+    "source": "openapi.yaml",
+    "tagsOrder": ["Pets", "Store"],
+    "defaultGroup": "General",
+    "overrides": {
+      "GET /pets": { "title": "List pets", "badge": "Stable" }
+    }
+  }
+}
+```
+
+The template includes an example Pet Store spec. Replace it with your own.
+
+## Customization
+
+### Brand Colors
+
+Edit `src/data/site.ts` to change the site name, description, links, and brand palette. Two presets are included (`primary` green, `secondary` purple) — switch between them or define your own.
+
+### Layout
+
+Edit `src/config/layout.ts` for padding, column widths, and panel styles.
+
+### Environment Variables
+
+Copy `.env.example` to `.env.local`:
+
+```bash
+cp .env.example .env.local
+```
+
+| Variable | Purpose |
+|---|---|
+| `DOX_SITE_URL` | Production URL for OpenGraph metadata, canonical URLs, and agent endpoints (legacy `NEXT_PUBLIC_SITE_URL` still honored) |
+| `ANTHROPIC_API_KEY` | Owner key for AI chat — lifts trial limits entirely |
+| `DOX_TRIAL_ANTHROPIC_KEY` | Optional shared key powering the out-of-the-box trial chat (strict per-IP limits + a global daily cap) |
+| `DOX_TRIAL_RATE_PER_MIN` / `DOX_TRIAL_RATE_PER_DAY` / `DOX_TRIAL_DAILY_LIMIT` / `DOX_CHAT_RATE_PER_MIN` | Optional chat rate-limit overrides |
+
+## Production
+
+```bash
+npm run build
+npm start
+```
+
+Deploy anywhere that supports Next.js — Vercel, Netlify, Cloudflare, Docker, etc.
+
+## Stack
+
+- Next.js 16 / TypeScript / App Router
+- Tailwind CSS 3.4 + `@tailwindcss/typography`
+- Radix UI (dialog, scroll-area, accordion, slot)
+- MDX via `next-mdx-remote` + Shiki syntax highlighting
+- `next-themes` for dark mode, `nuqs` for URL state, `zustand` for sidebar state
+- `gray-matter` for frontmatter parsing, `yaml` for OpenAPI spec loading
+
+## License
+
+MIT

@@ -1,0 +1,76 @@
+---
+title: "RequestExample & ResponseExample"
+description: "Styled wrappers that visually distinguish request and response code blocks."
+---
+
+Use `<RequestExample>` and `<ResponseExample>` to frame HTTP request/response pairs in MDX-written API docs. They add a labeled header bar — blue for requests, green for responses — matching the style used by the auto-generated API Reference pages.
+
+## Example
+
+<RequestExample>
+```bash cURL
+curl -X POST https://api.example.com/pets \
+  -H "Authorization: Bearer sk-..." \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Buddy", "species": "dog"}'
+```
+</RequestExample>
+
+<ResponseExample>
+```json 201 Created
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "Buddy",
+  "species": "dog",
+  "status": "available",
+  "created_at": "2025-01-15T10:30:00Z"
+}
+```
+</ResponseExample>
+
+```mdx
+<RequestExample>
+\`\`\`bash cURL
+curl -X POST https://api.example.com/pets \
+  -H "Authorization: Bearer sk-..." \
+  -d '{"name": "Buddy", "species": "dog"}'
+\`\`\`
+</RequestExample>
+
+<ResponseExample>
+\`\`\`json 201 Created
+{ "id": "a1b2c3d4", "name": "Buddy", "status": "available" }
+\`\`\`
+</ResponseExample>
+```
+
+## With CodeGroup
+
+Wrap a `<CodeGroup>` inside `<RequestExample>` to show the same request in multiple languages:
+
+```mdx
+<RequestExample>
+  <CodeGroup>
+  \`\`\`typescript TypeScript
+  await client.pets.create({ name: 'Buddy', species: 'dog' })
+  \`\`\`
+
+  \`\`\`python Python
+  client.pets.create(name="Buddy", species="dog")
+  \`\`\`
+  </CodeGroup>
+</RequestExample>
+```
+
+## See it in action
+
+The API Reference pages are auto-generated from your OpenAPI spec and render using the same visual components — `ParamField`, `ResponseField`, `Expandable`, `RequestExample`, and `ResponseExample`. Open any endpoint to see them all in context:
+
+<CardGroup cols={2}>
+  <Card title="List pets" icon="book-open" href="/api/default/pets/get">
+    `GET /pets` — query parameters, paginated response schema with nested expandable fields.
+  </Card>
+  <Card title="Create a pet" icon="code-simple" href="/api/default/pets/post">
+    `POST /pets` — request body params, full response schema, and live cURL example.
+  </Card>
+</CardGroup>

@@ -1,0 +1,52 @@
+---
+title: Redirects
+description: Map old paths to new ones so renamed or moved pages don't break existing links.
+---
+
+Define redirects in `docs.json` to automatically forward visitors from old URLs to new ones. This is especially useful after a migration or reorganization.
+
+## Configuration
+
+Add a `redirects` array to `docs.json`:
+
+```json
+"redirects": [
+  { "source": "/old-path", "destination": "/new-path", "permanent": false },
+  { "source": "/getting-started", "destination": "/quickstart", "permanent": true }
+]
+```
+
+Redirects are read at build time and passed to Next.js's built-in redirect mechanism — no server restarts or deploys needed beyond a normal build.
+
+## Fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `source` | `string` | The path to match (relative, no domain) |
+| `destination` | `string` | Where to send visitors |
+| `permanent` | `boolean` | `true` = 308 (permanent), `false` = 307 (temporary). Default: `false` |
+
+## When to use `permanent: true`
+
+Use `permanent: true` when a page has moved and will never return to the old URL. Browsers and search engines cache 308 redirects aggressively, so use `permanent: false` during a migration trial period and flip to `true` once you're confident.
+
+## Pattern matching
+
+You can use Next.js path matching syntax — including named parameters and wildcards:
+
+```json
+"redirects": [
+  { "source": "/blog/:slug", "destination": "/posts/:slug", "permanent": true },
+  { "source": "/v1/:path*", "destination": "/:path*", "permanent": true }
+]
+```
+
+See the [Next.js redirects documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/redirects) for the full matching syntax.
+
+## Migration use case
+
+When migrating from Mintlify, the `create-dox migrate` command automatically reads the `redirects` field from your Mintlify `docs.json` and emits equivalent entries in the Dox `docs.json`. It also generates redirects for any pages that were renamed during migration.
+
+<Note type="info" title="Example">
+This site has two demo redirects configured — try visiting `/docs` or `/getting-started` and you'll be forwarded to the correct pages.
+</Note>

@@ -1,0 +1,72 @@
+---
+title: "Color"
+description: "Display a color swatch with hex value — ideal for brand and design token documentation."
+---
+
+`<Color>` renders a color preview chip with an optional name and hex label. Use it on brand guidelines pages or design system documentation.
+
+## Example
+
+<Color hex="#10B981" name="Emerald" />
+<Color hex="#8B5CF6" name="Violet" />
+<Color hex="#F59E0B" name="Amber" />
+<Color hex="#EF4444" name="Rose" />
+
+```mdx
+<Color hex="#10B981" name="Emerald" />
+<Color hex="#8B5CF6" name="Violet" />
+<Color hex="#F59E0B" name="Amber" />
+<Color hex="#EF4444" name="Rose" />
+```
+
+## In a grid
+
+Use `<Columns>` to lay out multiple swatches side by side:
+
+<Columns cols={4}>
+  <Color hex="#10B981" name="Emerald" />
+  <Color hex="#8B5CF6" name="Violet" />
+  <Color hex="#F59E0B" name="Amber" />
+  <Color hex="#EF4444" name="Rose" />
+</Columns>
+
+```mdx
+<Columns cols={4}>
+  <Color hex="#10B981" name="Emerald" />
+  <Color hex="#8B5CF6" name="Violet" />
+  <Color hex="#F59E0B" name="Amber" />
+  <Color hex="#EF4444" name="Rose" />
+</Columns>
+```
+
+## Full brand palette
+
+<Columns cols={4}>
+  <Color hex="#0F172A" name="Slate 900" />
+  <Color hex="#1E293B" name="Slate 800" />
+  <Color hex="#334155" name="Slate 700" />
+  <Color hex="#64748B" name="Slate 500" />
+</Columns>
+
+<Columns cols={4}>
+  <Color hex="#3B82F6" name="Blue 500" />
+  <Color hex="#6366F1" name="Indigo 500" />
+  <Color hex="#8B5CF6" name="Violet 500" />
+  <Color hex="#A855F7" name="Purple 500" />
+</Columns>
+
+```mdx
+<Columns cols={4}>
+  <Color hex="#0F172A" name="Slate 900" />
+  <Color hex="#1E293B" name="Slate 800" />
+  <Color hex="#334155" name="Slate 700" />
+  <Color hex="#64748B" name="Slate 500" />
+</Columns>
+```
+
+## Props
+
+| Prop | Type | Description |
+|---|---|---|
+| `hex` | `string` | Hex color value including `#` (e.g. `#10B981`) |
+| `name` | `string` | Optional display name shown above the hex code |

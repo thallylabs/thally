@@ -1,0 +1,56 @@
+---
+title: "Callouts"
+description: "Highlight important information with styled callout blocks."
+---
+
+Use `<Note>`, `<Tip>`, `<Warning>`, and `<Info>` to draw attention to important content. Each maps to a visual style that signals intent.
+
+## Types
+
+<Note>
+  This is a **Note** — general information the reader should be aware of.
+</Note>
+
+<Tip>
+  This is a **Tip** — a helpful suggestion or best practice.
+</Tip>
+
+<Warning>
+  This is a **Warning** — something that could cause problems if ignored.
+</Warning>
+
+<Info>
+  This is an **Info** callout — neutral informational content.
+</Info>
+
+```mdx
+<Note>
+  Standard note callout.
+</Note>
+
+<Tip>
+  A helpful tip.
+</Tip>
+
+<Warning>
+  Be careful about this.
+</Warning>
+
+<Info>
+  Additional context.
+</Info>
+```
+
+## Generic `<Callout>`
+
+Migrated content from other platforms may use the generic `<Callout type="...">` form — this is supported as an alias:
+
+```mdx
+<Callout type="warning">
+  This maps to a Warning callout.
+</Callout>
+```
+
+## Props
+
+All callout components accept arbitrary MDX children including inline code, links, and lists. No additional props are required.

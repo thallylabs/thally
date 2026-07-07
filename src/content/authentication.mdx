@@ -1,0 +1,60 @@
+---
+title: Configuration
+description: How docs.json controls navigation, tabs, groups, and API references.
+---
+
+All navigation in Dox is driven by a single file: `docs.json` at the project root. This file defines the tabs shown in the header, the groups in each sidebar, and the pages within each group.
+
+## Basic structure
+
+```json
+{
+  "tabs": [
+    {
+      "tab": "Overview",
+      "groups": [
+        {
+          "group": "Getting Started",
+          "pages": ["introduction", "quickstart"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+- **`tabs`** — top-level navigation items shown in the site header
+- **`groups`** — sidebar sections within a tab
+- **`pages`** — array of page slugs (relative to `src/content/`)
+
+## Adding an API Reference tab
+
+Point a tab to an OpenAPI spec instead of manual pages:
+
+```json
+{
+  "tab": "API Reference",
+  "api": {
+    "source": "openapi.yaml",
+    "defaultGroup": "General"
+  }
+}
+```
+
+Dox parses the spec and generates endpoint pages automatically.
+
+## External links
+
+Add a tab that links to an external URL:
+
+```json
+{
+  "tab": "Changelog",
+  "href": "/changelog"
+}
+```
+
+<Note type="info" title="Sample page">
+This is example content that ships with the Dox template. Replace it with your own product documentation.
+</Note>
+

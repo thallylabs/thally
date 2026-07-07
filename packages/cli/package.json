@@ -1,0 +1,55 @@
+{
+  "name": "@doxlabs/cli",
+  "version": "0.3.0",
+  "description": "The unified dox CLI — author content + config; the framework stays a hidden runtime",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "dox": "./dist/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {
+    "create-dox": "*",
+    "@doxlabs/mcp": "*",
+    "@anthropic-ai/sdk": "^0.78.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.15"
+  },
+  "license": "MIT",
+  "keywords": [
+    "dox",
+    "documentation",
+    "docs",
+    "cli",
+    "mdx",
+    "nextjs",
+    "ai",
+    "agent-native"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kenny-io/Dox.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/kenny-io/Dox#readme",
+  "bugs": {
+    "url": "https://github.com/kenny-io/Dox/issues"
+  }
+}

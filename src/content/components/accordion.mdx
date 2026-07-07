@@ -1,0 +1,32 @@
+---
+title: "Accordion"
+description: "Collapsible sections for FAQs and progressive disclosure."
+---
+
+`<Accordion>` renders a collapsible `<details>` element. Use it for FAQs, optional deep-dives, or content that should stay hidden until needed.
+
+## Example
+
+<Accordion title="What is an API key?">
+  An API key is a unique identifier that authenticates requests from your application. Keep it secret — treat it like a password. Never expose it in client-side code.
+</Accordion>
+
+<Accordion title="How do I reset my API key?">
+  Go to your dashboard, navigate to **Settings → API Keys**, and click **Regenerate**. Your old key will be immediately invalidated.
+</Accordion>
+
+```mdx
+<Accordion title="What is an API key?">
+  An API key authenticates requests from your application.
+</Accordion>
+```
+
+## Props
+
+| Prop | Type | Description |
+|---|---|---|
+| `title` | `string` | The clickable heading shown when collapsed |
+
+<Note>
+  To group multiple accordions, place them one after another — no wrapper component is needed. Migrated content using `<AccordionGroup>` renders the children directly.
+</Note>

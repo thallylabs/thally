@@ -1,0 +1,70 @@
+---
+title: "Tabs"
+description: "Cambia entre variantes de contenido específicas de plataforma o de lenguaje."
+---
+
+`<Tabs>` y `<Tab>` crean un panel de contenido con pestañas. Úsalos para instrucciones específicas de plataforma, variantes de lenguaje, o cualquier contenido donde los usuarios necesiten elegir un camino.
+
+## Ejemplo
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm install @company/sdk
+    ```
+  </Tab>
+  <Tab title="pnpm">
+    ```bash
+    pnpm add @company/sdk
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash
+    yarn add @company/sdk
+    ```
+  </Tab>
+</Tabs>
+
+````mdx
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm install @company/sdk
+    ```
+  </Tab>
+  <Tab title="pnpm">
+    ```bash
+    pnpm add @company/sdk
+    ```
+  </Tab>
+</Tabs>
+````
+
+## Contenido enriquecido en pestañas
+
+Las pestañas pueden contener cualquier contenido MDX, incluyendo llamadas, grupos de código e imágenes:
+
+````mdx
+<Tabs>
+  <Tab title="macOS">
+    <Steps>
+      <Step title="Install Homebrew">
+        ```bash
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Windows">
+    Download the installer from the releases page.
+  </Tab>
+</Tabs>
+````
+
+## Props
+
+### `<Tab>`
+
+| Prop | Tipo | Descripción |
+|---|---|---|
+| `title` | `string` | Etiqueta que se muestra en el botón de la pestaña |

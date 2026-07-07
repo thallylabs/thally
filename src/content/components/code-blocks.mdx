@@ -1,0 +1,75 @@
+---
+title: "Code blocks"
+description: "Syntax-highlighted code blocks with language labels and copy support."
+---
+
+Code blocks are rendered automatically from fenced Markdown syntax. Use `<CodeGroup>` to group multiple language variants into a tabbed view.
+
+## Single code block
+
+```typescript
+const client = new ApiClient({ apiKey: process.env.API_KEY })
+const pets = await client.pets.list({ limit: 10 })
+```
+
+Add a filename after the language identifier:
+
+```typescript api-client.ts
+import { ApiClient } from '@company/sdk'
+
+export const client = new ApiClient({
+  apiKey: process.env.API_KEY!,
+})
+```
+
+## CodeGroup
+
+Group related snippets in multiple languages under a single tabbed block:
+
+<CodeGroup>
+```typescript TypeScript
+import { ApiClient } from '@company/sdk'
+const client = new ApiClient({ apiKey: 'sk-...' })
+```
+
+```python Python
+from company_sdk import ApiClient
+client = ApiClient(api_key="sk-...")
+```
+
+```bash cURL
+curl -X GET https://api.example.com/pets \
+  -H "Authorization: Bearer sk-..."
+```
+</CodeGroup>
+
+````mdx
+<CodeGroup>
+```typescript TypeScript
+const client = new ApiClient({ apiKey: 'sk-...' })
+```
+
+```python Python
+client = ApiClient(api_key="sk-...")
+```
+</CodeGroup>
+````
+
+## Highlighted lines
+
+Use the `highlight` prop to draw attention to specific lines:
+
+```typescript highlight={2,3}
+const client = new ApiClient()
+// These two lines will be highlighted
+const result = await client.pets.list()
+console.log(result)
+```
+
+## Long lines
+
+Add `wrap` after the language identifier to soft-wrap long lines instead of scrolling:
+
+```bash wrap
+npx create-dox my-docs --template default --yes --install --git
+```

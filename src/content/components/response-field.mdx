@@ -1,0 +1,60 @@
+---
+title: "ResponseField"
+description: "Document response object properties returned by API endpoints."
+---
+
+`<ResponseField>` renders a structured property entry for API response documentation. Pair it with `<Expandable>` to document nested objects.
+
+## Example
+
+<ResponseField name="id" type="string" required>
+  Unique identifier for the pet. Format: `pet_xxxxxxxx`
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  The pet's display name.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Current status. One of `available`, `pending`, or `sold`.
+</ResponseField>
+
+<ResponseField name="tags" type="Tag[]">
+  Array of tags associated with the pet.
+
+  <Expandable title="Tag properties">
+    <ResponseField name="id" type="integer">
+      Tag identifier.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Tag display name.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```mdx
+<ResponseField name="id" type="string" required>
+  Unique identifier.
+</ResponseField>
+
+<ResponseField name="tags" type="Tag[]">
+  Associated tags.
+  <Expandable title="Tag properties">
+    <ResponseField name="name" type="string">
+      Tag name.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+```
+
+## Props
+
+| Prop | Type | Description |
+|---|---|---|
+| `name` | `string` | Property name |
+| `type` | `string` | Data type (e.g. `string`, `integer`, `boolean`, `object`) |
+| `required` | `boolean` | Shows a "required" badge |
+
+<Tip>
+  Use `<Expandable>` inside a `<ResponseField>` to document nested object properties without cluttering the top-level response schema.
+</Tip>

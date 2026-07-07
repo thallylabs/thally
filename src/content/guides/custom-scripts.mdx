@@ -1,0 +1,50 @@
+---
+title: Custom Scripts
+description: Inject third-party scripts, widgets, and analytics tools via docs.json.
+---
+
+Add third-party JavaScript to every page by declaring scripts in `docs.json`. Scripts are injected via Next.js's `<Script>` component with full loading strategy control.
+
+## Configuration
+
+```json
+"customScripts": [
+  { "src": "https://cdn.example.com/widget.js", "strategy": "afterInteractive" },
+  { "src": "https://cdn.analytics.com/tracker.min.js", "strategy": "lazyOnload" }
+]
+```
+
+## Fields
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `src` | `string` | — | Full URL of the script to load |
+| `strategy` | `string` | `"afterInteractive"` | When to load the script (see below) |
+
+## Loading strategies
+
+| Strategy | When it runs | Use for |
+| --- | --- | --- |
+| `beforeInteractive` | Before page hydration | Critical scripts that must run first |
+| `afterInteractive` | After hydration | Analytics, chat widgets, most third-party tools |
+| `lazyOnload` | During browser idle time | Non-critical, decorative scripts |
+
+Prefer `afterInteractive` for most tools — it keeps page load performance fast while ensuring the script is available as soon as the user can interact.
+
+## Built-in analytics
+
+For common analytics providers (Google Analytics, Plausible, PostHog), use the dedicated `siteConfig.analytics` field in `src/data/site.ts` instead. Those providers are wired up with proper event tracking and type-safe configuration:
+
+```ts
+analytics: {
+  googleAnalyticsId: 'G-XXXXXXXXXX',
+  plausibleDomain: 'docs.example.com',
+  posthogKey: 'phc_...',
+}
+```
+
+Use `customScripts` for any provider not natively supported.
+
+<Note type="warning">
+Scripts added via `customScripts` run on every page. Make sure any third-party script you include has a privacy policy compatible with your users' expectations.
+</Note>

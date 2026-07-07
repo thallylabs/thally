@@ -1,0 +1,126 @@
+---
+title: Admin Dashboard & Team Access
+description: Run branding, analytics, AI, and team access from a live dashboard — no rebuild.
+---
+
+Dox ships with a built-in **admin dashboard** at `/admin`. It lets you control your docs site at runtime — change branding, toggle features, read analytics, manage your team, and protect the docs behind a password — without editing files or redeploying. Settings chosen here are stored at runtime and layered *on top of* the git-committed defaults in `docs.json` and `src/data/site.ts`.
+
+## What you can do
+
+| Section | What it controls |
+| --- | --- |
+| **Home** | At-a-glance overview of the site's status. |
+| **Analytics** | First-party traffic, top pages, search terms, and content gaps. |
+| **Agent Readiness** | Score for how well your docs serve AI agents. |
+| **Docs tasks** | Documentation edits drafted by the docs agent as pull requests. |
+| **MCP server** | Enable or disable the public `/api/mcp` endpoint. |
+| **Team** | Members, domains, and roles for admin access. |
+| **Branding** | Structural theme, brand accent, logo, and favicon (see [Branding and theming](/guides/branding-and-theming)). |
+| **Settings** | Feature toggles, site identity, docs-access password, and the AI chat key. |
+
+Everything an Owner changes here applies to the live site immediately — no merge, no rebuild.
+
+## Turning on the dashboard
+
+You grant access by configuring one of the two methods below. Do this **before you deploy**.
+
+<Note type="warning" title="An unconfigured dashboard is open">
+If you deploy with **neither** `DOX_ADMIN_PASSWORD` nor OIDC set, Dox does not gate `/admin` — anyone who reaches the URL gets full **Owner** access, in production too. There is no localhost-only fallback. Always configure one of the methods below before your site goes public.
+</Note>
+
+### Option 1 — Break-glass password (quickest)
+
+Set a single environment variable and sign in with that password. Anyone who knows it gets **Owner** access — best for a solo maintainer or a quick setup.
+
+```bash
+DOX_ADMIN_PASSWORD=a-long-random-string
+```
+
+<Note type="info" title="Keep it strong">
+This is a shared secret that grants full control. Use a long, random value and store it in your host's secret manager, not in git.
+</Note>
+
+### Option 2 — Team sign-in with OIDC (recommended for teams)
+
+Delegate identity to your own IdP (Google Workspace, Microsoft Entra, or any OIDC provider). Members sign in with their work account, and their **role** comes from a roster you keep in `docs.json`. Nothing is hosted by Dox, so there is no per-seat cost.
+
+Set these environment variables:
+
+```bash
+DOX_OIDC_ISSUER=https://accounts.google.com
+DOX_OIDC_CLIENT_ID=your-client-id
+DOX_OIDC_CLIENT_SECRET=your-client-secret
+DOX_AUTH_SECRET=another-long-random-string   # signs sessions & encrypts stored secrets
+```
+
+In your IdP, register the callback (redirect) URL:
+
+```
+https://your-docs-domain.com/api/admin/auth/callback
+```
+
+Dox uses OIDC discovery and requests the `openid email profile` scopes, with PKCE. On the [Google Cloud console](https://console.cloud.google.com/apis/credentials) or your provider's app registration, create an OAuth client and paste its ID and secret into the variables above.
+
+<Note type="info" title="You can run both">
+If both a password and OIDC are configured, team members sign in with their identity and the password stays available as a break-glass fallback.
+</Note>
+
+## Roles and the roster
+
+With OIDC enabled, who gets in — and at what level — is defined by a `team` block in `docs.json`. It is version-controlled and code-reviewed, so team management needs no database, even on serverless hosts.
+
+```json
+"team": {
+  "members": [
+    { "email": "you@company.com", "role": "owner" },
+    { "email": "writer@company.com", "role": "editor" }
+  ],
+  "domains": [
+    { "domain": "company.com", "role": "viewer" }
+  ]
+}
+```
+
+- **`members`** — explicit email → role. Explicit members always win over domain defaults.
+- **`domains`** — anyone who signs in with a verified work email on one of these domains gets the default role.
+- Anyone not matched by a member or a domain gets **no access**.
+
+Dox re-checks the roster on every admin page load, so removing or downgrading someone in `docs.json` takes effect on their next request — no waiting for a session to expire.
+
+### What each role can do
+
+| Capability | Viewer | Editor | Owner |
+| --- | :---: | :---: | :---: |
+| View analytics & agent readiness | ✓ | ✓ | ✓ |
+| Manage docs / run the docs agent | | ✓ | ✓ |
+| Set the docs-access password | | ✓ | ✓ |
+| Change branding & site identity | | | ✓ |
+| Manage the team roster | | | ✓ |
+
+The **Team** page shows the current members and domains, and generates the JSON snippet to paste into `docs.json` when you invite someone. Editing the roster itself is a git change — Owners can't add members from the UI, which keeps access under code review.
+
+## Protecting the docs for visitors
+
+Team access above is about the **admin dashboard**. To gate the public docs themselves behind a shared password, an Editor or Owner sets a **docs-access password** under **Settings → Access & authentication**. Visitors are then prompted for it before they can read any page. The password is stored as a salted hash — never in plaintext, never returned by the API.
+
+This is independent of the admin team: a visitor password protects reading the docs; the team roster protects managing them.
+
+## Live overrides vs. file defaults
+
+Anything you set in the dashboard is a runtime override that layers over the committed config:
+
+| Set in the dashboard | Falls back to |
+| --- | --- |
+| Structural theme, brand accent | `docs.json` `theme`, `src/data/site.ts` brand |
+| Logo, favicon | Built-in Dox mark |
+| Site name, description, repo URL | `src/data/site.ts` `siteConfig` |
+| AI chat on/off + Anthropic key | `docs.json` `ai.chat`, `ANTHROPIC_API_KEY` |
+| Analytics on/off | `docs.json` `analytics.enabled` |
+| MCP endpoint on/off | On |
+| Docs-access password | Open (no password) |
+
+Leave a setting untouched in the dashboard and the file default applies. This lets you keep a sensible, source-controlled baseline for fresh deploys while making day-to-day changes without shipping code.
+
+## AI chat key
+
+The in-docs AI assistant needs an Anthropic API key. Set it either as the `ANTHROPIC_API_KEY` environment variable or, for a no-deploy change, paste it under **Settings → AI chat** — the dashboard stores it encrypted. See [AI features](/guides/ai-features) for the full assistant setup.

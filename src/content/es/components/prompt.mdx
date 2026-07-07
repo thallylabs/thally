@@ -1,0 +1,43 @@
+---
+title: "Prompt"
+description: "Un bloque de terminal estilizado para documentar interacciones de CLI y conversaciones con IA."
+---
+
+Usa `<Prompt>` con `<PromptUser>` y `<PromptAssistant>` para mostrar sesiones de línea de comandos o pares de pregunta/respuesta de IA en un contenedor estilo terminal.
+
+## Ejemplo de CLI
+
+<Prompt>
+  <PromptUser>npx create-dox my-docs --yes</PromptUser>
+  <PromptAssistant>
+    ✓ Scaffolded my-docs/
+    ✓ Installed 312 packages
+    ✓ Initialized git repository
+
+    → Run `cd my-docs && npm run dev` to get started
+  </PromptAssistant>
+</Prompt>
+
+## Ejemplo de conversación con IA
+
+<Prompt>
+  <PromptUser>¿Cuál es el límite de velocidad para la API?</PromptUser>
+  <PromptAssistant>
+    El límite de velocidad predeterminado es 1,000 solicitudes por minuto por clave de API. Los planes Enterprise admiten límites más altos — contacta a soporte para actualizar.
+  </PromptAssistant>
+</Prompt>
+
+```mdx
+<Prompt>
+  <PromptUser>npm run build</PromptUser>
+  <PromptAssistant>✓ Build complete in 2.4s</PromptAssistant>
+</Prompt>
+```
+
+## Componentes
+
+| Componente | Descripción |
+|---|---|
+| `<Prompt>` | Contenedor exterior con estilo de fuente monoespaciada |
+| `<PromptUser>` | Línea de entrada del usuario — precedida por el símbolo `$` |
+| `<PromptAssistant>` | Bloque de respuesta o salida debajo de la entrada |

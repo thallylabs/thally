@@ -1,0 +1,148 @@
+---
+title: Navbar & Footer
+description: Configure custom navigation links, a CTA button, multi-column footer links, and social icons from docs.json.
+---
+
+The top navigation bar and the footer are both configurable from `docs.json`. No code changes required — add a `navbar` or `footer` block and Dox picks it up automatically.
+
+## Navbar
+
+Add a `navbar` block to `docs.json` to control the links and CTA button in the top bar.
+
+```json
+"navbar": {
+  "links": [
+    { "label": "GitHub", "href": "https://github.com/your-org/repo", "type": "github" },
+    { "label": "Support", "href": "https://support.example.com" }
+  ],
+  "primary": { "label": "Get started", "href": "/quickstart" }
+}
+```
+
+### `navbar.links`
+
+An array of navigation links rendered to the left of the CTA button.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `label` | `string` | Link text |
+| `href` | `string` | Destination URL (internal or external) |
+| `type` | `"github"` _(optional)_ | Set to `"github"` to render the GitHub icon alongside the label |
+
+When `type: "github"` is set, the GitHub mark is shown to the left of the label:
+
+```json
+{ "label": "GitHub", "href": "https://github.com/your-org/repo", "type": "github" }
+```
+
+External links open in a new tab automatically.
+
+### `navbar.primary`
+
+The primary CTA button — rendered as a filled accent pill in the top bar. When set, it overrides the auto-detected CTA from `siteConfig.links`.
+
+```json
+"primary": { "label": "Get started", "href": "/quickstart" }
+```
+
+<Note type="info" title="Fallback">
+When `navbar` is not defined in `docs.json`, Dox falls back to auto-detecting a support link and CTA from `siteConfig.links` in `src/data/site.ts`. Define `navbar` in `docs.json` when you want explicit control.
+</Note>
+
+---
+
+## Footer
+
+Add a `footer` block to `docs.json` to render a multi-column link grid and social icons at the bottom of every page.
+
+```json
+"footer": {
+  "socials": {
+    "github": "https://github.com/your-org",
+    "twitter": "https://twitter.com/yourhandle",
+    "discord": "https://discord.gg/invite"
+  },
+  "links": [
+    {
+      "heading": "Documentation",
+      "items": [
+        { "label": "Quick Start", "href": "/quickstart" },
+        { "label": "Guides", "href": "/guides/getting-started" }
+      ]
+    },
+    {
+      "heading": "Tooling",
+      "items": [
+        { "label": "CLI Reference", "href": "/guides/cli-reference" },
+        { "label": "MCP Server", "href": "/guides/mcp-server" }
+      ]
+    }
+  ]
+}
+```
+
+### `footer.socials`
+
+A map of social platform keys to URLs. Supported keys with icons:
+
+| Key | Icon |
+| --- | --- |
+| `github` | GitHub mark |
+| `twitter` or `x` | X (Twitter) mark |
+| `discord` | Discord logo |
+| `linkedin` | LinkedIn logo |
+
+Any other key renders as a plain text link.
+
+### `footer.links`
+
+An array of link columns. Each column has:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `heading` | `string` | Column heading (rendered in small caps) |
+| `items` | `Array<{ label, href }>` | Links in this column |
+
+Columns are displayed in a responsive grid — 2 columns on mobile, 3 on tablet, 4 on desktop.
+
+<Note type="info" title="Default footer">
+When `footer` is not defined in `docs.json`, Dox renders a minimal single-line footer with the site name and `siteConfig.links`.
+</Note>
+
+---
+
+## Full example
+
+```json
+{
+  "navbar": {
+    "links": [
+      { "label": "GitHub", "href": "https://github.com/your-org/repo", "type": "github" }
+    ],
+    "primary": { "label": "Get started", "href": "/quickstart" }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/your-org",
+      "twitter": "https://twitter.com/yourhandle"
+    },
+    "links": [
+      {
+        "heading": "Product",
+        "items": [
+          { "label": "Overview", "href": "/" },
+          { "label": "Quick Start", "href": "/quickstart" },
+          { "label": "Changelog", "href": "/changelog" }
+        ]
+      },
+      {
+        "heading": "Developers",
+        "items": [
+          { "label": "API Reference", "href": "/api" },
+          { "label": "CLI", "href": "/guides/cli-reference" }
+        ]
+      }
+    ]
+  }
+}
+```

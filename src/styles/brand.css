@@ -1,0 +1,25 @@
+:root {
+  /* Light theme brand tokens */
+  --brand-light-background: 0 0% 100%;
+  --brand-light-foreground: 222 45% 10%;
+  --brand-light-muted: 220 14% 96%;
+  --brand-light-border: 214 32% 94%;
+  --brand-light-accent: 222 89% 58%;
+  --brand-light-accent-foreground: 0 0% 100%;
+  --brand-light-ring: 250 90% 66%;
+  --brand-sidebar-active-bg-light: 152 60% 88% / 0.55;
+  --brand-sidebar-active-text-light: var(--brand-light-foreground, 222 45% 10%);
+
+  /* Dark theme brand tokens */
+  --brand-dark-background: 222 45% 6%;
+  --brand-dark-foreground: 0 0% 98%;
+  --brand-dark-muted: 222 35% 12%;
+  --brand-dark-border: 222 25% 14%;
+  --brand-dark-accent: 266 85% 65%;
+  --brand-dark-accent-foreground: 240 9% 12%;
+  --brand-dark-ring: 266 85% 65%;
+  --brand-sidebar-active-bg-dark: 152 40% 30% / 0.35;
+  --brand-sidebar-active-text-dark: var(--brand-dark-foreground, 0 0% 98%);
+}
+
+

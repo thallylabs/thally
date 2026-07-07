@@ -1,0 +1,24 @@
+---
+title: "Tooltip"
+description: "Inline hover tooltip for defining terms or providing context."
+---
+
+`<Tooltip>` adds a hover tooltip to any inline text. The wrapped text gets a dotted underline indicating it is interactive.
+
+## Example
+
+The <Tooltip tip="A JSON Web Token used for authentication">JWT</Tooltip> is sent in the `Authorization` header with every request.
+
+```mdx
+The <Tooltip tip="A JSON Web Token used for authentication">JWT</Tooltip> is sent in the `Authorization` header.
+```
+
+## Props
+
+| Prop | Type | Description |
+|---|---|---|
+| `tip` | `string` | Text shown in the tooltip on hover |
+
+<Note>
+  `<Tooltip>` uses the native `title` attribute for maximum compatibility. For richer tooltips with interactive content or markdown support, use a custom React component.
+</Note>

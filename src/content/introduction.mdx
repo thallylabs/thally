@@ -1,0 +1,81 @@
+---
+title: Introduction
+description: Dox is an open-source documentation template built with Next.js, MDX, and Tailwind CSS.
+mode: home
+---
+
+<Hero
+  title="Documentation your readers and their agents both love"
+  subtitle="Dox is a production-ready docs platform built on the Next.js App Router, MDX, and Tailwind CSS. Write in Markdown, own your stack, and ship a site that's fast for humans and legible to AI."
+  primaryLabel="Get started"
+  primaryHref="/quickstart"
+  secondaryLabel="Browse components"
+  secondaryHref="/components/card"
+/>
+
+<CardGroup cols={3}>
+  <Card title="Quickstart" icon="code-simple" href="/quickstart">
+    Scaffold a new site and go from zero to a running docs app in minutes.
+  </Card>
+  <Card title="Write content" icon="book-open" href="/guides/writing-content">
+    Author pages in MDX with Steps, Tabs, Cards, Callouts, and more.
+  </Card>
+  <Card title="Components" icon="grid-round" href="/components/card">
+    A full library of layout, content, and API-reference building blocks.
+  </Card>
+  <Card title="API reference" icon="link-simple" href="/api">
+    Drop in an OpenAPI spec for interactive endpoints and a "Try It" console.
+  </Card>
+  <Card title="CLI & tooling" icon="wrench" href="/guides/cli-reference">
+    One `dox` binary to init, dev, build, deploy, migrate, and check your docs.
+  </Card>
+  <Card title="AI features" icon="message" href="/guides/ai-features">
+    Grounded chat, an Agent Readiness Score, and `llms.txt` out of the box.
+  </Card>
+</CardGroup>
+
+## What's included
+
+<Columns cols={2}>
+  <Card title="Content & authoring" icon="book-open">
+    A unified content engine parses every page once into a typed graph — HTML, JSON, Markdown, search, and embeddings are all projections of one source of truth. Tabs, groups, hybrid search, Shiki code blocks, and an RSS-backed changelog ship in the box.
+  </Card>
+  <Card title="Tooling" icon="wrench">
+    The `dox` CLI hides the Next.js runtime behind a single binary. `create-dox` scaffolds, migrates, and lints; `dox check --ci` fails PRs on broken links, anchors, and drift; and the docs agent drafts documentation edits as reviewed pull requests — it never merges.
+  </Card>
+  <Card title="AI features" icon="message">
+    Retrieval-grounded chat answers with inline citations, a deterministic Agent Readiness Score grades how well your docs serve agents, and `/llms.txt`, per-page JSON, and agent manifests let tools index everything. Every deployed site is also a remote MCP endpoint at `/api/mcp`.
+  </Card>
+  <Card title="Design & infrastructure" icon="grid-round">
+    Automatic dark mode with customizable brand colors, a responsive sidebar-plus-TOC layout, dynamic OG images, built-in SEO, and a version switcher. Team accounts add Owner/Editor/Viewer roles from a git-committed roster — no database, no per-seat pricing.
+  </Card>
+</Columns>
+
+## Get started
+
+The fastest way to create a new Dox project is with the CLI:
+
+```bash
+npx create-dox my-docs
+```
+
+The CLI prompts you for a project name, description, brand preset, and optional GitHub repo URL — then scaffolds a ready-to-run docs site with starter content, navigation, and dependencies installed.
+
+Prefer to clone the template manually?
+
+```bash
+git clone https://github.com/kenny-io/Dox.git my-docs
+cd my-docs
+npm install
+npm run dev
+```
+
+## How it works
+
+Dox uses a file-based content model. All documentation lives in `src/content/` as `.mdx` files. Navigation structure is defined in `docs.json` at the project root — you list your tabs, groups, and pages there, and the sidebar, breadcrumbs, and routing are derived automatically.
+
+For API documentation, point the API Reference tab in `docs.json` to an OpenAPI spec file. Dox parses the spec and generates endpoint pages with parameter tables, request/response schemas, code samples, and an interactive playground.
+
+<Note type="info" title="Sample content">
+The pages in this Overview tab are example content that ships with the template. Replace them with your own product documentation to get started.
+</Note>

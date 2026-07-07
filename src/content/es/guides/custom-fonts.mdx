@@ -1,0 +1,79 @@
+---
+title: Fuentes Personalizadas
+description: Cambia a cualquier fuente de Google para el texto del cuerpo y los encabezados, configurado completamente desde docs.json.
+---
+
+Dox viene con **Inter** para el texto del cuerpo y **JetBrains Mono** para el código por defecto. Puedes reemplazar cualquiera de ellas con cualquier fuente de Google añadiendo un bloque `fonts` en `docs.json` — sin necesidad de cambios en el código.
+
+## Configuración
+
+```json
+"fonts": {
+  "body": { "family": "Plus Jakarta Sans", "weight": ["400", "500", "600", "700"] },
+  "heading": { "family": "Outfit", "weight": ["600", "700"] }
+}
+```
+
+Dox lee la configuración, obtiene la fuente de Google Fonts y sobreescribe las variables CSS que controlan la tipografía en todo el sitio.
+
+## Campos
+
+### `fonts.body`
+
+Se aplica a todo el texto del cuerpo, etiquetas de UI, navegación y la barra lateral.
+
+| Campo | Tipo | Valor por defecto | Descripción |
+| --- | --- | --- | --- |
+| `family` | `string` | `"Inter"` | Nombre de la familia de fuente de Google (ortografía exacta, p. ej. `"DM Sans"`) |
+| `weight` | `string[]` | `["400","500","600","700"]` | Pesos de fuente a cargar |
+
+### `fonts.heading`
+
+Se aplica a los encabezados h1–h6 en el contenido de la página. Si se omite, los encabezados usan la misma fuente que el cuerpo.
+
+| Campo | Tipo | Valor por defecto | Descripción |
+| --- | --- | --- | --- |
+| `family` | `string` | Igual que el cuerpo | Nombre de la familia de fuente de Google |
+| `weight` | `string[]` | `["600","700"]` | Pesos de fuente a cargar |
+
+## Combinaciones populares
+
+| Cuerpo | Encabezado | Carácter |
+| --- | --- | --- |
+| `Plus Jakarta Sans` | `Outfit` | Moderno, geométrico, orientado a productos |
+| `DM Sans` | `DM Sans` | Limpio, minimalista, neutro |
+| `IBM Plex Sans` | `IBM Plex Sans` | Técnico, similar a monoespaciado |
+| `Lato` | `Lato` | Humanista, amigable, accesible |
+| `Figtree` | `Figtree` | Redondeado, contemporáneo |
+| `Inter` | `Sora` | Cuerpo nítido + encabezados expresivos |
+| `Source Sans 3` | `Playfair Display` | Editorial, orientado al contenido |
+
+## Cómo funciona
+
+Cuando Dox detecta una fuente personalizada en `docs.json`:
+
+1. Genera una URL de CSS de Google Fonts para cada familia configurada
+2. Inyecta etiquetas `<link rel="preconnect">` y `<link rel="stylesheet">` en el head del documento
+3. Sobreescribe las variables CSS `--font-sans` y `--font-heading` para que Tailwind y la tipografía de prosa adopten la nueva fuente
+
+La fuente Inter predeterminada (cargada mediante `next/font`) permanece como alternativa — así que si la solicitud a Google Fonts falla, la página seguirá renderizándose correctamente con Inter.
+
+## Fuente de código
+
+La fuente monoespaciada utilizada para el código en línea y los bloques de código se configura por separado en `src/app/layout.tsx` mediante `next/font/google`. Para cambiarla, reemplaza la importación de `JetBrains_Mono`:
+
+```ts
+import { FiraCode } from 'next/font/google'
+
+const fontMono = FiraCode({
+  subsets: ['latin'],
+  variable: '--font-mono',
+  display: 'swap',
+})
+```
+
+El soporte para configurar la fuente monoespaciada desde `docs.json` (sin cambios en el código) está planificado.
+
+<Note type="info" title="Este sitio usa fuentes personalizadas">
+Esta documentación utiliza **Plus Jakarta Sans** para el texto del cuerpo y **Outfit** para los encabezados, configurado en `docs.json` — exactamente como se describe arriba.
+</Note>

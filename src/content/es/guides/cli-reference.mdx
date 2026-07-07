@@ -1,0 +1,193 @@
+---
+title: Referencia CLI
+description: Todos los comandos de create-dox para crear, migrar y verificar proyectos Dox.
+---
+
+La CLI `create-dox` es la herramienta principal para trabajar con proyectos Dox desde la terminal. Instálala globalmente o ejecútala directamente con `npx`.
+
+```bash
+npx create-dox [command] [args] [options]
+```
+
+---
+
+## create-dox (scaffold)
+
+Crea un nuevo proyecto de documentación Dox.
+
+```bash
+npx create-dox my-docs
+```
+
+La CLI guía a través de una configuración interactiva:
+
+- **Nombre del proyecto** — se muestra en el encabezado y los metadatos
+- **Descripción** — se usa para SEO y etiquetas OpenGraph
+- **Preset de marca** — `primary` (verde) o `secondary` (morado)
+- **URL del repositorio de GitHub** — configura automáticamente los enlaces de Soporte y GitHub
+- **Instalar dependencias** — ejecuta `npm install` por ti
+
+Omite todos los prompts y acepta los valores predeterminados con `--yes`:
+
+```bash
+npx create-dox my-docs --yes
+```
+
+### Opciones
+
+| Bandera | Descripción |
+|---------|-------------|
+| `--yes`, `-y` | Acepta todos los valores predeterminados, omite los prompts interactivos |
+
+---
+
+## create-dox migrate
+
+Migra un repositorio de documentación existente de GitHub a un proyecto Dox.
+
+```bash
+npx create-dox migrate <github-url> [output-dir] [options]
+```
+
+Dox clona el repositorio fuente, lee todos los archivos Markdown y MDX directamente, convierte la navegación desde la configuración de la plataforma fuente y escribe todo en un proyecto Dox listo para ejecutar.
+
+**Plataformas fuente compatibles:** Mintlify, Docusaurus, GitBook, Nextra, VitePress, Starlight y cualquier repositorio con archivos Markdown simples.
+
+### Ejemplos
+
+```bash
+# Migrar a un nuevo proyecto en ./my-docs
+npx create-dox migrate https://github.com/org/repo my-docs
+
+# Derivar el directorio de salida del nombre del repositorio
+npx create-dox migrate https://github.com/mintlify/starter
+
+# Migrar una rama o subdirectorio específico
+npx create-dox migrate https://github.com/org/repo/tree/main/docs my-docs
+
+# Migrar contenido a un proyecto Dox existente
+npx create-dox migrate https://github.com/org/repo --into ./existing-docs
+```
+
+### Qué se migra
+
+- Todos los archivos `.md` y `.mdx` se copian y convierten a MDX limpio
+- La estructura de navegación se detecta desde `mint.json`, `docusaurus.config.js`, `docs.json` o se infiere de la estructura de directorios
+- Los archivos de especificación OpenAPI (`.json`, `.yaml`) se detectan y se configuran como una pestaña de Referencia de API
+- Los componentes MDX específicos de la plataforma se normalizan a sus equivalentes en Dox (ver [mapeo de componentes](#component-mapping) a continuación)
+
+### Opciones
+
+| Bandera | Descripción |
+|---------|-------------|
+| `--into <dir>` | Migrar a un proyecto Dox existente en lugar de crear uno nuevo |
+| `--branch <name>` | Sobreescribir la rama de git detectada automáticamente |
+| `--docs-dir <path>` | Sobreescribir el subdirectorio de documentación detectado automáticamente |
+| `--api-key <key>` | Clave API de Anthropic para convertir archivos que no son Markdown (p. ej. `.rst`). Usa como alternativa la variable de entorno `ANTHROPIC_API_KEY` |
+| `--yes`, `-y` | Omitir los prompts de confirmación |
+
+### Mapeo de componentes
+
+Mintlify, Docusaurus y GitBook usan componentes MDX específicos de la plataforma que no existen en Dox. La herramienta de migración los convierte automáticamente:
+
+| Fuente | Equivalente en Dox |
+|--------|-------------------|
+| `<Tip>` | `<Note>` |
+| `<Check>` | `<Note>` |
+| `<Danger>` | `<Error>` |
+| `<Callout>` | `<Note>` / `<Warning>` / `<Info>` |
+| `:::note ...:::` (Docusaurus) | `<Note>` |
+| `{% hint style="..." %}` (GitBook) | `<Note>` / `<Warning>` |
+| `<AccordionGroup>` | eliminado (se mantienen los hijos) |
+| `<Expandable title="...">` | `<Accordion title="...">` |
+| `<ResponseField>` / `<ParamField>` | Definición de propiedad en Markdown |
+| `<RequestExample>` / `<ResponseExample>` | `<CodeGroup>` |
+| `<Tile>` | `<Card>` |
+
+<Note type="info" title="Archivos que no son Markdown">
+Los archivos en formato `.rst` u otros formatos requieren una clave API de Anthropic para convertirse. Establece `ANTHROPIC_API_KEY` en tu entorno o pasa `--api-key`. Los archivos `.md` y `.mdx` simples se migran de forma gratuita.
+</Note>
+
+---
+
+## create-dox check
+
+Verifica un proyecto Dox en busca de problemas comunes e informa errores y advertencias.
+
+```bash
+npx create-dox check [project-dir]
+```
+
+Usa el directorio actual si no se proporciona ninguna ruta.
+
+### Qué verifica
+
+| Problema | Severidad |
+|----------|-----------|
+| Página listada en `docs.json` pero no se encontró archivo MDX | Error |
+| ID de página duplicado en `docs.json` | Error |
+| Pestaña sin grupos y sin `href` | Error |
+| Archivo MDX no listado en `docs.json` (huérfano) | Advertencia |
+| `title` faltante en el frontmatter | Advertencia |
+| `description` faltante en el frontmatter | Advertencia |
+| Cuerpo de página vacío o casi vacío | Advertencia |
+
+```bash
+# Verificar el proyecto actual
+npx create-dox check
+
+# Verificar un directorio específico
+npx create-dox check /path/to/my-docs
+
+# Corregir automáticamente archivos huérfanos agregándolos a la navegación
+npx create-dox check --fix
+```
+
+La CLI termina con el código `1` si se encuentran errores, `0` si el proyecto está limpio o solo tiene advertencias.
+
+### Opciones
+
+| Bandera | Descripción |
+|---------|-------------|
+| `--fix` | Agregar automáticamente páginas huérfanas al último grupo de la primera pestaña de contenido |
+
+---
+
+## create-dox translate
+
+Traduce páginas de documentación a una configuración regional secundaria usando Claude AI. Requiere un bloque `i18n` en `docs.json`.
+
+```bash
+npx create-dox translate --locale es
+```
+
+Los archivos traducidos se escriben en `src/content/{locale}/` y se confirman en tu repositorio — sin costo en tiempo de ejecución, SSG completo.
+
+### Ejemplos
+
+```bash
+# Traducir todas las páginas al español
+npx create-dox translate --locale es
+
+# Traducir solo páginas específicas
+npx create-dox translate --locale fr --pages introduction,guides/getting-started
+
+# Sobreescribir traducciones existentes
+npx create-dox translate --locale es --force
+
+# Pasar la clave API explícitamente
+npx create-dox translate --locale de --api-key sk-ant-...
+```
+
+### Opciones
+
+| Bandera | Descripción |
+|---------|-------------|
+| `--locale <code>` | Código de configuración regional destino — requerido (debe estar en la configuración i18n de `docs.json`) |
+| `--pages <ids>` | IDs de páginas separados por comas para traducir (omitir para todas las páginas) |
+| `--force` | Sobreescribir archivos de traducción existentes |
+| `--api-key <key>` | Clave API de Anthropic (usa como alternativa la variable de entorno `ANTHROPIC_API_KEY`) |
+| `--model <id>` | Modelo de Claude a usar (predeterminado: `claude-sonnet-4-6`) |
+| `--yes`, `-y` | Omitir el prompt de confirmación |
+
+Consulta [Soporte Multilingüe](/guides/multi-language) para obtener instrucciones completas de configuración.

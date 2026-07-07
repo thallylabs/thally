@@ -1,0 +1,262 @@
+---
+title: Vitrina de Componentes
+description: Una demostración visual de los componentes MDX disponibles en Dox.
+---
+
+Esta página muestra los componentes integrados y los estilos tipográficos disponibles en Dox. Úsala como referencia al crear tu propia documentación.
+
+## Encabezados
+
+### Título de Sección (H3)
+
+#### Detalle Anidado (H4)
+
+El texto del cuerpo mantiene un ritmo consistente independientemente de la profundidad del encabezado. El código en línea como `npm run dev` se renderiza con un fondo sutil.
+
+## Listas
+
+- Los **elementos en negrita** destacan en las listas desordenadas
+- _Texto en cursiva_ para énfasis
+- Enlaces [con subrayado al pasar el cursor](#lists)
+
+1. Listas ordenadas para pasos secuenciales
+2. El contenido anidado también funciona:
+   - Sub-elemento con un fragmento de `code`
+   - Otra viñeta anidada
+
+> Las citas en bloque tienen estilo con un borde izquierdo y texto silenciado.
+
+## Llamadas
+
+<Note type="info" title="Info">
+Usa notas informativas para consejos útiles y contexto adicional.
+</Note>
+
+<Note type="warning" title="Warning">
+Las advertencias resaltan posibles problemas o consideraciones importantes.
+</Note>
+
+<Note type="danger" title="Danger">
+Las notas de peligro señalan cambios críticos o errores graves.
+</Note>
+
+## Tablas
+
+| Característica | Estado | Notas |
+| --- | --- | --- |
+| Páginas MDX | Compatible | Enrutamiento basado en archivos |
+| Referencia de API | Compatible | OpenAPI 3.x |
+| Búsqueda | Compatible | Del lado del cliente |
+| Modo oscuro | Compatible | Automático |
+
+## Bloques de código
+
+### Lenguaje único
+
+```bash
+npx create-dox my-docs
+cd my-docs
+npm run dev
+```
+
+### Grupo multilenguaje
+
+<CodeGroup title="Install dependencies">
+
+```bash
+npm install
+```
+
+```bash
+yarn install
+```
+
+```bash
+pnpm install
+```
+
+</CodeGroup>
+
+### Ejemplo JSON
+
+```json
+{
+  "tabs": [
+    {
+      "tab": "Overview",
+      "groups": [
+        {
+          "group": "Getting Started",
+          "pages": ["introduction", "quickstart"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+## Pasos
+
+<Steps>
+
+<Step title="Instalar Dox">
+
+Ejecuta el CLI para crear un nuevo proyecto:
+
+```bash
+npx create-dox my-docs
+```
+
+Se te pedirá un nombre de proyecto, descripción y un preset de marca.
+
+</Step>
+
+<Step title="Agrega tu contenido">
+
+Crea archivos `.mdx` en `src/content/` y regístralos en `docs.json`:
+
+1. Escribe tu página con frontmatter (`title`, `description`)
+2. Agrega el slug de la página a un grupo en `docs.json`
+3. La barra lateral se actualiza automáticamente
+
+<Note type="info" title="Tip">
+Usa la página `showcase` para previsualizar todos los componentes disponibles mientras escribes.
+</Note>
+
+</Step>
+
+<Step title="Desplegar">
+
+Compila y despliega en cualquier plataforma que sea compatible con Next.js:
+
+```bash
+npm run build
+```
+
+- **Vercel** — despliegue sin configuración
+- **Netlify** — agrega un `netlify.toml` con el plugin de Next.js
+- **Docker** — usa el `Dockerfile` incluido o crea el tuyo propio
+
+</Step>
+
+</Steps>
+
+## Pestañas
+
+<Tabs>
+
+<Tab title="macOS">
+
+```bash
+brew install node
+npx create-dox my-docs
+```
+
+</Tab>
+
+<Tab title="Windows">
+
+```bash
+winget install OpenJS.NodeJS
+npx create-dox my-docs
+```
+
+</Tab>
+
+<Tab title="Linux">
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+npx create-dox my-docs
+```
+
+</Tab>
+
+</Tabs>
+
+## Tarjetas
+
+<CardGroup cols={3}>
+
+<Card title="Inicio Rápido" href="/quickstart" icon="book-open">
+Pon en marcha un sitio de documentación en menos de cinco minutos.
+</Card>
+
+<Card title="Configuración" href="/authentication" icon="wrench">
+Controla la navegación, pestañas y grupos con docs.json.
+</Card>
+
+<Card title="Referencia de API" href="/webhooks" icon="code-simple">
+Genera documentación interactiva de API a partir de una especificación OpenAPI.
+</Card>
+
+</CardGroup>
+
+## Marco
+
+Envuelve imágenes en un `<Frame>` para obtener un borde con estilo, leyenda opcional y zoom al hacer clic:
+
+<Frame caption="Una imagen de muestra dentro de un Frame — haz clic para ampliar.">
+
+![JavaScript and flowchart](/images/image1.jpg)
+
+</Frame>
+
+También puedes envolver contenido que no sea imágenes. Usa `zoom={false}` para desactivar la superposición de zoom:
+
+<Frame caption="Tokens de color utilizados por el sistema de temas." zoom={false}>
+
+| Token | Propósito |
+| --- | --- |
+| `background` | Fondo de la página |
+| `accent` | Color principal de la marca |
+| `foreground` | Color del texto |
+
+</Frame>
+
+## Acordeón
+
+<Accordion title="¿Qué es Dox?">
+Dox es una plantilla de documentación de código abierto construida con Next.js, MDX y Tailwind CSS. Te proporciona un sitio de documentación listo para producción sin dependencia de proveedores.
+</Accordion>
+
+<Accordion title="¿Cómo agrego una nueva página?">
+Crea un archivo `.mdx` en `src/content/`, luego agrega su slug a un grupo en `docs.json`. La barra lateral se actualiza automáticamente.
+</Accordion>
+
+<Accordion title="¿Puedo usar mis propios componentes?">
+Sí. Crea un componente en `src/components/` y regístralo en `src/components/mdx/mdx-components.tsx`. Estará disponible en todos los archivos MDX.
+</Accordion>
+
+## Información emergente
+
+Pasa el cursor sobre el <Tooltip tip="Dox usa next-themes para el cambio automático entre modo claro y oscuro.">texto subrayado</Tooltip> para ver una información emergente. También puedes usar información emergente para explicar acrónimos de <Tooltip tip="Application Programming Interface">API</Tooltip> o <Tooltip tip="MDX te permite usar componentes JSX dentro de Markdown.">términos técnicos</Tooltip> en línea.
+
+## Columnas
+
+<Columns cols={2}>
+
+<div>
+
+### Columna izquierda
+
+![HTML browser](/images/image2.jpg)
+
+Las columnas son útiles para comparaciones en paralelo, listas de características o variedad de diseño.
+
+</div>
+
+<div>
+
+### Columna derecha
+
+![City skyline](/images/image3.jpg)
+
+Cada columna admite contenido MDX completo, incluyendo imágenes, bloques de código, listas y llamadas.
+
+</div>
+
+</Columns>
+
+Alterna entre los temas claro y oscuro para verificar que todos los componentes se rendericen correctamente en ambos modos.

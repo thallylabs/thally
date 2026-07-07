@@ -1,0 +1,131 @@
+---
+title: Funciones de IA
+description: Capacidades de IA integradas — widget de chat, endpoints listos para LLM y herramientas MCP para consultar tus docs.
+---
+
+Dox incluye un conjunto de funciones nativas de IA que hacen que tu documentación sea consumible por sistemas de IA y ofrecen a tus usuarios una experiencia de preguntas y respuestas potenciada por IA.
+
+---
+
+## Widget de chat con IA
+
+Añade un botón de chat flotante a tu sitio de documentación que permite a los usuarios hacer preguntas y obtener respuestas basadas en tu documentación real — impulsado por Claude.
+
+### Actívalo
+
+Añade `"ai": { "chat": true }` a tu `docs.json`:
+
+```json
+{
+  "ai": { "chat": true },
+  "tabs": [...]
+}
+```
+
+Luego configura tu clave de API de Anthropic en `.env.local`:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Eso es todo. Aparece un botón de chat en la esquina inferior derecha de tu sitio de documentación. Los usuarios hacen clic, hacen una pregunta y obtienen una respuesta en streaming obtenida de tu documentación.
+
+### Cómo funciona
+
+Cuando un usuario envía un mensaje, la ruta `/api/chat`:
+
+1. Carga el contenido completo de todas tus páginas de documentación (igual que `/llms-full.txt`)
+2. Lo envía como contexto a `claude-haiku-4-5` junto con el mensaje del usuario
+3. Transmite la respuesta de vuelta al widget
+
+Las respuestas están basadas en tu documentación. Si la respuesta no está ahí, Claude lo indica en lugar de adivinar.
+
+<Note type="info" title="Costo">
+El widget de chat usa `claude-haiku-4-5` — el modelo más rápido y asequible de Anthropic. Cada respuesta cuesta una fracción de centavo.
+</Note>
+
+<Note type="warning" title="Límite de velocidad">
+La ruta de chat aplica un límite de velocidad simple de 10 solicitudes por minuto por IP. No se requiere Redis ni ningún servicio externo.
+</Note>
+
+---
+
+## Endpoints listos para LLM
+
+Dox expone automáticamente tu documentación en formatos optimizados para el consumo por IA. Estos endpoints son accesibles públicamente y pueden ser referenciados por cualquier herramienta de IA que admita la carga de contexto basada en URL.
+
+### `/llms.txt`
+
+Un resumen conciso y estructurado de toda tu documentación — enlaces a cada página, organizados por pestaña y grupo. Sigue el estándar [llmstxt.org](https://llmstxt.org).
+
+```
+GET /llms.txt
+```
+
+Úsalo cuando quieras que las herramientas de IA descubran e indexen lo que cubre tu documentación.
+
+### `/llms-full.txt`
+
+El contenido completo de cada página de documentación en un único archivo de texto plano — sin JSX, listo para las ventanas de contexto de LLM.
+
+```
+GET /llms-full.txt
+```
+
+Úsalo como prompt de sistema o documento de contexto al construir funciones de IA sobre tu documentación.
+
+### `/api/docs/[slug]`
+
+Sirve una única página de documentación como Markdown limpio con frontmatter YAML. Útil para el acceso programático a páginas individuales.
+
+```
+GET /api/docs/guides/authentication
+```
+
+Respuesta:
+
+```markdown
+---
+title: Authentication
+description: How to authenticate requests to the API.
+url: https://docs.example.com/guides/authentication
+---
+
+# Authentication
+
+...page content...
+```
+
+---
+
+## Herramientas MCP para consultar documentación
+
+El servidor `@doxlabs/mcp` incluye tres herramientas que permiten a los agentes de IA buscar y leer tu documentación como contexto.
+
+### `search_docs`
+
+Busca en todas las páginas por palabra clave y devuelve resultados clasificados.
+
+```
+Search the acme-docs project for anything about rate limiting
+```
+
+Los resultados se puntúan por calidad de coincidencia en el título (3 pts), descripción (2 pts), palabras clave (2 pts) y contenido del cuerpo.
+
+### `read_page`
+
+Lee el contenido completo de una sola página por su ID.
+
+```
+Read the "guides/webhooks" page from the acme-docs project
+```
+
+### `get_context`
+
+Devuelve la documentación más relevante para un tema dado, ajustándose a un presupuesto de tokens. Esta es la herramienta adecuada cuando quieres responder una pregunta usando tu documentación como base de conocimiento.
+
+```
+Get context from acme-docs about the webhook authentication flow, up to 4000 tokens
+```
+
+Consulta [Servidor MCP](/guides/mcp-server) para instrucciones de configuración y la referencia completa de herramientas.

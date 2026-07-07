@@ -1,0 +1,58 @@
+---
+title: Theming
+description: Customize colors, fonts, and brand identity across your docs site.
+---
+
+Dox ships with a flexible theming system that lets you match your docs to your brand. All colors are defined in `src/data/site.ts` and applied as CSS custom properties.
+
+## Brand presets
+
+Two presets are included out of the box:
+
+| Preset | Accent | Style |
+| --- | --- | --- |
+| `primary` | Green (#10B981) | Clean and modern |
+| `secondary` | Purple (#8B5CF6) | Bold and vibrant |
+
+Set the active preset in `src/data/site.ts`:
+
+```ts
+export const siteConfig = {
+  brandPreset: 'primary', // or 'secondary'
+  // ...
+}
+```
+
+## Custom colors
+
+Override individual color tokens in the `brandPresets` object:
+
+```ts
+brandPresets: {
+  primary: {
+    light: {
+      background: '#FFFFFF',
+      foreground: '#0F172A',
+      accent: '#10B981',
+      // ...
+    },
+    dark: {
+      background: '#0B1120',
+      foreground: '#F8FAFC',
+      accent: '#34D399',
+      // ...
+    },
+  },
+}
+```
+
+Most colors accept hex values which are auto-converted to HSL. The sidebar tokens (`sidebarActiveBg`, `sidebarActiveText`) use raw HSL strings for translucent effects.
+
+## Dark mode
+
+Dark mode is automatic. Dox reads the system preference and provides a toggle in the header. Both light and dark palettes are defined in your brand preset, so switching themes is seamless.
+
+<Note type="info" title="Sample page">
+This is example content that ships with the Dox template. Replace it with your own product documentation.
+</Note>
+

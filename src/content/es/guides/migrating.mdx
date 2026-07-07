@@ -1,0 +1,155 @@
+---
+title: Migrando a Dox
+description: Mueve tu documentación existente de Mintlify, Docusaurus, GitBook o cualquier plataforma basada en Markdown a Dox con un solo comando.
+---
+
+El comando `create-dox migrate` clona un repositorio de documentación de GitHub y lo convierte en un proyecto Dox en funcionamiento — sin copiar manualmente, sin reformatear.
+
+```bash
+npx create-dox migrate https://github.com/your-org/your-docs my-docs
+```
+
+---
+
+## Cómo funciona
+
+<Steps>
+
+<Step title="Clonar el repositorio fuente">
+
+Dox realiza un `git clone` superficial del repositorio en un directorio temporal. No se requiere autenticación para repositorios públicos.
+
+</Step>
+
+<Step title="Detectar automáticamente la plataforma y la estructura">
+
+Dox inspecciona el repositorio en busca de archivos de configuración de plataforma para entender la navegación existente:
+
+| Archivo | Plataforma detectada |
+|------|-------------------|
+| `docs.json` / `mint.json` | Mintlify |
+| `docusaurus.config.js` + `sidebars.js` | Docusaurus |
+| `book.yaml` | GitBook |
+| `_meta.json` | Nextra |
+| `vitepress.config.*` | VitePress |
+| `.starlight/` | Starlight |
+| *(ninguno de los anteriores)* | Se usa la estructura de directorios |
+
+El directorio de documentación también se detecta automáticamente: `docs/`, `documentation/`, `content/`, `src/content/`, `pages/`, o la raíz del repositorio.
+
+</Step>
+
+<Step title="Importar todos los archivos de documentación">
+
+Cada archivo `.md` y `.mdx` se lee directamente. El frontmatter (`title`, `description`, `keywords`) se conserva. Los componentes MDX específicos de la plataforma se convierten a sus equivalentes en Dox.
+
+Los archivos que no son Markdown (p. ej. `.rst`) se convierten a MDX usando Claude si proporcionas una clave API de Anthropic.
+
+</Step>
+
+<Step title="Conectar la referencia de API">
+
+Si se encuentra una especificación OpenAPI (`openapi.json`, `openapi.yaml`, `swagger.json`, etc.) en cualquier parte del repositorio, se copia a `public/` y la pestaña de Referencia de API en `docs.json` se configura automáticamente.
+
+</Step>
+
+<Step title="Escribir el proyecto Dox">
+
+Todas las páginas convertidas se escriben en `src/content/`. La navegación de `docs.json` se construye a partir de la configuración de plataforma detectada o se infiere de la estructura de directorios.
+
+</Step>
+
+</Steps>
+
+---
+
+## Plataformas compatibles
+
+### Mintlify
+
+```bash
+npx create-dox migrate https://github.com/mintlify/starter my-docs
+```
+
+La navegación se lee desde `docs.json` (Mintlify v3) o `mint.json`. Las especificaciones OpenAPI en el directorio `api-reference/` se detectan y conectan automáticamente.
+
+### Docusaurus
+
+```bash
+npx create-dox migrate https://github.com/facebook/docusaurus/tree/main/website/docs my-docs
+```
+
+La estructura de la barra lateral se analiza desde `sidebars.js`. Las advertencias de Docusaurus (`:::note`, `:::warning`, etc.) se convierten a componentes de llamada de atención de Dox.
+
+### GitBook
+
+```bash
+npx create-dox migrate https://github.com/your-org/gitbook-docs my-docs
+```
+
+`SUMMARY.md` se usa para inferir el orden de navegación. Los bloques `{% hint %}` se convierten al componente de llamada de atención correspondiente de Dox.
+
+### Markdown simple
+
+Cualquier repositorio con archivos Markdown funciona — la navegación se construye a partir de la estructura de directorios.
+
+```bash
+npx create-dox migrate https://github.com/your-org/docs my-docs
+```
+
+---
+
+## Migrar a un proyecto existente
+
+Usa `--into` para agregar contenido de otro repositorio a un proyecto Dox existente sin sobreescribirlo. Las nuevas pestañas y grupos se fusionan; el contenido existente no se modifica.
+
+```bash
+npx create-dox migrate https://github.com/your-org/api-docs --into ./my-docs
+```
+
+---
+
+## Opciones
+
+| Indicador | Descripción |
+|------|-------------|
+| `--into <dir>` | Fusionar en un proyecto existente |
+| `--branch <name>` | Anular la rama de git detectada automáticamente |
+| `--docs-dir <path>` | Anular el subdirectorio de documentación detectado automáticamente |
+| `--api-key <key>` | Clave API de Anthropic (o establecer `ANTHROPIC_API_KEY`) para conversión de archivos no Markdown |
+| `--yes`, `-y` | Omitir confirmaciones interactivas |
+
+---
+
+## A través del servidor MCP
+
+Si usas Claude Code o Claude Desktop, puedes iniciar una migración a través del chat:
+
+```
+Migrate the Mintlify starter repo into a new Dox project at ~/dev/my-docs
+```
+
+La herramienta MCP `migrate_docs` acepta las mismas opciones que la CLI. Consulta [Servidor MCP](/guides/mcp-server) para instrucciones de configuración.
+
+---
+
+## Después de la migración
+
+Una vez completada la migración, inicia el servidor de desarrollo para revisar el resultado:
+
+```bash
+cd my-docs
+npm run dev
+```
+
+Luego ejecuta `create-dox check` para detectar cualquier problema antes de publicar:
+
+```bash
+npx create-dox check my-docs
+```
+
+Tareas comunes posteriores a la migración:
+- Actualiza `src/data/site.ts` con tu logotipo y colores de marca
+- Reemplaza las imágenes de marcador de posición en `src/content/`
+- Revisa el orden de navegación en `docs.json`
+- Establece `DOX_SITE_URL` antes de desplegar

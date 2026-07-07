@@ -1,0 +1,30 @@
+---
+title: "View"
+description: "Incrusta una demo en vivo o una URL externa dentro de tu documentación."
+---
+
+`<View>` renderiza un `<iframe>` en sandbox para incrustar demos en vivo, proyectos de CodeSandbox, instancias de Storybook o cualquier otra URL externa.
+
+## Uso
+
+```mdx
+<View src="https://codesandbox.io/embed/your-sandbox-id" height={500} />
+```
+
+## Altura personalizada
+
+```mdx
+<View src="https://example.com/demo" height="600px" title="Interactive demo" />
+```
+
+## Props
+
+| Prop | Tipo | Valor por defecto | Descripción |
+|---|---|---|---|
+| `src` | `string` | — | URL a incrustar |
+| `height` | `number \| string` | `500` | Altura del iframe — un número se trata como píxeles |
+| `title` | `string` | `"Live preview"` | Título accesible para lectores de pantalla |
+
+<Note>
+  `<View>` aplica `sandbox="allow-scripts allow-same-origin allow-forms allow-popups"`. El contenido que requiere permisos completos del navegador (p. ej., escritura en portapapeles, acceso a la cámara) no funcionará dentro de un embed de View.
+</Note>

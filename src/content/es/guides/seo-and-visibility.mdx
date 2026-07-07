@@ -1,0 +1,81 @@
+---
+title: SEO y Visibilidad
+description: Controla qué páginas se indexan, se ocultan de la navegación y se excluyen de los motores de búsqueda.
+---
+
+Dox te brinda un control preciso sobre qué páginas son visibles en la barra lateral, cuáles son indexadas por los motores de búsqueda y cuáles aparecen en el contexto de búsqueda con IA.
+
+## Páginas ocultas
+
+Establece `hidden: true` en el frontmatter de una página para eliminarla de la barra lateral y el sitemap sin hacerla inaccesible:
+
+```mdx
+---
+title: Internal Notes
+hidden: true
+---
+```
+
+Las páginas ocultas:
+- **No** aparecen en la navegación de la barra lateral
+- **No** se incluyen en el sitemap
+- Reciben automáticamente una metaetiqueta `noindex`
+- Siguen siendo accesibles mediante URL directa
+
+Esto es útil para páginas en preparación, referencias internas o borradores parciales que aún no estás listo para publicar.
+
+## Frontmatter `noindex`
+
+Para mantener una página en la barra lateral pero excluirla de los motores de búsqueda, usa `noindex: true`:
+
+```mdx
+---
+title: Legacy Reference
+noindex: true
+---
+```
+
+Esto inyecta `<meta name="robots" content="noindex, nofollow">` en el `<head>` de la página.
+
+## Diferencia entre `hidden` y `noindex`
+
+| | Aparece en la barra lateral | En el sitemap | Robots noindex |
+| --- | --- | --- | --- |
+| Por defecto | ✓ | ✓ | — |
+| `noindex: true` | ✓ | ✓ | ✓ |
+| `hidden: true` | — | — | ✓ |
+
+## Grupos y pestañas ocultos
+
+También puedes ocultar grupos enteros de la barra lateral o pestañas en `docs.json`:
+
+```json
+{
+  "tab": "Internal",
+  "hidden": true,
+  "groups": [
+    {
+      "group": "Staff Only",
+      "hidden": true,
+      "pages": ["internal/roadmap"]
+    }
+  ]
+}
+```
+
+Las pestañas y grupos ocultos se filtran de la navegación, pero sus páginas siguen siendo accesibles por URL.
+
+## Modo de indexación SEO
+
+Por defecto, las páginas ocultas se excluyen del contexto de búsqueda con IA. Para incluirlas (por ejemplo, para que las notas internas sean buscables dentro del chat de DoxAI), configura:
+
+```json
+"seo": {
+  "indexing": "all"
+}
+```
+
+| Valor | Comportamiento |
+| --- | --- |
+| `"navigable"` | Por defecto. Excluye las páginas ocultas del contexto de búsqueda e IA. |
+| `"all"` | Incluye todas las páginas — incluyendo las ocultas — en el contexto de búsqueda e IA. |

@@ -1,0 +1,120 @@
+---
+title: Deploying
+description: Build and deploy your Dox documentation site to any hosting platform.
+---
+
+## Build for production
+
+```bash
+npm run build
+```
+
+This generates an optimized production build in the `.next/` directory. All documentation pages are statically pre-rendered for fast loading.
+
+## Environment variables
+
+Before deploying, set the `DOX_SITE_URL` environment variable to your production domain. This is used for OpenGraph metadata and canonical URLs:
+
+```bash
+DOX_SITE_URL=https://docs.yourproduct.com
+```
+
+Depending on which features you use, you may also want to set:
+
+| Variable | Enables |
+| --- | --- |
+| `DOX_SITE_URL` | OpenGraph metadata and canonical URLs (recommended for every deploy) |
+| `ANTHROPIC_API_KEY` | The in-docs AI assistant ([AI features](/guides/ai-features)) |
+| `DOX_ADMIN_PASSWORD` | Break-glass Owner access to the `/admin` dashboard |
+| `DOX_OIDC_ISSUER` / `DOX_OIDC_CLIENT_ID` / `DOX_OIDC_CLIENT_SECRET` | Team sign-in to the dashboard via your IdP |
+| `DOX_AUTH_SECRET` | Signs admin sessions and encrypts stored secrets (required with OIDC) |
+
+Only `DOX_SITE_URL` is needed for a basic docs site. See [Admin dashboard & team access](/guides/admin-dashboard) for the auth variables in context.
+
+## Vercel
+
+The fastest way to deploy — push to GitHub and import the repo:
+
+1. Push your docs repo to GitHub
+2. Go to [vercel.com/new](https://vercel.com/new) and import the repository
+3. Set `DOX_SITE_URL` in the environment variables
+4. Deploy
+
+Vercel auto-detects Next.js and configures everything.
+
+## Netlify
+
+```bash
+npm run build
+```
+
+Set the build command to `npm run build` and the publish directory to `.next`. You may need the `@netlify/plugin-nextjs` plugin for full Next.js support.
+
+## Docker
+
+Create a `Dockerfile`:
+
+```dockerfile
+FROM node:18-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:18-alpine AS runner
+WORKDIR /app
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/src/content ./src/content
+COPY --from=builder /app/openapi.yaml ./
+COPY --from=builder /app/docs.json ./
+
+EXPOSE 3000
+CMD ["npm", "start"]
+```
+
+Build and run:
+
+```bash
+docker build -t my-docs .
+docker run -p 3000:3000 my-docs
+```
+
+## Cloudflare Pages
+
+Use the `@cloudflare/next-on-pages` adapter:
+
+1. Install: `npm install @cloudflare/next-on-pages`
+2. Set build command: `npx @cloudflare/next-on-pages`
+3. Set output directory: `.vercel/output/static`
+4. Deploy via the Cloudflare dashboard or Wrangler CLI
+
+## Static export
+
+If you don't need server-side features (like the Try It proxy), you can export as a fully static site. Add to `next.config.ts`:
+
+```ts
+const nextConfig = {
+  output: 'export',
+}
+```
+
+Then run `npm run build` — the output will be in the `out/` directory, ready for any static host.
+
+<Note type="warning" title="Static export limitation">
+  The API "Try It" panel requires a server-side proxy route and won't work with static export. All other features work fine.
+</Note>
+
+## SEO and feeds
+
+Once deployed, Dox automatically serves:
+
+- **`/sitemap.xml`** — includes all doc pages, API reference pages, and the changelog
+- **`/robots.txt`** — allows crawlers on all pages, blocks internal API routes (`/api/og`, `/api/try-it`)
+- **`/changelog/rss.xml`** — RSS feed for changelog updates
+- **Dynamic OG images** — every page gets a branded social preview image via `/api/og`
+
+All of these use `DOX_SITE_URL` to generate absolute URLs, so make sure it's set before deploying.

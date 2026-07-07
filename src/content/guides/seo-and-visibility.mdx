@@ -1,0 +1,81 @@
+---
+title: SEO & Visibility
+description: Control which pages are indexed, hidden from navigation, and excluded from search engines.
+---
+
+Dox gives you fine-grained control over which pages are visible in the sidebar, which are indexed by search engines, and which appear in the AI search context.
+
+## Hidden pages
+
+Set `hidden: true` in a page's frontmatter to remove it from the sidebar and sitemap without making it inaccessible:
+
+```mdx
+---
+title: Internal Notes
+hidden: true
+---
+```
+
+Hidden pages:
+- Are **not** listed in the sidebar navigation
+- Are **not** included in the sitemap
+- Automatically receive a `noindex` meta tag
+- Are still accessible by direct URL
+
+This is useful for staging pages, internal references, or partial drafts you're not ready to surface.
+
+## `noindex` frontmatter
+
+To keep a page in the sidebar but exclude it from search engines, use `noindex: true`:
+
+```mdx
+---
+title: Legacy Reference
+noindex: true
+---
+```
+
+This injects `<meta name="robots" content="noindex, nofollow">` into the page `<head>`.
+
+## Difference between `hidden` and `noindex`
+
+| | Appears in sidebar | In sitemap | Robots noindex |
+| --- | --- | --- | --- |
+| Default | ✓ | ✓ | — |
+| `noindex: true` | ✓ | ✓ | ✓ |
+| `hidden: true` | — | — | ✓ |
+
+## Hidden groups and tabs
+
+You can also hide entire sidebar groups or tabs in `docs.json`:
+
+```json
+{
+  "tab": "Internal",
+  "hidden": true,
+  "groups": [
+    {
+      "group": "Staff Only",
+      "hidden": true,
+      "pages": ["internal/roadmap"]
+    }
+  ]
+}
+```
+
+Hidden tabs and groups are filtered from the navigation but their pages remain accessible by URL.
+
+## SEO indexing mode
+
+By default, hidden pages are excluded from the AI search context. To include them (for example, to make internal notes searchable within the DoxAI chat), set:
+
+```json
+"seo": {
+  "indexing": "all"
+}
+```
+
+| Value | Behavior |
+| --- | --- |
+| `"navigable"` | Default. Excludes hidden pages from search and AI context. |
+| `"all"` | Includes all pages — including hidden ones — in search and AI context. |

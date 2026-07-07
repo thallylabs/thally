@@ -1,0 +1,300 @@
+---
+title: MCP Server
+description: Use @doxlabs/mcp to manage Dox projects with Claude, Cursor, or any MCP-compatible AI tool.
+---
+
+`@doxlabs/mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI tools — Claude Code, Claude Desktop, Cursor, Windsurf — create, read, update, and migrate Dox documentation projects through natural language.
+
+## Setup
+
+Add `@doxlabs/mcp` to your Claude Code or Claude Desktop configuration:
+
+<Tabs>
+
+<Tab title="Claude Code">
+
+```bash
+claude mcp add dox -- npx -y @doxlabs/mcp
+```
+
+</Tab>
+
+<Tab title="Claude Desktop">
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "dox": {
+      "command": "npx",
+      "args": ["-y", "@doxlabs/mcp"]
+    }
+  }
+}
+```
+
+</Tab>
+
+<Tab title="Cursor / Windsurf">
+
+Add to your MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "dox": {
+      "command": "npx",
+      "args": ["-y", "@doxlabs/mcp"]
+    }
+  }
+}
+```
+
+</Tab>
+
+</Tabs>
+
+Once connected, you can talk to your docs like a collaborator: *"Add a page about webhooks to the Guides tab"* or *"Migrate the Stripe docs into a new project"*.
+
+---
+
+## Tools
+
+### Project management
+
+#### `create_project`
+
+Scaffolds a new Dox project from the GitHub template.
+
+```
+Create a new Dox project at ~/dev/my-docs with the name "Acme Docs"
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `projectDir` | Yes | Path for the new project |
+| `projectName` | No | Displayed in header and metadata |
+| `description` | No | Used for SEO and OpenGraph |
+| `brandPreset` | No | `primary` or `secondary` |
+| `repoUrl` | No | GitHub URL for "Edit on GitHub" links |
+| `install` | No | Run `npm install` after scaffolding (default: `true`) |
+
+---
+
+#### `add_page`
+
+Creates a new MDX page and registers it in `docs.json`.
+
+```
+Add a page called "Authentication" to the Guides tab under a "Security" group
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `projectDir` | Yes | Path to the Dox project |
+| `pageId` | Yes | e.g. `guides/authentication` — no `.mdx` extension |
+| `title` | Yes | Page title (frontmatter) |
+| `description` | No | Page description (frontmatter) |
+| `content` | No | MDX body (placeholder used if omitted) |
+| `tab` | No | Tab name (defaults to first tab) |
+| `group` | No | Group name (defaults to first group) |
+| `position` | No | `start` or `end` (default: `end`) |
+
+---
+
+#### `add_tab`
+
+Adds a new top-level tab to the navigation.
+
+```
+Add a "SDK Reference" tab to the project
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `projectDir` | Yes | Path to the Dox project |
+| `tabName` | Yes | Tab label |
+| `href` | No | If set, creates a redirect link tab (e.g. `/changelog`) |
+| `position` | No | `start` or `end` (default: `end`) |
+
+---
+
+#### `update_page`
+
+Updates the frontmatter or body of an existing page.
+
+```
+Update the "Getting Started" page to mention the new --yes flag
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `projectDir` | Yes | Path to the Dox project |
+| `pageId` | Yes | Page to update |
+| `title` | No | New title |
+| `description` | No | New description |
+| `content` | No | Replaces the existing body |
+| `mergeFrontmatter` | No | Additional frontmatter fields to merge |
+
+---
+
+#### `list_pages`
+
+Lists all pages in a project, organized by tab and group.
+
+```
+Show me all the pages in my docs project
+```
+
+---
+
+### Migration
+
+#### `migrate_docs`
+
+Clones a GitHub docs repo and migrates its content into a Dox project.
+
+```
+Migrate the Mintlify starter into a new project at /tmp/my-docs
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `sourceUrl` | Yes | GitHub URL of the source repo |
+| `projectDir` | Yes | Target path (new project or existing) |
+| `into` | No | Migrate into an existing project (default: `false`) |
+| `branch` | No | Git branch to clone (auto-detected by default) |
+| `docsDir` | No | Docs subdirectory in the repo (auto-detected) |
+| `apiKey` | No | Anthropic API key for non-Markdown conversion |
+
+---
+
+### Reading & searching
+
+These tools let AI agents query your docs as context — useful for building AI features on top of your documentation.
+
+#### `search_docs`
+
+Searches all pages by keyword and returns ranked results.
+
+```
+Search the docs for anything about rate limiting
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `projectDir` | Yes | Path to the Dox project |
+| `query` | Yes | Search query |
+| `limit` | No | Max results to return (default: `5`) |
+
+---
+
+#### `read_page`
+
+Reads the full content of a single page by ID.
+
+```
+Read the "guides/authentication" page
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `projectDir` | Yes | Path to the Dox project |
+| `pageId` | Yes | e.g. `guides/authentication` |
+
+---
+
+#### `get_context`
+
+Returns the most relevant docs content for a topic, within a token budget. Ideal for grounding AI responses in your documentation.
+
+```
+Get context about the authentication flow for up to 4000 tokens
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `projectDir` | Yes | Path to the Dox project |
+| `topic` | Yes | Topic or question |
+| `maxTokens` | No | Token budget (default: `4000`) |
+
+---
+
+### Agent-native (deployed site)
+
+These tools query a **deployed** Dox site over HTTP — they use the same indexes and reports that power the live site, so an agent can reason about docs it didn't scaffold.
+
+#### `semantic_search`
+
+Runs hybrid (full-text + vector) search against a deployed site's `/api/search` — the same Orama index as the in-app command palette.
+
+```
+Semantic-search https://docs.example.com for "rotating API keys"
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `siteUrl` | Yes | Base URL of the deployed Dox site |
+| `query` | Yes | Natural-language search query |
+| `limit` | No | Max results (default: `8`) |
+| `mode` | No | `hybrid` (default) or `fulltext` |
+
+---
+
+#### `agent_readiness`
+
+Fetches the Agent Readiness Score (0–100) for a deployed site — the same report as `/api/agent-readiness` and `dox check`, including per-signal subscores and the specific pages dragging the score down.
+
+```
+What's the agent readiness score for https://docs.example.com?
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `siteUrl` | Yes | Base URL of the deployed Dox site |
+| `minScore` | No | Threshold (0–100); flags pass/fail in the summary |
+
+---
+
+### Quality
+
+#### `lint_project`
+
+Checks a project for errors and warnings: broken nav references, orphan files, missing frontmatter.
+
+```
+Check my docs project for any issues
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `projectDir` | Yes | Path to the Dox project |
+| `fix` | No | Auto-add orphan pages to the nav (default: `false`) |
+
+---
+
+### Internationalization
+
+#### `translate_docs`
+
+Translates documentation pages to a secondary locale using Claude AI. Requires an `i18n` block in the project's `docs.json`. Translated MDX files are written to `src/content/{locale}/` and committed to your repo.
+
+```
+Translate my docs to Spanish
+```
+
+```
+Translate only the introduction and quickstart pages to French
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `projectDir` | Yes | Path to the Dox project |
+| `locale` | Yes | Target locale code, e.g. `"es"`, `"fr"` |
+| `pages` | No | Array of page IDs to translate (omit for all pages) |
+| `force` | No | Overwrite existing translation files (default: `false`) |
+| `apiKey` | No | Anthropic API key (falls back to `ANTHROPIC_API_KEY`) |
+| `model` | No | Claude model to use (default: `claude-sonnet-4-6`) |
+
+See [Multi-Language Support](/guides/multi-language) for full setup instructions.

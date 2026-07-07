@@ -1,0 +1,36 @@
+---
+title: "Badge"
+description: "Inline label for status, version, or category callouts."
+---
+
+Use `<Badge>` to highlight status, versions, or categories inline within text or headings.
+
+## Variants
+
+<Badge variant="default">Default</Badge>{" "}
+<Badge variant="success">Success</Badge>{" "}
+<Badge variant="warning">Warning</Badge>{" "}
+<Badge variant="danger">Danger</Badge>{" "}
+<Badge variant="info">Info</Badge>
+
+```mdx
+<Badge variant="default">Default</Badge>
+<Badge variant="success">Stable</Badge>
+<Badge variant="warning">Beta</Badge>
+<Badge variant="danger">Deprecated</Badge>
+<Badge variant="info">New</Badge>
+```
+
+## Common patterns
+
+Place badges next to a page heading to show the status of a feature:
+
+```mdx
+## Webhooks <Badge variant="warning">Beta</Badge>
+```
+
+## Props
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `variant` | `"default" \| "success" \| "warning" \| "danger" \| "info"` | `"default"` | Color scheme |

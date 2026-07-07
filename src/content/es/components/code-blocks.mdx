@@ -1,0 +1,75 @@
+---
+title: "Bloques de código"
+description: "Bloques de código con resaltado de sintaxis, etiquetas de lenguaje y soporte para copiar."
+---
+
+Los bloques de código se renderizan automáticamente a partir de la sintaxis Markdown con cercas. Usa `<CodeGroup>` para agrupar múltiples variantes de lenguaje en una vista con pestañas.
+
+## Bloque de código simple
+
+```typescript
+const client = new ApiClient({ apiKey: process.env.API_KEY })
+const pets = await client.pets.list({ limit: 10 })
+```
+
+Agrega un nombre de archivo después del identificador de lenguaje:
+
+```typescript api-client.ts
+import { ApiClient } from '@company/sdk'
+
+export const client = new ApiClient({
+  apiKey: process.env.API_KEY!,
+})
+```
+
+## CodeGroup
+
+Agrupa fragmentos relacionados en múltiples lenguajes bajo un único bloque con pestañas:
+
+<CodeGroup>
+```typescript TypeScript
+import { ApiClient } from '@company/sdk'
+const client = new ApiClient({ apiKey: 'sk-...' })
+```
+
+```python Python
+from company_sdk import ApiClient
+client = ApiClient(api_key="sk-...")
+```
+
+```bash cURL
+curl -X GET https://api.example.com/pets \
+  -H "Authorization: Bearer sk-..."
+```
+</CodeGroup>
+
+````mdx
+<CodeGroup>
+```typescript TypeScript
+const client = new ApiClient({ apiKey: 'sk-...' })
+```
+
+```python Python
+client = ApiClient(api_key="sk-...")
+```
+</CodeGroup>
+````
+
+## Líneas resaltadas
+
+Usa la prop `highlight` para llamar la atención sobre líneas específicas:
+
+```typescript highlight={2,3}
+const client = new ApiClient()
+// These two lines will be highlighted
+const result = await client.pets.list()
+console.log(result)
+```
+
+## Líneas largas
+
+Agrega `wrap` después del identificador de lenguaje para ajustar automáticamente las líneas largas en lugar de desplazarse horizontalmente:
+
+```bash wrap
+npx create-dox my-docs --template default --yes --install --git
+```

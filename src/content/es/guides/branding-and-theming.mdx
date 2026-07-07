@@ -1,0 +1,158 @@
+---
+title: Marca y Temas
+description: Personaliza colores, fuentes e identidad del sitio para que coincidan con tu producto.
+---
+
+## Configuración del sitio
+
+Todos los ajustes a nivel de sitio se encuentran en `src/data/site.ts`. Edita este archivo para establecer el nombre, la descripción y los enlaces de tu producto:
+
+```ts
+export const siteConfig: SiteConfig = {
+  name: 'Your Product',
+  description: 'Documentation for Your Product.',
+  repoUrl: 'https://github.com/your-org/your-repo',
+  links: [
+    { label: 'Get started', href: '/quickstart' },
+    { label: 'Support', href: 'https://github.com/your-org/your-repo/issues' },
+    { label: 'GitHub', href: 'https://github.com/your-org/your-repo' },
+    { label: 'Changelog', href: '/changelog' },
+  ],
+  // ...brand config
+}
+```
+
+## Presets de marca
+
+Dox incluye dos presets de color:
+
+- **`primary`** — acento verde (tonos esmeralda)
+- **`secondary`** — acento morado (tonos violeta)
+
+Cambia entre ellos modificando la variable `brandPreset`:
+
+```ts
+const brandPreset: BrandPresetKey = 'primary'  // or 'secondary'
+```
+
+## Colores personalizados
+
+Para definir tu propia paleta, edita el objeto `brandPresets` en `site.ts`. Cada preset tiene variantes `light` y `dark` con estos tokens:
+
+| Token | Propósito |
+| --- | --- |
+| `background` | Fondo de la página |
+| `foreground` | Color de texto principal |
+| `muted` | Fondo sutil (tarjetas, estados hover) |
+| `border` | Color de borde |
+| `accent` | Color principal de marca (enlaces, estados activos) |
+| `accentForeground` | Texto sobre fondos de acento |
+| `ring` | Color del anillo de enfoque |
+| `sidebarActiveBg` | Fondo del elemento activo en la barra lateral |
+| `sidebarActiveText` | Texto del elemento activo en la barra lateral |
+
+La mayoría de los colores son valores hexadecimales (p. ej. `#10B981`) que se convierten automáticamente a HSL. Los tokens de la barra lateral (`sidebarActiveBg`, `sidebarActiveText`) usan cadenas HSL sin procesar con opacidad (p. ej. `'152 60% 88% / 0.55'`) para efectos translúcidos.
+
+## Modo oscuro
+
+El modo oscuro es gestionado automáticamente por `next-themes`. Los usuarios lo activan con el interruptor de tema en la barra superior. Tu paleta de marca define las variantes tanto clara como oscura, por lo que ambos temas mantienen la identidad de marca.
+
+## Logotipo
+
+El componente de logotipo se encuentra en `src/components/layout/logo.tsx`. Reemplaza el SVG con el tuyo propio:
+
+```tsx
+export function Logo({ className, showText = true }: LogoProps) {
+  return (
+    <div className={cn('inline-flex items-center gap-2', className)}>
+      {/* Replace this SVG with your logo */}
+      <img src="/logo.svg" alt="Logo" width={32} height={32} />
+      {showText ? (
+        <span className="text-lg font-bold tracking-tight text-foreground">
+          Your Product
+        </span>
+      ) : null}
+    </div>
+  )
+}
+```
+
+## Fuentes
+
+Las fuentes se configuran en `src/app/layout.tsx` usando `next/font/google`. Los valores predeterminados son:
+
+- **Sans**: Inter
+- **Mono**: JetBrains Mono
+
+Para cambiarlas, reemplaza las importaciones de fuentes:
+
+```ts
+import { Outfit, Fira_Code } from 'next/font/google'
+
+const fontSans = Outfit({ subsets: ['latin'], variable: '--font-sans' })
+const fontMono = Fira_Code({ subsets: ['latin'], variable: '--font-mono' })
+```
+
+## Analítica
+
+Agrega analítica configurando uno o más proveedores en `siteConfig.analytics`. Los scripts se cargan automáticamente — no se necesitan cambios en el código.
+
+```ts
+export const siteConfig: SiteConfig = {
+  // ...
+  analytics: {
+    googleAnalyticsId: 'G-XXXXXXXXXX',
+    // or
+    plausibleDomain: 'docs.yourproduct.com',
+    // or
+    posthogKey: 'phc_...',
+    posthogHost: 'https://us.i.posthog.com',
+  },
+}
+```
+
+Deja `analytics` sin definir para deshabilitar todo el seguimiento.
+
+## Selector de versión
+
+Si tu documentación tiene múltiples versiones, agrega un array `versions` a `siteConfig`. Un menú desplegable aparecerá automáticamente en la barra superior.
+
+```ts
+export const siteConfig: SiteConfig = {
+  // ...
+  versions: [
+    { label: 'v2.0', href: '/', current: true },
+    { label: 'v1.0', href: 'https://v1.docs.yourproduct.com' },
+  ],
+}
+```
+
+- **`label`** — texto que se muestra en el desplegable
+- **`href`** — URL para esa versión (`/` para el sitio actual, o una URL completa para versiones anteriores)
+- **`current`** — marca la versión activa (exactamente una debe ser `true`)
+
+El selector se oculta cuando hay menos de dos versiones definidas.
+
+## Editar en GitHub
+
+Cuando `repoUrl` en `siteConfig` apunta a un repositorio real de GitHub, cada página de documentación muestra un enlace "Editar esta página en GitHub" al final. Este enlace apunta directamente al archivo fuente MDX en la rama `main`.
+
+```ts
+export const siteConfig: SiteConfig = {
+  repoUrl: 'https://github.com/your-org/your-docs',
+  // ...
+}
+```
+
+## Feed RSS del registro de cambios
+
+Dox sirve un feed RSS en `/changelog/rss.xml`. Los usuarios pueden suscribirse en cualquier lector de RSS para recibir notificaciones de actualizaciones. Las entradas del feed se definen en `src/app/changelog/rss.xml/route.ts`.
+
+## Tokens de diseño
+
+Ajusta el espaciado y los anchos en `src/config/layout.ts`:
+
+- Ancho de la barra lateral
+- Ancho máximo del contenido
+- Relleno y espacios
+- Escala tipográfica para texto meta

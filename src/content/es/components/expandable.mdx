@@ -1,0 +1,49 @@
+---
+title: "Expandable"
+description: "Una sección en línea contraíble para propiedades de API anidadas."
+---
+
+`<Expandable>` renderiza un interruptor en línea utilizado dentro de `<ResponseField>` o `<ParamField>` para revelar propiedades anidadas bajo demanda. Mantiene el esquema de nivel superior limpio mientras mantiene los detalles anidados accesibles.
+
+## Ejemplo
+
+<ResponseField name="address" type="object">
+  La dirección de envío del usuario.
+
+  <Expandable title="address properties">
+    <ResponseField name="line1" type="string" required>
+      Línea 1 de la dirección postal.
+    </ResponseField>
+    <ResponseField name="line2" type="string">
+      Línea 2 de la dirección postal (apartamento, suite, etc.).
+    </ResponseField>
+    <ResponseField name="city" type="string" required>
+      Nombre de la ciudad.
+    </ResponseField>
+    <ResponseField name="postal_code" type="string" required>
+      Código postal o ZIP.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```mdx
+<ResponseField name="address" type="object">
+  Shipping address.
+
+  <Expandable title="address properties">
+    <ResponseField name="line1" type="string" required>
+      Street address line 1.
+    </ResponseField>
+    <ResponseField name="city" type="string" required>
+      City name.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+```
+
+## Props
+
+| Prop | Tipo | Predeterminado | Descripción |
+|---|---|---|---|
+| `title` | `string` | `"Show child attributes"` | Etiqueta mostrada en el botón de alternancia |
+| `defaultOpen` | `boolean` | `false` | Si la sección comienza expandida |

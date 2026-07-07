@@ -1,0 +1,56 @@
+---
+title: "Árbol de Archivos"
+description: "Renderiza un árbol de sistema de archivos interactivo para documentación de SDK y monorepo."
+---
+
+Usa `<Tree>`, `<Folder>` y `<File>` para representar estructuras de directorios en tu documentación. Las carpetas son interactivas — haz clic para expandirlas o contraerlas.
+
+## Ejemplo
+
+<Tree>
+  <Folder name="src" defaultOpen>
+    <Folder name="app">
+      <File name="page.tsx" />
+      <File name="layout.tsx" />
+    </Folder>
+    <Folder name="components">
+      <File name="button.tsx" />
+      <File name="card.tsx" />
+    </Folder>
+    <File name="globals.css" />
+  </Folder>
+  <File name="package.json" />
+  <File name="tsconfig.json" />
+  <File name="next.config.ts" />
+</Tree>
+
+```mdx
+<Tree>
+  <Folder name="src" defaultOpen>
+    <Folder name="app">
+      <File name="page.tsx" />
+      <File name="layout.tsx" />
+    </Folder>
+    <File name="globals.css" />
+  </Folder>
+  <File name="package.json" />
+</Tree>
+```
+
+## Props
+
+### `<Tree>`
+Elemento contenedor — proporciona el contenedor con estilos. No tiene props adicionales.
+
+### `<Folder>`
+
+| Prop | Tipo | Por defecto | Descripción |
+|---|---|---|---|
+| `name` | `string` | — | Nombre de la carpeta que se muestra junto al ícono |
+| `defaultOpen` | `boolean` | `false` | Si la carpeta comienza expandida |
+
+### `<File>`
+
+| Prop | Tipo | Descripción |
+|---|---|---|
+| `name` | `string` | Nombre del archivo que se muestra junto al ícono |

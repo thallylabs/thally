@@ -1,0 +1,58 @@
+---
+title: Page Modes
+description: Control the layout of individual pages — default two-column, wide, centered, or fully custom.
+---
+
+Each page can declare a `mode` in its frontmatter to override the default two-column layout. This is useful for landing pages, changelog entries, wide tables, and custom-designed pages.
+
+## Available modes
+
+### `default` (no frontmatter needed)
+
+The standard layout: a main content column with a table of contents on the right. This is the default for all pages.
+
+### `wide`
+
+Removes the table-of-contents column. Content spans the full available width — ideal for pages with wide tables, code samples, or dense API reference material.
+
+```mdx
+---
+title: API Reference
+mode: wide
+---
+```
+
+### `center`
+
+A single centered column with a narrower max-width (`max-w-2xl`). Good for prose-heavy pages, changelogs, or blog-style entries.
+
+```mdx
+---
+title: Changelog
+mode: center
+---
+```
+
+### `custom`
+
+Removes all layout chrome — no sidebar, no TOC, no breadcrumbs, no pagination. The page receives only its raw MDX content. Use this for completely bespoke designs where you want full control.
+
+```mdx
+---
+title: Themes Showcase
+mode: custom
+---
+```
+
+## Comparison
+
+| Mode | Sidebar | TOC | Breadcrumbs | Pagination |
+| --- | --- | --- | --- | --- |
+| `default` | ✓ | ✓ | ✓ | ✓ |
+| `wide` | ✓ | — | ✓ | ✓ |
+| `center` | ✓ | — | ✓ | ✓ |
+| `custom` | ✓ | — | — | — |
+
+<Note type="info">
+The sidebar is controlled by the tab/group structure in `docs.json` — it's always present unless you use `mode: "custom"` and manually hide it.
+</Note>

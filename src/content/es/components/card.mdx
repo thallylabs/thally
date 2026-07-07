@@ -1,0 +1,103 @@
+---
+title: "Card & CardGroup"
+description: "Tarjetas clicables para resúmenes de funciones, cuadrículas de enlaces y navegación."
+---
+
+Usa `<Card>` para tarjetas individuales de funciones o navegación, y `<CardGroup>` para disponerlas en una cuadrícula adaptable.
+
+## Ejemplo
+
+<CardGroup cols={2}>
+  <Card title="Inicio rápido" icon="party-horn" href="/quickstart">
+    Pon en marcha tu sitio de documentación en menos de cinco minutos.
+  </Card>
+  <Card title="Referencia de API" icon="code-simple" href="/api">
+    Explora cada endpoint con ejemplos en vivo y tipos generados.
+  </Card>
+  <Card title="Guías" icon="book-open" href="/guides/getting-started">
+    Tutoriales detallados para escenarios de configuración comunes.
+  </Card>
+  <Card title="GitHub" icon="link-simple" href="https://github.com/your-org/your-docs">
+    Explora el código fuente, abre incidencias y contribuye.
+  </Card>
+</CardGroup>
+
+```mdx
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="party-horn" href="/quickstart">
+    Get running in five minutes.
+  </Card>
+  <Card title="API Reference" icon="code-simple" href="/api">
+    Explore every endpoint.
+  </Card>
+</CardGroup>
+```
+
+## Tarjeta con imagen
+
+Las tarjetas pueden incluir una imagen en la parte superior, útil para mostrar capturas de pantalla, vistas previas de productos o documentación visual.
+
+<CardGroup cols={2}>
+  <Card title="Panel de análisis" img="/images/image1.jpg" href="/quickstart">
+    Monitorea usuarios activos, tasas de conversión y retención en tiempo real.
+  </Card>
+  <Card title="Explorador de API" img="/images/image2.jpg" href="/api">
+    Envía solicitudes en vivo directamente desde la documentación con tu propia clave de API.
+  </Card>
+</CardGroup>
+
+```mdx
+<CardGroup cols={2}>
+  <Card title="Analytics Dashboard" img="/images/dashboard.png" href="/quickstart">
+    Monitor active users and conversion rates.
+  </Card>
+  <Card title="API Explorer" img="/images/explorer.png" href="/api">
+    Send live requests from the docs.
+  </Card>
+</CardGroup>
+```
+
+## Tres columnas
+
+<CardGroup cols={3}>
+  <Card title="Redireccionamientos" icon="link-simple" href="/guides/redirects">
+    Asigna rutas antiguas a nuevas para que los enlaces existentes nunca se rompan.
+  </Card>
+  <Card title="Fuentes personalizadas" icon="book-open" href="/guides/custom-fonts">
+    Cambia a cualquier fuente de Google desde docs.json, sin cambios en el código.
+  </Card>
+  <Card title="Banner del sitio" icon="party-horn" href="/guides/site-banner">
+    Anuncia lanzamientos y deprecaciones con un banner superior descartable.
+  </Card>
+</CardGroup>
+
+```mdx
+<CardGroup cols={3}>
+  <Card title="Redirects" icon="link-simple" href="/guides/redirects">
+    Map old paths to new ones.
+  </Card>
+  <Card title="Custom Fonts" icon="book-open" href="/guides/custom-fonts">
+    Switch fonts from docs.json.
+  </Card>
+  <Card title="Site Banner" icon="party-horn" href="/guides/site-banner">
+    Announce launches and notices.
+  </Card>
+</CardGroup>
+```
+
+## Props
+
+### `<Card>`
+
+| Prop | Tipo | Descripción |
+|---|---|---|
+| `title` | `string` | Encabezado de la tarjeta |
+| `href` | `string` | URL de destino — hace que toda la tarjeta sea clicable |
+| `icon` | `string` | Nombre del icono (ver [iconos disponibles](/components/tooltip)) |
+| `img` | `string` | Ruta de imagen mostrada en la parte superior de la tarjeta |
+
+### `<CardGroup>`
+
+| Prop | Tipo | Predeterminado | Descripción |
+|---|---|---|---|
+| `cols` | `1 \| 2 \| 3 \| 4` | `3` | Número de columnas en la cuadrícula |

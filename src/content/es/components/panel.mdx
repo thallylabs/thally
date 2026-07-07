@@ -1,0 +1,36 @@
+---
+title: "Panel"
+description: "Un contenedor con borde neutro para agrupar contenido relacionado."
+---
+
+`<Panel>` es una sección visualmente contenida sin el color específico de los avisos. Úsalo para agrupar contenido relacionado o destacar un bloque sin implicar urgencia.
+
+## Ejemplo
+
+<Panel title="Configuration">
+  Establece tu clave de API en el archivo `.env` antes de ejecutar la aplicación.
+
+  ```bash
+  API_KEY=sk-your-key-here
+  ```
+</Panel>
+
+<Panel>
+  Los paneles sin título también son compatibles.
+</Panel>
+
+```mdx
+<Panel title="Configuration">
+  Set your API key in the `.env` file.
+</Panel>
+
+<Panel>
+  Content without a title.
+</Panel>
+```
+
+## Props
+
+| Prop | Tipo | Predeterminado | Descripción |
+|---|---|---|---|
+| `title` | `string` | — | Encabezado opcional que se muestra sobre el contenido |

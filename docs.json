@@ -1,0 +1,267 @@
+{
+  "theme": "sharp",
+  "banner": {
+    "content": "Dox v2 is coming — faster builds, more themes, and a brand-new component library. [See what's coming →](/changelog)",
+    "dismissible": true
+  },
+  "ai": {
+    "chat": true,
+    "label": "DoxAI",
+    "systemPrompt": "Prefer concise answers with links to relevant guide pages when available."
+  },
+  "admin": { "enabled": true },
+  "analytics": { "enabled": true },
+  "apiPlayground": {
+    "credentials": {
+      "bearerAuth": "YOUR_API_KEY"
+    }
+  },
+  "navbar": {
+    "links": [
+      { "label": "GitHub", "href": "https://github.com/kenny-io/Dox", "type": "github" }
+    ],
+    "primary": { "label": "Get started", "href": "/quickstart" }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/kenny-io/Dox",
+      "twitter": "https://twitter.com/doxdocs",
+      "discord": "https://discord.gg/dox"
+    },
+    "links": [
+      {
+        "heading": "Documentation",
+        "items": [
+          { "label": "Quick Start", "href": "/quickstart" },
+          { "label": "Guides", "href": "/guides/getting-started" },
+          { "label": "Components", "href": "/components/badge" },
+          { "label": "API Reference", "href": "/api" }
+        ]
+      },
+      {
+        "heading": "Customize",
+        "items": [
+          { "label": "Branding & Theming", "href": "/guides/branding-and-theming" },
+          { "label": "Navbar & Footer", "href": "/guides/navbar-and-footer" },
+          { "label": "Navigation", "href": "/guides/configuring-navigation" }
+        ]
+      },
+      {
+        "heading": "Tooling",
+        "items": [
+          { "label": "CLI Reference", "href": "/guides/cli-reference" },
+          { "label": "MCP Server", "href": "/guides/mcp-server" },
+          { "label": "Migrate from Mintlify", "href": "/guides/migrating" }
+        ]
+      }
+    ]
+  },
+  "fonts": {
+    "body": { "family": "Plus Jakarta Sans", "weight": ["400", "500", "600", "700"] },
+    "heading": { "family": "Outfit", "weight": ["600", "700"] }
+  },
+  "feedback": {
+    "thumbsRating": true,
+    "endpoint": "/api/feedback"
+  },
+  "redirects": [
+    { "source": "/docs", "destination": "/", "permanent": false },
+    { "source": "/getting-started", "destination": "/quickstart", "permanent": true }
+  ],
+  "i18n": {
+    "defaultLocale": "en",
+    "locales": [
+      { "code": "en", "label": "English" },
+      { "code": "es", "label": "Español" }
+    ]
+  },
+  "tabs": [
+    {
+      "tab": "Overview",
+      "groups": [
+        {
+          "group": "Getting Started",
+          "icon": "book-open",
+          "pages": [
+            "introduction",
+            "quickstart"
+          ]
+        },
+        {
+          "group": "Concepts",
+          "icon": "grid-round",
+          "pages": [
+            "authentication",
+            "pagination"
+          ]
+        },
+        {
+          "group": "Features",
+          "icon": "party-horn",
+          "pages": [
+            "webhooks",
+            "sdks"
+          ]
+        },
+        {
+          "group": "Project",
+          "icon": "wrench",
+          "pages": [
+            "errors",
+            "customization",
+            "showcase"
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "Guides",
+      "groups": [
+        {
+          "group": "Setup",
+          "icon": "wrench",
+          "pages": [
+            "guides/getting-started",
+            "guides/configuring-navigation"
+          ]
+        },
+        {
+          "group": "Content",
+          "icon": "book-open",
+          "pages": [
+            "guides/writing-content",
+            "guides/api-reference-setup"
+          ]
+        },
+        {
+          "group": "Customize & Ship",
+          "icon": "grid-round",
+          "pages": [
+            "guides/extending",
+            "guides/branding-and-theming",
+            "guides/navbar-and-footer",
+            "guides/custom-fonts",
+            "guides/og-images",
+            "guides/deploying",
+            "guides/admin-dashboard",
+            "guides/page-modes",
+            "guides/seo-and-visibility",
+            "guides/site-banner",
+            "guides/redirects",
+            "guides/custom-404",
+            "guides/custom-scripts"
+          ]
+        },
+        {
+          "group": "Tooling",
+          "icon": "code-simple",
+          "pages": [
+            "guides/cli-reference",
+            "guides/ci-checks",
+            "guides/provenance",
+            "guides/mcp-server",
+            "guides/remote-mcp",
+            "guides/docs-agent",
+            "guides/agent-manifests",
+            "guides/migrating",
+            "guides/ai-features",
+            "guides/multi-language"
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "API Reference",
+      "groups": [
+        {
+          "group": "Overview",
+          "pages": ["api/overview"]
+        }
+      ],
+      "api": {
+        "source": "openapi.yaml",
+        "tagsOrder": [
+          "Posts",
+          "Comments",
+          "Users"
+        ],
+        "defaultGroup": "General",
+        "overrides": {
+          "GET /pets": {
+            "title": "List pets",
+            "description": "Fetch a paginated list of pets.",
+            "badge": "Stable"
+          },
+          "POST /pets": {
+            "title": "Create a pet",
+            "description": "Add a new pet to the store."
+          },
+          "GET /pets/{petId}": {
+            "title": "Get a pet",
+            "description": "Retrieve a single pet by ID."
+          },
+          "DELETE /pets/{petId}": {
+            "title": "Delete a pet",
+            "description": "Remove a pet from the store."
+          }
+        }
+      }
+    },
+    {
+      "tab": "Components",
+      "groups": [
+        {
+          "group": "Content",
+          "pages": [
+            "components/badge",
+            "components/callouts",
+            "components/code-blocks",
+            "components/panel",
+            "components/update"
+          ]
+        },
+        {
+          "group": "Layout",
+          "pages": [
+            "components/accordion",
+            "components/card",
+            "components/columns",
+            "components/frame",
+            "components/steps",
+            "components/tabs",
+            "components/tile"
+          ]
+        },
+        {
+          "group": "Media & Diagrams",
+          "pages": [
+            "components/mermaid",
+            "components/view",
+            "components/color"
+          ]
+        },
+        {
+          "group": "API Reference",
+          "pages": [
+            "components/param-field",
+            "components/response-field",
+            "components/expandable",
+            "components/request-response-example"
+          ]
+        },
+        {
+          "group": "Navigation",
+          "pages": [
+            "components/file-tree",
+            "components/tooltip",
+            "components/prompt"
+          ]
+        }
+      ]
+    },
+    {
+      "tab": "Changelog",
+      "href": "/changelog"
+    }
+  ]
+}

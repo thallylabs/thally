@@ -1,0 +1,107 @@
+---
+title: Overview
+description: Base URL, authentication, rate limits, and error handling for the Pet Store API.
+---
+
+The Pet Store API is a RESTful HTTP API that lets you manage pets, place orders, and query store inventory. All requests and responses use JSON.
+
+## Base URL
+
+All endpoints are relative to the base URL:
+
+```
+https://api.example.com/v1
+```
+
+There is no versioning in the path beyond `v1`. Breaking changes are communicated with a deprecation notice and a migration window.
+
+## OpenAPI specification
+
+You can fetch the full API specification directly from the docs site:
+
+- YAML: `/openapi.yaml`
+- JSON: `/openapi.json`
+
+For local development:
+
+```bash
+curl http://localhost:3040/openapi.yaml
+curl http://localhost:3040/openapi.json
+```
+
+## Authentication
+
+The API supports two authentication methods. Include one of the following on every request.
+
+### Bearer token
+
+Pass a JWT bearer token in the `Authorization` header:
+
+```bash
+Authorization: Bearer <token>
+```
+
+### API key
+
+Pass your API key in the `X-API-Key` header:
+
+```bash
+X-API-Key: <your-api-key>
+```
+
+<Note type="info" title="Which should I use?">
+Use **Bearer tokens** for server-to-server integrations. Use **API keys** for quick testing and internal tooling. Both grant the same level of access.
+</Note>
+
+## Rate limits
+
+Requests are rate-limited per API key. Exceeding the limit returns `429 Too Many Requests`.
+
+| Plan | Requests / minute |
+| --- | --- |
+| Free | 60 |
+| Pro | 600 |
+| Enterprise | Unlimited |
+
+When rate-limited, the response includes a `Retry-After` header indicating how many seconds to wait before retrying.
+
+## Errors
+
+All error responses use a consistent JSON shape:
+
+```json
+{
+  "code": "not_found",
+  "message": "The requested resource was not found."
+}
+```
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| `400` | `bad_request` | Malformed request or missing required fields |
+| `401` | `unauthorized` | Missing or invalid credentials |
+| `404` | `not_found` | Resource does not exist |
+| `422` | `validation_error` | Request body failed schema validation |
+| `429` | `rate_limited` | Too many requests — check `Retry-After` |
+| `500` | `internal_error` | Unexpected server error |
+
+## Pagination
+
+List endpoints use **cursor-based pagination**. Pass the `next_cursor` from a response as the `cursor` query parameter in your next request. When `next_cursor` is `null`, you have reached the last page.
+
+```bash
+GET /pets?limit=20&cursor=eyJpZCI6ImIyYzNkNGU1In0
+```
+
+## SDKs
+
+Official client libraries are available for the most common languages:
+
+<CardGroup cols={2}>
+  <Card title="TypeScript / Node.js" icon="code-simple" href="/sdks">
+    Fully typed, Promise-based client with tree-shakeable imports.
+  </Card>
+  <Card title="Python" icon="code-simple" href="/sdks">
+    Async-first client compatible with FastAPI, Django, and Flask.
+  </Card>
+</CardGroup>

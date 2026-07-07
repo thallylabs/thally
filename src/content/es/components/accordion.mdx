@@ -1,0 +1,32 @@
+---
+title: "Accordion"
+description: "Secciones plegables para FAQs y divulgación progresiva."
+---
+
+`<Accordion>` renderiza un elemento `<details>` plegable. Úsalo para FAQs, profundizaciones opcionales o contenido que debe permanecer oculto hasta que sea necesario.
+
+## Ejemplo
+
+<Accordion title="What is an API key?">
+  Una clave de API es un identificador único que autentifica las solicitudes de tu aplicación. Mantenla en secreto — trátala como una contraseña. Nunca la expongas en código del lado del cliente.
+</Accordion>
+
+<Accordion title="How do I reset my API key?">
+  Ve a tu panel de control, navega a **Configuración → Claves de API** y haz clic en **Regenerar**. Tu clave anterior quedará invalidada de inmediato.
+</Accordion>
+
+```mdx
+<Accordion title="What is an API key?">
+  An API key authenticates requests from your application.
+</Accordion>
+```
+
+## Props
+
+| Prop | Tipo | Descripción |
+|---|---|---|
+| `title` | `string` | El encabezado clicable que se muestra cuando está plegado |
+
+<Note>
+  Para agrupar múltiples acordeones, colócalos uno tras otro — no se necesita ningún componente contenedor. El contenido migrado que usa `<AccordionGroup>` renderiza los hijos directamente.
+</Note>

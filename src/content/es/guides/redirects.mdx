@@ -1,0 +1,52 @@
+---
+title: Redirecciones
+description: Mapea rutas antiguas a nuevas para que las páginas renombradas o movidas no rompan los enlaces existentes.
+---
+
+Define redirecciones en `docs.json` para redirigir automáticamente a los visitantes de URLs antiguas a nuevas. Esto es especialmente útil después de una migración o reorganización.
+
+## Configuración
+
+Agrega un array `redirects` a `docs.json`:
+
+```json
+"redirects": [
+  { "source": "/old-path", "destination": "/new-path", "permanent": false },
+  { "source": "/getting-started", "destination": "/quickstart", "permanent": true }
+]
+```
+
+Las redirecciones se leen en tiempo de compilación y se pasan al mecanismo de redirección integrado de Next.js — no se necesitan reinicios de servidor ni despliegues más allá de una compilación normal.
+
+## Campos
+
+| Campo | Tipo | Descripción |
+| --- | --- | --- |
+| `source` | `string` | La ruta a coincidir (relativa, sin dominio) |
+| `destination` | `string` | A dónde enviar a los visitantes |
+| `permanent` | `boolean` | `true` = 308 (permanente), `false` = 307 (temporal). Predeterminado: `false` |
+
+## Cuándo usar `permanent: true`
+
+Usa `permanent: true` cuando una página se ha movido y nunca volverá a la URL antigua. Los navegadores y motores de búsqueda almacenan en caché las redirecciones 308 de forma agresiva, así que usa `permanent: false` durante un período de prueba de migración y cámbialo a `true` una vez que estés seguro.
+
+## Coincidencia de patrones
+
+Puedes usar la sintaxis de coincidencia de rutas de Next.js — incluyendo parámetros con nombre y comodines:
+
+```json
+"redirects": [
+  { "source": "/blog/:slug", "destination": "/posts/:slug", "permanent": true },
+  { "source": "/v1/:path*", "destination": "/:path*", "permanent": true }
+]
+```
+
+Consulta la [documentación de redirecciones de Next.js](https://nextjs.org/docs/app/api-reference/config/next-config-js/redirects) para ver la sintaxis de coincidencia completa.
+
+## Caso de uso de migración
+
+Al migrar desde Mintlify, el comando `create-dox migrate` lee automáticamente el campo `redirects` de tu `docs.json` de Mintlify y genera entradas equivalentes en el `docs.json` de Dox. También genera redirecciones para cualquier página que haya sido renombrada durante la migración.
+
+<Note type="info" title="Ejemplo">
+Este sitio tiene dos redirecciones de demostración configuradas — intenta visitar `/docs` o `/getting-started` y serás redirigido a las páginas correctas.
+</Note>

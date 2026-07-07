@@ -1,0 +1,109 @@
+---
+title: Getting Started with Dox
+description: Set up Dox and create your first documentation page in under five minutes.
+---
+
+## Prerequisites
+
+- **Node.js 18+** and npm (or pnpm/yarn)
+- A terminal and code editor
+- An OpenAPI spec (optional — a Pet Store example is included)
+
+<Frame caption="From setup to deployment in minutes" zoom={false}>
+
+![City skyline at night](/images/image3.jpg)
+
+</Frame>
+
+<Steps>
+
+<Step title="Create your project">
+
+Use the CLI (recommended):
+
+```bash
+npx create-dox my-docs
+```
+
+The CLI walks you through an interactive setup:
+
+- **Project name** — displayed in the header and metadata
+- **Description** — used for SEO and OpenGraph tags
+- **Brand preset** — `primary` (green) or `secondary` (purple)
+- **GitHub repo URL** — auto-wires the Support and GitHub links
+- **Install dependencies** — runs `npm install` for you
+
+You can also skip the prompts and accept all defaults:
+
+```bash
+npx create-dox my-docs --yes
+```
+
+Or clone manually:
+
+```bash
+git clone https://github.com/kenny-io/Dox.git my-docs
+cd my-docs
+rm -rf .git
+npm install
+```
+
+</Step>
+
+<Step title="Start the dev server">
+
+```bash
+cd my-docs
+npm run dev
+```
+
+Open [http://localhost:3040](http://localhost:3040) to see the default docs site.
+
+</Step>
+
+<Step title="Create your first page">
+
+Create a new file at `src/content/my-first-page.mdx`:
+
+```mdx
+---
+title: My First Page
+description: A quick test page to verify everything works.
+---
+
+Welcome to my documentation! This page was created with Dox.
+
+## Next steps
+
+- Edit `docs.json` to add this page to the sidebar.
+- Replace the example content with your own.
+```
+
+</Step>
+
+<Step title="Add it to the navigation">
+
+Open `docs.json` and add your page to a group:
+
+```json
+{
+  "group": "Getting Started",
+  "pages": ["introduction", "quickstart", "my-first-page"]
+}
+```
+
+Save the file and the sidebar updates automatically — no restart required.
+
+</Step>
+
+<Step title="Deploy">
+
+```bash
+npm run build
+```
+
+Deploy the output to any platform that supports Next.js — Vercel, Netlify, Cloudflare, or a Docker container.
+
+</Step>
+
+</Steps>

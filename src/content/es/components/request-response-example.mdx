@@ -1,0 +1,76 @@
+---
+title: "RequestExample & ResponseExample"
+description: "Envoltorios con estilo que distinguen visualmente los bloques de código de solicitud y respuesta."
+---
+
+Usa `<RequestExample>` y `<ResponseExample>` para enmarcar pares de solicitud/respuesta HTTP en documentación de API escrita en MDX. Añaden una barra de encabezado etiquetada — azul para solicitudes, verde para respuestas — que coincide con el estilo utilizado por las páginas de Referencia de API generadas automáticamente.
+
+## Ejemplo
+
+<RequestExample>
+```bash cURL
+curl -X POST https://api.example.com/pets \
+  -H "Authorization: Bearer sk-..." \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Buddy", "species": "dog"}'
+```
+</RequestExample>
+
+<ResponseExample>
+```json 201 Created
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "Buddy",
+  "species": "dog",
+  "status": "available",
+  "created_at": "2025-01-15T10:30:00Z"
+}
+```
+</ResponseExample>
+
+```mdx
+<RequestExample>
+\`\`\`bash cURL
+curl -X POST https://api.example.com/pets \
+  -H "Authorization: Bearer sk-..." \
+  -d '{"name": "Buddy", "species": "dog"}'
+\`\`\`
+</RequestExample>
+
+<ResponseExample>
+\`\`\`json 201 Created
+{ "id": "a1b2c3d4", "name": "Buddy", "status": "available" }
+\`\`\`
+</ResponseExample>
+```
+
+## Con CodeGroup
+
+Envuelve un `<CodeGroup>` dentro de `<RequestExample>` para mostrar la misma solicitud en múltiples lenguajes:
+
+```mdx
+<RequestExample>
+  <CodeGroup>
+  \`\`\`typescript TypeScript
+  await client.pets.create({ name: 'Buddy', species: 'dog' })
+  \`\`\`
+
+  \`\`\`python Python
+  client.pets.create(name="Buddy", species="dog")
+  \`\`\`
+  </CodeGroup>
+</RequestExample>
+```
+
+## Véalo en acción
+
+Las páginas de Referencia de API se generan automáticamente a partir de tu especificación OpenAPI y se renderizan usando los mismos componentes visuales — `ParamField`, `ResponseField`, `Expandable`, `RequestExample` y `ResponseExample`. Abre cualquier endpoint para verlos todos en contexto:
+
+<CardGroup cols={2}>
+  <Card title="Listar mascotas" icon="book-open" href="/api/default/pets/get">
+    `GET /pets` — parámetros de consulta, esquema de respuesta paginada con campos expandibles anidados.
+  </Card>
+  <Card title="Crear una mascota" icon="code-simple" href="/api/default/pets/post">
+    `POST /pets` — parámetros del cuerpo de la solicitud, esquema de respuesta completo y ejemplo cURL en vivo.
+  </Card>
+</CardGroup>

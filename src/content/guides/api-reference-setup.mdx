@@ -1,0 +1,92 @@
+---
+title: API Reference Setup
+description: How to connect your OpenAPI spec and customize the auto-generated API reference.
+---
+
+## Adding your spec
+
+Place your OpenAPI 3.x spec file in the project root as `openapi.yaml` (or `openapi.json`). Then configure it in `docs.json`:
+
+```json
+{
+  "tab": "API Reference",
+  "api": {
+    "source": "openapi.yaml",
+    "tagsOrder": ["Users", "Orders", "Products"],
+    "defaultGroup": "General"
+  }
+}
+```
+
+The API Reference tab will auto-generate a page for every operation in your spec.
+
+## Configuration options
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `source` | Yes | Path to your OpenAPI spec file, relative to the project root. |
+| `tagsOrder` | No | Controls the order tags appear in the sidebar. Unlisted tags appear after. |
+| `defaultGroup` | No | Group name for operations without tags. Defaults to `"General"`. |
+| `overrides` | No | Per-operation customizations (see below). |
+
+## Operation overrides
+
+You can customize how individual operations appear in the sidebar and docs:
+
+```json
+{
+  "api": {
+    "source": "openapi.yaml",
+    "overrides": {
+      "GET /users": {
+        "title": "List users",
+        "description": "Fetch all users with pagination.",
+        "badge": "Stable"
+      },
+      "DELETE /users/{id}": {
+        "title": "Delete user",
+        "badge": "Destructive"
+      }
+    }
+  }
+}
+```
+
+The key format is `METHOD /path` — matching the `method` and `path` from your OpenAPI spec.
+
+Available override fields:
+
+- **`title`** — custom sidebar and page title
+- **`description`** — custom description shown below the title
+- **`badge`** — a label displayed next to the operation title
+- **`group`** — move the operation to a different sidebar group
+
+## Tag ordering
+
+By default, operations are grouped by their OpenAPI `tags`. The `tagsOrder` array controls the sidebar order:
+
+```json
+"tagsOrder": ["Authentication", "Users", "Orders"]
+```
+
+Tags not listed in `tagsOrder` appear after the listed ones, in the order they first appear in the spec.
+
+## Try It panel
+
+Every API operation page includes a "Try It" button that opens an interactive request panel. It:
+
+- Prefills parameters from the OpenAPI schema
+- Sends requests through a server-side proxy to avoid CORS issues
+- Displays the response with status code, headers, and body
+- Generates a cURL command you can copy
+
+No configuration needed — it works automatically from your spec.
+
+## Replacing the example spec
+
+The template ships with a Pet Store example. To use your own API:
+
+1. Replace `openapi.yaml` with your spec
+2. Update the `tagsOrder` in `docs.json` to match your tags
+3. Add any `overrides` you want
+4. Run `npm run dev` to see the result

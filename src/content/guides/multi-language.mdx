@@ -1,0 +1,259 @@
+---
+title: Multi-Language Support
+description: Add first-class multi-language support to your Dox docs site with build-time translations, automatic fallbacks, and a built-in language switcher.
+keywords: [i18n, internationalization, translation, multi-language, localization, locale]
+---
+
+Dox supports build-time multi-language documentation. Translated MDX files live in your repo alongside your primary content — fully version-controlled, statically generated, and indexed by search engines with real locale-specific URLs.
+
+<CardGroup cols={2}>
+
+<Card title="Real locale URLs" icon="link-simple">
+  `/es/introduction`, `/fr/guides/getting-started` — every locale gets its own indexable URL, never a client-side redirect.
+</Card>
+
+<Card title="AI-powered translation" icon="wrench">
+  One command translates your entire docs site. Code blocks, component tags, and URLs are preserved automatically.
+</Card>
+
+<Card title="Automatic fallbacks" icon="book-open">
+  Untranslated or stale pages fall back to the primary language gracefully, with informative banners instead of 404s.
+</Card>
+
+<Card title="Built-in language switcher" icon="grid-round">
+  A globe icon appears automatically in the top bar as soon as you configure two or more locales.
+</Card>
+
+</CardGroup>
+
+---
+
+## URL structure
+
+The default locale is served without a URL prefix — fully backward-compatible with any existing links. Secondary locales are prefixed with their locale code:
+
+| URL | Content |
+|-----|---------|
+| `/introduction` | English (default) |
+| `/es/introduction` | Spanish |
+| `/fr/introduction` | French |
+| `/guides/getting-started` | English (default) |
+| `/es/guides/getting-started` | Spanish |
+
+Adding a new locale never breaks existing URLs.
+
+---
+
+## Setup
+
+<Steps>
+
+<Step title="Add an i18n block to docs.json">
+
+Open `docs.json` at your project root and add an `i18n` key:
+
+```json
+{
+  "i18n": {
+    "defaultLocale": "en",
+    "locales": [
+      { "code": "en", "label": "English" },
+      { "code": "es", "label": "Español" },
+      { "code": "fr", "label": "Français" }
+    ]
+  },
+  "tabs": [...]
+}
+```
+
+`defaultLocale` must match one of the locale codes. The locales array controls the order items appear in the language switcher dropdown.
+
+Once this is saved, a globe icon appears in the top bar automatically.
+
+</Step>
+
+<Step title="Translate your pages with the CLI">
+
+Run the translate command to generate translated MDX files for a locale:
+
+```bash
+npx create-dox translate --locale es
+```
+
+This calls Claude to translate every content page defined in your `docs.json` and writes the results to `src/content/es/`. You'll see a live progress list as each page completes, and a summary at the end.
+
+**Translate specific pages only:**
+
+```bash
+npx create-dox translate --locale es --pages introduction,guides/getting-started
+```
+
+**Overwrite existing translations:**
+
+```bash
+npx create-dox translate --locale es --force
+```
+
+**All options:**
+
+| Flag | Description |
+|------|-------------|
+| `--locale <code>` | Target locale — required. Must match a code in your `docs.json` i18n config. |
+| `--pages <ids>` | Comma-separated page IDs to translate. Omit to translate all pages. |
+| `--force` | Overwrite existing translation files. |
+| `--api-key <key>` | Anthropic API key. Falls back to `ANTHROPIC_API_KEY` env var. |
+| `--model <id>` | Claude model to use. Default: `claude-sonnet-4-6`. |
+| `--yes`, `-y` | Skip the confirmation prompt. |
+
+<Note type="info" title="API key required">
+The translate command calls Claude via the Anthropic API. Set `ANTHROPIC_API_KEY` in your environment or pass `--api-key` directly. Translating a typical docs page costs a fraction of a cent.
+</Note>
+
+</Step>
+
+<Step title="Review and commit">
+
+After translation, your content directory will look like this:
+
+```
+src/content/
+├── introduction.mdx            ← primary (English, unchanged)
+├── guides/
+│   └── getting-started.mdx
+├── es/                         ← Spanish translations
+│   ├── introduction.mdx
+│   └── guides/
+│       └── getting-started.mdx
+└── fr/                         ← French translations
+    └── introduction.mdx
+```
+
+Translated files are plain MDX — you can edit them just like any other content. Commit them to your repo and deploy as normal.
+
+</Step>
+
+</Steps>
+
+---
+
+## Translation quality
+
+Claude translates with these rules applied automatically:
+
+- **Translates:** all prose text, headings, frontmatter `title`, `description`, and `keywords`
+- **Preserves:** MDX component tags verbatim (`<Note>`, `<Steps>`, `<CodeGroup>`, etc.)
+- **Preserves:** all code blocks and inline code exactly as written
+- **Preserves:** all URLs, file paths, and import statements
+- **Preserves:** all frontmatter structure and non-text fields
+
+If a translation needs adjusting, edit the file in `src/content/{locale}/` directly. You can also re-run the command for specific pages:
+
+```bash
+npx create-dox translate --locale es --pages guides/getting-started --force
+```
+
+---
+
+## Fallback behavior
+
+Dox never returns a 404 for a missing translation. Instead, it serves the primary-language content with an informative banner:
+
+**Missing translation** — the page hasn't been translated for that locale yet:
+
+> ⚠️ This page hasn't been translated to **Español** yet. Showing the original **English** version.
+
+**Stale translation** — the primary-language file was updated after the translation was last generated:
+
+> This translation may be outdated. [View original →]
+
+Both banners appear only on secondary-locale routes. The primary route is never affected.
+
+To fix a stale or missing translation, run the translate command for that page:
+
+```bash
+npx create-dox translate --locale es --pages guides/getting-started
+```
+
+---
+
+## Language switcher
+
+Once you have two or more locales configured, a **globe icon** appears in the top bar automatically. Clicking it opens a dropdown listing all configured locales.
+
+Selecting a locale navigates to the same page in that locale — for example, switching from `/es/guides/getting-started` to French takes you directly to `/fr/guides/getting-started`. The switcher always keeps you on the current page rather than sending you to a home page.
+
+---
+
+## API Reference
+
+The API Reference tab is auto-generated from your OpenAPI spec. Its content is always in the primary language — OpenAPI specs define machine-readable contracts, not prose content.
+
+When navigating to the API Reference tab from a locale page, the URL prefix is preserved so you remain in the locale context (`/es/api/...`). The sidebar and tab bar stay locale-aware; only the operation content itself comes from the spec unchanged.
+
+<Note type="info" title="Localising API content">
+To change the language of API Reference descriptions and summaries, update them directly in your OpenAPI spec file.
+</Note>
+
+---
+
+## SEO
+
+When an `i18n` config is present, Dox automatically adds `hreflang` and `canonical` link tags to every page:
+
+```html
+<link rel="canonical" href="https://docs.example.com/introduction" />
+<link rel="alternate" hreflang="en" href="https://docs.example.com/introduction" />
+<link rel="alternate" hreflang="es" href="https://docs.example.com/es/introduction" />
+<link rel="alternate" hreflang="fr" href="https://docs.example.com/fr/introduction" />
+```
+
+The primary URL is always canonical, including on secondary-locale pages. Set `DOX_SITE_URL` so the correct domain appears in these tags:
+
+```bash
+DOX_SITE_URL=https://docs.example.com
+```
+
+---
+
+## Using the MCP tool
+
+If you use the Dox MCP server, you can translate docs directly from your AI assistant:
+
+```json
+{
+  "name": "translate_docs",
+  "arguments": {
+    "projectDir": "/path/to/my-docs",
+    "locale": "es",
+    "force": false
+  }
+}
+```
+
+The MCP tool accepts the same options as the CLI. See [MCP Server](/guides/mcp-server) for setup instructions.
+
+---
+
+## Scaffold with i18n
+
+When creating a new project, you can enable multi-language support from the start:
+
+```bash
+npx create-dox my-docs
+```
+
+When asked **"Enable multi-language support?"**, enter `y` and provide your locale codes (e.g. `es,fr,de`). The `i18n` block is written to `docs.json` automatically.
+
+---
+
+<CardGroup cols={2}>
+
+<Card title="CLI Reference" href="/guides/cli-reference" icon="wrench">
+  Full reference for `translate` and all other create-dox commands.
+</Card>
+
+<Card title="MCP Server" href="/guides/mcp-server" icon="grid-round">
+  Set up the Dox MCP server to translate docs from your AI assistant.
+</Card>
+
+</CardGroup>

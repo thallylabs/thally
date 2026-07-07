@@ -1,0 +1,50 @@
+---
+title: Scripts Personalizados
+description: Inyecta scripts de terceros, widgets y herramientas de análisis a través de docs.json.
+---
+
+Agrega JavaScript de terceros a cada página declarando scripts en `docs.json`. Los scripts se inyectan a través del componente `<Script>` de Next.js con control total sobre la estrategia de carga.
+
+## Configuración
+
+```json
+"customScripts": [
+  { "src": "https://cdn.example.com/widget.js", "strategy": "afterInteractive" },
+  { "src": "https://cdn.analytics.com/tracker.min.js", "strategy": "lazyOnload" }
+]
+```
+
+## Campos
+
+| Campo | Tipo | Valor por defecto | Descripción |
+| --- | --- | --- | --- |
+| `src` | `string` | — | URL completa del script a cargar |
+| `strategy` | `string` | `"afterInteractive"` | Cuándo cargar el script (ver más abajo) |
+
+## Estrategias de carga
+
+| Estrategia | Cuándo se ejecuta | Usar para |
+| --- | --- | --- |
+| `beforeInteractive` | Antes de la hidratación de la página | Scripts críticos que deben ejecutarse primero |
+| `afterInteractive` | Después de la hidratación | Análisis, widgets de chat, la mayoría de herramientas de terceros |
+| `lazyOnload` | Durante el tiempo de inactividad del navegador | Scripts no críticos o decorativos |
+
+Prefiere `afterInteractive` para la mayoría de las herramientas — mantiene el rendimiento de carga de página rápido al tiempo que garantiza que el script esté disponible en cuanto el usuario pueda interactuar.
+
+## Análisis integrado
+
+Para proveedores de análisis comunes (Google Analytics, Plausible, PostHog), utiliza el campo dedicado `siteConfig.analytics` en `src/data/site.ts` en su lugar. Esos proveedores están configurados con seguimiento de eventos adecuado y configuración con tipado seguro:
+
+```ts
+analytics: {
+  googleAnalyticsId: 'G-XXXXXXXXXX',
+  plausibleDomain: 'docs.example.com',
+  posthogKey: 'phc_...',
+}
+```
+
+Usa `customScripts` para cualquier proveedor que no sea compatible de forma nativa.
+
+<Note type="warning">
+Los scripts agregados mediante `customScripts` se ejecutan en cada página. Asegúrate de que cualquier script de terceros que incluyas tenga una política de privacidad compatible con las expectativas de tus usuarios.
+</Note>

@@ -1,0 +1,60 @@
+---
+title: "ResponseField"
+description: "Documenta las propiedades de objetos de respuesta devueltos por endpoints de API."
+---
+
+`<ResponseField>` renderiza una entrada de propiedad estructurada para la documentación de respuestas de API. Combínalo con `<Expandable>` para documentar objetos anidados.
+
+## Ejemplo
+
+<ResponseField name="id" type="string" required>
+  Identificador único de la mascota. Formato: `pet_xxxxxxxx`
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  El nombre de visualización de la mascota.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Estado actual. Uno de `available`, `pending` o `sold`.
+</ResponseField>
+
+<ResponseField name="tags" type="Tag[]">
+  Arreglo de etiquetas asociadas con la mascota.
+
+  <Expandable title="Tag properties">
+    <ResponseField name="id" type="integer">
+      Identificador de la etiqueta.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Nombre de visualización de la etiqueta.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```mdx
+<ResponseField name="id" type="string" required>
+  Unique identifier.
+</ResponseField>
+
+<ResponseField name="tags" type="Tag[]">
+  Associated tags.
+  <Expandable title="Tag properties">
+    <ResponseField name="name" type="string">
+      Tag name.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+```
+
+## Props
+
+| Prop | Tipo | Descripción |
+|---|---|---|
+| `name` | `string` | Nombre de la propiedad |
+| `type` | `string` | Tipo de dato (p. ej. `string`, `integer`, `boolean`, `object`) |
+| `required` | `boolean` | Muestra un distintivo de "requerido" |
+
+<Tip>
+  Usa `<Expandable>` dentro de un `<ResponseField>` para documentar propiedades de objetos anidados sin saturar el esquema de respuesta de nivel superior.
+</Tip>

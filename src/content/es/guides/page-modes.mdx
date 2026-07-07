@@ -1,0 +1,58 @@
+---
+title: Modos de Página
+description: Controla el diseño de páginas individuales — dos columnas por defecto, ancho, centrado o completamente personalizado.
+---
+
+Cada página puede declarar un `mode` en su frontmatter para reemplazar el diseño de dos columnas predeterminado. Esto es útil para páginas de inicio, entradas de changelog, tablas anchas y páginas con diseño personalizado.
+
+## Modos disponibles
+
+### `default` (no se necesita frontmatter)
+
+El diseño estándar: una columna de contenido principal con una tabla de contenidos a la derecha. Este es el predeterminado para todas las páginas.
+
+### `wide`
+
+Elimina la columna de tabla de contenidos. El contenido ocupa todo el ancho disponible — ideal para páginas con tablas anchas, ejemplos de código o material de referencia de API denso.
+
+```mdx
+---
+title: API Reference
+mode: wide
+---
+```
+
+### `center`
+
+Una sola columna centrada con un ancho máximo más estrecho (`max-w-2xl`). Ideal para páginas con mucho texto, changelogs o entradas estilo blog.
+
+```mdx
+---
+title: Changelog
+mode: center
+---
+```
+
+### `custom`
+
+Elimina todo el entorno de diseño — sin barra lateral, sin TOC, sin migas de pan, sin paginación. La página recibe únicamente su contenido MDX sin procesar. Úsalo para diseños completamente personalizados donde deseas control total.
+
+```mdx
+---
+title: Themes Showcase
+mode: custom
+---
+```
+
+## Comparación
+
+| Modo | Barra lateral | TOC | Migas de pan | Paginación |
+| --- | --- | --- | --- | --- |
+| `default` | ✓ | ✓ | ✓ | ✓ |
+| `wide` | ✓ | — | ✓ | ✓ |
+| `center` | ✓ | — | ✓ | ✓ |
+| `custom` | ✓ | — | — | — |
+
+<Note type="info">
+La barra lateral está controlada por la estructura de pestañas/grupos en `docs.json` — siempre está presente a menos que uses `mode: "custom"` y la ocultes manualmente.
+</Note>

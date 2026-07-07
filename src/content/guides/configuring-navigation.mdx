@@ -1,0 +1,153 @@
+---
+title: Configuring Navigation
+description: How to structure tabs, sidebar groups, and page ordering using docs.json.
+---
+
+## The docs.json file
+
+All navigation is controlled by a single file at the project root: `docs.json`. It defines the tabs in the top bar, the sidebar groups within each tab, and the order of pages.
+
+## Structure
+
+```json
+{
+  "tabs": [
+    {
+      "tab": "Tab Label",
+      "groups": [
+        {
+          "group": "Section Title",
+          "pages": ["page-one", "page-two"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+## Tabs
+
+Each entry in the `tabs` array creates a top-level navigation tab. There are three types:
+
+### Content tab
+
+A tab with sidebar groups and pages:
+
+```json
+{
+  "tab": "Overview",
+  "groups": [
+    { "group": "Getting Started", "pages": ["introduction", "quickstart"] },
+    { "group": "Core Concepts", "pages": ["authentication"] }
+  ]
+}
+```
+
+### API Reference tab
+
+A tab that auto-generates pages from an OpenAPI spec:
+
+```json
+{
+  "tab": "API Reference",
+  "api": {
+    "source": "openapi.yaml",
+    "tagsOrder": ["Pets", "Store"],
+    "defaultGroup": "General"
+  }
+}
+```
+
+### Link tab
+
+A tab that links to an internal route or external URL:
+
+```json
+{
+  "tab": "Changelog",
+  "href": "/changelog"
+}
+```
+
+## Groups
+
+Groups create labeled sections in the sidebar. Each group has:
+
+- **`group`** — the section heading displayed in the sidebar
+- **`pages`** — an ordered array of page IDs
+
+Page IDs map to file paths under `src/content/`. For example:
+
+| Page ID | File path |
+| --- | --- |
+| `"introduction"` | `src/content/introduction.mdx` |
+| `"guides/getting-started"` | `src/content/guides/getting-started.mdx` |
+| `"api/reference"` | `src/content/api/reference.mdx` |
+
+## Adding a new section
+
+To add a new sidebar section, add a group object to the relevant tab:
+
+```json
+{
+  "tab": "Overview",
+  "groups": [
+    { "group": "Getting Started", "pages": ["introduction", "quickstart"] },
+    { "group": "Advanced", "pages": ["webhooks", "pagination"] },
+    { "group": "New Section", "pages": ["my-new-page"] }
+  ]
+}
+```
+
+## Reordering
+
+Pages appear in the sidebar in the exact order listed in the `pages` array. Groups appear in the order they're defined in the `groups` array. Tabs appear left-to-right in the order defined in the `tabs` array.
+
+## Group icons
+
+Add an `icon` field to any group to display an icon next to the group heading in the sidebar:
+
+```json
+{
+  "group": "Getting Started",
+  "icon": "book-open",
+  "pages": ["introduction", "quickstart"]
+}
+```
+
+Available icon names:
+
+| Name | Icon |
+| --- | --- |
+| `book-open` | Book / documentation |
+| `code-simple` | Code brackets |
+| `grid-round` | Grid / overview |
+| `link-simple` | Link / URL |
+| `wrench` | Tools / settings |
+| `party-horn` | Features / celebration |
+| `telegram` | Send / messaging |
+| `envelope` | Email |
+| `x-twitter` | X / Twitter |
+| `message` | Chat / message |
+
+## Hiding groups and tabs
+
+Set `hidden: true` on a group or tab to exclude it from the sidebar while keeping its pages accessible by URL:
+
+```json
+{
+  "group": "Internal",
+  "hidden": true,
+  "pages": ["internal/roadmap", "internal/notes"]
+}
+```
+
+```json
+{
+  "tab": "Staff Only",
+  "hidden": true,
+  "groups": [...]
+}
+```
+
+Hidden pages are still reachable by direct URL — they just won't appear in navigation or sitemaps. See [SEO & Visibility](/guides/seo-and-visibility) for more control over indexing.

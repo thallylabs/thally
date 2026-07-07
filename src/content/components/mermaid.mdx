@@ -1,0 +1,46 @@
+---
+title: "Mermaid"
+description: "Render Mermaid diagrams inline in your documentation."
+---
+
+Use `<Mermaid>` to embed flowcharts, sequence diagrams, entity-relationship diagrams, and any other [Mermaid](https://mermaid.js.org)-supported diagram type. Diagrams are rendered client-side on first view.
+
+## Flowchart
+
+<Mermaid>{`
+flowchart LR
+    A[Client] -->|Request| B(API Gateway)
+    B --> C{Auth}
+    C -->|Valid| D[Service]
+    C -->|Invalid| E[401 Error]
+`}</Mermaid>
+
+## Sequence diagram
+
+<Mermaid>{`
+sequenceDiagram
+    participant U as User
+    participant A as API
+    participant D as Database
+    U->>A: POST /login
+    A->>D: SELECT user WHERE email=?
+    D-->>A: user row
+    A-->>U: 200 OK + JWT
+`}</Mermaid>
+
+```mdx
+<Mermaid>{`
+flowchart LR
+    A[Start] --> B[Process] --> C[End]
+`}</Mermaid>
+```
+
+<Note>
+  The Mermaid definition must be passed as a template literal string child (`{\`...\`}`), not as JSX children.
+</Note>
+
+## Props
+
+| Prop | Type | Description |
+|---|---|---|
+| `children` | `string` | Mermaid diagram definition string |

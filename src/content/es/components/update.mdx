@@ -1,0 +1,39 @@
+---
+title: "Update"
+description: "Un bloque de entrada de changelog con estilo, con una etiqueta y fecha opcionales."
+---
+
+Usa `<Update>` en páginas de changelog para renderizar entradas de versiones con un borde de acento izquierdo.
+
+## Ejemplo
+
+<Update label="v2.0.0" date="2025-01-15">
+  Versión principal con cambios que rompen compatibilidad. Consulta la [guía de migración](/guides/migrating) para más detalles.
+
+  - Barra lateral rediseñada con grupos colapsables
+  - Nuevo componente `<Steps>` para flujos de trabajo guiados
+  - Mejoras de rendimiento en todas las rutas
+</Update>
+
+<Update label="v1.4.0" date="2024-11-20">
+  Versión menor con nuevas funcionalidades y correcciones de errores.
+
+  - Se añadió soporte multiidioma
+  - Se corrigió la posición de desplazamiento de la barra lateral en la navegación
+</Update>
+
+```mdx
+<Update label="v2.0.0" date="2025-01-15">
+  Major release with breaking changes.
+
+  - Redesigned sidebar
+  - New Steps component
+</Update>
+```
+
+## Props
+
+| Prop | Tipo | Predeterminado | Descripción |
+|---|---|---|---|
+| `label` | `string` | — | Etiqueta o versión que se muestra como una pastilla |
+| `date` | `string` | — | Cadena de fecha de lanzamiento (cualquier formato) |

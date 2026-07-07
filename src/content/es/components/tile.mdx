@@ -1,0 +1,97 @@
+---
+title: "Tile & TileGroup"
+description: "Tarjetas más grandes con capacidad de imagen para resúmenes de funciones y secciones de inicio de producto."
+---
+
+`<Tile>` es una variante de tarjeta más grande con un área de imagen prominente y animación al pasar el cursor. Usa `<TileGroup>` para organizar tiles en una cuadrícula. A diferencia de `<Card>`, los tiles están diseñados para presentaciones visuales de funciones en lugar de enlaces de navegación.
+
+## Ejemplo
+
+<TileGroup cols={2}>
+  <Tile title="REST API" icon="code-simple" href="/api">
+    Operaciones CRUD completas sobre HTTP. Admite paginación, filtrado y operaciones en lote de forma nativa.
+  </Tile>
+  <Tile title="SDKs" icon="wrench" href="/sdks">
+    Bibliotecas cliente oficiales para TypeScript, Python, Go y Ruby con tipos generados.
+  </Tile>
+</TileGroup>
+
+```mdx
+<TileGroup cols={2}>
+  <Tile title="REST API" icon="code-simple" href="/api">
+    Full CRUD operations over HTTP.
+  </Tile>
+  <Tile title="SDKs" icon="wrench" href="/sdks">
+    Official client libraries for multiple languages.
+  </Tile>
+</TileGroup>
+```
+
+## Con imagen
+
+Agrega una imagen superior a los tiles para presentaciones visuales de productos. La imagen se escala al pasar el cursor para un efecto interactivo sutil.
+
+<TileGroup cols={2}>
+  <Tile title="Panel de Analíticas" img="/images/image1.jpg" href="/quickstart">
+    Monitorea usuarios activos, tasas de conversión y retención en una sola vista.
+  </Tile>
+  <Tile title="Explorador de API" img="/images/image2.jpg" href="/api">
+    Envía solicitudes en vivo directamente desde la documentación con tu propia clave de API.
+  </Tile>
+</TileGroup>
+
+```mdx
+<TileGroup cols={2}>
+  <Tile title="Analytics Dashboard" img="/images/dashboard.png" href="/quickstart">
+    Monitor users and conversion rates.
+  </Tile>
+  <Tile title="API Explorer" img="/images/explorer.png" href="/api">
+    Send live requests from the docs.
+  </Tile>
+</TileGroup>
+```
+
+## Tres tiles
+
+<TileGroup cols={3}>
+  <Tile title="Webhooks" icon="telegram" href="/webhooks">
+    Recibe notificaciones de eventos en tiempo real mediante HTTP POST a tu endpoint.
+  </Tile>
+  <Tile title="Autenticación" icon="envelope" href="/authentication">
+    Protege tu API con OAuth 2.0, claves de API o tokens JWT bearer.
+  </Tile>
+  <Tile title="Paginación" icon="grid-round" href="/pagination">
+    Paginación basada en cursor para grandes conjuntos de datos con rendimiento consistente.
+  </Tile>
+</TileGroup>
+
+```mdx
+<TileGroup cols={3}>
+  <Tile title="Webhooks" icon="telegram" href="/webhooks">
+    Real-time event notifications.
+  </Tile>
+  <Tile title="Authentication" icon="envelope" href="/authentication">
+    OAuth 2.0, API keys, or JWT.
+  </Tile>
+  <Tile title="Pagination" icon="grid-round" href="/pagination">
+    Cursor-based for large datasets.
+  </Tile>
+</TileGroup>
+```
+
+## Props
+
+### `<Tile>`
+
+| Prop | Tipo | Descripción |
+|---|---|---|
+| `title` | `string` | Encabezado del tile |
+| `href` | `string` | Convierte el tile en un enlace |
+| `icon` | `string` | Nombre del icono que se muestra junto al título |
+| `img` | `string` | Imagen que se muestra en la parte superior del tile |
+
+### `<TileGroup>`
+
+| Prop | Tipo | Por defecto | Descripción |
+|---|---|---|---|
+| `cols` | `1 \| 2 \| 3 \| 4` | `2` | Número de columnas |

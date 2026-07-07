@@ -1,0 +1,87 @@
+---
+title: API Reference Setup
+description: Generate interactive API docs from an OpenAPI specification.
+---
+
+Dox auto-generates a full API reference from an OpenAPI 3.x spec. Here's how to set it up.
+
+<Steps>
+
+<Step title="Add your OpenAPI spec">
+
+Place your OpenAPI 3.x spec file (YAML or JSON) in the project root:
+
+```bash
+cp path/to/your/openapi.yaml ./openapi.yaml
+```
+
+Dox ships with a Pet Store example spec you can use as a starting point.
+
+</Step>
+
+<Step title="Configure the API tab">
+
+Add an API Reference tab in `docs.json`:
+
+```json
+{
+  "tab": "API Reference",
+  "api": {
+    "source": "openapi.yaml",
+    "tagsOrder": ["Pets", "Store"],
+    "defaultGroup": "General"
+  }
+}
+```
+
+Dox parses the spec and generates interactive endpoint pages automatically.
+
+</Step>
+
+<Step title="Customize endpoint metadata">
+
+Use `overrides` to tweak titles, descriptions, or badges for specific operations:
+
+```json
+{
+  "overrides": {
+    "GET /pets": {
+      "title": "List pets",
+      "description": "Custom description for this endpoint.",
+      "badge": "Stable"
+    }
+  }
+}
+```
+
+The key format is `METHOD /path` (e.g. `GET /pets`, `POST /store/orders`).
+
+</Step>
+
+</Steps>
+
+## Configuration options
+
+| Option | Description |
+| --- | --- |
+| `source` | Path to the OpenAPI spec file (YAML or JSON) |
+| `tagsOrder` | Order of tag groups in the sidebar |
+| `defaultGroup` | Group name for untagged operations |
+| `overrides` | Per-endpoint title, description, and badge overrides |
+
+## Supported spec features
+
+- Path, query, header, and cookie parameters
+- Request body schemas with examples
+- Multiple response codes with schema viewers
+- Server URL selection
+- Security scheme documentation
+
+## Try It console
+
+Every generated endpoint page includes a **Try It** button that opens an interactive console. Users can fill in parameters, edit the request body, and send live requests directly from the docs.
+
+<Note type="info" title="Sample page">
+This is example content that ships with the Dox template. Replace it with your own product documentation.
+</Note>
+

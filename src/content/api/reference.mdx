@@ -1,0 +1,78 @@
+---
+title: API Reference Automation
+description: How the API reference tab is generated from your OpenAPI spec.
+---
+
+## Overview
+
+The API Reference tab is auto-generated from an OpenAPI 3.x spec. Configure it in `docs.json`:
+
+```json
+{
+  "tab": "API Reference",
+  "api": {
+    "source": "openapi.yaml",
+    "tagsOrder": ["Pets", "Store"],
+    "defaultGroup": "General",
+    "overrides": {
+      "GET /pets": { "title": "List pets", "badge": "Stable" }
+    }
+  }
+}
+```
+
+The system will:
+
+- Parse paths, operations, parameters, request bodies, responses, servers, and auth schemes.
+- Build navigation groups based on tags (with fallback to path segments).
+- Render interactive API pages with tables, accordions, and examples.
+
+## Configuration options
+
+| Field | Description |
+| --- | --- |
+| `source` | Path to your OpenAPI spec file (relative to project root). |
+| `tagsOrder` | Order tags appear in the sidebar. Unlisted tags appear after these. |
+| `defaultGroup` | Group name for untagged operations. |
+| `overrides` | Per-operation customizations (see below). |
+
+## Operation overrides
+
+Use `overrides` in `docs.json` to tweak generated metadata per operation:
+
+```json
+{
+  "GET /pets": {
+    "title": "List pets",
+    "description": "Custom description for the sidebar.",
+    "badge": "Stable"
+  },
+  "DELETE /pets/{petId}": {
+    "title": "Delete a pet",
+    "badge": "Destructive"
+  }
+}
+```
+
+- Key format: `METHOD /path` (e.g. `GET /pets`, `POST /store/orders`).
+- Supported fields: `title`, `description`, `badge`, `group`.
+
+## Navigation and routing
+
+- `/api` redirects to the first operation.
+- Each operation gets a route like `/api/default/pets/get`.
+- Navigation hydrates dynamically from the parsed spec.
+
+## Try It console
+
+The built-in "Try It" panel lets users test API calls directly from the docs:
+
+- Proxies requests through `/api/try-it` to avoid CORS issues.
+- Prefills parameters from the OpenAPI schema.
+- Shows live responses with status, headers, and body.
+
+## Customization
+
+- HTTP method chip colors: `src/components/api/tokens.ts`
+- Schema and example renderers: `src/components/api/`
+- Request proxy: `src/app/api/try-it/route.ts`

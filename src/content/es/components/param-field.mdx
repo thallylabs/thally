@@ -1,0 +1,51 @@
+---
+title: "ParamField"
+description: "Documenta parámetros de solicitud — body, query, path y header."
+---
+
+`<ParamField>` renderiza una entrada de parámetro estructurada para la documentación de solicitudes de API. Usa las props `body`, `query`, `path` o `header` para especificar la ubicación del parámetro.
+
+## Ejemplo
+
+<ParamField body name="name" type="string" required>
+  El nombre de la mascota. Debe tener entre 1 y 100 caracteres.
+</ParamField>
+
+<ParamField query name="limit" type="integer" default="20">
+  Número de resultados a devolver. El máximo es 100.
+</ParamField>
+
+<ParamField path name="petId" type="string" required>
+  El identificador único de la mascota.
+</ParamField>
+
+<ParamField header name="Authorization" type="string" required>
+  Token Bearer para autenticación: `Bearer sk-...`
+</ParamField>
+
+```mdx
+<ParamField body name="name" type="string" required>
+  The name of the pet.
+</ParamField>
+
+<ParamField query name="limit" type="integer" default="20">
+  Maximum results to return.
+</ParamField>
+
+<ParamField path name="petId" type="string" required>
+  The unique identifier.
+</ParamField>
+```
+
+## Props
+
+| Prop | Tipo | Descripción |
+|---|---|---|
+| `name` | `string` | Nombre del parámetro |
+| `type` | `string` | Tipo de dato (p. ej. `string`, `integer`, `boolean`) |
+| `body` | `boolean` | Marca como parámetro del cuerpo de la solicitud |
+| `query` | `boolean` | Marca como parámetro de cadena de consulta |
+| `path` | `boolean` | Marca como parámetro de ruta |
+| `header` | `boolean` | Marca como encabezado de solicitud |
+| `required` | `boolean` | Muestra un distintivo de "requerido" |
+| `default` | `string` | Valor predeterminado mostrado en línea |

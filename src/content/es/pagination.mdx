@@ -1,0 +1,64 @@
+---
+title: Escribir contenido
+description: Cómo crear páginas de documentación usando MDX en Dox.
+---
+
+Cada página de documentación en Dox es un archivo `.mdx` dentro de `src/content/`. Cada archivo necesita un frontmatter al inicio con un `title` y una `description`:
+
+```mdx
+---
+title: My Page Title
+description: A short summary for SEO and navigation.
+---
+
+Your content starts here.
+```
+
+## Características de Markdown
+
+Dox admite toda la sintaxis estándar de Markdown más algunos extras:
+
+| Característica | Sintaxis |
+| --- | --- |
+| Encabezados | `## H2`, `### H3`, `#### H4` |
+| Bloques de código | Delimitados con identificador de lenguaje |
+| Tablas | Columnas separadas por barras verticales |
+| Listas | Ordenadas y no ordenadas |
+| Enlaces | `[text](url)` |
+| Imágenes | `![alt](src)` |
+
+## Componentes integrados
+
+Dox incluye varios componentes JSX que puedes usar directamente en MDX:
+
+### Notas
+
+```mdx
+<Note type="info" title="Heads up">
+Informational callout with a blue accent.
+</Note>
+```
+
+### Grupos de código
+
+```mdx
+<CodeGroup title="Install">
+
+\`\`\`bash
+npm install my-package
+\`\`\`
+
+\`\`\`bash
+yarn add my-package
+\`\`\`
+
+</CodeGroup>
+```
+
+## Organización de archivos
+
+Las páginas pueden estar anidadas en subdirectorios. Un archivo en `src/content/guides/setup.mdx` se referencia en `docs.json` como `"guides/setup"`.
+
+<Note type="info" title="Página de ejemplo">
+Este es un contenido de ejemplo que se incluye con la plantilla Dox. Reemplázalo con la documentación de tu propio producto.
+</Note>

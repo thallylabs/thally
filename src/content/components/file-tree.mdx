@@ -1,0 +1,56 @@
+---
+title: "File Tree"
+description: "Render an interactive file-system tree for SDK and monorepo documentation."
+---
+
+Use `<Tree>`, `<Folder>`, and `<File>` to represent directory structures in your documentation. Folders are interactive — click to expand or collapse them.
+
+## Example
+
+<Tree>
+  <Folder name="src" defaultOpen>
+    <Folder name="app">
+      <File name="page.tsx" />
+      <File name="layout.tsx" />
+    </Folder>
+    <Folder name="components">
+      <File name="button.tsx" />
+      <File name="card.tsx" />
+    </Folder>
+    <File name="globals.css" />
+  </Folder>
+  <File name="package.json" />
+  <File name="tsconfig.json" />
+  <File name="next.config.ts" />
+</Tree>
+
+```mdx
+<Tree>
+  <Folder name="src" defaultOpen>
+    <Folder name="app">
+      <File name="page.tsx" />
+      <File name="layout.tsx" />
+    </Folder>
+    <File name="globals.css" />
+  </Folder>
+  <File name="package.json" />
+</Tree>
+```
+
+## Props
+
+### `<Tree>`
+Wrapper element — provides the styled container. No additional props.
+
+### `<Folder>`
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `name` | `string` | — | Folder name displayed next to the icon |
+| `defaultOpen` | `boolean` | `false` | Whether the folder starts expanded |
+
+### `<File>`
+
+| Prop | Type | Description |
+|---|---|---|
+| `name` | `string` | File name displayed next to the icon |

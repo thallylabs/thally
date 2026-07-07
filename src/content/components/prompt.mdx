@@ -1,0 +1,43 @@
+---
+title: "Prompt"
+description: "A styled terminal block for documenting CLI interactions and AI conversations."
+---
+
+Use `<Prompt>` with `<PromptUser>` and `<PromptAssistant>` to show command-line sessions or AI prompt/response pairs in a terminal-style container.
+
+## CLI example
+
+<Prompt>
+  <PromptUser>npx create-dox my-docs --yes</PromptUser>
+  <PromptAssistant>
+    ✓ Scaffolded my-docs/
+    ✓ Installed 312 packages
+    ✓ Initialized git repository
+
+    → Run `cd my-docs && npm run dev` to get started
+  </PromptAssistant>
+</Prompt>
+
+## AI conversation example
+
+<Prompt>
+  <PromptUser>What is the rate limit for the API?</PromptUser>
+  <PromptAssistant>
+    The default rate limit is 1,000 requests per minute per API key. Enterprise plans support higher limits — contact support to upgrade.
+  </PromptAssistant>
+</Prompt>
+
+```mdx
+<Prompt>
+  <PromptUser>npm run build</PromptUser>
+  <PromptAssistant>✓ Build complete in 2.4s</PromptAssistant>
+</Prompt>
+```
+
+## Components
+
+| Component | Description |
+|---|---|
+| `<Prompt>` | Outer container with monospace font styling |
+| `<PromptUser>` | User input line — prefixed with a `$` symbol |
+| `<PromptAssistant>` | Response or output block below the input |

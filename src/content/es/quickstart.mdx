@@ -1,0 +1,85 @@
+---
+title: Inicio rápido
+description: Pon en marcha un sitio de documentación Dox localmente en menos de cinco minutos.
+---
+
+Sigue estos pasos para pasar de cero a un sitio de documentación en funcionamiento.
+
+![Ventana del navegador HTML](/images/image2.jpg)
+
+<Steps>
+
+<Step title="Crea tu proyecto">
+
+```bash
+npx create-dox my-docs
+cd my-docs
+npm run dev
+```
+
+Abre [http://localhost:3040](http://localhost:3040) para ver tu nuevo sitio de documentación.
+
+</Step>
+
+<Step title="Añade una página">
+
+Crea `src/content/my-page.mdx`:
+
+```mdx
+---
+title: My Page
+description: A new documentation page.
+---
+
+Write your content here using Markdown and JSX components.
+```
+
+</Step>
+
+<Step title="Regístrala en la navegación">
+
+Abre `docs.json` y añade la página a un grupo:
+
+```json
+{
+  "group": "Getting Started",
+  "pages": ["introduction", "quickstart", "my-page"]
+}
+```
+
+La barra lateral se actualiza automáticamente — no es necesario reiniciar.
+
+</Step>
+
+<Step title="Añade una referencia de API">
+
+Coloca una especificación OpenAPI (YAML o JSON) en la raíz del proyecto y referénciala en `docs.json`:
+
+```json
+{
+  "tab": "API Reference",
+  "api": {
+    "source": "openapi.yaml"
+  }
+}
+```
+
+Dox genera páginas de endpoints interactivas con tablas de parámetros, esquemas, ejemplos de código y una consola "Pruébalo".
+
+</Step>
+
+<Step title="Despliega">
+
+```bash
+npm run build
+```
+
+Despliega en cualquier plataforma compatible con Next.js — Vercel, Netlify, Cloudflare o un contenedor Docker.
+
+<Note type="info" title="Variables de entorno">
+Configura `DOX_SITE_URL` en el panel de tu servicio de alojamiento para obtener URLs de OpenGraph y metadatos correctos.
+</Note>
+
+</Step>
+
+</Steps>

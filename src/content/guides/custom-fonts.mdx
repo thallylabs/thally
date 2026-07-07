@@ -1,0 +1,79 @@
+---
+title: Custom Fonts
+description: Switch to any Google Font for body text and headings, configured entirely from docs.json.
+---
+
+Dox ships with **Inter** for body text and **JetBrains Mono** for code by default. You can replace either with any Google Font by adding a `fonts` block to `docs.json` — no code changes required.
+
+## Configuration
+
+```json
+"fonts": {
+  "body": { "family": "Plus Jakarta Sans", "weight": ["400", "500", "600", "700"] },
+  "heading": { "family": "Outfit", "weight": ["600", "700"] }
+}
+```
+
+Dox reads the config, fetches the font from Google Fonts, and overrides the CSS variables that control typography across the entire site.
+
+## Fields
+
+### `fonts.body`
+
+Applies to all body text, UI labels, navigation, and the sidebar.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `family` | `string` | `"Inter"` | Google Font family name (exact spelling, e.g. `"DM Sans"`) |
+| `weight` | `string[]` | `["400","500","600","700"]` | Font weights to load |
+
+### `fonts.heading`
+
+Applies to h1–h6 headings in page content. When omitted, headings use the same font as the body.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `family` | `string` | Same as body | Google Font family name |
+| `weight` | `string[]` | `["600","700"]` | Font weights to load |
+
+## Popular combinations
+
+| Body | Heading | Character |
+| --- | --- | --- |
+| `Plus Jakarta Sans` | `Outfit` | Modern, geometric, product-y |
+| `DM Sans` | `DM Sans` | Clean, minimal, neutral |
+| `IBM Plex Sans` | `IBM Plex Sans` | Technical, monospaced-adjacent |
+| `Lato` | `Lato` | Humanist, friendly, approachable |
+| `Figtree` | `Figtree` | Rounded, contemporary |
+| `Inter` | `Sora` | Sharp body + expressive headings |
+| `Source Sans 3` | `Playfair Display` | Editorial, content-forward |
+
+## How it works
+
+When Dox detects a custom font in `docs.json`, it:
+
+1. Generates a Google Fonts CSS URL for each configured family
+2. Injects `<link rel="preconnect">` and `<link rel="stylesheet">` tags into the document head
+3. Overrides the `--font-sans` and `--font-heading` CSS variables so Tailwind and prose typography pick up the new font
+
+The default Inter font (loaded via `next/font`) stays as a fallback — so if the Google Fonts request fails, the page still renders correctly with Inter.
+
+## Code font
+
+The monospace font used for inline code and code blocks is configured separately in `src/app/layout.tsx` via `next/font/google`. To change it, swap the `JetBrains_Mono` import:
+
+```ts
+import { FiraCode } from 'next/font/google'
+
+const fontMono = FiraCode({
+  subsets: ['latin'],
+  variable: '--font-mono',
+  display: 'swap',
+})
+```
+
+Support for configuring the mono font from `docs.json` (without code changes) is planned.
+
+<Note type="info" title="This site uses custom fonts">
+This documentation uses **Plus Jakarta Sans** for body text and **Outfit** for headings, configured in `docs.json` — exactly as described above.
+</Note>

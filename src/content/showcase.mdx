@@ -1,0 +1,264 @@
+---
+title: Component Showcase
+description: A visual demo of the MDX components available in Dox.
+---
+
+This page demonstrates the built-in components and typography styles available in Dox. Use it as a reference when authoring your own documentation.
+
+## Headings
+
+### Section Title (H3)
+
+#### Nested Detail (H4)
+
+Body text maintains consistent rhythm regardless of heading depth. Inline code like `npm run dev` renders with a subtle background.
+
+## Lists
+
+- **Bold items** stand out in unordered lists
+- _Italicized text_ for emphasis
+- Links [with hover underlines](#lists)
+
+1. Ordered lists for sequential steps
+2. Nested content works too:
+   - Sub-item with a `code` fragment
+   - Another nested bullet
+
+> Blockquotes are styled with a left border and muted text.
+
+## Callouts
+
+<Note type="info" title="Info">
+Use info notes for helpful tips and additional context.
+</Note>
+
+<Note type="warning" title="Warning">
+Warnings highlight potential issues or important caveats.
+</Note>
+
+<Note type="danger" title="Danger">
+Danger notes flag breaking changes or critical errors.
+</Note>
+
+## Tables
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| MDX pages | Supported | File-based routing |
+| API reference | Supported | OpenAPI 3.x |
+| Search | Supported | Client-side |
+| Dark mode | Supported | Automatic |
+
+## Code blocks
+
+### Single language
+
+```bash
+npx create-dox my-docs
+cd my-docs
+npm run dev
+```
+
+### Multi-language group
+
+<CodeGroup title="Install dependencies">
+
+```bash
+npm install
+```
+
+```bash
+yarn install
+```
+
+```bash
+pnpm install
+```
+
+</CodeGroup>
+
+### JSON example
+
+```json
+{
+  "tabs": [
+    {
+      "tab": "Overview",
+      "groups": [
+        {
+          "group": "Getting Started",
+          "pages": ["introduction", "quickstart"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+## Steps
+
+<Steps>
+
+<Step title="Install Dox">
+
+Run the CLI to scaffold a new project:
+
+```bash
+npx create-dox my-docs
+```
+
+You'll be prompted for a project name, description, and brand preset.
+
+</Step>
+
+<Step title="Add your content">
+
+Create `.mdx` files in `src/content/` and register them in `docs.json`:
+
+1. Write your page with frontmatter (`title`, `description`)
+2. Add the page slug to a group in `docs.json`
+3. The sidebar updates automatically
+
+<Note type="info" title="Tip">
+Use the `showcase` page to preview all available components as you write.
+</Note>
+
+</Step>
+
+<Step title="Deploy">
+
+Build and deploy to any platform that supports Next.js:
+
+```bash
+npm run build
+```
+
+- **Vercel** — zero-config deployment
+- **Netlify** — add a `netlify.toml` with the Next.js plugin
+- **Docker** — use the included `Dockerfile` or roll your own
+
+</Step>
+
+</Steps>
+
+## Tabs
+
+<Tabs>
+
+<Tab title="macOS">
+
+```bash
+brew install node
+npx create-dox my-docs
+```
+
+</Tab>
+
+<Tab title="Windows">
+
+```bash
+winget install OpenJS.NodeJS
+npx create-dox my-docs
+```
+
+</Tab>
+
+<Tab title="Linux">
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+npx create-dox my-docs
+```
+
+</Tab>
+
+</Tabs>
+
+## Cards
+
+<CardGroup cols={3}>
+
+<Card title="Quickstart" href="/quickstart" icon="book-open">
+Get a docs site running in under five minutes.
+</Card>
+
+<Card title="Configuration" href="/authentication" icon="wrench">
+Control navigation, tabs, and groups with docs.json.
+</Card>
+
+<Card title="API Reference" href="/webhooks" icon="code-simple">
+Generate interactive API docs from an OpenAPI spec.
+</Card>
+
+</CardGroup>
+
+## Frame
+
+Wrap images in a `<Frame>` for a styled border, optional caption, and click-to-zoom:
+
+<Frame caption="A sample image inside a Frame — click to zoom in.">
+
+![JavaScript and flowchart](/images/image1.jpg)
+
+</Frame>
+
+You can also wrap non-image content. Use `zoom={false}` to disable the zoom overlay:
+
+<Frame caption="Color tokens used by the theming system." zoom={false}>
+
+| Token | Purpose |
+| --- | --- |
+| `background` | Page background |
+| `accent` | Primary brand color |
+| `foreground` | Text color |
+
+</Frame>
+
+## Accordion
+
+<Accordion title="What is Dox?">
+Dox is an open-source documentation template built with Next.js, MDX, and Tailwind CSS. It gives you a production-ready docs site with zero vendor lock-in.
+</Accordion>
+
+<Accordion title="How do I add a new page?">
+Create an `.mdx` file in `src/content/`, then add its slug to a group in `docs.json`. The sidebar updates automatically.
+</Accordion>
+
+<Accordion title="Can I use my own components?">
+Yes. Create a component in `src/components/` and register it in `src/components/mdx/mdx-components.tsx`. It will be available in all MDX files.
+</Accordion>
+
+## Tooltip
+
+Hover over the <Tooltip tip="Dox uses next-themes for automatic light/dark mode switching.">underlined text</Tooltip> to see a tooltip. You can also use tooltips to explain <Tooltip tip="Application Programming Interface">API</Tooltip> acronyms or <Tooltip tip="MDX lets you use JSX components inside Markdown.">technical terms</Tooltip> inline.
+
+## Columns
+
+<Columns cols={2}>
+
+<div>
+
+### Left column
+
+![HTML browser](/images/image2.jpg)
+
+Columns are useful for side-by-side comparisons, feature lists, or layout variety.
+
+</div>
+
+<div>
+
+### Right column
+
+![City skyline](/images/image3.jpg)
+
+Each column supports full MDX content including images, code blocks, lists, and callouts.
+
+</div>
+
+</Columns>
+
+Toggle between light and dark themes to verify all components render correctly in both modes.
+
+

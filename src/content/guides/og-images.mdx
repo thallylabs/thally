@@ -1,0 +1,130 @@
+---
+title: OG Image Previews
+description: Configure dynamic Open Graph images for social media link previews.
+---
+
+Dox generates dynamic OG images for every page so your docs look polished when shared on Twitter, Slack, Discord, and other platforms. Each image includes the page title, description, group label, and your site branding.
+
+## How it works
+
+Every doc page automatically gets an OG image URL in its metadata:
+
+```
+/api/og?title=Quickstart&description=Get+started+in+five+minutes&group=Getting+Started
+```
+
+The `/api/og` route runs on the edge and renders a 1200×630 PNG using [Satori](https://github.com/vercel/satori). It reads your brand colors from `src/data/site.ts` so the image matches your theme out of the box.
+
+## Default behavior
+
+With zero configuration, Dox will:
+
+- Use your **dark theme** brand palette for the image background, accent bar, and text colors
+- Display the **site name** and **domain** (from `DOX_SITE_URL`) in the bottom bar
+- Fetch the **Inter** font from Google Fonts at weight 700
+- Inject `og:image` and `twitter:image` meta tags on every doc page
+
+## Customizing the OG image
+
+Add an `ogImage` object to your site config in `src/data/site.ts`. All fields are optional — anything you don't specify falls back to your brand palette.
+
+```ts
+export const siteConfig: SiteConfig = {
+  name: 'My Product',
+  // ...
+  ogImage: {
+    accent: '#FF6B00',
+    domain: 'docs.myproduct.com',
+    fontFamily: 'Poppins',
+    fontWeight: '600',
+  },
+}
+```
+
+## Configuration reference
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `backgroundStart` | Gradient start color (hex) | Dark background from brand |
+| `backgroundEnd` | Gradient end color (hex) | Dark muted from brand |
+| `accent` | Top bar and orb color (hex) | Dark accent from brand |
+| `titleColor` | Title text color (hex) | Dark foreground from brand |
+| `descriptionColor` | Description text color (hex) | Foreground at 60% opacity |
+| `groupColor` | Group label color (hex) | Same as accent |
+| `domain` | Domain shown in bottom bar | Hostname from `DOX_SITE_URL` |
+| `logoText` | Logo text in bottom bar | Site name |
+| `fontFamily` | Google Font family | `Inter` |
+| `fontWeight` | Google Font weight | `700` |
+
+## Setting the site URL
+
+<Note type="warning" title="Important for production">
+Set `DOX_SITE_URL` in your hosting environment. Without it, crawlers resolve the relative `/api/og?...` URL against `localhost`, which is unreachable.
+</Note>
+
+<Steps>
+
+<Step title="Add the environment variable">
+
+In your hosting dashboard (Vercel, Netlify, etc.) or in `.env.local` for local testing:
+
+```bash
+DOX_SITE_URL=https://docs.myproduct.com
+```
+
+</Step>
+
+<Step title="Rebuild and deploy">
+
+```bash
+npm run build
+```
+
+The `metadataBase` in the root layout uses this URL to resolve all relative OG image paths into absolute URLs that crawlers can fetch.
+
+</Step>
+
+</Steps>
+
+## Testing locally
+
+Start the dev server and visit the OG endpoint directly in your browser:
+
+```
+http://localhost:3040/api/og?title=My+Page&description=A+test+page&group=Guides
+```
+
+You'll see the rendered PNG. You can also use tools like the [Twitter Card Validator](https://cards-dev.twitter.com/validator) or [OpenGraph.xyz](https://www.opengraph.xyz/) to verify your deployed previews.
+
+## Customization examples
+
+### Match a purple brand
+
+```ts
+ogImage: {
+  accent: '#8B5CF6',
+  backgroundStart: '#0F0B2E',
+  backgroundEnd: '#1A1145',
+}
+```
+
+### Use a custom font and domain
+
+```ts
+ogImage: {
+  fontFamily: 'Space Grotesk',
+  fontWeight: '700',
+  domain: 'developer.example.com',
+  logoText: 'Example Docs',
+}
+```
+
+### Override all text colors
+
+```ts
+ogImage: {
+  titleColor: '#FFFFFF',
+  descriptionColor: '#94A3B8',
+  groupColor: '#F59E0B',
+}
+```

@@ -1,0 +1,77 @@
+---
+title: Personalización
+description: Extiende Dox con componentes personalizados, tokens de diseño y nuevas páginas.
+---
+
+Dox está diseñado para ser extendido. Cada parte de la interfaz está construida con componentes componibles y tokens de diseño compartidos.
+
+## Tokens de diseño
+
+El espaciado, los estilos de panel y la tipografía están centralizados en `src/config/layout.ts`:
+
+```ts
+export const layout = {
+  pagePadding: 'px-4 sm:px-6 lg:px-12',
+  panel: 'rounded-xl border border-border/40 bg-muted',
+}
+```
+
+Actualiza estos valores para rediseñar toda la interfaz sin tocar los componentes individuales.
+
+## Agregar componentes personalizados
+
+Crea nuevos componentes en `src/components/` y úsalos directamente en los archivos MDX. Dox automáticamente pone a disposición los componentes comunes en todo el contenido MDX.
+
+Para registrar un nuevo componente MDX, agrégalo al mapa de componentes en `src/components/mdx/mdx-components.tsx`:
+
+```ts
+import { MyWidget } from '@/components/mdx/my-widget'
+
+const components: MDXComponents = {
+  // ...existing components
+  MyWidget: (props) => <MyWidget {...props} />,
+}
+```
+
+### Componentes MDX integrados
+
+| Componente | Propósito |
+| --- | --- |
+| `<Note>` | Avisos informativos, de advertencia y de peligro |
+| `<CodeGroup>` | Bloques de código con pestañas para múltiples lenguajes |
+| `<Steps>` / `<Step>` | Guías numeradas paso a paso |
+| `<Tabs>` / `<Tab>` | Pestañas de contenido para instrucciones específicas por plataforma |
+| `<Card>` / `<CardGroup>` | Cuadrículas de tarjetas clicables con íconos |
+| `<Frame>` | Contenedor de imagen estilizado con zoom al hacer clic |
+| `<Accordion>` | Secciones de contenido colapsables |
+| `<Tooltip>` | Información emergente en línea al pasar el cursor |
+| `<Columns>` | Cuadrícula de diseño en múltiples columnas |
+
+## Opciones de configuración del sitio
+
+El objeto `siteConfig` en `src/data/site.ts` controla muchas funciones más allá de la marca:
+
+| Campo | Propósito |
+| --- | --- |
+| `name` | Nombre del sitio en el encabezado, imágenes OG y metadatos |
+| `description` | Meta descripción predeterminada |
+| `repoUrl` | Habilita los enlaces "Editar en GitHub" en cada página |
+| `links` | Enlaces de navegación del encabezado (Soporte, GitHub, CTA) |
+| `brand` / `brandPreset` | Tema de color para los modos claro y oscuro |
+| `ogImage` | Personaliza los colores, fuentes y marca de las imágenes OG dinámicas |
+| `analytics` | Integra Google Analytics, Plausible o PostHog |
+| `versions` | Habilita el selector de versión desplegable en la barra superior |
+
+## Primitivas de sección
+
+Usa los ayudantes de diseño integrados de `src/components/layout/sections.tsx`:
+
+- **`PageContainer`** — relleno consistente a nivel de página
+- **`ContentStack`** — espaciado vertical para secciones de contenido
+- **`Panel`** / **`MutedPanel`** — contenedores de tarjeta estilizados
+
+Estos ayudantes consumen los tokens de diseño, por lo que cambiar un token actualiza todas las secciones que lo utilizan.
+
+<Note type="info" title="Página de ejemplo">
+Este es contenido de ejemplo que viene incluido con la plantilla Dox. Reemplázalo con la documentación de tu propio producto.
+</Note>

@@ -1,0 +1,189 @@
+---
+title: Writing Content
+description: How to write documentation pages using MDX, frontmatter, and built-in components.
+---
+
+## MDX basics
+
+Every page in Dox is an `.mdx` file — Markdown with JSX support. You can use standard Markdown syntax plus React components inline.
+
+```mdx
+# Heading
+
+Regular paragraph with **bold**, *italic*, and `inline code`.
+
+- Bullet lists
+- Work as expected
+
+1. Numbered lists too
+```
+
+## Frontmatter
+
+Every page needs a frontmatter block at the top:
+
+```yaml
+---
+title: Page Title
+description: A short summary for search results and meta tags.
+---
+```
+
+| Field | Required | Purpose |
+| --- | --- | --- |
+| `title` | Yes | Page heading and sidebar label |
+| `description` | Yes | Meta description and search snippet |
+
+The title from frontmatter is automatically rendered as the page heading — you don't need to add an `# H1` in the body.
+
+## Code blocks
+
+Fenced code blocks get syntax highlighting automatically:
+
+````mdx
+```javascript
+const greeting = 'Hello from Dox!'
+console.log(greeting)
+```
+````
+
+Use the `bash`, `typescript`, `python`, `json`, or any other language identifier supported by Shiki.
+
+## Callouts and notes
+
+Use the `<Note>` component to highlight important information:
+
+```mdx
+<Note type="info" title="Good to know">
+  Notes support **Markdown** inside them.
+</Note>
+
+<Note type="warning" title="Heads up">
+  This is a warning callout.
+</Note>
+```
+
+Available types: `info`, `warning`, `danger`, `tip`.
+
+## Links
+
+Standard Markdown links work for both internal and external pages:
+
+```mdx
+Check the [Quickstart](/quickstart) guide or visit [GitHub](https://github.com).
+```
+
+## Tabs
+
+Use `<Tabs>` and `<Tab>` to show platform-specific or variant content without code blocks:
+
+```mdx
+<Tabs>
+
+<Tab title="macOS">
+Install with Homebrew:
+\`\`\`bash
+brew install your-cli
+\`\`\`
+</Tab>
+
+<Tab title="Linux">
+Install with apt:
+\`\`\`bash
+sudo apt install your-cli
+\`\`\`
+</Tab>
+
+</Tabs>
+```
+
+Each `<Tab>` supports full MDX content inside — code blocks, lists, callouts, and more.
+
+## Steps
+
+Use `<Steps>` and `<Step>` for sequential instructions with numbered circles and connector lines:
+
+```mdx
+<Steps>
+
+<Step title="Install">
+Run the installer:
+\`\`\`bash
+npm install your-package
+\`\`\`
+</Step>
+
+<Step title="Configure">
+Create a config file and add your API key.
+</Step>
+
+</Steps>
+```
+
+## Cards
+
+Use `<CardGroup>` and `<Card>` to create clickable card grids for landing pages or "next steps" sections:
+
+```mdx
+<CardGroup cols={2}>
+
+<Card title="Quickstart" href="/quickstart" icon="book-open">
+Get up and running in five minutes.
+</Card>
+
+<Card title="API Reference" href="/api" icon="code-simple">
+Explore the full API.
+</Card>
+
+</CardGroup>
+```
+
+Available icons: `book-open`, `code-simple`, `grid-round`, `link-simple`, `wrench`, `party-horn`, `telegram`, `envelope`, `x-twitter`, `message`.
+
+## Images and frames
+
+Place images in the `public/` folder and reference them with a leading slash:
+
+```mdx
+![Screenshot](/images/image1.jpg)
+```
+
+Wrap images in a `<Frame>` for a styled border with an optional caption. Frames are click-to-zoom by default:
+
+```mdx
+<Frame caption="System architecture overview">
+  ![Screenshot](/images/image1.jpg)
+</Frame>
+```
+
+Disable zoom with `<Frame zoom={false}>`.
+
+## Heading anchor links
+
+Every `h2` and `h3` heading automatically gets a `#` anchor link. Hovering over a heading reveals the `#` symbol, and clicking it copies the full URL to the clipboard. This makes it easy to share links to specific sections.
+
+## Tables
+
+Standard Markdown tables render with proper styling:
+
+```mdx
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | /pets | List all pets |
+| POST | /pets | Create a pet |
+```
+
+## File organization
+
+All content lives in `src/content/`. You can use subdirectories to organize related pages:
+
+```
+src/content/
+  introduction.mdx          → /introduction (or / for the root)
+  quickstart.mdx             → /quickstart
+  guides/
+    getting-started.mdx      → /guides/getting-started
+    writing-content.mdx      → /guides/writing-content
+```
+
+The URL path matches the file path relative to `src/content/`, minus the `.mdx` extension.

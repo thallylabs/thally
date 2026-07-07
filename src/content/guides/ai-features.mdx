@@ -1,0 +1,347 @@
+---
+title: AI Features
+description: Built-in AI capabilities — chat widget, structured agent API, discovery files, and MCP tools for querying your docs.
+---
+
+Dox ships with a full AI-native layer that serves both human readers and AI agents from the same URLs. Agents get structured data; humans get the same pre-rendered UI they always did.
+
+---
+
+## AI chat widget
+
+Add a floating chat button to your docs site that lets users ask questions and get answers grounded in your actual documentation — powered by Claude.
+
+### Enable it
+
+Add `"ai": { "chat": true }` to your `docs.json`:
+
+```json
+{
+  "ai": { "chat": true },
+  "tabs": [...]
+}
+```
+
+A chat button appears in the bottom-right corner of your docs site. Users click it, ask a question, and get a streamed answer sourced from your documentation.
+
+### Keys: aha-first, then bring your own
+
+Chat resolves an Anthropic key in two tiers, so a brand-new site can answer questions immediately without any setup:
+
+| Tier | Key | Limits |
+|------|-----|--------|
+| **Owner** | `ANTHROPIC_API_KEY` | Generous (your key, you pay) |
+| **Trial** | `DOX_TRIAL_ANTHROPIC_KEY` (shared) | Tightly rate-limited per IP + a global daily ceiling |
+
+Set your own key in `.env.local` for production:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+When only the shared trial key is configured, chat still works — under strict caps — so visitors reach the "aha moment" before you commit a key. The active tier is returned on each response via the `x-dox-ai-tier` header. Limits are tunable with `DOX_TRIAL_RATE_PER_MIN`, `DOX_TRIAL_RATE_PER_DAY`, `DOX_TRIAL_DAILY_LIMIT`, and `DOX_CHAT_RATE_PER_MIN`.
+
+### How it works
+
+When a user sends a message, the `/api/chat` route:
+
+1. Embeds the question and retrieves only the most relevant content chunks (RAG) within a small token budget — not the whole corpus
+2. Builds a focused prompt for `claude-haiku-4-5` from those excerpts
+3. Streams the answer back with inline `[n]` citations and a **Sources** list linking to the exact pages and anchors
+
+Answers are grounded in your docs. If the answer isn't in the retrieved excerpts, Claude says so rather than guessing.
+
+<Note type="info" title="Cost">
+The chat widget uses `claude-haiku-4-5` — Anthropic's fastest and most affordable model — and retrieval keeps context small, so each response costs a fraction of a cent.
+</Note>
+
+<Note type="warning" title="Rate limiting">
+The chat route applies tier-aware in-memory rate limits (per minute and per day, per IP) plus a global daily ceiling on the shared trial key. No Redis or external service is required.
+</Note>
+
+---
+
+## LLM-ready text endpoints
+
+Dox exposes your documentation in plain-text formats for AI tools that prefer raw context over structured data.
+
+### `/llms.txt`
+
+A concise, structured summary of your entire documentation — links to every page, organized by tab and group. Follows the [llmstxt.org](https://llmstxt.org) standard.
+
+```
+GET /llms.txt
+```
+
+### `/llms-full.txt`
+
+The complete content of every documentation page in a single plain-text file, stripped of JSX and ready for LLM context windows.
+
+```
+GET /llms-full.txt
+```
+
+---
+
+## Structured JSON API
+
+The most capable way for an AI agent to consume your docs. Every page is available as a structured JSON payload at the same URL a human visits — no scraping required.
+
+### Content negotiation
+
+The `/api/docs/{slug}` endpoint serves different formats based on the request:
+
+```bash
+# Structured JSON — for agent pipelines
+curl https://docs.example.com/api/docs/guides/authentication \
+  -H "Accept: application/json"
+
+# Explicit format override — same result, no Accept header needed
+curl "https://docs.example.com/api/docs/guides/authentication?format=json"
+
+# Markdown with YAML frontmatter — token-efficient for simple lookups (default)
+curl https://docs.example.com/api/docs/guides/authentication \
+  -H "Accept: text/markdown"
+```
+
+Agents that visit a human-facing URL (e.g. `/guides/authentication`) with `Accept: application/json` are transparently rewritten to the API — the URL in the response is unchanged.
+
+### Response schema
+
+```json
+{
+  "schema_version": "1",
+
+  "id": "guides/authentication",
+  "url": "https://docs.example.com/guides/authentication",
+  "canonical_url": "https://docs.example.com/guides/authentication",
+
+  "title": "Authentication",
+  "description": "How to authenticate requests to the API.",
+
+  "content": {
+    "mdx": "## Overview\n\nAll requests require...",
+    "text": "Overview\n\nAll requests require...",
+    "code_blocks": [
+      { "language": "bash", "source": "curl -H 'Authorization: Bearer TOKEN'", "index": 0 }
+    ]
+  },
+
+  "headings": [
+    { "depth": 2, "text": "Overview", "id": "overview" },
+    { "depth": 2, "text": "Token types", "id": "token-types" }
+  ],
+  "toc": [
+    {
+      "depth": 2, "text": "Overview", "id": "overview",
+      "children": [{ "depth": 3, "text": "Token types", "id": "token-types" }]
+    }
+  ],
+
+  "nav": {
+    "tab": "Guides",
+    "group": "Security",
+    "prev": { "title": "Getting Started", "url": "/guides/getting-started" },
+    "next": { "title": "Rate Limiting", "url": "/guides/rate-limiting" },
+    "breadcrumb": [
+      { "label": "Guides", "href": "/guides/getting-started" },
+      { "label": "Security" },
+      { "label": "Authentication" }
+    ]
+  },
+
+  "meta": {
+    "locale": "en",
+    "keywords": ["auth", "token", "bearer"],
+    "timeEstimate": "5 min"
+  },
+
+  "freshness": {
+    "as_of": "2026-02-25T10:00:00.000Z",
+    "cache_ttl_seconds": 3600
+  }
+}
+```
+
+### Response headers
+
+Every `/api/docs` response includes cache and discovery headers:
+
+```
+Content-Type: application/json
+Cache-Control: public, s-maxage=3600, stale-while-revalidate=86400
+Vary: Accept
+Link: </guides/authentication>; rel="canonical"
+Link: </guides/authentication?format=json>; rel="alternate"; type="application/json"
+```
+
+### Automatic agent detection
+
+The middleware detects agent requests and transparently rewrites them to the JSON API — even when the agent hits a human-facing URL with no `?format=json` parameter. Detection checks (in priority order):
+
+| Signal | Example |
+|--------|---------|
+| `?format=json` query param | `?format=json` |
+| `Accept: application/json` header | Standard HTTP content negotiation |
+| `X-Dox-Client: agent` header | Explicit opt-in for internal tools |
+| Known bot User-Agent | `GPTBot`, `ClaudeBot`, `python-requests`, `node-fetch`, `Go-http-client` |
+
+Human visitors with a normal browser `Accept` header always receive the pre-rendered HTML page. Agents always receive structured data. The URL is the same for both.
+
+---
+
+## Page index
+
+A flat JSON index of every page in your site — use this first to discover what pages exist before fetching individual ones.
+
+```bash
+GET /api/docs-index
+```
+
+```json
+{
+  "schema_version": "1",
+  "as_of": "2026-02-25T10:00:00.000Z",
+  "total": 52,
+  "pages": [
+    {
+      "id": "guides/authentication",
+      "title": "Authentication",
+      "description": "How to authenticate requests to the API.",
+      "url": "https://docs.example.com/guides/authentication",
+      "api_url": "https://docs.example.com/api/docs/guides/authentication",
+      "tab": "Guides",
+      "group": "Security"
+    }
+  ]
+}
+```
+
+Fetching the index once lets an agent build the full navigation graph and decide which pages to read without fetching each one individually.
+
+---
+
+## Discovery file
+
+Dox ships `/ai.txt` at a well-known path that agents check before doing anything else. It tells agents how to interact with this site — format options, API patterns, and what's allowed:
+
+```
+Docs-Format: application/json, text/markdown
+Docs-API: /api/docs/{slug}
+Docs-Index: /api/docs-index
+
+Allow: /
+Allow: /api/docs/
+Allow: /api/docs-index
+Disallow: /api/chat
+```
+
+Generated dynamically at `/ai.txt` from your live navigation, so it always reflects the current set of pages and endpoints.
+
+---
+
+## JSON-LD structured data
+
+Every documentation page includes a `<script type="application/ld+json">` block embedded in the HTML. This is not executable JavaScript — browsers ignore it. Search engines and AI agents that receive HTML can extract structured metadata from it without scraping the page layout.
+
+```json
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "name": "Authentication",
+  "description": "How to authenticate requests to the API.",
+  "url": "https://docs.example.com/guides/authentication",
+  "identifier": "guides/authentication",
+  "dateModified": "2026-02-01",
+  "isPartOf": { "@type": "WebSite", "url": "https://docs.example.com" }
+}
+```
+
+Each page's `<head>` also includes a `<link rel="alternate">` pointing to the JSON endpoint:
+
+```html
+<link rel="alternate" type="application/json"
+  href="/guides/authentication?format=json" />
+```
+
+---
+
+## How an agent experiences your docs
+
+A well-behaved agent hitting your Dox site will:
+
+<Steps>
+
+<Step title="Check /ai.txt">
+Learns the API pattern immediately — no guessing, no scraping.
+</Step>
+
+<Step title="Fetch /api/docs-index">
+Gets the full page graph cheaply. Picks the pages it needs to read.
+</Step>
+
+<Step title="Fetch /api/docs/{slug} with Accept: application/json">
+Receives structured JSON: title, code blocks, headings, nav context, breadcrumb.
+</Step>
+
+<Step title="Or visit a human URL">
+Middleware detects the agent's User-Agent or Accept header and transparently rewrites to the JSON API. The agent never knows a rewrite happened.
+</Step>
+
+<Step title="Or scrape HTML as a last resort">
+Finds the JSON-LD structured data block embedded in the page and the `<link rel="alternate">` pointing to the JSON endpoint.
+</Step>
+
+</Steps>
+
+A human visiting the same URLs never notices any of this. The HTML is identical — the AI layer is invisible to browsers.
+
+---
+
+## Agent Readiness Score
+
+Dox grades how well your docs serve AI agents with a deterministic 0–100 score. It's computed from the content graph — structured data, metadata, discovery files, machine readability, OpenAPI coverage, and content quality — with an optional analytics-derived signal when agent traffic data is available.
+
+```bash
+# JSON report
+GET /api/agent-readiness
+
+# In your terminal (fails the run below a threshold — handy in CI)
+dox check --agents --min 80
+```
+
+The report includes weighted subscores and the specific pages dragging each one down, so the fix is always concrete. MCP clients can fetch the same report for any deployed site with the `agent_readiness` tool.
+
+---
+
+## MCP tools for querying docs
+
+The `@doxlabs/mcp` server includes tools that let AI agents search and read your documentation as context. Three work against a local project on disk (`search_docs`, `read_page`, `get_context`); two more — `semantic_search` and `agent_readiness` — run against any **deployed** Dox site over HTTP.
+
+### `search_docs`
+
+Searches all pages by keyword and returns ranked results.
+
+```
+Search the acme-docs project for anything about rate limiting
+```
+
+Results are scored by match quality in title (3 pts), description (2 pts), keywords (2 pts), and body content.
+
+### `read_page`
+
+Reads the full content of a single page by its ID.
+
+```
+Read the "guides/webhooks" page from the acme-docs project
+```
+
+### `get_context`
+
+Returns the most relevant documentation for a given topic, fitting within a token budget. This is the right tool when you want to answer a question using your docs as a knowledge base.
+
+```
+Get context from acme-docs about the webhook authentication flow, up to 4000 tokens
+```
+
+See [MCP Server](/guides/mcp-server) for setup instructions and the full tool reference.

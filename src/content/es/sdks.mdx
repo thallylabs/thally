@@ -1,0 +1,57 @@
+---
+title: Temas
+description: Personaliza colores, fuentes e identidad de marca en tu sitio de documentación.
+---
+
+Dox incluye un sistema de temas flexible que te permite adaptar tu documentación a tu marca. Todos los colores se definen en `src/data/site.ts` y se aplican como propiedades personalizadas de CSS.
+
+## Presets de marca
+
+Se incluyen dos presets de fábrica:
+
+| Preset | Acento | Estilo |
+| --- | --- | --- |
+| `primary` | Verde (#10B981) | Limpio y moderno |
+| `secondary` | Morado (#8B5CF6) | Audaz y vibrante |
+
+Establece el preset activo en `src/data/site.ts`:
+
+```ts
+export const siteConfig = {
+  brandPreset: 'primary', // o 'secondary'
+  // ...
+}
+```
+
+## Colores personalizados
+
+Sobreescribe tokens de color individuales en el objeto `brandPresets`:
+
+```ts
+brandPresets: {
+  primary: {
+    light: {
+      background: '#FFFFFF',
+      foreground: '#0F172A',
+      accent: '#10B981',
+      // ...
+    },
+    dark: {
+      background: '#0B1120',
+      foreground: '#F8FAFC',
+      accent: '#34D399',
+      // ...
+    },
+  },
+}
+```
+
+La mayoría de los colores aceptan valores hexadecimales que se convierten automáticamente a HSL. Los tokens de la barra lateral (`sidebarActiveBg`, `sidebarActiveText`) usan cadenas HSL sin procesar para efectos translúcidos.
+
+## Modo oscuro
+
+El modo oscuro es automático. Dox lee la preferencia del sistema y proporciona un interruptor en el encabezado. Tanto las paletas claras como las oscuras se definen en tu preset de marca, por lo que cambiar de tema es fluido.
+
+<Note type="info" title="Sample page">
+Este es contenido de ejemplo que viene incluido con la plantilla Dox. Reemplázalo con la documentación de tu propio producto.
+</Note>

@@ -1,0 +1,350 @@
+openapi: 3.1.0
+info:
+  title: JSONPlaceholder API
+  version: 1.0.0
+  description: |
+    A free, live, public REST API you can call right now — no API key required.
+    Every endpoint below works from the **Try It** console, so you can explore
+    real requests and responses.
+
+    [JSONPlaceholder](https://jsonplaceholder.typicode.com) is a fake-but-real
+    API for prototyping: `GET` requests return real data, and write requests
+    (`POST`, `PUT`, `PATCH`, `DELETE`) are accepted and echoed back (they are
+    faked server-side, so nothing is persisted). Replace this spec with your own
+    OpenAPI file to document your real API.
+
+servers:
+  - url: https://jsonplaceholder.typicode.com
+    description: Live public API
+
+tags:
+  - name: Posts
+    description: Blog posts — the primary resource. Full CRUD is supported.
+  - name: Comments
+    description: Comments belonging to posts.
+  - name: Users
+    description: Users who author posts and comments.
+
+paths:
+  /posts:
+    get:
+      operationId: listPosts
+      tags: [Posts]
+      summary: List posts
+      description: Return all posts. Filter by author with the `userId` query parameter.
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          description: Only return posts written by this user.
+          schema:
+            type: integer
+            example: 1
+      responses:
+        '200':
+          description: An array of posts.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Post'
+    post:
+      operationId: createPost
+      tags: [Posts]
+      summary: Create a post
+      description: Create a new post. The response echoes your body with a new `id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewPost'
+            example:
+              title: My first post
+              body: Hello from the Try It console.
+              userId: 1
+      responses:
+        '201':
+          description: The created post.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+
+  /posts/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The post ID.
+        schema:
+          type: integer
+          example: 1
+    get:
+      operationId: getPost
+      tags: [Posts]
+      summary: Get a post
+      responses:
+        '200':
+          description: A single post.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+        '404':
+          description: No post with that ID.
+    put:
+      operationId: replacePost
+      tags: [Posts]
+      summary: Replace a post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Post'
+            example:
+              id: 1
+              title: Updated title
+              body: Updated body
+              userId: 1
+      responses:
+        '200':
+          description: The updated post.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+    patch:
+      operationId: updatePost
+      tags: [Posts]
+      summary: Update a post
+      description: Partially update a post — send only the fields you want to change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewPost'
+            example:
+              title: A patched title
+      responses:
+        '200':
+          description: The updated post.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+    delete:
+      operationId: deletePost
+      tags: [Posts]
+      summary: Delete a post
+      responses:
+        '200':
+          description: The post was deleted.
+
+  /posts/{id}/comments:
+    get:
+      operationId: listPostComments
+      tags: [Posts]
+      summary: List a post's comments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The post ID.
+          schema:
+            type: integer
+            example: 1
+      responses:
+        '200':
+          description: Comments on the post.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Comment'
+
+  /comments:
+    get:
+      operationId: listComments
+      tags: [Comments]
+      summary: List comments
+      description: Return all comments. Filter to one post with `postId`.
+      parameters:
+        - name: postId
+          in: query
+          required: false
+          description: Only return comments on this post.
+          schema:
+            type: integer
+            example: 1
+      responses:
+        '200':
+          description: An array of comments.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Comment'
+
+  /comments/{id}:
+    get:
+      operationId: getComment
+      tags: [Comments]
+      summary: Get a comment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The comment ID.
+          schema:
+            type: integer
+            example: 1
+      responses:
+        '200':
+          description: A single comment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+
+  /users:
+    get:
+      operationId: listUsers
+      tags: [Users]
+      summary: List users
+      responses:
+        '200':
+          description: An array of users.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [Users]
+      summary: Get a user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The user ID.
+          schema:
+            type: integer
+            example: 1
+      responses:
+        '200':
+          description: A single user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+components:
+  schemas:
+    Post:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        userId:
+          type: integer
+          description: The author's user ID.
+          example: 1
+        title:
+          type: string
+          example: sunt aut facere repellat provident occaecati excepturi
+        body:
+          type: string
+          example: quia et suscipit suscipit recusandae consequuntur
+      required: [id, userId, title, body]
+    NewPost:
+      type: object
+      properties:
+        userId:
+          type: integer
+          example: 1
+        title:
+          type: string
+          example: My first post
+        body:
+          type: string
+          example: Hello from the Try It console.
+      required: [title, body, userId]
+    Comment:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        postId:
+          type: integer
+          description: The post this comment belongs to.
+          example: 1
+        name:
+          type: string
+          example: id labore ex et quam laborum
+        email:
+          type: string
+          format: email
+          example: Eliseo@gardner.biz
+        body:
+          type: string
+          example: laudantium enim quasi est quidem magnam
+      required: [id, postId, name, email, body]
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Leanne Graham
+        username:
+          type: string
+          example: Bret
+        email:
+          type: string
+          format: email
+          example: Sincere@april.biz
+        phone:
+          type: string
+          example: 1-770-736-8031 x56442
+        website:
+          type: string
+          example: hildegard.org
+        company:
+          type: object
+          properties:
+            name:
+              type: string
+              example: Romaguera-Crona
+            catchPhrase:
+              type: string
+              example: Multi-layered client-server neural-net
+        address:
+          type: object
+          properties:
+            street:
+              type: string
+              example: Kulas Light
+            suite:
+              type: string
+              example: Apt. 556
+            city:
+              type: string
+              example: Gwenborough
+            zipcode:
+              type: string
+              example: 92998-3874
+      required: [id, name, username, email]

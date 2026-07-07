@@ -1,0 +1,104 @@
+---
+title: Configurar la navegación
+description: Cómo estructurar pestañas, grupos de barra lateral y orden de páginas usando docs.json.
+---
+
+## El archivo docs.json
+
+Toda la navegación está controlada por un único archivo en la raíz del proyecto: `docs.json`. Define las pestañas en la barra superior, los grupos de la barra lateral dentro de cada pestaña y el orden de las páginas.
+
+## Estructura
+
+```json
+{
+  "tabs": [
+    {
+      "tab": "Tab Label",
+      "groups": [
+        {
+          "group": "Section Title",
+          "pages": ["page-one", "page-two"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+## Pestañas
+
+Cada entrada en el array `tabs` crea una pestaña de navegación de nivel superior. Hay tres tipos:
+
+### Pestaña de contenido
+
+Una pestaña con grupos de barra lateral y páginas:
+
+```json
+{
+  "tab": "Overview",
+  "groups": [
+    { "group": "Getting Started", "pages": ["introduction", "quickstart"] },
+    { "group": "Core Concepts", "pages": ["authentication"] }
+  ]
+}
+```
+
+### Pestaña de referencia de API
+
+Una pestaña que genera páginas automáticamente a partir de una especificación OpenAPI:
+
+```json
+{
+  "tab": "API Reference",
+  "api": {
+    "source": "openapi.yaml",
+    "tagsOrder": ["Pets", "Store"],
+    "defaultGroup": "General"
+  }
+}
+```
+
+### Pestaña de enlace
+
+Una pestaña que enlaza a una ruta interna o URL externa:
+
+```json
+{
+  "tab": "Changelog",
+  "href": "/changelog"
+}
+```
+
+## Grupos
+
+Los grupos crean secciones etiquetadas en la barra lateral. Cada grupo tiene:
+
+- **`group`** — el encabezado de sección que se muestra en la barra lateral
+- **`pages`** — un array ordenado de IDs de página
+
+Los IDs de página se corresponden con rutas de archivo bajo `src/content/`. Por ejemplo:
+
+| ID de página | Ruta del archivo |
+| --- | --- |
+| `"introduction"` | `src/content/introduction.mdx` |
+| `"guides/getting-started"` | `src/content/guides/getting-started.mdx` |
+| `"api/reference"` | `src/content/api/reference.mdx` |
+
+## Agregar una nueva sección
+
+Para agregar una nueva sección en la barra lateral, añade un objeto de grupo a la pestaña correspondiente:
+
+```json
+{
+  "tab": "Overview",
+  "groups": [
+    { "group": "Getting Started", "pages": ["introduction", "quickstart"] },
+    { "group": "Advanced", "pages": ["webhooks", "pagination"] },
+    { "group": "New Section", "pages": ["my-new-page"] }
+  ]
+}
+```
+
+## Reordenar
+
+Las páginas aparecen en la barra lateral en el orden exacto indicado en el array `pages`. Los grupos aparecen en el orden en que están definidos en el array `groups`. Las pestañas aparecen de izquierda a derecha en el orden definido en el array `tabs`.

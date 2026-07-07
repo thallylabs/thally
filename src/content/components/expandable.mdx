@@ -1,0 +1,49 @@
+---
+title: "Expandable"
+description: "A collapsible inline section for nested API properties."
+---
+
+`<Expandable>` renders an inline toggle used inside `<ResponseField>` or `<ParamField>` to reveal nested properties on demand. It keeps the top-level schema clean while keeping nested details accessible.
+
+## Example
+
+<ResponseField name="address" type="object">
+  The user's shipping address.
+
+  <Expandable title="address properties">
+    <ResponseField name="line1" type="string" required>
+      Street address line 1.
+    </ResponseField>
+    <ResponseField name="line2" type="string">
+      Street address line 2 (apartment, suite, etc.).
+    </ResponseField>
+    <ResponseField name="city" type="string" required>
+      City name.
+    </ResponseField>
+    <ResponseField name="postal_code" type="string" required>
+      Postal or ZIP code.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```mdx
+<ResponseField name="address" type="object">
+  Shipping address.
+
+  <Expandable title="address properties">
+    <ResponseField name="line1" type="string" required>
+      Street address line 1.
+    </ResponseField>
+    <ResponseField name="city" type="string" required>
+      City name.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+```
+
+## Props
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `title` | `string` | `"Show child attributes"` | Label shown on the toggle button |
+| `defaultOpen` | `boolean` | `false` | Whether the section starts expanded |

@@ -1,0 +1,92 @@
+---
+title: Configuración de la Referencia de API
+description: Cómo conectar tu especificación OpenAPI y personalizar la referencia de API generada automáticamente.
+---
+
+## Agregar tu especificación
+
+Coloca tu archivo de especificación OpenAPI 3.x en la raíz del proyecto como `openapi.yaml` (o `openapi.json`). Luego configúralo en `docs.json`:
+
+```json
+{
+  "tab": "API Reference",
+  "api": {
+    "source": "openapi.yaml",
+    "tagsOrder": ["Users", "Orders", "Products"],
+    "defaultGroup": "General"
+  }
+}
+```
+
+La pestaña de Referencia de API generará automáticamente una página para cada operación en tu especificación.
+
+## Opciones de configuración
+
+| Campo | Requerido | Descripción |
+| --- | --- | --- |
+| `source` | Sí | Ruta a tu archivo de especificación OpenAPI, relativa a la raíz del proyecto. |
+| `tagsOrder` | No | Controla el orden en que aparecen las etiquetas en la barra lateral. Las etiquetas no listadas aparecen después. |
+| `defaultGroup` | No | Nombre del grupo para operaciones sin etiquetas. Por defecto es `"General"`. |
+| `overrides` | No | Personalizaciones por operación (ver más abajo). |
+
+## Sobreescritura de operaciones
+
+Puedes personalizar cómo aparecen las operaciones individuales en la barra lateral y la documentación:
+
+```json
+{
+  "api": {
+    "source": "openapi.yaml",
+    "overrides": {
+      "GET /users": {
+        "title": "List users",
+        "description": "Fetch all users with pagination.",
+        "badge": "Stable"
+      },
+      "DELETE /users/{id}": {
+        "title": "Delete user",
+        "badge": "Destructive"
+      }
+    }
+  }
+}
+```
+
+El formato de la clave es `METHOD /path` — que coincide con el `method` y el `path` de tu especificación OpenAPI.
+
+Campos de sobreescritura disponibles:
+
+- **`title`** — título personalizado de la barra lateral y la página
+- **`description`** — descripción personalizada que se muestra debajo del título
+- **`badge`** — una etiqueta que se muestra junto al título de la operación
+- **`group`** — mover la operación a un grupo diferente en la barra lateral
+
+## Ordenamiento de etiquetas
+
+Por defecto, las operaciones se agrupan por sus `tags` de OpenAPI. El array `tagsOrder` controla el orden en la barra lateral:
+
+```json
+"tagsOrder": ["Authentication", "Users", "Orders"]
+```
+
+Las etiquetas no listadas en `tagsOrder` aparecen después de las listadas, en el orden en que aparecen por primera vez en la especificación.
+
+## Panel Pruébalo
+
+Cada página de operación de API incluye un botón "Try It" que abre un panel de solicitudes interactivo. Este:
+
+- Rellena previamente los parámetros desde el esquema OpenAPI
+- Envía solicitudes a través de un proxy del lado del servidor para evitar problemas de CORS
+- Muestra la respuesta con el código de estado, encabezados y cuerpo
+- Genera un comando cURL que puedes copiar
+
+No se necesita configuración — funciona automáticamente desde tu especificación.
+
+## Reemplazar la especificación de ejemplo
+
+La plantilla viene con un ejemplo de Pet Store. Para usar tu propia API:
+
+1. Reemplaza `openapi.yaml` con tu especificación
+2. Actualiza el `tagsOrder` en `docs.json` para que coincida con tus etiquetas
+3. Agrega los `overrides` que desees
+4. Ejecuta `npm run dev` para ver el resultado

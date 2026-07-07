@@ -1,0 +1,227 @@
+---
+title: Branding and Theming
+description: Customize colors, fonts, and site identity to match your product.
+---
+
+## Two places to set your brand
+
+Dox reads branding from two layers:
+
+1. **The admin dashboard** (`/admin/branding`) — an Owner picks the structural theme, brand accent, logo, and favicon and hits **Save**. Changes apply to the live docs site immediately, with **no rebuild or redeploy**. These settings are stored at runtime and layered *on top of* the file defaults below.
+2. **Source files** (`src/data/site.ts`, `docs.json`) — the git-committed defaults. They define what a freshly scaffolded site looks like and what renders before any dashboard override exists. Anything not overridden in the dashboard falls back to these.
+
+<Note type="info" title="Which should I use?">
+Use the **dashboard** for day-to-day changes — theme, brand accent, logo, favicon — with no deploy. Edit the **source files** to set the baseline for a new project, to keep branding in version control, or when you don't run the admin dashboard.
+</Note>
+
+The dashboard overrides the structural theme, the **brand accent** (and its focus ring), the logo, and the favicon. The rest of the palette (backgrounds, borders, sidebar tokens) is defined in the source files described below.
+
+## Site configuration
+
+All site-level settings live in `src/data/site.ts`. Edit this file to set your product name, description, and links. (Name, description, and repo URL can also be overridden live from the dashboard.)
+
+```ts
+export const siteConfig: SiteConfig = {
+  name: 'Your Product',
+  description: 'Documentation for Your Product.',
+  repoUrl: 'https://github.com/your-org/your-repo',
+  links: [
+    { label: 'Get started', href: '/quickstart' },
+    { label: 'Support', href: 'https://github.com/your-org/your-repo/issues' },
+    { label: 'GitHub', href: 'https://github.com/your-org/your-repo' },
+    { label: 'Changelog', href: '/changelog' },
+  ],
+  // ...brand config
+}
+```
+
+## Brand presets
+
+Dox ships with two color presets:
+
+- **`primary`** — green accent (emerald tones)
+- **`secondary`** — purple accent (violet tones)
+
+Switch between them by changing the `brandPreset` variable:
+
+```ts
+const brandPreset: BrandPresetKey = 'primary'  // or 'secondary'
+```
+
+## Custom colors
+
+To define your own palette, edit the `brandPresets` object in `site.ts`. Each preset has `light` and `dark` variants with these tokens:
+
+| Token | Purpose |
+| --- | --- |
+| `background` | Page background |
+| `foreground` | Primary text color |
+| `muted` | Subtle background (cards, hover states) |
+| `border` | Border color |
+| `accent` | Primary brand color (links, active states) |
+| `accentForeground` | Text on accent backgrounds |
+| `ring` | Focus ring color |
+| `sidebarActiveBg` | Active sidebar item background |
+| `sidebarActiveText` | Active sidebar item text |
+
+Most colors are hex values (e.g. `#10B981`) which are auto-converted to HSL. The sidebar tokens (`sidebarActiveBg`, `sidebarActiveText`) use raw HSL strings with opacity (e.g. `'152 60% 88% / 0.55'`) for translucent effects.
+
+## Dark mode
+
+Dark mode is handled automatically by `next-themes`. Users toggle it with the theme switch in the top bar. Your brand palette defines both light and dark variants, so both themes stay on-brand.
+
+## Logo
+
+The quickest way to set a logo is the **dashboard**: upload a PNG, JPEG, or WebP (≤150KB) under **Branding → Logo & favicon** and it appears in the header and social cards immediately — no code change.
+
+Under the hood, the logo component at `src/components/layout/logo.tsx` probes `/api/brand/logo` and swaps in the uploaded logo when one exists. When there's no upload, it falls back to a built-in SVG mark plus your `siteConfig.name`:
+
+```tsx
+export function Logo({ className, showText = true }: LogoProps) {
+  const [customOk, setCustomOk] = useState(false)
+  // ...
+  return (
+    <div className={cn('inline-flex items-center gap-2', className)}>
+      {/* Admin-uploaded logo; hidden until it loads successfully */}
+      <img
+        src="/api/brand/logo"
+        alt={siteConfig.name}
+        onLoad={() => setCustomOk(true)}
+        onError={() => setCustomOk(false)}
+        style={{ height: 28, display: customOk ? 'block' : 'none' }}
+      />
+      {!customOk ? (
+        <>
+          {/* Default SVG mark + site name */}
+          <svg /* ... */ />
+          {showText ? (
+            <span className="text-lg font-bold tracking-tight text-foreground">
+              {siteConfig.name}
+            </span>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  )
+}
+```
+
+To change the **default** mark (what renders before any upload), edit the fallback SVG in `logo.tsx`.
+
+## Fonts
+
+The body and heading fonts are set from a `fonts` block in `docs.json` — any Google Font, no code changes:
+
+```json
+"fonts": {
+  "body": { "family": "Plus Jakarta Sans", "weight": ["400", "500", "600", "700"] },
+  "heading": { "family": "Outfit", "weight": ["600", "700"] }
+}
+```
+
+The defaults are **Inter** (body) and **JetBrains Mono** (code). The monospace font is still configured in `src/app/layout.tsx` via `next/font/google`. See [Custom fonts](/guides/custom-fonts) for the full reference.
+
+## Analytics
+
+Add analytics by setting one or more providers in `siteConfig.analytics`. Scripts load automatically — no code changes needed.
+
+```ts
+export const siteConfig: SiteConfig = {
+  // ...
+  analytics: {
+    googleAnalyticsId: 'G-XXXXXXXXXX',
+    // or
+    plausibleDomain: 'docs.yourproduct.com',
+    // or
+    posthogKey: 'phc_...',
+    posthogHost: 'https://us.i.posthog.com',
+  },
+}
+```
+
+Leave `analytics` undefined to disable all tracking.
+
+## Version switcher
+
+If your docs have multiple versions, add a `versions` array to `siteConfig`. A dropdown appears in the top bar automatically.
+
+```ts
+export const siteConfig: SiteConfig = {
+  // ...
+  versions: [
+    { label: 'v2.0', href: '/', current: true },
+    { label: 'v1.0', href: 'https://v1.docs.yourproduct.com' },
+  ],
+}
+```
+
+- **`label`** — text shown in the dropdown
+- **`href`** — URL for that version (`/` for the current site, or a full URL for older versions)
+- **`current`** — marks the active version (exactly one should be `true`)
+
+The switcher is hidden when fewer than two versions are defined.
+
+## Edit on GitHub
+
+When `repoUrl` in `siteConfig` points to a real GitHub repository, every doc page shows an "Edit this page on GitHub" link at the bottom. This links directly to the MDX source file on the `main` branch.
+
+```ts
+export const siteConfig: SiteConfig = {
+  repoUrl: 'https://github.com/your-org/your-docs',
+  // ...
+}
+```
+
+## Changelog RSS feed
+
+Dox serves an RSS feed at `/changelog/rss.xml`. Users can subscribe to it in any RSS reader to get notified of updates. The feed entries are defined in `src/app/changelog/rss.xml/route.ts`.
+
+## Page feedback
+
+The "Was this page helpful?" widget is shown at the bottom of every doc page by default. To configure where feedback votes are sent, add a `feedback` block to `docs.json`:
+
+```json
+"feedback": {
+  "thumbsRating": true,
+  "endpoint": "/api/feedback"
+}
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `endpoint` | `string` | `/api/feedback` | URL that receives a POST with `{ page, vote, url }` |
+| `thumbsRating` | `boolean` | `true` | Show or hide the widget |
+
+The built-in `/api/feedback` route logs votes to stdout. Replace it with your own storage logic in `src/app/api/feedback/route.ts` — write to a database, forward to Slack, send to PostHog, etc.
+
+## Structural themes
+
+Structural themes control the shape and density of the UI — border radius, sidebar active item style, and navigation tab appearance. They are independent of brand colors, so any color preset works with any structural theme.
+
+Set the baseline theme in `docs.json` (or switch it live from the dashboard under **Branding → Structural theme**, no rebuild):
+
+```json
+{
+  "theme": "maple"
+}
+```
+
+| Theme | Character | Border radius | Sidebar active | Nav tabs |
+| --- | --- | --- | --- | --- |
+| `default` | Balanced | Medium (1 rem) | Left indicator + tinted background | Pill with underline accent |
+| `maple` | Warm, rounded | Large (1.25–2 rem) | Tinted background pill only | Full-width pill, no underline |
+| `sharp` | Technical, precise | Tight (0.25 rem) | Left indicator only, no background | Flat tabs, underline accent |
+| `minimal` | Content-first | None (0) | Text color change only | Text tabs, underline accent |
+
+<Note type="info" title="Tip">
+Structural themes and brand colors are orthogonal. You can use the `maple` theme with either the `primary` (green) or `secondary` (purple) brand preset.
+</Note>
+
+## Layout tokens
+
+Fine-tune spacing and widths in `src/config/layout.ts`:
+
+- Sidebar width
+- Content max-width
+- Padding and gaps
+- Typography scale for meta text

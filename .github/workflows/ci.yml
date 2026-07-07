@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint · Test · Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Advisory for now: the codebase has pre-existing lint violations
+      # (react-hooks rules in a few components). Surface them without blocking
+      # PRs; flip to a hard gate once the existing violations are burned down.
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          # Keep the build deterministic and offline — embeddings fall back to the
+          # local hash provider when no key is present.
+          DOX_SITE_URL: https://example.com
+
+  lighthouse:
+    name: Core Web Vitals budget
+    runs-on: ubuntu-latest
+    # Advisory perf gate: assertions are warn-level (see lighthouserc.json), so a
+    # noisy or flaky run reports annotations without failing the job. Flip the
+    # assertions to error-level once the budget is stable to make it blocking.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          DOX_SITE_URL: http://localhost:3040
+
+      - name: Run Lighthouse CI
+        run: npx --yes @lhci/cli@0.14.x autorun

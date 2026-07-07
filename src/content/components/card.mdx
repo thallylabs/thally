@@ -1,0 +1,103 @@
+---
+title: "Card & CardGroup"
+description: "Clickable cards for feature overviews, link grids, and navigation."
+---
+
+Use `<Card>` for individual feature or navigation cards, and `<CardGroup>` to lay them out in a responsive grid.
+
+## Example
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="party-horn" href="/quickstart">
+    Get your docs site running in under five minutes.
+  </Card>
+  <Card title="API Reference" icon="code-simple" href="/api">
+    Explore every endpoint with live examples and generated types.
+  </Card>
+  <Card title="Guides" icon="book-open" href="/guides/getting-started">
+    In-depth walkthroughs for common configuration scenarios.
+  </Card>
+  <Card title="GitHub" icon="link-simple" href="https://github.com/your-org/your-docs">
+    Browse the source, open issues, and contribute.
+  </Card>
+</CardGroup>
+
+```mdx
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="party-horn" href="/quickstart">
+    Get running in five minutes.
+  </Card>
+  <Card title="API Reference" icon="code-simple" href="/api">
+    Explore every endpoint.
+  </Card>
+</CardGroup>
+```
+
+## Card with image
+
+Cards can include a top image — useful for showcasing screenshots, product previews, or visual documentation.
+
+<CardGroup cols={2}>
+  <Card title="Analytics Dashboard" img="/images/image1.jpg" href="/quickstart">
+    Monitor active users, conversion rates, and retention in real time.
+  </Card>
+  <Card title="API Explorer" img="/images/image2.jpg" href="/api">
+    Send live requests directly from the docs with your own API key.
+  </Card>
+</CardGroup>
+
+```mdx
+<CardGroup cols={2}>
+  <Card title="Analytics Dashboard" img="/images/dashboard.png" href="/quickstart">
+    Monitor active users and conversion rates.
+  </Card>
+  <Card title="API Explorer" img="/images/explorer.png" href="/api">
+    Send live requests from the docs.
+  </Card>
+</CardGroup>
+```
+
+## Three columns
+
+<CardGroup cols={3}>
+  <Card title="Redirects" icon="link-simple" href="/guides/redirects">
+    Map old paths to new ones so existing links never break.
+  </Card>
+  <Card title="Custom Fonts" icon="book-open" href="/guides/custom-fonts">
+    Switch to any Google Font from docs.json — no code changes.
+  </Card>
+  <Card title="Site Banner" icon="party-horn" href="/guides/site-banner">
+    Announce launches and deprecations with a dismissible top banner.
+  </Card>
+</CardGroup>
+
+```mdx
+<CardGroup cols={3}>
+  <Card title="Redirects" icon="link-simple" href="/guides/redirects">
+    Map old paths to new ones.
+  </Card>
+  <Card title="Custom Fonts" icon="book-open" href="/guides/custom-fonts">
+    Switch fonts from docs.json.
+  </Card>
+  <Card title="Site Banner" icon="party-horn" href="/guides/site-banner">
+    Announce launches and notices.
+  </Card>
+</CardGroup>
+```
+
+## Props
+
+### `<Card>`
+
+| Prop | Type | Description |
+|---|---|---|
+| `title` | `string` | Card heading |
+| `href` | `string` | Destination URL — makes the entire card clickable |
+| `icon` | `string` | Icon name (see [available icons](/components/tooltip)) |
+| `img` | `string` | Image path shown at the top of the card |
+
+### `<CardGroup>`
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `cols` | `1 \| 2 \| 3 \| 4` | `3` | Number of columns in the grid |
