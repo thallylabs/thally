@@ -87,7 +87,9 @@ export async function updateAdminSettings(patch: Partial<AdminSettings>): Promis
 // settings blob, so getAdminSettings() (on hot paths) stays tiny.
 // ---------------------------------------------------------------------------
 
-export type BrandAsset = 'logo' | 'favicon'
+// The bare keys are the light-mode (and legacy single-asset) variants; `-dark`
+// keys hold optional dark-mode overrides that fall back to the light asset.
+export type BrandAsset = 'logo' | 'favicon' | 'logo-dark' | 'favicon-dark'
 
 const MAX_ASSET_BYTES = 150 * 1024
 const ALLOWED_ASSET_MIME = /^image\/(png|jpeg|webp)$/ // raster only — no SVG (navigable-route XSS)

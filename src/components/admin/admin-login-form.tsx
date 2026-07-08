@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AlertCircle } from 'lucide-react'
+import { BrandMark } from '@/components/admin/brand-mark'
 
 export function AdminLoginForm({ siteName = 'Dox', oidcEnabled = false }: { siteName?: string; oidcEnabled?: boolean }) {
   const router = useRouter()
@@ -35,7 +36,9 @@ export function AdminLoginForm({ siteName = 'Dox', oidcEnabled = false }: { site
   return (
     <div className="ds-auth">
       <form onSubmit={(e) => void handleSubmit(e)} className="ds-auth-card ds-rise">
-        <div className="ds-auth-logo">{siteName.charAt(0).toUpperCase()}</div>
+        <div className="ds-auth-logo" style={{ background: 'none' }}>
+          <BrandMark size={44} />
+        </div>
 
         <p className="mt-6 ds-workspace-sub">{siteName} Admin</p>
         <h1

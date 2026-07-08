@@ -24,6 +24,7 @@ const MAX_ASSET_KB = 150
 
 function DropTarget({
   kind,
+  mode,
   shape,
   hasAsset,
   version,
@@ -31,12 +32,16 @@ function DropTarget({
   onChange,
 }: {
   kind: 'logo' | 'favicon'
+  mode: 'light' | 'dark'
   shape: 'wide' | 'square'
   hasAsset: boolean
   version: number
   canEdit: boolean
   onChange: () => void
 }) {
+  // Dark variants save under their own API field and preview on an ink chip
+  // (dark-mode artwork is usually light-colored — invisible on white).
+  const field = mode === 'dark' ? (kind === 'logo' ? 'logoDark' : 'faviconDark') : kind
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -57,7 +62,7 @@ function DropTarget({
       const res = await fetch('/api/admin/settings', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ [kind]: dataUri }),
+        body: JSON.stringify({ [field]: dataUri }),
       })
       if (res.ok) onChange()
       else setError((await res.json().catch(() => ({}))).error ?? 'Upload failed')
@@ -72,7 +77,7 @@ function DropTarget({
       await fetch('/api/admin/settings', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ [kind]: null }),
+        body: JSON.stringify({ [field]: null }),
       })
       onChange()
     } finally {
@@ -81,7 +86,7 @@ function DropTarget({
   }
 
   const wide = shape === 'wide'
-  const size = wide ? { width: 208, height: 88 } : { width: 96, height: 96 }
+  const size = wide ? { width: 170, height: 80 } : { width: 88, height: 88 }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
@@ -129,9 +134,9 @@ function DropTarget({
         {hasAsset ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={`/api/brand/${kind}?v=${version}`}
+            src={`/api/brand/${kind}?mode=${mode}&v=${version}`}
             alt=""
-            style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', borderRadius: 6, background: '#fff', padding: 3 }}
+            style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', borderRadius: 6, background: mode === 'dark' ? '#111827' : '#fff', padding: 3 }}
           />
         ) : (
           <>
@@ -188,7 +193,7 @@ export function BrandingView({
   const [savedTheme, setSavedTheme] = useState<ThemeId>(currentTheme)
   const [savedLight, setSavedLight] = useState(currentAccentLight)
   const [savedDark, setSavedDark] = useState(currentAccentDark)
-  const [assets, setAssets] = useState({ hasLogo: false, hasFavicon: false })
+  const [assets, setAssets] = useState({ hasLogo: false, hasFavicon: false, hasLogoDark: false, hasFaviconDark: false })
   const [assetVersion, setAssetVersion] = useState(0)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -200,7 +205,12 @@ export function BrandingView({
       .then((r) => (r.ok ? r.json() : null))
       .then((s) => {
         if (!s) return
-        setAssets({ hasLogo: Boolean(s.hasLogo), hasFavicon: Boolean(s.hasFavicon) })
+        setAssets({
+          hasLogo: Boolean(s.hasLogo),
+          hasFavicon: Boolean(s.hasFavicon),
+          hasLogoDark: Boolean(s.hasLogoDark),
+          hasFaviconDark: Boolean(s.hasFaviconDark),
+        })
         const t = (s.brandTheme as ThemeId) || currentTheme
         const l = s.brandAccent?.light || currentAccentLight
         const d = s.brandAccent?.dark || currentAccentDark
@@ -375,7 +385,17 @@ export function BrandingView({
               })}
             </div>
 
-            <div className="mt-4 flex flex-wrap items-start gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {/* Native color wheel — picking applies immediately (sets light, derives dark). */}
+              <input
+                type="color"
+                aria-label="Pick a custom accent color"
+                disabled={!canEdit}
+                value={parseColorToHex(accentLight) ?? '#000000'}
+                onChange={(e) => applyAccent(e.target.value)}
+                className="ds-focusable"
+                style={{ width: 44, height: 38, padding: 2, border: '1px solid var(--ds-border)', borderRadius: 10, background: 'transparent', cursor: canEdit ? 'pointer' : 'default' }}
+              />
               <input
                 className="ds-input ds-focusable font-mono"
                 style={{ width: 200 }}
@@ -404,14 +424,27 @@ export function BrandingView({
             ) : null}
 
             <div className="mt-5 flex flex-wrap gap-8">
-              {([['Light', accentLight], ['Dark', accentDark]] as const).map(([label, hex]) => (
-                <div key={label} className="flex items-center gap-2.5">
-                  <span style={{ width: 40, height: 40, borderRadius: 10, background: hex, border: '1px solid var(--ds-border)' }} />
+              {/* Each mode swatch is itself a picker: Light re-derives the dark
+                  variant (same as Apply); Dark fine-tunes dark mode alone. */}
+              {([
+                ['Light', accentLight, (hex: string) => applyAccent(hex)],
+                ['Dark', accentDark, (hex: string) => setAccentDark(hex)],
+              ] as const).map(([label, hex, onPick]) => (
+                <label key={label} className="flex items-center gap-2.5" style={{ cursor: canEdit ? 'pointer' : 'default' }}>
+                  <input
+                    type="color"
+                    aria-label={`Adjust ${label.toLowerCase()}-mode accent`}
+                    disabled={!canEdit}
+                    value={parseColorToHex(hex) ?? '#000000'}
+                    onChange={(e) => onPick(e.target.value)}
+                    className="ds-focusable"
+                    style={{ width: 40, height: 40, padding: 2, border: '1px solid var(--ds-border)', borderRadius: 10, background: 'transparent' }}
+                  />
                   <span>
                     <span className="ds-rail-label block">{label}</span>
                     <span className="font-mono" style={{ fontSize: 'var(--ds-text-caption)' }}>{hex}</span>
                   </span>
-                </div>
+                </label>
               ))}
             </div>
           </section>
@@ -420,19 +453,53 @@ export function BrandingView({
           <section className="ds-panel">
             <div className="ds-panel-head"><div className="ds-panel-title">Logo &amp; favicon</div></div>
             <div>
-              <div className="ds-setting-row" style={{ alignItems: 'center' }}>
+              <div className="ds-setting-row" style={{ alignItems: 'flex-start' }}>
                 <div className="min-w-0">
                   <div className="ds-setting-row-label">Logo</div>
-                  <div className="ds-setting-row-desc">Header + social cards. PNG/JPEG/WebP, ≤150KB.</div>
+                  <div className="ds-setting-row-desc">
+                    Header + social cards. PNG/JPEG/WebP, ≤150KB. Dark mode falls back to the light logo when empty.
+                  </div>
                 </div>
-                <DropTarget kind="logo" shape="wide" hasAsset={assets.hasLogo} version={assetVersion} canEdit={canEdit} onChange={refreshAssets} />
+                <div className="flex flex-wrap justify-end" style={{ gap: 14 }}>
+                  {(['light', 'dark'] as const).map((mode) => (
+                    <div key={mode} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
+                      <span className="ds-rail-label">{mode === 'light' ? 'Light' : 'Dark'}</span>
+                      <DropTarget
+                        kind="logo"
+                        mode={mode}
+                        shape="wide"
+                        hasAsset={mode === 'light' ? assets.hasLogo : assets.hasLogoDark}
+                        version={assetVersion}
+                        canEdit={canEdit}
+                        onChange={refreshAssets}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="ds-setting-row" style={{ alignItems: 'center', borderTop: '1px solid var(--ds-border)', marginTop: 4, paddingTop: 20 }}>
+              <div className="ds-setting-row" style={{ alignItems: 'flex-start', borderTop: '1px solid var(--ds-border)', marginTop: 4, paddingTop: 20 }}>
                 <div className="min-w-0">
                   <div className="ds-setting-row-label">Favicon</div>
-                  <div className="ds-setting-row-desc">Browser-tab icon. A square PNG works best.</div>
+                  <div className="ds-setting-row-desc">
+                    Browser-tab icon; a square PNG works best. The dark icon shows on OS dark scheme.
+                  </div>
                 </div>
-                <DropTarget kind="favicon" shape="square" hasAsset={assets.hasFavicon} version={assetVersion} canEdit={canEdit} onChange={refreshAssets} />
+                <div className="flex flex-wrap justify-end" style={{ gap: 14 }}>
+                  {(['light', 'dark'] as const).map((mode) => (
+                    <div key={mode} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
+                      <span className="ds-rail-label">{mode === 'light' ? 'Light' : 'Dark'}</span>
+                      <DropTarget
+                        kind="favicon"
+                        mode={mode}
+                        shape="square"
+                        hasAsset={mode === 'light' ? assets.hasFavicon : assets.hasFaviconDark}
+                        version={assetVersion}
+                        canEdit={canEdit}
+                        onChange={refreshAssets}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </section>

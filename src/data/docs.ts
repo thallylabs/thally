@@ -331,19 +331,42 @@ function collectPageIds(groups: Array<DocsJsonNavigationGroup>): Array<string> {
   return ids
 }
 
+const KEYWORD_STOPWORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'to', 'of', 'for', 'with', 'in', 'on', 'how', 'your', 'you', 'is', 'are', 'using', 'guide',
+])
+
+/**
+ * Mechanical fallback keywords when a page has none in frontmatter — derived
+ * from its title and slug path (which mirrors its nav category). Thinner than
+ * hand-authored keywords, but real terms about the page: they feed JSON-LD and
+ * the ?format=json metadata, and lift agent-retrieval signal for every page,
+ * present and future, with no per-page authoring.
+ */
+function deriveKeywords(title: string, slug: Array<string>): Array<string> {
+  const words = new Set<string>()
+  const phrase = title.trim().toLowerCase()
+  if (phrase) words.add(phrase) // the full title as a phrase
+  for (const source of [...slug, ...title.split(/[\s/&,-]+/)]) {
+    const word = source.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+    if (word.length >= 2 && !KEYWORD_STOPWORDS.has(word)) words.add(word)
+  }
+  return Array.from(words).slice(0, 12)
+}
+
 function buildDocEntryFromPageId(pageId: string): DocEntry {
   const fm = readFrontmatter(pageId)
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
   const href = slug.length ? `/${slug.join('/')}` : '/'
+  const title = fm.title ?? deriveTitleFromSlug(pageId)
   return {
     id: pageId,
-    title: fm.title ?? deriveTitleFromSlug(pageId),
+    title,
     description: fm.description ?? '',
     slug,
     href,
     group: '',
     badge: fm.badge,
-    keywords: fm.keywords ?? [],
+    keywords: fm.keywords?.length ? fm.keywords : deriveKeywords(title, slug),
     component: Placeholder,
     timeEstimate: fm.timeEstimate ?? '5 min',
     lastUpdated: fm.lastUpdated ?? '',

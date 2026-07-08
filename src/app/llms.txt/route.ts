@@ -1,10 +1,10 @@
 import { siteConfig } from '@/data/site'
 import { getDocEntries, getSidebarCollections } from '@/data/docs'
-import { getSiteUrl } from '@/lib/site-url'
+import { getSiteUrl, siteUrlMismatch } from '@/lib/site-url'
 
 const baseUrl = getSiteUrl()
 
-export async function GET() {
+export async function GET(request: Request) {
   const entries = getDocEntries()
   const collections = getSidebarCollections()
 
@@ -72,10 +72,15 @@ export async function GET() {
 
   const body = lines.join('\n')
 
+  // Surface a stale-DOX_SITE_URL misconfiguration (all links above would be
+  // dead): warns in server logs and flags it on the response for tooling.
+  const mismatch = siteUrlMismatch(new URL(request.url).origin)
+
   return new Response(body, {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
       'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+      ...(mismatch ? { 'X-Dox-Site-Url-Warning': mismatch } : {}),
     },
   })
 }

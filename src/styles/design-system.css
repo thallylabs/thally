@@ -4,7 +4,8 @@
    A perceptual, OKLCH-based token system for Dox's admin analytics dashboard,
    modeled on LI.FI's design language (perceptual color scales, three-tier
    elevation, one dark/light flip, 4px spacing rhythm) but reskinned to Dox's
-   GREEN brand (brandPresets.primary — #10B981 light / #34D399 dark).
+   CRIMSON brand (brandPresets.primary — #E11D48 light / #F43F5E dark). The
+   green scale below is a fixed, brand-independent data-viz intensity ramp.
 
    SCOPING — this file is OPT-IN and MUST NOT leak into the docs site.
    Every token lives under `.dox-dashboard`; dark overrides live under
@@ -44,7 +45,7 @@
      Functional color (status, chart series, green data ramp) stays fixed
      below — semantics must not change with the brand.
      ──────────────────────────────────────────────────────────────────────── */
-  --ds-accent:            hsl(var(--dox-accent, 160 84% 39%));
+  --ds-accent:            hsl(var(--dox-accent, 347 77% 50%));
   --ds-accent-mid:        color-mix(in oklch, var(--ds-accent) 85%, black);  /* hovers, icons */
   --ds-accent-strong:     color-mix(in oklch, var(--ds-accent) 72%, black);  /* pressed / active */
   --ds-accent-fg:         color-mix(in oklch, var(--ds-accent) 8%, white);   /* text/icon on solid fill */
@@ -135,12 +136,12 @@
 
   /* ────────────────────────────────────────────────────────────────────────
      6. CHART / DATA-VIZ PALETTE — LIGHT
-     Categorical series lead with brand green (series-1), then Dox violet
+     Categorical series lead with brand violet (series-1), then emerald
      (series-2), amber, then evenly-spaced spectral hues. Sequential ramp =
-     the green scale; diverging = red↔green through neutral.
+     the green intensity scale; diverging = red↔green through neutral.
      ──────────────────────────────────────────────────────────────────────── */
-  --ds-series-1: #10B981;                 /* brand green */
-  --ds-series-2: #8B5CF6;                 /* Dox violet */
+  --ds-series-1: #8B5CF6;                 /* brand violet */
+  --ds-series-2: #10B981;                 /* Dox emerald */
   --ds-series-3: oklch(0.720 0.150 75);   /* amber */
   --ds-series-4: oklch(0.585 0.160 240);  /* blue */
   --ds-series-5: oklch(0.650 0.170 350);  /* pink */
@@ -262,7 +263,7 @@
   /* Accent — follows the brand's dark accent (--dox-accent flips with .dark).
      Mixing with white keeps derived tones vivid on dark surfaces; the fg tone
      goes near-black since dark-theme accents are typically light. */
-  --ds-accent:        hsl(var(--dox-accent, 158 64% 52%));
+  --ds-accent:        hsl(var(--dox-accent, 270 95% 75%));
   --ds-accent-mid:    color-mix(in oklch, var(--ds-accent) 88%, white);
   --ds-accent-strong: color-mix(in oklch, var(--ds-accent) 78%, black);
   --ds-accent-fg:     color-mix(in oklch, var(--ds-accent) 22%, black);
@@ -294,8 +295,8 @@
   --ds-info:    oklch(0.680 0.150 240);
 
   /* Chart series — brighter for dark backgrounds */
-  --ds-series-1: #34D399;
-  --ds-series-2: #A78BFA;
+  --ds-series-1: #A78BFA;
+  --ds-series-2: #34D399;
   --ds-series-3: oklch(0.800 0.150 75);
   --ds-series-4: oklch(0.700 0.150 240);
   --ds-series-5: oklch(0.740 0.170 350);

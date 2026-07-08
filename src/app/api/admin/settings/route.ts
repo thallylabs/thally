@@ -22,6 +22,8 @@ type SettingsBody = Partial<AdminSettings> & {
   chatKey?: string | null
   logo?: string | null
   favicon?: string | null
+  logoDark?: string | null
+  faviconDark?: string | null
 }
 
 async function applyAsset(kind: BrandAsset, value: string | null | undefined): Promise<'invalid' | void> {
@@ -35,8 +37,13 @@ async function applyAsset(kind: BrandAsset, value: string | null | undefined): P
 }
 
 async function fullResponse(s: AdminSettings) {
-  const [hasLogo, hasFavicon] = await Promise.all([hasBrandAsset('logo'), hasBrandAsset('favicon')])
-  return { ...sanitize(s), hasLogo, hasFavicon }
+  const [hasLogo, hasFavicon, hasLogoDark, hasFaviconDark] = await Promise.all([
+    hasBrandAsset('logo'),
+    hasBrandAsset('favicon'),
+    hasBrandAsset('logo-dark'),
+    hasBrandAsset('favicon-dark'),
+  ])
+  return { ...sanitize(s), hasLogo, hasFavicon, hasLogoDark, hasFaviconDark }
 }
 
 /** Public shape — secrets are surfaced as booleans only, never the hash or key. */
@@ -148,10 +155,14 @@ export async function PUT(request: NextRequest) {
     patch.chatKeyEnc = null
   }
 
-  // Brand assets (logo/favicon) — separate F1 keys, validated (raster + size cap).
-  const logoResult = await applyAsset('logo', body.logo)
-  const faviconResult = await applyAsset('favicon', body.favicon)
-  if (logoResult === 'invalid' || faviconResult === 'invalid') {
+  // Brand assets (logo/favicon, per mode) — separate F1 keys, validated (raster + size cap).
+  const assetResults = await Promise.all([
+    applyAsset('logo', body.logo),
+    applyAsset('favicon', body.favicon),
+    applyAsset('logo-dark', body.logoDark),
+    applyAsset('favicon-dark', body.faviconDark),
+  ])
+  if (assetResults.includes('invalid')) {
     return NextResponse.json(
       { error: 'Invalid image — use PNG/JPEG/WebP under 150KB.' },
       { status: 400 },

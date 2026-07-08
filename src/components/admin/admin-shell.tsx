@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-react'
 import { AdminCommandMenu } from '@/components/admin/admin-command-menu'
+import { BrandMark } from '@/components/admin/brand-mark'
 
 interface NavItem {
   href: string
@@ -121,10 +122,18 @@ export function AdminShell({ siteName, children }: { siteName: string; children:
 
       <aside className="ds-sidebar" data-collapsed={collapsed} data-open={mobileOpen}>
         <div className="ds-sidebar-head">
-          <Link href="/admin" className="ds-workspace ds-focusable" onClick={() => setMobileOpen(false)}>
-            <span className="ds-workspace-logo">{siteName.charAt(0).toUpperCase()}</span>
+          {/* Top-aligned so the mark sits on the same line as the site name
+              (the sub-label hangs below); collapsed mode still centers the
+              lone mark via the sidebar's [data-collapsed] rules. */}
+          <Link
+            href="/admin"
+            className="ds-workspace ds-focusable"
+            style={{ alignItems: 'flex-start' }}
+            onClick={() => setMobileOpen(false)}
+          >
+            <BrandMark size={20} />
             <span className="ds-rail-label min-w-0 truncate">
-              <span className="ds-workspace-name block truncate">{siteName}</span>
+              <span className="ds-workspace-name block truncate" style={{ lineHeight: '20px' }}>{siteName}</span>
               <span className="ds-workspace-sub">Admin console</span>
             </span>
           </Link>

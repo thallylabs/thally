@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { stripInternalFrontmatter } from '@/lib/provenance'
+import { mdxToMarkdown } from '@/lib/content/to-markdown'
 
 const localDocsRoot = path.join(process.cwd(), 'src/content')
 
@@ -29,8 +30,13 @@ export async function GET(
     if (!path.resolve(filePath).startsWith(rootPrefix)) continue
     try {
       const raw = await fs.readFile(filePath, 'utf8')
-      // Strip internal provenance frontmatter so it never ships publicly.
-      return new NextResponse(stripInternalFrontmatter(raw), {
+      // Strip internal provenance frontmatter so it never ships publicly, then
+      // clean the MDX body to real Markdown (JSX components → Markdown) while
+      // preserving the public frontmatter block.
+      const stripped = stripInternalFrontmatter(raw)
+      const frontmatter = stripped.match(/^\s*---\n[\s\S]*?\n---\n?/)?.[0] ?? ''
+      const body = mdxToMarkdown(stripped.slice(frontmatter.length))
+      return new NextResponse(frontmatter + body, {
         status: 200,
         headers: {
           'Content-Type': 'text/markdown; charset=utf-8',

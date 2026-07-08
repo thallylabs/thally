@@ -98,7 +98,13 @@ export const metadata: Metadata = {
   // template-marketing keywords.
   keywords: [siteConfig.name, `${siteConfig.name} documentation`, 'docs'],
   icons: {
-    icon: '/api/brand/favicon',
+    // The dark link wins on OS dark scheme (link media can't follow the
+    // in-site theme toggle); the route falls back to the light asset when no
+    // dark variant is uploaded, so both links always resolve.
+    icon: [
+      { url: '/api/brand/favicon', media: '(prefers-color-scheme: light)' },
+      { url: '/api/brand/favicon?mode=dark', media: '(prefers-color-scheme: dark)' },
+    ],
     shortcut: '/api/brand/favicon',
   },
   openGraph: {

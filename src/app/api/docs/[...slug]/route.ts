@@ -1,6 +1,7 @@
 import { type NextRequest } from 'next/server'
 import { getDocEntries, getI18nConfig, getNavContext } from '@/data/docs'
 import { getContentDocument } from '@/lib/content'
+import { mdxToMarkdown } from '@/lib/content/to-markdown'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
 import { getSiteUrl } from '@/lib/site-url'
 
@@ -232,7 +233,9 @@ export async function GET(
     lines.push(entry.description)
     lines.push('')
   }
-  lines.push(content.markdown)
+  // Clean MDX → Markdown so agents asking for text/markdown get real Markdown,
+  // not JSX component tags mixed into the prose.
+  lines.push(mdxToMarkdown(content.markdown))
 
   return new Response(lines.join('\n'), {
     headers: {

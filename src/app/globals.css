@@ -44,9 +44,9 @@
   --dox-foreground: var(--brand-light-foreground, 222 45% 10%);
   --dox-muted: var(--brand-light-muted, 220 14% 96%);
   --dox-border: var(--brand-light-border, 214 32% 91%);
-  --dox-accent: var(--brand-light-accent, 222 89% 58%);
+  --dox-accent: var(--brand-light-accent, 347 77% 50%);
   --dox-accent-foreground: var(--brand-light-accent-foreground, 0 0% 100%);
-  --dox-ring: var(--brand-light-ring, 250 90% 66%);
+  --dox-ring: var(--brand-light-ring, 347 77% 50%);
   /* Custom font CSS variables — overridden at runtime when fonts.body/heading is set in docs.json */
   --font-heading: var(--font-sans);
   --container-lg: 33rem;
@@ -59,8 +59,8 @@
   --shiki-token-function: #c4b5fd;
   --shiki-token-string-expression: #86efac;
   --shiki-token-punctuation: #e4e4e7;
-  --sidebar-active-bg: var(--brand-sidebar-active-bg-light, 152 55% 90% / 0.6);
-  --sidebar-active-text: var(--brand-sidebar-active-text-light, 152 65% 22%);
+  --sidebar-active-bg: var(--brand-sidebar-active-bg-light, 347 77% 92% / 0.6);
+  --sidebar-active-text: var(--brand-sidebar-active-text-light, 343 79% 35%);
   /* Ensure prose variables track the active foreground */
   --tw-prose-headings: hsl(var(--dox-foreground));
 }
@@ -70,11 +70,11 @@
   --dox-foreground: var(--brand-dark-foreground, 0 0% 98%);
   --dox-muted: var(--brand-dark-muted, 222 35% 12%);
   --dox-border: var(--brand-dark-border, 222 32% 18%);
-  --dox-accent: var(--brand-dark-accent, 266 85% 65%);
-  --dox-accent-foreground: var(--brand-dark-accent-foreground, 240 9% 12%);
-  --dox-ring: var(--brand-dark-ring, 266 85% 65%);
-  --sidebar-active-bg: var(--brand-sidebar-active-bg-dark, 152 38% 34% / 0.32);
-  --sidebar-active-text: var(--brand-sidebar-active-text-dark, 152 60% 78%);
+  --dox-accent: var(--brand-dark-accent, 350 89% 60%);
+  --dox-accent-foreground: var(--brand-dark-accent-foreground, 0 0% 100%);
+  --dox-ring: var(--brand-dark-ring, 350 89% 60%);
+  --sidebar-active-bg: var(--brand-sidebar-active-bg-dark, 347 77% 50% / 0.22);
+  --sidebar-active-text: var(--brand-sidebar-active-text-dark, 351 95% 82%);
   --tw-prose-headings: hsl(var(--dox-foreground));
 }
 
