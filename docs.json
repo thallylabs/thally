@@ -162,6 +162,7 @@
             "guides/mcp-server",
             "guides/remote-mcp",
             "guides/docs-agent",
+            "guides/dox-track",
             "guides/agent-manifests",
             "guides/migrating",
             "guides/ai-features",

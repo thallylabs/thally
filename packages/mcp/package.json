@@ -1,6 +1,6 @@
 {
   "name": "@doxlabs/mcp",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "MCP server for scaffolding and managing Dox documentation projects",
   "type": "module",
   "engines": {
@@ -15,7 +15,11 @@
       "types": "./dist/tools.d.ts",
       "import": "./dist/tools.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./track": {
+      "types": "./dist/track.d.ts",
+      "import": "./dist/track.js"
+    }
   },
   "files": [
     "dist",
@@ -24,7 +28,8 @@
   ],
   "scripts": {
     "build": "tsup",
-    "dev": "tsup --watch"
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.0",

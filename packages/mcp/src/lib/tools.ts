@@ -12,6 +12,7 @@ import { readPageSchema, handleReadPage } from '../tools/read-page.js'
 import { getContextSchema, handleGetContext } from '../tools/get-context.js'
 import { lintProjectSchema, handleLintProject } from '../tools/lint-project.js'
 import { translateDocsSchema, handleTranslateDocs } from '../tools/translate-docs.js'
+import { syncFromRepoSchema, handleSyncFromRepo } from '../tools/sync-from-repo.js'
 
 /**
  * Where a tool operates:
@@ -137,6 +138,14 @@ export const tools: Array<ToolDefinition> = [
     scope: 'project',
     schema: translateDocsSchema,
     handler: handleTranslateDocs,
+  }),
+  defineTool({
+    name: 'sync_from_repo',
+    description:
+      'Dox Track: analyze a tracked product-repo commit and preview the docs task it would produce (dryRun), or dispatch it to the docs repo so the docs agent drafts a documentation PR',
+    scope: 'project',
+    schema: syncFromRepoSchema,
+    handler: handleSyncFromRepo,
   }),
 ]
 

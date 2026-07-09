@@ -106,7 +106,9 @@ export async function runAgent(client: AnthropicLike, task: DocsTask, options: A
 
     if (mode === 'pr') {
       const title = `docs: ${task.instruction.slice(0, 60)}`
-      const body = `${summary}\n\n---\n${task.requester ? `Requested by ${task.requester}. ` : ''}Drafted by the Dox docs agent — please review.`
+      // The `(origin: …)` marker is parsed by the admin task queue (src/lib/tasks.ts
+      // parseOrigin) — keep it, and keep "Dox docs agent" (the queue's filter).
+      const body = `${summary}\n\n---\n${task.requester ? `Requested by ${task.requester}. ` : ''}Drafted by the Dox docs agent (origin: ${task.source}) — please review.`
       commitAll(projectDir, title)
       push(projectDir, branch)
       let prUrl: string

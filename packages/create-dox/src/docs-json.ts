@@ -21,6 +21,17 @@ export interface DocsJsonConfig {
     members?: Array<{ email: string; role: 'owner' | 'editor' | 'viewer' }>
     domains?: Array<{ domain: string; role: 'owner' | 'editor' | 'viewer' }>
   }
+  /** Dox Track — product repos whose commits trigger docs-agent PRs (typed for `dox track add`). */
+  tracking?: {
+    repos?: Array<{
+      owner: string
+      repo: string
+      branch?: string
+      paths?: Array<string>
+      outputTab?: string
+      outputGroup?: string
+    }>
+  }
 }
 
 export function readDocsJson(projectDir: string): DocsJsonConfig {

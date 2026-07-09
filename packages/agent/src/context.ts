@@ -1,4 +1,11 @@
 import { execFileSync } from 'node:child_process'
+import {
+  parseOwnerRepo,
+  fetchCommit,
+  fetchDefaultBranch,
+  buildTrackContext,
+  type GithubFetchOptions,
+} from '@doxlabs/mcp/track'
 
 /** Resolve a git ref (e.g. `HEAD~1`, a SHA, `main`) into a unified diff. */
 export function resolveDiff(projectDir: string, ref: string): string {
@@ -37,4 +44,24 @@ export function resolvePrContext(prUrl: string): string {
     pr.body?.trim() || '(no description)',
     diff ? `\n## Diff\n\`\`\`diff\n${diff}\n\`\`\`` : '',
   ].join('\n')
+}
+
+/**
+ * Resolve a tracked-repo commit spec (`owner/repo@sha`, or `owner/repo` for the
+ * latest commit on main) into task context via the GitHub API. Used by Dox
+ * Track (`dox agent --from-commit`, the docs-repo Action's `from_commit` path).
+ */
+export async function resolveCommitContext(spec: string, options?: GithubFetchOptions): Promise<string> {
+  const ref = parseOwnerRepo(spec)
+  if (!ref) {
+    throw new Error(`Invalid commit spec "${spec}" — expected owner/repo or owner/repo@sha`)
+  }
+  // Resolve the commit in a SINGLE fetch: /commits/{ref} accepts a branch name
+  // and returns the head commit (sha + files), so no separate sha lookup. A
+  // sha-less spec resolves against the repo's ACTUAL default branch (not a
+  // hardcoded "main"), so master-/develop-default repos work.
+  const commitRef = ref.sha ?? (await fetchDefaultBranch(ref.owner, ref.repo, options))
+  const commit = await fetchCommit(ref.owner, ref.repo, commitRef, options)
+  // Reuse the single distiller so the preview and the agent see identical context.
+  return buildTrackContext(ref, commit)
 }

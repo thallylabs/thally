@@ -159,6 +159,8 @@ cp .env.example .env.local
 | `ANTHROPIC_API_KEY` | Owner key for AI chat — lifts trial limits entirely |
 | `DOX_TRIAL_ANTHROPIC_KEY` | Optional shared key powering the out-of-the-box trial chat (strict per-IP limits + a global daily cap) |
 | `DOX_TRIAL_RATE_PER_MIN` / `DOX_TRIAL_RATE_PER_DAY` / `DOX_TRIAL_DAILY_LIMIT` / `DOX_CHAT_RATE_PER_MIN` | Optional chat rate-limit overrides |
+| `DOX_TRACK_WEBHOOK_SECRET` | Optional — enables the Dox Track webhook (`/api/track/webhook`); commits in tracked repos become docs-agent PRs |
+| `DOX_GITHUB_TOKEN` | Optional — reads tracked product-repo commits, relays Track dispatches, and authenticates the admin Docs-tasks queue |
 
 ## Production
 

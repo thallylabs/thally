@@ -220,11 +220,35 @@ interface DocsJsonConfig {
     members?: Array<{ email: string; role: 'owner' | 'editor' | 'viewer' }>
     domains?: Array<{ domain: string; role: 'owner' | 'editor' | 'viewer' }>
   }
+  /**
+   * Dox Track — product repos whose commits should trigger docs-agent PRs.
+   * Git-committed like the team roster: adding a repo is a reviewed change.
+   */
+  tracking?: {
+    repos?: Array<TrackingRepoConfig>
+  }
 }
 
 export interface TeamConfig {
   members: Array<{ email: string; role: 'owner' | 'editor' | 'viewer' }>
   domains: Array<{ domain: string; role: 'owner' | 'editor' | 'viewer' }>
+}
+
+export interface TrackingRepoConfig {
+  owner: string
+  repo: string
+  /** Branch to watch. Defaults to "main". */
+  branch?: string
+  /** Path globs — only commits touching these trigger docs tasks. Absent = all. */
+  paths?: Array<string>
+  /** Sidebar tab generated pages should land in. */
+  outputTab?: string
+  /** Group heading within that tab. */
+  outputGroup?: string
+}
+
+export interface TrackingConfig {
+  repos: Array<TrackingRepoConfig>
 }
 
 // ---------------------------------------------------------------------------
@@ -698,6 +722,11 @@ export function getTeamConfig(): TeamConfig {
     members: docsConfig.team?.members ?? [],
     domains: docsConfig.team?.domains ?? [],
   }
+}
+
+/** The git-committed Dox Track roster. Always returns an array. */
+export function getTrackingConfig(): TrackingConfig {
+  return { repos: docsConfig.tracking?.repos ?? [] }
 }
 
 export function getBannerConfig(): DocsJsonBanner | null {

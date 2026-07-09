@@ -1,5 +1,5 @@
 /** Where a docs task came from. */
-export type TaskSource = 'cli' | 'mention' | 'merge' | 'drift'
+export type TaskSource = 'cli' | 'mention' | 'merge' | 'drift' | 'track'
 
 /**
  * The unit of work for the agent. Every trigger surface (the CLI, a `@dox`

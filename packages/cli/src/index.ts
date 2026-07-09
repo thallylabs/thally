@@ -4,6 +4,7 @@ import { runNewPage } from './commands/new-page.js'
 import { runCheck } from './commands/check.js'
 import { runDeploy } from './commands/deploy.js'
 import { runAgentCommand } from './commands/agent.js'
+import { runTrackCommand } from './commands/track.js'
 
 const [major] = process.versions.node.split('.').map(Number)
 if (major < 18) {
@@ -69,6 +70,10 @@ async function main(): Promise<number> {
     case 'agent':
       requireProject()
       return runAgentCommand(args)
+
+    case 'track':
+      requireProject()
+      return runTrackCommand(args)
 
     default:
       process.stderr.write(`\n  Unknown command: ${args.command}\n`)

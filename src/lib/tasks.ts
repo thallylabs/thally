@@ -12,15 +12,32 @@ export interface DocsTask {
   state: 'open' | 'merged' | 'closed'
   author: string
   updatedAt: string
-  origin: 'mention' | 'merge' | 'drift' | 'manual'
+  origin: 'mention' | 'merge' | 'drift' | 'track' | 'manual'
 }
 
-function parseRepo(repoUrl: string): { owner: string; repo: string } | null {
+export function parseRepo(repoUrl: string): { owner: string; repo: string } | null {
   const m = repoUrl.match(/github\.com[/:]([^/]+)\/([^/]+?)(?:\.git|\/|$)/i)
   return m ? { owner: m[1], repo: m[2] } : null
 }
 
-function parseOrigin(body: string): DocsTask['origin'] {
+// Map TaskSource (agent) → the queue's origin. 'cli' has no dedicated chip.
+const SOURCE_TO_ORIGIN: Record<string, DocsTask['origin']> = {
+  track: 'track',
+  drift: 'drift',
+  merge: 'merge',
+  mention: 'mention',
+  cli: 'manual',
+}
+
+export function parseOrigin(body: string): DocsTask['origin'] {
+  // The authoritative marker is the LAST occurrence of the exact trailer the
+  // agent stamps (run.ts): "Drafted by the Dox docs agent (origin: <source>)".
+  // Anchoring to that phrase (and taking the last match) prevents a summary that
+  // merely quotes "origin: merge" from hijacking the classification.
+  const stamps = [...body.matchAll(/Drafted by the Dox docs agent \(origin:\s*(\w+)\)/gi)]
+  const marker = stamps.at(-1)?.[1]?.toLowerCase()
+  if (marker && marker in SOURCE_TO_ORIGIN) return SOURCE_TO_ORIGIN[marker]
+  // Pre-marker / hand-authored PRs: fall back to the fuzzy heuristics.
   if (/drift|stale/i.test(body)) return 'drift'
   if (/merged in|merge to main|@[\w-]+@[0-9a-f]{7,}/i.test(body)) return 'merge'
   if (/requested by/i.test(body)) return 'mention'

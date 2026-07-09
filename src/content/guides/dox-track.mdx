@@ -1,0 +1,104 @@
+---
+title: Dox Track
+description: Watch your product repos — commits there become reviewed documentation PRs, drafted by the docs agent.
+keywords:
+  - dox track
+  - code-triggered docs
+  - docs automation
+  - sync from repo
+  - keep docs in sync with code
+  - agent-native
+---
+
+**Dox Track closes the oldest gap in documentation: the feature shipped, and nobody updated the docs.** You register your product's source repositories, and when commits land there, Dox distills the diff into a task and has the [docs agent](/guides/docs-agent) draft a documentation pull request — reviewed by you, never merged on its own.
+
+```
+product repo push ──▶ trigger (webhook or Action) ──▶ repository_dispatch
+                                                            │
+        your review ◀── documentation PR ◀── docs agent ◀───┘
+```
+
+Everything runs on your infrastructure with your keys. Nothing is hosted by Dox.
+
+## Register a repo
+
+```bash
+dox track add acme/api-server --paths "src/**,openapi.yaml" --tab "API Reference"
+```
+
+This writes a `tracking` block into `docs.json` — version-controlled, so tracking a new repo is a reviewed change, just like the team roster:
+
+```json
+"tracking": {
+  "repos": [
+    {
+      "owner": "acme",
+      "repo": "api-server",
+      "branch": "main",
+      "paths": ["src/**", "openapi.yaml"],
+      "outputTab": "API Reference"
+    }
+  ]
+}
+```
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `owner` / `repo` | — | The GitHub repository to watch |
+| `branch` | `main` | Branch whose pushes trigger docs tasks |
+| `paths` | all files | Glob filters — only commits touching these fire (`**` crosses directories, `*` stays within one) |
+| `outputTab` / `outputGroup` | — | Where generated pages land in your navigation |
+
+## Try it before wiring anything
+
+`dox track test` fetches the latest commit on the tracked branch, applies your path filters, and shows the docs task it would produce:
+
+```bash
+dox track test acme/api-server
+```
+
+Without an `ANTHROPIC_API_KEY` it prints the distilled instruction and diff context. With one, it runs the docs agent in **dry-run** — you see the exact documentation edits it would draft, and nothing is written.
+
+## Wire the trigger
+
+Run `dox track setup` for tailored instructions. There are two interchangeable triggers — both end in a `repository_dispatch` to your docs repo, whose agent workflow (from [`dox agent init`](/guides/docs-agent)) drafts the PR:
+
+### Option A — webhook (nothing added to the product repo)
+
+Point a GitHub webhook at your deployed docs site. The site verifies the signature, checks the push against your tracking config, and relays the dispatch. The heavy lifting happens in GitHub Actions — the site itself only relays, so it works on serverless hosts.
+
+1. Generate a secret: `openssl rand -hex 32`
+2. On the deployed site, set `DOX_TRACK_WEBHOOK_SECRET=<secret>` and `DOX_GITHUB_TOKEN` (reads tracked commits, dispatches to the docs repo)
+3. In the tracked repo → **Settings → Webhooks → Add webhook**: payload URL `https://<your-docs-site>/api/track/webhook`, content type `application/json`, the same secret, **push** events only
+
+Deliveries are deduplicated (a redelivered push is a no-op), and pushes touching none of your `paths` are ignored.
+
+### Option B — sender workflow (no server in the loop)
+
+`dox track setup` prints a ready `.github/workflows/dox-track.yml` for each tracked repo (generated with your branch and path filters baked in). Commit it to the product repo and add a `DOX_DISPATCH_TOKEN` secret there with dispatch access to the docs repo.
+
+## What the agent produces
+
+The agent makes a **judgment call**: it reads the commit diff, decides what user-facing behavior changed (API surface, config, CLI flags, defaults), then finds the documentation pages that describe that behavior and updates them in place — adding new pages only where genuinely warranted. If the change has no user-facing impact, it does nothing. It is not maintaining a source-file-to-page map; it's keeping the docs true to the product.
+
+Track-originated PRs are labeled with `origin: track` and appear in the admin **Docs tasks** queue alongside a **Tracked repos** panel showing each repo, its filters, and the last synced commit.
+
+## From AI tools (MCP)
+
+The `sync_from_repo` tool exposes the same pipeline to Claude, Cursor, or any MCP client:
+
+- `dryRun: true` (default) — preview the docs task for a tracked repo's latest (or a specific) commit
+- `dryRun: false` + `docsRepo` — dispatch the task so the docs-agent workflow drafts the PR
+
+## Environment variables
+
+| Variable | Where | Purpose |
+| --- | --- | --- |
+| `DOX_TRACK_WEBHOOK_SECRET` | deployed docs site | Enables `/api/track/webhook`; shared with the GitHub webhook (feature is off without it) |
+| `DOX_GITHUB_TOKEN` | deployed docs site | Reads tracked commits + relays the dispatch (also used by the Docs tasks queue) |
+| `DOX_DISPATCH_TOKEN` | each tracked repo (Option B) | Dispatch access to the docs repo |
+| `ANTHROPIC_API_KEY` | docs repo secrets | Runs the agent inside the docs-repo workflow |
+
+<Note type="info" title="Upgrading an existing docs repo">
+The `from_commit` dispatch input was added to the agent workflow — re-run <code>dox agent init</code> in your docs repo to refresh <code>.github/workflows/dox-agent.yml</code> before using Track.
+</Note>

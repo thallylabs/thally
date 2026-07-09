@@ -103,7 +103,9 @@ Declare your product repos in `docs.json` so the setup is self-documenting:
 ```
 
 <Note>
-Every trigger — a `@dox` comment, a merge, the drift sweep, or the CLI — produces the same task and lands as a **reviewed pull request**. The agent never merges; a human always does.
+Every trigger — a `@dox` comment, a merge, a tracked-repo commit, the drift sweep, or the CLI — produces the same task and lands as a **reviewed pull request**. The agent never merges; a human always does.
 </Note>
+
+**Want commits in your product repos to trigger docs PRs automatically?** That's [Dox Track](/guides/dox-track) — register repos in `docs.json`, wire a webhook or sender workflow, and the agent documents what shipped.
 
 **Monorepo?** You need none of the sender plumbing — the workflow sees PRs and diffs natively. Run `dox agent init` and point it at the same repo.

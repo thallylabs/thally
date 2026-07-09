@@ -22,4 +22,13 @@ export default defineConfig([
     external: ['playwright', 'playwright-core'],
     dts: true,
   },
+  // Track distiller — shared by the agent, the CLI, and the Next.js webhook
+  // receiver (`@doxlabs/mcp/track`). Dependency-free, typed.
+  {
+    entry: { track: 'src/lib/track.ts' },
+    format: ['esm'],
+    platform: 'node',
+    target: 'node18',
+    dts: true,
+  },
 ])

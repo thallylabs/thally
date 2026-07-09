@@ -22,6 +22,9 @@ on:
       from_pr:
         description: Product PR URL (optional context)
         required: false
+      from_commit:
+        description: Tracked commit spec, owner/repo@sha (optional context)
+        required: false
   # Weekly provenance drift sweep — flags pages whose sources changed.
   schedule:
     - cron: '0 6 * * 1'
@@ -52,10 +55,18 @@ jobs:
           # A fine-grained PAT / App token with write on this docs repo (and read
           # on your product repos). Falls back to the built-in token.
           GH_TOKEN: \${{ secrets.DOX_AGENT_TOKEN || secrets.GITHUB_TOKEN }}
+          # Lets the agent read tracked product-repo commits (Dox Track).
+          DOX_GITHUB_TOKEN: \${{ secrets.DOX_AGENT_TOKEN || secrets.GITHUB_TOKEN }}
+          # Dispatch/input values are passed as ENV, never expanded inline into the
+          # run script — untrusted commit content in the instruction can't inject
+          # shell commands (GitHub Actions script-injection hardening).
+          INSTRUCTION: \${{ github.event.client_payload.instruction || inputs.instruction }}
+          FROM_PR: \${{ github.event.client_payload.from_pr || inputs.from_pr }}
+          FROM_COMMIT: \${{ github.event.client_payload.from_commit || inputs.from_commit }}
         run: |
-          INSTRUCTION="\${{ github.event.client_payload.instruction || inputs.instruction }}"
-          FROM_PR="\${{ github.event.client_payload.from_pr || inputs.from_pr }}"
-          if [ -n "$FROM_PR" ]; then
+          if [ -n "$FROM_COMMIT" ]; then
+            npx dox agent "$INSTRUCTION" --from-commit "$FROM_COMMIT" --pr
+          elif [ -n "$FROM_PR" ]; then
             npx dox agent "$INSTRUCTION" --from-pr "$FROM_PR" --pr
           else
             npx dox agent "$INSTRUCTION" --pr
@@ -132,6 +143,59 @@ jobs:
           gh api repos/${docsRepo}/dispatches -f event_type=dox-document \\
             -F "client_payload[instruction]=Document the changes merged in \${{ github.repository }}@\${{ github.sha }}" \\
             -F "client_payload[from_pr]=\${{ github.event.head_commit.url }}"
+`
+}
+
+export interface TrackSenderRepo {
+  owner: string
+  repo: string
+  branch?: string
+  paths?: Array<string>
+  outputTab?: string
+  outputGroup?: string
+}
+
+/**
+ * Product-repo sender for Dox Track: on push to the tracked branch (optionally
+ * filtered by paths), dispatch a `from_commit` docs task to the docs repo. The
+ * pure-GitHub-Actions alternative to the webhook relay — no server in the loop.
+ * The placement + provenance directives are baked in from the tracking config,
+ * mirroring what the webhook relay's distiller produces.
+ */
+export function trackSenderWorkflow(docsRepo: string, repo: TrackSenderRepo): string {
+  const branch = repo.branch ?? 'main'
+  const pathsBlock = repo.paths?.length
+    ? `\n    paths:\n${repo.paths.map((p) => `      - '${p}'`).join('\n')}`
+    : ''
+  // Baked from trusted docs.json config (no shell metacharacters). The commit
+  // message is NOT embedded (it's untrusted and the docs-repo Action rebuilds
+  // full context from --from-commit anyway). github.sha / pusher.name flow
+  // through ENV so bash never re-parses them.
+  const placement = repo.outputTab
+    ? ` If new pages are warranted, add them under the ${repo.outputTab} tab${repo.outputGroup ? ` (${repo.outputGroup} group)` : ''}.`
+    : ''
+  const spec = `${repo.owner}/${repo.repo}`
+  return `name: Dox track dispatch
+
+on:
+  push:
+    branches: [${branch}]${pathsBlock}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch docs task
+        env:
+          GH_TOKEN: \${{ secrets.DOX_DISPATCH_TOKEN }}
+          DOX_SHA: \${{ github.sha }}
+          DOX_REQUESTER: \${{ github.event.pusher.name }}
+        run: |
+          INSTRUCTION="A change landed in ${spec}@\${DOX_SHA:0:7}. Review the diff and decide what user-facing behavior it changes, then find and update the documentation pages that describe it so the docs match.${placement} Make no change if the diff has no user-facing impact."
+          gh api repos/${docsRepo}/dispatches -f event_type=dox-document \\
+            -F "client_payload[instruction]=\${INSTRUCTION}" \\
+            -F "client_payload[from_commit]=${spec}@\${DOX_SHA}" \\
+            -F "client_payload[requester]=\${DOX_REQUESTER}"
 `
 }
 

@@ -144,6 +144,9 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     !pathname.startsWith('/api/admin') &&
     !pathname.startsWith('/api/analytics') &&
     !pathname.startsWith('/api/access') &&
+    // The Dox Track webhook is called by GitHub, which can't hold a docs-access
+    // cookie — it authenticates itself via HMAC signature instead.
+    !pathname.startsWith('/api/track') &&
     pathname !== '/access' &&
     !pathname.startsWith('/_next') &&
     // Public agent-discovery + crawler-control docs (robots.txt, sitemap,

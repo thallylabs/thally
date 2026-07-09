@@ -19,7 +19,8 @@
   ],
   "scripts": {
     "build": "tsup",
-    "dev": "tsup --watch"
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "create-dox": "*",
@@ -30,7 +31,8 @@
     "@types/node": "^22.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0",
-    "vitest": "^4.0.15"
+    "vitest": "^4.0.15",
+    "@doxlabs/agent": "*"
   },
   "license": "MIT",
   "keywords": [

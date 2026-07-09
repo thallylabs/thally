@@ -8,17 +8,19 @@
   ],
   "scripts": {
     "dev": "next dev -p 3040",
-    "prebuild": "npm run embeddings:build",
+    "prebuild": "npm run packages:build && npm run embeddings:build",
     "build": "next build",
     "embeddings:build": "tsx scripts/build-embeddings.ts",
     "start": "next start -p 3040",
     "lint": "eslint",
+    "pretest": "npm run packages:build",
     "test": "vitest run",
     "check:agents": "tsx scripts/agent-readiness.ts",
-    "packages:build": "npm run build -w packages/create-dox && npm run build -w packages/mcp && npm run build -w packages/cli"
+    "packages:build": "npm run build -w packages/create-dox && npm run build -w packages/mcp && npm run build -w packages/agent && npm run build -w packages/cli"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "@doxlabs/mcp": "*",
     "@headlessui/react": "^2.2.9",
     "@libsql/client": "^0.14.0",
     "@mdx-js/loader": "^3.1.0",
@@ -33,6 +35,7 @@
     "cmdk": "^1.0.0",
     "framer-motion": "^12.23.11",
     "gray-matter": "^4.0.3",
+    "jose": "^6.1.3",
     "lucide-react": "^0.473.0",
     "mdast-util-to-string": "^4.0.0",
     "mermaid": "^11.12.3",
@@ -51,8 +54,7 @@
     "unified": "^11.0.5",
     "unist-util-visit": "^5.0.0",
     "yaml": "^2.6.0",
-    "zustand": "^5.0.9",
-    "jose": "^6.1.3"
+    "zustand": "^5.0.9"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.16",
