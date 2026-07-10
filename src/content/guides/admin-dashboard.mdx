@@ -10,7 +10,7 @@ Dox ships with a built-in **admin dashboard** at `/admin`. It lets you control y
 | Section | What it controls |
 | --- | --- |
 | **Home** | At-a-glance overview of the site's status. |
-| **Analytics** | First-party traffic, top pages, search terms, and content gaps. |
+| **Analytics** | First-party traffic, top pages, search terms, and content gaps. On serverless hosts this needs a remote database — see [Analytics storage](#analytics-storage). |
 | **Agent Readiness** | Score for how well your docs serve AI agents. |
 | **Docs tasks** | Documentation edits drafted by the docs agent as pull requests — the [Dox Track](/guides/dox-track) queue. |
 | **MCP server** | Enable or disable the public `/api/mcp` endpoint. |
@@ -120,6 +120,14 @@ Anything you set in the dashboard is a runtime override that layers over the com
 | Docs-access password | Open (no password) |
 
 Leave a setting untouched in the dashboard and the file default applies. This lets you keep a sensible, source-controlled baseline for fresh deploys while making day-to-day changes without shipping code.
+
+## Analytics storage
+
+Locally, analytics and admin state write to on-disk SQLite files under `.data/` — zero config. On **serverless** hosts (for example Vercel), that filesystem does not persist, so Home metrics stay empty and Analytics may show an error until you point Dox at a remote libSQL database (Turso).
+
+Set `DOX_ANALYTICS_DB_URL` / `DOX_ANALYTICS_DB_TOKEN` for traffic data, and `DOX_DATABASE_URL` / `DOX_DATABASE_TOKEN` for durable admin settings and related state. Full setup steps are in [Deploying → Analytics & durable storage](/guides/deploying#analytics--durable-storage).
+
+Agent Readiness does not use this database — it scores your docs content directly.
 
 ## AI chat key
 
