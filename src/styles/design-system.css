@@ -1345,7 +1345,6 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  justify-content: space-between;
   gap: var(--ds-space-16);
   margin-bottom: var(--ds-space-28);
   padding-bottom: var(--ds-space-24);
@@ -1378,30 +1377,6 @@
 .dox-dashboard .ds-readiness-pages {
   font-size: var(--ds-text-sm);
   color: var(--ds-text-muted);
-}
-.dox-dashboard .ds-readiness-fixes-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 2rem;
-  padding: 0 12px;
-  border-radius: var(--ds-radius-full);
-  background: var(--ds-accent-tint);
-  color: var(--ds-accent-mid);
-  font-size: var(--ds-text-sm);
-  font-weight: var(--ds-fw-semibold);
-  border: none;
-  cursor: pointer;
-  transition: background var(--ds-dur-fast) var(--ds-ease-standard);
-}
-.dox-dashboard .ds-readiness-fixes-pill:hover {
-  background: var(--ds-accent-tint-hover);
-}
-.dox-dashboard .ds-readiness-fixes-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--ds-accent);
 }
 .dox-dashboard .ds-readiness-table-wrap {
   width: 100%;
@@ -1473,6 +1448,30 @@
 .dox-dashboard .ds-readiness-fix-badge:hover,
 .dox-dashboard .ds-readiness-fix-badge[aria-expanded='true'] {
   background: var(--ds-accent-tint-hover);
+}
+.dox-dashboard .ds-readiness-send-pr {
+  gap: 6px;
+  height: 1.375rem;
+  padding: 0 10px;
+  font-size: var(--ds-text-caption);
+}
+.dox-dashboard .ds-readiness-dispatch {
+  margin: 8px 0 0;
+  max-width: 48ch;
+  font-size: var(--ds-text-caption);
+  line-height: 1.45;
+}
+.dox-dashboard .ds-readiness-dispatch--ok {
+  color: var(--ds-success, #15803d);
+}
+.dox-dashboard .ds-readiness-dispatch--err {
+  color: var(--ds-danger);
+}
+.dox-dashboard .ds-readiness-dispatch-link {
+  color: inherit;
+  font-weight: var(--ds-fw-semibold);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .dox-dashboard .ds-readiness-bar {
   height: 4px;

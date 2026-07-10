@@ -1,6 +1,6 @@
 {
   "name": "@doxlabs/agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The Dox docs agent — turns a task (a PR, a diff, or an instruction) into a reviewed documentation pull request.",
   "type": "module",
   "engines": {
