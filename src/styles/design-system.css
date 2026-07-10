@@ -1316,6 +1316,231 @@
 }
 
 /* ============================================================================
+   AGENT READINESS — report hero + check table
+   ============================================================================ */
+.dox-dashboard .ds-readiness-eyebrow {
+  color: var(--ds-accent);
+  margin-bottom: var(--ds-space-8);
+}
+.dox-dashboard .ds-readiness-title {
+  margin: 0;
+  font-family: var(--ds-font-heading);
+  font-size: var(--ds-text-h2);
+  font-weight: var(--ds-fw-bold);
+  letter-spacing: var(--ds-tracking-tight);
+  line-height: 1.1;
+  color: var(--ds-text-primary);
+}
+.dox-dashboard .ds-readiness-desc {
+  margin: var(--ds-space-8) 0 0;
+  max-width: 56ch;
+  font-size: var(--ds-text-sm);
+  line-height: 1.5;
+  color: var(--ds-text-muted);
+}
+.dox-dashboard .ds-readiness-header {
+  margin-bottom: var(--ds-space-32);
+}
+.dox-dashboard .ds-readiness-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--ds-space-16);
+  margin-bottom: var(--ds-space-28);
+  padding-bottom: var(--ds-space-24);
+  border-bottom: 1px solid var(--ds-border);
+}
+.dox-dashboard .ds-readiness-summary-left {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-16);
+  min-width: 0;
+}
+.dox-dashboard .ds-readiness-hero-score {
+  font-family: var(--ds-font-heading);
+  font-size: 4rem;
+  font-weight: var(--ds-fw-extrabold);
+  letter-spacing: var(--ds-tracking-tighter);
+  line-height: 0.9;
+  color: var(--ds-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.dox-dashboard .ds-readiness-summary-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-8);
+}
+.dox-dashboard .ds-readiness-grade {
+  align-self: flex-start;
+  gap: 6px;
+}
+.dox-dashboard .ds-readiness-pages {
+  font-size: var(--ds-text-sm);
+  color: var(--ds-text-muted);
+}
+.dox-dashboard .ds-readiness-fixes-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 2rem;
+  padding: 0 12px;
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-accent-tint);
+  color: var(--ds-accent-mid);
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-fw-semibold);
+  border: none;
+  cursor: pointer;
+  transition: background var(--ds-dur-fast) var(--ds-ease-standard);
+}
+.dox-dashboard .ds-readiness-fixes-pill:hover {
+  background: var(--ds-accent-tint-hover);
+}
+.dox-dashboard .ds-readiness-fixes-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ds-accent);
+}
+.dox-dashboard .ds-readiness-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+.dox-dashboard .ds-readiness-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.dox-dashboard .ds-readiness-table th {
+  padding: 0 0 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: var(--ds-fw-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ds-text-faint);
+  border-bottom: 1px solid var(--ds-border);
+}
+.dox-dashboard .ds-readiness-table th.ds-num,
+.dox-dashboard .ds-readiness-weight,
+.dox-dashboard .ds-readiness-score {
+  text-align: right;
+}
+.dox-dashboard .ds-readiness-coverage-head {
+  text-align: left;
+  width: 28%;
+  min-width: 140px;
+}
+.dox-dashboard .ds-readiness-row td {
+  padding: 18px 0;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--ds-border-subtle);
+}
+.dox-dashboard .ds-readiness-row:last-child td {
+  border-bottom: none;
+}
+.dox-dashboard .ds-readiness-check-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.dox-dashboard .ds-readiness-check-label {
+  font-size: var(--ds-text-body);
+  font-weight: var(--ds-fw-semibold);
+  color: var(--ds-text-primary);
+}
+.dox-dashboard .ds-readiness-check-detail {
+  margin: 4px 0 0;
+  font-size: var(--ds-text-sm);
+  color: var(--ds-text-muted);
+  max-width: 42ch;
+}
+.dox-dashboard .ds-readiness-fix-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 1.375rem;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-accent-tint);
+  color: var(--ds-accent-mid);
+  font-size: var(--ds-text-caption);
+  font-weight: var(--ds-fw-semibold);
+  cursor: pointer;
+}
+.dox-dashboard .ds-readiness-fix-badge:hover,
+.dox-dashboard .ds-readiness-fix-badge[aria-expanded='true'] {
+  background: var(--ds-accent-tint-hover);
+}
+.dox-dashboard .ds-readiness-bar {
+  height: 4px;
+  width: 100%;
+  max-width: 220px;
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-surface-sunk);
+  overflow: hidden;
+}
+.dox-dashboard .ds-readiness-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ds-text-primary);
+  transition: width var(--ds-dur-slow) var(--ds-ease-out);
+}
+.dox-dashboard .ds-readiness-weight {
+  font-size: var(--ds-text-sm);
+  color: var(--ds-text-muted);
+  white-space: nowrap;
+  padding-left: 16px !important;
+}
+.dox-dashboard .ds-readiness-score {
+  font-size: var(--ds-text-body);
+  font-weight: var(--ds-fw-bold);
+  color: var(--ds-text-primary);
+  white-space: nowrap;
+  padding-left: 16px !important;
+  min-width: 3rem;
+}
+.dox-dashboard .ds-readiness-offenders-row td {
+  padding: 0 0 18px;
+  border-bottom: 1px solid var(--ds-border-subtle);
+}
+.dox-dashboard .ds-readiness-offenders {
+  list-style: none;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-surface-tint);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dox-dashboard .ds-readiness-offenders li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.dox-dashboard .ds-readiness-offenders a {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-caption);
+  color: var(--ds-text-secondary);
+  text-decoration: none;
+}
+.dox-dashboard .ds-readiness-offenders a:hover { text-decoration: underline; }
+.dox-dashboard .ds-readiness-offenders span {
+  font-size: var(--ds-text-caption);
+  color: var(--ds-text-muted);
+}
+@media (max-width: 700px) {
+  .dox-dashboard .ds-readiness-hero-score { font-size: 3rem; }
+  .dox-dashboard .ds-readiness-coverage-head,
+  .dox-dashboard .ds-readiness-coverage { display: none; }
+}
+
+/* ============================================================================
    MOTION — one orchestrated page-load reveal (staggered via animation-delay).
    Calm and short; respects reduced-motion.
    ============================================================================ */

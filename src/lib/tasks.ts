@@ -5,6 +5,8 @@
  * private repo without a token).
  */
 
+import { resolveGithubToken } from '@doxlabs/mcp/track'
+
 export interface DocsTask {
   number: number
   title: string
@@ -61,7 +63,9 @@ export async function getDocsTasks(repoUrl: string | undefined, limit = 25): Pro
   if (!parsed) return []
 
   const headers: Record<string, string> = { Accept: 'application/vnd.github+json' }
-  const token = process.env.DOX_GITHUB_TOKEN?.trim() || process.env.DOX_TASKS_TOKEN?.trim()
+  // Unified token resolver: explicit → GitHub App creds (env) → PAT chain. Reading
+  // the queue is best-effort, so any failure just falls back to unauthenticated.
+  const token = await resolveGithubToken().catch(() => undefined)
   if (token) headers.Authorization = `Bearer ${token}`
 
   let res: Response

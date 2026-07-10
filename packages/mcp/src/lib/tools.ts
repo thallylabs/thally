@@ -142,7 +142,7 @@ export const tools: Array<ToolDefinition> = [
   defineTool({
     name: 'sync_from_repo',
     description:
-      'Dox Track: analyze a tracked product-repo commit and preview the docs task it would produce (dryRun), or dispatch it to the docs repo so the docs agent drafts a documentation PR',
+      'Dox Track: analyze a merged pull request in a tracked product repo and preview the docs task it would produce (dryRun), or dispatch it to the docs repo so the docs agent drafts a documentation PR',
     scope: 'project',
     schema: syncFromRepoSchema,
     handler: handleSyncFromRepo,

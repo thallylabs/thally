@@ -121,6 +121,7 @@ async function runScaffoldCommand(): Promise<void> {
     repoUrl: answers.repoUrl,
     doInstall: answers.doInstall,
     i18nLocales: answers.i18nLocales,
+    trackRepos: answers.trackRepos,
   })
 
   success(result.projectDir, answers.projectName)

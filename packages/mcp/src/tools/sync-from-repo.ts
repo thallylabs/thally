@@ -2,9 +2,12 @@ import { z } from 'zod'
 import { readDocsJson } from '../lib/docs-json.js'
 import {
   parseOwnerRepo,
-  fetchCommit,
+  fetchPullRequest,
+  fetchPullRequestFiles,
+  fetchLatestMergedPr,
   filterFilesByGlobs,
   buildTrackTask,
+  resolveGithubToken,
   type TrackedRepoLike,
 } from '../lib/track.js'
 
@@ -14,7 +17,10 @@ export const syncFromRepoSchema = z.object({
     .string()
     .optional()
     .describe('Tracked repo to sync as owner/repo (defaults to the single tracked repo when only one is configured)'),
-  commit: z.string().optional().describe('Commit SHA to analyze (defaults to the latest commit on the tracked branch)'),
+  pr: z
+    .number()
+    .optional()
+    .describe('Pull request number to analyze (defaults to the latest PR merged into the tracked base branch)'),
   dryRun: z
     .boolean()
     .optional()
@@ -29,10 +35,10 @@ export const syncFromRepoSchema = z.object({
 export type SyncFromRepoInput = z.infer<typeof syncFromRepoSchema>
 
 /**
- * Analyze a tracked product-repo commit and either preview the docs task it
- * would produce (dryRun) or dispatch it to the docs repo's agent workflow via
- * `repository_dispatch`. The dispatch payload stays tiny — the docs-repo
- * Action rebuilds the full diff context from `from_commit`.
+ * Analyze a MERGED pull request in a tracked product repo and either preview the
+ * docs task it would produce (dryRun) or dispatch it to the docs repo's agent
+ * workflow via `repository_dispatch`. The dispatch payload stays tiny — the
+ * docs-repo Action rebuilds the full context from `from_pr`.
  */
 export async function handleSyncFromRepo(input: SyncFromRepoInput): Promise<string> {
   const config = readDocsJson(input.projectDir)
@@ -57,24 +63,28 @@ export async function handleSyncFromRepo(input: SyncFromRepoInput): Promise<stri
     )
   }
 
-  // One fetch resolves the SHA + files: /commits/{ref} accepts a branch name.
   const branch = target.branch ?? 'main'
-  const commit = await fetchCommit(target.owner, target.repo, input.commit ?? branch)
-  const sha = commit.sha
-  const matched = filterFilesByGlobs(commit.files, target.paths)
-  if (matched.length === 0) {
-    return `Commit ${target.owner}/${target.repo}@${sha.slice(0, 7)} touches no tracked paths (${target.paths?.join(', ') ?? 'all'}) — nothing to document.`
+  const pr = input.pr
+    ? await fetchPullRequest(target.owner, target.repo, input.pr)
+    : await fetchLatestMergedPr(target.owner, target.repo, branch)
+  if (!pr) {
+    return `No merged pull requests found on ${target.owner}/${target.repo}@${branch}.`
   }
 
-  const task = buildTrackTask(target, { ...commit, files: matched })
-  const spec = `${target.owner}/${target.repo}@${commit.sha}`
+  const files = await fetchPullRequestFiles(target.owner, target.repo, pr.number)
+  const matched = filterFilesByGlobs(files, target.paths)
+  if (matched.length === 0) {
+    return `PR ${target.owner}/${target.repo}#${pr.number} touches no tracked paths (${target.paths?.join(', ') ?? 'all'}) — nothing to document.`
+  }
+
+  const task = buildTrackTask(target, pr, matched)
 
   if (input.dryRun) {
     return [
-      `🔍 Dry run — docs task for ${spec}`,
+      `🔍 Dry run — docs task for ${target.owner}/${target.repo}#${pr.number}`,
       '',
-      `Commit: ${commit.message.split('\n')[0]}`,
-      `Files matched: ${matched.length} of ${commit.files.length} (${matched.map((f) => f.filename).slice(0, 10).join(', ')}${matched.length > 10 ? ', …' : ''})`,
+      `PR: ${pr.title}`,
+      `Files matched: ${matched.length} of ${files.length} (${matched.map((f) => f.filename).slice(0, 10).join(', ')}${matched.length > 10 ? ', …' : ''})`,
       '',
       `Instruction: ${task.instruction}`,
       '',
@@ -89,10 +99,9 @@ export async function handleSyncFromRepo(input: SyncFromRepoInput): Promise<stri
   const docsRef = parseOwnerRepo(input.docsRepo)
   if (!docsRef) throw new Error(`Invalid docsRepo "${input.docsRepo}" — expected owner/repo`)
 
-  const token =
-    process.env.DOX_GITHUB_TOKEN ?? process.env.DOX_TASKS_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN
+  const token = await resolveGithubToken()
   if (!token) {
-    throw new Error('Set DOX_GITHUB_TOKEN (with dispatch access to the docs repo) to dispatch a docs task.')
+    throw new Error('Set DOX_GITHUB_TOKEN (or connect a GitHub App) with dispatch access to the docs repo to dispatch a docs task.')
   }
 
   const response = await fetch(`https://api.github.com/repos/${docsRef.owner}/${docsRef.repo}/dispatches`, {
@@ -104,12 +113,12 @@ export async function handleSyncFromRepo(input: SyncFromRepoInput): Promise<stri
     },
     body: JSON.stringify({
       event_type: 'dox-document',
-      client_payload: { instruction: task.instruction, from_commit: spec },
+      client_payload: { instruction: task.instruction, from_pr: pr.htmlUrl },
     }),
   })
   if (!response.ok) {
     throw new Error(`repository_dispatch failed (${response.status}) — check the token's access to ${input.docsRepo}.`)
   }
 
-  return `✅ Dispatched docs task for ${spec} to ${input.docsRepo}. The "Dox docs agent" workflow there will draft the PR — watch its Actions tab.`
+  return `✅ Dispatched docs task for ${target.owner}/${target.repo}#${pr.number} to ${input.docsRepo}. The "Dox docs agent" workflow there will draft the PR — watch its Actions tab.`
 }

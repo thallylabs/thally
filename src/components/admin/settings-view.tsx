@@ -6,6 +6,7 @@ import { isAdminEnabled, isDocsAccessEnabled } from '@/lib/admin/auth'
 import { getAiConfig, getI18nConfig, isAnalyticsEnabled } from '@/data/docs'
 import { AdminSettingsControls } from '@/components/admin/admin-settings-controls'
 import { SiteIdentityEditor } from '@/components/admin/site-identity-editor'
+import { GithubConnectPanel } from '@/components/admin/github-connect-panel'
 import type { Role } from '@/lib/auth/types'
 
 type Tone = 'success' | 'warn' | 'neutral'
@@ -137,6 +138,21 @@ export function SettingsView({ role = 'viewer' }: { role?: Role }) {
         <Row label="Agent endpoints" value="Live" tone="success" hint="llms.txt, ai.txt, docs-index, agent-readiness" />
         <Row label="Structured data" value="JSON-LD" tone="success" />
       </Group>
+
+      <section className="ds-setting-group">
+        <div className="ds-setting-group-head">
+          <h2 className="ds-setting-group-title">Integrations</h2>
+          <p className="ds-setting-group-desc">
+            Connect GitHub so <Link href="/guides/dox-track" style={{ color: 'var(--ds-accent-mid)', fontWeight: 'var(--ds-fw-semibold)' }}>Dox Track</Link>{' '}
+            can watch your product repos and draft docs PRs.
+          </p>
+        </div>
+        <div className="ds-settings-panel">
+          <div className="ds-settings-section">
+            <GithubConnectPanel canEdit={role === 'owner'} />
+          </div>
+        </div>
+      </section>
     </div>
   )
 }

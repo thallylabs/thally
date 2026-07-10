@@ -221,7 +221,7 @@ interface DocsJsonConfig {
     domains?: Array<{ domain: string; role: 'owner' | 'editor' | 'viewer' }>
   }
   /**
-   * Dox Track — product repos whose commits should trigger docs-agent PRs.
+   * Dox Track — product repos whose MERGED PRs should trigger docs-agent PRs.
    * Git-committed like the team roster: adding a repo is a reviewed change.
    */
   tracking?: {
@@ -237,9 +237,9 @@ export interface TeamConfig {
 export interface TrackingRepoConfig {
   owner: string
   repo: string
-  /** Branch to watch. Defaults to "main". */
+  /** Base branch PRs must merge into to trigger. Defaults to "main". */
   branch?: string
-  /** Path globs — only commits touching these trigger docs tasks. Absent = all. */
+  /** Path globs — only PRs touching these trigger docs tasks. Absent = all. */
   paths?: Array<string>
   /** Sidebar tab generated pages should land in. */
   outputTab?: string

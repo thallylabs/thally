@@ -6,8 +6,8 @@ export interface TrackedRepoStatus {
   branch: string
   paths: Array<string>
   outputTab?: string
-  /** Last commit relayed by the Track webhook, or null before the first push. */
-  lastSyncedSha: string | null
+  /** Last PR relayed by the Track webhook (e.g. "#42"), or null before the first merge. */
+  lastSyncedPr: string | null
 }
 
 const STATE_TONE: Record<DocsTask['state'], string> = {
@@ -51,7 +51,7 @@ export function TasksView({
         {trackedRepos.length === 0 ? (
           <p style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-text-muted)' }}>
             No product repos tracked yet. Run <code className="font-mono">dox track add &lt;owner/repo&gt;</code> to have
-            commits there become docs PRs automatically.
+            merged PRs there become docs PRs automatically.
           </p>
         ) : (
           <table className="ds-table">
@@ -93,9 +93,9 @@ export function TasksView({
                     )}
                   </td>
                   <td className="ds-num">
-                    {r.lastSyncedSha ? (
+                    {r.lastSyncedPr ? (
                       <code className="font-mono" style={{ fontSize: 'var(--ds-text-caption)' }}>
-                        {r.lastSyncedSha.slice(0, 7)}
+                        {r.lastSyncedPr}
                       </code>
                     ) : (
                       <span style={{ fontSize: 'var(--ds-text-caption)', color: 'var(--ds-text-muted)' }}>never</span>

@@ -62,6 +62,16 @@ function sanitize(s: AdminSettings) {
     allowedDomains: s.allowedDomains,
     hasDocsPassword: Boolean(s.docsPasswordHash),
     hasChatKey: Boolean(s.chatKeyEnc),
+    // GitHub App (Connect-GitHub flow): expose only the non-secret slug/id, never
+    // the encrypted key or webhook secret.
+    githubApp: s.githubApp
+      ? {
+          slug: s.githubApp.slug,
+          htmlUrl: s.githubApp.htmlUrl,
+          installationId: s.githubApp.installationId,
+          installed: Boolean(s.githubApp.installationId),
+        }
+      : null,
   }
 }
 

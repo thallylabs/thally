@@ -4,7 +4,9 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { ParsedArgs } from '../router.js'
 import {
   parseOwnerRepo,
-  fetchCommit,
+  fetchPullRequest,
+  fetchPullRequestFiles,
+  fetchLatestMergedPr,
   filterFilesByGlobs,
   buildTrackTask,
   type TrackedRepoLike,
@@ -105,28 +107,34 @@ function resolveTarget(args: ParsedArgs): TrackedRepo | null {
 async function runTrackTest(args: ParsedArgs): Promise<number> {
   const target = resolveTarget(args)
   if (!target) {
-    process.stderr.write('\n  ❌ Usage: dox track test <owner/repo> [--commit <sha>]\n     (the repo argument is optional when exactly one repo is tracked)\n\n')
+    process.stderr.write('\n  ❌ Usage: dox track test <owner/repo> [--pr <number>]\n     (the repo argument is optional when exactly one repo is tracked)\n\n')
     return 1
   }
 
   process.stdout.write(`\n  🧪 Dox Track — dry run for ${target.owner}/${target.repo}\n\n`)
 
   const branch = target.branch ?? 'main'
-  // One fetch resolves both the SHA and the files: /commits/{ref} accepts a
-  // branch name (no separate latest-sha lookup).
-  const commitRef = args.getFlag('--commit') ?? branch
   try {
-    const commit = await fetchCommit(target.owner, target.repo, commitRef)
-    const sha = commit.sha
-    const matched = filterFilesByGlobs(commit.files, target.paths)
-    if (matched.length === 0) {
-      process.stdout.write(`\n  Commit ${sha.slice(0, 7)} touches no tracked paths (${target.paths?.join(', ') ?? 'all'}) — nothing to document.\n\n`)
+    // A specific PR (--pr), else the latest PR merged into the tracked base branch.
+    const prArg = args.getFlag('--pr')
+    const pr = prArg
+      ? await fetchPullRequest(target.owner, target.repo, Number(prArg))
+      : await fetchLatestMergedPr(target.owner, target.repo, branch)
+    if (!pr) {
+      process.stdout.write(`\n  No merged pull requests found on ${target.owner}/${target.repo}@${branch}.\n\n`)
       return 0
     }
 
-    const task = buildTrackTask(target, { ...commit, files: matched })
-    process.stdout.write(`\n  Commit:  ${sha.slice(0, 7)} — ${commit.message.split('\n')[0]}\n`)
-    process.stdout.write(`  Files:   ${matched.length} matched (of ${commit.files.length})\n`)
+    const files = await fetchPullRequestFiles(target.owner, target.repo, pr.number)
+    const matched = filterFilesByGlobs(files, target.paths)
+    if (matched.length === 0) {
+      process.stdout.write(`\n  PR #${pr.number} touches no tracked paths (${target.paths?.join(', ') ?? 'all'}) — nothing to document.\n\n`)
+      return 0
+    }
+
+    const task = buildTrackTask(target, pr, matched)
+    process.stdout.write(`\n  PR:      #${pr.number} — ${pr.title}\n`)
+    process.stdout.write(`  Files:   ${matched.length} matched (of ${files.length})\n`)
     process.stdout.write(`\n  Task instruction:\n    ${task.instruction}\n`)
 
     const apiKey = process.env.ANTHROPIC_API_KEY?.trim()
@@ -168,42 +176,57 @@ function runTrackSetup(args: ParsedArgs): number {
   const docsRepo = args.getFlag('--repo') ?? '<owner>/<docs-repo>'
 
   process.stdout.write('\n  🔗 Dox Track — trigger setup\n')
-  process.stdout.write('\n  Pick ONE trigger per tracked repo. Both end in the same place: a dispatch to\n')
-  process.stdout.write('  your docs repo, whose "Dox docs agent" workflow drafts the docs PR\n')
+  process.stdout.write('\n  Pick ONE access mode. All three end in the same place: a dispatch to your\n')
+  process.stdout.write('  docs repo, whose "Dox docs agent" workflow drafts the docs PR\n')
   process.stdout.write('  (run "dox agent init" there first if you haven\'t).\n')
 
-  process.stdout.write('\n  ── Option A: GitHub webhook → your deployed Dox site (no files in the product repo)\n\n')
+  process.stdout.write('\n  ── Mode A: Connect GitHub app  (recommended for orgs / many private repos)\n\n')
+  process.stdout.write('    The Netlify/Vercel-style path — no token to paste, org-wide access to the\n')
+  process.stdout.write('    repos you pick.\n\n')
+  process.stdout.write(`    1. Open your admin dashboard → Settings → Integrations:  ${siteUrl}/admin/settings\n`)
+  process.stdout.write('    2. Click "Connect GitHub" (enter your org to install it org-wide), create the\n')
+  process.stdout.write('       app on GitHub, then choose which repos Dox Track may watch.\n')
+  process.stdout.write('    3. Set DOX_AUTH_SECRET on the deployed site first — it encrypts the app key.\n')
+  process.stdout.write('       The app carries its own webhook, so no DOX_TRACK_WEBHOOK_SECRET is needed.\n')
+
+  process.stdout.write('\n  ── Mode B: fine-grained PAT + webhook  (single repo, simplest to reason about)\n\n')
   process.stdout.write(`    1. Generate a secret:            openssl rand -hex 32\n`)
   process.stdout.write(`    2. Set it on the deployed site:  DOX_TRACK_WEBHOOK_SECRET=<secret>\n`)
-  process.stdout.write(`       …and set DOX_GITHUB_TOKEN (reads tracked commits + dispatches to the docs repo).\n`)
+  process.stdout.write(`       …and set DOX_GITHUB_TOKEN (a fine-grained PAT that reads tracked PRs +\n`)
+  process.stdout.write(`       dispatches to the docs repo).\n`)
   process.stdout.write(`    3. In each tracked repo → Settings → Webhooks → Add webhook:\n`)
   process.stdout.write(`         Payload URL:   ${siteUrl}/api/track/webhook\n`)
   process.stdout.write(`         Content type:  application/json\n`)
   process.stdout.write(`         Secret:        <the same secret>\n`)
-  process.stdout.write(`         Events:        Just the push event\n`)
+  process.stdout.write(`         Events:        Let me select — check "Pull requests"\n`)
 
-  process.stdout.write('\n  ── Option B: sender workflow in the tracked repo (no server in the loop)\n\n')
+  process.stdout.write('\n  ── Mode C: sender workflow in the tracked repo  (no server in the loop)\n\n')
   if (repos.length === 0) {
-    process.stdout.write('    (No tracked repos in docs.json yet — run "dox track add" first to generate\n     a paths-filtered workflow here.)\n\n')
-    return 0
-  }
-  for (const repo of repos) {
-    const yaml = trackSenderWorkflow(docsRepo, repo)
-    process.stdout.write(`    For ${repo.owner}/${repo.repo} — add .github/workflows/dox-track.yml:\n\n`)
-    process.stdout.write(yaml.split('\n').map((line) => `      ${line}`).join('\n'))
-    process.stdout.write('\n')
-    if (args.hasFlag('--write')) {
-      const out = `dox-track-sender-${repo.repo}.yml`
-      writeFileSync(join(process.cwd(), out), yaml)
-      process.stdout.write(`    ✓ Wrote ${out} (copy it into ${repo.owner}/${repo.repo})\n\n`)
+    process.stdout.write('    (No tracked repos in docs.json yet — run "dox track add" first to generate\n     a paths-filtered workflow here.)\n')
+  } else {
+    for (const repo of repos) {
+      const yaml = trackSenderWorkflow(docsRepo, repo)
+      process.stdout.write(`    For ${repo.owner}/${repo.repo} — add .github/workflows/dox-track.yml:\n\n`)
+      process.stdout.write(yaml.split('\n').map((line) => `      ${line}`).join('\n'))
+      process.stdout.write('\n')
+      if (args.hasFlag('--write')) {
+        const out = `dox-track-sender-${repo.repo}.yml`
+        writeFileSync(join(process.cwd(), out), yaml)
+        process.stdout.write(`    ✓ Wrote ${out} (copy it into ${repo.owner}/${repo.repo})\n\n`)
+      }
     }
+    process.stdout.write('    …and add a DOX_DISPATCH_TOKEN secret in each tracked repo (dispatch access to the docs repo).\n')
   }
-  process.stdout.write('    …and add a DOX_DISPATCH_TOKEN secret in each tracked repo (dispatch access to the docs repo).\n\n')
+
+  process.stdout.write('\n  ── Preview docs before merge\n\n')
+  process.stdout.write('    Add the "docs-preview" label to an OPEN PR (any mode above) to have the agent\n')
+  process.stdout.write('    draft its docs while it\'s still in review — so reviewers see the docs alongside\n')
+  process.stdout.write('    the code. The label re-drafts on each push; the docs land as a separate PR.\n\n')
   return 0
 }
 
 /**
- * `dox track <add|list|test|setup>` — register product repos whose commits
+ * `dox track <add|list|test|setup>` — register product repos whose merged PRs
  * should become documentation PRs (Dox Track).
  */
 export async function runTrackCommand(args: ParsedArgs): Promise<number> {
@@ -217,7 +240,7 @@ export async function runTrackCommand(args: ParsedArgs): Promise<number> {
   process.stdout.write('  Subcommands:\n')
   process.stdout.write('    add <owner/repo>     Track a repo (--branch, --paths csv, --tab, --group)\n')
   process.stdout.write('    list                 List tracked repos\n')
-  process.stdout.write('    test [owner/repo]    Dry run: distill the latest commit, preview doc changes\n')
-  process.stdout.write('    setup                Print webhook + sender-workflow trigger instructions\n\n')
+  process.stdout.write('    test [owner/repo]    Dry run: distill the latest merged PR, preview doc changes\n')
+  process.stdout.write('    setup                Print access setup (Connect-GitHub app / PAT / sender workflow)\n\n')
   return sub ? 1 : 0
 }

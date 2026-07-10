@@ -9,8 +9,12 @@
     "label": "DoxAI",
     "systemPrompt": "Prefer concise answers with links to relevant guide pages when available."
   },
-  "admin": { "enabled": true },
-  "analytics": { "enabled": true },
+  "admin": {
+    "enabled": true
+  },
+  "analytics": {
+    "enabled": true
+  },
   "apiPlayground": {
     "credentials": {
       "bearerAuth": "YOUR_API_KEY"
@@ -18,9 +22,16 @@
   },
   "navbar": {
     "links": [
-      { "label": "GitHub", "href": "https://github.com/kenny-io/Dox", "type": "github" }
+      {
+        "label": "GitHub",
+        "href": "https://github.com/kenny-io/Dox",
+        "type": "github"
+      }
     ],
-    "primary": { "label": "Get started", "href": "/quickstart" }
+    "primary": {
+      "label": "Get started",
+      "href": "/quickstart"
+    }
   },
   "footer": {
     "socials": {
@@ -32,47 +43,105 @@
       {
         "heading": "Documentation",
         "items": [
-          { "label": "Quick Start", "href": "/quickstart" },
-          { "label": "Guides", "href": "/guides/getting-started" },
-          { "label": "Components", "href": "/components/badge" },
-          { "label": "API Reference", "href": "/api" }
+          {
+            "label": "Quick Start",
+            "href": "/quickstart"
+          },
+          {
+            "label": "Guides",
+            "href": "/guides/getting-started"
+          },
+          {
+            "label": "Components",
+            "href": "/components/badge"
+          },
+          {
+            "label": "API Reference",
+            "href": "/api"
+          }
         ]
       },
       {
         "heading": "Customize",
         "items": [
-          { "label": "Branding & Theming", "href": "/guides/branding-and-theming" },
-          { "label": "Navbar & Footer", "href": "/guides/navbar-and-footer" },
-          { "label": "Navigation", "href": "/guides/configuring-navigation" }
+          {
+            "label": "Branding & Theming",
+            "href": "/guides/branding-and-theming"
+          },
+          {
+            "label": "Navbar & Footer",
+            "href": "/guides/navbar-and-footer"
+          },
+          {
+            "label": "Navigation",
+            "href": "/guides/configuring-navigation"
+          }
         ]
       },
       {
         "heading": "Tooling",
         "items": [
-          { "label": "CLI Reference", "href": "/guides/cli-reference" },
-          { "label": "MCP Server", "href": "/guides/mcp-server" },
-          { "label": "Migrate from Mintlify", "href": "/guides/migrating" }
+          {
+            "label": "CLI Reference",
+            "href": "/guides/cli-reference"
+          },
+          {
+            "label": "MCP Server",
+            "href": "/guides/mcp-server"
+          },
+          {
+            "label": "Migrate from Mintlify",
+            "href": "/guides/migrating"
+          }
         ]
       }
     ]
   },
   "fonts": {
-    "body": { "family": "Plus Jakarta Sans", "weight": ["400", "500", "600", "700"] },
-    "heading": { "family": "Outfit", "weight": ["600", "700"] }
+    "body": {
+      "family": "Plus Jakarta Sans",
+      "weight": [
+        "400",
+        "500",
+        "600",
+        "700"
+      ]
+    },
+    "heading": {
+      "family": "Outfit",
+      "weight": [
+        "600",
+        "700"
+      ]
+    }
   },
   "feedback": {
     "thumbsRating": true,
     "endpoint": "/api/feedback"
   },
   "redirects": [
-    { "source": "/docs", "destination": "/", "permanent": false },
-    { "source": "/getting-started", "destination": "/quickstart", "permanent": true }
+    {
+      "source": "/docs",
+      "destination": "/",
+      "permanent": false
+    },
+    {
+      "source": "/getting-started",
+      "destination": "/quickstart",
+      "permanent": true
+    }
   ],
   "i18n": {
     "defaultLocale": "en",
     "locales": [
-      { "code": "en", "label": "English" },
-      { "code": "es", "label": "Español" }
+      {
+        "code": "en",
+        "label": "English"
+      },
+      {
+        "code": "es",
+        "label": "Español"
+      }
     ]
   },
   "tabs": [
@@ -176,7 +245,9 @@
       "groups": [
         {
           "group": "Overview",
-          "pages": ["api/overview"]
+          "pages": [
+            "api/overview"
+          ]
         }
       ],
       "api": {
@@ -264,5 +335,22 @@
       "tab": "Changelog",
       "href": "/changelog"
     }
-  ]
+  ],
+  "tracking": {
+    "repos": [
+      {
+        "owner": "kenny-io",
+        "repo": "Dox",
+        "branch": "main",
+        "paths": [
+          "packages/**",
+          "src/app/**",
+          "src/lib/**",
+          "src/components/**",
+          "src/data/**",
+          "src/mdx/**"
+        ]
+      }
+    ]
+  }
 }

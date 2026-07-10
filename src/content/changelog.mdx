@@ -3,10 +3,42 @@ title: Changelog
 description: Track notable improvements to the Dox template.
 ---
 
-## v0.1.0
+<Update label="Dox Track: org access & preview" date="2026-07-10">
+
+**Track before merge, and across a whole org.**
+
+- **Connect GitHub** — create and install your own GitHub App from the admin dashboard (Settings → Integrations) in a couple of clicks. Grants org-wide access to the private repos you select, with no token to paste; credentials are stored encrypted.
+- **`docs-preview` label** — add it to an open PR to have the docs agent draft the documentation *before* the feature merges, so reviewers see the docs alongside the code. Re-drafts on each push.
+- **Self-tracking loop guard** — a repo can safely track itself; the agent's own `dox/agent-*` PRs never re-trigger Track.
+- Unified GitHub token resolution across the webhook, MCP tool, and tasks queue: explicit token → GitHub App → PAT chain.
+
+See [Dox Track](/guides/dox-track).
+
+</Update>
+
+<Update label="Live branding & assistant" date="2026-06-20">
+
+- **Brand accent color picker** — recolor the live site with a color wheel, presets, or hex/RGB entry, per light and dark mode, with no redeploy.
+- **Per-mode logos & favicons** — upload separate light and dark assets; dark falls back to light.
+- **Configurable AI assistant** — rename the chat assistant (`aiLabel`) and set its disclaimer (`aiDisclaimer`) from the dashboard.
+
+See [Branding and theming](/guides/branding-and-theming) and [Admin dashboard](/guides/admin-dashboard).
+
+</Update>
+
+<Update label="Docs agent & admin dashboard" date="2026-05-15">
+
+- The **docs agent** drafts documentation edits as reviewed pull requests from a `@dox` comment, a merge, the drift sweep, or the CLI — it never merges.
+- A built-in **admin dashboard** at `/admin` controls branding, feature toggles, analytics, team roles, and docs-access, layered on top of the git-committed defaults.
+
+</Update>
+
+<Update label="v0.1.0" date="2025-01-01">
 
 Initial release of the clean-room Dox template.
 
 - Next.js App Router foundation with MDX-powered docs
 - Responsive shell with Radix-driven navigation and search
 - Shadcn-inspired primitives for buttons, badges, and command palette
+
+</Update>

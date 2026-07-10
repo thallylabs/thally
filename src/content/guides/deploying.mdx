@@ -27,9 +27,11 @@ Depending on which features you use, you may also want to set:
 | `ANTHROPIC_API_KEY` | The in-docs AI assistant ([AI features](/guides/ai-features)) |
 | `DOX_ADMIN_PASSWORD` | Break-glass Owner access to the `/admin` dashboard |
 | `DOX_OIDC_ISSUER` / `DOX_OIDC_CLIENT_ID` / `DOX_OIDC_CLIENT_SECRET` | Team sign-in to the dashboard via your IdP |
-| `DOX_AUTH_SECRET` | Signs admin sessions and encrypts stored secrets (required with OIDC) |
+| `DOX_AUTH_SECRET` | Signs admin sessions and encrypts stored secrets (required with OIDC, and for the Connect-GitHub app key) |
+| `DOX_TRACK_WEBHOOK_SECRET` / `DOX_GITHUB_TOKEN` | [Dox Track](/guides/dox-track) — the manual-webhook path (not needed if you Connect a GitHub App) |
+| `DOX_GITHUB_APP_ID` / `DOX_GITHUB_APP_INSTALLATION_ID` / `DOX_GITHUB_APP_PRIVATE_KEY` | Optional — wire the Track GitHub App by hand instead of the admin "Connect GitHub" button |
 
-Only `DOX_SITE_URL` is needed for a basic docs site. See [Admin dashboard & team access](/guides/admin-dashboard) for the auth variables in context.
+Only `DOX_SITE_URL` is needed for a basic docs site. See [Admin dashboard & team access](/guides/admin-dashboard) for the auth variables in context, and [Dox Track](/guides/dox-track) for the code-triggered-docs variables.
 
 ## Vercel
 

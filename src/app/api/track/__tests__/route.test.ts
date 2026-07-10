@@ -54,22 +54,20 @@ describe('POST /api/track/webhook', () => {
     expect(await res.json()).toEqual({ ok: true, pong: true })
   })
 
-  it('noops signed non-push events', async () => {
-    const body = '{"action":"opened"}'
-    const res = await POST(makeRequest(body, { 'x-hub-signature-256': sign(body), 'x-github-event': 'issues' }))
+  it('noops signed non-pull_request events (e.g. push)', async () => {
+    const body = '{"ref":"refs/heads/main"}'
+    const res = await POST(makeRequest(body, { 'x-hub-signature-256': sign(body), 'x-github-event': 'push' }))
     expect(res.status).toBe(200)
     expect((await res.json()).reason).toBe('unhandled_event')
   })
 
-  it('noops a signed push for an untracked repo (this project tracks none)', async () => {
+  it('noops a signed merged PR for an untracked repo (this project tracks none)', async () => {
     const body = JSON.stringify({
-      ref: 'refs/heads/main',
-      before: 'a'.repeat(40),
-      after: 'b'.repeat(40),
+      action: 'closed',
+      pull_request: { number: 1, merged: true, html_url: 'u', base: { ref: 'main' } },
       repository: { full_name: 'acme/untracked' },
-      commits: [{ added: ['src/x.ts'], removed: [], modified: [] }],
     })
-    const res = await POST(makeRequest(body, { 'x-hub-signature-256': sign(body), 'x-github-event': 'push' }))
+    const res = await POST(makeRequest(body, { 'x-hub-signature-256': sign(body), 'x-github-event': 'pull_request' }))
     expect(res.status).toBe(200)
     expect((await res.json()).reason).toBe('not_tracked')
   })

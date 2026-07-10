@@ -1,0 +1,4 @@
+# Changes to the admin team roster (the "team" block) require approval from a
+# designated owner. REQUIRES branch protection on main (PRs + required review),
+# otherwise a direct push bypasses this.
+/docs.json   @kenny-io

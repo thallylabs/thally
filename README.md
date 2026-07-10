@@ -159,8 +159,10 @@ cp .env.example .env.local
 | `ANTHROPIC_API_KEY` | Owner key for AI chat — lifts trial limits entirely |
 | `DOX_TRIAL_ANTHROPIC_KEY` | Optional shared key powering the out-of-the-box trial chat (strict per-IP limits + a global daily cap) |
 | `DOX_TRIAL_RATE_PER_MIN` / `DOX_TRIAL_RATE_PER_DAY` / `DOX_TRIAL_DAILY_LIMIT` / `DOX_CHAT_RATE_PER_MIN` | Optional chat rate-limit overrides |
-| `DOX_TRACK_WEBHOOK_SECRET` | Optional — enables the Dox Track webhook (`/api/track/webhook`); commits in tracked repos become docs-agent PRs |
-| `DOX_GITHUB_TOKEN` | Optional — reads tracked product-repo commits, relays Track dispatches, and authenticates the admin Docs-tasks queue |
+| `DOX_REPO_URL` | Optional — the docs repo Dox Track dispatches to. Defaults to `siteConfig.repoUrl`; set it when `site.ts` keeps the template default (`repoUrl: ''`) but Track should still target your repo |
+| `DOX_TRACK_WEBHOOK_SECRET` | Optional — enables the manual Dox Track webhook (`/api/track/webhook`); merged/preview PRs in tracked repos become docs-agent PRs. Not needed when you Connect a GitHub App |
+| `DOX_GITHUB_TOKEN` | Optional — fine-grained PAT that reads tracked product-repo PRs, relays Track dispatches, and authenticates the admin Docs-tasks queue |
+| `DOX_GITHUB_APP_ID` / `DOX_GITHUB_APP_INSTALLATION_ID` / `DOX_GITHUB_APP_PRIVATE_KEY` | Optional — wire a GitHub App by hand instead of the admin "Connect GitHub" button (which stores these encrypted). Grants org-wide access to selected repos |
 
 ## Production
 

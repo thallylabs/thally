@@ -1,15 +1,39 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { fetchCommit, fetchCompare, filterFilesByGlobs, buildTrackTask } from '@doxlabs/mcp/track'
+import {
+  fetchPullRequestFiles,
+  filterFilesByGlobs,
+  buildTrackInstruction,
+  resolveGithubToken,
+  AGENT_BRANCH_PREFIX,
+  DOCS_PREVIEW_LABEL,
+  type GithubAppCreds,
+} from '@doxlabs/mcp/track'
 import type { TrackingConfig, TrackingRepoConfig } from '@/data/docs'
 import type { StorageAdapter } from '@/lib/storage/types'
+
+// AGENT_BRANCH_PREFIX (loop guard) and DOCS_PREVIEW_LABEL are the single source
+// of truth in @doxlabs/mcp/track — shared with the scaffolded sender workflow
+// and the agent's branch producer so the two Track ingress paths can't drift.
+/** Re-exported for back-compat with existing importers. */
+export const PREVIEW_LABEL = DOCS_PREVIEW_LABEL
+/** Non-merge actions that can (re)trigger a preview when the label is present. */
+const PREVIEW_ACTIONS = new Set(['labeled', 'synchronize', 'opened', 'reopened'])
 
 // ---------------------------------------------------------------------------
 // Dox Track webhook logic — kept free of next/server so it unit-tests cleanly.
 // The route (src/app/api/track/webhook/route.ts) is a thin shell around this.
+//
+// Track acts on MERGED pull requests, not raw commits: a merged PR is completed,
+// reviewed work, whereas a commit can be undone by the next one.
 // ---------------------------------------------------------------------------
 
-const ZERO_SHA = '0'.repeat(40)
+// Display keys (`owner/repo@branch` → last merged PR) — bounded, one per repo,
+// listed by the admin Tasks page.
 const STATE_NS = 'track_state'
+// Per-PR / per-preview-sha dedupe keys — these grow with PR history, so they live
+// in a SEPARATE namespace that is only ever point-read by exact key, never
+// kvList'd into memory (the Tasks page must not scan them on every render).
+const DEDUPE_NS = 'track_dedupe'
 
 /**
  * Verify GitHub's `x-hub-signature-256` header against the RAW request body.
@@ -26,118 +50,133 @@ export function verifyGithubSignature(rawBody: string, signatureHeader: string |
   return timingSafeEqual(a, b)
 }
 
-interface PushPayload {
-  ref?: string
-  before?: string
-  after?: string
-  deleted?: boolean
+interface PullRequestPayload {
+  action?: string
+  pull_request?: {
+    number?: number
+    title?: string
+    html_url?: string
+    merged?: boolean
+    base?: { ref?: string }
+    head?: { ref?: string; sha?: string }
+    user?: { login?: string }
+    labels?: Array<{ name?: string }>
+  }
   repository?: { full_name?: string }
-  pusher?: { name?: string }
-  head_commit?: { added?: Array<string>; removed?: Array<string>; modified?: Array<string> } | null
-  commits?: Array<{ added?: Array<string>; removed?: Array<string>; modified?: Array<string> }>
 }
 
-export interface PushMatch {
+export interface PrMatch {
   repo: TrackingRepoConfig
   branch: string
-  before: string
-  after: string
+  number: number
+  htmlUrl: string
   requester?: string
-  matchedFiles: Array<string>
+  /** 'merged' — the PR landed; 'preview' — an open, `docs-preview`-labelled PR. */
+  mode: 'merged' | 'preview'
+  /** Head commit SHA — used to dedupe preview re-runs (present in preview mode). */
+  headSha?: string
 }
 
 /**
- * Match a GitHub push payload against the tracking config. Returns null for
- * anything that shouldn't produce a docs task: tag pushes, branch deletions,
- * untracked repos/branches, or commits touching none of the tracked paths.
+ * Match a GitHub `pull_request` payload against the tracking config. Returns
+ * null unless the PR either MERGED into the tracked base branch, OR is an open
+ * PR labelled `docs-preview` on that base branch. Unmerged closes, wrong base,
+ * untracked repos, and the docs agent's own `dox/agent-*` branches are ignored.
+ * (Path filtering needs the PR's file list, which the payload omits — that
+ * happens in processPullRequest.)
  */
-export function matchPushEvent(payload: unknown, tracking: TrackingConfig): PushMatch | null {
-  const push = payload as PushPayload
-  const ref = push?.ref
-  if (typeof ref !== 'string' || !ref.startsWith('refs/heads/')) return null
-  if (push.deleted === true || !push.after || push.after === ZERO_SHA) return null
+export function matchPullRequestEvent(payload: unknown, tracking: TrackingConfig): PrMatch | null {
+  const event = payload as PullRequestPayload
+  const pr = event.pull_request
+  if (!pr || typeof pr.number !== 'number' || !pr.html_url) return null
 
-  const branch = ref.slice('refs/heads/'.length)
-  const fullName = push.repository?.full_name?.toLowerCase()
-  if (!fullName) return null
+  // Loop guard: never react to the docs agent's own PRs (a self-tracking repo
+  // would otherwise chase its own merged docs PRs forever).
+  if (pr.head?.ref?.startsWith(AGENT_BRANCH_PREFIX)) return null
+
+  const base = pr.base?.ref
+  const fullName = event.repository?.full_name?.toLowerCase()
+  if (!base || !fullName) return null
 
   const repo = tracking.repos.find(
-    (r) => `${r.owner}/${r.repo}`.toLowerCase() === fullName && (r.branch ?? 'main') === branch,
+    (r) => `${r.owner}/${r.repo}`.toLowerCase() === fullName && (r.branch ?? 'main') === base,
   )
   if (!repo) return null
 
-  // Path filter across ALL commits in the push (head_commit alone misses files
-  // from earlier commits); fall back to head_commit on force-push payloads.
-  const commits = push.commits?.length ? push.commits : push.head_commit ? [push.head_commit] : []
-  const touched = new Set<string>()
-  for (const commit of commits) {
-    for (const file of [...(commit.added ?? []), ...(commit.removed ?? []), ...(commit.modified ?? [])]) {
-      touched.add(file)
-    }
-  }
-  const matchedFiles = filterFilesByGlobs(
-    Array.from(touched).map((filename) => ({ filename })),
-    repo.paths,
-  ).map((f) => f.filename)
-  if (repo.paths?.length && matchedFiles.length === 0) return null
+  const merged = event.action === 'closed' && pr.merged === true
+  const isPreview =
+    !merged &&
+    pr.merged !== true &&
+    PREVIEW_ACTIONS.has(event.action ?? '') &&
+    (pr.labels ?? []).some((l) => l.name === DOCS_PREVIEW_LABEL)
+
+  if (!merged && !isPreview) return null
 
   return {
     repo,
-    branch,
-    before: push.before ?? ZERO_SHA,
-    after: push.after,
-    requester: push.pusher?.name,
-    matchedFiles,
+    branch: base,
+    number: pr.number,
+    htmlUrl: pr.html_url,
+    requester: pr.user?.login,
+    mode: merged ? 'merged' : 'preview',
+    headSha: isPreview ? pr.head?.sha : undefined,
   }
 }
 
-export interface ProcessPushDeps {
+export interface ProcessPrDeps {
   storage: Pick<StorageAdapter, 'kvGet' | 'kvSet'>
   /** The docs repo the dispatch goes to, as owner/repo — null disables the relay. */
   docsRepo: string | null
   token?: string
+  /** GitHub App creds (decrypted from admin settings) — preferred over env/PAT. */
+  appCreds?: GithubAppCreds
   fetchImpl?: typeof fetch
 }
 
-export interface ProcessPushResult {
+export interface ProcessPrResult {
   status: 'noop' | 'dispatched'
   reason?: string
 }
 
 /**
- * Turn a matched push into a `repository_dispatch` to the docs repo: dedupe by
- * last-seen SHA, distill the push range into an instruction, dispatch, then
- * record the SHA. Every failure short of a bug returns a noop with a reason —
+ * Turn a matched merged PR into a `repository_dispatch` to the docs repo:
+ * dedupe by PR number, apply the path filter (fetching the PR's files), build
+ * the instruction, and dispatch `from_pr` so the docs-repo Action drafts the
+ * documentation PR. Every failure short of a bug returns a noop with a reason —
  * the route never 5xxes at GitHub (flaky hooks get auto-disabled).
  */
-export async function processPush(match: PushMatch, deps: ProcessPushDeps): Promise<ProcessPushResult> {
-  const { repo, branch, before, after } = match
-  const stateKey = `${repo.owner}/${repo.repo}@${branch}`.toLowerCase()
+export async function processPullRequest(match: PrMatch, deps: ProcessPrDeps): Promise<ProcessPrResult> {
+  const { repo, branch, number, mode } = match
 
-  const lastSeen = await deps.storage.kvGet<string>(STATE_NS, stateKey)
-  if (lastSeen === after) return { status: 'noop', reason: 'already_synced' }
+  // Merged PRs dedupe once per PR (redelivery = no-op). Preview PRs dedupe per
+  // head sha so a fresh push re-drafts the preview docs, but the same push
+  // redelivered stays a no-op.
+  const dedupeKey =
+    mode === 'preview'
+      ? `${repo.owner}/${repo.repo}#${number}@${match.headSha ?? 'head'}`.toLowerCase()
+      : `${repo.owner}/${repo.repo}#${number}`.toLowerCase()
+
+  const seen = await deps.storage.kvGet<string>(DEDUPE_NS, dedupeKey)
+  if (seen) return { status: 'noop', reason: 'already_synced' }
 
   if (!deps.docsRepo) return { status: 'noop', reason: 'no_docs_repo_configured' }
-  const token = deps.token ?? process.env.DOX_GITHUB_TOKEN ?? process.env.DOX_TASKS_TOKEN
+  const token = await resolveGithubToken({ token: deps.token, appCreds: deps.appCreds, fetchImpl: deps.fetchImpl })
   if (!token) return { status: 'noop', reason: 'no_github_token' }
 
-  // Distill the whole push range when we have a real `before`; a single commit
-  // (or force-push) falls back to the head commit alone.
-  const fetchOptions = { token, fetchImpl: deps.fetchImpl }
-  let instruction: string
-  try {
-    const info =
-      before && before !== ZERO_SHA
-        ? await fetchCompare(repo.owner, repo.repo, before, after, fetchOptions)
-        : await fetchCommit(repo.owner, repo.repo, after, fetchOptions)
-    const matched = filterFilesByGlobs(info.files, repo.paths)
-    if (repo.paths?.length && matched.length === 0) return { status: 'noop', reason: 'no_tracked_paths_in_diff' }
-    instruction = buildTrackTask(repo, { ...info, files: matched, sha: after }).instruction
-  } catch {
-    // API hiccup — still dispatch; the docs-repo Action rebuilds context itself.
-    instruction = `Update the documentation for commit ${repo.owner}/${repo.repo}@${after.slice(0, 7)}.`
+  // Path filter (only when configured): the PR must touch a tracked path. If the
+  // file fetch hiccups, dispatch anyway — the docs-repo Action rebuilds context.
+  if (repo.paths?.length) {
+    try {
+      const files = await fetchPullRequestFiles(repo.owner, repo.repo, number, { token, fetchImpl: deps.fetchImpl })
+      if (filterFilesByGlobs(files, repo.paths).length === 0) {
+        return { status: 'noop', reason: 'no_tracked_paths_in_pr' }
+      }
+    } catch {
+      // fall through and dispatch — better a possibly-irrelevant task than a miss
+    }
   }
 
+  const instruction = buildTrackInstruction(repo, { number }, { preview: mode === 'preview' })
   const fetchImpl = deps.fetchImpl ?? fetch
   const response = await fetchImpl(`https://api.github.com/repos/${deps.docsRepo}/dispatches`, {
     method: 'POST',
@@ -150,19 +189,24 @@ export async function processPush(match: PushMatch, deps: ProcessPushDeps): Prom
       event_type: 'dox-document',
       client_payload: {
         instruction,
-        from_commit: `${repo.owner}/${repo.repo}@${after}`,
+        from_pr: match.htmlUrl,
+        preview: mode === 'preview',
         ...(match.requester ? { requester: match.requester } : {}),
       },
     }),
   })
   if (!response.ok) return { status: 'noop', reason: `dispatch_failed_${response.status}` }
 
-  // Record the SHA only AFTER a successful dispatch — a failed dispatch stays
-  // un-recorded so GitHub's redelivery retries it. This is at-most-once
-  // *dispatch* (dedupes GitHub redeliveries of the same push); it does not
-  // track whether the docs-repo Action then succeeded. If that Action fails,
-  // re-run it from the docs repo's Actions tab (workflow_dispatch) with the
-  // from_commit input — re-dispatching the same push here is a deliberate no-op.
-  await deps.storage.kvSet(STATE_NS, stateKey, after)
+  // Record only AFTER a successful dispatch (a failed dispatch stays un-recorded
+  // so GitHub redelivery retries it). At-most-once *dispatch* per key — dedupes
+  // GitHub redeliveries; it does not track whether the docs-repo Action then
+  // succeeded. Re-run that from the docs repo's Actions tab if it fails.
+  await deps.storage.kvSet(DEDUPE_NS, dedupeKey, match.htmlUrl)
+  // Display key for the admin panel: the last *merged* PR synced on this base
+  // branch. Previews are transient (they re-fire per push) — they must not
+  // overwrite the "last synced" status or an open PR would read as synced.
+  if (mode === 'merged') {
+    await deps.storage.kvSet(STATE_NS, `${repo.owner}/${repo.repo}@${branch}`.toLowerCase(), `#${number}`)
+  }
   return { status: 'dispatched' }
 }

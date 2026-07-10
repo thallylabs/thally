@@ -48,6 +48,12 @@ Switch between them by changing the `brandPreset` variable:
 const brandPreset: BrandPresetKey = 'primary'  // or 'secondary'
 ```
 
+## Brand accent (the color picker)
+
+The fastest way to recolor the site is the **dashboard**: under **Branding → Brand accent**, an Owner picks the accent with a color wheel, a set of presets, or by typing a hex/RGB value — for both light and dark mode. A live preview updates as you drag, and **Save** applies it to the running site with no rebuild. The accent drives links, active nav/sidebar states, buttons, and the focus ring; if you set only the light accent, Dox derives a sensible dark-mode shade automatically.
+
+This overrides just the accent (and its ring). The rest of the palette — backgrounds, borders, sidebar tokens — comes from the source-file presets below, so the dashboard is for quick recolors and the files are the versioned baseline.
+
 ## Custom colors
 
 To define your own palette, edit the `brandPresets` object in `site.ts`. Each preset has `light` and `dark` variants with these tokens:
@@ -70,9 +76,11 @@ Most colors are hex values (e.g. `#10B981`) which are auto-converted to HSL. The
 
 Dark mode is handled automatically by `next-themes`. Users toggle it with the theme switch in the top bar. Your brand palette defines both light and dark variants, so both themes stay on-brand.
 
-## Logo
+## Logo & favicon (light and dark)
 
 The quickest way to set a logo is the **dashboard**: upload a PNG, JPEG, or WebP (≤150KB) under **Branding → Logo & favicon** and it appears in the header and social cards immediately — no code change.
+
+You can upload **separate assets for light and dark mode** — both a logo and a favicon per mode. The site serves the variant that matches the viewer's theme; if you upload only the light-mode asset, dark mode falls back to it, so a single upload still works. This is how a wordmark that reads on a white header can be swapped for a light-on-dark version at night.
 
 Under the hood, the logo component at `src/components/layout/logo.tsx` probes `/api/brand/logo` and swaps in the uploaded logo when one exists. When there's no upload, it falls back to a built-in SVG mark plus your `siteConfig.name`:
 

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { downloadTemplate } from './download.js'
+import { resetTrackingConfig, writeTrackingConfig } from './docs-json.js'
 import { writeStarterContent, updateSiteConfig, updateEnvExample, patchApiReferenceGuard, patchTopBarNavigation, patchOpenApiFetch } from './customize.js'
 import { slugify, installDeps, initGit } from './utils.js'
 
@@ -13,6 +14,8 @@ export interface ScaffoldOptions {
   doInstall: boolean
   enableAiChat?: boolean
   i18nLocales?: Array<{ code: string; label: string }>
+  /** Repos to pre-register for Dox Track (opt-in). Empty/undefined = Track off. */
+  trackRepos?: Array<{ owner: string; repo: string }>
 }
 
 export interface ScaffoldResult {
@@ -29,6 +32,7 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
     doInstall,
     enableAiChat = true,
     i18nLocales,
+    trackRepos,
   } = options
 
   const targetDir = resolve(projectDir)
@@ -45,6 +49,18 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
 
   // 1. Download template (replaces git clone)
   await downloadTemplate(targetDir, projectName)
+
+  // 1a. Dox Track is opt-in — first drop the template's own tracking block so a
+  // new site never inherits kenny-io/Dox, THEN write the user's repos if they
+  // opted in during setup. (Order matters: reset, then apply their choice.)
+  resetTrackingConfig(targetDir)
+  if (trackRepos?.length) {
+    writeTrackingConfig(targetDir, trackRepos)
+    const list = trackRepos.map((r) => `${r.owner}/${r.repo}`).join(', ')
+    console.log(`  ✓ Dox Track enabled — watching ${list} (branch main, all files; refine in docs.json).`)
+    console.log('    To finish wiring it: `dox track setup` (pick a trigger) + `dox agent init`,')
+    console.log('    then add your ANTHROPIC_API_KEY. See /guides/dox-track.')
+  }
 
   // 2. Write starter content
   writeStarterContent(targetDir, projectName, slug, enableAiChat, repoUrl, i18nLocales)

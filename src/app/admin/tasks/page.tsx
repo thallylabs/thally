@@ -11,7 +11,7 @@ export default async function AdminTasksPage() {
   const { repoUrl } = await getEffectiveSiteConfig()
   const tasks = await getDocsTasks(repoUrl)
 
-  // Dox Track roster + last relayed commit per repo (written by the webhook).
+  // Dox Track roster + last relayed PR per repo (written by the webhook).
   // One kvList for the whole namespace, then synchronous lookups — not a
   // per-repo round-trip (which is N network calls on remote storage).
   const tracking = getTrackingConfig()
@@ -27,7 +27,7 @@ export default async function AdminTasksPage() {
       branch,
       paths: repo.paths ?? [],
       outputTab: repo.outputTab,
-      lastSyncedSha: stateByKey.get(`${repo.owner}/${repo.repo}@${branch}`.toLowerCase()) ?? null,
+      lastSyncedPr: stateByKey.get(`${repo.owner}/${repo.repo}@${branch}`.toLowerCase()) ?? null,
     }
   })
 

@@ -6,9 +6,32 @@ const pipelineAsync = promisify(pipeline)
 
 const TARBALL_URL = 'https://codeload.github.com/kenny-io/Dox/tar.gz/main'
 
-const EXCLUDE_PATHS = ['/cli/', '/packages/', '/node_modules/', '/.git/']
+// The Dox template repo is ALSO the live Dox project (its own deployment,
+// self-tracking config, and CI). These paths carry that project-specific wiring
+// and must NOT be copied into a user's scaffold, or every new site would inherit
+// Dox's own setup:
+//   - `/cli/`, `/packages/`  — the monorepo's tooling; scaffolds consume the
+//                              PUBLISHED @doxlabs/* packages instead of the source.
+//   - `/dox-agent.yml`       — the docs-agent runner. Track/the agent are OPT-IN;
+//     `/dox-track.yml`          a scaffolded site adds these via `dox agent init`
+//                              / `dox track setup`, so shipping them pre-baked
+//                              (with a weekly cron + kenny-io dispatch) is wrong.
+//   - `/CODEOWNERS`          — Dox's roster gate points at @kenny-io; inheriting
+//                              it would demand kenny-io review on a user's PRs.
+// (The `tracking` block in docs.json is stripped separately — see
+// resetTrackingConfig — because docs.json itself must be copied.)
+export const EXCLUDE_PATHS = [
+  '/cli/',
+  '/packages/',
+  '/node_modules/',
+  '/.git/',
+  '/dox-agent.yml',
+  '/dox-track.yml',
+  '/CODEOWNERS',
+]
 
-function shouldInclude(path: string): boolean {
+/** True if a tarball entry should land in the scaffold (see EXCLUDE_PATHS). */
+export function shouldInclude(path: string): boolean {
   for (const excluded of EXCLUDE_PATHS) {
     if (path.includes(excluded)) {
       return false

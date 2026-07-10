@@ -12,11 +12,11 @@ Dox ships with a built-in **admin dashboard** at `/admin`. It lets you control y
 | **Home** | At-a-glance overview of the site's status. |
 | **Analytics** | First-party traffic, top pages, search terms, and content gaps. |
 | **Agent Readiness** | Score for how well your docs serve AI agents. |
-| **Docs tasks** | Documentation edits drafted by the docs agent as pull requests. |
+| **Docs tasks** | Documentation edits drafted by the docs agent as pull requests — the [Dox Track](/guides/dox-track) queue. |
 | **MCP server** | Enable or disable the public `/api/mcp` endpoint. |
 | **Team** | Members, domains, and roles for admin access. |
-| **Branding** | Structural theme, brand accent, logo, and favicon (see [Branding and theming](/guides/branding-and-theming)). |
-| **Settings** | Feature toggles, site identity, docs-access password, and the AI chat key. |
+| **Branding** | Structural theme, brand accent, per-mode logos and favicons (see [Branding and theming](/guides/branding-and-theming)). |
+| **Settings** | Feature toggles, site identity, the AI assistant name & disclaimer, docs-access password, the AI chat key, and **Connect GitHub** for Dox Track. |
 
 Everything an Owner changes here applies to the live site immediately — no merge, no rebuild.
 
@@ -124,3 +124,16 @@ Leave a setting untouched in the dashboard and the file default applies. This le
 ## AI chat key
 
 The in-docs AI assistant needs an Anthropic API key. Set it either as the `ANTHROPIC_API_KEY` environment variable or, for a no-deploy change, paste it under **Settings → AI chat** — the dashboard stores it encrypted. See [AI features](/guides/ai-features) for the full assistant setup.
+
+## Naming the assistant
+
+Under **Settings → Site experience** you can rename the AI assistant and set its disclaimer, live:
+
+- **Assistant name** — shown on the chat button and panel header (e.g. "Ask Acme"). Blank falls back to the `docs.json` label, or "Ask AI".
+- **Assistant disclaimer** — the notice at the foot of the chat panel. Blank uses a generic "answers may be inaccurate, verify important details" message.
+
+Both are stored at runtime and apply without a redeploy.
+
+## Connect GitHub (Dox Track)
+
+Under **Settings → Integrations**, an Owner can click **Connect GitHub** to create and install a GitHub App for [Dox Track](/guides/dox-track) — the org-wide access path that lets the docs agent watch selected private repos and draft docs PRs. It needs `DOX_AUTH_SECRET` set (to encrypt the app's key). The status chip shows the connected app and whether it's installed; **Disconnect** clears the stored credentials.

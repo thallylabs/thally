@@ -4,7 +4,6 @@ import {
   runAgent,
   resolveDiff,
   resolvePrContext,
-  resolveCommitContext,
   scaffoldAgentWorkflow,
   type AnthropicLike,
   type DocsTask,
@@ -32,24 +31,23 @@ function runAgentInit(args: ParsedArgs): number {
 }
 
 /**
- * `dox agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--from-commit <owner/repo@sha>] [--dry-run] [--pr]`
+ * `dox agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--dry-run] [--pr]`
  *
  * Turns a task into documentation edits on a git sandbox branch. Default leaves
  * the edits on the branch for review; --dry-run previews and discards; --pr opens
- * a pull request. --from-commit reads a tracked product-repo commit via the
- * GitHub API (Dox Track).
+ * a pull request. --from-pr reads a product PR's title/body/diff via the gh CLI
+ * (the path Dox Track dispatches for a merged PR).
  */
 export async function runAgentCommand(args: ParsedArgs): Promise<number> {
   if (args.positionals[0] === 'init') return runAgentInit(args)
 
   const instruction = args.positionals.join(' ').trim()
   const fromPr = args.getFlag('--from-pr')
-  const fromCommit = args.getFlag('--from-commit')
   const diffRef = args.getFlag('--diff')
 
-  if (!instruction && !fromPr && !fromCommit) {
+  if (!instruction && !fromPr) {
     process.stderr.write(
-      '\n  Usage: dox agent "<what to document>" [--diff <ref>] [--from-pr <url>] [--from-commit <owner/repo@sha>] [--dry-run] [--pr]\n\n',
+      '\n  Usage: dox agent "<what to document>" [--diff <ref>] [--from-pr <url>] [--dry-run] [--pr]\n\n',
     )
     return 1
   }
@@ -62,8 +60,7 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
 
   let context = ''
   try {
-    if (fromCommit) context = await resolveCommitContext(fromCommit)
-    else if (fromPr) context = resolvePrContext(fromPr)
+    if (fromPr) context = resolvePrContext(fromPr)
     else if (diffRef) context = resolveDiff(process.cwd(), diffRef)
   } catch (err) {
     process.stderr.write(`\n  ${err instanceof Error ? err.message : String(err)}\n\n`)
@@ -72,9 +69,9 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
 
   const mode: OutputMode = args.hasFlag('--dry-run') ? 'dry-run' : args.hasFlag('--pr') ? 'pr' : 'write'
   const task: DocsTask = {
-    instruction: instruction || `Document the changes in ${fromCommit ?? fromPr}`,
+    instruction: instruction || `Document the changes in ${fromPr}`,
     context: context || undefined,
-    source: fromCommit ? 'track' : 'cli',
+    source: fromPr ? 'track' : 'cli',
   }
 
   const real = new Anthropic({ apiKey })

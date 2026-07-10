@@ -24,6 +24,15 @@ Add `"ai": { "chat": true }` to your `docs.json`:
 
 A chat button appears in the bottom-right corner of your docs site. Users click it, ask a question, and get a streamed answer sourced from your documentation.
 
+### Name it and add a disclaimer
+
+By default the button reads "Ask AI" and the panel carries a generic "answers may be inaccurate" notice. An Owner can customize both live from the admin dashboard under **Settings → Site experience** — no redeploy:
+
+- **Assistant name** (`aiLabel`) — shown on the chat button and panel header, e.g. "Ask Acme".
+- **Assistant disclaimer** (`aiDisclaimer`) — the footnote at the bottom of the panel; set your own compliance or accuracy wording.
+
+Leave either blank to fall back to the defaults (`aiLabel` falls back to the `docs.json` `ai.label`, then "Ask AI"). See [Admin dashboard](/guides/admin-dashboard#naming-the-assistant).
+
 ### Keys: aha-first, then bring your own
 
 Chat resolves an Anthropic key in two tiers, so a brand-new site can answer questions immediately without any setup:
