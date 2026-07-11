@@ -117,8 +117,8 @@ export function GithubConnectPanel({ canEdit }: { canEdit: boolean }) {
       <div className="min-w-0">
         <div className="ds-setting-row-label">GitHub App (Thally Track)</div>
         <div className="ds-setting-row-desc">
-          The Netlify/Vercel-style access path: create + install your own Thally app in a couple of clicks, then pick which
-          repos Track watches. Grants org-wide access to selected private repos — no token to paste. Requires{' '}
+          Create + install your own Thally GitHub App in a couple of clicks, then pick which repos Track watches.
+          Grants org-wide access to selected private repos — no token to paste. Requires{' '}
           <code className="font-mono">THALLY_AUTH_SECRET</code>.
         </div>
       </div>

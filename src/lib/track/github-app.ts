@@ -2,8 +2,8 @@ import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto'
 import { getSiteUrl } from '@/lib/site-url'
 
 // ---------------------------------------------------------------------------
-// "Connect GitHub" — GitHub App Manifest flow (the Netlify/Vercel-style access
-// path for Thally Track). The admin dashboard POSTs a manifest to GitHub, the user
+// "Connect GitHub" — GitHub App Manifest flow (the app-install access path
+// for Thally Track). The admin dashboard POSTs a manifest to GitHub, the user
 // creates + installs THEIR OWN app in a couple of clicks, GitHub redirects back
 // with a one-time `code`, and we exchange it for the app's id + private key +
 // webhook secret — no key paste. Everything stays on the user's infra.

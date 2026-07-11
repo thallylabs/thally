@@ -44,7 +44,7 @@ export function logo(): void {
   console.log('  ║      ██║   ██║  ██║██║  ██║███████╗███████╗   ██║      ║')
   console.log('  ║      ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝      ║')
   console.log('  ║                                                        ║')
-  console.log('  ║             Beautiful docs, zero lock-in.              ║')
+  console.log('  ║    Beautiful AI Native Docs, for agents and humans     ║')
   console.log('  ║                                                        ║')
   console.log('  ╚════════════════════════════════════════════════════════╝')
   console.log('')
