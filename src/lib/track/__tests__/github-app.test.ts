@@ -6,18 +6,18 @@ import {
   verifyManifestState,
 } from '@/lib/track/github-app'
 
-const prevSecret = process.env.DOX_AUTH_SECRET
-const prevSiteUrl = process.env.DOX_SITE_URL
+const prevSecret = process.env.THALLY_AUTH_SECRET
+const prevSiteUrl = process.env.THALLY_SITE_URL
 
 beforeAll(() => {
-  process.env.DOX_AUTH_SECRET = 'a-sufficiently-long-test-secret'
-  process.env.DOX_SITE_URL = 'https://docs.acme.test'
+  process.env.THALLY_AUTH_SECRET = 'a-sufficiently-long-test-secret'
+  process.env.THALLY_SITE_URL = 'https://docs.acme.test'
 })
 afterAll(() => {
-  if (prevSecret === undefined) delete process.env.DOX_AUTH_SECRET
-  else process.env.DOX_AUTH_SECRET = prevSecret
-  if (prevSiteUrl === undefined) delete process.env.DOX_SITE_URL
-  else process.env.DOX_SITE_URL = prevSiteUrl
+  if (prevSecret === undefined) delete process.env.THALLY_AUTH_SECRET
+  else process.env.THALLY_AUTH_SECRET = prevSecret
+  if (prevSiteUrl === undefined) delete process.env.THALLY_SITE_URL
+  else process.env.THALLY_SITE_URL = prevSiteUrl
 })
 
 describe('buildAppManifest', () => {
@@ -66,8 +66,8 @@ describe('exchangeManifestCode', () => {
         status: 201,
         json: async () => ({
           id: 987,
-          slug: 'acme-dox-track',
-          html_url: 'https://github.com/apps/acme-dox-track',
+          slug: 'acme-thally-track',
+          html_url: 'https://github.com/apps/acme-thally-track',
           pem: '-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----',
           webhook_secret: 'whsec_abc',
         }),
@@ -75,7 +75,7 @@ describe('exchangeManifestCode', () => {
     }) as typeof fetch
     const conv = await exchangeManifestCode('the-code', fakeFetch)
     expect(calledUrl).toContain('/app-manifests/the-code/conversions')
-    expect(conv).toMatchObject({ id: 987, slug: 'acme-dox-track', webhookSecret: 'whsec_abc' })
+    expect(conv).toMatchObject({ id: 987, slug: 'acme-thally-track', webhookSecret: 'whsec_abc' })
     expect(conv.pem).toContain('BEGIN RSA PRIVATE KEY')
   })
   it('throws on a non-ok response', async () => {

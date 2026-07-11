@@ -89,7 +89,7 @@ function initGit(targetDir: string): void {
   try {
     execSync('git init', { cwd: targetDir, stdio: 'inherit' })
     execSync('git add -A', { cwd: targetDir, stdio: 'inherit' })
-    execSync('git commit -m "Initial commit from create-dox"', { cwd: targetDir, stdio: 'inherit' })
+    execSync('git commit -m "Initial commit from create-thally-docs"', { cwd: targetDir, stdio: 'inherit' })
   } catch {
     // Git not configured — that's fine
   }
@@ -121,7 +121,7 @@ export async function migrateDocs(opts: MigrateOptions): Promise<MigrateResult> 
   }
 
   // Step 3: Clone to temp dir
-  const tmpBase = mkdtempSync(join(tmpdir(), 'dox-migrate-'))
+  const tmpBase = mkdtempSync(join(tmpdir(), 'thally-migrate-'))
   const cloneDir = join(tmpBase, 'repo')
 
   console.log(`  📦 Cloning ${source.owner}/${source.repo}...`)

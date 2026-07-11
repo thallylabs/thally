@@ -3,7 +3,7 @@ title: Navbar y Footer
 description: Configura enlaces de navegación personalizados, un botón CTA, enlaces de pie de página en múltiples columnas e íconos sociales desde docs.json.
 ---
 
-La barra de navegación superior y el pie de página son configurables desde `docs.json`. No se requieren cambios de código — agrega un bloque `navbar` o `footer` y Dox lo detecta automáticamente.
+La barra de navegación superior y el pie de página son configurables desde `docs.json`. No se requieren cambios de código — agrega un bloque `navbar` o `footer` y Thally lo detecta automáticamente.
 
 ## Navbar
 
@@ -46,7 +46,7 @@ El botón CTA principal — renderizado como una píldora de acento rellena en l
 ```
 
 <Note type="info" title="Alternativa">
-Cuando `navbar` no está definido en `docs.json`, Dox recurre a detectar automáticamente un enlace de soporte y CTA desde `siteConfig.links` en `src/data/site.ts`. Define `navbar` en `docs.json` cuando quieras un control explícito.
+Cuando `navbar` no está definido en `docs.json`, Thally recurre a detectar automáticamente un enlace de soporte y CTA desde `siteConfig.links` en `src/data/site.ts`. Define `navbar` en `docs.json` cuando quieras un control explícito.
 </Note>
 
 ---
@@ -106,7 +106,7 @@ Un arreglo de columnas de enlaces. Cada columna tiene:
 Las columnas se muestran en una cuadrícula responsiva — 2 columnas en móvil, 3 en tableta, 4 en escritorio.
 
 <Note type="info" title="Pie de página predeterminado">
-Cuando `footer` no está definido en `docs.json`, Dox renderiza un pie de página mínimo de una sola línea con el nombre del sitio y `siteConfig.links`.
+Cuando `footer` no está definido en `docs.json`, Thally renderiza un pie de página mínimo de una sola línea con el nombre del sitio y `siteConfig.links`.
 </Note>
 
 ---

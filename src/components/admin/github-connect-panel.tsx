@@ -19,10 +19,10 @@ interface ManifestStart {
 
 /** Map the ?github_app=… callback result to a human message. */
 const RESULT_MESSAGES: Record<string, { text: string; ok: boolean }> = {
-  connected: { text: 'GitHub App connected and installed — Dox Track can now watch your selected repos.', ok: true },
+  connected: { text: 'GitHub App connected and installed — Thally Track can now watch your selected repos.', ok: true },
   bad_state: { text: 'The connect link expired or was tampered with. Start again.', ok: false },
   exchange_failed: { text: 'GitHub could not complete the app creation. Start again.', ok: false },
-  no_auth_secret: { text: 'DOX_AUTH_SECRET is required to store the app credentials securely.', ok: false },
+  no_auth_secret: { text: 'THALLY_AUTH_SECRET is required to store the app credentials securely.', ok: false },
   missing_code: { text: 'GitHub returned no app code. Start again.', ok: false },
   not_connected: { text: 'No app to attach the installation to — start the connect flow again.', ok: false },
   forbidden: { text: 'Owner access is required to connect GitHub.', ok: false },
@@ -94,7 +94,7 @@ export function GithubConnectPanel({ canEdit }: { canEdit: boolean }) {
 
   async function disconnect() {
     if (!canEdit || busy) return
-    if (!window.confirm('Disconnect the GitHub App? Dox Track will fall back to the env token (if any).')) return
+    if (!window.confirm('Disconnect the GitHub App? Thally Track will fall back to the env token (if any).')) return
     setBusy(true)
     setError(null)
     try {
@@ -115,11 +115,11 @@ export function GithubConnectPanel({ canEdit }: { canEdit: boolean }) {
   return (
     <div className="ds-settings-row ds-settings-row--top">
       <div className="min-w-0">
-        <div className="ds-setting-row-label">GitHub App (Dox Track)</div>
+        <div className="ds-setting-row-label">GitHub App (Thally Track)</div>
         <div className="ds-setting-row-desc">
-          The Netlify/Vercel-style access path: create + install your own Dox app in a couple of clicks, then pick which
+          The Netlify/Vercel-style access path: create + install your own Thally app in a couple of clicks, then pick which
           repos Track watches. Grants org-wide access to selected private repos — no token to paste. Requires{' '}
-          <code className="font-mono">DOX_AUTH_SECRET</code>.
+          <code className="font-mono">THALLY_AUTH_SECRET</code>.
         </div>
       </div>
       <div className="ds-settings-control">

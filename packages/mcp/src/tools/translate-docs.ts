@@ -6,7 +6,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import pLimit from 'p-limit'
 
 export const translateDocsSchema = z.object({
-  projectDir: z.string().describe('Path to the Dox project directory'),
+  projectDir: z.string().describe('Path to the Thally project directory'),
   locale: z.string().describe('Target locale code, e.g. "es", "fr"'),
   pages: z.array(z.string()).optional().describe('Page IDs to translate (omit for all pages)'),
   force: z.boolean().optional().default(false).describe('Overwrite existing translation files'),

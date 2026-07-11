@@ -14,9 +14,9 @@ export interface OidcConfig {
 }
 
 export function getOidcConfig(): OidcConfig | null {
-  const issuer = process.env.DOX_OIDC_ISSUER?.trim()
-  const clientId = process.env.DOX_OIDC_CLIENT_ID?.trim()
-  const clientSecret = process.env.DOX_OIDC_CLIENT_SECRET?.trim()
+  const issuer = (process.env.THALLY_OIDC_ISSUER ?? process.env.DOX_OIDC_ISSUER)?.trim()
+  const clientId = (process.env.THALLY_OIDC_CLIENT_ID ?? process.env.DOX_OIDC_CLIENT_ID)?.trim()
+  const clientSecret = (process.env.THALLY_OIDC_CLIENT_SECRET ?? process.env.DOX_OIDC_CLIENT_SECRET)?.trim()
   if (!issuer || !clientId || !clientSecret) return null
   return { issuer, clientId, clientSecret }
 }

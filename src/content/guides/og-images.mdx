@@ -3,7 +3,7 @@ title: OG Image Previews
 description: Configure dynamic Open Graph images for social media link previews.
 ---
 
-Dox generates dynamic OG images for every page so your docs look polished when shared on Twitter, Slack, Discord, and other platforms. Each image includes the page title, description, group label, and your site branding.
+Thally generates dynamic OG images for every page so your docs look polished when shared on Twitter, Slack, Discord, and other platforms. Each image includes the page title, description, group label, and your site branding.
 
 ## How it works
 
@@ -17,10 +17,10 @@ The `/api/og` route runs on the edge and renders a 1200×630 PNG using [Satori](
 
 ## Default behavior
 
-With zero configuration, Dox will:
+With zero configuration, Thally will:
 
 - Use your **dark theme** brand palette for the image background, accent bar, and text colors
-- Display the **site name** and **domain** (from `DOX_SITE_URL`) in the bottom bar
+- Display the **site name** and **domain** (from `THALLY_SITE_URL`) in the bottom bar
 - Fetch the **Inter** font from Google Fonts at weight 700
 - Inject `og:image` and `twitter:image` meta tags on every doc page
 
@@ -51,7 +51,7 @@ export const siteConfig: SiteConfig = {
 | `titleColor` | Title text color (hex) | Dark foreground from brand |
 | `descriptionColor` | Description text color (hex) | Foreground at 60% opacity |
 | `groupColor` | Group label color (hex) | Same as accent |
-| `domain` | Domain shown in bottom bar | Hostname from `DOX_SITE_URL` |
+| `domain` | Domain shown in bottom bar | Hostname from `THALLY_SITE_URL` |
 | `logoText` | Logo text in bottom bar | Site name |
 | `fontFamily` | Google Font family | `Inter` |
 | `fontWeight` | Google Font weight | `700` |
@@ -59,7 +59,7 @@ export const siteConfig: SiteConfig = {
 ## Setting the site URL
 
 <Note type="warning" title="Important for production">
-Set `DOX_SITE_URL` in your hosting environment. Without it, crawlers resolve the relative `/api/og?...` URL against `localhost`, which is unreachable.
+Set `THALLY_SITE_URL` in your hosting environment. Without it, crawlers resolve the relative `/api/og?...` URL against `localhost`, which is unreachable.
 </Note>
 
 <Steps>
@@ -69,7 +69,7 @@ Set `DOX_SITE_URL` in your hosting environment. Without it, crawlers resolve the
 In your hosting dashboard (Vercel, Netlify, etc.) or in `.env.local` for local testing:
 
 ```bash
-DOX_SITE_URL=https://docs.myproduct.com
+THALLY_SITE_URL=https://docs.myproduct.com
 ```
 
 </Step>

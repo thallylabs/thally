@@ -1,7 +1,7 @@
 import matter from 'gray-matter'
 
 /**
- * Frontmatter keys that are **internal provenance** — the mechanism `dox check
+ * Frontmatter keys that are **internal provenance** — the mechanism `thally check
  * --drift` uses to detect staleness. They must NEVER appear in any public
  * projection (HTML, JSON, JSON-LD, `.md` mirror, llms.txt, docs-index): a
  * consuming agent can't interpret a source path or commit from a repo it can't

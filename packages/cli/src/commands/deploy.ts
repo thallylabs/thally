@@ -1,7 +1,7 @@
 import type { ParsedArgs } from '../router.js'
 import { projectScripts, run, runFramework } from '../process.js'
 
-const SITE_URL_HINT = process.env.DOX_SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL
+const SITE_URL_HINT = process.env.THALLY_SITE_URL ?? process.env.DOX_SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 

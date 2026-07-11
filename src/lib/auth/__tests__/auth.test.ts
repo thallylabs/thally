@@ -44,11 +44,11 @@ describe('resolveRoleFromRoster (git-committed roster)', () => {
 
 describe('rbac — session → live role → capability', () => {
   beforeEach(() => {
-    process.env.DOX_AUTH_SECRET = 'test-secret-at-least-16-chars'
+    process.env.THALLY_AUTH_SECRET = 'test-secret-at-least-16-chars'
     vi.mocked(getTeamConfig).mockReturnValue(team)
   })
   afterEach(() => {
-    delete process.env.DOX_AUTH_SECRET
+    delete process.env.THALLY_AUTH_SECRET
   })
 
   it('resolves the role, gates capabilities, and denies instantly when removed from the roster', async () => {

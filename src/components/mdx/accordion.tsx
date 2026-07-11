@@ -31,7 +31,7 @@ export function Accordion({ title, defaultOpen = false, children }: AccordionPro
             />
           </AccordionPrimitive.Trigger>
         </AccordionPrimitive.Header>
-        <AccordionPrimitive.Content className="dox-accordion-content overflow-hidden">
+        <AccordionPrimitive.Content className="thally-accordion-content overflow-hidden">
           <div className="prose prose-sm px-4 pb-4 pt-1 text-foreground/80 dark:prose-invert">
             {children}
           </div>

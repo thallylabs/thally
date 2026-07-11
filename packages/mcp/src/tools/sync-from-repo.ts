@@ -12,7 +12,7 @@ import {
 } from '../lib/track.js'
 
 export const syncFromRepoSchema = z.object({
-  projectDir: z.string().describe('Path to the Dox project (reads the tracking config from docs.json)'),
+  projectDir: z.string().describe('Path to the Thally project (reads the tracking config from docs.json)'),
   repo: z
     .string()
     .optional()
@@ -58,7 +58,7 @@ export async function handleSyncFromRepo(input: SyncFromRepoInput): Promise<stri
   if (!target) {
     throw new Error(
       tracked.length === 0
-        ? 'No tracked repos in docs.json — add one with `dox track add <owner/repo>` or pass `repo`.'
+        ? 'No tracked repos in docs.json — add one with `thally track add <owner/repo>` or pass `repo`.'
         : `Multiple tracked repos configured — pass \`repo\` (one of: ${tracked.map((r) => `${r.owner}/${r.repo}`).join(', ')}).`,
     )
   }
@@ -101,7 +101,7 @@ export async function handleSyncFromRepo(input: SyncFromRepoInput): Promise<stri
 
   const token = await resolveGithubToken()
   if (!token) {
-    throw new Error('Set DOX_GITHUB_TOKEN (or connect a GitHub App) with dispatch access to the docs repo to dispatch a docs task.')
+    throw new Error('Set THALLY_GITHUB_TOKEN (or connect a GitHub App) with dispatch access to the docs repo to dispatch a docs task.')
   }
 
   const response = await fetch(`https://api.github.com/repos/${docsRef.owner}/${docsRef.repo}/dispatches`, {
@@ -112,7 +112,7 @@ export async function handleSyncFromRepo(input: SyncFromRepoInput): Promise<stri
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      event_type: 'dox-document',
+      event_type: 'thally-document',
       client_payload: { instruction: task.instruction, from_pr: pr.htmlUrl },
     }),
   })
@@ -120,5 +120,5 @@ export async function handleSyncFromRepo(input: SyncFromRepoInput): Promise<stri
     throw new Error(`repository_dispatch failed (${response.status}) — check the token's access to ${input.docsRepo}.`)
   }
 
-  return `✅ Dispatched docs task for ${target.owner}/${target.repo}#${pr.number} to ${input.docsRepo}. The "Dox docs agent" workflow there will draft the PR — watch its Actions tab.`
+  return `✅ Dispatched docs task for ${target.owner}/${target.repo}#${pr.number} to ${input.docsRepo}. The "Thally docs agent" workflow there will draft the PR — watch its Actions tab.`
 }

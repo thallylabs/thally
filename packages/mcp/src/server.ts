@@ -1,13 +1,21 @@
+import { createRequire } from 'node:module'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { z } from 'zod'
 import { tools } from './lib/tools.js'
 
 type ToolResult = { content: Array<{ type: 'text'; text: string }> }
 
+// Both src/ and dist/ sit one level below the package root, so this resolves
+// from either the bundled output or the raw source (tests).
+const pkg = createRequire(import.meta.url)('../package.json') as {
+  name: string
+  version: string
+}
+
 export function createServer(): McpServer {
   const server = new McpServer({
-    name: '@doxlabs/mcp',
-    version: '0.3.0',
+    name: pkg.name,
+    version: pkg.version,
   })
 
   // Cast to a concrete signature: the SDK's `tool` overload infers arg types

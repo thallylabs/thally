@@ -1,0 +1,132 @@
+---
+title: Thally Track
+description: Watch your product repos — merged PRs there become reviewed documentation PRs, drafted by the docs agent.
+keywords:
+  - thally track
+  - pr-triggered docs
+  - docs automation
+  - sync from repo
+  - keep docs in sync with code
+  - agent-native
+---
+
+**Thally Track closes the oldest gap in documentation: the feature shipped, and nobody updated the docs.** You register your product's source repositories, and when a **pull request merges** there, Thally distills it into a task and has the [docs agent](/guides/docs-agent) draft a documentation pull request — reviewed by you, never merged on its own.
+
+Track acts on **merged PRs, not raw commits** — a merged PR is completed, reviewed work, whereas a commit can be undone by the next one. Triggering per-commit would open (and re-open) docs PRs on churning, incomplete work.
+
+```
+product-repo PR merged ──▶ trigger (webhook or Action) ──▶ repository_dispatch
+                                                                │
+          your review ◀── documentation PR ◀── docs agent ◀─────┘
+```
+
+Everything runs on your infrastructure with your keys. Nothing is hosted by Thally.
+
+## Register a repo
+
+Track is **opt-in**. A freshly scaffolded Thally site (`npx create-thally-docs`) tracks **nothing** — there's no `tracking` block in `docs.json` until you add one. You opt in from your project root:
+
+```bash
+thally track add acme/api-server --paths "src/**,openapi.yaml" --tab "API Reference"
+```
+
+This writes a `tracking` block into `docs.json` — version-controlled, so tracking a new repo is a reviewed change, just like the team roster:
+
+```json
+"tracking": {
+  "repos": [
+    {
+      "owner": "acme",
+      "repo": "api-server",
+      "branch": "main",
+      "paths": ["src/**", "openapi.yaml"],
+      "outputTab": "API Reference"
+    }
+  ]
+}
+```
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `owner` / `repo` | — | The GitHub repository to watch |
+| `branch` | `main` | The **base branch** a PR must merge into to trigger |
+| `paths` | all files | Glob filters — only PRs touching these fire (`**` crosses directories, `*` stays within one) |
+| `outputTab` / `outputGroup` | — | Where generated pages land in your navigation |
+
+## Try it before wiring anything
+
+`thally track test` fetches the latest PR merged into the tracked base branch, applies your path filters, and shows the docs task it would produce:
+
+```bash
+thally track test acme/api-server          # latest merged PR
+thally track test acme/api-server --pr 128  # a specific PR
+```
+
+Without an `ANTHROPIC_API_KEY` it prints the distilled instruction and diff context. With one, it runs the docs agent in **dry-run** — you see the exact documentation edits it would draft, and nothing is written.
+
+## Give Track access
+
+Run `thally track setup` for tailored instructions. There are three interchangeable access modes — all end in a `repository_dispatch` to your docs repo, whose agent workflow (from [`thally agent init`](/guides/docs-agent)) drafts the PR. Pick one:
+
+### Mode A — Connect GitHub app (recommended for orgs & private repos)
+
+The Netlify/Vercel-style path: from the admin dashboard, create + install **your own** Thally GitHub App in a couple of clicks, then choose which repos Track may watch — org-wide access to the repos you pick, with **no token to paste**.
+
+Because Thally is self-hosted, there's no central Thally server holding a key — instead the **"Connect GitHub"** button uses GitHub's [App Manifest flow](https://docs.github.com/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) to stand up an app that belongs entirely to you:
+
+1. Set `THALLY_AUTH_SECRET` on the deployed site (it encrypts the app's private key at rest) and `THALLY_SITE_URL` (so GitHub redirects back correctly).
+2. In the admin dashboard, go to **Settings → Integrations → Connect GitHub**. Enter your org name to install it org-wide (or leave it blank for a personal-account app).
+3. GitHub walks you through creating the app (permissions and the org webhook are pre-filled), then choosing repos. Thally captures the credentials automatically — the app carries its own webhook, so you don't set `THALLY_TRACK_WEBHOOK_SECRET`.
+
+The app requests least privilege: read pull requests, write contents + pull requests (to open docs PRs), read metadata. You can revoke or reconfigure repos any time from the app's GitHub page, or **Disconnect** from the dashboard.
+
+### Mode B — fine-grained PAT + webhook (simplest for a single repo)
+
+Point a GitHub webhook at your deployed docs site. The site verifies the signature, checks the PR against your tracking config, and relays the dispatch. The heavy lifting happens in GitHub Actions — the site only relays, so it works on serverless hosts.
+
+1. Generate a secret: `openssl rand -hex 32`
+2. On the deployed site, set `THALLY_TRACK_WEBHOOK_SECRET=<secret>` and `THALLY_GITHUB_TOKEN` (a fine-grained PAT that reads tracked PRs, dispatches to the docs repo)
+3. In the tracked repo → **Settings → Webhooks → Add webhook**: payload URL `https://<your-docs-site>/api/track/webhook`, content type `application/json`, the same secret, and under "Let me select individual events" check **Pull requests**
+
+Deliveries are deduplicated (a redelivered merge is a no-op), unmerged closes are ignored, and PRs touching none of your `paths` are ignored.
+
+### Mode C — sender workflow (no server in the loop)
+
+`thally track setup` prints a ready `.github/workflows/thally-track.yml` for each tracked repo (with your base branch and path filters baked in). Commit it to the product repo and add a `THALLY_DISPATCH_TOKEN` secret there with dispatch access to the docs repo.
+
+## Preview docs before a feature ships
+
+Sometimes you want the docs ready for review *before* the feature merges. Add the **`docs-preview`** label to an open PR (any access mode above) and Track drafts the documentation it will need as a separate PR — so reviewers see the docs alongside the code. The preview re-drafts on each push to the labelled PR, and the instruction tells the agent the PR is still in review and may change. (Commenting `@thally` on a PR does the same thing on demand.)
+
+## Tracking your own docs repo
+
+If you point Track at the repository that also holds your docs (e.g. Thally tracking Thally), the agent's own merged docs PRs would otherwise re-trigger it. Track guards against this automatically: it ignores any PR whose head branch starts with `thally/agent-` (the prefix the agent stamps on its branches). To keep it tidy, also exclude your docs from `paths` (e.g. don't list `src/content/**`) so doc-only PRs don't fan out.
+
+## What the agent produces
+
+The agent makes a **judgment call**: it reads the merged PR, decides what user-facing behavior changed (API surface, config, CLI flags, defaults), then finds the documentation pages that describe that behavior and updates them in place — adding new pages only where genuinely warranted. If the PR has no user-facing impact, it does nothing. It is not maintaining a source-file-to-page map; it's keeping the docs true to the product.
+
+Track-originated PRs are labeled with `origin: track` and appear in the admin **Docs tasks** queue alongside a **Tracked repos** panel showing each repo, its filters, and the last synced PR.
+
+## From AI tools (MCP)
+
+The `sync_from_repo` tool exposes the same pipeline to Claude, Cursor, or any MCP client:
+
+- `dryRun: true` (default) — preview the docs task for a tracked repo's latest merged PR (or a specific `pr` number)
+- `dryRun: false` + `docsRepo` — dispatch the task so the docs-agent workflow drafts the PR
+
+Its token resolution is the same as the webhook's: an explicit token, else a connected GitHub App, else the `THALLY_GITHUB_TOKEN` PAT chain.
+
+## Environment variables
+
+| Variable | Where | Purpose |
+| --- | --- | --- |
+| `THALLY_AUTH_SECRET` | deployed docs site | Encrypts the connected GitHub App's private key at rest (Mode A) |
+| `THALLY_SITE_URL` | deployed docs site | Canonical site URL — GitHub redirects back here during Connect (Mode A) |
+| `THALLY_REPO_URL` | deployed docs site | The docs repo Track dispatches to; defaults to `siteConfig.repoUrl`. Set it when `site.ts` keeps the template default |
+| `THALLY_TRACK_WEBHOOK_SECRET` | deployed docs site | Enables `/api/track/webhook` for a manual webhook (Mode B); not needed when a GitHub App is connected |
+| `THALLY_GITHUB_TOKEN` | deployed docs site | Fine-grained PAT that reads tracked PRs + relays the dispatch (Mode B; also used by the Docs tasks queue) |
+| `THALLY_DISPATCH_TOKEN` | each tracked repo (Mode C) | Dispatch access to the docs repo |
+| `ANTHROPIC_API_KEY` | docs repo secrets | Runs the agent inside the docs-repo workflow |
+
+Mode A stores the app's credentials (id, installation id, private key, webhook secret) encrypted in admin settings — you don't set `THALLY_GITHUB_APP_*` env vars unless you prefer to wire the app manually. The token resolver honors them if present: `THALLY_GITHUB_APP_ID`, `THALLY_GITHUB_APP_INSTALLATION_ID`, `THALLY_GITHUB_APP_PRIVATE_KEY`.

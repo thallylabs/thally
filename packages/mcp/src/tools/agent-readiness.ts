@@ -3,7 +3,7 @@ import { z } from 'zod'
 export const agentReadinessSchema = z.object({
   siteUrl: z
     .string()
-    .describe('Base URL of the deployed Dox site (e.g. https://docs.example.com)'),
+    .describe('Base URL of the deployed Thally site (e.g. https://docs.example.com)'),
   minScore: z
     .number()
     .optional()
@@ -37,7 +37,7 @@ interface ReadinessResponse {
 
 /**
  * Query the deployed site's Agent Readiness Score — the same deterministic
- * 0-100 report exposed at `/api/agent-readiness` and the `dox check` CLI.
+ * 0-100 report exposed at `/api/agent-readiness` and the `thally check` CLI.
  */
 export async function handleAgentReadiness(input: AgentReadinessInput): Promise<string> {
   const { siteUrl, minScore } = input

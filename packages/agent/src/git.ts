@@ -19,10 +19,10 @@ function gitTry(cwd: string, args: Array<string>): { ok: boolean; out: string } 
  */
 export function assertCleanGitRepo(cwd: string): void {
   if (!gitTry(cwd, ['rev-parse', '--is-inside-work-tree']).ok) {
-    throw new Error('`dox agent` needs a git repository to sandbox its edits — none found here.')
+    throw new Error('`thally agent` needs a git repository to sandbox its edits — none found here.')
   }
   if (git(cwd, ['status', '--porcelain'])) {
-    throw new Error('Working tree is not clean. Commit or stash your changes before running `dox agent`.')
+    throw new Error('Working tree is not clean. Commit or stash your changes before running `thally agent`.')
   }
 }
 

@@ -72,7 +72,7 @@ export async function GET(request: Request) {
 
   const body = lines.join('\n')
 
-  // Surface a stale-DOX_SITE_URL misconfiguration (all links above would be
+  // Surface a stale-THALLY_SITE_URL misconfiguration (all links above would be
   // dead): warns in server logs and flags it on the response for tooling.
   const mismatch = siteUrlMismatch(new URL(request.url).origin)
 
@@ -80,7 +80,7 @@ export async function GET(request: Request) {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
       'Cache-Control': 'public, max-age=3600, s-maxage=3600',
-      ...(mismatch ? { 'X-Dox-Site-Url-Warning': mismatch } : {}),
+      ...(mismatch ? { 'X-Thally-Site-Url-Warning': mismatch } : {}),
     },
   })
 }

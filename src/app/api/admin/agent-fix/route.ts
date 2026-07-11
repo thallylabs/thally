@@ -12,8 +12,8 @@ export const runtime = 'nodejs'
  * Dispatch the docs agent to open a PR fixing a readiness subscore.
  * Body: `{ subscoreId: string }`
  *
- * Relays `repository_dispatch` (event: dox-document) to the configured docs
- * repo — same path Track uses — so the existing dox-agent.yml workflow runs.
+ * Relays `repository_dispatch` (event: thally-document) to the configured docs
+ * repo — same path Track uses — so the existing thally-agent.yml workflow runs.
  */
 export async function POST(request: NextRequest) {
   const session = await requireCapabilityFromRequest(request, 'run_agent')

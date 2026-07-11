@@ -6,8 +6,8 @@ import { createHmac } from 'node:crypto'
 import { POST } from '../webhook/route'
 
 const SECRET = 'route-test-secret'
-const prevSecret = process.env.DOX_TRACK_WEBHOOK_SECRET
-const prevStorage = process.env.DOX_STORAGE
+const prevSecret = process.env.THALLY_TRACK_WEBHOOK_SECRET
+const prevStorage = process.env.THALLY_STORAGE
 
 function makeRequest(body: string, headers: Record<string, string>): Request {
   return new Request('http://localhost/api/track/webhook', {
@@ -22,20 +22,20 @@ function sign(body: string, secret = SECRET): string {
 }
 
 beforeEach(() => {
-  process.env.DOX_TRACK_WEBHOOK_SECRET = SECRET
-  process.env.DOX_STORAGE = 'memory'
+  process.env.THALLY_TRACK_WEBHOOK_SECRET = SECRET
+  process.env.THALLY_STORAGE = 'memory'
 })
 
 afterAll(() => {
-  if (prevSecret === undefined) delete process.env.DOX_TRACK_WEBHOOK_SECRET
-  else process.env.DOX_TRACK_WEBHOOK_SECRET = prevSecret
-  if (prevStorage === undefined) delete process.env.DOX_STORAGE
-  else process.env.DOX_STORAGE = prevStorage
+  if (prevSecret === undefined) delete process.env.THALLY_TRACK_WEBHOOK_SECRET
+  else process.env.THALLY_TRACK_WEBHOOK_SECRET = prevSecret
+  if (prevStorage === undefined) delete process.env.THALLY_STORAGE
+  else process.env.THALLY_STORAGE = prevStorage
 })
 
 describe('POST /api/track/webhook', () => {
   it('fails closed (401) when the secret is unset', async () => {
-    delete process.env.DOX_TRACK_WEBHOOK_SECRET
+    delete process.env.THALLY_TRACK_WEBHOOK_SECRET
     const res = await POST(makeRequest('{}', {}))
     expect(res.status).toBe(401)
     expect((await res.json()).error).toBe('webhook_not_configured')

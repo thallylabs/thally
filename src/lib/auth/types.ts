@@ -4,7 +4,7 @@
  * gating docs for visitors (that's a simple shared password).
  *
  * The roster lives in the customer's own store (F1); identity is delegated to
- * their IdP (Google/Microsoft OIDC). Nothing is hosted by Dox → no per-seat cost.
+ * their IdP (Google/Microsoft OIDC). Nothing is hosted by Thally → no per-seat cost.
  */
 
 export type Role = 'owner' | 'editor' | 'viewer'

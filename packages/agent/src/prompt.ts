@@ -3,7 +3,7 @@ import type { DocsTask } from './types.js'
 /** System prompt — carries the loop discipline (the tools don't). */
 export function buildSystemPrompt(agentsGuidance: string): string {
   const base = [
-    'You are the Dox documentation agent. You maintain a documentation site written in MDX and',
+    'You are the Thally documentation agent. You maintain a documentation site written in MDX and',
     'organized by a docs.json navigation file. Given a task, make the smallest correct set of',
     'documentation edits and then stop.',
     '',
@@ -16,7 +16,7 @@ export function buildSystemPrompt(agentsGuidance: string): string {
     '- Match the surrounding style. Keep edits minimal and scoped to the task. Never invent product',
     '  behavior — document only what the task and its context support.',
     '- When the documentation is written, STOP and reply with a short summary of what you changed and',
-    '  why. Do not keep calling tools once the work is done — `dox check` runs automatically afterward,',
+    '  why. Do not keep calling tools once the work is done — `thally check` runs automatically afterward,',
     '  and you will get a chance to fix anything it flags.',
   ]
   if (agentsGuidance) {
@@ -34,7 +34,7 @@ export function buildUserPrompt(task: DocsTask): string {
 
 export function buildRepairPrompt(errors: Array<string>): string {
   return [
-    'Your documentation edits did not pass `dox check`. Fix exactly these problems, then stop:',
+    'Your documentation edits did not pass `thally check`. Fix exactly these problems, then stop:',
     '',
     ...errors.map((e) => `- ${e}`),
   ].join('\n')

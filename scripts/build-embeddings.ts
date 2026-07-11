@@ -13,7 +13,7 @@ async function main() {
   const elapsed = Date.now() - start
   // eslint-disable-next-line no-console
   console.log(
-    `[dox] embeddings: ${index.chunks.length} chunks · provider ${index.provider} · ` +
+    `[thally] embeddings: ${index.chunks.length} chunks · provider ${index.provider} · ` +
       `${index.embeddedPages ?? 0} page(s) embedded, ${index.reusedPages ?? 0} reused · ${elapsed}ms`,
   )
 }
@@ -22,6 +22,6 @@ main().catch((error) => {
   // Never fail the build on embedding generation — retrieval falls back to a
   // lazy in-process build at runtime.
   // eslint-disable-next-line no-console
-  console.warn('[dox] embeddings build skipped:', error instanceof Error ? error.message : error)
+  console.warn('[thally] embeddings build skipped:', error instanceof Error ? error.message : error)
   process.exit(0)
 })

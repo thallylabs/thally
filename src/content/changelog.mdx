@@ -1,18 +1,18 @@
 ---
 title: Changelog
-description: Track notable improvements to the Dox template.
+description: Track notable improvements to the Thally template.
 ---
 
-<Update label="Dox Track: org access & preview" date="2026-07-10">
+<Update label="Thally Track: org access & preview" date="2026-07-10">
 
 **Track before merge, and across a whole org.**
 
 - **Connect GitHub** — create and install your own GitHub App from the admin dashboard (Settings → Integrations) in a couple of clicks. Grants org-wide access to the private repos you select, with no token to paste; credentials are stored encrypted.
 - **`docs-preview` label** — add it to an open PR to have the docs agent draft the documentation *before* the feature merges, so reviewers see the docs alongside the code. Re-drafts on each push.
-- **Self-tracking loop guard** — a repo can safely track itself; the agent's own `dox/agent-*` PRs never re-trigger Track.
+- **Self-tracking loop guard** — a repo can safely track itself; the agent's own `thally/agent-*` PRs never re-trigger Track.
 - Unified GitHub token resolution across the webhook, MCP tool, and tasks queue: explicit token → GitHub App → PAT chain.
 
-See [Dox Track](/guides/dox-track).
+See [Thally Track](/guides/thally-track).
 
 </Update>
 
@@ -28,14 +28,14 @@ See [Branding and theming](/guides/branding-and-theming) and [Admin dashboard](/
 
 <Update label="Docs agent & admin dashboard" date="2026-05-15">
 
-- The **docs agent** drafts documentation edits as reviewed pull requests from a `@dox` comment, a merge, the drift sweep, or the CLI — it never merges.
+- The **docs agent** drafts documentation edits as reviewed pull requests from a `@thally` comment, a merge, the drift sweep, or the CLI — it never merges.
 - A built-in **admin dashboard** at `/admin` controls branding, feature toggles, analytics, team roles, and docs-access, layered on top of the git-committed defaults.
 
 </Update>
 
 <Update label="v0.1.0" date="2025-01-01">
 
-Initial release of the clean-room Dox template.
+Initial release of the clean-room Thally template.
 
 - Next.js App Router foundation with MDX-powered docs
 - Responsive shell with Radix-driven navigation and search

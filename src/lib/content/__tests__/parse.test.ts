@@ -7,7 +7,7 @@ const sample = `## Getting Started
 Install the package and run the dev server.
 
 \`\`\`bash Install
-npm install dox
+npm install thally
 \`\`\`
 
 ### Configuration
@@ -51,13 +51,13 @@ describe('parseMdxContent', () => {
   it('extracts code blocks with language and fence title', () => {
     expect(parsed.codeBlocks).toHaveLength(2)
     expect(parsed.codeBlocks[0]).toMatchObject({ language: 'bash', title: 'Install', index: 0 })
-    expect(parsed.codeBlocks[0].source).toBe('npm install dox')
+    expect(parsed.codeBlocks[0].source).toBe('npm install thally')
     expect(parsed.codeBlocks[1]).toMatchObject({ language: 'ts', index: 1 })
   })
 
   it('extracts prose text without fenced code', () => {
     expect(parsed.text).toContain('Install the package')
-    expect(parsed.text).not.toContain('npm install dox')
+    expect(parsed.text).not.toContain('npm install thally')
     expect(parsed.text).not.toContain('const x = 1')
   })
 

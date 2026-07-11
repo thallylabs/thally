@@ -8,7 +8,7 @@ interface SiteBannerProps {
   banner: DocsJsonBanner
 }
 
-const STORAGE_KEY = 'dox-banner-dismissed'
+const STORAGE_KEY = 'thally-banner-dismissed'
 
 export function SiteBanner({ banner }: SiteBannerProps) {
   const [visible, setVisible] = useState(false)
@@ -35,11 +35,11 @@ export function SiteBanner({ banner }: SiteBannerProps) {
   if (!visible) return null
 
   return (
-    <div className="dox-ink-banner" role="status">
-      <div className="dox-ink-banner-inner">
-        <span className="dox-ink-banner-dot" aria-hidden />
+    <div className="thally-ink-banner" role="status">
+      <div className="thally-ink-banner-inner">
+        <span className="thally-ink-banner-dot" aria-hidden />
         <span
-          className="dox-ink-banner-content"
+          className="thally-ink-banner-content"
           // Banner copy is authored in docs.json by the site owner.
           // eslint-disable-next-line react/no-danger
           dangerouslySetInnerHTML={{ __html: parseBannerContent(banner.content) }}
@@ -49,7 +49,7 @@ export function SiteBanner({ banner }: SiteBannerProps) {
             type="button"
             onClick={dismiss}
             aria-label="Dismiss banner"
-            className="dox-ink-banner-dismiss"
+            className="thally-ink-banner-dismiss"
           >
             <X className="h-3.5 w-3.5" />
           </button>

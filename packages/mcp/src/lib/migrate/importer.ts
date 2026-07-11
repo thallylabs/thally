@@ -32,7 +32,7 @@ function extractFirstParagraph(content: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Mintlify component → Dox conversion
+// Mintlify component → Thally conversion
 // Covers all ~35 Mintlify MDX components documented at mintlify.com/docs
 // ---------------------------------------------------------------------------
 
@@ -64,23 +64,23 @@ function normalizeComponents(body: string): string {
   result = result.replace(/<!--([\s\S]*?)-->/g, (_, inner) => `{/*${inner}*/}`)
 
   // ── 3. Mintlify callouts ──────────────────────────────────────────────────
-  // Note / Warning / Info / Error → already valid Dox component names, no change needed.
+  // Note / Warning / Info / Error → already valid Thally component names, no change needed.
   result = result.replace(/<Tip>([\s\S]*?)<\/Tip>/g, (_, c) => `<Note>${c}</Note>`)
   result = result.replace(/<Check>([\s\S]*?)<\/Check>/g, (_, c) => `<Note>${c}</Note>`)
   result = result.replace(/<Danger>([\s\S]*?)<\/Danger>/g, (_, c) => `<Error>${c}</Error>`)
   result = result.replace(/<Callout(?:\s[^>]*)?>([\s\S]*?)<\/Callout>/g, (_, c) => `<Note>${c}</Note>`)
 
-  // ── 4. Docusaurus admonitions: :::type ... ::: → Dox callout components ───
+  // ── 4. Docusaurus admonitions: :::type ... ::: → Thally callout components ───
   result = result.replace(/:::(\w+)(?:\s+[^\n]*)?\n([\s\S]*?):::/g, (_, type, content) => {
-    const tag = mapAdmonitionToDoxTag(type.toLowerCase())
+    const tag = mapAdmonitionToThallyTag(type.toLowerCase())
     return `<${tag}>\n${content.trim()}\n</${tag}>`
   })
 
-  // ── 5. GitBook {% hint style="..." %} → Dox callout components ───────────
+  // ── 5. GitBook {% hint style="..." %} → Thally callout components ───────────
   result = result.replace(
     /\{%\s*hint\s+style="(\w+)"\s*%\}([\s\S]*?)\{%\s*endhint\s*%\}/g,
     (_, style, content) => {
-      const tag = mapGitBookStyleToDoxTag(style.toLowerCase())
+      const tag = mapGitBookStyleToThallyTag(style.toLowerCase())
       return `<${tag}>\n${content.trim()}\n</${tag}>`
     },
   )
@@ -95,7 +95,7 @@ function normalizeComponents(body: string): string {
   })
   result = result.replace(/<\/Expandable>/g, '</Accordion>')
 
-  // ── 8. <Latex> → inline code (no LaTeX renderer in Dox) ──────────────────
+  // ── 8. <Latex> → inline code (no LaTeX renderer in Thally) ──────────────────
   result = result.replace(/<Latex>([\s\S]*?)<\/Latex>/g, (_, inner) => `\`${inner.trim()}\``)
 
   // ── 9. <ResponseField> / <ParamField> → Markdown property definitions ─────
@@ -175,14 +175,14 @@ function normalizeComponents(body: string): string {
   return result
 }
 
-function mapAdmonitionToDoxTag(type: string): string {
+function mapAdmonitionToThallyTag(type: string): string {
   if (type === 'warning' || type === 'caution') return 'Warning'
   if (type === 'danger') return 'Error'
   if (type === 'info') return 'Info'
   return 'Note'
 }
 
-function mapGitBookStyleToDoxTag(style: string): string {
+function mapGitBookStyleToThallyTag(style: string): string {
   if (style === 'warning') return 'Warning'
   if (style === 'danger') return 'Error'
   if (style === 'success') return 'Note'

@@ -154,7 +154,7 @@ describe('fetchPullRequest / fetchPullRequestFiles / fetchLatestMergedPr', () =>
 
   it('throws a hint on 404', async () => {
     const { impl } = fakeFetch(404, {})
-    await expect(fetchPullRequest('a', 'b', 1, { fetchImpl: impl })).rejects.toThrow(/DOX_GITHUB_TOKEN/)
+    await expect(fetchPullRequest('a', 'b', 1, { fetchImpl: impl })).rejects.toThrow(/THALLY_GITHUB_TOKEN/)
   })
 })
 
@@ -241,8 +241,8 @@ describe('mintInstallationToken / resolveGithubToken', () => {
   })
 
   it('prefers an explicit token, then App creds, over the env PAT chain', async () => {
-    const prevPat = process.env.DOX_GITHUB_TOKEN
-    process.env.DOX_GITHUB_TOKEN = 'pat_env'
+    const prevPat = process.env.THALLY_GITHUB_TOKEN
+    process.env.THALLY_GITHUB_TOKEN = 'pat_env'
     try {
       // explicit wins
       expect(await resolveGithubToken({ token: 'explicit' })).toBe('explicit')
@@ -266,22 +266,27 @@ describe('mintInstallationToken / resolveGithubToken', () => {
       })
       expect(fellBack).toBe('pat_env')
     } finally {
-      if (prevPat === undefined) delete process.env.DOX_GITHUB_TOKEN
-      else process.env.DOX_GITHUB_TOKEN = prevPat
+      if (prevPat === undefined) delete process.env.THALLY_GITHUB_TOKEN
+      else process.env.THALLY_GITHUB_TOKEN = prevPat
     }
   })
 
   it('returns undefined (does not throw) when App mint fails and no PAT is set', async () => {
     const prev = {
-      a: process.env.DOX_GITHUB_TOKEN,
-      b: process.env.DOX_TASKS_TOKEN,
+      a: process.env.THALLY_GITHUB_TOKEN,
+      b: process.env.THALLY_TASKS_TOKEN,
       c: process.env.GH_TOKEN,
       d: process.env.GITHUB_TOKEN,
+      // Legacy fallback names still participate in the resolver chain.
+      e: process.env.DOX_GITHUB_TOKEN,
+      f: process.env.DOX_TASKS_TOKEN,
     }
-    delete process.env.DOX_GITHUB_TOKEN
-    delete process.env.DOX_TASKS_TOKEN
+    delete process.env.THALLY_GITHUB_TOKEN
+    delete process.env.THALLY_TASKS_TOKEN
     delete process.env.GH_TOKEN
     delete process.env.GITHUB_TOKEN
+    delete process.env.DOX_GITHUB_TOKEN
+    delete process.env.DOX_TASKS_TOKEN
     try {
       const failFetch = (async () => ({ ok: false, status: 500, json: async () => ({}) }) as Response) as typeof fetch
       const token = await resolveGithubToken({
@@ -290,10 +295,12 @@ describe('mintInstallationToken / resolveGithubToken', () => {
       })
       expect(token).toBeUndefined()
     } finally {
-      if (prev.a !== undefined) process.env.DOX_GITHUB_TOKEN = prev.a
-      if (prev.b !== undefined) process.env.DOX_TASKS_TOKEN = prev.b
+      if (prev.a !== undefined) process.env.THALLY_GITHUB_TOKEN = prev.a
+      if (prev.b !== undefined) process.env.THALLY_TASKS_TOKEN = prev.b
       if (prev.c !== undefined) process.env.GH_TOKEN = prev.c
       if (prev.d !== undefined) process.env.GITHUB_TOKEN = prev.d
+      if (prev.e !== undefined) process.env.DOX_GITHUB_TOKEN = prev.e
+      if (prev.f !== undefined) process.env.DOX_TASKS_TOKEN = prev.f
     }
   })
 })

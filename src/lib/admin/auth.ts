@@ -10,7 +10,7 @@ import {
 export { ADMIN_SESSION_COOKIE, DOCS_ACCESS_COOKIE }
 
 function getAdminPassword(): string | null {
-  return process.env.DOX_ADMIN_PASSWORD ?? null
+  return (process.env.THALLY_ADMIN_PASSWORD ?? process.env.DOX_ADMIN_PASSWORD) ?? null
 }
 
 export function isAdminEnabled(): boolean {
@@ -68,7 +68,7 @@ export function isAdminAuthenticated(request: NextRequest): boolean {
 }
 
 export function getDocsAccessPassword(): string | null {
-  return process.env.DOX_ACCESS_PASSWORD ?? null
+  return (process.env.THALLY_ACCESS_PASSWORD ?? process.env.DOX_ACCESS_PASSWORD) ?? null
 }
 
 export function isDocsAccessEnabled(): boolean {
@@ -88,7 +88,7 @@ export function verifyDocsAccessPassword(password: string): boolean {
 /**
  * Verify the docs-access password with the admin override applied: a
  * dashboard-set password (F1, hashed) WINS; otherwise fall back to the
- * DOX_ACCESS_PASSWORD env value. (Env presence remains the enable signal that
+ * THALLY_ACCESS_PASSWORD env value. (Env presence remains the enable signal that
  * the edge gate reads — it can't reach F1.)
  */
 export async function verifyDocsAccessPasswordAsync(password: string): Promise<boolean> {
@@ -112,5 +112,5 @@ export function verifyDocsAccessToken(token: string | undefined): boolean {
 }
 
 export function getInternalAnalyticsSecret(): string {
-  return process.env.DOX_ANALYTICS_SECRET ?? getSecret()
+  return (process.env.THALLY_ANALYTICS_SECRET ?? process.env.DOX_ANALYTICS_SECRET) ?? getSecret()
 }

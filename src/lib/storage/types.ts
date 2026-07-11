@@ -1,11 +1,11 @@
 /**
- * Dox durable storage (F1).
+ * Thally durable storage (F1).
  *
  * A small, adapter-based key–value layer that new v2.1 surfaces build on:
  * durable rate-limiting for the public MCP endpoint (A6), assistant insights and
  * the docs-task queue (A5), and the audit log (C3). Two adapters ship — `memory`
  * (tests / opt-out) and `libsql` (zero-config file by default, Turso/libSQL via
- * `DOX_DATABASE_URL`) — resolved once via {@link getStorage}.
+ * `THALLY_DATABASE_URL`) — resolved once via {@link getStorage}.
  *
  * Scope note: this is intentionally KV-only. An append-only event log with a
  * typed query surface is deferred to its first real consumer (A5/C3), because

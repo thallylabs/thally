@@ -18,18 +18,18 @@ export interface CommandInfo {
 // The single coherent command surface. The user authors content + config; the
 // framework (Next.js) is a hidden runtime invoked by these commands.
 export const COMMANDS: Array<CommandInfo> = [
-  { name: 'init', summary: 'Scaffold a new Dox project (alias for create-dox)', usage: 'dox init [dir] [--yes]' },
-  { name: 'dev', summary: 'Run the docs site locally (agent endpoints live)', usage: 'dox dev [-- <framework args>]' },
-  { name: 'build', summary: 'Build the production site', usage: 'dox build' },
-  { name: 'start', summary: 'Serve the built production site', usage: 'dox start' },
-  { name: 'deploy', summary: 'Build and deploy to a live URL', usage: 'dox deploy [--prod] [--cloudflare]' },
-  { name: 'check', summary: 'Lint content + Agent Readiness Score', usage: 'dox check [--agents] [--fix] [--ci] [--drift]' },
-  { name: 'new', summary: 'Create a new page and register it in docs.json', usage: 'dox new <page-id> [--title "..."]' },
-  { name: 'migrate', summary: 'Migrate docs from a GitHub URL', usage: 'dox migrate <github-url> [dir]' },
-  { name: 'translate', summary: 'Translate content into a locale', usage: 'dox translate --locale <code>' },
-  { name: 'mcp', summary: 'Start the Model Context Protocol server (stdio)', usage: 'dox mcp' },
-  { name: 'agent', summary: 'Draft docs from a task (PR, diff, or instruction) as a reviewed PR', usage: 'dox agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--dry-run] [--pr]' },
-  { name: 'track', summary: 'Track product repos — their merged PRs become docs PRs', usage: 'dox track <add|list|test|setup> [owner/repo] [--branch <base>] [--paths <globs>] [--pr <n>]' },
+  { name: 'init', summary: 'Scaffold a new Thally project (alias for create-thally-docs)', usage: 'thally init [dir] [--yes]' },
+  { name: 'dev', summary: 'Run the docs site locally (agent endpoints live)', usage: 'thally dev [-- <framework args>]' },
+  { name: 'build', summary: 'Build the production site', usage: 'thally build' },
+  { name: 'start', summary: 'Serve the built production site', usage: 'thally start' },
+  { name: 'deploy', summary: 'Build and deploy to a live URL', usage: 'thally deploy [--prod] [--cloudflare]' },
+  { name: 'check', summary: 'Lint content + Agent Readiness Score', usage: 'thally check [--agents] [--fix] [--ci] [--drift]' },
+  { name: 'new', summary: 'Create a new page and register it in docs.json', usage: 'thally new <page-id> [--title "..."]' },
+  { name: 'migrate', summary: 'Migrate docs from a GitHub URL', usage: 'thally migrate <github-url> [dir]' },
+  { name: 'translate', summary: 'Translate content into a locale', usage: 'thally translate --locale <code>' },
+  { name: 'mcp', summary: 'Start the Model Context Protocol server (stdio)', usage: 'thally mcp' },
+  { name: 'agent', summary: 'Draft docs from a task (PR, diff, or instruction) as a reviewed PR', usage: 'thally agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--dry-run] [--pr]' },
+  { name: 'track', summary: 'Track product repos — their merged PRs become docs PRs', usage: 'thally track <add|list|test|setup> [owner/repo] [--branch <base>] [--paths <globs>] [--pr <n>]' },
 ]
 
 export function parseArgs(argv: Array<string>): ParsedArgs {
@@ -70,12 +70,12 @@ export function parseArgs(argv: Array<string>): ParsedArgs {
 export function helpText(): string {
   const lines: Array<string> = []
   lines.push('')
-  lines.push('  dox — the unified documentation CLI')
+  lines.push('  thally — the unified documentation CLI')
   lines.push('')
   lines.push('  You author content/, docs.json, and snippets/.')
   lines.push('  The framework (Next.js) is a hidden runtime — you never touch src/app/.')
   lines.push('')
-  lines.push('  Usage: dox <command> [options]')
+  lines.push('  Usage: thally <command> [options]')
   lines.push('')
   lines.push('  Commands:')
   const pad = Math.max(...COMMANDS.map((c) => c.name.length))
@@ -83,7 +83,7 @@ export function helpText(): string {
     lines.push(`    ${command.name.padEnd(pad)}  ${command.summary}`)
   }
   lines.push('')
-  lines.push('  Run "dox <command> --help" for command-specific usage.')
+  lines.push('  Run "thally <command> --help" for command-specific usage.')
   lines.push('')
   return lines.join('\n')
 }

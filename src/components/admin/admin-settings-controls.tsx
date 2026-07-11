@@ -178,7 +178,7 @@ function LocalizationSection({
         <div className="ds-setting-row-label">Languages</div>
         <div className="ds-setting-row-desc">
           Supported locales (<code className="font-mono">docs.json</code> i18n). Adding one is a reviewed config change; translate
-          content with <code className="font-mono">dox translate</code>.
+          content with <code className="font-mono">thally translate</code>.
         </div>
       </div>
       <div className="ds-settings-control">
@@ -405,7 +405,7 @@ export function AdminSettingsControls({
             label="Docs access password"
             desc={
               <>
-                Password for the private-docs visitor gate. Set <code className="font-mono">DOX_ACCESS_PASSWORD</code> (any value)
+                Password for the private-docs visitor gate. Set <code className="font-mono">THALLY_ACCESS_PASSWORD</code> (any value)
                 to turn the gate on; this password then takes precedence.
               </>
             }
@@ -421,7 +421,7 @@ export function AdminSettingsControls({
             desc={
               <>
                 Anthropic API key for the assistant, <strong>encrypted at rest</strong>. Overrides the{' '}
-                <code className="font-mono">ANTHROPIC_API_KEY</code> env. Requires <code className="font-mono">DOX_AUTH_SECRET</code>.
+                <code className="font-mono">ANTHROPIC_API_KEY</code> env. Requires <code className="font-mono">THALLY_AUTH_SECRET</code>.
               </>
             }
             isSet={settings.hasChatKey}

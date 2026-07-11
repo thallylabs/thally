@@ -6,9 +6,9 @@ import type { MDXComponents } from 'mdx/types'
  * ─────────────────────────────────────────────────────────────────────────────
  *
  *  Register your own components here to use them in any `.mdx` page — no core
- *  files to touch, and nothing here is overwritten when you update Dox.
+ *  files to touch, and nothing here is overwritten when you update Thally.
  *
- *  Anything you add is merged on top of Dox's built-in components, so you can:
+ *  Anything you add is merged on top of Thally's built-in components, so you can:
  *    • add brand-new components (e.g. <PricingTable/>, <Roadmap/>), and
  *    • override a built-in by using the same key (e.g. `Note`, `Card`).
  *

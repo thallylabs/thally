@@ -1,24 +1,24 @@
  Here is Claude's plan:                                                                     
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
- Phase 1: Dox CLI Upgrade + MCP Server                                                      
+ Phase 1: Thally CLI Upgrade + MCP Server                                                      
                                                         
  Context
 
- Dox already has a working CLI at cli/ (zero-dep JS, uses git clone). Phase 1 upgrades it
- to a TypeScript package under packages/create-dox/ (replaces git with tarball download, so
+ Thally already has a working CLI at cli/ (zero-dep JS, uses git clone). Phase 1 upgrades it
+ to a TypeScript package under packages/create-thally-docs/ (replaces git with tarball download, so
   git is not required), and adds a brand-new packages/mcp/ MCP server so any LLM tool
- (Claude Code, Cursor, etc.) can scaffold and manage Dox projects programmatically.
+ (Claude Code, Cursor, etc.) can scaffold and manage Thally projects programmatically.
 
  The two packages share scaffold logic. The MCP server wraps it as 4 callable tools.
 
  ---
  Directory Structure
 
- dox/
+ thally/
  ├── package.json                   # MODIFY: add "workspaces": ["packages/*"]
  ├── cli/                           # KEEP as-is (retire after packages ship)
  └── packages/
-     ├── create-dox/
+     ├── create-thally-docs/
      │   ├── package.json
      │   ├── tsconfig.json
      │   ├── tsup.config.ts
@@ -43,7 +43,7 @@
              │   └── update-page.ts
              └── lib/
                  ├── docs-json.ts   # read/write/mutate docs.json
-                 └── scaffold.ts    # re-export scaffold() from create-dox workspace
+                 └── scaffold.ts    # re-export scaffold() from create-thally-docs workspace
 
  ---
  Step-by-Step Implementation
@@ -53,11 +53,11 @@
  Add "workspaces": ["packages/*"] and a packages:build convenience script. No other
  changes.
 
- Step 2 — packages/create-dox
+ Step 2 — packages/create-thally-docs
 
  package.json key fields:
- - name: "create-dox", version: "0.2.0"
- - bin: { "create-dox": "./dist/index.js" }
+ - name: "create-thally-docs", version: "0.2.0"
+ - bin: { "create-thally-docs": "./dist/index.js" }
  - deps: @inquirer/prompts ^7, tar ^6
  - devDeps: tsup ^8, typescript ^5, @types/node ^22
  - type: "module", engines: { node: ">=18" }
@@ -72,7 +72,7 @@
  cli/src/index.js exactly.
 
  src/download.ts: Replace git clone with fetch + tar extract:
- const url = `https://codeload.github.com/kenny-io/Dox/tar.gz/main`
+ const url = `https://codeload.github.com/thallylabs/thally/tar.gz/main`
  // fetch → Readable.fromWeb(response.body) → tar.extract({ cwd, strip: 1, filter })
  // filter: exclude /cli/, /packages/, /node_modules/, /.git/
  Use tar v6 API: tar.extract({ cwd, strip: 1, filter }, nodeStream)
@@ -89,7 +89,7 @@
 
  src/scaffold.ts (exported): Orchestrate in order:
  1. Validate + create target dir
- 2. downloadTemplate(targetDir) (logs "Downloading Dox template...")
+ 2. downloadTemplate(targetDir) (logs "Downloading Thally template...")
  3. writeStarterContent(targetDir, name, slug)
  4. updateSiteConfig(targetDir, name, desc, preset, repoUrl)
  5. updateEnvExample(targetDir)
@@ -103,16 +103,16 @@
  Step 3 — packages/mcp
 
  package.json key fields:
- - name: "@dox/mcp", version: "0.1.0"
- - bin: { "dox-mcp": "./dist/index.js" }
+ - name: "@thallylabs/mcp", version: "0.1.0"
+ - bin: { "thally-mcp": "./dist/index.js" }
  - deps: @modelcontextprotocol/sdk ^1.15, gray-matter ^4, zod ^3
- - Note: scaffold logic is copied (not workspace-linked) so @dox/mcp is self-contained when
+ - Note: scaffold logic is copied (not workspace-linked) so @thallylabs/mcp is self-contained when
   run via npx
 
  src/lib/docs-json.ts: Types DocsJsonConfig, DocsJsonTab, DocsJsonGroup (mirrored from
  src/data/docs.ts). Functions readDocsJson(projectDir), writeDocsJson(projectDir, config).
 
- src/lib/scaffold.ts: Copy of packages/create-dox/src/scaffold.ts (no workspace import —
+ src/lib/scaffold.ts: Copy of packages/create-thally-docs/src/scaffold.ts (no workspace import —
  keeps MCP self-contained for npx usage).
 
  src/tools/create-project.ts — Tool: create_project
@@ -146,7 +146,7 @@
  - Handler: find file (try .mdx then /index.mdx), parse with gray-matter, merge
  frontmatter, replace body if provided, matter.stringify(body.trim(), newFm), write file
 
- src/server.ts: Create McpServer({ name: '@dox/mcp', version: '0.1.0' }), register all 4
+ src/server.ts: Create McpServer({ name: '@thallylabs/mcp', version: '0.1.0' }), register all 4
  tools, export createServer().
 
  src/index.ts: Node version guard (exit if < 18), createServer(), new
@@ -155,12 +155,12 @@
  Step 4 — Install & Build
 
  npm install        # links workspaces
- npm run build -w packages/create-dox
+ npm run build -w packages/create-thally-docs
  npm run build -w packages/mcp
 
  Step 5 — Test CLI
 
- node packages/create-dox/dist/index.js test-project --yes
+ node packages/create-thally-docs/dist/index.js test-project --yes
  Verify: project created, site.ts patched, docs.json written, deps installed.
 
  Step 6 — Test MCP server locally
@@ -172,14 +172,14 @@
 
  Test add_page tool with a real project dir.
 
- Step 7 — MCP config snippet (add to Dox docs)
+ Step 7 — MCP config snippet (add to Thally docs)
 
  Users add to their Claude Desktop / Claude Code settings:
  {
    "mcpServers": {
-     "dox": {
+     "thally": {
        "command": "npx",
-       "args": ["-y", "@dox/mcp"]
+       "args": ["-y", "@thallylabs/mcp"]
      }
    }
  }
@@ -213,6 +213,6 @@
  can contain nested group objects.
  5. matter.stringify body: .trim() the body before passing to avoid double blank lines.
  6. Self-contained MCP: Copy scaffold logic into packages/mcp/src/lib/scaffold.ts — don't
- workspace:* depend on create-dox, since npx @dox/mcp won't have the workspace available.
+ workspace:* depend on create-thally-docs, since npx @thallylabs/mcp won't have the workspace available.
  7. tsup shebang: The banner: { js: '#!/usr/bin/env node' } in tsup config is what makes
  the compiled binary executable via npx.

@@ -1,20 +1,20 @@
 ---
 title: Servidor MCP
-description: Usa @doxlabs/mcp para gestionar proyectos Dox con Claude, Cursor o cualquier herramienta de IA compatible con MCP.
+description: Usa @thallylabs/mcp para gestionar proyectos Thally con Claude, Cursor o cualquier herramienta de IA compatible con MCP.
 ---
 
-`@doxlabs/mcp` es un servidor [Model Context Protocol](https://modelcontextprotocol.io) que permite a las herramientas de IA — Claude Code, Claude Desktop, Cursor, Windsurf — crear, leer, actualizar y migrar proyectos de documentación Dox mediante lenguaje natural.
+`@thallylabs/mcp` es un servidor [Model Context Protocol](https://modelcontextprotocol.io) que permite a las herramientas de IA — Claude Code, Claude Desktop, Cursor, Windsurf — crear, leer, actualizar y migrar proyectos de documentación Thally mediante lenguaje natural.
 
 ## Configuración
 
-Agrega `@doxlabs/mcp` a tu configuración de Claude Code o Claude Desktop:
+Agrega `@thallylabs/mcp` a tu configuración de Claude Code o Claude Desktop:
 
 <Tabs>
 
 <Tab title="Claude Code">
 
 ```bash
-claude mcp add dox -- npx -y @doxlabs/mcp
+claude mcp add thally -- npx -y @thallylabs/mcp
 ```
 
 </Tab>
@@ -26,9 +26,9 @@ Agrega a `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "dox": {
+    "thally": {
       "command": "npx",
-      "args": ["-y", "@doxlabs/mcp"]
+      "args": ["-y", "@thallylabs/mcp"]
     }
   }
 }
@@ -43,9 +43,9 @@ Agrega a tu configuración de MCP:
 ```json
 {
   "mcpServers": {
-    "dox": {
+    "thally": {
       "command": "npx",
-      "args": ["-y", "@doxlabs/mcp"]
+      "args": ["-y", "@thallylabs/mcp"]
     }
   }
 }
@@ -65,10 +65,10 @@ Una vez conectado, puedes hablarle a tu documentación como a un colaborador: *"
 
 #### `create_project`
 
-Genera un nuevo proyecto Dox a partir de la plantilla de GitHub.
+Genera un nuevo proyecto Thally a partir de la plantilla de GitHub.
 
 ```
-Create a new Dox project at ~/dev/my-docs with the name "Acme Docs"
+Create a new Thally project at ~/dev/my-docs with the name "Acme Docs"
 ```
 
 | Parámetro | Requerido | Descripción |
@@ -92,7 +92,7 @@ Add a page called "Authentication" to the Guides tab under a "Security" group
 
 | Parámetro | Requerido | Descripción |
 |-----------|----------|-------------|
-| `projectDir` | Sí | Ruta al proyecto Dox |
+| `projectDir` | Sí | Ruta al proyecto Thally |
 | `pageId` | Sí | p. ej. `guides/authentication` — sin extensión `.mdx` |
 | `title` | Sí | Título de la página (frontmatter) |
 | `description` | No | Descripción de la página (frontmatter) |
@@ -113,7 +113,7 @@ Add a "SDK Reference" tab to the project
 
 | Parámetro | Requerido | Descripción |
 |-----------|----------|-------------|
-| `projectDir` | Sí | Ruta al proyecto Dox |
+| `projectDir` | Sí | Ruta al proyecto Thally |
 | `tabName` | Sí | Etiqueta de la pestaña |
 | `href` | No | Si se define, crea una pestaña con enlace de redirección (p. ej. `/changelog`) |
 | `position` | No | `start` o `end` (predeterminado: `end`) |
@@ -130,7 +130,7 @@ Update the "Getting Started" page to mention the new --yes flag
 
 | Parámetro | Requerido | Descripción |
 |-----------|----------|-------------|
-| `projectDir` | Sí | Ruta al proyecto Dox |
+| `projectDir` | Sí | Ruta al proyecto Thally |
 | `pageId` | Sí | Página a actualizar |
 | `title` | No | Nuevo título |
 | `description` | No | Nueva descripción |
@@ -153,7 +153,7 @@ Show me all the pages in my docs project
 
 #### `migrate_docs`
 
-Clona un repositorio de documentación de GitHub y migra su contenido a un proyecto Dox.
+Clona un repositorio de documentación de GitHub y migra su contenido a un proyecto Thally.
 
 ```
 Migrate the Mintlify starter into a new project at /tmp/my-docs
@@ -184,7 +184,7 @@ Search the docs for anything about rate limiting
 
 | Parámetro | Requerido | Descripción |
 |-----------|----------|-------------|
-| `projectDir` | Sí | Ruta al proyecto Dox |
+| `projectDir` | Sí | Ruta al proyecto Thally |
 | `query` | Sí | Consulta de búsqueda |
 | `limit` | No | Número máximo de resultados a devolver (predeterminado: `5`) |
 
@@ -200,7 +200,7 @@ Read the "guides/authentication" page
 
 | Parámetro | Requerido | Descripción |
 |-----------|----------|-------------|
-| `projectDir` | Sí | Ruta al proyecto Dox |
+| `projectDir` | Sí | Ruta al proyecto Thally |
 | `pageId` | Sí | p. ej. `guides/authentication` |
 
 ---
@@ -215,7 +215,7 @@ Get context about the authentication flow for up to 4000 tokens
 
 | Parámetro | Requerido | Descripción |
 |-----------|----------|-------------|
-| `projectDir` | Sí | Ruta al proyecto Dox |
+| `projectDir` | Sí | Ruta al proyecto Thally |
 | `topic` | Sí | Tema o pregunta |
 | `maxTokens` | No | Presupuesto de tokens (predeterminado: `4000`) |
 
@@ -233,7 +233,7 @@ Check my docs project for any issues
 
 | Parámetro | Requerido | Descripción |
 |-----------|----------|-------------|
-| `projectDir` | Sí | Ruta al proyecto Dox |
+| `projectDir` | Sí | Ruta al proyecto Thally |
 | `fix` | No | Agrega automáticamente páginas huérfanas a la navegación (predeterminado: `false`) |
 
 ---
@@ -254,7 +254,7 @@ Translate only the introduction and quickstart pages to French
 
 | Parámetro | Requerido | Descripción |
 |-----------|----------|-------------|
-| `projectDir` | Sí | Ruta al proyecto Dox |
+| `projectDir` | Sí | Ruta al proyecto Thally |
 | `locale` | Sí | Código de configuración regional de destino, p. ej. `"es"`, `"fr"` |
 | `pages` | No | Array de IDs de página a traducir (omitir para todas las páginas) |
 | `force` | No | Sobreescribir archivos de traducción existentes (predeterminado: `false`) |

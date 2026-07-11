@@ -1,11 +1,11 @@
-# Dox Product Principles — "What Would Apple Do"
+# Thally Product Principles — "What Would Apple Do"
 
 > Internal strategy note. Not published to the docs site (lives outside `src/content/`).
 > Reference this when making product and architecture decisions.
 
 ## The wedge (the one thing we win)
 
-**Dox is the documentation platform for the age of AI agents.**
+**Thally is the documentation platform for the age of AI agents.**
 
 Mintlify is a human docs tool that bolted on AI. We are agent-native. Crucially,
 Mintlify cannot fully copy this without cannibalizing their hosted-tracking,
@@ -19,12 +19,12 @@ Do **not** chase Mintlify feature-for-feature. Pick the agent wedge and make it
 1. **Pick one wedge and make it 10x better.** (iPod = "1,000 songs in your pocket".)
    Our wedge is agent-native docs. Everything ladders up to it.
 2. **Obsess over the first 60 seconds.** The unboxing / first-run experience *is*
-   the product. `npx create-dox` → live, agent-ready docs with zero config.
+   the product. `npx create-thally-docs` → live, agent-ready docs with zero config.
 3. **Make the right thing the default.** You should never have to *configure*
    quality, privacy, performance, accessibility, or agent-readiness. It's just there.
 
 Supporting tenets:
-- **Cohesion is the product.** One mental model, one `dox` toolchain — not a pile of packages.
+- **Cohesion is the product.** One mental model, one `thally` toolchain — not a pile of packages.
 - **Privacy as a headline, not a footnote.** Self-hosted analytics: your traffic data
   never leaves your infra. ("What happens on your docs stays on your docs.")
 - **The framework is an implementation detail.** Users author content + config; the
@@ -37,7 +37,7 @@ Supporting tenets:
    Health / Privacy Report) showing how well the docs serve agents, with one-tap
    fixes. Makes the invisible agent layer visible, improvable, brag-worthy. Uniquely
    ours; builds on the analytics + classifier + lint already shipped.
-2. **Zero-config OOBE + `dox deploy`** — fix the first 60 seconds so the wedge is
+2. **Zero-config OOBE + `thally deploy`** — fix the first 60 seconds so the wedge is
    actually reachable. No required env vars to get a working, agent-ready site.
 3. **Performance & craft pass** — instant/prefetch navigation, real search,
    zero layout shift, Core Web Vitals budget enforced in CI.
@@ -60,9 +60,9 @@ The structured representation of a doc is the **single source of truth**; HTML,
 JSON, JSON-LD, Markdown, and embeddings are all *projections* of it. We never
 parse content twice with different code paths.
 
-This is also why config is framework-agnostic: the site URL is `DOX_SITE_URL`
-(not `NEXT_PUBLIC_SITE_URL`), the toolchain is `dox`, not `next`. A user should
-be able to use Dox for a year and never learn what renders it.
+This is also why config is framework-agnostic: the site URL is `THALLY_SITE_URL`
+(not `NEXT_PUBLIC_SITE_URL`), the toolchain is `thally`, not `next`. A user should
+be able to use Thally for a year and never learn what renders it.
 
 ## AI key strategy — "aha first, then bring your own"
 
@@ -74,17 +74,17 @@ So chat runs in two tiers, resolved automatically (see `src/lib/ai/chat-access.t
 | Tier | Key source | Limits | Who it's for |
 | --- | --- | --- | --- |
 | **Owner** | `ANTHROPIC_API_KEY` | Generous (20 req/min default, no global cap) | Production sites paying for their own usage |
-| **Trial** | `DOX_TRIAL_ANTHROPIC_KEY` (shared) | Strict per-IP **and** a global daily ceiling | The out-of-the-box aha moment |
+| **Trial** | `THALLY_TRIAL_ANTHROPIC_KEY` (shared) | Strict per-IP **and** a global daily ceiling | The out-of-the-box aha moment |
 
 Resolution precedence: owner key → trial key → chat disabled (helpful 503).
-The active tier is surfaced on responses via the `x-dox-ai-tier` header so the
-widget/dashboard can nudge: *"You're on the Dox trial key — add your own key to
+The active tier is surfaced on responses via the `x-thally-ai-tier` header so the
+widget/dashboard can nudge: *"You're on the Thally trial key — add your own key to
 remove limits."*
 
 **How the trial key is protected (defense in depth):**
 1. Per-IP sliding windows (per-minute + per-day).
 2. A single **global daily ceiling** across all IPs for the shared key
-   (`DOX_TRIAL_DAILY_LIMIT`), so one busy deployment can't drain it.
+   (`THALLY_TRIAL_DAILY_LIMIT`), so one busy deployment can't drain it.
 3. A **hard spend cap** configured at the Anthropic account level on the trial
    key itself — the real backstop, since in-memory counters are per-instance on
    serverless and are a soft limit only.
@@ -92,10 +92,10 @@ remove limits."*
    so trial answers cost cents, not dollars.
 
 **Hosted vs self-hosted:**
-- *Hosted Dox*: we inject `DOX_TRIAL_ANTHROPIC_KEY` for every site; the trial is
+- *Hosted Thally*: we inject `THALLY_TRIAL_ANTHROPIC_KEY` for every site; the trial is
   metered per workspace and converts to "add your own key or upgrade."
 - *Self-hosted*: owners just set `ANTHROPIC_API_KEY`. They can optionally set
-  their own trial key if they want a shared low-limit fallback. No Dox dependency.
+  their own trial key if they want a shared low-limit fallback. No Thally dependency.
 
 **Durability note:** robust global metering (and per-workspace trial quotas)
 needs the durable store on the roadmap (libSQL/Turso, issue #21). The current
@@ -119,7 +119,7 @@ should reflect a different unit of value.
 
 **Recommended model — open core + agent-metered:**
 
-1. **Free / Open (self-host):** the `dox` toolchain, agent endpoints, JSON-LD,
+1. **Free / Open (self-host):** the `thally` toolchain, agent endpoints, JSON-LD,
    client search, local-embedding chat with the trial key, self-hosted analytics.
    This is the wedge; it should be free and ungated to win developer love and
    distribution. Mintlify can't match this without hurting their hosted model.
@@ -136,7 +136,7 @@ should reflect a different unit of value.
    model routing — sold on "your agent + human traffic data never leaves your
    infra," which their hosted model structurally can't promise.
 
-**Positioning line:** *"Mintlify charges per site to host your docs. Dox is free
+**Positioning line:** *"Mintlify charges per site to host your docs. Thally is free
 to host anywhere, and you pay only for the agent intelligence you actually use."*
 
 Net: free where Mintlify gates (hosting/sites), paid where we add unique,

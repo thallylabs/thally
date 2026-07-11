@@ -10,13 +10,13 @@ import {
 describe('analytics store', () => {
   beforeEach(() => {
     // Isolate each test in its own in-memory libSQL database.
-    process.env.DOX_ANALYTICS_DB_URL = ':memory:'
+    process.env.THALLY_ANALYTICS_DB_URL = ':memory:'
     __resetAnalyticsStoreForTests()
   })
 
   afterEach(() => {
     __resetAnalyticsStoreForTests()
-    delete process.env.DOX_ANALYTICS_DB_URL
+    delete process.env.THALLY_ANALYTICS_DB_URL
   })
 
   it('aggregates human and agent page views', async () => {
@@ -106,7 +106,7 @@ describe('analytics store', () => {
   it('persists events across a client reset (durable store)', async () => {
     // :memory: is per-connection, so use a temp file to prove durability.
     const file = `file:${process.cwd()}/.data/analytics/__test_durable_${Date.now()}.db`
-    process.env.DOX_ANALYTICS_DB_URL = file
+    process.env.THALLY_ANALYTICS_DB_URL = file
     __resetAnalyticsStoreForTests()
 
     const now = Date.now()

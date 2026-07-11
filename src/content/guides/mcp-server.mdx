@@ -1,20 +1,20 @@
 ---
 title: MCP Server
-description: Use @doxlabs/mcp to manage Dox projects with Claude, Cursor, or any MCP-compatible AI tool.
+description: Use @thallylabs/mcp to manage Thally projects with Claude, Cursor, or any MCP-compatible AI tool.
 ---
 
-`@doxlabs/mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI tools — Claude Code, Claude Desktop, Cursor, Windsurf — create, read, update, and migrate Dox documentation projects through natural language.
+`@thallylabs/mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI tools — Claude Code, Claude Desktop, Cursor, Windsurf — create, read, update, and migrate Thally documentation projects through natural language.
 
 ## Setup
 
-Add `@doxlabs/mcp` to your Claude Code or Claude Desktop configuration:
+Add `@thallylabs/mcp` to your Claude Code or Claude Desktop configuration:
 
 <Tabs>
 
 <Tab title="Claude Code">
 
 ```bash
-claude mcp add dox -- npx -y @doxlabs/mcp
+claude mcp add thally -- npx -y @thallylabs/mcp
 ```
 
 </Tab>
@@ -26,9 +26,9 @@ Add to `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "dox": {
+    "thally": {
       "command": "npx",
-      "args": ["-y", "@doxlabs/mcp"]
+      "args": ["-y", "@thallylabs/mcp"]
     }
   }
 }
@@ -43,9 +43,9 @@ Add to your MCP settings:
 ```json
 {
   "mcpServers": {
-    "dox": {
+    "thally": {
       "command": "npx",
-      "args": ["-y", "@doxlabs/mcp"]
+      "args": ["-y", "@thallylabs/mcp"]
     }
   }
 }
@@ -65,10 +65,10 @@ Once connected, you can talk to your docs like a collaborator: *"Add a page abou
 
 #### `create_project`
 
-Scaffolds a new Dox project from the GitHub template.
+Scaffolds a new Thally project from the GitHub template.
 
 ```
-Create a new Dox project at ~/dev/my-docs with the name "Acme Docs"
+Create a new Thally project at ~/dev/my-docs with the name "Acme Docs"
 ```
 
 | Parameter | Required | Description |
@@ -92,7 +92,7 @@ Add a page called "Authentication" to the Guides tab under a "Security" group
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `projectDir` | Yes | Path to the Dox project |
+| `projectDir` | Yes | Path to the Thally project |
 | `pageId` | Yes | e.g. `guides/authentication` — no `.mdx` extension |
 | `title` | Yes | Page title (frontmatter) |
 | `description` | No | Page description (frontmatter) |
@@ -113,7 +113,7 @@ Add a "SDK Reference" tab to the project
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `projectDir` | Yes | Path to the Dox project |
+| `projectDir` | Yes | Path to the Thally project |
 | `tabName` | Yes | Tab label |
 | `href` | No | If set, creates a redirect link tab (e.g. `/changelog`) |
 | `position` | No | `start` or `end` (default: `end`) |
@@ -130,7 +130,7 @@ Update the "Getting Started" page to mention the new --yes flag
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `projectDir` | Yes | Path to the Dox project |
+| `projectDir` | Yes | Path to the Thally project |
 | `pageId` | Yes | Page to update |
 | `title` | No | New title |
 | `description` | No | New description |
@@ -153,7 +153,7 @@ Show me all the pages in my docs project
 
 #### `migrate_docs`
 
-Clones a GitHub docs repo and migrates its content into a Dox project.
+Clones a GitHub docs repo and migrates its content into a Thally project.
 
 ```
 Migrate the Mintlify starter into a new project at /tmp/my-docs
@@ -184,7 +184,7 @@ Search the docs for anything about rate limiting
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `projectDir` | Yes | Path to the Dox project |
+| `projectDir` | Yes | Path to the Thally project |
 | `query` | Yes | Search query |
 | `limit` | No | Max results to return (default: `5`) |
 
@@ -200,7 +200,7 @@ Read the "guides/authentication" page
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `projectDir` | Yes | Path to the Dox project |
+| `projectDir` | Yes | Path to the Thally project |
 | `pageId` | Yes | e.g. `guides/authentication` |
 
 ---
@@ -215,7 +215,7 @@ Get context about the authentication flow for up to 4000 tokens
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `projectDir` | Yes | Path to the Dox project |
+| `projectDir` | Yes | Path to the Thally project |
 | `topic` | Yes | Topic or question |
 | `maxTokens` | No | Token budget (default: `4000`) |
 
@@ -223,7 +223,7 @@ Get context about the authentication flow for up to 4000 tokens
 
 ### Agent-native (deployed site)
 
-These tools query a **deployed** Dox site over HTTP — they use the same indexes and reports that power the live site, so an agent can reason about docs it didn't scaffold.
+These tools query a **deployed** Thally site over HTTP — they use the same indexes and reports that power the live site, so an agent can reason about docs it didn't scaffold.
 
 #### `semantic_search`
 
@@ -235,7 +235,7 @@ Semantic-search https://docs.example.com for "rotating API keys"
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `siteUrl` | Yes | Base URL of the deployed Dox site |
+| `siteUrl` | Yes | Base URL of the deployed Thally site |
 | `query` | Yes | Natural-language search query |
 | `limit` | No | Max results (default: `8`) |
 | `mode` | No | `hybrid` (default) or `fulltext` |
@@ -244,7 +244,7 @@ Semantic-search https://docs.example.com for "rotating API keys"
 
 #### `agent_readiness`
 
-Fetches the Agent Readiness Score (0–100) for a deployed site — the same report as `/api/agent-readiness` and `dox check`, including per-signal subscores and the specific pages dragging the score down.
+Fetches the Agent Readiness Score (0–100) for a deployed site — the same report as `/api/agent-readiness` and `thally check`, including per-signal subscores and the specific pages dragging the score down.
 
 ```
 What's the agent readiness score for https://docs.example.com?
@@ -252,7 +252,7 @@ What's the agent readiness score for https://docs.example.com?
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `siteUrl` | Yes | Base URL of the deployed Dox site |
+| `siteUrl` | Yes | Base URL of the deployed Thally site |
 | `minScore` | No | Threshold (0–100); flags pass/fail in the summary |
 
 ---
@@ -269,7 +269,7 @@ Check my docs project for any issues
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `projectDir` | Yes | Path to the Dox project |
+| `projectDir` | Yes | Path to the Thally project |
 | `fix` | No | Auto-add orphan pages to the nav (default: `false`) |
 
 ---
@@ -290,7 +290,7 @@ Translate only the introduction and quickstart pages to French
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `projectDir` | Yes | Path to the Dox project |
+| `projectDir` | Yes | Path to the Thally project |
 | `locale` | Yes | Target locale code, e.g. `"es"`, `"fr"` |
 | `pages` | No | Array of page IDs to translate (omit for all pages) |
 | `force` | No | Overwrite existing translation files (default: `false`) |

@@ -5,7 +5,7 @@ description: Customize colors, fonts, and site identity to match your product.
 
 ## Two places to set your brand
 
-Dox reads branding from two layers:
+Thally reads branding from two layers:
 
 1. **The admin dashboard** (`/admin/branding`) — an Owner picks the structural theme, brand accent, logo, and favicon and hits **Save**. Changes apply to the live docs site immediately, with **no rebuild or redeploy**. These settings are stored at runtime and layered *on top of* the file defaults below.
 2. **Source files** (`src/data/site.ts`, `docs.json`) — the git-committed defaults. They define what a freshly scaffolded site looks like and what renders before any dashboard override exists. Anything not overridden in the dashboard falls back to these.
@@ -37,7 +37,7 @@ export const siteConfig: SiteConfig = {
 
 ## Brand presets
 
-Dox ships with two color presets:
+Thally ships with two color presets:
 
 - **`primary`** — green accent (emerald tones)
 - **`secondary`** — purple accent (violet tones)
@@ -50,7 +50,7 @@ const brandPreset: BrandPresetKey = 'primary'  // or 'secondary'
 
 ## Brand accent (the color picker)
 
-The fastest way to recolor the site is the **dashboard**: under **Branding → Brand accent**, an Owner picks the accent with a color wheel, a set of presets, or by typing a hex/RGB value — for both light and dark mode. A live preview updates as you drag, and **Save** applies it to the running site with no rebuild. The accent drives links, active nav/sidebar states, buttons, and the focus ring; if you set only the light accent, Dox derives a sensible dark-mode shade automatically.
+The fastest way to recolor the site is the **dashboard**: under **Branding → Brand accent**, an Owner picks the accent with a color wheel, a set of presets, or by typing a hex/RGB value — for both light and dark mode. A live preview updates as you drag, and **Save** applies it to the running site with no rebuild. The accent drives links, active nav/sidebar states, buttons, and the focus ring; if you set only the light accent, Thally derives a sensible dark-mode shade automatically.
 
 This overrides just the accent (and its ring). The rest of the palette — backgrounds, borders, sidebar tokens — comes from the source-file presets below, so the dashboard is for quick recolors and the files are the versioned baseline.
 
@@ -182,7 +182,7 @@ export const siteConfig: SiteConfig = {
 
 ## Changelog RSS feed
 
-Dox serves an RSS feed at `/changelog/rss.xml`. Users can subscribe to it in any RSS reader to get notified of updates. The feed entries are defined in `src/app/changelog/rss.xml/route.ts`.
+Thally serves an RSS feed at `/changelog/rss.xml`. Users can subscribe to it in any RSS reader to get notified of updates. The feed entries are defined in `src/app/changelog/rss.xml/route.ts`.
 
 ## Page feedback
 

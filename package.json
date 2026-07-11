@@ -1,5 +1,5 @@
 {
-  "name": "dox",
+  "name": "thally",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
@@ -16,11 +16,11 @@
     "pretest": "npm run packages:build",
     "test": "vitest run",
     "check:agents": "tsx scripts/agent-readiness.ts",
-    "packages:build": "npm run build -w packages/create-dox && npm run build -w packages/mcp && npm run build -w packages/agent && npm run build -w packages/cli"
+    "packages:build": "npm run build -w packages/create-thally-docs && npm run build -w packages/mcp && npm run build -w packages/agent && npm run build -w packages/cli"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "@doxlabs/mcp": "*",
+    "@thallylabs/mcp": "*",
     "@headlessui/react": "^2.2.9",
     "@libsql/client": "^0.14.0",
     "@mdx-js/loader": "^3.1.0",

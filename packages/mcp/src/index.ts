@@ -4,7 +4,7 @@ import { createServer } from './server.js'
 // Node version guard
 const [major] = process.versions.node.split('.').map(Number)
 if (major < 18) {
-  console.error('Error: @doxlabs/mcp requires Node.js >= 18')
+  console.error('Error: @thallylabs/mcp requires Node.js >= 18')
   process.exit(1)
 }
 

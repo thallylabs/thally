@@ -1,5 +1,5 @@
 import { zodToJsonSchema } from 'zod-to-json-schema'
-import { tools as mcpTools, getTool } from '@doxlabs/mcp/tools'
+import { tools as mcpTools, getTool } from '@thallylabs/mcp/tools'
 
 export interface ClaudeTool {
   name: string

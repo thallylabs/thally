@@ -42,7 +42,7 @@ export function buildSkillManifest(): string {
 
 /**
  * `AGENTS.md` — repo-agent-shaped guidance for an agent *editing* this docs
- * project. Doubles as the config surface the `dox agent` (v2.1) reads. A
+ * project. Doubles as the config surface the `thally agent` (v2.1) reads. A
  * physical `AGENTS.md` at the project root overrides this generated default.
  */
 export function buildAgentsManifest(): string {
@@ -52,7 +52,7 @@ export function buildAgentsManifest(): string {
   lines.push('# AGENTS.md')
   lines.push('')
   lines.push(`Guidance for AI agents working on the **${siteConfig.name}** documentation.`)
-  lines.push('This is a Dox project — a Next.js app. You author content and config; the framework is a hidden runtime you never edit.')
+  lines.push('This is a Thally project — a Next.js app. You author content and config; the framework is a hidden runtime you never edit.')
   lines.push('')
   lines.push('## Project layout')
   lines.push('- `src/content/*.mdx` — the documentation pages you edit')
@@ -68,7 +68,7 @@ export function buildAgentsManifest(): string {
   lines.push('4. Keep pages substantive and well-structured (headings + real content) so they score well for AI agents.')
   lines.push('')
   lines.push('## Before committing')
-  lines.push('- Run `dox check` (content lint + Agent Readiness Score) and fix anything it flags.')
+  lines.push('- Run `thally check` (content lint + Agent Readiness Score) and fix anything it flags.')
   lines.push('- Open a pull request for review — never push docs changes directly.')
   lines.push('')
   lines.push('## Machine-readable endpoints')

@@ -7,6 +7,13 @@ import {
 
 const ENV_KEYS = [
   'ANTHROPIC_API_KEY',
+  'THALLY_TRIAL_ANTHROPIC_KEY',
+  'THALLY_CHAT_RATE_PER_MIN',
+  'THALLY_CHAT_RATE_PER_DAY',
+  'THALLY_TRIAL_RATE_PER_MIN',
+  'THALLY_TRIAL_RATE_PER_DAY',
+  'THALLY_TRIAL_DAILY_LIMIT',
+  // Legacy fallback names — cleared too so an ambient DOX_* value can't leak in.
   'DOX_TRIAL_ANTHROPIC_KEY',
   'DOX_CHAT_RATE_PER_MIN',
   'DOX_CHAT_RATE_PER_DAY',
@@ -38,12 +45,12 @@ describe('resolveAnthropicKey', () => {
 
   it('prefers the owner key', () => {
     process.env.ANTHROPIC_API_KEY = 'owner-key'
-    process.env.DOX_TRIAL_ANTHROPIC_KEY = 'trial-key'
+    process.env.THALLY_TRIAL_ANTHROPIC_KEY = 'trial-key'
     expect(resolveAnthropicKey()).toEqual({ apiKey: 'owner-key', tier: 'owner' })
   })
 
   it('falls back to the trial key', () => {
-    process.env.DOX_TRIAL_ANTHROPIC_KEY = 'trial-key'
+    process.env.THALLY_TRIAL_ANTHROPIC_KEY = 'trial-key'
     expect(resolveAnthropicKey()).toEqual({ apiKey: 'trial-key', tier: 'trial' })
   })
 })
@@ -68,7 +75,7 @@ describe('checkChatRateLimit', () => {
   })
 
   it('caps the trial tier tightly per minute', () => {
-    process.env.DOX_TRIAL_RATE_PER_MIN = '5'
+    process.env.THALLY_TRIAL_RATE_PER_MIN = '5'
     const now = 1_000_000
     for (let i = 0; i < 5; i += 1) {
       expect(checkChatRateLimit('1.1.1.1', 'trial', now).limited).toBe(false)
@@ -79,7 +86,7 @@ describe('checkChatRateLimit', () => {
   })
 
   it('lets the owner tier run far higher than trial', () => {
-    process.env.DOX_CHAT_RATE_PER_MIN = '20'
+    process.env.THALLY_CHAT_RATE_PER_MIN = '20'
     const now = 2_000_000
     for (let i = 0; i < 20; i += 1) {
       expect(checkChatRateLimit('2.2.2.2', 'owner', now).limited).toBe(false)
@@ -88,9 +95,9 @@ describe('checkChatRateLimit', () => {
   })
 
   it('enforces a global daily ceiling on the shared trial key', () => {
-    process.env.DOX_TRIAL_RATE_PER_MIN = '1000'
-    process.env.DOX_TRIAL_RATE_PER_DAY = '0'
-    process.env.DOX_TRIAL_DAILY_LIMIT = '3'
+    process.env.THALLY_TRIAL_RATE_PER_MIN = '1000'
+    process.env.THALLY_TRIAL_RATE_PER_DAY = '0'
+    process.env.THALLY_TRIAL_DAILY_LIMIT = '3'
     const now = 3_000_000
     expect(checkChatRateLimit('a', 'trial', now).limited).toBe(false)
     expect(checkChatRateLimit('b', 'trial', now).limited).toBe(false)
@@ -101,8 +108,8 @@ describe('checkChatRateLimit', () => {
   })
 
   it('does not apply the global ceiling to the owner tier', () => {
-    process.env.DOX_CHAT_RATE_PER_MIN = '1000'
-    process.env.DOX_TRIAL_DAILY_LIMIT = '1'
+    process.env.THALLY_CHAT_RATE_PER_MIN = '1000'
+    process.env.THALLY_TRIAL_DAILY_LIMIT = '1'
     const now = 4_000_000
     for (let i = 0; i < 50; i += 1) {
       expect(checkChatRateLimit(`ip-${i}`, 'owner', now).limited).toBe(false)
@@ -110,7 +117,7 @@ describe('checkChatRateLimit', () => {
   })
 
   it('resets the per-minute window after it elapses', () => {
-    process.env.DOX_TRIAL_RATE_PER_MIN = '1'
+    process.env.THALLY_TRIAL_RATE_PER_MIN = '1'
     const start = 5_000_000
     expect(checkChatRateLimit('x', 'trial', start).limited).toBe(false)
     expect(checkChatRateLimit('x', 'trial', start).limited).toBe(true)

@@ -48,7 +48,7 @@ function Group({ title, desc, children }: { title: string; desc?: string; childr
 }
 
 function analyticsStore(): string {
-  const url = process.env.DOX_ANALYTICS_DB_URL?.trim()
+  const url = (process.env.THALLY_ANALYTICS_DB_URL ?? process.env.DOX_ANALYTICS_DB_URL)?.trim()
   if (!url) return 'Embedded libSQL (.data/analytics/events.db)'
   if (url.startsWith('libsql://') || url.startsWith('https://')) return 'Turso / libSQL (remote)'
   return 'Custom libSQL file'
@@ -61,7 +61,7 @@ export function SettingsView({ role = 'viewer' }: { role?: Role }) {
   const ai = getAiConfig()
   const i18n = getI18nConfig()
   const ownerKey = Boolean(process.env.ANTHROPIC_API_KEY?.trim())
-  const trialKey = Boolean(process.env.DOX_TRIAL_ANTHROPIC_KEY?.trim())
+  const trialKey = Boolean((process.env.THALLY_TRIAL_ANTHROPIC_KEY ?? process.env.DOX_TRIAL_ANTHROPIC_KEY)?.trim())
   const chatStatus = !ai.chat ? 'Off' : ownerKey ? 'Your key' : trialKey ? 'Trial key' : 'Needs a key'
   const chatTone: Tone = !ai.chat ? 'neutral' : ownerKey ? 'success' : trialKey ? 'warn' : 'warn'
 
@@ -84,7 +84,7 @@ export function SettingsView({ role = 'viewer' }: { role?: Role }) {
           <code style={{ fontFamily: 'var(--ds-font-mono)' }}>docs.json</code>,{' '}
           <code style={{ fontFamily: 'var(--ds-font-mono)' }}>src/data/site.ts</code>, and environment variables — see the{' '}
           <Link href="/guides/extending" style={{ color: 'var(--ds-accent-mid)', fontWeight: 'var(--ds-fw-semibold)' }}>
-            Extending Dox
+            Extending Thally
           </Link>{' '}
           guide.
         </p>
@@ -106,12 +106,12 @@ export function SettingsView({ role = 'viewer' }: { role?: Role }) {
       </section>
 
       <Group title="Access & authentication" desc="Who can reach the admin console and the docs themselves.">
-        <Row label="Admin dashboard" value={adminOn ? 'Enabled' : 'Off'} tone={adminOn ? 'success' : 'neutral'} hint="DOX_ADMIN_PASSWORD" />
+        <Row label="Admin dashboard" value={adminOn ? 'Enabled' : 'Off'} tone={adminOn ? 'success' : 'neutral'} hint="THALLY_ADMIN_PASSWORD" />
         <Row
           label="Docs access protection"
           value={accessOn ? 'Password-gated' : 'Public'}
           tone={accessOn ? 'success' : 'neutral'}
-          hint="DOX_ACCESS_PASSWORD"
+          hint="THALLY_ACCESS_PASSWORD"
         />
       </Group>
 
@@ -121,7 +121,7 @@ export function SettingsView({ role = 'viewer' }: { role?: Role }) {
       </Group>
 
       <Group title="AI chat" desc="The retrieval-augmented assistant embedded in your docs.">
-        <Row label="Chat widget" value={chatStatus} tone={chatTone} hint="ANTHROPIC_API_KEY / DOX_TRIAL_ANTHROPIC_KEY" />
+        <Row label="Chat widget" value={chatStatus} tone={chatTone} hint="ANTHROPIC_API_KEY / THALLY_TRIAL_ANTHROPIC_KEY" />
         <Row label="Retrieval" value="RAG + citations" tone="success" />
       </Group>
 
@@ -143,7 +143,7 @@ export function SettingsView({ role = 'viewer' }: { role?: Role }) {
         <div className="ds-setting-group-head">
           <h2 className="ds-setting-group-title">Integrations</h2>
           <p className="ds-setting-group-desc">
-            Connect GitHub so <Link href="/guides/dox-track" style={{ color: 'var(--ds-accent-mid)', fontWeight: 'var(--ds-fw-semibold)' }}>Dox Track</Link>{' '}
+            Connect GitHub so <Link href="/guides/thally-track" style={{ color: 'var(--ds-accent-mid)', fontWeight: 'var(--ds-fw-semibold)' }}>Thally Track</Link>{' '}
             can watch your product repos and draft docs PRs.
           </p>
         </div>

@@ -7,7 +7,7 @@ import { getAdminSettings } from '@/lib/admin/settings'
 export const runtime = 'nodejs'
 
 export async function POST(request: NextRequest) {
-  const secret = request.headers.get('x-dox-analytics-secret')
+  const secret = request.headers.get('x-thally-analytics-secret')
   if (secret !== getInternalAnalyticsSecret()) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }

@@ -1,14 +1,14 @@
 /**
  * Anthropic key tiering for the AI chat.
  *
- * The goal is a frictionless "aha" experience: every Dox project can answer a
+ * The goal is a frictionless "aha" experience: every Thally project can answer a
  * few questions out of the box using a shared, tightly rate-limited trial key.
  * Once owners want real usage, they drop in their own key and the trial limits
  * fall away.
  *
  * Key precedence:
  *   1. ANTHROPIC_API_KEY        -> owner tier  (their key, generous limits)
- *   2. DOX_TRIAL_ANTHROPIC_KEY  -> trial tier  (shared key, strict limits + global cap)
+ *   2. THALLY_TRIAL_ANTHROPIC_KEY  -> trial tier  (shared key, strict limits + global cap)
  *   3. none                     -> chat disabled (caller returns 503)
  *
  * Limits are per-IP (sliding windows) plus, for the trial tier only, a global
@@ -42,7 +42,8 @@ interface TierLimit {
 }
 
 function envInt(name: string, fallback: number): number {
-  const raw = process.env[name]
+  // THALLY_* is canonical; the legacy DOX_* name still works as a fallback.
+  const raw = process.env[name] ?? process.env[name.replace(/^THALLY_/, 'DOX_')]
   if (!raw) return fallback
   const parsed = Number.parseInt(raw, 10)
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
@@ -52,7 +53,7 @@ export function resolveAnthropicKey(): ResolvedAiKey | null {
   const ownerKey = process.env.ANTHROPIC_API_KEY?.trim()
   if (ownerKey) return { apiKey: ownerKey, tier: 'owner' }
 
-  const trialKey = process.env.DOX_TRIAL_ANTHROPIC_KEY?.trim()
+  const trialKey = (process.env.THALLY_TRIAL_ANTHROPIC_KEY ?? process.env.DOX_TRIAL_ANTHROPIC_KEY)?.trim()
   if (trialKey) return { apiKey: trialKey, tier: 'trial' }
 
   return null
@@ -61,7 +62,7 @@ export function resolveAnthropicKey(): ResolvedAiKey | null {
 /**
  * Resolve the chat key with the admin override applied: a dashboard-set key
  * (F1, encrypted) is used first at OWNER tier; otherwise fall back to the env
- * resolver. Decrypt failure (e.g. rotated DOX_AUTH_SECRET) degrades to env.
+ * resolver. Decrypt failure (e.g. rotated THALLY_AUTH_SECRET) degrades to env.
  */
 export async function resolveChatKey(): Promise<ResolvedAiKey | null> {
   try {
@@ -81,18 +82,18 @@ export async function resolveChatKey(): Promise<ResolvedAiKey | null> {
 function tierLimits(tier: AiKeyTier): TierLimit {
   if (tier === 'owner') {
     return {
-      perMinute: envInt('DOX_CHAT_RATE_PER_MIN', 20),
-      perDay: envInt('DOX_CHAT_RATE_PER_DAY', 0),
+      perMinute: envInt('THALLY_CHAT_RATE_PER_MIN', 20),
+      perDay: envInt('THALLY_CHAT_RATE_PER_DAY', 0),
     }
   }
   return {
-    perMinute: envInt('DOX_TRIAL_RATE_PER_MIN', 5),
-    perDay: envInt('DOX_TRIAL_RATE_PER_DAY', 30),
+    perMinute: envInt('THALLY_TRIAL_RATE_PER_MIN', 5),
+    perDay: envInt('THALLY_TRIAL_RATE_PER_DAY', 30),
   }
 }
 
 function trialGlobalDailyLimit(): number {
-  return envInt('DOX_TRIAL_DAILY_LIMIT', 500)
+  return envInt('THALLY_TRIAL_DAILY_LIMIT', 500)
 }
 
 const MINUTE_MS = 60_000

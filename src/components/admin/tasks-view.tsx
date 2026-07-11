@@ -50,7 +50,7 @@ export function TasksView({
         </div>
         {trackedRepos.length === 0 ? (
           <p style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-text-muted)' }}>
-            No product repos tracked yet. Run <code className="font-mono">dox track add &lt;owner/repo&gt;</code> to have
+            No product repos tracked yet. Run <code className="font-mono">thally track add &lt;owner/repo&gt;</code> to have
             merged PRs there become docs PRs automatically.
           </p>
         ) : (
@@ -119,8 +119,8 @@ export function TasksView({
           </p>
         ) : tasks.length === 0 ? (
           <p style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-text-muted)' }}>
-            No agent docs PRs yet. When someone comments <code className="font-mono">@dox</code> on a product PR (or runs{' '}
-            <code className="font-mono">dox agent</code>), the drafted PR shows up here.
+            No agent docs PRs yet. When someone comments <code className="font-mono">@thally</code> on a product PR (or runs{' '}
+            <code className="font-mono">thally agent</code>), the drafted PR shows up here.
           </p>
         ) : (
           <table className="ds-table">

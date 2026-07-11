@@ -94,7 +94,7 @@ export function AdminShell({ siteName, children }: { siteName: string; children:
 
   // The login screen renders bare — no shell chrome.
   if (pathname === '/admin/login') {
-    return <div className="dox-dashboard">{children}</div>
+    return <div className="thally-dashboard">{children}</div>
   }
 
   async function handleLogout() {
@@ -109,7 +109,7 @@ export function AdminShell({ siteName, children }: { siteName: string; children:
   const title = TITLES[pathname] ?? 'Admin'
 
   return (
-    <div className="dox-dashboard ds-shell">
+    <div className="thally-dashboard ds-shell">
       <AdminCommandMenu open={cmdOpen} onOpenChange={setCmdOpen} onLogout={() => void handleLogout()} />
 
       {mobileOpen ? (

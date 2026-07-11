@@ -1,4 +1,4 @@
-import { resolveGithubToken, type GithubAppCreds } from '@doxlabs/mcp/track'
+import { resolveGithubToken, type GithubAppCreds } from '@thallylabs/mcp/track'
 import { siteConfig } from '@/data/site'
 import { getEffectiveSiteConfig } from '@/lib/admin/site-config'
 import { getDecryptedGithubApp } from '@/lib/admin/settings'
@@ -17,7 +17,7 @@ export type DispatchAgentResult =
 /** Docs repo the agent should open PRs against (env wins, then admin/site config). */
 export async function resolveDocsRepoUrl(): Promise<string> {
   const effective = await getEffectiveSiteConfig()
-  return (process.env.DOX_REPO_URL?.trim() || effective.repoUrl || siteConfig.repoUrl || '').trim()
+  return ((process.env.THALLY_REPO_URL ?? process.env.DOX_REPO_URL)?.trim() || effective.repoUrl || siteConfig.repoUrl || '').trim()
 }
 
 /** Build a concrete agent instruction from a readiness subscore + its offenders. */
@@ -50,7 +50,7 @@ export async function dispatchDocsAgent(opts: {
       code: 'no_repo',
       status: 400,
       message:
-        'No docs repository configured. Set the repository URL in Admin → Settings (or DOX_REPO_URL) so the docs agent can open a PR.',
+        'No docs repository configured. Set the repository URL in Admin → Settings (or THALLY_REPO_URL) so the docs agent can open a PR.',
     }
   }
 
@@ -77,7 +77,7 @@ export async function dispatchDocsAgent(opts: {
       code: 'no_token',
       status: 503,
       message:
-        'No GitHub credentials available to dispatch the docs agent. Connect GitHub in Admin → Settings, or set DOX_GITHUB_TOKEN.',
+        'No GitHub credentials available to dispatch the docs agent. Connect GitHub in Admin → Settings, or set THALLY_GITHUB_TOKEN.',
     }
   }
 
@@ -90,7 +90,7 @@ export async function dispatchDocsAgent(opts: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      event_type: 'dox-document',
+      event_type: 'thally-document',
       client_payload: {
         instruction: opts.instruction.slice(0, 4000),
         ...(opts.requester ? { requester: opts.requester } : {}),

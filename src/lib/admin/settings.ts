@@ -34,7 +34,7 @@ export interface AdminSettings {
   chatKeyEnc: string | null
   /**
    * A user-owned GitHub App connected via the "Connect GitHub" manifest flow —
-   * Dox Track's org-wide access path. The private key + webhook secret are
+   * Thally Track's org-wide access path. The private key + webhook secret are
    * AES-GCM encrypted; the API only ever returns the non-secret slug/id.
    */
   githubApp: GithubAppSettings | null
@@ -43,7 +43,7 @@ export interface AdminSettings {
 export interface GithubAppSettings {
   /** Numeric GitHub App id (string for JSON safety). */
   appId: string
-  /** App slug, e.g. "acme-dox-track" — safe to display. */
+  /** App slug, e.g. "acme-thally-track" — safe to display. */
   slug: string
   /** The app's GitHub page — safe to display / link. */
   htmlUrl: string
@@ -105,7 +105,7 @@ export async function getAdminSettings(): Promise<AdminSettings> {
 /**
  * Decrypt the connected GitHub App into usable credentials for token minting +
  * webhook verification. Returns null unless the app is connected AND installed
- * AND the private key decrypts (e.g. after a DOX_AUTH_SECRET rotation it won't,
+ * AND the private key decrypts (e.g. after a THALLY_AUTH_SECRET rotation it won't,
  * and the caller degrades to env/PAT). Never throws.
  */
 export async function getDecryptedGithubApp(): Promise<{

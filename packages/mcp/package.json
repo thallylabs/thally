@@ -1,13 +1,13 @@
 {
-  "name": "@doxlabs/mcp",
-  "version": "0.6.0",
-  "description": "MCP server for scaffolding and managing Dox documentation projects",
+  "name": "@thallylabs/mcp",
+  "version": "0.7.0",
+  "description": "MCP server for scaffolding and managing Thally documentation projects",
   "type": "module",
   "engines": {
     "node": ">=18"
   },
   "bin": {
-    "dox-mcp": "./dist/index.js"
+    "thally-mcp": "./dist/index.js"
   },
   "exports": {
     ".": "./dist/index.js",
@@ -47,7 +47,7 @@
   },
   "license": "MIT",
   "keywords": [
-    "dox",
+    "thally",
     "documentation",
     "mcp",
     "model-context-protocol",
@@ -59,11 +59,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kenny-io/Dox.git",
+    "url": "git+https://github.com/thallylabs/thally.git",
     "directory": "packages/mcp"
   },
-  "homepage": "https://github.com/kenny-io/Dox#readme",
+  "homepage": "https://github.com/thallylabs/thally#readme",
   "bugs": {
-    "url": "https://github.com/kenny-io/Dox/issues"
+    "url": "https://github.com/thallylabs/thally/issues"
   }
 }

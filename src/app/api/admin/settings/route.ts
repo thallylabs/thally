@@ -151,12 +151,12 @@ export async function PUT(request: NextRequest) {
     patch.docsPasswordHash = null
   }
   // AI-chat API key: encrypt (AES-GCM) + store on set; clear on empty/null.
-  // Refuse to store without DOX_AUTH_SECRET rather than persist plaintext.
+  // Refuse to store without THALLY_AUTH_SECRET rather than persist plaintext.
   if (typeof body.chatKey === 'string' && body.chatKey.trim()) {
     const enc = encryptSecret(body.chatKey.trim())
     if (!enc) {
       return NextResponse.json(
-        { error: 'Set DOX_AUTH_SECRET to store an API key securely.' },
+        { error: 'Set THALLY_AUTH_SECRET to store an API key securely.' },
         { status: 400 },
       )
     }

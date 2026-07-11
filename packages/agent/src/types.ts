@@ -2,7 +2,7 @@
 export type TaskSource = 'cli' | 'mention' | 'merge' | 'drift' | 'track'
 
 /**
- * The unit of work for the agent. Every trigger surface (the CLI, a `@dox`
+ * The unit of work for the agent. Every trigger surface (the CLI, a `@thally`
  * comment, a merge dispatch, a drift sweep) produces one of these; the agent
  * consumes it the same way regardless of origin.
  */

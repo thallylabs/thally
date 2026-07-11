@@ -39,7 +39,7 @@ export interface DocsJsonConfig {
     defaultLocale: string
     locales: Array<{ code: string; label: string }>
   }
-  /** Dox Track — product repos whose commits trigger docs-agent PRs (typed for `sync_from_repo`). */
+  /** Thally Track — product repos whose commits trigger docs-agent PRs (typed for `sync_from_repo`). */
   tracking?: {
     repos?: Array<{
       owner: string

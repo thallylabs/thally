@@ -72,8 +72,8 @@ function apiCatalog(origin: string): Response {
 
 function mcpServerCard(origin: string): Response {
   return json({
-    name: 'dox-docs',
-    title: 'Dox documentation MCP server',
+    name: 'thally-docs',
+    title: 'Thally documentation MCP server',
     description:
       'Read-only MCP server exposing this documentation site: full-text search, page reads as Markdown, a page index, and an agent-readiness report.',
     version: '1.0.0',
@@ -109,7 +109,7 @@ function a2aAgentCard(origin: string): Response {
   // /api/mcp actually implements.
   return json({
     protocolVersion: '0.3.0',
-    name: 'Dox Docs Agent',
+    name: 'Thally Docs Agent',
     description:
       'Documentation agent for this site. Answers questions from the docs corpus via search, Markdown page reads, and a machine-readable page index. Read-only and public. Accessible over MCP (not A2A) — attach with an MCP client.',
     // No A2A service URL is advertised: this agent exposes no A2A transport.
@@ -144,7 +144,7 @@ function oauthProtectedResource(origin: string): Response {
   // this resource. auth.md carries the human/agent-readable version.
   return json({
     resource: origin,
-    resource_name: 'Dox documentation',
+    resource_name: 'Thally documentation',
     // Empty by declaration, not omission: no OAuth authorization server
     // fronts this resource (RFC 9728 §2 — the array lists AS issuers).
     authorization_servers: [],
@@ -192,7 +192,7 @@ honestly via \`User-Agent\` so rate limiting can be fair.
 ## Step 3 — Attach over MCP (optional)
 
 \`\`\`
-claude mcp add --transport http dox ${origin}/api/mcp
+claude mcp add --transport http thally ${origin}/api/mcp
 \`\`\`
 
 The MCP server accepts anonymous \`initialize\` and \`tools/call\` requests.
@@ -273,7 +273,7 @@ description: Attach an MCP client to this site and use its docs as native tools.
 This site runs a read-only MCP server (streamable HTTP, no auth):
 
 \`\`\`
-claude mcp add --transport http dox ${origin}/api/mcp
+claude mcp add --transport http thally ${origin}/api/mcp
 \`\`\`
 
 Available tools: ${toolMetadata.map((tool) => `\`${tool.name}\``).join(', ')}.

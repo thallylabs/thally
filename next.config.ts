@@ -19,13 +19,17 @@ const nextConfig: NextConfig = {
     externalDir: true,
   },
   async redirects() {
-    return docRedirects.map(({ source, destination, permanent = false }) => ({
-      source,
-      destination,
-      permanent,
-    }))
+    return [
+      // Legacy pre-rebrand URL — the guide moved with the Dox → Thally rename.
+      { source: '/guides/dox-track', destination: '/guides/thally-track', permanent: true },
+      ...docRedirects.map(({ source, destination, permanent = false }) => ({
+        source,
+        destination,
+        permanent,
+      })),
+    ]
   },
-  // Serve the dynamic brand favicon (admin upload → else the Dox default mark)
+  // Serve the dynamic brand favicon (admin upload → else the Thally default mark)
   // for the browser's automatic /favicon.ico request. We deleted the static
   // app/favicon.ico so Next's default icon can never win; this rewrite makes
   // sure a direct /favicon.ico hit still resolves to the right icon.

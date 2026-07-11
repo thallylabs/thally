@@ -1,26 +1,26 @@
 /* ============================================================================
-   DOX DASHBOARD DESIGN SYSTEM — token layer
+   THALLY DASHBOARD DESIGN SYSTEM — token layer
    ----------------------------------------------------------------------------
-   A perceptual, OKLCH-based token system for Dox's admin analytics dashboard,
+   A perceptual, OKLCH-based token system for Thally's admin analytics dashboard,
    modeled on LI.FI's design language (perceptual color scales, three-tier
-   elevation, one dark/light flip, 4px spacing rhythm) but reskinned to Dox's
+   elevation, one dark/light flip, 4px spacing rhythm) but reskinned to Thally's
    CRIMSON brand (brandPresets.primary — #E11D48 light / #F43F5E dark). The
    green scale below is a fixed, brand-independent data-viz intensity ramp.
 
    SCOPING — this file is OPT-IN and MUST NOT leak into the docs site.
-   Every token lives under `.dox-dashboard`; dark overrides live under
-   `.dark .dox-dashboard` (Dox toggles `.dark` on <html>, so the dashboard
+   Every token lives under `.thally-dashboard`; dark overrides live under
+   `.dark .thally-dashboard` (Thally toggles `.dark` on <html>, so the dashboard
    root is always a descendant). There is intentionally NO bare `:root`,
    `body`, or `*` rule here. Import it only where the dashboard mounts:
 
        // in the admin/dashboard entry (NOT globals.css)
        import '@/styles/design-system.css'
-       <div className="dox-dashboard"> … </div>
+       <div className="thally-dashboard"> … </div>
 
    BRAND ANCHORING — the accent is pinned to the literal brand hex and all
    companion tones (tints, borders, glows) are derived from it via
    color-mix / relative-color OKLCH, so the whole dashboard stays exactly
-   on-brand no matter what the running docs `--dox-accent` resolves to
+   on-brand no matter what the running docs `--thally-accent` resolves to
    (that token is purple under the current `secondary` preset — we do NOT
    inherit it here).
 
@@ -29,9 +29,9 @@
    or `className="bg-[color:var(--ds-surface-card)]"`.
    ============================================================================ */
 
-.dox-dashboard {
-  /* ── Brand-neutral references — reuse Dox's existing app tokens ──────────
-     Fonts and radii are brand-agnostic, so we point at what Dox already
+.thally-dashboard {
+  /* ── Brand-neutral references — reuse Thally's existing app tokens ──────────
+     Fonts and radii are brand-agnostic, so we point at what Thally already
      defines rather than forking. */
   --ds-font-sans:    var(--font-sans, 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif);
   --ds-font-heading: var(--font-heading, var(--ds-font-sans));
@@ -39,17 +39,17 @@
 
   /* ────────────────────────────────────────────────────────────────────────
      1. BRAND ACCENT — identity tones inherit the site's brand accent
-     (--dox-accent, the HSL triple set by brand.css / docs.json), so the
-     console feels like the owner's product rather than Dox's. Tones are
-     derived from the single anchor via OKLCH mixing. Fallback = Dox emerald.
+     (--thally-accent, the HSL triple set by brand.css / docs.json), so the
+     console feels like the owner's product rather than Thally's. Tones are
+     derived from the single anchor via OKLCH mixing. Fallback = Thally emerald.
      Functional color (status, chart series, green data ramp) stays fixed
      below — semantics must not change with the brand.
      ──────────────────────────────────────────────────────────────────────── */
-  --ds-accent:            hsl(var(--dox-accent, 347 77% 50%));
+  --ds-accent:            hsl(var(--thally-accent, 347 77% 50%));
   --ds-accent-mid:        color-mix(in oklch, var(--ds-accent) 85%, black);  /* hovers, icons */
   --ds-accent-strong:     color-mix(in oklch, var(--ds-accent) 72%, black);  /* pressed / active */
   --ds-accent-fg:         color-mix(in oklch, var(--ds-accent) 8%, white);   /* text/icon on solid fill */
-  --ds-accent-secondary:  #8B5CF6;  /* Dox secondary — violet (charts, dual metrics) */
+  --ds-accent-secondary:  #8B5CF6;  /* Thally secondary — violet (charts, dual metrics) */
   --ds-accent-tertiary:   #F59E0B;  /* amber — third categorical accent */
 
   /* Derived accent companions — the LI.FI recipe: one token, many tones.
@@ -77,9 +77,9 @@
   --ds-green-9: oklch(0.300 0.068 166);
 
   /* ────────────────────────────────────────────────────────────────────────
-     3. NEUTRAL / SLATE SCALE — 9 perceptual steps (hue ~257, Dox slate)
+     3. NEUTRAL / SLATE SCALE — 9 perceptual steps (hue ~257, Thally slate)
      The ink ramp for text, borders, and surfaces. Same L cadence as LI.FI's
-     "midnight"; cool slate hue matches Dox's #0F172A foreground.
+     "midnight"; cool slate hue matches Thally's #0F172A foreground.
      ──────────────────────────────────────────────────────────────────────── */
   --ds-slate-1: oklch(0.985 0.003 247);  /* near-white */
   --ds-slate-2: oklch(0.968 0.006 247);  /* ≈ #F8FAFC */
@@ -92,7 +92,7 @@
   --ds-slate-9: oklch(0.210 0.040 258);  /* ≈ #0F172A foreground */
 
   /* ────────────────────────────────────────────────────────────────────────
-     4. SEMANTIC SURFACES + TEXT — LIGHT theme (default under .dox-dashboard)
+     4. SEMANTIC SURFACES + TEXT — LIGHT theme (default under .thally-dashboard)
      Four surface tiers (sunk → page → raised → card) + four text tiers.
      ──────────────────────────────────────────────────────────────────────── */
   --ds-surface-sunk:   oklch(0.968 0.006 247);  /* recessed wells, track bg */
@@ -141,7 +141,7 @@
      the green intensity scale; diverging = red↔green through neutral.
      ──────────────────────────────────────────────────────────────────────── */
   --ds-series-1: #8B5CF6;                 /* brand violet */
-  --ds-series-2: #10B981;                 /* Dox emerald */
+  --ds-series-2: #10B981;                 /* Thally emerald */
   --ds-series-3: oklch(0.720 0.150 75);   /* amber */
   --ds-series-4: oklch(0.585 0.160 240);  /* blue */
   --ds-series-5: oklch(0.650 0.170 350);  /* pink */
@@ -188,7 +188,7 @@
   --ds-space-96:  96px;
 
   /* ────────────────────────────────────────────────────────────────────────
-     8. RADII — align to LI.FI's 4/8/12/16 ladder (Dox --theme-radius parallel)
+     8. RADII — align to LI.FI's 4/8/12/16 ladder (Thally --theme-radius parallel)
      ──────────────────────────────────────────────────────────────────────── */
   --ds-radius-sm:   6px;    /* chips, small controls */
   --ds-radius-md:   8px;    /* buttons, inputs, table cells */
@@ -254,16 +254,16 @@
 }
 
 /* ============================================================================
-   DARK THEME — one flip. Dox toggles `.dark` on <html>; the dashboard root is
-   a descendant, so `.dark .dox-dashboard` overrides only the surfaces, text,
+   DARK THEME — one flip. Thally toggles `.dark` on <html>; the dashboard root is
+   a descendant, so `.dark .thally-dashboard` overrides only the surfaces, text,
    status intensities, elevation opacities, and chart chrome that must change.
    Brand accent + scales are reused (accent bumps to the lighter #34D399).
    ============================================================================ */
-.dark .dox-dashboard {
-  /* Accent — follows the brand's dark accent (--dox-accent flips with .dark).
+.dark .thally-dashboard {
+  /* Accent — follows the brand's dark accent (--thally-accent flips with .dark).
      Mixing with white keeps derived tones vivid on dark surfaces; the fg tone
      goes near-black since dark-theme accents are typically light. */
-  --ds-accent:        hsl(var(--dox-accent, 270 95% 75%));
+  --ds-accent:        hsl(var(--thally-accent, 270 95% 75%));
   --ds-accent-mid:    color-mix(in oklch, var(--ds-accent) 88%, white);
   --ds-accent-strong: color-mix(in oklch, var(--ds-accent) 78%, black);
   --ds-accent-fg:     color-mix(in oklch, var(--ds-accent) 22%, black);
@@ -322,14 +322,14 @@
 
 /* ============================================================================
    MINIMAL COMPONENT BASE CLASSES
-   Token-driven, every selector prefixed with `.dox-dashboard` so nothing
+   Token-driven, every selector prefixed with `.thally-dashboard` so nothing
    leaks. These are starters for the core dashboard patterns — extend in JSX;
    see notes/design-system.md for the full pattern catalog. Not a component
    library, just the load-bearing primitives.
    ============================================================================ */
 
 /* Panel — the shared surface for chart/metric blocks */
-.dox-dashboard .ds-panel {
+.thally-dashboard .ds-panel {
   padding: var(--ds-space-24);
   background: var(--ds-surface-raised);
   border: 1px solid var(--ds-border);
@@ -337,24 +337,24 @@
   box-shadow: none;
 }
 /* Interactive panels — links/cards that respond to hover */
-.dox-dashboard .ds-panel--interactive {
+.thally-dashboard .ds-panel--interactive {
   transition: border-color var(--ds-dur-base) var(--ds-ease-standard),
               box-shadow var(--ds-dur-base) var(--ds-ease-standard),
               transform var(--ds-dur-base) var(--ds-ease-out);
 }
-.dox-dashboard .ds-panel--interactive:hover {
+.thally-dashboard .ds-panel--interactive:hover {
   border-color: var(--ds-border-strong);
   box-shadow: var(--ds-elev-2);
   transform: translateY(-1px);
 }
-.dox-dashboard .ds-panel-head {
+.thally-dashboard .ds-panel-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--ds-space-16);
   margin-bottom: var(--ds-space-20);
 }
-.dox-dashboard .ds-panel-title {
+.thally-dashboard .ds-panel-title {
   font-family: var(--ds-font-heading);
   font-size: var(--ds-text-h4);
   font-weight: var(--ds-fw-semibold);
@@ -362,7 +362,7 @@
   letter-spacing: var(--ds-tracking-snug);
   margin: 0 0 var(--ds-space-4);
 }
-.dox-dashboard .ds-panel-sub {
+.thally-dashboard .ds-panel-sub {
   font-size: var(--ds-text-caption);
   color: var(--ds-text-muted);
   letter-spacing: var(--ds-tracking-wide);
@@ -370,7 +370,7 @@
 }
 
 /* Section rhythm — eyebrow / title / description cluster */
-.dox-dashboard .ds-eyebrow {
+.thally-dashboard .ds-eyebrow {
   font-family: var(--ds-font-mono);
   font-size: var(--ds-text-caption);
   font-weight: var(--ds-fw-semibold);
@@ -379,7 +379,7 @@
   color: var(--ds-text-faint);
   margin-bottom: var(--ds-space-12);
 }
-.dox-dashboard .ds-section-title {
+.thally-dashboard .ds-section-title {
   font-family: var(--ds-font-heading);
   font-size: var(--ds-text-h3);
   font-weight: var(--ds-fw-semibold);
@@ -387,7 +387,7 @@
   letter-spacing: var(--ds-tracking-tight);
   margin: 0 0 var(--ds-space-8);
 }
-.dox-dashboard .ds-section-desc {
+.thally-dashboard .ds-section-desc {
   font-size: var(--ds-text-sm);
   line-height: var(--ds-lh-body);
   color: var(--ds-text-muted);
@@ -396,7 +396,7 @@
 }
 
 /* Stat card */
-.dox-dashboard .ds-stat-card {
+.thally-dashboard .ds-stat-card {
   --ds-stat-accent: var(--ds-accent);
   display: flex;
   flex-direction: column;
@@ -410,12 +410,12 @@
   overflow: hidden;
   min-width: 0;
 }
-.dox-dashboard .ds-stat-card-label {
+.thally-dashboard .ds-stat-card-label {
   font-size: var(--ds-text-body);
   color: var(--ds-text-muted);
   font-weight: var(--ds-fw-regular);
 }
-.dox-dashboard .ds-stat-card-value {
+.thally-dashboard .ds-stat-card-value {
   font-family: var(--ds-font-heading);
   font-size: var(--ds-text-h2);
   line-height: 1;
@@ -425,7 +425,7 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.dox-dashboard .ds-stat-card-footer {
+.thally-dashboard .ds-stat-card-footer {
   display: flex;
   align-items: center;
   gap: var(--ds-space-8);
@@ -434,18 +434,18 @@
   color: var(--ds-text-muted);
 }
 /* Positive / negative outline emphasis */
-.dox-dashboard .ds-stat-card--pos {
+.thally-dashboard .ds-stat-card--pos {
   border-color: var(--ds-success-border);
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--ds-success) 8%, transparent),
               var(--ds-elev-1);
 }
-.dox-dashboard .ds-stat-card--neg {
+.thally-dashboard .ds-stat-card--neg {
   border-color: var(--ds-danger-border);
   box-shadow: 0 0 0 1px color-mix(in oklch, var(--ds-danger) 8%, transparent),
               var(--ds-elev-1);
 }
 /* Radial accent-glow variant — ambient glow top-right */
-.dox-dashboard .ds-stat-card--glow {
+.thally-dashboard .ds-stat-card--glow {
   background:
     radial-gradient(ellipse 85% 65% at 100% 0%,
       color-mix(in oklch, var(--ds-stat-accent) 16%, transparent) 0%,
@@ -454,19 +454,19 @@
   border-color: color-mix(in oklch, var(--ds-stat-accent) 20%, transparent);
 }
 /* Bold hero fill — the single headline KPI on a page */
-.dox-dashboard .ds-stat-card--bold {
+.thally-dashboard .ds-stat-card--bold {
   background: linear-gradient(135deg, var(--ds-accent) 0%, var(--ds-accent-strong) 100%);
   border-color: transparent;
 }
-.dox-dashboard .ds-stat-card--bold .ds-stat-card-value { color: var(--ds-accent-fg); }
-.dox-dashboard .ds-stat-card--bold .ds-stat-card-label,
-.dox-dashboard .ds-stat-card--bold .ds-stat-card-footer {
+.thally-dashboard .ds-stat-card--bold .ds-stat-card-value { color: var(--ds-accent-fg); }
+.thally-dashboard .ds-stat-card--bold .ds-stat-card-label,
+.thally-dashboard .ds-stat-card--bold .ds-stat-card-footer {
   color: color-mix(in oklch, var(--ds-accent-fg) 82%, transparent);
 }
-.dox-dashboard .ds-stat-card--accent2 { --ds-stat-accent: var(--ds-accent-secondary); }
-.dox-dashboard .ds-stat-card--accent3 { --ds-stat-accent: var(--ds-accent-tertiary); }
+.thally-dashboard .ds-stat-card--accent2 { --ds-stat-accent: var(--ds-accent-secondary); }
+.thally-dashboard .ds-stat-card--accent3 { --ds-stat-accent: var(--ds-accent-tertiary); }
 /* Leading icon tile */
-.dox-dashboard .ds-stat-card-icon {
+.thally-dashboard .ds-stat-card-icon {
   width: var(--ds-space-32);
   height: var(--ds-space-32);
   border-radius: var(--ds-radius-md);
@@ -479,7 +479,7 @@
 }
 
 /* Chip / badge / pill */
-.dox-dashboard .ds-chip {
+.thally-dashboard .ds-chip {
   display: inline-flex;
   align-items: center;
   gap: var(--ds-space-4);
@@ -493,24 +493,24 @@
   font-weight: var(--ds-fw-semibold);
   white-space: nowrap;
 }
-.dox-dashboard .ds-chip--accent  { background: var(--ds-accent-tint); color: var(--ds-accent-mid); }
-.dox-dashboard .ds-chip--success { background: var(--ds-success-bg); color: var(--ds-success); }
-.dox-dashboard .ds-chip--danger  { background: var(--ds-danger-bg);  color: var(--ds-danger); }
-.dox-dashboard .ds-chip--warn    { background: var(--ds-warn-bg);    color: var(--ds-warn); }
-.dox-dashboard .ds-chip--info    { background: var(--ds-info-bg);    color: var(--ds-info); }
-.dox-dashboard .ds-chip--neutral {
+.thally-dashboard .ds-chip--accent  { background: var(--ds-accent-tint); color: var(--ds-accent-mid); }
+.thally-dashboard .ds-chip--success { background: var(--ds-success-bg); color: var(--ds-success); }
+.thally-dashboard .ds-chip--danger  { background: var(--ds-danger-bg);  color: var(--ds-danger); }
+.thally-dashboard .ds-chip--warn    { background: var(--ds-warn-bg);    color: var(--ds-warn); }
+.thally-dashboard .ds-chip--info    { background: var(--ds-info-bg);    color: var(--ds-info); }
+.thally-dashboard .ds-chip--neutral {
   background: color-mix(in oklch, var(--ds-text-primary) 8%, transparent);
   color: var(--ds-text-secondary);
 }
 
 /* Data table */
-.dox-dashboard .ds-table {
+.thally-dashboard .ds-table {
   width: 100%;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1, 'kern' 1;
 }
-.dox-dashboard .ds-table th {
+.thally-dashboard .ds-table th {
   height: var(--ds-space-48);
   padding: 0 var(--ds-space-20);
   text-align: left;
@@ -520,7 +520,7 @@
   color: var(--ds-text-muted);
   border-bottom: 1px solid var(--ds-border-subtle);
 }
-.dox-dashboard .ds-table td {
+.thally-dashboard .ds-table td {
   height: var(--ds-space-56);
   padding: 0 var(--ds-space-20);
   vertical-align: middle;
@@ -528,18 +528,18 @@
   color: var(--ds-text-primary);
   border-bottom: 1px solid var(--ds-border-subtle);
 }
-.dox-dashboard .ds-table tbody tr:last-child td { border-bottom: none; }
-.dox-dashboard .ds-table tbody tr:hover td {
+.thally-dashboard .ds-table tbody tr:last-child td { border-bottom: none; }
+.thally-dashboard .ds-table tbody tr:hover td {
   background: color-mix(in oklch, var(--ds-text-primary) 4%, transparent);
 }
-.dox-dashboard .ds-table--striped tbody tr:nth-child(even) td {
+.thally-dashboard .ds-table--striped tbody tr:nth-child(even) td {
   background: color-mix(in oklch, var(--ds-text-primary) 3%, transparent);
 }
-.dox-dashboard .ds-table td.ds-num,
-.dox-dashboard .ds-table th.ds-num { text-align: right; }
+.thally-dashboard .ds-table td.ds-num,
+.thally-dashboard .ds-table th.ds-num { text-align: right; }
 
 /* Progress / score ring — SVG, driven by --value (0–100) */
-.dox-dashboard .ds-ring {
+.thally-dashboard .ds-ring {
   --ds-ring-size: 80px;
   --ds-ring-stroke: 8;
   --ds-ring-value: 0;
@@ -553,21 +553,21 @@
   height: var(--ds-ring-size);
   flex-shrink: 0;
 }
-.dox-dashboard .ds-ring__svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-.dox-dashboard .ds-ring__track,
-.dox-dashboard .ds-ring__fill { fill: none; stroke-width: var(--ds-ring-stroke); }
-.dox-dashboard .ds-ring__track { stroke: var(--ds-ring-track); }
-.dox-dashboard .ds-ring__fill {
+.thally-dashboard .ds-ring__svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.thally-dashboard .ds-ring__track,
+.thally-dashboard .ds-ring__fill { fill: none; stroke-width: var(--ds-ring-stroke); }
+.thally-dashboard .ds-ring__track { stroke: var(--ds-ring-track); }
+.thally-dashboard .ds-ring__fill {
   stroke: var(--ds-ring-fill);
   stroke-linecap: round;
   stroke-dasharray: 100;
   stroke-dashoffset: calc(100 - var(--ds-ring-value));
   transition: stroke-dashoffset var(--ds-dur-slow) var(--ds-ease-out);
 }
-.dox-dashboard .ds-ring--success { --ds-ring-fill: var(--ds-success); }
-.dox-dashboard .ds-ring--warn    { --ds-ring-fill: var(--ds-warn); }
-.dox-dashboard .ds-ring--danger  { --ds-ring-fill: var(--ds-danger); }
-.dox-dashboard .ds-ring__label {
+.thally-dashboard .ds-ring--success { --ds-ring-fill: var(--ds-success); }
+.thally-dashboard .ds-ring--warn    { --ds-ring-fill: var(--ds-warn); }
+.thally-dashboard .ds-ring--danger  { --ds-ring-fill: var(--ds-danger); }
+.thally-dashboard .ds-ring__label {
   position: absolute;
   font-family: var(--ds-font-heading);
   font-size: var(--ds-text-body);
@@ -577,7 +577,7 @@
 }
 
 /* Segmented control / tabs */
-.dox-dashboard .ds-segmented {
+.thally-dashboard .ds-segmented {
   display: inline-flex;
   gap: var(--ds-space-2);
   padding: var(--ds-space-4);
@@ -585,7 +585,7 @@
   border: 1px solid var(--ds-border);
   border-radius: var(--ds-radius-lg);
 }
-.dox-dashboard .ds-segmented__item {
+.thally-dashboard .ds-segmented__item {
   appearance: none;
   border: 0;
   background: transparent;
@@ -599,22 +599,22 @@
   transition: color var(--ds-dur-fast) var(--ds-ease-standard),
               background var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.dox-dashboard .ds-segmented__item:hover { color: var(--ds-text-secondary); }
-.dox-dashboard .ds-segmented__item[aria-selected='true'],
-.dox-dashboard .ds-segmented__item.is-active {
+.thally-dashboard .ds-segmented__item:hover { color: var(--ds-text-secondary); }
+.thally-dashboard .ds-segmented__item[aria-selected='true'],
+.thally-dashboard .ds-segmented__item.is-active {
   background: var(--ds-surface-page);
   color: var(--ds-text-primary);
   box-shadow: var(--ds-elev-1);
 }
 
 /* Focus ring — apply to any interactive element */
-.dox-dashboard .ds-focusable:focus-visible {
+.thally-dashboard .ds-focusable:focus-visible {
   outline: none;
   box-shadow: var(--ds-shadow-focus);
 }
 
 /* Text input */
-.dox-dashboard .ds-input {
+.thally-dashboard .ds-input {
   width: 100%;
   height: 40px;
   padding: 0 var(--ds-space-12);
@@ -627,8 +627,8 @@
   transition: border-color var(--ds-dur-fast) var(--ds-ease-standard),
               box-shadow var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.dox-dashboard .ds-input::placeholder { color: var(--ds-text-faint); }
-.dox-dashboard .ds-input:focus {
+.thally-dashboard .ds-input::placeholder { color: var(--ds-text-faint); }
+.thally-dashboard .ds-input:focus {
   outline: none;
   border-color: color-mix(in oklch, var(--ds-accent) 35%, var(--ds-border));
   box-shadow: 0 0 0 1px var(--ds-accent-ring);
@@ -637,7 +637,7 @@
 /* ============================================================================
    AUTH — centered sign-in card on an ambient branded backdrop
    ============================================================================ */
-.dox-dashboard .ds-auth {
+.thally-dashboard .ds-auth {
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -647,7 +647,7 @@
     radial-gradient(60% 46% at 50% -4%, var(--ds-accent-glow), transparent 70%),
     var(--ds-surface-sunk);
 }
-.dox-dashboard .ds-auth-card {
+.thally-dashboard .ds-auth-card {
   width: 100%;
   max-width: 384px;
   padding: var(--ds-space-32);
@@ -656,7 +656,7 @@
   border-radius: var(--ds-radius-xl);
   box-shadow: var(--ds-elev-3);
 }
-.dox-dashboard .ds-auth-logo {
+.thally-dashboard .ds-auth-logo {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -678,14 +678,14 @@
    Render idiom). Depth comes from the hairline and quiet surface tints, never
    from a heavy floating shadow.
    ============================================================================ */
-.dox-dashboard.ds-shell,
-.dox-dashboard .ds-shell {
+.thally-dashboard.ds-shell,
+.thally-dashboard .ds-shell {
   display: flex;
   min-height: 100vh;
   background: var(--ds-surface-page);
   color: var(--ds-text-primary);
 }
-.dox-dashboard .ds-sidebar {
+.thally-dashboard .ds-sidebar {
   position: sticky;
   top: 0;
   align-self: flex-start;
@@ -698,16 +698,16 @@
   border-right: 1px solid var(--ds-border);
   transition: width var(--ds-dur-base) var(--ds-ease-standard);
 }
-.dox-dashboard .ds-sidebar[data-collapsed='true'] { width: 72px; }
+.thally-dashboard .ds-sidebar[data-collapsed='true'] { width: 72px; }
 
 /* Workspace switcher — the brand block at the rail head */
-.dox-dashboard .ds-sidebar-head {
+.thally-dashboard .ds-sidebar-head {
   display: flex;
   align-items: center;
   gap: var(--ds-space-8);
   padding: var(--ds-space-12) var(--ds-space-12) var(--ds-space-8);
 }
-.dox-dashboard .ds-workspace {
+.thally-dashboard .ds-workspace {
   display: flex;
   align-items: center;
   gap: var(--ds-space-8);
@@ -718,8 +718,8 @@
   text-align: left;
   transition: background var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.dox-dashboard .ds-workspace:hover { background: var(--ds-surface-hover); }
-.dox-dashboard .ds-workspace-logo {
+.thally-dashboard .ds-workspace:hover { background: var(--ds-surface-hover); }
+.thally-dashboard .ds-workspace-logo {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -735,7 +735,7 @@
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12),
               inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
-.dox-dashboard .ds-workspace-name {
+.thally-dashboard .ds-workspace-name {
   min-width: 0;
   font-family: var(--ds-font-heading);
   font-size: var(--ds-text-sm);
@@ -744,7 +744,7 @@
   color: var(--ds-text-primary);
   line-height: 1.2;
 }
-.dox-dashboard .ds-workspace-sub {
+.thally-dashboard .ds-workspace-sub {
   font-size: var(--ds-text-micro);
   color: var(--ds-text-faint);
   font-weight: var(--ds-fw-medium);
@@ -753,7 +753,7 @@
 }
 
 /* Sidebar search — a quiet command-bar affordance */
-.dox-dashboard .ds-sidebar-search {
+.thally-dashboard .ds-sidebar-search {
   display: flex;
   align-items: center;
   gap: var(--ds-space-8);
@@ -768,11 +768,11 @@
   transition: border-color var(--ds-dur-fast) var(--ds-ease-standard),
               color var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.dox-dashboard .ds-sidebar-search:hover {
+.thally-dashboard .ds-sidebar-search:hover {
   border-color: var(--ds-border-strong);
   color: var(--ds-text-muted);
 }
-.dox-dashboard .ds-kbd {
+.thally-dashboard .ds-kbd {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
@@ -790,13 +790,13 @@
   color: var(--ds-text-faint);
 }
 
-.dox-dashboard .ds-nav {
+.thally-dashboard .ds-nav {
   flex: 1;
   overflow-y: auto;
   padding: var(--ds-space-4) var(--ds-space-12) var(--ds-space-12);
 }
-.dox-dashboard .ds-nav-group + .ds-nav-group { margin-top: var(--ds-space-20); }
-.dox-dashboard .ds-nav-group-label {
+.thally-dashboard .ds-nav-group + .ds-nav-group { margin-top: var(--ds-space-20); }
+.thally-dashboard .ds-nav-group-label {
   font-size: var(--ds-text-micro);
   font-weight: var(--ds-fw-semibold);
   letter-spacing: var(--ds-tracking-wider);
@@ -807,7 +807,7 @@
   white-space: nowrap;
   overflow: hidden;
 }
-.dox-dashboard .ds-nav-item {
+.thally-dashboard .ds-nav-item {
   position: relative;
   display: flex;
   align-items: center;
@@ -822,41 +822,41 @@
   transition: color var(--ds-dur-fast) var(--ds-ease-standard),
               background var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.dox-dashboard .ds-nav-item > svg {
+.thally-dashboard .ds-nav-item > svg {
   flex-shrink: 0;
   color: var(--ds-text-faint);
   transition: color var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.dox-dashboard .ds-nav-item:hover {
+.thally-dashboard .ds-nav-item:hover {
   background: var(--ds-surface-hover);
   color: var(--ds-text-primary);
 }
-.dox-dashboard .ds-nav-item:hover > svg { color: var(--ds-text-secondary); }
-.dox-dashboard .ds-nav-item[aria-current='page'] {
+.thally-dashboard .ds-nav-item:hover > svg { color: var(--ds-text-secondary); }
+.thally-dashboard .ds-nav-item[aria-current='page'] {
   background: var(--ds-surface-active);
   color: var(--ds-text-primary);
   font-weight: var(--ds-fw-semibold);
 }
-.dox-dashboard .ds-nav-item[aria-current='page'] > svg { color: var(--ds-accent-mid); }
+.thally-dashboard .ds-nav-item[aria-current='page'] > svg { color: var(--ds-accent-mid); }
 
-.dox-dashboard .ds-sidebar-foot {
+.thally-dashboard .ds-sidebar-foot {
   border-top: 1px solid var(--ds-border);
   padding: var(--ds-space-8) var(--ds-space-12) var(--ds-space-12);
 }
-.dox-dashboard .ds-sidebar-actions {
+.thally-dashboard .ds-sidebar-actions {
   display: flex;
   flex-direction: column;
   gap: 1px;
   margin-bottom: var(--ds-space-8);
 }
-.dox-dashboard .ds-account {
+.thally-dashboard .ds-account {
   display: flex;
   align-items: center;
   gap: var(--ds-space-8);
   padding: var(--ds-space-8);
   border-radius: var(--ds-radius-md);
 }
-.dox-dashboard .ds-account-avatar {
+.thally-dashboard .ds-account-avatar {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -869,14 +869,14 @@
   font-size: var(--ds-text-caption);
   font-weight: var(--ds-fw-bold);
 }
-.dox-dashboard .ds-account-name {
+.thally-dashboard .ds-account-name {
   min-width: 0;
   font-size: var(--ds-text-sm);
   font-weight: var(--ds-fw-semibold);
   color: var(--ds-text-primary);
   line-height: 1.2;
 }
-.dox-dashboard .ds-account-role {
+.thally-dashboard .ds-account-role {
   font-size: var(--ds-text-micro);
   color: var(--ds-text-faint);
   letter-spacing: var(--ds-tracking-wide);
@@ -885,13 +885,13 @@
 }
 
 /* Collapsed rail — hide labels, center glyphs */
-.dox-dashboard .ds-sidebar[data-collapsed='true'] .ds-rail-label { display: none; }
-.dox-dashboard .ds-sidebar[data-collapsed='true'] .ds-nav-item,
-.dox-dashboard .ds-sidebar[data-collapsed='true'] .ds-workspace,
-.dox-dashboard .ds-sidebar[data-collapsed='true'] .ds-account { justify-content: center; }
-.dox-dashboard .ds-sidebar[data-collapsed='true'] .ds-nav-group-label { text-align: center; }
+.thally-dashboard .ds-sidebar[data-collapsed='true'] .ds-rail-label { display: none; }
+.thally-dashboard .ds-sidebar[data-collapsed='true'] .ds-nav-item,
+.thally-dashboard .ds-sidebar[data-collapsed='true'] .ds-workspace,
+.thally-dashboard .ds-sidebar[data-collapsed='true'] .ds-account { justify-content: center; }
+.thally-dashboard .ds-sidebar[data-collapsed='true'] .ds-nav-group-label { text-align: center; }
 
-.dox-dashboard .ds-content {
+.thally-dashboard .ds-content {
   flex: 1;
   min-width: 0;
   height: 100vh;
@@ -899,7 +899,7 @@
 }
 
 /* Top bar — sticky glass header with breadcrumb + page title */
-.dox-dashboard .ds-topbar {
+.thally-dashboard .ds-topbar {
   position: sticky;
   top: 0;
   z-index: 20;
@@ -912,15 +912,15 @@
   backdrop-filter: var(--ds-backdrop-glass);
   border-bottom: 1px solid var(--ds-border);
 }
-.dox-dashboard .ds-crumb {
+.thally-dashboard .ds-crumb {
   font-size: var(--ds-text-sm);
   font-weight: var(--ds-fw-semibold);
   color: var(--ds-text-primary);
   letter-spacing: var(--ds-tracking-snug);
 }
-.dox-dashboard .ds-crumb-sep { color: var(--ds-text-faint); }
-.dox-dashboard .ds-crumb-muted { font-weight: var(--ds-fw-medium); color: var(--ds-text-muted); }
-.dox-dashboard .ds-iconbtn {
+.thally-dashboard .ds-crumb-sep { color: var(--ds-text-faint); }
+.thally-dashboard .ds-crumb-muted { font-weight: var(--ds-fw-medium); color: var(--ds-text-muted); }
+.thally-dashboard .ds-iconbtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -931,10 +931,10 @@
   transition: background var(--ds-dur-fast) var(--ds-ease-standard),
               color var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.dox-dashboard .ds-iconbtn:hover { background: var(--ds-surface-hover); color: var(--ds-text-primary); }
+.thally-dashboard .ds-iconbtn:hover { background: var(--ds-surface-hover); color: var(--ds-text-primary); }
 
 @media (max-width: 767px) {
-  .dox-dashboard .ds-sidebar {
+  .thally-dashboard .ds-sidebar {
     position: fixed;
     z-index: 40;
     left: 0;
@@ -942,25 +942,25 @@
     transform: translateX(-100%);
     transition: transform var(--ds-dur-base) var(--ds-ease-standard);
   }
-  .dox-dashboard .ds-sidebar[data-open='true'] { transform: translateX(0); }
-  .dox-dashboard .ds-content { height: auto; }
-  .dox-dashboard .ds-topbar { padding: 0 var(--ds-space-16); }
+  .thally-dashboard .ds-sidebar[data-open='true'] { transform: translateX(0); }
+  .thally-dashboard .ds-content { height: auto; }
+  .thally-dashboard .ds-topbar { padding: 0 var(--ds-space-16); }
 }
 
 /* Responsive visibility helpers. Tailwind's `md:hidden`/`hidden` lose to the
-   two-class display rules above (.dox-dashboard .ds-iconbtn etc.), so the
+   two-class display rules above (.thally-dashboard .ds-iconbtn etc.), so the
    mobile-only controls need helpers that out-rank them. */
 @media (min-width: 768px) {
-  .dox-dashboard .ds-mobile-only { display: none !important; }
+  .thally-dashboard .ds-mobile-only { display: none !important; }
 }
 @media (max-width: 767px) {
-  .dox-dashboard .ds-desktop-only { display: none !important; }
+  .thally-dashboard .ds-desktop-only { display: none !important; }
 }
 
 /* ============================================================================
    BUTTONS — token-driven primary / secondary / ghost
    ============================================================================ */
-.dox-dashboard .ds-btn {
+.thally-dashboard .ds-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -979,51 +979,51 @@
               border-color var(--ds-dur-fast) var(--ds-ease-standard),
               color var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.dox-dashboard .ds-btn--primary {
+.thally-dashboard .ds-btn--primary {
   background: var(--ds-accent);
   color: var(--ds-accent-fg);
 }
-.dox-dashboard .ds-btn--primary:hover { background: var(--ds-accent-strong); }
-.dox-dashboard .ds-btn--secondary {
+.thally-dashboard .ds-btn--primary:hover { background: var(--ds-accent-strong); }
+.thally-dashboard .ds-btn--secondary {
   background: var(--ds-surface-raised);
   border-color: var(--ds-border);
   color: var(--ds-text-secondary);
 }
-.dox-dashboard .ds-btn--secondary:hover {
+.thally-dashboard .ds-btn--secondary:hover {
   border-color: var(--ds-border-strong);
   background: var(--ds-surface-hover);
   color: var(--ds-text-primary);
 }
-.dox-dashboard .ds-btn--ghost { color: var(--ds-text-muted); }
-.dox-dashboard .ds-btn--ghost:hover { background: var(--ds-surface-hover); color: var(--ds-text-primary); }
-.dox-dashboard .ds-btn--sm { height: 30px; padding: 0 var(--ds-space-12); font-size: var(--ds-text-caption); }
+.thally-dashboard .ds-btn--ghost { color: var(--ds-text-muted); }
+.thally-dashboard .ds-btn--ghost:hover { background: var(--ds-surface-hover); color: var(--ds-text-primary); }
+.thally-dashboard .ds-btn--sm { height: 30px; padding: 0 var(--ds-space-12); font-size: var(--ds-text-caption); }
 
 /* ============================================================================
    SETTINGS LIST — grouped label + description rows with a trailing control
    (Linear / Braintrust / Retool settings idiom)
    ============================================================================ */
-.dox-dashboard .ds-setting-group + .ds-setting-group { margin-top: var(--ds-space-40); }
-.dox-dashboard .ds-setting-group-head { margin-bottom: var(--ds-space-16); }
-.dox-dashboard .ds-setting-group-title {
+.thally-dashboard .ds-setting-group + .ds-setting-group { margin-top: var(--ds-space-40); }
+.thally-dashboard .ds-setting-group-head { margin-bottom: var(--ds-space-16); }
+.thally-dashboard .ds-setting-group-title {
   font-family: var(--ds-font-heading);
   font-size: var(--ds-text-h4);
   font-weight: var(--ds-fw-semibold);
   letter-spacing: var(--ds-tracking-snug);
   color: var(--ds-text-primary);
 }
-.dox-dashboard .ds-setting-group-desc {
+.thally-dashboard .ds-setting-group-desc {
   margin-top: var(--ds-space-4);
   font-size: var(--ds-text-sm);
   color: var(--ds-text-muted);
   max-width: 64ch;
 }
-.dox-dashboard .ds-setting-list {
+.thally-dashboard .ds-setting-list {
   border: 1px solid var(--ds-border);
   border-radius: var(--ds-radius-xl);
   background: var(--ds-surface-raised);
   overflow: hidden;
 }
-.dox-dashboard .ds-setting-row {
+.thally-dashboard .ds-setting-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1032,25 +1032,25 @@
   border-top: 1px solid var(--ds-border-subtle);
 }
 /* Descriptions read calmer when they don't run the full width. */
-.dox-dashboard .ds-setting-row-desc {
+.thally-dashboard .ds-setting-row-desc {
   max-width: 46ch;
 }
-.dox-dashboard .ds-setting-row:first-child { border-top: none; }
-.dox-dashboard .ds-setting-row-label {
+.thally-dashboard .ds-setting-row:first-child { border-top: none; }
+.thally-dashboard .ds-setting-row-label {
   font-size: var(--ds-text-body);
   font-weight: var(--ds-fw-medium);
   color: var(--ds-text-primary);
 }
-.dox-dashboard .ds-setting-row-desc {
+.thally-dashboard .ds-setting-row-desc {
   margin-top: 2px;
   font-size: var(--ds-text-caption);
   color: var(--ds-text-muted);
 }
-.dox-dashboard .ds-setting-row-value { flex-shrink: 0; }
+.thally-dashboard .ds-setting-row-value { flex-shrink: 0; }
 
 /* Status dot — a small leading indicator for chips/labels. Flat by design:
    the old glow ring read like an uptime LED, too loud for repeated use. */
-.dox-dashboard .ds-dot {
+.thally-dashboard .ds-dot {
   width: 6px;
   height: 6px;
   border-radius: var(--ds-radius-full);
@@ -1061,14 +1061,14 @@
 /* ── Settings — flat sectioned panel ──────────────────────────────────────
    One card, brand-accent section eyebrows, full-width row dividers. Colors
    come from tokens only (brand accent + semantic success), never hardcoded. */
-.dox-dashboard .ds-settings-panel {
+.thally-dashboard .ds-settings-panel {
   border: 1px solid var(--ds-border);
   border-radius: var(--ds-radius-xl);
   background: var(--ds-surface-raised);
   padding: 0 var(--ds-space-24) var(--ds-space-24);
 }
-.dox-dashboard .ds-settings-section { padding-top: var(--ds-space-24); }
-.dox-dashboard .ds-settings-eyebrow {
+.thally-dashboard .ds-settings-section { padding-top: var(--ds-space-24); }
+.thally-dashboard .ds-settings-eyebrow {
   font-family: var(--ds-font-mono);
   font-size: var(--ds-text-caption);
   font-weight: var(--ds-fw-semibold);
@@ -1077,7 +1077,7 @@
   color: var(--ds-accent-mid);
   margin-bottom: var(--ds-space-4);
 }
-.dox-dashboard .ds-settings-row {
+.thally-dashboard .ds-settings-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1085,21 +1085,21 @@
   padding: var(--ds-space-20) 0;
   border-top: 1px solid var(--ds-border-subtle);
 }
-.dox-dashboard .ds-settings-row--top { align-items: flex-start; }
-.dox-dashboard .ds-settings-section > .ds-settings-row:first-of-type { border-top: none; }
+.thally-dashboard .ds-settings-row--top { align-items: flex-start; }
+.thally-dashboard .ds-settings-section > .ds-settings-row:first-of-type { border-top: none; }
 /* Right-hand control column */
-.dox-dashboard .ds-settings-control {
+.thally-dashboard .ds-settings-control {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: var(--ds-space-8, 8px);
   min-width: 220px;
 }
-.dox-dashboard .ds-settings-field { display: inline-flex; align-items: center; gap: var(--ds-space-8, 8px); }
-.dox-dashboard .ds-settings-check { color: var(--ds-success); flex-shrink: 0; }
-.dox-dashboard .ds-settings-caption { font-size: var(--ds-text-caption); color: var(--ds-text-muted); }
-.dox-dashboard .ds-settings-caption--staged { color: var(--ds-accent-mid); }
-.dox-dashboard .ds-linkbtn {
+.thally-dashboard .ds-settings-field { display: inline-flex; align-items: center; gap: var(--ds-space-8, 8px); }
+.thally-dashboard .ds-settings-check { color: var(--ds-success); flex-shrink: 0; }
+.thally-dashboard .ds-settings-caption { font-size: var(--ds-text-caption); color: var(--ds-text-muted); }
+.thally-dashboard .ds-settings-caption--staged { color: var(--ds-accent-mid); }
+.thally-dashboard .ds-linkbtn {
   font-size: var(--ds-text-caption);
   font-weight: var(--ds-fw-semibold);
   color: var(--ds-accent-mid);
@@ -1108,12 +1108,12 @@
   cursor: pointer;
   padding: 0;
 }
-.dox-dashboard .ds-linkbtn:hover { text-decoration: underline; }
-.dox-dashboard .ds-settings-addrow { display: inline-flex; align-items: center; gap: var(--ds-space-8, 8px); }
-.dox-dashboard .ds-settings-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ds-space-8, 8px); }
+.thally-dashboard .ds-linkbtn:hover { text-decoration: underline; }
+.thally-dashboard .ds-settings-addrow { display: inline-flex; align-items: center; gap: var(--ds-space-8, 8px); }
+.thally-dashboard .ds-settings-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ds-space-8, 8px); }
 /* Smaller chip + muted small-caps role/locale badge + ghost close */
-.dox-dashboard .ds-chip--sm { min-height: var(--ds-space-20, 20px); padding: 0 var(--ds-space-8, 8px); font-size: var(--ds-text-caption); }
-.dox-dashboard .ds-chip-badge {
+.thally-dashboard .ds-chip--sm { min-height: var(--ds-space-20, 20px); padding: 0 var(--ds-space-8, 8px); font-size: var(--ds-text-caption); }
+.thally-dashboard .ds-chip-badge {
   margin-left: var(--ds-space-4);
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -1121,7 +1121,7 @@
   color: var(--ds-text-faint);
   font-weight: var(--ds-fw-semibold);
 }
-.dox-dashboard .ds-chip-x {
+.thally-dashboard .ds-chip-x {
   margin-left: var(--ds-space-4);
   display: inline-flex;
   align-items: center;
@@ -1131,17 +1131,17 @@
   cursor: pointer;
   transition: color 0.12s ease;
 }
-.dox-dashboard .ds-chip-x:hover { color: var(--ds-danger); }
+.thally-dashboard .ds-chip-x:hover { color: var(--ds-danger); }
 
 /* ============================================================================
    ENDPOINT LIST — compact monospace rows with a trailing open-in-new glyph
    ============================================================================ */
-.dox-dashboard .ds-endpoint-list {
+.thally-dashboard .ds-endpoint-list {
   border: 1px solid var(--ds-border);
   border-radius: var(--ds-radius-lg);
   overflow: hidden;
 }
-.dox-dashboard .ds-endpoint-row {
+.thally-dashboard .ds-endpoint-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1150,14 +1150,14 @@
   border-top: 1px solid var(--ds-border-subtle);
   transition: background var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.dox-dashboard .ds-endpoint-row:first-child { border-top: none; }
-.dox-dashboard .ds-endpoint-row:hover { background: var(--ds-surface-hover); }
-.dox-dashboard .ds-endpoint-name {
+.thally-dashboard .ds-endpoint-row:first-child { border-top: none; }
+.thally-dashboard .ds-endpoint-row:hover { background: var(--ds-surface-hover); }
+.thally-dashboard .ds-endpoint-name {
   font-size: var(--ds-text-sm);
   font-weight: var(--ds-fw-semibold);
   color: var(--ds-text-primary);
 }
-.dox-dashboard .ds-endpoint-desc {
+.thally-dashboard .ds-endpoint-desc {
   font-size: var(--ds-text-caption);
   color: var(--ds-text-muted);
   margin-top: 1px;
@@ -1166,7 +1166,7 @@
 /* ============================================================================
    SKELETON — quiet shimmer placeholders while data resolves
    ============================================================================ */
-.dox-dashboard .ds-skeleton {
+.thally-dashboard .ds-skeleton {
   border-radius: var(--ds-radius-sm);
   background: linear-gradient(
     90deg,
@@ -1177,7 +1177,7 @@
   background-size: 200% 100%;
   animation: ds-shimmer 1.4s ease-in-out infinite;
 }
-.dox-dashboard .ds-skeleton-ring {
+.thally-dashboard .ds-skeleton-ring {
   width: 112px;
   height: 112px;
   border-radius: var(--ds-radius-full);
@@ -1191,26 +1191,26 @@
   100% { background-position: -200% 0; opacity: 0.9; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .dox-dashboard .ds-skeleton,
-  .dox-dashboard .ds-skeleton-ring { animation: none; }
+  .thally-dashboard .ds-skeleton,
+  .thally-dashboard .ds-skeleton-ring { animation: none; }
 }
 
 /* ============================================================================
    BAR CHART — gridded stacked columns with a value axis + sparse date ticks
    ============================================================================ */
-.dox-dashboard .ds-chart-plot {
+.thally-dashboard .ds-chart-plot {
   position: relative;
   height: 224px;
   padding-left: 42px;
 }
-.dox-dashboard .ds-chart-gridline {
+.thally-dashboard .ds-chart-gridline {
   position: absolute;
   left: 42px;
   right: 0;
   height: 0;
   border-top: 1px solid var(--ds-chart-grid);
 }
-.dox-dashboard .ds-chart-ylabel {
+.thally-dashboard .ds-chart-ylabel {
   position: absolute;
   left: -42px;
   top: 0;
@@ -1221,7 +1221,7 @@
   color: var(--ds-text-faint);
   font-variant-numeric: tabular-nums;
 }
-.dox-dashboard .ds-chart-bars {
+.thally-dashboard .ds-chart-bars {
   position: absolute;
   left: 42px;
   right: 0;
@@ -1231,14 +1231,14 @@
   align-items: flex-end;
   gap: 3px;
 }
-.dox-dashboard .ds-chart-col {
+.thally-dashboard .ds-chart-col {
   flex: 1;
   min-width: 0;
   height: 100%;
   display: flex;
   align-items: flex-end;
 }
-.dox-dashboard .ds-chart-stack {
+.thally-dashboard .ds-chart-stack {
   position: relative;
   width: 100%;
   height: 100%;
@@ -1247,20 +1247,20 @@
   justify-content: flex-end;
   gap: 1px;
 }
-.dox-dashboard .ds-chart-seg {
+.thally-dashboard .ds-chart-seg {
   width: 100%;
   border-radius: 3px 3px 0 0;
   transition: opacity var(--ds-dur-fast) var(--ds-ease-standard);
 }
-.dox-dashboard .ds-chart-seg--base { border-radius: 0; }
-.dox-dashboard .ds-chart-col:hover .ds-chart-seg { opacity: 0.78; }
-.dox-dashboard .ds-chart-xaxis {
+.thally-dashboard .ds-chart-seg--base { border-radius: 0; }
+.thally-dashboard .ds-chart-col:hover .ds-chart-seg { opacity: 0.78; }
+.thally-dashboard .ds-chart-xaxis {
   display: flex;
   gap: 3px;
   padding-left: 42px;
   margin-top: var(--ds-space-8);
 }
-.dox-dashboard .ds-chart-xtick {
+.thally-dashboard .ds-chart-xtick {
   flex: 1;
   min-width: 0;
   text-align: center;
@@ -1272,7 +1272,7 @@
 }
 
 /* Inline mini bar — for ranked lists (top pages, top terms) */
-.dox-dashboard .ds-bar-track {
+.thally-dashboard .ds-bar-track {
   width: 84px;
   height: 6px;
   flex-shrink: 0;
@@ -1280,7 +1280,7 @@
   background: var(--ds-surface-active);
   overflow: hidden;
 }
-.dox-dashboard .ds-bar-fill {
+.thally-dashboard .ds-bar-fill {
   display: block;
   height: 100%;
   border-radius: var(--ds-radius-full);
@@ -1288,14 +1288,14 @@
   transition: width var(--ds-dur-slow) var(--ds-ease-out);
 }
 @media (max-width: 640px) {
-  .dox-dashboard .ds-bar-track { display: none; }
+  .thally-dashboard .ds-bar-track { display: none; }
   /* Stack setting rows (label over control) so fixed-width controls don't overflow. */
-  .dox-dashboard .ds-setting-row {
+  .thally-dashboard .ds-setting-row {
     flex-direction: column;
     align-items: stretch;
     gap: var(--ds-space-8);
   }
-  .dox-dashboard .ds-setting-row > div:last-child {
+  .thally-dashboard .ds-setting-row > div:last-child {
     align-items: stretch !important;
     min-width: 0 !important;
   }
@@ -1304,25 +1304,25 @@
 /* ============================================================================
    GRID PRIMITIVES — compose the patterns above into dashboard layouts
    ============================================================================ */
-.dox-dashboard .dash-grid { display: grid; gap: var(--ds-space-16); }
-.dox-dashboard .dash-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.dox-dashboard .dash-grid--2 { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+.thally-dashboard .dash-grid { display: grid; gap: var(--ds-space-16); }
+.thally-dashboard .dash-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.thally-dashboard .dash-grid--2 { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
 @media (max-width: 1100px) {
-  .dox-dashboard .dash-grid--2 { grid-template-columns: 1fr; }
-  .dox-dashboard .dash-grid--4 { grid-template-columns: 1fr 1fr; }
+  .thally-dashboard .dash-grid--2 { grid-template-columns: 1fr; }
+  .thally-dashboard .dash-grid--4 { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 700px) {
-  .dox-dashboard .dash-grid--4 { grid-template-columns: 1fr; }
+  .thally-dashboard .dash-grid--4 { grid-template-columns: 1fr; }
 }
 
 /* ============================================================================
    AGENT READINESS — report hero + check table
    ============================================================================ */
-.dox-dashboard .ds-readiness-eyebrow {
+.thally-dashboard .ds-readiness-eyebrow {
   color: var(--ds-accent);
   margin-bottom: var(--ds-space-8);
 }
-.dox-dashboard .ds-readiness-title {
+.thally-dashboard .ds-readiness-title {
   margin: 0;
   font-family: var(--ds-font-heading);
   font-size: var(--ds-text-h2);
@@ -1331,17 +1331,17 @@
   line-height: 1.1;
   color: var(--ds-text-primary);
 }
-.dox-dashboard .ds-readiness-desc {
+.thally-dashboard .ds-readiness-desc {
   margin: var(--ds-space-8) 0 0;
   max-width: 56ch;
   font-size: var(--ds-text-sm);
   line-height: 1.5;
   color: var(--ds-text-muted);
 }
-.dox-dashboard .ds-readiness-header {
+.thally-dashboard .ds-readiness-header {
   margin-bottom: var(--ds-space-32);
 }
-.dox-dashboard .ds-readiness-summary {
+.thally-dashboard .ds-readiness-summary {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
@@ -1350,13 +1350,13 @@
   padding-bottom: var(--ds-space-24);
   border-bottom: 1px solid var(--ds-border);
 }
-.dox-dashboard .ds-readiness-summary-left {
+.thally-dashboard .ds-readiness-summary-left {
   display: flex;
   align-items: center;
   gap: var(--ds-space-16);
   min-width: 0;
 }
-.dox-dashboard .ds-readiness-hero-score {
+.thally-dashboard .ds-readiness-hero-score {
   font-family: var(--ds-font-heading);
   font-size: 4rem;
   font-weight: var(--ds-fw-extrabold);
@@ -1365,29 +1365,29 @@
   color: var(--ds-text-primary);
   font-variant-numeric: tabular-nums;
 }
-.dox-dashboard .ds-readiness-summary-meta {
+.thally-dashboard .ds-readiness-summary-meta {
   display: flex;
   flex-direction: column;
   gap: var(--ds-space-8);
 }
-.dox-dashboard .ds-readiness-grade {
+.thally-dashboard .ds-readiness-grade {
   align-self: flex-start;
   gap: 6px;
 }
-.dox-dashboard .ds-readiness-pages {
+.thally-dashboard .ds-readiness-pages {
   font-size: var(--ds-text-sm);
   color: var(--ds-text-muted);
 }
-.dox-dashboard .ds-readiness-table-wrap {
+.thally-dashboard .ds-readiness-table-wrap {
   width: 100%;
   overflow-x: auto;
 }
-.dox-dashboard .ds-readiness-table {
+.thally-dashboard .ds-readiness-table {
   width: 100%;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
-.dox-dashboard .ds-readiness-table th {
+.thally-dashboard .ds-readiness-table th {
   padding: 0 0 12px;
   text-align: left;
   font-size: 11px;
@@ -1397,42 +1397,42 @@
   color: var(--ds-text-faint);
   border-bottom: 1px solid var(--ds-border);
 }
-.dox-dashboard .ds-readiness-table th.ds-num,
-.dox-dashboard .ds-readiness-weight,
-.dox-dashboard .ds-readiness-score {
+.thally-dashboard .ds-readiness-table th.ds-num,
+.thally-dashboard .ds-readiness-weight,
+.thally-dashboard .ds-readiness-score {
   text-align: right;
 }
-.dox-dashboard .ds-readiness-coverage-head {
+.thally-dashboard .ds-readiness-coverage-head {
   text-align: left;
   width: 28%;
   min-width: 140px;
 }
-.dox-dashboard .ds-readiness-row td {
+.thally-dashboard .ds-readiness-row td {
   padding: 18px 0;
   vertical-align: middle;
   border-bottom: 1px solid var(--ds-border-subtle);
 }
-.dox-dashboard .ds-readiness-row:last-child td {
+.thally-dashboard .ds-readiness-row:last-child td {
   border-bottom: none;
 }
-.dox-dashboard .ds-readiness-check-main {
+.thally-dashboard .ds-readiness-check-main {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
-.dox-dashboard .ds-readiness-check-label {
+.thally-dashboard .ds-readiness-check-label {
   font-size: var(--ds-text-body);
   font-weight: var(--ds-fw-semibold);
   color: var(--ds-text-primary);
 }
-.dox-dashboard .ds-readiness-check-detail {
+.thally-dashboard .ds-readiness-check-detail {
   margin: 4px 0 0;
   font-size: var(--ds-text-sm);
   color: var(--ds-text-muted);
   max-width: 42ch;
 }
-.dox-dashboard .ds-readiness-fix-badge {
+.thally-dashboard .ds-readiness-fix-badge {
   display: inline-flex;
   align-items: center;
   height: 1.375rem;
@@ -1445,35 +1445,35 @@
   font-weight: var(--ds-fw-semibold);
   cursor: pointer;
 }
-.dox-dashboard .ds-readiness-fix-badge:hover,
-.dox-dashboard .ds-readiness-fix-badge[aria-expanded='true'] {
+.thally-dashboard .ds-readiness-fix-badge:hover,
+.thally-dashboard .ds-readiness-fix-badge[aria-expanded='true'] {
   background: var(--ds-accent-tint-hover);
 }
-.dox-dashboard .ds-readiness-send-pr {
+.thally-dashboard .ds-readiness-send-pr {
   gap: 6px;
   height: 1.375rem;
   padding: 0 10px;
   font-size: var(--ds-text-caption);
 }
-.dox-dashboard .ds-readiness-dispatch {
+.thally-dashboard .ds-readiness-dispatch {
   margin: 8px 0 0;
   max-width: 48ch;
   font-size: var(--ds-text-caption);
   line-height: 1.45;
 }
-.dox-dashboard .ds-readiness-dispatch--ok {
+.thally-dashboard .ds-readiness-dispatch--ok {
   color: var(--ds-success, #15803d);
 }
-.dox-dashboard .ds-readiness-dispatch--err {
+.thally-dashboard .ds-readiness-dispatch--err {
   color: var(--ds-danger);
 }
-.dox-dashboard .ds-readiness-dispatch-link {
+.thally-dashboard .ds-readiness-dispatch-link {
   color: inherit;
   font-weight: var(--ds-fw-semibold);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.dox-dashboard .ds-readiness-bar {
+.thally-dashboard .ds-readiness-bar {
   height: 4px;
   width: 100%;
   max-width: 220px;
@@ -1481,19 +1481,19 @@
   background: var(--ds-surface-sunk);
   overflow: hidden;
 }
-.dox-dashboard .ds-readiness-bar-fill {
+.thally-dashboard .ds-readiness-bar-fill {
   height: 100%;
   border-radius: inherit;
   background: var(--ds-text-primary);
   transition: width var(--ds-dur-slow) var(--ds-ease-out);
 }
-.dox-dashboard .ds-readiness-weight {
+.thally-dashboard .ds-readiness-weight {
   font-size: var(--ds-text-sm);
   color: var(--ds-text-muted);
   white-space: nowrap;
   padding-left: 16px !important;
 }
-.dox-dashboard .ds-readiness-score {
+.thally-dashboard .ds-readiness-score {
   font-size: var(--ds-text-body);
   font-weight: var(--ds-fw-bold);
   color: var(--ds-text-primary);
@@ -1501,11 +1501,11 @@
   padding-left: 16px !important;
   min-width: 3rem;
 }
-.dox-dashboard .ds-readiness-offenders-row td {
+.thally-dashboard .ds-readiness-offenders-row td {
   padding: 0 0 18px;
   border-bottom: 1px solid var(--ds-border-subtle);
 }
-.dox-dashboard .ds-readiness-offenders {
+.thally-dashboard .ds-readiness-offenders {
   list-style: none;
   margin: 0;
   padding: 12px 14px;
@@ -1515,28 +1515,28 @@
   flex-direction: column;
   gap: 8px;
 }
-.dox-dashboard .ds-readiness-offenders li {
+.thally-dashboard .ds-readiness-offenders li {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px 16px;
 }
-.dox-dashboard .ds-readiness-offenders a {
+.thally-dashboard .ds-readiness-offenders a {
   font-family: var(--ds-font-mono);
   font-size: var(--ds-text-caption);
   color: var(--ds-text-secondary);
   text-decoration: none;
 }
-.dox-dashboard .ds-readiness-offenders a:hover { text-decoration: underline; }
-.dox-dashboard .ds-readiness-offenders span {
+.thally-dashboard .ds-readiness-offenders a:hover { text-decoration: underline; }
+.thally-dashboard .ds-readiness-offenders span {
   font-size: var(--ds-text-caption);
   color: var(--ds-text-muted);
 }
 @media (max-width: 700px) {
-  .dox-dashboard .ds-readiness-hero-score { font-size: 3rem; }
-  .dox-dashboard .ds-readiness-coverage-head,
-  .dox-dashboard .ds-readiness-coverage { display: none; }
+  .thally-dashboard .ds-readiness-hero-score { font-size: 3rem; }
+  .thally-dashboard .ds-readiness-coverage-head,
+  .thally-dashboard .ds-readiness-coverage { display: none; }
 }
 
 /* ============================================================================
@@ -1547,10 +1547,10 @@
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.dox-dashboard .ds-rise {
+.thally-dashboard .ds-rise {
   animation: ds-rise var(--ds-dur-base) var(--ds-ease-out) both;
 }
 @media (prefers-reduced-motion: reduce) {
-  .dox-dashboard .ds-rise { animation: none; }
-  .dox-dashboard .ds-ring__fill { transition: none; }
+  .thally-dashboard .ds-rise { animation: none; }
+  .thally-dashboard .ds-ring__fill { transition: none; }
 }

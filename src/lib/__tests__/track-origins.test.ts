@@ -4,23 +4,23 @@ import { getTrackingConfig } from '@/data/docs'
 
 describe('parseOrigin', () => {
   it('honors the stamped trailer', () => {
-    expect(parseOrigin('summary…\n\n---\nDrafted by the Dox docs agent (origin: track) — please review.')).toBe('track')
-    expect(parseOrigin('Drafted by the Dox docs agent (origin: drift) — please review.')).toBe('drift')
-    expect(parseOrigin('Drafted by the Dox docs agent (origin: merge)')).toBe('merge')
-    expect(parseOrigin('Drafted by the Dox docs agent (origin: mention)')).toBe('mention')
+    expect(parseOrigin('summary…\n\n---\nDrafted by the Thally docs agent (origin: track) — please review.')).toBe('track')
+    expect(parseOrigin('Drafted by the Thally docs agent (origin: drift) — please review.')).toBe('drift')
+    expect(parseOrigin('Drafted by the Thally docs agent (origin: merge)')).toBe('merge')
+    expect(parseOrigin('Drafted by the Thally docs agent (origin: mention)')).toBe('mention')
     // cli maps to manual (no dedicated chip)
-    expect(parseOrigin('Drafted by the Dox docs agent (origin: cli)')).toBe('manual')
+    expect(parseOrigin('Drafted by the Thally docs agent (origin: cli)')).toBe('manual')
   })
   it('is not hijacked by summary text that merely quotes the marker format', () => {
     // A PR documenting Track itself quotes "(origin: merge)" in its summary, but
     // the authoritative trailer says track — the trailer must win.
     const body =
-      'This page documents the marker, e.g. "(origin: merge)".\n\n---\nDrafted by the Dox docs agent (origin: track) — please review.'
+      'This page documents the marker, e.g. "(origin: merge)".\n\n---\nDrafted by the Thally docs agent (origin: track) — please review.'
     expect(parseOrigin(body)).toBe('track')
   })
   it('does not misfire on a cli PR whose summary contains heuristic words', () => {
     // 'stale' in the summary must not override the explicit cli (→manual) trailer.
-    expect(parseOrigin('Refresh the stale install guide.\n\n---\nDrafted by the Dox docs agent (origin: cli).')).toBe(
+    expect(parseOrigin('Refresh the stale install guide.\n\n---\nDrafted by the Thally docs agent (origin: cli).')).toBe(
       'manual',
     )
   })

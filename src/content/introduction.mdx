@@ -1,12 +1,12 @@
 ---
 title: Introduction
-description: Dox is an open-source documentation template built with Next.js, MDX, and Tailwind CSS.
+description: Thally is an open-source documentation template built with Next.js, MDX, and Tailwind CSS.
 mode: home
 ---
 
 <Hero
   title="Documentation your readers and their agents both love"
-  subtitle="Dox is a production-ready docs platform built on the Next.js App Router, MDX, and Tailwind CSS. Write in Markdown, own your stack, and ship a site that's fast for humans and legible to AI."
+  subtitle="Thally is a production-ready docs platform built on the Next.js App Router, MDX, and Tailwind CSS. Write in Markdown, own your stack, and ship a site that's fast for humans and legible to AI."
   primaryLabel="Get started"
   primaryHref="/quickstart"
   secondaryLabel="Browse components"
@@ -27,12 +27,12 @@ mode: home
     Drop in an OpenAPI spec for interactive endpoints and a "Try It" console.
   </Card>
   <Card title="CLI & tooling" icon="wrench" href="/guides/cli-reference">
-    One `dox` binary to init, dev, build, deploy, migrate, and check your docs.
+    One `thally` binary to init, dev, build, deploy, migrate, and check your docs.
   </Card>
   <Card title="AI features" icon="message" href="/guides/ai-features">
     Grounded chat, an Agent Readiness Score, and `llms.txt` out of the box.
   </Card>
-  <Card title="Dox Track" icon="git-pull-request" href="/guides/dox-track">
+  <Card title="Thally Track" icon="git-pull-request" href="/guides/thally-track">
     Merged (or preview) PRs in your product repos become reviewed docs PRs, drafted by the agent.
   </Card>
 </CardGroup>
@@ -44,7 +44,7 @@ mode: home
     A unified content engine parses every page once into a typed graph — HTML, JSON, Markdown, search, and embeddings are all projections of one source of truth. Tabs, groups, hybrid search, Shiki code blocks, and an RSS-backed changelog ship in the box.
   </Card>
   <Card title="Tooling" icon="wrench">
-    The `dox` CLI hides the Next.js runtime behind a single binary. `create-dox` scaffolds, migrates, and lints; `dox check --ci` fails PRs on broken links, anchors, and drift; and the docs agent drafts edits as reviewed pull requests — it never merges. **Dox Track** turns merged (or `docs-preview`-labelled) PRs in your product repos into docs PRs automatically, with org-wide access via a one-click GitHub App.
+    The `thally` CLI hides the Next.js runtime behind a single binary. `create-thally-docs` scaffolds, migrates, and lints; `thally check --ci` fails PRs on broken links, anchors, and drift; and the docs agent drafts edits as reviewed pull requests — it never merges. **Thally Track** turns merged (or `docs-preview`-labelled) PRs in your product repos into docs PRs automatically, with org-wide access via a one-click GitHub App.
   </Card>
   <Card title="AI features" icon="message">
     Retrieval-grounded chat answers with inline citations — with a configurable assistant name and disclaimer — a deterministic Agent Readiness Score grades how well your docs serve agents, and `/llms.txt`, per-page JSON, and agent manifests let tools index everything. Every deployed site is also a remote MCP endpoint at `/api/mcp`.
@@ -56,10 +56,10 @@ mode: home
 
 ## Get started
 
-The fastest way to create a new Dox project is with the CLI:
+The fastest way to create a new Thally project is with the CLI:
 
 ```bash
-npx create-dox my-docs
+npx create-thally-docs my-docs
 ```
 
 The CLI prompts you for a project name, description, brand preset, and optional GitHub repo URL — then scaffolds a ready-to-run docs site with starter content, navigation, and dependencies installed.
@@ -67,7 +67,7 @@ The CLI prompts you for a project name, description, brand preset, and optional 
 Prefer to clone the template manually?
 
 ```bash
-git clone https://github.com/kenny-io/Dox.git my-docs
+git clone https://github.com/thallylabs/thally.git my-docs
 cd my-docs
 npm install
 npm run dev
@@ -75,9 +75,9 @@ npm run dev
 
 ## How it works
 
-Dox uses a file-based content model. All documentation lives in `src/content/` as `.mdx` files. Navigation structure is defined in `docs.json` at the project root — you list your tabs, groups, and pages there, and the sidebar, breadcrumbs, and routing are derived automatically.
+Thally uses a file-based content model. All documentation lives in `src/content/` as `.mdx` files. Navigation structure is defined in `docs.json` at the project root — you list your tabs, groups, and pages there, and the sidebar, breadcrumbs, and routing are derived automatically.
 
-For API documentation, point the API Reference tab in `docs.json` to an OpenAPI spec file. Dox parses the spec and generates endpoint pages with parameter tables, request/response schemas, code samples, and an interactive playground.
+For API documentation, point the API Reference tab in `docs.json` to an OpenAPI spec file. Thally parses the spec and generates endpoint pages with parameter tables, request/response schemas, code samples, and an interactive playground.
 
 <Note type="info" title="Sample content">
 The pages in this Overview tab are example content that ships with the template. Replace them with your own product documentation to get started.

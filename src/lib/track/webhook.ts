@@ -7,12 +7,12 @@ import {
   AGENT_BRANCH_PREFIX,
   DOCS_PREVIEW_LABEL,
   type GithubAppCreds,
-} from '@doxlabs/mcp/track'
+} from '@thallylabs/mcp/track'
 import type { TrackingConfig, TrackingRepoConfig } from '@/data/docs'
 import type { StorageAdapter } from '@/lib/storage/types'
 
 // AGENT_BRANCH_PREFIX (loop guard) and DOCS_PREVIEW_LABEL are the single source
-// of truth in @doxlabs/mcp/track — shared with the scaffolded sender workflow
+// of truth in @thallylabs/mcp/track — shared with the scaffolded sender workflow
 // and the agent's branch producer so the two Track ingress paths can't drift.
 /** Re-exported for back-compat with existing importers. */
 export const PREVIEW_LABEL = DOCS_PREVIEW_LABEL
@@ -20,7 +20,7 @@ export const PREVIEW_LABEL = DOCS_PREVIEW_LABEL
 const PREVIEW_ACTIONS = new Set(['labeled', 'synchronize', 'opened', 'reopened'])
 
 // ---------------------------------------------------------------------------
-// Dox Track webhook logic — kept free of next/server so it unit-tests cleanly.
+// Thally Track webhook logic — kept free of next/server so it unit-tests cleanly.
 // The route (src/app/api/track/webhook/route.ts) is a thin shell around this.
 //
 // Track acts on MERGED pull requests, not raw commits: a merged PR is completed,
@@ -81,7 +81,7 @@ export interface PrMatch {
  * Match a GitHub `pull_request` payload against the tracking config. Returns
  * null unless the PR either MERGED into the tracked base branch, OR is an open
  * PR labelled `docs-preview` on that base branch. Unmerged closes, wrong base,
- * untracked repos, and the docs agent's own `dox/agent-*` branches are ignored.
+ * untracked repos, and the docs agent's own `thally/agent-*` branches are ignored.
  * (Path filtering needs the PR's file list, which the payload omits — that
  * happens in processPullRequest.)
  */
@@ -186,7 +186,7 @@ export async function processPullRequest(match: PrMatch, deps: ProcessPrDeps): P
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      event_type: 'dox-document',
+      event_type: 'thally-document',
       client_payload: {
         instruction,
         from_pr: match.htmlUrl,

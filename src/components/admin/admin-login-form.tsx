@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { AlertCircle } from 'lucide-react'
 import { BrandMark } from '@/components/admin/brand-mark'
 
-export function AdminLoginForm({ siteName = 'Dox', oidcEnabled = false }: { siteName?: string; oidcEnabled?: boolean }) {
+export function AdminLoginForm({ siteName = 'Thally', oidcEnabled = false }: { siteName?: string; oidcEnabled?: boolean }) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [password, setPassword] = useState('')

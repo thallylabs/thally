@@ -1,17 +1,17 @@
 ---
 title: The docs agent
-description: Turn a task — an instruction, a diff, or a product PR — into a reviewed documentation pull request with `dox agent`.
+description: Turn a task — an instruction, a diff, or a product PR — into a reviewed documentation pull request with `thally agent`.
 keywords:
   - docs agent
-  - dox agent
+  - thally agent
   - AI documentation
   - docs-as-code
   - agent-native
 ---
 
-The **docs agent** turns a *task* into documentation edits. A task is just an instruction plus optional context (a git diff, or a product PR) — the agent reads your existing docs, drafts the smallest correct change in your house style, validates its own work with `dox check`, and hands you a branch or a pull request to review.
+The **docs agent** turns a *task* into documentation edits. A task is just an instruction plus optional context (a git diff, or a product PR) — the agent reads your existing docs, drafts the smallest correct change in your house style, validates its own work with `thally check`, and hands you a branch or a pull request to review.
 
-It runs on **your** infrastructure with **your** Anthropic key. Nothing is hosted by Dox.
+It runs on **your** infrastructure with **your** Anthropic key. Nothing is hosted by Thally.
 
 ## Quick start
 
@@ -19,13 +19,13 @@ It runs on **your** infrastructure with **your** Anthropic key. Nothing is hoste
 export ANTHROPIC_API_KEY=sk-ant-...
 
 # Preview edits for an instruction (writes nothing):
-dox agent "Document that the swap widget now supports TRON and SOL" --dry-run
+thally agent "Document that the swap widget now supports TRON and SOL" --dry-run
 
 # Draft from a merged product PR and open a documentation PR:
-dox agent --from-pr https://github.com/acme/widget/pull/482 --pr
+thally agent --from-pr https://github.com/acme/widget/pull/482 --pr
 
 # Draft from a local diff, leaving edits on a branch to review:
-dox agent "Document the new webhook events" --diff HEAD~1
+thally agent "Document the new webhook events" --diff HEAD~1
 ```
 
 ## How it works
@@ -38,7 +38,7 @@ The agent requires a **clean git working tree** and creates a fresh branch off `
 It explores your docs (`list_pages`, `search_docs`, `read_page`), then edits — preferring to update an existing page over adding a new one, matching your existing voice and MDX components, and registering any new page in `docs.json`.
 </Step>
 <Step title="Self-validate">
-It runs `dox check` on its own output and gets one repair round to fix anything it broke — broken links, missing frontmatter, invalid nav.
+It runs `thally check` on its own output and gets one repair round to fix anything it broke — broken links, missing frontmatter, invalid nav.
 </Step>
 <Step title="Hand off">
 `--dry-run` prints the diff and discards it. The default leaves the edits on the branch. `--pr` commits, pushes, and opens a pull request for your team to review — the agent never merges.
@@ -55,7 +55,7 @@ It runs `dox check` on its own output and gets one repair round to fix anything 
 | `--pr` | Commit, push, and open a documentation pull request. |
 | _(default)_ | Leave the edits on the agent's branch for you to review. |
 
-Set `DOX_AGENT_MODEL` to choose the model (defaults to a capable Claude model).
+Set `THALLY_AGENT_MODEL` to choose the model (defaults to a capable Claude model).
 
 ## Steering with AGENTS.md
 
@@ -70,7 +70,7 @@ Drop an `AGENTS.md` in your docs project to give the agent house rules — tone,
 
 ## Automation
 
-The CLI is the whole engine. To make it autonomous, wire GitHub triggers that produce the same task — then engineering's contribution to docs is one `@dox` comment, and DevRel reviews a queue of agent-drafted PRs.
+The CLI is the whole engine. To make it autonomous, wire GitHub triggers that produce the same task — then engineering's contribution to docs is one `@thally` comment, and DevRel reviews a queue of agent-drafted PRs.
 
 The model is **hub-and-spoke**: your docs repo is the hub (it holds the workflow, the `ANTHROPIC_API_KEY`, and all config); each product repo gets a tiny sender. Secrets never scatter.
 
@@ -79,13 +79,13 @@ The model is **hub-and-spoke**: your docs repo is the hub (it holds the workflow
 In your docs repo:
 
 ```bash
-dox agent init --repo <owner>/<docs-repo>
+thally agent init --repo <owner>/<docs-repo>
 ```
 
-This writes `.github/workflows/dox-agent.yml` — a listener that runs the agent on a dispatched task (and a weekly `dox check --drift` sweep). Add two repo secrets: `ANTHROPIC_API_KEY` and `DOX_AGENT_TOKEN` (a fine-grained PAT or GitHub App with write on the docs repo and read on your product repos).
+This writes `.github/workflows/thally-agent.yml` — a listener that runs the agent on a dispatched task (and a weekly `thally check --drift` sweep). Add two repo secrets: `ANTHROPIC_API_KEY` and `THALLY_AGENT_TOKEN` (a fine-grained PAT or GitHub App with write on the docs repo and read on your product repos).
 </Step>
 <Step title="Add a sender to each product repo">
-`dox agent init` prints a ready-to-paste `dox-mention.yml`. It fires when a collaborator comments **`@dox document this …`** on a PR, dispatching the task (PR URL + instruction) to the docs repo. Add a `DOX_DISPATCH_TOKEN` secret there with dispatch access to the docs repo.
+`thally agent init` prints a ready-to-paste `thally-mention.yml`. It fires when a collaborator comments **`@thally document this …`** on a PR, dispatching the task (PR URL + instruction) to the docs repo. Add a `THALLY_DISPATCH_TOKEN` secret there with dispatch access to the docs repo.
 </Step>
 <Step title="(Optional) Document on merge">
 For API-reference-shaped repos, add the merge sender: on merge to `main`, if the diff touches watched paths, it dispatches automatically — no comment needed.
@@ -103,9 +103,9 @@ Declare your product repos in `docs.json` so the setup is self-documenting:
 ```
 
 <Note>
-Every trigger — a `@dox` comment, a merged PR, a `docs-preview`-labelled PR, the drift sweep, or the CLI — produces the same task and lands as a **reviewed pull request**. The agent never merges; a human always does.
+Every trigger — a `@thally` comment, a merged PR, a `docs-preview`-labelled PR, the drift sweep, or the CLI — produces the same task and lands as a **reviewed pull request**. The agent never merges; a human always does.
 </Note>
 
-**Want merged PRs in your product repos to trigger docs PRs automatically?** That's [Dox Track](/guides/dox-track) — register repos in `docs.json`, connect GitHub (or wire a webhook/sender workflow), and the agent documents what shipped. Label a PR `docs-preview` to get the docs drafted before it merges.
+**Want merged PRs in your product repos to trigger docs PRs automatically?** That's [Thally Track](/guides/thally-track) — register repos in `docs.json`, connect GitHub (or wire a webhook/sender workflow), and the agent documents what shipped. Label a PR `docs-preview` to get the docs drafted before it merges.
 
-**Monorepo?** You need none of the sender plumbing — the workflow sees PRs and diffs natively. Run `dox agent init` and point it at the same repo.
+**Monorepo?** You need none of the sender plumbing — the workflow sees PRs and diffs natively. Run `thally agent init` and point it at the same repo.

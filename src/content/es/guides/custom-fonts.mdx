@@ -3,7 +3,7 @@ title: Fuentes Personalizadas
 description: Cambia a cualquier fuente de Google para el texto del cuerpo y los encabezados, configurado completamente desde docs.json.
 ---
 
-Dox viene con **Inter** para el texto del cuerpo y **JetBrains Mono** para el código por defecto. Puedes reemplazar cualquiera de ellas con cualquier fuente de Google añadiendo un bloque `fonts` en `docs.json` — sin necesidad de cambios en el código.
+Thally viene con **Inter** para el texto del cuerpo y **JetBrains Mono** para el código por defecto. Puedes reemplazar cualquiera de ellas con cualquier fuente de Google añadiendo un bloque `fonts` en `docs.json` — sin necesidad de cambios en el código.
 
 ## Configuración
 
@@ -14,7 +14,7 @@ Dox viene con **Inter** para el texto del cuerpo y **JetBrains Mono** para el c�
 }
 ```
 
-Dox lee la configuración, obtiene la fuente de Google Fonts y sobreescribe las variables CSS que controlan la tipografía en todo el sitio.
+Thally lee la configuración, obtiene la fuente de Google Fonts y sobreescribe las variables CSS que controlan la tipografía en todo el sitio.
 
 ## Campos
 
@@ -50,7 +50,7 @@ Se aplica a los encabezados h1–h6 en el contenido de la página. Si se omite, 
 
 ## Cómo funciona
 
-Cuando Dox detecta una fuente personalizada en `docs.json`:
+Cuando Thally detecta una fuente personalizada en `docs.json`:
 
 1. Genera una URL de CSS de Google Fonts para cada familia configurada
 2. Inyecta etiquetas `<link rel="preconnect">` y `<link rel="stylesheet">` en el head del documento

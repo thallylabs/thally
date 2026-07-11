@@ -1,6 +1,6 @@
 ---
 title: Despliegue
-description: Compila y despliega tu sitio de documentación Dox en cualquier plataforma de alojamiento.
+description: Compila y despliega tu sitio de documentación Thally en cualquier plataforma de alojamiento.
 ---
 
 ## Compilar para producción
@@ -13,21 +13,21 @@ Esto genera una compilación de producción optimizada en el directorio `.next/`
 
 ## Variables de entorno
 
-Antes de desplegar, establece la variable de entorno `DOX_SITE_URL` con tu dominio de producción. Se utiliza para los metadatos de OpenGraph y las URLs canónicas:
+Antes de desplegar, establece la variable de entorno `THALLY_SITE_URL` con tu dominio de producción. Se utiliza para los metadatos de OpenGraph y las URLs canónicas:
 
 ```bash
-DOX_SITE_URL=https://docs.yourproduct.com
+THALLY_SITE_URL=https://docs.yourproduct.com
 ```
 
 ## Analíticas y almacenamiento durable
 
-En local, Dox guarda analíticas y estado del admin en archivos SQLite bajo `.data/` — sin configuración. En hosts **serverless** (por ejemplo Vercel), ese sistema de archivos no persiste: necesitas una base de datos libSQL remota (Turso) si quieres métricas de tráfico o ajustes del admin durables.
+En local, Thally guarda analíticas y estado del admin en archivos SQLite bajo `.data/` — sin configuración. En hosts **serverless** (por ejemplo Vercel), ese sistema de archivos no persiste: necesitas una base de datos libSQL remota (Turso) si quieres métricas de tráfico o ajustes del admin durables.
 
 ```bash
-DOX_ANALYTICS_DB_URL=libsql://tu-db.turso.io
-DOX_ANALYTICS_DB_TOKEN=…
-DOX_DATABASE_URL=libsql://tu-db.turso.io
-DOX_DATABASE_TOKEN=…
+THALLY_ANALYTICS_DB_URL=libsql://tu-db.turso.io
+THALLY_ANALYTICS_DB_TOKEN=…
+THALLY_DATABASE_URL=libsql://tu-db.turso.io
+THALLY_DATABASE_TOKEN=…
 ```
 
 Pasos completos (incluido el CLI de Turso) en la guía en inglés: [Deploying → Analytics & durable storage](/guides/deploying#analytics--durable-storage). Agent Readiness no usa esta base de datos.
@@ -38,7 +38,7 @@ La forma más rápida de desplegar — sube a GitHub e importa el repositorio:
 
 1. Sube tu repositorio de documentación a GitHub
 2. Ve a [vercel.com/new](https://vercel.com/new) e importa el repositorio
-3. Establece `DOX_SITE_URL` en las variables de entorno
+3. Establece `THALLY_SITE_URL` en las variables de entorno
 4. Si quieres analíticas del admin, también configura las variables de Turso de arriba
 5. Despliega
 
@@ -112,11 +112,11 @@ Luego ejecuta `npm run build` — la salida estará en el directorio `out/`, lis
 
 ## SEO y feeds
 
-Una vez desplegado, Dox sirve automáticamente:
+Una vez desplegado, Thally sirve automáticamente:
 
 - **`/sitemap.xml`** — incluye todas las páginas de documentación, páginas de referencia de la API y el registro de cambios
 - **`/robots.txt`** — permite a los rastreadores en todas las páginas, bloquea las rutas internas de la API (`/api/og`, `/api/try-it`)
 - **`/changelog/rss.xml`** — feed RSS para las actualizaciones del registro de cambios
 - **Imágenes OG dinámicas** — cada página obtiene una imagen de vista previa social personalizada a través de `/api/og`
 
-Todos estos usan `DOX_SITE_URL` para generar URLs absolutas, así que asegúrate de que esté configurado antes de desplegar.
+Todos estos usan `THALLY_SITE_URL` para generar URLs absolutas, así que asegúrate de que esté configurado antes de desplegar.

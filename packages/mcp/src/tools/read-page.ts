@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import matter from 'gray-matter'
 
 export const readPageSchema = z.object({
-  projectDir: z.string().describe('Path to the Dox project root'),
+  projectDir: z.string().describe('Path to the Thally project root'),
   pageId: z.string().describe('Page ID, e.g. "guides/authentication"'),
 })
 

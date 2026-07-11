@@ -3,7 +3,7 @@ title: Custom Fonts
 description: Switch to any Google Font for body text and headings, configured entirely from docs.json.
 ---
 
-Dox ships with **Inter** for body text and **JetBrains Mono** for code by default. You can replace either with any Google Font by adding a `fonts` block to `docs.json` — no code changes required.
+Thally ships with **Inter** for body text and **JetBrains Mono** for code by default. You can replace either with any Google Font by adding a `fonts` block to `docs.json` — no code changes required.
 
 ## Configuration
 
@@ -14,7 +14,7 @@ Dox ships with **Inter** for body text and **JetBrains Mono** for code by defaul
 }
 ```
 
-Dox reads the config, fetches the font from Google Fonts, and overrides the CSS variables that control typography across the entire site.
+Thally reads the config, fetches the font from Google Fonts, and overrides the CSS variables that control typography across the entire site.
 
 ## Fields
 
@@ -50,7 +50,7 @@ Applies to h1–h6 headings in page content. When omitted, headings use the same
 
 ## How it works
 
-When Dox detects a custom font in `docs.json`, it:
+When Thally detects a custom font in `docs.json`, it:
 
 1. Generates a Google Fonts CSS URL for each configured family
 2. Injects `<link rel="preconnect">` and `<link rel="stylesheet">` tags into the document head

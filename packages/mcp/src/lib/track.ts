@@ -1,25 +1,25 @@
 // ---------------------------------------------------------------------------
-// Dox Track — shared pull-request distiller.
+// Thally Track — shared pull-request distiller.
 //
 // Turns a MERGED pull request in a tracked product repo into the material a
 // docs task needs: the GitHub API fetchers, the path-glob filter, and the
 // instruction/context builder. A merged PR — not a raw commit — is the unit of
 // completed, reviewed change (a commit can be reverted by the next one), so
 // Track only ever acts on merges. Dependency-free on purpose (node:crypto only):
-// this module is consumed by the MCP `sync_from_repo` tool, `@doxlabs/cli`
-// (`dox track`), and the Next.js webhook receiver — one source of truth
-// (exported as `@doxlabs/mcp/track`).
+// this module is consumed by the MCP `sync_from_repo` tool, `@thallylabs/cli`
+// (`thally track`), and the Next.js webhook receiver — one source of truth
+// (exported as `@thallylabs/mcp/track`).
 // ---------------------------------------------------------------------------
 
 import { createSign, createHash } from 'node:crypto'
 
 /**
  * The branch prefix the docs agent stamps on its own PRs (`run.ts` creates
- * `dox/agent-<base36>`). Track's loop guard ignores PRs from these branches so a
+ * `thally/agent-<base36>`). Track's loop guard ignores PRs from these branches so a
  * self-tracking repo never chases its own agent PRs. Single source of truth for
  * the webhook relay, the scaffolded Actions workflow, and the producer.
  */
-export const AGENT_BRANCH_PREFIX = 'dox/agent-'
+export const AGENT_BRANCH_PREFIX = 'thally/agent-'
 
 /** Label that turns an OPEN PR into a preview-docs request (shared by the
  * webhook relay and the scaffolded sender workflow). */
@@ -163,9 +163,9 @@ export async function verifyInstallationBelongsToApp(
 
 /** GitHub App creds from env, when the "Connect GitHub" flow isn't used. */
 function envAppCreds(): GithubAppCreds | undefined {
-  const appId = process.env.DOX_GITHUB_APP_ID?.trim()
-  const installationId = process.env.DOX_GITHUB_APP_INSTALLATION_ID?.trim()
-  const privateKey = process.env.DOX_GITHUB_APP_PRIVATE_KEY
+  const appId = (process.env.THALLY_GITHUB_APP_ID ?? process.env.DOX_GITHUB_APP_ID)?.trim()
+  const installationId = (process.env.THALLY_GITHUB_APP_INSTALLATION_ID ?? process.env.DOX_GITHUB_APP_INSTALLATION_ID)?.trim()
+  const privateKey = process.env.THALLY_GITHUB_APP_PRIVATE_KEY ?? process.env.DOX_GITHUB_APP_PRIVATE_KEY
   if (appId && installationId && privateKey) return { appId, installationId, privateKey }
   return undefined
 }
@@ -173,13 +173,16 @@ function envAppCreds(): GithubAppCreds | undefined {
 /**
  * Resolve a GitHub API token. Precedence: an explicit token → a GitHub App
  * installation token (passed creds, then env creds) → the personal-token chain
- * (`DOX_GITHUB_TOKEN → DOX_TASKS_TOKEN → GH_TOKEN → GITHUB_TOKEN`). One resolver
+ * (`THALLY_GITHUB_TOKEN → THALLY_TASKS_TOKEN → GH_TOKEN → GITHUB_TOKEN`, each
+ * `THALLY_*` falling back to its legacy `DOX_*` name). One resolver
  * for every Track call site so the chain never drifts.
  */
 export async function resolveGithubToken(options?: GithubFetchOptions): Promise<string | undefined> {
   if (options?.token) return options.token
   const pat =
+    process.env.THALLY_GITHUB_TOKEN ??
     process.env.DOX_GITHUB_TOKEN ??
+    process.env.THALLY_TASKS_TOKEN ??
     process.env.DOX_TASKS_TOKEN ??
     process.env.GH_TOKEN ??
     process.env.GITHUB_TOKEN ??
@@ -194,7 +197,7 @@ export async function resolveGithubToken(options?: GithubFetchOptions): Promise<
       // it. With no PAT, return undefined (not throw) so callers no-op cleanly
       // and GitHub redelivers the webhook, rather than throwing → a 200 that
       // GitHub treats as delivered.
-      console.warn(`[dox-track] GitHub App token mint failed, falling back to PAT: ${err instanceof Error ? err.message : String(err)}`)
+      console.warn(`[thally-track] GitHub App token mint failed, falling back to PAT: ${err instanceof Error ? err.message : String(err)}`)
       return pat
     }
   }
@@ -210,7 +213,7 @@ async function githubJson<T>(path: string, options?: GithubFetchOptions): Promis
   if (!response.ok) {
     const hint =
       response.status === 404 || response.status === 403
-        ? ' (private repo or rate limit? set DOX_GITHUB_TOKEN or connect a GitHub App)'
+        ? ' (private repo or rate limit? set THALLY_GITHUB_TOKEN or connect a GitHub App)'
         : ''
     throw new Error(`GitHub API ${response.status} for ${path}${hint}`)
   }
@@ -283,7 +286,7 @@ export async function fetchPullRequestFiles(
 
 /**
  * The most recent MERGED pull request into `base`, or null when there is none.
- * Used by `dox track test` / `sync_from_repo` to preview "the latest merge".
+ * Used by `thally track test` / `sync_from_repo` to preview "the latest merge".
  */
 export async function fetchLatestMergedPr(
   owner: string,

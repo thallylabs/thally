@@ -28,13 +28,13 @@ function deriveTitle(pageId: string): string {
 export function runNewPage(args: ParsedArgs, cwd = process.cwd()): number {
   const pageId = args.positionals[0]
   if (!pageId) {
-    process.stderr.write('\n  Usage: dox new <page-id> [--title "..."] [--description "..."]\n\n')
+    process.stderr.write('\n  Usage: thally new <page-id> [--title "..."] [--description "..."]\n\n')
     return 1
   }
 
   const docsJsonPath = path.join(cwd, 'docs.json')
   if (!existsSync(docsJsonPath)) {
-    process.stderr.write('\n  Not a Dox project: docs.json not found.\n\n')
+    process.stderr.write('\n  Not a Thally project: docs.json not found.\n\n')
     return 1
   }
 

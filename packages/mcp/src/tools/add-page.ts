@@ -5,7 +5,7 @@ import { readDocsJson, writeDocsJson } from '../lib/docs-json.js'
 import type { DocsJsonNavigationGroup } from '../lib/docs-json.js'
 
 export const addPageSchema = z.object({
-  projectDir: z.string().describe('Path to the Dox project root'),
+  projectDir: z.string().describe('Path to the Thally project root'),
   pageId: z.string().describe('Page identifier (e.g. "guides/auth"). No .mdx extension.'),
   title: z.string().describe('Page title (used in frontmatter)'),
   description: z.string().optional().describe('Page description (used in frontmatter)'),

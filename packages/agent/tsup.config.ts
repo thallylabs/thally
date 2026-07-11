@@ -6,7 +6,7 @@ export default defineConfig({
   platform: 'node',
   target: 'node18',
   // Resolved at runtime from the dependency tree, not bundled.
-  external: ['@anthropic-ai/sdk', '@doxlabs/mcp', 'playwright', 'playwright-core'],
+  external: ['@anthropic-ai/sdk', '@thallylabs/mcp', 'playwright', 'playwright-core'],
   clean: true,
   dts: true,
 })

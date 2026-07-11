@@ -5,7 +5,7 @@
  * private repo without a token).
  */
 
-import { resolveGithubToken } from '@doxlabs/mcp/track'
+import { resolveGithubToken } from '@thallylabs/mcp/track'
 
 export interface DocsTask {
   number: number
@@ -33,10 +33,10 @@ const SOURCE_TO_ORIGIN: Record<string, DocsTask['origin']> = {
 
 export function parseOrigin(body: string): DocsTask['origin'] {
   // The authoritative marker is the LAST occurrence of the exact trailer the
-  // agent stamps (run.ts): "Drafted by the Dox docs agent (origin: <source>)".
+  // agent stamps (run.ts): "Drafted by the Thally docs agent (origin: <source>)".
   // Anchoring to that phrase (and taking the last match) prevents a summary that
   // merely quotes "origin: merge" from hijacking the classification.
-  const stamps = [...body.matchAll(/Drafted by the Dox docs agent \(origin:\s*(\w+)\)/gi)]
+  const stamps = [...body.matchAll(/Drafted by the Thally docs agent \(origin:\s*(\w+)\)/gi)]
   const marker = stamps.at(-1)?.[1]?.toLowerCase()
   if (marker && marker in SOURCE_TO_ORIGIN) return SOURCE_TO_ORIGIN[marker]
   // Pre-marker / hand-authored PRs: fall back to the fuzzy heuristics.
@@ -90,7 +90,7 @@ export async function getDocsTasks(repoUrl: string | undefined, limit = 25): Pro
   for (const pr of pulls) {
     const body = pr.body ?? ''
     // Only the docs agent's PRs are tasks (it stamps this line into the body).
-    if (!/dox docs agent/i.test(body)) continue
+    if (!/thally docs agent/i.test(body)) continue
     tasks.push({
       number: pr.number,
       title: pr.title,

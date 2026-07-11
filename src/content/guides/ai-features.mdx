@@ -3,7 +3,7 @@ title: AI Features
 description: Built-in AI capabilities — chat widget, structured agent API, discovery files, and MCP tools for querying your docs.
 ---
 
-Dox ships with a full AI-native layer that serves both human readers and AI agents from the same URLs. Agents get structured data; humans get the same pre-rendered UI they always did.
+Thally ships with a full AI-native layer that serves both human readers and AI agents from the same URLs. Agents get structured data; humans get the same pre-rendered UI they always did.
 
 ---
 
@@ -40,7 +40,7 @@ Chat resolves an Anthropic key in two tiers, so a brand-new site can answer ques
 | Tier | Key | Limits |
 |------|-----|--------|
 | **Owner** | `ANTHROPIC_API_KEY` | Generous (your key, you pay) |
-| **Trial** | `DOX_TRIAL_ANTHROPIC_KEY` (shared) | Tightly rate-limited per IP + a global daily ceiling |
+| **Trial** | `THALLY_TRIAL_ANTHROPIC_KEY` (shared) | Tightly rate-limited per IP + a global daily ceiling |
 
 Set your own key in `.env.local` for production:
 
@@ -48,7 +48,7 @@ Set your own key in `.env.local` for production:
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-When only the shared trial key is configured, chat still works — under strict caps — so visitors reach the "aha moment" before you commit a key. The active tier is returned on each response via the `x-dox-ai-tier` header. Limits are tunable with `DOX_TRIAL_RATE_PER_MIN`, `DOX_TRIAL_RATE_PER_DAY`, `DOX_TRIAL_DAILY_LIMIT`, and `DOX_CHAT_RATE_PER_MIN`.
+When only the shared trial key is configured, chat still works — under strict caps — so visitors reach the "aha moment" before you commit a key. The active tier is returned on each response via the `x-thally-ai-tier` header. Limits are tunable with `THALLY_TRIAL_RATE_PER_MIN`, `THALLY_TRIAL_RATE_PER_DAY`, `THALLY_TRIAL_DAILY_LIMIT`, and `THALLY_CHAT_RATE_PER_MIN`.
 
 ### How it works
 
@@ -72,7 +72,7 @@ The chat route applies tier-aware in-memory rate limits (per minute and per day,
 
 ## LLM-ready text endpoints
 
-Dox exposes your documentation in plain-text formats for AI tools that prefer raw context over structured data.
+Thally exposes your documentation in plain-text formats for AI tools that prefer raw context over structured data.
 
 ### `/llms.txt`
 
@@ -192,7 +192,7 @@ The middleware detects agent requests and transparently rewrites them to the JSO
 |--------|---------|
 | `?format=json` query param | `?format=json` |
 | `Accept: application/json` header | Standard HTTP content negotiation |
-| `X-Dox-Client: agent` header | Explicit opt-in for internal tools |
+| `X-Thally-Client: agent` header | Explicit opt-in for internal tools |
 | Known bot User-Agent | `GPTBot`, `ClaudeBot`, `python-requests`, `node-fetch`, `Go-http-client` |
 
 Human visitors with a normal browser `Accept` header always receive the pre-rendered HTML page. Agents always receive structured data. The URL is the same for both.
@@ -232,7 +232,7 @@ Fetching the index once lets an agent build the full navigation graph and decide
 
 ## Discovery file
 
-Dox ships `/ai.txt` at a well-known path that agents check before doing anything else. It tells agents how to interact with this site — format options, API patterns, and what's allowed:
+Thally ships `/ai.txt` at a well-known path that agents check before doing anything else. It tells agents how to interact with this site — format options, API patterns, and what's allowed:
 
 ```
 Docs-Format: application/json, text/markdown
@@ -277,7 +277,7 @@ Each page's `<head>` also includes a `<link rel="alternate">` pointing to the JS
 
 ## How an agent experiences your docs
 
-A well-behaved agent hitting your Dox site will:
+A well-behaved agent hitting your Thally site will:
 
 <Steps>
 
@@ -309,14 +309,14 @@ A human visiting the same URLs never notices any of this. The HTML is identical 
 
 ## Agent Readiness Score
 
-Dox grades how well your docs serve AI agents with a deterministic 0–100 score. It's computed from the content graph — structured data, metadata, discovery files, machine readability, OpenAPI coverage, and content quality — with an optional analytics-derived signal when agent traffic data is available.
+Thally grades how well your docs serve AI agents with a deterministic 0–100 score. It's computed from the content graph — structured data, metadata, discovery files, machine readability, OpenAPI coverage, and content quality — with an optional analytics-derived signal when agent traffic data is available.
 
 ```bash
 # JSON report
 GET /api/agent-readiness
 
 # In your terminal (fails the run below a threshold — handy in CI)
-dox check --agents --min 80
+thally check --agents --min 80
 ```
 
 The report includes weighted subscores and the specific pages dragging each one down, so the fix is always concrete. MCP clients can fetch the same report for any deployed site with the `agent_readiness` tool.
@@ -325,7 +325,7 @@ The report includes weighted subscores and the specific pages dragging each one 
 
 ## MCP tools for querying docs
 
-The `@doxlabs/mcp` server includes tools that let AI agents search and read your documentation as context. Three work against a local project on disk (`search_docs`, `read_page`, `get_context`); two more — `semantic_search` and `agent_readiness` — run against any **deployed** Dox site over HTTP.
+The `@thallylabs/mcp` server includes tools that let AI agents search and read your documentation as context. Three work against a local project on disk (`search_docs`, `read_page`, `get_context`); two more — `semantic_search` and `agent_readiness` — run against any **deployed** Thally site over HTTP.
 
 ### `search_docs`
 

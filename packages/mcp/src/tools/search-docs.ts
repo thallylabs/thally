@@ -4,7 +4,7 @@ import { join, relative, extname } from 'node:path'
 import matter from 'gray-matter'
 
 export const searchDocsSchema = z.object({
-  projectDir: z.string().describe('Path to the Dox project root'),
+  projectDir: z.string().describe('Path to the Thally project root'),
   query: z.string().describe('Search query'),
   limit: z.number().optional().default(5).describe('Max results to return (default 5)'),
 })

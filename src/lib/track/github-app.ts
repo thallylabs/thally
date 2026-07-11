@@ -3,7 +3,7 @@ import { getSiteUrl } from '@/lib/site-url'
 
 // ---------------------------------------------------------------------------
 // "Connect GitHub" — GitHub App Manifest flow (the Netlify/Vercel-style access
-// path for Dox Track). The admin dashboard POSTs a manifest to GitHub, the user
+// path for Thally Track). The admin dashboard POSTs a manifest to GitHub, the user
 // creates + installs THEIR OWN app in a couple of clicks, GitHub redirects back
 // with a one-time `code`, and we exchange it for the app's id + private key +
 // webhook secret — no key paste. Everything stays on the user's infra.
@@ -26,13 +26,13 @@ export interface AppManifest {
 /**
  * Build the App manifest. The `redirect_url` (where GitHub returns the one-time
  * code that exchanges into the private key) and the webhook `hook_attributes.url`
- * are derived from the CANONICAL site URL (`DOX_SITE_URL`) — never a request
+ * are derived from the CANONICAL site URL (`THALLY_SITE_URL`) — never a request
  * header, which is spoofable and would be a credential-exfil path.
  */
 export function buildAppManifest(opts?: { siteUrl?: string; appName?: string }): AppManifest {
   const base = (opts?.siteUrl ?? getSiteUrl()).replace(/\/+$/, '')
   return {
-    name: opts?.appName?.trim() || 'Dox Track',
+    name: opts?.appName?.trim() || 'Thally Track',
     url: base,
     redirect_url: `${base}/api/admin/github-app/callback`,
     setup_url: `${base}/api/admin/github-app/callback`,
@@ -83,17 +83,17 @@ export async function exchangeManifestCode(
 }
 
 // ---------------------------------------------------------------------------
-// CSRF state — a short-lived HMAC token (keyed on DOX_AUTH_SECRET) round-tripped
+// CSRF state — a short-lived HMAC token (keyed on THALLY_AUTH_SECRET) round-tripped
 // through GitHub so the callback can prove the flow it's completing is one we
 // started. The callback is also admin-gated; this is defense in depth.
 // ---------------------------------------------------------------------------
 
 function stateSecret(): string | null {
-  const s = process.env.DOX_AUTH_SECRET?.trim()
+  const s = (process.env.THALLY_AUTH_SECRET ?? process.env.DOX_AUTH_SECRET)?.trim()
   return s && s.length >= 16 ? s : null
 }
 
-/** Mint a signed state, or null if DOX_AUTH_SECRET is absent (caller must refuse). */
+/** Mint a signed state, or null if THALLY_AUTH_SECRET is absent (caller must refuse). */
 export function signManifestState(): string | null {
   const secret = stateSecret()
   if (!secret) return null

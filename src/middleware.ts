@@ -107,7 +107,7 @@ async function sendAnalyticsEvent(request: NextRequest, pathname: string) {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-dox-analytics-secret': secret,
+      'x-thally-analytics-secret': secret,
     },
     body: JSON.stringify(buildAnalyticsPayload(request, pathname)),
   }).catch(() => {
@@ -144,7 +144,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     !pathname.startsWith('/api/admin') &&
     !pathname.startsWith('/api/analytics') &&
     !pathname.startsWith('/api/access') &&
-    // The Dox Track webhook is called by GitHub, which can't hold a docs-access
+    // The Thally Track webhook is called by GitHub, which can't hold a docs-access
     // cookie — it authenticates itself via HMAC signature instead.
     !pathname.startsWith('/api/track') &&
     pathname !== '/access' &&
@@ -207,7 +207,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
 
     const requestHeaders = new Headers(request.headers)
     if (format === 'json' || format === 'ldjson' || format === 'md') {
-      requestHeaders.set('x-dox-format', format)
+      requestHeaders.set('x-thally-format', format)
     }
 
     return NextResponse.rewrite(url, { request: { headers: requestHeaders } })

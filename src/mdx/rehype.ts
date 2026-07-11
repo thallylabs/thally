@@ -102,7 +102,7 @@ function tokensToHtml(lines: Array<Array<ThemedToken>>, highlightedLines: Set<nu
       const inner = line
         .map((token) => `<span style="color:${token.color ?? 'inherit'}">${escapeHtml(token.content)}</span>`)
         .join('')
-      const highlightClass = highlightedLines.has(index + 1) ? ' class="dox-line-highlight"' : ''
+      const highlightClass = highlightedLines.has(index + 1) ? ' class="thally-line-highlight"' : ''
       return `<span${highlightClass}>${inner}</span>`
     })
     .join('\n')

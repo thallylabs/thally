@@ -43,7 +43,7 @@ jobs:
         env:
           # Keep the build deterministic and offline — embeddings fall back to the
           # local hash provider when no key is present.
-          DOX_SITE_URL: https://example.com
+          THALLY_SITE_URL: https://example.com
 
   lighthouse:
     name: Core Web Vitals budget
@@ -67,7 +67,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          DOX_SITE_URL: http://localhost:3040
+          THALLY_SITE_URL: http://localhost:3040
 
       - name: Run Lighthouse CI
         run: npx --yes @lhci/cli@0.14.x autorun

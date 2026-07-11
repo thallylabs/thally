@@ -53,7 +53,7 @@ export function Logo({ className, showText = true }: LogoProps) {
               theme-aware; replaced site-wide by an admin upload above. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={isDark ? '/brand/dox-logo-dark.png' : '/brand/dox-logo-light.png'}
+            src={isDark ? '/brand/thally-logo-dark.png' : '/brand/thally-logo-light.png'}
             alt=""
             width={32}
             height={32}

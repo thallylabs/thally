@@ -3,7 +3,7 @@ import { readDocsJson } from '../lib/docs-json.js'
 import type { DocsJsonNavigationGroup } from '../lib/docs-json.js'
 
 export const listPagesSchema = z.object({
-  projectDir: z.string().describe('Path to the Dox project root'),
+  projectDir: z.string().describe('Path to the Thally project root'),
 })
 
 export type ListPagesInput = z.infer<typeof listPagesSchema>

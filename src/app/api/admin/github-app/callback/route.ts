@@ -3,7 +3,7 @@ import { requireCapabilityFromRequest } from '@/lib/auth/rbac'
 import { getAdminSettings, updateAdminSettings } from '@/lib/admin/settings'
 import { encryptSecret, decryptSecret } from '@/lib/admin/secrets'
 import { exchangeManifestCode, verifyManifestState, signManifestState } from '@/lib/track/github-app'
-import { verifyInstallationBelongsToApp } from '@doxlabs/mcp/track'
+import { verifyInstallationBelongsToApp } from '@thallylabs/mcp/track'
 
 export const runtime = 'nodejs'
 
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
   const keyEnc = encryptSecret(conversion.pem)
   const webhookSecretEnc = encryptSecret(conversion.webhookSecret)
   if (!keyEnc || !webhookSecretEnc) {
-    // DOX_AUTH_SECRET vanished mid-flow — refuse rather than store plaintext.
+    // THALLY_AUTH_SECRET vanished mid-flow — refuse rather than store plaintext.
     return redirect(request, { github_app: 'no_auth_secret' })
   }
 

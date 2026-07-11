@@ -1,6 +1,6 @@
 ---
 title: Remote MCP server
-description: Every deployed Dox site is a Model Context Protocol server — attach it to any agent and your docs become native tools.
+description: Every deployed Thally site is a Model Context Protocol server — attach it to any agent and your docs become native tools.
 keywords:
   - MCP
   - Model Context Protocol
@@ -9,22 +9,22 @@ keywords:
   - agent-native
 ---
 
-Every deployed Dox site exposes a **remote [Model Context Protocol](https://modelcontextprotocol.io) server** at `/api/mcp`. Any MCP-capable agent — Claude Code, Claude Desktop, Cursor, or your own — attaches over HTTP and gets your documentation as **native tools**: it can search, read pages, list the site, and check the Agent Readiness Score without you writing a line of integration code.
+Every deployed Thally site exposes a **remote [Model Context Protocol](https://modelcontextprotocol.io) server** at `/api/mcp`. Any MCP-capable agent — Claude Code, Claude Desktop, Cursor, or your own — attaches over HTTP and gets your documentation as **native tools**: it can search, read pages, list the site, and check the Agent Readiness Score without you writing a line of integration code.
 
-This is different from the [local MCP server](/guides/mcp-server) (`@doxlabs/mcp`), which operates on a project directory on your machine. The remote server runs **inside your deployed site** and serves exactly what the site serves.
+This is different from the [local MCP server](/guides/mcp-server) (`@thallylabs/mcp`), which operates on a project directory on your machine. The remote server runs **inside your deployed site** and serves exactly what the site serves.
 
 ## Attach it
 
 <CodeGroup>
 
 ```bash Claude Code
-claude mcp add --transport http dox https://docs.example.com/api/mcp
+claude mcp add --transport http thally https://docs.example.com/api/mcp
 ```
 
 ```bash claude_desktop_config.json
 {
   "mcpServers": {
-    "dox": {
+    "thally": {
       "type": "http",
       "url": "https://docs.example.com/api/mcp"
     }
@@ -55,8 +55,8 @@ The endpoint works with zero configuration. Two optional environment variables t
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DOX_MCP_RATE_PER_MIN` | `60` | Per-IP ceiling on tool calls per minute (`0` disables). Backed by [durable storage](/guides/ai-features) when configured. |
-| `DOX_DATABASE_URL` | — | Point at Turso/libSQL to make the rate limit durable and shared across serverless instances. |
+| `THALLY_MCP_RATE_PER_MIN` | `60` | Per-IP ceiling on tool calls per minute (`0` disables). Backed by [durable storage](/guides/ai-features) when configured. |
+| `THALLY_DATABASE_URL` | — | Point at Turso/libSQL to make the rate limit durable and shared across serverless instances. |
 
 <Callout type="info">
 `search_docs` runs in **full-text** mode on the remote endpoint — it never embeds the query — so an anonymous, public server stays cheap. Semantic (hybrid) search remains available in-app and via `/api/search`.

@@ -70,7 +70,7 @@ const components: MDXComponents = {
     if (type === 'info') return <Note type="info">{children}</Note>
     return <Note>{children}</Note>
   },
-  // AccordionGroup: Mintlify wrapper — Dox uses <Accordion> directly, no group needed
+  // AccordionGroup: Mintlify wrapper — Thally uses <Accordion> directly, no group needed
   AccordionGroup: ({ children }: { children?: ReactNode }) => <>{children}</>,
   // Latex: Mintlify LaTeX component — render as inline code (no renderer available)
   Latex: ({ children }: { children?: ReactNode }) => <code className="font-mono text-sm">{children}</code>,

@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { readDocsJson, writeDocsJson } from '../lib/docs-json.js'
 
 export const addTabSchema = z.object({
-  projectDir: z.string().describe('Path to the Dox project root'),
+  projectDir: z.string().describe('Path to the Thally project root'),
   tabName: z.string().describe('Display name for the new tab (e.g. "Guides", "API Reference")'),
   href: z.string().optional().describe('If set, the tab is a redirect link instead of a content tab (e.g. "/changelog")'),
   position: z.enum(['start', 'end']).optional().default('end').describe('Insert the tab at the start or end of the tab bar'),

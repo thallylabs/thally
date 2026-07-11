@@ -72,20 +72,20 @@ export function McpView({
     }
   }
 
-  const claudeCmd = `claude mcp add --transport http dox-docs ${endpoint}`
+  const claudeCmd = `claude mcp add --transport http thally-docs ${endpoint}`
   const cursorJson = `{
   "mcpServers": {
-    "dox-docs": { "url": "${endpoint}" }
+    "thally-docs": { "url": "${endpoint}" }
   }
 }`
   const vscodeJson = `{
   "servers": {
-    "dox-docs": { "type": "http", "url": "${endpoint}" }
+    "thally-docs": { "type": "http", "url": "${endpoint}" }
   }
 }`
   const zedJson = `{
   "context_servers": {
-    "dox-docs": { "source": "custom", "url": "${endpoint}" }
+    "thally-docs": { "source": "custom", "url": "${endpoint}" }
   }
 }`
   const curlCmd = `curl -sX POST ${endpoint} \\

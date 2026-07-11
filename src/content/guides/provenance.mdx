@@ -1,6 +1,6 @@
 ---
 title: Provenance & freshness
-description: Machine-legible last_updated / last_verified dates that earn agent trust, plus dox check --drift to catch stale pages against the code they document.
+description: Machine-legible last_updated / last_verified dates that earn agent trust, plus thally check --drift to catch stale pages against the code they document.
 keywords:
   - provenance
   - freshness
@@ -9,7 +9,7 @@ keywords:
   - agent-native
 ---
 
-Agents (and people) trust docs more when they can tell *how current* a page is. Dox surfaces a **machine-legible freshness signal** on every projection, and gives you a deterministic way to catch pages that have drifted from the code they document.
+Agents (and people) trust docs more when they can tell *how current* a page is. Thally surfaces a **machine-legible freshness signal** on every projection, and gives you a deterministic way to catch pages that have drifted from the code they document.
 
 There are two layers, with two different audiences.
 
@@ -32,13 +32,13 @@ verifiedVersion: "2.3.0"     # optional: the product version it was verified aga
 
 ## Internal: sources & drift
 
-The mechanism behind `lastVerified` is a set of **sources** — the code a page documents — and the commit it was last checked against. These live in frontmatter but are **never published**: a consuming agent can't interpret a file path from a repo it can't see, so Dox strips them from every public projection.
+The mechanism behind `lastVerified` is a set of **sources** — the code a page documents — and the commit it was last checked against. These live in frontmatter but are **never published**: a consuming agent can't interpret a file path from a repo it can't see, so Thally strips them from every public projection.
 
 ```yaml
 ---
 title: Swap tokens
 lastVerified: 2026-07-01
-# Internal — read only by `dox check --drift`, never served publicly:
+# Internal — read only by `thally check --drift`, never served publicly:
 sources:
   - src/networks.ts
   - "openapi.yaml#/paths/~1swap"
@@ -48,18 +48,18 @@ verifiedCommit: 9f2c1a7
 
 Reference files in the same repo directly (`src/networks.ts`). A `#fragment` (e.g. an OpenAPI path) narrows *what* it documents — drift is still evaluated against the whole file.
 
-## `dox check --drift`
+## `thally check --drift`
 
 Run the drift check to flag any page whose `sources` changed since its `verifiedCommit`:
 
 ```bash
-dox check --drift
+thally check --drift
 ```
 
 It's deterministic and needs no AI — just git history. A page is flagged **stale** when a source file has new commits since it was verified. Combine with `--ci` for GitHub annotations:
 
 ```bash
-dox check --drift --ci
+thally check --drift --ci
 ```
 
 <Warning>
@@ -76,4 +76,4 @@ If a `verifiedCommit` isn't in history, the check reports it as **indeterminate*
 
 ## The verify flow
 
-When you've confirmed a page is still accurate, stamp both layers together — set `lastVerified` to today's date and `verifiedCommit` to the current commit (`git rev-parse HEAD`). The public date moves forward and the drift baseline resets. Scheduling `dox check --drift` on a cron turns this into a safety net: drift found → a docs task → a reviewed pull request.
+When you've confirmed a page is still accurate, stamp both layers together — set `lastVerified` to today's date and `verifiedCommit` to the current commit (`git rev-parse HEAD`). The public date moves forward and the drift baseline resets. Scheduling `thally check --drift` on a cron turns this into a safety net: drift found → a docs task → a reviewed pull request.

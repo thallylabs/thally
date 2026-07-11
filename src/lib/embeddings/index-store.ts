@@ -7,7 +7,7 @@ import { chunkDocument } from '@/lib/embeddings/chunk'
 import { getEmbeddingProvider } from '@/lib/embeddings/provider'
 import type { Chunk, EmbeddedChunk, EmbeddingIndex, EmbeddingProvider } from '@/lib/embeddings/types'
 
-const CACHE_DIR = path.join(process.cwd(), '.dox', 'embeddings')
+const CACHE_DIR = path.join(process.cwd(), '.thally', 'embeddings')
 
 interface PageCacheEntry {
   hash: string

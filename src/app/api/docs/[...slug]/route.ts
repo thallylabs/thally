@@ -33,7 +33,7 @@ function suggestSlugs(
 }
 
 function resolveRequestedFormat(request: NextRequest): 'json' | 'ldjson' | 'markdown' {
-  const formatHeader = request.headers.get('x-dox-format')
+  const formatHeader = request.headers.get('x-thally-format')
   if (formatHeader === 'ldjson') return 'ldjson'
   if (formatHeader === 'json') return 'json'
   if (formatHeader === 'md') return 'markdown'
@@ -124,7 +124,7 @@ export async function GET(
 
   const commonHeaders: Record<string, string> = {
     'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
-    Vary: 'Accept, X-Dox-Format',
+    Vary: 'Accept, X-Thally-Format',
     Link: `<${entry.href}>; rel="canonical", <${entry.href}?format=json>; rel="alternate"; type="application/json", <${entry.href}?format=ldjson>; rel="alternate"; type="application/ld+json"`,
   }
 

@@ -6,7 +6,7 @@ import { buildAppManifest, signManifestState } from '@/lib/track/github-app'
 export const runtime = 'nodejs'
 
 /**
- * "Connect GitHub" — start + status + disconnect for the Dox Track GitHub App.
+ * "Connect GitHub" — start + status + disconnect for the Thally Track GitHub App.
  *
  * GET  → connection status (redacted: slug/id only, never the key or secret).
  * POST → begin the manifest flow: returns the manifest + a signed CSRF state +
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
   const state = signManifestState()
   if (!state) {
     return NextResponse.json(
-      { error: 'Set DOX_AUTH_SECRET (≥16 chars) before connecting a GitHub App — it secures the flow and encrypts the key.' },
+      { error: 'Set THALLY_AUTH_SECRET (≥16 chars) before connecting a GitHub App — it secures the flow and encrypts the key.' },
       { status: 400 },
     )
   }

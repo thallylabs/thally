@@ -13,7 +13,7 @@ interface StepsProps {
 export function Steps({ children, className }: StepsProps) {
   return (
     <div
-      className={cn('dox-steps relative', className)}
+      className={cn('thally-steps relative', className)}
       style={{ counterReset: 'step 0' }}
     >
       {children}
@@ -33,14 +33,14 @@ interface StepProps {
 export function Step({ title, children }: StepProps) {
   return (
     <div
-      className="dox-step relative grid grid-cols-[40px_1fr] gap-x-4 pb-10 last:pb-0"
+      className="thally-step relative grid grid-cols-[40px_1fr] gap-x-4 pb-10 last:pb-0"
       style={{ counterIncrement: 'step 1' }}
     >
       {/* Vertical connector line — hidden on last step via CSS */}
-      <div className="dox-step-line absolute left-[19px] top-10 bottom-0 w-px bg-border" />
+      <div className="thally-step-line absolute left-[19px] top-10 bottom-0 w-px bg-border" />
 
       {/* Numbered circle */}
-      <div className="dox-step-number relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-accent/40 bg-background text-sm font-semibold text-accent before:content-[counter(step)]" />
+      <div className="thally-step-number relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-accent/40 bg-background text-sm font-semibold text-accent before:content-[counter(step)]" />
 
       {/* Step content */}
       <div className="pt-1.5">

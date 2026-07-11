@@ -64,19 +64,19 @@ const ADDED_COLUMNS: Array<[name: string, type: string]> = [
 
 /**
  * Resolve the libSQL connection string. Defaults to an embedded on-disk file so
- * the store works with zero config locally; point `DOX_ANALYTICS_DB_URL` at a
- * Turso/libSQL URL (with `DOX_ANALYTICS_DB_TOKEN`) for a durable, serverless-safe
+ * the store works with zero config locally; point `THALLY_ANALYTICS_DB_URL` at a
+ * Turso/libSQL URL (with `THALLY_ANALYTICS_DB_TOKEN`) for a durable, serverless-safe
  * store in production.
  */
 function resolveDbUrl(): { url: string; usingDefaultFile: boolean } {
-  const configured = process.env.DOX_ANALYTICS_DB_URL?.trim()
+  const configured = (process.env.THALLY_ANALYTICS_DB_URL ?? process.env.DOX_ANALYTICS_DB_URL)?.trim()
   if (configured) return { url: configured, usingDefaultFile: false }
   return { url: `file:${DEFAULT_DB_FILE}`, usingDefaultFile: true }
 }
 
 /**
  * Ensure the parent directory exists for any on-disk libSQL file URL (the
- * default DB, or a custom `file:` URL via DOX_ANALYTICS_DB_URL). Skipped for
+ * default DB, or a custom `file:` URL via THALLY_ANALYTICS_DB_URL). Skipped for
  * in-memory (`:memory:` / `file::memory:`) and remote (`libsql://`) targets,
  * which need no local directory.
  */
@@ -97,7 +97,7 @@ async function getClient(): Promise<Client> {
     clientPromise = (async () => {
       const { url, usingDefaultFile } = resolveDbUrl()
       ensureParentDir(url)
-      const authToken = process.env.DOX_ANALYTICS_DB_TOKEN?.trim() || undefined
+      const authToken = (process.env.THALLY_ANALYTICS_DB_TOKEN ?? process.env.DOX_ANALYTICS_DB_TOKEN)?.trim() || undefined
       const client = createClient({ url, authToken })
 
       await client.execute(`CREATE TABLE IF NOT EXISTS analytics_events (

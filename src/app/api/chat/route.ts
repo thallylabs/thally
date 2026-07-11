@@ -132,7 +132,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     return new Response(message, {
       status: 429,
       headers: {
-        'x-dox-ai-tier': tier,
+        'x-thally-ai-tier': tier,
         ...(decision.retryAfter ? { 'Retry-After': String(decision.retryAfter) } : {}),
       },
     })
@@ -261,7 +261,7 @@ ${context ? `Documentation excerpts:\n${context}\n\nSources:\n${sourceList}` : '
       'Content-Type': 'text/plain; charset=utf-8',
       'Transfer-Encoding': 'chunked',
       'Cache-Control': 'no-store',
-      'x-dox-ai-tier': tier,
+      'x-thally-ai-tier': tier,
     },
   })
 }

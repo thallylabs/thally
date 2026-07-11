@@ -5,7 +5,7 @@ import matter from 'gray-matter'
 import { scanMdxFiles, scoreFiles } from './search-docs.js'
 
 export const getContextSchema = z.object({
-  projectDir: z.string().describe('Path to the Dox project root'),
+  projectDir: z.string().describe('Path to the Thally project root'),
   topic: z.string().describe('Topic or question to find relevant docs for'),
   maxTokens: z.number().optional().default(4000).describe('Approximate token budget for returned context (default 4000)'),
 })

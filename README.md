@@ -1,8 +1,8 @@
-# Dox
+# Thally
 
 The first agent-native documentation platform — every page is served to humans as polished HTML and to AI agents as structured JSON, JSON-LD, and Markdown from the same URL. Built on Next.js: self-hosted, open, extensible, and free to commercialize.
 
-Dox is **agent-native**: every page is served to humans as pre-rendered HTML and to AI agents as structured JSON / JSON-LD / Markdown from the same URL.
+Thally is **agent-native**: every page is served to humans as pre-rendered HTML and to AI agents as structured JSON / JSON-LD / Markdown from the same URL.
 
 ## Features
 
@@ -14,10 +14,10 @@ Dox is **agent-native**: every page is served to humans as pre-rendered HTML and
 - **Retrieval-grounded AI chat** — Claude-powered Q&A with RAG retrieval and inline citations; works out of the box on a rate-limited trial key, then on your own `ANTHROPIC_API_KEY`
 - **Agent endpoints** — `/llms.txt`, `/ai.txt`, `/api/docs-index`, `/api/docs/{slug}`, and an **Agent Readiness Score** at `/api/agent-readiness`
 - **Remote MCP server** — every deployed site is an MCP endpoint at `/api/mcp`; attach with `claude mcp add --transport http <site>/api/mcp`
-- **Docs agent** — `dox agent "…"` (or `@dox` on a product PR) drafts docs as a **reviewed pull request**, self-checked with `dox check`; it never merges
-- **Provenance & drift** — machine-legible `lastVerified` dates + `dox check --drift` to catch pages stale against the code they document
+- **Docs agent** — `thally agent "…"` (or `@thally` on a product PR) drafts docs as a **reviewed pull request**, self-checked with `thally check`; it never merges
+- **Provenance & drift** — machine-legible `lastVerified` dates + `thally check --drift` to catch pages stale against the code they document
 - **Team accounts & roles** — Google/Microsoft OIDC sign-in + Owner/Editor/Viewer from a git-committed roster in `docs.json` (no database, no per-seat)
-- **Unified `dox` CLI + `@doxlabs/mcp`** — one toolchain to scaffold, develop, deploy, check, and drive your docs from any MCP client
+- **Unified `thally` CLI + `@thallylabs/mcp`** — one toolchain to scaffold, develop, deploy, check, and drive your docs from any MCP client
 - **TOC, dark mode, responsive** — built-in with zero config; persistent sidebar, mobile drawer, command palette
 - **Syntax highlighting** — Shiki with CSS variables for theme-aware code blocks
 
@@ -25,7 +25,7 @@ Dox is **agent-native**: every page is served to humans as pre-rendered HTML and
 
 ```bash
 # Scaffold a new project (recommended)
-npx create-dox my-docs
+npx create-thally-docs my-docs
 cd my-docs
 npm run dev
 ```
@@ -33,7 +33,7 @@ npm run dev
 Or use the repo directly:
 
 ```bash
-npx degit kenny-io/Dox my-docs
+npx degit thallylabs/thally my-docs
 cd my-docs
 npm install
 npm run dev
@@ -155,14 +155,16 @@ cp .env.example .env.local
 
 | Variable | Purpose |
 |---|---|
-| `DOX_SITE_URL` | Production URL for OpenGraph metadata, canonical URLs, and agent endpoints (legacy `NEXT_PUBLIC_SITE_URL` still honored) |
+| `THALLY_SITE_URL` | Production URL for OpenGraph metadata, canonical URLs, and agent endpoints (legacy `NEXT_PUBLIC_SITE_URL` still honored) |
 | `ANTHROPIC_API_KEY` | Owner key for AI chat — lifts trial limits entirely |
-| `DOX_TRIAL_ANTHROPIC_KEY` | Optional shared key powering the out-of-the-box trial chat (strict per-IP limits + a global daily cap) |
-| `DOX_TRIAL_RATE_PER_MIN` / `DOX_TRIAL_RATE_PER_DAY` / `DOX_TRIAL_DAILY_LIMIT` / `DOX_CHAT_RATE_PER_MIN` | Optional chat rate-limit overrides |
-| `DOX_REPO_URL` | Optional — the docs repo Dox Track dispatches to. Defaults to `siteConfig.repoUrl`; set it when `site.ts` keeps the template default (`repoUrl: ''`) but Track should still target your repo |
-| `DOX_TRACK_WEBHOOK_SECRET` | Optional — enables the manual Dox Track webhook (`/api/track/webhook`); merged/preview PRs in tracked repos become docs-agent PRs. Not needed when you Connect a GitHub App |
-| `DOX_GITHUB_TOKEN` | Optional — fine-grained PAT that reads tracked product-repo PRs, relays Track dispatches, and authenticates the admin Docs-tasks queue |
-| `DOX_GITHUB_APP_ID` / `DOX_GITHUB_APP_INSTALLATION_ID` / `DOX_GITHUB_APP_PRIVATE_KEY` | Optional — wire a GitHub App by hand instead of the admin "Connect GitHub" button (which stores these encrypted). Grants org-wide access to selected repos |
+| `THALLY_TRIAL_ANTHROPIC_KEY` | Optional shared key powering the out-of-the-box trial chat (strict per-IP limits + a global daily cap) |
+| `THALLY_TRIAL_RATE_PER_MIN` / `THALLY_TRIAL_RATE_PER_DAY` / `THALLY_TRIAL_DAILY_LIMIT` / `THALLY_CHAT_RATE_PER_MIN` | Optional chat rate-limit overrides |
+| `THALLY_REPO_URL` | Optional — the docs repo Thally Track dispatches to. Defaults to `siteConfig.repoUrl`; set it when `site.ts` keeps the template default (`repoUrl: ''`) but Track should still target your repo |
+| `THALLY_TRACK_WEBHOOK_SECRET` | Optional — enables the manual Thally Track webhook (`/api/track/webhook`); merged/preview PRs in tracked repos become docs-agent PRs. Not needed when you Connect a GitHub App |
+| `THALLY_GITHUB_TOKEN` | Optional — fine-grained PAT that reads tracked product-repo PRs, relays Track dispatches, and authenticates the admin Docs-tasks queue |
+| `THALLY_GITHUB_APP_ID` / `THALLY_GITHUB_APP_INSTALLATION_ID` / `THALLY_GITHUB_APP_PRIVATE_KEY` | Optional — wire a GitHub App by hand instead of the admin "Connect GitHub" button (which stores these encrypted). Grants org-wide access to selected repos |
+
+Legacy `DOX_*` names are still read as a fallback for every `THALLY_*` variable, so existing deployments keep working without renaming anything.
 
 ## Production
 

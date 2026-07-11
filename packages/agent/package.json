@@ -1,7 +1,7 @@
 {
-  "name": "@doxlabs/agent",
-  "version": "0.2.0",
-  "description": "The Dox docs agent — turns a task (a PR, a diff, or an instruction) into a reviewed documentation pull request.",
+  "name": "@thallylabs/agent",
+  "version": "0.3.0",
+  "description": "The Thally docs agent — turns a task (a PR, a diff, or an instruction) into a reviewed documentation pull request.",
   "type": "module",
   "engines": {
     "node": ">=18"
@@ -23,8 +23,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "@doxlabs/mcp": "*",
-    "create-dox": "*",
+    "@thallylabs/mcp": "*",
+    "create-thally-docs": "*",
     "zod-to-json-schema": "^3.23.0"
   },
   "devDependencies": {
@@ -35,7 +35,7 @@
   },
   "license": "MIT",
   "keywords": [
-    "dox",
+    "thally",
     "documentation",
     "agent",
     "ai",
@@ -44,7 +44,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kenny-io/Dox.git",
+    "url": "git+https://github.com/thallylabs/thally.git",
     "directory": "packages/agent"
   },
   "private": true

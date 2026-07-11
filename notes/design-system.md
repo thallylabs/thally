@@ -1,20 +1,20 @@
-# Dox Dashboard Design System — Foundations
+# Thally Dashboard Design System — Foundations
 
-A perceptual, token-driven design system for Dox's **admin analytics dashboard**,
+A perceptual, token-driven design system for Thally's **admin analytics dashboard**,
 modeled on LI.FI's design language (OKLCH perceptual color scales, three-tier
 elevation, a single dark/light flip, a 4px spacing rhythm, calm/precise data
-density) and reskinned to Dox's **green brand** (`brandPresets.primary` —
+density) and reskinned to Thally's **green brand** (`brandPresets.primary` —
 `#10B981` light / `#34D399` dark).
 
 - **Implementation:** [`src/styles/design-system.css`](../src/styles/design-system.css)
-- **Scope:** every token and class is namespaced under `.dox-dashboard`; dark
-  overrides live under `.dark .dox-dashboard`. Nothing leaks into the docs site.
+- **Scope:** every token and class is namespaced under `.thally-dashboard`; dark
+  overrides live under `.dark .thally-dashboard`. Nothing leaks into the docs site.
   There is deliberately no bare `:root` / `body` / `*` rule.
 - **Usage:**
   ```tsx
   import '@/styles/design-system.css'
   export default function DashboardLayout({ children }) {
-    return <div className="dox-dashboard">{children}</div>
+    return <div className="thally-dashboard">{children}</div>
   }
   ```
 - **Tailwind v3:** consume tokens via arbitrary values —
@@ -26,7 +26,7 @@ density) and reskinned to Dox's **green brand** (`brandPresets.primary` —
 1. **One anchor, many tones.** The brand accent is pinned to a literal hex; every
    companion (tint, border, glow, chart lead) is *derived* via
    `color-mix(in oklch, …)` / relative-color OKLCH. Change one hex → the whole
-   dashboard reskins. We do **not** inherit the running app's `--dox-accent`
+   dashboard reskins. We do **not** inherit the running app's `--thally-accent`
    (it resolves to purple under the current `secondary` preset).
 2. **Perceptual scales.** Colors ramp in OKLCH so every step is an even
    perceptual jump — legible heatmaps, predictable hover depths.
@@ -101,7 +101,7 @@ derived **14% bg** and **30% border** (the LI.FI alert recipe):
 
 ### Chart / data-viz palette
 
-- **Categorical** `--ds-series-1..8`: leads with **brand green** (1), **Dox
+- **Categorical** `--ds-series-1..8`: leads with **brand green** (1), **Thally
   violet** (2), amber (3), then evenly spaced spectral hues (blue, pink, cyan,
   coral, indigo). Brighter variants in dark.
 - **Sequential** `--ds-seq-1..7`: the green scale, low→high (single-metric heat).
@@ -112,7 +112,7 @@ derived **14% bg** and **30% border** (the LI.FI alert recipe):
 
 ## 2. Typography
 
-Fonts reference Dox's existing app tokens: `--ds-font-sans` (Inter),
+Fonts reference Thally's existing app tokens: `--ds-font-sans` (Inter),
 `--ds-font-heading`, `--ds-font-mono` (IBM Plex Mono).
 
 | Step | Size | Line-height | Token |
@@ -147,7 +147,7 @@ Grid gaps = 16. Inter-slot rhythm inside a stat card = 12.
 `--ds-radius-sm` 6 (chips/controls) · `-md` 8 (buttons/inputs/cells) · `-lg` 12
 (nested tiles/menus) · `-xl` 16 (**cards & panels — the dashboard default**,
 aliased `--ds-radius-card`) · `-full` 9999 (pills/avatars/rings). Parallels
-Dox's existing `--theme-radius-*`.
+Thally's existing `--theme-radius-*`.
 
 ## 5. Elevation — three tiers + glass
 
@@ -174,8 +174,8 @@ not layout.
 ## 7. Dashboard component patterns
 
 Each pattern lists the tokens that build it. A starter class (prefixed
-`.dox-dashboard`) exists in `design-system.css`; extend in JSX. All examples
-assume a `.dox-dashboard` ancestor.
+`.thally-dashboard`) exists in `design-system.css`; extend in JSX. All examples
+assume a `.thally-dashboard` ancestor.
 
 ### Stat card — `.ds-stat-card`
 The KPI atom. Vertical stack: label → value → footer.

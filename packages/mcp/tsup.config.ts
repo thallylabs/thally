@@ -12,7 +12,7 @@ export default defineConfig([
     clean: true,
     dts: false,
   },
-  // Library entry — the shared tool registry consumed by @doxlabs/agent. Typed,
+  // Library entry — the shared tool registry consumed by @thallylabs/agent. Typed,
   // no shebang.
   {
     entry: { tools: 'src/lib/tools.ts' },
@@ -23,7 +23,7 @@ export default defineConfig([
     dts: true,
   },
   // Track distiller — shared by the agent, the CLI, and the Next.js webhook
-  // receiver (`@doxlabs/mcp/track`). Dependency-free, typed.
+  // receiver (`@thallylabs/mcp/track`). Dependency-free, typed.
   {
     entry: { track: 'src/lib/track.ts' },
     format: ['esm'],

@@ -3,7 +3,7 @@ import { createLibsqlAdapter } from '@/lib/storage/adapters/libsql'
 import { createMemoryAdapter } from '@/lib/storage/adapters/memory'
 import type { StorageAdapter } from '@/lib/storage/types'
 
-const DEFAULT_DB_FILE = `file:${path.join(process.cwd(), '.data', 'dox.db')}`
+const DEFAULT_DB_FILE = `file:${path.join(process.cwd(), '.data', 'thally.db')}`
 
 let cached: StorageAdapter | null = null
 
@@ -13,11 +13,11 @@ function isTestEnv(): boolean {
 
 function createAdapter(): StorageAdapter {
   // Explicit opt-out and tests use the in-memory adapter.
-  if (process.env.DOX_STORAGE === 'memory' || isTestEnv()) return createMemoryAdapter()
+  if ((process.env.THALLY_STORAGE ?? process.env.DOX_STORAGE) === 'memory' || isTestEnv()) return createMemoryAdapter()
 
   // A configured URL (Turso/libSQL) is durable and, if remote, cross-instance.
-  const configured = process.env.DOX_DATABASE_URL?.trim()
-  if (configured) return createLibsqlAdapter(configured, process.env.DOX_DATABASE_TOKEN?.trim())
+  const configured = (process.env.THALLY_DATABASE_URL ?? process.env.DOX_DATABASE_URL)?.trim()
+  if (configured) return createLibsqlAdapter(configured, (process.env.THALLY_DATABASE_TOKEN ?? process.env.DOX_DATABASE_TOKEN)?.trim())
 
   // Zero-config default: a durable on-disk file, like the analytics store.
   return createLibsqlAdapter(DEFAULT_DB_FILE)
@@ -31,7 +31,7 @@ export function getStorage(): StorageAdapter {
 
 /** True when a remote (cross-instance-durable) store is configured. */
 export function isRemoteStorage(): boolean {
-  const url = process.env.DOX_DATABASE_URL?.trim() ?? ''
+  const url = (process.env.THALLY_DATABASE_URL ?? process.env.DOX_DATABASE_URL)?.trim() ?? ''
   return url.startsWith('libsql://') || url.startsWith('http://') || url.startsWith('https://')
 }
 

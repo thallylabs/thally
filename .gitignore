@@ -25,7 +25,9 @@
 *.pem
 .data/
 
-# dox generated artifacts (embeddings cache, analytics)
+# thally generated artifacts (embeddings cache, analytics)
+.thally/
+# legacy pre-rebrand cache dir — keep ignored so stale local caches never commit
 .dox/
 .data/
 
@@ -63,6 +65,9 @@ demo/
 # Personal/process notes. The shared notes/*.md (design-system, product-principles)
 # stay tracked; these are local planning + the history-scrub handoff (must never ship).
 notes/auth-model.md
+notes/thally-v2-plan.md
+notes/thally-v2-updated-plan.md
+# legacy pre-rebrand names of the two local v2 plan notes — keep ignored
 notes/dox-v2-plan.md
 notes/dox-v2-updated-plan.md
 notes/mintlify-audit.md

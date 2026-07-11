@@ -19,7 +19,7 @@ Steps to reproduce the behavior:
 What you expected to happen.
 
 ## Environment
-- Dox version:
+- Thally version:
 - Node version:
 - OS:
 - Browser (if a UI issue):

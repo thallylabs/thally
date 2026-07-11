@@ -1,6 +1,6 @@
 ---
-title: Extending Dox
-description: Dox is a docs platform you own and build on — add custom components, pages, API routes, themes, and more without forking core.
+title: Extending Thally
+description: Thally is a docs platform you own and build on — add custom components, pages, API routes, themes, and more without forking core.
 keywords:
   - extend
   - customize
@@ -9,17 +9,17 @@ keywords:
   - architecture
 ---
 
-Dox isn't a black box you configure from the outside — a Dox project is a
+Thally isn't a black box you configure from the outside — a Thally project is a
 Next.js app **you own**. You author `src/content/`, `docs.json`, and `snippets/`;
 everything under `src/app/` is a hidden runtime. That means you can add virtually
-any functionality your team needs, and Dox gives you clean, update-safe surfaces
+any functionality your team needs, and Thally gives you clean, update-safe surfaces
 for the most common extensions so you rarely have to touch core files.
 
 ## Custom MDX components
 
 Register your own React components once and use them in any `.mdx` page. Edit
 **`src/mdx/custom-components.tsx`** — this file is yours and is never overwritten
-when you update Dox.
+when you update Thally.
 
 <Steps>
 <Step title="Write a component">
@@ -39,7 +39,7 @@ export const customComponents: MDXComponents = {
 </Step>
 <Step title="Use it in any page">
 ```mdx
-Dox is <Highlight>yours to extend</Highlight>.
+Thally is <Highlight>yours to extend</Highlight>.
 ```
 </Step>
 </Steps>
@@ -50,13 +50,13 @@ can take props from MDX (`<PricingTable plan="pro" />`), import anything, and be
 server or client components.
 
 <Note type="tip">
-Look at `src/components/mdx/rich-content.tsx` to see how Dox's own components are
+Look at `src/components/mdx/rich-content.tsx` to see how Thally's own components are
 built — it's the best reference for writing your own.
 </Note>
 
 ## Custom pages and routes
 
-Because Dox is a Next.js App Router project, any file you add under `src/app/`
+Because Thally is a Next.js App Router project, any file you add under `src/app/`
 becomes a route. Add a marketing page, a dashboard, an interactive playground —
 anything React can do.
 

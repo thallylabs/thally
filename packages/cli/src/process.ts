@@ -27,8 +27,8 @@ export function resolveBin(pkg: string, binName: string): string | null {
   }
 }
 
-/** True when the current directory looks like a Dox project. */
-export function isDoxProject(cwd = process.cwd()): boolean {
+/** True when the current directory looks like a Thally project. */
+export function isThallyProject(cwd = process.cwd()): boolean {
   return existsSync(path.join(cwd, 'docs.json'))
 }
 
@@ -59,7 +59,7 @@ export function runFramework(task: string, scriptName: string, passthrough: Arra
   return run(npx, ['next', task, ...passthrough])
 }
 
-/** Run a sibling package binary (create-dox, dox-mcp) via node. */
+/** Run a sibling package binary (create-thally-docs, thally-mcp) via node. */
 export function runPackageBin(pkg: string, binName: string, args: Array<string>): Promise<number> {
   const bin = resolveBin(pkg, binName)
   if (!bin) {

@@ -3,7 +3,7 @@ import { z } from 'zod'
 export const semanticSearchSchema = z.object({
   siteUrl: z
     .string()
-    .describe('Base URL of the deployed Dox site (e.g. https://docs.example.com)'),
+    .describe('Base URL of the deployed Thally site (e.g. https://docs.example.com)'),
   query: z.string().describe('Natural-language search query'),
   limit: z.number().optional().default(8).describe('Max results to return (default 8)'),
   mode: z

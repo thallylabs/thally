@@ -96,7 +96,7 @@ export function Hero({
             {primaryHref ? (
               <Link
                 href={primaryHref}
-                className="inline-flex items-center gap-2 rounded-[var(--theme-control-radius)] bg-accent px-5 py-2.5 text-sm font-semibold text-[hsl(var(--dox-accent-foreground))] shadow-sm transition hover:opacity-90"
+                className="inline-flex items-center gap-2 rounded-[var(--theme-control-radius)] bg-accent px-5 py-2.5 text-sm font-semibold text-[hsl(var(--thally-accent-foreground))] shadow-sm transition hover:opacity-90"
               >
                 {primaryLabel ?? 'Get started'}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />

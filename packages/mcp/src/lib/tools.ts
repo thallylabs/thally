@@ -16,8 +16,8 @@ import { syncFromRepoSchema, handleSyncFromRepo } from '../tools/sync-from-repo.
 
 /**
  * Where a tool operates:
- * - `project` — reads/writes a local Dox project directory (`projectDir`).
- * - `site` — queries a deployed Dox site over HTTP (`siteUrl`).
+ * - `project` — reads/writes a local Thally project directory (`projectDir`).
+ * - `site` — queries a deployed Thally site over HTTP (`siteUrl`).
  *
  * The remote MCP endpoint (A6) exposes only what's safe over HTTP; the docs
  * agent (A1) drives the `project` tools against a checked-out docs repo. Both
@@ -44,46 +44,46 @@ function defineTool<S extends z.ZodRawShape>(def: {
   return def as unknown as ToolDefinition
 }
 
-/** The single source of truth for Dox's MCP/agent tools. */
+/** The single source of truth for Thally's MCP/agent tools. */
 export const tools: Array<ToolDefinition> = [
   defineTool({
     name: 'create_project',
-    description: 'Scaffold a new Dox documentation project from the GitHub template',
+    description: 'Scaffold a new Thally documentation project from the GitHub template',
     scope: 'project',
     schema: createProjectSchema,
     handler: handleCreateProject,
   }),
   defineTool({
     name: 'add_page',
-    description: 'Add a new MDX page to a Dox project and register it in docs.json navigation',
+    description: 'Add a new MDX page to a Thally project and register it in docs.json navigation',
     scope: 'project',
     schema: addPageSchema,
     handler: handleAddPage,
   }),
   defineTool({
     name: 'add_tab',
-    description: 'Add a new top-level tab to a Dox project navigation (content tab or redirect link)',
+    description: 'Add a new top-level tab to a Thally project navigation (content tab or redirect link)',
     scope: 'project',
     schema: addTabSchema,
     handler: handleAddTab,
   }),
   defineTool({
     name: 'list_pages',
-    description: 'List all pages in a Dox project, organized by tab and group',
+    description: 'List all pages in a Thally project, organized by tab and group',
     scope: 'project',
     schema: listPagesSchema,
     handler: handleListPages,
   }),
   defineTool({
     name: 'update_page',
-    description: 'Update the frontmatter or body content of an existing MDX page in a Dox project',
+    description: 'Update the frontmatter or body content of an existing MDX page in a Thally project',
     scope: 'project',
     schema: updatePageSchema,
     handler: handleUpdatePage,
   }),
   defineTool({
     name: 'migrate_docs',
-    description: 'Crawl a docs site and migrate it into a Dox project',
+    description: 'Crawl a docs site and migrate it into a Thally project',
     scope: 'project',
     schema: migrateDocsSchema,
     handler: handleMigrateDocs,
@@ -98,7 +98,7 @@ export const tools: Array<ToolDefinition> = [
   defineTool({
     name: 'semantic_search',
     description:
-      'Hybrid (full-text + vector) semantic search against a deployed Dox site — uses the same index as the in-app command palette and /api/search',
+      'Hybrid (full-text + vector) semantic search against a deployed Thally site — uses the same index as the in-app command palette and /api/search',
     scope: 'site',
     schema: semanticSearchSchema,
     handler: handleSemanticSearch,
@@ -106,7 +106,7 @@ export const tools: Array<ToolDefinition> = [
   defineTool({
     name: 'agent_readiness',
     description:
-      'Fetch the Agent Readiness Score (0-100) for a deployed Dox site — the same report as /api/agent-readiness and `dox check`, with per-signal subscores and fixable offenders',
+      'Fetch the Agent Readiness Score (0-100) for a deployed Thally site — the same report as /api/agent-readiness and `thally check`, with per-signal subscores and fixable offenders',
     scope: 'site',
     schema: agentReadinessSchema,
     handler: handleAgentReadiness,
@@ -127,14 +127,14 @@ export const tools: Array<ToolDefinition> = [
   }),
   defineTool({
     name: 'lint_project',
-    description: 'Check a Dox project for issues: broken nav references, orphan files, missing frontmatter',
+    description: 'Check a Thally project for issues: broken nav references, orphan files, missing frontmatter',
     scope: 'project',
     schema: lintProjectSchema,
     handler: handleLintProject,
   }),
   defineTool({
     name: 'translate_docs',
-    description: 'Translate Dox documentation pages to a secondary locale using Claude AI',
+    description: 'Translate Thally documentation pages to a secondary locale using Claude AI',
     scope: 'project',
     schema: translateDocsSchema,
     handler: handleTranslateDocs,
@@ -142,7 +142,7 @@ export const tools: Array<ToolDefinition> = [
   defineTool({
     name: 'sync_from_repo',
     description:
-      'Dox Track: analyze a merged pull request in a tracked product repo and preview the docs task it would produce (dryRun), or dispatch it to the docs repo so the docs agent drafts a documentation PR',
+      'Thally Track: analyze a merged pull request in a tracked product repo and preview the docs task it would produce (dryRun), or dispatch it to the docs repo so the docs agent drafts a documentation PR',
     scope: 'project',
     schema: syncFromRepoSchema,
     handler: handleSyncFromRepo,

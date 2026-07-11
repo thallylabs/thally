@@ -9,7 +9,7 @@ keywords:
   - agent-native
 ---
 
-Alongside `/llms.txt`, Dox generates two agent-facing manifests automatically —
+Alongside `/llms.txt`, Thally generates two agent-facing manifests automatically —
 no configuration required. Both describe your documentation *to agents*, and both
 stay in sync with your content because they're generated from the same content
 graph.
@@ -25,8 +25,8 @@ OpenAPI spec. Point an agent at it and it knows how to work with your docs.
 
 Served at **`/AGENTS.md`**, this tells an agent *working on your repo* how the
 project is laid out and how to add or edit pages safely (frontmatter rules,
-`docs.json` registration, running `dox check`). It's also the config surface the
-`dox agent` reads.
+`docs.json` registration, running `thally check`). It's also the config surface the
+`thally agent` reads.
 
 <Note type="tip">
 Drop a physical `AGENTS.md` at your project root to override the generated one
@@ -36,7 +36,7 @@ The file wins over the generated default.
 
 ## Discovery
 
-Both manifests are linked from `/llms.txt`, and Dox advertises the index on every
+Both manifests are linked from `/llms.txt`, and Thally advertises the index on every
 page with `Link: </llms.txt>; rel="llms-txt"` and `X-Llms-Txt` response headers,
 plus a `/.well-known/llms.txt` mirror — so agents and crawlers find everything
 without guessing.

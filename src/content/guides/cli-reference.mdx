@@ -1,22 +1,22 @@
 ---
 title: CLI Reference
-description: All create-dox commands for scaffolding, migrating, and linting Dox projects.
+description: All create-thally-docs commands for scaffolding, migrating, and linting Thally projects.
 ---
 
-The `create-dox` CLI is the primary tool for working with Dox projects from the terminal. Install it globally or run it directly with `npx`.
+The `create-thally-docs` CLI is the primary tool for working with Thally projects from the terminal. Install it globally or run it directly with `npx`.
 
 ```bash
-npx create-dox [command] [args] [options]
+npx create-thally-docs [command] [args] [options]
 ```
 
 ---
 
-## create-dox (scaffold)
+## create-thally-docs (scaffold)
 
-Creates a new Dox documentation project.
+Creates a new Thally documentation project.
 
 ```bash
-npx create-dox my-docs
+npx create-thally-docs my-docs
 ```
 
 The CLI walks through an interactive setup:
@@ -30,7 +30,7 @@ The CLI walks through an interactive setup:
 Skip all prompts and accept defaults with `--yes`:
 
 ```bash
-npx create-dox my-docs --yes
+npx create-thally-docs my-docs --yes
 ```
 
 ### Options
@@ -41,15 +41,15 @@ npx create-dox my-docs --yes
 
 ---
 
-## create-dox migrate
+## create-thally-docs migrate
 
-Migrates an existing documentation repository from GitHub into a Dox project.
+Migrates an existing documentation repository from GitHub into a Thally project.
 
 ```bash
-npx create-dox migrate <github-url> [output-dir] [options]
+npx create-thally-docs migrate <github-url> [output-dir] [options]
 ```
 
-Dox clones the source repo, reads all Markdown and MDX files directly, converts navigation from the source platform's config, and writes everything into a ready-to-run Dox project.
+Thally clones the source repo, reads all Markdown and MDX files directly, converts navigation from the source platform's config, and writes everything into a ready-to-run Thally project.
 
 **Supported source platforms:** Mintlify, Docusaurus, GitBook, Nextra, VitePress, Starlight, and any repo with plain Markdown files.
 
@@ -57,16 +57,16 @@ Dox clones the source repo, reads all Markdown and MDX files directly, converts 
 
 ```bash
 # Migrate into a new project at ./my-docs
-npx create-dox migrate https://github.com/org/repo my-docs
+npx create-thally-docs migrate https://github.com/org/repo my-docs
 
 # Derive the output dir from the repo name
-npx create-dox migrate https://github.com/mintlify/starter
+npx create-thally-docs migrate https://github.com/mintlify/starter
 
 # Migrate a specific branch or subdirectory
-npx create-dox migrate https://github.com/org/repo/tree/main/docs my-docs
+npx create-thally-docs migrate https://github.com/org/repo/tree/main/docs my-docs
 
-# Migrate content into an existing Dox project
-npx create-dox migrate https://github.com/org/repo --into ./existing-docs
+# Migrate content into an existing Thally project
+npx create-thally-docs migrate https://github.com/org/repo --into ./existing-docs
 ```
 
 ### What gets migrated
@@ -74,13 +74,13 @@ npx create-dox migrate https://github.com/org/repo --into ./existing-docs
 - All `.md` and `.mdx` files are copied and converted to clean MDX
 - Navigation structure is detected from `mint.json`, `docusaurus.config.js`, `docs.json`, or inferred from the directory structure
 - OpenAPI spec files (`.json`, `.yaml`) are detected and wired up as an API Reference tab
-- Platform-specific MDX components are normalized to Dox equivalents (see [component mapping](#component-mapping) below)
+- Platform-specific MDX components are normalized to Thally equivalents (see [component mapping](#component-mapping) below)
 
 ### Options
 
 | Flag | Description |
 |------|-------------|
-| `--into <dir>` | Migrate into an existing Dox project instead of scaffolding a new one |
+| `--into <dir>` | Migrate into an existing Thally project instead of scaffolding a new one |
 | `--branch <name>` | Override the auto-detected git branch |
 | `--docs-dir <path>` | Override the auto-detected docs subdirectory |
 | `--api-key <key>` | Anthropic API key for converting non-Markdown files (e.g. `.rst`). Falls back to `ANTHROPIC_API_KEY` env var |
@@ -88,9 +88,9 @@ npx create-dox migrate https://github.com/org/repo --into ./existing-docs
 
 ### Component mapping
 
-Mintlify, Docusaurus, and GitBook use platform-specific MDX components that don't exist in Dox. The migration tool converts them automatically:
+Mintlify, Docusaurus, and GitBook use platform-specific MDX components that don't exist in Thally. The migration tool converts them automatically:
 
-| Source | Dox equivalent |
+| Source | Thally equivalent |
 |--------|---------------|
 | `<Tip>` | `<Note>` |
 | `<Check>` | `<Note>` |
@@ -110,12 +110,12 @@ Files in `.rst` or other formats require an Anthropic API key to convert. Set `A
 
 ---
 
-## create-dox check
+## create-thally-docs check
 
-Lints a Dox project for common issues and reports errors and warnings.
+Lints a Thally project for common issues and reports errors and warnings.
 
 ```bash
-npx create-dox check [project-dir]
+npx create-thally-docs check [project-dir]
 ```
 
 Defaults to the current directory if no path is given.
@@ -134,13 +134,13 @@ Defaults to the current directory if no path is given.
 
 ```bash
 # Check the current project
-npx create-dox check
+npx create-thally-docs check
 
 # Check a specific directory
-npx create-dox check /path/to/my-docs
+npx create-thally-docs check /path/to/my-docs
 
 # Auto-fix orphan files by adding them to the nav
-npx create-dox check --fix
+npx create-thally-docs check --fix
 ```
 
 The CLI exits with code `1` if any errors are found, `0` if the project is clean or only has warnings.
@@ -153,12 +153,12 @@ The CLI exits with code `1` if any errors are found, `0` if the project is clean
 
 ---
 
-## create-dox translate
+## create-thally-docs translate
 
 Translates documentation pages to a secondary locale using Claude AI. Requires an `i18n` block in `docs.json`.
 
 ```bash
-npx create-dox translate --locale es
+npx create-thally-docs translate --locale es
 ```
 
 Translated files are written to `src/content/{locale}/` and committed to your repo — no runtime cost, full SSG.
@@ -167,16 +167,16 @@ Translated files are written to `src/content/{locale}/` and committed to your re
 
 ```bash
 # Translate all pages to Spanish
-npx create-dox translate --locale es
+npx create-thally-docs translate --locale es
 
 # Translate specific pages only
-npx create-dox translate --locale fr --pages introduction,guides/getting-started
+npx create-thally-docs translate --locale fr --pages introduction,guides/getting-started
 
 # Overwrite existing translations
-npx create-dox translate --locale es --force
+npx create-thally-docs translate --locale es --force
 
 # Pass API key explicitly
-npx create-dox translate --locale de --api-key sk-ant-...
+npx create-thally-docs translate --locale de --api-key sk-ant-...
 ```
 
 ### Options

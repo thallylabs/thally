@@ -49,8 +49,8 @@ export const localHashProvider: EmbeddingProvider = {
 }
 
 function createOpenAIProvider(apiKey: string): EmbeddingProvider {
-  const model = process.env.DOX_EMBEDDING_MODEL ?? 'text-embedding-3-small'
-  const dimensions = Number(process.env.DOX_EMBEDDING_DIMENSIONS ?? 1536)
+  const model = (process.env.THALLY_EMBEDDING_MODEL ?? process.env.DOX_EMBEDDING_MODEL) ?? 'text-embedding-3-small'
+  const dimensions = Number((process.env.THALLY_EMBEDDING_DIMENSIONS ?? process.env.DOX_EMBEDDING_DIMENSIONS) ?? 1536)
   return {
     id: `openai:${model}`,
     dimensions,
@@ -81,8 +81,8 @@ let cachedProvider: EmbeddingProvider | null = null
 export function getEmbeddingProvider(): EmbeddingProvider {
   if (cachedProvider) return cachedProvider
 
-  const providerName = (process.env.DOX_EMBEDDING_PROVIDER ?? 'local').toLowerCase()
-  const apiKey = process.env.DOX_EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY
+  const providerName = ((process.env.THALLY_EMBEDDING_PROVIDER ?? process.env.DOX_EMBEDDING_PROVIDER) ?? 'local').toLowerCase()
+  const apiKey = (process.env.THALLY_EMBEDDING_API_KEY ?? process.env.DOX_EMBEDDING_API_KEY) ?? process.env.OPENAI_API_KEY
 
   if (providerName === 'openai' && apiKey) {
     cachedProvider = createOpenAIProvider(apiKey)

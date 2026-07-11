@@ -13,11 +13,11 @@ describe('secrets — password hashing (docs access)', () => {
 
 describe('secrets — API key encryption (AES-GCM)', () => {
   afterEach(() => {
-    delete process.env.DOX_AUTH_SECRET
+    delete process.env.THALLY_AUTH_SECRET
   })
 
   it('round-trips with a secret; random IV → distinct ciphertexts', () => {
-    process.env.DOX_AUTH_SECRET = 'test-secret-at-least-16-chars'
+    process.env.THALLY_AUTH_SECRET = 'test-secret-at-least-16-chars'
     const a = encryptSecret('sk-ant-123')!
     const b = encryptSecret('sk-ant-123')!
     expect(a).not.toEqual(b) // random IV per encrypt
@@ -25,19 +25,19 @@ describe('secrets — API key encryption (AES-GCM)', () => {
     expect(decryptSecret(b)).toBe('sk-ant-123')
   })
 
-  it('refuses to encrypt without DOX_AUTH_SECRET (never plaintext)', () => {
+  it('refuses to encrypt without THALLY_AUTH_SECRET (never plaintext)', () => {
     expect(encryptSecret('sk-ant-123')).toBeNull()
   })
 
   it('degrades to null (no throw) on tamper, rotated secret, or malformed blob', () => {
-    process.env.DOX_AUTH_SECRET = 'test-secret-at-least-16-chars'
+    process.env.THALLY_AUTH_SECRET = 'test-secret-at-least-16-chars'
     const blob = encryptSecret('sk-ant-123')!
 
     const parts = blob.split(':')
     parts[2] = `deadbeef${parts[2].slice(8)}` // tamper ciphertext → auth tag fails
     expect(decryptSecret(parts.join(':'))).toBeNull()
 
-    process.env.DOX_AUTH_SECRET = 'a-different-secret-16chars-xx'
+    process.env.THALLY_AUTH_SECRET = 'a-different-secret-16chars-xx'
     expect(decryptSecret(blob)).toBeNull() // rotated secret
 
     expect(decryptSecret('nope')).toBeNull() // malformed

@@ -1,12 +1,12 @@
 ---
-title: Migrating to Dox
-description: Move your existing documentation from Mintlify, Docusaurus, GitBook, or any Markdown-based platform to Dox in one command.
+title: Migrating to Thally
+description: Move your existing documentation from Mintlify, Docusaurus, GitBook, or any Markdown-based platform to Thally in one command.
 ---
 
-The `create-dox migrate` command clones a GitHub docs repository and converts it into a running Dox project — no manual copying, no reformatting.
+The `create-thally-docs migrate` command clones a GitHub docs repository and converts it into a running Thally project — no manual copying, no reformatting.
 
 ```bash
-npx create-dox migrate https://github.com/your-org/your-docs my-docs
+npx create-thally-docs migrate https://github.com/your-org/your-docs my-docs
 ```
 
 ---
@@ -17,13 +17,13 @@ npx create-dox migrate https://github.com/your-org/your-docs my-docs
 
 <Step title="Clone the source repo">
 
-Dox does a shallow `git clone` of the repository to a temporary directory. No authentication is required for public repos.
+Thally does a shallow `git clone` of the repository to a temporary directory. No authentication is required for public repos.
 
 </Step>
 
 <Step title="Auto-detect the platform and structure">
 
-Dox inspects the repo for platform config files to understand the existing navigation:
+Thally inspects the repo for platform config files to understand the existing navigation:
 
 | File | Platform detected |
 |------|-------------------|
@@ -41,7 +41,7 @@ The docs directory is also auto-detected: `docs/`, `documentation/`, `content/`,
 
 <Step title="Import all documentation files">
 
-Every `.md` and `.mdx` file is read directly. Frontmatter (`title`, `description`, `keywords`) is preserved. Platform-specific MDX components are converted to their Dox equivalents.
+Every `.md` and `.mdx` file is read directly. Frontmatter (`title`, `description`, `keywords`) is preserved. Platform-specific MDX components are converted to their Thally equivalents.
 
 Non-Markdown files (e.g. `.rst`) are converted to MDX using Claude if you provide an Anthropic API key.
 
@@ -53,7 +53,7 @@ If an OpenAPI spec (`openapi.json`, `openapi.yaml`, `swagger.json`, etc.) is fou
 
 </Step>
 
-<Step title="Write the Dox project">
+<Step title="Write the Thally project">
 
 All converted pages are written to `src/content/`. The `docs.json` navigation is built from the detected platform config or inferred from the directory structure.
 
@@ -68,7 +68,7 @@ All converted pages are written to `src/content/`. The `docs.json` navigation is
 ### Mintlify
 
 ```bash
-npx create-dox migrate https://github.com/mintlify/starter my-docs
+npx create-thally-docs migrate https://github.com/mintlify/starter my-docs
 ```
 
 Navigation is read from `docs.json` (Mintlify v3) or `mint.json`. OpenAPI specs in the `api-reference/` directory are detected and wired up automatically.
@@ -76,35 +76,35 @@ Navigation is read from `docs.json` (Mintlify v3) or `mint.json`. OpenAPI specs 
 ### Docusaurus
 
 ```bash
-npx create-dox migrate https://github.com/facebook/docusaurus/tree/main/website/docs my-docs
+npx create-thally-docs migrate https://github.com/facebook/docusaurus/tree/main/website/docs my-docs
 ```
 
-Sidebar structure is parsed from `sidebars.js`. Docusaurus admonitions (`:::note`, `:::warning`, etc.) are converted to Dox callout components.
+Sidebar structure is parsed from `sidebars.js`. Docusaurus admonitions (`:::note`, `:::warning`, etc.) are converted to Thally callout components.
 
 ### GitBook
 
 ```bash
-npx create-dox migrate https://github.com/your-org/gitbook-docs my-docs
+npx create-thally-docs migrate https://github.com/your-org/gitbook-docs my-docs
 ```
 
-`SUMMARY.md` is used to infer navigation order. `{% hint %}` blocks are converted to the appropriate Dox callout component.
+`SUMMARY.md` is used to infer navigation order. `{% hint %}` blocks are converted to the appropriate Thally callout component.
 
 ### Plain Markdown
 
 Any repository with Markdown files works — navigation is built from the directory structure.
 
 ```bash
-npx create-dox migrate https://github.com/your-org/docs my-docs
+npx create-thally-docs migrate https://github.com/your-org/docs my-docs
 ```
 
 ---
 
 ## Migrating into an existing project
 
-Use `--into` to add content from another repo into an existing Dox project without overwriting it. New tabs and groups are merged; existing content is not touched.
+Use `--into` to add content from another repo into an existing Thally project without overwriting it. New tabs and groups are merged; existing content is not touched.
 
 ```bash
-npx create-dox migrate https://github.com/your-org/api-docs --into ./my-docs
+npx create-thally-docs migrate https://github.com/your-org/api-docs --into ./my-docs
 ```
 
 ---
@@ -126,7 +126,7 @@ npx create-dox migrate https://github.com/your-org/api-docs --into ./my-docs
 If you're using Claude Code or Claude Desktop, you can trigger a migration through chat:
 
 ```
-Migrate the Mintlify starter repo into a new Dox project at ~/dev/my-docs
+Migrate the Mintlify starter repo into a new Thally project at ~/dev/my-docs
 ```
 
 The `migrate_docs` MCP tool accepts the same options as the CLI. See [MCP Server](/guides/mcp-server) for setup instructions.
@@ -142,14 +142,14 @@ cd my-docs
 npm run dev
 ```
 
-Then run `create-dox check` to catch any issues before publishing:
+Then run `create-thally-docs check` to catch any issues before publishing:
 
 ```bash
-npx create-dox check my-docs
+npx create-thally-docs check my-docs
 ```
 
 Common post-migration tasks:
 - Update `src/data/site.ts` with your logo and brand colors
 - Replace placeholder images in `src/content/`
 - Review the nav order in `docs.json`
-- Set `DOX_SITE_URL` before deploying
+- Set `THALLY_SITE_URL` before deploying

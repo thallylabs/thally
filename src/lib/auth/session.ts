@@ -1,8 +1,8 @@
 import { SignJWT, jwtVerify } from 'jose'
 
 /** Cookie holding the OIDC identity session (distinct from the break-glass
- * password session cookie `dox_admin_session`). */
-export const SESSION_COOKIE = 'dox_admin_id'
+ * password session cookie `thally_admin_session`). */
+export const SESSION_COOKIE = 'thally_admin_id'
 
 const TTL_SECONDS = 60 * 60 * 8 // 8 hours
 
@@ -12,7 +12,7 @@ const TTL_SECONDS = 60 * 60 * 8 // 8 hours
  * simply unavailable rather than insecure.
  */
 function secretKey(): Uint8Array | null {
-  const secret = process.env.DOX_AUTH_SECRET?.trim()
+  const secret = (process.env.THALLY_AUTH_SECRET ?? process.env.DOX_AUTH_SECRET)?.trim()
   if (!secret || secret.length < 16) return null
   return new TextEncoder().encode(secret)
 }
@@ -45,7 +45,7 @@ export async function verifySession(token: string | undefined): Promise<SessionP
 }
 
 /** Cookie holding the in-flight OIDC state/nonce/PKCE verifier. */
-export const OIDC_FLOW_COOKIE = 'dox_oidc_flow'
+export const OIDC_FLOW_COOKIE = 'thally_oidc_flow'
 
 /** Sign a short-lived payload (the OIDC flow cookie). */
 export async function signShortLived(data: Record<string, string>, ttlSeconds: number): Promise<string | null> {

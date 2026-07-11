@@ -9,17 +9,17 @@ export interface ValidationResult {
   warnings: Array<string>
 }
 
-/** Resolve the workspace create-dox CLI (with B1/A8) — never the stale published one. */
+/** Resolve the workspace create-thally-docs CLI (with B1/A8) — never the stale published one. */
 function resolveCheckBin(): string {
   try {
-    return require.resolve('create-dox')
+    return require.resolve('create-thally-docs')
   } catch {
-    return require.resolve('create-dox/dist/index.js')
+    return require.resolve('create-thally-docs/dist/index.js')
   }
 }
 
 /**
- * Run `dox check --ci` against the project and parse the GitHub-annotation
+ * Run `thally check --ci` against the project and parse the GitHub-annotation
  * output into structured errors/warnings, so the agent can feed failures back
  * into a repair round.
  */

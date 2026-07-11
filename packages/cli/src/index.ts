@@ -1,5 +1,5 @@
 import { helpText, parseArgs } from './router.js'
-import { isDoxProject, runFramework, runPackageBin } from './process.js'
+import { isThallyProject, runFramework, runPackageBin } from './process.js'
 import { runNewPage } from './commands/new-page.js'
 import { runCheck } from './commands/check.js'
 import { runDeploy } from './commands/deploy.js'
@@ -8,13 +8,13 @@ import { runTrackCommand } from './commands/track.js'
 
 const [major] = process.versions.node.split('.').map(Number)
 if (major < 18) {
-  process.stderr.write('Error: dox requires Node.js >= 18\n')
+  process.stderr.write('Error: thally requires Node.js >= 18\n')
   process.exit(1)
 }
 
 function requireProject(): void {
-  if (!isDoxProject()) {
-    process.stderr.write('\n  Not a Dox project (no docs.json here). Run "dox init" to scaffold one.\n\n')
+  if (!isThallyProject()) {
+    process.stderr.write('\n  Not a Thally project (no docs.json here). Run "thally init" to scaffold one.\n\n')
     process.exit(1)
   }
 }
@@ -31,7 +31,7 @@ async function main(): Promise<number> {
   switch (args.command) {
     case 'init':
     case 'create':
-      return runPackageBin('create-dox', 'create-dox', args.rest)
+      return runPackageBin('create-thally-docs', 'create-thally-docs', args.rest)
 
     case 'dev':
       requireProject()
@@ -58,14 +58,14 @@ async function main(): Promise<number> {
       return runNewPage(args)
 
     case 'migrate':
-      return runPackageBin('create-dox', 'create-dox', ['migrate', ...args.rest])
+      return runPackageBin('create-thally-docs', 'create-thally-docs', ['migrate', ...args.rest])
 
     case 'translate':
       requireProject()
-      return runPackageBin('create-dox', 'create-dox', ['translate', ...args.rest])
+      return runPackageBin('create-thally-docs', 'create-thally-docs', ['translate', ...args.rest])
 
     case 'mcp':
-      return runPackageBin('@doxlabs/mcp', 'dox-mcp', args.rest)
+      return runPackageBin('@thallylabs/mcp', 'thally-mcp', args.rest)
 
     case 'agent':
       requireProject()

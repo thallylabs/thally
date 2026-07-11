@@ -1,10 +1,10 @@
 ---
 title: Multi-Language Support
-description: Add first-class multi-language support to your Dox docs site with build-time translations, automatic fallbacks, and a built-in language switcher.
+description: Add first-class multi-language support to your Thally docs site with build-time translations, automatic fallbacks, and a built-in language switcher.
 keywords: [i18n, internationalization, translation, multi-language, localization, locale]
 ---
 
-Dox supports build-time multi-language documentation. Translated MDX files live in your repo alongside your primary content — fully version-controlled, statically generated, and indexed by search engines with real locale-specific URLs.
+Thally supports build-time multi-language documentation. Translated MDX files live in your repo alongside your primary content — fully version-controlled, statically generated, and indexed by search engines with real locale-specific URLs.
 
 <CardGroup cols={2}>
 
@@ -77,7 +77,7 @@ Once this is saved, a globe icon appears in the top bar automatically.
 Run the translate command to generate translated MDX files for a locale:
 
 ```bash
-npx create-dox translate --locale es
+npx create-thally-docs translate --locale es
 ```
 
 This calls Claude to translate every content page defined in your `docs.json` and writes the results to `src/content/es/`. You'll see a live progress list as each page completes, and a summary at the end.
@@ -85,13 +85,13 @@ This calls Claude to translate every content page defined in your `docs.json` an
 **Translate specific pages only:**
 
 ```bash
-npx create-dox translate --locale es --pages introduction,guides/getting-started
+npx create-thally-docs translate --locale es --pages introduction,guides/getting-started
 ```
 
 **Overwrite existing translations:**
 
 ```bash
-npx create-dox translate --locale es --force
+npx create-thally-docs translate --locale es --force
 ```
 
 **All options:**
@@ -149,14 +149,14 @@ Claude translates with these rules applied automatically:
 If a translation needs adjusting, edit the file in `src/content/{locale}/` directly. You can also re-run the command for specific pages:
 
 ```bash
-npx create-dox translate --locale es --pages guides/getting-started --force
+npx create-thally-docs translate --locale es --pages guides/getting-started --force
 ```
 
 ---
 
 ## Fallback behavior
 
-Dox never returns a 404 for a missing translation. Instead, it serves the primary-language content with an informative banner:
+Thally never returns a 404 for a missing translation. Instead, it serves the primary-language content with an informative banner:
 
 **Missing translation** — the page hasn't been translated for that locale yet:
 
@@ -171,7 +171,7 @@ Both banners appear only on secondary-locale routes. The primary route is never 
 To fix a stale or missing translation, run the translate command for that page:
 
 ```bash
-npx create-dox translate --locale es --pages guides/getting-started
+npx create-thally-docs translate --locale es --pages guides/getting-started
 ```
 
 ---
@@ -198,7 +198,7 @@ To change the language of API Reference descriptions and summaries, update them 
 
 ## SEO
 
-When an `i18n` config is present, Dox automatically adds `hreflang` and `canonical` link tags to every page:
+When an `i18n` config is present, Thally automatically adds `hreflang` and `canonical` link tags to every page:
 
 ```html
 <link rel="canonical" href="https://docs.example.com/introduction" />
@@ -207,17 +207,17 @@ When an `i18n` config is present, Dox automatically adds `hreflang` and `canonic
 <link rel="alternate" hreflang="fr" href="https://docs.example.com/fr/introduction" />
 ```
 
-The primary URL is always canonical, including on secondary-locale pages. Set `DOX_SITE_URL` so the correct domain appears in these tags:
+The primary URL is always canonical, including on secondary-locale pages. Set `THALLY_SITE_URL` so the correct domain appears in these tags:
 
 ```bash
-DOX_SITE_URL=https://docs.example.com
+THALLY_SITE_URL=https://docs.example.com
 ```
 
 ---
 
 ## Using the MCP tool
 
-If you use the Dox MCP server, you can translate docs directly from your AI assistant:
+If you use the Thally MCP server, you can translate docs directly from your AI assistant:
 
 ```json
 {
@@ -239,7 +239,7 @@ The MCP tool accepts the same options as the CLI. See [MCP Server](/guides/mcp-s
 When creating a new project, you can enable multi-language support from the start:
 
 ```bash
-npx create-dox my-docs
+npx create-thally-docs my-docs
 ```
 
 When asked **"Enable multi-language support?"**, enter `y` and provide your locale codes (e.g. `es,fr,de`). The `i18n` block is written to `docs.json` automatically.
@@ -249,11 +249,11 @@ When asked **"Enable multi-language support?"**, enter `y` and provide your loca
 <CardGroup cols={2}>
 
 <Card title="CLI Reference" href="/guides/cli-reference" icon="wrench">
-  Full reference for `translate` and all other create-dox commands.
+  Full reference for `translate` and all other create-thally-docs commands.
 </Card>
 
 <Card title="MCP Server" href="/guides/mcp-server" icon="grid-round">
-  Set up the Dox MCP server to translate docs from your AI assistant.
+  Set up the Thally MCP server to translate docs from your AI assistant.
 </Card>
 
 </CardGroup>

@@ -1,6 +1,6 @@
 ---
 title: Deploying
-description: Build and deploy your Dox documentation site to any hosting platform.
+description: Build and deploy your Thally documentation site to any hosting platform.
 ---
 
 ## Build for production
@@ -13,41 +13,41 @@ This generates an optimized production build in the `.next/` directory. All docu
 
 ## Environment variables
 
-Before deploying, set the `DOX_SITE_URL` environment variable to your production domain. This is used for OpenGraph metadata and canonical URLs:
+Before deploying, set the `THALLY_SITE_URL` environment variable to your production domain. This is used for OpenGraph metadata and canonical URLs:
 
 ```bash
-DOX_SITE_URL=https://docs.yourproduct.com
+THALLY_SITE_URL=https://docs.yourproduct.com
 ```
 
 Depending on which features you use, you may also want to set:
 
 | Variable | Enables |
 | --- | --- |
-| `DOX_SITE_URL` | OpenGraph metadata and canonical URLs (recommended for every deploy) |
+| `THALLY_SITE_URL` | OpenGraph metadata and canonical URLs (recommended for every deploy) |
 | `ANTHROPIC_API_KEY` | The in-docs AI assistant ([AI features](/guides/ai-features)) |
-| `DOX_ADMIN_PASSWORD` | Break-glass Owner access to the `/admin` dashboard |
-| `DOX_OIDC_ISSUER` / `DOX_OIDC_CLIENT_ID` / `DOX_OIDC_CLIENT_SECRET` | Team sign-in to the dashboard via your IdP |
-| `DOX_AUTH_SECRET` | Signs admin sessions and encrypts stored secrets (required with OIDC, and for the Connect-GitHub app key) |
-| `DOX_ANALYTICS_DB_URL` / `DOX_ANALYTICS_DB_TOKEN` | Durable analytics store on serverless hosts (see [Analytics & durable storage](#analytics--durable-storage)) |
-| `DOX_DATABASE_URL` / `DOX_DATABASE_TOKEN` | Durable admin storage (settings, tasks, rate limits) on serverless hosts |
-| `DOX_TRACK_WEBHOOK_SECRET` / `DOX_GITHUB_TOKEN` | [Dox Track](/guides/dox-track) — the manual-webhook path (not needed if you Connect a GitHub App) |
-| `DOX_GITHUB_APP_ID` / `DOX_GITHUB_APP_INSTALLATION_ID` / `DOX_GITHUB_APP_PRIVATE_KEY` | Optional — wire the Track GitHub App by hand instead of the admin "Connect GitHub" button |
+| `THALLY_ADMIN_PASSWORD` | Break-glass Owner access to the `/admin` dashboard |
+| `THALLY_OIDC_ISSUER` / `THALLY_OIDC_CLIENT_ID` / `THALLY_OIDC_CLIENT_SECRET` | Team sign-in to the dashboard via your IdP |
+| `THALLY_AUTH_SECRET` | Signs admin sessions and encrypts stored secrets (required with OIDC, and for the Connect-GitHub app key) |
+| `THALLY_ANALYTICS_DB_URL` / `THALLY_ANALYTICS_DB_TOKEN` | Durable analytics store on serverless hosts (see [Analytics & durable storage](#analytics--durable-storage)) |
+| `THALLY_DATABASE_URL` / `THALLY_DATABASE_TOKEN` | Durable admin storage (settings, tasks, rate limits) on serverless hosts |
+| `THALLY_TRACK_WEBHOOK_SECRET` / `THALLY_GITHUB_TOKEN` | [Thally Track](/guides/thally-track) — the manual-webhook path (not needed if you Connect a GitHub App) |
+| `THALLY_GITHUB_APP_ID` / `THALLY_GITHUB_APP_INSTALLATION_ID` / `THALLY_GITHUB_APP_PRIVATE_KEY` | Optional — wire the Track GitHub App by hand instead of the admin "Connect GitHub" button |
 
-Only `DOX_SITE_URL` is needed for a basic docs site. Analytics and admin storage work with zero config locally; on serverless you need a remote database (below). See [Admin dashboard & team access](/guides/admin-dashboard) for the auth variables in context, and [Dox Track](/guides/dox-track) for the code-triggered-docs variables.
+Only `THALLY_SITE_URL` is needed for a basic docs site. Analytics and admin storage work with zero config locally; on serverless you need a remote database (below). See [Admin dashboard & team access](/guides/admin-dashboard) for the auth variables in context, and [Thally Track](/guides/thally-track) for the code-triggered-docs variables.
 
 ## Analytics & durable storage
 
-Dox stores first-party analytics and some admin state in **libSQL** (SQLite-compatible). Locally this is automatic — no account, no setup.
+Thally stores first-party analytics and some admin state in **libSQL** (SQLite-compatible). Locally this is automatic — no account, no setup.
 
 | Environment | What happens |
 | --- | --- |
-| **Local (`npm run dev`)** | Analytics writes to `.data/analytics/events.db`. General admin KV storage uses `.data/dox.db`. Both are created on first use. |
+| **Local (`npm run dev`)** | Analytics writes to `.data/analytics/events.db`. General admin KV storage uses `.data/thally.db`. Both are created on first use. |
 | **Server with a persistent disk** (Docker volume, VPS) | The same on-disk files work if the volume survives restarts. |
 | **Serverless** (Vercel, Lambda, etc.) | The filesystem is ephemeral. Without a remote database, Home/Analytics show empty values or fail to load, and runtime admin settings may not persist across deploys. |
 
 ### When you need a remote database
 
-Point Dox at a hosted libSQL database such as [Turso](https://turso.tech) when you deploy to serverless **and** you want any of:
+Point Thally at a hosted libSQL database such as [Turso](https://turso.tech) when you deploy to serverless **and** you want any of:
 
 - Admin **Analytics** / Home traffic metrics
 - Durable admin settings, docs-task queue state, or rate-limit counters across instances
@@ -70,15 +70,15 @@ turso db tokens create your-docs
 
 ```bash
 # Analytics (page views, human vs agent traffic, search terms)
-DOX_ANALYTICS_DB_URL=libsql://your-docs-….turso.io
-DOX_ANALYTICS_DB_TOKEN=…
+THALLY_ANALYTICS_DB_URL=libsql://your-docs-….turso.io
+THALLY_ANALYTICS_DB_TOKEN=…
 
 # Admin KV (settings overrides, tasks, rate limits) — can be the same database
-DOX_DATABASE_URL=libsql://your-docs-….turso.io
-DOX_DATABASE_TOKEN=…
+THALLY_DATABASE_URL=libsql://your-docs-….turso.io
+THALLY_DATABASE_TOKEN=…
 ```
 
-3. Redeploy. Dox creates the required tables on first connect — you do not run migrations by hand.
+3. Redeploy. Thally creates the required tables on first connect — you do not run migrations by hand.
 
 You can use one Turso database for both pairs of variables, or separate databases if you prefer.
 
@@ -92,7 +92,7 @@ The fastest way to deploy — push to GitHub and import the repo:
 
 1. Push your docs repo to GitHub
 2. Go to [vercel.com/new](https://vercel.com/new) and import the repository
-3. Set `DOX_SITE_URL` in the environment variables
+3. Set `THALLY_SITE_URL` in the environment variables
 4. If you want admin analytics and durable settings, also set the Turso variables from [Analytics & durable storage](#analytics--durable-storage)
 5. Deploy
 
@@ -166,11 +166,11 @@ Then run `npm run build` — the output will be in the `out/` directory, ready f
 
 ## SEO and feeds
 
-Once deployed, Dox automatically serves:
+Once deployed, Thally automatically serves:
 
 - **`/sitemap.xml`** — includes all doc pages, API reference pages, and the changelog
 - **`/robots.txt`** — allows crawlers on all pages, blocks internal API routes (`/api/og`, `/api/try-it`)
 - **`/changelog/rss.xml`** — RSS feed for changelog updates
 - **Dynamic OG images** — every page gets a branded social preview image via `/api/og`
 
-All of these use `DOX_SITE_URL` to generate absolute URLs, so make sure it's set before deploying.
+All of these use `THALLY_SITE_URL` to generate absolute URLs, so make sure it's set before deploying.

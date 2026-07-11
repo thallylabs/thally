@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import matter from 'gray-matter'
 
 export const updatePageSchema = z.object({
-  projectDir: z.string().describe('Path to the Dox project root'),
+  projectDir: z.string().describe('Path to the Thally project root'),
   pageId: z.string().describe('Page identifier (e.g. "guides/auth"). No .mdx extension.'),
   title: z.string().optional().describe('New page title'),
   description: z.string().optional().describe('New page description'),

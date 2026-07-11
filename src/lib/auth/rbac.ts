@@ -51,7 +51,7 @@ export async function requireCapability(
 
 /**
  * Resolve the admin from a request: an OIDC identity (→ live roster role), or the
- * break-glass DOX_ADMIN_PASSWORD session (→ Owner, since the password-holder is
+ * break-glass THALLY_ADMIN_PASSWORD session (→ Owner, since the password-holder is
  * the deployer). Node-only (reaches the roster).
  */
 export async function resolveAdminFromRequest(request: NextRequest): Promise<AdminSession | null> {

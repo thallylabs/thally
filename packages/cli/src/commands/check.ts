@@ -2,7 +2,7 @@ import type { ParsedArgs } from '../router.js'
 import { projectScripts, run, runPackageBin } from '../process.js'
 
 /**
- * Lint content (orphan pages, missing frontmatter) via create-dox, and — with
+ * Lint content (orphan pages, missing frontmatter) via create-thally-docs, and — with
  * --agents — run the Agent Readiness Score from the same project script.
  */
 export async function runCheck(args: ParsedArgs): Promise<number> {
@@ -12,7 +12,7 @@ export async function runCheck(args: ParsedArgs): Promise<number> {
   if (args.hasFlag('--external')) contentArgs.push('--external')
   if (args.hasFlag('--drift')) contentArgs.push('--drift')
 
-  let exit = await runPackageBin('create-dox', 'create-dox', contentArgs)
+  let exit = await runPackageBin('create-thally-docs', 'create-thally-docs', contentArgs)
 
   if (args.hasFlag('--agents')) {
     const scripts = projectScripts()

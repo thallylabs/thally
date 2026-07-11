@@ -200,7 +200,7 @@ interface DocsJsonConfig {
   apiPlayground?: {
     credentials?: Record<string, string>
   }
-  /** Built-in analytics dashboard at /admin (requires DOX_ADMIN_PASSWORD env). */
+  /** Built-in analytics dashboard at /admin (requires THALLY_ADMIN_PASSWORD env). */
   admin?: {
     enabled?: boolean
   }
@@ -221,7 +221,7 @@ interface DocsJsonConfig {
     domains?: Array<{ domain: string; role: 'owner' | 'editor' | 'viewer' }>
   }
   /**
-   * Dox Track — product repos whose MERGED PRs should trigger docs-agent PRs.
+   * Thally Track — product repos whose MERGED PRs should trigger docs-agent PRs.
    * Git-committed like the team roster: adding a repo is a reviewed change.
    */
   tracking?: {
@@ -724,7 +724,7 @@ export function getTeamConfig(): TeamConfig {
   }
 }
 
-/** The git-committed Dox Track roster. Always returns an array. */
+/** The git-committed Thally Track roster. Always returns an array. */
 export function getTrackingConfig(): TrackingConfig {
   return { repos: docsConfig.tracking?.repos ?? [] }
 }

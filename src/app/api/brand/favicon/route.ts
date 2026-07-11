@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   if (!match) {
     return new Response(null, {
       status: 302,
-      headers: { Location: `/brand/dox-favicon-${dark ? 'dark' : 'light'}.png` },
+      headers: { Location: `/brand/thally-favicon-${dark ? 'dark' : 'light'}.png` },
     })
   }
   return new Response(Buffer.from(match[2], 'base64'), {

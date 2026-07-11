@@ -71,10 +71,10 @@ describe('matchPullRequestEvent', () => {
     expect(matchPullRequestEvent(prPayload(), TRACKING)!.mode).toBe('merged')
   })
 
-  // Loop guard — the docs agent's own PRs (dox/agent-*) must never re-trigger.
-  it('ignores a merged PR from a dox/agent-* branch (loop guard)', () => {
+  // Loop guard — the docs agent's own PRs (thally/agent-*) must never re-trigger.
+  it('ignores a merged PR from a thally/agent-* branch (loop guard)', () => {
     expect(
-      matchPullRequestEvent(prPayload({ pull_request: { head: { ref: 'dox/agent-abc123' } } }), TRACKING),
+      matchPullRequestEvent(prPayload({ pull_request: { head: { ref: 'thally/agent-abc123' } } }), TRACKING),
     ).toBeNull()
   })
 
@@ -111,8 +111,8 @@ describe('matchPullRequestEvent', () => {
   it('ignores a docs-preview PR closed without merging', () => {
     expect(matchPullRequestEvent(previewPayload({ merged: false }, 'closed'), TRACKING)).toBeNull()
   })
-  it('ignores a docs-preview label on a dox/agent-* branch (loop guard wins)', () => {
-    expect(matchPullRequestEvent(previewPayload({ head: { ref: 'dox/agent-x', sha: 'z' } }), TRACKING)).toBeNull()
+  it('ignores a docs-preview label on a thally/agent-* branch (loop guard wins)', () => {
+    expect(matchPullRequestEvent(previewPayload({ head: { ref: 'thally/agent-x', sha: 'z' } }), TRACKING)).toBeNull()
   })
 })
 

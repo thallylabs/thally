@@ -1,10 +1,10 @@
 ---
 title: Soporte Multi-Idioma
-description: Agrega soporte multi-idioma de primera clase a tu sitio de documentación Dox con traducciones en tiempo de compilación y un selector de idioma.
+description: Agrega soporte multi-idioma de primera clase a tu sitio de documentación Thally con traducciones en tiempo de compilación y un selector de idioma.
 keywords: [i18n, internacionalización, traducción, multi-idioma, localización]
 ---
 
-Dox soporta documentación multi-idioma en tiempo de compilación. Los archivos MDX traducidos se confirman en tu repositorio, lo que te brinda SSG completo, costo cero en tiempo de ejecución y URLs realmente indexables para cada locale.
+Thally soporta documentación multi-idioma en tiempo de compilación. Los archivos MDX traducidos se confirman en tu repositorio, lo que te brinda SSG completo, costo cero en tiempo de ejecución y URLs realmente indexables para cada locale.
 
 **Por qué traducciones en tiempo de compilación:**
 
@@ -49,7 +49,7 @@ Una vez agregado esto, un **selector de idioma** (ícono de globo) aparecerá au
 Ejecuta el comando de traducción para generar archivos MDX traducidos para un locale:
 
 ```bash
-npx create-dox translate --locale es
+npx create-thally-docs translate --locale es
 ```
 
 Esto traduce **todas las páginas** y las escribe en `src/content/es/`.
@@ -57,13 +57,13 @@ Esto traduce **todas las páginas** y las escribe en `src/content/es/`.
 ### Traducir páginas específicas
 
 ```bash
-npx create-dox translate --locale es --pages introduction,guides/getting-started
+npx create-thally-docs translate --locale es --pages introduction,guides/getting-started
 ```
 
 ### Sobrescribir traducciones existentes
 
 ```bash
-npx create-dox translate --locale es --force
+npx create-thally-docs translate --locale es --force
 ```
 
 ### Todas las opciones
@@ -114,11 +114,11 @@ El comando de traducción usa Claude para traducir tu documentación con estas r
 
 ## Comportamiento de reserva
 
-Si una página no ha sido traducida para un locale, Dox sirve el contenido en el idioma principal y muestra un banner ámbar:
+Si una página no ha sido traducida para un locale, Thally sirve el contenido en el idioma principal y muestra un banner ámbar:
 
 > ⚠️ Esta página aún no ha sido traducida a **es**. Mostrando la versión original en **EN**.
 
-Si el archivo principal ha sido actualizado después de que se creó la traducción, Dox muestra un banner amarillo de antigüedad:
+Si el archivo principal ha sido actualizado después de que se creó la traducción, Thally muestra un banner amarillo de antigüedad:
 
 > Esta traducción puede estar desactualizada. [Ver original →]
 
@@ -134,7 +134,7 @@ Una vez que tienes 2 o más locales configurados, aparece un **ícono de globo**
 
 ## SEO
 
-Dox agrega automáticamente etiquetas `hreflang` y `canonical` para todos los locales configurados:
+Thally agrega automáticamente etiquetas `hreflang` y `canonical` para todos los locales configurados:
 
 ```html
 <link rel="canonical" href="https://example.com/introduction" />
@@ -149,7 +149,7 @@ La URL principal siempre es la canónica, incluso para páginas de locales secun
 
 ## Usar la herramienta MCP
 
-Si usas el servidor MCP de Dox, puedes traducir documentación directamente desde tu asistente de IA:
+Si usas el servidor MCP de Thally, puedes traducir documentación directamente desde tu asistente de IA:
 
 ```json
 {
@@ -171,7 +171,7 @@ Consulta [Servidor MCP](/guides/mcp-server) para instrucciones de configuración
 Al inicializar un nuevo proyecto, puedes habilitar el soporte multi-idioma desde el principio:
 
 ```bash
-npx create-dox my-docs
+npx create-thally-docs my-docs
 ```
 
 Cuando se te pregunte **"¿Habilitar soporte multi-idioma?"**, ingresa `y` y proporciona tus códigos de locale (p. ej. `es,fr,de`). El bloque `i18n` se escribirá en `docs.json` automáticamente.

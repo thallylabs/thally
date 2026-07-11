@@ -16,12 +16,12 @@ export const runtime = 'nodejs'
  * SDK's transport targets Node req/res, not Web Requests).
  */
 
-const SERVER_INFO = { name: 'dox-docs', version: '1.0.0' }
+const SERVER_INFO = { name: 'thally-docs', version: '1.0.0' }
 const SUPPORTED_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05']
 const LATEST_PROTOCOL = '2025-06-18'
 
 /** Per-IP ceiling on tool calls per minute (0 disables). */
-const RATE_PER_MIN = Number.parseInt(process.env.DOX_MCP_RATE_PER_MIN ?? '60', 10)
+const RATE_PER_MIN = Number.parseInt((process.env.THALLY_MCP_RATE_PER_MIN ?? process.env.DOX_MCP_RATE_PER_MIN) ?? '60', 10)
 
 interface JsonRpcMessage {
   jsonrpc?: string
@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
 export function GET() {
   // Streamable-HTTP GET opens a server→client SSE stream; this stateless server
   // never pushes, so it's POST-only.
-  return new Response('Dox MCP endpoint — POST JSON-RPC 2.0 (streamable HTTP).', {
+  return new Response('Thally MCP endpoint — POST JSON-RPC 2.0 (streamable HTTP).', {
     status: 405,
     headers: { Allow: 'POST' },
   })

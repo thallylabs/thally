@@ -1,15 +1,15 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHash, createCipheriv, createDecipheriv } from 'node:crypto'
 
-/** 32-byte AES key derived from DOX_AUTH_SECRET (arbitrary-length string). */
+/** 32-byte AES key derived from THALLY_AUTH_SECRET (arbitrary-length string). */
 function deriveKey(): Buffer | null {
-  const secret = process.env.DOX_AUTH_SECRET?.trim()
+  const secret = (process.env.THALLY_AUTH_SECRET ?? process.env.DOX_AUTH_SECRET)?.trim()
   if (!secret || secret.length < 16) return null
   return createHash('sha256').update(secret).digest()
 }
 
 /**
  * AES-256-GCM encrypt a secret for storage. Format: `iv:tag:ciphertext` (hex),
- * random IV per call. Returns null when DOX_AUTH_SECRET is absent — the caller
+ * random IV per call. Returns null when THALLY_AUTH_SECRET is absent — the caller
  * must REFUSE to store rather than fall back to plaintext (a silent downgrade).
  */
 export function encryptSecret(plain: string): string | null {

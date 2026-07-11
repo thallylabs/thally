@@ -1,7 +1,7 @@
 /**
  * Self-contained scaffold logic for the MCP server.
- * This is intentionally a copy of packages/create-dox/src/scaffold.ts
- * so that @doxlabs/mcp is fully self-contained when run via `npx @doxlabs/mcp`.
+ * This is intentionally a copy of packages/create-thally-docs/src/scaffold.ts
+ * so that @thallylabs/mcp is fully self-contained when run via `npx @thallylabs/mcp`.
  */
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync, readFileSync, cpSync } from 'node:fs'
@@ -17,7 +17,7 @@ const pipelineAsync = promisify(pipeline)
 // Constants
 // ---------------------------------------------------------------------------
 
-const TARBALL_URL = 'https://codeload.github.com/kenny-io/Dox/tar.gz/main'
+const TARBALL_URL = 'https://codeload.github.com/thallylabs/thally/tar.gz/main'
 const EXCLUDE_PATHS = ['/cli/', '/packages/', '/node_modules/', '/.git/']
 
 const STARTER_PAGES: Record<string, string> = {
@@ -28,7 +28,7 @@ description: Welcome to {NAME} documentation.
 
 ## Welcome
 
-This is the home page of your **{NAME}** documentation site, powered by [Dox](https://github.com/kenny-io/Dox).
+This is the home page of your **{NAME}** documentation site, powered by [Thally](https://github.com/thallylabs/thally).
 
 Get started by editing this file at \`src/content/introduction.mdx\`.
 `,
@@ -272,7 +272,7 @@ function initGit(targetDir: string): void {
   try {
     run('git init', targetDir)
     run('git add -A', targetDir)
-    run('git commit -m "Initial commit from create-dox"', targetDir)
+    run('git commit -m "Initial commit from create-thally-docs"', targetDir)
   } catch {
     // Git not configured — that's fine
   }

@@ -35,7 +35,7 @@ export interface OgImageConfig {
   descriptionColor?: string
   /** Group label text color (hex). Defaults to accent. */
   groupColor?: string
-  /** Domain text shown in the bottom bar (e.g. "docs.example.com"). Defaults to DOX_SITE_URL hostname. */
+  /** Domain text shown in the bottom bar (e.g. "docs.example.com"). Defaults to THALLY_SITE_URL hostname. */
   domain?: string
   /** Logo text displayed in the bottom bar. Defaults to site name. */
   logoText?: string
@@ -84,7 +84,7 @@ export interface SiteConfig {
 }
 
 const brandPresets: Record<BrandPresetKey, BrandConfig> = {
-  // Dox's canonical brand — Ink + Crimson (see Brand-Design-System). Neutral ink
+  // Thally's canonical brand — Ink + Crimson (see Brand-Design-System). Neutral ink
   // surfaces do the work; crimson is the signal accent (links, active states,
   // marks). Light accent #E11D48, brightened to #F43F5E on dark for contrast.
   primary: {
@@ -141,14 +141,14 @@ const brandPresets: Record<BrandPresetKey, BrandConfig> = {
 const brandPreset: BrandPresetKey = 'primary'
 
 export const siteConfig: SiteConfig = {
-  name: 'Dox',
+  name: 'Thally',
   description:
-    'Dox is the first agent-native documentation platform. Every page is served to humans as polished HTML and to AI agents as structured JSON, JSON-LD, and Markdown from the same URL — self-hosted, open, and fully extensible.',
+    'Thally is the first agent-native documentation platform. Every page is served to humans as polished HTML and to AI agents as structured JSON, JSON-LD, and Markdown from the same URL — self-hosted, open, and fully extensible.',
   repoUrl: '',
   links: [
     { label: 'Get started', href: '/quickstart' },
-    { label: 'Support', href: 'https://github.com/kenny-io/Dox/issues/new' },
-    { label: 'GitHub', href: 'https://github.com/kenny-io/Dox' },
+    { label: 'Support', href: 'https://github.com/thallylabs/thally/issues/new' },
+    { label: 'GitHub', href: 'https://github.com/thallylabs/thally' },
     { label: 'Changelog', href: '/changelog' },
   ],
   brand: brandPresets[brandPreset],

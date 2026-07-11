@@ -1,8 +1,8 @@
-# @doxlabs/mcp
+# @thallylabs/mcp
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI
 tools — Claude Code, Claude Desktop, Cursor, Windsurf — create, read, update,
-search, and migrate [Dox](https://github.com/kenny-io/Dox) documentation projects
+search, and migrate [Thally](https://github.com/thallylabs/thally) documentation projects
 through natural language.
 
 ## Setup
@@ -10,7 +10,7 @@ through natural language.
 Add it to your MCP client. For Claude Code:
 
 ```bash
-claude mcp add dox -- npx -y @doxlabs/mcp
+claude mcp add thally -- npx -y @thallylabs/mcp
 ```
 
 Or in a `mcp.json` / client config:
@@ -18,9 +18,9 @@ Or in a `mcp.json` / client config:
 ```json
 {
   "mcpServers": {
-    "dox": {
+    "thally": {
       "command": "npx",
-      "args": ["-y", "@doxlabs/mcp"]
+      "args": ["-y", "@thallylabs/mcp"]
     }
   }
 }
@@ -36,7 +36,7 @@ Or in a `mcp.json` / client config:
 - **Migration** — `migrate_docs`, `translate_docs`
 
 `search_docs`, `read_page`, and `get_context` work against a local project on
-disk; `semantic_search` and `agent_readiness` run against any **deployed** Dox
+disk; `semantic_search` and `agent_readiness` run against any **deployed** Thally
 site over HTTP.
 
 ## License

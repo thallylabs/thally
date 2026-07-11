@@ -1,10 +1,10 @@
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
-export const ADMIN_SESSION_COOKIE = 'dox_admin_session'
-export const DOCS_ACCESS_COOKIE = 'dox_docs_access'
+export const ADMIN_SESSION_COOKIE = 'thally_admin_session'
+export const DOCS_ACCESS_COOKIE = 'thally_docs_access'
 
 function getSecret(): string {
-  return process.env.DOX_ADMIN_SECRET ?? process.env.DOX_ADMIN_PASSWORD ?? 'dox-dev-admin'
+  return (process.env.THALLY_ADMIN_SECRET ?? process.env.DOX_ADMIN_SECRET) ?? (process.env.THALLY_ADMIN_PASSWORD ?? process.env.DOX_ADMIN_PASSWORD) ?? 'thally-dev-admin'
 }
 
 function toBase64Url(bytes: Uint8Array): string {
@@ -45,20 +45,20 @@ async function verifySignedToken(token: string | undefined, scope?: string): Pro
 }
 
 export function isOidcConfiguredEdge(): boolean {
-  return Boolean(process.env.DOX_OIDC_ISSUER && process.env.DOX_OIDC_CLIENT_ID)
+  return Boolean((process.env.THALLY_OIDC_ISSUER ?? process.env.DOX_OIDC_ISSUER) && (process.env.THALLY_OIDC_CLIENT_ID ?? process.env.DOX_OIDC_CLIENT_ID))
 }
 
 export function isAdminEnabledEdge(): boolean {
   // Gate /admin when EITHER a break-glass password OR OIDC sign-in is configured.
-  return Boolean(process.env.DOX_ADMIN_PASSWORD) || isOidcConfiguredEdge()
+  return Boolean((process.env.THALLY_ADMIN_PASSWORD ?? process.env.DOX_ADMIN_PASSWORD)) || isOidcConfiguredEdge()
 }
 
 export function isDocsAccessEnabledEdge(): boolean {
-  return Boolean(process.env.DOX_ACCESS_PASSWORD)
+  return Boolean((process.env.THALLY_ACCESS_PASSWORD ?? process.env.DOX_ACCESS_PASSWORD))
 }
 
 export function getInternalAnalyticsSecretEdge(): string {
-  return process.env.DOX_ANALYTICS_SECRET ?? getSecret()
+  return (process.env.THALLY_ANALYTICS_SECRET ?? process.env.DOX_ANALYTICS_SECRET) ?? getSecret()
 }
 
 export async function isAdminAuthenticatedEdge(cookieValue: string | undefined): Promise<boolean> {
@@ -66,7 +66,7 @@ export async function isAdminAuthenticatedEdge(cookieValue: string | undefined):
   // (Gating on isAdminEnabledEdge — which is also true for OIDC-only — would let
   // a cookie forged with the public default HMAC secret pass when no password is
   // set but OIDC enables the admin gate.)
-  if (!process.env.DOX_ADMIN_PASSWORD) return false
+  if (!(process.env.THALLY_ADMIN_PASSWORD ?? process.env.DOX_ADMIN_PASSWORD)) return false
   return verifySignedToken(cookieValue)
 }
 

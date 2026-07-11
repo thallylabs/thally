@@ -28,13 +28,13 @@ const DEFAULT_MODEL = 'claude-sonnet-5'
  */
 export async function runAgent(client: AnthropicLike, task: DocsTask, options: AgentOptions): Promise<AgentResult> {
   const { projectDir, mode } = options
-  const model = options.model ?? process.env.DOX_AGENT_MODEL ?? DEFAULT_MODEL
+  const model = options.model ?? process.env.THALLY_AGENT_MODEL ?? process.env.DOX_AGENT_MODEL ?? DEFAULT_MODEL
   const maxSteps = options.maxSteps ?? 24
   const emit = options.onEvent ?? (() => {})
 
   assertCleanGitRepo(projectDir)
   const original = currentBranch(projectDir)
-  const branch = `dox/agent-${Date.now().toString(36)}`
+  const branch = `thally/agent-${Date.now().toString(36)}`
   createBranch(projectDir, branch)
 
   const restore = () => {
@@ -78,7 +78,7 @@ export async function runAgent(client: AnthropicLike, task: DocsTask, options: A
       return { branch, summary, steps, diff: '', validation: { ok: true, errors: [], warnings: [] }, noChanges: true }
     }
 
-    // Self-validate against the workspace `dox check`; one repair round on failure.
+    // Self-validate against the workspace `thally check`; one repair round on failure.
     let validation = runDocsCheck(projectDir)
     if (!validation.ok) {
       emit('Validation failed — attempting a repair…')
@@ -107,8 +107,8 @@ export async function runAgent(client: AnthropicLike, task: DocsTask, options: A
     if (mode === 'pr') {
       const title = `docs: ${task.instruction.slice(0, 60)}`
       // The `(origin: …)` marker is parsed by the admin task queue (src/lib/tasks.ts
-      // parseOrigin) — keep it, and keep "Dox docs agent" (the queue's filter).
-      const body = `${summary}\n\n---\n${task.requester ? `Requested by ${task.requester}. ` : ''}Drafted by the Dox docs agent (origin: ${task.source}) — please review.`
+      // parseOrigin) — keep it, and keep "Thally docs agent" (the queue's filter).
+      const body = `${summary}\n\n---\n${task.requester ? `Requested by ${task.requester}. ` : ''}Drafted by the Thally docs agent (origin: ${task.source}) — please review.`
       commitAll(projectDir, title)
       push(projectDir, branch)
       let prUrl: string

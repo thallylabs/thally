@@ -146,16 +146,16 @@ export function TopBar({
           </div>
         </div>
         <div
-          className="dox-nav-tab-bar scrollbar-hide -mx-2 flex items-center gap-1.5 overflow-x-auto border border-border/50 bg-muted/20 px-2 py-1 text-xs font-semibold sm:mx-0 sm:gap-2 sm:text-sm rounded-[var(--theme-nav-bar-radius)]"
+          className="thally-nav-tab-bar scrollbar-hide -mx-2 flex items-center gap-1.5 overflow-x-auto border border-border/50 bg-muted/20 px-2 py-1 text-xs font-semibold sm:mx-0 sm:gap-2 sm:text-sm rounded-[var(--theme-nav-bar-radius)]"
           style={{ backgroundColor: 'var(--theme-nav-bar-bg)', borderColor: 'var(--theme-nav-bar-border-color)' }}
         >
           {collections.map((collection) => {
             const isActive = collection.id === activeCollectionId
             const baseClasses = cn(
-              'dox-nav-tab-item group relative shrink-0 px-3 py-1.5 text-left transition whitespace-nowrap sm:px-4 sm:py-2',
+              'thally-nav-tab-item group relative shrink-0 px-3 py-1.5 text-left transition whitespace-nowrap sm:px-4 sm:py-2',
               'rounded-[var(--theme-nav-tab-radius)]',
               isActive
-                ? 'dox-nav-tab-active text-foreground'
+                ? 'thally-nav-tab-active text-foreground'
                 : 'text-foreground/70 hover:text-foreground',
             )
             const indicator = (

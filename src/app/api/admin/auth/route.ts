@@ -15,7 +15,7 @@ export const runtime = 'nodejs'
 export async function POST(request: NextRequest) {
   if (!isAdminEnabled()) {
     return NextResponse.json(
-      { error: 'Admin dashboard is not configured. Set DOX_ADMIN_PASSWORD.' },
+      { error: 'Admin dashboard is not configured. Set THALLY_ADMIN_PASSWORD.' },
       { status: 503 },
     )
   }
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
 export async function DELETE() {
   // Logout is idempotent and always allowed. Clear BOTH the break-glass password
   // session and the OIDC identity session — the old handler 401'd OIDC admins and
-  // left dox_admin_id valid until its 8h expiry (a non-terminable session).
+  // left thally_admin_id valid until its 8h expiry (a non-terminable session).
   const response = NextResponse.json({ ok: true })
   const expire = { httpOnly: true as const, path: '/', maxAge: 0 }
   response.cookies.set(ADMIN_SESSION_COOKIE, '', expire)

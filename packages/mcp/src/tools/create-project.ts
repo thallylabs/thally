@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { scaffold } from '../lib/scaffold.js'
 
 export const createProjectSchema = z.object({
-  projectDir: z.string().describe('Path where the new Dox project should be created'),
+  projectDir: z.string().describe('Path where the new Thally project should be created'),
   projectName: z.string().optional().describe('Display name of the project (defaults to directory name)'),
   description: z.string().optional().describe('Short description of the project'),
   brandPreset: z.enum(['primary', 'secondary']).optional().default('primary').describe('Brand color preset'),
@@ -40,7 +40,7 @@ export async function handleCreateProject(input: CreateProjectInput): Promise<st
   const dirName = result.projectDir.split('/').pop() ?? projectDir
 
   return [
-    `✅ Dox project "${projectName}" created at: ${result.projectDir}`,
+    `✅ Thally project "${projectName}" created at: ${result.projectDir}`,
     '',
     'Next steps:',
     `  cd ${dirName}`,

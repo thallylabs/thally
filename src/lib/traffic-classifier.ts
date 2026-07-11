@@ -25,7 +25,7 @@ export type VisitorType = 'agent' | 'human'
 export type AgentSignal =
   | 'format_param'
   | 'accept_header'
-  | 'x_dox_client'
+  | 'x_thally_client'
   | 'user_agent'
   | 'discovery_path'
 
@@ -71,8 +71,8 @@ export function classifyRequest(req: NextRequest, pathname: string): TrafficClas
     return { visitorType: 'agent', agentSignal: 'accept_header', format: 'markdown' }
   }
 
-  if (req.headers.get('x-dox-client')?.toLowerCase() === 'agent') {
-    return { visitorType: 'agent', agentSignal: 'x_dox_client', format: 'json' }
+  if (req.headers.get('x-thally-client')?.toLowerCase() === 'agent') {
+    return { visitorType: 'agent', agentSignal: 'x_thally_client', format: 'json' }
   }
 
   const ua = req.headers.get('user-agent') ?? ''

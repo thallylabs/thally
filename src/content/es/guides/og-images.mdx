@@ -3,7 +3,7 @@ title: Vistas previas de imágenes OG
 description: Configura imágenes Open Graph dinámicas para las vistas previas de enlaces en redes sociales.
 ---
 
-Dox genera imágenes OG dinámicas para cada página, de modo que tu documentación luzca impecable cuando se comparte en Twitter, Slack, Discord y otras plataformas. Cada imagen incluye el título de la página, la descripción, la etiqueta del grupo y la marca de tu sitio.
+Thally genera imágenes OG dinámicas para cada página, de modo que tu documentación luzca impecable cuando se comparte en Twitter, Slack, Discord y otras plataformas. Cada imagen incluye el título de la página, la descripción, la etiqueta del grupo y la marca de tu sitio.
 
 ## Cómo funciona
 
@@ -17,10 +17,10 @@ La ruta `/api/og` se ejecuta en el edge y renderiza un PNG de 1200×630 usando [
 
 ## Comportamiento predeterminado
 
-Sin ninguna configuración, Dox:
+Sin ninguna configuración, Thally:
 
 - Usará la paleta de colores de tu **tema oscuro** para el fondo de la imagen, la barra de acento y los colores del texto
-- Mostrará el **nombre del sitio** y el **dominio** (desde `DOX_SITE_URL`) en la barra inferior
+- Mostrará el **nombre del sitio** y el **dominio** (desde `THALLY_SITE_URL`) en la barra inferior
 - Obtendrá la fuente **Inter** de Google Fonts con peso 700
 - Inyectará las etiquetas meta `og:image` y `twitter:image` en cada página de documentación
 
@@ -51,7 +51,7 @@ export const siteConfig: SiteConfig = {
 | `titleColor` | Color del texto del título (hex) | Primer plano oscuro de la marca |
 | `descriptionColor` | Color del texto de la descripción (hex) | Primer plano con 60% de opacidad |
 | `groupColor` | Color de la etiqueta del grupo (hex) | Igual que el acento |
-| `domain` | Dominio mostrado en la barra inferior | Nombre de host desde `DOX_SITE_URL` |
+| `domain` | Dominio mostrado en la barra inferior | Nombre de host desde `THALLY_SITE_URL` |
 | `logoText` | Texto del logotipo en la barra inferior | Nombre del sitio |
 | `fontFamily` | Familia de fuente de Google Fonts | `Inter` |
 | `fontWeight` | Peso de la fuente de Google Fonts | `700` |
@@ -59,7 +59,7 @@ export const siteConfig: SiteConfig = {
 ## Configurar la URL del sitio
 
 <Note type="warning" title="Importante para producción">
-Configura `DOX_SITE_URL` en tu entorno de alojamiento. Sin ella, los rastreadores resuelven la URL relativa `/api/og?...` contra `localhost`, que no es accesible.
+Configura `THALLY_SITE_URL` en tu entorno de alojamiento. Sin ella, los rastreadores resuelven la URL relativa `/api/og?...` contra `localhost`, que no es accesible.
 </Note>
 
 <Steps>
@@ -69,7 +69,7 @@ Configura `DOX_SITE_URL` en tu entorno de alojamiento. Sin ella, los rastreadore
 En el panel de tu servicio de alojamiento (Vercel, Netlify, etc.) o en `.env.local` para pruebas locales:
 
 ```bash
-DOX_SITE_URL=https://docs.myproduct.com
+THALLY_SITE_URL=https://docs.myproduct.com
 ```
 
 </Step>

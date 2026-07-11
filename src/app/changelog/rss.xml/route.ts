@@ -16,7 +16,7 @@ const entries: Array<ChangelogEntry> = [
   {
     version: 'v0.1.0',
     date: '2025-01-01',
-    description: 'Initial release of the clean-room Dox template.',
+    description: 'Initial release of the clean-room Thally template.',
     items: [
       'Next.js App Router foundation with MDX-powered docs',
       'Responsive shell with Radix-driven navigation and search',

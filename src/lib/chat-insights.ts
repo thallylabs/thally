@@ -18,10 +18,10 @@ export interface ChatInsight {
 
 /**
  * Record one chat exchange for insights — fire-and-forget, never blocks or fails
- * the chat. Opt out with DOX_CHAT_INSIGHTS=off.
+ * the chat. Opt out with THALLY_CHAT_INSIGHTS=off.
  */
 export function recordChatInsight(insight: ChatInsight): void {
-  if (process.env.DOX_CHAT_INSIGHTS === 'off') return
+  if ((process.env.THALLY_CHAT_INSIGHTS ?? process.env.DOX_CHAT_INSIGHTS) === 'off') return
   void getStorage()
     .appendEvent(STREAM, { ...insight })
     .catch(() => {

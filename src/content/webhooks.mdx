@@ -3,7 +3,7 @@ title: API Reference Setup
 description: Generate interactive API docs from an OpenAPI specification.
 ---
 
-Dox auto-generates a full API reference from an OpenAPI 3.x spec. Here's how to set it up.
+Thally auto-generates a full API reference from an OpenAPI 3.x spec. Here's how to set it up.
 
 <Steps>
 
@@ -15,7 +15,7 @@ Place your OpenAPI 3.x spec file (YAML or JSON) in the project root:
 cp path/to/your/openapi.yaml ./openapi.yaml
 ```
 
-Dox ships with a Pet Store example spec you can use as a starting point.
+Thally ships with a Pet Store example spec you can use as a starting point.
 
 </Step>
 
@@ -34,7 +34,7 @@ Add an API Reference tab in `docs.json`:
 }
 ```
 
-Dox parses the spec and generates interactive endpoint pages automatically.
+Thally parses the spec and generates interactive endpoint pages automatically.
 
 </Step>
 
@@ -82,6 +82,6 @@ The key format is `METHOD /path` (e.g. `GET /pets`, `POST /store/orders`).
 Every generated endpoint page includes a **Try It** button that opens an interactive console. Users can fill in parameters, edit the request body, and send live requests directly from the docs.
 
 <Note type="info" title="Sample page">
-This is example content that ships with the Dox template. Replace it with your own product documentation.
+This is example content that ships with the Thally template. Replace it with your own product documentation.
 </Note>
 

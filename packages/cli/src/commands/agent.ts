@@ -8,9 +8,9 @@ import {
   type AnthropicLike,
   type DocsTask,
   type OutputMode,
-} from '@doxlabs/agent'
+} from '@thallylabs/agent'
 
-/** `dox agent init` — scaffold the docs-repo workflow + print the product-repo sender. */
+/** `thally agent init` — scaffold the docs-repo workflow + print the product-repo sender. */
 function runAgentInit(args: ParsedArgs): number {
   const docsRepo = args.getFlag('--repo') ?? '<owner>/<docs-repo>'
   const { written, senderSnippet } = scaffoldAgentWorkflow(process.cwd(), docsRepo)
@@ -18,25 +18,25 @@ function runAgentInit(args: ParsedArgs): number {
   process.stdout.write('\n')
   process.stdout.write('\n  Add two secrets to THIS docs repo:\n')
   process.stdout.write('    - ANTHROPIC_API_KEY   (runs the agent)\n')
-  process.stdout.write('    - DOX_AGENT_TOKEN     (fine-grained PAT/App: write here, read on product repos)\n')
-  process.stdout.write('\n  Then in each PRODUCT repo, add .github/workflows/dox-mention.yml:\n\n')
+  process.stdout.write('    - THALLY_AGENT_TOKEN     (fine-grained PAT/App: write here, read on product repos)\n')
+  process.stdout.write('\n  Then in each PRODUCT repo, add .github/workflows/thally-mention.yml:\n\n')
   process.stdout.write(
     senderSnippet
       .split('\n')
       .map((l) => `    ${l}`)
       .join('\n'),
   )
-  process.stdout.write('\n  …and a DOX_DISPATCH_TOKEN secret there (dispatch access to this docs repo).\n\n')
+  process.stdout.write('\n  …and a THALLY_DISPATCH_TOKEN secret there (dispatch access to this docs repo).\n\n')
   return 0
 }
 
 /**
- * `dox agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--dry-run] [--pr]`
+ * `thally agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--dry-run] [--pr]`
  *
  * Turns a task into documentation edits on a git sandbox branch. Default leaves
  * the edits on the branch for review; --dry-run previews and discards; --pr opens
  * a pull request. --from-pr reads a product PR's title/body/diff via the gh CLI
- * (the path Dox Track dispatches for a merged PR).
+ * (the path Thally Track dispatches for a merged PR).
  */
 export async function runAgentCommand(args: ParsedArgs): Promise<number> {
   if (args.positionals[0] === 'init') return runAgentInit(args)
@@ -47,7 +47,7 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
 
   if (!instruction && !fromPr) {
     process.stderr.write(
-      '\n  Usage: dox agent "<what to document>" [--diff <ref>] [--from-pr <url>] [--dry-run] [--pr]\n\n',
+      '\n  Usage: thally agent "<what to document>" [--diff <ref>] [--from-pr <url>] [--dry-run] [--pr]\n\n',
     )
     return 1
   }
@@ -79,7 +79,7 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
     messages: { create: (body) => real.messages.create(body as never) as never },
   }
 
-  process.stdout.write(`\n  🤖 Dox docs agent — ${mode}\n\n`)
+  process.stdout.write(`\n  🤖 Thally docs agent — ${mode}\n\n`)
   try {
     const result = await runAgent(client, task, {
       projectDir: process.cwd(),

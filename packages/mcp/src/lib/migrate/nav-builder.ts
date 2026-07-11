@@ -114,7 +114,7 @@ export type DocsPlatform =
   | 'nextra'
   | 'vitepress'
   | 'starlight'
-  | 'dox'
+  | 'thally'
   | 'unknown'
 
 export function detectPlatform(cloneDir: string): DocsPlatform {
@@ -122,7 +122,7 @@ export function detectPlatform(cloneDir: string): DocsPlatform {
   if (existsSync(join(cloneDir, 'docs.json'))) {
     try {
       const parsed = JSON.parse(readFileSync(join(cloneDir, 'docs.json'), 'utf8')) as Record<string, unknown>
-      if (Array.isArray(parsed.tabs)) return 'dox'
+      if (Array.isArray(parsed.tabs)) return 'thally'
       const schema = parsed.$schema as string | undefined
       if (schema?.includes('mintlify') || 'navigation' in parsed) return 'mintlify'
     } catch { /* ignore */ }
@@ -307,7 +307,7 @@ const PLATFORM_LABELS: Record<DocsPlatform, string> = {
   nextra: 'Nextra',
   vitepress: 'VitePress',
   starlight: 'Starlight (Astro)',
-  dox: 'Dox',
+  thally: 'Thally',
   unknown: 'unknown',
 }
 
@@ -320,7 +320,7 @@ export function detectNavFromConfig(
   const label = PLATFORM_LABELS[detected]
 
   switch (detected) {
-    case 'dox': {
+    case 'thally': {
       try {
         const parsed = JSON.parse(
           readFileSync(join(cloneDir, 'docs.json'), 'utf8'),

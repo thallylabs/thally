@@ -3,13 +3,13 @@ title: CI checks
 description: Catch broken links, invalid OpenAPI specs, and content issues in CI before they ship.
 keywords:
   - ci
-  - dox check
+  - thally check
   - broken links
   - openapi validation
   - github actions
 ---
 
-`dox check` lints your docs and, with `--ci`, fails a pull request when something
+`thally check` lints your docs and, with `--ci`, fails a pull request when something
 is broken — so mistakes never reach production.
 
 ## What it checks
@@ -26,21 +26,21 @@ External links are skipped by default for deterministic, network-free CI. Pass
 ## Run it
 
 ```bash
-dox check           # human-readable report
-dox check --fix     # auto-add orphan pages to navigation
-dox check --ci      # GitHub annotations + non-zero exit on errors
+thally check           # human-readable report
+thally check --fix     # auto-add orphan pages to navigation
+thally check --ci      # GitHub annotations + non-zero exit on errors
 ```
 
-No global install? `npx create-dox check --ci .` does the same.
+No global install? `npx create-thally-docs check --ci .` does the same.
 
 ## In GitHub Actions
 
-New projects scaffold a `.github/workflows/dox-check.yml` that runs on every pull
+New projects scaffold a `.github/workflows/thally-check.yml` that runs on every pull
 request and annotates broken links and invalid specs inline on the diff:
 
 ```yaml
-- name: dox check
-  run: npx --yes create-dox@latest check --ci .
+- name: thally check
+  run: npx --yes create-thally-docs@latest check --ci .
 ```
 
 Warnings (orphans, thin pages) are reported but don't fail the build; **errors**

@@ -9,10 +9,10 @@ import { verifyGithubSignature, matchPullRequestEvent, processPullRequest } from
 export const runtime = 'nodejs'
 
 /**
- * Dox Track webhook — MERGED pull_request events from tracked product repos
- * land here. Verifies the HMAC signature (DOX_TRACK_WEBHOOK_SECRET), matches the
+ * Thally Track webhook — MERGED pull_request events from tracked product repos
+ * land here. Verifies the HMAC signature (THALLY_TRACK_WEBHOOK_SECRET), matches the
  * merged PR against docs.json `tracking.repos`, and relays a
- * `repository_dispatch` to the docs repo, whose "Dox docs agent" workflow drafts
+ * `repository_dispatch` to the docs repo, whose "Thally docs agent" workflow drafts
  * the documentation PR. Configure the GitHub webhook to send "Pull requests"
  * events.
  *
@@ -22,10 +22,10 @@ export const runtime = 'nodejs'
  */
 export async function POST(request: Request) {
   // The connected GitHub App (Connect-GitHub flow) carries its own webhook
-  // secret; the manual-webhook path uses DOX_TRACK_WEBHOOK_SECRET. Accept a
+  // secret; the manual-webhook path uses THALLY_TRACK_WEBHOOK_SECRET. Accept a
   // signature that matches EITHER — a decrypt failure just drops that candidate.
   const app = await getDecryptedGithubApp().catch(() => null)
-  const secrets = [process.env.DOX_TRACK_WEBHOOK_SECRET?.trim(), app?.webhookSecret ?? undefined].filter(
+  const secrets = [(process.env.THALLY_TRACK_WEBHOOK_SECRET ?? process.env.DOX_TRACK_WEBHOOK_SECRET)?.trim(), app?.webhookSecret ?? undefined].filter(
     (s): s is string => Boolean(s),
   )
   if (secrets.length === 0) {
@@ -57,12 +57,12 @@ export async function POST(request: Request) {
     const match = matchPullRequestEvent(payload, getTrackingConfig())
     if (!match) return NextResponse.json({ ok: true, noop: true, reason: 'not_tracked' })
 
-    // Dispatch target = a DEPLOYER-set value (the DOX_REPO_URL env or the
+    // Dispatch target = a DEPLOYER-set value (the THALLY_REPO_URL env or the
     // git-committed siteConfig.repoUrl), NOT the admin-editable override —
     // routing secret-bearing Actions shouldn't change via an unreviewed
-    // dashboard edit. DOX_REPO_URL lets a deployment that keeps site.ts as the
+    // dashboard edit. THALLY_REPO_URL lets a deployment that keeps site.ts as the
     // template default (repoUrl: '') still point Track at its own repo.
-    const repoForDispatch = process.env.DOX_REPO_URL?.trim() || siteConfig.repoUrl
+    const repoForDispatch = (process.env.THALLY_REPO_URL ?? process.env.DOX_REPO_URL)?.trim() || siteConfig.repoUrl
     const docsRef = repoForDispatch ? parseRepo(repoForDispatch) : null
 
     const result = await processPullRequest(match, {

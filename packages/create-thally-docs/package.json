@@ -1,0 +1,63 @@
+{
+  "name": "create-thally-docs",
+  "version": "0.7.0",
+  "description": "Scaffold a new Thally documentation project",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "create-thally-docs": "./dist/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./scaffold": "./dist/scaffold.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.0",
+    "@inquirer/prompts": "^7.0.0",
+    "gray-matter": "^4.0.3",
+    "p-limit": "^6.1.0",
+    "tar": "^6.2.0",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/tar": "^6.1.13",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT",
+  "keywords": [
+    "thally",
+    "documentation",
+    "docs",
+    "scaffold",
+    "mdx",
+    "nextjs",
+    "ai",
+    "agent-native",
+    "mcp",
+    "create"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thallylabs/thally.git",
+    "directory": "packages/create-thally-docs"
+  },
+  "homepage": "https://github.com/thallylabs/thally#readme",
+  "bugs": {
+    "url": "https://github.com/thallylabs/thally/issues"
+  }
+}

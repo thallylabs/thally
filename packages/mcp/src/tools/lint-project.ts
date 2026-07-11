@@ -7,7 +7,7 @@ import type { DocsJsonNavigationGroup } from '../lib/docs-json.js'
 import { scanMdxFiles } from './search-docs.js'
 
 export const lintProjectSchema = z.object({
-  projectDir: z.string().describe('Path to the Dox project root'),
+  projectDir: z.string().describe('Path to the Thally project root'),
   fix: z.boolean().optional().default(false).describe('Auto-fix issues where possible (adds orphan pages to nav)'),
 })
 
@@ -52,7 +52,7 @@ export async function handleLintProject(input: LintProjectInput): Promise<string
   const issues: LintIssue[] = []
 
   if (!existsSync(join(projectDir, 'docs.json'))) {
-    throw new Error(`Not a Dox project: docs.json not found in ${projectDir}`)
+    throw new Error(`Not a Thally project: docs.json not found in ${projectDir}`)
   }
 
   const config = readDocsJson(projectDir)

@@ -1,9 +1,9 @@
 ---
 title: Introducción
-description: Dox es una plantilla de documentación de código abierto construida con Next.js, MDX y Tailwind CSS.
+description: Thally es una plantilla de documentación de código abierto construida con Next.js, MDX y Tailwind CSS.
 ---
 
-Dox es una plantilla de documentación de código abierto que te ofrece un sitio de documentación listo para producción desde el primer momento. Está construida con el App Router de Next.js, MDX para la redacción de contenido y Tailwind CSS para los estilos. Cada página que escribes es un archivo `.mdx` — sin CMS, sin dependencia de proveedores y con control total sobre tu infraestructura.
+Thally es una plantilla de documentación de código abierto que te ofrece un sitio de documentación listo para producción desde el primer momento. Está construida con el App Router de Next.js, MDX para la redacción de contenido y Tailwind CSS para los estilos. Cada página que escribes es un archivo `.mdx` — sin CMS, sin dependencia de proveedores y con control total sobre tu infraestructura.
 
 <Frame caption="Construido con tecnologías web modernas" zoom={false}>
 
@@ -22,9 +22,9 @@ Dox es una plantilla de documentación de código abierto que te ofrece un sitio
 - **Changelog con RSS** — página de changelog con un feed RSS en `/changelog/rss.xml`
 
 **Herramientas**
-- **CLI (`create-dox`)** — crea un nuevo proyecto, migra desde otra plataforma o valida tu documentación con un solo comando
-- **Servidor MCP (`@doxlabs/mcp`)** — 13 herramientas para Claude, Cursor y cualquier cliente MCP para crear, editar, buscar y migrar documentación mediante lenguaje natural
-- **Migración** — importa desde Mintlify, Docusaurus, GitBook, Nextra y más con `create-dox migrate`
+- **CLI (`create-thally-docs`)** — crea un nuevo proyecto, migra desde otra plataforma o valida tu documentación con un solo comando
+- **Servidor MCP (`@thallylabs/mcp`)** — 13 herramientas para Claude, Cursor y cualquier cliente MCP para crear, editar, buscar y migrar documentación mediante lenguaje natural
+- **Migración** — importa desde Mintlify, Docusaurus, GitBook, Nextra y más con `create-thally-docs migrate`
 
 **Funcionalidades de IA**
 - **Widget de chat con IA** — preguntas y respuestas flotantes impulsadas por Claude, basadas en el contenido real de tu documentación
@@ -43,10 +43,10 @@ Dox es una plantilla de documentación de código abierto que te ofrece un sitio
 
 ## Primeros pasos
 
-La forma más rápida de crear un nuevo proyecto Dox es con la CLI:
+La forma más rápida de crear un nuevo proyecto Thally es con la CLI:
 
 ```bash
-npx create-dox my-docs
+npx create-thally-docs my-docs
 ```
 
 La CLI te solicita un nombre de proyecto, descripción, preajuste de marca y URL opcional del repositorio de GitHub — luego crea un sitio de documentación listo para ejecutar con contenido inicial, navegación y dependencias instaladas.
@@ -54,7 +54,7 @@ La CLI te solicita un nombre de proyecto, descripción, preajuste de marca y URL
 Alternativamente, clona la plantilla manualmente:
 
 ```bash
-git clone https://github.com/kenny-io/Dox.git my-docs
+git clone https://github.com/thallylabs/thally.git my-docs
 cd my-docs
 npm install
 npm run dev
@@ -62,13 +62,13 @@ npm run dev
 
 ## Cómo funciona
 
-Dox utiliza un modelo de contenido basado en archivos. Toda la documentación reside en `src/content/` como archivos `.mdx`. La estructura de navegación se define en `docs.json` en la raíz del proyecto — allí listas tus pestañas, grupos y páginas, y la barra lateral, las migas de pan y el enrutamiento se derivan automáticamente.
+Thally utiliza un modelo de contenido basado en archivos. Toda la documentación reside en `src/content/` como archivos `.mdx`. La estructura de navegación se define en `docs.json` en la raíz del proyecto — allí listas tus pestañas, grupos y páginas, y la barra lateral, las migas de pan y el enrutamiento se derivan automáticamente.
 
-Para la documentación de API, apunta la pestaña de Referencia de API en `docs.json` a un archivo de especificación OpenAPI. Dox analiza la especificación y genera páginas de endpoints con tablas de parámetros, esquemas de solicitud/respuesta, ejemplos de código y un playground interactivo.
+Para la documentación de API, apunta la pestaña de Referencia de API en `docs.json` a un archivo de especificación OpenAPI. Thally analiza la especificación y genera páginas de endpoints con tablas de parámetros, esquemas de solicitud/respuesta, ejemplos de código y un playground interactivo.
 
-## Cuándo usar Dox
+## Cuándo usar Thally
 
-Dox es una buena opción cuando quieres:
+Thally es una buena opción cuando quieres:
 
 - **Publicar documentación rápido** — empieza a escribir contenido en minutos, no en días
 - **Controlar tu stack** — sin dependencias de servicios de terceros ni tarifas mensuales

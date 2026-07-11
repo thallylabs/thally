@@ -1,13 +1,13 @@
 {
-  "name": "@doxlabs/cli",
-  "version": "0.4.0",
-  "description": "The unified dox CLI — author content + config; the framework stays a hidden runtime",
+  "name": "@thallylabs/cli",
+  "version": "0.5.0",
+  "description": "The unified thally CLI — author content + config; the framework stays a hidden runtime",
   "type": "module",
   "engines": {
     "node": ">=18"
   },
   "bin": {
-    "dox": "./dist/index.js"
+    "thally": "./dist/index.js"
   },
   "exports": {
     ".": "./dist/index.js"
@@ -23,8 +23,8 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "create-dox": "*",
-    "@doxlabs/mcp": "*",
+    "create-thally-docs": "*",
+    "@thallylabs/mcp": "*",
     "@anthropic-ai/sdk": "^0.78.0"
   },
   "devDependencies": {
@@ -32,11 +32,11 @@
     "tsup": "^8.0.0",
     "typescript": "^5.0.0",
     "vitest": "^4.0.15",
-    "@doxlabs/agent": "*"
+    "@thallylabs/agent": "*"
   },
   "license": "MIT",
   "keywords": [
-    "dox",
+    "thally",
     "documentation",
     "docs",
     "cli",
@@ -47,11 +47,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kenny-io/Dox.git",
+    "url": "git+https://github.com/thallylabs/thally.git",
     "directory": "packages/cli"
   },
-  "homepage": "https://github.com/kenny-io/Dox#readme",
+  "homepage": "https://github.com/thallylabs/thally#readme",
   "bugs": {
-    "url": "https://github.com/kenny-io/Dox/issues"
+    "url": "https://github.com/thallylabs/thally/issues"
   }
 }

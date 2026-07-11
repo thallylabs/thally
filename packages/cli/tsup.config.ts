@@ -8,9 +8,9 @@ export default defineConfig({
   banner: {
     js: '#!/usr/bin/env node',
   },
-  // Bundle @doxlabs/agent INTO the CLI (it's the engine behind `dox agent`, not a
+  // Bundle @thallylabs/agent INTO the CLI (it's the engine behind `thally agent`, not a
   // standalone package). Its remaining externals resolve from the CLI's own deps.
-  noExternal: ['@doxlabs/agent'],
+  noExternal: ['@thallylabs/agent'],
   external: ['playwright', 'playwright-core'],
   clean: true,
   dts: false,

@@ -11,7 +11,7 @@ describe('agent tool whitelist', () => {
   })
 })
 
-describe('generated workflow shell-safety (Dox Track injection hardening)', () => {
+describe('generated workflow shell-safety (Thally Track injection hardening)', () => {
   it('DOCS_AGENT_WORKFLOW passes dispatch values via env, never inline in the run script', async () => {
     const { DOCS_AGENT_WORKFLOW } = await import('../scaffold.js')
     // The instruction must be an env var, not expanded into the shell assignment.
@@ -26,7 +26,7 @@ describe('generated workflow shell-safety (Dox Track injection hardening)', () =
     expect(yaml).toMatch(/on:\s*\n\s*pull_request:/)
     expect(yaml).toContain('github.event.pull_request.merged == true')
     // PR url + author flow through ENV; the run body references only the vars.
-    expect(yaml).toMatch(/DOX_PR_URL:\s*\$\{\{\s*github\.event\.pull_request\.html_url/)
+    expect(yaml).toMatch(/THALLY_PR_URL:\s*\$\{\{\s*github\.event\.pull_request\.html_url/)
     expect(yaml).not.toMatch(/from_pr\]=\$\{\{/)
     expect(yaml).not.toMatch(/requester\]=\$\{\{/)
     // No unescaped double-quotes around the tab that could break the assignment.
@@ -35,7 +35,7 @@ describe('generated workflow shell-safety (Dox Track injection hardening)', () =
 
   it('trackSenderWorkflow covers all preview actions + the loop guard, matching the webhook path', async () => {
     const { trackSenderWorkflow } = await import('../scaffold.js')
-    const { AGENT_BRANCH_PREFIX, DOCS_PREVIEW_LABEL } = await import('@doxlabs/mcp/track')
+    const { AGENT_BRANCH_PREFIX, DOCS_PREVIEW_LABEL } = await import('@thallylabs/mcp/track')
     const yaml = trackSenderWorkflow('acme/docs', { owner: 'acme', repo: 'api' })
     // Fires on merges AND on opened/reopened/labeled/synchronize (preview) —
     // same action set the webhook honors, so Mode B and Mode C don't diverge.
@@ -47,11 +47,11 @@ describe('generated workflow shell-safety (Dox Track injection hardening)', () =
 
   it('trackSenderWorkflow bakes the same instruction prose as the webhook (single source) and escapes hostile config', async () => {
     const { trackSenderWorkflow } = await import('../scaffold.js')
-    const { buildTrackInstruction } = await import('@doxlabs/mcp/track')
+    const { buildTrackInstruction } = await import('@thallylabs/mcp/track')
     const yaml = trackSenderWorkflow('acme/docs', { owner: 'acme', repo: 'api' })
     // The prose is buildTrackInstruction's, with the PR number as the runtime env
     // var — not a re-authored copy that can drift.
-    const merged = buildTrackInstruction({ owner: 'acme', repo: 'api' }, { number: '${DOX_PR_NUMBER}' as unknown as number })
+    const merged = buildTrackInstruction({ owner: 'acme', repo: 'api' }, { number: '${THALLY_PR_NUMBER}' as unknown as number })
     expect(yaml).toContain(`INSTRUCTION="${merged}"`)
     expect(yaml).toContain('An OPEN pull request in acme/api')
 

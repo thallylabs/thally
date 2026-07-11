@@ -1,9 +1,9 @@
 ---
 title: Customization
-description: Extend Dox with custom components, layout tokens, and new pages.
+description: Extend Thally with custom components, layout tokens, and new pages.
 ---
 
-Dox is designed to be extended. Every part of the UI is built with composable components and shared layout tokens.
+Thally is designed to be extended. Every part of the UI is built with composable components and shared layout tokens.
 
 ## Layout tokens
 
@@ -20,7 +20,7 @@ Update these values to restyle the entire shell without touching individual comp
 
 ## Adding custom components
 
-Create new components in `src/components/` and use them directly in MDX files. Dox automatically makes common components available in all MDX content.
+Create new components in `src/components/` and use them directly in MDX files. Thally automatically makes common components available in all MDX content.
 
 To register a new MDX component, add it to the components map in `src/components/mdx/mdx-components.tsx`:
 
@@ -92,6 +92,6 @@ Use the built-in layout helpers from `src/components/layout/sections.tsx`:
 These helpers consume the layout tokens, so changing a token updates every section that uses it.
 
 <Note type="info" title="Sample page">
-This is example content that ships with the Dox template. Replace it with your own product documentation.
+This is example content that ships with the Thally template. Replace it with your own product documentation.
 </Note>
 
