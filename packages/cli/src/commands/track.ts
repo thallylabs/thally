@@ -181,7 +181,7 @@ function runTrackSetup(args: ParsedArgs): number {
   process.stdout.write('  (run "thally agent init" there first if you haven\'t).\n')
 
   process.stdout.write('\n  ── Mode A: Connect GitHub app  (recommended for orgs / many private repos)\n\n')
-  process.stdout.write('    The Netlify/Vercel-style path — no token to paste, org-wide access to the\n')
+  process.stdout.write('    The app-install path — no token to paste, org-wide access to the\n')
   process.stdout.write('    repos you pick.\n\n')
   process.stdout.write(`    1. Open your admin dashboard → Settings → Integrations:  ${siteUrl}/admin/settings\n`)
   process.stdout.write('    2. Click "Connect GitHub" (enter your org to install it org-wide), create the\n')
