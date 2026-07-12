@@ -4,7 +4,7 @@ import type { ButtonHTMLAttributes } from 'react'
 import { cn } from '@/lib/utils'
 
 const VARIANTS: Record<string, string> = {
-  solid: 'bg-accent text-accent-foreground shadow-sm hover:bg-accent/90',
+  solid: 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 active:scale-[0.98]',
   outline: 'border border-border text-foreground hover:bg-muted',
   ghost: 'text-foreground hover:bg-muted',
 }

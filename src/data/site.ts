@@ -84,31 +84,34 @@ export interface SiteConfig {
 }
 
 const brandPresets: Record<BrandPresetKey, BrandConfig> = {
-  // Thally's canonical brand — Ink + Crimson (see Brand-Design-System). Neutral ink
-  // surfaces do the work; crimson is the signal accent (links, active states,
-  // marks). Light accent #E11D48, brightened to #F43F5E on dark for contrast.
+  // Thally's canonical brand (see Thally-Design-System / thally-website).
+  // Warm off-white surfaces with a near-black green-tinted ink foreground;
+  // the personality comes from the green palette — teal green as the light
+  // accent (links, active states, CTAs), flipping to bright lime on the deep
+  // teal-green dark mode, exactly like the marketing site.
   primary: {
     light: {
-      background: '#FFFFFF',
-      foreground: '#111827',
-      muted: '#F3F4F6',
-      border: '#E5E7EB',
-      accent: '#E11D48',
+      background: '#FCFCF7',
+      foreground: '#1A2018',
+      muted: '#EFEFE9',
+      border: '#E5E6E1',
+      accent: '#007852',
       accentForeground: '#FFFFFF',
-      ring: '#E11D48',
-      sidebarActiveBg: '347 77% 92% / 0.55',
-      sidebarActiveText: '#9F1239',
+      ring: '#397059',
+      // Olive-family tint (the leaf's own green) for the active sidebar item
+      sidebarActiveBg: '68 40% 88% / 0.65',
+      sidebarActiveText: '#454A22',
     },
     dark: {
-      background: '#0B0D12',
-      foreground: '#F3F4F6',
-      muted: '#111827',
-      border: '#232A38',
-      accent: '#F43F5E',
-      accentForeground: '#FFFFFF',
-      ring: '#F43F5E',
-      sidebarActiveBg: '347 77% 50% / 0.22',
-      sidebarActiveText: '#FDA4AF',
+      background: '#002B28',
+      foreground: '#EFEFE9',
+      muted: '#0E3D38',
+      border: '#1D433F',
+      accent: '#CBEF63',
+      accentForeground: '#1A2018',
+      ring: '#CBEF63',
+      sidebarActiveBg: '172 47% 19% / 0.8',
+      sidebarActiveText: '#CBEF63',
     },
   },
   // Alternate preset — violet. Still a first-class, ready-to-use accent.

@@ -1,25 +1,24 @@
 :root {
-  /* Light theme brand tokens */
-  --brand-light-background: 0 0% 100%;
-  --brand-light-foreground: 222 45% 10%;
-  --brand-light-muted: 220 14% 96%;
-  --brand-light-border: 214 32% 94%;
-  --brand-light-accent: 222 89% 58%;
+  /* Light theme brand tokens — Thally: warm off-white, green-tinted ink,
+     teal-green accent (mirrors thally-website / Thally-Design-System) */
+  --brand-light-background: 60 45% 98%;
+  --brand-light-foreground: 105 14% 11%;
+  --brand-light-muted: 60 16% 93%;
+  --brand-light-border: 72 9% 89%;
+  --brand-light-accent: 161 100% 24%;
   --brand-light-accent-foreground: 0 0% 100%;
-  --brand-light-ring: 250 90% 66%;
-  --brand-sidebar-active-bg-light: 152 60% 88% / 0.55;
-  --brand-sidebar-active-text-light: var(--brand-light-foreground, 222 45% 10%);
+  --brand-light-ring: 155 33% 33%;
+  --brand-sidebar-active-bg-light: 68 40% 88% / 0.65;
+  --brand-sidebar-active-text-light: 66 37% 21%;
 
-  /* Dark theme brand tokens */
-  --brand-dark-background: 222 45% 6%;
-  --brand-dark-foreground: 0 0% 98%;
-  --brand-dark-muted: 222 35% 12%;
-  --brand-dark-border: 222 25% 14%;
-  --brand-dark-accent: 266 85% 65%;
-  --brand-dark-accent-foreground: 240 9% 12%;
-  --brand-dark-ring: 266 85% 65%;
-  --brand-sidebar-active-bg-dark: 152 40% 30% / 0.35;
-  --brand-sidebar-active-text-dark: var(--brand-dark-foreground, 0 0% 98%);
+  /* Dark theme brand tokens — deep teal-green with a bright lime accent */
+  --brand-dark-background: 176 100% 8%;
+  --brand-dark-foreground: 60 16% 93%;
+  --brand-dark-muted: 174 63% 15%;
+  --brand-dark-border: 174 40% 19%;
+  --brand-dark-accent: 75 81% 66%;
+  --brand-dark-accent-foreground: 105 14% 11%;
+  --brand-dark-ring: 75 81% 66%;
+  --brand-sidebar-active-bg-dark: 172 47% 19% / 0.8;
+  --brand-sidebar-active-text-dark: 75 81% 66%;
 }
-
-

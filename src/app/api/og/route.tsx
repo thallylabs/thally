@@ -15,7 +15,23 @@ export async function GET(request: NextRequest) {
   const group = searchParams.get('group') || ''
 
   const og = resolveOgConfig(searchParams.get('accent') || undefined)
-  const logoUri = await getBrandAsset('logo')
+  // Admin-uploaded logo first, then the bundled default mark (public/brand —
+  // the dark variant, since the OG canvas uses the dark brand surface). The
+  // bundled mark is square, so it can carry an explicit width (Satori cannot
+  // compute `width: auto`); admin uploads keep auto width via height only.
+  let logoUri = await getBrandAsset('logo')
+  let logoIsSquareDefault = false
+  if (!logoUri) {
+    try {
+      const { readFile } = await import('node:fs/promises')
+      const { join } = await import('node:path')
+      const png = await readFile(join(process.cwd(), 'public', 'brand', 'thally-logo-dark.png'))
+      logoUri = `data:image/png;base64,${png.toString('base64')}`
+      logoIsSquareDefault = true
+    } catch {
+      // No bundled mark — the lettered fallback below renders instead
+    }
+  }
 
   // Fetch the font from Google Fonts at the edge
   let fontData: ArrayBuffer | null = null
@@ -165,10 +181,16 @@ export async function GET(request: NextRequest) {
               gap: '12px',
             }}
           >
-            {/* Admin logo, or a lettered mark fallback */}
+            {/* Admin logo / bundled default mark, or a lettered fallback */}
             {logoUri ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={logoUri} alt="" height={32} style={{ height: '32px', width: 'auto', borderRadius: '6px' }} />
+              <img
+                src={logoUri}
+                alt=""
+                height={32}
+                {...(logoIsSquareDefault ? { width: 32 } : {})}
+                style={{ height: '32px', width: logoIsSquareDefault ? '32px' : 'auto' }}
+              />
             ) : (
               <div
                 style={{
