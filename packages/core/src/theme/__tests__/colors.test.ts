@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseColorToHex, deriveDarkAccent } from '@/lib/colors'
+import { parseColorToHex, deriveDarkAccent } from '../colors'
 
 const HEX6 = /^#[0-9a-f]{6}$/
 

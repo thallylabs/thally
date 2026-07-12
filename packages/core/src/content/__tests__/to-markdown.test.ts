@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mdxToMarkdown } from '@/lib/content/to-markdown'
+import { mdxToMarkdown } from '../to-markdown'
 
 describe('mdxToMarkdown', () => {
   it('strips JSX wrappers but keeps their inner content', () => {

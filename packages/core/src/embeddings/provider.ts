@@ -1,4 +1,4 @@
-import type { EmbeddingProvider, EmbeddingVector } from '@/lib/embeddings/types'
+import type { EmbeddingProvider, EmbeddingVector } from './types.js'
 
 const LOCAL_DIMENSIONS = 384
 

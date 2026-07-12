@@ -2,7 +2,7 @@
 
 import { useDeferredValue, useEffect, useRef, useState } from 'react'
 import { Check } from 'lucide-react'
-import { parseColorToHex, deriveDarkAccent } from '@/lib/colors'
+import { parseColorToHex, deriveDarkAccent } from '@thallylabs/core/theme'
 
 type ThemeId = 'default' | 'maple' | 'sharp' | 'minimal'
 

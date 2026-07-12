@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMdx from 'remark-mdx'
 import { toString as mdastToString } from 'mdast-util-to-string'
 import type { Root, RootContent } from 'mdast'
-import { slugify } from '@/lib/utils'
+import { slugify } from '../slugify.js'
 import type {
   ContentCodeBlock,
   ContentHeading,
@@ -12,7 +12,7 @@ import type {
   ContentSection,
   ContentTocItem,
   ParsedContent,
-} from '@/lib/content/types'
+} from './types.js'
 
 // Single shared MDX → mdast parser. This is the one place content is parsed;
 // every structured projection below is derived from the same tree.

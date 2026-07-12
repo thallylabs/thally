@@ -12,6 +12,9 @@ const docRedirects: Array<DocsRedirect> =
 
 const nextConfig: NextConfig = {
   pageExtensions: ['ts', 'tsx'],
+  // The engine core is a workspace package shipped as TS-built ESM; let Next
+  // transpile it so app routes and (server) components can import it directly.
+  transpilePackages: ['@thallylabs/core'],
   // libSQL ships a native binding; leave it as a runtime require so Next doesn't
   // try to bundle it (which breaks the analytics store on serverless builds).
   serverExternalPackages: ['@libsql/client'],
@@ -20,8 +23,8 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     return [
-      // Legacy pre-rebrand URL — the guide moved with the Dox → Thally rename.
-      { source: '/guides/dox-track', destination: '/guides/thally-track', permanent: true },
+      // Legacy pre-rebrand URL — Track is now documented in the AI features guide.
+      { source: '/guides/dox-track', destination: '/guides/ai-features', permanent: true },
       ...docRedirects.map(({ source, destination, permanent = false }) => ({
         source,
         destination,

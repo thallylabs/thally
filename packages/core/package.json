@@ -1,0 +1,68 @@
+{
+  "name": "@thallylabs/core",
+  "version": "0.1.0",
+  "description": "Framework-agnostic core of the Thally docs engine: content pipeline, search, embeddings, and brand-token utilities",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./theme": {
+      "types": "./dist/theme.d.ts",
+      "import": "./dist/theme.js",
+      "default": "./dist/theme.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@orama/orama": "^3.1.18",
+    "gray-matter": "^4.0.3",
+    "mdast-util-to-string": "^4.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-mdx": "^3.1.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5"
+  },
+  "devDependencies": {
+    "@types/mdast": "^4.0.0",
+    "@types/node": "^20",
+    "tsup": "^8.0.0",
+    "typescript": "5.9.3"
+  },
+  "license": "MIT",
+  "keywords": [
+    "thally",
+    "documentation",
+    "mdx",
+    "search",
+    "embeddings",
+    "content"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thallylabs/thally.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/thallylabs/thally#readme",
+  "bugs": {
+    "url": "https://github.com/thallylabs/thally/issues"
+  }
+}

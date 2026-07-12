@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { ContentSection } from '@/lib/content/types'
-import { chunkDocument } from '@/lib/embeddings/chunk'
-import { embedLocal, localHashProvider } from '@/lib/embeddings/provider'
-import { buildEmbeddingIndex } from '@/lib/embeddings/index-store'
-import { rankChunks } from '@/lib/embeddings/retrieve'
-import type { PageSource } from '@/lib/embeddings/index-store'
+import type { ContentSection } from '../../content/types'
+import { chunkDocument } from '../chunk'
+import { embedLocal, localHashProvider } from '../provider'
+import { buildEmbeddingIndex } from '../index-store'
+import { rankChunks } from '../retrieve'
+import type { PageSource } from '../index-store'
 
 function section(partial: Partial<ContentSection> & { id: string; title: string }): ContentSection {
   return { depth: 2, headingPath: [partial.title], text: '', code: [], ...partial }

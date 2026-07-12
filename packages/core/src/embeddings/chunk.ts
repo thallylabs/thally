@@ -1,5 +1,5 @@
-import type { ContentSection } from '@/lib/content/types'
-import type { Chunk } from '@/lib/embeddings/types'
+import type { ContentSection } from '../content/types.js'
+import type { Chunk } from './types.js'
 
 // Rough token estimate (~4 chars/token) — good enough for budgeting retrieval.
 export function estimateTokens(text: string): number {

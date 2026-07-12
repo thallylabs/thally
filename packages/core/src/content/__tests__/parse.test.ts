@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { parseMdxContent } from '@/lib/content/parse'
-import { slugify } from '@/lib/utils'
+import { parseMdxContent } from '../parse'
+import { slugify } from '../../slugify'
 
 const sample = `## Getting Started
 

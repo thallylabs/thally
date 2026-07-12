@@ -1,6 +1,6 @@
-import { getEmbeddingIndex } from '@/lib/embeddings/index-store'
-import { getEmbeddingProvider } from '@/lib/embeddings/provider'
-import type { EmbeddedChunk, EmbeddingVector, RetrievalResult } from '@/lib/embeddings/types'
+import { getEmbeddingIndex } from './index-store.js'
+import { getEmbeddingProvider } from './provider.js'
+import type { EmbeddedChunk, EmbeddingVector, RetrievalResult } from './types.js'
 
 function dot(a: EmbeddingVector, b: EmbeddingVector): number {
   let sum = 0

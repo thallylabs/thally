@@ -1,4 +1,4 @@
-import { getContentDocument } from '@/lib/content'
+import { getContentDocument } from '@thallylabs/core'
 import { getDocEntries, getNavigablePageIds } from '@/data/docs'
 import type { PageFact } from '@/lib/agent-readiness/types'
 

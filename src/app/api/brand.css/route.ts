@@ -1,6 +1,5 @@
 import { getAdminSettings } from '@/lib/admin/settings'
-import { themeVarsFor } from '@/lib/theme-vars'
-import { toHslValue } from '@/lib/colors'
+import { themeVarsFor, toHslValue } from '@thallylabs/core/theme'
 
 export const runtime = 'nodejs'
 

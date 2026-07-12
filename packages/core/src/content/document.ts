@@ -1,8 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import matter from 'gray-matter'
-import { parseMdxContent } from '@/lib/content/parse'
-import type { ParsedContent } from '@/lib/content/types'
+import { parseMdxContent } from './parse.js'
+import type { ParsedContent } from './types.js'
 
 const CONTENT_ROOT = path.join(process.cwd(), 'src/content')
 
