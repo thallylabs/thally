@@ -1,9 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { shouldInclude } from '../download.js'
 import { resetTrackingConfig, writeTrackingConfig } from '../docs-json.js'
+import { patchPackageJson } from '../customize.js'
 
 // A scaffold must NOT inherit the Thally project's own project-specific wiring.
 // These guards are the safety net: if a future template change re-introduces the
@@ -92,5 +93,58 @@ describe('scaffold hygiene — Track/agent are opt-in, never inherited', () => {
       const result = JSON.parse(readFileSync(join(dir, 'docs.json'), 'utf8'))
       expect(result.tracking).toBeUndefined()
     })
+  })
+})
+
+// The template repo is an npm-workspaces monorepo but scaffolds are standalone
+// sites: if the monorepo wiring survives the copy, the very first
+// `npm run build` in a fresh scaffold aborts with "No workspaces found".
+describe('patchPackageJson — standalone scaffolds must not inherit monorepo wiring', () => {
+  let dir: string
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true })
+  })
+
+  function writeTemplatePkg(dir: string) {
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'thally',
+        version: '0.1.0',
+        workspaces: ['packages/*'],
+        scripts: {
+          dev: 'next dev -p 3040',
+          prebuild: 'npm run packages:build && npm run embeddings:build',
+          build: 'next build',
+          'embeddings:build': 'tsx scripts/build-embeddings.ts',
+          pretest: 'npm run packages:build',
+          test: 'vitest run',
+          'packages:build': 'npm run build -w packages/core',
+        },
+        dependencies: { '@thallylabs/core': '^0.1.0' },
+      }),
+    )
+  }
+
+  it('strips workspaces + package builds, keeps embeddings prebuild, renames to the site slug', () => {
+    dir = mkdtempSync(join(tmpdir(), 'thally-scaffold-'))
+    writeTemplatePkg(dir)
+    writeFileSync(join(dir, 'package-lock.json'), '{"name":"thally","lockfileVersion":3}')
+
+    patchPackageJson(dir, 'acme-docs')
+
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+    expect(pkg.name).toBe('acme-docs')
+    expect(pkg.workspaces).toBeUndefined()
+    expect(pkg.scripts.prebuild).toBe('npm run embeddings:build')
+    expect(pkg.scripts.pretest).toBeUndefined()
+    expect(pkg.scripts['packages:build']).toBeUndefined()
+    // Untouched: the scripts a site actually runs, and registry-resolvable deps.
+    expect(pkg.scripts.build).toBe('next build')
+    expect(pkg.scripts.dev).toBe('next dev -p 3040')
+    expect(pkg.dependencies['@thallylabs/core']).toBe('^0.1.0')
+    // The monorepo lockfile must not survive — the scaffold's own npm install
+    // writes a clean one that resolves workspace deps from the registry.
+    expect(existsSync(join(dir, 'package-lock.json'))).toBe(false)
   })
 })

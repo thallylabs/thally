@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { downloadTemplate } from './download.js'
 import { resetTrackingConfig, writeTrackingConfig } from './docs-json.js'
-import { writeStarterContent, updateSiteConfig, updateEnvExample, patchApiReferenceGuard, patchTopBarNavigation, patchOpenApiFetch } from './customize.js'
+import { writeStarterContent, updateSiteConfig, updateEnvExample, patchApiReferenceGuard, patchTopBarNavigation, patchOpenApiFetch, patchPackageJson } from './customize.js'
 import { slugify, installDeps, initGit } from './utils.js'
 
 export interface ScaffoldOptions {
@@ -76,6 +76,10 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
 
   // 6. Patch openapi fetch to resolve /openapi.json relative to public/ (not fs root)
   patchOpenApiFetch(targetDir)
+
+  // 7. Rewrite package.json for a standalone site (the template is a monorepo;
+  // scaffolds are not — without this, the first `npm run build` fails).
+  patchPackageJson(targetDir, slug)
 
   // 5. Copy .env.example → .env.local
   updateEnvExample(targetDir)
