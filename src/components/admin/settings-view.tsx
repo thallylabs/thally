@@ -7,6 +7,7 @@ import { getAiConfig, getI18nConfig, isAnalyticsEnabled } from '@/data/docs'
 import { AdminSettingsControls } from '@/components/admin/admin-settings-controls'
 import { SiteIdentityEditor } from '@/components/admin/site-identity-editor'
 import { GithubConnectPanel } from '@/components/admin/github-connect-panel'
+import { getEntitlements } from '@/lib/cloud-bridge'
 import type { Role } from '@/lib/auth/types'
 
 type Tone = 'success' | 'warn' | 'neutral'
@@ -55,6 +56,7 @@ function analyticsStore(): string {
 }
 
 export function SettingsView({ role = 'viewer' }: { role?: Role }) {
+  const entitlements = getEntitlements()
   const adminOn = isAdminEnabled()
   const accessOn = isDocsAccessEnabled()
   const analyticsOn = isAnalyticsEnabled()
@@ -115,15 +117,27 @@ export function SettingsView({ role = 'viewer' }: { role?: Role }) {
         />
       </Group>
 
-      <Group title="Analytics" desc="First-party traffic and engagement collection.">
-        <Row label="Collection" value={analyticsOn ? 'On' : 'Off'} tone={analyticsOn ? 'success' : 'neutral'} />
-        <Row label="Store" value="Durable" tone="success" hint={analyticsStore()} />
-      </Group>
+      {entitlements.features.analytics ? (
+        <Group title="Analytics" desc="First-party traffic and engagement collection.">
+          <Row label="Collection" value={analyticsOn ? 'On' : 'Off'} tone={analyticsOn ? 'success' : 'neutral'} />
+          <Row label="Store" value="Durable" tone="success" hint={analyticsStore()} />
+        </Group>
+      ) : (
+        <Group title="Analytics" desc="First-party traffic and engagement collection.">
+          <Row label="Collection" value="Thally Cloud" tone="neutral" hint="Available on Thally Cloud — thally.io/pricing" />
+        </Group>
+      )}
 
-      <Group title="AI chat" desc="The retrieval-augmented assistant embedded in your docs.">
-        <Row label="Chat widget" value={chatStatus} tone={chatTone} hint="ANTHROPIC_API_KEY / THALLY_TRIAL_ANTHROPIC_KEY" />
-        <Row label="Retrieval" value="RAG + citations" tone="success" />
-      </Group>
+      {entitlements.features.aiChat ? (
+        <Group title="AI chat" desc="The retrieval-augmented assistant embedded in your docs.">
+          <Row label="Chat widget" value={chatStatus} tone={chatTone} hint="ANTHROPIC_API_KEY / THALLY_TRIAL_ANTHROPIC_KEY" />
+          <Row label="Retrieval" value="RAG + citations" tone="success" />
+        </Group>
+      ) : (
+        <Group title="AI chat" desc="The retrieval-augmented assistant embedded in your docs.">
+          <Row label="Chat widget" value="Thally Cloud" tone="neutral" hint="Available on Thally Cloud — thally.io/pricing" />
+        </Group>
+      )}
 
       <Group title="Localization" desc="Languages your documentation is available in.">
         <Row
@@ -149,7 +163,16 @@ export function SettingsView({ role = 'viewer' }: { role?: Role }) {
         </div>
         <div className="ds-settings-panel">
           <div className="ds-settings-section">
-            <GithubConnectPanel canEdit={role === 'owner'} />
+            {entitlements.features.track ? (
+              <GithubConnectPanel canEdit={role === 'owner'} />
+            ) : (
+              <p style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-text-muted)' }}>
+                Thally Track is available on Thally Cloud — connect this site to activate the one-click GitHub App.{' '}
+                <a href="https://thally.io/pricing" target="_blank" rel="noreferrer" style={{ color: 'var(--ds-accent-mid)', fontWeight: 'var(--ds-fw-semibold)' }}>
+                  Learn more
+                </a>
+              </p>
+            )}
           </div>
         </div>
       </section>

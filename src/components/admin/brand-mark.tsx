@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useTheme } from 'next-themes'
 
 // Stable no-op subscribe for the hydration gate below.
@@ -18,15 +18,25 @@ export function BrandMark({ size = 30 }: { size?: number }) {
   const dark = mounted && resolvedTheme === 'dark'
 
   const [customOk, setCustomOk] = useState(true)
+  const imgRef = useRef<HTMLImageElement>(null)
   const src = customOk
     ? `/api/brand/logo${dark ? '?mode=dark' : ''}`
     : dark
-      ? '/brand/thally-logo-dark.png'
-      : '/brand/thally-logo-light.png'
+      ? '/brand/thally-logo-dark.svg'
+      : '/brand/thally-logo-light.svg'
+
+  // The <img> is server-rendered, so it can finish (and fail) BEFORE React
+  // attaches onError — the event never fires and the broken probe sticks.
+  // Check completeness on mount to catch that (same guard as layout/logo.tsx).
+  useEffect(() => {
+    const img = imgRef.current
+    if (img?.complete) setCustomOk(img.naturalWidth > 0)
+  }, [])
 
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
+      ref={imgRef}
       src={src}
       alt=""
       width={size}

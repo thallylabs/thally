@@ -1,5 +1,5 @@
 {
-  "theme": "sharp",
+  "theme": "default",
   "banner": {
     "content": "Thally v2 is coming — faster builds, more themes, and a brand-new component library. [See what's coming →](/changelog)",
     "dismissible": true
@@ -96,24 +96,6 @@
         ]
       }
     ]
-  },
-  "fonts": {
-    "body": {
-      "family": "Plus Jakarta Sans",
-      "weight": [
-        "400",
-        "500",
-        "600",
-        "700"
-      ]
-    },
-    "heading": {
-      "family": "Outfit",
-      "weight": [
-        "600",
-        "700"
-      ]
-    }
   },
   "feedback": {
     "thumbsRating": true,

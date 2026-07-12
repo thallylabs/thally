@@ -3,9 +3,10 @@
    ----------------------------------------------------------------------------
    A perceptual, OKLCH-based token system for Thally's admin analytics dashboard,
    modeled on LI.FI's design language (perceptual color scales, three-tier
-   elevation, one dark/light flip, 4px spacing rhythm) but reskinned to Thally's
-   CRIMSON brand (brandPresets.primary — #E11D48 light / #F43F5E dark). The
-   green scale below is a fixed, brand-independent data-viz intensity ramp.
+   elevation, one dark/light flip, 4px spacing rhythm) reskinned to Thally's
+   GREEN brand (brandPresets.primary — teal #007852 light / lime #CBEF63 dark;
+   warm green-tinted ink neutrals, deep teal dark surfaces). The green scale
+   below is a fixed, brand-independent data-viz intensity ramp.
 
    SCOPING — this file is OPT-IN and MUST NOT leak into the docs site.
    Every token lives under `.thally-dashboard`; dark overrides live under
@@ -17,12 +18,10 @@
        import '@/styles/design-system.css'
        <div className="thally-dashboard"> … </div>
 
-   BRAND ANCHORING — the accent is pinned to the literal brand hex and all
-   companion tones (tints, borders, glows) are derived from it via
-   color-mix / relative-color OKLCH, so the whole dashboard stays exactly
-   on-brand no matter what the running docs `--thally-accent` resolves to
-   (that token is purple under the current `secondary` preset — we do NOT
-   inherit it here).
+   BRAND ANCHORING — the accent follows the site's `--thally-accent` (with the
+   Thally brand green as fallback) and all companion tones (tints, borders,
+   glows) are derived from it via color-mix / relative-color OKLCH, so the
+   whole dashboard reskins with the owner's brand from a single anchor.
 
    Tailwind v3 compatible: plain custom properties. Consume in JSX via
    arbitrary values, e.g. `style={{ background: 'var(--ds-surface-card)' }}`
@@ -45,11 +44,11 @@
      Functional color (status, chart series, green data ramp) stays fixed
      below — semantics must not change with the brand.
      ──────────────────────────────────────────────────────────────────────── */
-  --ds-accent:            hsl(var(--thally-accent, 347 77% 50%));
+  --ds-accent:            hsl(var(--thally-accent, 161 100% 24%));
   --ds-accent-mid:        color-mix(in oklch, var(--ds-accent) 85%, black);  /* hovers, icons */
   --ds-accent-strong:     color-mix(in oklch, var(--ds-accent) 72%, black);  /* pressed / active */
   --ds-accent-fg:         color-mix(in oklch, var(--ds-accent) 8%, white);   /* text/icon on solid fill */
-  --ds-accent-secondary:  #8B5CF6;  /* Thally secondary — violet (charts, dual metrics) */
+  --ds-accent-secondary:  #6CA52E;  /* Thally mid green (charts, dual metrics) */
   --ds-accent-tertiary:   #F59E0B;  /* amber — third categorical accent */
 
   /* Derived accent companions — the LI.FI recipe: one token, many tones.
@@ -60,6 +59,13 @@
   --ds-accent-border:     color-mix(in oklch, var(--ds-accent) 30%, transparent);
   --ds-accent-ring:       color-mix(in oklch, var(--ds-accent) 15%, transparent);
   --ds-accent-glow:       color-mix(in oklch, var(--ds-accent) 22%, transparent);
+
+  /* Primary (solid CTAs, toggle on-state) — ink in light mode, per the brand:
+     "primary is the dark foreground itself". The accent above stays for
+     links, focus, tints, and data viz. Flips to the bright accent on dark. */
+  --ds-primary:        var(--ds-text-primary);
+  --ds-primary-hover:  color-mix(in oklch, var(--ds-primary) 86%, white);
+  --ds-primary-fg:     var(--ds-surface-page);
 
   /* ────────────────────────────────────────────────────────────────────────
      2. PRIMARY GREEN SCALE — 9 perceptual steps (hue ~162)
@@ -77,41 +83,42 @@
   --ds-green-9: oklch(0.300 0.068 166);
 
   /* ────────────────────────────────────────────────────────────────────────
-     3. NEUTRAL / SLATE SCALE — 9 perceptual steps (hue ~257, Thally slate)
+     3. NEUTRAL / INK SCALE — 9 perceptual steps (green-tinted, Thally ink)
      The ink ramp for text, borders, and surfaces. Same L cadence as LI.FI's
-     "midnight"; cool slate hue matches Thally's #0F172A foreground.
+     "midnight"; warm green-tinted hue matches Thally's oklch(0.235 0.017 138)
+     foreground (the `--ds-slate-*` names are kept for compatibility).
      ──────────────────────────────────────────────────────────────────────── */
-  --ds-slate-1: oklch(0.985 0.003 247);  /* near-white */
-  --ds-slate-2: oklch(0.968 0.006 247);  /* ≈ #F8FAFC */
-  --ds-slate-3: oklch(0.922 0.012 250);  /* ≈ #E2E8F0 hairlines */
-  --ds-slate-4: oklch(0.860 0.016 252);
-  --ds-slate-5: oklch(0.720 0.024 255);
-  --ds-slate-6: oklch(0.580 0.030 257);
-  --ds-slate-7: oklch(0.445 0.034 259);
-  --ds-slate-8: oklch(0.330 0.036 261);
-  --ds-slate-9: oklch(0.210 0.040 258);  /* ≈ #0F172A foreground */
+  --ds-slate-1: oklch(0.985 0.004 106);  /* near-white, warm */
+  --ds-slate-2: oklch(0.968 0.007 106);  /* warm paper */
+  --ds-slate-3: oklch(0.922 0.008 115);  /* hairlines */
+  --ds-slate-4: oklch(0.860 0.010 120);
+  --ds-slate-5: oklch(0.720 0.014 130);
+  --ds-slate-6: oklch(0.580 0.015 135);
+  --ds-slate-7: oklch(0.445 0.016 137);
+  --ds-slate-8: oklch(0.330 0.017 138);
+  --ds-slate-9: oklch(0.235 0.017 138);  /* Thally ink foreground */
 
   /* ────────────────────────────────────────────────────────────────────────
      4. SEMANTIC SURFACES + TEXT — LIGHT theme (default under .thally-dashboard)
      Four surface tiers (sunk → page → raised → card) + four text tiers.
      ──────────────────────────────────────────────────────────────────────── */
-  --ds-surface-sunk:   oklch(0.968 0.006 247);  /* recessed wells, track bg */
-  --ds-surface-page:   #FFFFFF;                 /* app canvas */
+  --ds-surface-sunk:   oklch(0.968 0.007 106);  /* recessed wells, track bg */
+  --ds-surface-page:   oklch(0.99 0.007 106);   /* app canvas — warm off-white */
   --ds-surface-raised: #FFFFFF;                 /* panels — separated by border */
   --ds-surface-card:   #FFFFFF;                 /* stat cards */
   --ds-surface-tint:   color-mix(in oklch, var(--ds-slate-9) 2.5%, transparent);
-  --ds-surface-sidebar: oklch(0.988 0.003 247); /* flush rail — a hair off page */
+  --ds-surface-sidebar: oklch(0.97 0.007 110);  /* flush rail — a hair off page */
   --ds-surface-hover:  color-mix(in oklch, var(--ds-slate-9) 4%, transparent);
   --ds-surface-active: color-mix(in oklch, var(--ds-slate-9) 6.5%, transparent);
 
-  --ds-text-primary:   oklch(0.210 0.040 258);  /* headings, KPI values */
-  --ds-text-secondary: oklch(0.445 0.034 259);  /* body */
-  --ds-text-muted:     oklch(0.580 0.030 257);  /* labels, captions */
-  --ds-text-faint:     oklch(0.680 0.026 256);  /* eyebrows, disabled */
+  --ds-text-primary:   oklch(0.235 0.017 138);  /* headings, KPI values */
+  --ds-text-secondary: oklch(0.445 0.016 137);  /* body */
+  --ds-text-muted:     oklch(0.580 0.015 135);  /* labels, captions */
+  --ds-text-faint:     oklch(0.680 0.014 130);  /* eyebrows, disabled */
 
-  --ds-border:         oklch(0.922 0.012 250);  /* default hairline */
+  --ds-border:         oklch(0.922 0.008 115);  /* default hairline */
   --ds-border-subtle:  color-mix(in oklch, var(--ds-slate-9) 8%, transparent);
-  --ds-border-strong:  oklch(0.860 0.016 252);
+  --ds-border-strong:  oklch(0.860 0.010 120);
 
   /* ────────────────────────────────────────────────────────────────────────
      5. STATUS / SEMANTIC COLORS — LIGHT
@@ -136,12 +143,12 @@
 
   /* ────────────────────────────────────────────────────────────────────────
      6. CHART / DATA-VIZ PALETTE — LIGHT
-     Categorical series lead with brand violet (series-1), then emerald
-     (series-2), amber, then evenly-spaced spectral hues. Sequential ramp =
-     the green intensity scale; diverging = red↔green through neutral.
+     Categorical series lead with brand teal green (series-1), then brand
+     lime (series-2), amber, then evenly-spaced spectral hues. Sequential
+     ramp = the green intensity scale; diverging = red↔green through neutral.
      ──────────────────────────────────────────────────────────────────────── */
-  --ds-series-1: #8B5CF6;                 /* brand violet */
-  --ds-series-2: #10B981;                 /* Thally emerald */
+  --ds-series-1: #007852;                 /* Thally teal green */
+  --ds-series-2: #A5D122;                 /* Thally lime */
   --ds-series-3: oklch(0.720 0.150 75);   /* amber */
   --ds-series-4: oklch(0.585 0.160 240);  /* blue */
   --ds-series-5: oklch(0.650 0.170 350);  /* pink */
@@ -204,14 +211,14 @@
        elev-3  floating surfaces — modals, popovers, dropdowns
      Reach for the tier, don't hand-author shadows.
      ──────────────────────────────────────────────────────────────────────── */
-  --ds-elev-1: 0 1px 2px rgba(15, 23, 42, 0.03);
-  --ds-elev-2: 0 8px 24px -6px rgba(15, 23, 42, 0.10),
-               0 2px 6px -2px rgba(15, 23, 42, 0.06);
-  --ds-elev-3: 0 24px 56px -8px rgba(15, 23, 42, 0.16),
-               0 8px 16px -4px rgba(15, 23, 42, 0.10);
+  --ds-elev-1: 0 1px 2px rgba(26, 32, 24, 0.03);
+  --ds-elev-2: 0 8px 24px -6px rgba(26, 32, 24, 0.10),
+               0 2px 6px -2px rgba(26, 32, 24, 0.06);
+  --ds-elev-3: 0 24px 56px -8px rgba(26, 32, 24, 0.16),
+               0 8px 16px -4px rgba(26, 32, 24, 0.10);
   --ds-shadow-focus: 0 0 0 2px var(--ds-accent-ring);
   --ds-shadow-glass: inset 0 1px 0 rgba(255, 255, 255, 0.6),
-                     0 12px 40px -12px rgba(15, 23, 42, 0.18),
+                     0 12px 40px -12px rgba(26, 32, 24, 0.18),
                      0 2px 8px -4px var(--ds-accent-glow);
   --ds-backdrop-glass: blur(24px) saturate(140%);
 
@@ -257,36 +264,42 @@
    DARK THEME — one flip. Thally toggles `.dark` on <html>; the dashboard root is
    a descendant, so `.dark .thally-dashboard` overrides only the surfaces, text,
    status intensities, elevation opacities, and chart chrome that must change.
-   Brand accent + scales are reused (accent bumps to the lighter #34D399).
+   Brand accent + scales are reused (accent flips to the bright Thally lime).
    ============================================================================ */
 .dark .thally-dashboard {
   /* Accent — follows the brand's dark accent (--thally-accent flips with .dark).
      Mixing with white keeps derived tones vivid on dark surfaces; the fg tone
      goes near-black since dark-theme accents are typically light. */
-  --ds-accent:        hsl(var(--thally-accent, 270 95% 75%));
+  --ds-accent:        hsl(var(--thally-accent, 75 81% 66%));
   --ds-accent-mid:    color-mix(in oklch, var(--ds-accent) 88%, white);
   --ds-accent-strong: color-mix(in oklch, var(--ds-accent) 78%, black);
   --ds-accent-fg:     color-mix(in oklch, var(--ds-accent) 22%, black);
+  --ds-accent-secondary: #99CA50;  /* Thally mid green, brightened for dark */
 
-  /* Surfaces — cool near-black slate, four tiers lifting toward the viewer */
-  --ds-surface-sunk:   oklch(0.150 0.024 262);
-  --ds-surface-page:   oklch(0.178 0.028 262);   /* ≈ #0B1220 */
-  --ds-surface-raised: oklch(0.208 0.030 261);
-  --ds-surface-card:   oklch(0.224 0.030 260);
+  /* Primary flips to the bright accent (lime) on dark, matching the site */
+  --ds-primary:       var(--ds-accent);
+  --ds-primary-hover: var(--ds-accent-mid);
+  --ds-primary-fg:    var(--ds-accent-fg);
+
+  /* Surfaces — deep teal-green (Thally dark), four tiers lifting toward the viewer */
+  --ds-surface-sunk:   oklch(0.225 0.042 188);
+  --ds-surface-page:   oklch(0.260 0.045 188);   /* Thally dark background */
+  --ds-surface-raised: oklch(0.300 0.048 187);
+  --ds-surface-card:   oklch(0.327 0.050 186);   /* Thally dark card */
   --ds-surface-tint:   color-mix(in oklch, var(--ds-text-primary) 3%, transparent);
-  --ds-surface-sidebar: oklch(0.152 0.026 262); /* flush rail — recedes behind page */
+  --ds-surface-sidebar: oklch(0.240 0.040 188); /* flush rail — recedes behind page */
   --ds-surface-hover:  color-mix(in oklch, var(--ds-text-primary) 6%, transparent);
   --ds-surface-active: color-mix(in oklch, var(--ds-text-primary) 10%, transparent);
 
-  /* Text — inverted ink ladder */
-  --ds-text-primary:   oklch(0.985 0.004 247);   /* ≈ #F8FAFC */
-  --ds-text-secondary: oklch(0.780 0.020 253);
-  --ds-text-muted:     oklch(0.620 0.026 256);
-  --ds-text-faint:     oklch(0.500 0.028 258);
+  /* Text — inverted ink ladder, warm on teal */
+  --ds-text-primary:   oklch(0.950 0.008 107);   /* Thally dark foreground */
+  --ds-text-secondary: oklch(0.800 0.016 115);
+  --ds-text-muted:     oklch(0.680 0.020 125);
+  --ds-text-faint:     oklch(0.560 0.024 145);
 
-  --ds-border:         oklch(0.300 0.028 260);   /* ≈ #1F2937 */
+  --ds-border:         oklch(0.360 0.040 184);
   --ds-border-subtle:  color-mix(in oklch, var(--ds-text-primary) 8%, transparent);
-  --ds-border-strong:  oklch(0.360 0.030 260);
+  --ds-border-strong:  oklch(0.420 0.038 183);
 
   /* Status — slightly lighter/brighter to hold contrast on dark surfaces */
   --ds-success: oklch(0.720 0.170 152);
@@ -295,8 +308,8 @@
   --ds-info:    oklch(0.680 0.150 240);
 
   /* Chart series — brighter for dark backgrounds */
-  --ds-series-1: #A78BFA;
-  --ds-series-2: #34D399;
+  --ds-series-1: #009E77;                 /* Thally teal green (dark) */
+  --ds-series-2: #CBEF63;                 /* Thally lime (dark) */
   --ds-series-3: oklch(0.800 0.150 75);
   --ds-series-4: oklch(0.700 0.150 240);
   --ds-series-5: oklch(0.740 0.170 350);
@@ -732,7 +745,7 @@
   font-family: var(--ds-font-heading);
   font-weight: var(--ds-fw-bold);
   font-size: var(--ds-text-sm);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12),
+  box-shadow: 0 1px 2px rgba(26, 32, 24, 0.12),
               inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 .thally-dashboard .ds-workspace-name {
@@ -980,10 +993,11 @@
               color var(--ds-dur-fast) var(--ds-ease-standard);
 }
 .thally-dashboard .ds-btn--primary {
-  background: var(--ds-accent);
-  color: var(--ds-accent-fg);
+  background: var(--ds-primary);
+  color: var(--ds-primary-fg);
 }
-.thally-dashboard .ds-btn--primary:hover { background: var(--ds-accent-strong); }
+.thally-dashboard .ds-btn--primary:hover { background: var(--ds-primary-hover); }
+.thally-dashboard .ds-btn--primary:active { transform: scale(0.98); }
 .thally-dashboard .ds-btn--secondary {
   background: var(--ds-surface-raised);
   border-color: var(--ds-border);

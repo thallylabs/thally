@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server'
 import { type NextRequest } from 'next/server'
-import { aggregateAnalytics } from '@/lib/analytics/store'
 import { isAdminDashboardEnabled } from '@/data/docs'
 import { requireCapabilityFromRequest } from '@/lib/auth/rbac'
-import { getContentGaps } from '@/lib/chat-insights'
+import { getCloud } from '@/lib/cloud-bridge'
 import type { AnalyticsRange } from '@/lib/analytics/types'
 
 export const runtime = 'nodejs'
@@ -25,9 +24,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cloud = getCloud()
+  if (!cloud?.analytics) {
+    // OSS free tier — the analytics panel renders its locked state on this.
+    return NextResponse.json({ error: 'analytics_unavailable', locked: true }, { status: 404 })
+  }
+
   const range = parseRange(request.nextUrl.searchParams.get('range'))
-  const summary = await aggregateAnalytics(range)
+  const summary = await cloud.analytics.aggregate(range)
   // Feed the already-computed zero-result terms in — no second aggregation.
-  const contentGaps = await getContentGaps(summary.search.zeroResults)
+  const contentGaps = cloud.ai ? await cloud.ai.getContentGaps(summary.search.zeroResults) : []
   return NextResponse.json({ ...summary, contentGaps })
 }

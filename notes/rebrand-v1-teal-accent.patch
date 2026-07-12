@@ -1,0 +1,376 @@
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 01c0236..e2cc25a 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -19,8 +19,13 @@
+   --theme-radius-lg:                 1rem;      /* cards, panels */
+   --theme-radius-xl:                 1.5rem;    /* large panels, hero sections */
+ 
+-  /* Buttons / CTAs / pill controls — pill by default; squared by sharp/minimal */
+-  --theme-control-radius:            9999px;
++  /* Buttons / CTAs / inputs — brand rounded-rect by default (Thally buttons
++     are 0.5rem, not pills); squared further by sharp/minimal */
++  --theme-control-radius:            0.5rem;
++
++  /* Badges / chips / capsules — pills by default per the brand; squared by
++     sharp/minimal alongside the control radius */
++  --theme-badge-radius:              9999px;
+ 
+   /* Sidebar active item */
+   --theme-sidebar-item-radius:       0.5rem;
+@@ -40,15 +45,17 @@
+    attribute-selector matching or Tailwind JIT class regeneration. */
+ 
+ :root {
+-  --thally-background: var(--brand-light-background, 0 0% 100%);
+-  --thally-foreground: var(--brand-light-foreground, 222 45% 10%);
+-  --thally-muted: var(--brand-light-muted, 220 14% 96%);
+-  --thally-border: var(--brand-light-border, 214 32% 91%);
+-  --thally-accent: var(--brand-light-accent, 347 77% 50%);
++  --thally-background: var(--brand-light-background, 60 45% 98%);
++  --thally-foreground: var(--brand-light-foreground, 105 14% 11%);
++  --thally-muted: var(--brand-light-muted, 60 16% 93%);
++  --thally-border: var(--brand-light-border, 72 9% 89%);
++  --thally-accent: var(--brand-light-accent, 161 100% 24%);
+   --thally-accent-foreground: var(--brand-light-accent-foreground, 0 0% 100%);
+-  --thally-ring: var(--brand-light-ring, 347 77% 50%);
+-  /* Custom font CSS variables — overridden at runtime when fonts.body/heading is set in docs.json */
+-  --font-heading: var(--font-sans);
++  --thally-ring: var(--brand-light-ring, 155 33% 33%);
++  /* Custom font CSS variables — the heading default is the brand display face
++     (Plus Jakarta Sans, loaded in layout.tsx); overridden at runtime when
++     fonts.body/heading is set in docs.json */
++  --font-heading: var(--font-display, var(--font-sans));
+   --container-lg: 33rem;
+   --shiki-color-text: #f8fafc;
+   --shiki-token-constant: #86efac;
+@@ -59,22 +66,22 @@
+   --shiki-token-function: #c4b5fd;
+   --shiki-token-string-expression: #86efac;
+   --shiki-token-punctuation: #e4e4e7;
+-  --sidebar-active-bg: var(--brand-sidebar-active-bg-light, 347 77% 92% / 0.6);
+-  --sidebar-active-text: var(--brand-sidebar-active-text-light, 343 79% 35%);
++  --sidebar-active-bg: var(--brand-sidebar-active-bg-light, 161 45% 90% / 0.6);
++  --sidebar-active-text: var(--brand-sidebar-active-text-light, 174 95% 17%);
+   /* Ensure prose variables track the active foreground */
+   --tw-prose-headings: hsl(var(--thally-foreground));
+ }
+ 
+ .dark {
+-  --thally-background: var(--brand-dark-background, 222 45% 6%);
+-  --thally-foreground: var(--brand-dark-foreground, 0 0% 98%);
+-  --thally-muted: var(--brand-dark-muted, 222 35% 12%);
+-  --thally-border: var(--brand-dark-border, 222 32% 18%);
+-  --thally-accent: var(--brand-dark-accent, 350 89% 60%);
+-  --thally-accent-foreground: var(--brand-dark-accent-foreground, 0 0% 100%);
+-  --thally-ring: var(--brand-dark-ring, 350 89% 60%);
+-  --sidebar-active-bg: var(--brand-sidebar-active-bg-dark, 347 77% 50% / 0.22);
+-  --sidebar-active-text: var(--brand-sidebar-active-text-dark, 351 95% 82%);
++  --thally-background: var(--brand-dark-background, 176 100% 8%);
++  --thally-foreground: var(--brand-dark-foreground, 60 16% 93%);
++  --thally-muted: var(--brand-dark-muted, 174 63% 15%);
++  --thally-border: var(--brand-dark-border, 174 40% 19%);
++  --thally-accent: var(--brand-dark-accent, 75 81% 66%);
++  --thally-accent-foreground: var(--brand-dark-accent-foreground, 105 14% 11%);
++  --thally-ring: var(--brand-dark-ring, 75 81% 66%);
++  --sidebar-active-bg: var(--brand-sidebar-active-bg-dark, 172 47% 19% / 0.8);
++  --sidebar-active-text: var(--brand-sidebar-active-text-dark, 75 81% 66%);
+   --tw-prose-headings: hsl(var(--thally-foreground));
+ }
+ 
+@@ -85,6 +92,8 @@
+ body {
+   @apply bg-background text-foreground antialiased;
+   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
++  /* Brand body tracking (Inter reads a touch tighter at UI sizes) */
++  letter-spacing: -0.0025em;
+ }
+ 
+ ::selection {
+@@ -175,7 +184,8 @@ body {
+ }
+ 
+ /* ============================================================================
+-   SITE BANNER — dark ink bar with brand-accent (crimson) highlights
++   SITE BANNER — deep teal-green bar with brand-accent highlights (matches the
++   Thally dark surface; the accent dot/underline pick up the brand accent)
+    ============================================================================ */
+ .thally-ink-banner {
+   position: relative;
+@@ -183,8 +193,8 @@ body {
+   display: flex;
+   justify-content: center;
+   padding: 0.625rem 1rem;
+-  background: #0c0c0d;
+-  color: #fafafa;
++  background: #002b28;
++  color: #efefe9;
+ }
+ .thally-ink-banner-inner {
+   display: flex;
+@@ -200,18 +210,19 @@ body {
+   height: 0.375rem;
+   flex-shrink: 0;
+   border-radius: 9999px;
+-  background: hsl(var(--thally-accent));
++  /* Always the dark-theme accent: the banner bar is dark in both themes */
++  background: hsl(var(--brand-dark-accent, 75 81% 66%));
+ }
+ .thally-ink-banner-content {
+   font-size: 0.875rem;
+   font-weight: 500;
+   line-height: 1.4;
+-  color: #fafafa;
++  color: #efefe9;
+ }
+ .thally-ink-banner-content a {
+-  color: #fafafa;
++  color: #efefe9;
+   text-decoration: underline;
+-  text-decoration-color: hsl(var(--thally-accent));
++  text-decoration-color: hsl(var(--brand-dark-accent, 75 81% 66%));
+   text-decoration-thickness: 2px;
+   text-underline-offset: 3px;
+   transition: opacity 0.15s ease;
+@@ -228,11 +239,11 @@ body {
+   width: 1.5rem;
+   height: 1.5rem;
+   border-radius: 0.375rem;
+-  color: rgba(250, 250, 250, 0.55);
++  color: rgba(239, 239, 233, 0.55);
+   transition: color 0.15s ease, background 0.15s ease;
+ }
+ .thally-ink-banner-dismiss:hover {
+-  color: #fafafa;
++  color: #efefe9;
+   background: rgba(255, 255, 255, 0.08);
+ }
+ @media (max-width: 640px) {
+diff --git a/src/components/mdx/rich-content.tsx b/src/components/mdx/rich-content.tsx
+index 350edf2..d9a0388 100644
+--- a/src/components/mdx/rich-content.tsx
++++ b/src/components/mdx/rich-content.tsx
+@@ -258,7 +258,7 @@ const badgeVariantStyles: Record<BadgeVariant, string> = {
+ 
+ export function Badge({ variant = 'default', children }: BadgeProps) {
+   return (
+-    <span className={cn('inline-flex items-center rounded-[var(--theme-control-radius)] border px-2 py-0.5 text-xs font-medium', badgeVariantStyles[variant])}>
++    <span className={cn('inline-flex items-center rounded-[var(--theme-badge-radius)] border px-2 py-0.5 text-xs font-medium', badgeVariantStyles[variant])}>
+       {children}
+     </span>
+   )
+@@ -280,7 +280,7 @@ export function Update({ label, date, children }: UpdateProps) {
+       {(label || date) && (
+         <div className="mb-3 flex flex-wrap items-center gap-3">
+           {label && (
+-            <span className="inline-flex items-center rounded-[var(--theme-control-radius)] bg-accent/10 px-2.5 py-0.5 text-xs font-semibold text-accent">
++            <span className="inline-flex items-center rounded-[var(--theme-badge-radius)] bg-accent/10 px-2.5 py-0.5 text-xs font-semibold text-accent">
+               {label}
+             </span>
+           )}
+diff --git a/src/data/site.ts b/src/data/site.ts
+index 1aca698..0541e79 100644
+--- a/src/data/site.ts
++++ b/src/data/site.ts
+@@ -84,31 +84,33 @@ export interface SiteConfig {
+ }
+ 
+ const brandPresets: Record<BrandPresetKey, BrandConfig> = {
+-  // Thally's canonical brand — Ink + Crimson (see Brand-Design-System). Neutral ink
+-  // surfaces do the work; crimson is the signal accent (links, active states,
+-  // marks). Light accent #E11D48, brightened to #F43F5E on dark for contrast.
++  // Thally's canonical brand (see Thally-Design-System / thally-website).
++  // Warm off-white surfaces with a near-black green-tinted ink foreground;
++  // the personality comes from the green palette — teal green as the light
++  // accent (links, active states, CTAs), flipping to bright lime on the deep
++  // teal-green dark mode, exactly like the marketing site.
+   primary: {
+     light: {
+-      background: '#FFFFFF',
+-      foreground: '#111827',
+-      muted: '#F3F4F6',
+-      border: '#E5E7EB',
+-      accent: '#E11D48',
++      background: '#FCFCF7',
++      foreground: '#1A2018',
++      muted: '#EFEFE9',
++      border: '#E5E6E1',
++      accent: '#007852',
+       accentForeground: '#FFFFFF',
+-      ring: '#E11D48',
+-      sidebarActiveBg: '347 77% 92% / 0.55',
+-      sidebarActiveText: '#9F1239',
++      ring: '#397059',
++      sidebarActiveBg: '161 45% 90% / 0.6',
++      sidebarActiveText: '#02544C',
+     },
+     dark: {
+-      background: '#0B0D12',
+-      foreground: '#F3F4F6',
+-      muted: '#111827',
+-      border: '#232A38',
+-      accent: '#F43F5E',
+-      accentForeground: '#FFFFFF',
+-      ring: '#F43F5E',
+-      sidebarActiveBg: '347 77% 50% / 0.22',
+-      sidebarActiveText: '#FDA4AF',
++      background: '#002B28',
++      foreground: '#EFEFE9',
++      muted: '#0E3D38',
++      border: '#1D433F',
++      accent: '#CBEF63',
++      accentForeground: '#1A2018',
++      ring: '#CBEF63',
++      sidebarActiveBg: '172 47% 19% / 0.8',
++      sidebarActiveText: '#CBEF63',
+     },
+   },
+   // Alternate preset — violet. Still a first-class, ready-to-use accent.
+diff --git a/src/styles/brand.css b/src/styles/brand.css
+index c7d9c68..80e4f1b 100644
+--- a/src/styles/brand.css
++++ b/src/styles/brand.css
+@@ -1,25 +1,24 @@
+ :root {
+-  /* Light theme brand tokens */
+-  --brand-light-background: 0 0% 100%;
+-  --brand-light-foreground: 222 45% 10%;
+-  --brand-light-muted: 220 14% 96%;
+-  --brand-light-border: 214 32% 94%;
+-  --brand-light-accent: 222 89% 58%;
++  /* Light theme brand tokens — Thally: warm off-white, green-tinted ink,
++     teal-green accent (mirrors thally-website / Thally-Design-System) */
++  --brand-light-background: 60 45% 98%;
++  --brand-light-foreground: 105 14% 11%;
++  --brand-light-muted: 60 16% 93%;
++  --brand-light-border: 72 9% 89%;
++  --brand-light-accent: 161 100% 24%;
+   --brand-light-accent-foreground: 0 0% 100%;
+-  --brand-light-ring: 250 90% 66%;
+-  --brand-sidebar-active-bg-light: 152 60% 88% / 0.55;
+-  --brand-sidebar-active-text-light: var(--brand-light-foreground, 222 45% 10%);
++  --brand-light-ring: 155 33% 33%;
++  --brand-sidebar-active-bg-light: 161 45% 90% / 0.6;
++  --brand-sidebar-active-text-light: 174 95% 17%;
+ 
+-  /* Dark theme brand tokens */
+-  --brand-dark-background: 222 45% 6%;
+-  --brand-dark-foreground: 0 0% 98%;
+-  --brand-dark-muted: 222 35% 12%;
+-  --brand-dark-border: 222 25% 14%;
+-  --brand-dark-accent: 266 85% 65%;
+-  --brand-dark-accent-foreground: 240 9% 12%;
+-  --brand-dark-ring: 266 85% 65%;
+-  --brand-sidebar-active-bg-dark: 152 40% 30% / 0.35;
+-  --brand-sidebar-active-text-dark: var(--brand-dark-foreground, 0 0% 98%);
++  /* Dark theme brand tokens — deep teal-green with a bright lime accent */
++  --brand-dark-background: 176 100% 8%;
++  --brand-dark-foreground: 60 16% 93%;
++  --brand-dark-muted: 174 63% 15%;
++  --brand-dark-border: 174 40% 19%;
++  --brand-dark-accent: 75 81% 66%;
++  --brand-dark-accent-foreground: 105 14% 11%;
++  --brand-dark-ring: 75 81% 66%;
++  --brand-sidebar-active-bg-dark: 172 47% 19% / 0.8;
++  --brand-sidebar-active-text-dark: 75 81% 66%;
+ }
+-
+-
+diff --git a/tailwind.config.ts b/tailwind.config.ts
+index 4b94eb8..4380a9f 100644
+--- a/tailwind.config.ts
++++ b/tailwind.config.ts
+@@ -15,8 +15,8 @@ const config: Config = {
+     extend: {
+       fontFamily: {
+         sans: ['var(--font-sans)', 'Inter', 'system-ui', 'sans-serif'],
+-        heading: ['var(--font-heading)', 'var(--font-sans)', 'Inter', 'sans-serif'],
+-        mono: ['var(--font-mono)', 'IBM Plex Mono', 'monospace'],
++        heading: ['var(--font-heading)', 'var(--font-display)', 'var(--font-sans)', 'Plus Jakarta Sans', 'Inter', 'sans-serif'],
++        mono: ['var(--font-mono)', 'JetBrains Mono', 'IBM Plex Mono', 'monospace'],
+       },
+       fontSize: {
+         '2xs': ['0.625rem', { lineHeight: '1.25rem' }],
+@@ -48,41 +48,44 @@ const config: Config = {
+       typography: ({ theme }: { theme: any }) => ({
+         DEFAULT: {
+           css: {
+-            '--tw-prose-body': theme('colors.zinc.700'),
++            // Prose neutrals derive from the brand foreground/border tokens
++            // (warm green-tinted ink by default) so a rebrand re-tints the
++            // reading surface automatically instead of leaving cool zinc.
++            '--tw-prose-body': 'hsl(var(--thally-foreground) / 0.84)',
+             '--tw-prose-headings': 'hsl(var(--thally-foreground))',
+             '--tw-prose-links': 'hsl(var(--thally-accent))',
+             '--tw-prose-links-hover': 'hsl(var(--thally-accent) / 0.85)',
+             '--tw-prose-links-underline': 'hsl(var(--thally-accent) / 0.3)',
+-            '--tw-prose-strong': 'hsl(var(--thally-accent))',
+-            '--tw-prose-bold': theme('colors.zinc.900'),
+-            '--tw-prose-counters': theme('colors.zinc.500'),
+-            '--tw-prose-bullets': theme('colors.zinc.300'),
+-            '--tw-prose-hr': 'rgba(24, 24, 27, 0.05)',
+-            '--tw-prose-quotes': theme('colors.zinc.900'),
+-            '--tw-prose-quote-borders': theme('colors.zinc.200'),
+-            '--tw-prose-captions': theme('colors.zinc.500'),
+-            '--tw-prose-code': theme('colors.zinc.900'),
+-            '--tw-prose-code-bg': theme('colors.zinc.100'),
+-            '--tw-prose-code-ring': theme('colors.zinc.300'),
+-            '--tw-prose-th-borders': theme('colors.zinc.300'),
+-            '--tw-prose-td-borders': theme('colors.zinc.200'),
+-            '--tw-prose-invert-body': theme('colors.zinc.400'),
++            '--tw-prose-strong': 'hsl(var(--thally-foreground))',
++            '--tw-prose-bold': 'hsl(var(--thally-foreground))',
++            '--tw-prose-counters': 'hsl(var(--thally-foreground) / 0.55)',
++            '--tw-prose-bullets': 'hsl(var(--thally-foreground) / 0.3)',
++            '--tw-prose-hr': 'hsl(var(--thally-foreground) / 0.06)',
++            '--tw-prose-quotes': 'hsl(var(--thally-foreground))',
++            '--tw-prose-quote-borders': 'hsl(var(--thally-border))',
++            '--tw-prose-captions': 'hsl(var(--thally-foreground) / 0.55)',
++            '--tw-prose-code': 'hsl(var(--thally-foreground))',
++            '--tw-prose-code-bg': 'hsl(var(--thally-muted) / 0.7)',
++            '--tw-prose-code-ring': 'hsl(var(--thally-border))',
++            '--tw-prose-th-borders': 'hsl(var(--thally-border))',
++            '--tw-prose-td-borders': 'hsl(var(--thally-border) / 0.7)',
++            '--tw-prose-invert-body': 'hsl(var(--thally-foreground) / 0.78)',
+             '--tw-prose-invert-headings': 'hsl(var(--thally-foreground))',
+             '--tw-prose-invert-links': 'hsl(var(--thally-accent))',
+             '--tw-prose-invert-links-hover': 'hsl(var(--thally-accent) / 0.85)',
+             '--tw-prose-invert-links-underline': 'hsl(var(--thally-accent) / 0.3)',
+-            '--tw-prose-invert-bold': theme('colors.white'),
+-            '--tw-prose-invert-counters': theme('colors.zinc.400'),
+-            '--tw-prose-invert-bullets': theme('colors.zinc.600'),
+-            '--tw-prose-invert-hr': 'rgba(255, 255, 255, 0.05)',
+-            '--tw-prose-invert-quotes': theme('colors.zinc.100'),
+-            '--tw-prose-invert-quote-borders': theme('colors.zinc.700'),
+-            '--tw-prose-invert-captions': theme('colors.zinc.400'),
+-            '--tw-prose-invert-code': theme('colors.white'),
+-            '--tw-prose-invert-code-bg': 'rgba(63, 63, 70, 0.15)',
+-            '--tw-prose-invert-code-ring': 'rgba(255, 255, 255, 0.1)',
+-            '--tw-prose-invert-th-borders': theme('colors.zinc.600'),
+-            '--tw-prose-invert-td-borders': theme('colors.zinc.700'),
++            '--tw-prose-invert-bold': 'hsl(var(--thally-foreground))',
++            '--tw-prose-invert-counters': 'hsl(var(--thally-foreground) / 0.6)',
++            '--tw-prose-invert-bullets': 'hsl(var(--thally-foreground) / 0.35)',
++            '--tw-prose-invert-hr': 'hsl(var(--thally-foreground) / 0.06)',
++            '--tw-prose-invert-quotes': 'hsl(var(--thally-foreground) / 0.95)',
++            '--tw-prose-invert-quote-borders': 'hsl(var(--thally-border))',
++            '--tw-prose-invert-captions': 'hsl(var(--thally-foreground) / 0.6)',
++            '--tw-prose-invert-code': 'hsl(var(--thally-foreground))',
++            '--tw-prose-invert-code-bg': 'hsl(var(--thally-muted) / 0.6)',
++            '--tw-prose-invert-code-ring': 'hsl(var(--thally-border))',
++            '--tw-prose-invert-th-borders': 'hsl(var(--thally-border))',
++            '--tw-prose-invert-td-borders': 'hsl(var(--thally-border) / 0.7)',
+             color: 'var(--tw-prose-body)',
+             // 15px base with a relaxed measure reads more premium than the
+             // former 14px (fontSize.sm) on wide docs columns.
+@@ -211,8 +214,8 @@ const config: Config = {
+             // this config styles every heading, MDX or plain markdown.
+             h1: {
+               color: 'var(--tw-prose-headings)',
+-              fontWeight: '700',
+-              letterSpacing: '-0.025em',
++              fontWeight: '600',
++              letterSpacing: '-0.02em',
+               fontSize: theme('fontSize.3xl')[0],
+               ...theme('fontSize.3xl')[1],
+               marginBottom: theme('spacing.2'),

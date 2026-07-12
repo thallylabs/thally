@@ -96,7 +96,7 @@ export function Hero({
             {primaryHref ? (
               <Link
                 href={primaryHref}
-                className="inline-flex items-center gap-2 rounded-[var(--theme-control-radius)] bg-accent px-5 py-2.5 text-sm font-semibold text-[hsl(var(--thally-accent-foreground))] shadow-sm transition hover:opacity-90"
+                className="inline-flex items-center gap-2 rounded-[var(--theme-control-radius)] bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition hover:opacity-90 active:scale-[0.98]"
               >
                 {primaryLabel ?? 'Get started'}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
@@ -258,7 +258,7 @@ const badgeVariantStyles: Record<BadgeVariant, string> = {
 
 export function Badge({ variant = 'default', children }: BadgeProps) {
   return (
-    <span className={cn('inline-flex items-center rounded-[var(--theme-control-radius)] border px-2 py-0.5 text-xs font-medium', badgeVariantStyles[variant])}>
+    <span className={cn('inline-flex items-center rounded-[var(--theme-badge-radius)] border px-2 py-0.5 text-xs font-medium', badgeVariantStyles[variant])}>
       {children}
     </span>
   )
@@ -280,7 +280,7 @@ export function Update({ label, date, children }: UpdateProps) {
       {(label || date) && (
         <div className="mb-3 flex flex-wrap items-center gap-3">
           {label && (
-            <span className="inline-flex items-center rounded-[var(--theme-control-radius)] bg-accent/10 px-2.5 py-0.5 text-xs font-semibold text-accent">
+            <span className="inline-flex items-center rounded-[var(--theme-badge-radius)] bg-accent/10 px-2.5 py-0.5 text-xs font-semibold text-accent">
               {label}
             </span>
           )}

@@ -18,7 +18,20 @@ const pipelineAsync = promisify(pipeline)
 // ---------------------------------------------------------------------------
 
 const TARBALL_URL = 'https://codeload.github.com/thallylabs/thally/tar.gz/main'
-const EXCLUDE_PATHS = ['/cli/', '/packages/', '/node_modules/', '/.git/']
+// Keep in sync with packages/create-thally-docs/src/download.ts (the canonical
+// list, with per-entry rationale). This copy exists because @thallylabs/mcp is
+// deliberately self-contained for `npx` usage — no workspace import available.
+const EXCLUDE_PATHS = [
+  '/cli/',
+  '/packages/',
+  '/node_modules/',
+  '/.git/',
+  '/thally-agent.yml',
+  '/thally-track.yml',
+  '/CODEOWNERS',
+  '/CLAUDE.md',
+  '/notes/',
+]
 
 const STARTER_PAGES: Record<string, string> = {
   'introduction.mdx': `---

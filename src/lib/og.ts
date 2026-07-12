@@ -48,7 +48,8 @@ export function resolveOgConfig(accentOverride?: string) {
     groupColor: og.groupColor ?? accent,
     domain: domain || siteConfig.name.toLowerCase(),
     logoText: og.logoText ?? siteConfig.name,
-    fontFamily: og.fontFamily ?? 'Inter',
-    fontWeight: og.fontWeight ?? '700',
+    // Brand display face — OG titles render in Plus Jakarta Sans semibold
+    fontFamily: og.fontFamily ?? 'Plus Jakarta Sans',
+    fontWeight: og.fontWeight ?? '600',
   }
 }

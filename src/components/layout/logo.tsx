@@ -50,17 +50,18 @@ export function Logo({ className, showText = true }: LogoProps) {
       {!customOk ? (
         <>
           {/* Default brand mark (public/brand, ships with every scaffold) —
-              theme-aware; replaced site-wide by an admin upload above. */}
+              the Thally olive-leaf SVG, theme-aware (olive on light, pale lime
+              on dark); replaced site-wide by an admin upload above. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={isDark ? '/brand/thally-logo-dark.png' : '/brand/thally-logo-light.png'}
+            src={isDark ? '/brand/thally-logo-dark.svg' : '/brand/thally-logo-light.svg'}
             alt=""
-            width={32}
-            height={32}
+            width={28}
+            height={28}
             className="shrink-0"
           />
           {showText ? (
-            <span className="text-lg font-bold tracking-tight text-foreground">{siteConfig.name}</span>
+            <span className="font-heading text-lg font-semibold tracking-tight text-foreground">{siteConfig.name}</span>
           ) : null}
         </>
       ) : null}

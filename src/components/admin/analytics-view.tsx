@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import type { AnalyticsRange, AnalyticsSummary } from '@/lib/analytics/types'
-import type { ContentGap } from '@/lib/chat-insights'
+import type { ContentGap } from '@/lib/cloud-bridge/types'
 
 type AnalyticsData = AnalyticsSummary & { contentGaps?: Array<ContentGap> }
 

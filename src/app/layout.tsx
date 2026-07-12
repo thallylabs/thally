@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
+import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from 'next/font/google'
 import Script from 'next/script'
 import './globals.css'
 import { Providers } from '@/app/providers'
@@ -16,10 +16,18 @@ import { AnalyticsProvider } from '@/components/analytics/analytics-provider'
 import { SiteBanner } from '@/components/layout/site-banner'
 import { WebMcpTools } from '@/components/agent/web-mcp-tools'
 
-// Default fonts via next/font (optimal performance — preloaded, no FOUC)
+// Default fonts via next/font (optimal performance — preloaded, no FOUC).
+// The Thally brand pairs Inter (body) with Plus Jakarta Sans (display —
+// headings, wordmark); JetBrains Mono covers machine-facing text.
 const fontSans = Inter({
   subsets: ['latin'],
   variable: '--font-sans',
+  display: 'swap',
+})
+
+const fontDisplay = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  variable: '--font-display',
   display: 'swap',
 })
 
@@ -158,7 +166,15 @@ const siteJsonLd = buildSiteJsonLd({ siteUrl, locale: defaultLang })
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang={defaultLang} suppressHydrationWarning data-theme={structuralTheme}>
+    // Font variables live on <html> (not <body>) so :root-level rules — the
+    // globals.css --font-heading default and docs.json font overrides — can
+    // reference and override them.
+    <html
+      lang={defaultLang}
+      suppressHydrationWarning
+      data-theme={structuralTheme}
+      className={cn(fontSans.variable, fontDisplay.variable, fontMono.variable)}
+    >
       <head>
         <JsonLdScript data={siteJsonLd} />
         {/* Google Fonts for custom body/heading fonts set in docs.json */}
@@ -181,7 +197,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         {/* eslint-disable-next-line @next/next/no-head-element */}
         <link rel="stylesheet" href="/api/brand.css" />
       </head>
-      <body className={cn('min-h-screen bg-background font-sans text-foreground antialiased', fontSans.variable, fontMono.variable)}>
+      <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         {bannerConfig && <SiteBanner banner={bannerConfig} />}
         <Providers>{children}</Providers>
         <AnalyticsProvider />

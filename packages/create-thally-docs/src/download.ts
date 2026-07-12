@@ -18,6 +18,10 @@ const TARBALL_URL = 'https://codeload.github.com/thallylabs/thally/tar.gz/main'
 //                              (with a weekly cron + upstream dispatch) is wrong.
 //   - `/CODEOWNERS`          — Thally's roster gate points at its maintainers;
 //                              inheriting it would demand their review on a user's PRs.
+//   - `/CLAUDE.md`, `/notes/` — the maintainers' AI working agreements and
+//                              planning notes; meaningless (or misleading) inside
+//                              a user's scaffold. Both are gitignored upstream,
+//                              so this is belt-and-braces for local tarballs.
 // (The `tracking` block in docs.json is stripped separately — see
 // resetTrackingConfig — because docs.json itself must be copied.)
 export const EXCLUDE_PATHS = [
@@ -28,6 +32,8 @@ export const EXCLUDE_PATHS = [
   '/thally-agent.yml',
   '/thally-track.yml',
   '/CODEOWNERS',
+  '/CLAUDE.md',
+  '/notes/',
 ]
 
 /** True if a tarball entry should land in the scaffold (see EXCLUDE_PATHS). */

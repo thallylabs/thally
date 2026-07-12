@@ -204,7 +204,7 @@ export function DocsChat({ label = 'Ask AI', icon, enabled = true }: DocsChatPro
         <button
           onClick={() => setOpen(true)}
           aria-label={`Open ${liveLabel}`}
-          className="fixed bottom-6 right-6 z-50 flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-2xl bg-accent text-accent-foreground shadow-lg transition-all hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+          className="fixed bottom-6 right-6 z-50 flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-2xl bg-primary text-primary-foreground shadow-lg transition-all hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           <FabIcon icon={icon} className="h-5 w-5" />
           <span className="text-[9px] font-semibold tracking-wide opacity-90">{liveLabel}</span>
@@ -353,7 +353,7 @@ export function DocsChat({ label = 'Ask AI', icon, enabled = true }: DocsChatPro
                 onClick={loading ? stop : () => void send()}
                 disabled={!loading && !input.trim()}
                 aria-label={loading ? 'Stop' : 'Send'}
-                className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition-all disabled:opacity-30"
+                className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-all disabled:opacity-30"
               >
                 {loading
                   ? <Square className="h-3 w-3 fill-current" />

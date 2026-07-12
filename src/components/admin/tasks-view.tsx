@@ -1,14 +1,6 @@
-import type { DocsTask } from '@/lib/tasks'
+import type { DocsTask, TrackedRepoStatus } from '@/lib/cloud-bridge/types'
 
-export interface TrackedRepoStatus {
-  owner: string
-  repo: string
-  branch: string
-  paths: Array<string>
-  outputTab?: string
-  /** Last PR relayed by the Track webhook (e.g. "#42"), or null before the first merge. */
-  lastSyncedPr: string | null
-}
+export type { TrackedRepoStatus }
 
 const STATE_TONE: Record<DocsTask['state'], string> = {
   open: 'ds-chip--warn',

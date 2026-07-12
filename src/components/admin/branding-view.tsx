@@ -17,8 +17,8 @@ const THEMES: Array<{ id: ThemeId; name: string; desc: string; radius: number; c
 ]
 
 // Curated accent swatches. Applying one sets the light accent; the dark variant
-// is derived (see deriveDarkAccent).
-const PRESETS = ['#f97316', '#6366f1', '#16a34a', '#e11d48', '#334155', '#0ea5e9']
+// is derived (see deriveDarkAccent). Thally teal green leads.
+const PRESETS = ['#007852', '#6ca52e', '#f97316', '#6366f1', '#334155', '#0ea5e9']
 
 const MAX_ASSET_KB = 150
 
@@ -136,7 +136,7 @@ function DropTarget({
           <img
             src={`/api/brand/${kind}?mode=${mode}&v=${version}`}
             alt=""
-            style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', borderRadius: 6, background: mode === 'dark' ? '#111827' : '#fff', padding: 3 }}
+            style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', borderRadius: 6, background: mode === 'dark' ? '#002b28' : '#fff', padding: 3 }}
           />
         ) : (
           <>
@@ -355,7 +355,7 @@ export function BrandingView({
               <div>
                 <div className="ds-panel-title">Brand accent</div>
                 <div style={{ fontSize: 'var(--ds-text-caption)', color: 'var(--ds-text-muted)', marginTop: 2 }}>
-                  Drives links, active states and primary buttons.
+                  Drives links, active states and highlights. Primary buttons stay ink (light) and flip to your dark accent.
                 </div>
               </div>
             </div>
@@ -523,7 +523,9 @@ export function BrandingView({
                 <div style={{ flex: 1, padding: 14 }}>
                   <div style={{ fontWeight: 'var(--ds-fw-bold)', fontSize: 'var(--ds-text-sm)' }}>Getting started</div>
                   <div style={{ fontSize: 11, color: 'var(--ds-text-muted)', marginTop: 4, lineHeight: 1.5 }}>A short paragraph of body copy showing your theme radius and accent.</div>
-                  <button type="button" style={{ marginTop: 10, background: accentLight, color: '#fff', border: 'none', borderRadius: controlRadius, padding: '7px 13px', fontSize: 12, fontWeight: 600, boxShadow: active.flat ? 'none' : '0 6px 16px -8px ' + accentLight }}>
+                  {/* Primary buttons are ink on the live site (accent stays on
+                      links/active states), so the preview mirrors that. */}
+                  <button type="button" style={{ marginTop: 10, background: 'var(--ds-primary)', color: 'var(--ds-primary-fg)', border: 'none', borderRadius: controlRadius, padding: '7px 13px', fontSize: 12, fontWeight: 600, boxShadow: active.flat ? 'none' : 'var(--ds-elev-1)' }}>
                     Primary action
                   </button>
                 </div>

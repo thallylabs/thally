@@ -1,35 +1,21 @@
 import { requireAdminPageSession } from '@/lib/auth/admin-page'
-import { TasksView, type TrackedRepoStatus } from '@/components/admin/tasks-view'
-import { getDocsTasks } from '@/lib/tasks'
-import { getTrackingConfig } from '@/data/docs'
-import { getStorage } from '@/lib/storage'
+import { TasksView } from '@/components/admin/tasks-view'
+import { CloudLockedPanel } from '@/components/admin/cloud-locked-panel'
+import { getCloud } from '@/lib/cloud-bridge'
 import { getEffectiveSiteConfig } from '@/lib/admin/site-config'
 
 export default async function AdminTasksPage() {
   await requireAdminPageSession()
+
+  // Track is a cloud-tier service — free self-hosted deployments see the
+  // locked upsell panel instead (notes/thally-architecture-plan.md §1).
+  const track = getCloud()?.track
+  if (!track) return <CloudLockedPanel feature="track" />
+
   // Effective config so an admin-edited repo URL takes effect without a rebuild.
   const { repoUrl } = await getEffectiveSiteConfig()
-  const tasks = await getDocsTasks(repoUrl)
-
-  // Thally Track roster + last relayed PR per repo (written by the webhook).
-  // One kvList for the whole namespace, then synchronous lookups — not a
-  // per-repo round-trip (which is N network calls on remote storage).
-  const tracking = getTrackingConfig()
-  const stateEntries = await getStorage()
-    .kvList<string>('track_state')
-    .catch(() => [])
-  const stateByKey = new Map(stateEntries.map((entry) => [entry.key, entry.value]))
-  const trackedRepos: Array<TrackedRepoStatus> = tracking.repos.map((repo) => {
-    const branch = repo.branch ?? 'main'
-    return {
-      owner: repo.owner,
-      repo: repo.repo,
-      branch,
-      paths: repo.paths ?? [],
-      outputTab: repo.outputTab,
-      lastSyncedPr: stateByKey.get(`${repo.owner}/${repo.repo}@${branch}`.toLowerCase()) ?? null,
-    }
-  })
+  const tasks = await track.getDocsTasks(repoUrl)
+  const trackedRepos = await track.getTrackedRepoStatuses()
 
   return <TasksView tasks={tasks} repoConfigured={Boolean(repoUrl)} trackedRepos={trackedRepos} />
 }

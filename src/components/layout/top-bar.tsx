@@ -127,7 +127,7 @@ export function TopBar({
             {primaryCta ? (
               <Link
                 href={primaryCta.href}
-                className="inline-flex items-center rounded-[var(--theme-control-radius)] bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground shadow hover:bg-accent/90 sm:px-4 sm:py-2 sm:text-sm"
+                className="inline-flex items-center rounded-[var(--theme-control-radius)] bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow hover:bg-primary/90 active:scale-[0.98] sm:px-4 sm:py-2 sm:text-sm"
               >
                 <span className="hidden sm:inline">{primaryCta.label}</span>
                 <span className="inline sm:hidden">{primaryCta.label.replace('Get ', '')}</span>
