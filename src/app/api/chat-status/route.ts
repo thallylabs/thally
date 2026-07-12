@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getAdminSettings } from '@/lib/admin/settings'
 import { getAiConfig } from '@/data/docs'
 import { DEFAULT_AI_DISCLAIMER } from '@/lib/ai-defaults'
+import { getCloud } from '@/lib/cloud-bridge'
 
 export const runtime = 'nodejs'
 
@@ -10,11 +11,12 @@ export const runtime = 'nodejs'
  * Lets the admin toggle chat and rename/relabel the assistant live (F1 override)
  * without making every static docs page dynamic — the client DocsChat fetches
  * this, hides itself when disabled, and reflects the admin's name + disclaimer.
+ * Always hidden when the deployment has no AI service (OSS free tier).
  */
 export async function GET() {
   const settings = await getAdminSettings()
   const ai = getAiConfig()
-  const show = settings.chatEnabled ?? Boolean(ai.chat)
+  const show = Boolean(getCloud()?.ai) && (settings.chatEnabled ?? Boolean(ai.chat))
   const label = settings.aiLabel ?? ai.label ?? 'Ask AI'
   const disclaimer = settings.aiDisclaimer ?? DEFAULT_AI_DISCLAIMER
   return NextResponse.json({ show, label, disclaimer }, { headers: { 'Cache-Control': 'no-store' } })

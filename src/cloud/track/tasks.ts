@@ -6,16 +6,9 @@
  */
 
 import { resolveGithubToken } from '@thallylabs/mcp/track'
+import type { DocsTask } from '@/lib/cloud-bridge/types'
 
-export interface DocsTask {
-  number: number
-  title: string
-  url: string
-  state: 'open' | 'merged' | 'closed'
-  author: string
-  updatedAt: string
-  origin: 'mention' | 'merge' | 'drift' | 'track' | 'manual'
-}
+export type { DocsTask }
 
 export function parseRepo(repoUrl: string): { owner: string; repo: string } | null {
   const m = repoUrl.match(/github\.com[/:]([^/]+)\/([^/]+?)(?:\.git|\/|$)/i)

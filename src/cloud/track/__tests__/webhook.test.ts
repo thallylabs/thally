@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createHmac } from 'node:crypto'
-import { verifyGithubSignature, matchPullRequestEvent, processPullRequest } from '@/lib/track/webhook'
+import { verifyGithubSignature, matchPullRequestEvent, processPullRequest } from '@/cloud/track/webhook'
 import { createMemoryAdapter } from '@/lib/storage'
 import type { TrackingConfig } from '@/data/docs'
 

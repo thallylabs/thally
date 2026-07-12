@@ -1,6 +1,7 @@
 import { getStorage } from '@/lib/storage'
-import { aggregateAnalytics } from '@/lib/analytics/store'
+import { aggregateAnalytics } from '@/cloud/analytics/store'
 import type { AnalyticsSummary } from '@/lib/analytics/types'
+import type { ContentGap } from '@/lib/cloud-bridge/types'
 
 const STREAM = 'chat_insight'
 
@@ -29,11 +30,7 @@ export function recordChatInsight(insight: ChatInsight): void {
     })
 }
 
-export interface ContentGap {
-  term: string
-  source: 'chat' | 'search'
-  count: number
-}
+export type { ContentGap }
 
 /**
  * The unified content-gap list: questions the AI chat couldn't answer (weak

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { trackAnalyticsEvent } from '@/lib/analytics/store'
+import { recordAnalyticsEvent } from '@/lib/cloud-bridge'
 
 /**
  * POST /api/feedback
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
 
     if (vote === 'yes' || vote === 'no') {
       try {
-        await trackAnalyticsEvent({
+        await recordAnalyticsEvent({
           type: 'feedback',
           path: url ?? page,
           page,

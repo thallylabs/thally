@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseOrigin } from '@/lib/tasks'
+import { parseOrigin } from '@/cloud/track/tasks'
 import { getTrackingConfig } from '@/data/docs'
 
 describe('parseOrigin', () => {

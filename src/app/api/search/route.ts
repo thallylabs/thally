@@ -1,7 +1,7 @@
 import { type NextRequest } from 'next/server'
 import { searchDocs, type SearchMode } from '@/lib/search/engine'
 import { getSiteUrl } from '@/lib/site-url'
-import { trackAnalyticsEvent } from '@/lib/analytics/store'
+import { recordAnalyticsEvent } from '@/lib/cloud-bridge'
 import { classifyRequest } from '@/lib/traffic-classifier'
 
 export const runtime = 'nodejs'
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
   // Record the search (best-effort) — feeds the admin Search analytics.
   try {
     const classification = classifyRequest(request, '/api/search')
-    await trackAnalyticsEvent({
+    await recordAnalyticsEvent({
       type: 'search_query',
       path: '/api/search',
       query,

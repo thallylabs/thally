@@ -2,7 +2,7 @@ import { resolveGithubToken, type GithubAppCreds } from '@thallylabs/mcp/track'
 import { siteConfig } from '@/data/site'
 import { getEffectiveSiteConfig } from '@/lib/admin/site-config'
 import { getDecryptedGithubApp } from '@/lib/admin/settings'
-import { parseRepo } from '@/lib/tasks'
+import { parseRepo } from '@/cloud/track/tasks'
 import type { SubscoreResult } from '@/lib/agent-readiness/types'
 
 export type DispatchAgentResult =

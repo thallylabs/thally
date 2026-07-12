@@ -4,7 +4,7 @@ import {
   exchangeManifestCode,
   signManifestState,
   verifyManifestState,
-} from '@/lib/track/github-app'
+} from '@/cloud/track/github-app'
 
 const prevSecret = process.env.THALLY_AUTH_SECRET
 const prevSiteUrl = process.env.THALLY_SITE_URL

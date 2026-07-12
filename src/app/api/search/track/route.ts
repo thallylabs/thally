@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { trackAnalyticsEvent } from '@/lib/analytics/store'
+import { recordAnalyticsEvent } from '@/lib/cloud-bridge'
 import { classifyRequest } from '@/lib/traffic-classifier'
 
 export const runtime = 'nodejs'
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
   const classification = classifyRequest(request, '/api/search/track')
 
   try {
-    await trackAnalyticsEvent({
+    await recordAnalyticsEvent({
       type: 'search_query',
       path: '/api/search',
       query,

@@ -3,7 +3,7 @@ import {
   resolveAnthropicKey,
   checkChatRateLimit,
   __resetChatRateLimit,
-} from '@/lib/ai/chat-access'
+} from '@/cloud/ai/chat-access'
 
 const ENV_KEYS = [
   'ANTHROPIC_API_KEY',

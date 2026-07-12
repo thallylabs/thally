@@ -5,7 +5,7 @@ import {
   bucketUnitForDays,
   bucketKey,
   __resetAnalyticsStoreForTests,
-} from '@/lib/analytics/store'
+} from '@/cloud/analytics/store'
 
 describe('analytics store', () => {
   beforeEach(() => {
