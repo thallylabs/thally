@@ -14,6 +14,18 @@ export interface ScaffoldAnswers {
   trackRepos?: Array<{ owner: string; repo: string }>
 }
 
+/** Accepts `owner/repo`, an https GitHub URL (with or without `.git` / extra path), or an ssh remote. */
+function parseRepoSpec(spec: string): { owner: string; repo: string } | null {
+  const trimmed = spec.trim()
+  const url = trimmed.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+?)(?:\.git)?(?:[/#?].*)?$/i)
+  if (url) return { owner: url[1], repo: url[2] }
+  const ssh = trimmed.match(/^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i)
+  if (ssh) return { owner: ssh[1], repo: ssh[2] }
+  const plain = trimmed.match(/^([A-Za-z0-9-_.]+)\/([A-Za-z0-9-_.]+)$/)
+  if (plain) return { owner: plain[1], repo: plain[2] }
+  return null
+}
+
 export async function gatherAnswers(
   dirArg: string | undefined,
   useDefaults: boolean,
@@ -83,14 +95,14 @@ export async function gatherAnswers(
     })
     if (enableTrack.trim().toLowerCase() === 'y') {
       const reposInput = await input({
-        message: '  Which repo(s) should Thally watch? (comma-separated owner/repo, e.g. acme/api,acme/web):',
+        message:
+          '  Which repo(s) should Thally watch? (comma-separated owner/repo or GitHub URLs, e.g. acme/api,acme/web):',
         default: '',
       })
       const parsed = reposInput
         .split(',')
-        .map((spec) => spec.trim().match(/^([A-Za-z0-9-_.]+)\/([A-Za-z0-9-_.]+)$/))
-        .filter((m): m is RegExpMatchArray => m !== null)
-        .map((m) => ({ owner: m[1], repo: m[2] }))
+        .map(parseRepoSpec)
+        .filter((r): r is { owner: string; repo: string } => r !== null)
       if (parsed.length > 0) trackRepos = parsed
       else console.log('  ⚠ No valid owner/repo entries — skipping Track (add it later with `thally track add`).')
     }
