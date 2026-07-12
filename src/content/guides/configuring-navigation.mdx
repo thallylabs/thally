@@ -38,7 +38,7 @@ A tab with sidebar groups and pages:
   "tab": "Overview",
   "groups": [
     { "group": "Getting Started", "pages": ["introduction", "quickstart"] },
-    { "group": "Core Concepts", "pages": ["authentication"] }
+    { "group": "Core Concepts", "pages": ["guides/writing-content"] }
   ]
 }
 ```
@@ -52,7 +52,7 @@ A tab that auto-generates pages from an OpenAPI spec:
   "tab": "API Reference",
   "api": {
     "source": "openapi.yaml",
-    "tagsOrder": ["Pets", "Store"],
+    "tagsOrder": ["Posts", "Comments"],
     "defaultGroup": "General"
   }
 }
@@ -81,8 +81,8 @@ Page IDs map to file paths under `src/content/`. For example:
 | Page ID | File path |
 | --- | --- |
 | `"introduction"` | `src/content/introduction.mdx` |
-| `"guides/getting-started"` | `src/content/guides/getting-started.mdx` |
-| `"api/reference"` | `src/content/api/reference.mdx` |
+| `"guides/writing-content"` | `src/content/guides/writing-content.mdx` |
+| `"api/overview"` | `src/content/api/overview.mdx` |
 
 ## Adding a new section
 
@@ -93,7 +93,7 @@ To add a new sidebar section, add a group object to the relevant tab:
   "tab": "Overview",
   "groups": [
     { "group": "Getting Started", "pages": ["introduction", "quickstart"] },
-    { "group": "Advanced", "pages": ["webhooks", "pagination"] },
+    { "group": "Advanced", "pages": ["guides/deploying", "guides/seo-and-visibility"] },
     { "group": "New Section", "pages": ["my-new-page"] }
   ]
 }

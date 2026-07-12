@@ -85,8 +85,8 @@ export function SettingsView({ role = 'viewer' }: { role?: Role }) {
           Toggle live settings under <strong>Controls</strong>. The rest is a read-only view of config managed in{' '}
           <code style={{ fontFamily: 'var(--ds-font-mono)' }}>docs.json</code>,{' '}
           <code style={{ fontFamily: 'var(--ds-font-mono)' }}>src/data/site.ts</code>, and environment variables — see the{' '}
-          <Link href="/guides/extending" style={{ color: 'var(--ds-accent-mid)', fontWeight: 'var(--ds-fw-semibold)' }}>
-            Extending Thally
+          <Link href="/guides/configuring-navigation" style={{ color: 'var(--ds-accent-mid)', fontWeight: 'var(--ds-fw-semibold)' }}>
+            Configuring navigation
           </Link>{' '}
           guide.
         </p>
@@ -157,7 +157,7 @@ export function SettingsView({ role = 'viewer' }: { role?: Role }) {
         <div className="ds-setting-group-head">
           <h2 className="ds-setting-group-title">Integrations</h2>
           <p className="ds-setting-group-desc">
-            Connect GitHub so <Link href="/guides/thally-track" style={{ color: 'var(--ds-accent-mid)', fontWeight: 'var(--ds-fw-semibold)' }}>Thally Track</Link>{' '}
+            Connect GitHub so <Link href="/guides/ai-features" style={{ color: 'var(--ds-accent-mid)', fontWeight: 'var(--ds-fw-semibold)' }}>Thally Track</Link>{' '}
             can watch your product repos and draft docs PRs.
           </p>
         </div>

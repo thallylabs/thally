@@ -29,11 +29,8 @@ mode: home
   <Card title="CLI & tooling" icon="wrench" href="/guides/cli-reference">
     One `thally` binary to init, dev, build, deploy, migrate, and check your docs.
   </Card>
-  <Card title="AI features" icon="message" href="/guides/ai-features">
-    Grounded chat, an Agent Readiness Score, and `llms.txt` out of the box.
-  </Card>
-  <Card title="Thally Track" icon="git-pull-request" href="/guides/thally-track">
-    Merged (or preview) PRs in your product repos become reviewed docs PRs, drafted by the agent.
+  <Card title="AI & agents" icon="message" href="/guides/ai-features">
+    An Agent Readiness Score, `llms.txt`, structured JSON per page, and a remote MCP endpoint — all free.
   </Card>
 </CardGroup>
 
@@ -44,10 +41,10 @@ mode: home
     A unified content engine parses every page once into a typed graph — HTML, JSON, Markdown, search, and embeddings are all projections of one source of truth. Tabs, groups, hybrid search, Shiki code blocks, and an RSS-backed changelog ship in the box.
   </Card>
   <Card title="Tooling" icon="wrench">
-    The `thally` CLI hides the Next.js runtime behind a single binary. `create-thally-docs` scaffolds, migrates, and lints; `thally check --ci` fails PRs on broken links, anchors, and drift; and the docs agent drafts edits as reviewed pull requests — it never merges. **Thally Track** turns merged (or `docs-preview`-labelled) PRs in your product repos into docs PRs automatically, with org-wide access via a one-click GitHub App.
+    The `thally` CLI hides the Next.js runtime behind a single binary. `create-thally-docs` scaffolds and lints; `thally check --ci` fails PRs on broken links, anchors, and drift. An `@thallylabs/mcp` server lets Claude, Cursor, or any MCP client search, read, and edit your docs through natural language.
   </Card>
-  <Card title="AI features" icon="message">
-    Retrieval-grounded chat answers with inline citations — with a configurable assistant name and disclaimer — a deterministic Agent Readiness Score grades how well your docs serve agents, and `/llms.txt`, per-page JSON, and agent manifests let tools index everything. Every deployed site is also a remote MCP endpoint at `/api/mcp`.
+  <Card title="AI & agents" icon="message">
+    A deterministic Agent Readiness Score grades how well your docs serve agents, and `/llms.txt`, per-page JSON, `/ai.txt`, and a remote MCP endpoint at `/api/mcp` let tools index everything — all free and self-hosted. Grounded AI chat answers are available as a [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) service.
   </Card>
   <Card title="Design & infrastructure" icon="grid-round">
     A live admin dashboard recolors the site with a brand-accent color picker, swaps per-mode (light/dark) logos and favicons, and toggles features — no redeploy. Automatic dark mode, a responsive sidebar-plus-TOC layout, dynamic OG images, built-in SEO, and a version switcher round it out. Team accounts add Owner/Editor/Viewer roles from a git-committed roster — no database, no per-seat pricing.

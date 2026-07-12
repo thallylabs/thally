@@ -10,15 +10,18 @@ Thally ships with a built-in **admin dashboard** at `/admin`. It lets you contro
 | Section | What it controls |
 | --- | --- |
 | **Home** | At-a-glance overview of the site's status. |
-| **Analytics** | First-party traffic, top pages, search terms, and content gaps. On serverless hosts this needs a remote database — see [Analytics storage](#analytics-storage). |
-| **Agent Readiness** | Score for how well your docs serve AI agents. |
-| **Docs tasks** | Documentation edits drafted by the docs agent as pull requests — the [Thally Track](/guides/thally-track) queue. |
+| **Analytics** | Traffic, top pages, search terms, and content gaps. A [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) service — the panel appears locked until you connect Cloud. |
+| **Agent Readiness** | Score for how well your docs serve AI agents. Computed from your content — always free. |
 | **MCP server** | Enable or disable the public `/api/mcp` endpoint. |
 | **Team** | Members, domains, and roles for admin access. |
 | **Branding** | Structural theme, brand accent, per-mode logos and favicons (see [Branding and theming](/guides/branding-and-theming)). |
-| **Settings** | Feature toggles, site identity, the AI assistant name & disclaimer, docs-access password, the AI chat key, and **Connect GitHub** for Thally Track. |
+| **Settings** | Feature toggles, site identity, the AI assistant name & disclaimer, and the docs-access password. |
 
 Everything an Owner changes here applies to the live site immediately — no merge, no rebuild.
+
+<Note type="info" title="Free vs Thally Cloud">
+The admin panel, search, Agent Readiness, and the [agent endpoints](/guides/ai-features) are free in the self-hosted template. Grounded **AI answers**, **Track** (code-triggered docs), and **traffic analytics** are [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) services — their panels appear locked until you connect Cloud.
+</Note>
 
 ## Turning on the dashboard
 
@@ -114,34 +117,25 @@ Anything you set in the dashboard is a runtime override that layers over the com
 | Structural theme, brand accent | `docs.json` `theme`, `src/data/site.ts` brand |
 | Logo, favicon | Built-in Thally mark |
 | Site name, description, repo URL | `src/data/site.ts` `siteConfig` |
-| AI chat on/off + Anthropic key | `docs.json` `ai.chat`, `ANTHROPIC_API_KEY` |
-| Analytics on/off | `docs.json` `analytics.enabled` |
+| AI chat on/off *(Thally Cloud)* | `docs.json` `ai.chat` |
+| Analytics on/off *(Thally Cloud)* | `docs.json` `analytics.enabled` |
 | MCP endpoint on/off | On |
 | Docs-access password | Open (no password) |
 
 Leave a setting untouched in the dashboard and the file default applies. This lets you keep a sensible, source-controlled baseline for fresh deploys while making day-to-day changes without shipping code.
 
-## Analytics storage
+## Durable storage
 
-Locally, analytics and admin state write to on-disk SQLite files under `.data/` — zero config. On **serverless** hosts (for example Vercel), that filesystem does not persist, so Home metrics stay empty and Analytics may show an error until you point Thally at a remote libSQL database (Turso).
+Locally, admin state (settings overrides, rate-limit counters) writes to an on-disk SQLite file under `.data/` — zero config. On **serverless** hosts (for example Vercel), that filesystem does not persist, so runtime settings may not survive a deploy until you point Thally at a remote libSQL database (Turso) with `THALLY_DATABASE_URL` / `THALLY_DATABASE_TOKEN`. Full setup steps are in [Deploying → Durable admin storage](/guides/deploying#durable-admin-storage).
 
-Set `THALLY_ANALYTICS_DB_URL` / `THALLY_ANALYTICS_DB_TOKEN` for traffic data, and `THALLY_DATABASE_URL` / `THALLY_DATABASE_TOKEN` for durable admin settings and related state. Full setup steps are in [Deploying → Analytics & durable storage](/guides/deploying#analytics--durable-storage).
+Agent Readiness does not use this database — it scores your docs content directly, so it works everywhere for free.
 
-Agent Readiness does not use this database — it scores your docs content directly.
+## Naming the AI assistant
 
-## AI chat key
-
-The in-docs AI assistant needs an Anthropic API key. Set it either as the `ANTHROPIC_API_KEY` environment variable or, for a no-deploy change, paste it under **Settings → AI chat** — the dashboard stores it encrypted. See [AI features](/guides/ai-features) for the full assistant setup.
-
-## Naming the assistant
-
-Under **Settings → Site experience** you can rename the AI assistant and set its disclaimer, live:
+The AI chat widget is a [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) service, so its answers light up only when a deployment carries Cloud. Its *appearance*, however, is a free admin setting: under **Settings → Site experience** you can rename the assistant and set its disclaimer, live:
 
 - **Assistant name** — shown on the chat button and panel header (e.g. "Ask Acme"). Blank falls back to the `docs.json` label, or "Ask AI".
 - **Assistant disclaimer** — the notice at the foot of the chat panel. Blank uses a generic "answers may be inaccurate, verify important details" message.
 
 Both are stored at runtime and apply without a redeploy.
 
-## Connect GitHub (Thally Track)
-
-Under **Settings → Integrations**, an Owner can click **Connect GitHub** to create and install a GitHub App for [Thally Track](/guides/thally-track) — the org-wide access path that lets the docs agent watch selected private repos and draft docs PRs. It needs `THALLY_AUTH_SECRET` set (to encrypt the app's key). The status chip shows the connected app and whether it's installed; **Disconnect** clears the stored credentials.

@@ -3,6 +3,8 @@ title: Writing Content
 description: How to write documentation pages using MDX, frontmatter, and built-in components.
 ---
 
+import { GettingStartedTip } from '/snippets/getting-started-tip.mdx'
+
 ## MDX basics
 
 Every page in Thally is an `.mdx` file — Markdown with JSX support. You can use standard Markdown syntax plus React components inline.
@@ -173,6 +175,22 @@ Standard Markdown tables render with proper styling:
 | POST | /pets | Create a pet |
 ```
 
+## Reusable snippets
+
+Repeated content — an install note, a support callout, a compatibility warning — lives once in the `snippets/` folder and is imported into any page. Editing the snippet updates every page that uses it.
+
+Import it at the top of your MDX file (the name you choose is up to you), then render it as a component wherever you need it:
+
+```mdx
+import { GettingStartedTip } from '/snippets/getting-started-tip.mdx'
+
+<GettingStartedTip />
+```
+
+Rendered from `snippets/getting-started-tip.mdx`, this page shows:
+
+<GettingStartedTip />
+
 ## File organization
 
 All content lives in `src/content/`. You can use subdirectories to organize related pages:
@@ -182,8 +200,8 @@ src/content/
   introduction.mdx          → /introduction (or / for the root)
   quickstart.mdx             → /quickstart
   guides/
-    getting-started.mdx      → /guides/getting-started
     writing-content.mdx      → /guides/writing-content
+    branding-and-theming.mdx → /guides/branding-and-theming
 ```
 
 The URL path matches the file path relative to `src/content/`, minus the `.mdx` extension.

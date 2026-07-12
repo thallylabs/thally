@@ -13,7 +13,7 @@ description: "A styled image wrapper with optional caption and click-to-zoom."
 
 ```mdx
 <Frame>
-  <img src="/images/dashboard.png" alt="Dashboard overview" />
+  <img src="/images/dashboard.svg" alt="Dashboard overview" />
 </Frame>
 ```
 
@@ -25,7 +25,7 @@ description: "A styled image wrapper with optional caption and click-to-zoom."
 
 ```mdx
 <Frame caption="The analytics dashboard showing daily active users.">
-  <img src="/images/analytics.png" alt="Analytics dashboard" />
+  <img src="/images/analytics.svg" alt="Analytics dashboard" />
 </Frame>
 ```
 
@@ -39,7 +39,7 @@ Set `zoom={false}` when the image is purely decorative or you want to prevent th
 
 ```mdx
 <Frame zoom={false}>
-  <img src="/images/diagram.png" alt="Architecture diagram" />
+  <img src="/images/diagram.svg" alt="Architecture diagram" />
 </Frame>
 ```
 
@@ -49,8 +49,8 @@ Wrap two images with conditional `className` to swap between light and dark mode
 
 ```mdx
 <Frame>
-  <img className="block dark:hidden" src="/images/light.png" alt="Light mode" />
-  <img className="hidden dark:block" src="/images/dark.png" alt="Dark mode" />
+  <img className="block dark:hidden" src="/images/light.svg" alt="Light mode" />
+  <img className="hidden dark:block" src="/images/dark.svg" alt="Dark mode" />
 </Frame>
 ```
 
