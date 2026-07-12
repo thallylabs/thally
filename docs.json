@@ -1,7 +1,7 @@
 {
   "theme": "default",
   "banner": {
-    "content": "Thally v2 is coming — faster builds, more themes, and a brand-new component library. [See what's coming →](/changelog)",
+    "content": "This is a sample documentation site built with the Thally template. [Get started →](/quickstart)",
     "dismissible": true
   },
   "ai": {
@@ -14,11 +14,6 @@
   },
   "analytics": {
     "enabled": true
-  },
-  "apiPlayground": {
-    "credentials": {
-      "bearerAuth": "YOUR_API_KEY"
-    }
   },
   "navbar": {
     "links": [
@@ -49,7 +44,7 @@
           },
           {
             "label": "Guides",
-            "href": "/guides/getting-started"
+            "href": "/guides/writing-content"
           },
           {
             "label": "Components",
@@ -90,8 +85,8 @@
             "href": "/guides/mcp-server"
           },
           {
-            "label": "Migrate from Mintlify",
-            "href": "/guides/migrating"
+            "label": "AI & Agents",
+            "href": "/guides/ai-features"
           }
         ]
       }
@@ -137,31 +132,6 @@
             "introduction",
             "quickstart"
           ]
-        },
-        {
-          "group": "Concepts",
-          "icon": "grid-round",
-          "pages": [
-            "authentication",
-            "pagination"
-          ]
-        },
-        {
-          "group": "Features",
-          "icon": "party-horn",
-          "pages": [
-            "webhooks",
-            "sdks"
-          ]
-        },
-        {
-          "group": "Project",
-          "icon": "wrench",
-          "pages": [
-            "errors",
-            "customization",
-            "showcase"
-          ]
         }
       ]
     },
@@ -169,54 +139,39 @@
       "tab": "Guides",
       "groups": [
         {
-          "group": "Setup",
-          "icon": "wrench",
-          "pages": [
-            "guides/getting-started",
-            "guides/configuring-navigation"
-          ]
-        },
-        {
           "group": "Content",
           "icon": "book-open",
           "pages": [
             "guides/writing-content",
+            "guides/configuring-navigation",
             "guides/api-reference-setup"
           ]
         },
         {
-          "group": "Customize & Ship",
+          "group": "Customize",
           "icon": "grid-round",
           "pages": [
-            "guides/extending",
             "guides/branding-and-theming",
-            "guides/navbar-and-footer",
             "guides/custom-fonts",
-            "guides/og-images",
-            "guides/deploying",
-            "guides/admin-dashboard",
-            "guides/page-modes",
-            "guides/seo-and-visibility",
-            "guides/site-banner",
-            "guides/redirects",
-            "guides/custom-404",
-            "guides/custom-scripts"
+            "guides/navbar-and-footer"
           ]
         },
         {
-          "group": "Tooling",
+          "group": "Ship",
+          "icon": "wrench",
+          "pages": [
+            "guides/deploying",
+            "guides/admin-dashboard",
+            "guides/seo-and-visibility"
+          ]
+        },
+        {
+          "group": "AI & Tooling",
           "icon": "code-simple",
           "pages": [
-            "guides/cli-reference",
-            "guides/ci-checks",
-            "guides/provenance",
-            "guides/mcp-server",
-            "guides/remote-mcp",
-            "guides/docs-agent",
-            "guides/thally-track",
-            "guides/agent-manifests",
-            "guides/migrating",
             "guides/ai-features",
+            "guides/cli-reference",
+            "guides/mcp-server",
             "guides/multi-language"
           ]
         }
@@ -241,22 +196,23 @@
         ],
         "defaultGroup": "General",
         "overrides": {
-          "GET /pets": {
-            "title": "List pets",
-            "description": "Fetch a paginated list of pets.",
+          "GET /posts": {
+            "title": "List posts",
+            "description": "Fetch all posts, optionally filtered by author.",
             "badge": "Stable"
           },
-          "POST /pets": {
-            "title": "Create a pet",
-            "description": "Add a new pet to the store."
+          "POST /posts": {
+            "title": "Create a post",
+            "description": "Add a new post."
           },
-          "GET /pets/{petId}": {
-            "title": "Get a pet",
-            "description": "Retrieve a single pet by ID."
+          "GET /posts/{id}": {
+            "title": "Get a post",
+            "description": "Retrieve a single post by ID."
           },
-          "DELETE /pets/{petId}": {
-            "title": "Delete a pet",
-            "description": "Remove a pet from the store."
+          "DELETE /posts/{id}": {
+            "title": "Delete a post",
+            "description": "Remove a post.",
+            "badge": "Destructive"
           }
         }
       }
@@ -317,22 +273,5 @@
       "tab": "Changelog",
       "href": "/changelog"
     }
-  ],
-  "tracking": {
-    "repos": [
-      {
-        "owner": "thallylabs",
-        "repo": "thally",
-        "branch": "main",
-        "paths": [
-          "packages/**",
-          "src/app/**",
-          "src/lib/**",
-          "src/components/**",
-          "src/data/**",
-          "src/mdx/**"
-        ]
-      }
-    ]
-  }
+  ]
 }

@@ -9,7 +9,7 @@ Thally supports build-time multi-language documentation. Translated MDX files li
 <CardGroup cols={2}>
 
 <Card title="Real locale URLs" icon="link-simple">
-  `/es/introduction`, `/fr/guides/getting-started` — every locale gets its own indexable URL, never a client-side redirect.
+  `/es/introduction`, `/fr/guides/writing-content` — every locale gets its own indexable URL, never a client-side redirect.
 </Card>
 
 <Card title="AI-powered translation" icon="wrench">
@@ -37,8 +37,8 @@ The default locale is served without a URL prefix — fully backward-compatible 
 | `/introduction` | English (default) |
 | `/es/introduction` | Spanish |
 | `/fr/introduction` | French |
-| `/guides/getting-started` | English (default) |
-| `/es/guides/getting-started` | Spanish |
+| `/guides/writing-content` | English (default) |
+| `/es/guides/writing-content` | Spanish |
 
 Adding a new locale never breaks existing URLs.
 
@@ -85,7 +85,7 @@ This calls Claude to translate every content page defined in your `docs.json` an
 **Translate specific pages only:**
 
 ```bash
-npx create-thally-docs translate --locale es --pages introduction,guides/getting-started
+npx create-thally-docs translate --locale es --pages introduction,guides/writing-content
 ```
 
 **Overwrite existing translations:**
@@ -119,11 +119,11 @@ After translation, your content directory will look like this:
 src/content/
 ├── introduction.mdx            ← primary (English, unchanged)
 ├── guides/
-│   └── getting-started.mdx
+│   └── writing-content.mdx
 ├── es/                         ← Spanish translations
 │   ├── introduction.mdx
 │   └── guides/
-│       └── getting-started.mdx
+│       └── writing-content.mdx
 └── fr/                         ← French translations
     └── introduction.mdx
 ```
@@ -149,7 +149,7 @@ Claude translates with these rules applied automatically:
 If a translation needs adjusting, edit the file in `src/content/{locale}/` directly. You can also re-run the command for specific pages:
 
 ```bash
-npx create-thally-docs translate --locale es --pages guides/getting-started --force
+npx create-thally-docs translate --locale es --pages guides/writing-content --force
 ```
 
 ---
@@ -171,7 +171,7 @@ Both banners appear only on secondary-locale routes. The primary route is never 
 To fix a stale or missing translation, run the translate command for that page:
 
 ```bash
-npx create-thally-docs translate --locale es --pages guides/getting-started
+npx create-thally-docs translate --locale es --pages guides/writing-content
 ```
 
 ---
@@ -180,7 +180,7 @@ npx create-thally-docs translate --locale es --pages guides/getting-started
 
 Once you have two or more locales configured, a **globe icon** appears in the top bar automatically. Clicking it opens a dropdown listing all configured locales.
 
-Selecting a locale navigates to the same page in that locale — for example, switching from `/es/guides/getting-started` to French takes you directly to `/fr/guides/getting-started`. The switcher always keeps you on the current page rather than sending you to a home page.
+Selecting a locale navigates to the same page in that locale — for example, switching from `/es/guides/writing-content` to French takes you directly to `/fr/guides/writing-content`. The switcher always keeps you on the current page rather than sending you to a home page.
 
 ---
 

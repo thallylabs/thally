@@ -1,5 +1,4 @@
-import { siteConfig } from '@/data/site'
-import { getAdminSettings } from '@/lib/admin/settings'
+import { resolveSiteConfig } from '@/lib/site-config'
 
 export interface EffectiveSiteConfig {
   name: string
@@ -7,16 +6,16 @@ export interface EffectiveSiteConfig {
   repoUrl: string
 }
 
-/** Build-config site identity with the dashboard (F1) overrides applied. */
+/**
+ * Build-config site identity with the dashboard (F1) overrides applied.
+ *
+ * Thin projection over {@link resolveSiteConfig} — the single site-config
+ * resolution point — exposing just the identity triple that the public
+ * /api/site-config route and the admin tasks page consume. Kept as a named
+ * helper so those callers stay unchanged while all override logic lives in one
+ * place.
+ */
 export async function getEffectiveSiteConfig(): Promise<EffectiveSiteConfig> {
-  try {
-    const s = await getAdminSettings()
-    return {
-      name: s.siteName ?? siteConfig.name,
-      description: s.siteDescription ?? siteConfig.description,
-      repoUrl: s.siteRepoUrl ?? siteConfig.repoUrl ?? '',
-    }
-  } catch {
-    return { name: siteConfig.name, description: siteConfig.description, repoUrl: siteConfig.repoUrl ?? '' }
-  }
+  const config = await resolveSiteConfig()
+  return { name: config.name, description: config.description, repoUrl: config.repoUrl ?? '' }
 }

@@ -3,70 +3,41 @@ title: AI Features
 description: Built-in AI capabilities — chat widget, structured agent API, discovery files, and MCP tools for querying your docs.
 ---
 
-Thally ships with a full AI-native layer that serves both human readers and AI agents from the same URLs. Agents get structured data; humans get the same pre-rendered UI they always did.
+Thally ships with an AI-native layer that serves both human readers and AI agents from the same URLs. Agents get structured data; humans get the same pre-rendered UI they always did — and most of this layer is free and fully self-hosted.
+
+## Free vs Thally Cloud
+
+Everything an AI agent needs to read and reason about your docs is **free** in the self-hosted template. Grounded chat *answers* — where the site writes prose back to a reader — are a **Thally Cloud** service, because they run an answer pipeline on your behalf.
+
+| Capability | Tier |
+|---|---|
+| `/llms.txt`, `/llms-full.txt` | Free |
+| Structured JSON per page (`/api/docs/{slug}`) & page index | Free |
+| `/ai.txt` discovery file | Free |
+| JSON-LD structured data | Free |
+| Agent Readiness Score | Free |
+| MCP tools for querying docs | Free |
+| Full-text search | Free |
+| **Grounded AI chat answers** | Thally Cloud |
+| **Track** (code-triggered docs) & **traffic analytics** | Thally Cloud |
+
+The rest of this page documents the free, agent-facing surfaces. The AI chat widget below is the one Cloud service covered here.
 
 ---
 
-## AI chat widget
+## AI chat widget (Thally Cloud)
 
-Add a floating chat button to your docs site that lets users ask questions and get answers grounded in your actual documentation — powered by Claude.
+Thally Cloud adds a floating chat button that lets readers ask questions and get answers grounded in your actual documentation, with inline citations back to the exact pages and anchors.
 
-### Enable it
+When enabled, the `/api/chat` route embeds the question, retrieves only the most relevant content chunks (RAG) within a small token budget, and streams back an answer that cites its sources — or says the answer isn't in your docs rather than guessing. In the self-hosted template the widget's panel appears but stays inactive until you connect Thally Cloud.
 
-Add `"ai": { "chat": true }` to your `docs.json`:
+Enable the widget in `docs.json`, and set the assistant's name and disclaimer live from the [admin dashboard](/guides/admin-dashboard#naming-the-ai-assistant) under **Settings → Site experience**:
 
 ```json
 {
-  "ai": { "chat": true },
-  "tabs": [...]
+  "ai": { "chat": true, "label": "Ask Acme" }
 }
 ```
-
-A chat button appears in the bottom-right corner of your docs site. Users click it, ask a question, and get a streamed answer sourced from your documentation.
-
-### Name it and add a disclaimer
-
-By default the button reads "Ask AI" and the panel carries a generic "answers may be inaccurate" notice. An Owner can customize both live from the admin dashboard under **Settings → Site experience** — no redeploy:
-
-- **Assistant name** (`aiLabel`) — shown on the chat button and panel header, e.g. "Ask Acme".
-- **Assistant disclaimer** (`aiDisclaimer`) — the footnote at the bottom of the panel; set your own compliance or accuracy wording.
-
-Leave either blank to fall back to the defaults (`aiLabel` falls back to the `docs.json` `ai.label`, then "Ask AI"). See [Admin dashboard](/guides/admin-dashboard#naming-the-assistant).
-
-### Keys: aha-first, then bring your own
-
-Chat resolves an Anthropic key in two tiers, so a brand-new site can answer questions immediately without any setup:
-
-| Tier | Key | Limits |
-|------|-----|--------|
-| **Owner** | `ANTHROPIC_API_KEY` | Generous (your key, you pay) |
-| **Trial** | `THALLY_TRIAL_ANTHROPIC_KEY` (shared) | Tightly rate-limited per IP + a global daily ceiling |
-
-Set your own key in `.env.local` for production:
-
-```bash
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-When only the shared trial key is configured, chat still works — under strict caps — so visitors reach the "aha moment" before you commit a key. The active tier is returned on each response via the `x-thally-ai-tier` header. Limits are tunable with `THALLY_TRIAL_RATE_PER_MIN`, `THALLY_TRIAL_RATE_PER_DAY`, `THALLY_TRIAL_DAILY_LIMIT`, and `THALLY_CHAT_RATE_PER_MIN`.
-
-### How it works
-
-When a user sends a message, the `/api/chat` route:
-
-1. Embeds the question and retrieves only the most relevant content chunks (RAG) within a small token budget — not the whole corpus
-2. Builds a focused prompt for `claude-haiku-4-5` from those excerpts
-3. Streams the answer back with inline `[n]` citations and a **Sources** list linking to the exact pages and anchors
-
-Answers are grounded in your docs. If the answer isn't in the retrieved excerpts, Claude says so rather than guessing.
-
-<Note type="info" title="Cost">
-The chat widget uses `claude-haiku-4-5` — Anthropic's fastest and most affordable model — and retrieval keeps context small, so each response costs a fraction of a cent.
-</Note>
-
-<Note type="warning" title="Rate limiting">
-The chat route applies tier-aware in-memory rate limits (per minute and per day, per IP) plus a global daily ceiling on the shared trial key. No Redis or external service is required.
-</Note>
 
 ---
 

@@ -1,5 +1,5 @@
 import { searchDocs } from '@/lib/search/engine'
-import { getContentDocument } from '@/lib/content'
+import { getContentDocument } from '@thallylabs/core'
 import { getDocEntries } from '@/data/docs'
 import { computeAgentReadiness } from '@/lib/agent-readiness'
 import { getSiteUrl } from '@/lib/site-url'

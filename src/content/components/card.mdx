@@ -14,7 +14,7 @@ Use `<Card>` for individual feature or navigation cards, and `<CardGroup>` to la
   <Card title="API Reference" icon="code-simple" href="/api">
     Explore every endpoint with live examples and generated types.
   </Card>
-  <Card title="Guides" icon="book-open" href="/guides/getting-started">
+  <Card title="Guides" icon="book-open" href="/guides/writing-content">
     In-depth walkthroughs for common configuration scenarios.
   </Card>
   <Card title="GitHub" icon="link-simple" href="https://github.com/your-org/your-docs">
@@ -48,10 +48,10 @@ Cards can include a top image — useful for showcasing screenshots, product pre
 
 ```mdx
 <CardGroup cols={2}>
-  <Card title="Analytics Dashboard" img="/images/dashboard.png" href="/quickstart">
+  <Card title="Analytics Dashboard" img="/images/dashboard.svg" href="/quickstart">
     Monitor active users and conversion rates.
   </Card>
-  <Card title="API Explorer" img="/images/explorer.png" href="/api">
+  <Card title="API Explorer" img="/images/explorer.svg" href="/api">
     Send live requests from the docs.
   </Card>
 </CardGroup>
@@ -60,27 +60,27 @@ Cards can include a top image — useful for showcasing screenshots, product pre
 ## Three columns
 
 <CardGroup cols={3}>
-  <Card title="Redirects" icon="link-simple" href="/guides/redirects">
-    Map old paths to new ones so existing links never break.
+  <Card title="Navigation" icon="link-simple" href="/guides/configuring-navigation">
+    Structure tabs, sidebar groups, and page order with docs.json.
   </Card>
   <Card title="Custom Fonts" icon="book-open" href="/guides/custom-fonts">
     Switch to any Google Font from docs.json — no code changes.
   </Card>
-  <Card title="Site Banner" icon="party-horn" href="/guides/site-banner">
-    Announce launches and deprecations with a dismissible top banner.
+  <Card title="Deploying" icon="party-horn" href="/guides/deploying">
+    Ship to Vercel, Netlify, Cloudflare, or a Docker container.
   </Card>
 </CardGroup>
 
 ```mdx
 <CardGroup cols={3}>
-  <Card title="Redirects" icon="link-simple" href="/guides/redirects">
-    Map old paths to new ones.
+  <Card title="Navigation" icon="link-simple" href="/guides/configuring-navigation">
+    Structure tabs and groups with docs.json.
   </Card>
   <Card title="Custom Fonts" icon="book-open" href="/guides/custom-fonts">
     Switch fonts from docs.json.
   </Card>
-  <Card title="Site Banner" icon="party-horn" href="/guides/site-banner">
-    Announce launches and notices.
+  <Card title="Deploying" icon="party-horn" href="/guides/deploying">
+    Ship to any Next.js host.
   </Card>
 </CardGroup>
 ```

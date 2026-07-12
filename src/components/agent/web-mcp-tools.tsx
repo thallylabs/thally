@@ -54,7 +54,7 @@ function buildTools(): Array<ModelContextTool> {
     {
       name: 'read_page',
       description:
-        'Read a documentation page on this site as Markdown, by its URL path (e.g. "guides/getting-started").',
+        'Read a documentation page on this site as Markdown, by its URL path (e.g. "guides/writing-content").',
       inputSchema: {
         type: 'object',
         properties: {

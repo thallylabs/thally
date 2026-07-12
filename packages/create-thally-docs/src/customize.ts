@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, cpSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, cpSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 
@@ -295,4 +295,45 @@ export function updateEnvExample(targetDir: string): void {
       cpSync(envFile, envLocal)
     }
   }
+}
+
+/**
+ * Rewrite the template's root package.json for a STANDALONE site. The template
+ * repo is an npm-workspaces monorepo, but `packages/` is excluded from the
+ * scaffold tarball — so the monorepo wiring must not survive the copy, or the
+ * very first `npm run build` aborts with "No workspaces found":
+ *
+ *   - `workspaces` points at a directory that doesn't exist in scaffolds.
+ *   - `prebuild`/`pretest` invoke `packages:build`, which builds those absent
+ *     workspaces. `embeddings:build` stays in `prebuild`: it runs standalone
+ *     (local-hash provider, no API key needed) and powers hybrid search.
+ *   - The copied `package-lock.json` still resolves the monorepo's workspace
+ *     graph; deleting it lets the scaffold's own `npm install` write a clean
+ *     lockfile. Workspace-linked deps (e.g. @thallylabs/core) resolve from the
+ *     npm registry instead, which is why the template must depend on published
+ *     versions, never `workspace:*` specs.
+ *
+ * Also names the package after the site so `npm ls`/lockfiles read correctly.
+ */
+export function patchPackageJson(targetDir: string, slug: string): void {
+  const pkgPath = join(targetDir, 'package.json')
+  if (!existsSync(pkgPath)) return
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
+    name?: string
+    workspaces?: unknown
+    scripts?: Record<string, string>
+  }
+
+  pkg.name = slug
+  delete pkg.workspaces
+  if (pkg.scripts) {
+    if (pkg.scripts['prebuild']) pkg.scripts['prebuild'] = 'npm run embeddings:build'
+    delete pkg.scripts['pretest']
+    delete pkg.scripts['packages:build']
+  }
+
+  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
+
+  const lockPath = join(targetDir, 'package-lock.json')
+  if (existsSync(lockPath)) rmSync(lockPath)
 }

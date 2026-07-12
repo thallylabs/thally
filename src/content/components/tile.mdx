@@ -8,21 +8,21 @@ description: "Larger image-capable cards for feature overviews and product landi
 ## Example
 
 <TileGroup cols={2}>
-  <Tile title="REST API" icon="code-simple" href="/api">
-    Full CRUD operations over HTTP. Supports pagination, filtering, and bulk operations out of the box.
+  <Tile title="API Reference" icon="code-simple" href="/api">
+    Interactive endpoint pages generated from an OpenAPI spec, with a live Try It console.
   </Tile>
-  <Tile title="SDKs" icon="wrench" href="/sdks">
-    Official client libraries for TypeScript, Python, Go, and Ruby with generated types.
+  <Tile title="CLI & Tooling" icon="wrench" href="/guides/cli-reference">
+    Scaffold, lint, and check your docs with a single `thally` binary.
   </Tile>
 </TileGroup>
 
 ```mdx
 <TileGroup cols={2}>
-  <Tile title="REST API" icon="code-simple" href="/api">
-    Full CRUD operations over HTTP.
+  <Tile title="API Reference" icon="code-simple" href="/api">
+    Interactive endpoint pages from your OpenAPI spec.
   </Tile>
-  <Tile title="SDKs" icon="wrench" href="/sdks">
-    Official client libraries for multiple languages.
+  <Tile title="CLI & Tooling" icon="wrench" href="/guides/cli-reference">
+    One binary to scaffold, lint, and check.
   </Tile>
 </TileGroup>
 ```
@@ -42,10 +42,10 @@ Add a top image to tiles for visual product showcases. The image scales on hover
 
 ```mdx
 <TileGroup cols={2}>
-  <Tile title="Analytics Dashboard" img="/images/dashboard.png" href="/quickstart">
+  <Tile title="Analytics Dashboard" img="/images/dashboard.svg" href="/quickstart">
     Monitor users and conversion rates.
   </Tile>
-  <Tile title="API Explorer" img="/images/explorer.png" href="/api">
+  <Tile title="API Explorer" img="/images/explorer.svg" href="/api">
     Send live requests from the docs.
   </Tile>
 </TileGroup>
@@ -54,27 +54,27 @@ Add a top image to tiles for visual product showcases. The image scales on hover
 ## Three tiles
 
 <TileGroup cols={3}>
-  <Tile title="Webhooks" icon="telegram" href="/webhooks">
-    Receive real-time event notifications via HTTP POST to your endpoint.
+  <Tile title="AI & Agents" icon="message" href="/guides/ai-features">
+    An Agent Readiness Score, llms.txt, and structured JSON for every page.
   </Tile>
-  <Tile title="Authentication" icon="envelope" href="/authentication">
-    Secure your API with OAuth 2.0, API keys, or JWT bearer tokens.
+  <Tile title="Admin Dashboard" icon="wrench" href="/guides/admin-dashboard">
+    Change branding, toggle features, and manage team access at runtime.
   </Tile>
-  <Tile title="Pagination" icon="grid-round" href="/pagination">
-    Cursor-based pagination for large datasets with consistent performance.
+  <Tile title="Navigation" icon="grid-round" href="/guides/configuring-navigation">
+    Tabs, sidebar groups, and page order from a single docs.json file.
   </Tile>
 </TileGroup>
 
 ```mdx
 <TileGroup cols={3}>
-  <Tile title="Webhooks" icon="telegram" href="/webhooks">
-    Real-time event notifications.
+  <Tile title="AI & Agents" icon="message" href="/guides/ai-features">
+    Agent Readiness Score, llms.txt, and per-page JSON.
   </Tile>
-  <Tile title="Authentication" icon="envelope" href="/authentication">
-    OAuth 2.0, API keys, or JWT.
+  <Tile title="Admin Dashboard" icon="wrench" href="/guides/admin-dashboard">
+    Branding and feature toggles at runtime.
   </Tile>
-  <Tile title="Pagination" icon="grid-round" href="/pagination">
-    Cursor-based for large datasets.
+  <Tile title="Navigation" icon="grid-round" href="/guides/configuring-navigation">
+    Tabs and groups from docs.json.
   </Tile>
 </TileGroup>
 ```

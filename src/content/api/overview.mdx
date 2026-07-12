@@ -1,107 +1,67 @@
 ---
 title: Overview
-description: Base URL, authentication, rate limits, and error handling for the Pet Store API.
+description: How this API Reference tab works, and how to point it at your own OpenAPI spec.
 ---
 
-The Pet Store API is a RESTful HTTP API that lets you manage pets, place orders, and query store inventory. All requests and responses use JSON.
+The pages in this tab are generated automatically from an OpenAPI spec. Every
+operation gets its own page with parameter tables, request and response schemas,
+code samples, and an interactive **Try It** console.
 
-## Base URL
+## The example spec
 
-All endpoints are relative to the base URL:
+This demo is wired to [JSONPlaceholder](https://jsonplaceholder.typicode.com) — a
+free, live, public REST API that needs no API key. Because it's a real endpoint,
+the **Try It** console returns real responses, so you can explore the feature
+before swapping in your own API.
 
-```
-https://api.example.com/v1
-```
+- **Base URL:** `https://jsonplaceholder.typicode.com`
+- **Auth:** none — every request works as-is
+- **Resources:** Posts, Comments, and Users
 
-There is no versioning in the path beyond `v1`. Breaking changes are communicated with a deprecation notice and a migration window.
+`GET` requests return real data; write requests (`POST`, `PUT`, `PATCH`, `DELETE`)
+are accepted and echoed back but not persisted.
 
-## OpenAPI specification
+## Fetch the spec
 
-You can fetch the full API specification directly from the docs site:
+The spec is served from the docs site itself, in both formats:
 
-- YAML: `/openapi.yaml`
-- JSON: `/openapi.json`
-
-For local development:
+- YAML: [`/openapi.yaml`](/openapi.yaml)
+- JSON: [`/openapi.json`](/openapi.json)
 
 ```bash
 curl http://localhost:3040/openapi.yaml
 curl http://localhost:3040/openapi.json
 ```
 
-## Authentication
+## Use your own API
 
-The API supports two authentication methods. Include one of the following on every request.
+Replace the example with your real API in three steps:
 
-### Bearer token
+<Steps>
 
-Pass a JWT bearer token in the `Authorization` header:
+<Step title="Drop in your spec">
+Put your OpenAPI 3.x file in the project root as `openapi.yaml` (or `openapi.json`).
+</Step>
 
-```bash
-Authorization: Bearer <token>
-```
-
-### API key
-
-Pass your API key in the `X-API-Key` header:
-
-```bash
-X-API-Key: <your-api-key>
-```
-
-<Note type="info" title="Which should I use?">
-Use **Bearer tokens** for server-to-server integrations. Use **API keys** for quick testing and internal tooling. Both grant the same level of access.
-</Note>
-
-## Rate limits
-
-Requests are rate-limited per API key. Exceeding the limit returns `429 Too Many Requests`.
-
-| Plan | Requests / minute |
-| --- | --- |
-| Free | 60 |
-| Pro | 600 |
-| Enterprise | Unlimited |
-
-When rate-limited, the response includes a `Retry-After` header indicating how many seconds to wait before retrying.
-
-## Errors
-
-All error responses use a consistent JSON shape:
+<Step title="Point docs.json at it">
+The `api` block on the API Reference tab references the file and orders the sidebar by tag.
 
 ```json
 {
-  "code": "not_found",
-  "message": "The requested resource was not found."
+  "tab": "API Reference",
+  "api": {
+    "source": "openapi.yaml",
+    "tagsOrder": ["Posts", "Comments", "Users"]
+  }
 }
 ```
+</Step>
 
-| Status | Code | Meaning |
-| --- | --- | --- |
-| `400` | `bad_request` | Malformed request or missing required fields |
-| `401` | `unauthorized` | Missing or invalid credentials |
-| `404` | `not_found` | Resource does not exist |
-| `422` | `validation_error` | Request body failed schema validation |
-| `429` | `rate_limited` | Too many requests — check `Retry-After` |
-| `500` | `internal_error` | Unexpected server error |
+<Step title="Run the dev server">
+`npm run dev` regenerates the endpoint pages from your spec — no manual page authoring.
+</Step>
 
-## Pagination
+</Steps>
 
-List endpoints use **cursor-based pagination**. Pass the `next_cursor` from a response as the `cursor` query parameter in your next request. When `next_cursor` is `null`, you have reached the last page.
-
-```bash
-GET /pets?limit=20&cursor=eyJpZCI6ImIyYzNkNGU1In0
-```
-
-## SDKs
-
-Official client libraries are available for the most common languages:
-
-<CardGroup cols={2}>
-  <Card title="TypeScript / Node.js" icon="code-simple" href="/sdks">
-    Fully typed, Promise-based client with tree-shakeable imports.
-  </Card>
-  <Card title="Python" icon="code-simple" href="/sdks">
-    Async-first client compatible with FastAPI, Django, and Flask.
-  </Card>
-</CardGroup>
+See [API Reference Setup](/guides/api-reference-setup) for the full list of
+configuration options, including per-operation overrides and custom grouping.
