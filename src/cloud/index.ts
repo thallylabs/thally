@@ -1,5 +1,5 @@
 /**
- * Cloud services stub — the open-source distribution of Thally ships no
+ * Thally Cloud services stub — the open-source distribution of Thally ships no
  * cloud tier. Paid capabilities (Thally Track, AI answers, analytics) are
  * services provided by Thally Cloud and light up when a deployment carries
  * the real implementation of this module; every engine surface degrades

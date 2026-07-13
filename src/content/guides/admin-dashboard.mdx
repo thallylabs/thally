@@ -10,7 +10,7 @@ Thally ships with a built-in **admin dashboard** at `/admin`. It lets you contro
 | Section | What it controls |
 | --- | --- |
 | **Home** | At-a-glance overview of the site's status. |
-| **Analytics** | Traffic, top pages, search terms, and content gaps. A [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) service — the panel appears locked until you connect Cloud. |
+| **Analytics** | Traffic, top pages, search terms, and content gaps. A [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) service — the panel appears locked until you connect Thally Cloud. |
 | **Agent Readiness** | Score for how well your docs serve AI agents. Computed from your content — always free. |
 | **MCP server** | Enable or disable the public `/api/mcp` endpoint. |
 | **Team** | Members, domains, and roles for admin access. |
@@ -20,7 +20,7 @@ Thally ships with a built-in **admin dashboard** at `/admin`. It lets you contro
 Everything an Owner changes here applies to the live site immediately — no merge, no rebuild.
 
 <Note type="info" title="Free vs Thally Cloud">
-The admin panel, search, Agent Readiness, and the [agent endpoints](/guides/ai-features) are free in the self-hosted template. Grounded **AI answers**, **Track** (code-triggered docs), and **traffic analytics** are [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) services — their panels appear locked until you connect Cloud.
+The admin panel, search, Agent Readiness, and the [agent endpoints](/guides/ai-features) are free in the self-hosted template. Grounded **AI answers**, **Track** (code-triggered docs), and **traffic analytics** are [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) services — their panels appear locked until you connect Thally Cloud.
 </Note>
 
 ## Turning on the dashboard
@@ -132,10 +132,9 @@ Agent Readiness does not use this database — it scores your docs content direc
 
 ## Naming the AI assistant
 
-The AI chat widget is a [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) service, so its answers light up only when a deployment carries Cloud. Its *appearance*, however, is a free admin setting: under **Settings → Site experience** you can rename the assistant and set its disclaimer, live:
+The AI chat widget is a [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) service, so its answers light up only when a deployment carries a Thally Cloud grant. Its *appearance*, however, is a free admin setting: under **Settings → Site experience** you can rename the assistant and set its disclaimer, live:
 
 - **Assistant name** — shown on the chat button and panel header (e.g. "Ask Acme"). Blank falls back to the `docs.json` label, or "Ask AI".
 - **Assistant disclaimer** — the notice at the foot of the chat panel. Blank uses a generic "answers may be inaccurate, verify important details" message.
 
 Both are stored at runtime and apply without a redeploy.
-

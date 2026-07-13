@@ -46,7 +46,7 @@ export function CloudLockedPanel({ feature }: { feature: keyof typeof FEATURE_CO
           </p>
           <p className="mt-3 max-w-[60ch]" style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-text-muted)' }}>
             This self-hosted deployment doesn&apos;t include the {copy.title} service. Connect the site to Thally
-            Cloud to activate it — your docs stay in your repo, on your hosting.
+            Thally Cloud to activate it — your docs stay in your repo, on your hosting.
           </p>
           <a
             className="ds-btn ds-btn--primary mt-5 inline-flex"

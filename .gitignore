@@ -74,3 +74,6 @@ notes/mintlify-audit.md
 notes/worktree-history-scrub-handoff.md
 notes/thally-architecture-plan.md
 notes/thally-cloud-plan.md
+
+# Local Thally Cloud build-state handoff (mirror of thally-cloud/notes/BUILD-STATE.md)
+notes/thally-cloud-BUILD-STATE.md
