@@ -24,6 +24,8 @@ Depending on which features you use, you may also want to set:
 | Variable | Enables |
 | --- | --- |
 | `THALLY_SITE_URL` | OpenGraph metadata and canonical URLs (recommended for every deploy) |
+| `THALLY_CLOUD_SITE_TOKEN` | Connects this deployment to its Thally Cloud site (server-only) |
+| `THALLY_CLOUD_URL` | Overrides the Thally Cloud control-plane URL for staging or a public development tunnel |
 | `THALLY_ADMIN_PASSWORD` | Break-glass Owner access to the `/admin` dashboard |
 | `THALLY_OIDC_ISSUER` / `THALLY_OIDC_CLIENT_ID` / `THALLY_OIDC_CLIENT_SECRET` | Team sign-in to the dashboard via your IdP |
 | `THALLY_AUTH_SECRET` | Signs admin sessions and encrypts stored secrets (required with OIDC) |
@@ -31,8 +33,26 @@ Depending on which features you use, you may also want to set:
 
 Only `THALLY_SITE_URL` is needed for a basic docs site. Admin storage works with zero config locally; on serverless you point Thally at a remote database (below). See [Admin dashboard & team access](/guides/admin-dashboard) for the auth variables in context.
 
+## Connect a self-hosted site to Thally Cloud
+
+After linking the repository in Thally Cloud, copy the one-time site credential and add it to your hosting provider as:
+
+```bash
+THALLY_CLOUD_SITE_TOKEN=thally_site_...
+```
+
+Keep it server-side: do not commit it, put it in `docs.json`, or rename it with a `NEXT_PUBLIC_` prefix. Redeploy or restart the site, then visit any documentation page. The runtime calls its own server-only handshake route, exchanges the credential for a short-lived entitlement grant, and reports the deployment URL to Thally Cloud automatically. It reports `THALLY_SITE_URL` when configured; otherwise it uses the origin that served the page. This behavior is provider-independent and requires no Vercel, Netlify, or other hosting API.
+
+Production sites use `https://app.thally.io` by default. For local Thally Cloud development, a deployed docs site cannot reach `localhost` on your laptop. Expose Thally Cloud through a secure public tunnel and set its URL on the docs deployment instead:
+
+```bash
+THALLY_CLOUD_URL=https://your-cloud-tunnel.example
+```
+
+The token never enters browser JavaScript, and Thally Cloud does not need access to your hosting provider's environment variables.
+
 <Note type="info" title="Thally Cloud services">
-  AI chat answers, [Track](/guides/ai-features#free-vs-thally-cloud), and traffic analytics are Thally Cloud services. They carry their own variables (for example `ANTHROPIC_API_KEY` and `THALLY_ANALYTICS_DB_URL`) that light up when a deployment connects Cloud; in the free, self-hosted template their admin panels stay locked and none are needed to ship your docs.
+  AI chat answers, [Track](/guides/ai-features#free-vs-thally-cloud), and traffic analytics are Thally Cloud services. They carry their own variables (for example `ANTHROPIC_API_KEY` and `THALLY_ANALYTICS_DB_URL`) that light up when a deployment connects Thally Cloud; in the free, self-hosted template their admin panels stay locked and none are needed to ship your docs.
 </Note>
 
 ## Durable admin storage

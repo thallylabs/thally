@@ -99,7 +99,7 @@ export interface CloudServices {
 
 /**
  * Transitional tiers. `self-hosted-full` is what a deployment with the cloud
- * subtree present gets today; token-backed Cloud plans replace this when the
+ * subtree present gets today; token-backed Thally Cloud plans replace this when the
  * control plane exists (notes/thally-cloud-plan.md §4).
  */
 export type PlanTier = 'free' | 'self-hosted-full'

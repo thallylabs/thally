@@ -4,7 +4,7 @@
  * boundary enforces it. See src/lib/cloud-bridge/types.ts for the contract.
  *
  * `@/cloud` always resolves: to the real services in this repo (and in Thally
- * Cloud deployments), or to the no-op stub the OSS distribution ships. Every
+ * Thally Cloud deployments), or to the no-op stub the OSS distribution ships. Every
  * consumer handles `getCloud()` returning null-ish services gracefully.
  */
 

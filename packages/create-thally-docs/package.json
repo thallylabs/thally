@@ -1,6 +1,6 @@
 {
   "name": "create-thally-docs",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Scaffold a new Thally documentation project",
   "type": "module",
   "engines": {

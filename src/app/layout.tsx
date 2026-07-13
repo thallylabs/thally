@@ -14,6 +14,7 @@ import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { AnalyticsProvider } from '@/components/analytics/analytics-provider'
 import { SiteBanner } from '@/components/layout/site-banner'
 import { WebMcpTools } from '@/components/agent/web-mcp-tools'
+import { CloudHandshake } from '@/components/cloud/cloud-handshake'
 
 // Default fonts via next/font (optimal performance — preloaded, no FOUC).
 // The Thally brand pairs Inter (body) with Plus Jakarta Sans (display —
@@ -199,6 +200,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         {bannerConfig && <SiteBanner banner={bannerConfig} />}
         <Providers>{children}</Providers>
+        <CloudHandshake />
         <AnalyticsProvider />
         <WebMcpTools />
         {customScripts.map((script) => (
