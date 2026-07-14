@@ -2,7 +2,18 @@ import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { downloadTemplate } from './download.js'
 import { resetTrackingConfig, writeTrackingConfig } from './docs-json.js'
-import { writeStarterContent, updateSiteConfig, updateEnvExample, patchApiReferenceGuard, patchTopBarNavigation, patchOpenApiFetch, patchPackageJson } from './customize.js'
+import {
+  writeStarterAgentGuide,
+  writeStarterContent,
+  writeStarterReadme,
+  updateSiteConfig,
+  updateEnvExample,
+  patchApiReferenceGuard,
+  patchTopBarNavigation,
+  patchOpenApiFetch,
+  patchPackageJson,
+  patchGitignore,
+} from './customize.js'
 import { slugify, installDeps, initGit } from './utils.js'
 
 export interface ScaffoldOptions {
@@ -63,7 +74,9 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
   }
 
   // 2. Write starter content
-  writeStarterContent(targetDir, projectName, slug, enableAiChat, repoUrl, i18nLocales)
+  writeStarterContent(targetDir, projectName, enableAiChat, repoUrl, i18nLocales)
+  writeStarterReadme(targetDir, projectName)
+  writeStarterAgentGuide(targetDir, projectName)
 
   // 3. Update site config
   updateSiteConfig(targetDir, projectName, description, brandPreset, repoUrl)
@@ -77,19 +90,22 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
   // 6. Patch openapi fetch to resolve /openapi.json relative to public/ (not fs root)
   patchOpenApiFetch(targetDir)
 
-  // 7. Rewrite package.json for a standalone site (the template is a monorepo;
-  // scaffolds are not — without this, the first `npm run build` fails).
+  // 7. Normalize package.json and regenerate a site-owned lockfile.
   patchPackageJson(targetDir, slug)
 
-  // 5. Copy .env.example → .env.local
+  // 8. Keep dependency folders out of git even if tooling creates one below
+  // the project root.
+  patchGitignore(targetDir)
+
+  // 9. Copy .env.example → .env.local
   updateEnvExample(targetDir)
 
-  // 5. Install dependencies
+  // 10. Install dependencies
   if (doInstall) {
     installDeps(targetDir)
   }
 
-  // 6. Initialize git
+  // 11. Initialize git
   initGit(targetDir)
 
   return { projectDir: targetDir }

@@ -4,36 +4,44 @@ import tar from 'tar'
 
 const pipelineAsync = promisify(pipeline)
 
-const TARBALL_URL = 'https://codeload.github.com/thallylabs/thally/tar.gz/main'
+/**
+ * The live Thally documentation site is also the canonical standalone site
+ * source. Keeping one source means a runtime or UI improvement shipped to the
+ * docs is available to every subsequent scaffold without maintaining a second
+ * template repository.
+ */
+export const TEMPLATE_REPOSITORY = 'thallylabs/docs'
+const TARBALL_URL = `https://codeload.github.com/${TEMPLATE_REPOSITORY}/tar.gz/main`
 
-// The Thally template repo is ALSO the live Thally project (its own deployment,
-// self-tracking config, and CI). These paths carry that project-specific wiring
-// and must NOT be copied into a user's scaffold, or every new site would inherit
-// Thally's own setup:
-//   - `/cli/`, `/packages/`  — the monorepo's tooling; scaffolds consume the
-//                              PUBLISHED @thallylabs/* packages instead of the source.
-//   - `/thally-agent.yml`    — the docs-agent runner. Track/the agent are OPT-IN;
-//     `/thally-track.yml`       a scaffolded site adds these via `thally agent init`
-//                              / `thally track setup`, so shipping them pre-baked
-//                              (with a weekly cron + upstream dispatch) is wrong.
-//   - `/CODEOWNERS`          — Thally's roster gate points at its maintainers;
-//                              inheriting it would demand their review on a user's PRs.
-//   - `/CLAUDE.md`, `/notes/` — the maintainers' AI working agreements and
-//                              planning notes; meaningless (or misleading) inside
-//                              a user's scaffold. Both are gitignored upstream,
-//                              so this is belt-and-braces for local tarballs.
+// The source repo is ALSO the live Thally docs project. These paths contain its
+// public documentation, screenshots, generated caches, and maintainer-specific
+// automation. The scaffold writes a small starter README/content set instead.
+// Generic CI and the reusable application/runtime are deliberately retained.
 // (The `tracking` block in docs.json is stripped separately — see
 // resetTrackingConfig — because docs.json itself must be copied.)
 export const EXCLUDE_PATHS = [
-  '/cli/',
-  '/packages/',
-  '/node_modules/',
+  // Match both the directory entry itself and every nested file. Tar invokes
+  // the filter for `.../node_modules` before descendants, without a trailing `/`.
+  '/node_modules',
+  // The canonical docs repository may temporarily retain package sources while
+  // runtime work is being upstreamed. A scaffold consumes the published
+  // packages declared in package.json; it must never inherit those sources.
+  '/packages',
   '/.git/',
+  '/.next/',
+  '/.data/',
+  '/.thally/',
   '/thally-agent.yml',
   '/thally-track.yml',
   '/CODEOWNERS',
   '/CLAUDE.md',
   '/notes/',
+  '/public/images/',
+  '/src/public/',
+  '/snippets/',
+  '/.github/ISSUE_TEMPLATE/',
+  '/.github/PULL_REQUEST_TEMPLATE.md',
+  '/README.md',
 ]
 
 /** True if a tarball entry should land in the scaffold (see EXCLUDE_PATHS). */

@@ -20,7 +20,7 @@ export function Accordion({ title, defaultOpen = false, children }: AccordionPro
     >
       <AccordionPrimitive.Item
         value="item"
-        className="overflow-hidden rounded-2xl border border-border/40 bg-background/80"
+        className="overflow-hidden rounded-2xl border border-border/60 bg-card"
       >
         <AccordionPrimitive.Header className="m-0">
           <AccordionPrimitive.Trigger className="group flex w-full items-center justify-between gap-4 px-4 py-3.5 text-left text-base font-semibold text-foreground transition hover:bg-muted/40">

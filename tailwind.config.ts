@@ -34,11 +34,17 @@ const config: Config = {
       },
       colors: {
         background: 'hsl(var(--thally-background) / <alpha-value>)',
+        card: 'hsl(var(--thally-card) / <alpha-value>)',
         foreground: 'hsl(var(--thally-foreground) / <alpha-value>)',
         muted: 'hsl(var(--thally-muted) / <alpha-value>)',
+        'muted-foreground': 'hsl(var(--thally-muted-foreground) / <alpha-value>)',
         border: 'hsl(var(--thally-border) / <alpha-value>)',
         accent: 'hsl(var(--thally-accent) / <alpha-value>)',
         'accent-foreground': 'hsl(var(--thally-accent-foreground) / <alpha-value>)',
+        'accent-2': 'hsl(var(--thally-accent-2) / <alpha-value>)',
+        'accent-2-foreground': 'hsl(var(--thally-accent-2-foreground) / <alpha-value>)',
+        input: 'hsl(var(--thally-input) / <alpha-value>)',
+        sidebar: 'hsl(var(--thally-sidebar) / <alpha-value>)',
         primary: 'hsl(var(--thally-primary) / <alpha-value>)',
         'primary-foreground': 'hsl(var(--thally-primary-foreground) / <alpha-value>)',
         ring: 'hsl(var(--thally-ring) / <alpha-value>)',
@@ -402,4 +408,3 @@ const config: Config = {
 }
 
 export default config
-

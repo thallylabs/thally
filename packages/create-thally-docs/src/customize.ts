@@ -1,11 +1,11 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, cpSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { execSync } from 'node:child_process'
 
 const STARTER_PAGES: Record<string, string> = {
   'introduction.mdx': `---
 title: Introduction
-description: Welcome to {NAME} — learn what it does, how the docs are organized, and where to start.
+description: Welcome to {NAME}.
+mode: home
 keywords:
   - {NAME}
   - documentation
@@ -13,29 +13,44 @@ keywords:
   - getting started
 ---
 
-## Welcome
+<Hero
+  title="Welcome to {NAME}"
+  subtitle="Use this starter to introduce your product, guide readers to their first successful outcome, and publish a clear API reference."
+  primaryLabel="Start the quickstart"
+  primaryHref="/quickstart"
+  secondaryLabel="See components"
+  secondaryHref="/components"
+/>
 
-Welcome to the **{NAME}** documentation. This is your home base for guides, API
-references, and everything you need to build with {NAME}. The site is powered by
-[Thally](https://github.com/thallylabs/thally), an agent-native docs platform — every page
-is served to humans as polished HTML and to AI agents as structured JSON, JSON-LD,
-and Markdown from the same URL, so assistants can read your docs accurately.
+<CardGroup cols={3}>
+  <Card title="Quickstart" icon="party-horn" href="/quickstart">
+    Show readers the fastest path to a useful first result.
+  </Card>
+  <Card title="Components" icon="grid-round" href="/components">
+    Structure guides with steps, tabs, cards, callouts, accordions, and more.
+  </Card>
+  <Card title="API reference" icon="code-simple" href="/api">
+    Replace \`openapi.yaml\` with your specification to publish interactive endpoints.
+  </Card>
+  <Card title="Customize" icon="wrench" href="/customization">
+    Make the navigation, brand, typography, and links your own.
+  </Card>
+  <Card title="Multi-language" icon="message" href="/es">
+    Switch to the included Spanish example from the language menu.
+  </Card>
+  <Card title="Agent-ready docs" icon="link-simple" href="/llms.txt">
+    Give coding agents a clean, structured version of your documentation.
+  </Card>
+</CardGroup>
 
-## What you'll find here
-
-- **Guides** — step-by-step walkthroughs of common tasks and workflows.
-- **API reference** — generated from your OpenAPI spec, with a live "Try It" console.
-- **Quickstart** — install {NAME} and make your first call in a few minutes.
-
-## Next steps
-
-Start with the [Quickstart](/quickstart) to get {NAME} running, then make this site
-your own by editing \`src/content/introduction.mdx\` and updating the navigation in
-\`docs.json\`. Every change you save is instantly reflected for both readers and agents.
+<Note type="info" title="Make it yours">
+  Start by editing \`src/content/introduction.mdx\`. Then update \`docs.json\` to
+  organize navigation and \`src/data/site.ts\` to set your product name and links.
+</Note>
 `,
   'quickstart.mdx': `---
 title: Quickstart
-description: Install {NAME}, configure your API key, and make your first call in under five minutes.
+description: Give readers the fastest path to a successful first result with {NAME}.
 keywords:
   - {NAME}
   - quickstart
@@ -43,32 +58,121 @@ keywords:
   - getting started
 ---
 
-## Installation
+Describe the prerequisites and the shortest useful workflow. A good quickstart
+takes someone from zero to a visible result without explaining every option.
 
-Install {NAME} with your package manager of choice. We recommend pinning the
-version in your project so builds stay reproducible across machines and CI:
+## Prerequisites
 
-\`\`\`bash
-npm install {SLUG}
-\`\`\`
+- Requirement one, such as an account, API key, or supported runtime
+- Requirement two, such as a compatible device, browser, or operating system
 
-## Basic usage
+<Steps>
+  <Step title="Install">
+    Explain how to install {NAME} or create an account.
 
-Import the client and initialize it with your API key. Keep the key in an
-environment variable rather than committing it to source control, so it never
-leaks into your repository or build logs:
+    \`\`\`bash
+    npm install your-package
+    \`\`\`
+  </Step>
+  <Step title="Configure">
+    Show only the configuration required for the first successful run.
 
-\`\`\`ts
-import { create } from '{SLUG}'
+    \`\`\`bash
+    your-cli init
+    \`\`\`
+  </Step>
+  <Step title="Run it">
+    Give readers a command or action with an observable result.
 
-const client = create({ apiKey: process.env.API_KEY })
-\`\`\`
+    \`\`\`bash
+    your-cli start
+    \`\`\`
+  </Step>
+</Steps>
 
-## What's next
+<Tip>
+  Tell readers where to get help, then link to the next guide they should read.
+</Tip>
+`,
+  'components.mdx': `---
+title: Components
+description: A compact tour of the rich MDX components available in {NAME}.
+keywords:
+  - {NAME}
+  - components
+  - MDX
+---
 
-That's the basics — you're ready to build. Explore the guides for common workflows,
-open the API reference to try endpoints against a live "Try It" console, or edit this
-page at \`src/content/quickstart.mdx\` to document your own onboarding flow.
+Use components to keep complex instructions clear without turning every page
+into a wall of text.
+
+## Show equivalent paths
+
+<Tabs>
+  <Tab title="npm">
+    \`\`\`bash
+    npm install your-package
+    \`\`\`
+  </Tab>
+  <Tab title="pnpm">
+    \`\`\`bash
+    pnpm add your-package
+    \`\`\`
+  </Tab>
+  <Tab title="yarn">
+    \`\`\`bash
+    yarn add your-package
+    \`\`\`
+  </Tab>
+</Tabs>
+
+## Reveal detail when it matters
+
+<Accordion title="Where should advanced configuration live?">
+  Keep the default path visible and move optional detail into an accordion. This
+  lets new readers move quickly without hiding information from experts.
+</Accordion>
+
+## Communicate status
+
+<Badge variant="success">Stable</Badge>{" "}
+<Badge variant="warning">Beta</Badge>{" "}
+<Badge variant="info">New</Badge>
+
+<Tip>
+  Browse the complete component library at [docs.thally.io](https://docs.thally.io/components/card).
+</Tip>
+`,
+  'customization.mdx': `---
+title: Customization
+description: Make {NAME} feel unmistakably like your product.
+keywords:
+  - {NAME}
+  - branding
+  - navigation
+---
+
+Your documentation should feel like part of the product—not a separate website.
+
+<CardGroup cols={2}>
+  <Card title="Brand and theme" icon="party-horn" href="https://docs.thally.io/guides/branding-and-theming">
+    Configure colors, logos, favicons, typography, and light or dark presentation.
+  </Card>
+  <Card title="Navigation" icon="book-open" href="https://docs.thally.io/guides/configuring-navigation">
+    Organize tabs, icon-labelled groups, pages, and external destinations in \`docs.json\`.
+  </Card>
+  <Card title="Domains" icon="link-simple" href="https://app.thally.io">
+    Connect a custom domain from your site settings in Thally Cloud.
+  </Card>
+  <Card title="Analytics and feedback" icon="message" href="https://app.thally.io">
+    Learn what readers need and collect feedback without third-party widgets.
+  </Card>
+</CardGroup>
+
+<Note type="info" title="Start with docs.json">
+  Navigation and portable presentation settings live in \`docs.json\`. Site
+  identity and fallback brand values live in \`src/data/site.ts\`.
+</Note>
 `,
   'changelog.mdx': `---
 title: Changelog
@@ -92,6 +196,115 @@ Edit this page at \`src/content/changelog.mdx\` to announce your own releases as
 `,
 }
 
+const STARTER_SPANISH_PAGES: Record<string, string> = {
+  'introduction.mdx': `---
+title: Introducción
+description: Te damos la bienvenida a {NAME}.
+mode: home
+---
+
+<Hero
+  title="Te damos la bienvenida a {NAME}"
+  subtitle="Usa este sitio inicial para presentar tu producto, guiar a tus lectores hasta su primer resultado y publicar una referencia de API clara."
+  primaryLabel="Abrir inicio rápido"
+  primaryHref="/es/quickstart"
+  secondaryLabel="Ver componentes"
+  secondaryHref="/es/components"
+/>
+
+<CardGroup cols={3}>
+  <Card title="Inicio rápido" icon="party-horn" href="/es/quickstart">
+    Ayuda a tus lectores a lograr su primer resultado en minutos.
+  </Card>
+  <Card title="Componentes" icon="grid-round" href="/es/components">
+    Usa pestañas, pasos, tarjetas, avisos y acordeones.
+  </Card>
+  <Card title="Referencia de API" icon="code-simple" href="/es/api">
+    Convierte \`openapi.yaml\` en documentación interactiva.
+  </Card>
+  <Card title="Personalización" icon="wrench" href="/es/customization">
+    Adapta la navegación, marca, tipografía y enlaces.
+  </Card>
+  <Card title="Varios idiomas" icon="message" href="/">
+    Cambia entre inglés y español desde el selector de idioma.
+  </Card>
+  <Card title="Preparado para IA" icon="link-simple" href="/llms.txt">
+    Publica contenido legible por agentes desde el primer día.
+  </Card>
+</CardGroup>
+`,
+  'quickstart.mdx': `---
+title: Inicio rápido
+description: Guía a tus lectores hasta su primer resultado con {NAME}.
+---
+
+Un buen inicio rápido lleva al lector de cero a un resultado visible sin explicar
+todas las opciones.
+
+<Steps>
+  <Step title="Instala">
+    Explica cómo instalar {NAME} o crear una cuenta.
+
+    \`\`\`bash
+    npm install your-package
+    \`\`\`
+  </Step>
+  <Step title="Configura">
+    Muestra únicamente la configuración necesaria para comenzar.
+  </Step>
+  <Step title="Ejecuta">
+    Termina con una acción y un resultado que el lector pueda comprobar.
+  </Step>
+</Steps>
+
+<Tip>Enlaza la siguiente guía que debería leer una vez completado este flujo.</Tip>
+`,
+  'components.mdx': `---
+title: Componentes
+description: Una muestra de los componentes MDX disponibles en {NAME}.
+---
+
+<Tabs>
+  <Tab title="npm">\`npm install your-package\`</Tab>
+  <Tab title="pnpm">\`pnpm add your-package\`</Tab>
+  <Tab title="yarn">\`yarn add your-package\`</Tab>
+</Tabs>
+
+<Accordion title="¿Dónde debe ir la configuración avanzada?">
+  Mantén visible el camino principal y coloca los detalles opcionales aquí.
+</Accordion>
+
+<Badge variant="success">Estable</Badge>{" "}
+<Badge variant="warning">Beta</Badge>{" "}
+<Badge variant="info">Nuevo</Badge>
+`,
+  'customization.mdx': `---
+title: Personalización
+description: Haz que {NAME} se sienta como una parte natural de tu producto.
+---
+
+<CardGroup cols={2}>
+  <Card title="Marca y tema" icon="party-horn">Configura colores, logotipos, tipografía y apariencia.</Card>
+  <Card title="Navegación" icon="book-open">Organiza pestañas, grupos con iconos y páginas en \`docs.json\`.</Card>
+  <Card title="Dominios" icon="link-simple">Conecta un dominio personalizado desde Thally Cloud.</Card>
+  <Card title="Analítica y feedback" icon="message">Comprende qué necesitan tus lectores.</Card>
+</CardGroup>
+`,
+  'changelog.mdx': `---
+title: Novedades
+description: Cambios, versiones y mejoras destacadas de {NAME}.
+---
+
+## v0.1.0
+
+La primera versión de la documentación de **{NAME}**.
+
+- Sitio creado con [Thally](https://github.com/thallylabs/thally)
+- Referencia de API y contenido preparado para agentes
+- Ejemplo bilingüe en inglés y español
+`,
+}
+
 function buildStarterDocsJson({
   enableAiChat,
   repoUrl,
@@ -103,13 +316,9 @@ function buildStarterDocsJson({
 }): string {
   const config: Record<string, unknown> = {}
 
-  // Opinionated defaults so new sites boot into the polished look instead of
-  // the generic one. Both are plain docs.json fields the owner can change.
-  config.theme = 'sharp'
-  config.fonts = {
-    body: { family: 'Plus Jakarta Sans', weight: ['400', '500', '600', '700'] },
-    heading: { family: 'Outfit', weight: ['600', '700'] },
-  }
+  // Match the canonical Thally docs presentation. Owners can still change this
+  // portable setting later without touching the application runtime.
+  config.theme = 'default'
 
   if (enableAiChat) {
     config.ai = { chat: true }
@@ -122,17 +331,21 @@ function buildStarterDocsJson({
     }
   }
 
-  if (i18nLocales && i18nLocales.length > 0) {
-    config.i18n = {
-      defaultLocale: 'en',
-      locales: [{ code: 'en', label: 'English' }, ...i18nLocales],
-    }
-  }
+  const locales = [
+    { code: 'en', label: 'English' },
+    { code: 'es', label: 'Español' },
+    ...(i18nLocales ?? []).filter(({ code }) => code !== 'en' && code !== 'es'),
+  ]
+  config.i18n = { defaultLocale: 'en', locales }
 
   config.tabs = [
     {
       tab: 'Overview',
-      groups: [{ group: 'Getting Started', pages: ['introduction', 'quickstart'] }],
+      groups: [
+        { group: 'Getting Started', icon: 'book-open', pages: ['introduction', 'quickstart'] },
+        { group: 'Explore', icon: 'grid-round', pages: ['components'] },
+        { group: 'Project', icon: 'wrench', pages: ['customization'] },
+      ],
     },
     { tab: 'API Reference', api: { source: 'openapi.yaml' } },
     { tab: 'Changelog', href: '/changelog' },
@@ -144,7 +357,6 @@ function buildStarterDocsJson({
 export function writeStarterContent(
   targetDir: string,
   projectName: string,
-  slug: string,
   enableAiChat = true,
   repoUrl = '',
   i18nLocales?: Array<{ code: string; label: string }>,
@@ -156,7 +368,7 @@ export function writeStarterContent(
     const entries = readdirSync(contentDir)
     for (const entry of entries) {
       const fullPath = join(contentDir, entry)
-      execSync(`rm -rf "${fullPath}"`)
+      rmSync(fullPath, { recursive: true, force: true })
     }
   } else {
     mkdirSync(contentDir, { recursive: true })
@@ -164,10 +376,15 @@ export function writeStarterContent(
 
   // Write starter pages
   for (const [filename, template] of Object.entries(STARTER_PAGES)) {
-    const content = template
-      .replace(/\{NAME\}/g, projectName)
-      .replace(/\{SLUG\}/g, slug)
+    const content = template.replace(/\{NAME\}/g, projectName)
     writeFileSync(join(contentDir, filename), content, 'utf8')
+  }
+
+  const spanishDir = join(contentDir, 'es')
+  mkdirSync(spanishDir, { recursive: true })
+  for (const [filename, template] of Object.entries(STARTER_SPANISH_PAGES)) {
+    const content = template.replace(/\{NAME\}/g, projectName)
+    writeFileSync(join(spanishDir, filename), content, 'utf8')
   }
 
   writeFileSync(
@@ -175,6 +392,73 @@ export function writeStarterContent(
     buildStarterDocsJson({ enableAiChat, repoUrl: repoUrl || undefined, i18nLocales }),
     'utf8',
   )
+}
+
+export function writeStarterAgentGuide(targetDir: string, projectName: string): void {
+  const guide = `# ${projectName} documentation instructions
+
+## About this project
+
+- This is a documentation site built with [Thally](https://github.com/thallylabs/thally).
+- Pages are MDX files with YAML frontmatter in \`src/content/\`.
+- Navigation and product features are configured in \`docs.json\`.
+- Site identity and fallback brand values live in \`src/data/site.ts\`.
+- Use \`/llms.txt\`, \`/llms-full.txt\`, and \`/skill.md\` on the deployed site for agent-readable context.
+
+## Terminology
+
+<!-- Add product-specific terms and preferred usage. -->
+
+## Writing style
+
+- Use active voice and address the reader as “you.”
+- Keep sentences concise and headings in sentence case.
+- Bold interface labels and format commands, files, and code with backticks.
+- Lead with the outcome, then explain prerequisites and steps.
+
+## Content boundaries
+
+<!-- Define what belongs in public docs and what must remain internal. -->
+`
+  writeFileSync(join(targetDir, 'AGENTS.md'), guide, 'utf8')
+}
+
+export function writeStarterReadme(targetDir: string, projectName: string): void {
+  const readme = `# ${projectName}
+
+Documentation powered by [Thally](https://github.com/thallylabs/thally).
+
+## Local development
+
+\`\`\`bash
+npm install
+npm run dev
+\`\`\`
+
+Open [http://localhost:3040](http://localhost:3040).
+
+## Write your docs
+
+- Add MDX pages in \`src/content/\`.
+- Organize navigation and product features in \`docs.json\`.
+- Update the site name, links, and brand defaults in \`src/data/site.ts\`.
+- Copy \`.env.example\` to \`.env.local\` for local secrets.
+
+The starter includes a home hero, icon-grouped navigation, English and Spanish
+examples, a guided quickstart, component showcase, changelog, OpenAPI reference,
+and \`AGENTS.md\` writing instructions for coding agents.
+
+## Publishing changes
+
+Push changes to the default branch to trigger your connected deployment. If the
+site is not connected yet, add the repository in
+[Thally Cloud](https://app.thally.io) or deploy it to any Next.js host.
+
+Run \`npx create-thally-docs check --ci .\` before publishing. Deploy the site
+anywhere Next.js is supported, or connect the repository to
+[Thally Cloud](https://app.thally.io) for managed hosting and services.
+`
+  writeFileSync(join(targetDir, 'README.md'), readme, 'utf8')
 }
 
 export function updateSiteConfig(
@@ -222,6 +506,15 @@ export function updateSiteConfig(
     /\{\s*label:\s*'Support',\s*href:\s*'[^']*'\s*\}/,
     `{ label: 'Support', href: '${repoUrl ? `${repoUrl}/issues/new` : ''}' }`,
   )
+
+  // A fresh site may not have a repository URL yet. Omit those links until it
+  // does instead of rendering empty anchors with duplicate React keys.
+  if (!repoUrl) {
+    source = source.replace(
+      /\n\s*\{\s*label:\s*'(?:GitHub|Support)',\s*href:\s*''\s*\},?/g,
+      '',
+    )
+  }
 
   writeFileSync(siteFile, source, 'utf8')
 }
@@ -298,10 +591,9 @@ export function updateEnvExample(targetDir: string): void {
 }
 
 /**
- * Rewrite the template's root package.json for a STANDALONE site. The template
- * repo is an npm-workspaces monorepo, but `packages/` is excluded from the
- * scaffold tarball — so the monorepo wiring must not survive the copy, or the
- * very first `npm run build` aborts with "No workspaces found":
+ * Normalize the canonical docs package for a newly named standalone site.
+ * `thallylabs/docs` is already standalone, while this defensive cleanup also
+ * keeps local or older monorepo-based sources safe to scaffold:
  *
  *   - `workspaces` points at a directory that doesn't exist in scaffolds.
  *   - `prebuild`/`pretest` invoke `packages:build`, which builds those absent
@@ -322,8 +614,10 @@ export function patchPackageJson(targetDir: string, slug: string): void {
     name?: string
     workspaces?: unknown
     scripts?: Record<string, string>
+    dependencies?: Record<string, string>
   }
 
+  const hadWorkspaces = Array.isArray(pkg.workspaces) && pkg.workspaces.length > 0
   pkg.name = slug
   delete pkg.workspaces
   if (pkg.scripts) {
@@ -332,8 +626,44 @@ export function patchPackageJson(targetDir: string, slug: string): void {
     delete pkg.scripts['packages:build']
   }
 
+  // The canonical docs repository previously resolved MCP through a workspace
+  // wildcard. Fresh sites have no workspace, so use the published package
+  // version explicitly and let npm create a portable standalone lockfile.
+  if (pkg.dependencies?.['@thallylabs/mcp'] === '*') {
+    pkg.dependencies['@thallylabs/mcp'] = '0.7.0'
+  }
+
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
 
   const lockPath = join(targetDir, 'package-lock.json')
-  if (existsSync(lockPath)) rmSync(lockPath)
+  if (!existsSync(lockPath)) return
+  const lock = JSON.parse(readFileSync(lockPath, 'utf8')) as {
+    name?: string
+    packages?: Record<string, { name?: string }>
+  }
+  const hasWorkspaceEntries = Object.keys(lock.packages ?? {}).some(
+    (key) => key === 'packages' || key.startsWith('packages/'),
+  )
+
+  if (hadWorkspaces || hasWorkspaceEntries) {
+    rmSync(lockPath)
+    return
+  }
+
+  // The canonical docs source is already standalone. Preserve its known-good,
+  // reproducible dependency graph and update only the project identity.
+  lock.name = slug
+  if (lock.packages?.['']) lock.packages[''].name = slug
+  writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`, 'utf8')
+}
+
+/** Ensure dependency folders are ignored at any depth in generated sites. */
+export function patchGitignore(targetDir: string): void {
+  const gitignorePath = join(targetDir, '.gitignore')
+  const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf8') : ''
+  const lines = existing.split(/\r?\n/)
+  if (lines.includes('node_modules/')) return
+
+  const separator = existing.length > 0 && !existing.endsWith('\n') ? '\n' : ''
+  writeFileSync(gitignorePath, `${existing}${separator}node_modules/\n`, 'utf8')
 }
