@@ -15,7 +15,7 @@ export interface EffectiveSiteConfig {
  * helper so those callers stay unchanged while all override logic lives in one
  * place.
  */
-export async function getEffectiveSiteConfig(): Promise<EffectiveSiteConfig> {
-  const config = await resolveSiteConfig()
+export async function getEffectiveSiteConfig(siteUrl?: string): Promise<EffectiveSiteConfig> {
+  const config = await resolveSiteConfig(siteUrl)
   return { name: config.name, description: config.description, repoUrl: config.repoUrl ?? '' }
 }

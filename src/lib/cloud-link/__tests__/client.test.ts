@@ -1,7 +1,17 @@
-/** Server-only Thally Cloud grant exchange and cache behavior. */
+/** Server-only Thally Cloud grant exchange, cache, and runtime config behavior. */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { connectCloudSite, getCloudGrant, resetCloudGrantCacheForTests } from '../client'
+import {
+  connectCloudSite,
+  getCloudGrant,
+  getCloudSiteConfig,
+  resetCloudGrantCacheForTests,
+} from '../client'
+
+function unsignedGrant(payload: Record<string, unknown>): string {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url')
+  return `${encode({ alg: 'none' })}.${encode(payload)}.`
+}
 
 describe('Thally Cloud link client', () => {
   beforeEach(() => {
@@ -72,5 +82,24 @@ describe('Thally Cloud link client', () => {
     await expect(connectCloudSite('https://docs.example.com')).resolves.toEqual({
       status: 'cloud_unreachable',
     })
+  })
+
+  it('decodes portable settings and server-only access policy from a grant', async () => {
+    vi.stubEnv('THALLY_CLOUD_SITE_TOKEN', 'thally_site_secret')
+    const payload = {
+      siteId: 'site-1',
+      orgId: 'org-1',
+      exp: Math.floor(Date.now() / 1000) + 300,
+      entitlements: { features: { passwordProtection: true, analytics: true } },
+      siteConfig: {
+        portable: { analytics: { enabled: false }, branding: { themePreset: 'sharp' } },
+        access: { mode: 'password', passwordHash: 'salt:hash' },
+      },
+    }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      Response.json({ grant: unsignedGrant(payload) }),
+    )
+
+    await expect(getCloudSiteConfig('https://docs.example.com')).resolves.toMatchObject(payload)
   })
 })

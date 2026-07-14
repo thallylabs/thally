@@ -12,6 +12,7 @@ import {
 import { classifyRequest, isAgentRequest } from '@/lib/traffic-classifier'
 import { isMachineEndpoint, isPublicAgentEndpoint } from '@/lib/agent-endpoints'
 import { verifySession, SESSION_COOKIE } from '@/lib/auth/session'
+import { getCloudAccessConfigEdge } from '@/lib/cloud-link/edge'
 
 function shouldTrackPath(pathname: string): boolean {
   // Admin console (pages + its own asset/nav requests) and Next internals are
@@ -117,6 +118,9 @@ async function sendAnalyticsEvent(request: NextRequest, pathname: string) {
 
 export async function middleware(request: NextRequest, event: NextFetchEvent) {
   const { pathname } = request.nextUrl
+  const cloudAccess = await getCloudAccessConfigEdge(request.nextUrl.origin)
+  const docsAccessEnabled =
+    isDocsAccessEnabledEdge() || cloudAccess?.access?.mode === 'password'
 
   // Gate admin PAGES and admin APIs at the edge — except the public auth routes
   // (login/OIDC start/callback), which must be reachable pre-auth. This is
@@ -139,7 +143,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   }
 
   if (
-    isDocsAccessEnabledEdge() &&
+    docsAccessEnabled &&
     !pathname.startsWith('/admin') &&
     !pathname.startsWith('/api/admin') &&
     !pathname.startsWith('/api/analytics') &&
@@ -158,7 +162,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     // the HTML /access page instead of the JSON/markdown it asked for, and the
     // anonymous-access promises in auth.md / oauth-protected-resource go false.
     !isPublicAgentEndpoint(pathname) &&
-    !(await isDocsAccessGrantedEdge(request.cookies.get(DOCS_ACCESS_COOKIE)?.value))
+    !(await isDocsAccessGrantedEdge(request.cookies.get(DOCS_ACCESS_COOKIE)?.value, docsAccessEnabled))
   ) {
     const accessUrl = request.nextUrl.clone()
     accessUrl.pathname = '/access'

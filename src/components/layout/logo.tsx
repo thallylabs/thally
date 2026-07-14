@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
-import { siteConfig } from '@/data/site'
+import { useSiteName } from './use-site-name'
 
 // Stable no-op subscribe for the hydration gate below.
 const emptySubscribe = () => () => {}
@@ -14,6 +14,7 @@ interface LogoProps {
 }
 
 export function Logo({ className, showText = true }: LogoProps) {
+  const siteName = useSiteName()
   // Show an admin-uploaded logo when one exists; otherwise the default mark +
   // site name. The <img> probes /api/brand/logo and swaps in on load.
   const [customOk, setCustomOk] = useState(false)
@@ -42,7 +43,7 @@ export function Logo({ className, showText = true }: LogoProps) {
       <img
         ref={imgRef}
         src={src}
-        alt={siteConfig.name}
+        alt={siteName}
         onLoad={() => setCustomOk(true)}
         onError={() => setCustomOk(false)}
         style={{ height: 28, width: 'auto', display: customOk ? 'block' : 'none' }}
@@ -61,7 +62,7 @@ export function Logo({ className, showText = true }: LogoProps) {
             className="shrink-0"
           />
           {showText ? (
-            <span className="font-heading text-lg font-semibold tracking-tight text-foreground">{siteConfig.name}</span>
+            <span className="font-heading text-lg font-semibold tracking-tight text-foreground">{siteName}</span>
           ) : null}
         </>
       ) : null}

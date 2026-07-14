@@ -20,6 +20,8 @@ export interface AnalyticsEvent {
   referer?: string
   vote?: 'yes' | 'no'
   page?: string
+  /** Optional written feedback submitted with a page rating. */
+  message?: string
   /** search_query: the search term. */
   query?: string
   /** search_query: number of results returned (0 = a content gap). */

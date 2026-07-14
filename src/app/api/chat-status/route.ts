@@ -3,6 +3,8 @@ import { getAdminSettings } from '@/lib/admin/settings'
 import { getAiConfig } from '@/data/docs'
 import { DEFAULT_AI_DISCLAIMER } from '@/lib/ai-defaults'
 import { getCloud } from '@/lib/cloud-bridge'
+import type { NextRequest } from 'next/server'
+import { getCloudSiteConfig } from '@/lib/cloud-link/client'
 
 export const runtime = 'nodejs'
 
@@ -13,10 +15,17 @@ export const runtime = 'nodejs'
  * this, hides itself when disabled, and reflects the admin's name + disclaimer.
  * Always hidden when the deployment has no AI service (OSS free tier).
  */
-export async function GET() {
-  const settings = await getAdminSettings()
+export async function GET(request: NextRequest) {
+  const [settings, cloudConfig] = await Promise.all([
+    getAdminSettings(),
+    getCloudSiteConfig(request.nextUrl.origin),
+  ])
   const ai = getAiConfig()
-  const show = Boolean(getCloud()?.ai) && (settings.chatEnabled ?? Boolean(ai.chat))
+  const cloudEnabled = cloudConfig
+    ? Boolean(cloudConfig.entitlements.features?.aiAnswers) &&
+      Boolean(cloudConfig.siteConfig.portable.ai?.enabled)
+    : null
+  const show = Boolean(getCloud()?.ai) && (cloudEnabled ?? settings.chatEnabled ?? Boolean(ai.chat))
   const label = settings.aiLabel ?? ai.label ?? 'Ask AI'
   const disclaimer = settings.aiDisclaimer ?? DEFAULT_AI_DISCLAIMER
   return NextResponse.json({ show, label, disclaimer }, { headers: { 'Cache-Control': 'no-store' } })
