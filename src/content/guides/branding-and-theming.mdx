@@ -61,16 +61,22 @@ To define your own palette, edit the `brandPresets` object in `site.ts`. Each pr
 | Token | Purpose |
 | --- | --- |
 | `background` | Page background |
+| `card` | One-step elevated card and popover surface (optional) |
 | `foreground` | Primary text color |
-| `muted` | Subtle background (cards, hover states) |
+| `muted` | Subtle background and hover states |
+| `mutedForeground` | Secondary text color (optional) |
 | `border` | Border color |
 | `accent` | Primary brand color (links, active states) |
 | `accentForeground` | Text on accent backgrounds |
+| `accent2` | Secondary accent for charts and restrained emphasis (optional) |
+| `accent2Foreground` | Text on secondary-accent backgrounds (optional) |
+| `input` | Form control surface (optional) |
+| `sidebar` | Sidebar surface (optional) |
 | `ring` | Focus ring color |
 | `sidebarActiveBg` | Active sidebar item background |
 | `sidebarActiveText` | Active sidebar item text |
 
-Most colors are hex values (e.g. `#10B981`) which are auto-converted to HSL. The sidebar tokens (`sidebarActiveBg`, `sidebarActiveText`) use raw HSL strings with opacity (e.g. `'152 60% 88% / 0.55'`) for translucent effects.
+Most colors are hex values (e.g. `#10B981`) which are auto-converted to HSL. Optional tokens fall back to their nearest core surface, so existing palettes remain valid. The sidebar state tokens (`sidebarActiveBg`, `sidebarActiveText`) may also use raw HSL strings with opacity (e.g. `'152 60% 88% / 0.55'`) for translucent effects.
 
 ## Dark mode
 

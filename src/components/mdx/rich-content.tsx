@@ -77,7 +77,7 @@ export function Hero({
 }: HeroProps) {
   const hasActions = Boolean(primaryHref || secondaryHref)
   return (
-    <section className="not-prose relative isolate overflow-hidden rounded-[var(--theme-radius-xl)] border border-border/50 bg-gradient-to-b from-muted/50 via-background to-background px-6 py-16 sm:px-12 sm:py-20">
+    <section className="not-prose relative isolate mb-10 overflow-hidden rounded-[var(--theme-radius-xl)] border border-border/50 bg-gradient-to-b from-muted/50 via-background to-background px-6 py-16 sm:mb-12 sm:px-12 sm:py-20">
       <div
         aria-hidden
         className="pointer-events-none absolute -top-28 left-1/2 h-72 w-[46rem] -translate-x-1/2 rounded-full bg-accent/15 blur-3xl"
@@ -132,7 +132,7 @@ function isExternalLink(href: string) {
 
 export function Card({ title, href, icon, iconType, img, children }: CardProps) {
   const content = (
-    <article className="group/card flex h-full flex-col gap-3 rounded-2xl border border-border/40 bg-background/95 p-5 shadow-sm transition duration-200 hover:border-accent/60 hover:shadow-md motion-safe:hover:-translate-y-0.5">
+    <article className="group/card flex h-full flex-col gap-3 rounded-2xl border border-border/60 bg-card p-5 transition duration-200 hover:border-accent/60 motion-safe:hover:-translate-y-0.5">
       {img ? (
         <div className="relative overflow-hidden rounded-xl border border-border/30">
           <Image
@@ -360,7 +360,7 @@ interface TileProps {
 
 export function Tile({ title, href, icon, iconType, img, children }: TileProps & { iconType?: 'solid' | 'outline' }) {
   const content = (
-    <article className="group flex h-full flex-col gap-4 rounded-2xl border border-border/40 bg-background/95 p-6 shadow-sm transition hover:border-accent/60 hover:shadow-md">
+    <article className="group flex h-full flex-col gap-4 rounded-2xl border border-border/60 bg-card p-6 transition hover:border-accent/60">
       {img ? (
         <div className="relative overflow-hidden rounded-xl border border-border/30 bg-muted">
           <Image
@@ -466,4 +466,3 @@ export function Color({ hex, name }: ColorProps) {
     </div>
   )
 }
-

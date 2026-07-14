@@ -1,24 +1,35 @@
 :root {
-  /* Light theme brand tokens — Thally: warm off-white, green-tinted ink,
-     teal-green accent (mirrors thally-website / Thally-Design-System) */
+  /* Light theme brand tokens — warm paper, green-tinted ink, lime + iris. */
   --brand-light-background: 60 45% 98%;
+  --brand-light-card: 0 0% 100%;
   --brand-light-foreground: 105 14% 11%;
   --brand-light-muted: 60 16% 93%;
+  --brand-light-muted-foreground: 108 4% 46%;
   --brand-light-border: 72 9% 89%;
   --brand-light-accent: 161 100% 24%;
   --brand-light-accent-foreground: 0 0% 100%;
+  --brand-light-accent-2: 254 40% 55%;
+  --brand-light-accent-2-foreground: 247 31% 6%;
+  --brand-light-input: 72 9% 89%;
+  --brand-light-sidebar: 60 26% 96%;
   --brand-light-ring: 155 33% 33%;
   --brand-sidebar-active-bg-light: 68 40% 88% / 0.65;
   --brand-sidebar-active-text-light: 66 37% 21%;
 
-  /* Dark theme brand tokens — deep teal-green with a bright lime accent */
-  --brand-dark-background: 176 100% 8%;
-  --brand-dark-foreground: 60 16% 93%;
-  --brand-dark-muted: 174 63% 15%;
-  --brand-dark-border: 174 40% 19%;
-  --brand-dark-accent: 75 81% 66%;
-  --brand-dark-accent-foreground: 105 14% 11%;
-  --brand-dark-ring: 75 81% 66%;
-  --brand-sidebar-active-bg-dark: 172 47% 19% / 0.8;
-  --brand-sidebar-active-text-dark: 75 81% 66%;
+  /* Dark theme brand tokens — Ink + Iris, with lime for primary actions. */
+  --brand-dark-background: 120 27% 2%;
+  --brand-dark-card: 120 20% 3%;
+  --brand-dark-foreground: 60 20% 92%;
+  --brand-dark-muted: 132 15% 6%;
+  --brand-dark-muted-foreground: 110 6% 59%;
+  --brand-dark-border: 120 5% 11%;
+  --brand-dark-accent: 75 75% 57%;
+  --brand-dark-accent-foreground: 127 22% 8%;
+  --brand-dark-accent-2: 251 74% 78%;
+  --brand-dark-accent-2-foreground: 247 31% 6%;
+  --brand-dark-input: 129 8% 17%;
+  --brand-dark-sidebar: 120 20% 3%;
+  --brand-dark-ring: 75 75% 57%;
+  --brand-sidebar-active-bg-dark: 132 15% 6%;
+  --brand-sidebar-active-text-dark: 75 75% 57%;
 }

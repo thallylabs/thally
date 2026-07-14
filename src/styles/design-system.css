@@ -4,8 +4,8 @@
    A perceptual, OKLCH-based token system for Thally's admin analytics dashboard,
    modeled on LI.FI's design language (perceptual color scales, three-tier
    elevation, one dark/light flip, 4px spacing rhythm) reskinned to Thally's
-   GREEN brand (brandPresets.primary — teal #007852 light / lime #CBEF63 dark;
-   warm green-tinted ink neutrals, deep teal dark surfaces). The green scale
+   INK + IRIS brand (brandPresets.primary — teal #007852 light / lime #BAE43E dark;
+   warm green-tinted ink neutrals, near-black ink dark surfaces). The green scale
    below is a fixed, brand-independent data-viz intensity ramp.
 
    SCOPING — this file is OPT-IN and MUST NOT leak into the docs site.
@@ -274,32 +274,33 @@
   --ds-accent-mid:    color-mix(in oklch, var(--ds-accent) 88%, white);
   --ds-accent-strong: color-mix(in oklch, var(--ds-accent) 78%, black);
   --ds-accent-fg:     color-mix(in oklch, var(--ds-accent) 22%, black);
-  --ds-accent-secondary: #99CA50;  /* Thally mid green, brightened for dark */
+  --ds-accent-secondary: oklch(0.740 0.120 292); /* Iris supports lime without competing */
 
   /* Primary flips to the bright accent (lime) on dark, matching the site */
   --ds-primary:       var(--ds-accent);
   --ds-primary-hover: var(--ds-accent-mid);
   --ds-primary-fg:    var(--ds-accent-fg);
 
-  /* Surfaces — deep teal-green (Thally dark), four tiers lifting toward the viewer */
-  --ds-surface-sunk:   oklch(0.225 0.042 188);
-  --ds-surface-page:   oklch(0.260 0.045 188);   /* Thally dark background */
-  --ds-surface-raised: oklch(0.300 0.048 187);
-  --ds-surface-card:   oklch(0.327 0.050 186);   /* Thally dark card */
+  /* Surfaces — near-neutral Ink. Cards stay deliberately close to the page;
+     elevated is reserved for active navigation, hovers, and inset wells. */
+  --ds-surface-sunk:   oklch(0.120 0.010 152);
+  --ds-surface-page:   oklch(0.120 0.010 152);
+  --ds-surface-raised: oklch(0.180 0.012 152);
+  --ds-surface-card:   oklch(0.135 0.010 152);
   --ds-surface-tint:   color-mix(in oklch, var(--ds-text-primary) 3%, transparent);
-  --ds-surface-sidebar: oklch(0.240 0.040 188); /* flush rail — recedes behind page */
+  --ds-surface-sidebar: oklch(0.135 0.010 152);
   --ds-surface-hover:  color-mix(in oklch, var(--ds-text-primary) 6%, transparent);
   --ds-surface-active: color-mix(in oklch, var(--ds-text-primary) 10%, transparent);
 
-  /* Text — inverted ink ladder, warm on teal */
-  --ds-text-primary:   oklch(0.950 0.008 107);   /* Thally dark foreground */
+  /* Text — a warm off-white ladder tuned for the darker Ink page. */
+  --ds-text-primary:   oklch(0.950 0.010 106);
   --ds-text-secondary: oklch(0.800 0.016 115);
-  --ds-text-muted:     oklch(0.680 0.020 125);
+  --ds-text-muted:     oklch(0.680 0.020 140);
   --ds-text-faint:     oklch(0.560 0.024 145);
 
-  --ds-border:         oklch(0.360 0.040 184);
-  --ds-border-subtle:  color-mix(in oklch, var(--ds-text-primary) 8%, transparent);
-  --ds-border-strong:  oklch(0.420 0.038 183);
+  --ds-border:         oklch(0.950 0.010 106 / 0.10);
+  --ds-border-subtle:  oklch(0.950 0.010 106 / 0.06);
+  --ds-border-strong:  oklch(0.950 0.010 106 / 0.16);
 
   /* Status — slightly lighter/brighter to hold contrast on dark surfaces */
   --ds-success: oklch(0.720 0.170 152);
@@ -307,24 +308,21 @@
   --ds-warn:    oklch(0.790 0.150 75);
   --ds-info:    oklch(0.680 0.150 240);
 
-  /* Chart series — brighter for dark backgrounds */
-  --ds-series-1: #009E77;                 /* Thally teal green (dark) */
-  --ds-series-2: #CBEF63;                 /* Thally lime (dark) */
-  --ds-series-3: oklch(0.800 0.150 75);
-  --ds-series-4: oklch(0.700 0.150 240);
-  --ds-series-5: oklch(0.740 0.170 350);
+  /* Chart series — primary lime, teal-green, iris, mid-green, forest. */
+  --ds-series-1: oklch(0.860 0.190 123);
+  --ds-series-2: oklch(0.620 0.130 168);
+  --ds-series-3: oklch(0.740 0.120 292);
+  --ds-series-4: oklch(0.780 0.160 128);
+  --ds-series-5: oklch(0.580 0.100 150);
   --ds-series-6: oklch(0.760 0.130 200);
   --ds-series-7: oklch(0.720 0.180 30);
   --ds-series-8: oklch(0.680 0.130 285);
 
   --ds-chart-grid: color-mix(in oklch, var(--ds-text-primary) 8%, transparent);
 
-  /* Elevation — deeper black + inset white rim sells the lift on dark */
-  --ds-elev-1: 0 1px 2px rgba(0, 0, 0, 0.35),
-               inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  --ds-elev-2: 0 4px 14px -2px rgba(0, 0, 0, 0.45),
-               0 2px 4px -1px rgba(0, 0, 0, 0.25),
-               inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  /* Resting and interactive cards are flush; hairlines carry separation. */
+  --ds-elev-1: none;
+  --ds-elev-2: none;
   --ds-elev-3: 0 24px 56px -8px rgba(0, 0, 0, 0.55),
                0 8px 16px -4px rgba(0, 0, 0, 0.30),
                inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -344,7 +342,7 @@
 /* Panel — the shared surface for chart/metric blocks */
 .thally-dashboard .ds-panel {
   padding: var(--ds-space-24);
-  background: var(--ds-surface-raised);
+  background: var(--ds-surface-card);
   border: 1px solid var(--ds-border);
   border-radius: var(--ds-radius-xl);
   box-shadow: none;

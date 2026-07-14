@@ -188,7 +188,7 @@ function rehypeParseCodeBlocks() {
         ...parent.properties,
         language,
         ...(parsedMeta.title ? { title: parsedMeta.title } : {}),
-        ...(parsedMeta.wrap ? { wrap: true } : {}),
+        ...(parsedMeta.wrap ? { wrap: '' } : {}),
         ...(parsedMeta.highlight?.length
           ? { highlightLines: parsedMeta.highlight.join(',') }
           : {}),

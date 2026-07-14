@@ -46,11 +46,17 @@
 
 :root {
   --thally-background: var(--brand-light-background, 60 45% 98%);
+  --thally-card: var(--brand-light-card, 0 0% 100%);
   --thally-foreground: var(--brand-light-foreground, 105 14% 11%);
   --thally-muted: var(--brand-light-muted, 60 16% 93%);
+  --thally-muted-foreground: var(--brand-light-muted-foreground, 108 4% 46%);
   --thally-border: var(--brand-light-border, 72 9% 89%);
   --thally-accent: var(--brand-light-accent, 161 100% 24%);
   --thally-accent-foreground: var(--brand-light-accent-foreground, 0 0% 100%);
+  --thally-accent-2: var(--brand-light-accent-2, 254 40% 55%);
+  --thally-accent-2-foreground: var(--brand-light-accent-2-foreground, 247 31% 6%);
+  --thally-input: var(--brand-light-input, 72 9% 89%);
+  --thally-sidebar: var(--brand-light-sidebar, 60 26% 96%);
   /* Primary (solid CTAs/buttons) — ink in light mode, per the brand: "primary
      is the dark foreground itself". Accent stays for links/active states.
      Overridable per site via --brand-light-primary[-foreground]. */
@@ -78,18 +84,24 @@
 }
 
 .dark {
-  --thally-background: var(--brand-dark-background, 176 100% 8%);
-  --thally-foreground: var(--brand-dark-foreground, 60 16% 93%);
-  --thally-muted: var(--brand-dark-muted, 174 63% 15%);
-  --thally-border: var(--brand-dark-border, 174 40% 19%);
-  --thally-accent: var(--brand-dark-accent, 75 81% 66%);
-  --thally-accent-foreground: var(--brand-dark-accent-foreground, 105 14% 11%);
+  --thally-background: var(--brand-dark-background, 120 27% 2%);
+  --thally-card: var(--brand-dark-card, 120 20% 3%);
+  --thally-foreground: var(--brand-dark-foreground, 60 20% 92%);
+  --thally-muted: var(--brand-dark-muted, 132 15% 6%);
+  --thally-muted-foreground: var(--brand-dark-muted-foreground, 110 6% 59%);
+  --thally-border: var(--brand-dark-border, 120 5% 11%);
+  --thally-accent: var(--brand-dark-accent, 75 75% 57%);
+  --thally-accent-foreground: var(--brand-dark-accent-foreground, 127 22% 8%);
+  --thally-accent-2: var(--brand-dark-accent-2, 251 74% 78%);
+  --thally-accent-2-foreground: var(--brand-dark-accent-2-foreground, 247 31% 6%);
+  --thally-input: var(--brand-dark-input, 129 8% 17%);
+  --thally-sidebar: var(--brand-dark-sidebar, 120 20% 3%);
   /* Dark primary flips to the bright accent (lime), matching the site */
   --thally-primary: var(--brand-dark-primary, var(--thally-accent));
   --thally-primary-foreground: var(--brand-dark-primary-foreground, var(--thally-accent-foreground));
-  --thally-ring: var(--brand-dark-ring, 75 81% 66%);
-  --sidebar-active-bg: var(--brand-sidebar-active-bg-dark, 172 47% 19% / 0.8);
-  --sidebar-active-text: var(--brand-sidebar-active-text-dark, 75 81% 66%);
+  --thally-ring: var(--brand-dark-ring, 75 75% 57%);
+  --sidebar-active-bg: var(--brand-sidebar-active-bg-dark, 132 15% 6%);
+  --sidebar-active-text: var(--brand-sidebar-active-text-dark, 75 75% 57%);
   --tw-prose-headings: hsl(var(--thally-foreground));
 }
 
@@ -197,7 +209,7 @@ body {
 }
 
 /* ============================================================================
-   SITE BANNER — deep teal-green bar with brand-accent highlights (matches the
+   SITE BANNER — Ink bar with brand-accent highlights (matches the
    Thally dark surface; the accent dot/underline pick up the brand accent)
    ============================================================================ */
 .thally-ink-banner {
@@ -206,7 +218,7 @@ body {
   display: flex;
   justify-content: center;
   padding: 0.625rem 1rem;
-  background: #002b28;
+  background: hsl(var(--brand-dark-background, 120 27% 2%));
   color: #efefe9;
 }
 .thally-ink-banner-inner {

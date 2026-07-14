@@ -136,7 +136,7 @@ function DropTarget({
           <img
             src={`/api/brand/${kind}?mode=${mode}&v=${version}`}
             alt=""
-            style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', borderRadius: 6, background: mode === 'dark' ? '#002b28' : '#fff', padding: 3 }}
+            style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', borderRadius: 6, background: mode === 'dark' ? '#040704' : '#fff', padding: 3 }}
           />
         ) : (
           <>

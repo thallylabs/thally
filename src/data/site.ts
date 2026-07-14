@@ -7,11 +7,17 @@ export type BrandPresetKey = 'primary' | 'secondary'
 
 export interface BrandPalette {
   background: string
+  card?: string
   foreground: string
   muted: string
+  mutedForeground?: string
   border: string
   accent: string
   accentForeground: string
+  accent2?: string
+  accent2Foreground?: string
+  input?: string
+  sidebar?: string
   ring: string
   sidebarActiveBg: string
   sidebarActiveText: string
@@ -84,34 +90,45 @@ export interface SiteConfig {
 }
 
 const brandPresets: Record<BrandPresetKey, BrandConfig> = {
-  // Thally's canonical brand (see Thally-Design-System / thally-website).
-  // Warm off-white surfaces with a near-black green-tinted ink foreground;
-  // the personality comes from the green palette — teal green as the light
-  // accent (links, active states, CTAs), flipping to bright lime on the deep
-  // teal-green dark mode, exactly like the marketing site.
+  // Thally's canonical Ink + Iris brand (see Thally-Design-System).
+  // Warm off-white surfaces in light mode become near-black ink surfaces in
+  // dark mode. Lime remains the primary action color; iris is a restrained
+  // secondary accent for visual distinction and chart series.
   primary: {
     light: {
       background: '#FCFCF7',
+      card: '#FFFFFF',
       foreground: '#1A2018',
       muted: '#EFEFE9',
+      mutedForeground: '#747B72',
       border: '#E5E6E1',
       accent: '#007852',
       accentForeground: '#FFFFFF',
+      accent2: '#755FBB',
+      accent2Foreground: '#0B0A13',
+      input: '#E5E6E1',
+      sidebar: '#F7F7F2',
       ring: '#397059',
       // Olive-family tint (the leaf's own green) for the active sidebar item
       sidebarActiveBg: '68 40% 88% / 0.65',
       sidebarActiveText: '#454A22',
     },
     dark: {
-      background: '#002B28',
-      foreground: '#EFEFE9',
-      muted: '#0E3D38',
-      border: '#1D433F',
-      accent: '#CBEF63',
-      accentForeground: '#1A2018',
-      ring: '#CBEF63',
-      sidebarActiveBg: '172 47% 19% / 0.8',
-      sidebarActiveText: '#CBEF63',
+      background: '#040704',
+      card: '#060906',
+      foreground: '#EFEFE7',
+      muted: '#0E130F',
+      mutedForeground: '#929C90',
+      border: '#1B1E1A',
+      accent: '#BAE43E',
+      accentForeground: '#101911',
+      accent2: '#AC9CF0',
+      accent2Foreground: '#0B0A13',
+      input: '#29302A',
+      sidebar: '#060906',
+      ring: '#BAE43E',
+      sidebarActiveBg: '132 15% 6%',
+      sidebarActiveText: '#BAE43E',
     },
   },
   // Alternate preset — violet. Still a first-class, ready-to-use accent.
@@ -158,4 +175,3 @@ export const siteConfig: SiteConfig = {
   brandPreset,
   brandPresets,
 }
-
