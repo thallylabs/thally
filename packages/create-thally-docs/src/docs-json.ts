@@ -16,6 +16,10 @@ export interface DocsJsonTab {
 export interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
   ai?: { chat?: boolean }
+  i18n?: {
+    defaultLocale: string
+    locales: Array<{ code: string; label: string }>
+  }
   /** Admin-dashboard team roster (C1) — git-committed, no database. */
   team?: {
     members?: Array<{ email: string; role: 'owner' | 'editor' | 'viewer' }>

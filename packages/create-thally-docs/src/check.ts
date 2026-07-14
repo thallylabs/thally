@@ -177,8 +177,21 @@ function extractLinks(content: string): FoundLink[] {
   return links
 }
 
-function pageIdToPath(pageId: string): string {
-  return pageId === 'introduction' ? '/' : `/${pageId}`
+function localizedPage(
+  pageId: string,
+  secondaryLocales: Set<string>,
+): { navPageId: string; locale?: string } {
+  const [first, ...rest] = pageId.split('/')
+  if (secondaryLocales.has(first) && rest.length > 0) {
+    return { navPageId: rest.join('/'), locale: first }
+  }
+  return { navPageId: pageId }
+}
+
+function pageIdToPath(pageId: string, secondaryLocales: Set<string>): string {
+  const { navPageId, locale } = localizedPage(pageId, secondaryLocales)
+  const basePath = navPageId === 'introduction' ? '/' : `/${navPageId}`
+  return locale ? `/${locale}${basePath === '/' ? '' : basePath}` : basePath
 }
 
 function validateOpenApi(projectDir: string, source: string, issues: LintIssue[]): void {
@@ -231,6 +244,15 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   const contentDir = join(projectDir, 'src', 'content')
   const issues: LintIssue[] = []
   const config = readDocsJson(projectDir)
+  const secondaryLocales = new Set(
+    (config.i18n?.locales ?? [])
+      .map((locale) => locale.code)
+      .filter((code) => code !== config.i18n?.defaultLocale),
+  )
+  const generatedApiPaths = new Set([
+    '/api',
+    ...Array.from(secondaryLocales, (locale) => `/${locale}/api`),
+  ])
 
   const navPageIds = new Set<string>()
   const duplicates = new Set<string>()
@@ -272,7 +294,8 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     const rel = filePath.slice(contentDir.length + 1).replace(/\.mdx$/, '').replace(/\\/g, '/')
     const pageId = rel.endsWith('/index') ? rel.slice(0, -6) : rel
 
-    if (!navPageIds.has(pageId)) {
+    const { navPageId } = localizedPage(pageId, secondaryLocales)
+    if (!navPageIds.has(navPageId)) {
       if (fix) {
         addOrphanToNav(projectDir, pageId)
         fixedOrphans.push(pageId)
@@ -304,7 +327,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
     if (options.drift) checkDrift(projectDir, rel2, data, issues)
 
-    const path = pageIdToPath(pageId)
+    const path = pageIdToPath(pageId, secondaryLocales)
     const anchors = extractHeadingAnchors(content)
     validPaths.add(path)
     anchorsByPath.set(path, anchors)
@@ -327,7 +350,10 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       const [beforeHash, anchor] = target.split('#')
       let path = beforeHash.split('?')[0] // strip query string
       if (path.length > 1) path = path.replace(/\/$/, '')
-      if (path.startsWith('/api') || path.startsWith('/_next') || /\.[a-z0-9]+$/i.test(path)) continue // generated/assets
+      const isGeneratedApiPath = Array.from(generatedApiPaths).some(
+        (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+      )
+      if (isGeneratedApiPath || path.startsWith('/_next') || /\.[a-z0-9]+$/i.test(path)) continue // generated/assets
       if (!validPaths.has(path)) {
         issues.push({ severity: 'error', message: `Broken link: "${target}" — no page at "${path}"`, file, line })
       } else if (anchor && !anchorsByPath.get(path)?.has(anchor)) {
