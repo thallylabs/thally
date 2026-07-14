@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { recordAnalyticsEvent } from '@/lib/cloud-bridge'
+import { getCloudSiteConfig } from '@/lib/cloud-link/client'
 
 /**
  * POST /api/feedback
@@ -10,7 +11,28 @@ import { recordAnalyticsEvent } from '@/lib/cloud-bridge'
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { page, vote, url } = body as { page?: string; vote?: string; url?: string }
+    const { page, vote, url, message, visitorType } = body as {
+      page?: string
+      vote?: string
+      url?: string
+      message?: string
+      visitorType?: 'human' | 'agent'
+    }
+
+    const origin = new URL(request.url).origin
+    const cloud = await getCloudSiteConfig(origin)
+    const feedback = cloud?.siteConfig.portable.feedback
+    if (cloud) {
+      if (visitorType === 'agent' && !feedback?.agentFeedback) {
+        return NextResponse.json({ error: 'Agent feedback is disabled.' }, { status: 403 })
+      }
+      if (visitorType !== 'agent' && !feedback?.thumbsRating) {
+        return NextResponse.json({ error: 'Page feedback is disabled.' }, { status: 403 })
+      }
+      if (message && !feedback?.pageFeedback) {
+        return NextResponse.json({ error: 'Written feedback is disabled.' }, { status: 403 })
+      }
+    }
 
     if (!page || !vote) {
       return NextResponse.json({ error: 'Missing page or vote' }, { status: 400 })
@@ -23,7 +45,8 @@ export async function POST(request: Request) {
           path: url ?? page,
           page,
           vote,
-          visitorType: 'human',
+          message: typeof message === 'string' ? message.trim().slice(0, 500) : undefined,
+          visitorType: visitorType ?? 'human',
         })
       } catch (error) {
         // Never let an analytics write failure break the user's request.

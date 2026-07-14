@@ -70,8 +70,11 @@ export async function isAdminAuthenticatedEdge(cookieValue: string | undefined):
   return verifySignedToken(cookieValue)
 }
 
-export async function isDocsAccessGrantedEdge(cookieValue: string | undefined): Promise<boolean> {
-  if (!isDocsAccessEnabledEdge()) return true
+export async function isDocsAccessGrantedEdge(
+  cookieValue: string | undefined,
+  accessEnabled = isDocsAccessEnabledEdge(),
+): Promise<boolean> {
+  if (!accessEnabled) return true
   return verifySignedToken(cookieValue, 'docs')
 }
 

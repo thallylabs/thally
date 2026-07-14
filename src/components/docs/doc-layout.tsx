@@ -8,18 +8,44 @@ import { Feedback } from '@/components/docs/feedback'
 import { TableOfContents } from '@/components/docs/table-of-contents'
 import { ContentStack, DetailColumn, MainColumns } from '@/components/layout/sections'
 import { Prose } from '@/components/mdx/prose'
+import { getRequestCloudSiteConfig, getRequestOrigin } from '@/lib/cloud-link/request'
+import { resolveSiteConfig } from '@/lib/site-config'
 
 interface DocLayoutProps {
   doc: DocEntry
   children: React.ReactNode
 }
 
-export function DocLayout({ doc, children }: DocLayoutProps) {
+export async function DocLayout({ doc, children }: DocLayoutProps) {
   const { prev, next } = getPrevNextLinks(doc.href)
   const breadcrumbs = getBreadcrumbs(doc.href)
   const mode = doc.mode ?? 'default'
   const feedbackConfig = getFeedbackConfig()
-  const feedbackEndpoint = feedbackConfig.endpoint
+  const origin = await getRequestOrigin()
+  const [cloud, effectiveSite] = await Promise.all([
+    getRequestCloudSiteConfig(),
+    resolveSiteConfig(origin),
+  ])
+  const cloudFeedback = cloud?.siteConfig.portable.feedback
+  const showFeedback = cloud
+    ? Boolean(
+        cloudFeedback?.thumbsRating ||
+          cloudFeedback?.pageFeedback ||
+          cloudFeedback?.editSuggestions ||
+          cloudFeedback?.issueReporting,
+      )
+    : true
+  const feedback = showFeedback ? (
+    <Feedback
+      endpoint={feedbackConfig.endpoint ?? '/api/feedback'}
+      pageId={doc.id}
+      repoUrl={effectiveSite.repoUrl}
+      thumbsRating={cloud ? Boolean(cloudFeedback?.thumbsRating) : true}
+      pageFeedback={Boolean(cloudFeedback?.pageFeedback)}
+      editSuggestions={Boolean(cloudFeedback?.editSuggestions)}
+      issueReporting={Boolean(cloudFeedback?.issueReporting)}
+    />
+  ) : null
 
   // custom mode: render children directly, no shell chrome
   if (mode === 'custom') {
@@ -53,7 +79,7 @@ export function DocLayout({ doc, children }: DocLayoutProps) {
           </div>
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
-            <Feedback endpoint={feedbackEndpoint} />
+            {feedback}
             <EditOnGithub pageId={doc.id} />
             <DocPagination prev={prev} next={next} />
           </div>
@@ -73,7 +99,7 @@ export function DocLayout({ doc, children }: DocLayoutProps) {
           </div>
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
-            <Feedback endpoint={feedbackEndpoint} />
+            {feedback}
             <EditOnGithub pageId={doc.id} />
             <DocPagination prev={prev} next={next} />
           </div>
@@ -93,7 +119,7 @@ export function DocLayout({ doc, children }: DocLayoutProps) {
           </div>
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
-            <Feedback endpoint={feedbackEndpoint} />
+            {feedback}
             <EditOnGithub pageId={doc.id} />
             <DocPagination prev={prev} next={next} />
           </div>

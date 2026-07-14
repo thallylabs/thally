@@ -8,8 +8,10 @@
 
 import 'server-only'
 
+import { decodeJwt } from 'jose'
+
 const DEFAULT_CLOUD_URL = 'https://app.thally.io'
-const GRANT_CACHE_TTL_MS = 4 * 60 * 1000
+const GRANT_CACHE_TTL_MS = 30_000
 const REQUEST_TIMEOUT_MS = 8_000
 
 export type CloudLinkStatus = 'connected' | 'not_configured' | 'cloud_unreachable' | 'credential_rejected'
@@ -25,6 +27,56 @@ interface CachedGrant {
 
 interface GrantResponse {
   grant?: unknown
+}
+
+export interface CloudEntitlements {
+  features?: {
+    settingsSync?: boolean
+    passwordProtection?: boolean
+    aiAnswers?: boolean
+    analytics?: boolean
+    [key: string]: boolean | undefined
+  }
+}
+
+export interface CloudPortableConfig {
+  details?: { name?: string; description?: string }
+  feedback?: {
+    thumbsRating?: boolean
+    editSuggestions?: boolean
+    issueReporting?: boolean
+    pageFeedback?: boolean
+    agentFeedback?: boolean
+  }
+  ai?: { enabled?: boolean }
+  branding?: {
+    logo?: string
+    logoDark?: string
+    favicon?: string
+    faviconDark?: string
+    themePreset?: string
+  }
+  analytics?: {
+    enabled?: boolean
+    collectAgentTraffic?: boolean
+    retentionDays?: number
+  }
+}
+
+export interface CloudSiteConfig {
+  portable: CloudPortableConfig
+  access: {
+    mode: 'public' | 'password'
+    passwordHash: string | null
+  }
+}
+
+export interface CloudGrantPayload {
+  siteId: string
+  orgId: string
+  entitlements: CloudEntitlements
+  siteConfig: CloudSiteConfig
+  exp?: number
 }
 
 let cachedGrant: CachedGrant | null = null
@@ -105,6 +157,33 @@ export async function getCloudGrant(siteUrl: string): Promise<string | null> {
   if (cached) return cached
   const result = await exchangeGrant(siteUrl)
   return result.grant ?? null
+}
+
+/**
+ * Read the server-only runtime configuration carried by the short-lived grant.
+ * The grant is obtained directly from Thally Cloud over authenticated TLS and
+ * is never exposed to browser code. Invalid or legacy grants safely resolve to
+ * null so free/self-hosted sites keep using their repository configuration.
+ */
+export async function getCloudSiteConfig(siteUrl: string): Promise<CloudGrantPayload | null> {
+  const grant = await getCloudGrant(siteUrl)
+  if (!grant) return null
+
+  try {
+    const payload = decodeJwt(grant) as Partial<CloudGrantPayload>
+    if (
+      typeof payload.siteId !== 'string' ||
+      typeof payload.orgId !== 'string' ||
+      !payload.entitlements ||
+      !payload.siteConfig ||
+      (payload.exp && payload.exp * 1000 <= Date.now())
+    ) {
+      return null
+    }
+    return payload as CloudGrantPayload
+  } catch {
+    return null
+  }
 }
 
 /** Clear process-local state between tests. */

@@ -28,6 +28,10 @@ vi.mock('@/lib/agent-endpoints', () => ({
   isPublicAgentEndpoint: vi.fn().mockReturnValue(false),
 }))
 
+vi.mock('@/lib/cloud-link/edge', () => ({
+  getCloudAccessConfigEdge: vi.fn().mockResolvedValue(null),
+}))
+
 import { middleware } from '@/middleware'
 
 describe('Thally Cloud handshake middleware access', () => {

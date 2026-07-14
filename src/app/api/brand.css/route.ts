@@ -1,5 +1,7 @@
 import { getAdminSettings } from '@/lib/admin/settings'
 import { themeVarsFor, toHslValue } from '@thallylabs/core/theme'
+import type { NextRequest } from 'next/server'
+import { getCloudSiteConfig } from '@/lib/cloud-link/client'
 
 export const runtime = 'nodejs'
 
@@ -10,11 +12,15 @@ const HEX = /^#[0-9a-fA-F]{3,8}$/
  * defaults, so a theme/accent chosen in the dashboard applies site-wide without
  * making every page dynamic. Empty when nothing is overridden.
  */
-export async function GET() {
-  const s = await getAdminSettings()
+export async function GET(request: NextRequest) {
+  const [s, cloud] = await Promise.all([
+    getAdminSettings(),
+    getCloudSiteConfig(request.nextUrl.origin),
+  ])
   const parts: Array<string> = []
 
-  if (s.brandTheme) parts.push(themeVarsFor(s.brandTheme))
+  const theme = cloud?.siteConfig.portable.branding?.themePreset ?? s.brandTheme
+  if (theme) parts.push(themeVarsFor(theme))
 
   if (s.brandAccent) {
     const { light, dark } = s.brandAccent

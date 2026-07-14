@@ -25,6 +25,7 @@
  */
 import { siteConfig, type SiteConfig } from '@/data/site'
 import { getAdminSettings } from '@/lib/admin/settings'
+import { getCloudSiteConfig } from '@/lib/cloud-link/client'
 
 /**
  * Resolve the effective site config: build-time `siteConfig` with the
@@ -32,13 +33,17 @@ import { getAdminSettings } from '@/lib/admin/settings'
  * Falls back to the pristine build config if admin storage is unavailable, so
  * a free self-hosted site with no store still renders.
  */
-export async function resolveSiteConfig(): Promise<SiteConfig> {
+export async function resolveSiteConfig(siteUrl?: string): Promise<SiteConfig> {
   try {
-    const s = await getAdminSettings()
+    const [s, cloud] = await Promise.all([
+      getAdminSettings(),
+      siteUrl ? getCloudSiteConfig(siteUrl) : Promise.resolve(null),
+    ])
+    const details = cloud?.siteConfig.portable.details
     return {
       ...siteConfig,
-      name: s.siteName ?? siteConfig.name,
-      description: s.siteDescription ?? siteConfig.description,
+      name: details?.name ?? s.siteName ?? siteConfig.name,
+      description: details?.description ?? s.siteDescription ?? siteConfig.description,
       repoUrl: s.siteRepoUrl ?? siteConfig.repoUrl ?? '',
     }
   } catch {
