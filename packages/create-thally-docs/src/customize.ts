@@ -435,7 +435,8 @@ npm install
 npm run dev
 \`\`\`
 
-Open [http://localhost:3040](http://localhost:3040).
+The server starts at [http://localhost:3040](http://localhost:3040), or the next
+available port when 3040 is already in use.
 
 ## Write your docs
 

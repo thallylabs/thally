@@ -10,13 +10,23 @@ import { runTranslateCommand } from './translate.js'
 
 const args = process.argv.slice(2)
 const flags = args.filter((a) => a.startsWith('-'))
+const valueFlags = new Set([
+  '--api-key',
+  '--branch',
+  '--docs-dir',
+  '--into',
+  '--locale',
+  '--model',
+  '--pages',
+])
 
 // Build positionals by skipping values consumed by named flags (e.g. --locale es)
 const positional: Array<string> = []
 for (let i = 0; i < args.length; i++) {
   if (args[i].startsWith('-')) {
-    // If the next token doesn't start with '-', it's this flag's value — skip it
-    if (i + 1 < args.length && !args[i + 1].startsWith('-')) {
+    // Only named value flags consume the next token. Boolean flags such as
+    // --yes and --install can safely appear before the project directory.
+    if (valueFlags.has(args[i]) && i + 1 < args.length && !args[i + 1].startsWith('-')) {
       i++
     }
   } else {
@@ -100,6 +110,11 @@ async function runMigrateCommand(): Promise<void> {
 
 async function runScaffoldCommand(): Promise<void> {
   const useDefaults = flags.includes('--yes') || flags.includes('-y')
+  const installPreference = flags.includes('--install')
+    ? true
+    : flags.includes('--no-install')
+      ? false
+      : undefined
   const dirArg = positional[0]
 
   // Early validation when dir is passed via positional arg
@@ -111,7 +126,7 @@ async function runScaffoldCommand(): Promise<void> {
     }
   }
 
-  const answers = await gatherAnswers(dirArg, useDefaults)
+  const answers = await gatherAnswers(dirArg, useDefaults, installPreference)
 
   const result = await scaffold({
     projectDir: answers.projectDir,
@@ -124,7 +139,7 @@ async function runScaffoldCommand(): Promise<void> {
     trackRepos: answers.trackRepos,
   })
 
-  success(result.projectDir, answers.projectName)
+  success(result.projectDir, answers.projectName, answers.doInstall)
 }
 
 async function runCheckCommand(): Promise<void> {

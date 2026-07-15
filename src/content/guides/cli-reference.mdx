@@ -25,7 +25,7 @@ The CLI walks through an interactive setup:
 - **Description** — used for SEO and OpenGraph tags
 - **Brand preset** — `primary` (green) or `secondary` (purple)
 - **GitHub repo URL** — auto-wires Support and GitHub links
-- **Install dependencies** — runs `npm install` for you
+- **Install dependencies now** — optional; skip it for a seconds-fast scaffold, then run `npm install` when you are ready
 
 Skip all prompts and accept defaults with `--yes`:
 
@@ -38,6 +38,8 @@ npx create-thally-docs my-docs --yes
 | Flag | Description |
 |------|-------------|
 | `--yes`, `-y` | Accept all defaults, skip interactive prompts |
+| `--install` | Install project dependencies after scaffolding |
+| `--no-install` | Skip dependency installation without prompting |
 
 ---
 
