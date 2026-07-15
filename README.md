@@ -27,6 +27,7 @@ Thally is **agent-native**: every page is served to humans as pre-rendered HTML 
 # Scaffold a new project (recommended)
 npx create-thally-docs my-docs
 cd my-docs
+npm install
 npm run dev
 ```
 
@@ -39,7 +40,8 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3040](http://localhost:3040).
+The server starts at [http://localhost:3040](http://localhost:3040), or the next
+available port when 3040 is already in use.
 
 ## Project Structure
 

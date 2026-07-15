@@ -9,10 +9,12 @@ AI agents as structured JSON, JSON-LD, and Markdown from the same URL.
 ```bash
 npx create-thally-docs my-docs
 cd my-docs
+npm install
 npm run dev
 ```
 
-Then open [http://localhost:3040](http://localhost:3040). A freshly scaffolded
+The dev server starts at [http://localhost:3040](http://localhost:3040) and
+automatically uses the next available port when needed. A freshly scaffolded
 site is agent-ready out of the box and scores 100/A on the built-in
 [Agent Readiness Score](https://github.com/thallylabs/thally).
 
@@ -21,6 +23,10 @@ Run non-interactively with smart defaults:
 ```bash
 npx create-thally-docs my-docs --yes
 ```
+
+Dependency installation is deliberately opt-in so the scaffold finishes in
+seconds. Pass `--install` to run it immediately, or `--no-install` to skip the
+interactive question explicitly.
 
 ## What you get
 

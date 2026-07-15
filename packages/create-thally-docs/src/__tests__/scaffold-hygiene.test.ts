@@ -221,7 +221,7 @@ describe('patchPackageJson — standalone scaffolds must not inherit monorepo wi
         version: '0.1.0',
         workspaces: ['packages/*'],
         scripts: {
-          dev: 'next dev -p 3040',
+          dev: 'node scripts/run-next.mjs dev',
           prebuild: 'npm run packages:build && npm run embeddings:build',
           build: 'next build',
           'embeddings:build': 'tsx scripts/build-embeddings.ts',
@@ -249,7 +249,7 @@ describe('patchPackageJson — standalone scaffolds must not inherit monorepo wi
     expect(pkg.scripts['packages:build']).toBeUndefined()
     // Untouched: the scripts a site actually runs, and registry-resolvable deps.
     expect(pkg.scripts.build).toBe('next build')
-    expect(pkg.scripts.dev).toBe('next dev -p 3040')
+    expect(pkg.scripts.dev).toBe('node scripts/run-next.mjs dev')
     expect(pkg.dependencies['@thallylabs/core']).toBe('^0.1.0')
     // The monorepo lockfile must not survive — the scaffold's own npm install
     // writes a clean one that resolves workspace deps from the registry.
