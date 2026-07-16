@@ -7,21 +7,28 @@
     "packages/*"
   ],
   "scripts": {
+    "predev": "npm run runtime-sources:build",
     "dev": "next dev -p 3040",
-    "prebuild": "npm run packages:build && npm run embeddings:build",
+    "postinstall": "npm run runtime-sources:build",
+    "prebuild": "npm run runtime-sources:build && npm run packages:build && npm run embeddings:build",
     "build": "next build",
+    "build:cloudflare": "opennextjs-cloudflare build",
+    "preview:cloudflare": "npm run build:cloudflare && opennextjs-cloudflare preview",
+    "deploy:cloudflare": "npm run build:cloudflare && opennextjs-cloudflare deploy",
+    "upload:cloudflare": "npm run build:cloudflare && opennextjs-cloudflare upload",
+    "smoke:cloudflare": "tsx scripts/smoke-cloudflare.mts",
+    "test:cloudflare": "npm run build:cloudflare && npm run smoke:cloudflare",
     "embeddings:build": "tsx scripts/build-embeddings.ts",
     "start": "next start -p 3040",
     "lint": "eslint",
     "pretest": "npm run packages:build",
     "test": "vitest run",
     "check:agents": "tsx scripts/agent-readiness.ts",
+    "runtime-sources:build": "tsx scripts/build-runtime-sources.mts",
     "packages:build": "npm run build -w packages/core && npm run build -w packages/create-thally-docs && npm run build -w packages/mcp && npm run build -w packages/agent && npm run build -w packages/cli"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "@thallylabs/core": "^0.1.0",
-    "@thallylabs/mcp": "*",
     "@headlessui/react": "^2.2.9",
     "@libsql/client": "^0.14.0",
     "@mdx-js/loader": "^3.1.0",
@@ -32,6 +39,8 @@
     "@radix-ui/react-scroll-area": "^1.1.0",
     "@radix-ui/react-separator": "^1.0.3",
     "@radix-ui/react-slot": "^1.1.0",
+    "@thallylabs/core": "^0.1.0",
+    "@thallylabs/mcp": "*",
     "clsx": "^2.1.1",
     "cmdk": "^1.0.0",
     "framer-motion": "^12.23.11",
@@ -59,6 +68,7 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "1.15.0",
     "@tailwindcss/typography": "^0.5.16",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -71,6 +81,7 @@
     "tsx": "^4.21.0",
     "typescript": "5.9.3",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^4.0.15"
+    "vitest": "^4.0.15",
+    "wrangler": "4.111.0"
   }
 }

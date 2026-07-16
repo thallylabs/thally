@@ -8,6 +8,7 @@ import {
   patchGitignore,
   patchPackageJson,
   updateSiteConfig,
+  writeCloudflareRuntimeConfig,
   writeStarterAgentGuide,
   writeStarterContent,
   writeStarterReadme,
@@ -128,6 +129,36 @@ describe('writeStarterReadme', () => {
   })
 })
 
+describe('writeCloudflareRuntimeConfig', () => {
+  let dir: string
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('writes portable OpenNext and Wrangler configuration without account secrets', () => {
+    dir = mkdtempSync(join(tmpdir(), 'thally-scaffold-'))
+
+    writeCloudflareRuntimeConfig(dir, 'acme-docs')
+
+    const openNext = readFileSync(join(dir, 'open-next.config.ts'), 'utf8')
+    const wrangler = JSON.parse(readFileSync(join(dir, 'wrangler.jsonc'), 'utf8'))
+    expect(openNext).toContain('defineCloudflareConfig')
+    expect(wrangler).toMatchObject({
+      name: 'acme-docs',
+      main: '.open-next/worker.js',
+      compatibility_date: '2026-07-15',
+      observability: {
+        enabled: true,
+        logs: { head_sampling_rate: 1 },
+        traces: { enabled: true, head_sampling_rate: 0.01 },
+      },
+      assets: { binding: 'ASSETS' },
+    })
+    expect(JSON.stringify(wrangler)).not.toContain('account_id')
+    expect(JSON.stringify(wrangler)).not.toContain('api_token')
+  })
+})
+
 describe('writeStarterAgentGuide', () => {
   let dir: string
   afterEach(() => {
@@ -230,13 +261,16 @@ describe('patchPackageJson — standalone scaffolds must not inherit monorepo wi
           'packages:build': 'npm run build -w packages/core',
         },
         dependencies: { '@thallylabs/core': '^0.1.0' },
+        devDependencies: { '@thallylabs/cli': '0.5.0' },
       }),
     )
   }
 
-  it('strips workspaces + package builds, keeps embeddings prebuild, renames to the site slug', () => {
+  it('strips workspaces, keeps generated inputs, and renames to the site slug', () => {
     dir = mkdtempSync(join(tmpdir(), 'thally-scaffold-'))
     writeTemplatePkg(dir)
+    mkdirSync(join(dir, 'scripts'))
+    writeFileSync(join(dir, 'scripts/build-runtime-sources.mts'), '// template compiler\n')
     writeFileSync(join(dir, 'package-lock.json'), '{"name":"thally","lockfileVersion":3}')
 
     patchPackageJson(dir, 'acme-docs')
@@ -244,11 +278,21 @@ describe('patchPackageJson — standalone scaffolds must not inherit monorepo wi
     const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
     expect(pkg.name).toBe('acme-docs')
     expect(pkg.workspaces).toBeUndefined()
-    expect(pkg.scripts.prebuild).toBe('npm run embeddings:build')
+    expect(pkg.scripts.prebuild).toBe(
+      'npm run runtime-sources:build && npm run embeddings:build',
+    )
+    expect(pkg.scripts.predev).toBe('npm run runtime-sources:build')
+    expect(pkg.scripts.postinstall).toBe('npm run runtime-sources:build')
     expect(pkg.scripts.pretest).toBeUndefined()
     expect(pkg.scripts['packages:build']).toBeUndefined()
     // Untouched: the scripts a site actually runs, and registry-resolvable deps.
     expect(pkg.scripts.build).toBe('next build')
+    expect(pkg.scripts['build:cloudflare']).toBe('opennextjs-cloudflare build')
+    expect(pkg.scripts['deploy:cloudflare']).toContain('opennextjs-cloudflare deploy')
+    expect(pkg.devDependencies['@thallylabs/cli']).toBe('0.5.1')
+    expect(pkg.devDependencies['@opennextjs/cloudflare']).toBe('1.15.0')
+    expect(pkg.devDependencies.vite).toBe('7.2.6')
+    expect(pkg.devDependencies.wrangler).toBe('4.111.0')
     expect(pkg.scripts.dev).toBe('node scripts/run-next.mjs dev')
     expect(pkg.dependencies['@thallylabs/core']).toBe('^0.1.0')
     // The monorepo lockfile must not survive — the scaffold's own npm install
@@ -276,7 +320,10 @@ describe('patchPackageJson — standalone scaffolds must not inherit monorepo wi
 
     patchPackageJson(dir, 'acme-docs')
 
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
     const lock = JSON.parse(readFileSync(join(dir, 'package-lock.json'), 'utf8'))
+    expect(pkg.scripts.prebuild).toBe('npm run embeddings:build')
+    expect(pkg.scripts['runtime-sources:build']).toBeUndefined()
     expect(lock.name).toBe('acme-docs')
     expect(lock.packages[''].name).toBe('acme-docs')
     expect(existsSync(join(dir, 'package-lock.json'))).toBe(true)
@@ -284,6 +331,8 @@ describe('patchPackageJson — standalone scaffolds must not inherit monorepo wi
 
   it('drops a stale canonical lockfile that still contains workspace packages', () => {
     dir = mkdtempSync(join(tmpdir(), 'thally-scaffold-'))
+    mkdirSync(join(dir, 'scripts'))
+    writeFileSync(join(dir, 'scripts/build-runtime-sources.mts'), '// template compiler\n')
     writeFileSync(
       join(dir, 'package.json'),
       JSON.stringify({
@@ -308,7 +357,11 @@ describe('patchPackageJson — standalone scaffolds must not inherit monorepo wi
     patchPackageJson(dir, 'acme-docs')
 
     const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
-    expect(pkg.dependencies['@thallylabs/mcp']).toBe('0.7.0')
+    expect(pkg.dependencies['@thallylabs/mcp']).toBe('0.7.1')
+    expect(pkg.scripts['runtime-sources:build']).toBe('tsx scripts/build-runtime-sources.mts')
+    expect(pkg.scripts.prebuild).toBe(
+      'npm run runtime-sources:build && npm run embeddings:build',
+    )
     expect(existsSync(join(dir, 'package-lock.json'))).toBe(false)
   })
 })

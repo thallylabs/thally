@@ -1,6 +1,6 @@
-import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parse as parseYaml } from 'yaml'
+import { readRuntimeSource } from '@/lib/runtime-sources'
 import type { ApiReferenceConfig, ApiSpecConfig, OpenAPIDocument, ResolvedSpec } from '@/lib/openapi/types'
 
 const specCache = new Map<string, Promise<OpenAPIDocument>>()
@@ -10,13 +10,14 @@ function cacheKey(config: ApiSpecConfig) {
 }
 
 async function readFromFile(filePath: string) {
-  // URL-style paths like /openapi.json are served from public/ at runtime,
-  // so resolve them relative to public/ on the filesystem.
-  const absolutePath = filePath.startsWith('/')
-    ? path.resolve(process.cwd(), 'public', filePath.slice(1))
-    : path.resolve(process.cwd(), filePath)
-  const buffer = await readFile(absolutePath, 'utf8')
-  const ext = path.extname(absolutePath).toLowerCase()
+  // URL-style paths like /openapi.json are author-owned public files. The
+  // runtime-source layer reads those exact bytes from disk during development
+  // and from the generated Worker bundle in production.
+  const projectPath = filePath.startsWith('/')
+    ? path.join('public', filePath.slice(1))
+    : filePath
+  const buffer = readRuntimeSource(projectPath)
+  const ext = path.extname(projectPath).toLowerCase()
   if (ext === '.yaml' || ext === '.yml') {
     return parseYaml(buffer) as OpenAPIDocument
   }
@@ -69,4 +70,3 @@ export function getSpecConfig(reference: ApiReferenceConfig, specId?: string) {
   }
   return spec
 }
-

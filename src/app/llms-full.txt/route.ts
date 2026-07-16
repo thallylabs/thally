@@ -1,12 +1,12 @@
-import fs from 'node:fs'
 import path from 'node:path'
 import matter from 'gray-matter'
 import { siteConfig } from '@/data/site'
 import { getDocEntries, getSidebarCollections } from '@/data/docs'
+import { readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 import { getSiteUrl } from '@/lib/site-url'
 
 const baseUrl = getSiteUrl()
-const CONTENT_ROOT = path.join(process.cwd(), 'src/content')
+const CONTENT_ROOT = 'src/content'
 
 function readRawContent(pageId: string): string | null {
   const candidates = [
@@ -15,8 +15,8 @@ function readRawContent(pageId: string): string | null {
   ]
 
   for (const filePath of candidates) {
-    if (fs.existsSync(filePath)) {
-      const raw = fs.readFileSync(filePath, 'utf8')
+    if (runtimeSourceExists(filePath)) {
+      const raw = readRuntimeSource(filePath)
       const { content } = matter(raw)
       // Strip JSX component tags but keep their text content
       return content

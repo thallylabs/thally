@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { createClient, type Client } from '@libsql/client'
+import { createClient as createWebClient, type Client } from '@libsql/client/web'
 import type { KvEntry, StorageAdapter, StorageEvent } from '@/lib/storage/types'
 
 /**
@@ -34,6 +34,14 @@ export function createLibsqlAdapter(url: string, authToken?: string): StorageAda
     if (!clientPromise) {
       clientPromise = (async () => {
         ensureParentDir(url)
+        // The package root selects a native SQLite binding under Node, which
+        // cannot even be evaluated in workerd. Remote databases use libSQL's
+        // fetch/WebSocket client in every runtime. Only a local `file:` URL
+        // resolves the Node entry, and the computed specifier prevents edge
+        // bundlers from eagerly instantiating that native-only dependency.
+        const createClient = url.startsWith('file:')
+          ? (await import('@libsql/' + 'client')).createClient
+          : createWebClient
         const client = createClient({ url, authToken })
         await client.execute(`CREATE TABLE IF NOT EXISTS storage_kv (
           namespace TEXT NOT NULL,

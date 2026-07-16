@@ -1,6 +1,8 @@
 import type { Element, Root } from 'hast'
 import {
   createHighlighter,
+  createJavaScriptRegexEngine,
+  defaultJavaScriptRegexConstructor,
   type Highlighter,
   type ThemedToken,
   type ThemeRegistration,
@@ -41,6 +43,14 @@ let highlighterPromise: Promise<Highlighter> | null = null
 function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
+      // Workers disallow runtime WebAssembly code generation. Shiki's
+      // JavaScript regex engine preserves highlighting without Oniguruma WASM.
+      engine: createJavaScriptRegexEngine({
+        // The default lazily compiles long patterns with `new Function`, which
+        // workerd forbids. Eager native RegExp construction is CSP-safe.
+        regexConstructor: (pattern) =>
+          defaultJavaScriptRegexConstructor(pattern, { lazyCompileLength: Infinity }),
+      }),
       themes: [cssVariablesTheme],
       langs: [FALLBACK_LANGUAGE],
     })
