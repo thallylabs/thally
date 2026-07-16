@@ -4,7 +4,7 @@ import { siteConfig } from '@/data/site'
 import { resolveOgConfig } from '@/lib/og'
 import { getBrandAsset } from '@/lib/admin/settings'
 
-// Node (not edge) so it can read the admin-uploaded logo from F1.
+// Node (not edge) because the admin storage adapter may use Node facilities.
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest) {
@@ -22,15 +22,10 @@ export async function GET(request: NextRequest) {
   let logoUri = await getBrandAsset('logo')
   let logoIsSquareDefault = false
   if (!logoUri) {
-    try {
-      const { readFile } = await import('node:fs/promises')
-      const { join } = await import('node:path')
-      const png = await readFile(join(process.cwd(), 'public', 'brand', 'thally-logo-dark.png'))
-      logoUri = `data:image/png;base64,${png.toString('base64')}`
-      logoIsSquareDefault = true
-    } catch {
-      // No bundled mark — the lettered fallback below renders instead
-    }
+    // Keep binary assets in the Worker's static-assets binding instead of the
+    // text source manifest. ImageResponse can resolve the absolute asset URL.
+    logoUri = new URL('/brand/thally-logo-dark.png', request.url).toString()
+    logoIsSquareDefault = true
   }
 
   // Fetch the font from Google Fonts at the edge

@@ -18,6 +18,14 @@ packages/*/node_modules/
 /.next/
 /out/
 
+# Cloudflare/OpenNext build and local runtime state
+/.open-next/
+/.thally-upload/
+/.wrangler/
+/src/generated/runtime-sources.ts
+/src/generated/runtime-docs.ts
+/src/generated/runtime-docs/
+
 # production
 /build
 

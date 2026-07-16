@@ -145,14 +145,20 @@ docker build -t my-docs .
 docker run -p 3000:3000 my-docs
 ```
 
-## Cloudflare Pages
+## Cloudflare Workers
 
-Use the `@cloudflare/next-on-pages` adapter:
+Thally ships an OpenNext configuration for Cloudflare Workers. Workers preserve
+the server routes used by search, agent endpoints, authentication, analytics,
+and the Try It proxy; a static Pages export does not.
 
-1. Install: `npm install @cloudflare/next-on-pages`
-2. Set build command: `npx @cloudflare/next-on-pages`
-3. Set output directory: `.vercel/output/static`
-4. Deploy via the Cloudflare dashboard or Wrangler CLI
+```bash
+npm run preview:cloudflare  # build and test locally in workerd
+npm run deploy:cloudflare   # build and deploy with Wrangler
+```
+
+Authenticate Wrangler with `npx wrangler login` for local deployment, or set a
+scoped `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in CI. Keep those
+values in the deployment environment—never in `docs.json` or the repository.
 
 ## Static export
 

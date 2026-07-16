@@ -11,6 +11,10 @@ function isTestEnv(): boolean {
   return process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST)
 }
 
+function isWorkerdRuntime(): boolean {
+  return globalThis.navigator?.userAgent === 'Cloudflare-Workers'
+}
+
 function createAdapter(): StorageAdapter {
   // Explicit opt-out and tests use the in-memory adapter.
   if ((process.env.THALLY_STORAGE ?? process.env.DOX_STORAGE) === 'memory' || isTestEnv()) return createMemoryAdapter()
@@ -18,6 +22,11 @@ function createAdapter(): StorageAdapter {
   // A configured URL (Turso/libSQL) is durable and, if remote, cross-instance.
   const configured = (process.env.THALLY_DATABASE_URL ?? process.env.DOX_DATABASE_URL)?.trim()
   if (configured) return createLibsqlAdapter(configured, (process.env.THALLY_DATABASE_TOKEN ?? process.env.DOX_DATABASE_TOKEN)?.trim())
+
+  // Cloudflare Workers has a read-only virtual filesystem and cannot persist a
+  // local libSQL database. Keep the zero-config runtime functional in memory;
+  // production durability still requires the documented remote database URL.
+  if (isWorkerdRuntime()) return createMemoryAdapter()
 
   // Zero-config default: a durable on-disk file, like the analytics store.
   return createLibsqlAdapter(DEFAULT_DB_FILE)
