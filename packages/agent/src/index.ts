@@ -9,7 +9,9 @@ export {
   mentionSenderWorkflow,
   mergeSenderWorkflow,
   trackSenderWorkflow,
+  buildDocsAgentWorkflow,
   DOCS_AGENT_WORKFLOW,
+  DOCS_AGENT_WORKFLOW_CONTRACT,
 } from './scaffold.js'
-export type { TrackSenderRepo } from './scaffold.js'
+export type { DocsAgentWorkflowOptions, TrackSenderRepo } from './scaffold.js'
 export type { DocsTask, AgentOptions, AgentResult, OutputMode, TaskSource } from './types.js'

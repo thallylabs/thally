@@ -2,13 +2,17 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { AGENT_BRANCH_PREFIX, DOCS_PREVIEW_LABEL, buildTrackInstruction } from '@thallylabs/mcp/track'
 
+/** Version marker used by Cloud Track to offer reviewable workflow upgrades. */
+export const DOCS_AGENT_WORKFLOW_CONTRACT = 'thally-track/v2'
+
 /**
  * The docs-repo "hub" workflow: it listens for a dispatched docs task (from a
  * `@thally` comment or a merge in a product repo), runs the agent, and opens a
  * documentation PR — plus a scheduled drift sweep. This is the only place the
  * ANTHROPIC_API_KEY lives; product repos never see it.
  */
-export const DOCS_AGENT_WORKFLOW = `name: Thally docs agent
+const DOCS_AGENT_WORKFLOW_TEMPLATE = `# Contract: ${DOCS_AGENT_WORKFLOW_CONTRACT}
+name: Thally docs agent
 
 on:
   # A product repo dispatches a docs task here (see the sender workflow).
@@ -22,6 +26,9 @@ on:
         required: true
       from_pr:
         description: Product PR URL (optional context)
+        required: false
+      context:
+        description: Pre-resolved product PR context (optional)
         required: false
   # Weekly provenance drift sweep — flags pages whose sources changed.
   schedule:
@@ -50,6 +57,7 @@ jobs:
       - name: Draft docs and open a PR
         env:
           ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
+          THALLY_AGENT_MODEL: \${{ vars.THALLY_AGENT_MODEL }}
           # A fine-grained PAT / App token with write on this docs repo (and read
           # on your product repos). Falls back to the built-in token.
           GH_TOKEN: \${{ secrets.THALLY_AGENT_TOKEN || secrets.GITHUB_TOKEN }}
@@ -60,11 +68,33 @@ jobs:
           # commands (GitHub Actions script-injection hardening).
           INSTRUCTION: \${{ github.event.client_payload.instruction || inputs.instruction }}
           FROM_PR: \${{ github.event.client_payload.from_pr || inputs.from_pr }}
+          TRACK_CONTEXT: \${{ github.event.client_payload.context || inputs.context }}
+          REQUESTER: \${{ github.event.client_payload.requester }}
         run: |
-          if [ -n "$FROM_PR" ]; then
-            npx thally agent "$INSTRUCTION" --from-pr "$FROM_PR" --pr
+          run_thally() {
+            if [ -x node_modules/.bin/thally ]; then
+              # Existing sites may pin an older CLI that cannot consume the
+              # App-resolved private PR context. Keep Track's receiver pinned
+              # to the workflow contract version without editing package.json.
+              npm install --no-save --package-lock=false --ignore-scripts @thallylabs/cli@0.5.2
+              node_modules/.bin/thally "$@"
+              return
+            fi
+            npm run packages:build
+            node packages/cli/dist/index.js "$@"
+          }
+          REQUESTER_ARGS=()
+          if [ -n "$REQUESTER" ]; then
+            REQUESTER_ARGS=(--requester "$REQUESTER")
+          fi
+          if [ -n "$TRACK_CONTEXT" ]; then
+            CONTEXT_FILE="$RUNNER_TEMP/thally-track-context.md"
+            printf '%s' "$TRACK_CONTEXT" > "$CONTEXT_FILE"
+            run_thally agent "$INSTRUCTION" --from-pr "$FROM_PR" --context-file "$CONTEXT_FILE" "\${REQUESTER_ARGS[@]}" --pr
+          elif [ -n "$FROM_PR" ]; then
+            run_thally agent "$INSTRUCTION" --from-pr "$FROM_PR" "\${REQUESTER_ARGS[@]}" --pr
           else
-            npx thally agent "$INSTRUCTION" --pr
+            run_thally agent "$INSTRUCTION" "\${REQUESTER_ARGS[@]}" --pr
           fi
 
   drift-sweep:
@@ -79,8 +109,55 @@ jobs:
           node-version: 20
       - run: npm ci
       - name: Check for stale docs
-        run: npx thally check --drift --ci
+        run: |
+          if [ -x node_modules/.bin/thally ]; then
+            node_modules/.bin/thally check --drift --ci
+          else
+            npm run packages:build
+            node packages/cli/dist/index.js check --drift --ci
+          fi
 `
+
+export interface DocsAgentWorkflowOptions {
+  /** Branch containing the production docs; repository_dispatch still reads this workflow from the default branch. */
+  docsBranch?: string
+  /** Repository-relative directory containing docs.json for monorepo sites. */
+  docsRootDir?: string | null
+}
+
+/**
+ * Build the docs-side receiver for a specific connected site.
+ *
+ * GitHub loads repository_dispatch workflows only from the repository default
+ * branch. Cloud therefore installs this file there while an explicit checkout
+ * ref and working directory keep agent edits on the site's configured docs
+ * branch/root.
+ */
+export function buildDocsAgentWorkflow(options: DocsAgentWorkflowOptions = {}): string {
+  const docsBranch = options.docsBranch?.trim()
+  const docsRootDir = options.docsRootDir?.replace(/^\/+|\/+$/g, '')
+  if (docsRootDir?.split('/').some((segment) => !segment || segment === '.' || segment === '..')) {
+    throw new Error('The docs root must be a repository-relative directory.')
+  }
+
+  let workflow = DOCS_AGENT_WORKFLOW_TEMPLATE
+  if (docsBranch) {
+    workflow = workflow.replaceAll(
+      '          fetch-depth: 0',
+      `          fetch-depth: 0\n          ref: ${JSON.stringify(docsBranch)}`,
+    )
+  }
+  if (docsRootDir) {
+    workflow = workflow.replaceAll(
+      '    runs-on: ubuntu-latest\n    steps:',
+      `    runs-on: ubuntu-latest\n    defaults:\n      run:\n        working-directory: ${JSON.stringify(docsRootDir)}\n    steps:`,
+    )
+  }
+  return workflow
+}
+
+/** Generic root/default-branch receiver scaffolded by the public CLI. */
+export const DOCS_AGENT_WORKFLOW = buildDocsAgentWorkflow()
 
 /** Product-repo sender: a `@thally` comment on a PR dispatches a task to the docs repo. */
 export function mentionSenderWorkflow(docsRepo: string): string {

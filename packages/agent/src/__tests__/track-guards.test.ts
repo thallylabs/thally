@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildToolBridge } from '../tools.js'
+import { buildPullRequestCreateArgs } from '../run.js'
 
 describe('agent tool whitelist', () => {
   it('never exposes sync_from_repo (or other non-whitelisted tools) to the model', () => {
@@ -12,6 +13,31 @@ describe('agent tool whitelist', () => {
 })
 
 describe('generated workflow shell-safety (Thally Track injection hardening)', () => {
+  it('checks out a connected non-default branch and runs from a monorepo docs root', async () => {
+    const { buildDocsAgentWorkflow } = await import('../scaffold.js')
+    const yaml = buildDocsAgentWorkflow({ docsBranch: 'release/v2', docsRootDir: 'apps/docs' })
+    expect(yaml.match(/ref: "release\/v2"/g)).toHaveLength(2)
+    expect(yaml.match(/working-directory: "apps\/docs"/g)).toHaveLength(2)
+    expect(() => buildDocsAgentWorkflow({ docsRootDir: '../outside' })).toThrow(
+      'repository-relative directory',
+    )
+  })
+
+  it('targets the checked-out production branch when opening the docs PR', () => {
+    expect(buildPullRequestCreateArgs('docs: export', 'body', 'thally/agent-1', 'release/v2')).toEqual([
+      'pr',
+      'create',
+      '--title',
+      'docs: export',
+      '--body',
+      'body',
+      '--head',
+      'thally/agent-1',
+      '--base',
+      'release/v2',
+    ])
+  })
+
   it('DOCS_AGENT_WORKFLOW passes dispatch values via env, never inline in the run script', async () => {
     const { DOCS_AGENT_WORKFLOW } = await import('../scaffold.js')
     // The instruction must be an env var, not expanded into the shell assignment.
@@ -31,6 +57,23 @@ describe('generated workflow shell-safety (Thally Track injection hardening)', (
     expect(yaml).not.toMatch(/requester\]=\$\{\{/)
     // No unescaped double-quotes around the tab that could break the assignment.
     expect(yaml).not.toContain('\\"API Reference\\"')
+  })
+
+  it('docs-agent workflow accepts app-resolved PR context without exposing it to shell parsing', async () => {
+    const { DOCS_AGENT_WORKFLOW } = await import('../scaffold.js')
+    expect(DOCS_AGENT_WORKFLOW).toContain('TRACK_CONTEXT: ${{ github.event.client_payload.context || inputs.context }}')
+    expect(DOCS_AGENT_WORKFLOW).toContain(`printf '%s' "$TRACK_CONTEXT" > "$CONTEXT_FILE"`)
+    expect(DOCS_AGENT_WORKFLOW).toContain('--context-file "$CONTEXT_FILE"')
+    expect(DOCS_AGENT_WORKFLOW).not.toContain('printf \'$TRACK_CONTEXT\'')
+  })
+
+  it('docs-agent workflow resolves the CLI in both standalone sites and the source monorepo', async () => {
+    const { DOCS_AGENT_WORKFLOW } = await import('../scaffold.js')
+    expect(DOCS_AGENT_WORKFLOW).toContain('[ -x node_modules/.bin/thally ]')
+    expect(DOCS_AGENT_WORKFLOW).toContain(
+      'npm install --no-save --package-lock=false --ignore-scripts @thallylabs/cli@0.5.2',
+    )
+    expect(DOCS_AGENT_WORKFLOW).toContain('node packages/cli/dist/index.js')
   })
 
   it('trackSenderWorkflow covers all preview actions + the loop guard, matching the webhook path', async () => {
