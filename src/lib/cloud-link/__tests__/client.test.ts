@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   connectCloudSite,
   getCloudGrant,
+  getCloudServiceGrant,
   getCloudSiteConfig,
   resetCloudGrantCacheForTests,
 } from '../client'
@@ -38,6 +39,7 @@ describe('Thally Cloud link client', () => {
       siteId: 'site-managed',
       orgId: 'org-1',
       entitlements: { features: { settingsSync: true, analytics: true } },
+      runtimeGrant: 'managed-release-grant',
       siteConfig: {
         portable: {
           details: { name: 'Managed docs' },
@@ -55,6 +57,9 @@ describe('Thally Cloud link client', () => {
     })
     await expect(getCloudSiteConfig('https://docs.example.com')).resolves.toEqual(payload)
     await expect(getCloudGrant('https://docs.example.com')).resolves.toBeNull()
+    await expect(getCloudServiceGrant('https://docs.example.com')).resolves.toBe(
+      'managed-release-grant',
+    )
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

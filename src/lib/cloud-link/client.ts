@@ -76,6 +76,8 @@ export interface CloudGrantPayload {
   orgId: string
   entitlements: CloudEntitlements
   siteConfig: CloudSiteConfig
+  /** Release-scoped credential for managed paid-service calls. */
+  runtimeGrant?: string
   exp?: number
 }
 
@@ -207,6 +209,17 @@ export async function getCloudGrant(siteUrl: string): Promise<string | null> {
   if (cached) return cached
   const result = await exchangeGrant(siteUrl)
   return result.grant ?? null
+}
+
+/**
+ * Return the credential accepted by Thally Cloud data-plane endpoints.
+ * Managed sites use the revocable release grant embedded in their snapshot;
+ * linked external sites reuse their short-lived signed entitlement grant.
+ */
+export async function getCloudServiceGrant(siteUrl: string): Promise<string | null> {
+  const managed = getManagedSiteConfig()
+  if (managed) return managed.runtimeGrant?.trim() || null
+  return getCloudGrant(siteUrl)
 }
 
 /**
