@@ -45,6 +45,14 @@ export interface TrackedRepoStatus {
   lastSyncedPr: string | null
 }
 
+/** Tenant scope resolved from a signed runtime grant by the control plane. */
+export interface CloudSiteServiceScope {
+  orgId: string
+  siteId: string
+  retentionDays: number
+  analyticsEnabled: boolean
+}
+
 // ---------------------------------------------------------------------------
 // Services
 // ---------------------------------------------------------------------------
@@ -78,6 +86,8 @@ export interface AiService {
     zeroResults?: AnalyticsSummary['search']['zeroResults'],
     limit?: number,
   ): Promise<Array<ContentGap>>
+  /** Metered answer endpoint for a signed linked-site runtime. */
+  handleSiteChat?(request: Request, scope: CloudSiteServiceScope): Promise<Response>
 }
 
 export interface AnalyticsService {
@@ -85,6 +95,16 @@ export interface AnalyticsService {
   trackEvent(event: Omit<AnalyticsEvent, 'id' | 'ts'> & { ts?: number }): Promise<AnalyticsEvent>
   /** Aggregate the event store into the dashboard summary. */
   aggregate(range: AnalyticsRange): Promise<AnalyticsSummary>
+  /** Persist an event under a control-plane-resolved tenant scope. */
+  trackSiteEvent?(
+    scope: CloudSiteServiceScope,
+    event: Omit<AnalyticsEvent, 'id' | 'ts'> & { ts?: number },
+  ): Promise<void>
+  /** Aggregate one owned site's retained events. */
+  aggregateSite?(
+    scope: CloudSiteServiceScope,
+    range: AnalyticsRange,
+  ): Promise<AnalyticsSummary>
 }
 
 export interface CloudServices {
