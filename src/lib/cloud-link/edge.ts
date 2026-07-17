@@ -15,6 +15,22 @@ interface EdgeGrantPayload {
 
 let cached: { value: EdgeCloudConfig; expiresAt: number } | null = null
 
+function managedSiteConfig(): EdgeCloudConfig | null {
+  const serialized =
+    process.env.THALLY_CLOUD_SITE_CONFIG?.trim() ||
+    process.env.DOX_CLOUD_SITE_CONFIG?.trim()
+  if (!serialized) return null
+
+  try {
+    const payload = JSON.parse(serialized) as EdgeGrantPayload
+    return payload?.siteConfig && typeof payload.siteConfig === 'object'
+      ? payload.siteConfig
+      : null
+  } catch {
+    return null
+  }
+}
+
 function decodeBase64Url(value: string): string {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
@@ -32,12 +48,19 @@ function decodeGrant(grant: string): EdgeGrantPayload | null {
 }
 
 export async function getCloudAccessConfigEdge(siteUrl: string): Promise<EdgeCloudConfig | null> {
+  const managed = managedSiteConfig()
+  if (managed) return managed
   if (cached && cached.expiresAt > Date.now()) return cached.value
 
-  const token = process.env.THALLY_CLOUD_SITE_TOKEN?.trim()
+  const token =
+    process.env.THALLY_CLOUD_SITE_TOKEN?.trim() ||
+    process.env.DOX_CLOUD_SITE_TOKEN?.trim()
   if (!token) return null
 
-  const cloud = process.env.THALLY_CLOUD_URL?.trim() || DEFAULT_CLOUD_URL
+  const cloud =
+    process.env.THALLY_CLOUD_URL?.trim() ||
+    process.env.DOX_CLOUD_URL?.trim() ||
+    DEFAULT_CLOUD_URL
   try {
     const response = await fetch(new URL('/api/cloud/grant', cloud), {
       method: 'POST',
