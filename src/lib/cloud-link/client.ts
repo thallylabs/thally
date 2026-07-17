@@ -82,12 +82,61 @@ export interface CloudGrantPayload {
 let cachedGrant: CachedGrant | null = null
 
 function getSiteToken(): string | null {
-  return process.env.THALLY_CLOUD_SITE_TOKEN?.trim() || null
+  return (
+    process.env.THALLY_CLOUD_SITE_TOKEN?.trim() ||
+    process.env.DOX_CLOUD_SITE_TOKEN?.trim() ||
+    null
+  )
 }
 
 function getCloudUrl(): URL {
-  const configured = process.env.THALLY_CLOUD_URL?.trim() || DEFAULT_CLOUD_URL
+  const configured =
+    process.env.THALLY_CLOUD_URL?.trim() ||
+    process.env.DOX_CLOUD_URL?.trim() ||
+    DEFAULT_CLOUD_URL
   return new URL(configured.endsWith('/') ? configured : `${configured}/`)
+}
+
+/**
+ * Managed hosting injects a release-scoped snapshot instead of the long-lived
+ * site credential. Customer-authored Worker code can inspect its own bindings,
+ * so handing it the reusable credential would let that code impersonate the
+ * deployment after the release has been superseded. The snapshot contains only
+ * that release's effective settings and entitlements.
+ */
+function getManagedSiteConfig(): CloudGrantPayload | null {
+  const serialized =
+    process.env.THALLY_CLOUD_SITE_CONFIG?.trim() ||
+    process.env.DOX_CLOUD_SITE_CONFIG?.trim()
+  if (!serialized) return null
+
+  try {
+    const payload = JSON.parse(serialized) as Partial<CloudGrantPayload>
+    return isCloudGrantPayload(payload) ? payload : null
+  } catch {
+    return null
+  }
+}
+
+function isCloudGrantPayload(
+  payload: Partial<CloudGrantPayload>,
+): payload is CloudGrantPayload {
+  return Boolean(
+    typeof payload.siteId === 'string' &&
+      typeof payload.orgId === 'string' &&
+      payload.entitlements &&
+      typeof payload.entitlements === 'object' &&
+      payload.siteConfig &&
+      typeof payload.siteConfig === 'object' &&
+      payload.siteConfig.portable &&
+      typeof payload.siteConfig.portable === 'object' &&
+      payload.siteConfig.access &&
+      (payload.siteConfig.access.mode === 'public' ||
+        payload.siteConfig.access.mode === 'password') &&
+      (payload.siteConfig.access.passwordHash === null ||
+        typeof payload.siteConfig.access.passwordHash === 'string') &&
+      (!payload.exp || payload.exp * 1000 > Date.now()),
+  )
 }
 
 function readCachedGrant(): string | null {
@@ -142,6 +191,7 @@ async function exchangeGrant(siteUrl: string): Promise<CloudLinkResult & { grant
  * The returned status is deliberately sanitized and never includes a secret.
  */
 export async function connectCloudSite(siteUrl: string): Promise<CloudLinkResult> {
+  if (getManagedSiteConfig()) return { status: 'connected' }
   const cached = readCachedGrant()
   if (cached) return { status: 'connected' }
   const result = await exchangeGrant(siteUrl)
@@ -166,21 +216,15 @@ export async function getCloudGrant(siteUrl: string): Promise<string | null> {
  * null so free/self-hosted sites keep using their repository configuration.
  */
 export async function getCloudSiteConfig(siteUrl: string): Promise<CloudGrantPayload | null> {
+  const managed = getManagedSiteConfig()
+  if (managed) return managed
+
   const grant = await getCloudGrant(siteUrl)
   if (!grant) return null
 
   try {
     const payload = decodeJwt(grant) as Partial<CloudGrantPayload>
-    if (
-      typeof payload.siteId !== 'string' ||
-      typeof payload.orgId !== 'string' ||
-      !payload.entitlements ||
-      !payload.siteConfig ||
-      (payload.exp && payload.exp * 1000 <= Date.now())
-    ) {
-      return null
-    }
-    return payload as CloudGrantPayload
+    return isCloudGrantPayload(payload) ? payload : null
   } catch {
     return null
   }
