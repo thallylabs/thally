@@ -698,7 +698,7 @@ export function patchPackageJson(targetDir: string, slug: string): void {
   // The managed builder depends on the Cloudflare-aware CLI contract. Override
   // older canonical-template pins so a newly scaffolded site cannot silently
   // retain a pre-Workers release.
-  pkg.devDependencies['@thallylabs/cli'] = '0.5.1'
+  pkg.devDependencies['@thallylabs/cli'] = '0.5.2'
   pkg.devDependencies['@opennextjs/cloudflare'] ??= '1.15.0'
   // vite-tsconfig-paths declares Vite as a peer; the monorepo used to satisfy
   // it incidentally through workspace tooling. Standalone test runs need the

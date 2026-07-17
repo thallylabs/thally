@@ -20,6 +20,16 @@ import type { DocsTask, AgentOptions, AgentResult } from './types.js'
 
 const DEFAULT_MODEL = 'claude-sonnet-5'
 
+/** Keep generated documentation PRs based on the branch the agent checked out. */
+export function buildPullRequestCreateArgs(
+  title: string,
+  body: string,
+  branch: string,
+  baseBranch: string,
+): Array<string> {
+  return ['pr', 'create', '--title', title, '--body', body, '--head', branch, '--base', baseBranch]
+}
+
 /**
  * Run a docs task end-to-end on a **git sandbox branch**: assert a clean repo,
  * branch off HEAD, let the agent mutate the tree, self-validate (one repair
@@ -113,7 +123,7 @@ export async function runAgent(client: AnthropicLike, task: DocsTask, options: A
       push(projectDir, branch)
       let prUrl: string
       try {
-        prUrl = execFileSync('gh', ['pr', 'create', '--title', title, '--body', body, '--head', branch], {
+        prUrl = execFileSync('gh', buildPullRequestCreateArgs(title, body, branch, original), {
           cwd: projectDir,
           encoding: 'utf8',
         }).trim()

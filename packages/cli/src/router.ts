@@ -28,7 +28,7 @@ export const COMMANDS: Array<CommandInfo> = [
   { name: 'migrate', summary: 'Migrate docs from a GitHub URL', usage: 'thally migrate <github-url> [dir]' },
   { name: 'translate', summary: 'Translate content into a locale', usage: 'thally translate --locale <code>' },
   { name: 'mcp', summary: 'Start the Model Context Protocol server (stdio)', usage: 'thally mcp' },
-  { name: 'agent', summary: 'Draft docs from a task (PR, diff, or instruction) as a reviewed PR', usage: 'thally agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--dry-run] [--pr]' },
+  { name: 'agent', summary: 'Draft docs from a task (PR, diff, or instruction) as a reviewed PR', usage: 'thally agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--context-file <path>] [--dry-run] [--pr]' },
   { name: 'track', summary: 'Track product repos — their merged PRs become docs PRs', usage: 'thally track <add|list|test|setup> [owner/repo] [--branch <base>] [--paths <globs>] [--pr <n>]' },
 ]
 

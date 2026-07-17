@@ -289,7 +289,7 @@ describe('patchPackageJson — standalone scaffolds must not inherit monorepo wi
     expect(pkg.scripts.build).toBe('next build')
     expect(pkg.scripts['build:cloudflare']).toBe('opennextjs-cloudflare build')
     expect(pkg.scripts['deploy:cloudflare']).toContain('opennextjs-cloudflare deploy')
-    expect(pkg.devDependencies['@thallylabs/cli']).toBe('0.5.1')
+    expect(pkg.devDependencies['@thallylabs/cli']).toBe('0.5.2')
     expect(pkg.devDependencies['@opennextjs/cloudflare']).toBe('1.15.0')
     expect(pkg.devDependencies.vite).toBe('7.2.6')
     expect(pkg.devDependencies.wrangler).toBe('4.111.0')
