@@ -1,6 +1,6 @@
 {
   "name": "@thallylabs/cli",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "The unified thally CLI — author content + config; the framework stays a hidden runtime",
   "type": "module",
   "engines": {

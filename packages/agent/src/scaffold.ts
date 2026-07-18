@@ -1,9 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { AGENT_BRANCH_PREFIX, DOCS_PREVIEW_LABEL, buildTrackInstruction } from '@thallylabs/mcp/track'
+import { DEFAULT_AGENT_MODEL } from './model.js'
 
 /** Version marker used by Cloud Track to offer reviewable workflow upgrades. */
-export const DOCS_AGENT_WORKFLOW_CONTRACT = 'thally-track/v2'
+export const DOCS_AGENT_WORKFLOW_CONTRACT = 'thally-track/v3'
 
 /**
  * The docs-repo "hub" workflow: it listens for a dispatched docs task (from a
@@ -57,7 +58,7 @@ jobs:
       - name: Draft docs and open a PR
         env:
           ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
-          THALLY_AGENT_MODEL: \${{ vars.THALLY_AGENT_MODEL }}
+          THALLY_AGENT_MODEL: \${{ vars.THALLY_AGENT_MODEL || '${DEFAULT_AGENT_MODEL}' }}
           # A fine-grained PAT / App token with write on this docs repo (and read
           # on your product repos). Falls back to the built-in token.
           GH_TOKEN: \${{ secrets.THALLY_AGENT_TOKEN || secrets.GITHUB_TOKEN }}
@@ -76,7 +77,7 @@ jobs:
               # Existing sites may pin an older CLI that cannot consume the
               # App-resolved private PR context. Keep Track's receiver pinned
               # to the workflow contract version without editing package.json.
-              npm install --no-save --package-lock=false --ignore-scripts @thallylabs/cli@0.5.2
+              npm install --no-save --package-lock=false --ignore-scripts @thallylabs/cli@0.5.3
               node_modules/.bin/thally "$@"
               return
             fi
