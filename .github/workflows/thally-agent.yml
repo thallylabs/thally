@@ -1,4 +1,4 @@
-# Contract: thally-track/v2
+# Contract: thally-track/v3
 name: Thally docs agent
 
 on:
@@ -44,7 +44,7 @@ jobs:
       - name: Draft docs and open a PR
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          THALLY_AGENT_MODEL: ${{ vars.THALLY_AGENT_MODEL }}
+          THALLY_AGENT_MODEL: ${{ vars.THALLY_AGENT_MODEL || 'claude-sonnet-5' }}
           # A fine-grained PAT / App token with write on this docs repo (and read
           # on your product repos). Falls back to the built-in token.
           GH_TOKEN: ${{ secrets.THALLY_AGENT_TOKEN || secrets.GITHUB_TOKEN }}
@@ -63,7 +63,7 @@ jobs:
               # Existing sites may pin an older CLI that cannot consume the
               # App-resolved private PR context. Keep Track's receiver pinned
               # to the workflow contract version without editing package.json.
-              npm install --no-save --package-lock=false --ignore-scripts @thallylabs/cli@0.5.2
+              npm install --no-save --package-lock=false --ignore-scripts @thallylabs/cli@0.5.3
               node_modules/.bin/thally "$@"
               return
             fi

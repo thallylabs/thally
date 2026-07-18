@@ -67,11 +67,19 @@ describe('generated workflow shell-safety (Thally Track injection hardening)', (
     expect(DOCS_AGENT_WORKFLOW).not.toContain('printf \'$TRACK_CONTEXT\'')
   })
 
+  it('docs-agent workflow supplies a model when the optional repository variable is unset', async () => {
+    const { DOCS_AGENT_WORKFLOW, DOCS_AGENT_WORKFLOW_CONTRACT } = await import('../scaffold.js')
+    expect(DOCS_AGENT_WORKFLOW_CONTRACT).toBe('thally-track/v3')
+    expect(DOCS_AGENT_WORKFLOW).toContain(
+      "THALLY_AGENT_MODEL: ${{ vars.THALLY_AGENT_MODEL || 'claude-sonnet-5' }}",
+    )
+  })
+
   it('docs-agent workflow resolves the CLI in both standalone sites and the source monorepo', async () => {
     const { DOCS_AGENT_WORKFLOW } = await import('../scaffold.js')
     expect(DOCS_AGENT_WORKFLOW).toContain('[ -x node_modules/.bin/thally ]')
     expect(DOCS_AGENT_WORKFLOW).toContain(
-      'npm install --no-save --package-lock=false --ignore-scripts @thallylabs/cli@0.5.2',
+      'npm install --no-save --package-lock=false --ignore-scripts @thallylabs/cli@0.5.3',
     )
     expect(DOCS_AGENT_WORKFLOW).toContain('node packages/cli/dist/index.js')
   })

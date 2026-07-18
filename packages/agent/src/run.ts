@@ -16,9 +16,8 @@ import { runDocsCheck } from './validate.js'
 import { runAgentLoop, type AnthropicLike } from './agent.js'
 import { loadAgentsGuidance } from './config.js'
 import { buildSystemPrompt, buildUserPrompt, buildRepairPrompt } from './prompt.js'
+import { resolveAgentModel } from './model.js'
 import type { DocsTask, AgentOptions, AgentResult } from './types.js'
-
-const DEFAULT_MODEL = 'claude-sonnet-5'
 
 /** Keep generated documentation PRs based on the branch the agent checked out. */
 export function buildPullRequestCreateArgs(
@@ -38,7 +37,7 @@ export function buildPullRequestCreateArgs(
  */
 export async function runAgent(client: AnthropicLike, task: DocsTask, options: AgentOptions): Promise<AgentResult> {
   const { projectDir, mode } = options
-  const model = options.model ?? process.env.THALLY_AGENT_MODEL ?? process.env.DOX_AGENT_MODEL ?? DEFAULT_MODEL
+  const model = resolveAgentModel(options.model)
   const maxSteps = options.maxSteps ?? 24
   const emit = options.onEvent ?? (() => {})
 
