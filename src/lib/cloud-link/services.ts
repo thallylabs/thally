@@ -9,6 +9,7 @@
 
 import 'server-only'
 
+import '@/lib/search/register-doc-source'
 import { getRelevantChunks } from '@thallylabs/core'
 import { siteConfig } from '@/data/site'
 import type { AnalyticsEvent } from '@/lib/analytics/types'

@@ -28,10 +28,12 @@ export { slugify } from './slugify.js'
 export {
   parseMdxContent,
   getContentDocument,
+  registerContentDocumentSource,
   mdxToMarkdown,
 } from './content/index.js'
 export type {
   ContentDocument,
+  ContentDocumentResolver,
   ContentHeading,
   ContentTocItem,
   ContentCodeBlock,
