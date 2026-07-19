@@ -120,8 +120,10 @@ export function SiteShell({ children, initialCollections, searchIndex, i18nConfi
         (matchesPath(collection.href, pathname) || matchesPath(collection.href, currentPath)),
     )?.id ?? activeCollection.id
 
+  // `clip` contains horizontal spill without creating a scroll container,
+  // which lets the banner-aware desktop sidebar remain sticky.
   return (
-    <div className="min-h-screen w-full overflow-x-hidden bg-background text-foreground">
+    <div className="min-h-screen w-full overflow-x-clip bg-background text-foreground">
       <div className={`flex min-h-screen w-full ${shell.wrapper}`}>
         <Sidebar
           sections={activeCollection.sections}
@@ -163,4 +165,3 @@ export function SiteShell({ children, initialCollections, searchIndex, i18nConfi
     </div>
   )
 }
-
