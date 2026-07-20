@@ -35,10 +35,8 @@
   --theme-nav-bar-bg:                hsl(var(--thally-muted) / 0.2);
   --theme-nav-bar-border-color:      hsl(var(--thally-border) / 0.5);
   --theme-nav-bar-radius:            1rem;      /* outer container */
-  --theme-nav-tab-radius:            1rem;      /* individual tab pill */
+  --theme-nav-tab-radius:            1rem;      /* individual tab */
   --theme-nav-tab-indicator-opacity: 1;         /* accent underline on active tab */
-  --theme-nav-tab-active-bg:         hsl(var(--thally-background));
-  --theme-nav-tab-active-shadow:     0 1px 2px 0 rgb(0 0 0 / 0.05);
 }
 /* Per-theme overrides are injected as a <style> tag in layout.tsx so they
    are SSR'd directly in the HTML and take effect without relying on CSS
@@ -153,15 +151,6 @@ body {
 }
 .dark .prose :where(h1, h2, h3, h4) {
   color: var(--tw-prose-headings) !important;
-}
-
-/* Nav tab strip — active pill.
-   Consumes the --theme-nav-tab-active-* tokens (defined in :root above and
-   overridden per structural theme in layout.tsx). Previously these tokens
-   were defined but never applied, so active tabs only showed the underline. */
-.thally-nav-tab-item.thally-nav-tab-active {
-  background-color: var(--theme-nav-tab-active-bg);
-  box-shadow: var(--theme-nav-tab-active-shadow);
 }
 
 /* Steps component — hide connector line on last step */
