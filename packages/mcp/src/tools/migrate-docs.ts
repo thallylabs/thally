@@ -1,13 +1,14 @@
 import { z } from 'zod'
-import { migrateDocs } from '../lib/migrate/index.js'
+import { migrateDocs } from 'create-thally-docs/migrate'
 
 export const migrateDocsSchema = z.object({
-  sourceUrl: z.string().describe('GitHub URL of the docs repo to migrate'),
+  sourceUrl: z.string().describe('GitHub repository URL or public documentation URL to migrate'),
   projectDir: z.string().describe('Path for new project or existing project dir'),
   into: z.boolean().optional().default(false).describe('Migrate into existing project instead of scaffolding'),
   branch: z.string().optional().describe('Git branch (default: auto-detect)'),
   docsDir: z.string().optional().describe('Docs subdirectory in repo (default: auto-detect)'),
   apiKey: z.string().optional().describe('Anthropic API key for non-Markdown file conversion'),
+  maxPages: z.number().int().min(1).max(1000).optional().describe('Maximum public URL pages to import'),
 })
 
 export async function handleMigrateDocs(input: z.infer<typeof migrateDocsSchema>): Promise<string> {
@@ -20,6 +21,7 @@ export async function handleMigrateDocs(input: z.infer<typeof migrateDocsSchema>
     apiKey,
     branch: input.branch,
     docsDir: input.docsDir,
+    maxPages: input.maxPages,
     yes: true,
   })
 

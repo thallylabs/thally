@@ -43,13 +43,13 @@ npx create-thally-docs my-docs --yes
 
 ## create-thally-docs migrate
 
-Migrates an existing documentation repository from GitHub into a Thally project.
+Migrates a GitHub documentation repository or any public documentation URL into a Thally project.
 
 ```bash
-npx create-thally-docs migrate <github-url> [output-dir] [options]
+npx create-thally-docs migrate <github-or-docs-url> [output-dir] [options]
 ```
 
-Thally clones the source repo, reads all Markdown and MDX files directly, converts navigation from the source platform's config, and writes everything into a ready-to-run Thally project.
+For repositories, Thally reads Markdown, MDX, navigation, local snippets, assets, locales, redirects, and OpenAPI files. For live sites, it prefers `llms.txt` and Markdown endpoints, then uses path-scoped sitemaps and navigation links before falling back to HTML conversion.
 
 **Supported source platforms:** Mintlify, Docusaurus, GitBook, Nextra, VitePress, Starlight, and any repo with plain Markdown files.
 
@@ -62,6 +62,12 @@ npx create-thally-docs migrate https://github.com/org/repo my-docs
 # Derive the output dir from the repo name
 npx create-thally-docs migrate https://github.com/mintlify/starter
 
+# Migrate a live docs site without its source repository
+npx create-thally-docs migrate https://docs.example.com my-docs
+
+# Keep a large public crawl bounded
+npx create-thally-docs migrate https://example.com/docs my-docs --max-pages 200
+
 # Migrate a specific branch or subdirectory
 npx create-thally-docs migrate https://github.com/org/repo/tree/main/docs my-docs
 
@@ -71,10 +77,12 @@ npx create-thally-docs migrate https://github.com/org/repo --into ./existing-doc
 
 ### What gets migrated
 
-- All `.md` and `.mdx` files are copied and converted to clean MDX
-- Navigation structure is detected from `mint.json`, `docusaurus.config.js`, `docs.json`, or inferred from the directory structure
+- All documentation `.md` and `.mdx` files are copied; repository-only files such as `README.md` and `AGENTS.md` are excluded
+- Current Mintlify `docs.json` navigation, local `$ref` files, languages, nested groups, tabs, anchors, products, dropdowns, versions, and menus are projected into Thally navigation
+- Imported MDX snippets are inlined, while components already supported by Thally are preserved
+- Public URL crawls remain on the submitted origin and docs path, preventing an origin-wide sitemap from importing marketing or blog pages
 - OpenAPI spec files (`.json`, `.yaml`) are detected and wired up as an API Reference tab
-- Platform-specific MDX components are normalized to Thally equivalents (see [component mapping](#component-mapping) below)
+- Static repository assets are copied into `public/`
 
 ### Options
 
@@ -83,21 +91,19 @@ npx create-thally-docs migrate https://github.com/org/repo --into ./existing-doc
 | `--into <dir>` | Migrate into an existing Thally project instead of scaffolding a new one |
 | `--branch <name>` | Override the auto-detected git branch |
 | `--docs-dir <path>` | Override the auto-detected docs subdirectory |
-| `--api-key <key>` | Anthropic API key for converting non-Markdown files (e.g. `.rst`). Falls back to `ANTHROPIC_API_KEY` env var |
+| `--max-pages <count>` | Maximum pages for a public URL crawl (default and maximum `1000`) |
 | `--yes`, `-y` | Skip confirmation prompts |
 
 ### Component mapping
 
-Mintlify, Docusaurus, and GitBook use platform-specific MDX components that don't exist in Thally. The migration tool converts them automatically:
+Thally renders Mintlify's common MDX components directly. The importer only renames syntax that does not have the same component name:
 
 | Source | Thally equivalent |
 |--------|---------------|
-| `<Tip>` | `<Note>` |
 | `<Check>` | `<Note>` |
 | `<Danger>` | `<Error>` |
-| `<Callout>` | `<Note>` / `<Warning>` / `<Info>` |
-| `:::note ...:::` (Docusaurus) | `<Note>` |
-| `{% hint style="..." %}` (GitBook) | `<Note>` / `<Warning>` |
+| `<Tree.Folder>` | `<Folder>` |
+| `<Tree.File>` | `<File>` |
 | `<AccordionGroup>` | stripped (children kept) |
 | `<Expandable title="...">` | `<Accordion title="...">` |
 | `<ResponseField>` / `<ParamField>` | Markdown property definition |

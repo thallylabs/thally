@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { logo, success, slugify } from './utils.js'
 import { gatherAnswers } from './prompts.js'
 import { scaffold } from './scaffold.js'
-import { parseGitHubUrl } from './migrate/github.js'
+import { parseGitHubRepositoryUrl } from '@thallylabs/migrate'
 import { migrateDocs } from './migrate/index.js'
 import { runCheck } from './check.js'
 import { runTranslateCommand } from './translate.js'
@@ -36,15 +36,16 @@ async function runMigrateCommand(): Promise<void> {
   const sourceUrl = positional[1]
   if (!sourceUrl) {
     console.error('\n  ❌ Source URL is required.')
-    console.error('     Usage: create-thally-docs migrate <github-url> [output-dir] [options]')
-    console.error('     Example: create-thally-docs migrate https://github.com/mintlify/docs my-docs')
+    console.error('     Usage: create-thally-docs migrate <github-or-docs-url> [output-dir] [options]')
+    console.error('     Example: create-thally-docs migrate https://docs.example.com my-docs')
     process.exit(1)
   }
 
-  // Validate GitHub URL
-  let parsedSource: ReturnType<typeof parseGitHubUrl>
+  let source: URL
   try {
-    parsedSource = parseGitHubUrl(sourceUrl)
+    source = new URL(sourceUrl)
+    if (!['http:', 'https:'].includes(source.protocol)) throw new Error('Only HTTP and HTTPS sources are supported.')
+    if (source.hostname.toLowerCase() === 'github.com') parseGitHubRepositoryUrl(sourceUrl)
   } catch (err) {
     console.error(`\n  ❌ ${err instanceof Error ? err.message : err}`)
     process.exit(1)
@@ -64,12 +65,20 @@ async function runMigrateCommand(): Promise<void> {
   } else if (positional[2]) {
     projectDir = resolve(positional[2])
   } else {
-    // Derive from repo name
-    projectDir = resolve(`${slugify(parsedSource.repo)}-docs`)
+    const sourceName = source.hostname.toLowerCase() === 'github.com'
+      ? parseGitHubRepositoryUrl(sourceUrl).repo
+      : source.pathname.split('/').filter(Boolean).at(-1) ?? source.hostname.split('.')[0]
+    projectDir = resolve(`${slugify(sourceName)}-docs`)
   }
 
   const branch = getFlagValue('--branch')
   const docsDir = getFlagValue('--docs-dir')
+  const maxPagesValue = getFlagValue('--max-pages')
+  const maxPages = maxPagesValue ? Number(maxPagesValue) : undefined
+  if (maxPages !== undefined && (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 1000)) {
+    console.error('\n  ❌ --max-pages must be an integer between 1 and 1000.')
+    process.exit(1)
+  }
   const yes = flags.includes('--yes') || flags.includes('-y')
 
   logo()
@@ -81,12 +90,6 @@ async function runMigrateCommand(): Promise<void> {
   if (docsDir) console.log(`  Docs dir: ${docsDir}`)
   console.log('')
 
-  if (!apiKey) {
-    console.warn('  ⚠  No API key provided. Non-Markdown files will be skipped.')
-    console.warn('     Set ANTHROPIC_API_KEY=... or pass --api-key <key> to convert them.')
-    console.warn('')
-  }
-
   await migrateDocs({
     sourceUrl,
     projectDir,
@@ -94,6 +97,7 @@ async function runMigrateCommand(): Promise<void> {
     apiKey,
     branch,
     docsDir,
+    maxPages,
     yes,
   })
 }
