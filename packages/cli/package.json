@@ -1,6 +1,6 @@
 {
   "name": "@thallylabs/cli",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "The unified thally CLI — author content + config; the framework stays a hidden runtime",
   "type": "module",
   "engines": {
@@ -24,8 +24,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "@thallylabs/mcp": "0.7.2",
-    "create-thally-docs": "0.7.6"
+    "@thallylabs/mcp": "0.7.3",
+    "create-thally-docs": "0.7.7"
   },
   "devDependencies": {
     "@thallylabs/agent": "*",
