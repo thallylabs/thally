@@ -17,6 +17,7 @@ export interface ScaffoldAnswers {
 export async function gatherAnswers(
   dirArg: string | undefined,
   useDefaults: boolean,
+  installPreference?: boolean,
 ): Promise<ScaffoldAnswers> {
   // 1. Project directory
   let projectDir: string
@@ -97,13 +98,13 @@ export async function gatherAnswers(
   }
 
   // 7. Install deps?
-  let doInstall = true
-  if (!useDefaults) {
+  let doInstall = installPreference ?? false
+  if (!useDefaults && installPreference === undefined) {
     const shouldInstall = await input({
-      message: '  Install dependencies? (Y/n):',
-      default: 'Y',
+      message: '  Install dependencies now? (y/N):',
+      default: 'N',
     })
-    doInstall = shouldInstall.toLowerCase() !== 'n'
+    doInstall = shouldInstall.trim().toLowerCase().startsWith('y')
   }
 
   // 8. Multi-language support?

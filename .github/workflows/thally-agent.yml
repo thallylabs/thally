@@ -1,3 +1,4 @@
+# Contract: thally-track/v3
 name: Thally docs agent
 
 on:
@@ -12,6 +13,9 @@ on:
         required: true
       from_pr:
         description: Product PR URL (optional context)
+        required: false
+      context:
+        description: Pre-resolved product PR context (optional)
         required: false
   # Weekly provenance drift sweep — flags pages whose sources changed.
   schedule:
@@ -40,6 +44,7 @@ jobs:
       - name: Draft docs and open a PR
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          THALLY_AGENT_MODEL: ${{ vars.THALLY_AGENT_MODEL || 'claude-sonnet-5' }}
           # A fine-grained PAT / App token with write on this docs repo (and read
           # on your product repos). Falls back to the built-in token.
           GH_TOKEN: ${{ secrets.THALLY_AGENT_TOKEN || secrets.GITHUB_TOKEN }}
@@ -50,11 +55,33 @@ jobs:
           # commands (GitHub Actions script-injection hardening).
           INSTRUCTION: ${{ github.event.client_payload.instruction || inputs.instruction }}
           FROM_PR: ${{ github.event.client_payload.from_pr || inputs.from_pr }}
+          TRACK_CONTEXT: ${{ github.event.client_payload.context || inputs.context }}
+          REQUESTER: ${{ github.event.client_payload.requester }}
         run: |
-          if [ -n "$FROM_PR" ]; then
-            npx thally agent "$INSTRUCTION" --from-pr "$FROM_PR" --pr
+          run_thally() {
+            if [ -x node_modules/.bin/thally ]; then
+              # Existing sites may pin an older CLI that cannot consume the
+              # App-resolved private PR context. Keep Track's receiver pinned
+              # to the workflow contract version without editing package.json.
+              npm install --no-save --package-lock=false --ignore-scripts @thallylabs/cli@0.5.3
+              node_modules/.bin/thally "$@"
+              return
+            fi
+            npm run packages:build
+            node packages/cli/dist/index.js "$@"
+          }
+          REQUESTER_ARGS=()
+          if [ -n "$REQUESTER" ]; then
+            REQUESTER_ARGS=(--requester "$REQUESTER")
+          fi
+          if [ -n "$TRACK_CONTEXT" ]; then
+            CONTEXT_FILE="$RUNNER_TEMP/thally-track-context.md"
+            printf '%s' "$TRACK_CONTEXT" > "$CONTEXT_FILE"
+            run_thally agent "$INSTRUCTION" --from-pr "$FROM_PR" --context-file "$CONTEXT_FILE" "${REQUESTER_ARGS[@]}" --pr
+          elif [ -n "$FROM_PR" ]; then
+            run_thally agent "$INSTRUCTION" --from-pr "$FROM_PR" "${REQUESTER_ARGS[@]}" --pr
           else
-            npx thally agent "$INSTRUCTION" --pr
+            run_thally agent "$INSTRUCTION" "${REQUESTER_ARGS[@]}" --pr
           fi
 
   drift-sweep:
@@ -69,4 +96,10 @@ jobs:
           node-version: 20
       - run: npm ci
       - name: Check for stale docs
-        run: npx thally check --drift --ci
+        run: |
+          if [ -x node_modules/.bin/thally ]; then
+            node_modules/.bin/thally check --drift --ci
+          else
+            npm run packages:build
+            node packages/cli/dist/index.js check --drift --ci
+          fi

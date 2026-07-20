@@ -435,7 +435,8 @@ npm install
 npm run dev
 \`\`\`
 
-Open [http://localhost:3040](http://localhost:3040).
+The server starts at [http://localhost:3040](http://localhost:3040), or the next
+available port when 3040 is already in use.
 
 ## Write your docs
 
@@ -459,6 +460,50 @@ anywhere Next.js is supported, or connect the repository to
 [Thally Cloud](https://app.thally.io) for managed hosting and services.
 `
   writeFileSync(join(targetDir, 'README.md'), readme, 'utf8')
+}
+
+/**
+ * Write provider-portable Cloudflare Workers configuration into every scaffold.
+ *
+ * The files contain no account, route, bucket, or token identifiers. Thally
+ * Cloud supplies those operational values while self-hosters can deploy the
+ * same source tree to their own account without editing application internals.
+ */
+export function writeCloudflareRuntimeConfig(targetDir: string, slug: string): void {
+  writeFileSync(
+    join(targetDir, 'open-next.config.ts'),
+    `/** OpenNext adapter configuration for the Cloudflare Workers runtime. */
+import { defineCloudflareConfig } from '@opennextjs/cloudflare/config'
+
+export default defineCloudflareConfig()
+`,
+    'utf8',
+  )
+
+  writeFileSync(
+    join(targetDir, 'wrangler.jsonc'),
+    `${JSON.stringify(
+      {
+        $schema: 'node_modules/wrangler/config-schema.json',
+        name: slug,
+        main: '.open-next/worker.js',
+        compatibility_date: '2026-07-15',
+        compatibility_flags: ['nodejs_compat', 'global_fetch_strictly_public'],
+        observability: {
+          enabled: true,
+          logs: { head_sampling_rate: 1 },
+          traces: { enabled: true, head_sampling_rate: 0.01 },
+        },
+        assets: {
+          directory: '.open-next/assets',
+          binding: 'ASSETS',
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
 }
 
 export function updateSiteConfig(
@@ -597,8 +642,8 @@ export function updateEnvExample(targetDir: string): void {
  *
  *   - `workspaces` points at a directory that doesn't exist in scaffolds.
  *   - `prebuild`/`pretest` invoke `packages:build`, which builds those absent
- *     workspaces. `embeddings:build` stays in `prebuild`: it runs standalone
- *     (local-hash provider, no API key needed) and powers hybrid search.
+ *     workspaces. Runtime sources and embeddings stay in `prebuild`: both run
+ *     standalone and supply request-time data in filesystem-free Workers.
  *   - The copied `package-lock.json` still resolves the monorepo's workspace
  *     graph; deleting it lets the scaffold's own `npm install` write a clean
  *     lockfile. Workspace-linked deps (e.g. @thallylabs/core) resolve from the
@@ -615,22 +660,57 @@ export function patchPackageJson(targetDir: string, slug: string): void {
     workspaces?: unknown
     scripts?: Record<string, string>
     dependencies?: Record<string, string>
+    devDependencies?: Record<string, string>
   }
 
   const hadWorkspaces = Array.isArray(pkg.workspaces) && pkg.workspaces.length > 0
+  const hasRuntimeSourceCompiler = existsSync(
+    join(targetDir, 'scripts', 'build-runtime-sources.mts'),
+  )
   pkg.name = slug
   delete pkg.workspaces
   if (pkg.scripts) {
-    if (pkg.scripts['prebuild']) pkg.scripts['prebuild'] = 'npm run embeddings:build'
+    if (hasRuntimeSourceCompiler) {
+      pkg.scripts['runtime-sources:build'] ??= 'tsx scripts/build-runtime-sources.mts'
+      pkg.scripts['predev'] = 'npm run runtime-sources:build'
+      pkg.scripts['postinstall'] = 'npm run runtime-sources:build'
+      pkg.scripts['prebuild'] =
+        'npm run runtime-sources:build && npm run embeddings:build'
+    } else {
+      pkg.scripts['prebuild'] = 'npm run embeddings:build'
+    }
     delete pkg.scripts['pretest']
     delete pkg.scripts['packages:build']
+    pkg.scripts['build:cloudflare'] = 'opennextjs-cloudflare build'
+    pkg.scripts['preview:cloudflare'] =
+      'npm run build:cloudflare && opennextjs-cloudflare preview'
+    pkg.scripts['deploy:cloudflare'] =
+      'npm run build:cloudflare && opennextjs-cloudflare deploy'
+    pkg.scripts['upload:cloudflare'] =
+      'npm run build:cloudflare && opennextjs-cloudflare upload'
   }
+
+  pkg.devDependencies ??= {}
+  // `thally check` is part of the managed-build contract and is also the
+  // documented local/CI validation command. Declare the published CLI in the
+  // standalone site rather than relying on the source monorepo's workspace
+  // binary being hoisted into node_modules/.bin.
+  // The managed builder depends on the Cloudflare-aware CLI contract. Override
+  // older canonical-template pins so a newly scaffolded site cannot silently
+  // retain a pre-Workers release.
+  pkg.devDependencies['@thallylabs/cli'] = '0.5.2'
+  pkg.devDependencies['@opennextjs/cloudflare'] ??= '1.15.0'
+  // vite-tsconfig-paths declares Vite as a peer; the monorepo used to satisfy
+  // it incidentally through workspace tooling. Standalone test runs need the
+  // peer declared explicitly.
+  pkg.devDependencies.vite ??= '7.2.6'
+  pkg.devDependencies.wrangler ??= '4.111.0'
 
   // The canonical docs repository previously resolved MCP through a workspace
   // wildcard. Fresh sites have no workspace, so use the published package
   // version explicitly and let npm create a portable standalone lockfile.
   if (pkg.dependencies?.['@thallylabs/mcp'] === '*') {
-    pkg.dependencies['@thallylabs/mcp'] = '0.7.0'
+    pkg.dependencies['@thallylabs/mcp'] = '0.7.1'
   }
 
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getAdminSettings } from '@/lib/admin/settings'
 import { getAiConfig } from '@/data/docs'
 import { DEFAULT_AI_DISCLAIMER } from '@/lib/ai-defaults'
-import { getCloud } from '@/lib/cloud-bridge'
+import { isAiChatAvailable } from '@/lib/cloud-bridge'
 import type { NextRequest } from 'next/server'
 import { getCloudSiteConfig } from '@/lib/cloud-link/client'
 
@@ -25,7 +25,9 @@ export async function GET(request: NextRequest) {
     ? Boolean(cloudConfig.entitlements.features?.aiAnswers) &&
       Boolean(cloudConfig.siteConfig.portable.ai?.enabled)
     : null
-  const show = Boolean(getCloud()?.ai) && (cloudEnabled ?? settings.chatEnabled ?? Boolean(ai.chat))
+  const show =
+    (await isAiChatAvailable(request.nextUrl.origin)) &&
+    (cloudEnabled ?? settings.chatEnabled ?? Boolean(ai.chat))
   const label = settings.aiLabel ?? ai.label ?? 'Ask AI'
   const disclaimer = settings.aiDisclaimer ?? DEFAULT_AI_DISCLAIMER
   return NextResponse.json({ show, label, disclaimer }, { headers: { 'Cache-Control': 'no-store' } })

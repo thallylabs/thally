@@ -14,6 +14,25 @@ export interface ContentDocument {
   content: ParsedContent
 }
 
+export type ContentDocumentResolver = (
+  pageId: string,
+  locale?: string,
+) => ContentDocument | null
+
+let registeredResolver: ContentDocumentResolver | null = null
+
+/**
+ * Register the host's runtime-aware content reader.
+ *
+ * The default filesystem reader keeps the framework-agnostic package useful
+ * for local tools. Deployed hosts register a reader backed by their generated
+ * source map so every projection consumes the same customer-authored bytes in
+ * runtimes where the project checkout is unavailable.
+ */
+export function registerContentDocumentSource(resolver: ContentDocumentResolver): void {
+  registeredResolver = resolver
+}
+
 function resolveContentFile(pageId: string, locale?: string): string | null {
   const candidates: Array<string> = []
   if (locale) {
@@ -42,6 +61,8 @@ const documentCache = new Map<string, { mtimeMs: number; document: ContentDocume
  * embeddings should use — no ad-hoc regex extraction anywhere else.
  */
 export function getContentDocument(pageId: string, locale?: string): ContentDocument | null {
+  if (registeredResolver) return registeredResolver(pageId, locale)
+
   const filePath = resolveContentFile(pageId, locale)
   if (!filePath) return null
 

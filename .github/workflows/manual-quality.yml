@@ -1,0 +1,62 @@
+name: Manual quality checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      check:
+        description: Quality check to run
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - lint
+          - core-web-vitals
+
+# Manual checks for diagnostics that are useful but too slow or noisy to gate
+# every pull request. Select a branch in the Actions UI before starting a run.
+jobs:
+  lint:
+    name: Lint
+    if: inputs.check == 'all' || inputs.check == 'lint'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+  lighthouse:
+    name: Core Web Vitals budget
+    if: inputs.check == 'all' || inputs.check == 'core-web-vitals'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          THALLY_SITE_URL: http://localhost:3040
+
+      - name: Run Lighthouse CI
+        run: npx --yes @lhci/cli@0.14.x autorun

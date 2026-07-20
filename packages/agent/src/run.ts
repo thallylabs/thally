@@ -16,9 +16,18 @@ import { runDocsCheck } from './validate.js'
 import { runAgentLoop, type AnthropicLike } from './agent.js'
 import { loadAgentsGuidance } from './config.js'
 import { buildSystemPrompt, buildUserPrompt, buildRepairPrompt } from './prompt.js'
+import { resolveAgentModel } from './model.js'
 import type { DocsTask, AgentOptions, AgentResult } from './types.js'
 
-const DEFAULT_MODEL = 'claude-sonnet-5'
+/** Keep generated documentation PRs based on the branch the agent checked out. */
+export function buildPullRequestCreateArgs(
+  title: string,
+  body: string,
+  branch: string,
+  baseBranch: string,
+): Array<string> {
+  return ['pr', 'create', '--title', title, '--body', body, '--head', branch, '--base', baseBranch]
+}
 
 /**
  * Run a docs task end-to-end on a **git sandbox branch**: assert a clean repo,
@@ -28,7 +37,7 @@ const DEFAULT_MODEL = 'claude-sonnet-5'
  */
 export async function runAgent(client: AnthropicLike, task: DocsTask, options: AgentOptions): Promise<AgentResult> {
   const { projectDir, mode } = options
-  const model = options.model ?? process.env.THALLY_AGENT_MODEL ?? process.env.DOX_AGENT_MODEL ?? DEFAULT_MODEL
+  const model = resolveAgentModel(options.model)
   const maxSteps = options.maxSteps ?? 24
   const emit = options.onEvent ?? (() => {})
 
@@ -113,7 +122,7 @@ export async function runAgent(client: AnthropicLike, task: DocsTask, options: A
       push(projectDir, branch)
       let prUrl: string
       try {
-        prUrl = execFileSync('gh', ['pr', 'create', '--title', title, '--body', body, '--head', branch], {
+        prUrl = execFileSync('gh', buildPullRequestCreateArgs(title, body, branch, original), {
           cwd: projectDir,
           encoding: 'utf8',
         }).trim()

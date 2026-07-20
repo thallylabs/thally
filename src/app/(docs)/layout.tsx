@@ -5,7 +5,8 @@ import type { NavigationSection } from '@/data/docs'
 import { getClientSearchCorpus } from '@/lib/search/corpus'
 import { buildApiNavigation } from '@/data/api-reference'
 import { DocsChat } from '@/components/docs/docs-chat'
-import { getCloud } from '@/lib/cloud-bridge'
+import { isAiChatAvailable } from '@/lib/cloud-bridge'
+import { getRequestCloudSiteConfig, getRequestOrigin } from '@/lib/cloud-link/request'
 
 interface DocsLayoutProps {
   children: React.ReactNode
@@ -39,6 +40,15 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
   const i18nConfig = getI18nConfig()
   const navbarConfig = getNavbarConfig()
   const footerConfig = getFooterConfig()
+  const origin = await getRequestOrigin()
+  // Resolve settings first so linked sites reuse the same cached short-lived
+  // grant when checking the paid AI service immediately afterward.
+  const cloudConfig = await getRequestCloudSiteConfig()
+  const hasAiService = await isAiChatAvailable(origin)
+  const isAiEnabled = cloudConfig
+    ? Boolean(cloudConfig.entitlements.features?.aiAnswers) &&
+      Boolean(cloudConfig.siteConfig.portable.ai?.enabled)
+    : Boolean(aiConfig.chat)
 
   return (
     <>
@@ -52,8 +62,9 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
       >
         {children}
       </SiteShell>
-      {aiConfig.chat && <DocsChat label={aiConfig.label} icon={aiConfig.icon} enabled={Boolean(getCloud()?.ai?.isChatConfigured())} />}
+      {isAiEnabled && (
+        <DocsChat label={aiConfig.label} icon={aiConfig.icon} enabled={hasAiService} />
+      )}
     </>
   )
 }
-
