@@ -36,8 +36,9 @@ const PORTABLE_MDX_COMPONENTS = new Set([
 const LOCALE_CODES = new Set([
   'ar', 'cs', 'da', 'de', 'el', 'es', 'fi', 'fr', 'he', 'hi', 'hu', 'id',
   'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sv',
-  'th', 'tr', 'uk', 'vi', 'zh',
+  'th', 'tr', 'uk', 'vi', 'zh', 'pt-br', 'zh-hans', 'zh-hant',
 ])
+const PORTABLE_URL_PROPS = 'href|src|img|primaryHref|secondaryHref'
 
 export interface UrlMigrationOptions {
   sourceUrl: string
@@ -115,6 +116,35 @@ function docsScopePath(source: URL): string {
   return `/${segments.length > 1 ? segments[0] : segments.join('/')}`
 }
 
+function machineIndexScopePath(
+  source: URL,
+  documents: Array<MigrationFetchResponse | null>,
+): string | null {
+  const candidates = new Set<string>()
+  for (const document of documents) {
+    if (!document) continue
+    const references = [...headerLinks(document)]
+    if (/html/i.test(document.contentType)) {
+      const $ = load(document.body)
+      references.push(...$('link[href], a[href]')
+        .map((_index, element) => $(element).attr('href') ?? '')
+        .get()
+        .filter((href) => /\/(?:llms(?:-full)?\.txt|sitemap\.xml)(?:[?#]|$)/i.test(href)))
+    }
+    for (const reference of references) {
+      try {
+        const indexUrl = new URL(reference, document.finalUrl)
+        if (indexUrl.origin !== source.origin) continue
+        const scope = indexUrl.pathname.replace(/\/(?:llms(?:-full)?\.txt|sitemap\.xml)$/i, '') || '/'
+        if (isInScope(source, source, scope)) candidates.add(scope)
+      } catch {
+        // Malformed discovery hints are ignored just like malformed page links.
+      }
+    }
+  }
+  return [...candidates].sort((left, right) => right.length - left.length)[0] ?? null
+}
+
 function isInScope(url: URL, source: URL, scopePath: string): boolean {
   if (url.origin !== source.origin || !['http:', 'https:'].includes(url.protocol)) return false
   const path = url.pathname.replace(/\/+$/, '') || '/'
@@ -127,6 +157,9 @@ function normalizeCandidate(value: string, base: URL, source: URL, scopePath: st
     const url = new URL(value, base)
     url.hash = ''
     if (!isInScope(url, source, scopePath)) return null
+    if (url.pathname.startsWith('/cdn-cgi/')) return null
+    if (/\/(?:llms(?:-full)?|robots)\.txt$/i.test(url.pathname)
+      || /\/sitemap\.xml$/i.test(url.pathname)) return null
     if (/\.(?:avif|bmp|gif|ico|jpe?g|mp[34]|pdf|png|svg|webm|webp|zip)$/i.test(url.pathname)) return null
     return url
   } catch {
@@ -149,9 +182,23 @@ function pageIdForUrl(url: URL, scopePath: string): string | null {
   return pageIdFromReference(path.replace(/^\/+/, '') || 'introduction')
 }
 
+function canonicalLocalizedPageId(id: string): string {
+  const [segment, ...rest] = id.split('/')
+  if (LOCALE_CODES.has(segment)) return rest.length > 0 ? id : `${segment}/introduction`
+  for (const locale of LOCALE_CODES) {
+    if (segment !== `${locale}-api-reference`) continue
+    return [locale, 'api-reference', ...rest].join('/')
+  }
+  return id
+}
+
 function detectUrlPlatform(document: MigrationFetchResponse): MigrationPlatform {
-  const value = `${document.body.slice(0, 200_000)} ${document.headers?.['x-powered-by'] ?? ''}`.toLowerCase()
-  if (value.includes('mintlify') || value.includes('__mintlify')) return 'mintlify'
+  const headers = Object.entries(document.headers ?? {})
+    .map(([key, value]) => `${key}:${value ?? ''}`)
+    .join(' ')
+  const value = `${document.body.slice(0, 200_000)} ${headers}`.toLowerCase()
+  if (value.includes('__mintlify') || value.includes('/mintlify-assets/')
+    || value.includes('x-mintlify-') || value.includes('/_mintlify/')) return 'mintlify'
   if (value.includes('docusaurus') || value.includes('__docusaurus')) return 'docusaurus'
   if (value.includes('gitbook') || value.includes('gitbook.io')) return 'gitbook'
   if (value.includes('nextra')) return 'nextra'
@@ -189,6 +236,78 @@ function withoutFencedCode(body: string): string {
   }).join('\n')
 }
 
+function eventHandlerPropEnd(value: string, start: number): number | null {
+  const opening = value[start]
+  if (opening === '"' || opening === "'") {
+    for (let index = start + 1; index < value.length; index += 1) {
+      if (value[index] === opening && value[index - 1] !== '\\') return index + 1
+    }
+    return null
+  }
+  if (opening !== '{') {
+    const match = value.slice(start).match(/^[^\s>]+/)
+    return match ? start + match[0].length : null
+  }
+  let depth = 0
+  let quote = ''
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote) {
+      if (character === quote && value[index - 1] !== '\\') quote = ''
+      continue
+    }
+    if (character === '"' || character === "'" || character === '`') {
+      quote = character
+      continue
+    }
+    if (character === '{') depth += 1
+    if (character === '}') {
+      depth -= 1
+      if (depth === 0) return index + 1
+    }
+  }
+  return null
+}
+
+function stripEventHandlerProps(line: string): string {
+  const matcher = /\s+on[A-Z][A-Za-z0-9]*\s*=\s*/g
+  let cursor = 0
+  let result = ''
+  for (const match of line.matchAll(matcher)) {
+    const start = match.index
+    const valueStart = start + match[0].length
+    const end = eventHandlerPropEnd(line, valueStart)
+    if (end === null) continue
+    result += line.slice(cursor, start)
+    cursor = end
+  }
+  return cursor === 0 ? line : `${result}${line.slice(cursor)}`
+}
+
+function hasUnsafeUrlScheme(value: string): boolean {
+  const normalized = value
+    .trim()
+    .replace(/[\u0000-\u0020]/g, '')
+    .replace(/&(?:#x0*3a|#0*58|colon);/gi, ':')
+  return /^(?:javascript|data|vbscript):/i.test(normalized)
+}
+
+function hasUnsafePortableUrlProp(value: string): boolean {
+  const quotedProps = new RegExp(`\\b(?:${PORTABLE_URL_PROPS})\\s*=\\s*(['"])([^'"\\r\\n]*)\\1`, 'gi')
+  for (const match of value.matchAll(quotedProps)) {
+    if (hasUnsafeUrlScheme(match[2])) return true
+  }
+  const expressionProps = new RegExp(`\\b(?:${PORTABLE_URL_PROPS})\\s*=\\s*\\{\\s*("(?:\\\\.|[^"\\\\])*")\\s*\\}`, 'gi')
+  for (const match of value.matchAll(expressionProps)) {
+    try {
+      if (hasUnsafeUrlScheme(JSON.parse(match[1]))) return true
+    } catch {
+      return true
+    }
+  }
+  return false
+}
+
 function sanitizeRemoteMarkdown(body: string): string | null {
   let fenceCharacter = ''
   let fenceLength = 0
@@ -206,14 +325,17 @@ function sanitizeRemoteMarkdown(body: string): string | null {
       return line
     }
     if (fenceCharacter) return line
-    return line
+    return stripEventHandlerProps(line
+      .replace(/!\[([^\]]*)\]\(\s*([^)]+)\)/g, (original, alternative: string, destination: string) => {
+        return hasUnsafeUrlScheme(destination.replace(/^<|>$/g, '')) ? alternative : original
+      })
       .replace(/<\/?div\b[^>]*>/gi, '')
       .replace(/<img\s+([^>]*?)\/?\s*>/gi, (original, attributes: string) => {
         const source = attributes.match(/\bsrc\s*=\s*(['"])(.*?)\1/i)?.[2]
         const alternative = attributes.match(/\balt\s*=\s*(['"])(.*?)\1/i)?.[2] ?? ''
-        if (!source || /^(?:javascript|data):/i.test(source)) return ''
+        if (!source || hasUnsafeUrlScheme(source)) return ''
         return `![${alternative.replace(/]/g, '\\]')}](${source})`
-      })
+      }))
   }).join('\n')
   const executable = withoutFencedCode(sanitized)
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
@@ -235,7 +357,7 @@ function sanitizeRemoteMarkdown(body: string): string | null {
   }).replace(/\\[{}]/g, '')
   if (hasUnsafeExpression || /[{}]/.test(withoutStaticProps)
     || /\bon[A-Z][A-Za-z]*\s*=/g.test(withoutStaticProps)
-    || /\b(?:href|src)\s*=\s*(['"])\s*(?:javascript|data):/gi.test(withoutStaticProps)) return null
+    || hasUnsafePortableUrlProp(executable)) return null
   for (const match of withoutStaticProps.matchAll(/<\/?([A-Za-z][A-Za-z0-9.]*)(?:\s|>|\/)/g)) {
     const component = match[1].split('.', 1)[0]
     if (!PORTABLE_MDX_COMPONENTS.has(component)) return null
@@ -249,20 +371,25 @@ function migratedHref(
   source: URL,
   scopePath: string,
   importedIds: Set<string>,
+  sourceHomePageId?: string,
 ): string {
   if (/^(?:javascript|data|vbscript):/i.test(href)) return '#'
   if (href.startsWith('#') || /^(?:mailto|tel):/i.test(href)) return href
   try {
     const target = new URL(href, currentUrl)
     if (target.origin !== source.origin) return href
+    if (scopePath === '/' && candidateIdentity(target) === candidateIdentity(source)) {
+      return `/${target.search}${target.hash}`
+    }
     let path = target.pathname
     if (scopePath !== '/' && (path === scopePath || path.startsWith(`${scopePath}/`))) {
       path = path.slice(scopePath.length)
     }
     const id = pageIdFromReference(path.replace(/^\/+/, '') || 'introduction')
-    const localizedId = id && LOCALE_CODES.has(id) ? `${id}/introduction` : id
-    if (localizedId && importedIds.has(localizedId)) {
-      const destination = localizedId === 'introduction' ? '/' : `/${localizedId.replace(/\/introduction$/, '')}`
+    const localizedId = id ? canonicalLocalizedPageId(id) : id
+    const destinationId = localizedId === sourceHomePageId ? 'introduction' : localizedId
+    if (destinationId && importedIds.has(destinationId)) {
+      const destination = destinationId === 'introduction' ? '/' : `/${destinationId}`
       return `${destination}${target.search}${target.hash}`
     }
     // Same-origin marketing and intentionally missing example links remain
@@ -279,6 +406,7 @@ function rewriteInternalLinks(
   source: URL,
   scopePath: string,
   importedIds: Set<string>,
+  sourceHomePageId?: string,
 ): string {
   const markdown = body.replace(/(?<!!)\[([^\]]+)\]\(([^)\s]+)(\s+['"][^'"]*['"])?\)/g, (
     original,
@@ -286,11 +414,11 @@ function rewriteInternalLinks(
     href: string,
     title = '',
   ) => {
-    const destination = migratedHref(href, currentUrl, source, scopePath, importedIds)
+    const destination = migratedHref(href, currentUrl, source, scopePath, importedIds, sourceHomePageId)
     return destination === href ? original : `[${label}](${destination}${title})`
   })
   return markdown.replace(/\bhref=(['"])([^'"]+)\1/g, (_original, quote: string, href: string) => {
-    const destination = migratedHref(href, currentUrl, source, scopePath, importedIds)
+    const destination = migratedHref(href, currentUrl, source, scopePath, importedIds, sourceHomePageId)
     return `href=${quote}${destination}${quote}`
   })
 }
@@ -325,20 +453,41 @@ function remoteMarkdownMetadata(body: string): {
   }
 }
 
+function stripMintlifyDocumentationIndex(body: string): string {
+  const lines = body.split(/\r?\n/)
+  if (!/^>\s*##\s+Documentation Index\s*$/i.test(lines[0] ?? '')
+    || !/^>.*\/llms(?:-full)?\.txt/i.test(lines[1] ?? '')
+    || !/^>.*discover all available pages/i.test(lines[2] ?? '')) return body
+  let index = 3
+  while (index < lines.length && /^>/.test(lines[index])) index += 1
+  while (index < lines.length && lines[index].trim() === '') index += 1
+  return lines.slice(index).join('\n')
+}
+
 function markdownPage(document: MigrationFetchResponse, id: string): MigrationPage | null {
   const parsed = remoteMarkdownMetadata(document.body)
-  const titleMatch = parsed.content.match(/^#\s+(.+)$/m)
+  let content = stripMintlifyDocumentationIndex(parsed.content).trimStart()
+  const titleMatch = content.match(/^#\s+(.+)\r?\n/)
   const title = parsed.title ?? titleMatch?.[1] ?? id.split('/').at(-1) ?? 'Introduction'
+  if (titleMatch) content = content.slice(titleMatch[0].length).trimStart()
+  let description = parsed.description
+  if (!description) {
+    const quoteMatch = content.match(/^(>[^\r\n]*(?:\r?\n>[^\r\n]*)*)\r?\n/)
+    if (quoteMatch) {
+      description = plainDescription(quoteMatch[1].replace(/^>\s?/gm, ''))
+      content = content.slice(quoteMatch[0].length).trimStart()
+    }
+  }
   // Re-emit only scalar metadata we parsed ourselves. `gray-matter` remains in
   // the shared page parser for trusted repository sources, but never receives
   // attacker-controlled YAML aliases from a public URL.
   const raw = [
     '---',
     `title: ${JSON.stringify(title)}`,
-    ...(parsed.description ? [`description: ${JSON.stringify(parsed.description)}`] : []),
+    ...(description ? [`description: ${JSON.stringify(description)}`] : []),
     '---',
     '',
-    parsed.content,
+    content,
   ].join('\n')
   return parseMarkdownPage({ id, raw, source: document.finalUrl.toString() })
 }
@@ -419,6 +568,73 @@ function htmlPage(
   }
 }
 
+function htmlNavigationLinks(document: MigrationFetchResponse): Array<string> {
+  const $ = load(document.body)
+  return $('.nav-tabs a[href], nav a[href], aside a[href], [role="navigation"] a[href]')
+    .map((_index, element) => $(element).attr('href') ?? '')
+    .get()
+    .filter(Boolean)
+}
+
+interface SourceNavigationTab {
+  section: string
+  label: string
+  pageId: string
+}
+
+function htmlTopLevelNavigation(
+  document: MigrationFetchResponse,
+  source: URL,
+  scopePath: string,
+): Array<SourceNavigationTab> {
+  const $ = load(document.body)
+  interface NavigationCandidate {
+    entries: Array<SourceNavigationTab>
+    anchorCount: number
+  }
+  const collectCandidates = (selector: string): Array<NavigationCandidate> => {
+    const candidates: Array<NavigationCandidate> = []
+    $(selector).each((_containerIndex, container) => {
+      const entries: Array<SourceNavigationTab> = []
+      const seenSections = new Set<string>()
+      let anchorCount = 0
+      $(container).find('a[href]').each((_index, element) => {
+        const label = $(element).text().replace(/\s+/g, ' ').trim()
+        const href = $(element).attr('href')
+        if (!label || !href) return
+        try {
+          const target = new URL(href, document.finalUrl)
+          if (!isInScope(target, source, scopePath)) return
+          anchorCount += 1
+          const targetId = canonicalLocalizedPageId(pageIdForUrl(target, scopePath) ?? '')
+          const pageId = targetId
+          const section = targetId.split('/', 1)[0] || 'introduction'
+          if (!pageId || seenSections.has(section)) return
+          seenSections.add(section)
+          entries.push({ section, label, pageId })
+        } catch {
+          // Ignore malformed navigation targets; discovery applies the same rule.
+        }
+      })
+      if (entries.length > 1) {
+        candidates.push({ entries, anchorCount })
+      }
+    })
+    return candidates
+  }
+  // Mintlify marks its product-tab strip consistently. Prefer that explicit
+  // platform signal; generic nav elements usually describe only the sidebar.
+  const tabCandidates = collectCandidates('.nav-tabs')
+  const candidates = tabCandidates.length > 0
+    ? tabCandidates
+    : collectCandidates('nav, [role="navigation"]')
+  return candidates.sort((left, right) => {
+    const densityDifference = (right.entries.length / right.anchorCount)
+      - (left.entries.length / left.anchorCount)
+    return densityDifference || right.entries.length - left.entries.length
+  })[0]?.entries ?? []
+}
+
 function markdownLinks(body: string): Array<string> {
   return [...body.matchAll(/\[[^\]]+\]\(([^)\s]+)(?:\s+['"][^'"]*['"])?\)/g)]
     .map((match) => match[1])
@@ -465,12 +681,36 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
   const maxPages = Math.max(1, Math.min(options.maxPages ?? DEFAULT_MAX_PAGES, 1_000))
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 5, 10))
   const maxTotalBytes = Math.max(1_000_000, Math.min(options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES, 500_000_000))
-  const scopePath = docsScopePath(source)
+  const submittedScopePath = docsScopePath(source)
   const initial = await fetcher(source, { accept: 'text/markdown,text/html,application/xhtml+xml;q=0.9' })
-  if (!isInScope(initial.finalUrl, source, scopePath)) {
+  if (!isInScope(initial.finalUrl, source, submittedScopePath)) {
     throw new Error('The documentation URL redirected outside the submitted docs origin or path.')
   }
-  const platform = detectUrlPlatform(initial)
+  const htmlProbe = /html/i.test(initial.contentType)
+    ? initial
+    : await safeFetch(fetcher, source, 'text/html,application/xhtml+xml')
+  // Content negotiation must not let an HTML-only redirect escape the path
+  // boundary already validated for the submitted documentation response.
+  const scopedHtmlProbe = htmlProbe && isInScope(htmlProbe.finalUrl, source, submittedScopePath)
+    ? htmlProbe
+    : null
+  const platform = detectUrlPlatform(scopedHtmlProbe ?? initial)
+  // A Mintlify site may own an entire docs origin or a path below a marketing
+  // site. Its llms/sitemap location is the authoritative crawl boundary.
+  const scopePath = platform === 'mintlify'
+    ? machineIndexScopePath(source, [initial, scopedHtmlProbe]) ?? submittedScopePath
+    : submittedScopePath
+  const sourceTopLevelNavigation = platform === 'mintlify' && scopedHtmlProbe && /html/i.test(scopedHtmlProbe.contentType)
+    ? htmlTopLevelNavigation(scopedHtmlProbe, source, scopePath)
+    : undefined
+  // The submitted URL can be any page. Mintlify's first authored product tab,
+  // rather than the submitted page, defines which source page becomes `/`.
+  // Older single-section themes do not expose a tab strip, so they retain the
+  // legacy dedicated-origin fallback when no authored home can be recovered.
+  const sourceHomePageId = sourceTopLevelNavigation?.[0]?.pageId
+    ?? (platform === 'mintlify' && scopePath === '/'
+      ? canonicalLocalizedPageId(pageIdForUrl(source, scopePath) ?? '') || undefined
+      : undefined)
   const cache = new Map([[source.toString(), initial]])
   const queue: Array<URL> = [source]
   const queued = new Set([candidateIdentity(source)])
@@ -483,6 +723,12 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
     if (!url || queued.has(candidateIdentity(url))) return
     queued.add(candidateIdentity(url))
     queue.push(url)
+  }
+
+  // Mintlify renders the authored navigation into the HTML shell. Seed the
+  // queue from that order before machine indexes add completeness fallbacks.
+  if (scopedHtmlProbe && /html/i.test(scopedHtmlProbe.contentType)) {
+    for (const link of htmlNavigationLinks(scopedHtmlProbe)) enqueue(link, scopedHtmlProbe.finalUrl)
   }
 
   async function discoverDocumentLinks(document: MigrationFetchResponse, depth = 0): Promise<void> {
@@ -556,6 +802,7 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
 
   const pages: Array<MigrationPage> = []
   const seenIds = new Set<string>()
+  const seenSources = new Set<string>()
   const visited = new Set<string>()
   let importedBytes = 0
   let isByteBudgetExhausted = false
@@ -598,6 +845,10 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
         if (htmlDocument && isInScope(htmlDocument.finalUrl, source, scopePath)
           && /html/i.test(htmlDocument.contentType)) {
           document = htmlDocument
+        } else {
+          // Never recover by compiling the rejected MDX. A source that does
+          // not expose a safe rendered representation is skipped instead.
+          return { candidate, page: null, links: [] as Array<string>, failure: false }
         }
       } else if (sanitizedMarkdown !== null) {
         document = { ...document, body: sanitizedMarkdown }
@@ -608,8 +859,11 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
         return { candidate, page: null, links: [] as Array<string>, failure: false, budgetExceeded: true }
       }
       importedBytes += responseBytes
-      const id = pageIdForUrl(document.finalUrl, scopePath)
+      const discoveredId = pageIdForUrl(document.finalUrl, scopePath)
         ?? pageIdForUrl(candidate, scopePath)
+      const id = discoveredId && canonicalLocalizedPageId(discoveredId) === sourceHomePageId
+        ? 'introduction'
+        : discoveredId
       if (!id) return { candidate, page: null, links: [] as Array<string>, failure: false }
       if (/(?:markdown|text\/plain)/i.test(document.contentType) || /\.mdx?$/i.test(document.finalUrl.pathname)) {
         return {
@@ -629,9 +883,15 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
         continue
       }
       if (result.budgetExceeded) continue
-      if (result.page && !seenIds.has(result.page.id) && pages.length < maxPages) {
+      if (result.page) result.page.id = canonicalLocalizedPageId(result.page.id)
+      const sourceIdentity = result.page
+        ? candidateIdentity(new URL(result.page.source))
+        : null
+      if (result.page && sourceIdentity && !seenSources.has(sourceIdentity)
+        && !seenIds.has(result.page.id) && pages.length < maxPages) {
         pages.push(result.page)
         seenIds.add(result.page.id)
+        seenSources.add(sourceIdentity)
       }
       for (const link of result.links) enqueue(link, result.base ?? result.candidate)
     }
@@ -648,14 +908,28 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
   }
   const importedIds = new Set(pages.map((page) => page.id))
   for (const page of pages) {
-    page.body = rewriteInternalLinks(page.body, new URL(page.source), source, scopePath, importedIds)
+    page.body = rewriteInternalLinks(
+      page.body,
+      new URL(page.source),
+      source,
+      scopePath,
+      importedIds,
+      sourceHomePageId,
+    )
   }
   if (isByteBudgetExhausted) {
     warnings.push({ code: 'limit-reached', message: `Import stopped after reaching the ${Math.round(maxTotalBytes / 1_000_000)} MB content budget.` })
   } else if (queue.length > 0 || queued.size >= MAX_DISCOVERED_URLS) {
     warnings.push({ code: 'limit-reached', message: `Import stopped after ${pages.length} pages; narrow the URL or raise the caller limit to import more.` })
   }
-  const docsConfig = buildNavigationFromPages(pages)
+  const topLevelNavigation = sourceTopLevelNavigation?.map((entry) => ({
+    ...entry,
+    pageId: entry.pageId === sourceHomePageId ? 'introduction' : entry.pageId,
+  }))
+  const docsConfig = buildNavigationFromPages(pages, {
+    topLevelTabs: platform === 'mintlify',
+    topLevelNavigation,
+  })
   const locales = [...new Set(pages.map((page) => page.locale).filter((value): value is string => Boolean(value)))]
   if (locales.length > 0) {
     docsConfig.i18n = {

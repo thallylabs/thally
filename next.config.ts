@@ -17,6 +17,9 @@ const docRedirects: Array<DocsRedirect> =
 
 const nextConfig: NextConfig = {
   pageExtensions: ['ts', 'tsx'],
+  // Generated projects are commonly inspected through a loopback URL. Permit
+  // that origin so Next dev can load the RSC payloads required for navigation.
+  allowedDevOrigins: ['127.0.0.1'],
   // The engine core is a workspace package shipped as TS-built ESM; let Next
   // transpile it so app routes and (server) components can import it directly.
   // OpenNext cannot load arbitrary Node externals inside workerd. Transpiling
