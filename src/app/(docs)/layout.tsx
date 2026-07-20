@@ -1,3 +1,5 @@
+/** Request-bound documentation shell shared by every rendered content route. */
+
 import { SiteShell } from '@/components/layout/site-shell'
 import { SidebarCollectionsHydrator } from '@/components/layout/sidebar-hydrator'
 import { getSidebarCollections, getAiConfig, getI18nConfig, getNavbarConfig, getFooterConfig } from '@/data/docs'
@@ -7,6 +9,11 @@ import { buildApiNavigation } from '@/data/api-reference'
 import { DocsChat } from '@/components/docs/docs-chat'
 import { isAiChatAvailable } from '@/lib/cloud-bridge'
 import { getRequestCloudSiteConfig, getRequestOrigin } from '@/lib/cloud-link/request'
+
+// The docs shell resolves request-bound Cloud configuration and origin data.
+// Marking that contract explicitly keeps OpenNext from attempting a static
+// render that fails only on non-root routes with DYNAMIC_SERVER_USAGE.
+export const dynamic = 'force-dynamic'
 
 interface DocsLayoutProps {
   children: React.ReactNode

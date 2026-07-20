@@ -13,7 +13,7 @@ export const THEME_VARS: Record<string, string> = {
     '--theme-sidebar-indicator-opacity:0',
     '--theme-nav-bar-radius:1.5rem',
     '--theme-nav-tab-radius:9999px',
-    '--theme-nav-tab-indicator-opacity:0',
+    '--theme-nav-tab-indicator-opacity:1',
   ].join(';'),
   sharp: [
     '--theme-radius-sm:0.125rem',
@@ -43,8 +43,6 @@ export const THEME_VARS: Record<string, string> = {
     '--sidebar-active-bg:0 0% 0% / 0',
     '--theme-nav-bar-bg:transparent',
     '--theme-nav-bar-border-color:transparent',
-    '--theme-nav-tab-active-bg:transparent',
-    '--theme-nav-tab-active-shadow:none',
     '--theme-nav-bar-radius:0',
     '--theme-nav-tab-radius:0',
     '--theme-nav-tab-indicator-opacity:1',

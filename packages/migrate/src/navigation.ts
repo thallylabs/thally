@@ -300,10 +300,133 @@ function titleCase(value: string): string {
     .join(' ')
 }
 
+interface GeneratedNavigationOptions {
+  /** Dedicated docs platforms expose their primary sections as top-level tabs. */
+  topLevelTabs?: boolean
+  /** Ordered tabs recovered from the source site's rendered navigation. */
+  topLevelNavigation?: ReadonlyArray<{
+    section: string
+    label: string
+    pageId: string
+  }>
+}
+
+const TOP_LEVEL_LABELS: Record<string, string> = {
+  'api-reference': 'API Reference',
+  cli: 'CLI',
+  faqs: 'FAQs',
+  introduction: 'Overview',
+  'mcp-server': 'MCP Server',
+  sdk: 'SDK',
+}
+
+function topLevelLabel(segment: string): string {
+  return TOP_LEVEL_LABELS[segment] ?? titleCase(segment)
+}
+
+function groupsWithinSection(
+  section: string,
+  pageIds: Array<string>,
+  sectionLabel = topLevelLabel(section),
+): Array<MigrationNavigationGroup> {
+  const groups = new Map<string, Array<string>>()
+  for (const id of pageIds) {
+    const relative = id === 'introduction'
+      ? ''
+      : id.startsWith(`${section}/`)
+        ? id.slice(section.length + 1)
+        : id
+    const nestedSegment = relative.includes('/') ? relative.split('/', 1)[0] : 'overview'
+    const group = groups.get(nestedSegment) ?? []
+    group.push(id)
+    groups.set(nestedSegment, group)
+  }
+  return [...groups].map(([segment, pages]) => ({
+    group: segment === 'overview' ? sectionLabel : titleCase(segment),
+    pages,
+  }))
+}
+
+function preferredLandingPage(
+  section: string,
+  pageIds: Array<string>,
+): string | undefined {
+  const candidates = [
+    section === 'introduction' ? 'introduction' : undefined,
+    `${section}/overview`,
+    `${section}/introduction`,
+    section,
+  ]
+  return candidates.find((candidate): candidate is string => Boolean(candidate && pageIds.includes(candidate)))
+}
+
 /** Build deterministic fallback navigation from imported default-locale pages. */
-export function buildNavigationFromPages(pages: Array<MigrationPage>): MigrationDocsConfig {
+export function buildNavigationFromPages(
+  pages: Array<MigrationPage>,
+  options: GeneratedNavigationOptions = {},
+): MigrationDocsConfig {
   const ids = pages.filter((page) => !page.locale || page.locale === 'en').map((page) => page.navigationId)
   const ordered = [...new Set(ids)]
+  if (options.topLevelTabs) {
+    const sourceNavigation = (options.topLevelNavigation ?? []).flatMap((entry) => {
+      const sectionPages = ordered.filter((id) => id === entry.section || id.startsWith(`${entry.section}/`))
+      const pageId = ordered.includes(entry.pageId)
+        ? entry.pageId
+        : preferredLandingPage(entry.section, sectionPages) ?? sectionPages[0]
+      return pageId ? [{ ...entry, pageId }] : []
+    })
+    if (sourceNavigation.length > 1) {
+      const claimedIds = new Set<string>()
+      const tabs = sourceNavigation.map((entry) => {
+        const pageIds = ordered.filter((id) => {
+          const matches = id === entry.pageId
+            || id === entry.section
+            || id.startsWith(`${entry.section}/`)
+          if (matches) claimedIds.add(id)
+          return matches
+        })
+        return { entry, pageIds }
+      })
+      // Mintlify's first tab is the documentation home and owns pages that do
+      // not belong to another product tab (for example /create and /deploy).
+      tabs[0].pageIds.push(...ordered.filter((id) => !claimedIds.has(id)))
+      return {
+        tabs: tabs.map(({ entry, pageIds }) => ({
+          tab: entry.label,
+          href: entry.pageId === 'introduction' ? '/' : `/${entry.pageId}`,
+          groups: groupsWithinSection(entry.section, [...new Set(pageIds)], entry.label),
+        })),
+      }
+    }
+    const sectionNames = [...new Set(ordered
+      .filter((id) => id.includes('/'))
+      .map((id) => id.split('/', 1)[0]))]
+    if (sectionNames.length > 1) {
+      const defaultSection = sectionNames.includes('introduction')
+        ? 'introduction'
+        : sectionNames[0]
+      const sections = new Map<string, Array<string>>()
+      for (const id of ordered) {
+        const section = id.includes('/') ? id.split('/', 1)[0] : defaultSection
+        const bucket = sections.get(section) ?? []
+        bucket.push(id)
+        sections.set(section, bucket)
+      }
+      return {
+        tabs: [...sections].map(([section, pageIds]) => {
+          const label = topLevelLabel(section)
+          const landingPage = preferredLandingPage(section, pageIds)
+          return {
+            tab: label,
+            ...(landingPage
+              ? { href: landingPage === 'introduction' ? '/' : `/${landingPage}` }
+              : {}),
+            groups: groupsWithinSection(section, pageIds),
+          }
+        }),
+      }
+    }
+  }
   const buckets = new Map<string, Array<string>>()
   for (const id of ordered) {
     const segment = id.includes('/') ? id.split('/', 1)[0] : 'overview'

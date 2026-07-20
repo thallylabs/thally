@@ -77,6 +77,211 @@ describe('public URL migration', () => {
     ])
   })
 
+  it('migrates a deep Mintlify URL as a complete, portable docs site', async () => {
+    const sourceUrl = 'https://docs.product.test/introduction/introduction'
+    const pages = new Map([
+      ['/introduction/chains', '# Chain Overview\n\n> Supported networks.\n\nEvery supported chain is listed here.'],
+      ['/api-reference/introduction', '# API Reference\n\n> REST API endpoints.\n\nUse the API to request quotes.'],
+      ['/sdk/overview', '# SDK Overview\n\n> TypeScript SDK.\n\nInstall and configure the SDK.'],
+      ['/zh-hans-api-reference/introduction', '# API 参考\n\n> REST API 端点。\n\n使用 API 请求报价。'],
+      ['/zh-hans/api-reference/introduction', '# API 参考\n\n> REST API 端点。\n\n使用 API 请求报价。'],
+    ])
+    const fetcher: MigrationFetcher = async (url, request) => {
+      if (url.toString() === sourceUrl && request.accept.startsWith('text/html')) {
+        return response(
+          sourceUrl,
+          '<html><head><link href="/mintlify-assets/site.css"></head><body><div class="nav-tabs"><a href="/introduction/introduction">Overview</a><a href="/api-reference/introduction">API Reference</a><a href="/sdk/overview">SDK</a></div><nav><a href="/introduction/chains">Chains</a><a href="/cdn-cgi/l/email-protection">Email</a></nav></body></html>',
+          'text/html',
+        )
+      }
+      if (url.toString() === sourceUrl) {
+        return {
+          ...response(
+            sourceUrl,
+            '> ## Documentation Index\n> Fetch the complete documentation index at: https://docs.product.test/llms.txt\n> Use this file to discover all available pages before exploring further.\n\n# Product Documentation\n\n> One integration for every platform.\n\nThe authored introduction remains intact.\n\n<Steps>\n  <Step title="Install">Run the installer.</Step>\n</Steps>\n\n<CardGroup cols={2}>\n  <Card title="API" href="/api-reference/introduction" onClick={() => window.analytics?.track(\'api\')}>Read the API.</Card>\n</CardGroup>\n\n| Feature | Status |\n| --- | --- |\n| Navigation | Ready |',
+            'text/markdown',
+          ),
+          headers: { 'x-llms-txt': '/llms.txt' },
+        }
+      }
+      if (url.pathname === '/llms.txt') {
+        return response(
+          url.toString(),
+          '# Product docs\n\n- [Introduction](/introduction/introduction.md)\n- [Chains](/introduction/chains)\n- [API](/api-reference/introduction)\n- [SDK](/sdk/overview)\n- [中文 API](/zh-hans-api-reference/introduction)\n- [中文 API alias](/zh-hans/api-reference/introduction)',
+          'text/plain',
+        )
+      }
+      if (url.pathname === '/sitemap.xml') {
+        return response(
+          url.toString(),
+          '<urlset><url><loc>https://docs.product.test/introduction/introduction</loc></url><url><loc>https://docs.product.test/introduction/chains</loc></url><url><loc>https://docs.product.test/api-reference/introduction</loc></url><url><loc>https://docs.product.test/sdk/overview</loc></url><url><loc>https://docs.product.test/zh-hans-api-reference/introduction</loc></url><url><loc>https://docs.product.test/zh-hans/api-reference/introduction</loc></url></urlset>',
+          'application/xml',
+        )
+      }
+      const page = pages.get(url.pathname.replace(/\.md$/, ''))
+      if (page) return response(url.toString(), page, 'text/markdown')
+      throw new Error(`missing fixture: ${url}`)
+    }
+
+    const bundle = await migrateUrl({ sourceUrl, fetcher })
+
+    expect(bundle.platform).toBe('mintlify')
+    expect(bundle.pages.map((page) => page.id)).toEqual([
+      'introduction',
+      'api-reference/introduction',
+      'sdk/overview',
+      'introduction/chains',
+      'zh-hans/api-reference/introduction',
+    ])
+    expect(bundle.pages[0]).toMatchObject({
+      title: 'Product Documentation',
+      description: 'One integration for every platform.',
+    })
+    expect(bundle.pages[0].body).not.toContain('Documentation Index')
+    expect(bundle.pages[0].body).not.toContain('# Product Documentation')
+    expect(bundle.pages[0].body).not.toContain('onClick')
+    expect(bundle.pages[0].body).not.toContain('window.analytics')
+    expect(bundle.pages[0].body).toContain('<Steps>')
+    expect(bundle.pages[0].body).toContain('<CardGroup cols={2}>')
+    expect(bundle.pages[0].body).toContain('href="/api-reference/introduction"')
+    expect(bundle.pages[0].body).toContain('| Feature | Status |')
+    expect(bundle.docsConfig.tabs.map((tab) => ({ tab: tab.tab, href: tab.href }))).toEqual([
+      { tab: 'Overview', href: '/' },
+      { tab: 'API Reference', href: '/api-reference/introduction' },
+      { tab: 'SDK', href: '/sdk/overview' },
+    ])
+    expect(bundle.warnings).toEqual([])
+    expect(bundle.docsConfig.i18n?.locales.map((locale) => locale.code)).toEqual(['en', 'zh-hans'])
+  })
+
+  it('uses the source navigation home when a different Mintlify page is submitted', async () => {
+    const sourceUrl = 'https://docs.product.test/widget/compatibility'
+    const pages = new Map([
+      ['/introduction/introduction', '# Product home\n\nStart with the canonical documentation overview.'],
+      ['/widget/overview', '# Widget overview\n\nIntegrate the widget into an application.'],
+    ])
+    const fetcher: MigrationFetcher = async (url, request) => {
+      if (url.toString() === sourceUrl && request.accept.startsWith('text/html')) {
+        return response(
+          sourceUrl,
+          '<html><head><link href="/mintlify-assets/site.css"></head><body><div class="nav-tabs"><a href="/introduction/introduction">Overview</a><a href="/widget/overview">Widget</a></div></body></html>',
+          'text/html',
+        )
+      }
+      if (url.toString() === sourceUrl) {
+        return {
+          ...response(sourceUrl, '# Compatibility\n\n[Home](/introduction/introduction) and supported environments.', 'text/markdown'),
+          headers: { 'x-llms-txt': '/llms.txt' },
+        }
+      }
+      if (url.pathname === '/llms.txt') {
+        return response(
+          url.toString(),
+          '- [Home](/introduction/introduction)\n- [Widget](/widget/overview)\n- [Compatibility](/widget/compatibility)',
+          'text/plain',
+        )
+      }
+      const page = pages.get(url.pathname.replace(/\.md$/, ''))
+      if (page) return response(url.toString(), page, 'text/markdown')
+      throw new Error(`missing fixture: ${url}`)
+    }
+
+    const bundle = await migrateUrl({ sourceUrl, fetcher })
+
+    expect(bundle.pages.find((page) => page.id === 'introduction')).toMatchObject({
+      title: 'Product home',
+      source: 'https://docs.product.test/introduction/introduction',
+    })
+    expect(bundle.pages.find((page) => page.id === 'widget/compatibility')?.body).toContain('[Home](/)')
+    expect(bundle.docsConfig.tabs.map((tab) => ({ tab: tab.tab, href: tab.href }))).toEqual([
+      { tab: 'Overview', href: '/' },
+      { tab: 'Widget', href: '/widget/overview' },
+    ])
+  })
+
+  it('preserves Mintlify tabs while containing a path-scoped docs site', async () => {
+    const sourceUrl = 'https://platform.test/docs'
+    const fetchedUrls: Array<string> = []
+    const pages = new Map([
+      ['/docs/guides', '# Guides\n\nBuild complete documentation sites.'],
+      ['/docs/api/introduction', '# API reference\n\nIntegrate with the platform API.'],
+      ['/docs/changelog', '# Changelog\n\nFollow product updates and improvements.'],
+      ['/docs/create/text', '# Write text\n\nCreate clear documentation content.'],
+    ])
+    const fetcher: MigrationFetcher = async (url, request) => {
+      fetchedUrls.push(url.toString())
+      if (url.toString() === sourceUrl && request.accept.startsWith('text/html')) {
+        return response(
+          sourceUrl,
+          '<html><head><link href="/docs/_mintlify/site.css"><link href="/docs/sitemap.xml"></head><body><nav><a href="/docs">Documentation</a><a href="/docs/guides">Guides</a><a href="/docs/api/introduction">API reference</a><a href="/docs/changelog">Changelog</a></nav><nav><a href="/docs/create/text">Write text</a><a href="/pricing">Pricing</a></nav></body></html>',
+          'text/html',
+        )
+      }
+      if (url.toString() === sourceUrl) {
+        return {
+          ...response(sourceUrl, '# Documentation\n\nBuild documentation that users love.', 'text/markdown'),
+          headers: { 'x-llms-txt': '/docs/llms.txt' },
+        }
+      }
+      if (url.pathname === '/docs/llms.txt') {
+        return response(
+          url.toString(),
+          '# Platform docs\n\n- [Documentation](/docs)\n- [Write text](/docs/create/text)\n- [Guides](/docs/guides)\n- [API reference](/docs/api/introduction)\n- [Changelog](/docs/changelog)',
+          'text/plain',
+        )
+      }
+      if (url.pathname === '/docs/sitemap.xml') {
+        return response(
+          url.toString(),
+          '<urlset><url><loc>https://platform.test/docs</loc></url><url><loc>https://platform.test/docs/create/text</loc></url><url><loc>https://platform.test/docs/guides</loc></url><url><loc>https://platform.test/docs/api/introduction</loc></url><url><loc>https://platform.test/docs/changelog</loc></url></urlset>',
+          'application/xml',
+        )
+      }
+      const page = pages.get(url.pathname.replace(/\.md$/, ''))
+      if (page) return response(url.toString(), page, 'text/markdown')
+      throw new Error(`missing fixture: ${url}`)
+    }
+
+    const bundle = await migrateUrl({ sourceUrl, fetcher })
+
+    expect(bundle.docsConfig.tabs.map((tab) => ({ tab: tab.tab, href: tab.href }))).toEqual([
+      { tab: 'Documentation', href: '/' },
+      { tab: 'Guides', href: '/guides' },
+      { tab: 'API reference', href: '/api/introduction' },
+      { tab: 'Changelog', href: '/changelog' },
+    ])
+    expect(bundle.docsConfig.tabs[0].groups?.flatMap((group) => group.pages)).toContain('create/text')
+    expect(fetchedUrls.some((url) => new URL(url).pathname === '/pricing')).toBe(false)
+  })
+
+  it('does not widen path scope through an HTML-only same-origin redirect', async () => {
+    const sourceUrl = 'https://platform.test/docs'
+    const fetchedUrls: Array<string> = []
+    const fetcher: MigrationFetcher = async (url, request) => {
+      fetchedUrls.push(url.toString())
+      if (url.toString() === sourceUrl && request.accept.startsWith('text/html')) {
+        return response(
+          'https://platform.test/',
+          '<html><head><link href="/_mintlify/site.css"><link href="/sitemap.xml"></head><body><nav><a href="/pricing">Pricing</a><a href="/blog">Blog</a></nav></body></html>',
+          'text/html',
+        )
+      }
+      if (url.toString() === sourceUrl) {
+        return {
+          ...response(sourceUrl, '# Documentation\n\nPath-scoped documentation content remains isolated.', 'text/markdown'),
+          headers: { 'x-mintlify-project': 'platform-docs' },
+        }
+      }
+      throw new Error(`missing fixture: ${url}`)
+    }
+
+    const bundle = await migrateUrl({ sourceUrl, fetcher })
+
+    expect(bundle.platform).toBe('mintlify')
+    expect(bundle.pages.map((page) => page.id)).toEqual(['introduction'])
+    expect(fetchedUrls.some((url) => ['/pricing', '/blog'].includes(new URL(url).pathname))).toBe(false)
+  })
+
   it('falls back to rendered HTML when a Markdown endpoint contains site-local code', async () => {
     const fetcher: MigrationFetcher = async (url) => {
       if (url.pathname.endsWith('.md')) {
@@ -127,12 +332,25 @@ describe('public URL migration', () => {
     expect(bundle.pages[0].body).not.toContain('javascript:')
   })
 
+  it('fails closed when unsafe MDX has no rendered HTML fallback', async () => {
+    const fetcher: MigrationFetcher = async (url) => response(
+      url.toString(),
+      '# Unsafe docs\n\n<Hero primaryHref={"javascript:alert(1)"}>Run code</Hero>',
+      'text/markdown',
+    )
+
+    await expect(migrateUrl({
+      sourceUrl: 'https://unsafe.example.com/docs',
+      fetcher,
+    })).rejects.toThrow('No readable documentation pages were found')
+  })
+
   it('preserves known documentation components with static props', async () => {
     const fetcher: MigrationFetcher = async (url) => {
       if (url.toString() !== 'https://portable.example.com/docs') throw new Error('not found')
       return response(
         url.toString(),
-        '---\ntitle: Portable docs\n---\n\n# Portable docs\n\n<div id="section"><Columns cols={2}><Note title="Heads up">Static component content is portable.</Note></Columns></div>\n\n<Prompt actions={["copy", "cursor"]}>Copy me.</Prompt>\n\n<img src="https://cdn.example.com/image.png" alt="Diagram" onerror="alert(1)" />\n\n[Unsafe link](javascript:alert)\n\n````mdx\n<Card value={{ unsafe: true }} />\n```js\nconst value = { nested: true }\n```\n````',
+        '---\ntitle: Portable docs\n---\n\n# Portable docs\n\n<div id="section"><Columns cols={2}><Note title="Heads up">Static component content is portable.</Note></Columns></div>\n\n<Prompt actions={["copy", "cursor"]}>Copy me.</Prompt>\n\n<img src="https://cdn.example.com/image.png" alt="Diagram" onerror="alert(1)" />\n\n[Unsafe link](javascript:alert)\n\n![Unsafe image](data:image/svg+xml,<svg onload=alert(1)>)\n\n````mdx\n<Card value={{ unsafe: true }} />\n```js\nconst value = { nested: true }\n```\n````',
         'text/markdown',
       )
     }
@@ -145,6 +363,7 @@ describe('public URL migration', () => {
     expect(bundle.pages[0].body).toContain('![Diagram](https://cdn.example.com/image.png)')
     expect(bundle.pages[0].body).not.toContain('<div')
     expect(bundle.pages[0].body).not.toContain('javascript:')
+    expect(bundle.pages[0].body).not.toContain('data:image')
   })
 
   it('maps localized URL roots to Thally locale content directories', async () => {
