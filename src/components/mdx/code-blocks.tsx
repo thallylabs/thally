@@ -59,6 +59,28 @@ function ClipboardIcon(props: ComponentPropsWithoutRef<'svg'>) {
   )
 }
 
+async function writeClipboardText(value: string): Promise<boolean> {
+  try {
+    await window.navigator.clipboard.writeText(value)
+    return true
+  } catch {
+    // Clipboard access can be unavailable in embedded or non-secure previews.
+    // Keep copy functional there using the browser's legacy selection path.
+    const textarea = document.createElement('textarea')
+    textarea.value = value
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.append(textarea)
+    textarea.select()
+    try {
+      return document.execCommand('copy')
+    } finally {
+      textarea.remove()
+    }
+  }
+}
+
 function CopyButton({ code }: { code: string }) {
   const [copyCount, setCopyCount] = useState(0)
   const copied = copyCount > 0
@@ -75,6 +97,7 @@ function CopyButton({ code }: { code: string }) {
   return (
     <button
       type="button"
+      aria-label={copied ? 'Copied' : 'Copy code'}
       className={clsx(
         'group/button absolute top-3.5 right-4 overflow-hidden rounded-full py-1 pr-3 pl-2 text-2xs font-medium opacity-0 backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100',
         copied
@@ -82,8 +105,8 @@ function CopyButton({ code }: { code: string }) {
           : 'bg-white/5 hover:bg-white/10 dark:bg-white/10 dark:hover:bg-white/5',
       )}
       onClick={() => {
-        window.navigator.clipboard.writeText(code).then(() => {
-          setCopyCount((count) => count + 1)
+        void writeClipboardText(code).then((wasCopied) => {
+          if (wasCopied) setCopyCount((count) => count + 1)
         })
       }}
     >
@@ -443,4 +466,3 @@ export function Pre({
 
   return <CodeGroup {...props}>{children}</CodeGroup>
 }
-

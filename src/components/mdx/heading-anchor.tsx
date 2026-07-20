@@ -34,7 +34,7 @@ export function HeadingAnchor({ id, children }: HeadingAnchorProps) {
       {children}
       <span
         className={cn(
-          'ml-2 inline-block text-foreground/20 transition group-hover/anchor:text-accent/60',
+          'ml-2 inline-block align-middle text-sm font-normal text-foreground/20 transition group-hover/anchor:text-accent/60',
           copied && 'text-accent',
         )}
         aria-hidden

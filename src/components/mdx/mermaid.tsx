@@ -1,3 +1,5 @@
+/** Render authored Mermaid diagrams without allowing diagram text to inject active HTML. */
+
 'use client'
 
 import { useEffect, useId, useState } from 'react'
@@ -17,7 +19,9 @@ export function Mermaid({ children }: MermaidProps) {
     import('mermaid').then((m) => {
       if (cancelled) return
       const mermaid = m.default
-      mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' })
+      // Migrated diagrams are untrusted input. Strict mode sanitizes labels
+      // and link targets before the generated SVG enters the DOM below.
+      mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'strict' })
       mermaid
         .render(`mermaid-${id}`, children.trim())
         .then(({ svg: rendered }) => {
@@ -49,7 +53,6 @@ export function Mermaid({ children }: MermaidProps) {
   return (
     <div
       className="not-prose my-6 overflow-x-auto rounded-2xl border border-border/40 bg-background p-6 [&_svg]:mx-auto"
-      // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   )

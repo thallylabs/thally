@@ -15,10 +15,16 @@ interface SmokeCheck {
   path: string
   init?: RequestInit
   contentType?: string
+  validateHydrationBootstrap?: boolean
 }
 
 const checks: ReadonlyArray<SmokeCheck> = [
-  { name: 'home', path: '/', contentType: 'text/html' },
+  {
+    name: 'home',
+    path: '/',
+    contentType: 'text/html',
+    validateHydrationBootstrap: true,
+  },
   { name: 'guide', path: '/guides/deploying', contentType: 'text/html' },
   { name: 'docs index', path: '/api/docs-index', contentType: 'application/json' },
   {
@@ -130,7 +136,18 @@ async function main(): Promise<void> {
           `${check.name} returned ${contentType || 'no content type'}; expected ${check.contentType}.`,
         )
       }
-      await response.arrayBuffer()
+      if (check.validateHydrationBootstrap) {
+        const html = await response.text()
+        const shimIndex = html.indexOf('globalThis.__name')
+        const transformedCallIndex = html.indexOf('__name(')
+        if (shimIndex < 0 || (transformedCallIndex >= 0 && shimIndex > transformedCallIndex)) {
+          throw new Error(
+            `${check.name} does not define the runtime name helper before transformed inline scripts.`,
+          )
+        }
+      } else {
+        await response.arrayBuffer()
+      }
       console.log(`[cloudflare-smoke] ${check.name}: ${response.status}`)
     }
   } finally {
