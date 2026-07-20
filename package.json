@@ -25,7 +25,7 @@
     "test": "vitest run",
     "check:agents": "tsx scripts/agent-readiness.ts",
     "runtime-sources:build": "tsx scripts/build-runtime-sources.mts",
-    "packages:build": "npm run build -w packages/core && npm run build -w packages/create-thally-docs && npm run build -w packages/mcp && npm run build -w packages/agent && npm run build -w packages/cli"
+    "packages:build": "npm run build -w packages/core && npm run build -w packages/migrate && npm run build -w packages/create-thally-docs && npm run build -w packages/mcp && npm run build -w packages/agent && npm run build -w packages/cli"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

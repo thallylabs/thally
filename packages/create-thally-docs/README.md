@@ -40,7 +40,7 @@ interactive question explicitly.
 | Command | What it does |
 | --- | --- |
 | `create-thally-docs <dir>` | Scaffold a new project |
-| `create-thally-docs migrate <github-url> [dir]` | Import docs from a GitHub repo (Mintlify, Docusaurus, GitBook, Nextra, …) |
+| `create-thally-docs migrate <github-or-docs-url> [dir]` | Import a docs repository or public docs site through the shared migration engine |
 | `create-thally-docs check [dir] [--fix]` | Lint content for orphan pages and missing frontmatter |
 | `create-thally-docs translate --locale <code>` | Translate content into another locale |
 
