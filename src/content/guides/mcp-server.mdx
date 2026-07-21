@@ -153,7 +153,7 @@ Show me all the pages in my docs project
 
 #### `migrate_docs`
 
-Clones a GitHub docs repo and migrates its content into a Thally project.
+Migrates a GitHub docs repository or public docs URL into a Thally project.
 
 ```
 Migrate the Mintlify starter into a new project at /tmp/my-docs
@@ -167,6 +167,8 @@ Migrate the Mintlify starter into a new project at /tmp/my-docs
 | `branch` | No | Git branch to clone (auto-detected by default) |
 | `docsDir` | No | Docs subdirectory in the repo (auto-detected) |
 | `apiKey` | No | Anthropic API key for non-Markdown conversion |
+| `platform` | No | Source adapter: `mintlify` or `docusaurus` (auto-detected by default) |
+| `maxPages` | No | Maximum pages to crawl from a public docs URL |
 
 ---
 

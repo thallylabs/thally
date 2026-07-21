@@ -13,6 +13,14 @@ import {
 } from 'node:fs'
 import { basename, dirname, extname, relative } from 'node:path'
 
+import {
+  projectDocusaurusNavigation,
+  readDocusaurusSidebars,
+  rewriteDocusaurusLinks,
+  resolveDocusaurusPageIdentity,
+  type DocusaurusPageDescriptor,
+  type DocusaurusSidebars,
+} from './docusaurus.js'
 import { parseMarkdownPage } from './mdx.js'
 import {
   buildNavigationFromPages,
@@ -278,6 +286,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let docsConfig: MigrationDocsConfig = { tabs: [] }
   const referenceMap = new Map<string, { navigationId: string; locale?: string }>()
   const referenceOrder = new Map<string, number>()
+  let docusaurusSidebars: DocusaurusSidebars | null = null
 
   if (platform === 'mintlify') {
     try {
@@ -300,6 +309,17 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
 
+  if (platform === 'docusaurus') {
+    try {
+      docusaurusSidebars = readDocusaurusSidebars(repositoryDir)
+    } catch (error) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `Docusaurus sidebar could not be read safely: ${error instanceof Error ? error.message : String(error)} Generated navigation will be used.`,
+      })
+    }
+  }
+
   const configuredDocsDir = options.docsDir ?? (platform === 'mintlify' ? '' : detectRepositoryDocsDir(repositoryDir))
   const contentRoot = resolveWithin(repositoryDir, configuredDocsDir)
   if (!existsSync(contentRoot) || !lstatSync(contentRoot).isDirectory()) {
@@ -308,6 +328,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const files = scanFiles(contentRoot)
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
+  const docusaurusDescriptors: Array<DocusaurusPageDescriptor> = []
   const seenPageIds = new Set<string>()
   let skipped = 0
 
@@ -324,7 +345,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       continue
     }
     const rootFilename = !file.relativePath.includes('/') ? basename(file.relativePath).toLowerCase() : ''
-    if (REPOSITORY_ONLY_DOCUMENTS.has(rootFilename)) {
+    if (!configuredDocsDir && REPOSITORY_ONLY_DOCUMENTS.has(rootFilename)) {
       skipped++
       continue
     }
@@ -357,30 +378,41 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     const isDefaultLocale = !locale || locale === localeConfig?.defaultLocale
     const id = isDefaultLocale ? navigationId : `${locale}/${navigationId}`
-    if (seenPageIds.has(id)) {
-      skipped++
-      warnings.push({ code: 'collision', message: `Multiple source files map to ${id}; the first file was kept.`, source: file.relativePath })
-      continue
-    }
     const raw = inlineMdxSnippets(
       readFileSync(file.absolutePath, 'utf8'),
       file.absolutePath,
       repositoryDir,
       warnings,
     )
+    let docusaurusDescriptor: Omit<DocusaurusPageDescriptor, 'title'> | undefined
     const page = parseMarkdownPage({
       id,
       navigationId,
       ...(locale ? { locale } : {}),
       raw,
       source: `${options.sourceUrl}#${file.relativePath}`,
+      ...(platform === 'docusaurus' ? {
+        resolveIdentity: (frontmatter, fallback) => {
+          const resolved = resolveDocusaurusPageIdentity(file.relativePath, frontmatter, fallback)
+          docusaurusDescriptor = resolved.descriptor
+          return resolved.identity
+        },
+      } : {}),
     })
     if (!page) {
       skipped++
       continue
     }
-    seenPageIds.add(id)
+    if (seenPageIds.has(page.id)) {
+      skipped++
+      warnings.push({ code: 'collision', message: `Multiple source files map to ${page.id}; the first file was kept.`, source: file.relativePath })
+      continue
+    }
+    seenPageIds.add(page.id)
     pages.push(page)
+    if (docusaurusDescriptor) {
+      docusaurusDescriptors.push({ ...docusaurusDescriptor, title: page.title })
+    }
   }
 
   const discoveredReferenceKeys = new Set(files.map((file) => normalizedReferenceKey(file.relativePath)))
@@ -390,8 +422,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
 
+  const repositoryAssets = platform === 'docusaurus' && configuredDocsDir
+    ? ['static', 'public'].flatMap((directory) => {
+        const root = resolveWithin(repositoryDir, directory)
+        if (!existsSync(root) || !lstatSync(root).isDirectory()) return []
+        return scanFiles(root).map((file) => ({
+          ...file,
+          relativePath: `${directory}/${file.relativePath}`,
+        }))
+      })
+    : []
   let totalAssetBytes = 0
-  for (const file of files) {
+  for (const file of [...files, ...repositoryAssets]) {
     const firstSegment = file.relativePath.split('/', 1)[0].toLowerCase()
     if (!ASSET_DIRECTORIES.has(firstSegment) || !ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
     const size = lstatSync(file.absolutePath).size
@@ -399,9 +441,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       warnings.push({ code: 'limit-reached', message: 'An asset was skipped because the migration asset budget was exhausted.', source: file.relativePath })
       continue
     }
+    const isDocusaurusStatic = platform === 'docusaurus' && firstSegment === 'static'
     const assetPath = normalizeAssetPath(firstSegment === 'public'
       ? file.relativePath.slice('public/'.length)
-      : file.relativePath)
+      : isDocusaurusStatic
+        ? file.relativePath.slice('static/'.length)
+        : file.relativePath)
     if (!assetPath) continue
     assets.push({ path: assetPath, content: readFileSync(file.absolutePath) })
     totalAssetBytes += size
@@ -409,6 +454,28 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
 
   if (files.length >= MAX_SOURCE_FILES) {
     warnings.push({ code: 'limit-reached', message: `Repository discovery stopped at ${MAX_SOURCE_FILES} files.` })
+  }
+  if (platform === 'docusaurus') {
+    const projected = projectDocusaurusNavigation({
+      sidebars: docusaurusSidebars,
+      descriptors: docusaurusDescriptors,
+      contentRoot,
+      sourceUrl: options.sourceUrl,
+    })
+    docsConfig = projected.docsConfig
+    warnings.push(...projected.warnings)
+    for (const page of projected.generatedPages) {
+      if (seenPageIds.has(page.id)) continue
+      seenPageIds.add(page.id)
+      pages.push(page)
+    }
+    const descriptorByNavigationId = new Map(
+      docusaurusDescriptors.map((descriptor) => [descriptor.navigationId, descriptor]),
+    )
+    for (const page of pages) {
+      const descriptor = descriptorByNavigationId.get(page.navigationId)
+      if (descriptor) page.body = rewriteDocusaurusLinks(page.body, descriptor, docusaurusDescriptors)
+    }
   }
   if (docsConfig.tabs.length === 0) docsConfig = buildNavigationFromPages(pages)
   const openApi = findOpenApi(files)

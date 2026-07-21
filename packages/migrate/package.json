@@ -30,6 +30,7 @@
   "dependencies": {
     "cheerio": "1.0.0",
     "gray-matter": "^4.0.3",
+    "json5": "^2.2.3",
     "turndown": "^7.2.1",
     "yaml": "^2.6.0"
   },

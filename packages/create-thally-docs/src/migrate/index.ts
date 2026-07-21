@@ -17,6 +17,7 @@ import {
   type MigrationBundle,
   type MigrationDocsConfig,
   type MigrationFetcher,
+  type MigrationPlatform,
   type MigrationWarning,
 } from '@thallylabs/migrate'
 
@@ -34,6 +35,8 @@ export interface MigrateOptions {
   projectName?: string
   yes: boolean
   maxPages?: number
+  /** Explicit source platform selected by an interactive or automated caller. */
+  platform?: MigrationPlatform
   /** Optional host fetch boundary; used by Thally Cloud adapters and tests. */
   fetcher?: MigrationFetcher
 }
@@ -82,7 +85,12 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
   const url = new URL(options.sourceUrl)
   if (url.hostname.toLowerCase() !== 'github.com') {
     console.log(`  🌐 Discovering public docs at ${url.origin}${url.pathname}...`)
-    return migrateUrl({ sourceUrl: options.sourceUrl, maxPages: options.maxPages, fetcher: options.fetcher })
+    return migrateUrl({
+      sourceUrl: options.sourceUrl,
+      platform: options.platform,
+      maxPages: options.maxPages,
+      fetcher: options.fetcher,
+    })
   }
 
   const source = parseGitHubRepositoryUrl(options.sourceUrl)
@@ -96,6 +104,7 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
       repositoryDir: cloneDir,
       sourceUrl: options.sourceUrl,
       docsDir: options.docsDir ?? (source.docsDir || undefined),
+      platform: options.platform,
     })
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true })

@@ -49,6 +49,8 @@ interface EmbeddedOpenApiFragment {
 
 export interface UrlMigrationOptions {
   sourceUrl: string
+  /** Explicit caller selection; omitted callers retain source auto-detection. */
+  platform?: MigrationPlatform
   fetcher?: MigrationFetcher
   maxPages?: number
   concurrency?: number
@@ -864,7 +866,7 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
   const scopedHtmlProbe = htmlProbe && isInScope(htmlProbe.finalUrl, source, submittedScopePath)
     ? htmlProbe
     : null
-  const platform = detectUrlPlatform(scopedHtmlProbe ?? initial)
+  const platform = options.platform ?? detectUrlPlatform(scopedHtmlProbe ?? initial)
   // A Mintlify site may own an entire docs origin or a path below a marketing
   // site. Its llms/sitemap location is the authoritative crawl boundary.
   const scopePath = platform === 'mintlify'
