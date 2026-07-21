@@ -55,6 +55,24 @@ export interface CloudPortableConfig {
     favicon?: string
     faviconDark?: string
     themePreset?: string
+    colors?: {
+      light?: { primary?: string; accent?: string }
+      dark?: { primary?: string; accent?: string }
+    }
+    fonts?: {
+      body?: {
+        source: 'google' | 'custom'
+        family?: string
+        weights?: string[]
+        path?: string
+      }
+      heading?: {
+        source: 'google' | 'custom'
+        family?: string
+        weights?: string[]
+        path?: string
+      }
+    }
   }
   analytics?: {
     enabled?: boolean
