@@ -29,6 +29,17 @@ export function buildPullRequestCreateArgs(
   return ['pr', 'create', '--title', title, '--body', body, '--head', branch, '--base', baseBranch]
 }
 
+/** Build a single-line conventional title that stays within GitHub's readable subject length. */
+export function buildPullRequestTitle(instruction: string): string {
+  const normalizedInstruction = instruction.replace(/\s+/g, ' ').trim()
+  if (!normalizedInstruction) return 'docs: update documentation'
+  const maxSummaryLength = 65
+  const summary = normalizedInstruction.length > maxSummaryLength
+    ? `${normalizedInstruction.slice(0, maxSummaryLength).trimEnd()}…`
+    : normalizedInstruction
+  return `docs: ${summary}`
+}
+
 /**
  * Run a docs task end-to-end on a **git sandbox branch**: assert a clean repo,
  * branch off HEAD, let the agent mutate the tree, self-validate (one repair
@@ -114,7 +125,7 @@ export async function runAgent(client: AnthropicLike, task: DocsTask, options: A
     }
 
     if (mode === 'pr') {
-      const title = `docs: ${task.instruction.slice(0, 60)}`
+      const title = buildPullRequestTitle(task.instruction)
       // The `(origin: …)` marker is parsed by the admin task queue (src/lib/tasks.ts
       // parseOrigin) — keep it, and keep "Thally docs agent" (the queue's filter).
       const body = `${summary}\n\n---\n${task.requester ? `Requested by ${task.requester}. ` : ''}Drafted by the Thally docs agent (origin: ${task.source}) — please review.`
