@@ -4,6 +4,8 @@ import { join, dirname } from 'node:path'
 import { readDocsJson, writeDocsJson } from '../lib/docs-json.js'
 import type { DocsJsonNavigationGroup } from '../lib/docs-json.js'
 
+import { stripEchoedPageHeader } from '../lib/page-echo.js'
+
 export const addPageSchema = z.object({
   projectDir: z.string().describe('Path to the Thally project root'),
   pageId: z.string().describe('Page identifier (e.g. "guides/auth"). No .mdx extension.'),
@@ -48,7 +50,11 @@ export async function handleAddPage(input: AddPageInput): Promise<string> {
     frontmatterLines.push(`description: ${description}`)
   }
 
-  const bodyContent = content ?? `## ${title}\n\nAdd your content here.`
+  // New pages inherit the same echo guard as updates: a model that just read
+  // a sibling page may reproduce the read_page metadata header verbatim.
+  const bodyContent = content
+    ? stripEchoedPageHeader(content, pageId)
+    : `## ${title}\n\nAdd your content here.`
 
   const mdxContent = `---\n${frontmatterLines.join('\n')}\n---\n\n${bodyContent}\n`
 
