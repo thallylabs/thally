@@ -195,7 +195,11 @@ function pageIdToPath(pageId: string, secondaryLocales: Set<string>): string {
 }
 
 function validateOpenApi(projectDir: string, source: string, issues: LintIssue[]): void {
-  const specPath = join(projectDir, source)
+  // Runtime URL-style sources are author-owned files below `public/`, while
+  // relative sources are resolved from the project root.
+  const specPath = source.startsWith('/')
+    ? join(projectDir, 'public', source.slice(1))
+    : join(projectDir, source)
   if (!existsSync(specPath)) {
     issues.push({ severity: 'error', message: `API reference points at "${source}" but the file does not exist`, file: source })
     return
@@ -258,12 +262,15 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   const duplicates = new Set<string>()
 
   for (const tab of config.tabs) {
-    if (tab.href) {
+    if (tab.href && (!tab.groups || tab.groups.length === 0)) {
       // A standalone href tab (e.g. Changelog) references a real page — not an orphan.
       if (tab.href.startsWith('/')) navPageIds.add(tab.href.slice(1) || 'introduction')
       continue
     }
-    if (tab.api) continue
+    // API tabs normally derive navigation from their specification. URL
+    // migrations set `navigation: false` because their authored groups retain
+    // the source hierarchy and should participate in ordinary page checks.
+    if (tab.api && tab.api.navigation !== false) continue
     if (!tab.groups || tab.groups.length === 0) {
       issues.push({ severity: 'error', message: `Tab "${tab.tab}" has no groups and no href — it will render empty` })
       continue
@@ -323,7 +330,9 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     const rel2 = relative(projectDir, filePath)
     if (!data.title) issues.push({ severity: 'warning', message: `Missing "title" in frontmatter`, file: rel2 })
     if (!data.description) issues.push({ severity: 'warning', message: `Missing "description" in frontmatter`, file: rel2 })
-    if (content.trim().length < 50) issues.push({ severity: 'warning', message: `Very short body (${content.trim().length} chars) — page may be empty`, file: rel2 })
+    if (typeof data.openapi !== 'string' && content.trim().length < 50) {
+      issues.push({ severity: 'warning', message: `Very short body (${content.trim().length} chars) — page may be empty`, file: rel2 })
+    }
 
     if (options.drift) checkDrift(projectDir, rel2, data, issues)
 
