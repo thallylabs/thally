@@ -34,7 +34,7 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
 
   const sidebarCollections = getSidebarCollections()
   const collections = sidebarCollections.map((collection) => {
-    if (collection.api) {
+    if (collection.api && collection.api.navigation !== false) {
       // Merge MDX-based sections (from docs.json groups) with OpenAPI-generated sections
       const mdxSections = collection.sections ?? []
       const mergedSections = [...mdxSections, ...apiSections]

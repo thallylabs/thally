@@ -80,6 +80,8 @@ interface DocsJsonNavigationGroup {
 
 export interface DocsJsonApiConfig {
   source: string
+  /** Set false when authored MDX groups already provide API navigation. */
+  navigation?: boolean
   tagsOrder?: Array<string>
   defaultGroup?: string
   webhookGroup?: string

@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { migrateUrl, type MigrationFetcher } from '../index.js'
+import { migrateUrl, renderMigrationFiles, type MigrationFetcher } from '../index.js'
 
 function response(url: string, body: string, contentType: string) {
   return { finalUrl: new URL(url), body, contentType }
@@ -364,6 +364,85 @@ describe('public URL migration', () => {
     expect(bundle.pages[0].body).not.toContain('<div')
     expect(bundle.pages[0].body).not.toContain('javascript:')
     expect(bundle.pages[0].body).not.toContain('data:image')
+  })
+
+  it('preserves Mintlify cards and converts embedded operation specs', async () => {
+    const sourceUrl = 'https://api-docs.example.test/welcome'
+    const operationMarkdown = [
+      '# Get service status',
+      '',
+      '> Returns the current service status.',
+      '',
+      '## OpenAPI',
+      '',
+      '````yaml /openapi.yaml get /status',
+      'openapi: 3.0.0',
+      'info:',
+      '  title: Service API',
+      '  version: 1.0.0',
+      'servers:',
+      '  - url: https://api.example.test',
+      'paths:',
+      '  /status:',
+      '    get:',
+      '      summary: Get service status',
+      '      responses:',
+      "        '200':",
+      '          description: Service is available',
+      '````',
+    ].join('\n')
+    const fetcher: MigrationFetcher = async (url, request) => {
+      if (url.toString() === sourceUrl && request.accept.startsWith('text/html')) {
+        return response(
+          sourceUrl,
+          '<html><head><link href="/_mintlify/site.css"></head><body><div class="nav-tabs"><a href="/welcome">Welcome</a><a href="/api-reference/status/get-status">Prediction APIs</a></div></body></html>',
+          'text/html',
+        )
+      }
+      if (url.toString() === sourceUrl) {
+        return {
+          ...response(
+            sourceUrl,
+            '# Service documentation\n\n<div className="hero">\n<h2 className="title">\nThe APIs\n</h2>\n<p><span>Choose an API surface.</span></p>\n</div>\n\n<CardGroup cols={2}>\n<Card title="Prediction APIs" href="/api-reference">Read the API reference.</Card>\n</CardGroup>',
+            'text/markdown',
+          ),
+          headers: { 'x-llms-txt': '/llms.txt' },
+        }
+      }
+      if (url.pathname === '/llms.txt') {
+        return response(
+          url.toString(),
+          '- [Welcome](/welcome)\n- [Get service status](/api-reference/status/get-status)\n- [OpenAPI spec](/openapi.yaml)',
+          'text/plain',
+        )
+      }
+      if (url.pathname.replace(/\.md$/, '') === '/api-reference/status/get-status') {
+        return response(url.toString(), operationMarkdown, 'text/markdown')
+      }
+      throw new Error(`missing fixture: ${url}`)
+    }
+
+    const bundle = await migrateUrl({ sourceUrl, fetcher })
+    const introduction = bundle.pages.find((page) => page.id === 'introduction')
+    const operation = bundle.pages.find((page) => page.id === 'api-reference/status/get-status')
+
+    expect(introduction?.body).toContain('## The APIs')
+    expect(introduction?.body).toContain('<CardGroup cols={2}>')
+    expect(introduction?.body).toContain('href="/api-reference/status/get-status"')
+    expect(operation).toMatchObject({
+      openapi: 'GET /status',
+      body: '',
+    })
+    expect(bundle.assets).toHaveLength(1)
+    expect(new TextDecoder().decode(bundle.assets[0].content)).toContain('/status:')
+    expect(bundle.docsConfig.tabs.find((tab) => tab.tab === 'Prediction APIs')).toMatchObject({
+      href: '/api-reference/status/get-status',
+      api: { source: '/openapi.yaml', navigation: false },
+    })
+    const operationFile = renderMigrationFiles(bundle)
+      .find((file) => file.path === 'src/content/api-reference/status/get-status.mdx')
+    expect(operationFile?.content).toContain('openapi: "GET /status"')
+    expect(operationFile?.content).not.toContain('openapi: 3.0.0')
   })
 
   it('maps localized URL roots to Thally locale content directories', async () => {

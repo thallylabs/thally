@@ -127,7 +127,7 @@ function tokensToHtml(lines: Array<Array<ThemedToken>>, highlightedLines: Set<nu
 //   ```bash wrap                 (soft-wrap long lines)
 // ---------------------------------------------------------------------------
 
-interface CodeFenceMeta {
+export interface CodeFenceMeta {
   title?: string
   wrap?: boolean
   highlight?: Array<number>
@@ -148,7 +148,8 @@ function expandLineRanges(spec: string): Array<number> {
   return lines
 }
 
-function parseCodeFenceMeta(meta: string): CodeFenceMeta {
+/** Parse portable code-fence metadata without exposing framework-only props. */
+export function parseCodeFenceMeta(meta: string): CodeFenceMeta {
   const result: CodeFenceMeta = {}
   const tokens = meta.match(/[^\s"{]+="[^"]*"|\{[^}]*\}|\S+/g) ?? []
   for (const token of tokens) {
@@ -166,6 +167,10 @@ function parseCodeFenceMeta(meta: string): CodeFenceMeta {
       result.title = titleMatch[1]
       continue
     }
+    // Mintlify emits presentation props such as `theme={"system"}` in the
+    // fence metadata. They configure its renderer and are not human-facing
+    // filenames, so carrying them into Thally's title bar is misleading.
+    if (/^[A-Za-z][\w-]*=/.test(token)) continue
     if (!result.title) result.title = token
   }
   return result
