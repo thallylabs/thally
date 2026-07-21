@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { buildToolBridge } from '../tools.js'
 import { buildPullRequestCreateArgs, buildPullRequestTitle } from '../run.js'
@@ -97,6 +99,16 @@ describe('generated workflow shell-safety (Thally Track injection hardening)', (
     expect(DOCS_AGENT_WORKFLOW).toContain('https://app.thally.io/api/github/readiness-pr')
     expect(DOCS_AGENT_WORKFLOW).toContain('deploy-preview-[0-9]+--thally-cloud\\.netlify\\.app')
     expect(DOCS_AGENT_WORKFLOW).not.toContain('thally_github_token')
+  })
+
+  it('keeps the repository workflow synchronized with the public generator', async () => {
+    const { DOCS_AGENT_WORKFLOW } = await import('../scaffold.js')
+    const checkedInWorkflow = readFileSync(
+      join(process.cwd(), '.github', 'workflows', 'thally-agent.yml'),
+      'utf8',
+    )
+
+    expect(checkedInWorkflow).toBe(DOCS_AGENT_WORKFLOW)
   })
 
   it('docs-agent workflow resolves the CLI in both standalone sites and the source monorepo', async () => {

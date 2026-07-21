@@ -17,21 +17,26 @@ const pipelineAsync = promisify(pipeline)
 // Constants
 // ---------------------------------------------------------------------------
 
-const TARBALL_URL = 'https://codeload.github.com/thallylabs/thally/tar.gz/main'
+export const MCP_TEMPLATE_REPOSITORY = 'thallylabs/docs'
+const TARBALL_URL = `https://codeload.github.com/${MCP_TEMPLATE_REPOSITORY}/tar.gz/main`
 // Keep in sync with packages/create-thally-docs/src/download.ts (the canonical
 // list, with per-entry rationale). This copy exists because @thallylabs/mcp is
 // deliberately self-contained for `npx` usage — no workspace import available.
-const EXCLUDE_PATHS = [
+export const MCP_EXCLUDE_PATHS = [
   '/cli/',
   '/packages/',
   '/node_modules/',
   '/.git/',
-  '/thally-agent.yml',
   '/thally-track.yml',
   '/CODEOWNERS',
   '/CLAUDE.md',
   '/notes/',
 ]
+
+/** Keep reusable site automation while filtering maintainer-specific wiring. */
+export function shouldIncludeMcpTemplatePath(path: string): boolean {
+  return !MCP_EXCLUDE_PATHS.some((excluded) => path.includes(excluded))
+}
 
 const STARTER_PAGES: Record<string, string> = {
   'introduction.mdx': `---
@@ -139,12 +144,7 @@ async function downloadTemplate(targetDir: string): Promise<void> {
     tar.extract({
       cwd: targetDir,
       strip: 1,
-      filter: (path: string) => {
-        for (const excluded of EXCLUDE_PATHS) {
-          if (path.includes(excluded)) return false
-        }
-        return true
-      },
+      filter: shouldIncludeMcpTemplatePath,
     }),
   )
 }

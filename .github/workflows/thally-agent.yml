@@ -1,10 +1,10 @@
-# Contract: thally-track/v3
+# Contract: thally-track/v4
 name: Thally docs agent
 
 on:
   # A product repo dispatches a docs task here (see the sender workflow).
   repository_dispatch:
-    types: [thally-document]
+    types: [thally-document, thally-readiness]
   # Run it by hand from the Actions tab.
   workflow_dispatch:
     inputs:
@@ -22,12 +22,15 @@ on:
     - cron: '0 6 * * 1'
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   document:
     if: github.event_name != 'schedule'
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +60,13 @@ jobs:
           FROM_PR: ${{ github.event.client_payload.from_pr || inputs.from_pr }}
           TRACK_CONTEXT: ${{ github.event.client_payload.context || inputs.context }}
           REQUESTER: ${{ github.event.client_payload.requester }}
+          THALLY_PR_GRANT: ${{ github.event.client_payload.thally_pr_grant }}
+          THALLY_PR_BRANCH: ${{ github.event.client_payload.thally_pr_branch }}
+          THALLY_PR_BROKER_URL: ${{ github.event.client_payload.thally_pr_broker_url || 'https://app.thally.io/api/github/readiness-pr' }}
         run: |
+          if [ -n "${THALLY_PR_GRANT:-}" ]; then
+            echo "::add-mask::$THALLY_PR_GRANT"
+          fi
           run_thally() {
             if [ -x node_modules/.bin/thally ]; then
               # Existing sites may pin an older CLI that cannot consume the
@@ -74,14 +83,49 @@ jobs:
           if [ -n "$REQUESTER" ]; then
             REQUESTER_ARGS=(--requester "$REQUESTER")
           fi
+          OUTPUT_ARGS=(--pr)
+          if [ -n "${THALLY_PR_GRANT:-}" ]; then
+            # A readiness repair leaves its validated changes staged. The
+            # workflow pushes the pre-granted branch, then asks Cloud to open
+            # the PR as the Thally App after GitHub OIDC authentication.
+            OUTPUT_ARGS=()
+          fi
           if [ -n "$TRACK_CONTEXT" ]; then
             CONTEXT_FILE="$RUNNER_TEMP/thally-track-context.md"
             printf '%s' "$TRACK_CONTEXT" > "$CONTEXT_FILE"
-            run_thally agent "$INSTRUCTION" --from-pr "$FROM_PR" --context-file "$CONTEXT_FILE" "${REQUESTER_ARGS[@]}" --pr
+            run_thally agent "$INSTRUCTION" --from-pr "$FROM_PR" --context-file "$CONTEXT_FILE" "${REQUESTER_ARGS[@]}" "${OUTPUT_ARGS[@]}"
           elif [ -n "$FROM_PR" ]; then
-            run_thally agent "$INSTRUCTION" --from-pr "$FROM_PR" "${REQUESTER_ARGS[@]}" --pr
+            run_thally agent "$INSTRUCTION" --from-pr "$FROM_PR" "${REQUESTER_ARGS[@]}" "${OUTPUT_ARGS[@]}"
           else
-            run_thally agent "$INSTRUCTION" "${REQUESTER_ARGS[@]}" --pr
+            run_thally agent "$INSTRUCTION" "${REQUESTER_ARGS[@]}" "${OUTPUT_ARGS[@]}"
+          fi
+          if [ -n "${THALLY_PR_GRANT:-}" ]; then
+            GENERATED_BRANCH="$(git branch --show-current)"
+            if [[ "$GENERATED_BRANCH" != thally/agent-* ]]; then
+              echo "No documentation changes were needed."
+              exit 0
+            fi
+            if [[ ! "$THALLY_PR_BRANCH" =~ ^thally/agent-readiness-[a-f0-9]{16}$ ]]; then
+              echo "The readiness PR branch grant is invalid." >&2
+              exit 1
+            fi
+            git branch -m "$THALLY_PR_BRANCH"
+            git commit -m "docs: improve Thally Agent Readiness"
+            git push -u origin "$THALLY_PR_BRANCH"
+
+            node -e 'const url = new URL(process.env.THALLY_PR_BROKER_URL); const isProduction = url.origin === "https://app.thally.io"; const isPreview = /^deploy-preview-[0-9]+--thally-cloud\.netlify\.app$/.test(url.hostname); if (url.pathname !== "/api/github/readiness-pr" || (!isProduction && !isPreview)) process.exit(1)'
+
+            OIDC_RESPONSE="$(curl --silent --show-error --fail-with-body               -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN"               "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=thally-readiness-pr")"
+            export OIDC_RESPONSE
+            OIDC_TOKEN="$(node -e 'const body = JSON.parse(process.env.OIDC_RESPONSE); if (typeof body.value !== "string") process.exit(1); process.stdout.write(body.value)')"
+            unset OIDC_RESPONSE
+            echo "::add-mask::$OIDC_TOKEN"
+            REQUEST_FILE="$RUNNER_TEMP/thally-readiness-pr-request.json"
+            RESPONSE_FILE="$RUNNER_TEMP/thally-readiness-pr-response.json"
+            node -e 'require("node:fs").writeFileSync(process.argv[1], JSON.stringify({ grant: process.env.THALLY_PR_GRANT }))' "$REQUEST_FILE"
+            curl --silent --show-error --fail-with-body               --output "$RESPONSE_FILE"               -H "Authorization: Bearer $OIDC_TOKEN"               -H "Content-Type: application/json"               --data-binary "@$REQUEST_FILE"               "$THALLY_PR_BROKER_URL"
+            unset OIDC_TOKEN
+            node -e 'const body = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); if (typeof body.pull_request_url !== "string") process.exit(1); process.stdout.write("Pull request: " + body.pull_request_url + "\n")' "$RESPONSE_FILE"
           fi
 
   drift-sweep:
