@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import matter from 'gray-matter'
 
+import { readPageBodyDelimiter } from '../lib/page-echo.js'
+
 export const readPageSchema = z.object({
   projectDir: z.string().describe('Path to the Thally project root'),
   pageId: z.string().describe('Page ID, e.g. "guides/authentication"'),
@@ -36,14 +38,13 @@ export async function handleReadPage(input: ReadPageInput): Promise<string> {
   const title = (data.title as string | undefined) ?? pageId
   const description = (data.description as string | undefined) ?? ''
 
-  const lines = [`# ${title}`, `*${pageId}*`, '']
-
-  if (description) {
-    lines.push(`> ${description}`)
-    lines.push('')
-  }
-
-  lines.push('---', '', content.trim())
+  // Present metadata as labelled fields, not markdown, and fence the body
+  // behind an explicit delimiter. Models mirror what they read: the old
+  // H1/blockquote preamble kept getting echoed back through update_page and
+  // persisted into src/content on every agent edit.
+  const lines = [`id: ${pageId}`, `title: ${title}`]
+  if (description) lines.push(`description: ${description}`)
+  lines.push('', readPageBodyDelimiter(), '', content.trim())
 
   return lines.join('\n')
 }
