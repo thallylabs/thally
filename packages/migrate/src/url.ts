@@ -6,6 +6,7 @@
 
 import { load } from 'cheerio'
 import TurndownService from 'turndown'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
 import { parseMarkdownPage } from './mdx.js'
 import { buildNavigationFromPages } from './navigation.js'
@@ -39,6 +40,12 @@ const LOCALE_CODES = new Set([
   'th', 'tr', 'uk', 'vi', 'zh', 'pt-br', 'zh-hans', 'zh-hant',
 ])
 const PORTABLE_URL_PROPS = 'href|src|img|primaryHref|secondaryHref'
+
+interface EmbeddedOpenApiFragment {
+  method: string
+  path: string
+  document: Record<string, unknown>
+}
 
 export interface UrlMigrationOptions {
   sourceUrl: string
@@ -160,7 +167,8 @@ function normalizeCandidate(value: string, base: URL, source: URL, scopePath: st
     if (url.pathname.startsWith('/cdn-cgi/')) return null
     if (/\/(?:llms(?:-full)?|robots)\.txt$/i.test(url.pathname)
       || /\/sitemap\.xml$/i.test(url.pathname)) return null
-    if (/\.(?:avif|bmp|gif|ico|jpe?g|mp[34]|pdf|png|svg|webm|webp|zip)$/i.test(url.pathname)) return null
+    if (/\.(?:avif|bmp|gif|ico|jpe?g|mp[34]|pdf|png|svg|ya?ml|webm|webp|zip)$/i.test(url.pathname)
+      || /\/(?:openapi|swagger|asyncapi)[^/]*\.json$/i.test(url.pathname)) return null
     return url
   } catch {
     return null
@@ -308,10 +316,62 @@ function hasUnsafePortableUrlProp(value: string): boolean {
   return false
 }
 
+function portableHtmlToMarkdown(value: string): string {
+  return value
+    .replace(/<span\b[^>]*>|<\/span>/gi, '')
+    .replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_original, attributes: string, label: string) => {
+      const href = attributes.match(/\bhref\s*=\s*(['"])(.*?)\1/i)?.[2]
+      const plainLabel = label.replace(/<[^>]+>/g, '').trim()
+      if (!href || hasUnsafeUrlScheme(href)) return plainLabel
+      return `[${plainLabel.replace(/]/g, '\\]')}](${href})`
+    })
+    .replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_original, level: string, content: string) => {
+      return `\n${'#'.repeat(Number(level))} ${content.trim()}\n`
+    })
+    .replace(/<p\b[^>]*>([\s\S]*?)<\/p>/gi, (_original, content: string) => `\n${content.trim()}\n`)
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/?(?:article|div|main|section)\b[^>]*>/gi, '')
+}
+
+function transformMarkdownProse(body: string, transform: (value: string) => string): string {
+  const output: Array<string> = []
+  let prose: Array<string> = []
+  let fenceCharacter = ''
+  let fenceLength = 0
+  const flushProse = () => {
+    if (prose.length === 0) return
+    output.push(transform(prose.join('\n')))
+    prose = []
+  }
+  for (const line of body.split('\n')) {
+    const fence = line.match(/^\s{0,3}(`{3,}|~{3,})(.*)$/)
+    if (fence && !fenceCharacter) {
+      flushProse()
+      fenceCharacter = fence[1][0]
+      fenceLength = fence[1].length
+      output.push(line)
+      continue
+    }
+    if (fenceCharacter) {
+      output.push(line)
+      if (fence && fence[1][0] === fenceCharacter && fence[1].length >= fenceLength
+        && fence[2].trim() === '') {
+        fenceCharacter = ''
+        fenceLength = 0
+      }
+      continue
+    }
+    prose.push(line)
+  }
+  flushProse()
+  return output.join('\n')
+}
+
 function sanitizeRemoteMarkdown(body: string): string | null {
   let fenceCharacter = ''
   let fenceLength = 0
-  const sanitized = body.split('\n').map((line) => {
+  const portableBody = transformMarkdownProse(body, portableHtmlToMarkdown)
+  const sanitized = portableBody.split('\n').map((line) => {
     const fence = line.match(/^\s{0,3}(`{3,}|~{3,})(.*)$/)
     if (fence && !fenceCharacter) {
       fenceCharacter = fence[1][0]
@@ -325,17 +385,16 @@ function sanitizeRemoteMarkdown(body: string): string | null {
       return line
     }
     if (fenceCharacter) return line
-    return stripEventHandlerProps(line
+    return portableHtmlToMarkdown(stripEventHandlerProps(line
       .replace(/!\[([^\]]*)\]\(\s*([^)]+)\)/g, (original, alternative: string, destination: string) => {
         return hasUnsafeUrlScheme(destination.replace(/^<|>$/g, '')) ? alternative : original
       })
-      .replace(/<\/?div\b[^>]*>/gi, '')
       .replace(/<img\s+([^>]*?)\/?\s*>/gi, (original, attributes: string) => {
         const source = attributes.match(/\bsrc\s*=\s*(['"])(.*?)\1/i)?.[2]
         const alternative = attributes.match(/\balt\s*=\s*(['"])(.*?)\1/i)?.[2] ?? ''
         if (!source || hasUnsafeUrlScheme(source)) return ''
         return `![${alternative.replace(/]/g, '\\]')}](${source})`
-      }))
+      })))
   }).join('\n')
   const executable = withoutFencedCode(sanitized)
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
@@ -388,8 +447,16 @@ function migratedHref(
     const id = pageIdFromReference(path.replace(/^\/+/, '') || 'introduction')
     const localizedId = id ? canonicalLocalizedPageId(id) : id
     const destinationId = localizedId === sourceHomePageId ? 'introduction' : localizedId
-    if (destinationId && importedIds.has(destinationId)) {
-      const destination = destinationId === 'introduction' ? '/' : `/${destinationId}`
+    let importedDestinationId = destinationId && importedIds.has(destinationId)
+      ? destinationId
+      : undefined
+    if (destinationId && !importedDestinationId) {
+      importedDestinationId = [`${destinationId}/overview`, `${destinationId}/introduction`]
+        .find((candidate) => importedIds.has(candidate))
+        ?? [...importedIds].find((candidate) => candidate.startsWith(`${destinationId}/`))
+    }
+    if (importedDestinationId) {
+      const destination = importedDestinationId === 'introduction' ? '/' : `/${importedDestinationId}`
       return `${destination}${target.search}${target.hash}`
     }
     // Same-origin marketing and intentionally missing example links remain
@@ -464,7 +531,46 @@ function stripMintlifyDocumentationIndex(body: string): string {
   return lines.slice(index).join('\n')
 }
 
-function markdownPage(document: MigrationFetchResponse, id: string): MigrationPage | null {
+function extractEmbeddedOpenApi(content: string): {
+  content: string
+  openapi?: string
+  fragment?: EmbeddedOpenApiFragment
+} {
+  const fencePattern = /^\s{0,3}(`{3,}|~{3,})(?:yaml|yml|json)\s+(\S+\.(?:yaml|yml|json))\s+(delete|get|head|options|patch|post|put|trace)\s+(\/\S+)\s*\r?\n([\s\S]*?)^\s{0,3}\1\s*$/im
+  const match = fencePattern.exec(content)
+  if (!match) return { content }
+  try {
+    const parsed = parseYaml(match[5], { maxAliasCount: 50 })
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { content }
+    const document = parsed as Record<string, unknown>
+    if (typeof document.openapi !== 'string' && typeof document.swagger !== 'string') return { content }
+    const method = match[3].toUpperCase()
+    const path = match[4]
+    const paths = document.paths
+    if (!paths || typeof paths !== 'object' || Array.isArray(paths)) return { content }
+    const pathItem = (paths as Record<string, unknown>)[path]
+    if (!pathItem || typeof pathItem !== 'object' || Array.isArray(pathItem)
+      || !(match[3].toLowerCase() in pathItem)) return { content }
+    const before = content.slice(0, match.index).replace(/(?:^|\n)##\s+OpenAPI\s*\n\s*$/i, '\n')
+    const after = content.slice(match.index + match[0].length)
+    return {
+      content: `${before}${after}`.trim(),
+      openapi: `${method} ${path}`,
+      fragment: {
+        method,
+        path,
+        document,
+      },
+    }
+  } catch {
+    return { content }
+  }
+}
+
+function markdownPage(document: MigrationFetchResponse, id: string): {
+  page: MigrationPage | null
+  openApiFragment?: EmbeddedOpenApiFragment
+} {
   const parsed = remoteMarkdownMetadata(document.body)
   let content = stripMintlifyDocumentationIndex(parsed.content).trimStart()
   const titleMatch = content.match(/^#\s+(.+)\r?\n/)
@@ -481,15 +587,79 @@ function markdownPage(document: MigrationFetchResponse, id: string): MigrationPa
   // Re-emit only scalar metadata we parsed ourselves. `gray-matter` remains in
   // the shared page parser for trusted repository sources, but never receives
   // attacker-controlled YAML aliases from a public URL.
+  const embeddedOpenApi = extractEmbeddedOpenApi(content)
   const raw = [
     '---',
     `title: ${JSON.stringify(title)}`,
     ...(description ? [`description: ${JSON.stringify(description)}`] : []),
+    ...(embeddedOpenApi.openapi ? [`openapi: ${JSON.stringify(embeddedOpenApi.openapi)}`] : []),
     '---',
     '',
-    content,
+    embeddedOpenApi.content,
   ].join('\n')
-  return parseMarkdownPage({ id, raw, source: document.finalUrl.toString() })
+  return {
+    page: parseMarkdownPage({ id, raw, source: document.finalUrl.toString() }),
+    openApiFragment: embeddedOpenApi.fragment,
+  }
+}
+
+function mergeRecord(target: Record<string, unknown>, source: unknown): void {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return
+  for (const [key, value] of Object.entries(source)) {
+    if (['__proto__', 'constructor', 'prototype'].includes(key)) continue
+    if (!Object.prototype.hasOwnProperty.call(target, key)) {
+      target[key] = value
+      continue
+    }
+    const current = target[key]
+    if (current && value && typeof current === 'object' && typeof value === 'object'
+      && !Array.isArray(current) && !Array.isArray(value)) {
+      mergeRecord(current as Record<string, unknown>, value)
+    }
+  }
+}
+
+function mergeEmbeddedOpenApi(fragments: Array<EmbeddedOpenApiFragment>): Uint8Array | null {
+  const first = fragments[0]
+  if (!first) return null
+  const combined: Record<string, unknown> = {
+    ...first.document,
+    paths: {},
+    components: {},
+  }
+  const combinedPaths = combined.paths as Record<string, unknown>
+  const combinedComponents = combined.components as Record<string, unknown>
+  const tags = new Map<string, unknown>()
+  for (const fragment of fragments) {
+    const sourcePaths = fragment.document.paths as Record<string, unknown>
+    const sourcePathItem = sourcePaths?.[fragment.path]
+    if (!sourcePathItem || typeof sourcePathItem !== 'object' || Array.isArray(sourcePathItem)) continue
+    const sourceOperation = (sourcePathItem as Record<string, unknown>)[fragment.method.toLowerCase()]
+    if (!sourceOperation || typeof sourceOperation !== 'object' || Array.isArray(sourceOperation)) continue
+    const operation = { ...(sourceOperation as Record<string, unknown>) }
+    if (!operation.servers && Array.isArray(fragment.document.servers)) operation.servers = fragment.document.servers
+    if (!operation.security && Array.isArray(fragment.document.security)) operation.security = fragment.document.security
+    const existingPath = combinedPaths[fragment.path]
+    const pathItem = existingPath && typeof existingPath === 'object' && !Array.isArray(existingPath)
+      ? existingPath as Record<string, unknown>
+      : {}
+    for (const sharedKey of ['parameters', 'servers', 'summary', 'description']) {
+      const sharedValue = (sourcePathItem as Record<string, unknown>)[sharedKey]
+      if (sharedValue !== undefined && pathItem[sharedKey] === undefined) pathItem[sharedKey] = sharedValue
+    }
+    pathItem[fragment.method.toLowerCase()] = operation
+    combinedPaths[fragment.path] = pathItem
+    mergeRecord(combinedComponents, fragment.document.components)
+    for (const tag of Array.isArray(fragment.document.tags) ? fragment.document.tags : []) {
+      if (!tag || typeof tag !== 'object' || Array.isArray(tag)) continue
+      const name = (tag as Record<string, unknown>).name
+      if (typeof name === 'string' && !tags.has(name)) tags.set(name, tag)
+    }
+  }
+  if (Object.keys(combinedPaths).length === 0) return null
+  if (Object.keys(combinedComponents).length === 0) delete combined.components
+  if (tags.size > 0) combined.tags = [...tags.values()]
+  return new TextEncoder().encode(stringifyYaml(combined))
 }
 
 function htmlPage(
@@ -801,6 +971,7 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
   }
 
   const pages: Array<MigrationPage> = []
+  const openApiFragments: Array<EmbeddedOpenApiFragment> = []
   const seenIds = new Set<string>()
   const seenSources = new Set<string>()
   const visited = new Set<string>()
@@ -866,9 +1037,11 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
         : discoveredId
       if (!id) return { candidate, page: null, links: [] as Array<string>, failure: false }
       if (/(?:markdown|text\/plain)/i.test(document.contentType) || /\.mdx?$/i.test(document.finalUrl.pathname)) {
+        const markdown = markdownPage(document, id)
         return {
           candidate,
-          page: markdownPage(document, id),
+          page: markdown.page,
+          openApiFragment: markdown.openApiFragment,
           links: markdownLinks(document.body),
           base: document.finalUrl,
           failure: false,
@@ -890,6 +1063,9 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
       if (result.page && sourceIdentity && !seenSources.has(sourceIdentity)
         && !seenIds.has(result.page.id) && pages.length < maxPages) {
         pages.push(result.page)
+        if ('openApiFragment' in result && result.openApiFragment) {
+          openApiFragments.push(result.openApiFragment)
+        }
         seenIds.add(result.page.id)
         seenSources.add(sourceIdentity)
       }
@@ -930,6 +1106,22 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
     topLevelTabs: platform === 'mintlify',
     topLevelNavigation,
   })
+  const openApiAsset = mergeEmbeddedOpenApi(openApiFragments)
+  if (openApiAsset) {
+    const operationPageIds = new Set(pages.filter((page) => page.openapi).map((page) => page.navigationId))
+    const apiTab = docsConfig.tabs.find((tab) => tab.groups?.some((group) => {
+      const containsOperation = (pages: typeof group.pages): boolean => pages.some((page) => {
+        return typeof page === 'string' ? operationPageIds.has(page) : containsOperation(page.pages)
+      })
+      return containsOperation(group.pages)
+    })) ?? docsConfig.tabs[0]
+    if (apiTab) {
+      // Migrated operation pages preserve the source URLs and sidebar order.
+      // The spec is still configured for operation rendering, but its derived
+      // `/api/*` navigation would duplicate every imported endpoint.
+      apiTab.api = { source: '/openapi.yaml', navigation: false }
+    }
+  }
   const locales = [...new Set(pages.map((page) => page.locale).filter((value): value is string => Boolean(value)))]
   if (locales.length > 0) {
     docsConfig.i18n = {
@@ -945,7 +1137,7 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
     sourceKind: 'url',
     platform,
     pages,
-    assets: [],
+    assets: openApiAsset ? [{ path: 'openapi.yaml', content: openApiAsset }] : [],
     docsConfig,
     warnings,
     stats: {

@@ -25,7 +25,7 @@ export default async function ApiLayoutProvider({ children, params }: ApiLayoutP
 
   const collections = getSidebarCollections()
   const updatedCollections = collections.map((collection) => {
-    if (!collection.api) return collection
+    if (!collection.api || collection.api.navigation === false) return collection
     const mdxSections = collection.sections ?? []
     return { ...collection, sections: [...mdxSections, ...apiSections] }
   })
@@ -37,4 +37,3 @@ export default async function ApiLayoutProvider({ children, params }: ApiLayoutP
     </>
   )
 }
-

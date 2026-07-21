@@ -17,6 +17,7 @@ function renderPage(bundle: MigrationBundle, page: MigrationBundle['pages'][numb
     `title: ${yamlString(page.title)}`,
     `description: ${yamlString(page.description)}`,
     page.keywords.length > 0 ? `keywords: [${page.keywords.map(yamlString).join(', ')}]` : null,
+    page.openapi ? `openapi: ${yamlString(page.openapi)}` : null,
     bundle.sourceKind === 'url' ? `source: ${yamlString(page.source)}` : null,
     '---',
     '',

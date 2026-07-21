@@ -47,7 +47,6 @@ export function parseMarkdownPage(input: {
 }): MigrationPage | null {
   const parsed = matter(input.raw)
   const body = normalizeMdx(parsed.content).trim()
-  if (parsed.data.openapi && !body) return null
   const keywords = Array.isArray(parsed.data.keywords)
     ? parsed.data.keywords.filter((value): value is string => typeof value === 'string')
     : []
@@ -64,6 +63,7 @@ export function parseMarkdownPage(input: {
     title,
     description,
     keywords,
+    openapi: typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined,
     body,
     source: input.source,
   }

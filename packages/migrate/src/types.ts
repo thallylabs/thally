@@ -25,7 +25,7 @@ export interface MigrationNavigationTab {
   tab: string
   href?: string
   groups?: Array<MigrationNavigationGroup>
-  api?: { source: string }
+  api?: { source: string; navigation?: boolean }
 }
 
 export interface MigrationDocsConfig {
@@ -50,6 +50,8 @@ export interface MigrationPage {
   title: string
   description: string
   keywords: Array<string>
+  /** OpenAPI operation key rendered by Thally instead of ordinary MDX. */
+  openapi?: string
   body: string
   source: string
 }

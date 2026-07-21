@@ -31,7 +31,7 @@ export default async function LocaleLayout({ children, params }: LocaleLayoutPro
 
   const sidebarCollections = getSidebarCollections(locale)
   const collections = sidebarCollections.map((collection) => {
-    if (collection.api) {
+    if (collection.api && collection.api.navigation !== false) {
       const mdxSections = collection.sections ?? []
       // Prefix API operation hrefs so navigation stays within the locale
       const localizedApiSections = apiSections.map((section) => ({
