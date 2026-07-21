@@ -61,6 +61,23 @@ function readExistingConfig(projectDir: string): MigrationDocsConfig | undefined
   return JSON.parse(readFileSync(configPath, 'utf8')) as MigrationDocsConfig
 }
 
+/**
+ * Remove content authored by the starter template before materializing a fresh
+ * migration. This is intentionally limited to newly scaffolded projects;
+ * `--into` imports must never delete files the user already owns.
+ */
+function resetFreshMigrationContent(projectDir: string): void {
+  const contentDirectory = projectPath(projectDir, 'src/content')
+  rmSync(contentDirectory, { recursive: true, force: true })
+  mkdirSync(contentDirectory, { recursive: true })
+
+  // The scaffold's sample spec is useful for a new blank site but misleading
+  // after a migration, which writes any discovered spec below `public/`.
+  for (const sampleSpec of ['openapi.yaml', 'openapi.json']) {
+    rmSync(projectPath(projectDir, sampleSpec), { force: true })
+  }
+}
+
 async function discoverMigration(options: MigrateOptions): Promise<MigrationBundle> {
   const url = new URL(options.sourceUrl)
   if (url.hostname.toLowerCase() !== 'github.com') {
@@ -100,6 +117,7 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
       repoUrl: bundle.sourceKind === 'repository' ? options.sourceUrl : '',
       doInstall: false,
     })
+    resetFreshMigrationContent(projectDir)
   } else if (!existsSync(projectDir)) {
     throw new Error(`Project directory "${projectDir}" does not exist. Use without --into to scaffold a new one.`)
   }
