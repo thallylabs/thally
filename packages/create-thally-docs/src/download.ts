@@ -16,7 +16,9 @@ const TARBALL_URL = `https://codeload.github.com/${TEMPLATE_REPOSITORY}/tar.gz/m
 // The source repo is ALSO the live Thally docs project. These paths contain its
 // public documentation, screenshots, generated caches, and maintainer-specific
 // automation. The scaffold writes a small starter README/content set instead.
-// Generic CI and the reusable application/runtime are deliberately retained.
+// Generic CI, the review-gated docs-agent receiver, and the reusable
+// application/runtime are deliberately retained. Product-specific Track
+// senders remain opt-in.
 // (The `tracking` block in docs.json is stripped separately — see
 // resetTrackingConfig — because docs.json itself must be copied.)
 export const EXCLUDE_PATHS = [
@@ -31,7 +33,6 @@ export const EXCLUDE_PATHS = [
   '/.next/',
   '/.data/',
   '/.thally/',
-  '/thally-agent.yml',
   '/thally-track.yml',
   '/CODEOWNERS',
   '/CLAUDE.md',

@@ -14,15 +14,14 @@ import {
   writeStarterReadme,
 } from '../customize.js'
 
-// A scaffold must NOT inherit the Thally project's own project-specific wiring.
-// These guards are the safety net: if a future template change re-introduces the
-// Thally project's tracking/agent config into a scaffold, one of these fails.
-describe('scaffold hygiene — Track/agent are opt-in, never inherited', () => {
+// A scaffold inherits the reusable docs-agent receiver, but never Thally's own
+// project-specific Track senders or repository administration files.
+describe('scaffold hygiene — agent-ready by default, Track senders remain opt-in', () => {
   describe('download filter (shouldInclude)', () => {
-    it('excludes the monorepo tooling and the opt-in Track/agent wiring', () => {
+    it('excludes monorepo tooling and project-specific Track wiring', () => {
       // Tarball entries look like `docs-main/<path>`.
       expect(TEMPLATE_REPOSITORY).toBe('thallylabs/docs')
-      expect(shouldInclude('docs-main/.github/workflows/thally-agent.yml')).toBe(false)
+      expect(shouldInclude('docs-main/.github/workflows/thally-agent.yml')).toBe(true)
       expect(shouldInclude('docs-main/packages/mcp/node_modules')).toBe(false)
       expect(shouldInclude('docs-main/packages/mcp/node_modules/zod/index.js')).toBe(false)
       expect(shouldInclude('docs-main/packages/mcp/package.json')).toBe(false)
@@ -37,13 +36,14 @@ describe('scaffold hygiene — Track/agent are opt-in, never inherited', () => {
     })
 
     it('still includes the platform source, docs.json, and generic CI', () => {
-      // The Track/agent CODE ships (it's the platform capability, off by default);
-      // only the Thally project's own config/workflows are stripped.
+      // The receiver is inert until explicitly dispatched and its required
+      // secret is configured, so it is safe to ship with every new site.
       expect(shouldInclude('docs-main/src/app/api/track/webhook/route.ts')).toBe(true)
       expect(shouldInclude('docs-main/src/lib/track/github-app.ts')).toBe(true)
       expect(shouldInclude('docs-main/src/components/admin/github-connect-panel.tsx')).toBe(true)
       expect(shouldInclude('docs-main/docs.json')).toBe(true)
       expect(shouldInclude('docs-main/.github/workflows/ci.yml')).toBe(true)
+      expect(shouldInclude('docs-main/.github/workflows/thally-agent.yml')).toBe(true)
     })
   })
 
