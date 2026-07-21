@@ -57,6 +57,7 @@ interface ProjectionContext {
   generatedIds: Set<string>
   referencedNavigationIds: Set<string>
   sourceUrl: string
+  routePrefix: string
   sidebarSource: string
   warnings: Array<MigrationWarning>
 }
@@ -89,6 +90,38 @@ function normalizeDocId(value: string): string {
     .join('/')
 }
 
+function docusaurusSlugifySegment(value: string): string {
+  let decoded = value
+  try {
+    decoded = decodeURIComponent(value)
+  } catch {
+    // Malformed escapes remain literal input and are normalized safely below.
+  }
+  return decoded
+    .replace(/\.(?:html?|mdx?)$/i, '')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+}
+
+function docusaurusRouteId(value: string): string | null {
+  const segments = normalizeDocId(value)
+    .split('/')
+    .map(docusaurusSlugifySegment)
+    .filter(Boolean)
+  return segments.join('/') || 'introduction'
+}
+
+function defaultDocusaurusRouteId(value: string): string | null {
+  const segments = normalizeDocId(value).split('/').filter(Boolean)
+  if (/^(?:index|readme)$/i.test(segments.at(-1) ?? '')) segments.pop()
+  const normalized = segments.map(docusaurusSlugifySegment).filter(Boolean)
+  return normalized.join('/') || 'introduction'
+}
+
+function storageIdForRoute(routeId: string): string {
+  return /(?:^|\/)(?:index|readme)$/i.test(routeId) ? `${routeId}/index` : routeId
+}
+
 function titleCase(value: string): string {
   return stripNumberPrefix(value)
     .replace(/sidebar$/i, '')
@@ -100,13 +133,13 @@ function titleCase(value: string): string {
     .join(' ')
 }
 
-function routeFromSlug(slug: string, fallback: string): string | null {
+function routeFromSlug(slug: string, fallback: string, sourceDirectory?: string): string | null {
   if (slug === '/') return 'introduction'
-  if (slug.startsWith('/')) return pageIdFromReference(slug)
-  const fallbackDirectory = fallback === 'introduction' ? '' : posix.dirname(fallback)
+  if (slug.startsWith('/')) return docusaurusRouteId(slug)
+  const fallbackDirectory = sourceDirectory ?? (fallback === 'introduction' ? '' : posix.dirname(fallback))
   const resolved = posix.normalize(posix.join(fallbackDirectory, slug))
   if (resolved === '..' || resolved.startsWith('../')) return null
-  return pageIdFromReference(resolved)
+  return docusaurusRouteId(resolved)
 }
 
 /** Resolve Docusaurus `id`, `slug`, and numeric-prefix semantics once. */
@@ -123,17 +156,23 @@ export function resolveDocusaurusPageIdentity(
   const docId = configuredId
     ? normalizeDocId(sourceDirectory === '.' ? configuredId : posix.join(sourceDirectory, configuredId))
     : sourceDocId
-  const defaultNavigationId = pageIdFromReference(docId) ?? fallback.navigationId
+  // Docusaurus collapses a source `index` document by default, but an explicit
+  // `slug: index` remains a literal route. Keep those two cases distinct.
+  const defaultNavigationId = defaultDocusaurusRouteId(docId) ?? fallback.navigationId
   const configuredSlug = typeof frontmatter.slug === 'string' ? frontmatter.slug.trim() : ''
   const navigationId = configuredSlug
-    ? routeFromSlug(configuredSlug, defaultNavigationId) ?? defaultNavigationId
+    ? routeFromSlug(
+        configuredSlug,
+        defaultNavigationId,
+        sourceDirectory === '.' ? '' : sourceDirectory,
+      ) ?? defaultNavigationId
     : defaultNavigationId
   const position = typeof frontmatter.sidebar_position === 'number'
     && Number.isFinite(frontmatter.sidebar_position)
     ? frontmatter.sidebar_position
     : undefined
   return {
-    identity: { id: navigationId, navigationId },
+    identity: { id: storageIdForRoute(navigationId), navigationId },
     descriptor: {
       sourcePath: sourcePath.replace(/\\/g, '/'),
       docId,
@@ -262,26 +301,107 @@ function matchingObjectLiteral(source: string, start: number): string | null {
 }
 
 function parseStaticSidebarModule(source: string): Record<string, unknown> {
+  const bindings = new Map<string, Record<string, unknown>>()
+  const normalizedSource = replaceExternalFbContent(source)
+  const parseFailures: Array<string> = []
   const assignmentPatterns = [
     /\bmodule\.exports\s*=\s*/g,
     /\bexport\s+default\s*/g,
     /\b(?:const|let|var)\s+[A-Za-z_$][\w$]*(?:\s*:\s*[^=;]+)?\s*=\s*/g,
   ]
-  const candidates = assignmentPatterns.flatMap((pattern) => [...source.matchAll(pattern)])
+  const candidates = assignmentPatterns.flatMap((pattern) => [...normalizedSource.matchAll(pattern)])
     .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))
 
   for (const candidate of candidates) {
-    const literal = matchingObjectLiteral(source, (candidate.index ?? 0) + candidate[0].length)
+    const literal = matchingObjectLiteral(normalizedSource, (candidate.index ?? 0) + candidate[0].length)
     if (!literal) continue
     try {
-      const parsed = JSON5.parse(literal) as unknown
+      const substituted = [...bindings].reduce(
+        (value, [name, binding]) => value.replace(
+          new RegExp(`(:\\s*)${name}\\b`, 'g'),
+          (_match, prefix: string) => `${prefix}${JSON.stringify(binding)}`,
+        ),
+        literal,
+      )
+      const parsed = JSON5.parse(substituted) as unknown
       const object = objectValue(parsed)
-      if (object) return object
-    } catch {
+      if (!object) continue
+      const bindingName = candidate[0].match(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)/)?.[1]
+      if (bindingName) {
+        bindings.set(bindingName, object)
+        continue
+      }
+      return object
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const line = Number(message.match(/at (\d+):/)?.[1] ?? 0)
+      const context = line > 0 ? literal.split('\n').slice(Math.max(0, line - 2), line + 1).join(' ') : ''
+      parseFailures.push(`${message}${context ? ` near ${context}` : ''}`)
       // Try the next assignment. Expressions and function calls are rejected.
     }
   }
-  throw new Error('Sidebar config is executable or outside the supported data-only syntax.')
+  const exportedBinding = normalizedSource.match(/\bexport\s+default\s+([A-Za-z_$][\w$]*)\b/)?.[1]
+    ?? normalizedSource.match(/\bmodule\.exports\s*=\s*([A-Za-z_$][\w$]*)\b/)?.[1]
+  if (exportedBinding && bindings.has(exportedBinding)) return bindings.get(exportedBinding)!
+  throw new Error(`Sidebar config is executable or outside the supported data-only syntax.${parseFailures[0] ? ` ${parseFailures[0]}` : ''}`)
+}
+
+function replaceExternalFbContent(source: string): string {
+  const marker = '...fbContent('
+  let result = source
+  let searchFrom = 0
+  while (true) {
+    const start = result.indexOf(marker, searchFrom)
+    if (start < 0) return result.replace(/,\s*,/g, ',')
+    const objectStart = result.indexOf('{', start + marker.length)
+    if (objectStart < 0) return result
+    const objectLiteral = matchingObjectLiteral(result, objectStart)
+    if (!objectLiteral) {
+      searchFrom = start + marker.length
+      continue
+    }
+    const objectEnd = objectStart + objectLiteral.length
+    const close = result.indexOf(')', objectEnd)
+    if (close < 0) return result
+    const externalMatch = /\bexternal\s*:\s*/g.exec(objectLiteral)
+    let replacement = ''
+    if (externalMatch) {
+      const arrayStart = objectLiteral.indexOf('[', externalMatch.index + externalMatch[0].length)
+      if (arrayStart >= 0) {
+        const array = matchingArrayLiteral(objectLiteral, arrayStart)
+        if (array) replacement = array.slice(1, -1)
+      }
+    }
+    let replaceEnd = close + 1
+    if (!replacement) {
+      const trailingComma = result.slice(replaceEnd).match(/^\s*,/)
+      if (trailingComma) replaceEnd += trailingComma[0].length
+    }
+    result = `${result.slice(0, start)}${replacement}${result.slice(replaceEnd)}`
+    searchFrom = start + replacement.length
+  }
+}
+
+function matchingArrayLiteral(source: string, start: number): string | null {
+  let depth = 0
+  let quote = ''
+  let isEscaped = false
+  for (let index = start; index < source.length; index++) {
+    const character = source[index]
+    if (quote) {
+      if (isEscaped) isEscaped = false
+      else if (character === '\\') isEscaped = true
+      else if (character === quote) quote = ''
+      continue
+    }
+    if (character === '"' || character === "'" || character === '`') {
+      quote = character
+      continue
+    }
+    if (character === '[') depth++
+    if (character === ']' && --depth === 0) return source.slice(start, index + 1)
+  }
+  return null
 }
 
 function configuredSidebarPath(repositoryRoot: string): string | null {
@@ -345,7 +465,7 @@ function descriptorSort(left: DocusaurusPageDescriptor, right: DocusaurusPageDes
 function registerDoc(docId: string, context: ProjectionContext): string | null {
   const key = normalizeDocId(docId)
   const descriptor = context.descriptorByDocId.get(key)
-    ?? context.descriptors.find((page) => page.navigationId === pageIdFromReference(key))
+    ?? context.descriptors.find((page) => page.navigationId === docusaurusRouteId(key))
   if (!descriptor) {
     context.warnings.push({
       code: 'missing-page',
@@ -368,16 +488,21 @@ function generatedIndexPage(
   if (link.type === 'doc' && typeof link.id === 'string') return registerDoc(link.id, context)
   if (link.type !== 'generated-index') return null
   const fallback = `category/${slugifySegment(label)}`
-  const navigationId = typeof link.slug === 'string'
+  const unprefixedNavigationId = typeof link.slug === 'string'
     ? routeFromSlug(link.slug, fallback) ?? fallback
     : fallback
+  const navigationId = context.routePrefix
+    && unprefixedNavigationId !== context.routePrefix
+    && !unprefixedNavigationId.startsWith(`${context.routePrefix}/`)
+    ? posix.join(context.routePrefix, unprefixedNavigationId)
+    : unprefixedNavigationId
   if (!context.generatedIds.has(navigationId)
     && !context.descriptors.some((page) => page.navigationId === navigationId)) {
     const description = typeof link.description === 'string'
       ? link.description
       : `Browse the ${label} documentation.`
     context.generatedPages.push({
-      id: navigationId,
+      id: storageIdForRoute(navigationId),
       navigationId,
       title: typeof link.title === 'string' ? link.title : label,
       description,
@@ -473,6 +598,7 @@ export function projectDocusaurusNavigation(input: {
   descriptors: Array<DocusaurusPageDescriptor>
   contentRoot: string
   sourceUrl: string
+  routePrefix?: string
 }): DocusaurusNavigationResult {
   const warnings: Array<MigrationWarning> = []
   const descriptorByDocId = new Map(input.descriptors.map((page) => [page.docId, page]))
@@ -484,6 +610,7 @@ export function projectDocusaurusNavigation(input: {
     generatedIds: new Set(),
     referencedNavigationIds: new Set(),
     sourceUrl: input.sourceUrl,
+    routePrefix: input.routePrefix ?? '',
     sidebarSource: input.sidebars?.sourcePath ?? 'autogenerated sidebar',
     warnings,
   }
@@ -509,9 +636,6 @@ export function projectDocusaurusNavigation(input: {
   if (unreferenced.length > 0) {
     if (tabs.length === 0) tabs.push({ tab: 'Documentation', groups: [] })
     tabs[0].groups?.push({ group: 'Additional', pages: unreferenced })
-  }
-  if (!tabs.some((tab) => tab.tab.toLowerCase() === 'changelog')) {
-    tabs.push({ tab: 'Changelog', href: '/changelog' })
   }
   return {
     docsConfig: { tabs },

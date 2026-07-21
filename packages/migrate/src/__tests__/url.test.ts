@@ -480,4 +480,86 @@ describe('public URL migration', () => {
     expect(bundle.docsConfig.i18n?.defaultLocale).toBe('en')
     expect(bundle.docsConfig.i18n?.locales.map((locale) => locale.code)).toEqual(['en', 'es'])
   })
+
+  it('uses Docusaurus sidebars, current-version scope, aliases, and rendered primitives', async () => {
+    const sourceUrl = 'https://docusaurus.test/'
+    const sidebar = (active: string) => `
+      <ul class="theme-doc-sidebar-menu menu__list">
+        <li class="theme-doc-sidebar-item-link menu__list-item"><a class="menu__link" href="/docs/index">Introduction</a></li>
+        <li class="theme-doc-sidebar-item-category menu__list-item">
+          <div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist" href="/docs/guide/start">Guides</a></div>
+          ${active === 'guide' ? '<ul class="menu__list"><li><a class="menu__link" href="/docs/guide/start">Start</a></li></ul>' : ''}
+        </li>
+        <li class="theme-doc-sidebar-item-category menu__list-item">
+          <div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist" href="/docs/API/Type">API</a></div>
+          ${active === 'api' ? '<ul class="menu__list"><li><a class="menu__link" href="/docs/API/Type">Type</a></li></ul>' : ''}
+        </li>
+        <li class="theme-doc-sidebar-item-link menu__list-item"><a class="menu__link" href="/docs/EmptyPage">Empty page</a></li>
+      </ul>`
+    const page = (url: string, title: string, active: string, content = '') => response(
+      url,
+      `<html><body><aside>${sidebar(active)}</aside><div class="dropdown__menu"><a href="/docs/v1/index">v1</a></div><main><article><header><h1>${title}</h1></header>${content}</article></main></body></html>`,
+      'text/html',
+    )
+    const fetcher: MigrationFetcher = async (url) => {
+      if (url.toString() === sourceUrl) {
+        return response(
+          sourceUrl,
+          '<html><body><nav><a href="/docs/index">Docs</a><a href="/blog">Blog</a></nav><main><h1>Marketing</h1><p>This homepage must not become documentation.</p></main></body></html>',
+          'text/html',
+        )
+      }
+      if (url.pathname === '/docs/sitemap.xml') {
+        return response(url.toString(), '<urlset>'
+          + '<url><loc>https://docusaurus.test/docs/</loc></url>'
+          + '<url><loc>https://docusaurus.test/docs/index</loc></url>'
+          + '<url><loc>https://docusaurus.test/docs/guide/start</loc></url>'
+          + '<url><loc>https://docusaurus.test/docs/API/Type</loc></url>'
+          + '<url><loc>https://docusaurus.test/docs/EmptyPage</loc></url>'
+          + '<url><loc>https://docusaurus.test/docs/search</loc></url>'
+          + '<url><loc>https://docusaurus.test/docs/v1/index</loc></url>'
+          + '</urlset>', 'application/xml')
+      }
+      if (url.pathname === '/docs/' || url.pathname === '/docs') {
+        return page('https://docusaurus.test/docs/index', 'Introduction', 'intro', '<p>Canonical docs introduction.</p>')
+      }
+      if (url.pathname === '/docs/index') {
+        return page(url.toString(), 'Introduction', 'intro', '<p>Canonical docs introduction.</p>')
+      }
+      if (url.pathname === '/docs/guide/start') {
+        return page(url.toString(), 'Start', 'guide', `
+          <div class="theme-admonition theme-admonition-warning"><div class="admonitionHeading">Caution</div><div><p>Back up first.</p></div></div>
+          <div class="tabs-container"><ul class="tabs"><li>npm</li><li>pnpm</li></ul><div role="tabpanel"><pre><code class="language-bash">npm install</code></pre></div><div role="tabpanel"><pre><code class="language-bash">pnpm install</code></pre></div></div>
+          <table><thead><tr><th>Option</th><th>Value</th></tr></thead><tbody><tr><td>endpoint</td><td>https://&lt;host&gt;/{project}</td></tr></tbody></table>`)
+      }
+      if (url.pathname === '/docs/API/Type') {
+        return page(url.toString(), 'Type', 'api', '<p>Case-sensitive reference content.</p>')
+      }
+      if (url.pathname === '/docs/EmptyPage') return page(url.toString(), 'Empty page', 'intro')
+      throw new Error(`missing fixture: ${url}`)
+    }
+
+    const bundle = await migrateUrl({ sourceUrl, platform: 'docusaurus', fetcher })
+
+    expect(bundle.pages.map((entry) => entry.id)).toEqual([
+      'index/index',
+      'guide/start',
+      'API/Type',
+      'EmptyPage',
+    ])
+    expect(bundle.pages.some((entry) => entry.title === 'Marketing')).toBe(false)
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/', destination: '/index' })
+    expect(bundle.docsConfig.tabs).toHaveLength(1)
+    expect(bundle.docsConfig.tabs[0].groups).toEqual([
+      { group: 'Overview', pages: ['index', 'EmptyPage'] },
+      { group: 'Guides', pages: ['guide/start'] },
+      { group: 'API', pages: ['API/Type'] },
+    ])
+    const guide = bundle.pages.find((entry) => entry.navigationId === 'guide/start')
+    expect(guide?.body).toContain('<Warning>')
+    expect(guide?.body).toContain('<Tabs>')
+    expect(guide?.body).toContain('<Tab title="npm">')
+    expect(guide?.body).toContain('| Option | Value |')
+    expect(guide?.body).toContain('https://&lt;host&gt;/&#123;project&#125;')
+  })
 })

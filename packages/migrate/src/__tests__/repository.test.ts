@@ -154,4 +154,63 @@ describe('Docusaurus repository migration', () => {
     }))
     expect(bundle.docsConfig.tabs[0].tab).toBe('Documentation')
   })
+
+  it('discovers monorepo projects, static external wrappers, aliases, plugins, and literal index slugs', () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-monorepo-'))
+    const siteRoot = join(repositoryDir, 'packages', 'website')
+    mkdirSync(join(siteRoot, 'docs', 'API'), { recursive: true })
+    mkdirSync(join(siteRoot, 'docs', 'filters'), { recursive: true })
+    mkdirSync(join(siteRoot, 'wiki', 'style'), { recursive: true })
+    mkdirSync(join(siteRoot, 'static', 'img'), { recursive: true })
+    writeFileSync(join(siteRoot, 'docusaurus.config.ts'), `
+      export default {
+        presets: [['classic', { docs: { path: 'docs', sidebarPath: './sidebars.js' } }]],
+        plugins: [[
+          '@docusaurus/plugin-content-docs',
+          { id: 'wiki', path: 'wiki', routeBasePath: 'wiki' },
+        ]],
+      }
+    `)
+    writeFileSync(join(siteRoot, 'sidebars.js'), `
+      module.exports = {
+        docs: ['index', { 'API Reference': [
+          ...fbContent({ internal: ['internal/secret'], external: ['API/Type', 'filters/index'] }),
+        ] }],
+      }
+    `)
+    writeFileSync(join(siteRoot, 'docs', '_partial.mdx'), 'Portable imported prerequisite.')
+    writeFileSync(join(siteRoot, 'docs', 'index.mdx'), "---\ntitle: Introduction\n---\n\nimport Partial from '@site/docs/_partial.mdx';\n\n<Partial />")
+    writeFileSync(join(siteRoot, 'docs', 'API', 'Type.mdx'), '---\ntitle: Type\n---\n\nCase-sensitive API type.')
+    writeFileSync(join(siteRoot, 'docs', 'filters', 'index.mdx'), '---\ntitle: Filters\nslug: index\n---\n\nFilter reference.')
+    writeFileSync(join(siteRoot, 'wiki', 'index.mdx'), '---\ntitle: Wiki\n---\n\nWiki introduction.')
+    writeFileSync(join(siteRoot, 'wiki', 'style', '_category_.json'), JSON.stringify({
+      label: 'Style',
+      link: { type: 'generated-index', title: 'Style index' },
+    }))
+    writeFileSync(join(siteRoot, 'wiki', 'style', 'writing.mdx'), '---\ntitle: Writing\n---\n\nWriting guidance.')
+    writeFileSync(join(siteRoot, 'static', 'img', 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+
+    const bundle = migrateRepository({
+      repositoryDir,
+      sourceUrl: 'https://github.com/acme/monorepo',
+    })
+
+    expect(bundle.platform).toBe('docusaurus')
+    expect(bundle.pages.map((page) => page.id)).toEqual([
+      'API/Type',
+      'filters/index/index',
+      'introduction',
+      'wiki',
+      'wiki/style/writing',
+      'wiki/category/style',
+    ])
+    expect(bundle.pages.find((page) => page.id === 'introduction')?.body).toContain('Portable imported prerequisite.')
+    expect(bundle.pages.map((page) => page.id)).not.toContain('_partial')
+    expect(bundle.docsConfig.tabs.map((tab) => tab.tab)).toEqual(['Documentation', 'Wiki'])
+    expect(bundle.docsConfig.tabs[0].groups).toEqual([
+      { group: 'Overview', pages: ['introduction'] },
+      { group: 'API Reference', pages: ['API/Type', 'filters/index'] },
+    ])
+    expect(bundle.assets.map((asset) => asset.path)).toContain('img/logo.svg')
+  })
 })
