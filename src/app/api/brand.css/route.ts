@@ -2,6 +2,7 @@ import { getAdminSettings } from '@/lib/admin/settings'
 import { themeVarsFor, toHslValue } from '@thallylabs/core/theme'
 import type { NextRequest } from 'next/server'
 import { getCloudSiteConfig } from '@/lib/cloud-link/client'
+import { brandRuntimeCss } from '@/lib/brand-runtime-css'
 
 export const runtime = 'nodejs'
 
@@ -22,7 +23,8 @@ export async function GET(request: NextRequest) {
   const theme = cloud?.siteConfig.portable.branding?.themePreset ?? s.brandTheme
   if (theme) parts.push(themeVarsFor(theme))
 
-  if (s.brandAccent) {
+  const cloudBranding = cloud?.siteConfig.portable.branding
+  if (!cloudBranding?.colors && s.brandAccent) {
     const { light, dark } = s.brandAccent
     if (typeof light === 'string' && HEX.test(light)) {
       const hsl = toHslValue(light)
@@ -38,7 +40,8 @@ export async function GET(request: NextRequest) {
   // override wins regardless of how Next/React 19 orders the stylesheets by
   // precedence — otherwise the globals bundle can re-sort after this link.
   const declarations = parts.filter(Boolean).join(';')
-  const css = declarations ? `:root:root{${declarations}}` : ''
+  const legacyCss = declarations ? `:root:root{${declarations}}` : ''
+  const css = [brandRuntimeCss(cloudBranding), legacyCss].filter(Boolean).join('\n')
   return new Response(css, {
     headers: { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'public, max-age=30' },
   })
