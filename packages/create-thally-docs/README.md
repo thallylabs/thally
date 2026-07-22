@@ -44,6 +44,11 @@ interactive question explicitly.
 | `create-thally-docs check [dir] [--fix]` | Lint content for orphan pages and missing frontmatter |
 | `create-thally-docs translate --locale <code>` | Translate content into another locale |
 
+Interactive migrations ask whether the source is Mintlify, Docusaurus, or
+another auto-detected platform. For scripts and CI, pass
+`--platform mintlify`, `--platform docusaurus`, or `--platform auto`; `--yes`
+keeps backward-compatible auto-detection when no platform flag is supplied.
+
 Prefer a single binary? Install [`@thallylabs/cli`](https://www.npmjs.com/package/@thallylabs/cli)
 and use `thally init`, which delegates here.
 

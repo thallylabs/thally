@@ -15,6 +15,7 @@ import type {
   MigrationBundle,
   MigrationFetcher,
   MigrationFetchResponse,
+  MigrationNavigationGroup,
   MigrationPage,
   MigrationPlatform,
   MigrationWarning,
@@ -49,6 +50,8 @@ interface EmbeddedOpenApiFragment {
 
 export interface UrlMigrationOptions {
   sourceUrl: string
+  /** Explicit caller selection; omitted callers retain source auto-detection. */
+  platform?: MigrationPlatform
   fetcher?: MigrationFetcher
   maxPages?: number
   concurrency?: number
@@ -679,6 +682,7 @@ function htmlPage(
   const content = $('main article, article, main, [role="main"]').first()
   const root = content.length ? content : $('body')
   root.find('script,style,noscript,nav,header,footer,aside,form,button,svg,iframe,object,embed,link,meta').remove()
+  root.find('.theme-doc-version-badge,.theme-doc-breadcrumbs,.theme-doc-toc-mobile,.table-of-contents,.hash-link').remove()
   root.find('a[href]').each((_index, element) => {
     const href = $(element).attr('href')
     if (!href) return
@@ -709,12 +713,76 @@ function htmlPage(
   })
   const turndown = new TurndownService({ codeBlockStyle: 'fenced', emDelimiter: '_', headingStyle: 'atx' })
   turndown.remove(['script', 'style', 'noscript'])
+  turndown.addRule('docusaurus-admonition', {
+    filter: (node) => node.nodeName === 'DIV'
+      && (node as HTMLElement).classList.contains('theme-admonition'),
+    replacement: (_content, node) => {
+      const element = node as HTMLElement
+      const className = element.className
+      const tag = /admonition-(?:danger)/.test(className)
+        ? 'Error'
+        : /admonition-(?:caution|warning)/.test(className)
+          ? 'Warning'
+          : /admonition-info/.test(className)
+            ? 'Info'
+            : 'Note'
+      const fragment = load(element.outerHTML)
+      const clone = fragment('.theme-admonition').first()
+      const title = clone.find('[class*="admonitionHeading"],.admonition-heading').first()
+      const titleText = title.text().trim()
+      title.remove()
+      const markdown = turndown.turndown(clone.html() ?? '').trim()
+      return `\n\n<${tag}>\n${titleText ? `**${titleText}**\n\n` : ''}${markdown}\n</${tag}>\n\n`
+    },
+  })
+  turndown.addRule('docusaurus-tabs', {
+    filter: (node) => node.nodeName === 'DIV'
+      && (node as HTMLElement).classList.contains('tabs-container'),
+    replacement: (_content, node) => {
+      const element = node as HTMLElement
+      const fragment = load(element.outerHTML)
+      const container = fragment('.tabs-container').first()
+      const labels = container.children('ul.tabs').children('li').toArray()
+        .map((item) => fragment(item).text().trim() || 'Tab')
+      const panels = container.children('div[role="tabpanel"]').toArray()
+      if (panels.length === 0) return _content
+      const tabs = panels.map((panel, index) => {
+        const title = (labels[index] ?? `Tab ${index + 1}`).replace(/"/g, '&quot;')
+        return `<Tab title="${title}">\n${turndown.turndown(fragment(panel).html() ?? '').trim()}\n</Tab>`
+      })
+      return `\n\n<Tabs>\n${tabs.join('\n\n')}\n</Tabs>\n\n`
+    },
+  })
+  turndown.addRule('gfm-table', {
+    filter: 'table',
+    replacement: (_content, node) => {
+      const fragment = load((node as HTMLElement).outerHTML)
+      const rows = fragment('tr').toArray().map((row) => (
+        fragment(row).children('th,td').toArray().map((cell) => fragment(cell).text()
+          .replace(/\s+/g, ' ')
+          .replace(/\|/g, '\\|')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\{/g, '&#123;')
+          .replace(/\}/g, '&#125;')
+          .trim())
+      )).filter((row) => row.length > 0)
+      if (rows.length === 0) return ''
+      const width = Math.max(...rows.map((row) => row.length))
+      const normalized = rows.map((row) => [...row, ...Array<string>(width - row.length).fill('')])
+      return `\n\n| ${normalized[0].join(' | ')} |\n| ${Array<string>(width).fill('---').join(' | ')} |\n${normalized.slice(1).map((row) => `| ${row.join(' | ')} |`).join('\n')}\n\n`
+    },
+  })
   turndown.addRule('migration-safe-fenced-code', {
     filter: (node) => node.nodeName === 'PRE',
     replacement: (_content, node) => {
       const element = node as HTMLElement
-      const code = element.textContent?.replace(/\n$/, '') ?? ''
-      const language = element.querySelector('code')?.className.match(/(?:language-|lang-)([A-Za-z0-9_+-]+)/)?.[1] ?? ''
+      const fragment = load(element.outerHTML)
+      const tokenLines = fragment('.token-line').toArray()
+      const code = (tokenLines.length > 0
+        ? tokenLines.map((line) => fragment(line).text()).join('\n')
+        : fragment('pre').text()).replace(/\n$/, '')
+      const language = fragment('code').attr('class')?.match(/(?:language-|lang-)([A-Za-z0-9_+-]+)/)?.[1] ?? ''
       const longestFence = Math.max(0, ...[...code.matchAll(/`+/g)].map((match) => match[0].length))
       const fence = '`'.repeat(Math.max(3, longestFence + 1))
       return `\n\n${fence}${language}\n${code}\n${fence}\n\n`
@@ -723,7 +791,10 @@ function htmlPage(
   const escape = turndown.escape.bind(turndown)
   turndown.escape = (text: string) => escape(text).replace(/[<{]/g, (match) => `\\${match}`)
   const body = turndown.turndown(root.html() ?? '').trim()
-  if (!title || body.length < 40) return { page: null, links }
+  // Docusaurus can intentionally publish title-only reference/partial pages.
+  // Keep those real article routes while still rejecting empty search/app
+  // shells that happen to expose a document title.
+  if (!title || (body.length < 40 && $('article').length === 0)) return { page: null, links }
   return {
     page: {
       id,
@@ -750,6 +821,239 @@ interface SourceNavigationTab {
   section: string
   label: string
   pageId: string
+}
+
+interface DocusaurusSidebarItem {
+  label: string
+  href?: string
+  items?: Array<DocusaurusSidebarItem>
+  isCategory?: boolean
+}
+
+interface DocusaurusSidebarSnapshot {
+  items: Array<DocusaurusSidebarItem>
+}
+
+interface DocusaurusDiscovery {
+  scopePath: string
+  excludedVersionPrefixes: Array<string>
+  sidebar: DocusaurusSidebarSnapshot | null
+}
+
+function normalizedLinkLabel(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function readDocusaurusSidebar(document: MigrationFetchResponse): DocusaurusSidebarSnapshot | null {
+  if (!/html/i.test(document.contentType)) return null
+  const $ = load(document.body)
+  const sidebar = $('ul.theme-doc-sidebar-menu').first()
+  if (sidebar.length === 0) return null
+
+  type CheerioSelector = Exclude<Parameters<ReturnType<typeof load>>[0], undefined>
+  function readList(list: CheerioSelector): Array<DocusaurusSidebarItem> {
+    return $(list).children('li').toArray().flatMap((item) => {
+      const directLink = $(item).children('a.menu__link').first()
+      const collapsibleLink = $(item)
+        .children('.menu__list-item-collapsible')
+        .children('a.menu__link')
+        .first()
+      const link = directLink.length > 0 ? directLink : collapsibleLink
+      const label = normalizedLinkLabel(link.text())
+      const href = link.attr('href')
+      const nested = $(item).children('ul.menu__list').first()
+      const children = nested.length > 0 ? readList(nested.get(0)!) : []
+      const isCategory = $(item).hasClass('theme-doc-sidebar-item-category')
+        || link.hasClass('menu__link--sublist')
+      if (!label && children.length === 0) return []
+      return [{
+        label: label || 'Documentation',
+        ...(href ? { href: new URL(href, document.finalUrl).toString() } : {}),
+        ...(children.length > 0 ? { items: children } : {}),
+        ...(isCategory ? { isCategory: true } : {}),
+      }]
+    })
+  }
+
+  return { items: readList(sidebar.get(0)!) }
+}
+
+function docusaurusSidebarHrefs(snapshot: DocusaurusSidebarSnapshot | null): Array<string> {
+  const hrefs: Array<string> = []
+  const visit = (items: Array<DocusaurusSidebarItem>) => {
+    for (const item of items) {
+      if (item.href) hrefs.push(item.href)
+      if (item.items) visit(item.items)
+    }
+  }
+  if (snapshot) visit(snapshot.items)
+  return hrefs
+}
+
+function deriveDocusaurusScope(
+  source: URL,
+  document: MigrationFetchResponse,
+  submittedScopePath: string,
+): DocusaurusDiscovery {
+  const $ = load(document.body)
+  const sidebar = readDocusaurusSidebar(document)
+  const internalPaths = docusaurusSidebarHrefs(sidebar).flatMap((href) => {
+    try {
+      const url = new URL(href)
+      return url.origin === source.origin ? [url.pathname.replace(/\/+$/, '') || '/'] : []
+    } catch {
+      return []
+    }
+  })
+  const counts = new Map<string, number>()
+  for (const path of internalPaths) {
+    const segments = path.split('/').filter(Boolean)
+    for (let length = 1; length < segments.length; length++) {
+      const prefix = `/${segments.slice(0, length).join('/')}`
+      counts.set(prefix, (counts.get(prefix) ?? 0) + 1)
+    }
+  }
+  const threshold = Math.max(2, Math.ceil(internalPaths.length * 0.6))
+  const scopePath = [...counts]
+    .filter(([, count]) => count >= threshold)
+    .sort((left, right) => right[0].split('/').length - left[0].split('/').length
+      || right[1] - left[1])[0]?.[0]
+    ?? submittedScopePath
+
+  const excludedVersionPrefixes = $('.dropdown__menu a[href]').toArray().flatMap((element) => {
+    const href = $(element).attr('href')
+    if (!href) return []
+    try {
+      const target = new URL(href, document.finalUrl)
+      if (target.origin !== source.origin || !isInScope(target, source, scopePath)) return []
+      const relativePath = target.pathname.slice(scopePath.length).replace(/^\/+/, '')
+      const version = relativePath.split('/', 1)[0]
+      if (!/^(?:legacy|next|v\d[\w.-]*)$/i.test(version)) return []
+      return [`${scopePath}/${version}`]
+    } catch {
+      return []
+    }
+  })
+
+  return {
+    scopePath,
+    excludedVersionPrefixes: [...new Set(excludedVersionPrefixes)],
+    sidebar,
+  }
+}
+
+function docusaurusRouteIdForUrl(url: URL, scopePath: string): string | null {
+  let path = url.pathname.replace(/\/+$/, '')
+  if (scopePath === '/') path = path.replace(/^\/+/, '')
+  else if (path === scopePath) path = ''
+  else if (path.startsWith(`${scopePath}/`)) path = path.slice(scopePath.length + 1)
+  else return null
+  const segments = path.split('/').filter(Boolean).map((segment) => {
+    let decoded = segment
+    try {
+      decoded = decodeURIComponent(segment)
+    } catch {
+      // Preserve malformed source segments as literal route input.
+    }
+    return decoded
+      .replace(/\.(?:html?|mdx?)$/i, '')
+      .replace(/[^A-Za-z0-9._-]+/g, '-')
+      .replace(/(^-|-$)/g, '')
+  }).filter(Boolean)
+  return segments.join('/') || 'introduction'
+}
+
+function storageIdForDocusaurusRoute(routeId: string): string {
+  return /(?:^|\/)(?:index|readme)$/i.test(routeId) ? `${routeId}/index` : routeId
+}
+
+function docusaurusNavigationFromSnapshots(
+  snapshots: Array<DocusaurusSidebarSnapshot>,
+  pages: Array<MigrationPage>,
+  scopePath: string,
+): ReturnType<typeof buildNavigationFromPages> {
+  const imported = new Set(pages.map((page) => page.navigationId))
+  const claimed = new Set<string>()
+  const uniqueSnapshots = [...new Map(snapshots.map((snapshot) => [
+    JSON.stringify(snapshot.items),
+    snapshot,
+  ])).values()]
+  const mergedSnapshots: Array<DocusaurusSidebarSnapshot> = []
+  function mergeItems(
+    target: Array<DocusaurusSidebarItem>,
+    incoming: Array<DocusaurusSidebarItem>,
+  ): void {
+    for (const item of incoming) {
+      const existing = target.find((candidate) => candidate.label === item.label
+        && (candidate.items || item.items))
+        ?? target.find((candidate) => candidate.label === item.label && candidate.href === item.href)
+      if (!existing) {
+        target.push(structuredClone(item))
+        continue
+      }
+      if (!existing.href && item.href) existing.href = item.href
+      if (item.items) {
+        existing.items ??= []
+        mergeItems(existing.items, item.items)
+      }
+    }
+  }
+  for (const snapshot of uniqueSnapshots) {
+    const incomingLabels = new Set(snapshot.items.map((item) => item.label))
+    const cluster = mergedSnapshots.find((candidate) => {
+      const candidateLabels = new Set(candidate.items.map((item) => item.label))
+      const overlap = [...incomingLabels].filter((label) => candidateLabels.has(label)).length
+      return overlap >= Math.max(2, Math.ceil(Math.min(incomingLabels.size, candidateLabels.size) * 0.5))
+    })
+    if (cluster) mergeItems(cluster.items, snapshot.items)
+    else mergedSnapshots.push(structuredClone(snapshot))
+  }
+  const pageIdsFor = (snapshot: DocusaurusSidebarSnapshot): Array<string> => docusaurusSidebarHrefs(snapshot)
+    .flatMap((href) => {
+      const id = docusaurusRouteIdForUrl(new URL(href), scopePath)
+      return id && imported.has(id) ? [id] : []
+    })
+  mergedSnapshots.sort((left, right) => pageIdsFor(right).length - pageIdsFor(left).length)
+
+  const tabs = mergedSnapshots.flatMap((snapshot, snapshotIndex) => {
+    function convert(items: Array<DocusaurusSidebarItem>): Array<string | MigrationNavigationGroup> {
+      const converted: Array<string | MigrationNavigationGroup> = []
+      for (const item of items) {
+        const routeId = item.href
+          ? docusaurusRouteIdForUrl(new URL(item.href), scopePath)
+          : null
+        const page = routeId && imported.has(routeId) && !claimed.has(routeId) ? routeId : null
+        if (page) claimed.add(page)
+        const children = item.items ? convert(item.items) : []
+        if (children.length > 0 || item.isCategory) {
+          converted.push({ group: item.label, pages: page ? [page, ...children] : children })
+          continue
+        }
+        if (page) converted.push(page)
+      }
+      return converted
+    }
+    const converted = convert(snapshot.items)
+    const loosePages = converted.filter((item): item is string => typeof item === 'string')
+    const groups = converted.filter((item): item is Exclude<typeof item, string> => typeof item !== 'string')
+    if (loosePages.length > 0) groups.unshift({ group: 'Overview', pages: loosePages })
+    if (groups.length === 0) return []
+    const snapshotPageIds = pageIdsFor(snapshot)
+    const firstSegments = new Set(snapshotPageIds.map((id) => id.split('/', 1)[0]))
+    const tab = snapshotIndex > 0 && firstSegments.size === 1
+      ? normalizedLinkLabel([...firstSegments][0].replace(/[-_]/g, ' ')).replace(/\b\w/g, (letter) => letter.toUpperCase())
+      : 'Documentation'
+    return [{ tab, groups }]
+  })
+
+  const additional = pages
+    .map((page) => page.navigationId)
+    .filter((id) => !claimed.has(id))
+  if (additional.length > 0) {
+    if (tabs.length === 0) return buildNavigationFromPages(pages)
+    tabs[0].groups?.push({ group: 'Additional', pages: additional })
+  }
+  return { tabs }
 }
 
 function htmlTopLevelNavigation(
@@ -864,12 +1168,36 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
   const scopedHtmlProbe = htmlProbe && isInScope(htmlProbe.finalUrl, source, submittedScopePath)
     ? htmlProbe
     : null
-  const platform = detectUrlPlatform(scopedHtmlProbe ?? initial)
+  const platform = options.platform ?? detectUrlPlatform(scopedHtmlProbe ?? initial)
+  let docusaurusHtmlProbe = platform === 'docusaurus' ? scopedHtmlProbe : null
+  if (docusaurusHtmlProbe && !readDocusaurusSidebar(docusaurusHtmlProbe)) {
+    const $ = load(docusaurusHtmlProbe.body)
+    const docsHref = $('nav a[href]').toArray().map((element) => ({
+      href: $(element).attr('href'),
+      label: normalizedLinkLabel($(element).text()),
+    })).find((link) => /^docs(?:umentation)?$/i.test(link.label))?.href
+    if (docsHref) {
+      try {
+        const docsUrl = new URL(docsHref, docusaurusHtmlProbe.finalUrl)
+        if (docsUrl.origin === source.origin && isInScope(docsUrl, source, submittedScopePath)) {
+          const probe = await safeFetch(fetcher, docsUrl, 'text/html,application/xhtml+xml')
+          if (probe && probe.finalUrl.origin === source.origin && /html/i.test(probe.contentType)) {
+            docusaurusHtmlProbe = probe
+          }
+        }
+      } catch {
+        // A malformed navbar link falls back to the submitted path boundary.
+      }
+    }
+  }
+  const docusaurusDiscovery = platform === 'docusaurus' && docusaurusHtmlProbe
+    ? deriveDocusaurusScope(source, docusaurusHtmlProbe, submittedScopePath)
+    : null
   // A Mintlify site may own an entire docs origin or a path below a marketing
   // site. Its llms/sitemap location is the authoritative crawl boundary.
   const scopePath = platform === 'mintlify'
     ? machineIndexScopePath(source, [initial, scopedHtmlProbe]) ?? submittedScopePath
-    : submittedScopePath
+    : docusaurusDiscovery?.scopePath ?? submittedScopePath
   const sourceTopLevelNavigation = platform === 'mintlify' && scopedHtmlProbe && /html/i.test(scopedHtmlProbe.contentType)
     ? htmlTopLevelNavigation(scopedHtmlProbe, source, scopePath)
     : undefined
@@ -882,23 +1210,34 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
       ? canonicalLocalizedPageId(pageIdForUrl(source, scopePath) ?? '') || undefined
       : undefined)
   const cache = new Map([[source.toString(), initial]])
+  if (docusaurusHtmlProbe) cache.set(docusaurusHtmlProbe.finalUrl.toString(), docusaurusHtmlProbe)
   const queue: Array<URL> = [source]
   const queued = new Set([candidateIdentity(source)])
   const warnings: Array<MigrationWarning> = []
   const fetchedSitemaps = new Set<string>()
+  const docusaurusSidebars: Array<DocusaurusSidebarSnapshot> = docusaurusDiscovery?.sidebar
+    ? [docusaurusDiscovery.sidebar]
+    : []
+  const docusaurusRedirects: Array<{ source: string; destination: string }> = []
 
   function enqueue(value: string, base: URL): void {
     if (queued.size >= MAX_DISCOVERED_URLS) return
     const url = normalizeCandidate(value, base, source, scopePath)
     if (!url || queued.has(candidateIdentity(url))) return
+    if (platform === 'docusaurus' && url.pathname.replace(/\/+$/, '') === `${scopePath}/search`) return
+    if (docusaurusDiscovery?.excludedVersionPrefixes.some((prefix) => {
+      const path = url.pathname.replace(/\/+$/, '')
+      return path === prefix || path.startsWith(`${prefix}/`)
+    })) return
     queued.add(candidateIdentity(url))
     queue.push(url)
   }
 
   // Mintlify renders the authored navigation into the HTML shell. Seed the
   // queue from that order before machine indexes add completeness fallbacks.
-  if (scopedHtmlProbe && /html/i.test(scopedHtmlProbe.contentType)) {
-    for (const link of htmlNavigationLinks(scopedHtmlProbe)) enqueue(link, scopedHtmlProbe.finalUrl)
+  const navigationProbe = docusaurusHtmlProbe ?? scopedHtmlProbe
+  if (navigationProbe && /html/i.test(navigationProbe.contentType)) {
+    for (const link of htmlNavigationLinks(navigationProbe)) enqueue(link, navigationProbe.finalUrl)
   }
 
   async function discoverDocumentLinks(document: MigrationFetchResponse, depth = 0): Promise<void> {
@@ -1030,14 +1369,22 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
         return { candidate, page: null, links: [] as Array<string>, failure: false, budgetExceeded: true }
       }
       importedBytes += responseBytes
-      const discoveredId = pageIdForUrl(document.finalUrl, scopePath)
-        ?? pageIdForUrl(candidate, scopePath)
-      const id = discoveredId && canonicalLocalizedPageId(discoveredId) === sourceHomePageId
+      const discoveredNavigationId = platform === 'docusaurus'
+        ? docusaurusRouteIdForUrl(document.finalUrl, scopePath)
+          ?? docusaurusRouteIdForUrl(candidate, scopePath)
+        : pageIdForUrl(document.finalUrl, scopePath)
+          ?? pageIdForUrl(candidate, scopePath)
+      const navigationId = discoveredNavigationId
+        && canonicalLocalizedPageId(discoveredNavigationId) === sourceHomePageId
         ? 'introduction'
-        : discoveredId
-      if (!id) return { candidate, page: null, links: [] as Array<string>, failure: false }
+        : discoveredNavigationId
+      if (!navigationId) return { candidate, page: null, links: [] as Array<string>, failure: false }
+      const id = platform === 'docusaurus'
+        ? storageIdForDocusaurusRoute(navigationId)
+        : navigationId
       if (/(?:markdown|text\/plain)/i.test(document.contentType) || /\.mdx?$/i.test(document.finalUrl.pathname)) {
         const markdown = markdownPage(document, id)
+        if (markdown.page) markdown.page.navigationId = navigationId
         return {
           candidate,
           page: markdown.page,
@@ -1048,7 +1395,9 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
         }
       }
       const extracted = htmlPage(document, id)
-      return { candidate, page: extracted.page, links: extracted.links, base: document.finalUrl, failure: false }
+      if (extracted.page) extracted.page.navigationId = navigationId
+      const sidebar = platform === 'docusaurus' ? readDocusaurusSidebar(document) : null
+      return { candidate, page: extracted.page, links: extracted.links, base: document.finalUrl, sidebar, failure: false }
     }))
     for (const result of results) {
       if (result.failure) {
@@ -1056,7 +1405,10 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
         continue
       }
       if (result.budgetExceeded) continue
-      if (result.page) result.page.id = canonicalLocalizedPageId(result.page.id)
+      if (result.page && platform !== 'docusaurus') {
+        result.page.id = canonicalLocalizedPageId(result.page.id)
+        result.page.navigationId = canonicalLocalizedPageId(result.page.navigationId)
+      }
       const sourceIdentity = result.page
         ? candidateIdentity(new URL(result.page.source))
         : null
@@ -1069,6 +1421,16 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
         seenIds.add(result.page.id)
         seenSources.add(sourceIdentity)
       }
+      if (platform === 'docusaurus' && result.page) {
+        const candidateRoute = docusaurusRouteIdForUrl(result.candidate, scopePath)
+        if (candidateRoute && candidateRoute !== result.page.navigationId) {
+          docusaurusRedirects.push({
+            source: candidateRoute === 'introduction' ? '/' : `/${candidateRoute}`,
+            destination: result.page.navigationId === 'introduction' ? '/' : `/${result.page.navigationId}`,
+          })
+        }
+      }
+      if ('sidebar' in result && result.sidebar) docusaurusSidebars.push(result.sidebar)
       for (const link of result.links) enqueue(link, result.base ?? result.candidate)
     }
   }
@@ -1082,7 +1444,7 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
       page.navigationId = navigationSegments.join('/') || 'introduction'
     }
   }
-  const importedIds = new Set(pages.map((page) => page.id))
+  const importedIds = new Set(pages.map((page) => page.navigationId))
   for (const page of pages) {
     page.body = rewriteInternalLinks(
       page.body,
@@ -1102,10 +1464,18 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
     ...entry,
     pageId: entry.pageId === sourceHomePageId ? 'introduction' : entry.pageId,
   }))
-  const docsConfig = buildNavigationFromPages(pages, {
-    topLevelTabs: platform === 'mintlify',
-    topLevelNavigation,
-  })
+  const docsConfig = platform === 'docusaurus'
+    ? docusaurusNavigationFromSnapshots(docusaurusSidebars, pages, scopePath)
+    : buildNavigationFromPages(pages, {
+        topLevelTabs: platform === 'mintlify',
+        topLevelNavigation,
+      })
+  if (docusaurusRedirects.length > 0) {
+    docsConfig.redirects = [...new Map(docusaurusRedirects.map((redirect) => [
+      `${redirect.source}:${redirect.destination}`,
+      redirect,
+    ])).values()]
+  }
   const openApiAsset = mergeEmbeddedOpenApi(openApiFragments)
   if (openApiAsset) {
     const operationPageIds = new Set(pages.filter((page) => page.openapi).map((page) => page.navigationId))

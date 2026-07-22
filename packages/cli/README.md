@@ -30,6 +30,10 @@ stays invisible.
 | `thally translate --locale <code>` | Translate content into a locale |
 | `thally mcp` | Start the Model Context Protocol server (stdio) |
 
+`thally migrate` asks which platform currently hosts the docs and dispatches to
+the Mintlify or Docusaurus adapter. Non-interactive callers can pass
+`--platform mintlify`, `--platform docusaurus`, or `--platform auto`.
+
 Run `thally` with no arguments for the full help.
 
 ## How it works

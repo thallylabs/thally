@@ -1,7 +1,9 @@
+/** CLI entry point for scaffolding, migration, validation, and translation. */
+
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { logo, success, slugify } from './utils.js'
-import { gatherAnswers } from './prompts.js'
+import { gatherAnswers, gatherMigrationPlatform } from './prompts.js'
 import { scaffold } from './scaffold.js'
 import { parseGitHubRepositoryUrl } from '@thallylabs/migrate'
 import { migrateDocs } from './migrate/index.js'
@@ -16,8 +18,10 @@ const valueFlags = new Set([
   '--docs-dir',
   '--into',
   '--locale',
+  '--max-pages',
   '--model',
   '--pages',
+  '--platform',
 ])
 
 // Build positionals by skipping values consumed by named flags (e.g. --locale es)
@@ -83,14 +87,14 @@ async function runMigrateCommand(): Promise<void> {
 
   const branch = getFlagValue('--branch')
   const docsDir = getFlagValue('--docs-dir')
+  const yes = flags.includes('--yes') || flags.includes('-y')
+  const platform = await gatherMigrationPlatform(getFlagValue('--platform'), yes)
   const maxPagesValue = getFlagValue('--max-pages')
   const maxPages = maxPagesValue ? Number(maxPagesValue) : undefined
   if (maxPages !== undefined && (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 1000)) {
     console.error('\n  ❌ --max-pages must be an integer between 1 and 1000.')
     process.exit(1)
   }
-  const yes = flags.includes('--yes') || flags.includes('-y')
-
   logo()
   console.log('  🚀 Thally Migrate')
   console.log('')
@@ -98,6 +102,7 @@ async function runMigrateCommand(): Promise<void> {
   console.log(`  Target:  ${projectDir}`)
   if (branch) console.log(`  Branch:  ${branch}`)
   if (docsDir) console.log(`  Docs dir: ${docsDir}`)
+  console.log(`  Platform: ${platform ?? 'auto-detect'}`)
   console.log('')
 
   await migrateDocs({
@@ -108,6 +113,7 @@ async function runMigrateCommand(): Promise<void> {
     branch,
     docsDir,
     maxPages,
+    platform,
     yes,
   })
 }

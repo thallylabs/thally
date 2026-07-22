@@ -25,7 +25,7 @@ export const COMMANDS: Array<CommandInfo> = [
   { name: 'deploy', summary: 'Build and deploy to a live URL', usage: 'thally deploy [--prod] [--cloudflare]' },
   { name: 'check', summary: 'Lint content + Agent Readiness Score', usage: 'thally check [--agents] [--fix] [--ci] [--drift]' },
   { name: 'new', summary: 'Create a new page and register it in docs.json', usage: 'thally new <page-id> [--title "..."]' },
-  { name: 'migrate', summary: 'Migrate docs from a GitHub URL', usage: 'thally migrate <github-url> [dir]' },
+  { name: 'migrate', summary: 'Migrate a docs repository or public site', usage: 'thally migrate <github-or-docs-url> [dir] [--platform <mintlify|docusaurus|auto>]' },
   { name: 'translate', summary: 'Translate content into a locale', usage: 'thally translate --locale <code>' },
   { name: 'mcp', summary: 'Start the Model Context Protocol server (stdio)', usage: 'thally mcp' },
   { name: 'agent', summary: 'Draft docs from a task (PR, diff, or instruction) as a reviewed PR', usage: 'thally agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--context-file <path>] [--dry-run] [--pr]' },

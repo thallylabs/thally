@@ -1,3 +1,5 @@
+/** MCP adapter for the same platform-aware migration engine used by the CLI. */
+
 import { z } from 'zod'
 import { migrateDocs } from 'create-thally-docs/migrate'
 
@@ -9,6 +11,7 @@ export const migrateDocsSchema = z.object({
   docsDir: z.string().optional().describe('Docs subdirectory in repo (default: auto-detect)'),
   apiKey: z.string().optional().describe('Anthropic API key for non-Markdown file conversion'),
   maxPages: z.number().int().min(1).max(1000).optional().describe('Maximum public URL pages to import'),
+  platform: z.enum(['mintlify', 'docusaurus']).optional().describe('Source platform (default: auto-detect)'),
 })
 
 export async function handleMigrateDocs(input: z.infer<typeof migrateDocsSchema>): Promise<string> {
@@ -22,6 +25,7 @@ export async function handleMigrateDocs(input: z.infer<typeof migrateDocsSchema>
     branch: input.branch,
     docsDir: input.docsDir,
     maxPages: input.maxPages,
+    platform: input.platform,
     yes: true,
   })
 
