@@ -9,6 +9,7 @@ import { getAllApiOperationNodes, getApiOperationBySlug, getApiOperationNodes } 
 import { getBreadcrumbs, getI18nConfig } from '@/data/docs'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { buildApiOperationJsonLd } from '@/lib/json-ld'
+import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
 
 interface PageProps {
   params: Promise<{ locale: string; slug?: Array<string> }>
@@ -25,9 +26,7 @@ export async function generateStaticParams() {
   if (!i18n) return []
   const secondaryLocales = i18n.locales.filter((l) => l.code !== i18n.defaultLocale)
   const nodes = await getAllApiOperationNodes()
-  return secondaryLocales.flatMap(({ code }) =>
-    nodes.map((node) => ({ locale: code, slug: node.slug })),
-  )
+  return secondaryLocales.flatMap(({ code }) => nodes.map((node) => ({ locale: code, slug: node.slug })))
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
@@ -37,14 +36,36 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const specUrl = getOpenApiSpecUrl(siteUrl)
   const node = await getApiOperationBySlug(resolved.slug)
   if (!node) return {}
+  const title = node.operation.title
+  const description = node.operation.description ?? `${node.operation.method} ${node.operation.path}`
+  const localizedPath = `/${resolved.locale}${node.href}`
+  const ogImageUrl = buildOgImageUrl({
+    title,
+    description,
+    crumb: formatOgBreadcrumb(getBreadcrumbs(node.href), title, 'API Reference'),
+    url: formatOgDisplayUrl(localizedPath),
+  })
+
   return {
-    title: node.operation.title,
-    description: node.operation.description ?? `${node.operation.method} ${node.operation.path}`,
+    title,
+    description,
     alternates: {
+      canonical: `${siteUrl}${localizedPath}`,
       types: {
         ...buildAgentAlternateLinks(node.href),
         ...(specUrl ? { 'application/vnd.oai.openapi': specUrl } : {}),
       },
+    },
+    openGraph: {
+      title,
+      description,
+      images: [{ url: ogImageUrl, width: 1200, height: 630 }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [ogImageUrl],
     },
   }
 }

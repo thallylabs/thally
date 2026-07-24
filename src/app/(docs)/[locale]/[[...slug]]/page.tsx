@@ -13,7 +13,7 @@ import { LocaleStaleBanner } from '@/components/docs/locale-stale-banner'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
-import { buildOgImageUrl } from '@/lib/og'
+import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
 
 interface PageProps {
   params: Promise<{ locale: string; slug?: Array<string> }>
@@ -54,10 +54,12 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
     const siteUrl = getSiteUrl()
     const primaryHref = doc.slug.length ? `/${doc.slug.join('/')}` : '/'
+    const nav = getNavContext(doc.id)
     const ogImageUrl = buildOgImageUrl({
       title: doc.title,
       description: doc.description,
-      group: doc.group,
+      crumb: formatOgBreadcrumb(nav.breadcrumb, doc.title, doc.group),
+      url: formatOgDisplayUrl(primaryHref),
     })
     const alternateLanguages = i18n
       ? Object.fromEntries(
@@ -92,11 +94,14 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
   const siteUrl = getSiteUrl()
   const primaryHref = doc.slug.length ? `/${doc.slug.join('/')}` : '/'
+  const localizedPath = `/${resolved.locale}${primaryHref}`
+  const nav = getNavContext(doc.id)
 
   const ogImageUrl = buildOgImageUrl({
     title: doc.title,
     description: doc.description,
-    group: doc.group,
+    crumb: formatOgBreadcrumb(nav.breadcrumb, doc.title, doc.group),
+    url: formatOgDisplayUrl(localizedPath),
   })
 
   const alternateLanguages = i18n

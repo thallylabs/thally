@@ -1,35 +1,75 @@
 import { siteConfig } from '@/data/site'
+import { getSiteUrl } from '@/lib/site-url'
 
 /**
  * Build a URL string for the dynamic OG image endpoint.
- * All parameters are optional — the route handler fills in defaults from siteConfig.
+ * All parameters are optional. The route handler fills in defaults from siteConfig.
  */
 export function buildOgImageUrl(params: {
   title?: string
   description?: string
-  group?: string
+  crumb?: string
+  url?: string
+  theme?: 'light' | 'dark'
 }): string {
   const searchParams = new URLSearchParams()
   if (params.title) searchParams.set('title', params.title)
   if (params.description) searchParams.set('description', params.description)
-  if (params.group) searchParams.set('group', params.group)
+  if (params.crumb) searchParams.set('crumb', params.crumb)
+  if (params.url) searchParams.set('url', params.url)
+  if (params.theme) searchParams.set('theme', params.theme)
 
   const query = searchParams.toString()
   return `/api/og${query ? `?${query}` : ''}`
 }
 
 /**
- * Resolve the full set of OG image colors by merging user overrides with brand defaults.
- * Used by the /api/og route handler.
+ * Format a canonical path for the compact URL slot in a social preview.
  */
-export function resolveOgConfig(accentOverride?: string) {
-  const og = siteConfig.ogImage ?? {}
-  const dark = siteConfig.brand.dark
+export function formatOgDisplayUrl(path = '/'): string {
+  const url = new URL(path, getSiteUrl())
+  return `${url.host}${url.pathname === '/' ? '' : url.pathname}`
+}
 
-  // accentOverride powers the branding-page preview (a chosen-but-not-yet-applied
-  // accent); otherwise the OG derives entirely from the site brand.
-  const accent = (accentOverride && /^#[0-9a-fA-F]{3,8}$/.test(accentOverride) ? accentOverride : undefined) ?? og.accent ?? dark.accent
-  const siteUrl = (process.env.THALLY_SITE_URL ?? process.env.DOX_SITE_URL) ?? process.env.NEXT_PUBLIC_SITE_URL ?? ''
+/**
+ * Turn page navigation into the two-level breadcrumb used by the docs preview.
+ */
+export function formatOgBreadcrumb(
+  breadcrumb: Array<{ label: string }>,
+  title: string,
+  fallback = 'Documentation',
+): string {
+  const labels = breadcrumb
+    .map((item) => item.label.trim())
+    .filter((label) => label && label.toLocaleLowerCase() !== title.trim().toLocaleLowerCase())
+
+  return labels.slice(-2).join(' / ') || fallback
+}
+
+/**
+ * Resolve the brand values used by the handoff-aligned docs preview.
+ */
+export function resolveOgConfig(theme: 'light' | 'dark', accentOverride?: string) {
+  const og = siteConfig.ogImage ?? {}
+  const palette =
+    theme === 'dark'
+      ? {
+          background: '#131A14',
+          foreground: '#F5F6EC',
+          muted: '#ABB2A2',
+          faint: '#7C8375',
+          leaf: '#FFFFFF',
+        }
+      : {
+          background: '#FBFBF3',
+          foreground: '#252B22',
+          muted: '#6C7268',
+          faint: '#8B9188',
+          leaf: '#41794F',
+        }
+
+  const accent = accentOverride && /^#[0-9a-fA-F]{3,8}$/.test(accentOverride) ? accentOverride : undefined
+  const siteUrl = getSiteUrl()
   let domain = og.domain ?? ''
   if (!domain && siteUrl) {
     try {
@@ -40,16 +80,12 @@ export function resolveOgConfig(accentOverride?: string) {
   }
 
   return {
-    backgroundStart: og.backgroundStart ?? dark.background,
-    backgroundEnd: og.backgroundEnd ?? dark.muted,
-    accent,
-    titleColor: og.titleColor ?? dark.foreground,
-    descriptionColor: og.descriptionColor ?? `${dark.foreground}99`,
-    groupColor: og.groupColor ?? accent,
+    background: og.backgroundStart ?? palette.background,
+    foreground: og.titleColor ?? palette.foreground,
+    muted: og.descriptionColor ?? palette.muted,
+    faint: og.groupColor ?? palette.faint,
+    leaf: theme === 'light' ? (accent ?? og.accent ?? palette.leaf) : palette.leaf,
     domain: domain || siteConfig.name.toLowerCase(),
     logoText: og.logoText ?? siteConfig.name,
-    // Brand display face — OG titles render in Plus Jakarta Sans semibold
-    fontFamily: og.fontFamily ?? 'Plus Jakarta Sans',
-    fontWeight: og.fontWeight ?? '600',
   }
 }
