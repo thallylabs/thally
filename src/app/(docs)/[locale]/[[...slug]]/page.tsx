@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { DocLayout } from '@/components/docs/doc-layout'
 import { getDocEntries, getI18nConfig, getNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
+import { isRemoteContentSource } from '@/lib/content-source'
 import { getSiteUrl } from '@/lib/site-url'
 import { getApiOperationByKey } from '@/data/api-reference'
 import { DocHeader } from '@/components/docs/doc-header'
@@ -30,6 +31,8 @@ function isValidSecondaryLocale(locale: string): boolean {
 }
 
 export async function generateStaticParams() {
+  // Remote content sources resolve pages at request time (see [[...slug]]).
+  if (isRemoteContentSource()) return []
   const i18n = getI18nConfig()
   if (!i18n) return []
   const docs = getDocEntries()

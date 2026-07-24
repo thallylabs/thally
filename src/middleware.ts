@@ -12,7 +12,7 @@ import {
 import { classifyRequest, isAgentRequest } from '@/lib/traffic-classifier'
 import { isMachineEndpoint, isPublicAgentEndpoint } from '@/lib/agent-endpoints'
 import { verifySession, SESSION_COOKIE } from '@/lib/auth/session'
-import { getCloudAccessConfigEdge } from '@/lib/cloud-link/edge'
+import { getCloudAccessConfigEdge, getManagedSiteIdEdge } from '@/lib/cloud-link/edge'
 
 function shouldTrackPath(pathname: string): boolean {
   // Admin console (pages + its own asset/nav requests) and Next internals are
@@ -116,11 +116,74 @@ async function sendAnalyticsEvent(request: NextRequest, pathname: string) {
   })
 }
 
+// API routes whose responses are pure projections of published content, so a
+// content publish (which purges by tag) must be able to evict them.
+const CONTENT_PROJECTION_API_PREFIXES = ['/api/docs/', '/api/markdown/']
+const CONTENT_PROJECTION_API_PATHS = ['/api/docs-index', '/api/og']
+
+function isManagedContentCachePath(pathname: string): boolean {
+  if (pathname.startsWith('/api/')) {
+    return (
+      CONTENT_PROJECTION_API_PATHS.includes(pathname) ||
+      CONTENT_PROJECTION_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+    )
+  }
+  // Everything else that reaches this check is a content surface: doc pages,
+  // their .md mirrors, llms.txt / llms-full.txt, sitemap, robots.
+  return !pathname.startsWith('/admin') && !pathname.startsWith('/_next') && pathname !== '/access'
+}
+
+/**
+ * Under the assets ContentSource, doc responses are served from the CDN and
+ * invalidated by tag when a content publish lands: `Cache-Tag: site:{siteId}`
+ * is the purge handle, and the long CDN TTL makes the tag the only eviction
+ * path. Applied in middleware because App Router pages cannot set response
+ * headers themselves.
+ *
+ * The env var is read inline (not via @/lib/content-source) because that
+ * module's filesystem provider imports node:fs, which cannot be bundled into
+ * edge middleware.
+ *
+ * `isAffirmativelyPublic` must fail CLOSED: headers are applied only when the
+ * managed access config was actually read and says the site is public. When
+ * the config is unavailable (control-plane outage), request gating above
+ * fails open for availability, but a possibly-password-gated page must never
+ * be frozen into a shared cache for a year.
+ *
+ * `cdnCacheable: false` sets the purge tag without a TTL. Used for the
+ * agent content-negotiation rewrite: it varies on User-Agent/Accept while
+ * sharing the browser URL's cache key (CDNs do not honor Vary on those), so
+ * a cached agent response would poison the URL for human visitors. Agents
+ * that want cached responses have URL-distinct forms (`.md`, `?format=`).
+ */
+function applyManagedContentCacheHeaders(
+  response: NextResponse,
+  pathname: string,
+  isAffirmativelyPublic: boolean,
+  options: { cdnCacheable: boolean } = { cdnCacheable: true },
+): NextResponse {
+  if (process.env.THALLY_CONTENT_SOURCE?.trim().toLowerCase() !== 'assets') return response
+  if (!isAffirmativelyPublic) return response
+  if (!isManagedContentCachePath(pathname)) return response
+  const siteId = getManagedSiteIdEdge()
+  if (!siteId) return response
+  response.headers.set('Cache-Tag', `site:${siteId}`)
+  if (options.cdnCacheable) {
+    response.headers.set('CDN-Cache-Control', 'public, s-maxage=31536000')
+  }
+  return response
+}
+
 export async function middleware(request: NextRequest, event: NextFetchEvent) {
   const { pathname } = request.nextUrl
   const cloudAccess = await getCloudAccessConfigEdge(request.nextUrl.origin)
   const docsAccessEnabled =
     isDocsAccessEnabledEdge() || cloudAccess?.access?.mode === 'password'
+
+  // Affirmative check for CDN cacheability: the access config must be present
+  // AND public. `cloudAccess == null` (self-host, or a failed/timed-out grant
+  // exchange) means "unknown", and unknown never enters a shared cache.
+  const contentCachePublic = !isDocsAccessEnabledEdge() && cloudAccess?.access?.mode === 'public'
 
   // Gate admin PAGES and admin APIs at the edge — except the public auth routes
   // (login/OIDC start/callback), which must be reachable pre-auth. This is
@@ -201,7 +264,8 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     if (slugPath) {
       const url = request.nextUrl.clone()
       url.pathname = `/api/markdown/${slugPath}`
-      return NextResponse.rewrite(url)
+      // URL-distinct (.md) — safe to fully CDN-cache.
+      return applyManagedContentCacheHeaders(NextResponse.rewrite(url), pathname, contentCachePublic)
     }
   }
 
@@ -217,7 +281,14 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
       requestHeaders.set('x-thally-format', format)
     }
 
-    return NextResponse.rewrite(url, { request: { headers: requestHeaders } })
+    // Tag-only: this response varies on User-Agent/Accept under the browser
+    // URL's cache key, so it must never be CDN-cached (see helper docs).
+    return applyManagedContentCacheHeaders(
+      NextResponse.rewrite(url, { request: { headers: requestHeaders } }),
+      pathname,
+      contentCachePublic,
+      { cdnCacheable: false },
+    )
   }
 
   // Advertise the llms.txt discovery endpoint on HTML doc-page responses, so
@@ -236,7 +307,10 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     response.headers.append('Link', '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"')
     response.headers.set('X-Llms-Txt', `${request.nextUrl.origin}/llms.txt`)
   }
-  return response
+  // Full caching is safe here: RSC payload requests share doc-page pathnames
+  // but stay cache-distinct via their `_rsc` query param, and every other
+  // variant agents use is URL-distinct (`.md`, `?format=`).
+  return applyManagedContentCacheHeaders(response, pathname, contentCachePublic)
 }
 
 export const config = {

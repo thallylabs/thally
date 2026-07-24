@@ -161,6 +161,7 @@ cp .env.example .env.local
 | `THALLY_CLOUD_SITE_TOKEN` | Optional server-only credential from Thally Cloud. The deployed site exchanges it automatically on its next visit; never prefix it with `NEXT_PUBLIC_` |
 | `THALLY_CLOUD_URL` | Optional Thally Cloud control-plane base URL. Defaults to `https://app.thally.io`; set this only for staging or a public development tunnel |
 | `THALLY_CLOUD_SITE_CONFIG` | Managed-hosting release snapshot injected by Thally Cloud. Self-hosted sites should leave this unset and use `THALLY_CLOUD_SITE_TOKEN` |
+| `THALLY_CONTENT_SOURCE` | Optional — where doc content is read from: `filesystem` (default; build-embedded, SSG) or `assets` (managed hosting; content served from the deployment's static assets and rendered per request). Self-hosted sites should leave this unset |
 | `ANTHROPIC_API_KEY` | Owner key for AI chat — lifts trial limits entirely |
 | `THALLY_TRIAL_ANTHROPIC_KEY` | Optional shared key powering the out-of-the-box trial chat (strict per-IP limits + a global daily cap) |
 | `THALLY_TRIAL_RATE_PER_MIN` / `THALLY_TRIAL_RATE_PER_DAY` / `THALLY_TRIAL_DAILY_LIMIT` / `THALLY_CHAT_RATE_PER_MIN` | Optional chat rate-limit overrides |

@@ -31,6 +31,29 @@ function managedSiteConfig(): EdgeCloudConfig | null {
   }
 }
 
+/**
+ * Site id from the injected managed-runtime snapshot; null on self-host.
+ * Read directly from the env (not via the grant exchange) because callers —
+ * cache tagging in middleware — must never add a network round-trip. The
+ * charset check keeps the value safe to embed in a response header even if
+ * the snapshot is ever attacker-influenced.
+ */
+export function getManagedSiteIdEdge(): string | null {
+  const serialized =
+    process.env.THALLY_CLOUD_SITE_CONFIG?.trim() ||
+    process.env.DOX_CLOUD_SITE_CONFIG?.trim()
+  if (!serialized) return null
+
+  try {
+    const payload = JSON.parse(serialized) as { siteId?: unknown }
+    return typeof payload.siteId === 'string' && /^[A-Za-z0-9_-]+$/.test(payload.siteId)
+      ? payload.siteId
+      : null
+  } catch {
+    return null
+  }
+}
+
 function decodeBase64Url(value: string): string {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
