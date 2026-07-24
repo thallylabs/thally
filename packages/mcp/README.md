@@ -1,9 +1,11 @@
 # @thallylabs/mcp
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI
-tools — Claude Code, Claude Desktop, Cursor, Windsurf — create, read, update,
-search, and migrate [Thally](https://github.com/thallylabs/thally) documentation projects
-through natural language.
+tools — Claude Code, Claude Desktop, Cursor, Windsurf — manage
+[Thally](https://github.com/thallylabs/thally) knowledge surfaces through
+natural language. Tools can create, read, update, search, and migrate
+documentation, then trace a product-repository change into reviewable docs
+work.
 
 ## Setup
 

@@ -1,7 +1,7 @@
 {
   "name": "@thallylabs/mcp",
   "version": "0.8.0",
-  "description": "MCP server for scaffolding and managing Thally documentation projects",
+  "description": "MCP server for managing Thally knowledge surfaces and tracing product changes into documentation work.",
   "type": "module",
   "engines": {
     "node": ">=18"

@@ -36,6 +36,10 @@ describe('helpText', () => {
     for (const command of COMMANDS) {
       expect(text).toContain(command.name)
     }
+    expect(text).toContain(
+      'keep customer-facing knowledge in sync with product changes',
+    )
+    expect(text).toContain('prepare reviewable updates')
     expect(text).toContain('hidden runtime')
   })
 })

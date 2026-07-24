@@ -1,8 +1,15 @@
 # Thally
 
-The first agent-native documentation platform — every page is served to humans as polished HTML and to AI agents as structured JSON, JSON-LD, and Markdown from the same URL. Built on Next.js: self-hosted, open, extensible, and free to commercialize.
+**Every product change. Every knowledge surface. Automatically in sync.**
 
-Thally is **agent-native**: every page is served to humans as pre-rendered HTML and to AI agents as structured JSON / JSON-LD / Markdown from the same URL.
+Thally is the open product-knowledge pipeline for software teams. It starts
+with documentation: connect product repositories, identify the customer-facing
+knowledge a change affects, and turn that work into evidence-backed pull
+requests for people to review.
+
+The documentation engine stays self-hosted, open, extensible, and free to
+commercialize. Every page is served to humans as pre-rendered HTML and to AI
+agents as structured JSON, JSON-LD, and Markdown from the same URL.
 
 ## Features
 
