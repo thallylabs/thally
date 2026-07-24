@@ -5,6 +5,12 @@
   // Keep new scaffolds on the runtime behavior validated by this release.
   "compatibility_date": "2026-07-15",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // Public canonical origin for runtime-generated links and metadata.
+  "vars": {
+    "THALLY_SITE_URL": "https://docs.thally.io"
+  },
+  // Keep deployment-managed variables that are not declared in this config.
+  "keep_vars": true,
   "observability": {
     "enabled": true,
     "logs": {

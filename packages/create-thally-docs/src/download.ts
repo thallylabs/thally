@@ -33,6 +33,8 @@ export const EXCLUDE_PATHS = [
   '/.next/',
   '/.data/',
   '/.thally/',
+  // The first-party docs deployment pins its own canonical origin.
+  '/.env.production',
   '/thally-track.yml',
   '/CODEOWNERS',
   '/CLAUDE.md',
