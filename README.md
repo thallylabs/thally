@@ -165,6 +165,7 @@ cp .env.example .env.local
 | `THALLY_TRACK_WEBHOOK_SECRET` | Optional — enables the manual Thally Track webhook (`/api/track/webhook`); merged/preview PRs in tracked repos become docs-agent PRs. Not needed when you Connect a GitHub App |
 | `THALLY_GITHUB_TOKEN` | Optional — fine-grained PAT that reads tracked product-repo PRs, relays Track dispatches, and authenticates the admin Docs-tasks queue |
 | `THALLY_GITHUB_APP_ID` / `THALLY_GITHUB_APP_INSTALLATION_ID` / `THALLY_GITHUB_APP_PRIVATE_KEY` | Optional — wire a GitHub App by hand instead of the admin "Connect GitHub" button (which stores these encrypted). Grants org-wide access to selected repos |
+| `THALLY_DISABLE_BUILD_CACHE` | Optional — set to `1` to turn off Turbopack's persistent build cache (kept under `.next/cache` to speed up warm builds) if a production build misbehaves with it |
 
 Legacy `DOX_*` names are still read as a fallback for every `THALLY_*` variable, so existing deployments keep working without renaming anything.
 

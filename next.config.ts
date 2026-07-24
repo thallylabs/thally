@@ -20,6 +20,13 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ['@libsql/client'],
   experimental: {
     externalDir: true,
+    // Persist Turbopack's compiler cache under .next/cache so warm builds —
+    // local rebuilds, CI with cache restore, and Thally-managed deploys that
+    // restore .next/cache between publishes — skip recompiling unchanged
+    // modules. Still marked experimental for production builds by Next, so
+    // THALLY_DISABLE_BUILD_CACHE=1 opts out without editing this file.
+    turbopackFileSystemCacheForBuild:
+      process.env.THALLY_DISABLE_BUILD_CACHE !== '1',
   },
   async redirects() {
     return [
