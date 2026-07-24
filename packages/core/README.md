@@ -1,9 +1,9 @@
 # @thallylabs/core
 
-The framework-agnostic core of the [Thally](https://thally.io) documentation
-engine: the content pipeline, search, embeddings, and brand-token utilities
-that turn a directory of MDX into a structured, queryable, agent-readable
-knowledge base.
+The framework-agnostic content engine behind the
+[Thally](https://thally.io) product-knowledge pipeline. It turns one directory
+of MDX into structured, queryable, agent-readable customer-facing knowledge
+through content parsing, search, embeddings, and brand-token utilities.
 
 It has no dependency on Next.js, React, or any particular host — the host
 provides its list of pages through a small resolver seam, and core does the

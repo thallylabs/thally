@@ -1,8 +1,10 @@
 # create-thally-docs
 
-Scaffold a new [Thally](https://github.com/thallylabs/thally) documentation project — an
-agent-native docs site that serves every page to humans as polished HTML and to
-AI agents as structured JSON, JSON-LD, and Markdown from the same URL.
+Scaffold the first customer-facing knowledge surface in a
+[Thally](https://github.com/thallylabs/thally) product-knowledge pipeline. The
+result is an open documentation site that serves every page to humans as
+polished HTML and to agents as structured JSON, JSON-LD, and Markdown from the
+same URL.
 
 ## Quick start
 

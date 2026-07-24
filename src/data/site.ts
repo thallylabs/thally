@@ -163,7 +163,7 @@ const brandPreset: BrandPresetKey = 'primary'
 export const siteConfig: SiteConfig = {
   name: 'Thally',
   description:
-    'Thally is the first agent-native documentation platform. Every page is served to humans as polished HTML and to AI agents as structured JSON, JSON-LD, and Markdown from the same URL — self-hosted, open, and fully extensible.',
+    'Thally connects product changes to customer-facing knowledge, preparing evidence-backed documentation updates for human review on an open, agent-readable stack.',
   repoUrl: '',
   links: [
     { label: 'Get started', href: '/quickstart' },
