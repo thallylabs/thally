@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { buildToolBridge } from '../tools.js'
+import { buildPullRequestCreateArgs, buildPullRequestTitle } from '../run.js'
 
 describe('agent tool whitelist', () => {
   it('never exposes sync_from_repo (or other non-whitelisted tools) to the model', () => {
@@ -12,6 +15,43 @@ describe('agent tool whitelist', () => {
 })
 
 describe('generated workflow shell-safety (Thally Track injection hardening)', () => {
+  it('checks out a connected non-default branch and runs from a monorepo docs root', async () => {
+    const { buildDocsAgentWorkflow } = await import('../scaffold.js')
+    const yaml = buildDocsAgentWorkflow({ docsBranch: 'release/v2', docsRootDir: 'apps/docs' })
+    expect(yaml.match(/ref: "release\/v2"/g)).toHaveLength(2)
+    expect(yaml.match(/working-directory: "apps\/docs"/g)).toHaveLength(2)
+    expect(() => buildDocsAgentWorkflow({ docsRootDir: '../outside' })).toThrow(
+      'repository-relative directory',
+    )
+  })
+
+  it('targets the checked-out production branch when opening the docs PR', () => {
+    expect(buildPullRequestCreateArgs('docs: export', 'body', 'thally/agent-1', 'release/v2')).toEqual([
+      'pr',
+      'create',
+      '--title',
+      'docs: export',
+      '--body',
+      'body',
+      '--head',
+      'thally/agent-1',
+      '--base',
+      'release/v2',
+    ])
+  })
+
+  it('normalizes untrusted multiline instructions into a bounded PR title', () => {
+    const title = buildPullRequestTitle(
+      'Fix the Thally Agent Readiness check "Content quality".\n\nGive every page substantive content.',
+    )
+
+    expect(title).not.toContain('\n')
+    expect(title.length).toBeLessThanOrEqual(72)
+    expect(title).toBe(
+      'docs: Fix the Thally Agent Readiness check "Content quality". Give ever…',
+    )
+  })
+
   it('DOCS_AGENT_WORKFLOW passes dispatch values via env, never inline in the run script', async () => {
     const { DOCS_AGENT_WORKFLOW } = await import('../scaffold.js')
     // The instruction must be an env var, not expanded into the shell assignment.
@@ -31,6 +71,53 @@ describe('generated workflow shell-safety (Thally Track injection hardening)', (
     expect(yaml).not.toMatch(/requester\]=\$\{\{/)
     // No unescaped double-quotes around the tab that could break the assignment.
     expect(yaml).not.toContain('\\"API Reference\\"')
+  })
+
+  it('docs-agent workflow accepts app-resolved PR context without exposing it to shell parsing', async () => {
+    const { DOCS_AGENT_WORKFLOW } = await import('../scaffold.js')
+    expect(DOCS_AGENT_WORKFLOW).toContain('TRACK_CONTEXT: ${{ github.event.client_payload.context || inputs.context }}')
+    expect(DOCS_AGENT_WORKFLOW).toContain(`printf '%s' "$TRACK_CONTEXT" > "$CONTEXT_FILE"`)
+    expect(DOCS_AGENT_WORKFLOW).toContain('--context-file "$CONTEXT_FILE"')
+    expect(DOCS_AGENT_WORKFLOW).not.toContain('printf \'$TRACK_CONTEXT\'')
+  })
+
+  it('docs-agent workflow supplies a model when the optional repository variable is unset', async () => {
+    const { DOCS_AGENT_WORKFLOW, DOCS_AGENT_WORKFLOW_CONTRACT } = await import('../scaffold.js')
+    expect(DOCS_AGENT_WORKFLOW_CONTRACT).toBe('thally-track/v4')
+    expect(DOCS_AGENT_WORKFLOW).toContain(
+      "THALLY_AGENT_MODEL: ${{ vars.THALLY_AGENT_MODEL || 'claude-sonnet-5' }}",
+    )
+  })
+
+  it('brokers readiness PR creation through GitHub OIDC without an App token', async () => {
+    const { DOCS_AGENT_WORKFLOW } = await import('../scaffold.js')
+
+    expect(DOCS_AGENT_WORKFLOW).toContain('id-token: write')
+    expect(DOCS_AGENT_WORKFLOW).toContain('THALLY_PR_GRANT: ${{ github.event.client_payload.thally_pr_grant }}')
+    expect(DOCS_AGENT_WORKFLOW).toContain('echo "::add-mask::$THALLY_PR_GRANT"')
+    expect(DOCS_AGENT_WORKFLOW).toContain('audience=thally-readiness-pr')
+    expect(DOCS_AGENT_WORKFLOW).toContain('https://app.thally.io/api/github/readiness-pr')
+    expect(DOCS_AGENT_WORKFLOW).toContain('deploy-preview-[0-9]+--thally-cloud\\.netlify\\.app')
+    expect(DOCS_AGENT_WORKFLOW).not.toContain('thally_github_token')
+  })
+
+  it('keeps the repository workflow synchronized with the public generator', async () => {
+    const { DOCS_AGENT_WORKFLOW } = await import('../scaffold.js')
+    const checkedInWorkflow = readFileSync(
+      join(process.cwd(), '.github', 'workflows', 'thally-agent.yml'),
+      'utf8',
+    )
+
+    expect(checkedInWorkflow).toBe(DOCS_AGENT_WORKFLOW)
+  })
+
+  it('docs-agent workflow resolves the CLI in both standalone sites and the source monorepo', async () => {
+    const { DOCS_AGENT_WORKFLOW } = await import('../scaffold.js')
+    expect(DOCS_AGENT_WORKFLOW).toContain('[ -x node_modules/.bin/thally ]')
+    expect(DOCS_AGENT_WORKFLOW).toContain(
+      'npm install --no-save --package-lock=false --ignore-scripts @thallylabs/cli@0.5.3',
+    )
+    expect(DOCS_AGENT_WORKFLOW).toContain('node packages/cli/dist/index.js')
   })
 
   it('trackSenderWorkflow covers all preview actions + the loop guard, matching the webhook path', async () => {

@@ -1,6 +1,6 @@
 export { parseMdxContent } from './parse.js'
-export { getContentDocument } from './document.js'
-export type { ContentDocument } from './document.js'
+export { getContentDocument, registerContentDocumentSource } from './document.js'
+export type { ContentDocument, ContentDocumentResolver } from './document.js'
 export { mdxToMarkdown } from './to-markdown.js'
 export type {
   ContentHeading,

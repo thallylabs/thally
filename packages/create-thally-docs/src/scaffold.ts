@@ -6,6 +6,7 @@ import {
   writeStarterAgentGuide,
   writeStarterContent,
   writeStarterReadme,
+  writeCloudflareRuntimeConfig,
   updateSiteConfig,
   updateEnvExample,
   patchApiReferenceGuard,
@@ -92,6 +93,10 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
 
   // 7. Normalize package.json and regenerate a site-owned lockfile.
   patchPackageJson(targetDir, slug)
+
+  // 7a. Every generated site is deployable to the managed Cloudflare runtime;
+  // account-owned routes and credentials stay out of the customer repository.
+  writeCloudflareRuntimeConfig(targetDir, slug)
 
   // 8. Keep dependency folders out of git even if tooling creates one below
   // the project root.

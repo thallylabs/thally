@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { getInternalAnalyticsSecret } from '@/lib/admin/auth'
 import { isAnalyticsEnabled } from '@/data/docs'
 import { getAdminSettings } from '@/lib/admin/settings'
-import { getCloud } from '@/lib/cloud-bridge'
+import { recordAnalyticsEvent } from '@/lib/cloud-bridge'
 import { getCloudSiteConfig } from '@/lib/cloud-link/client'
 
 export const runtime = 'nodejs'
@@ -12,10 +12,6 @@ export async function POST(request: NextRequest) {
   if (secret !== getInternalAnalyticsSecret()) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
-
-  // No analytics service on this deployment (OSS free tier) — accept + drop.
-  const analytics = getCloud()?.analytics
-  if (!analytics) return NextResponse.json({ ok: true, skipped: true })
 
   const cloudConfig = await getCloudSiteConfig(request.nextUrl.origin)
   if (cloudConfig) {
@@ -37,7 +33,7 @@ export async function POST(request: NextRequest) {
     ) {
       return NextResponse.json({ ok: true, skipped: true })
     }
-    await analytics.trackEvent(body)
+    await recordAnalyticsEvent(body)
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 })

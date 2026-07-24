@@ -41,14 +41,20 @@ export function Sidebar({ sections, title, className }: SidebarProps) {
     <aside
       className={cn('hidden shrink-0 border-r border-border/80 bg-sidebar lg:block', layout.sidebarWidth, className)}
     >
-      <div className={cn('fixed top-0 flex h-screen flex-col', layout.sidebarWidth, layout.sidebarPadding)}>
+      {/* Stay in the shell's flow so optional site banners reserve their own
+          space above the brand, then pin the navigation once they scroll away. */}
+      <div className={cn('sticky top-0 flex h-screen flex-col', layout.sidebarWidth, layout.sidebarPadding)}>
         <div className="flex shrink-0 flex-col gap-3 px-1 pt-2">
           <Link
             href="/"
             className="flex items-center gap-2 rounded-lg focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/30"
           >
             <Logo showText={false} className="shrink-0" />
-            <span className="text-sm font-semibold text-foreground">{siteName} Docs</span>
+            {/* Site names like "Acme Docs" already say it — appending the
+                suffix again renders as "Acme Docs Docs". */}
+            <span className="text-sm font-semibold text-foreground">
+              {/docs$/i.test(siteName.trim()) ? siteName : `${siteName} Docs`}
+            </span>
           </Link>
         </div>
         <div className="shrink-0 px-1 pt-6">

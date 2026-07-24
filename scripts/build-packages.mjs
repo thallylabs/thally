@@ -3,7 +3,7 @@
  * dependency graph allows.
  *
  * The graph (from each package's tsup config and dependencies):
- * - core, mcp, and create-thally-docs have no @thallylabs/* build-time
+ * - core, migrate, mcp, and create-thally-docs have no @thallylabs/* build-time
  *   dependencies — they build concurrently.
  * - agent marks @thallylabs/mcp external at runtime, but its `dts: true`
  *   type build reads mcp's generated declarations — it builds after mcp.
@@ -37,7 +37,7 @@ function buildWorkspace(workspace) {
 }
 
 await Promise.all(
-  ['packages/core', 'packages/mcp', 'packages/create-thally-docs'].map(
+  ['packages/core', 'packages/migrate', 'packages/mcp', 'packages/create-thally-docs'].map(
     buildWorkspace,
   ),
 )

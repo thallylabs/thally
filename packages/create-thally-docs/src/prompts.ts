@@ -1,6 +1,36 @@
+/** Interactive prompt contracts for new projects and source migrations. */
+
 import { input, select } from '@inquirer/prompts'
-import { basename } from 'node:path'
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
+
+import type { MigrationPlatform } from '@thallylabs/migrate'
+
+export type SelectableMigrationPlatform = Extract<MigrationPlatform, 'mintlify' | 'docusaurus'>
+
+/** Validate the scriptable platform flag while preserving auto-detection. */
+export function parseMigrationPlatform(value: string | undefined): SelectableMigrationPlatform | undefined {
+  if (!value || value === 'auto') return undefined
+  if (value === 'mintlify' || value === 'docusaurus') return value
+  throw new Error('--platform must be mintlify, docusaurus, or auto.')
+}
+
+/** Ask interactive migrations which source adapter should own the import. */
+export async function gatherMigrationPlatform(
+  value: string | undefined,
+  useDefaults: boolean,
+): Promise<SelectableMigrationPlatform | undefined> {
+  const configured = parseMigrationPlatform(value)
+  if (configured || value === 'auto' || useDefaults) return configured
+  return select({
+    message: '  Which platform currently hosts these docs?',
+    choices: [
+      { name: 'Mintlify', value: 'mintlify' as const },
+      { name: 'Docusaurus', value: 'docusaurus' as const },
+      { name: 'Other / detect automatically', value: undefined },
+    ],
+    default: 'mintlify',
+  })
+}
 
 export interface ScaffoldAnswers {
   projectDir: string
@@ -17,6 +47,7 @@ export interface ScaffoldAnswers {
 export async function gatherAnswers(
   dirArg: string | undefined,
   useDefaults: boolean,
+  installPreference?: boolean,
 ): Promise<ScaffoldAnswers> {
   // 1. Project directory
   let projectDir: string
@@ -97,13 +128,13 @@ export async function gatherAnswers(
   }
 
   // 7. Install deps?
-  let doInstall = true
-  if (!useDefaults) {
+  let doInstall = installPreference ?? false
+  if (!useDefaults && installPreference === undefined) {
     const shouldInstall = await input({
-      message: '  Install dependencies? (Y/n):',
-      default: 'Y',
+      message: '  Install dependencies now? (y/N):',
+      default: 'N',
     })
-    doInstall = shouldInstall.toLowerCase() !== 'n'
+    doInstall = shouldInstall.trim().toLowerCase().startsWith('y')
   }
 
   // 8. Multi-language support?

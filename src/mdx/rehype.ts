@@ -1,6 +1,8 @@
 import type { Element, Root } from 'hast'
 import {
   createHighlighter,
+  createJavaScriptRegexEngine,
+  defaultJavaScriptRegexConstructor,
   type Highlighter,
   type ThemedToken,
   type ThemeRegistration,
@@ -41,6 +43,14 @@ let highlighterPromise: Promise<Highlighter> | null = null
 function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
+      // Workers disallow runtime WebAssembly code generation. Shiki's
+      // JavaScript regex engine preserves highlighting without Oniguruma WASM.
+      engine: createJavaScriptRegexEngine({
+        // The default lazily compiles long patterns with `new Function`, which
+        // workerd forbids. Eager native RegExp construction is CSP-safe.
+        regexConstructor: (pattern) =>
+          defaultJavaScriptRegexConstructor(pattern, { lazyCompileLength: Infinity }),
+      }),
       themes: [cssVariablesTheme],
       langs: [FALLBACK_LANGUAGE],
     })
@@ -117,7 +127,7 @@ function tokensToHtml(lines: Array<Array<ThemedToken>>, highlightedLines: Set<nu
 //   ```bash wrap                 (soft-wrap long lines)
 // ---------------------------------------------------------------------------
 
-interface CodeFenceMeta {
+export interface CodeFenceMeta {
   title?: string
   wrap?: boolean
   highlight?: Array<number>
@@ -138,7 +148,8 @@ function expandLineRanges(spec: string): Array<number> {
   return lines
 }
 
-function parseCodeFenceMeta(meta: string): CodeFenceMeta {
+/** Parse portable code-fence metadata without exposing framework-only props. */
+export function parseCodeFenceMeta(meta: string): CodeFenceMeta {
   const result: CodeFenceMeta = {}
   const tokens = meta.match(/[^\s"{]+="[^"]*"|\{[^}]*\}|\S+/g) ?? []
   for (const token of tokens) {
@@ -156,6 +167,10 @@ function parseCodeFenceMeta(meta: string): CodeFenceMeta {
       result.title = titleMatch[1]
       continue
     }
+    // Mintlify emits presentation props such as `theme={"system"}` in the
+    // fence metadata. They configure its renderer and are not human-facing
+    // filenames, so carrying them into Thally's title bar is misleading.
+    if (/^[A-Za-z][\w-]*=/.test(token)) continue
     if (!result.title) result.title = token
   }
   return result

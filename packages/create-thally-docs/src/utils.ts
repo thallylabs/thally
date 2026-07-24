@@ -30,7 +30,7 @@ export function installDeps(targetDir: string): void {
   console.log('')
   console.log('  📦 Installing dependencies...')
   console.log('')
-  run('npm install', targetDir)
+  run('npm install --prefer-offline --no-audit --no-fund --progress=false', targetDir)
 }
 
 export function logo(): void {
@@ -44,13 +44,13 @@ export function logo(): void {
   console.log('  ║      ██║   ██║  ██║██║  ██║███████╗███████╗   ██║      ║')
   console.log('  ║      ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝      ║')
   console.log('  ║                                                        ║')
-  console.log('  ║             Beautiful docs, zero lock-in.              ║')
+  console.log('  ║Give your product and docs first-class agent visibility.║')
   console.log('  ║                                                        ║')
   console.log('  ╚════════════════════════════════════════════════════════╝')
   console.log('')
 }
 
-export function success(projectDir: string, projectName: string): void {
+export function success(projectDir: string, projectName: string, dependenciesInstalled: boolean): void {
   console.log('')
   console.log('  ✅ Your Thally project is ready!')
   console.log('')
@@ -59,9 +59,12 @@ export function success(projectDir: string, projectName: string): void {
   console.log('  Next steps:')
   console.log('')
   console.log(`    cd ${basename(projectDir)}`)
+  if (!dependenciesInstalled) {
+    console.log('    npm install')
+  }
   console.log('    npm run dev')
   console.log('')
-  console.log(`  Then open http://localhost:3040 to see your ${projectName} docs.`)
+  console.log(`  Your terminal will print the local URL for your ${projectName} docs.`)
   console.log('')
   console.log('  📝 Key files to edit:')
   console.log('    • src/data/site.ts        — name, links, branding')

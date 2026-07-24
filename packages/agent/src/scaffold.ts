@@ -1,6 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { AGENT_BRANCH_PREFIX, DOCS_PREVIEW_LABEL, buildTrackInstruction } from '@thallylabs/mcp/track'
+import { DEFAULT_AGENT_MODEL } from './model.js'
+
+/** Version marker used by Cloud Track to offer reviewable workflow upgrades. */
+export const DOCS_AGENT_WORKFLOW_CONTRACT = 'thally-track/v4'
 
 /**
  * The docs-repo "hub" workflow: it listens for a dispatched docs task (from a
@@ -8,12 +12,13 @@ import { AGENT_BRANCH_PREFIX, DOCS_PREVIEW_LABEL, buildTrackInstruction } from '
  * documentation PR — plus a scheduled drift sweep. This is the only place the
  * ANTHROPIC_API_KEY lives; product repos never see it.
  */
-export const DOCS_AGENT_WORKFLOW = `name: Thally docs agent
+const DOCS_AGENT_WORKFLOW_TEMPLATE = `# Contract: ${DOCS_AGENT_WORKFLOW_CONTRACT}
+name: Thally docs agent
 
 on:
   # A product repo dispatches a docs task here (see the sender workflow).
   repository_dispatch:
-    types: [thally-document]
+    types: [thally-document, thally-readiness]
   # Run it by hand from the Actions tab.
   workflow_dispatch:
     inputs:
@@ -23,17 +28,23 @@ on:
       from_pr:
         description: Product PR URL (optional context)
         required: false
+      context:
+        description: Pre-resolved product PR context (optional)
+        required: false
   # Weekly provenance drift sweep — flags pages whose sources changed.
   schedule:
     - cron: '0 6 * * 1'
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   document:
     if: github.event_name != 'schedule'
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,6 +61,7 @@ jobs:
       - name: Draft docs and open a PR
         env:
           ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
+          THALLY_AGENT_MODEL: \${{ vars.THALLY_AGENT_MODEL || '${DEFAULT_AGENT_MODEL}' }}
           # A fine-grained PAT / App token with write on this docs repo (and read
           # on your product repos). Falls back to the built-in token.
           GH_TOKEN: \${{ secrets.THALLY_AGENT_TOKEN || secrets.GITHUB_TOKEN }}
@@ -60,11 +72,81 @@ jobs:
           # commands (GitHub Actions script-injection hardening).
           INSTRUCTION: \${{ github.event.client_payload.instruction || inputs.instruction }}
           FROM_PR: \${{ github.event.client_payload.from_pr || inputs.from_pr }}
+          TRACK_CONTEXT: \${{ github.event.client_payload.context || inputs.context }}
+          REQUESTER: \${{ github.event.client_payload.requester }}
+          THALLY_PR_GRANT: \${{ github.event.client_payload.thally_pr_grant }}
+          THALLY_PR_BRANCH: \${{ github.event.client_payload.thally_pr_branch }}
+          THALLY_PR_BROKER_URL: \${{ github.event.client_payload.thally_pr_broker_url || 'https://app.thally.io/api/github/readiness-pr' }}
         run: |
-          if [ -n "$FROM_PR" ]; then
-            npx thally agent "$INSTRUCTION" --from-pr "$FROM_PR" --pr
+          if [ -n "\${THALLY_PR_GRANT:-}" ]; then
+            echo "::add-mask::$THALLY_PR_GRANT"
+          fi
+          run_thally() {
+            if [ -x node_modules/.bin/thally ]; then
+              # Existing sites may pin an older CLI that cannot consume the
+              # App-resolved private PR context. Keep Track's receiver pinned
+              # to the workflow contract version without editing package.json.
+              npm install --no-save --package-lock=false --ignore-scripts @thallylabs/cli@0.5.3
+              node_modules/.bin/thally "$@"
+              return
+            fi
+            npm run packages:build
+            node packages/cli/dist/index.js "$@"
+          }
+          REQUESTER_ARGS=()
+          if [ -n "$REQUESTER" ]; then
+            REQUESTER_ARGS=(--requester "$REQUESTER")
+          fi
+          OUTPUT_ARGS=(--pr)
+          if [ -n "\${THALLY_PR_GRANT:-}" ]; then
+            # A readiness repair leaves its validated changes staged. The
+            # workflow pushes the pre-granted branch, then asks Cloud to open
+            # the PR as the Thally App after GitHub OIDC authentication.
+            OUTPUT_ARGS=()
+          fi
+          if [ -n "$TRACK_CONTEXT" ]; then
+            CONTEXT_FILE="$RUNNER_TEMP/thally-track-context.md"
+            printf '%s' "$TRACK_CONTEXT" > "$CONTEXT_FILE"
+            run_thally agent "$INSTRUCTION" --from-pr "$FROM_PR" --context-file "$CONTEXT_FILE" "\${REQUESTER_ARGS[@]}" "\${OUTPUT_ARGS[@]}"
+          elif [ -n "$FROM_PR" ]; then
+            run_thally agent "$INSTRUCTION" --from-pr "$FROM_PR" "\${REQUESTER_ARGS[@]}" "\${OUTPUT_ARGS[@]}"
           else
-            npx thally agent "$INSTRUCTION" --pr
+            run_thally agent "$INSTRUCTION" "\${REQUESTER_ARGS[@]}" "\${OUTPUT_ARGS[@]}"
+          fi
+          if [ -n "\${THALLY_PR_GRANT:-}" ]; then
+            GENERATED_BRANCH="$(git branch --show-current)"
+            if [[ "$GENERATED_BRANCH" != thally/agent-* ]]; then
+              echo "No documentation changes were needed."
+              exit 0
+            fi
+            if [[ ! "$THALLY_PR_BRANCH" =~ ^thally/agent-readiness-[a-f0-9]{16}$ ]]; then
+              echo "The readiness PR branch grant is invalid." >&2
+              exit 1
+            fi
+            git branch -m "$THALLY_PR_BRANCH"
+            git commit -m "docs: improve Thally Agent Readiness"
+            git push -u origin "$THALLY_PR_BRANCH"
+
+            node -e 'const url = new URL(process.env.THALLY_PR_BROKER_URL); const isProduction = url.origin === "https://app.thally.io"; const isPreview = /^deploy-preview-[0-9]+--thally-cloud\\.netlify\\.app$/.test(url.hostname); if (url.pathname !== "/api/github/readiness-pr" || (!isProduction && !isPreview)) process.exit(1)'
+
+            OIDC_RESPONSE="$(curl --silent --show-error --fail-with-body \
+              -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "\${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=thally-readiness-pr")"
+            export OIDC_RESPONSE
+            OIDC_TOKEN="$(node -e 'const body = JSON.parse(process.env.OIDC_RESPONSE); if (typeof body.value !== "string") process.exit(1); process.stdout.write(body.value)')"
+            unset OIDC_RESPONSE
+            echo "::add-mask::$OIDC_TOKEN"
+            REQUEST_FILE="$RUNNER_TEMP/thally-readiness-pr-request.json"
+            RESPONSE_FILE="$RUNNER_TEMP/thally-readiness-pr-response.json"
+            node -e 'require("node:fs").writeFileSync(process.argv[1], JSON.stringify({ grant: process.env.THALLY_PR_GRANT }))' "$REQUEST_FILE"
+            curl --silent --show-error --fail-with-body \
+              --output "$RESPONSE_FILE" \
+              -H "Authorization: Bearer $OIDC_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-binary "@$REQUEST_FILE" \
+              "$THALLY_PR_BROKER_URL"
+            unset OIDC_TOKEN
+            node -e 'const body = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); if (typeof body.pull_request_url !== "string") process.exit(1); process.stdout.write("Pull request: " + body.pull_request_url + "\\n")' "$RESPONSE_FILE"
           fi
 
   drift-sweep:
@@ -79,8 +161,55 @@ jobs:
           node-version: 20
       - run: npm ci
       - name: Check for stale docs
-        run: npx thally check --drift --ci
+        run: |
+          if [ -x node_modules/.bin/thally ]; then
+            node_modules/.bin/thally check --drift --ci
+          else
+            npm run packages:build
+            node packages/cli/dist/index.js check --drift --ci
+          fi
 `
+
+export interface DocsAgentWorkflowOptions {
+  /** Branch containing the production docs; repository_dispatch still reads this workflow from the default branch. */
+  docsBranch?: string
+  /** Repository-relative directory containing docs.json for monorepo sites. */
+  docsRootDir?: string | null
+}
+
+/**
+ * Build the docs-side receiver for a specific connected site.
+ *
+ * GitHub loads repository_dispatch workflows only from the repository default
+ * branch. Cloud therefore installs this file there while an explicit checkout
+ * ref and working directory keep agent edits on the site's configured docs
+ * branch/root.
+ */
+export function buildDocsAgentWorkflow(options: DocsAgentWorkflowOptions = {}): string {
+  const docsBranch = options.docsBranch?.trim()
+  const docsRootDir = options.docsRootDir?.replace(/^\/+|\/+$/g, '')
+  if (docsRootDir?.split('/').some((segment) => !segment || segment === '.' || segment === '..')) {
+    throw new Error('The docs root must be a repository-relative directory.')
+  }
+
+  let workflow = DOCS_AGENT_WORKFLOW_TEMPLATE
+  if (docsBranch) {
+    workflow = workflow.replaceAll(
+      '          fetch-depth: 0',
+      `          fetch-depth: 0\n          ref: ${JSON.stringify(docsBranch)}`,
+    )
+  }
+  if (docsRootDir) {
+    workflow = workflow.replaceAll(
+      '    runs-on: ubuntu-latest\n    steps:',
+      `    runs-on: ubuntu-latest\n    defaults:\n      run:\n        working-directory: ${JSON.stringify(docsRootDir)}\n    steps:`,
+    )
+  }
+  return workflow
+}
+
+/** Generic root/default-branch receiver scaffolded by the public CLI. */
+export const DOCS_AGENT_WORKFLOW = buildDocsAgentWorkflow()
 
 /** Product-repo sender: a `@thally` comment on a PR dispatches a task to the docs repo. */
 export function mentionSenderWorkflow(docsRepo: string): string {

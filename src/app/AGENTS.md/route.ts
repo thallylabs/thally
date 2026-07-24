@@ -1,21 +1,16 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import { buildAgentsManifest } from '@/lib/agent-manifest'
+import { readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 
 export const runtime = 'nodejs'
 
 export function GET() {
   // Author override: a physical AGENTS.md at the project root wins over the
-  // generated default, so teams can hand-tune the agent guidance.
-  try {
-    const custom = path.join(process.cwd(), 'AGENTS.md')
-    if (fs.existsSync(custom)) {
-      return new Response(fs.readFileSync(custom, 'utf8'), {
-        headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
-      })
-    }
-  } catch {
-    // fall through to the generated manifest
+  // generated default, so teams can hand-tune agent guidance. Production
+  // reads the same source from the build-generated Worker manifest.
+  if (runtimeSourceExists('AGENTS.md')) {
+    return new Response(readRuntimeSource('AGENTS.md'), {
+      headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+    })
   }
 
   return new Response(buildAgentsManifest(), {

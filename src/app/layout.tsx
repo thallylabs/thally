@@ -176,6 +176,13 @@ const customScripts = getCustomScriptsConfig()
 const siteUrl = getSiteUrl()
 const siteJsonLd = buildSiteJsonLd({ siteUrl, locale: defaultLang })
 
+// OpenNext's production transform can add esbuild's `__name` calls to the
+// serialized next-themes bootstrap. The bootstrap runs before client bundles,
+// so provide the tiny helper first or one missing global prevents the entire
+// React tree from hydrating and disables every interactive control.
+const runtimeNameShim =
+  "globalThis.__name ??= (target, value) => Object.defineProperty(target, 'name', { value, configurable: true });"
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     // Font variables live on <html> (not <body>) so :root-level rules — the
@@ -188,6 +195,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       className={cn(fontSans.variable, fontDisplay.variable, fontMono.variable)}
     >
       <head>
+        <script
+          id="thally-runtime-name-shim"
+          dangerouslySetInnerHTML={{ __html: runtimeNameShim }}
+        />
         <JsonLdScript data={siteJsonLd} />
         {/* Google Fonts for custom body/heading fonts set in docs.json */}
         {googleFontUrls.length > 0 && (

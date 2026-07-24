@@ -8,6 +8,7 @@ const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 interface Adapter {
   id: 'vercel' | 'cloudflare'
   label: string
+  build: () => Promise<number>
   deploy: (prod: boolean) => Promise<number>
 }
 
@@ -15,12 +16,17 @@ const ADAPTERS: Record<Adapter['id'], Adapter> = {
   vercel: {
     id: 'vercel',
     label: 'Vercel',
+    build: () => runFramework('build', 'build'),
     deploy: (prod) => run(npx, ['vercel', 'deploy', ...(prod ? ['--prod'] : [])]),
   },
   cloudflare: {
     id: 'cloudflare',
-    label: 'Cloudflare Pages',
-    deploy: () => run(npx, ['wrangler', 'pages', 'deploy']),
+    label: 'Cloudflare Workers',
+    // The OpenNext build both compiles Next.js and adapts its output for
+    // workerd. Running the generic Next build first would perform the most
+    // expensive part twice and would not validate the actual edge artifact.
+    build: () => run(npx, ['opennextjs-cloudflare', 'build']),
+    deploy: () => run(npx, ['opennextjs-cloudflare', 'deploy']),
   },
 }
 
@@ -45,17 +51,18 @@ async function confirmAgentReadiness(): Promise<void> {
 
 /**
  * Build, confirm agent readiness, then deploy via a provider adapter. Vercel is
- * the default; pass --cloudflare for Cloudflare Pages. If the adapter CLI isn't
- * available we print clear next steps rather than failing hard.
+ * the default; pass --cloudflare for Cloudflare Workers. If the adapter CLI
+ * isn't available we print clear next steps rather than failing hard.
  */
 export async function runDeploy(args: ParsedArgs): Promise<number> {
+  const adapter = selectAdapter(args)
+
   process.stdout.write('\n  Building production site...\n')
-  const buildExit = await runFramework('build', 'build')
+  const buildExit = await adapter.build()
   if (buildExit !== 0) return buildExit
 
   await confirmAgentReadiness()
 
-  const adapter = selectAdapter(args)
   const prod = args.hasFlag('--prod', '--production')
 
   process.stdout.write(`\n  Deploying with ${adapter.label}...\n`)
@@ -65,7 +72,7 @@ export async function runDeploy(args: ParsedArgs): Promise<number> {
     process.stdout.write(
       '\n  Deploy did not complete. To deploy manually:\n' +
         '    • Vercel:     npx vercel deploy --prod\n' +
-        '    • Cloudflare: npx wrangler pages deploy\n\n',
+        '    • Cloudflare: npm run deploy:cloudflare\n\n',
     )
     return deployExit
   }

@@ -26,9 +26,13 @@ stays invisible.
 | `thally deploy [--prod]` | Build and deploy to a live URL, print agent endpoints |
 | `thally check [--agents] [--fix]` | Lint content + Agent Readiness Score |
 | `thally new <page-id> [--title]` | Create a page and register it in `docs.json` |
-| `thally migrate <github-url> [dir]` | Migrate docs from a GitHub repo |
+| `thally migrate <github-or-docs-url> [dir]` | Migrate a docs repository or public docs site |
 | `thally translate --locale <code>` | Translate content into a locale |
 | `thally mcp` | Start the Model Context Protocol server (stdio) |
+
+`thally migrate` asks which platform currently hosts the docs and dispatches to
+the Mintlify or Docusaurus adapter. Non-interactive callers can pass
+`--platform mintlify`, `--platform docusaurus`, or `--platform auto`.
 
 Run `thally` with no arguments for the full help.
 

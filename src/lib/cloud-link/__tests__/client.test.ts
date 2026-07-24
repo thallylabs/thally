@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   connectCloudSite,
   getCloudGrant,
+  getCloudServiceGrant,
   getCloudSiteConfig,
   resetCloudGrantCacheForTests,
 } from '../client'
@@ -31,6 +32,50 @@ describe('Thally Cloud link client', () => {
       status: 'not_configured',
     })
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('uses a managed release snapshot without exchanging a site credential', async () => {
+    const payload = {
+      siteId: 'site-managed',
+      orgId: 'org-1',
+      entitlements: { features: { settingsSync: true, analytics: true } },
+      runtimeGrant: 'managed-release-grant',
+      siteConfig: {
+        portable: {
+          details: { name: 'Managed docs' },
+          feedback: { thumbsRating: false, pageFeedback: true },
+          branding: { themePreset: 'minimal' },
+        },
+        access: { mode: 'password', passwordHash: 'salt:hash' },
+      },
+    }
+    vi.stubEnv('THALLY_CLOUD_SITE_CONFIG', JSON.stringify(payload))
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+
+    await expect(connectCloudSite('https://docs.example.com')).resolves.toEqual({
+      status: 'connected',
+    })
+    await expect(getCloudSiteConfig('https://docs.example.com')).resolves.toEqual(payload)
+    await expect(getCloudGrant('https://docs.example.com')).resolves.toBeNull()
+    await expect(getCloudServiceGrant('https://docs.example.com')).resolves.toBe(
+      'managed-release-grant',
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the legacy DOX managed snapshot fallback working', async () => {
+    const payload = {
+      siteId: 'site-legacy',
+      orgId: 'org-legacy',
+      entitlements: { features: {} },
+      siteConfig: {
+        portable: {},
+        access: { mode: 'public', passwordHash: null },
+      },
+    }
+    vi.stubEnv('DOX_CLOUD_SITE_CONFIG', JSON.stringify(payload))
+
+    await expect(getCloudSiteConfig('https://docs.example.com')).resolves.toEqual(payload)
   })
 
   it('exchanges the server-only token and reports the deployment URL', async () => {

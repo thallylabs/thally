@@ -3,6 +3,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import matter from 'gray-matter'
 
+import { stripEchoedPageHeader } from '../lib/page-echo.js'
+
 export const updatePageSchema = z.object({
   projectDir: z.string().describe('Path to the Thally project root'),
   pageId: z.string().describe('Page identifier (e.g. "guides/auth"). No .mdx extension.'),
@@ -49,8 +51,12 @@ export async function handleUpdatePage(input: UpdatePageInput): Promise<string> 
     Object.assign(newFm, input.mergeFrontmatter)
   }
 
-  // Determine body
-  const newBody = input.content !== undefined ? input.content : parsed.content
+  // Determine body, dropping any read_page metadata header the model echoed
+  // back — frontmatter is the single source of truth for title/description.
+  const newBody =
+    input.content !== undefined
+      ? stripEchoedPageHeader(input.content, pageId)
+      : parsed.content
 
   // Stringify and write
   const newContent = matter.stringify(newBody.trim(), newFm)

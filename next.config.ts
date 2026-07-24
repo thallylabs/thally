@@ -1,5 +1,10 @@
 import type { NextConfig } from 'next'
+import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare'
 import docsJson from './docs.json' assert { type: 'json' }
+
+// Make Wrangler bindings available while `next dev` is running. Production
+// receives the same bindings from the OpenNext-generated Worker entrypoint.
+initOpenNextCloudflareForDev()
 
 interface DocsRedirect {
   source: string
@@ -12,12 +17,21 @@ const docRedirects: Array<DocsRedirect> =
 
 const nextConfig: NextConfig = {
   pageExtensions: ['ts', 'tsx'],
+  // Generated projects are commonly inspected through a loopback URL. Permit
+  // that origin so Next dev can load the RSC payloads required for navigation.
+  allowedDevOrigins: ['127.0.0.1'],
   // The engine core is a workspace package shipped as TS-built ESM; let Next
   // transpile it so app routes and (server) components can import it directly.
-  transpilePackages: ['@thallylabs/core'],
-  // libSQL ships a native binding; leave it as a runtime require so Next doesn't
-  // try to bundle it (which breaks the analytics store on serverless builds).
-  serverExternalPackages: ['@libsql/client'],
+  // OpenNext cannot load arbitrary Node externals inside workerd. Transpiling
+  // these packages lets its final bundle select libSQL's `workerd` export and
+  // include the MDX compiler used by dynamic documentation routes.
+  transpilePackages: ['@thallylabs/core', '@libsql/client', 'next-mdx-remote', 'shiki'],
+  // Several agent surfaces intentionally read customer-owned source/config at
+  // runtime. Include those files in the server trace so workerd's read-only fs
+  // contains the same project inputs as a Node deployment.
+  outputFileTracingIncludes: {
+    '/*': ['./AGENTS.md', './docs.json', './openapi.yaml', './public/**/*', './src/content/**/*'],
+  },
   experimental: {
     externalDir: true,
     // Persist Turbopack's compiler cache under .next/cache so warm builds —

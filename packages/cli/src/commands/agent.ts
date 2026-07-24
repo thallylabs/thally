@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import type { ParsedArgs } from '../router.js'
 import Anthropic from '@anthropic-ai/sdk'
 import {
@@ -9,6 +10,13 @@ import {
   type DocsTask,
   type OutputMode,
 } from '@thallylabs/agent'
+
+const TRACK_CONTEXT_CHAR_CAP = 40_000
+
+/** Read only the bounded context payload prepared by the Track workflow. */
+export function readTrackContextFile(path: string): string {
+  return readFileSync(path, 'utf8').slice(0, TRACK_CONTEXT_CHAR_CAP)
+}
 
 /** `thally agent init` — scaffold the docs-repo workflow + print the product-repo sender. */
 function runAgentInit(args: ParsedArgs): number {
@@ -31,7 +39,7 @@ function runAgentInit(args: ParsedArgs): number {
 }
 
 /**
- * `thally agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--dry-run] [--pr]`
+ * `thally agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--context-file <path>] [--dry-run] [--pr]`
  *
  * Turns a task into documentation edits on a git sandbox branch. Default leaves
  * the edits on the branch for review; --dry-run previews and discards; --pr opens
@@ -44,10 +52,12 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
   const instruction = args.positionals.join(' ').trim()
   const fromPr = args.getFlag('--from-pr')
   const diffRef = args.getFlag('--diff')
+  const contextFile = args.getFlag('--context-file')
+  const requester = args.getFlag('--requester')?.trim()
 
-  if (!instruction && !fromPr) {
+  if (!instruction && !fromPr && !contextFile) {
     process.stderr.write(
-      '\n  Usage: thally agent "<what to document>" [--diff <ref>] [--from-pr <url>] [--dry-run] [--pr]\n\n',
+      '\n  Usage: thally agent "<what to document>" [--diff <ref>] [--from-pr <url>] [--context-file <path>] [--dry-run] [--pr]\n\n',
     )
     return 1
   }
@@ -60,7 +70,11 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
 
   let context = ''
   try {
-    if (fromPr) context = resolvePrContext(fromPr)
+    // Cloud Track resolves private product-repository context with its GitHub
+    // App before dispatch. Prefer that bounded context file so the docs-repo
+    // Action never needs a cross-repository PAT merely to read the source PR.
+    if (contextFile) context = readTrackContextFile(contextFile)
+    else if (fromPr) context = resolvePrContext(fromPr)
     else if (diffRef) context = resolveDiff(process.cwd(), diffRef)
   } catch (err) {
     process.stderr.write(`\n  ${err instanceof Error ? err.message : String(err)}\n\n`)
@@ -71,7 +85,8 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
   const task: DocsTask = {
     instruction: instruction || `Document the changes in ${fromPr}`,
     context: context || undefined,
-    source: fromPr ? 'track' : 'cli',
+    requester: requester || undefined,
+    source: fromPr || contextFile ? 'track' : 'cli',
   }
 
   const real = new Anthropic({ apiKey })

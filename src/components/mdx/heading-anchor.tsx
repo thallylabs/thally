@@ -1,24 +1,25 @@
 'use client'
 
-import { useCallback, useState, type ReactNode } from 'react'
-import { cn } from '@/lib/utils'
+/**
+ * Interactive permalink wrapper for MDX section headings.
+ * The heading itself is the link, so no extra hash glyph is rendered beside
+ * authored content.
+ */
+
+import { useCallback, type ReactNode } from 'react'
 
 interface HeadingAnchorProps {
   id: string
   children: ReactNode
 }
 
+/** Wrap a rendered heading in a permalink that copies its canonical URL. */
 export function HeadingAnchor({ id, children }: HeadingAnchorProps) {
-  const [copied, setCopied] = useState(false)
-
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault()
       const url = `${window.location.origin}${window.location.pathname}#${id}`
-      navigator.clipboard.writeText(url).then(() => {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 1500)
-      })
+      void navigator.clipboard.writeText(url)
       // Still update the hash for scroll behavior
       window.history.replaceState(null, '', `#${id}`)
     },
@@ -29,18 +30,9 @@ export function HeadingAnchor({ id, children }: HeadingAnchorProps) {
     <a
       href={`#${id}`}
       onClick={handleClick}
-      className="group/anchor no-underline hover:underline"
+      className="no-underline hover:underline"
     >
       {children}
-      <span
-        className={cn(
-          'ml-2 inline-block text-foreground/20 transition group-hover/anchor:text-accent/60',
-          copied && 'text-accent',
-        )}
-        aria-hidden
-      >
-        {copied ? '✓' : '#'}
-      </span>
     </a>
   )
 }

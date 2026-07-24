@@ -1,8 +1,7 @@
 import type { ComponentType } from 'react'
-import fs from 'node:fs'
-import path from 'node:path'
 import matter from 'gray-matter'
 import docsNavigationConfig from '../../docs.json' assert { type: 'json' }
+import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 
 // ---------------------------------------------------------------------------
 // Public interfaces (consumed by components, pages, and stores)
@@ -81,6 +80,8 @@ interface DocsJsonNavigationGroup {
 
 export interface DocsJsonApiConfig {
   source: string
+  /** Set false when authored MDX groups already provide API navigation. */
+  navigation?: boolean
   tagsOrder?: Array<string>
   defaultGroup?: string
   webhookGroup?: string
@@ -255,7 +256,7 @@ export interface TrackingConfig {
 // Content root & frontmatter cache
 // ---------------------------------------------------------------------------
 
-const CONTENT_ROOT = path.join(process.cwd(), 'src/content')
+const CONTENT_ROOT = 'src/content'
 const docsConfig = docsNavigationConfig as unknown as DocsJsonConfig
 
 interface FrontmatterData {
@@ -286,20 +287,20 @@ function readFrontmatter(pageId: string, locale?: string): FrontmatterData {
   // Try locale-specific file first
   if (locale) {
     candidates.push(
-      path.join(CONTENT_ROOT, locale, `${pageId}.mdx`),
-      path.join(CONTENT_ROOT, locale, `${pageId}/index.mdx`),
+      `${CONTENT_ROOT}/${locale}/${pageId}.mdx`,
+      `${CONTENT_ROOT}/${locale}/${pageId}/index.mdx`,
     )
   }
 
   // Fall back to primary
   candidates.push(
-    path.join(CONTENT_ROOT, `${pageId}.mdx`),
-    path.join(CONTENT_ROOT, `${pageId}/index.mdx`),
+    `${CONTENT_ROOT}/${pageId}.mdx`,
+    `${CONTENT_ROOT}/${pageId}/index.mdx`,
   )
 
   for (const filePath of candidates) {
-    if (fs.existsSync(filePath)) {
-      const raw = fs.readFileSync(filePath, 'utf8')
+    if (runtimeSourceExists(filePath)) {
+      const raw = readRuntimeSource(filePath)
       const { data } = matter(raw)
       frontmatterCache.set(cacheKey, data as FrontmatterData)
       return data as FrontmatterData
@@ -408,27 +409,14 @@ let _allEntries: Array<DocEntry> | null = null
 /** Every page that has an .mdx file under src/content (default locale only). */
 function getAllContentPageIds(): Array<string> {
   const localeCodes = new Set((getI18nConfig()?.locales ?? []).map((l) => l.code))
-  const ids: Array<string> = []
-  const walk = (dir: string, prefix: string) => {
-    let entries: Array<fs.Dirent>
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (prefix === '' && localeCodes.has(entry.name)) continue // skip translation dirs
-        walk(path.join(dir, entry.name), prefix ? `${prefix}/${entry.name}` : entry.name)
-      } else if (entry.name.endsWith('.mdx')) {
-        const base = entry.name.slice(0, -4)
-        const id = base === 'index' ? prefix : prefix ? `${prefix}/${base}` : base
-        if (id) ids.push(id)
-      }
-    }
-  }
-  walk(CONTENT_ROOT, '')
-  return ids
+  return listRuntimeSources(CONTENT_ROOT)
+    .filter((filePath) => filePath.endsWith('.mdx'))
+    .map((filePath) => filePath.slice(`${CONTENT_ROOT}/`.length, -'.mdx'.length))
+    .filter((relativePath) => !localeCodes.has(relativePath.split('/')[0] ?? ''))
+    .map((relativePath) =>
+      relativePath.endsWith('/index') ? relativePath.slice(0, -'/index'.length) : relativePath,
+    )
+    .filter(Boolean)
 }
 
 function getAllDocEntries(): Array<DocEntry> {
@@ -771,4 +759,3 @@ export function getStructuralTheme(): StructuralTheme {
 
 export const sidebarCollections = getSidebarCollections()
 export const searchableDocs = getSearchableDocs()
-

@@ -1,6 +1,6 @@
 {
   "name": "create-thally-docs",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "Scaffold a new Thally documentation project",
   "type": "module",
   "engines": {
@@ -12,6 +12,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./scaffold": "./dist/scaffold.js",
+    "./migrate": "./dist/migrate/index.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -27,6 +28,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.0",
     "@inquirer/prompts": "^7.0.0",
+    "@thallylabs/migrate": "0.2.0",
     "gray-matter": "^4.0.3",
     "p-limit": "^6.1.0",
     "tar": "^6.2.0",

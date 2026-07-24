@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
-import fs from 'node:fs/promises'
 import path from 'node:path'
 import { stripInternalFrontmatter } from '@/lib/provenance'
+import { readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 import { mdxToMarkdown } from '@thallylabs/core'
 
-const localDocsRoot = path.join(process.cwd(), 'src/content')
+const localDocsRoot = 'src/content'
 
 export async function GET(
   _request: Request,
@@ -18,18 +18,18 @@ export async function GET(
     return new NextResponse('Not Found', { status: 404 })
   }
 
-  const rootPrefix = path.resolve(localDocsRoot) + path.sep
+  const rootPrefix = `${localDocsRoot}/`
   const candidates = [
-    path.join(localDocsRoot, `${slugPath}.mdx`),
-    path.join(localDocsRoot, `${slugPath}.md`),
-    path.join(localDocsRoot, `${slugPath}/index.mdx`),
+    path.posix.join(localDocsRoot, `${slugPath}.mdx`),
+    path.posix.join(localDocsRoot, `${slugPath}.md`),
+    path.posix.join(localDocsRoot, `${slugPath}/index.mdx`),
   ]
 
   for (const filePath of candidates) {
     // Containment: the resolved file must stay inside src/content.
-    if (!path.resolve(filePath).startsWith(rootPrefix)) continue
-    try {
-      const raw = await fs.readFile(filePath, 'utf8')
+    if (!filePath.startsWith(rootPrefix)) continue
+    if (runtimeSourceExists(filePath)) {
+      const raw = readRuntimeSource(filePath)
       // Strip internal provenance frontmatter so it never ships publicly, then
       // clean the MDX body to real Markdown (JSX components → Markdown) while
       // preserving the public frontmatter block.
@@ -43,8 +43,6 @@ export async function GET(
           'Cache-Control': 'public, max-age=300',
         },
       })
-    } catch {
-      // file not found — try next candidate
     }
   }
 
