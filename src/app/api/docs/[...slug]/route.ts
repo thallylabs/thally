@@ -1,7 +1,7 @@
 import { type NextRequest } from 'next/server'
 import { getDocEntries, getI18nConfig, getNavContext } from '@/data/docs'
 import { mdxToMarkdown } from '@thallylabs/core'
-import { getContentDocument } from '@/lib/content'
+import { loadContentDocument } from '@/lib/content'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
 import { getSiteUrl } from '@/lib/site-url'
 
@@ -87,8 +87,10 @@ export async function GET(
     )
   }
 
-  // Single source of truth — parse the content graph once via the content engine.
-  const document = getContentDocument(entry.id)
+  // Single source of truth — parse the content graph once via the content
+  // engine, reading through the active ContentSource so managed content
+  // publishes are reflected without a rebuild.
+  const document = await loadContentDocument(entry.id)
   if (!document) {
     if (wantsJson || wantsLdJson) {
       return Response.json(

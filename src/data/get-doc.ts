@@ -9,11 +9,8 @@ import { rehypePlugins } from '@/mdx/rehype'
 import { useMDXComponents as getMDXComponents } from '@/components/mdx/mdx-components'
 import { resolveSnippetComponent } from '@/mdx/snippet-registry'
 import { runtimeDocs } from '@/generated/runtime-docs'
-import {
-  readRuntimeSource,
-  runtimeSourceExists,
-  runtimeSourceModifiedAt,
-} from '@/lib/runtime-sources'
+import { readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
+import { ensureDynamicContentRendering, getContentSource, type ContentSource } from '@/lib/content-source'
 
 interface DocFrontmatter {
   title?: string
@@ -47,32 +44,42 @@ export interface DocSourceResult {
 const dynamicDocCache = new Map<string, Promise<(DocEntry & { isFallback: boolean; isStale: boolean }) | null>>()
 
 export async function getDocFromParams(slugSegments?: Array<string>, locale?: string) {
+  // Remote content must never be baked into a static or ISR-cached render —
+  // a no-op under the default filesystem source. Called before the cache
+  // lookup so every request opts out, not just the first.
+  await ensureDynamicContentRendering()
+
   const normalized = Array.isArray(slugSegments) ? slugSegments.filter(Boolean) : []
   const slugKey = normalized.join('/')
 
   const cacheKey = locale ? `${locale}:${slugKey}` : slugKey
   let pending = dynamicDocCache.get(cacheKey)
   if (!pending) {
-    pending = loadDocFromFilesystem(normalized, locale)
+    pending = loadDocFromSource(normalized, locale)
     dynamicDocCache.set(cacheKey, pending)
   }
 
   return pending
 }
 
-async function loadDocFromFilesystem(
+async function loadDocFromSource(
   slugSegments: Array<string>,
   locale?: string,
 ): Promise<(DocEntry & { isFallback: boolean; isStale: boolean }) | null> {
+  const source = getContentSource()
   const slugPath = slugSegments.join('/')
-  const candidate = await findDocSource(slugPath, locale)
+  const candidate = await findDocSource(source, slugPath, locale)
   if (!candidate) {
     return null
   }
-  return compileDocEntry(candidate.filePath, slugSegments, candidate.isFallback, candidate.isStale)
+  return compileDocEntry(source, candidate.filePath, slugSegments, candidate.isFallback, candidate.isStale)
 }
 
-async function findDocSource(slugPath: string, locale?: string): Promise<DocSourceResult | null> {
+async function findDocSource(
+  source: ContentSource,
+  slugPath: string,
+  locale?: string,
+): Promise<DocSourceResult | null> {
   const normalized = slugPath || 'introduction'
   const i18n = getI18nConfig()
   const defaultLocale = i18n?.defaultLocale ?? 'en'
@@ -85,7 +92,7 @@ async function findDocSource(slugPath: string, locale?: string): Promise<DocSour
 
     for (const candidate of candidates) {
       const filePath = projectJoin(localDocsRoot, candidate)
-      if (runtimeSourceExists(filePath)) {
+      if (await source.exists(filePath)) {
         return { filePath, isFallback: false, isStale: false }
       }
     }
@@ -108,12 +115,12 @@ async function findDocSource(slugPath: string, locale?: string): Promise<DocSour
       ]
 
   for (const localeFilePath of localeCandidates) {
-    if (runtimeSourceExists(localeFilePath)) {
+    if (await source.exists(localeFilePath)) {
       // Translation file exists — check staleness against primary
       let isStale = false
       for (const primaryPath of primaryCandidates) {
-        if (runtimeSourceExists(primaryPath)) {
-          if (runtimeSourceModifiedAt(primaryPath) > runtimeSourceModifiedAt(localeFilePath)) {
+        if (await source.exists(primaryPath)) {
+          if ((await source.modifiedAt(primaryPath)) > (await source.modifiedAt(localeFilePath))) {
             isStale = true
           }
           break
@@ -125,7 +132,7 @@ async function findDocSource(slugPath: string, locale?: string): Promise<DocSour
 
   // Fall back to primary
   for (const primaryPath of primaryCandidates) {
-    if (runtimeSourceExists(primaryPath)) {
+    if (await source.exists(primaryPath)) {
       return { filePath: primaryPath, isFallback: true, isStale: false }
     }
   }
@@ -133,14 +140,30 @@ async function findDocSource(slugPath: string, locale?: string): Promise<DocSour
   return null
 }
 
+/**
+ * Whether this render must compile MDX now instead of using the module the
+ * build precompiled. Development always compiles for fresh authoring
+ * feedback. The assets source compiles only files that actually changed
+ * since the build: an unchanged file is byte-identical to its embedded copy,
+ * so reusing the precompiled module skips the request-time compile (and, on
+ * workerd, the dynamic-eval requirement) for everything except edited pages.
+ */
+function needsRuntimeCompile(source: ContentSource, filePath: string, content: string): boolean {
+  if (process.env.NODE_ENV === 'development') return true
+  if (source.kind !== 'assets') return false
+  return !(runtimeSourceExists(filePath) && readRuntimeSource(filePath) === content)
+}
+
 async function compileDocEntry(
+  source: ContentSource,
   filePath: string,
   slugSegments: Array<string>,
   isFallback: boolean,
   isStale: boolean,
 ): Promise<(DocEntry & { isFallback: boolean; isStale: boolean }) | null> {
-  const source = readRuntimeSource(filePath)
-  const { cleanedSource, snippetInjectors } = extractSnippetComponents(source)
+  const sourceFile = await source.read(filePath)
+  if (!sourceFile) return null
+  const { cleanedSource, snippetInjectors } = extractSnippetComponents(sourceFile.content)
   const resolvedSnippetComponents: Record<string, ComponentType<Record<string, unknown>>> = {}
   for (const [name, resolver] of Object.entries(snippetInjectors)) {
     resolvedSnippetComponents[name] = (await resolver()) as ComponentType<Record<string, unknown>>
@@ -149,7 +172,7 @@ async function compileDocEntry(
   let content: ReactNode
   let frontmatter: DocFrontmatter
 
-  if (process.env.NODE_ENV === 'development') {
+  if (needsRuntimeCompile(source, filePath, sourceFile.content)) {
     const compiled = await compileMDX<DocFrontmatter>({
       source: cleanedSource,
       components,
@@ -233,29 +256,31 @@ function extractSnippetComponents(source: string) {
 const SNIPPETS_ROOT = 'snippets'
 
 async function compileSnippetFromPath(snippetImportPath: string): Promise<ComponentType<Record<string, unknown>>> {
+  const source = getContentSource()
   const relative = snippetImportPath.replace(/^\/snippets\//, '').replace(/\.mdx$/, '')
   const candidates = [
     projectJoin(SNIPPETS_ROOT, `${relative}.mdx`),
     projectJoin(SNIPPETS_ROOT, relative, 'index.mdx'),
   ]
 
-  let source: string | null = null
+  let snippetFile: { content: string } | null = null
   let sourcePath: string | null = null
   for (const filePath of candidates) {
-    if (runtimeSourceExists(filePath)) {
-      source = readRuntimeSource(filePath)
+    const candidateFile = await source.read(filePath)
+    if (candidateFile) {
+      snippetFile = candidateFile
       sourcePath = filePath
       break
     }
   }
 
-  if (!source) {
+  if (!snippetFile || !sourcePath) {
     const MissingSnippet: ComponentType<Record<string, unknown>> = () => null
     return MissingSnippet
   }
 
-  if (process.env.NODE_ENV !== 'development') {
-    const compiled = sourcePath ? runtimeDocs[sourcePath] : null
+  if (!needsRuntimeCompile(source, sourcePath, snippetFile.content)) {
+    const compiled = runtimeDocs[sourcePath]
     if (!compiled) {
       const MissingSnippet: ComponentType<Record<string, unknown>> = () => null
       return MissingSnippet
@@ -268,7 +293,7 @@ async function compileSnippetFromPath(snippetImportPath: string): Promise<Compon
   }
 
   const { content } = await compileMDX({
-    source,
+    source: snippetFile.content,
     components: getMDXComponents({}),
     options: {
       parseFrontmatter: false,
