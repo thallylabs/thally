@@ -70,8 +70,9 @@ export function parseArgs(argv: Array<string>): ParsedArgs {
 export function helpText(): string {
   const lines: Array<string> = []
   lines.push('')
-  lines.push('  thally — the unified documentation CLI')
+  lines.push('  thally — keep customer-facing knowledge in sync with product changes')
   lines.push('')
+  lines.push('  Connect product evidence, prepare reviewable updates, and publish one trusted source.')
   lines.push('  You author content/, docs.json, and snippets/.')
   lines.push('  The framework (Next.js) is a hidden runtime — you never touch src/app/.')
   lines.push('')

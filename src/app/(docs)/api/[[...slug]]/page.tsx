@@ -11,6 +11,7 @@ import { getBreadcrumbs, getDocEntries } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { buildApiOperationJsonLd, buildDocPageJsonLd } from '@/lib/json-ld'
+import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
 
 interface PageProps {
   params: Promise<{ slug?: Array<string> }>
@@ -35,14 +36,35 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
   const node = await getApiOperationBySlug(resolved.slug)
   if (node) {
+    const title = node.operation.title
+    const description = node.operation.description ?? `${node.operation.method} ${node.operation.path}`
+    const ogImageUrl = buildOgImageUrl({
+      title,
+      description,
+      crumb: formatOgBreadcrumb(getBreadcrumbs(node.href), title, 'API Reference'),
+      url: formatOgDisplayUrl(node.href),
+    })
+
     return {
-      title: node.operation.title,
-      description: node.operation.description ?? `${node.operation.method} ${node.operation.path}`,
+      title,
+      description,
       alternates: {
+        canonical: `${siteUrl}${node.href}`,
         types: {
           ...buildAgentAlternateLinks(node.href),
           ...(specUrl ? { 'application/vnd.oai.openapi': specUrl } : {}),
         },
+      },
+      openGraph: {
+        title,
+        description,
+        images: [{ url: ogImageUrl, width: 1200, height: 630 }],
+      },
+      twitter: {
+        card: 'summary_large_image',
+        title,
+        description,
+        images: [ogImageUrl],
       },
     }
   }
@@ -50,11 +72,30 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const doc = await getDocFromParams(['api', ...(resolved.slug ?? [])])
   if (doc) {
     const primaryHref = doc.href
+    const ogImageUrl = buildOgImageUrl({
+      title: doc.title,
+      description: doc.description,
+      crumb: formatOgBreadcrumb(getBreadcrumbs(primaryHref), doc.title, doc.group),
+      url: formatOgDisplayUrl(primaryHref),
+    })
+
     return {
       title: doc.title,
       description: doc.description,
       alternates: {
+        canonical: `${siteUrl}${primaryHref}`,
         types: buildAgentAlternateLinks(primaryHref),
+      },
+      openGraph: {
+        title: doc.title,
+        description: doc.description,
+        images: [{ url: ogImageUrl, width: 1200, height: 630 }],
+      },
+      twitter: {
+        card: 'summary_large_image',
+        title: doc.title,
+        description: doc.description,
+        images: [ogImageUrl],
       },
     }
   }

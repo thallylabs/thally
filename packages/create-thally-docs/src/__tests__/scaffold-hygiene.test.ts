@@ -33,6 +33,7 @@ describe('scaffold hygiene — agent-ready by default, Track senders remain opt-
       expect(shouldInclude('docs-main/.github/ISSUE_TEMPLATE/bug_report.md')).toBe(false)
       expect(shouldInclude('docs-main/.github/PULL_REQUEST_TEMPLATE.md')).toBe(false)
       expect(shouldInclude('docs-main/README.md')).toBe(false)
+      expect(shouldInclude('docs-main/.env.production')).toBe(false)
     })
 
     it('still includes the platform source, docs.json, and generic CI', () => {
@@ -156,6 +157,7 @@ describe('writeCloudflareRuntimeConfig', () => {
     })
     expect(JSON.stringify(wrangler)).not.toContain('account_id')
     expect(JSON.stringify(wrangler)).not.toContain('api_token')
+    expect(JSON.stringify(wrangler)).not.toContain('THALLY_SITE_URL')
   })
 })
 

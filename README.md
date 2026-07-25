@@ -1,8 +1,15 @@
 # Thally
 
-The first agent-native documentation platform — every page is served to humans as polished HTML and to AI agents as structured JSON, JSON-LD, and Markdown from the same URL. Built on Next.js: self-hosted, open, extensible, and free to commercialize.
+**Every product change. Every knowledge surface. Automatically in sync.**
 
-Thally is **agent-native**: every page is served to humans as pre-rendered HTML and to AI agents as structured JSON / JSON-LD / Markdown from the same URL.
+Thally is the open product-knowledge pipeline for software teams. It starts
+with documentation: connect product repositories, identify the customer-facing
+knowledge a change affects, and turn that work into evidence-backed pull
+requests for people to review.
+
+The documentation engine stays self-hosted, open, extensible, and free to
+commercialize. Every page is served to humans as pre-rendered HTML and to AI
+agents as structured JSON, JSON-LD, and Markdown from the same URL.
 
 ## Features
 
@@ -169,6 +176,7 @@ cp .env.example .env.local
 | `THALLY_TRACK_WEBHOOK_SECRET` | Optional — enables the manual Thally Track webhook (`/api/track/webhook`); merged/preview PRs in tracked repos become docs-agent PRs. Not needed when you Connect a GitHub App |
 | `THALLY_GITHUB_TOKEN` | Optional — fine-grained PAT that reads tracked product-repo PRs, relays Track dispatches, and authenticates the admin Docs-tasks queue |
 | `THALLY_GITHUB_APP_ID` / `THALLY_GITHUB_APP_INSTALLATION_ID` / `THALLY_GITHUB_APP_PRIVATE_KEY` | Optional — wire a GitHub App by hand instead of the admin "Connect GitHub" button (which stores these encrypted). Grants org-wide access to selected repos |
+| `THALLY_DISABLE_BUILD_CACHE` | Optional — set to `1` to turn off Turbopack's persistent build cache (kept under `.next/cache` to speed up warm builds) if a production build misbehaves with it |
 
 Legacy `DOX_*` names are still read as a fallback for every `THALLY_*` variable, so existing deployments keep working without renaming anything.
 
