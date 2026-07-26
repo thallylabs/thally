@@ -1,8 +1,8 @@
 import { z } from 'zod'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import matter from 'gray-matter'
 
+import { parseFrontmatter } from '../lib/frontmatter.js'
 import { readPageBodyDelimiter } from '../lib/page-echo.js'
 
 export const readPageSchema = z.object({
@@ -34,7 +34,7 @@ export async function handleReadPage(input: ReadPageInput): Promise<string> {
   }
 
   const raw = readFileSync(filePath, 'utf8')
-  const { data, content } = matter(raw)
+  const { data, content } = parseFrontmatter(raw)
   const title = (data.title as string | undefined) ?? pageId
   const description = (data.description as string | undefined) ?? ''
 

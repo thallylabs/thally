@@ -18,14 +18,16 @@ import {
 } from 'node:fs'
 import path from 'node:path'
 import { compile } from '@mdx-js/mdx'
-import matter from 'gray-matter'
 // tsx exposes these extensionless TypeScript modules through CJS interop when
 // this generator runs as ESM. Their declared shape still has named exports.
+// @ts-expect-error -- runtime interop intentionally provides the default object
+import frontmatterModule from '../src/lib/frontmatter'
 // @ts-expect-error -- runtime interop intentionally provides the default object
 import rehypeModule from '../src/mdx/rehype'
 // @ts-expect-error -- runtime interop intentionally provides the default object
 import remarkModule from '../src/mdx/remark'
 
+const { parseFrontmatter } = frontmatterModule as unknown as typeof import('../src/lib/frontmatter')
 const { rehypePlugins } = rehypeModule as unknown as typeof import('../src/mdx/rehype')
 const { remarkPlugins } = remarkModule as unknown as typeof import('../src/mdx/remark')
 
@@ -109,7 +111,7 @@ async function writeCompiledDocs(): Promise<number> {
     const moduleName = `RuntimeDoc${index}`
     const frontmatterName = `RuntimeFrontmatter${index}`
     const modulePath = path.join(compiledDocsDirectory, `doc-${index}.tsx`)
-    const parsed = matter(entry.content)
+    const parsed = parseFrontmatter(entry.content)
     const mdxSource = parsed.content.replace(snippetImportPattern, '')
     let program
     try {

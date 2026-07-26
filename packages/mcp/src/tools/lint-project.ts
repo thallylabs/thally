@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import matter from 'gray-matter'
+import { parseFrontmatter } from '../lib/frontmatter.js'
 import { readDocsJson, writeDocsJson } from '../lib/docs-json.js'
 import type { DocsJsonNavigationGroup } from '../lib/docs-json.js'
 import { scanMdxFiles } from './search-docs.js'
@@ -116,7 +116,7 @@ export async function handleLintProject(input: LintProjectInput): Promise<string
     let content = ''
     try {
       const raw = readFileSync(filePath, 'utf8')
-      const parsed = matter(raw)
+      const parsed = parseFrontmatter(raw)
       data = parsed.data
       content = parsed.content
     } catch {

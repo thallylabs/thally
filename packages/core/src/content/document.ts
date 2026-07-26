@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import matter from 'gray-matter'
+import { parseFrontmatter } from './frontmatter.js'
 import { parseMdxContent } from './parse.js'
 import type { ParsedContent } from './types.js'
 
@@ -74,7 +74,7 @@ export function getContentDocument(pageId: string, locale?: string): ContentDocu
   }
 
   const raw = fs.readFileSync(filePath, 'utf8')
-  const { data, content } = matter(raw)
+  const { data, content } = parseFrontmatter(raw)
   const document: ContentDocument = {
     pageId,
     frontmatter: data,

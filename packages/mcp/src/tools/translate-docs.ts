@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import matter from 'gray-matter'
+import { parseFrontmatter } from '../lib/frontmatter.js'
 import Anthropic from '@anthropic-ai/sdk'
 import pLimit from 'p-limit'
 
@@ -202,7 +202,7 @@ export async function handleTranslateDocs(input: TranslateDocsInput): Promise<st
           const sourceContent = readFileSync(sourceFile, 'utf8')
 
           // Validate frontmatter
-          const parsed = matter(sourceContent)
+          const parsed = parseFrontmatter(sourceContent)
           if (!parsed.data.title) {
             console.warn(`[translate] ${pageId}: missing title in frontmatter`)
           }

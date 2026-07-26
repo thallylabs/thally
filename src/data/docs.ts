@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import matter from 'gray-matter'
+import { parseFrontmatter } from '@/lib/frontmatter'
 import docsNavigationConfig from '../../docs.json' assert { type: 'json' }
 import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 
@@ -301,7 +301,7 @@ function readFrontmatter(pageId: string, locale?: string): FrontmatterData {
   for (const filePath of candidates) {
     if (runtimeSourceExists(filePath)) {
       const raw = readRuntimeSource(filePath)
-      const { data } = matter(raw)
+      const { data } = parseFrontmatter(raw)
       frontmatterCache.set(cacheKey, data as FrontmatterData)
       return data as FrontmatterData
     }

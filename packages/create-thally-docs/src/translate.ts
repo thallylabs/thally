@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { input } from '@inquirer/prompts'
-import matter from 'gray-matter'
+import { parseFrontmatter } from './frontmatter.js'
 import Anthropic from '@anthropic-ai/sdk'
 import pLimit from 'p-limit'
 
@@ -283,7 +283,7 @@ export async function runTranslateCommand(
           const sourceContent = readFileSync(sourceFile, 'utf8')
 
           // Validate it has frontmatter
-          const parsed = matter(sourceContent)
+          const parsed = parseFrontmatter(sourceContent)
           if (!parsed.data.title) {
             console.warn(`  ⚠  ${pageId}: missing title in frontmatter — translating anyway`)
           }
