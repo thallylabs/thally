@@ -19,8 +19,15 @@ npm install @thallylabs/core
 
 | Export | Purpose |
 | --- | --- |
-| `@thallylabs/core` | Content parsing (`getContentDocument`, `mdxToMarkdown`), search (`searchDocs`, `buildSearchCorpus`), and embeddings (`buildEmbeddingIndex`, `getRelevantChunks`). |
+| `@thallylabs/core` | Everything below in one barrel: content parsing, search (`searchDocs`, `buildSearchCorpus`), and embeddings (`buildEmbeddingIndex`, `getRelevantChunks`). |
+| `@thallylabs/core/content` | Just the content pipeline (`parseMdxContent`, `getContentDocument`, `mdxToMarkdown`, `ContentDocument`) — for consumers that transform content and don't need search or embeddings. |
 | `@thallylabs/core/theme` | Pure brand-token utilities (colors, CSS theme variables) — no Node or content dependencies, safe to import from client bundles. |
+
+The package is side-effect free (`"sideEffects": false`), so bundlers
+tree-shake unused exports even when you import from the barrel. Size-sensitive
+consumers (edge workers, client bundles) should still prefer the subpath
+entries — they keep unused modules out of the module graph entirely, which
+also helps bundlers that can't prove the barrel's re-exports are unused.
 
 ## The one thing a host must wire up
 

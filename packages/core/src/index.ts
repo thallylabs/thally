@@ -6,8 +6,13 @@
  * index. It has no dependency on Next.js, React, or `docs.json`; the host wires
  * in its page list through {@link registerDocEntriesSource} (see `./doc-source`).
  *
- * Pure brand/theme token helpers live at the separate `@thallylabs/core/theme`
- * entry so client bundles never pull in Node/MDX/search code.
+ * Leaner subpath entries exist for consumers that don't want the full barrel:
+ * `@thallylabs/core/content` exposes just the content pipeline, and
+ * `@thallylabs/core/theme` exposes the pure brand/theme token helpers so
+ * client bundles never pull in Node/MDX/search code. The package declares
+ * `"sideEffects": false`, so keep every module here import-safe: no top-level
+ * global mutation, registration, or I/O — bundlers are told they may drop any
+ * module whose exports go unused.
  *
  * Boundary note: nothing here may import `src/cloud` — core is engine-side and
  * ships in the OSS distribution. Cloud-tier services reach engine code, never
