@@ -21,7 +21,17 @@ export async function getRequestOrigin(): Promise<string> {
     const proto = incoming.get('x-forwarded-proto') ?? (process.env.NODE_ENV === 'production' ? 'https' : 'http')
     if (host) return `${proto}://${host}`
   }
-  return process.env.THALLY_SITE_URL?.trim() || 'http://localhost:3000'
+  const configured = process.env.THALLY_SITE_URL?.trim()
+  if (configured) return configured
+  if (isRemoteContentSource()) {
+    // A managed release always carries THALLY_SITE_URL. Without it the
+    // localhost fallback below would be baked into every rendered page as the
+    // canonical origin instead of surfacing as an error, so say so once.
+    console.warn(
+      'THALLY_SITE_URL is unset under a remote content source; canonical links will point at localhost.',
+    )
+  }
+  return 'http://localhost:3000'
 }
 
 export async function getRequestCloudSiteConfig() {

@@ -109,4 +109,94 @@ describe('interpretMDX', () => {
     })
     expect(render(content)).toContain('Still renders.')
   })
+
+  it('renders MDX comments as nothing', async () => {
+    // Regression: an expression-free `{/* … */}` parses to an empty estree
+    // Program, and hast-util-to-jsx-runtime reads body[0].type unguarded.
+    const { content } = await interpretMDX({
+      source: '{/* a note to editors */}\n\nVisible text.\n\nInline {/* here */} too.',
+      components: {},
+    })
+    const html = render(content)
+    expect(html).toContain('Visible text.')
+    expect(html).toContain('too.')
+    expect(html).not.toContain('note to editors')
+  })
+
+  it('refuses inherited property lookups on components', async () => {
+    // `<Note.constructor/>` would otherwise resolve to Function, which React
+    // calls with an attacker-influenced string — code generation by proxy.
+    const { content } = await interpretMDX({
+      source: '<Note.constructor />\n\nAfter.',
+      components: { Note },
+    })
+    const html = render(content)
+    expect(html).toContain('After.')
+    expect(html).not.toContain('function')
+  })
+
+  it('refuses inherited identifier lookups', async () => {
+    const { content } = await interpretMDX({
+      source: 'Value {constructor} here.',
+      components: {},
+    })
+    expect(render(content)).toContain('Value')
+  })
+
+  it('does not execute javascript frontmatter', async () => {
+    const marker = '__interpreter_frontmatter_probe__'
+    const globals = globalThis as unknown as Record<string, unknown>
+    delete globals[marker]
+    const { frontmatter } = await interpretMDX({
+      source: `---js\n{ title: ((globalThis['${marker}'] = 'executed'), 'Hi') }\n---\n\nBody.`,
+      components: {},
+      parseFrontmatter: true,
+    })
+    expect(globals[marker]).toBeUndefined()
+    expect(frontmatter.title).not.toBe('Hi')
+  })
+
+  it('returns a fresh frontmatter object per call', async () => {
+    const source = '---\ntitle: Shared\n---\n\nBody.'
+    const first = await interpretMDX({ source, components: {}, parseFrontmatter: true })
+    first.frontmatter.title = 'Mutated'
+    const second = await interpretMDX({ source, components: {}, parseFrontmatter: true })
+    expect(second.frontmatter.title).toBe('Shared')
+  })
+
+  it('degrades computed object keys instead of fabricating props', async () => {
+    const Probe: ComponentType<Record<string, unknown>> = (props) =>
+      createElement('div', { 'data-value': JSON.stringify(props.data ?? null) })
+    const { content } = await interpretMDX({
+      source: '<Probe data={{[someName]: 1}} />',
+      components: { Probe },
+    })
+    expect(render(content)).not.toContain('someName')
+  })
+
+  it('renders object expressions in child position as nothing', async () => {
+    const { content } = await interpretMDX({
+      source: 'Before {{ a: 1 }} after.',
+      components: {},
+    })
+    const html = render(content)
+    expect(html).toContain('Before')
+    expect(html).toContain('after.')
+  })
+
+  it('renders unknown components as their children instead of failing', async () => {
+    const { content } = await interpretMDX({
+      source: '<Nope>inner text</Nope>',
+      components: {},
+    })
+    expect(render(content)).toContain('inner text')
+  })
+
+  it('drops HTML-style string style attributes', async () => {
+    const { content } = await interpretMDX({
+      source: '<div style="color:red">styled</div>',
+      components: {},
+    })
+    expect(render(content)).toContain('styled')
+  })
 })
