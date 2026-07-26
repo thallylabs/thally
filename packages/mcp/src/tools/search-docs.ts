@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
 import { join, relative, extname } from 'node:path'
-import matter from 'gray-matter'
+import { parseFrontmatter } from '../lib/frontmatter.js'
 
 export const searchDocsSchema = z.object({
   projectDir: z.string().describe('Path to the Thally project root'),
@@ -52,7 +52,7 @@ export function scoreFiles(files: string[], contentDir: string, query: string): 
       continue
     }
 
-    const { data, content } = matter(raw)
+    const { data, content } = parseFrontmatter(raw)
     const title = (data.title as string | undefined) ?? ''
     const description = (data.description as string | undefined) ?? ''
     const keywords = (data.keywords as string[] | undefined) ?? []

@@ -20,7 +20,6 @@
  */
 import type { Root } from 'hast'
 import { toJsxRuntime } from 'hast-util-to-jsx-runtime'
-import matter from 'gray-matter'
 import type { ReactNode } from 'react'
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
 import remarkMdx from 'remark-mdx'
@@ -29,6 +28,7 @@ import remarkRehype from 'remark-rehype'
 import { unified } from 'unified'
 import { SKIP, visit } from 'unist-util-visit'
 
+import { parseFrontmatter } from '@/lib/frontmatter'
 import { rehypePlugins } from '@/mdx/rehype'
 import { remarkPlugins } from '@/mdx/remark'
 
@@ -185,20 +185,6 @@ function createStaticEvaluater(components: Record<string, unknown>) {
 }
 
 /**
- * gray-matter dispatches on the language token of the opening delimiter, so
- * `---js` frontmatter reaches an engine whose parser is literally `eval`.
- * Content is customer-authored, so that would be a code-execution sink inside
- * a module whose whole premise is that there isn't one. Neutralize the
- * JavaScript engines; YAML (the documented format) is unaffected.
- */
-const FRONTMATTER_OPTIONS = {
-  engines: {
-    javascript: () => ({}),
-    js: () => ({}),
-  },
-} as const
-
-/**
  * Remove MDX expressions that carry no expression — `{/* a comment *\/}`
  * parses to an estree Program with an empty body, and
  * `hast-util-to-jsx-runtime` reads `program.body[0].type` unguarded, throwing
@@ -256,8 +242,12 @@ const processor = unified()
  * compiled path uses; snippet imports must already have been extracted.
  */
 export async function interpretMDX(input: InterpretMdxInput): Promise<InterpretMdxResult> {
+  // `parseFrontmatter` is the hardened parser: authored `---js` frontmatter
+  // would otherwise reach a gray-matter engine whose parser is `eval`, a
+  // code-execution sink inside a module whose whole premise is that there
+  // isn't one.
   const { content: body, data } = input.parseFrontmatter
-    ? matter(input.source, FRONTMATTER_OPTIONS)
+    ? parseFrontmatter(input.source)
     : { content: input.source, data: {} }
 
   const parsed = processor.parse(body)

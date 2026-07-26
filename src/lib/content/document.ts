@@ -8,8 +8,8 @@
  * source map on the legacy sync path.
  */
 
-import matter from 'gray-matter'
 import { parseMdxContent, type ContentDocument } from '@thallylabs/core'
+import { parseFrontmatter } from '@/lib/frontmatter'
 import {
   readRuntimeSource,
   runtimeSourceExists,
@@ -56,7 +56,7 @@ function parseDocument(
   const cached = documentCache.get(cacheKey)
   if (cached?.modifiedAtMs === modifiedAtMs) return cached.document
 
-  const { data, content } = matter(raw)
+  const { data, content } = parseFrontmatter(raw)
   const document: ContentDocument = {
     pageId,
     frontmatter: data,

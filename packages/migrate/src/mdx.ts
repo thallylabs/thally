@@ -1,7 +1,6 @@
 /** Markdown/MDX normalization that preserves every component Thally supports. */
 
-import matter from 'gray-matter'
-
+import { parseFrontmatter } from './frontmatter.js'
 import type { MigrationPage } from './types.js'
 
 export interface MarkdownPageIdentity {
@@ -115,7 +114,7 @@ export function parseMarkdownPage(input: {
     fallback: MarkdownPageIdentity,
   ) => MarkdownPageIdentity
 }): MigrationPage | null {
-  const parsed = matter(input.raw)
+  const parsed = parseFrontmatter(input.raw)
   const fallbackIdentity: MarkdownPageIdentity = {
     id: input.id,
     navigationId: input.navigationId ?? input.id,

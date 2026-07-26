@@ -1,8 +1,8 @@
 import { z } from 'zod'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import matter from 'gray-matter'
 
+import { parseFrontmatter, stringifyFrontmatter } from '../lib/frontmatter.js'
 import { stripEchoedPageHeader } from '../lib/page-echo.js'
 
 export const updatePageSchema = z.object({
@@ -40,7 +40,7 @@ export async function handleUpdatePage(input: UpdatePageInput): Promise<string> 
   }
 
   const raw = readFileSync(filePath, 'utf8')
-  const parsed = matter(raw)
+  const parsed = parseFrontmatter(raw)
 
   // Merge frontmatter
   const newFm: Record<string, unknown> = { ...parsed.data }
@@ -59,7 +59,7 @@ export async function handleUpdatePage(input: UpdatePageInput): Promise<string> 
       : parsed.content
 
   // Stringify and write
-  const newContent = matter.stringify(newBody.trim(), newFm)
+  const newContent = stringifyFrontmatter(newBody.trim(), newFm)
   writeFileSync(filePath, newContent, 'utf8')
 
   return [

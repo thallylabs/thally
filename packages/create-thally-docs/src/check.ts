@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, extname, relative } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import matter from 'gray-matter'
+import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
 import type { DocsJsonNavigationGroup } from './docs-json.js'
@@ -316,7 +316,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     let lineOffset = 0
     try {
       const raw = readFileSync(filePath, 'utf8')
-      const parsed = matter(raw)
+      const parsed = parseFrontmatter(raw)
       data = parsed.data
       content = parsed.content
       // Links/anchors are found in `content` (frontmatter stripped); offset the

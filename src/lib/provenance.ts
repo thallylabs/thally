@@ -1,4 +1,8 @@
-import matter from 'gray-matter'
+import {
+  parseFrontmatter,
+  stringifyFrontmatter,
+  type ParsedFrontmatter,
+} from '@/lib/frontmatter'
 
 /**
  * Frontmatter keys that are **internal provenance** — the mechanism `thally check
@@ -19,9 +23,9 @@ export const INTERNAL_FRONTMATTER_KEYS = ['sources', 'verifiedCommit'] as const
  * pages aren't reformatted).
  */
 export function stripInternalFrontmatter(raw: string): string {
-  let parsed: matter.GrayMatterFile<string>
+  let parsed: ParsedFrontmatter
   try {
-    parsed = matter(raw)
+    parsed = parseFrontmatter(raw)
   } catch {
     return raw
   }
@@ -31,5 +35,5 @@ export function stripInternalFrontmatter(raw: string): string {
 
   const clean: Record<string, unknown> = { ...data }
   for (const key of INTERNAL_FRONTMATTER_KEYS) delete clean[key]
-  return matter.stringify(parsed.content, clean)
+  return stringifyFrontmatter(parsed.content, clean)
 }

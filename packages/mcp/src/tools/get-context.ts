@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import matter from 'gray-matter'
+import { parseFrontmatter } from '../lib/frontmatter.js'
 import { scanMdxFiles, scoreFiles } from './search-docs.js'
 
 export const getContextSchema = z.object({
@@ -45,7 +45,7 @@ export async function handleGetContext(input: GetContextInput): Promise<string> 
     for (const c of candidates) {
       if (existsSync(c)) {
         const raw = readFileSync(c, 'utf8')
-        const { content: body } = matter(raw)
+        const { content: body } = parseFrontmatter(raw)
         content = body.trim()
         break
       }
