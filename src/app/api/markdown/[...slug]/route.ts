@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import path from 'node:path'
 import { stripInternalFrontmatter } from '@/lib/provenance'
-import { ensureDynamicContentRendering, getContentSource } from '@/lib/content-source'
+import { getContentSource } from '@/lib/content-source'
 import { mdxToMarkdown } from '@thallylabs/core'
 
 const localDocsRoot = 'src/content'
@@ -10,7 +10,6 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ slug: string[] }> },
 ) {
-  await ensureDynamicContentRendering()
 
   const { slug } = await params
   const slugPath = slug.join('/')

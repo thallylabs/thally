@@ -10,12 +10,17 @@
  *     Worker modules reused verbatim) goes live without a build. Doc routes
  *     render as on-demand static generation: every publish is a new immutable
  *     release deployed under its own Worker script name, so a cached render
- *     can never outlive the content it was built from. See
- *     `ensureDynamicContentRendering` for why this is not a dynamic render.
+ *     can never outlive the content it was built from.
  *
  * Managed hosting sets the variable in the injected Worker bindings AND at
  * build time — `generateStaticParams` consults it during `next build`, so it
  * must be present then for doc routes to skip prerendering.
+ *
+ * Doc routes deliberately do NOT force a dynamic render under `assets`.
+ * `connection()` throws DYNAMIC_SERVER_USAGE inside on-demand static
+ * generation on workerd, and Turbopack rejects a computed `export const
+ * dynamic`, so per-request rendering cannot be declared conditionally anyway.
+ * Static-per-release is both permitted and semantically right here.
  */
 
 import type { ContentSource, ContentSourceKind } from './types'
@@ -69,25 +74,6 @@ export function getContentSource(): ContentSource {
   cachedSource =
     kind === 'assets' ? createAssetsContentSource(filesystemContentSource) : filesystemContentSource
   return cachedSource
-}
-
-/**
- * Under the assets source, doc pages render as ON-DEMAND static generation:
- * generateStaticParams is empty, so Next builds each page the first time a
- * release serves it. That is the correct freshness model here — managed
- * releases are immutable, every content publish ships a NEW Worker whose
- * in-process render caches start empty, and the publish purges the CDN by
- * Cache-Tag — so a render can never outlive the content it was built from.
- *
- * Deliberately NOT connection(): forcing a dynamic render inside on-demand
- * static generation throws DYNAMIC_SERVER_USAGE (observed in workerd), and
- * Turbopack rejects computed `export const dynamic` segment config, so
- * per-request rendering cannot be declared conditionally. Static-per-release
- * is both allowed and semantically right.
- */
-export async function ensureDynamicContentRendering(): Promise<void> {
-  // Intentionally a no-op in every mode; kept as the single documented seam
-  // should a future content source ever need true per-request rendering.
 }
 
 /** Clear process-local state between tests. */

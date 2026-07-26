@@ -11,7 +11,7 @@ import { useMDXComponents as getMDXComponents } from '@/components/mdx/mdx-compo
 import { resolveSnippetComponent } from '@/mdx/snippet-registry'
 import { runtimeDocs } from '@/generated/runtime-docs'
 import { readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
-import { ensureDynamicContentRendering, getContentSource, type ContentSource } from '@/lib/content-source'
+import { getContentSource, type ContentSource } from '@/lib/content-source'
 
 interface DocFrontmatter {
   title?: string
@@ -48,7 +48,6 @@ export async function getDocFromParams(slugSegments?: Array<string>, locale?: st
   // Remote content must never be baked into a static or ISR-cached render —
   // a no-op under the default filesystem source. Called before the cache
   // lookup so every request opts out, not just the first.
-  await ensureDynamicContentRendering()
 
   const normalized = Array.isArray(slugSegments) ? slugSegments.filter(Boolean) : []
   const slugKey = normalized.join('/')
