@@ -1,8 +1,9 @@
 {
   "name": "@thallylabs/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework-agnostic content engine for Thally's product-knowledge pipeline: structured content, search, embeddings, and brand tokens.",
   "type": "module",
+  "sideEffects": false,
   "publishConfig": {
     "access": "public"
   },
@@ -14,6 +15,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./content": {
+      "types": "./dist/content.d.ts",
+      "import": "./dist/content.js",
+      "default": "./dist/content.js"
     },
     "./theme": {
       "types": "./dist/theme.d.ts",
