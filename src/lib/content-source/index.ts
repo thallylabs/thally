@@ -6,8 +6,12 @@
  *     SSG preserved. This is the default and must stay byte-for-byte
  *     identical to the pre-ContentSource engine when the variable is unset.
  *   - `assets` — content read from the deployed Worker's static assets under
- *     `/_thally/content/…`; doc routes render dynamically so a content-only
- *     publish (new assets, same Worker modules) goes live without a build.
+ *     `/_thally/content/…`, so a content-only publish (new assets, the build's
+ *     Worker modules reused verbatim) goes live without a build. Doc routes
+ *     render as on-demand static generation: every publish is a new immutable
+ *     release deployed under its own Worker script name, so a cached render
+ *     can never outlive the content it was built from. See
+ *     `ensureDynamicContentRendering` for why this is not a dynamic render.
  *
  * Managed hosting sets the variable in the injected Worker bindings AND at
  * build time — `generateStaticParams` consults it during `next build`, so it
