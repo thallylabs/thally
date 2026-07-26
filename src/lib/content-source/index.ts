@@ -14,7 +14,6 @@
  * must be present then for doc routes to skip prerendering.
  */
 
-import { connection } from 'next/server'
 import type { ContentSource, ContentSourceKind } from './types'
 import { filesystemContentSource } from './filesystem'
 import { createAssetsContentSource } from './assets'
@@ -69,17 +68,22 @@ export function getContentSource(): ContentSource {
 }
 
 /**
- * Opt the current render out of static generation when content is remote.
+ * Under the assets source, doc pages render as ON-DEMAND static generation:
+ * generateStaticParams is empty, so Next builds each page the first time a
+ * release serves it. That is the correct freshness model here — managed
+ * releases are immutable, every content publish ships a NEW Worker whose
+ * in-process render caches start empty, and the publish purges the CDN by
+ * Cache-Tag — so a render can never outlive the content it was built from.
  *
- * Under the assets source, a prerendered or ISR-cached page would freeze the
- * content it was built with — the CDN purge on publish clears Cloudflare's
- * cache, not Next's. Calling `connection()` marks the render dynamic so every
- * cache miss re-reads the deployment's assets. A no-op under `filesystem`, so
- * SSG is untouched for OSS/self-host builds.
+ * Deliberately NOT connection(): forcing a dynamic render inside on-demand
+ * static generation throws DYNAMIC_SERVER_USAGE (observed in workerd), and
+ * Turbopack rejects computed `export const dynamic` segment config, so
+ * per-request rendering cannot be declared conditionally. Static-per-release
+ * is both allowed and semantically right.
  */
 export async function ensureDynamicContentRendering(): Promise<void> {
-  if (!isRemoteContentSource()) return
-  await connection()
+  // Intentionally a no-op in every mode; kept as the single documented seam
+  // should a future content source ever need true per-request rendering.
 }
 
 /** Clear process-local state between tests. */

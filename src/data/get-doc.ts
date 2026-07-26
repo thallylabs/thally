@@ -2,6 +2,7 @@
 
 import { createElement, type ComponentType, type ReactNode } from 'react'
 import { compileMDX } from 'next-mdx-remote/rsc'
+import { interpretMDX } from '@/lib/mdx-interpret'
 import type { DocEntry, DocPageMode, OpenApiReference } from '@/data/docs'
 import { deriveTitleFromSlug, getI18nConfig } from '@/data/docs'
 import { remarkPlugins } from '@/mdx/remark'
@@ -173,19 +174,33 @@ async function compileDocEntry(
   let frontmatter: DocFrontmatter
 
   if (needsRuntimeCompile(source, filePath, sourceFile.content)) {
-    const compiled = await compileMDX<DocFrontmatter>({
-      source: cleanedSource,
-      components,
-      options: {
-        parseFrontmatter: true,
-        mdxOptions: {
-          remarkPlugins,
-          rehypePlugins,
+    if (process.env.NODE_ENV === 'development') {
+      const compiled = await compileMDX<DocFrontmatter>({
+        source: cleanedSource,
+        components,
+        options: {
+          parseFrontmatter: true,
+          mdxOptions: {
+            remarkPlugins,
+            rehypePlugins,
+          },
         },
-      },
-    })
-    content = compiled.content
-    frontmatter = compiled.frontmatter
+      })
+      content = compiled.content
+      frontmatter = compiled.frontmatter
+    } else {
+      // Production runtime compiles happen on Cloudflare Workers, where
+      // `compileMDX` is impossible: workerd forbids code generation from
+      // strings, so executing freshly compiled MDX throws EvalError. The
+      // interpreter renders the same pipeline output without codegen.
+      const interpreted = await interpretMDX({
+        source: cleanedSource,
+        components,
+        parseFrontmatter: true,
+      })
+      content = interpreted.content
+      frontmatter = interpreted.frontmatter as DocFrontmatter
+    }
   } else {
     const compiled = runtimeDocs[filePath]
     if (!compiled) return null
@@ -292,14 +307,27 @@ async function compileSnippetFromPath(snippetImportPath: string): Promise<Compon
     return PrecompiledSnippet
   }
 
-  const { content } = await compileMDX({
-    source: snippetFile.content,
-    components: getMDXComponents({}),
-    options: {
-      parseFrontmatter: false,
-      mdxOptions: { remarkPlugins, rehypePlugins },
-    },
-  })
+  // Same split as compileDocEntry: dev compiles for full MDX fidelity;
+  // production runtime compiles run on workerd, where only the eval-free
+  // interpreter can render freshly published snippet content.
+  const content =
+    process.env.NODE_ENV === 'development'
+      ? (
+          await compileMDX({
+            source: snippetFile.content,
+            components: getMDXComponents({}),
+            options: {
+              parseFrontmatter: false,
+              mdxOptions: { remarkPlugins, rehypePlugins },
+            },
+          })
+        ).content
+      : (
+          await interpretMDX({
+            source: snippetFile.content,
+            components: getMDXComponents({}),
+          })
+        ).content
 
   const SnippetComponent: ComponentType<Record<string, unknown>> = function SnippetComponent() {
     return content
