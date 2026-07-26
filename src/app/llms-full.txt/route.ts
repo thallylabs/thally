@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { siteConfig } from '@/data/site'
 import { getDocEntries, getSidebarCollections } from '@/data/docs'
-import { ensureDynamicContentRendering, getContentSource } from '@/lib/content-source'
+import { getContentSource } from '@/lib/content-source'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { getSiteUrl } from '@/lib/site-url'
 
@@ -33,7 +33,6 @@ async function readRawContent(pageId: string): Promise<string | null> {
 export async function GET() {
   // Under the assets ContentSource this route must render per request — the
   // corpus below reflects published content, not the build. No-op by default.
-  await ensureDynamicContentRendering()
 
   const entries = getDocEntries()
   const collections = getSidebarCollections()
