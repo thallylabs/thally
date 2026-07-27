@@ -3,7 +3,11 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { logo, success, slugify } from './utils.js'
-import { gatherAnswers, gatherMigrationPlatform } from './prompts.js'
+import {
+  gatherAnswers,
+  gatherMigrationPlatform,
+  resolveAutoDetectedMigrationSource,
+} from './prompts.js'
 import { scaffold } from './scaffold.js'
 import { parseGitHubRepositoryUrl } from '@thallylabs/migrate'
 import { migrateDocs } from './migrate/index.js'
@@ -47,7 +51,7 @@ function getFlagValue(flag: string): string | undefined {
 }
 
 async function runMigrateCommand(): Promise<void> {
-  const sourceUrl = positional[1]
+  let sourceUrl = positional[1]
   if (!sourceUrl) {
     console.error('\n  ❌ Source URL is required.')
     console.error('     Usage: create-thally-docs migrate <github-or-docs-url> [output-dir] [options]')
@@ -65,6 +69,17 @@ async function runMigrateCommand(): Promise<void> {
     process.exit(1)
   }
 
+  const branch = getFlagValue('--branch')
+  const docsDir = getFlagValue('--docs-dir')
+  const yes = flags.includes('--yes') || flags.includes('-y')
+  const platformFlag = getFlagValue('--platform')
+  const platform = await gatherMigrationPlatform(platformFlag, yes)
+  if (platform === undefined) {
+    const shouldPromptForSource = platformFlag === undefined && !yes
+    sourceUrl = await resolveAutoDetectedMigrationSource(sourceUrl, shouldPromptForSource)
+    source = new URL(sourceUrl)
+  }
+
   // API key is optional — only needed for non-Markdown files
   const apiKey = getFlagValue('--api-key') ?? process.env.ANTHROPIC_API_KEY
 
@@ -72,7 +87,8 @@ async function runMigrateCommand(): Promise<void> {
   const intoDir = getFlagValue('--into')
   const isInto = Boolean(intoDir)
 
-  // Determine project directory
+  // Determine the project directory after the source guard so accepting a
+  // repository suggestion also gives the generated project its repository name.
   let projectDir: string
   if (intoDir) {
     projectDir = resolve(intoDir)
@@ -85,10 +101,6 @@ async function runMigrateCommand(): Promise<void> {
     projectDir = resolve(`${slugify(sourceName)}-docs`)
   }
 
-  const branch = getFlagValue('--branch')
-  const docsDir = getFlagValue('--docs-dir')
-  const yes = flags.includes('--yes') || flags.includes('-y')
-  const platform = await gatherMigrationPlatform(getFlagValue('--platform'), yes)
   const maxPagesValue = getFlagValue('--max-pages')
   const maxPages = maxPagesValue ? Number(maxPagesValue) : undefined
   if (maxPages !== undefined && (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 1000)) {

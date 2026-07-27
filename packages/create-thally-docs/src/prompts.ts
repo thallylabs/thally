@@ -1,9 +1,18 @@
-/** Interactive prompt contracts for new projects and source migrations. */
+/**
+ * Interactive prompt contracts for new projects and source migrations.
+ *
+ * Live-site auto-detection is intentionally a confirmed fallback: repository
+ * sources retain authored navigation, assets, OpenAPI files, and component
+ * structure that a rendered website may no longer expose.
+ */
 
-import { input, select } from '@inquirer/prompts'
+import { confirm, input, select } from '@inquirer/prompts'
 import { basename, resolve } from 'node:path'
 
-import type { MigrationPlatform } from '@thallylabs/migrate'
+import {
+  parseGitHubRepositoryUrl,
+  type MigrationPlatform,
+} from '@thallylabs/migrate'
 
 export type SelectableMigrationPlatform = Extract<MigrationPlatform, 'mintlify' | 'docusaurus'>
 
@@ -30,6 +39,74 @@ export async function gatherMigrationPlatform(
     ],
     default: 'mintlify',
   })
+}
+
+export const LIVE_URL_MIGRATION_WARNING =
+  'Live website migration reconstructs documentation from public output and may need manual alignment. ' +
+  'A source GitHub repository produces a more accurate migration. ' +
+  'Use the Thally MCP afterward if the generated project needs refinement.'
+
+function validateGitHubRepositorySource(value: string): true | string {
+  try {
+    parseGitHubRepositoryUrl(value)
+    return true
+  } catch (error) {
+    return error instanceof Error ? error.message : 'Enter a valid public GitHub repository URL.'
+  }
+}
+
+/**
+ * Gives interactive auto-detection users a chance to replace a live URL with
+ * its source repository. Automated runs preserve their existing no-prompt
+ * contract and receive the same limitation as a visible warning.
+ */
+export async function resolveAutoDetectedMigrationSource(
+  sourceUrl: string,
+  shouldPrompt: boolean,
+): Promise<string> {
+  const source = new URL(sourceUrl)
+  if (source.hostname.toLowerCase() === 'github.com') return sourceUrl
+
+  console.warn(`\n  ⚠ ${LIVE_URL_MIGRATION_WARNING}`)
+
+  if (!shouldPrompt) return sourceUrl
+
+  const sourcePreference = await select({
+    message: '  Which source should Thally migrate?',
+    choices: [
+      {
+        name: 'Source GitHub repository (recommended)',
+        value: 'github' as const,
+      },
+      {
+        name: 'Continue with the live website URL',
+        value: 'website' as const,
+      },
+    ],
+    default: 'github',
+  })
+
+  if (sourcePreference === 'github') {
+    const repositoryUrl = await input({
+      message: '  GitHub repository URL:',
+      validate: validateGitHubRepositorySource,
+    })
+    parseGitHubRepositoryUrl(repositoryUrl)
+    return repositoryUrl
+  }
+
+  const hasAcceptedAlignment = await confirm({
+    message:
+      '  Continue knowing the migration may need manual alignment, using the Thally MCP afterward if needed?',
+    default: false,
+  })
+  if (!hasAcceptedAlignment) {
+    throw new Error(
+      'Migration cancelled. Re-run with the source GitHub repository for the most accurate result.',
+    )
+  }
+
+  return sourceUrl
 }
 
 export interface ScaffoldAnswers {
