@@ -47,9 +47,14 @@ interactive question explicitly.
 | `create-thally-docs translate --locale <code>` | Translate content into another locale |
 
 Interactive migrations ask whether the source is Mintlify, Docusaurus, or
-another auto-detected platform. For scripts and CI, pass
+another auto-detected platform. When automatic detection receives a live
+website URL, the CLI recommends its source GitHub repository and requires
+confirmation before continuing with the less precise website crawl. For
+scripts and CI, pass
 `--platform mintlify`, `--platform docusaurus`, or `--platform auto`; `--yes`
 keeps backward-compatible auto-detection when no platform flag is supplied.
+Explicit `--platform auto` and `--yes` runs print the live-site limitation
+without introducing an interactive prompt.
 
 Prefer a single binary? Install [`@thallylabs/cli`](https://www.npmjs.com/package/@thallylabs/cli)
 and use `thally init`, which delegates here.

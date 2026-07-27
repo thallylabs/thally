@@ -55,7 +55,11 @@ For repositories, Thally reads Markdown, MDX, navigation, local snippets, assets
 
 **Supported source platforms:** Mintlify, Docusaurus, GitBook, Nextra, VitePress, Starlight, and any repo with plain Markdown files.
 
-Interactive runs ask which platform currently hosts the docs. Selecting Mintlify keeps the existing Mintlify projection; selecting Docusaurus uses its sidebar, route, syntax, and asset adapter. Choose automatic detection for another platform. Scripts can make the same choice with `--platform`.
+Interactive runs ask which platform currently hosts the docs. Selecting Mintlify keeps the existing Mintlify projection; selecting Docusaurus uses its sidebar, route, syntax, and asset adapter. Choose automatic detection for another platform.
+
+When automatic detection receives a live website URL, the CLI first recommends migrating its source GitHub repository. Repository migrations retain authored navigation, assets, OpenAPI files, and component structure that may not be recoverable from rendered HTML. If you continue with the live URL, you must accept that the result may need manual alignment; use the Thally MCP afterward to refine the generated project when needed.
+
+Scripts can make the same platform choice with `--platform`. Explicit `--platform auto` and `--yes` runs print the live-site warning but remain non-interactive.
 
 ### Examples
 
@@ -102,7 +106,7 @@ npx create-thally-docs migrate https://github.com/org/repo --into ./existing-doc
 | `--docs-dir <path>` | Override the auto-detected docs subdirectory |
 | `--max-pages <count>` | Maximum pages for a public URL crawl (default and maximum `1000`) |
 | `--platform <name>` | Select `mintlify`, `docusaurus`, or `auto` instead of answering interactively |
-| `--yes`, `-y` | Skip prompts; platform auto-detection is used unless `--platform` is set |
+| `--yes`, `-y` | Skip prompts; platform auto-detection is used unless `--platform` is set, and live-site limitations are accepted non-interactively |
 
 ### Component mapping
 
