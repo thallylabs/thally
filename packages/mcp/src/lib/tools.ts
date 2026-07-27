@@ -4,7 +4,12 @@ import { addPageSchema, handleAddPage } from '../tools/add-page.js'
 import { addTabSchema, handleAddTab } from '../tools/add-tab.js'
 import { listPagesSchema, handleListPages } from '../tools/list-pages.js'
 import { updatePageSchema, handleUpdatePage } from '../tools/update-page.js'
-import { migrateDocsSchema, handleMigrateDocs } from '../tools/migrate-docs.js'
+import {
+  importDocsSchema,
+  handleImportDocs,
+  migrateDocsSchema,
+  handleMigrateDocs,
+} from '../tools/migrate-docs.js'
 import { searchDocsSchema, handleSearchDocs } from '../tools/search-docs.js'
 import { semanticSearchSchema, handleSemanticSearch } from '../tools/semantic-search.js'
 import { agentReadinessSchema, handleAgentReadiness } from '../tools/agent-readiness.js'
@@ -83,10 +88,19 @@ export const tools: Array<ToolDefinition> = [
   }),
   defineTool({
     name: 'migrate_docs',
-    description: 'Crawl a docs site and migrate it into a Thally project',
+    description:
+      'Create a fresh canonical Thally template, then migrate a GitHub repository or public docs site into it; the target must be new or empty',
     scope: 'project',
     schema: migrateDocsSchema,
     handler: handleMigrateDocs,
+  }),
+  defineTool({
+    name: 'import_docs',
+    description:
+      'Import content into an existing Thally project without scaffolding; use only when an in-place import is explicitly requested',
+    scope: 'project',
+    schema: importDocsSchema,
+    handler: handleImportDocs,
   }),
   defineTool({
     name: 'search_docs',

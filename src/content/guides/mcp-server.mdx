@@ -153,7 +153,7 @@ Show me all the pages in my docs project
 
 #### `migrate_docs`
 
-Migrates a GitHub docs repository or public docs URL into a Thally project.
+Creates a fresh canonical Thally template, then migrates a GitHub docs repository or public docs URL into it. The target directory must be new or empty. This guarantees that migrated sites use Thally's supported runtime, layout, navigation, and configuration instead of retaining the source site's application shell.
 
 ```
 Migrate the Mintlify starter into a new project at /tmp/my-docs
@@ -162,13 +162,34 @@ Migrate the Mintlify starter into a new project at /tmp/my-docs
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `sourceUrl` | Yes | GitHub URL of the source repo |
-| `projectDir` | Yes | Target path (new project or existing) |
-| `into` | No | Migrate into an existing project (default: `false`) |
+| `projectDir` | Yes | Target path for the new canonical Thally project |
 | `branch` | No | Git branch to clone (auto-detected by default) |
 | `docsDir` | No | Docs subdirectory in the repo (auto-detected) |
 | `apiKey` | No | Anthropic API key for non-Markdown conversion |
 | `platform` | No | Source adapter: `mintlify` or `docusaurus` (auto-detected by default) |
 | `maxPages` | No | Maximum pages to crawl from a public docs URL |
+
+---
+
+#### `import_docs`
+
+Imports content into an existing Thally project without scaffolding or replacing its runtime. Use this only when you explicitly want an in-place content import.
+
+```
+Import the docs repository into the existing Thally project at /workspace/docs
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `sourceUrl` | Yes | GitHub repository or public documentation URL |
+| `projectDir` | Yes | Path to the existing Thally project |
+| `branch` | No | Git branch to clone (auto-detected by default) |
+| `docsDir` | No | Docs subdirectory in the repo (auto-detected) |
+| `apiKey` | No | Anthropic API key for non-Markdown conversion |
+| `platform` | No | Source adapter: `mintlify` or `docusaurus` (auto-detected by default) |
+| `maxPages` | No | Maximum pages to crawl from a public docs URL |
+
+`import_docs` preserves the target application's files. It does not upgrade a legacy or third-party app to the Thally template; use `migrate_docs` for that.
 
 ---
 
