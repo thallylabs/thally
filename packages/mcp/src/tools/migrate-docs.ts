@@ -1,26 +1,61 @@
-/** MCP adapter for the same platform-aware migration engine used by the CLI. */
+/**
+ * MCP adapters for template-first migration and explicit in-place imports.
+ *
+ * `migrate_docs` deliberately cannot opt into an existing project. That
+ * invariant ensures agents always start from Thally's supported runtime,
+ * layout, and configuration instead of preserving an arbitrary source app.
+ * Callers that intentionally want to keep an existing Thally runtime must use
+ * the separately named `import_docs` tool.
+ */
 
 import { z } from 'zod'
 import { migrateDocs } from 'create-thally-docs/migrate'
 
-export const migrateDocsSchema = z.object({
+const migrationSourceShape = {
   sourceUrl: z.string().describe('GitHub repository URL or public documentation URL to migrate'),
-  projectDir: z.string().describe('Path for new project or existing project dir'),
-  into: z.boolean().optional().default(false).describe('Migrate into existing project instead of scaffolding'),
   branch: z.string().optional().describe('Git branch (default: auto-detect)'),
   docsDir: z.string().optional().describe('Docs subdirectory in repo (default: auto-detect)'),
   apiKey: z.string().optional().describe('Anthropic API key for non-Markdown file conversion'),
   maxPages: z.number().int().min(1).max(1000).optional().describe('Maximum public URL pages to import'),
   platform: z.enum(['mintlify', 'docusaurus']).optional().describe('Source platform (default: auto-detect)'),
+}
+
+export const migrateDocsSchema = z.object({
+  ...migrationSourceShape,
+  projectDir: z
+    .string()
+    .describe('Path for the new canonical Thally project; the directory must be absent or empty'),
 })
 
-export async function handleMigrateDocs(input: z.infer<typeof migrateDocsSchema>): Promise<string> {
+export const importDocsSchema = z.object({
+  ...migrationSourceShape,
+  projectDir: z
+    .string()
+    .describe('Path to an existing Thally project whose runtime should be preserved'),
+})
+
+interface RunMigrationInput {
+  sourceUrl: string
+  projectDir: string
+  branch?: string
+  docsDir?: string
+  apiKey?: string
+  maxPages?: number
+  platform?: 'mintlify' | 'docusaurus'
+}
+
+async function runMigration(
+  input: RunMigrationInput,
+  isInPlaceImport: boolean,
+): Promise<Awaited<ReturnType<typeof migrateDocs>>> {
   const apiKey = input.apiKey ?? process.env.ANTHROPIC_API_KEY
 
-  const result = await migrateDocs({
+  return migrateDocs({
     sourceUrl: input.sourceUrl,
     projectDir: input.projectDir,
-    into: input.into ?? false,
+    // Keep this decision inside the adapter so stale or adversarial callers
+    // cannot turn a template-first migration into an in-place mutation.
+    into: isInPlaceImport,
     apiKey,
     branch: input.branch,
     docsDir: input.docsDir,
@@ -28,6 +63,22 @@ export async function handleMigrateDocs(input: z.infer<typeof migrateDocsSchema>
     platform: input.platform,
     yes: true,
   })
+}
 
-  return `Migration complete! ${result.pagesWritten} pages written to ${result.projectDir}/src/content/`
+/**
+ * Creates a fresh canonical Thally project before importing source content.
+ */
+export async function handleMigrateDocs(input: z.infer<typeof migrateDocsSchema>): Promise<string> {
+  const result = await runMigration(input, false)
+
+  return `Migration complete! Created a fresh Thally template at ${result.projectDir} and imported ${result.pagesWritten} pages.`
+}
+
+/**
+ * Imports source content into an existing Thally project without scaffolding.
+ */
+export async function handleImportDocs(input: z.infer<typeof importDocsSchema>): Promise<string> {
+  const result = await runMigration(input, true)
+
+  return `Import complete! Imported ${result.pagesWritten} pages into the existing Thally project at ${result.projectDir}.`
 }
