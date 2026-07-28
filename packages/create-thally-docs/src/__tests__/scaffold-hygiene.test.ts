@@ -2,11 +2,15 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { shouldInclude, TEMPLATE_REPOSITORY } from '../download.js'
 import { resetTrackingConfig, writeTrackingConfig } from '../docs-json.js'
 import {
+  MIN_CLI_VERSION,
+  MIN_MCP_VERSION,
   patchGitignore,
   patchPackageJson,
+  raisePinToFloor,
   updateSiteConfig,
   writeCloudflareRuntimeConfig,
   writeStarterAgentGuide,
@@ -291,7 +295,8 @@ describe('patchPackageJson — standalone scaffolds must not inherit monorepo wi
     expect(pkg.scripts.build).toBe('next build')
     expect(pkg.scripts['build:cloudflare']).toBe('opennextjs-cloudflare build')
     expect(pkg.scripts['deploy:cloudflare']).toContain('opennextjs-cloudflare deploy')
-    expect(pkg.devDependencies['@thallylabs/cli']).toBe('0.5.2')
+    // Fixture pins 0.5.0, below the floor — the floor wins.
+    expect(pkg.devDependencies['@thallylabs/cli']).toBe(MIN_CLI_VERSION)
     expect(pkg.devDependencies['@opennextjs/cloudflare']).toBe('1.15.0')
     expect(pkg.devDependencies.vite).toBe('7.2.6')
     expect(pkg.devDependencies.wrangler).toBe('4.111.0')
@@ -309,6 +314,10 @@ describe('patchPackageJson — standalone scaffolds must not inherit monorepo wi
       JSON.stringify({
         name: 'thally',
         scripts: { prebuild: 'npm run embeddings:build', build: 'next build' },
+        // The canonical template already pins current releases; nothing is
+        // raised, so its resolved lockfile stays valid.
+        dependencies: { '@thallylabs/mcp': MIN_MCP_VERSION },
+        devDependencies: { '@thallylabs/cli': MIN_CLI_VERSION },
       }),
     )
     writeFileSync(
@@ -359,12 +368,93 @@ describe('patchPackageJson — standalone scaffolds must not inherit monorepo wi
     patchPackageJson(dir, 'acme-docs')
 
     const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
-    expect(pkg.dependencies['@thallylabs/mcp']).toBe('0.7.1')
+    expect(pkg.dependencies['@thallylabs/mcp']).toBe(MIN_MCP_VERSION)
     expect(pkg.scripts['runtime-sources:build']).toBe('tsx scripts/build-runtime-sources.mts')
     expect(pkg.scripts.prebuild).toBe(
       'npm run runtime-sources:build && npm run embeddings:build',
     )
     expect(existsSync(join(dir, 'package-lock.json'))).toBe(false)
+  })
+})
+
+// The floor constants exist to rescue stale templates. They must never rewrite
+// a template that is already ahead of them: `thallylabs/docs` tracks the newest
+// published releases, so an unconditional assignment turns into a downgrade the
+// moment the template moves on.
+describe('dependency floors — a scaffold never pins below what the template ships', () => {
+  let dir: string
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true })
+  })
+
+  interface ScaffoldedPkg {
+    dependencies: Record<string, string>
+    devDependencies: Record<string, string>
+  }
+
+  function scaffoldWith(cliPin: string, mcpPin: string): ScaffoldedPkg {
+    dir = mkdtempSync(join(tmpdir(), 'thally-scaffold-'))
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'thally',
+        dependencies: { '@thallylabs/mcp': mcpPin },
+        devDependencies: { '@thallylabs/cli': cliPin },
+      }),
+    )
+    patchPackageJson(dir, 'acme-docs')
+    return JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as ScaffoldedPkg
+  }
+
+  // The regression this suite exists for: the template moved to 0.6.0 while the
+  // constant stayed at 0.5.2, so every CLI-created site was silently downgraded.
+  it('keeps a template pin that is newer than the floor', () => {
+    const pkg = scaffoldWith('0.6.0', '0.8.0')
+
+    expect(pkg.devDependencies['@thallylabs/cli']).toBe('0.6.0')
+    expect(pkg.dependencies['@thallylabs/mcp']).toBe('0.8.0')
+  })
+
+  it('leaves ranges and dist-tags alone rather than guessing their ordering', () => {
+    const pkg = scaffoldWith('^0.4.0', 'latest')
+
+    expect(pkg.devDependencies['@thallylabs/cli']).toBe('^0.4.0')
+    expect(pkg.dependencies['@thallylabs/mcp']).toBe('latest')
+  })
+
+  it('resolves each pin to the newer of the template value and the floor', () => {
+    expect(raisePinToFloor(undefined, '1.2.3')).toBe('1.2.3')
+    expect(raisePinToFloor('*', '1.2.3')).toBe('1.2.3')
+    expect(raisePinToFloor('1.2.2', '1.2.3')).toBe('1.2.3')
+    expect(raisePinToFloor('1.2.3', '1.2.3')).toBe('1.2.3')
+    expect(raisePinToFloor('1.2.4', '1.2.3')).toBe('1.2.4')
+    expect(raisePinToFloor('1.10.0', '1.9.0')).toBe('1.10.0')
+    expect(raisePinToFloor('2.0.0', '10.0.0')).toBe('10.0.0')
+    expect(raisePinToFloor('~1.0.0', '1.2.3')).toBe('~1.0.0')
+    expect(raisePinToFloor('1.2.3-beta.1', '1.2.3')).toBe('1.2.3-beta.1')
+  })
+
+  // Rot guard, the other direction. A floor above the newest published release
+  // pins a version that does not exist on the registry; a floor above what the
+  // template ships also means every scaffold discards the template's lockfile.
+  // Both constants must therefore stay at or below this monorepo's releases.
+  it('never floors above the versions this monorepo publishes', () => {
+    const published = (pkgName: string): string =>
+      (
+        JSON.parse(
+          readFileSync(
+            fileURLToPath(new URL(`../../../${pkgName}/package.json`, import.meta.url)),
+            'utf8',
+          ),
+        ) as { version: string }
+      ).version
+
+    // A guard that silently reads the wrong file is worse than no guard: assert
+    // it resolved a real bare version before trusting the comparison below.
+    expect(published('cli')).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(published('mcp')).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(raisePinToFloor(published('cli'), MIN_CLI_VERSION)).toBe(published('cli'))
+    expect(raisePinToFloor(published('mcp'), MIN_MCP_VERSION)).toBe(published('mcp'))
   })
 })
 
