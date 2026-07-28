@@ -9,6 +9,7 @@ import { apiReferenceConfig, getOpenApiSpecUrl } from '@/config/api-reference'
 import { getAllApiOperationNodes, getApiOperationBySlug, getApiOperationNodes } from '@/data/api-reference'
 import { getBreadcrumbs, getDocEntries } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
+import { isRemoteContentSource } from '@/lib/content-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { buildApiOperationJsonLd, buildDocPageJsonLd } from '@/lib/json-ld'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
@@ -18,6 +19,8 @@ interface PageProps {
 }
 
 export async function generateStaticParams() {
+  // Remote content sources resolve pages at request time (see [[...slug]]).
+  if (isRemoteContentSource()) return []
   const apiNodes = await getAllApiOperationNodes()
   const apiParams = apiNodes.map((node) => ({ slug: node.slug }))
 
