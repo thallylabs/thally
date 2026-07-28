@@ -1,6 +1,57 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, cpSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
+/**
+ * Lowest `@thallylabs/cli` release a scaffold may declare.
+ *
+ * The managed builder depends on the Cloudflare-aware CLI contract, so a site
+ * scaffolded from an older or locally-vendored template must not keep a
+ * pre-Workers pin. This is a FLOOR, never an override: the canonical template
+ * tracks the newest published CLI, and overwriting its pin with a constant that
+ * has since aged past it silently downgrades every generated site. Raise it
+ * only alongside a released CLI — `scaffold-hygiene.test.ts` fails if it ever
+ * climbs above the version this monorepo publishes.
+ */
+export const MIN_CLI_VERSION = '0.6.0'
+
+/**
+ * Lowest `@thallylabs/mcp` release a scaffold may declare. Same floor semantics
+ * as {@link MIN_CLI_VERSION}; it also stands in for the unresolvable `*` range
+ * that older workspace-based templates used.
+ */
+export const MIN_MCP_VERSION = '0.8.0'
+
+/**
+ * Compare two bare `x.y.z` versions, or return `null` if either is not one.
+ *
+ * Ranges (`^0.1.0`), dist-tags (`latest`) and prereleases encode intent the
+ * scaffold has no business second-guessing, so an unparseable side means
+ * "leave the template's value alone" rather than "assume it is older".
+ */
+function compareExactVersions(a: string, b: string): number | null {
+  const parse = (value: string): number[] | null =>
+    /^\d+\.\d+\.\d+$/.test(value) ? value.split('.').map(Number) : null
+  const left = parse(a)
+  const right = parse(b)
+  if (!left || !right) return null
+  for (let i = 0; i < 3; i += 1) {
+    if (left[i] !== right[i]) return left[i] - right[i]
+  }
+  return 0
+}
+
+/**
+ * Resolve a dependency pin to at least `floor`, preferring what the template
+ * already ships. An absent, unresolvable, or demonstrably older pin becomes the
+ * floor; anything newer — or anything the comparison cannot rank — survives.
+ */
+export function raisePinToFloor(current: string | undefined, floor: string): string {
+  if (!current || current === '*') return floor
+  const ordering = compareExactVersions(current, floor)
+  if (ordering === null) return current
+  return ordering < 0 ? floor : current
+}
+
 const STARTER_PAGES: Record<string, string> = {
   'introduction.mdx': `---
 title: Introduction
@@ -695,10 +746,12 @@ export function patchPackageJson(targetDir: string, slug: string): void {
   // documented local/CI validation command. Declare the published CLI in the
   // standalone site rather than relying on the source monorepo's workspace
   // binary being hoisted into node_modules/.bin.
-  // The managed builder depends on the Cloudflare-aware CLI contract. Override
-  // older canonical-template pins so a newly scaffolded site cannot silently
-  // retain a pre-Workers release.
-  pkg.devDependencies['@thallylabs/cli'] = '0.5.2'
+  // Raise older canonical-template pins so a newly scaffolded site cannot
+  // retain a pre-Workers release — but never below what the template ships, or
+  // the constant ages past the template and starts performing a downgrade.
+  const cliPin = raisePinToFloor(pkg.devDependencies['@thallylabs/cli'], MIN_CLI_VERSION)
+  const raisedCliPin = cliPin !== pkg.devDependencies['@thallylabs/cli']
+  pkg.devDependencies['@thallylabs/cli'] = cliPin
   pkg.devDependencies['@opennextjs/cloudflare'] ??= '1.15.0'
   // vite-tsconfig-paths declares Vite as a peer; the monorepo used to satisfy
   // it incidentally through workspace tooling. Standalone test runs need the
@@ -707,10 +760,14 @@ export function patchPackageJson(targetDir: string, slug: string): void {
   pkg.devDependencies.wrangler ??= '4.111.0'
 
   // The canonical docs repository previously resolved MCP through a workspace
-  // wildcard. Fresh sites have no workspace, so use the published package
-  // version explicitly and let npm create a portable standalone lockfile.
-  if (pkg.dependencies?.['@thallylabs/mcp'] === '*') {
-    pkg.dependencies['@thallylabs/mcp'] = '0.7.1'
+  // wildcard. Fresh sites have no workspace, so a `*` — and any pin older than
+  // the floor — becomes an explicit published version, letting npm write a
+  // portable standalone lockfile.
+  let raisedMcpPin = false
+  if (pkg.dependencies?.['@thallylabs/mcp']) {
+    const mcpPin = raisePinToFloor(pkg.dependencies['@thallylabs/mcp'], MIN_MCP_VERSION)
+    raisedMcpPin = mcpPin !== pkg.dependencies['@thallylabs/mcp']
+    pkg.dependencies['@thallylabs/mcp'] = mcpPin
   }
 
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
@@ -725,7 +782,10 @@ export function patchPackageJson(targetDir: string, slug: string): void {
     (key) => key === 'packages' || key.startsWith('packages/'),
   )
 
-  if (hadWorkspaces || hasWorkspaceEntries) {
+  // A raised pin no longer describes the tree the template's lockfile resolved.
+  // Keeping it would leave the site's own `npm ci` failing on a package.json /
+  // lockfile mismatch, so let the scaffold's `npm install` write a fresh one.
+  if (hadWorkspaces || hasWorkspaceEntries || raisedCliPin || raisedMcpPin) {
     rmSync(lockPath)
     return
   }
