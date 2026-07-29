@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react'
+import { getContentIndex } from '@/lib/content-index'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import docsNavigationConfig from '../../docs.json' assert { type: 'json' }
 import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
@@ -297,6 +298,26 @@ function readFrontmatter(pageId: string, locale?: string): FrontmatterData {
     `${CONTENT_ROOT}/${pageId}.mdx`,
     `${CONTENT_ROOT}/${pageId}/index.mdx`,
   )
+
+  // A runtime content index answers frontmatter directly and is authoritative
+  // when present: the index describes the content this release actually
+  // serves, while the compiled sources describe whatever this bundle was
+  // built from. The two diverge after every content publish that skipped a
+  // build, and falling through to the compiled copy here would pin nav
+  // titles and descriptions to the stale build (or, under a shared bundle,
+  // to another site's content entirely).
+  const index = getContentIndex()
+  if (index) {
+    for (const filePath of candidates) {
+      const entry = index.pages[filePath]
+      if (entry) {
+        frontmatterCache.set(cacheKey, entry.data as FrontmatterData)
+        return entry.data as FrontmatterData
+      }
+    }
+    frontmatterCache.set(cacheKey, {})
+    return {}
+  }
 
   for (const filePath of candidates) {
     if (runtimeSourceExists(filePath)) {
