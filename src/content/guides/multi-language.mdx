@@ -1,10 +1,12 @@
 ---
 title: Multi-Language Support
-description: Add first-class multi-language support to your Thally docs site with build-time translations, automatic fallbacks, and a built-in language switcher.
+description: Select the languages your Thally docs site supports, then progressively add server-rendered translations with automatic routing, fallbacks, and SEO.
 keywords: [i18n, internationalization, translation, multi-language, localization, locale]
 ---
 
-Thally supports build-time multi-language documentation. Translated MDX files live in your repo alongside your primary content — fully version-controlled, statically generated, and indexed by search engines with real locale-specific URLs.
+Every new Thally site includes English and Spanish. Add or remove reader languages from **Settings → Localization**; Thally updates the language switcher, localized routes, navigation, and crawler metadata without a code change or redeploy.
+
+Translated MDX files still live alongside the source content so a localized page is server-rendered, version-controlled, and available in the initial HTML. Until a translation exists, the locale route keeps working with an explicit source-language fallback.
 
 <CardGroup cols={2}>
 
@@ -48,9 +50,15 @@ Adding a new locale never breaks existing URLs.
 
 <Steps>
 
-<Step title="Add an i18n block to docs.json">
+<Step title="Choose languages in Settings">
 
-Open `docs.json` at your project root and add an `i18n` key:
+Open **Admin → Settings → Localization**, open the language menu, and select every language readers should see. Search by language name or locale code, then choose **Save changes**.
+
+The source language is intentionally fixed to the repository default (English in new sites). It owns the unprefixed URLs and the root `<html lang>` value, which keeps the initial DOM truthful for crawlers and assistive technology.
+
+<Note type="info" title="Repository configuration remains the fallback">
+Self-hosted teams can still commit the same selection in `docs.json`. Live Settings override the selected languages, while `defaultLocale` continues to identify the language used by the root content tree.
+</Note>
 
 ```json
 {
@@ -61,14 +69,11 @@ Open `docs.json` at your project root and add an `i18n` key:
       { "code": "es", "label": "Español" },
       { "code": "fr", "label": "Français" }
     ]
-  },
-  "tabs": [...]
+  }
 }
 ```
 
-`defaultLocale` must match one of the locale codes. The locales array controls the order items appear in the language switcher dropdown.
-
-Once this is saved, a globe icon appears in the top bar automatically.
+Selected languages become available immediately. No locale directory is required to activate the switcher or route.
 
 </Step>
 
@@ -156,7 +161,7 @@ npx create-thally-docs translate --locale es --pages guides/writing-content --fo
 
 ## Fallback behavior
 
-Thally never returns a 404 for a missing translation. Instead, it serves the primary-language content with an informative banner:
+Thally never returns a 404 for a missing translation. Instead, it serves the source-language content with an informative banner:
 
 **Missing translation** — the page hasn't been translated for that locale yet:
 
@@ -198,16 +203,19 @@ To change the language of API Reference descriptions and summaries, update them 
 
 ## SEO
 
-When an `i18n` config is present, Thally automatically adds `hreflang` and `canonical` link tags to every page:
+Thally generates crawler metadata from the same language selection used by the site. A locale is added to `hreflang` and the sitemap only after that page has a real translated MDX file:
 
 ```html
 <link rel="canonical" href="https://docs.example.com/introduction" />
 <link rel="alternate" hreflang="en" href="https://docs.example.com/introduction" />
 <link rel="alternate" hreflang="es" href="https://docs.example.com/es/introduction" />
 <link rel="alternate" hreflang="fr" href="https://docs.example.com/fr/introduction" />
+<link rel="alternate" hreflang="x-default" href="https://docs.example.com/introduction" />
 ```
 
-The primary URL is always canonical, including on secondary-locale pages. Set `THALLY_SITE_URL` so the correct domain appears in these tags:
+Real translations use their own locale URL as canonical. A missing-translation fallback is marked `noindex` and canonicalized to the source URL, so crawlers never index English prose as if it were Spanish or French. The translated content also carries its own `lang` and text direction on the server-rendered content container.
+
+Set `THALLY_SITE_URL` so the correct domain appears in these tags:
 
 ```bash
 THALLY_SITE_URL=https://docs.example.com
@@ -236,13 +244,13 @@ The MCP tool accepts the same options as the CLI. See [MCP Server](/guides/mcp-s
 
 ## Scaffold with i18n
 
-When creating a new project, you can enable multi-language support from the start:
+Every scaffold starts with English and Spanish:
 
 ```bash
 npx create-thally-docs my-docs
 ```
 
-When asked **"Enable multi-language support?"**, enter `y` and provide your locale codes (e.g. `es,fr,de`). The `i18n` block is written to `docs.json` automatically.
+When asked **"Add languages beyond English and Spanish?"**, enter `y` and provide any additional locale codes (for example `fr,de,ja`). You can change the selection later from Settings.
 
 ---
 

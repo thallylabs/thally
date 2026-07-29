@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildStarterDocsJson,
   MCP_TEMPLATE_REPOSITORY,
   shouldIncludeMcpTemplatePath,
 } from '../lib/scaffold.js'
@@ -21,5 +22,33 @@ describe('MCP site scaffold source', () => {
     ).toBe(false)
     expect(shouldIncludeMcpTemplatePath('docs-main/.github/CODEOWNERS')).toBe(false)
     expect(shouldIncludeMcpTemplatePath('docs-main/packages/mcp/package.json')).toBe(false)
+  })
+
+  it('always scaffolds English and Spanish before optional locales', () => {
+    const defaults = JSON.parse(
+      buildStarterDocsJson({ enableAiChat: false }),
+    )
+    expect(defaults.i18n).toEqual({
+      defaultLocale: 'en',
+      locales: [
+        { code: 'en', label: 'English' },
+        { code: 'es', label: 'Español' },
+      ],
+    })
+
+    const extended = JSON.parse(
+      buildStarterDocsJson({
+        enableAiChat: false,
+        i18nLocales: [
+          { code: 'es', label: 'Duplicate' },
+          { code: 'fr', label: 'Français' },
+        ],
+      }),
+    )
+    expect(extended.i18n.locales).toEqual([
+      { code: 'en', label: 'English' },
+      { code: 'es', label: 'Español' },
+      { code: 'fr', label: 'Français' },
+    ])
   })
 })

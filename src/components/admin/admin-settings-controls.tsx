@@ -1,9 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { Check, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronDown, Search, X } from 'lucide-react'
 import type { Role } from '@/lib/auth/types'
 import { DEFAULT_AI_DISCLAIMER } from '@/lib/ai-defaults'
+import {
+  SUPPORTED_LOCALE_OPTIONS,
+  resolveI18nSelection,
+  type I18nConfig,
+  type LocaleOption,
+} from '@/lib/i18n/config'
 
 interface Domain {
   domain: string
@@ -14,6 +20,7 @@ interface Settings {
   analyticsEnabled: boolean | null
   aiLabel: string | null
   aiDisclaimer: string | null
+  localization: I18nConfig | null
   allowedDomains: Array<Domain>
   hasDocsPassword: boolean
   hasChatKey: boolean
@@ -158,78 +165,287 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 function LocalizationSection({
-  locales,
-  repoUrl,
+  value,
+  repositoryConfig,
   canEdit,
+  onChange,
 }: {
-  locales: Array<{ code: string; label: string }>
-  repoUrl: string
+  value: I18nConfig
+  repositoryConfig: I18nConfig
   canEdit: boolean
+  onChange: (value: I18nConfig) => void
 }) {
-  const [code, setCode] = useState('')
-  const [label, setLabel] = useState('')
-  const editUrl = repoUrl ? `${repoUrl.replace(/\/$/, '')}/edit/main/docs.json` : ''
-  const valid = /^[a-z]{2}(-[A-Za-z]{2,4})?$/.test(code.trim()) && Boolean(label.trim())
-  const snippet = valid ? `{ "code": "${code.trim()}", "label": "${label.trim()}" }` : ''
+  const [isOpen, setIsOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const menuRef = useRef<HTMLDivElement>(null)
+  const selectedCodes = new Set(value.locales.map((locale) => locale.code))
+  const options = useMemo(() => {
+    const byCode = new Map<string, LocaleOption>(
+      SUPPORTED_LOCALE_OPTIONS.map((locale) => [locale.code, locale]),
+    )
+    for (const locale of repositoryConfig.locales) {
+      if (!byCode.has(locale.code)) {
+        byCode.set(locale.code, {
+          code: locale.code,
+          label: locale.label,
+          name: locale.label,
+        })
+      }
+    }
+    return [...byCode.values()]
+  }, [repositoryConfig])
+  const filteredOptions = options.filter((locale) => {
+    const search = query.trim().toLowerCase()
+    return (
+      !search ||
+      locale.code.toLowerCase().includes(search) ||
+      locale.label.toLowerCase().includes(search) ||
+      locale.name.toLowerCase().includes(search)
+    )
+  })
+
+  useEffect(() => {
+    if (!isOpen) return
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+        setQuery('')
+      }
+    }
+    document.addEventListener('mousedown', closeOnOutsideClick)
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick)
+  }, [isOpen])
+
+  function toggleLocale(option: LocaleOption) {
+    if (!canEdit) return
+    const isSelected = selectedCodes.has(option.code)
+    const isSourceDefault =
+      option.code.toLowerCase() === repositoryConfig.defaultLocale.toLowerCase()
+    if (isSelected && (value.locales.length === 1 || isSourceDefault)) return
+    const locales = isSelected
+      ? value.locales.filter((locale) => locale.code !== option.code)
+      : [...value.locales, { code: option.code, label: option.label }]
+    onChange({ defaultLocale: repositoryConfig.defaultLocale, locales })
+  }
 
   return (
     <div className="ds-settings-row ds-settings-row--top">
       <div className="min-w-0">
         <div className="ds-setting-row-label">Languages</div>
         <div className="ds-setting-row-desc">
-          Supported locales (<code className="font-mono">docs.json</code> i18n). Adding one is a reviewed config change; translate
-          content with <code className="font-mono">thally translate</code>.
+          Choose every language readers can use. Thally creates locale-aware routes, navigation, and crawler metadata automatically.
         </div>
       </div>
-      <div className="ds-settings-control">
-        {canEdit ? (
-          <div className="ds-settings-addrow">
-            <input
-              className="ds-input ds-focusable"
-              style={{ width: 70 }}
-              placeholder="es"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
+      <div className="ds-settings-control" style={{ width: 'min(100%, 360px)' }}>
+        <div
+          ref={menuRef}
+          style={{ position: 'relative', width: '100%' }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setIsOpen(false)
+              setQuery('')
+            }
+          }}
+        >
+          <button
+            type="button"
+            className="ds-input ds-focusable"
+            style={{
+              width: '100%',
+              minHeight: 38,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              textAlign: 'left',
+            }}
+            aria-haspopup="listbox"
+            aria-expanded={isOpen}
+            disabled={!canEdit}
+            onClick={() =>
+              setIsOpen((open) => {
+                if (open) setQuery('')
+                return !open
+              })
+            }
+          >
+            <span>{value.locales.length} {value.locales.length === 1 ? 'language' : 'languages'} selected</span>
+            <ChevronDown
+              className="h-4 w-4"
+              aria-hidden="true"
+              style={{ transform: isOpen ? 'rotate(180deg)' : undefined, transition: 'transform 150ms ease' }}
             />
-            <input
-              className="ds-input ds-focusable"
-              style={{ width: 130 }}
-              placeholder="Español"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-            />
-            {editUrl ? (
-              <a
-                href={valid ? editUrl : undefined}
-                target="_blank"
-                rel="noreferrer"
-                aria-disabled={!valid}
-                className="ds-btn ds-btn--primary ds-btn--sm ds-focusable"
-                style={{ opacity: valid ? 1 : 0.55, pointerEvents: valid ? undefined : 'none' }}
-              >
-                Add
-              </a>
-            ) : null}
-          </div>
-        ) : null}
-        <div className="ds-settings-chips">
-          {locales.length === 0 ? (
-            <span className="ds-settings-caption">Single language</span>
-          ) : (
-            locales.map((l) => (
-              <span key={l.code} className="ds-chip ds-chip--neutral ds-chip--sm">
-                {l.label}
-                <span className="ds-chip-badge">{l.code}</span>
-              </span>
-            ))
-          )}
+          </button>
+          {isOpen ? (
+            <div
+              role="listbox"
+              aria-label="Supported languages"
+              aria-multiselectable="true"
+              style={{
+                position: 'absolute',
+                zIndex: 50,
+                top: 'calc(100% + 6px)',
+                right: 0,
+                width: '100%',
+                minWidth: 280,
+                maxHeight: 340,
+                overflow: 'hidden',
+                border: '1px solid var(--ds-border)',
+                borderRadius: 'var(--ds-radius-md)',
+                background: 'var(--ds-surface-page)',
+                boxShadow: 'var(--ds-elev-3)',
+              }}
+            >
+              <div style={{ position: 'relative', padding: 8, borderBottom: '1px solid var(--ds-border)' }}>
+                <Search
+                  className="h-4 w-4"
+                  aria-hidden="true"
+                  style={{ position: 'absolute', left: 18, top: 18, color: 'var(--ds-text-faint)' }}
+                />
+                <input
+                  autoFocus
+                  className="ds-input ds-focusable"
+                  style={{ width: '100%', paddingLeft: 34 }}
+                  placeholder="Search languages"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </div>
+              <div style={{ maxHeight: 276, overflowY: 'auto', padding: 6 }}>
+                {filteredOptions.length ? (
+                  filteredOptions.map((locale) => {
+                    const isSelected = selectedCodes.has(locale.code)
+                    const isSourceDefault =
+                      locale.code.toLowerCase() ===
+                      repositoryConfig.defaultLocale.toLowerCase()
+                    const isOnlySelection =
+                      isSelected && (value.locales.length === 1 || isSourceDefault)
+                    return (
+                      <button
+                        key={locale.code}
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        disabled={isOnlySelection}
+                        className="ds-focusable"
+                        onClick={() => toggleLocale(locale)}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '8px 10px',
+                          border: 0,
+                          borderRadius: 'var(--ds-radius-sm)',
+                          background: isSelected ? 'var(--ds-surface-active)' : 'transparent',
+                          color: 'var(--ds-text)',
+                          cursor: isOnlySelection ? 'not-allowed' : 'pointer',
+                          opacity: isOnlySelection ? 0.65 : 1,
+                          textAlign: 'left',
+                        }}
+                      >
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            width: 18,
+                            height: 18,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: `1px solid ${isSelected ? 'var(--ds-primary)' : 'var(--ds-border-strong)'}`,
+                            borderRadius: 5,
+                            background: isSelected ? 'var(--ds-primary)' : 'transparent',
+                            color: 'var(--ds-primary-fg)',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {isSelected ? <Check className="h-3 w-3" /> : null}
+                        </span>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ display: 'block', fontSize: 'var(--ds-text-sm)', fontWeight: 600 }}>
+                            {locale.label}
+                          </span>
+                          {locale.name !== locale.label ? (
+                            <span style={{ display: 'block', fontSize: 'var(--ds-text-caption)', color: 'var(--ds-text-muted)' }}>
+                              {locale.name}
+                            </span>
+                          ) : null}
+                        </span>
+                        <code style={{ fontFamily: 'var(--ds-font-mono)', fontSize: 'var(--ds-text-caption)', color: 'var(--ds-text-faint)' }}>
+                          {locale.code}
+                        </code>
+                      </button>
+                    )
+                  })
+                ) : (
+                  <p style={{ margin: 0, padding: 12, color: 'var(--ds-text-muted)', fontSize: 'var(--ds-text-sm)' }}>
+                    No languages match “{query}”.
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
-        {canEdit && valid && !editUrl ? (
-          <span className="ds-settings-caption">
-            Add <code className="font-mono">{snippet}</code> to <code className="font-mono">docs.json</code> →{' '}
-            <code className="font-mono">i18n.locales</code>.
+
+        <div style={{ width: '100%' }}>
+          <span className="ds-settings-caption" style={{ display: 'block', marginBottom: 6 }}>
+            Source language
           </span>
-        ) : null}
+          <div
+            className="ds-input"
+            style={{
+              width: '100%',
+              minHeight: 38,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <span>
+              {value.locales.find(
+                (locale) => locale.code === repositoryConfig.defaultLocale,
+              )?.label ?? repositoryConfig.defaultLocale}
+            </span>
+            <span className="ds-chip-badge">default</span>
+          </div>
+          <span className="ds-settings-caption" style={{ display: 'block', marginTop: 6 }}>
+            Kept at unprefixed URLs so the server-rendered page source always matches its declared language.
+          </span>
+        </div>
+
+        <div className="ds-settings-chips" style={{ width: '100%' }}>
+          {value.locales.map((locale) => (
+            <span key={locale.code} className="ds-chip ds-chip--neutral ds-chip--sm">
+              {locale.label}
+              <span className="ds-chip-badge">{locale.code}</span>
+              {locale.code === value.defaultLocale ? (
+                <span className="ds-chip-badge">default</span>
+              ) : null}
+              {canEdit &&
+              value.locales.length > 1 &&
+              locale.code !== repositoryConfig.defaultLocale ? (
+                <button
+                  type="button"
+                  className="ds-chip-x ds-focusable"
+                  aria-label={`Remove ${locale.label}`}
+                  onClick={() =>
+                    toggleLocale({
+                      code: locale.code,
+                      label: locale.label,
+                      name: locale.label,
+                    })
+                  }
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              ) : null}
+            </span>
+          ))}
+        </div>
+        <p className="ds-settings-caption" style={{ margin: 0 }}>
+          Pages without a translation keep working with the default-language version until translated content is available.
+        </p>
       </div>
     </div>
   )
@@ -237,12 +453,10 @@ function LocalizationSection({
 
 export function AdminSettingsControls({
   canEdit,
-  i18nLocales,
-  repoUrl,
+  repositoryI18nConfig,
 }: {
   canEdit: boolean
-  i18nLocales: Array<{ code: string; label: string }>
-  repoUrl: string
+  repositoryI18nConfig: I18nConfig
 }) {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [draft, setDraft] = useState<{
@@ -250,6 +464,7 @@ export function AdminSettingsControls({
     analyticsEnabled: boolean | null
     aiLabel: string | null
     aiDisclaimer: string | null
+    localization: I18nConfig
     allowedDomains: Array<Domain>
   } | null>(null)
   const [pendDocs, setPendDocs] = useState<string | null | undefined>(undefined)
@@ -267,11 +482,13 @@ export function AdminSettingsControls({
       analyticsEnabled: s.analyticsEnabled,
       aiLabel: s.aiLabel,
       aiDisclaimer: s.aiDisclaimer,
+      localization: resolveI18nSelection(s.localization, repositoryI18nConfig),
       allowedDomains: s.allowedDomains,
     })
     setPendDocs(undefined)
     setPendKey(undefined)
   }
+
   useEffect(() => {
     fetch('/api/admin/settings')
       .then((r) => (r.ok ? r.json() : null))
@@ -281,11 +498,16 @@ export function AdminSettingsControls({
 
   if (!settings || !draft) return null
 
+  const savedLocalization = resolveI18nSelection(
+    settings.localization,
+    repositoryI18nConfig,
+  )
   const dirty =
     draft.chatEnabled !== settings.chatEnabled ||
     draft.analyticsEnabled !== settings.analyticsEnabled ||
     draft.aiLabel !== settings.aiLabel ||
     draft.aiDisclaimer !== settings.aiDisclaimer ||
+    JSON.stringify(draft.localization) !== JSON.stringify(savedLocalization) ||
     JSON.stringify(draft.allowedDomains) !== JSON.stringify(settings.allowedDomains) ||
     pendDocs !== undefined ||
     pendKey !== undefined
@@ -300,6 +522,7 @@ export function AdminSettingsControls({
       analyticsEnabled: draft.analyticsEnabled,
       aiLabel: draft.aiLabel,
       aiDisclaimer: draft.aiDisclaimer,
+      localization: draft.localization,
       allowedDomains: draft.allowedDomains,
     }
     if (pendDocs !== undefined) patch.docsPassword = pendDocs
@@ -502,7 +725,12 @@ export function AdminSettingsControls({
 
         <div className="ds-settings-section">
           <SectionLabel>Localization</SectionLabel>
-          <LocalizationSection locales={i18nLocales} repoUrl={repoUrl} canEdit={canEdit} />
+          <LocalizationSection
+            value={draft.localization}
+            repositoryConfig={repositoryI18nConfig}
+            canEdit={canEdit}
+            onChange={(localization) => setDraft({ ...draft, localization })}
+          />
         </div>
       </section>
 

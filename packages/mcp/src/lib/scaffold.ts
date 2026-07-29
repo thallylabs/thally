@@ -73,7 +73,7 @@ That's it — you're ready to go!
 `,
 }
 
-function buildStarterDocsJson({
+export function buildStarterDocsJson({
   enableAiChat,
   repoUrl,
   i18nLocales,
@@ -95,12 +95,12 @@ function buildStarterDocsJson({
     }
   }
 
-  if (i18nLocales && i18nLocales.length > 0) {
-    config.i18n = {
-      defaultLocale: 'en',
-      locales: [{ code: 'en', label: 'English' }, ...i18nLocales],
-    }
-  }
+  const locales = [
+    { code: 'en', label: 'English' },
+    { code: 'es', label: 'Español' },
+    ...(i18nLocales ?? []).filter(({ code }) => code !== 'en' && code !== 'es'),
+  ]
+  config.i18n = { defaultLocale: 'en', locales }
 
   config.tabs = [
     {

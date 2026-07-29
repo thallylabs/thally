@@ -62,6 +62,24 @@ export async function getDocFromParams(slugSegments?: Array<string>, locale?: st
   return pending
 }
 
+/**
+ * Check whether a locale has an authored MDX source without compiling it.
+ * Crawler surfaces call this across many pages and locales, so keeping the
+ * operation at the content-source `exists` layer avoids turning sitemap reads
+ * into a burst of MDX compilation work.
+ */
+export async function hasDocTranslation(
+  slugSegments: Array<string> | undefined,
+  locale: string,
+): Promise<boolean> {
+  const source = getContentSource()
+  const normalized = Array.isArray(slugSegments)
+    ? slugSegments.filter(Boolean)
+    : []
+  const candidate = await findDocSource(source, normalized.join('/'), locale)
+  return Boolean(candidate && !candidate.isFallback)
+}
+
 async function loadDocFromSource(
   slugSegments: Array<string>,
   locale?: string,

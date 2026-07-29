@@ -214,17 +214,18 @@ export async function gatherAnswers(
     doInstall = shouldInstall.trim().toLowerCase().startsWith('y')
   }
 
-  // 8. Multi-language support?
+  // 8. Every starter includes English and Spanish; owners can add more now or
+  // later from Settings without editing framework code.
   let i18nLocales: Array<{ code: string; label: string }> | undefined
   if (!useDefaults) {
     const enableI18n = await input({
-      message: '  Enable multi-language support? (y/N):',
+      message: '  Add languages beyond English and Spanish? (y/N):',
       default: 'N',
     })
     if (enableI18n.toLowerCase() === 'y') {
       const localesInput = await input({
-        message: '  Which locales? (comma-separated codes, e.g. es,fr,de):',
-        default: 'es',
+        message: '  Which additional locales? (comma-separated codes, e.g. fr,de,ja):',
+        default: 'fr',
       })
       const LOCALE_LABELS: Record<string, string> = {
         en: 'English', es: 'Español', fr: 'Français', de: 'Deutsch',

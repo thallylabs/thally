@@ -3,20 +3,36 @@ import { getDocEntries } from '@/data/docs'
 import { getAllApiOperationNodes } from '@/data/api-reference'
 
 import { getSiteUrl } from '@/lib/site-url'
+import { localizedPath } from '@/lib/i18n/config'
+import { getContentI18nConfig } from '@/lib/i18n/content'
+import { buildLocaleAlternates } from '@/lib/i18n/metadata'
+import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 
 const baseUrl = getSiteUrl()
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const docEntries = getDocEntries().filter((doc) => !doc.hidden && !doc.noindex)
   const apiNodes = await getAllApiOperationNodes()
+  const i18n = await getEffectiveI18nConfig()
   const now = new Date()
 
-  const docPages: MetadataRoute.Sitemap = docEntries.map((doc) => ({
-    url: `${baseUrl}${doc.href}`,
-    changeFrequency: 'weekly',
-    priority: doc.href === '/' ? 1.0 : 0.7,
-    ...(doc.lastUpdated ? { lastModified: new Date(doc.lastUpdated) } : { lastModified: now }),
-  }))
+  const docPages: MetadataRoute.Sitemap = (
+    await Promise.all(
+      docEntries.map(async (doc) => {
+        const availableI18n = await getContentI18nConfig(doc.slug, i18n)
+        const languages = buildLocaleAlternates(baseUrl, doc.href, availableI18n)
+        return availableI18n.locales.map((locale) => ({
+          url: `${baseUrl}${localizedPath(doc.href, locale.code, i18n.defaultLocale)}`,
+          changeFrequency: 'weekly' as const,
+          priority: doc.href === '/' ? 1.0 : 0.7,
+          alternates: { languages },
+          ...(doc.lastUpdated
+            ? { lastModified: new Date(doc.lastUpdated) }
+            : { lastModified: now }),
+        }))
+      }),
+    )
+  ).flat()
 
   const apiPages: MetadataRoute.Sitemap = apiNodes.map((node) => ({
     url: `${baseUrl}${node.href}`,
