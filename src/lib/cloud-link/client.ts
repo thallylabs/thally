@@ -41,6 +41,10 @@ export interface CloudEntitlements {
 
 export interface CloudPortableConfig {
   details?: { name?: string; description?: string }
+  localization?: {
+    defaultLocale: string
+    locales: Array<{ code: string; label: string }>
+  }
   feedback?: {
     thumbsRating?: boolean
     editSuggestions?: boolean

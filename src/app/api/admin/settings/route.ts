@@ -11,6 +11,8 @@ import {
 import { requireCapabilityFromRequest } from '@/lib/auth/rbac'
 import { hashPassword, encryptSecret } from '@/lib/admin/secrets'
 import type { Role } from '@/lib/auth/types'
+import { validateI18nSelection } from '@/lib/i18n/config'
+import { getRepositoryI18nConfig } from '@/lib/i18n/request'
 
 export const runtime = 'nodejs'
 
@@ -59,6 +61,7 @@ function sanitize(s: AdminSettings) {
     siteRepoUrl: s.siteRepoUrl,
     aiLabel: s.aiLabel,
     aiDisclaimer: s.aiDisclaimer,
+    localization: s.localization,
     allowedDomains: s.allowedDomains,
     hasDocsPassword: Boolean(s.docsPasswordHash),
     hasChatKey: Boolean(s.chatKeyEnc),
@@ -131,6 +134,18 @@ export async function PUT(request: NextRequest) {
   if (aiLabelVal !== undefined) patch.aiLabel = aiLabelVal
   const aiDisclaimerVal = siteField(body.aiDisclaimer, 300)
   if (aiDisclaimerVal !== undefined) patch.aiDisclaimer = aiDisclaimerVal
+  if (body.localization === null) {
+    patch.localization = null
+  } else if (body.localization !== undefined) {
+    const localization = validateI18nSelection(
+      body.localization,
+      getRepositoryI18nConfig(),
+    )
+    if (!localization) {
+      return NextResponse.json({ error: 'Choose valid language options.' }, { status: 400 })
+    }
+    patch.localization = localization
+  }
   if (body.brandAccent === null) {
     patch.brandAccent = null
   } else if (body.brandAccent && typeof body.brandAccent === 'object') {

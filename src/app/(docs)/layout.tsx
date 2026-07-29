@@ -2,13 +2,14 @@
 
 import { SiteShell } from '@/components/layout/site-shell'
 import { SidebarCollectionsHydrator } from '@/components/layout/sidebar-hydrator'
-import { getSidebarCollections, getAiConfig, getI18nConfig, getNavbarConfig, getFooterConfig } from '@/data/docs'
+import { getSidebarCollections, getAiConfig, getNavbarConfig, getFooterConfig } from '@/data/docs'
 import type { NavigationSection } from '@/data/docs'
 import { getClientSearchCorpus } from '@/lib/search/corpus'
 import { buildApiNavigation } from '@/data/api-reference'
 import { DocsChat } from '@/components/docs/docs-chat'
 import { isAiChatAvailable } from '@/lib/cloud-bridge'
 import { getRequestCloudSiteConfig, getRequestOrigin } from '@/lib/cloud-link/request'
+import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 
 // The docs shell resolves request-bound Cloud configuration and origin data.
 // Marking that contract explicitly keeps OpenNext from attempting a static
@@ -44,7 +45,7 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
   })
   const searchIndex = getClientSearchCorpus()
   const aiConfig = getAiConfig()
-  const i18nConfig = getI18nConfig()
+  const i18nConfig = await getEffectiveI18nConfig()
   const navbarConfig = getNavbarConfig()
   const footerConfig = getFooterConfig()
   const origin = await getRequestOrigin()

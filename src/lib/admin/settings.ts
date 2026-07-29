@@ -1,6 +1,7 @@
 import { getStorage } from '@/lib/storage'
 import { decryptSecret } from '@/lib/admin/secrets'
 import type { Role } from '@/lib/auth/types'
+import type { I18nConfig } from '@/lib/i18n/config'
 
 /**
  * Runtime, admin-editable settings (F1-backed) — the layer that makes the admin
@@ -26,6 +27,8 @@ export interface AdminSettings {
   aiLabel: string | null
   /** Custom disclaimer shown at the foot of the assistant panel, or null for the generic default. */
   aiDisclaimer: string | null
+  /** Live locale selection, or null to use the repository's docs.json config. */
+  localization: I18nConfig | null
   /** Extra OIDC access domains, merged with the git-committed `team.domains`. */
   allowedDomains: Array<{ domain: string; role: Role }>
   /** scrypt hash of the docs-access (visitor) password. Never returned by the API. */
@@ -68,6 +71,7 @@ const DEFAULTS: AdminSettings = {
   siteRepoUrl: null,
   aiLabel: null,
   aiDisclaimer: null,
+  localization: null,
   allowedDomains: [],
   docsPasswordHash: null,
   chatKeyEnc: null,
@@ -89,6 +93,10 @@ export async function getAdminSettings(): Promise<AdminSettings> {
       siteRepoUrl: typeof stored?.siteRepoUrl === 'string' ? stored.siteRepoUrl : DEFAULTS.siteRepoUrl,
       aiLabel: typeof stored?.aiLabel === 'string' ? stored.aiLabel : DEFAULTS.aiLabel,
       aiDisclaimer: typeof stored?.aiDisclaimer === 'string' ? stored.aiDisclaimer : DEFAULTS.aiDisclaimer,
+      localization:
+        stored?.localization && typeof stored.localization === 'object'
+          ? stored.localization
+          : DEFAULTS.localization,
       allowedDomains: Array.isArray(stored?.allowedDomains) ? stored!.allowedDomains! : DEFAULTS.allowedDomains,
       docsPasswordHash: typeof stored?.docsPasswordHash === 'string' ? stored.docsPasswordHash : DEFAULTS.docsPasswordHash,
       chatKeyEnc: typeof stored?.chatKeyEnc === 'string' ? stored.chatKeyEnc : DEFAULTS.chatKeyEnc,

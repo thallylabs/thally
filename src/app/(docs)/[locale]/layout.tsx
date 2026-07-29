@@ -1,7 +1,8 @@
 import { SidebarCollectionsHydrator } from '@/components/layout/sidebar-hydrator'
-import { getSidebarCollections, getI18nConfig } from '@/data/docs'
+import { getSidebarCollections } from '@/data/docs'
 import type { NavigationSection } from '@/data/docs'
 import { buildApiNavigation } from '@/data/api-reference'
+import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 
 interface LocaleLayoutProps {
   children: React.ReactNode
@@ -13,8 +14,8 @@ export default async function LocaleLayout({ children, params }: LocaleLayoutPro
 
   // Guard: if this is not a valid secondary locale (e.g. /quickstart was intercepted as
   // locale="quickstart"), skip locale-aware sidebar hydration to avoid invalid hrefs.
-  const i18n = getI18nConfig()
-  const isValid = i18n?.locales.some((l) => l.code === locale && l.code !== i18n.defaultLocale) ?? false
+  const i18n = await getEffectiveI18nConfig()
+  const isValid = i18n.locales.some((l) => l.code === locale && l.code !== i18n.defaultLocale)
   if (!isValid) return <>{children}</>
 
   const navigation = await buildApiNavigation()

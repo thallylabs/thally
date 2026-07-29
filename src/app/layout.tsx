@@ -4,7 +4,7 @@ import Script from 'next/script'
 import './globals.css'
 import { Providers } from '@/app/providers'
 import { siteConfig } from '@/data/site'
-import { getBannerConfig, getCustomScriptsConfig, getFontsConfig, getI18nConfig, getStructuralTheme } from '@/data/docs'
+import { getBannerConfig, getCustomScriptsConfig, getFontsConfig, getStructuralTheme } from '@/data/docs'
 import { cn } from '@/lib/utils'
 import { toHslValue, THEME_VARS } from '@thallylabs/core/theme'
 import { buildOgImageUrl } from '@/lib/og'
@@ -15,6 +15,8 @@ import { AnalyticsProvider } from '@/components/analytics/analytics-provider'
 import { SiteBanner } from '@/components/layout/site-banner'
 import { WebMcpTools } from '@/components/agent/web-mcp-tools'
 import { CloudHandshake } from '@/components/cloud/cloud-handshake'
+import { localeDirection } from '@/lib/i18n/config'
+import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 
 // Default fonts via next/font (optimal performance — preloaded, no FOUC).
 // The Thally brand pairs Inter (body) with Plus Jakarta Sans (display —
@@ -170,11 +172,9 @@ const brandCss = Object.entries(brandStyle)
   .map(([k, v]) => `${k}:${v}`)
   .join(';')
 
-const defaultLang = getI18nConfig()?.defaultLocale ?? 'en'
 const bannerConfig = getBannerConfig()
 const customScripts = getCustomScriptsConfig()
 const siteUrl = getSiteUrl()
-const siteJsonLd = buildSiteJsonLd({ siteUrl, locale: defaultLang })
 
 // OpenNext's production transform can add esbuild's `__name` calls to the
 // serialized next-themes bootstrap. The bootstrap runs before client bundles,
@@ -183,13 +183,18 @@ const siteJsonLd = buildSiteJsonLd({ siteUrl, locale: defaultLang })
 const runtimeNameShim =
   "globalThis.__name ??= (target, value) => Object.defineProperty(target, 'name', { value, configurable: true });"
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const i18n = await getEffectiveI18nConfig()
+  const defaultLang = i18n.defaultLocale
+  const siteJsonLd = buildSiteJsonLd({ siteUrl, locale: defaultLang })
+
   return (
     // Font variables live on <html> (not <body>) so :root-level rules — the
     // globals.css --font-heading default and docs.json font overrides — can
     // reference and override them.
     <html
       lang={defaultLang}
+      dir={localeDirection(defaultLang)}
       suppressHydrationWarning
       data-theme={structuralTheme}
       className={cn(fontSans.variable, fontDisplay.variable, fontMono.variable)}

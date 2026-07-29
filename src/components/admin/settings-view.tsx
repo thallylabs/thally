@@ -3,12 +3,16 @@ import Link from 'next/link'
 import { Check } from 'lucide-react'
 import { siteConfig } from '@/data/site'
 import { isAdminEnabled, isDocsAccessEnabled } from '@/lib/admin/auth'
-import { getAiConfig, getI18nConfig, isAnalyticsEnabled } from '@/data/docs'
+import { getAiConfig, isAnalyticsEnabled } from '@/data/docs'
 import { AdminSettingsControls } from '@/components/admin/admin-settings-controls'
 import { SiteIdentityEditor } from '@/components/admin/site-identity-editor'
 import { GithubConnectPanel } from '@/components/admin/github-connect-panel'
 import { getEntitlements } from '@/lib/cloud-bridge'
 import type { Role } from '@/lib/auth/types'
+import {
+  getEffectiveI18nConfig,
+  getRepositoryI18nConfig,
+} from '@/lib/i18n/request'
 
 type Tone = 'success' | 'warn' | 'neutral'
 
@@ -55,13 +59,14 @@ function analyticsStore(): string {
   return 'Custom libSQL file'
 }
 
-export function SettingsView({ role = 'viewer' }: { role?: Role }) {
+export async function SettingsView({ role = 'viewer' }: { role?: Role }) {
   const entitlements = getEntitlements()
   const adminOn = isAdminEnabled()
   const accessOn = isDocsAccessEnabled()
   const analyticsOn = isAnalyticsEnabled()
   const ai = getAiConfig()
-  const i18n = getI18nConfig()
+  const repositoryI18n = getRepositoryI18nConfig()
+  const i18n = await getEffectiveI18nConfig()
   const ownerKey = Boolean(process.env.ANTHROPIC_API_KEY?.trim())
   const trialKey = Boolean((process.env.THALLY_TRIAL_ANTHROPIC_KEY ?? process.env.DOX_TRIAL_ANTHROPIC_KEY)?.trim())
   const chatStatus = !ai.chat ? 'Off' : ownerKey ? 'Your key' : trialKey ? 'Trial key' : 'Needs a key'
@@ -92,7 +97,10 @@ export function SettingsView({ role = 'viewer' }: { role?: Role }) {
         </p>
       </header>
 
-      <AdminSettingsControls canEdit={role === 'owner'} i18nLocales={i18n?.locales ?? []} repoUrl={siteConfig.repoUrl ?? ''} />
+      <AdminSettingsControls
+        canEdit={role === 'owner'}
+        repositoryI18nConfig={repositoryI18n}
+      />
 
       <section className="ds-setting-group">
         <div className="ds-setting-group-head">
@@ -142,9 +150,9 @@ export function SettingsView({ role = 'viewer' }: { role?: Role }) {
       <Group title="Localization" desc="Languages your documentation is available in.">
         <Row
           label="Languages"
-          value={i18n ? `${i18n.locales.length} locales` : 'Single locale'}
-          tone={i18n ? 'success' : 'neutral'}
-          hint={i18n ? i18n.locales.map((l) => l.code).join(', ') : 'en'}
+          value={`${i18n.locales.length} ${i18n.locales.length === 1 ? 'language' : 'languages'}`}
+          tone={i18n.locales.length > 1 ? 'success' : 'neutral'}
+          hint={`${i18n.locales.map((locale) => locale.code).join(', ')} · ${i18n.defaultLocale} default`}
         />
       </Group>
 
