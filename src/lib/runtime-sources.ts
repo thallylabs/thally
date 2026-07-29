@@ -8,6 +8,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { getContentIndex, isIndexedContentPath } from '@/lib/content-index'
 import { runtimeSources } from '@/generated/runtime-sources'
 
 function normalizedProjectPath(filePath: string): string {
@@ -53,12 +54,20 @@ export function readRuntimeSource(filePath: string): string {
   return source.content
 }
 
-/** Return the build-observed modification time used for translation staleness. */
+/** Return the publish-observed modification time used for translation staleness. */
 export function runtimeSourceModifiedAt(filePath: string): number {
   const key = normalizedProjectPath(filePath)
   if (isDevelopmentFilesystemAvailable()) {
     const absolute = path.resolve(/* turbopackIgnore: true */ process.cwd(), key)
     if (fs.existsSync(absolute)) return fs.statSync(absolute).mtimeMs
+  }
+  // A content publish can update a file without rebuilding this bundle, so
+  // the index's timestamps supersede the compiled ones — otherwise a
+  // translated page would compare against the build's mtime and never notice
+  // the primary page moved ahead of it.
+  const index = getContentIndex()
+  if (index && isIndexedContentPath(key)) {
+    return index.pages[key]?.modifiedAtMs ?? 0
   }
   return runtimeSources[key]?.modifiedAtMs ?? 0
 }
@@ -79,6 +88,15 @@ export function listRuntimeSources(prefix: string): Array<string> {
     }
     walk(root)
     return files
+  }
+  // Under a runtime content index, the index — not the bundle — defines which
+  // content pages exist. This is what keeps a served page set honest when
+  // content was published without a rebuild: pages the bundle compiled but the
+  // release no longer carries must not reappear in navigation, the sitemap, or
+  // llms.txt. Non-content prefixes always enumerate the compiled map.
+  const index = getContentIndex()
+  if (index && isIndexedContentPath(normalizedPrefix)) {
+    return Object.keys(index.pages).filter((key) => key.startsWith(normalizedPrefix))
   }
   return Object.keys(runtimeSources).filter((key) => key.startsWith(normalizedPrefix))
 }
