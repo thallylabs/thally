@@ -209,7 +209,16 @@ export function AgentReadinessPanel() {
           </div>
         </div>
       ) : error ? (
-        <p style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-danger)' }}>{error}</p>
+        <div className="flex items-center justify-between gap-3 p-4 rounded-lg border border-red-500/20 bg-red-500/5">
+          <p style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-danger)' }}>{error}</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="ds-btn ds-btn--secondary ds-btn--sm ds-focusable shrink-0"
+          >
+            Retry
+          </button>
+        </div>
       ) : report ? (
         <>
           <div className="ds-readiness-summary">
