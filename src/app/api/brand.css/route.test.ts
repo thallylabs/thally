@@ -38,6 +38,8 @@ describe('GET /api/brand.css', () => {
 
     expect(css).toContain('family=IBM+Plex+Sans')
     expect(css).toContain('--brand-light-primary:221 39% 11%')
+    expect(css).toContain('--brand-sidebar-active-bg-light:175 77% 26% / 0.12')
+    expect(css).toContain('--brand-sidebar-active-text-light:175 77% 26%')
     expect(css).toContain('--theme-radius-sm:0.125rem')
     expect(response.headers.get('content-type')).toBe('text/css; charset=utf-8')
   })

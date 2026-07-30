@@ -21,6 +21,20 @@ describe('brandRuntimeCss', () => {
     )
   })
 
+  it('uses each theme accent for active sidebar items', () => {
+    const css = brandRuntimeCss({
+      colors: {
+        light: { accent: '#5f021e' },
+        dark: { accent: '#fbd204' },
+      },
+    })
+
+    expect(css).toContain('--brand-sidebar-active-bg-light:342 96% 19% / 0.12')
+    expect(css).toContain('--brand-sidebar-active-text-light:342 96% 19%')
+    expect(css).toContain('--brand-sidebar-active-bg-dark:50 97% 50% / 0.12')
+    expect(css).toContain('--brand-sidebar-active-text-dark:50 97% 50%')
+  })
+
   it('loads validated Google and repository-hosted fonts', () => {
     const css = brandRuntimeCss({
       fonts: {

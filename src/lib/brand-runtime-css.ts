@@ -35,6 +35,7 @@ const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
 const GOOGLE_FONT_FAMILY = /^[A-Za-z0-9][A-Za-z0-9 -]{0,79}$/
 const FONT_WEIGHT = /^(?:[1-9]00)$/
 const CUSTOM_FONT_PATH = /^\/?[A-Za-z0-9._/-]+\.(?:woff2|woff)$/i
+const SIDEBAR_ACTIVE_BACKGROUND_ALPHA = '0.12'
 
 function relativePublicPath(value: string | undefined): string | null {
   if (!value || !CUSTOM_FONT_PATH.test(value) || value.includes('..')) return null
@@ -67,6 +68,11 @@ function colorDeclarations(config: RuntimeBrandingConfig): string[] {
         `--brand-${mode}-accent:${accent}`,
         `--brand-${mode}-accent-foreground:${hexToHslString(readableForeground(colors.accent))}`,
         `--brand-${mode}-ring:${accent}`,
+        // Sidebar states have dedicated semantic tokens so repository-authored
+        // palettes can tune them independently. A managed accent must override
+        // those defaults too, or the published site leaks Thally's own colors.
+        `--brand-sidebar-active-bg-${mode}:${accent} / ${SIDEBAR_ACTIVE_BACKGROUND_ALPHA}`,
+        `--brand-sidebar-active-text-${mode}:${accent}`,
       )
     }
   }
