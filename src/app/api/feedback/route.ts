@@ -1,3 +1,5 @@
+/** Public page-feedback ingestion and analytics forwarding. */
+
 import { NextResponse } from 'next/server'
 import { recordAnalyticsEvent } from '@/lib/cloud-bridge'
 import { getCloudSiteConfig } from '@/lib/cloud-link/client'
@@ -42,8 +44,11 @@ export async function POST(request: Request) {
       try {
         await recordAnalyticsEvent({
           type: 'feedback',
-          path: url ?? page,
+          // Cloud analytics accepts path-only destinations so tenant data can
+          // never smuggle credentials or query data into the event store.
+          path: page,
           page,
+          referer: url,
           vote,
           message: typeof message === 'string' ? message.trim().slice(0, 500) : undefined,
           visitorType: visitorType ?? 'human',
