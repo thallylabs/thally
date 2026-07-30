@@ -37,11 +37,13 @@ function CopyBlock({ code }: { code: string }) {
 
 export function McpView({
   endpoint,
+  serverName,
   tools,
   ratePerMin,
   canEdit,
 }: {
   endpoint: string
+  serverName: string
   tools: Array<Tool>
   ratePerMin: number
   canEdit: boolean
@@ -72,20 +74,20 @@ export function McpView({
     }
   }
 
-  const claudeCmd = `claude mcp add --transport http thally-docs ${endpoint}`
+  const claudeCmd = `claude mcp add --transport http ${serverName} ${endpoint}`
   const cursorJson = `{
   "mcpServers": {
-    "thally-docs": { "url": "${endpoint}" }
+    "${serverName}": { "url": "${endpoint}" }
   }
 }`
   const vscodeJson = `{
   "servers": {
-    "thally-docs": { "type": "http", "url": "${endpoint}" }
+    "${serverName}": { "type": "http", "url": "${endpoint}" }
   }
 }`
   const zedJson = `{
   "context_servers": {
-    "thally-docs": { "source": "custom", "url": "${endpoint}" }
+    "${serverName}": { "source": "custom", "url": "${endpoint}" }
   }
 }`
   const curlCmd = `curl -sX POST ${endpoint} \\

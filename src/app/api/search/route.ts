@@ -1,14 +1,12 @@
 import { type NextRequest } from 'next/server'
 import { searchDocs, type SearchMode } from '@/lib/search/engine'
-import { getSiteUrl } from '@/lib/site-url'
 import { recordAnalyticsEvent } from '@/lib/cloud-bridge'
 import { classifyRequest } from '@/lib/traffic-classifier'
 
 export const runtime = 'nodejs'
 
-const baseUrl = getSiteUrl()
-
 export async function GET(request: NextRequest) {
+  const baseUrl = request.nextUrl.origin
   const params = request.nextUrl.searchParams
   const query = params.get('q')?.trim() ?? ''
   const limit = Math.min(Math.max(Number(params.get('limit') ?? 8), 1), 25)

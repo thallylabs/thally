@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { Check } from 'lucide-react'
-import { siteConfig } from '@/data/site'
 import { isAdminEnabled, isDocsAccessEnabled } from '@/lib/admin/auth'
 import { getAiConfig, isAnalyticsEnabled } from '@/data/docs'
 import { AdminSettingsControls } from '@/components/admin/admin-settings-controls'
@@ -13,6 +12,7 @@ import {
   getEffectiveI18nConfig,
   getRepositoryI18nConfig,
 } from '@/lib/i18n/request'
+import { resolveRequestSiteConfig } from '@/lib/site-config'
 
 type Tone = 'success' | 'warn' | 'neutral'
 
@@ -67,6 +67,7 @@ export async function SettingsView({ role = 'viewer' }: { role?: Role }) {
   const ai = getAiConfig()
   const repositoryI18n = getRepositoryI18nConfig()
   const i18n = await getEffectiveI18nConfig()
+  const effectiveSite = await resolveRequestSiteConfig()
   const ownerKey = Boolean(process.env.ANTHROPIC_API_KEY?.trim())
   const trialKey = Boolean((process.env.THALLY_TRIAL_ANTHROPIC_KEY ?? process.env.DOX_TRIAL_ANTHROPIC_KEY)?.trim())
   const chatStatus = !ai.chat ? 'Off' : ownerKey ? 'Your key' : trialKey ? 'Trial key' : 'Needs a key'
@@ -109,9 +110,9 @@ export async function SettingsView({ role = 'viewer' }: { role?: Role }) {
         </div>
         <SiteIdentityEditor
           canEdit={role === 'owner'}
-          defaultName={siteConfig.name}
-          defaultDescription={siteConfig.description}
-          defaultRepoUrl={siteConfig.repoUrl ?? ''}
+          defaultName={effectiveSite.name}
+          defaultDescription={effectiveSite.description}
+          defaultRepoUrl={effectiveSite.repoUrl}
         />
       </section>
 

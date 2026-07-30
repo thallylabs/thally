@@ -1,5 +1,7 @@
 import { type NextRequest } from 'next/server'
 import { toolMetadata } from '@/lib/mcp/tool-metadata'
+import { resolveSiteConfig, type SiteIdentity } from '@/lib/site-config'
+import { agentIdentitySlug, agentServerName } from '@/lib/agent-identity'
 
 /**
  * Agent-discovery documents served under `/.well-known/*` (and `/auth.md`),
@@ -70,12 +72,12 @@ function apiCatalog(origin: string): Response {
   )
 }
 
-function mcpServerCard(origin: string): Response {
+export function mcpServerCard(origin: string, identity: SiteIdentity): Response {
   return json({
-    name: 'thally-docs',
-    title: 'Thally documentation MCP server',
+    name: agentServerName(identity.name),
+    title: `${identity.name} documentation MCP server`,
     description:
-      'Read-only MCP server exposing this documentation site: full-text search, page reads as Markdown, a page index, and an agent-readiness report.',
+      `Read-only MCP server exposing the ${identity.name} documentation site: full-text search, page reads as Markdown, a page index, and an agent-readiness report.`,
     version: '1.0.0',
     protocolVersion: '2025-06-18',
     url: `${origin}/api/mcp`,
@@ -92,7 +94,7 @@ function mcpServerCard(origin: string): Response {
   })
 }
 
-function a2aAgentCard(origin: string): Response {
+export function a2aAgentCard(origin: string, identity: SiteIdentity): Response {
   // Finding (6): /api/mcp speaks MCP, NOT A2A. It implements only the MCP
   // JSON-RPC methods `initialize`, `ping`, `tools/list`, and `tools/call`
   // (see src/app/api/mcp/route.ts) — and ZERO A2A methods (`message/send`,
@@ -109,9 +111,9 @@ function a2aAgentCard(origin: string): Response {
   // /api/mcp actually implements.
   return json({
     protocolVersion: '0.3.0',
-    name: 'Thally Docs Agent',
+    name: `${identity.name} Docs Agent`,
     description:
-      'Documentation agent for this site. Answers questions from the docs corpus via search, Markdown page reads, and a machine-readable page index. Read-only and public. Accessible over MCP (not A2A) — attach with an MCP client.',
+      `Documentation agent for ${identity.name}. Answers questions from the docs corpus via search, Markdown page reads, and a machine-readable page index. Read-only and public. Accessible over MCP (not A2A) — attach with an MCP client.`,
     // No A2A service URL is advertised: this agent exposes no A2A transport.
     // The MCP interface is described below via a non-A2A transport annotation.
     url: `${origin}/.well-known/mcp-server-card.json`,
@@ -137,14 +139,17 @@ function a2aAgentCard(origin: string): Response {
   })
 }
 
-function oauthProtectedResource(origin: string): Response {
+export function oauthProtectedResource(
+  origin: string,
+  identity: SiteIdentity,
+): Response {
   // RFC 9728. Honest shape for this site: the docs corpus and its agent
   // surfaces are public and unauthenticated; `authorization_servers` is
   // intentionally absent (it is OPTIONAL) because no OAuth server fronts
   // this resource. auth.md carries the human/agent-readable version.
   return json({
     resource: origin,
-    resource_name: 'Thally documentation',
+    resource_name: `${identity.name} documentation`,
     // Empty by declaration, not omission: no OAuth authorization server
     // fronts this resource (RFC 9728 §2 — the array lists AS issuers).
     authorization_servers: [],
@@ -153,8 +158,9 @@ function oauthProtectedResource(origin: string): Response {
   })
 }
 
-function authMd(origin: string): Response {
+function authMd(origin: string, identity: SiteIdentity): Response {
   const host = new URL(origin).host
+  const localMcpName = agentIdentitySlug(identity.name)
   return markdown(`# auth.md
 
 You are an agent. This document tells you how to access **${host}** — a
@@ -192,7 +198,7 @@ honestly via \`User-Agent\` so rate limiting can be fair.
 ## Step 3 — Attach over MCP (optional)
 
 \`\`\`
-claude mcp add --transport http thally ${origin}/api/mcp
+claude mcp add --transport http ${localMcpName} ${origin}/api/mcp
 \`\`\`
 
 The MCP server accepts anonymous \`initialize\` and \`tools/call\` requests.
@@ -273,7 +279,7 @@ description: Attach an MCP client to this site and use its docs as native tools.
 This site runs a read-only MCP server (streamable HTTP, no auth):
 
 \`\`\`
-claude mcp add --transport http thally ${origin}/api/mcp
+claude mcp add --transport http docs ${origin}/api/mcp
 \`\`\`
 
 Available tools: ${toolMetadata.map((tool) => `\`${tool.name}\``).join(', ')}.
@@ -312,18 +318,19 @@ export async function GET(
   const { document } = await params
   const [name, arg] = document
   const origin = request.nextUrl.origin
+  const identity = await resolveSiteConfig(origin)
 
   switch (name) {
     case 'api-catalog':
       return apiCatalog(origin)
     case 'mcp-server-card':
-      return mcpServerCard(origin)
+      return mcpServerCard(origin, identity)
     case 'agent-card':
-      return a2aAgentCard(origin)
+      return a2aAgentCard(origin, identity)
     case 'oauth-protected-resource':
-      return oauthProtectedResource(origin)
+      return oauthProtectedResource(origin, identity)
     case 'auth-md':
-      return authMd(origin)
+      return authMd(origin, identity)
     case 'agent-skills-index':
       return agentSkillsIndex(origin)
     case 'agent-skills-file':

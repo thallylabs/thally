@@ -1,7 +1,7 @@
 import { TeamView } from '@/components/admin/team-view'
 import { getTeamConfig } from '@/data/docs'
-import { siteConfig } from '@/data/site'
 import { requireAdminPageSession } from '@/lib/auth/admin-page'
+import { resolveRequestSiteConfig } from '@/lib/site-config'
 
 export default async function AdminTeamPage() {
   // Enforce the live roster: a removed/downgraded member is redirected to login,
@@ -10,6 +10,7 @@ export default async function AdminTeamPage() {
   const viewerRole = session?.role ?? 'owner'
   const viewerEmail = session?.email ?? 'break-glass (password)'
   const team = getTeamConfig()
+  const effectiveSite = await resolveRequestSiteConfig()
 
   return (
     <TeamView
@@ -17,7 +18,7 @@ export default async function AdminTeamPage() {
       domains={team.domains}
       viewerRole={viewerRole}
       viewerEmail={viewerEmail}
-      repoUrl={siteConfig.repoUrl ?? ''}
+      repoUrl={effectiveSite.repoUrl}
     />
   )
 }

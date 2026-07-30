@@ -10,6 +10,7 @@ import { DocsChat } from '@/components/docs/docs-chat'
 import { isAiChatAvailable } from '@/lib/cloud-bridge'
 import { getRequestCloudSiteConfig, getRequestOrigin } from '@/lib/cloud-link/request'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
+import { resolveSiteConfig, siteIdentity } from '@/lib/site-config'
 
 // The docs shell resolves request-bound Cloud configuration and origin data.
 // Marking that contract explicitly keeps OpenNext from attempting a static
@@ -51,7 +52,10 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
   const origin = await getRequestOrigin()
   // Resolve settings first so linked sites reuse the same cached short-lived
   // grant when checking the paid AI service immediately afterward.
-  const cloudConfig = await getRequestCloudSiteConfig()
+  const [cloudConfig, effectiveSite] = await Promise.all([
+    getRequestCloudSiteConfig(),
+    resolveSiteConfig(origin),
+  ])
   const hasAiService = await isAiChatAvailable(origin)
   const isAiEnabled = cloudConfig
     ? Boolean(cloudConfig.entitlements.features?.aiAnswers) &&
@@ -67,6 +71,7 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
         i18nConfig={i18nConfig}
         navbarConfig={navbarConfig}
         footerConfig={footerConfig}
+        identity={siteIdentity(effectiveSite)}
       >
         {children}
       </SiteShell>

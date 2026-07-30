@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { siteConfig } from '@/data/site'
+import type { SiteLink } from '@/data/site'
 import type { DocsJsonFooter } from '@/data/docs'
 
 // Social icon SVGs (inline, no extra dep needed)
@@ -45,9 +45,11 @@ const SOCIAL_ICONS: Record<string, React.ComponentType<{ className?: string }>> 
 
 interface FooterProps {
   footerConfig?: DocsJsonFooter | null
+  siteName: string
+  siteLinks: Array<SiteLink>
 }
 
-export function Footer({ footerConfig }: FooterProps) {
+export function Footer({ footerConfig, siteName, siteLinks }: FooterProps) {
   const hasSocials = footerConfig?.socials && Object.keys(footerConfig.socials).length > 0
   const hasColumns = footerConfig?.links && footerConfig.links.length > 0
 
@@ -90,7 +92,7 @@ export function Footer({ footerConfig }: FooterProps) {
             </div>
           )}
           <div className="flex flex-col gap-3 text-sm text-foreground/60 sm:flex-row sm:items-center sm:justify-between">
-            <p>© {new Date().getFullYear()} {siteConfig.name}. All rights reserved.</p>
+            <p>© {new Date().getFullYear()} {siteName}. All rights reserved.</p>
             {hasSocials && (
               <div className="flex items-center gap-3">
                 {Object.entries(footerConfig!.socials!).map(([key, href]) => {
@@ -120,9 +122,9 @@ export function Footer({ footerConfig }: FooterProps) {
   return (
     <footer className="border-t border-border/60 bg-muted/30">
       <div className="flex flex-col gap-3 px-4 py-6 text-sm text-foreground/60 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
-        <p>© {new Date().getFullYear()} {siteConfig.name}. All rights reserved.</p>
+        <p>© {new Date().getFullYear()} {siteName}. All rights reserved.</p>
         <div className="flex gap-4">
-          {siteConfig.links.map((link) => (
+          {siteLinks.map((link) => (
             <Link key={link.href} href={link.href} className="hover:text-foreground">
               {link.label}
             </Link>

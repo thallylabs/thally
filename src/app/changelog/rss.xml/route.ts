@@ -1,7 +1,4 @@
-import { siteConfig } from '@/data/site'
-import { getSiteUrl } from '@/lib/site-url'
-
-const baseUrl = getSiteUrl()
+import { resolveRequestSiteConfig } from '@/lib/site-config'
 
 interface ChangelogEntry {
   version: string
@@ -16,11 +13,11 @@ const entries: Array<ChangelogEntry> = [
   {
     version: 'v0.1.0',
     date: '2025-01-01',
-    description: 'Initial release of the clean-room Thally template.',
+    description: 'Initial documentation release.',
     items: [
-      'Next.js App Router foundation with MDX-powered docs',
-      'Responsive shell with Radix-driven navigation and search',
-      'Shadcn-inspired primitives for buttons, badges, and command palette',
+      'Documentation site published',
+      'Search and responsive navigation available',
+      'Machine-readable documentation endpoints available',
     ],
   },
 ]
@@ -34,11 +31,13 @@ function escapeXml(str: string): string {
     .replace(/'/g, '&apos;')
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const effectiveSite = await resolveRequestSiteConfig()
+  const baseUrl = new URL(request.url).origin
   const items = entries
     .map(
       (entry) => `    <item>
-      <title>${escapeXml(`${siteConfig.name} ${entry.version}`)}</title>
+      <title>${escapeXml(`${effectiveSite.name} ${entry.version}`)}</title>
       <link>${baseUrl}/changelog</link>
       <guid>${baseUrl}/changelog#${entry.version}</guid>
       <pubDate>${new Date(entry.date).toUTCString()}</pubDate>
@@ -50,9 +49,9 @@ export async function GET() {
   const rss = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>${escapeXml(siteConfig.name)} Changelog</title>
+    <title>${escapeXml(effectiveSite.name)} Changelog</title>
     <link>${baseUrl}/changelog</link>
-    <description>${escapeXml(`Latest updates to ${siteConfig.name}`)}</description>
+    <description>${escapeXml(`Latest updates to ${effectiveSite.name}`)}</description>
     <language>en</language>
     <atom:link href="${baseUrl}/changelog/rss.xml" rel="self" type="application/rss+xml"/>
 ${items}

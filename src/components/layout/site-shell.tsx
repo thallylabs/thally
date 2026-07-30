@@ -10,6 +10,8 @@ import type { SearchCorpusRecord } from '@/components/search/command-search'
 import { useSidebarCollectionsStore } from './sidebar-store'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { SiteNameProvider } from '@/components/layout/use-site-name'
+import type { SiteIdentity } from '@/lib/site-config'
 
 export interface I18nConfig {
   defaultLocale: string
@@ -59,9 +61,18 @@ interface SiteShellProps {
   i18nConfig?: I18nConfig | null
   navbarConfig?: DocsJsonNavbar | null
   footerConfig?: DocsJsonFooter | null
+  identity: SiteIdentity
 }
 
-export function SiteShell({ children, initialCollections, searchIndex, i18nConfig, navbarConfig, footerConfig }: SiteShellProps) {
+export function SiteShell({
+  children,
+  initialCollections,
+  searchIndex,
+  i18nConfig,
+  navbarConfig,
+  footerConfig,
+  identity,
+}: SiteShellProps) {
   const hydratedCollections = useSidebarCollectionsStore((state) => state.collections)
   const collections = hydratedCollections.length > 0 ? hydratedCollections : initialCollections
   const pathname = usePathname()
@@ -123,45 +134,52 @@ export function SiteShell({ children, initialCollections, searchIndex, i18nConfi
   // `clip` contains horizontal spill without creating a scroll container,
   // which lets the banner-aware desktop sidebar remain sticky.
   return (
-    <div className="min-h-screen w-full overflow-x-clip bg-background text-foreground">
-      <div className={`flex min-h-screen w-full ${shell.wrapper}`}>
-        <Sidebar
-          sections={activeCollection.sections}
-          title={activeCollection.label}
-        />
-        <div className="flex min-h-screen w-full min-w-0 flex-1 flex-col">
-          <TopBar
-            collections={collections}
-            activeCollectionId={activeTabId}
-            onCollectionChange={(id) => {
-              const target = collections.find((collection) => collection.id === id)
-              if (!target) {
-                return
-              }
-              setSelectedCollectionId(target.id)
-              const targetHref = target.href
-              const firstHref = target.sections[0]?.items[0]?.href
-              if (targetHref && !matchesPath(targetHref, pathname)) {
-                router.push(targetHref)
-                return
-              }
-              if (firstHref && !collectionContainsPath(target, pathname)) {
-                router.push(firstHref)
-              }
-            }}
-            activeSections={activeCollection.sections}
-            searchIndex={searchIndex}
-            i18nConfig={i18nConfig ?? null}
-            currentLocale={currentLocale}
-            currentPath={currentPath}
-            navbarConfig={navbarConfig ?? null}
+    <SiteNameProvider initialName={identity.name}>
+      <div className="min-h-screen w-full overflow-x-clip bg-background text-foreground">
+        <div className={`flex min-h-screen w-full ${shell.wrapper}`}>
+          <Sidebar
+            sections={activeCollection.sections}
+            title={activeCollection.label}
           />
-          <main className="flex-1 py-6 sm:py-8 lg:py-10">
-            <PageContainer className={layout.pageGap}>{children}</PageContainer>
-          </main>
-          <Footer footerConfig={footerConfig ?? null} />
+          <div className="flex min-h-screen w-full min-w-0 flex-1 flex-col">
+            <TopBar
+              collections={collections}
+              activeCollectionId={activeTabId}
+              onCollectionChange={(id) => {
+                const target = collections.find((collection) => collection.id === id)
+                if (!target) {
+                  return
+                }
+                setSelectedCollectionId(target.id)
+                const targetHref = target.href
+                const firstHref = target.sections[0]?.items[0]?.href
+                if (targetHref && !matchesPath(targetHref, pathname)) {
+                  router.push(targetHref)
+                  return
+                }
+                if (firstHref && !collectionContainsPath(target, pathname)) {
+                  router.push(firstHref)
+                }
+              }}
+              activeSections={activeCollection.sections}
+              searchIndex={searchIndex}
+              i18nConfig={i18nConfig ?? null}
+              currentLocale={currentLocale}
+              currentPath={currentPath}
+              navbarConfig={navbarConfig ?? null}
+              siteLinks={identity.links}
+            />
+            <main className="flex-1 py-6 sm:py-8 lg:py-10">
+              <PageContainer className={layout.pageGap}>{children}</PageContainer>
+            </main>
+            <Footer
+              footerConfig={footerConfig ?? null}
+              siteName={identity.name}
+              siteLinks={identity.links}
+            />
+          </div>
         </div>
       </div>
-    </div>
+    </SiteNameProvider>
   )
 }

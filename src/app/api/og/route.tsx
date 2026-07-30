@@ -2,10 +2,10 @@
  * Dynamic social-image endpoint for documentation pages.
  */
 import { type NextRequest } from 'next/server'
-import { siteConfig } from '@/data/site'
 import { renderDocsOgImage, type OgImageFont } from '@/lib/og-image'
 import { resolveOgConfig } from '@/lib/og'
 import { getBrandAsset } from '@/lib/admin/settings'
+import { resolveSiteConfig } from '@/lib/site-config'
 
 // Node is required because the admin storage adapter may use Node facilities.
 export const runtime = 'nodejs'
@@ -37,9 +37,15 @@ async function buildLeafDataUri(requestUrl: string, color: string) {
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl
   const theme = searchParams.get('theme') === 'dark' ? 'dark' : 'light'
-  const og = resolveOgConfig(theme, searchParams.get('accent') || undefined)
-  const title = searchParams.get('title') || `${siteConfig.name} Documentation`
-  const description = searchParams.get('description') || siteConfig.description
+  const effectiveSite = await resolveSiteConfig(request.nextUrl.origin)
+  const og = resolveOgConfig(
+    theme,
+    searchParams.get('accent') || undefined,
+    effectiveSite,
+    request.nextUrl.origin,
+  )
+  const title = searchParams.get('title') || `${effectiveSite.name} Documentation`
+  const description = searchParams.get('description') || effectiveSite.description
   const crumb = searchParams.get('crumb') || 'Documentation'
   const url = searchParams.get('url') || og.domain
 
