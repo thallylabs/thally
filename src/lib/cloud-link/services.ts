@@ -108,7 +108,11 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
         authorization: `Bearer ${grant}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ siteName: siteConfig.name, messages, context }),
+      body: JSON.stringify({
+        siteName: cloud.siteConfig.portable.details?.name ?? siteConfig.name,
+        messages,
+        context,
+      }),
       cache: 'no-store',
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })

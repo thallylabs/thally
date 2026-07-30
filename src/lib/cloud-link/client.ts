@@ -40,7 +40,7 @@ export interface CloudEntitlements {
 }
 
 export interface CloudPortableConfig {
-  details?: { name?: string; description?: string }
+  details?: { name?: string; description?: string; repoUrl?: string }
   localization?: {
     defaultLocale: string
     locales: Array<{ code: string; label: string }>

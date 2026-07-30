@@ -26,6 +26,47 @@
 import { siteConfig, type SiteConfig } from '@/data/site'
 import { getAdminSettings } from '@/lib/admin/settings'
 import { getCloudSiteConfig } from '@/lib/cloud-link/client'
+import { getRequestOrigin } from '@/lib/cloud-link/request'
+
+export interface SiteIdentity {
+  name: string
+  description: string
+  repoUrl: string
+  links: SiteConfig['links']
+}
+
+function managedRepositoryLinks(repoUrl: string): SiteConfig['links'] {
+  const normalized = repoUrl.replace(/\/+$/, '')
+  return [
+    { label: 'Get started', href: '/quickstart' },
+    { label: 'Support', href: `${normalized}/issues/new` },
+    { label: 'GitHub', href: normalized },
+    { label: 'Changelog', href: '/changelog' },
+  ]
+}
+
+function isCompleteManagedIdentity(
+  details: { name?: string; description?: string; repoUrl?: string } | undefined,
+): details is { name: string; description: string; repoUrl: string } {
+  return Boolean(
+    details?.name?.trim() &&
+      typeof details.description === 'string' &&
+      details.repoUrl?.trim(),
+  )
+}
+
+function unavailableManagedSiteConfig(): SiteConfig {
+  return {
+    ...siteConfig,
+    name: 'Documentation',
+    description: 'Site identity is temporarily unavailable.',
+    repoUrl: '',
+    links: [
+      { label: 'Get started', href: '/quickstart' },
+      { label: 'Changelog', href: '/changelog' },
+    ],
+  }
+}
 
 /**
  * Resolve the effective site config: build-time `siteConfig` with the
@@ -40,13 +81,47 @@ export async function resolveSiteConfig(siteUrl?: string): Promise<SiteConfig> {
       siteUrl ? getCloudSiteConfig(siteUrl) : Promise.resolve(null),
     ])
     const details = cloud?.siteConfig.portable.details
+    if (
+      process.env.THALLY_BASELINE_FORK_IDENTITY_REQUIRED === 'true' &&
+      !isCompleteManagedIdentity(details)
+    ) {
+      return unavailableManagedSiteConfig()
+    }
+    const repoUrl = details?.repoUrl ?? s.siteRepoUrl ?? siteConfig.repoUrl ?? ''
+    // A forked release runs the baseline's compiled site.ts. The runtime repo
+    // mismatch is therefore the durable signal that its fallback links also
+    // belong to the baseline and must be reconstructed for this customer.
+    const links =
+      details?.repoUrl &&
+      details.repoUrl.replace(/\/+$/, '') !== (siteConfig.repoUrl ?? '').replace(/\/+$/, '')
+        ? managedRepositoryLinks(details.repoUrl)
+        : siteConfig.links
     return {
       ...siteConfig,
       name: details?.name ?? s.siteName ?? siteConfig.name,
       description: details?.description ?? s.siteDescription ?? siteConfig.description,
-      repoUrl: s.siteRepoUrl ?? siteConfig.repoUrl ?? '',
+      repoUrl,
+      links,
     }
   } catch {
+    if (process.env.THALLY_BASELINE_FORK_IDENTITY_REQUIRED === 'true') {
+      return unavailableManagedSiteConfig()
+    }
     return siteConfig
+  }
+}
+
+/** Resolve the request-bound identity used by every human and agent surface. */
+export async function resolveRequestSiteConfig(): Promise<SiteConfig> {
+  return resolveSiteConfig(await getRequestOrigin())
+}
+
+/** Narrow the effective config to the serializable identity used by clients. */
+export function siteIdentity(config: SiteConfig): SiteIdentity {
+  return {
+    name: config.name,
+    description: config.description,
+    repoUrl: config.repoUrl ?? '',
+    links: config.links,
   }
 }

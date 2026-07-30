@@ -1,11 +1,9 @@
 import { type NextRequest } from 'next/server'
 import { getAllApiOperationNodes } from '@/data/api-reference'
 import { getDocEntries, getSidebarCollections } from '@/data/docs'
-import { getSiteUrl } from '@/lib/site-url'
 
-const baseUrl = getSiteUrl()
-
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
+  const baseUrl = request.nextUrl.origin
   const entries = getDocEntries()
   const collections = getSidebarCollections()
   const apiNodes = await getAllApiOperationNodes()

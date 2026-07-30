@@ -1,11 +1,9 @@
 import path from 'node:path'
-import { siteConfig } from '@/data/site'
 import { getDocEntries, getSidebarCollections } from '@/data/docs'
 import { getContentSource } from '@/lib/content-source'
 import { parseFrontmatter } from '@/lib/frontmatter'
-import { getSiteUrl } from '@/lib/site-url'
+import { resolveRequestSiteConfig } from '@/lib/site-config'
 
-const baseUrl = getSiteUrl()
 const CONTENT_ROOT = 'src/content'
 
 async function readRawContent(pageId: string): Promise<string | null> {
@@ -30,9 +28,11 @@ async function readRawContent(pageId: string): Promise<string | null> {
   return null
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   // Under the assets ContentSource this route must render per request — the
   // corpus below reflects published content, not the build. No-op by default.
+  const effectiveSite = await resolveRequestSiteConfig()
+  const baseUrl = new URL(request.url).origin
 
   const entries = getDocEntries()
   const collections = getSidebarCollections()
@@ -40,9 +40,9 @@ export async function GET() {
   const lines: Array<string> = []
 
   // Header
-  lines.push(`# ${siteConfig.name} — Complete Documentation`)
+  lines.push(`# ${effectiveSite.name} — Complete Documentation`)
   lines.push('')
-  lines.push(`> ${siteConfig.description}`)
+  lines.push(`> ${effectiveSite.description}`)
   lines.push('')
   lines.push(`Source: ${baseUrl}`)
   lines.push('')

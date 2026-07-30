@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { siteTools, getSiteTool } from '@/lib/mcp/site-tools'
 import { getStorage } from '@/lib/storage'
 import { getAdminSettings } from '@/lib/admin/settings'
+import { resolveSiteConfig } from '@/lib/site-config'
+import { agentServerName } from '@/lib/agent-identity'
 
 export const runtime = 'nodejs'
 
@@ -16,7 +18,6 @@ export const runtime = 'nodejs'
  * SDK's transport targets Node req/res, not Web Requests).
  */
 
-const SERVER_INFO = { name: 'thally-docs', version: '1.0.0' }
 const SUPPORTED_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05']
 const LATEST_PROTOCOL = '2025-06-18'
 
@@ -38,7 +39,10 @@ function rpcError(id: unknown, code: number, message: string) {
   return { jsonrpc: '2.0', id: id ?? null, error: { code, message } }
 }
 
-async function handleMessage(msg: JsonRpcMessage): Promise<object | null> {
+async function handleMessage(
+  msg: JsonRpcMessage,
+  siteName: string,
+): Promise<object | null> {
   const { id, method, params } = msg
 
   // Notifications carry no id and expect no response.
@@ -52,7 +56,7 @@ async function handleMessage(msg: JsonRpcMessage): Promise<object | null> {
       return rpcResult(id, {
         protocolVersion,
         capabilities: { tools: {} },
-        serverInfo: SERVER_INFO,
+        serverInfo: { name: agentServerName(siteName), version: '1.0.0' },
       })
     }
 
@@ -110,6 +114,7 @@ export async function POST(request: NextRequest) {
   }
 
   const messages = Array.isArray(body) ? body : [body]
+  const effectiveSite = await resolveSiteConfig(request.nextUrl.origin)
 
   // Rate-limit the expensive path (tool calls) per IP — fail open. Count EVERY
   // tool call in the batch, not just one per request, or a single batched array
@@ -136,7 +141,7 @@ export async function POST(request: NextRequest) {
 
   const responses: Array<object> = []
   for (const msg of messages) {
-    const res = await handleMessage(msg)
+    const res = await handleMessage(msg, effectiveSite.name)
     if (res) responses.push(res)
   }
 
@@ -148,10 +153,11 @@ export async function POST(request: NextRequest) {
   return Response.json(Array.isArray(body) ? responses : responses[0], { headers })
 }
 
-export function GET() {
+export async function GET(request: NextRequest) {
   // Streamable-HTTP GET opens a server→client SSE stream; this stateless server
   // never pushes, so it's POST-only.
-  return new Response('Thally MCP endpoint — POST JSON-RPC 2.0 (streamable HTTP).', {
+  const effectiveSite = await resolveSiteConfig(request.nextUrl.origin)
+  return new Response(`${effectiveSite.name} MCP endpoint — POST JSON-RPC 2.0 (streamable HTTP).`, {
     status: 405,
     headers: { Allow: 'POST' },
   })

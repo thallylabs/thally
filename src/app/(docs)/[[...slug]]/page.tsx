@@ -4,7 +4,7 @@ import { DocLayout } from '@/components/docs/doc-layout'
 import { getDocEntries, getNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { isRemoteContentSource } from '@/lib/content-source'
-import { getSiteUrl } from '@/lib/site-url'
+import { getRequestOrigin } from '@/lib/cloud-link/request'
 import { getApiOperationByKey } from '@/data/api-reference'
 import { DocHeader } from '@/components/docs/doc-header'
 import { ApiLayout } from '@/components/api/api-layout'
@@ -16,6 +16,7 @@ import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/o
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { getContentI18nConfig } from '@/lib/i18n/content'
 import { buildLocaleAlternates } from '@/lib/i18n/metadata'
+import { resolveSiteConfig } from '@/lib/site-config'
 
 interface PageProps {
   params: Promise<{ slug?: Array<string> }>
@@ -39,7 +40,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     return {}
   }
 
-  const siteUrl = getSiteUrl()
+  const siteUrl = await getRequestOrigin()
   const primaryHref = doc.slug.length ? `/${doc.slug.join('/')}` : '/'
   const i18n = await getContentI18nConfig(
     resolved.slug,
@@ -51,7 +52,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     title: doc.title,
     description: doc.description,
     crumb: formatOgBreadcrumb(nav.breadcrumb, doc.title, doc.group),
-    url: formatOgDisplayUrl(primaryHref),
+    url: formatOgDisplayUrl(primaryHref, siteUrl),
   })
 
   const isNoindex = doc.noindex || doc.hidden
@@ -63,7 +64,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     alternates: {
       canonical: `${siteUrl}${primaryHref}`,
       languages: buildLocaleAlternates(siteUrl, primaryHref, i18n),
-      types: buildAgentAlternateLinks(primaryHref),
+      types: buildAgentAlternateLinks(primaryHref, siteUrl),
     },
     openGraph: {
       title: doc.title,
@@ -87,13 +88,15 @@ export default async function DocsPage({ params }: PageProps) {
     notFound()
   }
 
-  const siteUrl = getSiteUrl()
+  const siteUrl = await getRequestOrigin()
+  const effectiveSite = await resolveSiteConfig(siteUrl)
   const primaryHref = doc.slug.length ? `/${doc.slug.join('/')}` : '/'
   const pageUrl = `${siteUrl}${primaryHref}`
   const locale = (await getEffectiveI18nConfig()).defaultLocale
   const nav = getNavContext(doc.id)
   const jsonLd = buildDocPageJsonLd({
     siteUrl,
+    siteName: effectiveSite.name,
     pageUrl,
     id: doc.id,
     title: doc.title,

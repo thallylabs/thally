@@ -26,8 +26,8 @@ export function buildOgImageUrl(params: {
 /**
  * Format a canonical path for the compact URL slot in a social preview.
  */
-export function formatOgDisplayUrl(path = '/'): string {
-  const url = new URL(path, getSiteUrl())
+export function formatOgDisplayUrl(path = '/', siteUrl = getSiteUrl()): string {
+  const url = new URL(path, siteUrl)
   return `${url.host}${url.pathname === '/' ? '' : url.pathname}`
 }
 
@@ -49,7 +49,12 @@ export function formatOgBreadcrumb(
 /**
  * Resolve the brand values used by the handoff-aligned docs preview.
  */
-export function resolveOgConfig(theme: 'light' | 'dark', accentOverride?: string) {
+export function resolveOgConfig(
+  theme: 'light' | 'dark',
+  accentOverride?: string,
+  identity: { name: string } = siteConfig,
+  requestOrigin?: string,
+) {
   const og = siteConfig.ogImage ?? {}
   const palette =
     theme === 'dark'
@@ -69,7 +74,7 @@ export function resolveOgConfig(theme: 'light' | 'dark', accentOverride?: string
         }
 
   const accent = accentOverride && /^#[0-9a-fA-F]{3,8}$/.test(accentOverride) ? accentOverride : undefined
-  const siteUrl = getSiteUrl()
+  const siteUrl = requestOrigin ?? getSiteUrl()
   let domain = og.domain ?? ''
   if (!domain && siteUrl) {
     try {
@@ -85,7 +90,7 @@ export function resolveOgConfig(theme: 'light' | 'dark', accentOverride?: string
     muted: og.descriptionColor ?? palette.muted,
     faint: og.groupColor ?? palette.faint,
     leaf: theme === 'light' ? (accent ?? og.accent ?? palette.leaf) : palette.leaf,
-    domain: domain || siteConfig.name.toLowerCase(),
-    logoText: og.logoText ?? siteConfig.name,
+    domain: domain || identity.name.toLowerCase(),
+    logoText: og.logoText ?? identity.name,
   }
 }

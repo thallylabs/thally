@@ -86,7 +86,7 @@ export async function DocLayout({ doc, locale = 'en', children }: DocLayoutProps
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
             {feedback}
-            <EditOnGithub pageId={doc.id} />
+            <EditOnGithub pageId={doc.id} repoUrl={effectiveSite.repoUrl} />
             <DocPagination prev={prev} next={next} />
           </div>
         </ContentStack>
@@ -106,7 +106,7 @@ export async function DocLayout({ doc, locale = 'en', children }: DocLayoutProps
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
             {feedback}
-            <EditOnGithub pageId={doc.id} />
+            <EditOnGithub pageId={doc.id} repoUrl={effectiveSite.repoUrl} />
             <DocPagination prev={prev} next={next} />
           </div>
         </ContentStack>
@@ -126,7 +126,7 @@ export async function DocLayout({ doc, locale = 'en', children }: DocLayoutProps
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
             {feedback}
-            <EditOnGithub pageId={doc.id} />
+            <EditOnGithub pageId={doc.id} repoUrl={effectiveSite.repoUrl} />
             <DocPagination prev={prev} next={next} />
           </div>
         </ContentStack>

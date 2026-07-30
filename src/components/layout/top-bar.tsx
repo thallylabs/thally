@@ -15,7 +15,7 @@ import { LocaleSwitcher } from '@/components/layout/locale-switcher'
 import type { I18nConfig } from '@/components/layout/site-shell'
 import { shell } from '@/config/layout'
 import { cn } from '@/lib/utils'
-import { siteConfig } from '@/data/site'
+import type { SiteLink } from '@/data/site'
 
 function matchesPath(targetHref: string, pathname: string) {
   if (!targetHref || /^https?:\/\//i.test(targetHref)) {
@@ -44,6 +44,7 @@ interface TopBarProps {
   currentLocale?: string
   currentPath?: string
   navbarConfig?: DocsJsonNavbar | null
+  siteLinks: Array<SiteLink>
 }
 
 export function TopBar({
@@ -56,18 +57,19 @@ export function TopBar({
   currentLocale,
   currentPath,
   navbarConfig,
+  siteLinks,
 }: TopBarProps) {
   const pathname = usePathname()
   const router = useRouter()
 
-  // siteConfig fallbacks (used when navbarConfig is not set)
+  // Request-bound site fallbacks (used when navbarConfig is not set).
   const supportLink =
-    siteConfig.links.find((link) => {
+    siteLinks.find((link) => {
       const label = link.label.toLowerCase()
       return label.includes('support') || label.includes('contact')
     })
   const siteConfigCta =
-    siteConfig.links.find((link) => {
+    siteLinks.find((link) => {
       const label = link.label.toLowerCase()
       return link !== supportLink && (label.includes('get') || label.includes('start') || label.includes('demo'))
     })
@@ -217,4 +219,3 @@ export function TopBar({
     </header>
   )
 }
-

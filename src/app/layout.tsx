@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 import { toHslValue, THEME_VARS } from '@thallylabs/core/theme'
 import { buildOgImageUrl } from '@/lib/og'
 import { buildSiteJsonLd } from '@/lib/json-ld'
-import { getSiteUrl } from '@/lib/site-url'
+import { getRequestOrigin } from '@/lib/cloud-link/request'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { AnalyticsProvider } from '@/components/analytics/analytics-provider'
 import { SiteBanner } from '@/components/layout/site-banner'
@@ -17,6 +17,7 @@ import { WebMcpTools } from '@/components/agent/web-mcp-tools'
 import { CloudHandshake } from '@/components/cloud/cloud-handshake'
 import { localeDirection } from '@/lib/i18n/config'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
+import { resolveRequestSiteConfig } from '@/lib/site-config'
 
 // Default fonts via next/font (optimal performance — preloaded, no FOUC).
 // The Thally brand pairs Inter (body) with Plus Jakarta Sans (display —
@@ -95,41 +96,46 @@ const themeVars = THEME_VARS[structuralTheme] ?? ''
 
 // ---------------------------------------------------------------------------
 
-const defaultOgImage = buildOgImageUrl({})
-
-export const metadata: Metadata = {
-  metadataBase: new URL(getSiteUrl()),
-  title: {
-    default: `${siteConfig.name} Documentation`,
-    template: `%s • ${siteConfig.name}`,
-  },
-  description: siteConfig.description,
-  // Derived from the site config so scaffolded sites never inherit
-  // template-marketing keywords.
-  keywords: [siteConfig.name, `${siteConfig.name} documentation`, 'docs'],
-  icons: {
-    // The dark link wins on OS dark scheme (link media can't follow the
-    // in-site theme toggle); the route falls back to the light asset when no
-    // dark variant is uploaded, so both links always resolve.
-    icon: [
-      { url: '/api/brand/favicon', media: '(prefers-color-scheme: light)' },
-      { url: '/api/brand/favicon?mode=dark', media: '(prefers-color-scheme: dark)' },
-    ],
-    shortcut: '/api/brand/favicon',
-  },
-  openGraph: {
-    title: `${siteConfig.name} Documentation`,
-    description: siteConfig.description,
-    url: getSiteUrl(),
-    siteName: siteConfig.name,
-    images: [{ url: defaultOgImage, width: 1200, height: 630 }],
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: `${siteConfig.name} Documentation`,
-    description: siteConfig.description,
-    images: [defaultOgImage],
-  },
+export async function generateMetadata(): Promise<Metadata> {
+  const [effectiveSite, siteUrl] = await Promise.all([
+    resolveRequestSiteConfig(),
+    getRequestOrigin(),
+  ])
+  const defaultOgImage = buildOgImageUrl({})
+  return {
+    metadataBase: new URL(siteUrl),
+    title: {
+      default: `${effectiveSite.name} Documentation`,
+      template: `%s • ${effectiveSite.name}`,
+    },
+    description: effectiveSite.description,
+    // Derived from the request-bound site config so a fork never inherits
+    // the baseline's marketing keywords.
+    keywords: [effectiveSite.name, `${effectiveSite.name} documentation`, 'docs'],
+    icons: {
+      // The dark link wins on OS dark scheme (link media can't follow the
+      // in-site theme toggle); the route falls back to the light asset when no
+      // dark variant is uploaded, so both links always resolve.
+      icon: [
+        { url: '/api/brand/favicon', media: '(prefers-color-scheme: light)' },
+        { url: '/api/brand/favicon?mode=dark', media: '(prefers-color-scheme: dark)' },
+      ],
+      shortcut: '/api/brand/favicon',
+    },
+    openGraph: {
+      title: `${effectiveSite.name} Documentation`,
+      description: effectiveSite.description,
+      url: siteUrl,
+      siteName: effectiveSite.name,
+      images: [{ url: defaultOgImage, width: 1200, height: 630 }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `${effectiveSite.name} Documentation`,
+      description: effectiveSite.description,
+      images: [defaultOgImage],
+    },
+  }
 }
 
 const brandStyle: Record<string, string> = {
@@ -174,8 +180,6 @@ const brandCss = Object.entries(brandStyle)
 
 const bannerConfig = getBannerConfig()
 const customScripts = getCustomScriptsConfig()
-const siteUrl = getSiteUrl()
-
 // OpenNext's production transform can add esbuild's `__name` calls to the
 // serialized next-themes bootstrap. The bootstrap runs before client bundles,
 // so provide the tiny helper first or one missing global prevents the entire
@@ -184,9 +188,19 @@ const runtimeNameShim =
   "globalThis.__name ??= (target, value) => Object.defineProperty(target, 'name', { value, configurable: true });"
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const i18n = await getEffectiveI18nConfig()
+  const [i18n, effectiveSite, siteUrl] = await Promise.all([
+    getEffectiveI18nConfig(),
+    resolveRequestSiteConfig(),
+    getRequestOrigin(),
+  ])
   const defaultLang = i18n.defaultLocale
-  const siteJsonLd = buildSiteJsonLd({ siteUrl, locale: defaultLang })
+  const siteJsonLd = buildSiteJsonLd({
+    siteUrl,
+    siteName: effectiveSite.name,
+    description: effectiveSite.description,
+    repoUrl: effectiveSite.repoUrl,
+    locale: defaultLang,
+  })
 
   return (
     // Font variables live on <html> (not <body>) so :root-level rules — the

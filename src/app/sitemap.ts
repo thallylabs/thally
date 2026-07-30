@@ -2,15 +2,14 @@ import type { MetadataRoute } from 'next'
 import { getDocEntries } from '@/data/docs'
 import { getAllApiOperationNodes } from '@/data/api-reference'
 
-import { getSiteUrl } from '@/lib/site-url'
+import { getRequestOrigin } from '@/lib/cloud-link/request'
 import { localizedPath } from '@/lib/i18n/config'
 import { getContentI18nConfig } from '@/lib/i18n/content'
 import { buildLocaleAlternates } from '@/lib/i18n/metadata'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 
-const baseUrl = getSiteUrl()
-
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const baseUrl = await getRequestOrigin()
   const docEntries = getDocEntries().filter((doc) => !doc.hidden && !doc.noindex)
   const apiNodes = await getAllApiOperationNodes()
   const i18n = await getEffectiveI18nConfig()

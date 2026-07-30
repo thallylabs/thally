@@ -1,12 +1,11 @@
 import { Pencil } from 'lucide-react'
-import { siteConfig } from '@/data/site'
 
 interface EditOnGithubProps {
   pageId: string
+  repoUrl: string
 }
 
-export function EditOnGithub({ pageId }: EditOnGithubProps) {
-  const repoUrl = siteConfig.repoUrl
+export function EditOnGithub({ pageId, repoUrl }: EditOnGithubProps) {
   if (!repoUrl || repoUrl.includes('your-org')) return null
 
   const filePath = `src/content/${pageId}.mdx`

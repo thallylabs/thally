@@ -1,25 +1,24 @@
-import { siteConfig } from '@/data/site'
 import { getDocEntries } from '@/data/docs'
 import { getSiteUrl } from '@/lib/site-url'
 import { apiReferenceConfig } from '@/config/api-reference'
+import type { SiteIdentity } from '@/lib/site-config'
 
 /**
  * `skill.md` — a Claude-skill-shaped manifest that tells an agent what this
  * product is and how to read its docs programmatically. Generated from the
  * content graph so it never drifts from the actual site.
  */
-export function buildSkillManifest(): string {
-  const base = getSiteUrl()
+export function buildSkillManifest(identity: SiteIdentity, base = getSiteUrl()): string {
   const entries = getDocEntries()
   const hasApi = apiReferenceConfig.specs.length > 0
   const lines: Array<string> = []
 
-  lines.push(`# ${siteConfig.name} — documentation skill`)
+  lines.push(`# ${identity.name} — documentation skill`)
   lines.push('')
-  lines.push(siteConfig.description)
+  lines.push(identity.description)
   lines.push('')
   lines.push('## When to use')
-  lines.push(`Use this to answer questions about ${siteConfig.name} from its official documentation.`)
+  lines.push(`Use this to answer questions about ${identity.name} from its official documentation.`)
   lines.push('')
   lines.push('## Read the docs programmatically')
   lines.push(`- Index: ${base}/llms.txt`)
@@ -45,13 +44,12 @@ export function buildSkillManifest(): string {
  * project. Doubles as the config surface the `thally agent` (v2.1) reads. A
  * physical `AGENTS.md` at the project root overrides this generated default.
  */
-export function buildAgentsManifest(): string {
-  const base = getSiteUrl()
+export function buildAgentsManifest(identity: SiteIdentity, base = getSiteUrl()): string {
   const lines: Array<string> = []
 
   lines.push('# AGENTS.md')
   lines.push('')
-  lines.push(`Guidance for AI agents working on the **${siteConfig.name}** documentation.`)
+  lines.push(`Guidance for AI agents working on the **${identity.name}** documentation.`)
   lines.push('This is a Thally project — a Next.js app. You author content and config; the framework is a hidden runtime you never edit.')
   lines.push('')
   lines.push('## Project layout')

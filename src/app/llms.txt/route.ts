@@ -1,25 +1,25 @@
-import { siteConfig } from '@/data/site'
 import { getDocEntries, getSidebarCollections } from '@/data/docs'
-import { getSiteUrl, siteUrlMismatch } from '@/lib/site-url'
-
-const baseUrl = getSiteUrl()
+import { siteUrlMismatch } from '@/lib/site-url'
+import { resolveSiteConfig } from '@/lib/site-config'
 
 export async function GET(request: Request) {
+  const baseUrl = new URL(request.url).origin
+  const effectiveSite = await resolveSiteConfig(baseUrl)
   const entries = getDocEntries()
   const collections = getSidebarCollections()
 
   const lines: Array<string> = []
 
   // Header
-  lines.push(`# ${siteConfig.name}`)
+  lines.push(`# ${effectiveSite.name}`)
   lines.push('')
-  lines.push(`> ${siteConfig.description}`)
+  lines.push(`> ${effectiveSite.description}`)
   lines.push('')
 
   // Links
   lines.push(`- Documentation: ${baseUrl}`)
-  if (siteConfig.repoUrl && !siteConfig.repoUrl.includes('your-org')) {
-    lines.push(`- GitHub: ${siteConfig.repoUrl}`)
+  if (effectiveSite.repoUrl && !effectiveSite.repoUrl.includes('your-org')) {
+    lines.push(`- GitHub: ${effectiveSite.repoUrl}`)
   }
   lines.push(`- Full docs for LLMs: ${baseUrl}/llms-full.txt`)
   lines.push(`- Agent discovery (ai.txt): ${baseUrl}/ai.txt`)
@@ -74,7 +74,7 @@ export async function GET(request: Request) {
 
   // Surface a stale-THALLY_SITE_URL misconfiguration (all links above would be
   // dead): warns in server logs and flags it on the response for tooling.
-  const mismatch = siteUrlMismatch(new URL(request.url).origin)
+  const mismatch = siteUrlMismatch(baseUrl)
 
   return new Response(body, {
     headers: {
