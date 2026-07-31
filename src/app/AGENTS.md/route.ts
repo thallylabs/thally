@@ -1,15 +1,16 @@
 import { buildAgentsManifest } from '@/lib/agent-manifest'
-import { readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
+import { getContentSource } from '@/lib/content-source'
 import { resolveRequestSiteConfig, siteIdentity } from '@/lib/site-config'
 
 export const runtime = 'nodejs'
 
 export async function GET(request: Request) {
-  // Author override: a physical AGENTS.md at the project root wins over the
-  // generated default, so teams can hand-tune agent guidance. Production
-  // reads the same source from the build-generated Worker manifest.
-  if (runtimeSourceExists('AGENTS.md')) {
-    return new Response(readRuntimeSource('AGENTS.md'), {
+  // Author overrides follow the active source so an assets-mode replacement
+  // never falls back to the baseline Worker's physical AGENTS.md. Filesystem
+  // mode remains the active source for OSS and preserves repository overrides.
+  const override = await getContentSource().read('AGENTS.md')
+  if (override) {
+    return new Response(override.content, {
       headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
     })
   }
