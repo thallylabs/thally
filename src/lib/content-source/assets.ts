@@ -13,9 +13,10 @@
  * e.g. /_thally/content/src/content/introduction.mdx
  *
  * Failure contract: this source must never take a site down. When the assets
- * binding is missing or the manifest cannot be loaded, every operation falls
- * back to the embedded filesystem source, so a misconfigured deployment
- * serves its build-time content instead of 404s.
+ * binding is missing or the manifest cannot be loaded, operations fall back
+ * to the embedded filesystem source. `AGENTS.md` is the exception: it carries
+ * tenant identity, so assets mode reports it missing rather than exposing a
+ * baseline Worker's embedded guidance.
  */
 
 import type { ContentSource, ContentSourceFile } from './types'
@@ -26,6 +27,9 @@ export const CONTENT_ASSET_PREFIX = '/_thally/content/'
 
 /** Manifest asset path. One fetch answers exists/list/modifiedAt for the release. */
 export const CONTENT_MANIFEST_PATH = `${CONTENT_ASSET_PREFIX}manifest.json`
+
+/** Root guidance is tenant-bound and must never fall back across deployments. */
+const TENANT_IDENTITY_BOUND_PATH = 'AGENTS.md'
 
 export interface ContentManifestEntry {
   /** Publish-observed modification time (e.g. commit timestamp). */
@@ -68,6 +72,12 @@ export function createAssetsContentSource(
   let manifestPromise: Promise<ContentManifest | null> | null = null
   const filePromises = new Map<string, Promise<ContentSourceFile | null>>()
   let warnedUnavailable = false
+
+  function readFallback(projectPath: string): Promise<ContentSourceFile | null> {
+    return projectPath === TENANT_IDENTITY_BOUND_PATH
+      ? Promise.resolve(null)
+      : fallback.read(projectPath)
+  }
 
   function warnFallbackOnce(reason: string): void {
     if (warnedUnavailable) return
@@ -129,7 +139,7 @@ export function createAssetsContentSource(
     if (!pending) {
       pending = (async () => {
         const fetchAsset = resolveFetcher()
-        if (!fetchAsset) return fallback.read(projectPath)
+        if (!fetchAsset) return readFallback(projectPath)
         try {
           const response = await fetchAsset(assetUrlPath(projectPath))
           if (!response.ok) {
@@ -175,7 +185,7 @@ export function createAssetsContentSource(
     async read(projectPath: string): Promise<ContentSourceFile | null> {
       if (!isSafeProjectPath(projectPath)) return null
       const manifest = await loadManifest()
-      if (!manifest) return fallback.read(projectPath)
+      if (!manifest) return readFallback(projectPath)
       if (!Object.prototype.hasOwnProperty.call(manifest.files, projectPath)) return null
       return readAsset(projectPath, manifest)
     },

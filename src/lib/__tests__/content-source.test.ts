@@ -218,8 +218,10 @@ describe('assets source', () => {
     const source = createAssetsContentSource(fallback, () => async () => new Response('boom', { status: 500 }))
 
     expect((await source.read('src/content/introduction.mdx'))?.content).toBe('embedded fallback')
+    expect(await source.read('AGENTS.md')).toBeNull()
     expect(await source.list('src/content')).toEqual(['embedded/list'])
     expect(fallback.reads).toContain('src/content/introduction.mdx')
+    expect(fallback.reads).not.toContain('AGENTS.md')
     // The warning fires once, not per operation.
     expect(warn).toHaveBeenCalledOnce()
   })
