@@ -203,10 +203,12 @@ The "Was this page helpful?" widget is shown at the bottom of every doc page by 
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `endpoint` | `string` | `/api/feedback` | URL that receives a POST with `{ page, vote, url }` |
+| `endpoint` | `string` | `/api/feedback` | URL that receives rating and written follow-up POSTs |
 | `thumbsRating` | `boolean` | `true` | Show or hide the widget |
 
-The built-in `/api/feedback` route logs votes to stdout. Replace it with your own storage logic in `src/app/api/feedback/route.ts` — write to a database, forward to Slack, send to PostHog, etc.
+Ratings send `{ page, vote, url }`. When written feedback is enabled through a linked Thally Cloud site, an optional note after a "No" rating sends `{ page, vote: "no", message, followUp: true, url }`. Treat `followUp: true` as context for the original rating, not another vote.
+
+The built-in `/api/feedback` route forwards feedback to the configured analytics service and safely no-ops when none is connected. Replace it with your own storage logic in `src/app/api/feedback/route.ts` to write to a database, forward to Slack, or send to another analytics tool.
 
 ## Structural themes
 

@@ -1,3 +1,5 @@
+/** Documentation page shell and its configurable reader feedback surfaces. */
+
 import type { DocEntry } from '@/data/docs'
 import { getBreadcrumbs, getPrevNextLinks, getFeedbackConfig } from '@/data/docs'
 import { DocBreadcrumbs } from '@/components/docs/doc-breadcrumbs'
@@ -29,12 +31,10 @@ export async function DocLayout({ doc, locale = 'en', children }: DocLayoutProps
     resolveSiteConfig(origin),
   ])
   const cloudFeedback = cloud?.siteConfig.portable.feedback
+  const hasThumbsRating = cloud ? Boolean(cloudFeedback?.thumbsRating) : true
   const showFeedback = cloud
     ? Boolean(
-        cloudFeedback?.thumbsRating ||
-          cloudFeedback?.pageFeedback ||
-          cloudFeedback?.editSuggestions ||
-          cloudFeedback?.issueReporting,
+        hasThumbsRating || cloudFeedback?.editSuggestions || cloudFeedback?.issueReporting,
       )
     : true
   const feedback = showFeedback ? (
@@ -42,8 +42,8 @@ export async function DocLayout({ doc, locale = 'en', children }: DocLayoutProps
       endpoint={feedbackConfig.endpoint ?? '/api/feedback'}
       pageId={doc.id}
       repoUrl={effectiveSite.repoUrl}
-      thumbsRating={cloud ? Boolean(cloudFeedback?.thumbsRating) : true}
-      pageFeedback={Boolean(cloudFeedback?.pageFeedback)}
+      thumbsRating={hasThumbsRating}
+      pageFeedback={hasThumbsRating && Boolean(cloudFeedback?.pageFeedback)}
       editSuggestions={Boolean(cloudFeedback?.editSuggestions)}
       issueReporting={Boolean(cloudFeedback?.issueReporting)}
     />
