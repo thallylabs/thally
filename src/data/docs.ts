@@ -161,7 +161,7 @@ export interface DocsJsonFonts {
 }
 
 export interface DocsJsonFeedback {
-  /** POST endpoint to receive feedback votes. Request body: { page, vote, url } */
+  /** POST endpoint for ratings and optional negative follow-ups. */
   endpoint?: string
   /** Show thumbs up/down widget. Defaults to true. */
   thumbsRating?: boolean

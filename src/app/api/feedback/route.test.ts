@@ -57,4 +57,56 @@ describe('POST /api/feedback', () => {
       })
     },
   )
+
+  it('records a written negative follow-up without counting another vote', async () => {
+    mocks.getCloudSiteConfig.mockResolvedValue({
+      siteConfig: {
+        portable: {
+          feedback: { thumbsRating: true, pageFeedback: true },
+        },
+      },
+    })
+
+    const response = await POST(
+      new Request('https://docs.example.com/api/feedback', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          page: '/guides/install',
+          vote: 'no',
+          message: '  Explain the required Node version.  ',
+          followUp: true,
+          url: 'https://docs.example.com/guides/install',
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(mocks.recordAnalyticsEvent).toHaveBeenCalledWith({
+      type: 'feedback',
+      path: '/guides/install',
+      page: '/guides/install',
+      referer: 'https://docs.example.com/guides/install',
+      vote: undefined,
+      message: 'Explain the required Node version.',
+      visitorType: 'human',
+    })
+  })
+
+  it.each([
+    { page: '/guide', vote: 'maybe' },
+    { page: '/guide', vote: 'yes', message: 'More examples', followUp: true },
+    { page: '/guide', vote: 'no', message: '   ', followUp: true },
+  ])('rejects an invalid feedback path %#', async (body) => {
+    const response = await POST(
+      new Request('https://docs.example.com/api/feedback', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    )
+
+    expect(response.status).toBe(400)
+    expect(mocks.recordAnalyticsEvent).not.toHaveBeenCalled()
+  })
 })

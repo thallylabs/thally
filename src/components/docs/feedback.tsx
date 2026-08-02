@@ -1,5 +1,7 @@
 'use client'
 
+/** Reader-facing page ratings and optional negative-feedback follow-ups. */
+
 import { AlertCircle, Pencil, Send, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { useState } from 'react'
 import { usePathname } from 'next/navigation'
@@ -16,6 +18,19 @@ interface FeedbackProps {
   issueReporting?: boolean
 }
 
+type FeedbackVote = 'yes' | 'no'
+type FeedbackRequestState = 'idle' | 'submitting' | 'recorded'
+type FeedbackMessageState = 'idle' | 'submitting' | 'sent'
+
+/** Keep the written prompt exclusive to an unresolved negative rating. */
+export function shouldShowFeedbackMessage(
+  vote: FeedbackVote | null,
+  isWrittenFeedbackEnabled: boolean,
+  messageState: FeedbackMessageState,
+): boolean {
+  return vote === 'no' && isWrittenFeedbackEnabled && messageState !== 'sent'
+}
+
 export function Feedback({
   endpoint = '/api/feedback',
   pageId,
@@ -26,44 +41,55 @@ export function Feedback({
   issueReporting = false,
 }: FeedbackProps) {
   const pathname = usePathname()
-  const [state, setState] = useState<'idle' | 'submitting' | 'recorded'>('idle')
-  const [voteValue, setVoteValue] = useState<'yes' | 'no' | null>(null)
+  const [state, setState] = useState<FeedbackRequestState>('idle')
+  const [voteValue, setVoteValue] = useState<FeedbackVote | null>(null)
   const [message, setMessage] = useState('')
+  const [messageState, setMessageState] = useState<FeedbackMessageState>('idle')
+  const [errorMessage, setErrorMessage] = useState('')
 
-  async function vote(value: 'yes' | 'no') {
+  async function sendFeedback(payload: Record<string, unknown>) {
+    // An empty endpoint intentionally preserves the zero-backend demo path.
+    if (!endpoint) return
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) throw new Error(`Feedback endpoint returned ${response.status}`)
+  }
+
+  async function vote(value: FeedbackVote) {
     setVoteValue(value)
     setState('submitting')
-    if (endpoint) {
-      try {
-        await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ page: pathname, vote: value, url: window.location.href }),
-        })
-      } catch {
-        // Silently ignore network errors — still show the thank-you message
-      }
+    setErrorMessage('')
+    try {
+      await sendFeedback({ page: pathname, vote: value, url: window.location.href })
+      setState('recorded')
+    } catch {
+      setVoteValue(null)
+      setState('idle')
+      setErrorMessage("We couldn't send your feedback. Check your connection and try again.")
     }
-    setState('recorded')
   }
 
   async function submitMessage() {
-    if (!voteValue || !message.trim()) return
-    setState('submitting')
+    const normalizedMessage = message.trim()
+    if (voteValue !== 'no' || !normalizedMessage) return
+    setMessageState('submitting')
+    setErrorMessage('')
     try {
-      await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          page: pathname,
-          vote: voteValue,
-          message: message.trim(),
-          url: window.location.href,
-        }),
+      await sendFeedback({
+        page: pathname,
+        vote: voteValue,
+        message: normalizedMessage,
+        followUp: true,
+        url: window.location.href,
       })
       setMessage('')
-    } finally {
-      setState('recorded')
+      setMessageState('sent')
+    } catch {
+      setMessageState('idle')
+      setErrorMessage("We couldn't send your note. Check your connection and try again.")
     }
   }
 
@@ -75,28 +101,43 @@ export function Feedback({
   const issueUrl = issueReporting && normalizedRepo
     ? `${normalizedRepo}/issues/new?title=${encodeURIComponent(`Docs feedback: ${pathname}`)}`
     : null
+  const isMessageVisible = shouldShowFeedbackMessage(voteValue, pageFeedback, messageState)
 
   if (state === 'recorded') {
     return (
       <MutedPanel className="space-y-3 text-sm text-foreground/80">
-        <p>Thanks for the feedback.</p>
-        {pageFeedback ? (
-          <div className="flex flex-col gap-2 sm:flex-row">
+        <p role="status">
+          {messageState === 'sent' ? 'Thanks — your note was sent.' : 'Thanks for the feedback.'}
+        </p>
+        {isMessageVisible ? (
+          <form
+            className="flex flex-col gap-2 sm:flex-row"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submitMessage()
+            }}
+          >
             <label className="sr-only" htmlFor="page-feedback-message">Tell us more</label>
             <input
               id="page-feedback-message"
               value={message}
               onChange={(event) => setMessage(event.target.value)}
               maxLength={500}
+              disabled={messageState === 'submitting'}
               placeholder="Tell us what could be clearer"
               className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
-            <Button size="sm" disabled={!message.trim()} onClick={submitMessage}>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={!message.trim() || messageState === 'submitting'}
+            >
               <Send className="mr-1.5 h-4 w-4" />
-              Send note
+              {messageState === 'submitting' ? 'Sending…' : 'Send note'}
             </Button>
-          </div>
+          </form>
         ) : null}
+        {errorMessage ? <p className="text-destructive" role="alert">{errorMessage}</p> : null}
       </MutedPanel>
     )
   }
@@ -105,13 +146,18 @@ export function Feedback({
     <Panel className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       {thumbsRating ? (
         <>
-          <p className="text-sm font-medium text-foreground/80">Was this page helpful?</p>
+          <div>
+            <p className="text-sm font-medium text-foreground/80">Was this page helpful?</p>
+            {errorMessage ? (
+              <p className="mt-1 text-sm text-destructive" role="alert">{errorMessage}</p>
+            ) : null}
+          </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" disabled={state === 'submitting'} onClick={() => vote('yes')}>
+            <Button variant="outline" size="sm" disabled={state === 'submitting'} onClick={() => void vote('yes')}>
               <ThumbsUp className="mr-1.5 h-4 w-4" />
               Yes
             </Button>
-            <Button variant="outline" size="sm" disabled={state === 'submitting'} onClick={() => vote('no')}>
+            <Button variant="outline" size="sm" disabled={state === 'submitting'} onClick={() => void vote('no')}>
               <ThumbsDown className="mr-1.5 h-4 w-4" />
               No
             </Button>
