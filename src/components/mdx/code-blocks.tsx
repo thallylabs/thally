@@ -100,7 +100,7 @@ function CopyButton({ code }: { code: string }) {
       type="button"
       aria-label={copied ? 'Copied' : 'Copy code'}
       title={copied ? 'Copied' : 'Copy'}
-      className="group/button relative inline-flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-foreground/55 transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="group/button relative inline-flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-white/60 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
       onClick={() => {
         void writeClipboardText(code).then((wasCopied) => {
           if (wasCopied) setCopyCount((count) => count + 1)
@@ -150,11 +150,11 @@ function CodeActions({ code }: { code: string }) {
 
   return (
     <span className="ml-auto flex items-center gap-0.5">
-      <button type="button" onClick={reportCode} disabled={!repositoryUrl} className="inline-flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-foreground/55 transition hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35" aria-label="Report incorrect code" title="Report incorrect code">
+      <button type="button" onClick={reportCode} disabled={!repositoryUrl} className="inline-flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-white/60 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35" aria-label="Report incorrect code" title="Report incorrect code">
         <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true"><path d="M8.2 3h7.6L21 8.2v7.6L15.8 21H8.2L3 15.8V8.2L8.2 3z"/><path d="M12 7.5V13" strokeLinecap="round"/><path d="M12 16.2v.1" strokeLinecap="round" strokeWidth="2.2"/></svg>
       </button>
       <CopyButton code={code} />
-      <button type="button" onClick={askAssistant} className="inline-flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-foreground/55 transition hover:bg-muted hover:text-foreground" aria-label="Ask assistant about this code" title="Ask Assistant">
+      <button type="button" onClick={askAssistant} className="inline-flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-white/60 transition hover:bg-white/10 hover:text-white" aria-label="Ask assistant about this code" title="Ask Assistant">
         <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true"><path d="M12 3.5l1.8 4.9 4.9 1.8-4.9 1.8L12 16.9l-1.8-4.9-4.9-1.8 4.9-1.8L12 3.5z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg>
       </button>
     </span>
@@ -163,7 +163,7 @@ function CodeActions({ code }: { code: string }) {
 
 function CodePanelHeader({ tag, label, code }: { tag?: string; label?: string; code: string }) {
   return (
-    <div className="flex h-9 items-center gap-2 border-b border-border px-3.5">
+    <div className="flex h-9 items-center gap-2 border-b border-white/10 px-3.5">
       {tag && (
         <div className="flex">
           <Tag variant="small">{tag}</Tag>
@@ -173,7 +173,7 @@ function CodePanelHeader({ tag, label, code }: { tag?: string; label?: string; c
         <span className="h-0.5 w-0.5 rounded-full bg-zinc-500" />
       )}
       {label && (
-        <span className="font-mono text-[0.74rem] text-foreground/55">{label}</span>
+        <span className="font-mono text-[0.74rem] text-white/60">{label}</span>
       )}
       <CodeActions code={code} />
     </div>
@@ -201,12 +201,14 @@ function CodePanel({
   label,
   code,
   wrap,
+  hasGroupHeader,
 }: {
   children: ReactNode
   tag?: string
   label?: string
   code?: string
   wrap?: boolean
+  hasGroupHeader?: boolean
 }) {
   const renderableChildren = getRenderableChildren(children)
   if (!renderableChildren.length) {
@@ -265,12 +267,18 @@ function CodePanel({
   }
 
   return (
-    <div className="group dark:bg-black/20">
-      <CodePanelHeader tag={resolvedTag} label={resolvedLabel ?? 'Code'} code={resolvedCode} />
+    <div className="group">
+      {hasGroupHeader ? (
+        <span className="absolute right-3 top-[7px] z-10">
+          <CodeActions code={resolvedCode} />
+        </span>
+      ) : (
+        <CodePanelHeader tag={resolvedTag} label={resolvedLabel ?? 'Code'} code={resolvedCode} />
+      )}
       <div className="relative">
         <pre
           className={clsx(
-            'p-4 font-mono text-[0.82rem] leading-[1.65] text-foreground',
+            'p-4 font-mono text-[0.82rem] leading-[1.65] text-white',
             resolvedWrap ? 'whitespace-pre-wrap break-words' : 'overflow-x-auto',
             languageClass,
           )}
@@ -299,9 +307,9 @@ function CodeGroupHeader({
   }
 
   return (
-    <div className="flex min-h-10 flex-wrap items-start gap-x-4 border-b border-border px-4">
+    <div className="flex min-h-10 flex-wrap items-start gap-x-4 border-b border-white/10 px-4 pr-24">
       {title && (
-        <p className="mr-auto pt-3 text-xs font-semibold text-foreground">
+        <p className="mr-auto pt-3 text-xs font-semibold text-white">
           {title}
         </p>
       )}
@@ -313,7 +321,7 @@ function CodeGroupHeader({
                 'border-b py-3 transition focus-visible:outline-none',
                 childIndex === selectedIndex
                   ? 'border-accent text-accent'
-                  : 'border-transparent text-foreground/55 hover:text-foreground',
+                  : 'border-transparent text-white/55 hover:text-white',
               )}
             >
               {getPanelTitle(
@@ -409,7 +417,7 @@ const CodeGroupContext = createContext(false)
 
 export function CodeGroup({
   children,
-  title = 'Code',
+  title,
   ...props
 }: ComponentPropsWithoutRef<typeof CodeGroupPanels> & { title?: string }) {
   const languages = useMemo(
@@ -423,15 +431,16 @@ export function CodeGroup({
   )
   const tabGroupProps = useTabGroupProps(languages)
   const hasTabs = Children.count(children) > 1
+  const hasGroupHeader = Boolean(title || hasTabs)
 
   const containerClassName =
-    'thally-docs-code my-5 overflow-hidden rounded-[11px] border border-border bg-muted/40'
+    'thally-docs-code relative my-5 overflow-hidden rounded-[11px] border'
   const header = (
     <CodeGroupHeader title={title} selectedIndex={tabGroupProps.selectedIndex}>
       {children}
     </CodeGroupHeader>
   )
-  const panels = <CodeGroupPanels {...props}>{children}</CodeGroupPanels>
+  const panels = <CodeGroupPanels {...props} hasGroupHeader={hasGroupHeader}>{children}</CodeGroupPanels>
 
   return (
     <CodeGroupContext.Provider value={true}>

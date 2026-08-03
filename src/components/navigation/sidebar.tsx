@@ -35,7 +35,7 @@ export function Sidebar({ sections, title, className }: SidebarProps) {
 
   return (
     <aside
-      className={cn('thally-docs-sidebar hidden shrink-0 border-r border-border bg-sidebar lg:block', layout.sidebarWidth, className)}
+      className={cn('thally-docs-sidebar hidden shrink-0 border-r border-border bg-background lg:block', layout.sidebarWidth, className)}
     >
       {/* Stay in the shell's flow so optional site banners reserve their own
           space above the brand, then pin the navigation once they scroll away. */}

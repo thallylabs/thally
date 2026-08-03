@@ -83,12 +83,12 @@ export function Hero({
           {title}
         </h1>
         {subtitle ? (
-          <p className="mt-4 max-w-[56ch] text-[1.08rem] leading-[1.65] text-pretty text-foreground/75">
+          <p className="mt-6 max-w-[56ch] text-[1.08rem] leading-[1.65] text-pretty text-foreground/75">
             {subtitle}
           </p>
         ) : null}
         {hasActions ? (
-          <div className="mt-7 flex flex-wrap items-center gap-3">
+          <div className="mt-8 flex flex-wrap items-center gap-3">
             {primaryHref ? (
               <Link
                 href={primaryHref}
@@ -141,9 +141,13 @@ export function Card({ title, href, icon, iconType, img, children }: CardProps) 
           />
         </div>
       ) : null}
-      <div className="flex items-center gap-2">
-        {icon ? <Icon icon={icon} iconType={iconType} /> : null}
-        {title ? <p className="text-base font-semibold text-foreground">{title}</p> : null}
+      <div className="flex min-h-6 items-center gap-2.5">
+        {icon ? (
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center text-accent">
+            <Icon icon={icon} iconType={iconType} className="h-[18px] w-[18px]" />
+          </span>
+        ) : null}
+        {title ? <p className="m-0 flex min-h-6 items-center text-base font-semibold leading-5 text-foreground">{title}</p> : null}
       </div>
       {children ? <div className="prose prose-sm text-foreground/80 dark:prose-invert">{children}</div> : null}
     </article>
@@ -363,9 +367,13 @@ export function Tile({ title, href, icon, iconType, img, children }: TileProps &
           />
         </div>
       ) : null}
-      <div className="flex items-center gap-3">
-        {icon ? <Icon icon={icon} iconType={iconType} className="h-6 w-6" /> : null}
-        {title ? <p className="text-lg font-semibold text-foreground">{title}</p> : null}
+      <div className="flex min-h-7 items-center gap-3">
+        {icon ? (
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center text-accent">
+            <Icon icon={icon} iconType={iconType} className="h-5 w-5" />
+          </span>
+        ) : null}
+        {title ? <p className="m-0 flex min-h-7 items-center text-lg font-semibold leading-6 text-foreground">{title}</p> : null}
       </div>
       {children ? <div className="prose prose-sm text-foreground/70 dark:prose-invert">{children}</div> : null}
     </article>

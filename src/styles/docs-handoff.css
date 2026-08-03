@@ -20,11 +20,11 @@
   --theme-nav-tab-active-bg: transparent;
   --theme-nav-tab-active-shadow: none;
   --docs-panel: hsl(var(--thally-muted) / 0.48);
-  --docs-code: hsl(var(--thally-muted) / 0.62);
+  --docs-code: #11150f;
 }
 html {
   scroll-behavior: auto;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 body {
@@ -130,6 +130,7 @@ body {
 
 .thally-docs-sidebar {
   align-self: stretch;
+  background: hsl(var(--thally-background));
 }
 
 .thally-docs-sidebar a[aria-current='page'] {
@@ -146,6 +147,7 @@ body {
 }
 
 .thally-docs-prose {
+  min-width: 0;
   color: hsl(var(--thally-foreground) / 0.78);
   font-size: 0.94rem;
   line-height: 1.7;
@@ -220,13 +222,25 @@ body {
 }
 
 .thally-docs-code {
+  width: 100%;
+  max-width: 54rem;
+  min-width: 0;
+  border-color: rgb(255 255 255 / 0.12);
   background: var(--docs-code);
+  color: #f4f5ee;
   box-shadow: none;
 }
 
 .thally-docs-code pre {
+  max-width: 100%;
   margin: 0;
   background: transparent !important;
+  color: #f4f5ee !important;
+  overflow-x: auto;
+}
+
+.thally-docs-api .thally-docs-code {
+  max-width: 100%;
 }
 
 .thally-docs-card {
