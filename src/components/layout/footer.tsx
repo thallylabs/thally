@@ -1,6 +1,6 @@
-import Link from 'next/link'
 import type { SiteLink } from '@/data/site'
 import type { DocsJsonFooter } from '@/data/docs'
+import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
 
 // Social icon SVGs (inline, no extra dep needed)
 function GithubIcon({ className }: { className?: string }) {
@@ -79,9 +79,9 @@ export function Footer({ footerConfig, siteName, siteLinks }: FooterProps) {
                               {item.label}
                             </a>
                           ) : (
-                            <Link href={item.href} className="text-sm text-foreground/60 hover:text-foreground">
+                            <IntentPrefetchLink href={item.href} className="text-sm text-foreground/60 hover:text-foreground">
                               {item.label}
-                            </Link>
+                            </IntentPrefetchLink>
                           )}
                         </li>
                       )
@@ -125,9 +125,9 @@ export function Footer({ footerConfig, siteName, siteLinks }: FooterProps) {
         <p>© {new Date().getFullYear()} {siteName}. All rights reserved.</p>
         <div className="flex gap-4">
           {siteLinks.map((link) => (
-            <Link key={link.href} href={link.href} className="hover:text-foreground">
+            <IntentPrefetchLink key={link.href} href={link.href} className="hover:text-foreground">
               {link.label}
-            </Link>
+            </IntentPrefetchLink>
           ))}
         </div>
       </div>

@@ -185,10 +185,9 @@ describe('managed content cache headers', () => {
     expect(response.headers.get('Cache-Tag')).toBeNull()
   })
 
-  it('leaves RSC navigation requests passing through untouched (regression)', async () => {
-    enableManagedAssetsMode()
+  it('CDN-caches public RSC navigation payloads without changing routing', async () => {
     const response = await middleware(
-      docRequest('/getting-started', {
+      docRequest('/getting-started?_rsc=route-state', {
         rsc: '1',
         'next-router-state-tree': '%5B%22%22%5D',
       }),
@@ -199,5 +198,37 @@ describe('managed content cache headers', () => {
     expect(response.headers.get('x-middleware-next')).toBe('1')
     expect(response.headers.get('location')).toBeNull()
     expect(response.headers.get('x-middleware-rewrite')).toBeNull()
+    expect(response.headers.get('CDN-Cache-Control')).toBe(
+      'public, s-maxage=31536000, stale-while-revalidate=86400',
+    )
+    expect(response.headers.get('Netlify-CDN-Cache-Control')).toBe(
+      'public, s-maxage=31536000, stale-while-revalidate=86400',
+    )
+  })
+
+  it('never CDN-caches an authenticated RSC payload from password-gated docs', async () => {
+    vi.mocked(getCloudAccessConfigEdge).mockResolvedValue({ access: { mode: 'password' } })
+    vi.mocked(isDocsAccessGrantedEdge).mockResolvedValue(true)
+
+    const response = await middleware(
+      docRequest('/getting-started?_rsc=private-route-state', { rsc: '1' }),
+      EVENT,
+    )
+
+    expect(response.headers.get('x-middleware-next')).toBe('1')
+    expect(response.headers.get('CDN-Cache-Control')).toBeNull()
+    expect(response.headers.get('Netlify-CDN-Cache-Control')).toBeNull()
+  })
+
+  it('does not count intent-prefetched routes as page views', async () => {
+    await middleware(
+      docRequest('/quickstart?_rsc=prefetch-state', {
+        rsc: '1',
+        'next-router-prefetch': '1',
+      }),
+      EVENT,
+    )
+
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })

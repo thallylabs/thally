@@ -1,5 +1,4 @@
 import Image from 'next/image'
-import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { ZoomableContent } from '@/components/mdx/zoomable-content'
 import {
@@ -17,6 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
 
 type IconName =
   | 'book-open'
@@ -90,21 +90,21 @@ export function Hero({
         {hasActions ? (
           <div className="mt-8 flex flex-wrap items-center gap-3">
             {primaryHref ? (
-              <Link
+              <IntentPrefetchLink
                 href={primaryHref}
                 className="inline-flex items-center gap-2 rounded-[9px] bg-primary px-4 py-2 text-[0.84rem] font-semibold text-primary-foreground transition hover:brightness-125 active:scale-[0.98]"
               >
                 {primaryLabel ?? 'Get started'}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
-              </Link>
+              </IntentPrefetchLink>
             ) : null}
             {secondaryHref ? (
-              <Link
+              <IntentPrefetchLink
                 href={secondaryHref}
                 className="inline-flex items-center gap-2 rounded-[9px] border border-border bg-background px-4 py-2 text-[0.84rem] font-semibold text-foreground transition hover:border-accent hover:text-foreground active:scale-[0.98]"
               >
                 {secondaryLabel ?? 'Learn more'}
-              </Link>
+              </IntentPrefetchLink>
             ) : null}
           </div>
         ) : null}
@@ -156,14 +156,14 @@ export function Card({ title, href, icon, iconType, img, children }: CardProps) 
   if (href) {
     const external = isExternalLink(href)
     return (
-      <Link
+      <IntentPrefetchLink
         href={href}
         className="block h-full"
         target={external ? '_blank' : undefined}
         rel={external ? 'noreferrer' : undefined}
       >
         {content}
-      </Link>
+      </IntentPrefetchLink>
     )
   }
 
@@ -382,9 +382,9 @@ export function Tile({ title, href, icon, iconType, img, children }: TileProps &
   if (href) {
     const external = isExternalLink(href)
     return (
-      <Link href={href} className="block h-full" target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
+      <IntentPrefetchLink href={href} className="block h-full" target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
         {content}
-      </Link>
+      </IntentPrefetchLink>
     )
   }
   return content
