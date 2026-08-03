@@ -1,88 +1,135 @@
 ---
 title: Quickstart
-description: Get a Thally documentation site running locally in under five minutes.
+description: Create a Thally documentation site, add your first page, and validate it locally in one guided flow.
 ---
 
-Follow these steps to go from zero to a running docs site.
+After this guide, you will have a local Thally site with a page you created in
+the sidebar and a validation report you can act on.
 
-![HTML browser window](/images/image2.jpg)
+## Before you begin
 
-<Steps>
+You need [Node.js](https://nodejs.org/) 20.9 or later, npm, a terminal, and a
+code editor. You do not need an account, API key, or database.
 
-<Step title="Create your project">
+Thally uses a docs-as-code workflow. You write pages as MDX files, organize
+them in `docs.json`, preview changes locally, and commit them with the rest of
+your project.
+
+## Create your documentation site
+
+Run the non-interactive setup to create a project and install its dependencies:
 
 ```bash
-npx create-thally-docs my-docs
+npx create-thally-docs my-docs --yes --install
 cd my-docs
-npm install
 npm run dev
 ```
 
-Open the local URL printed by the server. It starts at
+Open the URL printed in your terminal. The server starts at
 [http://localhost:3040](http://localhost:3040) and moves to the next available
-port when needed.
+port when 3040 is already in use.
 
-</Step>
+<Note type="info" title="Want to choose the name, brand, and repository?">
+Run `npx create-thally-docs my-docs --install` without `--yes` to use the guided
+setup.
+</Note>
 
-<Step title="Add a page">
+## Know the three files you will edit
 
-Create `src/content/my-page.mdx`:
+| File | What you control |
+| --- | --- |
+| `src/content/*.mdx` | Page content and frontmatter |
+| `docs.json` | Tabs, sidebar groups, page order, and optional features |
+| `src/data/site.ts` | Product name, description, links, and versioned brand defaults |
+
+## Make your first content change
+
+<Steps>
+
+<Step title="Create a page">
+
+Create `src/content/first-page.mdx`:
 
 ```mdx
 ---
-title: My Page
-description: A new documentation page.
+title: Your first page
+description: A short page created during the Thally quickstart.
 ---
 
-Write your content here using Markdown and JSX components.
+You created this page with Markdown. Because it is MDX, you can also use
+Thally components when you need callouts, steps, cards, tabs, or diagrams.
+
+## What to do next
+
+Replace this example with the first task your users need to complete.
 ```
 
 </Step>
 
-<Step title="Register it in navigation">
+<Step title="Add the page to your sidebar">
 
-Open `docs.json` and add the page to a group:
+In `docs.json`, add the page ID to the `Start here` group:
 
 ```json
 {
-  "group": "Getting Started",
-  "pages": ["introduction", "quickstart", "my-page"]
+  "group": "Start here",
+  "pages": ["introduction", "quickstart", "first-page"]
 }
 ```
 
-The sidebar updates automatically — no restart required.
+Page IDs match file paths under `src/content/` without the `.mdx` extension.
+Save the file and the sidebar updates without restarting the server.
 
 </Step>
 
-<Step title="Add an API reference">
+<Step title="Open your page">
 
-Drop an OpenAPI spec (YAML or JSON) into the project root and reference it in `docs.json`:
-
-```json
-{
-  "tab": "API Reference",
-  "api": {
-    "source": "openapi.yaml"
-  }
-}
-```
-
-Thally generates interactive endpoint pages with parameter tables, schemas, code samples, and a "Try It" console.
+Select **Your first page** in the sidebar. Confirm that the title, description,
+body, and new sidebar entry all appear as expected.
 
 </Step>
 
-<Step title="Deploy">
+<Step title="Validate the project">
+
+In a second terminal, run:
 
 ```bash
-npm run build
+npx thally check
 ```
 
-Deploy to any platform that supports Next.js — Vercel, Netlify, Cloudflare, or a Docker container.
-
-<Note type="info" title="Environment variables">
-Set `THALLY_SITE_URL` in your hosting dashboard for correct OpenGraph URLs and metadata.
-</Note>
+Resolve any errors before you publish. Warnings identify content that may need
+attention but do not block a build.
 
 </Step>
 
 </Steps>
+
+## What you accomplished
+
+- Created a complete documentation project without an account or hosted service
+- Added a real MDX page and placed it in the sidebar
+- Previewed the result locally
+- Checked the content and navigation before publishing
+
+## Choose your next task
+
+<CardGroup cols={2}>
+  <Card title="Write and format pages" icon="book-open" href="/guides/writing-content">
+    Add frontmatter, code examples, callouts, steps, tabs, and reusable content.
+  </Card>
+  <Card title="Organize the navigation" icon="grid-round" href="/guides/configuring-navigation">
+    Turn your page list into task-based tabs and sidebar groups.
+  </Card>
+  <Card title="Customize the site" icon="wrench" href="/guides/branding-and-theming">
+    Set your product identity, colors, logos, fonts, navbar, and footer.
+  </Card>
+  <Card title="Generate an API reference" icon="link-simple" href="/guides/api-reference-setup">
+    Connect an OpenAPI specification and publish interactive endpoint docs.
+  </Card>
+  <Card title="Deploy the site" icon="code-simple" href="/guides/deploying">
+    Build the project, set its production URL, and deploy it to your host.
+  </Card>
+  <Card title="Connect agents" icon="message" href="/guides/mcp-server">
+    Give supported tools structured access to search and read your documentation.
+  </Card>
+</CardGroup>

@@ -126,11 +126,12 @@
       "tab": "Overview",
       "groups": [
         {
-          "group": "Getting Started",
+          "group": "Start here",
           "icon": "book-open",
           "pages": [
             "introduction",
-            "quickstart"
+            "quickstart",
+            "guides/cli-reference"
           ]
         }
       ]
@@ -139,16 +140,17 @@
       "tab": "Guides",
       "groups": [
         {
-          "group": "Content",
+          "group": "Create and organize",
           "icon": "book-open",
           "pages": [
             "guides/writing-content",
             "guides/configuring-navigation",
-            "guides/api-reference-setup"
+            "guides/api-reference-setup",
+            "guides/multi-language"
           ]
         },
         {
-          "group": "Customize",
+          "group": "Customize your site",
           "icon": "grid-round",
           "pages": [
             "guides/branding-and-theming",
@@ -157,7 +159,7 @@
           ]
         },
         {
-          "group": "Ship",
+          "group": "Publish and maintain",
           "icon": "wrench",
           "pages": [
             "guides/deploying",
@@ -166,13 +168,11 @@
           ]
         },
         {
-          "group": "AI & Tooling",
-          "icon": "code-simple",
+          "group": "Connect agents",
+          "icon": "message",
           "pages": [
             "guides/ai-features",
-            "guides/cli-reference",
-            "guides/mcp-server",
-            "guides/multi-language"
+            "guides/mcp-server"
           ]
         }
       ]

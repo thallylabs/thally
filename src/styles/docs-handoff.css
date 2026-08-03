@@ -149,7 +149,7 @@ body {
 .thally-docs-prose {
   min-width: 0;
   color: hsl(var(--thally-foreground) / 0.78);
-  font-size: 0.94rem;
+  font-size: 1rem;
   line-height: 1.7;
 }
 
@@ -245,6 +245,11 @@ body {
 
 .thally-docs-card {
   box-shadow: none;
+}
+
+.thally-docs-card > .prose {
+  font-size: 1rem;
+  line-height: 1.6;
 }
 
 a[target='_blank'] > .thally-docs-card::after {

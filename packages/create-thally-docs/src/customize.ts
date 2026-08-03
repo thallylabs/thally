@@ -65,32 +65,32 @@ keywords:
 ---
 
 <Hero
-  title="Welcome to {NAME}"
-  subtitle="Use this starter to introduce your product, guide readers to their first successful outcome, and publish a clear API reference."
-  primaryLabel="Start the quickstart"
+  title="Start building with {NAME}"
+  subtitle="Complete the quickstart, learn the core workflow, and find the next task you need without reading the docs front to back."
+  primaryLabel="Complete the quickstart"
   primaryHref="/quickstart"
-  secondaryLabel="See components"
+  secondaryLabel="Create a guide"
   secondaryHref="/components"
 />
 
 <CardGroup cols={3}>
-  <Card title="Quickstart" icon="party-horn" href="/quickstart">
-    Show readers the fastest path to a useful first result.
+  <Card title="Complete the quickstart" icon="party-horn" href="/quickstart">
+    Install {NAME}, complete the smallest useful workflow, and verify the result.
   </Card>
-  <Card title="Components" icon="grid-round" href="/components">
-    Structure guides with steps, tabs, cards, callouts, accordions, and more.
+  <Card title="Create a guide" icon="grid-round" href="/components">
+    Turn a product task into clear steps using tabs, cards, callouts, and more.
   </Card>
-  <Card title="API reference" icon="code-simple" href="/api">
-    Replace \`openapi.yaml\` with your specification to publish interactive endpoints.
+  <Card title="Integrate the API" icon="code-simple" href="/api">
+    Find an endpoint, understand its inputs, and make your first request.
   </Card>
-  <Card title="Customize" icon="wrench" href="/customization">
+  <Card title="Customize your site" icon="wrench" href="/customization">
     Make the navigation, brand, typography, and links your own.
   </Card>
-  <Card title="Multi-language" icon="message" href="/es">
-    Switch to the included Spanish example from the language menu.
+  <Card title="Publish another language" icon="message" href="/es">
+    Use the included Spanish pages as a starting point for localized documentation.
   </Card>
-  <Card title="Agent-ready docs" icon="link-simple" href="/llms.txt">
-    Give coding agents a clean, structured version of your documentation.
+  <Card title="Connect an AI agent" icon="link-simple" href="/llms.txt">
+    Give an agent clean, structured context through the generated discovery endpoints.
   </Card>
 </CardGroup>
 
@@ -100,8 +100,8 @@ keywords:
 </Note>
 `,
   'quickstart.mdx': `---
-title: Quickstart
-description: Give readers the fastest path to a successful first result with {NAME}.
+title: Get started with {NAME}
+description: Install {NAME}, complete the core workflow, and verify your first successful result.
 keywords:
   - {NAME}
   - quickstart
@@ -109,41 +109,63 @@ keywords:
   - getting started
 ---
 
-Describe the prerequisites and the shortest useful workflow. A good quickstart
-takes someone from zero to a visible result without explaining every option.
+By the end of this guide, you will install {NAME}, complete its smallest useful
+workflow, and verify the result. Keep this path focused on one outcome; move
+optional configuration and alternative workflows into separate guides.
 
-## Prerequisites
+## Before you begin
 
-- Requirement one, such as an account, API key, or supported runtime
-- Requirement two, such as a compatible device, browser, or operating system
+Replace this starter list with the exact requirements a reader needs:
+
+- An account or credential, if the workflow requires one
+- A supported runtime, device, browser, or operating system
+- Permission to create or modify the resource used in the example
 
 <Steps>
-  <Step title="Install">
-    Explain how to install {NAME} or create an account.
+  <Step title="Install {NAME}">
+    Give readers one recommended installation path.
 
     \`\`\`bash
     npm install your-package
     \`\`\`
   </Step>
-  <Step title="Configure">
-    Show only the configuration required for the first successful run.
+  <Step title="Add the required configuration">
+    Include only the settings required for this first successful run.
 
     \`\`\`bash
     your-cli init
     \`\`\`
   </Step>
-  <Step title="Run it">
-    Give readers a command or action with an observable result.
+  <Step title="Complete your first task">
+    Use one realistic example that produces an observable result.
 
     \`\`\`bash
     your-cli start
     \`\`\`
   </Step>
+  <Step title="Verify the result">
+    Tell readers exactly what they should see, where they should see it, and
+    how to recover if the expected result does not appear.
+  </Step>
 </Steps>
 
-<Tip>
-  Tell readers where to get help, then link to the next guide they should read.
-</Tip>
+## What you accomplished
+
+Summarize the working state the reader now has in one or two sentences.
+
+## Choose your next task
+
+<CardGroup cols={3}>
+  <Card title="Create a guide" icon="grid-round" href="/components">
+    Learn which content components make a task easier to follow.
+  </Card>
+  <Card title="Integrate the API" icon="code-simple" href="/api">
+    Explore endpoints and make a request against your API.
+  </Card>
+  <Card title="Customize your site" icon="wrench" href="/customization">
+    Update navigation, branding, typography, and project links.
+  </Card>
+</CardGroup>
 `,
   'components.mdx': `---
 title: Components
@@ -255,60 +277,75 @@ mode: home
 ---
 
 <Hero
-  title="Te damos la bienvenida a {NAME}"
-  subtitle="Usa este sitio inicial para presentar tu producto, guiar a tus lectores hasta su primer resultado y publicar una referencia de API clara."
-  primaryLabel="Abrir inicio rápido"
+  title="Empieza a crear con {NAME}"
+  subtitle="Completa el inicio rápido, aprende el flujo principal y encuentra tu siguiente tarea sin leer toda la documentación."
+  primaryLabel="Completar el inicio rápido"
   primaryHref="/es/quickstart"
-  secondaryLabel="Ver componentes"
+  secondaryLabel="Crear una guía"
   secondaryHref="/es/components"
 />
 
 <CardGroup cols={3}>
-  <Card title="Inicio rápido" icon="party-horn" href="/es/quickstart">
-    Ayuda a tus lectores a lograr su primer resultado en minutos.
+  <Card title="Completa el inicio rápido" icon="party-horn" href="/es/quickstart">
+    Instala {NAME}, completa el flujo principal y comprueba el resultado.
   </Card>
-  <Card title="Componentes" icon="grid-round" href="/es/components">
-    Usa pestañas, pasos, tarjetas, avisos y acordeones.
+  <Card title="Crea una guía" icon="grid-round" href="/es/components">
+    Convierte una tarea en pasos claros con pestañas, tarjetas y avisos.
   </Card>
-  <Card title="Referencia de API" icon="code-simple" href="/es/api">
-    Convierte \`openapi.yaml\` en documentación interactiva.
+  <Card title="Integra la API" icon="code-simple" href="/es/api">
+    Encuentra un endpoint, comprende sus entradas y realiza una solicitud.
   </Card>
-  <Card title="Personalización" icon="wrench" href="/es/customization">
+  <Card title="Personaliza el sitio" icon="wrench" href="/es/customization">
     Adapta la navegación, marca, tipografía y enlaces.
   </Card>
-  <Card title="Varios idiomas" icon="message" href="/">
+  <Card title="Publica otro idioma" icon="message" href="/">
     Cambia entre inglés y español desde el selector de idioma.
   </Card>
-  <Card title="Preparado para IA" icon="link-simple" href="/llms.txt">
-    Publica contenido legible por agentes desde el primer día.
+  <Card title="Conecta un agente de IA" icon="link-simple" href="/llms.txt">
+    Ofrece contexto estructurado mediante los endpoints de descubrimiento.
   </Card>
 </CardGroup>
 `,
   'quickstart.mdx': `---
-title: Inicio rápido
-description: Guía a tus lectores hasta su primer resultado con {NAME}.
+title: Empieza con {NAME}
+description: Instala {NAME}, completa el flujo principal y comprueba tu primer resultado.
 ---
 
-Un buen inicio rápido lleva al lector de cero a un resultado visible sin explicar
-todas las opciones.
+Al terminar esta guía, habrás instalado {NAME}, completado su flujo más útil y
+comprobado el resultado.
+
+## Antes de empezar
+
+- Una cuenta o credencial, si el flujo la necesita
+- Un entorno, dispositivo o navegador compatible
+- Permiso para crear o modificar el recurso del ejemplo
 
 <Steps>
-  <Step title="Instala">
-    Explica cómo instalar {NAME} o crear una cuenta.
+  <Step title="Instala {NAME}">
+    Muestra una única ruta de instalación recomendada.
 
     \`\`\`bash
     npm install your-package
     \`\`\`
   </Step>
-  <Step title="Configura">
-    Muestra únicamente la configuración necesaria para comenzar.
+  <Step title="Añade la configuración necesaria">
+    Incluye solo los ajustes necesarios para completar este flujo.
   </Step>
-  <Step title="Ejecuta">
-    Termina con una acción y un resultado que el lector pueda comprobar.
+  <Step title="Completa tu primera tarea">
+    Usa un ejemplo realista que produzca un resultado observable.
+  </Step>
+  <Step title="Comprueba el resultado">
+    Explica qué debe ver el lector y dónde debe encontrarlo.
   </Step>
 </Steps>
 
-<Tip>Enlaza la siguiente guía que debería leer una vez completado este flujo.</Tip>
+## Elige tu siguiente tarea
+
+<CardGroup cols={3}>
+  <Card title="Crea una guía" icon="grid-round" href="/es/components" />
+  <Card title="Integra la API" icon="code-simple" href="/es/api" />
+  <Card title="Personaliza el sitio" icon="wrench" href="/es/customization" />
+</CardGroup>
 `,
   'components.mdx': `---
 title: Componentes
@@ -393,9 +430,9 @@ function buildStarterDocsJson({
     {
       tab: 'Overview',
       groups: [
-        { group: 'Getting Started', icon: 'book-open', pages: ['introduction', 'quickstart'] },
-        { group: 'Explore', icon: 'grid-round', pages: ['components'] },
-        { group: 'Project', icon: 'wrench', pages: ['customization'] },
+        { group: 'Start here', icon: 'book-open', pages: ['introduction', 'quickstart'] },
+        { group: 'Create content', icon: 'grid-round', pages: ['components'] },
+        { group: 'Customize your site', icon: 'wrench', pages: ['customization'] },
       ],
     },
     { tab: 'API Reference', api: { source: 'openapi.yaml' } },
