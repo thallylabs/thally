@@ -147,7 +147,7 @@ export function Card({ title, href, icon, iconType, img, children }: CardProps) 
             <Icon icon={icon} iconType={iconType} className="h-[18px] w-[18px]" />
           </span>
         ) : null}
-        {title ? <p className="m-0 flex min-h-6 items-center text-base font-semibold leading-5 text-foreground">{title}</p> : null}
+        {title ? <span className="flex min-h-6 items-center text-base font-semibold leading-5 text-foreground">{title}</span> : null}
       </div>
       {children ? <div className="prose prose-sm text-foreground/80 dark:prose-invert">{children}</div> : null}
     </article>
@@ -373,7 +373,7 @@ export function Tile({ title, href, icon, iconType, img, children }: TileProps &
             <Icon icon={icon} iconType={iconType} className="h-5 w-5" />
           </span>
         ) : null}
-        {title ? <p className="m-0 flex min-h-7 items-center text-lg font-semibold leading-6 text-foreground">{title}</p> : null}
+        {title ? <span className="flex min-h-7 items-center text-lg font-semibold leading-6 text-foreground">{title}</span> : null}
       </div>
       {children ? <div className="prose prose-sm text-foreground/70 dark:prose-invert">{children}</div> : null}
     </article>
