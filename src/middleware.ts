@@ -75,22 +75,19 @@ function shouldTrackRequest(request: NextRequest, pathname: string): boolean {
 }
 
 /**
- * Browser documents and App Router payloads are safe to cache only when they
- * are public and URL-distinct. RSC payloads require the `_rsc` query key so a
- * CDN can never serve component data for a plain HTML request.
+ * Public browser documents are immutable within an atomic deployment. Dynamic
+ * RSC responses are intentionally excluded: Next.js finalizes those responses
+ * as private/no-store after middleware, so navigation speed comes from full
+ * intent prefetching rather than an unreliable CDN header.
  */
-function isCacheableDocsRequest(
+function isCacheableDocsPage(
   request: NextRequest,
   pathname: string,
   docsAccessEnabled: boolean,
 ): boolean {
-  const isHtmlDocument = request.headers.get('accept')?.includes('text/html') === true
-  const isRscPayload =
-    request.headers.get('rsc') === '1' && request.nextUrl.searchParams.has('_rsc')
-
   return (
     request.method === 'GET' &&
-    (isHtmlDocument || isRscPayload) &&
+    request.headers.get('accept')?.includes('text/html') === true &&
     !docsAccessEnabled &&
     !pathname.startsWith('/api') &&
     !pathname.startsWith('/admin') &&
@@ -330,10 +327,10 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     response.headers.append('Link', '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"')
     response.headers.set('X-Llms-Txt', `${request.nextUrl.origin}/llms.txt`)
   }
-  if (isCacheableDocsRequest(request, pathname, docsAccessEnabled)) {
-    // Middleware makes otherwise-static docs dynamic to Netlify. Documents and
-    // URL-keyed RSC payloads are immutable within an atomic deploy, so keep
-    // browser revalidation while serving navigation payloads from the CDN.
+  if (isCacheableDocsPage(request, pathname, docsAccessEnabled)) {
+    // Middleware makes otherwise-static docs dynamic to Netlify. Documents are
+    // immutable within an atomic deploy, so retain browser revalidation while
+    // serving full page loads from the CDN.
     const cdnCache = 'public, s-maxage=31536000, stale-while-revalidate=86400'
     response.headers.set(
       'Cache-Control',
