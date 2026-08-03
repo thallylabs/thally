@@ -205,6 +205,10 @@ body {
   color: hsl(var(--thally-primary-foreground)) !important;
 }
 
+.thally-docs-prose .thally-docs-hero-copy {
+  margin-block: 2rem 1.08rem;
+}
+
 .thally-docs-prose :where(code):not(:where(pre *)) {
   border: 1px solid hsl(var(--thally-border));
   border-radius: 4px;

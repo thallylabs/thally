@@ -1,17 +1,82 @@
 ---
-title: CLI Reference
-description: All create-thally-docs commands for scaffolding, migrating, and linting Thally projects.
+title: CLI reference
+description: Use the Thally CLI to create, preview, check, migrate, translate, and publish documentation projects.
 ---
 
-The `create-thally-docs` CLI is the primary tool for working with Thally projects from the terminal. Install it globally or run it directly with `npx`.
+The generated project includes `@thallylabs/cli`, so you can run the unified
+CLI with `npx thally` from the project root. The command keeps routine work
+focused on content and configuration instead of Next.js internals.
 
 ```bash
-npx create-thally-docs [command] [args] [options]
+npx thally
+```
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `thally init [dir]` | Create a project with `create-thally-docs`. |
+| `thally dev` | Start the local documentation server. |
+| `thally build` | Build the production site. |
+| `thally start` | Serve a completed production build. |
+| `thally deploy [--prod] [--cloudflare]` | Build and deploy with Vercel or Cloudflare Workers. |
+| `thally check [--agents] [--fix] [--ci] [--external] [--drift]` | Validate content and optional agent-readiness checks. |
+| `thally new PAGE_ID` | Create an MDX page and register it in `docs.json`. |
+| `thally migrate SOURCE [dir]` | Import a documentation repository or public site. |
+| `thally translate --locale LOCALE` | Generate or refresh a translated content tree. |
+| `thally mcp` | Start the local MCP server over standard input/output. |
+| `thally agent "INSTRUCTION"` | Draft a documentation change for review. |
+| `thally track add`, `list`, `test`, or `setup` | Connect product-repository changes to documentation work. |
+
+Run `npx thally` with no command to see the current command list.
+
+### Preview and build
+
+```bash
+npx thally dev
+npx thally build
+npx thally start
+```
+
+`dev` starts the project server. `build` creates the production output, and
+`start` serves an existing production build.
+
+### Add and check content
+
+```bash
+npx thally new guides/invite-a-member \
+  --title "Invite a team member" \
+  --description "Add a teammate and choose their role."
+
+npx thally check
+```
+
+`new` creates the MDX file and registers it in the last group of the first
+content tab. `check` validates the project. Add `--ci` for GitHub annotations,
+`--external` to check external links, `--drift` to evaluate provenance, or
+`--agents` to include the Agent Readiness Score.
+
+### Deploy
+
+```bash
+npx thally deploy --prod          # Vercel
+npx thally deploy --cloudflare    # Cloudflare Workers
+```
+
+The deploy command builds the provider-specific artifact before it publishes.
+See [Deploying](/guides/deploying) for host configuration and durable storage.
+
+## Scaffold with create-thally-docs
+
+Use `create-thally-docs` directly when you are creating or migrating a project:
+
+```bash
+npx create-thally-docs@latest [command] [args] [options]
 ```
 
 ---
 
-## create-thally-docs (scaffold)
+### Create a project
 
 Creates a new Thally documentation project.
 
@@ -43,7 +108,7 @@ npx create-thally-docs my-docs --yes
 
 ---
 
-## create-thally-docs migrate
+## Migrate existing documentation
 
 Migrates a GitHub documentation repository or any public documentation URL into a Thally project.
 
@@ -134,7 +199,7 @@ Files in `.rst` or other formats require an Anthropic API key to convert. Set `A
 
 ---
 
-## create-thally-docs check
+## Check a project
 
 Lints a Thally project for common issues and reports errors and warnings.
 
@@ -177,7 +242,7 @@ The CLI exits with code `1` if any errors are found, `0` if the project is clean
 
 ---
 
-## create-thally-docs translate
+## Translate content
 
 Translates documentation pages to a secondary locale using Claude AI. Requires an `i18n` block in `docs.json`.
 

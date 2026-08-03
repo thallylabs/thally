@@ -126,7 +126,12 @@ Leave a setting untouched in the dashboard and the file default applies. This le
 
 ## Durable storage
 
-Locally, admin state (settings overrides, rate-limit counters) writes to an on-disk SQLite file under `.data/` — zero config. On **serverless** hosts (for example Vercel), that filesystem does not persist, so runtime settings may not survive a deploy until you point Thally at a remote libSQL database (Turso) with `THALLY_DATABASE_URL` / `THALLY_DATABASE_TOKEN`. Full setup steps are in [Deploying → Durable admin storage](/guides/deploying#durable-admin-storage).
+Locally, admin state such as settings overrides and rate-limit counters writes
+to an SQLite file under `.data/` without additional setup. On **serverless**
+hosts such as Vercel, that filesystem does not persist. Configure a remote
+libSQL database such as Turso with `THALLY_DATABASE_URL` and
+`THALLY_DATABASE_TOKEN` before you depend on durable runtime settings. See
+[Deploying → Durable admin storage](/guides/deploying#durable-admin-storage).
 
 Agent Readiness does not use this database — it scores your docs content directly, so it works everywhere for free.
 

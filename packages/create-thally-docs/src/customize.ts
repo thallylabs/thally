@@ -66,14 +66,18 @@ keywords:
 
 <Hero
   title="Start building with {NAME}"
-  subtitle="Complete the quickstart, learn the core workflow, and find the next task you need without reading the docs front to back."
-  primaryLabel="Complete the quickstart"
+  subtitle="Complete the quickstart, learn the core workflow, then choose the next task that matches your goal."
+  primaryLabel="Start the quickstart"
   primaryHref="/quickstart"
-  secondaryLabel="Create a guide"
+  secondaryLabel="Explore components"
   secondaryHref="/components"
 />
 
-<CardGroup cols={3}>
+## Build your documentation
+
+Start with the first useful result, then shape the content around your readers.
+
+<CardGroup cols="2">
   <Card title="Complete the quickstart" icon="party-horn" href="/quickstart">
     Install {NAME}, complete the smallest useful workflow, and verify the result.
   </Card>
@@ -86,6 +90,13 @@ keywords:
   <Card title="Customize your site" icon="wrench" href="/customization">
     Make the navigation, brand, typography, and links your own.
   </Card>
+</CardGroup>
+
+## Publish and extend
+
+Add another language or make the same documentation available to an AI agent.
+
+<CardGroup cols="2">
   <Card title="Publish another language" icon="message" href="/es">
     Use the included Spanish pages as a starting point for localized documentation.
   </Card>
@@ -227,7 +238,7 @@ keywords:
 
 Your documentation should feel like part of the product—not a separate website.
 
-<CardGroup cols={2}>
+<CardGroup cols="2">
   <Card title="Brand and theme" icon="party-horn" href="https://docs.thally.io/guides/branding-and-theming">
     Configure colors, logos, favicons, typography, and light or dark presentation.
   </Card>
@@ -278,14 +289,18 @@ mode: home
 
 <Hero
   title="Empieza a crear con {NAME}"
-  subtitle="Completa el inicio rápido, aprende el flujo principal y encuentra tu siguiente tarea sin leer toda la documentación."
-  primaryLabel="Completar el inicio rápido"
+  subtitle="Completa el inicio rápido, aprende el flujo principal y elige la siguiente tarea según tu objetivo."
+  primaryLabel="Empezar el inicio rápido"
   primaryHref="/es/quickstart"
-  secondaryLabel="Crear una guía"
+  secondaryLabel="Explorar componentes"
   secondaryHref="/es/components"
 />
 
-<CardGroup cols={3}>
+## Crea tu documentación
+
+Empieza con el primer resultado útil y organiza el contenido para tus lectores.
+
+<CardGroup cols="2">
   <Card title="Completa el inicio rápido" icon="party-horn" href="/es/quickstart">
     Instala {NAME}, completa el flujo principal y comprueba el resultado.
   </Card>
@@ -298,6 +313,13 @@ mode: home
   <Card title="Personaliza el sitio" icon="wrench" href="/es/customization">
     Adapta la navegación, marca, tipografía y enlaces.
   </Card>
+</CardGroup>
+
+## Publica y amplía
+
+Añade otro idioma o comparte la misma documentación con un agente de IA.
+
+<CardGroup cols="2">
   <Card title="Publica otro idioma" icon="message" href="/">
     Cambia entre inglés y español desde el selector de idioma.
   </Card>
@@ -371,7 +393,7 @@ title: Personalización
 description: Haz que {NAME} se sienta como una parte natural de tu producto.
 ---
 
-<CardGroup cols={2}>
+<CardGroup cols="2">
   <Card title="Marca y tema" icon="party-horn">Configura colores, logotipos, tipografía y apariencia.</Card>
   <Card title="Navegación" icon="book-open">Organiza pestañas, grupos con iconos y páginas en \`docs.json\`.</Card>
   <Card title="Dominios" icon="link-simple">Conecta un dominio personalizado desde Thally Cloud.</Card>

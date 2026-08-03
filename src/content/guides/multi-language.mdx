@@ -8,7 +8,7 @@ Every new Thally site includes English and Spanish. Add or remove reader languag
 
 Translated MDX files still live alongside the source content so a localized page is server-rendered, version-controlled, and available in the initial HTML. Until a translation exists, the locale route keeps working with an explicit source-language fallback.
 
-<CardGroup cols={2}>
+<CardGroup cols="2">
 
 <Card title="Real locale URLs" icon="link-simple">
   `/es/introduction`, `/fr/guides/writing-content` — every locale gets its own indexable URL, never a client-side redirect.
@@ -133,7 +133,8 @@ src/content/
     └── introduction.mdx
 ```
 
-Translated files are plain MDX — you can edit them just like any other content. Commit them to your repo and deploy as normal.
+Translated files are plain MDX. Edit them with the rest of your content, commit
+them to the repository, and deploy normally.
 
 </Step>
 
@@ -254,7 +255,7 @@ When asked **"Add languages beyond English and Spanish?"**, enter `y` and provid
 
 ---
 
-<CardGroup cols={2}>
+<CardGroup cols="2">
 
 <Card title="CLI Reference" href="/guides/cli-reference" icon="wrench">
   Full reference for `translate` and all other create-thally-docs commands.

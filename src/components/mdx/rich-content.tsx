@@ -83,7 +83,7 @@ export function Hero({
           {title}
         </h1>
         {subtitle ? (
-          <p className="mt-6 max-w-[56ch] text-[1.08rem] leading-[1.65] text-pretty text-foreground/75">
+          <p className="thally-docs-hero-copy max-w-[56ch] text-[1.08rem] leading-[1.65] text-pretty text-foreground/75">
             {subtitle}
           </p>
         ) : null}

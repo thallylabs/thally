@@ -32,7 +32,10 @@ Depending on which features you use, you may also want to set:
 | `THALLY_AUTH_SECRET` | Signs admin sessions and encrypts stored secrets (required with OIDC) |
 | `THALLY_DATABASE_URL` / `THALLY_DATABASE_TOKEN` | Durable admin storage (settings, rate limits) on serverless hosts |
 
-Only `THALLY_SITE_URL` is needed for a basic docs site. Admin storage works with zero config locally; on serverless you point Thally at a remote database (below). See [Admin dashboard & team access](/guides/admin-dashboard) for the auth variables in context.
+Only `THALLY_SITE_URL` is needed for a basic documentation site. Local admin
+storage needs no extra configuration. On a serverless host, configure the
+remote database described below. See [Admin dashboard and team access](/guides/admin-dashboard)
+for the authentication variables in context.
 
 ## Connect a self-hosted site to Thally Cloud
 
