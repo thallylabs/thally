@@ -97,7 +97,9 @@ const brandPresets: Record<BrandPresetKey, BrandConfig> = {
   primary: {
     light: {
       background: '#FCFCF7',
-      card: '#FFFFFF',
+      // The docs handoff uses the page surface for cards; hierarchy comes from
+      // hairline borders rather than white tiles or elevation.
+      card: '#FCFCF7',
       foreground: '#1A2018',
       muted: '#EFEFE9',
       mutedForeground: '#747B72',

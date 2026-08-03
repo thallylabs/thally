@@ -46,6 +46,9 @@ describe('scaffold hygiene — agent-ready by default, Track senders remain opt-
       expect(shouldInclude('docs-main/src/app/api/track/webhook/route.ts')).toBe(true)
       expect(shouldInclude('docs-main/src/lib/track/github-app.ts')).toBe(true)
       expect(shouldInclude('docs-main/src/components/admin/github-connect-panel.tsx')).toBe(true)
+      // The visual handoff is runtime infrastructure, so every new scaffold
+      // must retain it from the canonical docs repository.
+      expect(shouldInclude('docs-main/src/styles/docs-handoff.css')).toBe(true)
       expect(shouldInclude('docs-main/docs.json')).toBe(true)
       expect(shouldInclude('docs-main/.github/workflows/ci.yml')).toBe(true)
       expect(shouldInclude('docs-main/.github/workflows/thally-agent.yml')).toBe(true)

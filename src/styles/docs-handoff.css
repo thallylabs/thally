@@ -1,0 +1,366 @@
+/*
+ * Thally docs visual system.
+ *
+ * This layer ports the approved design handoff without changing any content,
+ * routing, search, localization, OpenAPI, or AI behavior. The shell is built
+ * from hairlines and the page surface; shadows remain reserved for overlays.
+ */
+
+:root {
+  --theme-radius-sm: 0.375rem;
+  --theme-radius-md: 0.5rem;
+  --theme-radius-lg: 0.75rem;
+  --theme-radius-xl: 0.85rem;
+  --theme-control-radius: 0.5625rem;
+  --theme-sidebar-item-radius: 0;
+  --theme-nav-bar-radius: 0;
+  --theme-nav-tab-radius: 0;
+  --theme-nav-bar-bg: transparent;
+  --theme-nav-bar-border-color: transparent;
+  --theme-nav-tab-active-bg: transparent;
+  --theme-nav-tab-active-shadow: none;
+  --docs-panel: hsl(var(--thally-muted) / 0.48);
+  --docs-code: hsl(var(--thally-muted) / 0.62);
+}
+html {
+  scroll-behavior: auto;
+  font-size: 13px;
+}
+
+body {
+  letter-spacing: -0.0025em;
+}
+
+* {
+  scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+}
+
+.thally-docs-root a,
+.thally-docs-root button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.thally-docs-root a:focus-visible,
+.thally-docs-root button:focus-visible {
+  outline: 2px solid hsl(var(--thally-ring));
+  outline-offset: 2px;
+}
+
+.thally-docs-topbar {
+  background: color-mix(in oklab, hsl(var(--thally-background)) 92%, transparent);
+}
+
+.thally-docs-topbar-inner {
+  padding-block: 0;
+}
+
+.thally-docs-brand:hover {
+  color: hsl(var(--thally-foreground));
+}
+
+.thally-docs-brand img,
+.thally-docs-brand svg {
+  width: 19px !important;
+  height: 19px !important;
+}
+
+.thally-docs-actions > button,
+.thally-docs-actions > div > button {
+  min-height: 30px;
+}
+
+.thally-docs-search {
+  width: 180px;
+}
+
+.thally-docs-search > button:first-of-type {
+  height: 30px;
+  width: 180px;
+  gap: 8px;
+  border-color: hsl(var(--thally-foreground) / 0.16);
+  border-radius: 9px;
+  padding-inline: 10px;
+  background: hsl(var(--thally-background));
+  font-size: 0.85rem;
+}
+
+.thally-docs-search > button:first-of-type kbd {
+  border-color: hsl(var(--thally-border));
+  border-radius: 5px;
+  background: hsl(var(--thally-muted));
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.thally-docs-search > button:nth-of-type(2) {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+}
+
+.thally-docs-actions [aria-label='Toggle theme'],
+.thally-docs-actions [aria-label='Switch language'] {
+  height: 30px;
+  min-height: 30px;
+  border-color: hsl(var(--thally-foreground) / 0.16);
+  border-radius: 9px;
+  background: hsl(var(--thally-background));
+  box-shadow: none;
+}
+
+.thally-theme-sun { display: none; }
+.dark .thally-theme-sun { display: block; }
+.dark .thally-theme-moon { display: none; }
+
+.thally-docs-topbar-inner > button[aria-haspopup='dialog'] {
+  display: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+}
+
+.thally-docs-shell {
+  align-items: stretch;
+}
+
+.thally-docs-sidebar {
+  align-self: stretch;
+}
+
+.thally-docs-sidebar a[aria-current='page'] {
+  background: transparent !important;
+  color: hsl(var(--thally-foreground)) !important;
+}
+
+.thally-docs-main {
+  min-width: 0;
+}
+
+.thally-docs-article {
+  min-width: 0;
+}
+
+.thally-docs-prose {
+  color: hsl(var(--thally-foreground) / 0.78);
+  font-size: 0.94rem;
+  line-height: 1.7;
+}
+
+.thally-docs-prose > :where(p, ul, ol, blockquote),
+.thally-docs-prose :where(.prose) {
+  max-width: 70ch;
+}
+
+.thally-docs-prose :where(h1, h2, h3, h4) {
+  color: hsl(var(--thally-foreground));
+  font-family: var(--font-heading);
+  text-wrap: balance;
+}
+
+.thally-docs-prose :where(h2) {
+  margin-top: 4.15rem;
+  margin-bottom: 0.75rem;
+  border-top: 1px solid hsl(var(--thally-border));
+  padding-top: 1.7rem;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.thally-docs-prose :where(h3) {
+  margin-top: 2.3rem;
+  margin-bottom: 0.6rem;
+  font-size: 1.02rem;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+}
+
+.thally-docs-prose :where(p) {
+  margin-block: 0 1.08rem;
+  color: hsl(var(--thally-foreground) / 0.78);
+  text-wrap: pretty;
+}
+
+.thally-docs-prose :where(a) {
+  color: hsl(var(--thally-accent));
+  text-decoration-color: transparent;
+}
+
+.thally-docs-prose :where(a:hover) {
+  text-decoration-color: currentColor;
+}
+
+.thally-docs-prose :where(h1, h2, h3, h4) a {
+  color: inherit;
+}
+
+.thally-docs-hero a.bg-primary {
+  color: hsl(var(--thally-primary-foreground)) !important;
+}
+
+.thally-docs-prose :where(code):not(:where(pre *)) {
+  border: 1px solid hsl(var(--thally-border));
+  border-radius: 4px;
+  background: hsl(var(--thally-muted));
+  padding: 0 4px;
+  color: hsl(var(--thally-foreground) / 0.82);
+  font-size: 0.78em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.thally-docs-prose :where(code):not(:where(pre *))::before,
+.thally-docs-prose :where(code):not(:where(pre *))::after {
+  content: none;
+}
+
+.thally-docs-code {
+  background: var(--docs-code);
+  box-shadow: none;
+}
+
+.thally-docs-code pre {
+  margin: 0;
+  background: transparent !important;
+}
+
+.thally-docs-card {
+  box-shadow: none;
+}
+
+a[target='_blank'] > .thally-docs-card::after {
+  position: absolute;
+  top: 12px;
+  right: 15px;
+  color: hsl(var(--thally-accent));
+  content: '\2197';
+  font-size: 0.95rem;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+a[target='_blank']:hover > .thally-docs-card::after {
+  opacity: 1;
+}
+
+.thally-docs-card :where(h2, h3, p:first-child) {
+  font-family: var(--font-heading);
+  letter-spacing: -0.012em;
+}
+
+.thally-docs-toc {
+  padding-top: 0;
+}
+
+.thally-docs-root footer {
+  border-color: hsl(var(--thally-border));
+  background: hsl(var(--thally-background));
+  box-shadow: none;
+}
+
+.thally-docs-root [role='dialog'] {
+  scrollbar-width: none;
+}
+
+@media (max-width: 1360px) {
+  .thally-docs-topbar-link span {
+    display: none;
+  }
+}
+
+@media (max-width: 1240px) {
+  .thally-docs-search,
+  .thally-docs-search > button:first-of-type {
+    width: 150px;
+  }
+}
+
+@media (max-width: 1120px) {
+  .thally-docs-search {
+    width: 30px;
+  }
+
+  .thally-docs-search > button:first-of-type {
+    display: none;
+  }
+
+  .thally-docs-search > button:nth-of-type(2) {
+    display: flex;
+  }
+}
+
+@media (max-width: 1010px) {
+  .thally-docs-tabs {
+    display: none;
+  }
+
+  .thally-docs-search,
+  .thally-docs-search > button:first-of-type {
+    width: 180px;
+  }
+
+  .thally-docs-search > button:first-of-type {
+    display: flex;
+  }
+
+  .thally-docs-search > button:nth-of-type(2) {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .thally-docs-topbar-inner > button[aria-haspopup='dialog'] { display: inline-flex; }
+  .thally-docs-sidebar {
+    display: none;
+  }
+
+  .thally-docs-main > div {
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .thally-docs-brand > span:last-child,
+  .thally-docs-topbar-link,
+  .thally-docs-primary {
+    display: none;
+  }
+
+  .thally-docs-search {
+    width: 30px;
+  }
+
+  .thally-docs-search > button:first-of-type {
+    display: none;
+  }
+
+  .thally-docs-search > button:nth-of-type(2) {
+    display: flex;
+  }
+
+  .thally-docs-topbar-inner {
+    gap: 8px;
+    padding-inline: 14px;
+  }
+
+  .thally-docs-main {
+    padding-top: 26px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thally-docs-root *,
+  .thally-docs-root *::before,
+  .thally-docs-root *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

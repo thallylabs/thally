@@ -89,6 +89,18 @@ export function DocsChat({ label = 'Ask AI', icon, enabled = true }: DocsChatPro
     if (open) setTimeout(() => textareaRef.current?.focus(), 60)
   }, [open])
 
+  // Code-block actions use one document-level contract so every renderer can
+  // open the configured assistant without coupling MDX to this panel.
+  useEffect(() => {
+    function handleAskAssistant(event: Event) {
+      const prompt = (event as CustomEvent<{ prompt?: string }>).detail?.prompt
+      if (prompt) setInput(prompt)
+      setOpen(true)
+    }
+    window.addEventListener('thally:ask-assistant', handleAskAssistant)
+    return () => window.removeEventListener('thally:ask-assistant', handleAskAssistant)
+  }, [])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])

@@ -23,7 +23,7 @@ export function TryItDialog({ controller, open, onOpenChange }: TryItDialogProps
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-background/70 backdrop-blur-md" />
         <Dialog.Content className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => onOpenChange(false)}>
-          <div className="relative max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-border/40 bg-background/95 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="relative max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-[14px] border border-border bg-background p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <header className="flex flex-wrap gap-4">
               <div className="space-y-1">
                 <Dialog.Title className="text-lg font-semibold">Execute {controller.operation.title}</Dialog.Title>
@@ -34,13 +34,13 @@ export function TryItDialog({ controller, open, onOpenChange }: TryItDialogProps
                 ) : null}
               </div>
               <div className="ml-auto flex flex-wrap items-center gap-3">
-                <span className={cn('rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-widest', methodToken.bg, methodToken.text)}>
+                <span className={cn('rounded-[5px] px-2 py-1 font-mono text-[0.7rem] font-medium uppercase tracking-[0.02em]', methodToken.bg, methodToken.text)}>
                   {controller.operation.method}
                 </span>
                 <div className="flex min-w-0 flex-col">
                   <span className="text-[10px] uppercase tracking-[0.3em] text-foreground/50">Resolved URL</span>
                   <div
-                    className="w-64 max-w-full truncate rounded-xl border border-border/40 bg-transparent px-3 py-1 font-mono text-xs text-foreground/80"
+                    className="w-64 max-w-full truncate rounded-[9px] border border-border bg-transparent px-3 py-1 font-mono text-xs text-foreground/80"
                     title={controller.preparedRequest.url || undefined}
                   >
                     {controller.preparedRequest.url || 'Select a server to build the URL'}
@@ -50,7 +50,7 @@ export function TryItDialog({ controller, open, onOpenChange }: TryItDialogProps
                   type="button"
                   onClick={() => void controller.sendRequest()}
                   disabled={!controller.preparedRequest.isServerConfigured || controller.isSending}
-                  className="flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-xs font-semibold uppercase tracking-wide text-accent-foreground shadow transition hover:bg-accent/90 disabled:opacity-50"
+                  className="flex items-center gap-2 rounded-[9px] bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition hover:brightness-125 disabled:opacity-50"
                 >
                   {controller.isSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                   {controller.isSending ? 'Sending' : 'Send'}
@@ -58,7 +58,7 @@ export function TryItDialog({ controller, open, onOpenChange }: TryItDialogProps
                 <Dialog.Close asChild>
                   <button
                     type="button"
-                    className="rounded-full border border-border/40 p-2 text-foreground/70 transition hover:text-foreground"
+                    className="rounded-[9px] border border-border p-2 text-foreground/70 transition hover:bg-muted hover:text-foreground"
                   >
                     <X className="h-4 w-4" />
                     <span className="sr-only">Close</span>
@@ -76,4 +76,3 @@ export function TryItDialog({ controller, open, onOpenChange }: TryItDialogProps
     </Dialog.Root>
   )
 }
-

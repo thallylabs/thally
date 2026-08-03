@@ -18,7 +18,7 @@ interface ResponseFieldProps {
 
 export function ResponseField({ name, type, required, children }: ResponseFieldProps) {
   return (
-    <div className="my-4 border-b border-border/40 pb-4 last:border-0 last:pb-0">
+    <div className="border-b border-border py-4 last:border-0">
       <div className="flex flex-wrap items-center gap-2">
         <code className="text-sm font-semibold text-foreground">{name}</code>
         {type && (
@@ -27,7 +27,7 @@ export function ResponseField({ name, type, required, children }: ResponseFieldP
           </span>
         )}
         {required && (
-          <span className="rounded bg-rose-500/10 px-1.5 py-0.5 text-xs font-medium text-rose-600 dark:text-rose-400">
+          <span className="text-xs font-semibold text-rose-600 dark:text-rose-400">
             required
           </span>
         )}
@@ -58,19 +58,19 @@ interface ParamFieldProps {
 }
 
 const locationStyles: Record<ParamLocation, string> = {
-  body: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-500/10 dark:text-violet-300 dark:border-violet-500/20',
-  query: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-500/10 dark:text-sky-300 dark:border-sky-500/20',
-  path: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20',
-  header: 'bg-green-50 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-300 dark:border-green-500/20',
+  body: 'text-violet-700 dark:text-violet-300',
+  query: 'text-sky-700 dark:text-sky-300',
+  path: 'text-amber-700 dark:text-amber-300',
+  header: 'text-green-700 dark:text-green-300',
 }
 
-export function ParamField({ name, type, required, body, query, path, header, default: defaultValue, children }: ParamFieldProps) {
+export function ParamField({ name, type, required, query, path, header, default: defaultValue, children }: ParamFieldProps) {
   const location: ParamLocation = path ? 'path' : query ? 'query' : header ? 'header' : 'body'
   return (
-    <div className="my-4 border-b border-border/40 pb-4 last:border-0 last:pb-0">
+    <div className="border-b border-border py-4 last:border-0">
       <div className="flex flex-wrap items-center gap-2">
         <code className="text-sm font-semibold text-foreground">{name}</code>
-        <span className={cn('rounded border px-1.5 py-0.5 text-xs font-medium', locationStyles[location])}>
+        <span className={cn('font-mono text-[0.7rem] font-medium', locationStyles[location])}>
           {location}
         </span>
         {type && (
@@ -79,7 +79,7 @@ export function ParamField({ name, type, required, body, query, path, header, de
           </span>
         )}
         {required && (
-          <span className="rounded bg-rose-500/10 px-1.5 py-0.5 text-xs font-medium text-rose-600 dark:text-rose-400">
+          <span className="text-xs font-semibold text-rose-600 dark:text-rose-400">
             required
           </span>
         )}

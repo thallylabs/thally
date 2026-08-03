@@ -1,16 +1,16 @@
 export const layout = {
-  pagePadding: 'px-4 sm:px-6 lg:px-12',
-  pageWidth: 'max-w-6xl',
-  pageGap: 'space-y-12',
-  contentGap: 'space-y-8',
-  columnGap: 'gap-10 xl:gap-16',
-  shellPadding: 'px-4 sm:px-6 lg:px-8',
-  shellWidth: 'max-w-[100rem]',
-  topbarHeight: 'h-16',
-  sidebarWidth: 'w-[17.25rem] xl:w-[21.6rem]',
-  sidebarPadding: 'px-5 py-8',
-  sidebarGap: 'gap-8',
-  tocWidth: 'w-64',
+  pagePadding: 'px-5 sm:px-8 lg:px-12',
+  pageWidth: 'max-w-none',
+  pageGap: 'space-y-10',
+  contentGap: 'space-y-7',
+  columnGap: 'gap-12',
+  shellPadding: 'px-5 sm:px-[26px]',
+  shellWidth: 'max-w-[1320px]',
+  topbarHeight: 'h-12',
+  sidebarWidth: 'w-[216px]',
+  sidebarPadding: 'pr-5 py-[30px]',
+  sidebarGap: 'gap-7',
+  tocWidth: 'w-[184px]',
   stackGap: 'space-y-6',
   denseStackGap: 'space-y-4',
   panel: 'rounded-[var(--theme-radius-lg)] border border-border/60 bg-muted/30',
@@ -27,8 +27,7 @@ const shellBounds = `mx-auto w-full ${layout.shellWidth} ${layout.shellPadding}`
 
 export const shell = {
   wrapper: shellBounds,
-  sidebar: `${layout.sidebarWidth} border-r border-border/60 ${layout.sidebarPadding} ${layout.sidebarGap}`,
+  sidebar: `${layout.sidebarWidth} border-r border-border ${layout.sidebarPadding} ${layout.sidebarGap}`,
   main: `${layout.pagePadding} ${layout.pageGap}`,
   topbar: shellBounds,
 }
-

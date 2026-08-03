@@ -17,8 +17,8 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
   const queryPairs = Object.entries(queryParams ?? {})
   const containerStyles =
     variant === 'dialog'
-      ? 'space-y-4 rounded-2xl border border-border/30 bg-background/50 p-4'
-      : 'space-y-4 rounded-2xl border border-border/40 bg-background/40 p-4'
+      ? 'space-y-4 rounded-[11px] border border-border bg-background p-4'
+      : 'space-y-4 rounded-[11px] border border-border bg-background p-4'
 
   const heading = (
     <div className="flex items-center justify-between">
@@ -30,7 +30,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
         <select
           value={serverUrl}
           onChange={(event) => setServerUrl(event.target.value)}
-          className="rounded-xl border border-border/50 bg-transparent px-3 py-1 text-sm"
+          className="rounded-[9px] border border-border bg-background px-3 py-1 text-sm"
         >
           {operation.servers.map((server) => (
             <option key={server.url} value={server.url}>
@@ -61,7 +61,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
                   <input
                     value={value}
                     onChange={(event) => setParamValue('path', key, event.target.value)}
-                    className="w-full rounded-xl border border-border/50 bg-transparent px-3 py-2 text-sm"
+                    className="w-full rounded-[9px] border border-border bg-background px-3 py-2 text-sm"
                   />
                 </label>
               ))}
@@ -80,7 +80,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
                   <input
                     value={value}
                     onChange={(event) => setParamValue('query', key, event.target.value)}
-                    className="w-full rounded-xl border border-border/50 bg-transparent px-3 py-2 text-sm"
+                    className="w-full rounded-[9px] border border-border bg-background px-3 py-2 text-sm"
                   />
                 </label>
               ))}
@@ -99,7 +99,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
                   <input
                     value={value}
                     onChange={(event) => setParamValue('header', key, event.target.value)}
-                    className="w-full rounded-xl border border-border/50 bg-transparent px-3 py-2 text-sm"
+                    className="w-full rounded-[9px] border border-border bg-background px-3 py-2 text-sm"
                   />
                 </label>
               ))}
@@ -117,7 +117,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
             <textarea
               value={bodyValue}
               onChange={(event) => setBodyValue(event.target.value)}
-              className="min-h-[180px] w-full rounded-2xl border border-border/40 bg-background/70 px-4 py-3 font-mono text-sm text-foreground"
+              className="min-h-[180px] w-full rounded-[9px] border border-border bg-background px-4 py-3 font-mono text-sm text-foreground"
             />
           </div>
         ) : null}
@@ -129,7 +129,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
             <button
               type="submit"
               disabled={isSending || !preparedRequest.isServerConfigured}
-              className="flex items-center gap-2 rounded-full bg-foreground px-5 py-2 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-60"
+              className="flex items-center gap-2 rounded-[9px] bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground transition hover:brightness-125 disabled:opacity-60"
             >
               {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Send request
@@ -145,7 +145,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
 export function TryItResponse({ response }: { response: TryItController['response'] }) {
   if (!response) {
     return (
-      <div className="rounded-2xl border border-dashed border-border/40 p-4 text-sm text-foreground/60">
+      <div className="rounded-[11px] border border-dashed border-border p-4 text-sm text-foreground/60">
         Responses will appear here.
       </div>
     )
@@ -160,7 +160,7 @@ export function TryItResponse({ response }: { response: TryItController['respons
   }
 
   return (
-    <div className="space-y-3 rounded-2xl border border-border/40 bg-background/50 p-4">
+    <div className="space-y-3 rounded-[11px] border border-border bg-background p-4">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <StatusPill status={response.status} statusText={response.statusText} />
         <span className="text-xs text-foreground/60">{response.duration} ms</span>
@@ -177,12 +177,12 @@ function StatusPill({ status, statusText }: { status: number; statusText: string
   const intent = status >= 200 && status < 300 ? 'success' : status >= 400 ? 'error' : 'info'
   const styles =
     intent === 'success'
-      ? 'bg-accent/10 text-accent border-accent/30'
+      ? 'text-accent'
       : intent === 'error'
-        ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-        : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+        ? 'text-rose-400'
+        : 'text-amber-400'
   return (
-    <span className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide', styles)}>
+    <span className={cn('inline-flex items-center gap-2 text-xs font-semibold before:h-1.5 before:w-1.5 before:rounded-full before:bg-current', styles)}>
       {status}
       <span className="text-foreground/70">{statusText}</span>
     </span>
@@ -209,4 +209,3 @@ export function ResponseBody({ body }: { body: string }) {
     </pre>
   )
 }
-

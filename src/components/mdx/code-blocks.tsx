@@ -15,6 +15,7 @@ import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 import { create } from 'zustand'
 
 import { Tag } from '@/components/ui/tag'
+import { siteConfig } from '@/data/site'
 
 const languageNames: Record<string, string> = {
   js: 'JavaScript',
@@ -98,12 +99,8 @@ function CopyButton({ code }: { code: string }) {
     <button
       type="button"
       aria-label={copied ? 'Copied' : 'Copy code'}
-      className={clsx(
-        'group/button absolute top-3.5 right-4 overflow-hidden rounded-full py-1 pr-3 pl-2 text-2xs font-medium opacity-0 backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100',
-        copied
-          ? 'bg-accent/10 ring-1 ring-accent/20 ring-inset'
-          : 'bg-white/5 hover:bg-white/10 dark:bg-white/10 dark:hover:bg-white/5',
-      )}
+      title={copied ? 'Copied' : 'Copy'}
+      className="group/button relative inline-flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-foreground/55 transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       onClick={() => {
         void writeClipboardText(code).then((wasCopied) => {
           if (wasCopied) setCopyCount((count) => count + 1)
@@ -112,34 +109,61 @@ function CopyButton({ code }: { code: string }) {
     >
       <span
         aria-hidden={copied}
-        className={clsx(
-          'pointer-events-none flex items-center gap-0.5 text-zinc-400 transition duration-300',
-          copied && '-translate-y-1.5 opacity-0',
-        )}
+        className={clsx('pointer-events-none transition duration-200', copied && '-translate-y-1 opacity-0')}
       >
-        <ClipboardIcon className="h-5 w-5 fill-zinc-500/20 stroke-zinc-500 transition-colors group-hover/button:stroke-zinc-400" />
-        Copy
+        <ClipboardIcon className="h-[15px] w-[15px] fill-transparent stroke-current" />
       </span>
       <span
         aria-hidden={!copied}
         className={clsx(
-          'pointer-events-none absolute inset-0 flex items-center justify-center text-accent transition duration-300',
-          !copied && 'translate-y-1.5 opacity-0',
+          'pointer-events-none absolute inset-0 flex items-center justify-center text-accent transition duration-200',
+          !copied && 'translate-y-1 opacity-0',
         )}
       >
-        Copied!
+        ✓
       </span>
     </button>
   )
 }
 
-function CodePanelHeader({ tag, label }: { tag?: string; label?: string }) {
-  if (!tag && !label) {
-    return null
+function CodeActions({ code }: { code: string }) {
+  const repositoryUrl = siteConfig.repoUrl || siteConfig.links.find((link) => link.label.toLowerCase() === 'github')?.href
+
+  function reportCode() {
+    if (!repositoryUrl) return
+    try {
+      const url = new URL(`${repositoryUrl.replace(/\/$/, '')}/issues/new`)
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') return
+      url.searchParams.set('title', 'Docs: incorrect code sample')
+      url.searchParams.set('body', `Page: ${window.location.href}\n\nCode sample:\n\n\`\`\`\n${code}\n\`\`\``)
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch {
+      // A malformed optional repository URL should not break code samples.
+    }
+  }
+
+  function askAssistant() {
+    window.dispatchEvent(new CustomEvent('thally:ask-assistant', {
+      detail: { prompt: `Explain this code sample and check it for mistakes:\n\n\`\`\`\n${code}\n\`\`\`` },
+    }))
   }
 
   return (
-    <div className="flex h-9 items-center gap-2 border-y border-t-transparent border-b-white/10 bg-white/5 bg-zinc-900 px-4 dark:border-b-white/10 dark:bg-white/[0.04]">
+    <span className="ml-auto flex items-center gap-0.5">
+      <button type="button" onClick={reportCode} disabled={!repositoryUrl} className="inline-flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-foreground/55 transition hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35" aria-label="Report incorrect code" title="Report incorrect code">
+        <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true"><path d="M8.2 3h7.6L21 8.2v7.6L15.8 21H8.2L3 15.8V8.2L8.2 3z"/><path d="M12 7.5V13" strokeLinecap="round"/><path d="M12 16.2v.1" strokeLinecap="round" strokeWidth="2.2"/></svg>
+      </button>
+      <CopyButton code={code} />
+      <button type="button" onClick={askAssistant} className="inline-flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-foreground/55 transition hover:bg-muted hover:text-foreground" aria-label="Ask assistant about this code" title="Ask Assistant">
+        <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true"><path d="M12 3.5l1.8 4.9 4.9 1.8-4.9 1.8L12 16.9l-1.8-4.9-4.9-1.8 4.9-1.8L12 3.5z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg>
+      </button>
+    </span>
+  )
+}
+
+function CodePanelHeader({ tag, label, code }: { tag?: string; label?: string; code: string }) {
+  return (
+    <div className="flex h-9 items-center gap-2 border-b border-border px-3.5">
       {tag && (
         <div className="flex">
           <Tag variant="small">{tag}</Tag>
@@ -149,8 +173,9 @@ function CodePanelHeader({ tag, label }: { tag?: string; label?: string }) {
         <span className="h-0.5 w-0.5 rounded-full bg-zinc-500" />
       )}
       {label && (
-        <span className="font-mono text-xs text-zinc-400">{label}</span>
+        <span className="font-mono text-[0.74rem] text-foreground/55">{label}</span>
       )}
+      <CodeActions code={code} />
     </div>
   )
 }
@@ -241,11 +266,11 @@ function CodePanel({
 
   return (
     <div className="group dark:bg-black/20">
-      <CodePanelHeader tag={resolvedTag} label={resolvedLabel} />
+      <CodePanelHeader tag={resolvedTag} label={resolvedLabel ?? 'Code'} code={resolvedCode} />
       <div className="relative">
         <pre
           className={clsx(
-            'p-4 text-xs text-white',
+            'p-4 font-mono text-[0.82rem] leading-[1.65] text-foreground',
             resolvedWrap ? 'whitespace-pre-wrap break-words' : 'overflow-x-auto',
             languageClass,
           )}
@@ -253,7 +278,6 @@ function CodePanel({
         >
           {content}
         </pre>
-        <CopyButton code={resolvedCode} />
       </div>
     </div>
   )
@@ -275,9 +299,9 @@ function CodeGroupHeader({
   }
 
   return (
-    <div className="flex min-h-[calc(3rem+1px)] flex-wrap items-start gap-x-4 border-b border-zinc-700 bg-zinc-800 px-4 dark:border-white/10 dark:bg-white/[0.04]">
+    <div className="flex min-h-10 flex-wrap items-start gap-x-4 border-b border-border px-4">
       {title && (
-        <p className="mr-auto pt-3 text-xs font-semibold text-white">
+        <p className="mr-auto pt-3 text-xs font-semibold text-foreground">
           {title}
         </p>
       )}
@@ -289,7 +313,7 @@ function CodeGroupHeader({
                 'border-b py-3 transition focus-visible:outline-none',
                 childIndex === selectedIndex
                   ? 'border-accent text-accent'
-                  : 'border-transparent text-zinc-400 hover:text-zinc-300',
+                  : 'border-transparent text-foreground/55 hover:text-foreground',
               )}
             >
               {getPanelTitle(
@@ -401,7 +425,7 @@ export function CodeGroup({
   const hasTabs = Children.count(children) > 1
 
   const containerClassName =
-    'my-6 overflow-hidden rounded-2xl bg-zinc-900 shadow-md dark:bg-[#0a0c12] dark:shadow-[0_20px_50px_-24px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.06)]'
+    'thally-docs-code my-5 overflow-hidden rounded-[11px] border border-border bg-muted/40'
   const header = (
     <CodeGroupHeader title={title} selectedIndex={tabGroupProps.selectedIndex}>
       {children}
