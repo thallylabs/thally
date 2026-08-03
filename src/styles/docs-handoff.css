@@ -197,6 +197,10 @@ body {
   text-decoration-color: currentColor;
 }
 
+.thally-docs-prose a:has(> .thally-docs-card) {
+  text-decoration: none;
+}
+
 .thally-docs-prose :where(h1, h2, h3, h4) a {
   color: inherit;
 }
