@@ -1,16 +1,16 @@
 ---
 title: Introduction
-description: Thally connects product changes to customer-facing knowledge and prepares evidence-backed documentation updates for human review.
+description: Learn how to create, organize, customize, validate, and publish a Thally documentation site.
 mode: home
 ---
 
 <Hero
-  title="Every product change. Every knowledge surface. Automatically in sync."
-  subtitle="Thally starts with documentation: connect product repositories to the places customers learn, understand what a change affects, and prepare evidence-backed updates for human review."
-  primaryLabel="Get started"
+  title="Build and publish documentation with Thally"
+  subtitle="Create a site, write task-focused pages, document APIs, and keep every update ready for review."
+  primaryLabel="Start the quickstart"
   primaryHref="/quickstart"
-  secondaryLabel="Browse components"
-  secondaryHref="/components/card"
+  secondaryLabel="Create and edit pages"
+  secondaryHref="/guides/writing-content"
 />
 
 <CardGroup cols={3}>
@@ -33,74 +33,3 @@ mode: home
     Deploy the site, then expose structured docs through discovery files and MCP.
   </Card>
 </CardGroup>
-
-## The product-change pipeline
-
-Every product change creates communication work. Thally makes that work visible
-and reviewable instead of treating documentation as a separate destination
-someone has to remember to update.
-
-<Columns cols={2}>
-  <Card title="1. Start with product evidence" icon="code-simple">
-    A merged or review-ready GitHub pull request is the source: what changed,
-    why it changed, and which code or API surfaces moved.
-  </Card>
-  <Card title="2. Understand the impact" icon="link-simple">
-    Thally Track traces that evidence to the customer-facing knowledge it may
-    affect. Understanding comes before generation.
-  </Card>
-  <Card title="3. Prepare a reviewable update" icon="book-open">
-    The docs agent edits the relevant pages and opens a pull request with the
-    product context attached. It never merges its own work.
-  </Card>
-  <Card title="4. Publish one trusted source" icon="book-open">
-    After human approval, the content engine projects the same structured
-    source into HTML, Markdown, JSON, JSON-LD, search, and agent context.
-  </Card>
-</Columns>
-
-## What's included
-
-<Columns cols={2}>
-  <Card title="Content & authoring" icon="book-open">
-    A unified content engine parses every page once into a typed graph — HTML, JSON, Markdown, search, and embeddings are all projections of one source of truth. Tabs, groups, hybrid search, Shiki code blocks, and an RSS-backed changelog ship in the box.
-  </Card>
-  <Card title="Tooling" icon="wrench">
-    The `thally` CLI hides the Next.js runtime behind a single binary. `create-thally-docs` scaffolds and lints; `thally check --ci` fails PRs on broken links, anchors, and drift. An `@thallylabs/mcp` server lets Claude, Cursor, or any MCP client search, read, and edit your docs through natural language.
-  </Card>
-  <Card title="AI & agents" icon="message">
-    A deterministic Agent Readiness Score grades how well your docs serve agents, and `/llms.txt`, per-page JSON, `/ai.txt`, and a remote MCP endpoint at `/api/mcp` let tools index everything — all free and self-hosted. Grounded AI chat answers are available as a [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) service.
-  </Card>
-  <Card title="Design & infrastructure" icon="grid-round">
-    A live admin dashboard recolors the site with a brand-accent color picker, swaps per-mode (light/dark) logos and favicons, and toggles features — no redeploy. Automatic dark mode, a responsive sidebar-plus-TOC layout, dynamic OG images, built-in SEO, and a version switcher round it out. Team accounts add Owner/Editor/Viewer roles from a git-committed roster — no database, no per-seat pricing.
-  </Card>
-</Columns>
-
-## Get started
-
-The fastest way to create a new Thally project is with the CLI:
-
-```bash
-npx create-thally-docs my-docs
-```
-
-The CLI prompts you for a project name, description, brand preset, and optional GitHub repo URL — then scaffolds a ready-to-run docs site with starter content, navigation, and dependencies installed.
-
-Prefer to clone the template manually?
-
-```bash
-git clone https://github.com/thallylabs/thally.git my-docs
-cd my-docs
-npm install
-npm run dev
-```
-
-## How it works
-
-Thally uses a file-based content model. All documentation lives in `src/content/` as `.mdx` files. Navigation structure is defined in `docs.json` at the project root — you list your tabs, groups, and pages there, and the sidebar, breadcrumbs, and routing are derived automatically.
-
-For API documentation, point the API Reference tab in `docs.json` to an OpenAPI spec file. Thally parses the spec and generates endpoint pages with parameter tables, request/response schemas, code samples, and an interactive playground.
-
-<Note type="info" title="Sample content">
-The pages in this Overview tab are example content that ships with the template. Replace them with your own product documentation to get started.
-</Note>

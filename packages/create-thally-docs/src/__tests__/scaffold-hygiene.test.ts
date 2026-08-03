@@ -204,6 +204,7 @@ describe('writeStarterContent', () => {
       { code: 'en', label: 'English' },
       { code: 'es', label: 'Español' },
     ])
+    expect(config.tabs[0].tab).toBe('Get started')
     expect(config.tabs[0].groups).toEqual([
       { group: 'Start here', icon: 'book-open', pages: ['introduction', 'quickstart'] },
       { group: 'Create content', icon: 'grid-round', pages: ['components'] },

@@ -123,7 +123,7 @@
   },
   "tabs": [
     {
-      "tab": "Overview",
+      "tab": "Get started",
       "groups": [
         {
           "group": "Start here",
@@ -140,13 +140,19 @@
       "tab": "Guides",
       "groups": [
         {
-          "group": "Create and organize",
+          "group": "Create content",
           "icon": "book-open",
           "pages": [
             "guides/writing-content",
-            "guides/configuring-navigation",
-            "guides/api-reference-setup",
             "guides/multi-language"
+          ]
+        },
+        {
+          "group": "Organize your docs",
+          "icon": "grid-round",
+          "pages": [
+            "guides/configuring-navigation",
+            "guides/seo-and-visibility"
           ]
         },
         {
@@ -159,12 +165,19 @@
           ]
         },
         {
-          "group": "Publish and maintain",
+          "group": "Document APIs",
+          "icon": "link-simple",
+          "pages": [
+            "guides/api-reference-setup",
+            "api/overview"
+          ]
+        },
+        {
+          "group": "Publish and operate",
           "icon": "wrench",
           "pages": [
             "guides/deploying",
-            "guides/admin-dashboard",
-            "guides/seo-and-visibility"
+            "guides/admin-dashboard"
           ]
         },
         {
@@ -179,14 +192,6 @@
     },
     {
       "tab": "API Reference",
-      "groups": [
-        {
-          "group": "Overview",
-          "pages": [
-            "api/overview"
-          ]
-        }
-      ],
       "api": {
         "source": "openapi.yaml",
         "tagsOrder": [

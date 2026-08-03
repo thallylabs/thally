@@ -263,7 +263,7 @@ The first release of your **{NAME}** documentation.
 
 - Initial docs site scaffolded with [Thally](https://github.com/thallylabs/thally)
 - Agent-ready endpoints live: \`/llms.txt\`, \`/ai.txt\`, \`/api/docs-index\`, and \`/api/agent-readiness\`
-- Starter guides in the Overview tab and an interactive API reference
+- Starter guides in the Get started tab and an interactive API reference
 
 Edit this page at \`src/content/changelog.mdx\` to announce your own releases as you ship.
 `,
@@ -428,7 +428,7 @@ function buildStarterDocsJson({
 
   config.tabs = [
     {
-      tab: 'Overview',
+      tab: 'Get started',
       groups: [
         { group: 'Start here', icon: 'book-open', pages: ['introduction', 'quickstart'] },
         { group: 'Create content', icon: 'grid-round', pages: ['components'] },
