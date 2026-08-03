@@ -1,9 +1,5 @@
 {
   "theme": "default",
-  "banner": {
-    "content": "This is a sample documentation site built with the Thally template. [Get started →](/quickstart)",
-    "dismissible": true
-  },
   "ai": {
     "chat": true,
     "label": "ThallyAI",

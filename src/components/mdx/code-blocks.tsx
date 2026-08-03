@@ -18,10 +18,25 @@ import { Tag } from '@/components/ui/tag'
 import { siteConfig } from '@/data/site'
 
 const languageNames: Record<string, string> = {
+  bash: 'Shell',
+  sh: 'Shell',
+  shell: 'Shell',
+  zsh: 'Shell',
+  css: 'CSS',
+  html: 'HTML',
   js: 'JavaScript',
   ts: 'TypeScript',
   javascript: 'JavaScript',
   typescript: 'TypeScript',
+  jsx: 'JSX',
+  tsx: 'TSX',
+  json: 'JSON',
+  jsonc: 'JSONC',
+  md: 'Markdown',
+  markdown: 'Markdown',
+  mdx: 'MDX',
+  yaml: 'YAML',
+  yml: 'YAML',
   php: 'PHP',
   python: 'Python',
   ruby: 'Ruby',
@@ -40,6 +55,9 @@ function getPanelTitle({
   }
   if (language && language in languageNames) {
     return languageNames[language]
+  }
+  if (language) {
+    return language.toUpperCase()
   }
   return 'Code'
 }
@@ -200,6 +218,7 @@ function CodePanel({
   tag,
   label,
   code,
+  language,
   wrap,
   hasGroupHeader,
 }: {
@@ -207,6 +226,7 @@ function CodePanel({
   tag?: string
   label?: string
   code?: string
+  language?: string
   wrap?: boolean
   hasGroupHeader?: boolean
 }) {
@@ -273,7 +293,11 @@ function CodePanel({
           <CodeActions code={resolvedCode} />
         </span>
       ) : (
-        <CodePanelHeader tag={resolvedTag} label={resolvedLabel ?? 'Code'} code={resolvedCode} />
+        <CodePanelHeader
+          tag={resolvedTag}
+          label={resolvedLabel ?? getPanelTitle({ language })}
+          code={resolvedCode}
+        />
       )}
       <div className="relative">
         <pre

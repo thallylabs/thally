@@ -67,14 +67,15 @@
   --font-heading: var(--font-display, var(--font-sans));
   --container-lg: 33rem;
   --shiki-color-text: #f8fafc;
-  --shiki-token-constant: #86efac;
+  --shiki-token-property: #7dd3fc;
+  --shiki-token-constant: #fbbf24;
   --shiki-token-string: #86efac;
-  --shiki-token-comment: #a1a1aa;
-  --shiki-token-keyword: #7dd3fc;
+  --shiki-token-comment: #94a3b8;
+  --shiki-token-keyword: #c4b5fd;
   --shiki-token-parameter: #f9a8d4;
-  --shiki-token-function: #c4b5fd;
+  --shiki-token-function: #fde68a;
   --shiki-token-string-expression: #86efac;
-  --shiki-token-punctuation: #e4e4e7;
+  --shiki-token-punctuation: #cbd5e1;
   --sidebar-active-bg: var(--brand-sidebar-active-bg-light, 68 40% 88% / 0.65);
   --sidebar-active-text: var(--brand-sidebar-active-text-light, 66 37% 21%);
   /* Ensure prose variables track the active foreground */

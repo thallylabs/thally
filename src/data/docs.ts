@@ -262,6 +262,8 @@ const docsConfig = docsNavigationConfig as unknown as DocsJsonConfig
 
 interface FrontmatterData {
   title?: string
+  /** Optional compact label used only in sidebar and previous/next navigation. */
+  navTitle?: string
   description?: string
   badge?: string
   keywords?: Array<string>
@@ -523,7 +525,7 @@ function resolveNavItem(pageId: string, locale?: string): NavigationItem {
     : baseHref
   return {
     id: slugifyId(pageId) || 'introduction',
-    title: fm.title ?? deriveTitleFromSlug(pageId),
+    title: fm.navTitle ?? fm.title ?? deriveTitleFromSlug(pageId),
     href,
     badge: fm.badge,
     description: fm.description,

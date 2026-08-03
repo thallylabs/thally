@@ -190,11 +190,12 @@ body {
 
 .thally-docs-prose :where(a) {
   color: hsl(var(--thally-accent));
-  text-decoration-color: transparent;
 }
 
-.thally-docs-prose :where(a:hover) {
-  text-decoration-color: currentColor;
+.thally-docs-prose :where(p, li, td, dd) a {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
 }
 
 .thally-docs-prose a:has(> .thally-docs-card) {

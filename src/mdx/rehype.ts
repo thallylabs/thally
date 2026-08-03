@@ -26,6 +26,7 @@ const cssVariablesTheme: ThemeRegistration = {
   bg: 'var(--shiki-color-background, transparent)',
   settings: [
     { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: 'var(--shiki-token-comment)' } },
+    { scope: ['support.type.property-name.json', 'support.type.property-name.json.comments', 'meta.mapping.key'], settings: { foreground: 'var(--shiki-token-property)' } },
     { scope: ['string', 'constant.other.symbol'], settings: { foreground: 'var(--shiki-token-string)' } },
     { scope: ['constant.numeric', 'constant.language', 'constant', 'support.constant'], settings: { foreground: 'var(--shiki-token-constant)' } },
     { scope: ['keyword', 'storage.type', 'storage.modifier', 'keyword.control'], settings: { foreground: 'var(--shiki-token-keyword)' } },
@@ -60,7 +61,12 @@ function getHighlighter(): Promise<Highlighter> {
 
 const languageAliases: Record<string, string> = {
   curl: 'bash',
+  sh: 'bash',
   shell: 'bash',
+  shellscript: 'bash',
+  zsh: 'bash',
+  md: 'markdown',
+  yml: 'yaml',
 }
 
 function normalizeLanguage(language?: string) {
