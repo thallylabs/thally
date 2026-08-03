@@ -10,6 +10,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 interface AgentPromptProps {
   title?: string
+  copyOnly?: boolean
   children: ReactNode
 }
 
@@ -38,6 +39,7 @@ async function copyText(value: string): Promise<boolean> {
 /** Render one prompt with an explicit, accessible copy action. */
 export function AgentPrompt({
   title = 'Copy and paste this prompt into your coding agent',
+  copyOnly = false,
   children,
 }: AgentPromptProps) {
   const [isCopied, setIsCopied] = useState(false)
@@ -51,7 +53,11 @@ export function AgentPrompt({
 
   return (
     <section className="not-prose my-7 overflow-hidden rounded-xl border border-border bg-muted/20">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <div
+        className={`flex flex-wrap items-center justify-between gap-3 ${
+          copyOnly ? 'px-5 py-5' : 'border-b border-border px-4 py-3'
+        }`}
+      >
         <p className="text-sm font-semibold text-foreground">{title}</p>
         <button
           type="button"
@@ -69,12 +75,22 @@ export function AgentPrompt({
           {isCopied ? 'Copied' : 'Copy prompt'}
         </button>
       </div>
-      <div
-        ref={contentRef}
-        className="max-h-[30rem] overflow-auto px-5 py-4 text-[0.9rem] leading-7 text-foreground/75 [&>ol]:my-3 [&>ol]:list-decimal [&>ol]:pl-5 [&>p]:my-3 [&>ul]:my-3 [&>ul]:list-disc [&>ul]:pl-5"
-      >
-        {children}
-      </div>
+      {copyOnly ? (
+        <div
+          ref={contentRef}
+          aria-hidden="true"
+          className="pointer-events-none fixed left-[-10000px] top-0 w-[60rem] whitespace-normal"
+        >
+          {children}
+        </div>
+      ) : (
+        <div
+          ref={contentRef}
+          className="max-h-[30rem] overflow-auto px-5 py-4 text-[0.9rem] leading-7 text-foreground/75 [&>ol]:my-3 [&>ol]:list-decimal [&>ol]:pl-5 [&>p]:my-3 [&>ul]:my-3 [&>ul]:list-disc [&>ul]:pl-5"
+        >
+          {children}
+        </div>
+      )}
     </section>
   )
 }

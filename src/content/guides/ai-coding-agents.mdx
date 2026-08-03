@@ -4,15 +4,16 @@ navTitle: AI coding agents
 description: Give Codex, Claude Code, Cursor, and other coding agents accurate instructions and structured Thally tools.
 ---
 
-Thally works with any coding agent that can edit files and run terminal
-commands. The agent can work directly in a Thally repository with the CLI, or
-you can connect the local MCP server so it gets purpose-built documentation
-tools instead of guessing the project structure.
+Thally works with any coding agent that can use a browser, edit files, and run
+terminal commands. Use Thally Cloud to create and publish the site. After the
+site exists, the agent can work directly in its repository with the CLI or use
+the local MCP server for structured documentation operations.
 
 ## Choose how your agent works
 
 | Workflow | Best for | What the agent can do |
 | --- | --- | --- |
+| Thally Cloud | Creating and publishing a managed site | Create or connect the docs repository, publish to a `thally.app` address, and manage deployments. |
 | Repository + CLI | Agents with shell and file access | Edit MDX and `docs.json`, preview, build, and run checks. |
 | Local MCP server | MCP-compatible coding agents | Create, read, search, update, migrate, translate, and validate projects with structured tools. |
 | `thally agent` | Review-gated documentation automation | Turn an instruction, diff, or product PR into a branch or pull request. Requires an Anthropic API key. |
@@ -68,30 +69,21 @@ The local server runs over standard input/output on your machine. Tools that
 change content require an explicit `projectDir`; use an absolute path when your
 agent is not already inside the documentation repository.
 
-## Create a site with an agent
+## Create and publish a site with an agent
 
-Replace the uppercase placeholders before you paste this prompt. If you leave
-one in place, the prompt tells the agent to ask you for it.
+The recommended setup starts in [Thally Cloud](https://app.thally.io/), not with
+a local scaffold. The [Cloud quickstart](/quickstart#prefer-to-use-a-coding-agent)
+includes one copy-only prompt that tells the agent how to:
 
-<AgentPrompt
-  title="Create a Thally documentation site"
->
+- verify the documentation source before it changes anything;
+- pause for sign-in, GitHub App approval, repository choices, and DNS changes;
+- create and publish the site through Thally Cloud;
+- migrate existing content into the Cloud-created repository safely;
+- validate, push, and verify the managed deployment; and
+- connect the local and remote MCP servers for future work.
 
-Set up a new Thally documentation site for PROJECT_NAME in TARGET_DIRECTORY.
-
-If either value is missing, ask me before you run commands. Then:
-
-1. Confirm Node.js 20.9 or later is available.
-2. Run: npx create-thally-docs@latest TARGET_DIRECTORY --yes --install
-3. Work only in the generated project. Read its README, AGENTS.md if present, docs.json, and src/data/site.ts before editing.
-4. Replace starter identity values with PROJECT_NAME, but keep the Thally runtime structure intact.
-5. Run npx thally check and npm run build. Fix errors caused by your changes.
-6. Start npm run dev if the environment can keep a development server running, and report the local URL.
-7. Summarize the files you changed and any choices I still need to make.
-
-Do not deploy, create a remote repository, commit, or push unless I explicitly ask.
-
-</AgentPrompt>
+The prompt stays collapsed on the page so readers can copy the complete,
+reviewed instructions without scrolling through an agent runbook.
 
 ## Add or update a documentation page
 
