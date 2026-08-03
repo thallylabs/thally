@@ -6,6 +6,32 @@ description: Create a Thally documentation site, add your first page, and valida
 After this guide, you will have a local Thally site with a page you created in
 the sidebar and a validation report you can act on.
 
+## Prefer to use a coding agent?
+
+Paste this prompt into Codex, Claude Code, Cursor, or another agent with terminal
+and file access. It follows the same verified path as the manual guide below.
+
+<AgentPrompt
+  title="Ask an agent to complete the quickstart"
+>
+
+Create a new Thally documentation site in a directory named my-docs.
+
+1. Confirm Node.js 20.9 or later is available.
+2. Run npx create-thally-docs@latest my-docs --yes --install.
+3. In the generated project, read docs.json and src/data/site.ts before editing.
+4. Add src/content/first-page.mdx with a clear title, description, and one task-focused section.
+5. Register first-page in the Start here group in docs.json.
+6. Run npx thally check and npm run build. Fix errors caused by your changes.
+7. Start npm run dev if the environment supports a persistent development server, and report the local URL and changed files.
+
+Do not deploy, create a remote repository, commit, or push unless I explicitly ask.
+
+</AgentPrompt>
+
+For reusable prompts, MCP setup, and review-gated automation, see
+[Use Thally with AI coding agents](/guides/ai-coding-agents).
+
 ## Before you begin
 
 You need [Node.js](https://nodejs.org/) 20.9 or later, npm, a terminal, and a
@@ -129,7 +155,7 @@ attention but do not block a build.
   <Card title="Deploy the site" icon="code-simple" href="/guides/deploying">
     Build the project, set its production URL, and deploy it to your host.
   </Card>
-  <Card title="Connect agents" icon="message" href="/guides/mcp-server">
-    Give supported tools structured access to search and read your documentation.
+  <Card title="Use an AI coding agent" icon="message" href="/guides/ai-coding-agents">
+    Copy task-ready prompts or connect Thally's structured MCP tools.
   </Card>
 </CardGroup>

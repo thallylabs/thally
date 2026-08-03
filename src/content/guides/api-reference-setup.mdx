@@ -8,6 +8,18 @@ By the end of this guide, your Thally site will have a browsable page for each
 operation in an OpenAPI 3.x document. You need a valid YAML or JSON
 specification and a local Thally project.
 
+<AgentPrompt
+  title="Ask an agent to connect an OpenAPI specification"
+>
+
+Connect the OpenAPI specification at SPEC_PATH to this Thally documentation project.
+
+Validate that the file is OpenAPI 3.x before editing. Add or update the API Reference tab in docs.json with the correct source path, tag order from the specification, and a sensible default group. Do not invent servers, authentication schemes, operation descriptions, or example credentials.
+
+Run npx thally check and npm run build. Inspect at least one generated operation for parameters, request and response schemas, and Try It behavior. Report specification problems separately from Thally configuration problems. Do not commit, push, or send live API requests unless I ask.
+
+</AgentPrompt>
+
 ## Adding your spec
 
 Place your OpenAPI 3.x spec file in the project root as `openapi.yaml` (or `openapi.json`). Then configure it in `docs.json`:

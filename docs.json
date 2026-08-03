@@ -73,16 +73,16 @@
         "heading": "Tooling",
         "items": [
           {
-            "label": "CLI Reference",
-            "href": "/guides/cli-reference"
+            "label": "AI coding agents",
+            "href": "/guides/ai-coding-agents"
           },
           {
-            "label": "MCP Server",
-            "href": "/guides/mcp-server"
+            "label": "CLI overview",
+            "href": "/guides/cli-overview"
           },
           {
-            "label": "AI & Agents",
-            "href": "/guides/ai-features"
+            "label": "MCP overview",
+            "href": "/guides/mcp-overview"
           }
         ]
       }
@@ -126,7 +126,16 @@
           "icon": "book-open",
           "pages": [
             "introduction",
-            "quickstart",
+            "quickstart"
+          ]
+        },
+        {
+          "group": "Developer tools",
+          "icon": "code-simple",
+          "pages": [
+            "guides/ai-coding-agents",
+            "guides/cli-overview",
+            "guides/mcp-overview",
             "guides/cli-reference"
           ]
         }
@@ -225,6 +234,7 @@
           "group": "Content",
           "pages": [
             "components/badge",
+            "components/agent-prompt",
             "components/callouts",
             "components/code-blocks",
             "components/panel",

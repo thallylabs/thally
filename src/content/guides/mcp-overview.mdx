@@ -1,0 +1,156 @@
+---
+title: Understand the Thally MCP servers
+navTitle: MCP overview
+description: Choose between Thally's local authoring server and the read-only MCP endpoint published by every deployed site.
+---
+
+Thally provides two Model Context Protocol servers. The **local server** helps
+an AI coding agent work on a repository. The **remote server** helps an agent
+research the documentation already published by a site.
+
+## Local and remote MCP
+
+| | Local authoring server | Deployed site server |
+| --- | --- | --- |
+| Endpoint | `npx -y @thallylabs/mcp` or `npx thally mcp` | `https://docs.example.com/api/mcp` |
+| Transport | stdio | Streamable HTTP |
+| Access | Your machine and filesystem permissions | Public by default; read-only and rate-limited |
+| Tools | 15 project and site tools | 4 site tools |
+| Use it for | Creating, editing, migrating, translating, and validating docs | Searching, reading, listing pages, and checking readiness |
+
+## Connect the local server
+
+<Tabs>
+
+<Tab title="Codex">
+
+```bash
+codex mcp add thally -- npx -y @thallylabs/mcp
+```
+
+</Tab>
+
+<Tab title="Claude Code">
+
+```bash
+claude mcp add thally -- npx -y @thallylabs/mcp
+```
+
+</Tab>
+
+<Tab title="Cursor">
+
+```json
+{
+  "mcpServers": {
+    "thally": {
+      "command": "npx",
+      "args": ["-y", "@thallylabs/mcp"]
+    }
+  }
+}
+```
+
+</Tab>
+
+</Tabs>
+
+Restart or reload the client after adding the configuration.
+
+## What the local server exposes
+
+The local package registers 15 tools from one shared registry:
+
+- **Create and organize:** `create_project`, `add_page`, `update_page`,
+  `add_tab`, `list_pages`
+- **Read and search:** `read_page`, `search_docs`, `get_context`
+- **Migrate and translate:** `migrate_docs`, `import_docs`, `translate_docs`
+- **Validate and inspect:** `lint_project`, `semantic_search`,
+  `agent_readiness`
+- **Automate product changes:** `sync_from_repo`
+
+Most tools act on a local `projectDir`. `semantic_search` and
+`agent_readiness` query a deployed `siteUrl`. The server returns structured
+errors when required paths or values are missing, so your agent can correct the
+call instead of inferring a result.
+
+<AgentPrompt
+  title="Audit a local Thally project with MCP"
+>
+
+Use the connected Thally MCP server to audit the documentation project at ABSOLUTE_PROJECT_PATH.
+
+Call list_pages first, then search_docs and read_page to understand the current information architecture. Run lint_project without fix. Report:
+
+- broken navigation or missing pages;
+- orphan pages and missing frontmatter;
+- duplicated or overlapping guidance;
+- the three highest-impact improvements for a new reader.
+
+Do not modify files until you show me the audit and I approve a specific change.
+
+</AgentPrompt>
+
+## Connect a deployed site
+
+Replace the example URL with the documentation site's origin.
+
+<Tabs>
+
+<Tab title="Codex">
+
+```bash
+codex mcp add product-docs --url https://docs.example.com/api/mcp
+```
+
+</Tab>
+
+<Tab title="Claude Code">
+
+```bash
+claude mcp add --transport http product-docs https://docs.example.com/api/mcp
+```
+
+</Tab>
+
+<Tab title="Cursor">
+
+```json
+{
+  "mcpServers": {
+    "product-docs": {
+      "type": "http",
+      "url": "https://docs.example.com/api/mcp"
+    }
+  }
+}
+```
+
+</Tab>
+
+</Tabs>
+
+The deployed endpoint exposes `search_docs`, `read_page`, `list_pages`, and
+`agent_readiness`. It cannot edit the site. Site owners can disable it from the
+admin dashboard, and public tool calls default to a per-IP limit of 60 per
+minute.
+
+<AgentPrompt
+  title="Research a product through its deployed docs"
+>
+
+Use the connected product-docs MCP server to answer this question: QUESTION.
+
+Search before reading. Open the most relevant pages, distinguish documented facts from your own inference, and cite the page URLs returned by the tools. If the documentation does not support a claim, say what is missing instead of guessing.
+
+</AgentPrompt>
+
+## Safe write behavior
+
+The public remote endpoint is always read-only. Local MCP tools inherit the
+permissions of the process that started them, so review any request that writes
+files. `migrate_docs` requires a new or empty target; `import_docs` modifies an
+existing project and should be used only when an in-place merge is intentional.
+
+Continue to [Connect an MCP client](/guides/mcp-server) for the complete local
+tool reference and setup details.

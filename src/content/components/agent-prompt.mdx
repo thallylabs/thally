@@ -1,0 +1,42 @@
+---
+title: Agent prompt
+description: Add a copyable prompt that gives AI coding agents accurate, task-specific instructions.
+---
+
+Use `<AgentPrompt>` when a reader can delegate the documented task to an AI
+coding agent. The visible prompt is the exact text copied to the clipboard.
+
+## Example
+
+<AgentPrompt
+  title="Ask an agent to add a page"
+>
+
+Add a task-focused page to this Thally project about inviting a team member.
+
+Inspect docs.json and the existing pages before editing. Add the page to the most relevant sidebar group, then run npx thally check. Do not commit or push.
+
+</AgentPrompt>
+
+```mdx
+<AgentPrompt
+  title="Ask an agent to add a page"
+>
+
+Add a task-focused page to this Thally project about inviting a team member.
+
+Inspect docs.json and the existing pages before editing. Add the page to the most relevant sidebar group, then run npx thally check. Do not commit or push.
+
+</AgentPrompt>
+```
+
+## Write a reliable prompt
+
+Include the outcome, scope, files or tools the agent should inspect, validation
+commands, and actions that require separate approval. Use placeholders only
+when the reader knows they must replace them.
+
+| Prop | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| `children` | MDX | Required | Visible instructions and clipboard payload. |
+| `title` | string | Copy-and-paste instruction | Short context shown beside the copy action. |

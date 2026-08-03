@@ -1,0 +1,78 @@
+---
+title: Use the Thally CLI
+navTitle: CLI overview
+description: Learn the small set of Thally commands used to create, edit, validate, publish, and automate documentation.
+---
+
+The `thally` CLI is the main interface for a documentation project. It wraps
+the framework so you can work with content and configuration instead of Next.js
+internals. Generated projects include `@thallylabs/cli`; run it with `npx` from
+the project root.
+
+```bash
+npx thally
+```
+
+## The five-command path
+
+```bash
+npx create-thally-docs@latest my-docs --yes --install
+cd my-docs
+npx thally dev
+npx thally new guides/invite-a-member --title "Invite a team member"
+npx thally check
+```
+
+Use `build` when the project is ready for production and `deploy` when you want
+the CLI to publish it through a supported provider.
+
+## Choose a command by goal
+
+| Goal | Command | Result |
+| --- | --- | --- |
+| Create a project | `create-thally-docs@latest [dir]` | Downloads and runs the current scaffold. |
+| Preview locally | `thally dev` | Starts the docs site and agent endpoints. |
+| Add a page | `thally new PAGE_ID` | Creates MDX and registers it in `docs.json`. |
+| Validate work | `thally check` | Finds broken navigation, missing metadata, and optional readiness issues. |
+| Build production output | `thally build` | Runs the production build. |
+| Publish | `thally deploy` | Builds and deploys through Vercel or Cloudflare. |
+| Migrate documentation | `thally migrate SOURCE [dir]` | Imports a repository or public docs site. |
+| Translate pages | `thally translate --locale CODE` | Writes a localized content tree. |
+| Start local MCP | `thally mcp` | Runs the 15-tool stdio MCP server. |
+| Draft an update | `thally agent` | Produces a reviewable branch or pull request. |
+| Automate product changes | `thally track` | Turns tracked repository changes into docs tasks. |
+
+## `thally` and `create-thally-docs`
+
+Use `npx thally` for routine work inside a project. Use
+`npx create-thally-docs@latest` when you need the newest scaffold before a
+project exists. `thally init` and `thally migrate` delegate to the scaffold
+package, so both interfaces produce the same supported project shape.
+
+## Validate work from an agent
+
+<AgentPrompt
+  title="Check and repair a Thally project"
+>
+
+Validate the current Thally documentation project without changing its product meaning.
+
+1. Read AGENTS.md if present, docs.json, and package.json.
+2. Run npx thally check.
+3. Fix errors caused by missing files, broken navigation references, invalid frontmatter, or orphan pages. Do not auto-fix warnings whose intent is ambiguous; explain them instead.
+4. Run npm run build after the check passes.
+5. Summarize each change and any remaining warnings.
+
+Do not commit, push, deploy, or change framework internals unless I explicitly ask.
+
+</AgentPrompt>
+
+## CLI or MCP?
+
+Use the CLI when you are in a terminal, writing automation, or debugging a
+specific command. Connect the [local MCP server](/guides/mcp-overview) when you
+want a coding agent to discover structured operations and their parameters.
+Both interfaces act on the same project files and use the same validation
+rules.
+
+For every flag and migration option, continue to the [CLI reference](/guides/cli-reference).

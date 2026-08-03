@@ -1,6 +1,7 @@
 import type { MDXComponents } from 'mdx/types'
 import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 import { Note } from '@/components/mdx/note'
+import { AgentPrompt } from '@/components/mdx/agent-prompt'
 import { Code, CodeGroup, Pre } from '@/components/mdx/code-blocks'
 import {
   Badge, Card, CardGroup, Color, Columns, Frame, Hero, Icon, Panel,
@@ -97,6 +98,7 @@ const components: MDXComponents = {
   Prompt: (props) => <Prompt {...props} />,
   PromptUser: (props) => <PromptUser {...props} />,
   PromptAssistant: (props) => <PromptAssistant {...props} />,
+  AgentPrompt: (props) => <AgentPrompt {...props} />,
   Color: (props) => <Color {...props} />,
   Tree: (props) => <Tree {...props} />,
   Folder: (props) => <Folder {...props} />,

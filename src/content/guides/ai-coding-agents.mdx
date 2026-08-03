@@ -1,0 +1,184 @@
+---
+title: Use Thally with AI coding agents
+navTitle: AI coding agents
+description: Give Codex, Claude Code, Cursor, and other coding agents accurate instructions and structured Thally tools.
+---
+
+Thally works with any coding agent that can edit files and run terminal
+commands. The agent can work directly in a Thally repository with the CLI, or
+you can connect the local MCP server so it gets purpose-built documentation
+tools instead of guessing the project structure.
+
+## Choose how your agent works
+
+| Workflow | Best for | What the agent can do |
+| --- | --- | --- |
+| Repository + CLI | Agents with shell and file access | Edit MDX and `docs.json`, preview, build, and run checks. |
+| Local MCP server | MCP-compatible coding agents | Create, read, search, update, migrate, translate, and validate projects with structured tools. |
+| `thally agent` | Review-gated documentation automation | Turn an instruction, diff, or product PR into a branch or pull request. Requires an Anthropic API key. |
+| Remote MCP server | Agents researching a deployed site | Search and read published docs through four public, read-only tools. |
+
+You do not need MCP to use Thally with an agent. MCP makes the agent more
+reliable because it exposes explicit operations such as `add_page`,
+`search_docs`, and `lint_project`.
+
+## Connect the local MCP server
+
+Run the command for your coding agent, then restart or reload the agent so it
+discovers the `thally` server.
+
+<Tabs>
+
+<Tab title="Codex">
+
+```bash
+codex mcp add thally -- npx -y @thallylabs/mcp
+```
+
+</Tab>
+
+<Tab title="Claude Code">
+
+```bash
+claude mcp add thally -- npx -y @thallylabs/mcp
+```
+
+</Tab>
+
+<Tab title="Cursor">
+
+Add this to `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "thally": {
+      "command": "npx",
+      "args": ["-y", "@thallylabs/mcp"]
+    }
+  }
+}
+```
+
+</Tab>
+
+</Tabs>
+
+The local server runs over standard input/output on your machine. Tools that
+change content require an explicit `projectDir`; use an absolute path when your
+agent is not already inside the documentation repository.
+
+## Create a site with an agent
+
+Replace the uppercase placeholders before you paste this prompt. If you leave
+one in place, the prompt tells the agent to ask you for it.
+
+<AgentPrompt
+  title="Create a Thally documentation site"
+>
+
+Set up a new Thally documentation site for PROJECT_NAME in TARGET_DIRECTORY.
+
+If either value is missing, ask me before you run commands. Then:
+
+1. Confirm Node.js 20.9 or later is available.
+2. Run: npx create-thally-docs@latest TARGET_DIRECTORY --yes --install
+3. Work only in the generated project. Read its README, AGENTS.md if present, docs.json, and src/data/site.ts before editing.
+4. Replace starter identity values with PROJECT_NAME, but keep the Thally runtime structure intact.
+5. Run npx thally check and npm run build. Fix errors caused by your changes.
+6. Start npm run dev if the environment can keep a development server running, and report the local URL.
+7. Summarize the files you changed and any choices I still need to make.
+
+Do not deploy, create a remote repository, commit, or push unless I explicitly ask.
+
+</AgentPrompt>
+
+## Add or update a documentation page
+
+This prompt works whether the agent uses MCP tools or edits the repository
+directly. It tells the agent to preserve the existing information architecture
+instead of adding a page wherever it is convenient.
+
+<AgentPrompt
+  title="Document one user task"
+>
+
+Document this user task in the current Thally project: TASK_TO_DOCUMENT.
+
+Before editing, inspect docs.json and search the existing pages for overlapping guidance. Prefer updating the best existing page. Add a new page only when the task needs its own durable URL.
+
+If the Thally MCP server is connected, use list_pages, search_docs, read_page, add_page, or update_page as appropriate. Otherwise edit files under src/content and update docs.json directly.
+
+Write for the reader who is trying to complete the task:
+
+- Use a specific task title and outcome-led description.
+- Put prerequisites before steps.
+- Use tested commands and realistic examples.
+- Keep sidebar labels short with navTitle when the full page title is long.
+- Link to prerequisites instead of repeating them.
+
+Run npx thally check and npm run build. Fix errors caused by your changes, then summarize the result. Do not commit or push unless I ask.
+
+</AgentPrompt>
+
+## Migrate existing documentation
+
+Use a GitHub repository when one is available. Repository migrations retain
+more authored structure than a crawl of the deployed site.
+
+<AgentPrompt
+  title="Migrate documentation into Thally"
+>
+
+Migrate SOURCE_URL into a new Thally project at TARGET_DIRECTORY.
+
+First determine whether SOURCE_URL is a GitHub documentation repository or only a public documentation site. Prefer the source repository when both are available.
+
+Use the Thally MCP migrate_docs tool if connected. Otherwise run npx create-thally-docs@latest migrate SOURCE_URL TARGET_DIRECTORY. Do not use import_docs or --into unless I explicitly ask to merge into an existing Thally project.
+
+After migration:
+
+1. Install dependencies if needed.
+2. Run npx thally check and npm run build.
+3. Inspect the homepage, primary navigation, several content pages, code blocks, images, and any OpenAPI reference.
+4. Report migration warnings and content that needs human review.
+
+Do not overwrite an existing non-empty directory, deploy, commit, or push without asking.
+
+</AgentPrompt>
+
+## Review a product change
+
+For one-off work, your current coding agent can inspect a diff and update the
+docs directly. For a repeatable, review-gated workflow, use the built-in docs
+agent:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+npx thally agent "Document the new webhook retry policy" --diff HEAD~1 --dry-run
+```
+
+`--dry-run` prints the proposed diff and writes nothing. The default leaves
+edits on a new branch; `--pr` commits, pushes, and opens a pull request. The
+docs agent requires a clean git working tree and never merges its own work.
+
+## Give agents project-specific rules
+
+Add an `AGENTS.md` file at the project root for tone, information architecture,
+files that must not change, and review requirements. Thally feeds that file to
+the built-in docs agent. Other coding agents also discover it when they work in
+the repository.
+
+Deployed sites publish additional machine-readable guidance automatically:
+
+- `/AGENTS.md` explains how to edit the project safely;
+- `/skill.md` describes the site's agent-readable capabilities;
+- `/llms.txt` and `/llms-full.txt` index the published documentation;
+- `/api/mcp` exposes the public, read-only remote MCP server.
+
+## Next steps
+
+- [CLI overview](/guides/cli-overview)
+- [MCP overview](/guides/mcp-overview)
+- [Connect an MCP client](/guides/mcp-server)
+- [Connect AI and agent tools](/guides/ai-features)
