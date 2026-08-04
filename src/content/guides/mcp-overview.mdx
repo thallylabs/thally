@@ -75,19 +75,30 @@ errors when required paths or values are missing, so your agent can correct the
 call instead of inferring a result.
 
 <AgentPrompt
-  title="Audit a local Thally project with MCP"
+  title="Copy a complete prompt to audit a Thally project"
+  copyOnly
 >
 
-Use the connected Thally MCP server to audit the documentation project at ABSOLUTE_PROJECT_PATH.
+Use the connected local Thally MCP server to audit the documentation project at ABSOLUTE_PROJECT_PATH. You are done when I have an evidence-backed audit ordered by reader impact, with exact page IDs or files for every finding and no unapproved edits.
 
-Call list_pages first, then search_docs and read_page to understand the current information architecture. Run lint_project without fix. Report:
+Confirm that ABSOLUTE_PROJECT_PATH is the intended Thally project and that it contains docs.json and package.json. Read AGENTS.md or equivalent repository instructions if present. Record the current git status and do not disturb unrelated work.
+
+Call list_pages first. Use search_docs to test the language a new reader would use for setup, common tasks, API documentation, deployment, troubleshooting, CLI, MCP, and agent workflows. Use read_page on the most relevant results and on pages that appear duplicated, thin, orphaned, or misplaced. Call get_context when you need project-level configuration rather than guessing. Run lint_project with fixes disabled.
+
+Evaluate the documentation against the actual project, not against generic docs conventions. Trace important capability claims to repository configuration, implementation, CLI output, tests, or a clearly labeled external dependency. Distinguish facts, reasonable editorial recommendations, and questions that require a product owner.
+
+Report:
 
 - broken navigation or missing pages;
-- orphan pages and missing frontmatter;
-- duplicated or overlapping guidance;
-- the three highest-impact improvements for a new reader.
+- orphan pages, invalid or missing frontmatter, and broken local links;
+- duplicated, contradictory, generic, or unsupported guidance;
+- tasks that lack prerequisites, expected results, troubleshooting, or a clear next step;
+- sidebar labels that obscure scanning or wrap unnecessarily;
+- code examples with missing languages, unsafe placeholders, or commands the repository does not support;
+- agent prompts that lack context, validation, permissions, or success criteria;
+- the five highest-impact improvements, each with the affected page, reader consequence, evidence, and recommended fix.
 
-Do not modify files until you show me the audit and I approve a specific change.
+Do not modify files, run fix mode, install packages, commit, push, or deploy. Show me the audit first and wait for approval of a specific change set.
 
 </AgentPrompt>
 
@@ -136,12 +147,17 @@ admin dashboard, and public tool calls default to a per-IP limit of 60 per
 minute.
 
 <AgentPrompt
-  title="Research a product through its deployed docs"
+  title="Copy a complete prompt to research deployed documentation"
+  copyOnly
 >
 
-Use the connected product-docs MCP server to answer this question: QUESTION.
+Use the connected read-only Thally MCP server for PRODUCT_DOCS_URL to answer this question: QUESTION. You are done when the answer is concise, supported by the deployed documentation, linked to the exact source pages, and explicit about anything the site does not establish.
 
-Search before reading. Open the most relevant pages, distinguish documented facts from your own inference, and cite the page URLs returned by the tools. If the documentation does not support a claim, say what is missing instead of guessing.
+Confirm that the MCP server belongs to PRODUCT_DOCS_URL. Start with list_pages when the information architecture is unfamiliar, then use search_docs with the reader's wording, product terminology, and likely synonyms. Read the most relevant pages in full before answering. Follow prerequisite and reference links when a claim depends on them, but do not browse unrelated sections to manufacture certainty.
+
+For each material claim, cite the exact page URL returned by the tools. Separate direct documentation facts from your inference and label the inference. When pages conflict, report both, prefer the more specific or recently updated source only when the metadata supports that choice, and identify the contradiction. If the documentation does not answer part of the question, state what is missing and suggest the page or product owner that could resolve it.
+
+Do not modify the site, invoke local authoring tools, submit forms, send live API requests, or use uncited general knowledge as if it came from the product documentation. End with a short answer, supporting sources, assumptions, and unresolved gaps.
 
 </AgentPrompt>
 

@@ -57,7 +57,7 @@ export function MobileNav({ sections }: MobileNavProps) {
                         onClick={() => setOpen(false)}
                         className={cn(
                           'flex flex-col rounded-xl border border-transparent px-3 py-2 text-sm font-medium transition hover:border-border',
-                          'focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/30',
+                          'focus:outline-none',
                           isActive && 'border-border bg-muted',
                         )}
                       >

@@ -52,18 +52,21 @@ package, so both interfaces produce the same supported project shape.
 ## Validate work from an agent
 
 <AgentPrompt
-  title="Check and repair a Thally project"
+  title="Copy a complete prompt to check a Thally project"
+  copyOnly
 >
 
-Validate the current Thally documentation project without changing its product meaning.
+Audit and repair the current Thally documentation project without changing its product meaning, brand intent, or ownership boundaries. You are done when validation and the production build pass, every automatic fix is justified, and I have a precise report of anything that still needs a human decision.
 
-1. Read AGENTS.md if present, docs.json, and package.json.
-2. Run npx thally check.
-3. Fix errors caused by missing files, broken navigation references, invalid frontmatter, or orphan pages. Do not auto-fix warnings whose intent is ambiguous; explain them instead.
-4. Run npm run build after the check passes.
-5. Summarize each change and any remaining warnings.
+1. Confirm the working directory contains package.json, docs.json, and src/content. Read AGENTS.md or equivalent repository instructions before changing files. Record the current git status and preserve unrelated edits.
+2. Read docs.json, package.json scripts, src/data/site.ts, and any configuration or content files named by existing errors. Do not edit generated output or hidden framework internals when an authored content or configuration fix exists.
+3. Run npx thally check without a fix flag first. Group results into blocking errors, warnings that can be proven from repository state, and warnings that require editorial or product judgment.
+4. Fix only issues you can prove: missing navigation targets, invalid or incomplete frontmatter, duplicate page IDs, broken local links, malformed configuration, and clearly accidental orphan pages. Do not delete or publish orphan content merely to silence a warning. Do not rewrite product claims unless the implementation or tests contradict them.
+5. Run npx thally check again. When it passes, run npm run build. If a command fails, isolate whether the failure came from your edit, existing repository state, the environment, or an external service before changing more files.
+6. Start the local site when possible and inspect the homepage, primary navigation, one representative guide, a code-heavy page, images, and any API reference. Check narrow and wide layouts, light and dark mode, broken links, horizontal overflow, and console errors.
+7. Summarize the initial findings, exact files changed, why each edit was safe, final command results, visual checks, and remaining warnings with a recommended owner and next step.
 
-Do not commit, push, deploy, or change framework internals unless I explicitly ask.
+Do not commit, push, deploy, install unrelated packages, remove content, overwrite user changes, or change framework internals unless I explicitly ask. If a fix would change product meaning or public navigation intent, stop and ask before applying it.
 
 </AgentPrompt>
 

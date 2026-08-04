@@ -7,14 +7,21 @@ description: Create task-focused MDX pages with frontmatter, code examples, and 
 import { GettingStartedTip } from '/snippets/getting-started-tip.mdx'
 
 <AgentPrompt
-  title="Ask an agent to write a page"
+  title="Copy a complete prompt to write a page"
+  copyOnly
 >
 
-Create or improve a task-focused page in this Thally project about TASK.
+Create or improve a task-focused page in this Thally project about TASK. You are done when a reader can complete the task without guessing, the page is placed where they will look for it, every product claim is supported by the current implementation, and the project passes its documentation checks and production build.
 
-Inspect docs.json and search existing content before editing. Prefer updating an existing page when it already owns the task. Otherwise create one MDX file under src/content, add it to the most relevant navigation group, and use navTitle if the full page title would wrap in the sidebar.
+Start by reading AGENTS.md if present, docs.json, package.json, src/data/site.ts, and the pages returned by a repository search for the task, feature names, commands, settings, and related user language. Inspect the source code, CLI help, configuration types, and tests behind any behavior you plan to document. Treat code and tests as evidence; do not turn assumptions, roadmap notes, generic Next.js behavior, or another product's conventions into Thally claims.
 
-Write prerequisites, ordered steps, tested examples, and a clear success check. Use built-in Thally components only when they make the task easier to scan. Run npx thally check and npm run build, then summarize the changed files. Do not commit or push.
+Prefer improving the existing page that owns the task. Create one new MDX file under src/content only when the task needs its own durable URL. Add a new page to the most relevant docs.json group, keep its navTitle short enough for one sidebar line when practical, and link to prerequisites instead of duplicating them.
+
+Write directly to the reader in friendly, concrete language. Include the outcome, prerequisites, ordered steps, exact UI labels or tested commands, realistic examples, expected results, and troubleshooting for the two or three most likely failures. Use code fences with the correct language. Use Note, Warning, Steps, Tabs, Cards, or another built-in component only when it makes the task easier to scan. Never add a second H1 inside the body.
+
+Run every safe command you document when the environment permits. Then run npx thally check and npm run build. Start a local preview, inspect the page in light and dark mode at desktop and narrow widths, and check links, navigation, code contrast, overflow, and headings. Fix regressions caused by your changes.
+
+Report the user outcome, files changed, evidence used for product claims, commands run, visual checks completed, and any facts that still require a product owner. Do not commit, push, deploy, delete content, or modify unrelated framework internals unless I explicitly ask.
 
 </AgentPrompt>
 

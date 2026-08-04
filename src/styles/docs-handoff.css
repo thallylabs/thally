@@ -22,6 +22,12 @@
   --docs-panel: hsl(var(--thally-muted) / 0.48);
   --docs-code: #11150f;
 }
+
+.dark {
+  /* A deeper neutral than the surrounding dark surfaces keeps bright syntax
+     tokens legible without turning the code panel into another card. */
+  --docs-code: #070a07;
+}
 html {
   scroll-behavior: auto;
   font-size: 16px;
@@ -44,10 +50,20 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-.thally-docs-root a:focus-visible,
-.thally-docs-root button:focus-visible {
-  outline: 2px solid hsl(var(--thally-ring));
-  outline-offset: 2px;
+.thally-docs-root :where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 1px solid hsl(var(--thally-foreground) / 0.34);
+  outline-offset: 1px;
+  box-shadow: none !important;
+}
+
+/* Selected controls already have an active indicator. Repeating it as a full
+   focus rectangle creates the oversized double highlight seen in navigation. */
+.thally-docs-root :where(
+  [aria-current='page'],
+  [aria-selected='true'],
+  [data-state='active']
+):focus-visible {
+  outline: none;
 }
 
 .thally-docs-topbar {
@@ -189,13 +205,19 @@ body {
 }
 
 .thally-docs-prose :where(a) {
-  color: hsl(var(--thally-accent));
+  color: inherit;
+  text-decoration-color: hsl(var(--thally-accent));
+  transition: color 120ms ease;
 }
 
 .thally-docs-prose :where(p, li, td, dd) a {
   text-decoration-line: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.18em;
+}
+
+.thally-docs-prose :where(p, li, td, dd) a:hover {
+  color: hsl(var(--thally-accent));
 }
 
 .thally-docs-prose a:has(> .thally-docs-card) {

@@ -9,14 +9,19 @@ operation in an OpenAPI 3.x document. You need a valid YAML or JSON
 specification and a local Thally project.
 
 <AgentPrompt
-  title="Ask an agent to connect an OpenAPI specification"
+  title="Copy a complete prompt to connect an OpenAPI specification"
+  copyOnly
 >
 
-Connect the OpenAPI specification at SPEC_PATH to this Thally documentation project.
+Connect the OpenAPI specification at SPEC_PATH to this Thally documentation project. You are done when Thally validates the specification, generated endpoint navigation reflects the source accurately, representative operations render correctly, and the project passes its documentation check and production build.
 
-Validate that the file is OpenAPI 3.x before editing. Add or update the API Reference tab in docs.json with the correct source path, tag order from the specification, and a sensible default group. Do not invent servers, authentication schemes, operation descriptions, or example credentials.
+Before editing, read AGENTS.md if present, docs.json, package.json, the existing API guides, and the complete specification. Preserve unrelated navigation and any authored pages already paired with operations. Confirm SPEC_PATH resolves from the project root, parses as OpenAPI 3.x, and does not contain unresolved local references.
 
-Run npx thally check and npm run build. Inspect at least one generated operation for parameters, request and response schemas, and Try It behavior. Report specification problems separately from Thally configuration problems. Do not commit, push, or send live API requests unless I ask.
+Add or update the API Reference tab in docs.json. Use the exact source path. Derive tagsOrder from tags that actually exist, keep deliberate existing ordering when it remains valid, and choose defaultGroup only for genuinely untagged operations. Preserve operation IDs, paths, methods, servers, security schemes, schemas, examples, and descriptions exactly as the source defines them. Do not invent authentication, credentials, base URLs, response bodies, or business meaning. Never place a production secret in docs.json or an example.
+
+Run npx thally check and npm run build. Start the local site and inspect at least one read operation and one write operation when both exist. Verify navigation grouping, path and method, parameters, request body, response schemas, examples, authentication fields, generated cURL, overflow, and dark-mode syntax contrast. Do not send a live request unless the specification points to a safe test server and I explicitly approve it.
+
+Report specification errors separately from Thally configuration errors. Include the exact files changed, commands run, operations inspected, source facts preserved, and anything the API owner must correct. Do not commit, push, deploy, modify the specification itself, or change unrelated framework files unless I ask.
 
 </AgentPrompt>
 

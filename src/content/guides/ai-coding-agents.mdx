@@ -92,24 +92,30 @@ directly. It tells the agent to preserve the existing information architecture
 instead of adding a page wherever it is convenient.
 
 <AgentPrompt
-  title="Document one user task"
+  title="Copy a complete prompt to document one task"
+  copyOnly
 >
 
-Document this user task in the current Thally project: TASK_TO_DOCUMENT.
+Document this user task in the current Thally project: TASK_TO_DOCUMENT. You are done when a first-time reader can complete the task without guessing, the page is easy to find, every Thally claim is verified against the current repository, and validation plus the production build pass.
 
-Before editing, inspect docs.json and search the existing pages for overlapping guidance. Prefer updating the best existing page. Add a new page only when the task needs its own durable URL.
+First read AGENTS.md or equivalent repository instructions if present. Record the current git status so you preserve unrelated work. Inspect docs.json, package.json, src/data/site.ts, the relevant content pages, and the implementation, CLI help, configuration types, or tests behind the task. Search for the reader's language as well as internal feature names. Do not copy generic guidance from another documentation product or assume that a standard Next.js capability is configured by Thally.
 
-If the Thally MCP server is connected, use list_pages, search_docs, read_page, add_page, or update_page as appropriate. Otherwise edit files under src/content and update docs.json directly.
+If the local Thally MCP server is connected, use list_pages, search_docs, and read_page to understand the current structure. Use update_page when one page already owns the task; use add_page only when a separate URL is justified. Otherwise edit authored files under src/content and docs.json directly. Do not edit generated runtime sources.
 
 Write for the reader who is trying to complete the task:
 
-- Use a specific task title and outcome-led description.
-- Put prerequisites before steps.
-- Use tested commands and realistic examples.
-- Keep sidebar labels short with navTitle when the full page title is long.
-- Link to prerequisites instead of repeating them.
+- Use a specific task title and an outcome-led description.
+- Put prerequisites, permissions, and irreversible effects before the steps.
+- Give ordered steps with exact UI labels or commands you can test.
+- Use realistic values and state the expected result after consequential steps.
+- Cover the most likely failure modes and the safest recovery action.
+- Keep sidebar labels short with navTitle when the full page title would wrap.
+- Link to prerequisite concepts instead of repeating them.
+- Use built-in MDX components only when they improve scanning.
 
-Run npx thally check and npm run build. Fix errors caused by your changes, then summarize the result. Do not commit or push unless I ask.
+Run npx thally check and npm run build. Start a local preview when possible and inspect the page in light and dark mode at desktop and narrow widths, including links, code blocks, navigation, headings, and overflow. Fix regressions caused by your changes.
+
+Summarize the reader outcome, files changed, sources used to authenticate product behavior, commands and visual checks completed, and any facts that still need a product owner. Do not commit, push, deploy, delete content, or modify unrelated framework files unless I ask.
 
 </AgentPrompt>
 
@@ -119,23 +125,26 @@ Use a GitHub repository when one is available. Repository migrations retain
 more authored structure than a crawl of the deployed site.
 
 <AgentPrompt
-  title="Migrate documentation into Thally"
+  title="Copy a complete prompt to migrate documentation"
+  copyOnly
 >
 
-Migrate SOURCE_URL into a new Thally project at TARGET_DIRECTORY.
+Migrate SOURCE_URL into a new Thally project at TARGET_DIRECTORY. You are done when the source has been imported into a fresh Thally project, the information architecture and important assets survive the move, checks and the production build pass, and I have a review report instead of an unverified claim that the migration is complete.
 
-First determine whether SOURCE_URL is a GitHub documentation repository or only a public documentation site. Prefer the source repository when both are available.
+Before writing files, read repository instructions in the current workspace and inspect TARGET_DIRECTORY. Stop if the target exists and is not empty; never overwrite or merge into it by assumption. Determine whether SOURCE_URL is a GitHub documentation repository, a public documentation site, or both. Prefer the source repository when it is available because it preserves source MDX, configuration, history, and assets. Confirm the exact source and target with me if either is ambiguous.
 
-Use the Thally MCP migrate_docs tool if connected. Otherwise run npx create-thally-docs@latest migrate SOURCE_URL TARGET_DIRECTORY. Do not use import_docs or --into unless I explicitly ask to merge into an existing Thally project.
+Use the local Thally MCP migrate_docs tool if connected. Otherwise run npx create-thally-docs@latest migrate SOURCE_URL TARGET_DIRECTORY. Do not use import_docs or --into unless I explicitly ask for an in-place merge and approve the destination. Preserve the migration log and warnings.
 
 After migration:
 
-1. Install dependencies if needed.
-2. Run npx thally check and npm run build.
-3. Inspect the homepage, primary navigation, several content pages, code blocks, images, and any OpenAPI reference.
-4. Report migration warnings and content that needs human review.
+1. Read the generated AGENTS.md if present, docs.json, package.json, and src/data/site.ts. Compare the source and destination page counts, top-level navigation, redirects, important images and downloads, code languages, custom components, and API specification references.
+2. Install dependencies only with the package manager and lockfile chosen by the generated project. Do not upgrade unrelated packages.
+3. Run npx thally check and npm run build. Separate importer limitations from source-content errors and from environment failures.
+4. Start the local site and inspect the homepage, every primary navigation tab, representative shallow and deep pages, links, headings, code blocks, images, tables, callouts, and any OpenAPI reference. Check light and dark mode plus a narrow viewport. Look for missing assets, raw unsupported MDX, broken anchors, overflow, duplicate headings, and generic placeholder copy.
+5. Fix safe mechanical migration issues that do not change product meaning. Flag unsupported components, ambiguous navigation, stale or duplicate content, and claims that need a product owner instead of inventing replacements.
+6. Report what migrated, exact commands run, validation results, visual checks, warnings, unresolved content, and the safest next action for each item.
 
-Do not overwrite an existing non-empty directory, deploy, commit, or push without asking.
+Do not overwrite an existing non-empty directory, delete source material, deploy, commit, push, or change public URLs without asking.
 
 </AgentPrompt>
 

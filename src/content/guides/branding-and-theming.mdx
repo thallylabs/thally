@@ -138,9 +138,11 @@ The body and heading fonts are set from a `fonts` block in `docs.json` — any G
 
 The defaults are **Inter** (body) and **JetBrains Mono** (code). The monospace font is still configured in `src/app/layout.tsx` via `next/font/google`. See [Custom fonts](/guides/custom-fonts) for the full reference.
 
-## Analytics
+## Third-party analytics scripts
 
-Add analytics by setting one or more providers in `siteConfig.analytics`. Scripts load automatically — no code changes needed.
+Initialize Google Analytics, Plausible, or PostHog by setting one or more
+providers in `siteConfig.analytics`. Thally's root layout renders the provider
+loader when this object is present, so you do not need to edit the layout.
 
 ```ts
 export const siteConfig: SiteConfig = {
@@ -156,7 +158,9 @@ export const siteConfig: SiteConfig = {
 }
 ```
 
-Leave `analytics` undefined to disable all tracking.
+Leave `analytics` undefined when you do not want these third-party scripts.
+This setting loads the provider SDKs; it does not replace provider-specific
+single-page navigation, custom-event, privacy, or consent configuration.
 
 ## Version switcher
 

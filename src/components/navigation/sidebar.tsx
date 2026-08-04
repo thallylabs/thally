@@ -62,7 +62,7 @@ export function Sidebar({ sections, title, className }: SidebarProps) {
                           aria-current={active ? 'page' : undefined}
                           className={cn(
                             'group relative block px-3 py-[7px] text-left transition',
-                            'focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/30',
+                            'focus:outline-none',
                             active
                               ? 'bg-transparent text-foreground shadow-none'
                               : 'text-foreground/58 hover:bg-transparent hover:text-foreground',

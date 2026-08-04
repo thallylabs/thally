@@ -2,8 +2,8 @@
 
 /**
  * Copyable, agent-ready instructions for task-focused documentation guides.
- * Clipboard text is read from the rendered prompt so rich MDX and copied
- * instructions always stay aligned.
+ * The instruction payload stays out of the visual and accessibility trees;
+ * readers reveal it only by choosing the explicit copy action.
  */
 import { Check, Copy } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
@@ -36,10 +36,33 @@ async function copyText(value: string): Promise<boolean> {
   }
 }
 
+/** Preserve paragraph and list structure while reading a hidden MDX payload. */
+function promptText(root: HTMLDivElement): string {
+  return Array.from(root.childNodes)
+    .map((node) => {
+      if (node.nodeType === 3) return node.textContent?.trim() ?? ''
+
+      const element = node as HTMLElement
+      if (element.tagName === 'OL' || element.tagName === 'UL') {
+        const isOrdered = element.tagName === 'OL'
+        return Array.from(element.children)
+          .map((item, index) => {
+            const marker = isOrdered ? `${index + 1}.` : '-'
+            return `${marker} ${item.textContent?.trim() ?? ''}`
+          })
+          .join('\n')
+      }
+
+      return element.textContent?.trim() ?? ''
+    })
+    .filter(Boolean)
+    .join('\n\n')
+}
+
 /** Render one prompt with an explicit, accessible copy action. */
 export function AgentPrompt({
   title = 'Copy and paste this prompt into your coding agent',
-  copyOnly = false,
+  copyOnly = true,
   children,
 }: AgentPromptProps) {
   const [isCopied, setIsCopied] = useState(false)
@@ -64,7 +87,9 @@ export function AgentPrompt({
           className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           aria-live="polite"
           onClick={() => {
-            const value = contentRef.current?.innerText.trim() ?? ''
+            const value = contentRef.current
+              ? promptText(contentRef.current)
+              : ''
             if (!value) return
             void copyText(value).then((wasCopied) => {
               if (wasCopied) setIsCopied(true)
@@ -78,8 +103,7 @@ export function AgentPrompt({
       {copyOnly ? (
         <div
           ref={contentRef}
-          aria-hidden="true"
-          className="pointer-events-none fixed left-[-10000px] top-0 w-[60rem] whitespace-normal"
+          hidden
         >
           {children}
         </div>
