@@ -43,6 +43,18 @@ describe('documentation visual system', () => {
     expect(markup).not.toContain('shadow-')
   })
 
+  it.each([
+    ['card', Card],
+    ['tile', Tile],
+  ])('lets %s icons inherit the live brand accent', (_, Component) => {
+    const markup = renderToStaticMarkup(
+      createElement(Component, { title: 'Quickstart', icon: 'book-open', iconColor: 'accent' }),
+    )
+
+    expect(markup).toContain('text-accent')
+    expect(markup).not.toContain('text-foreground/60')
+  })
+
   it('renders a rail-free sidebar with a visible current-page state', () => {
     const markup = renderToStaticMarkup(
       createElement(Sidebar, {

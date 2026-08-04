@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
+import { getContentIconTone, type ContentIconTone } from '@/data/docs'
 
 type IconName =
   | 'book-open'
@@ -118,6 +119,8 @@ interface CardProps {
   href?: string
   icon?: IconName
   iconType?: 'solid' | 'outline'
+  /** Override the site-wide `appearance.contentIcons` treatment for this card. */
+  iconColor?: ContentIconTone
   img?: string
   children?: ReactNode
 }
@@ -126,7 +129,11 @@ function isExternalLink(href: string) {
   return href.startsWith('http')
 }
 
-export function Card({ title, href, icon, iconType, img, children }: CardProps) {
+export function Card({ title, href, icon, iconType, iconColor, img, children }: CardProps) {
+  const resolvedIconColor = iconColor ?? getContentIconTone()
+  const iconClassName = resolvedIconColor === 'accent'
+    ? 'text-accent transition-opacity group-hover/card:opacity-80'
+    : 'text-foreground/60 transition-colors group-hover/card:text-foreground/80'
   const content = (
     <article className="thally-docs-card group/card relative flex h-full flex-col rounded-[12px] border border-border bg-background p-5 transition-colors duration-150 hover:border-foreground/25 hover:bg-muted/20">
       {img ? (
@@ -143,8 +150,8 @@ export function Card({ title, href, icon, iconType, img, children }: CardProps) 
       ) : null}
       <div className="flex min-h-6 items-center gap-2.5">
         {icon ? (
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center text-foreground/60">
-            <Icon icon={icon} iconType={iconType} className="h-[18px] w-[18px] text-foreground/60 transition-colors group-hover/card:text-foreground/80" />
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center">
+            <Icon icon={icon} iconType={iconType} className={cn('h-[18px] w-[18px]', iconClassName)} />
           </span>
         ) : null}
         {title ? <span className="flex min-h-6 items-center text-base font-medium leading-6 text-foreground">{title}</span> : null}
@@ -348,11 +355,17 @@ interface TileProps {
   title?: string
   href?: string
   icon?: string
+  /** Override the site-wide `appearance.contentIcons` treatment for this tile. */
+  iconColor?: ContentIconTone
   img?: string
   children?: ReactNode
 }
 
-export function Tile({ title, href, icon, iconType, img, children }: TileProps & { iconType?: 'solid' | 'outline' }) {
+export function Tile({ title, href, icon, iconType, iconColor, img, children }: TileProps & { iconType?: 'solid' | 'outline' }) {
+  const resolvedIconColor = iconColor ?? getContentIconTone()
+  const iconClassName = resolvedIconColor === 'accent'
+    ? 'text-accent transition-opacity group-hover/card:opacity-80'
+    : 'text-foreground/60 transition-colors group-hover/card:text-foreground/80'
   const content = (
     <article className="thally-docs-card group/card relative flex h-full flex-col rounded-[12px] border border-border bg-background p-5 transition-colors duration-150 hover:border-foreground/25 hover:bg-muted/20">
       {img ? (
@@ -369,8 +382,8 @@ export function Tile({ title, href, icon, iconType, img, children }: TileProps &
       ) : null}
       <div className="flex min-h-7 items-center gap-3">
         {icon ? (
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center text-foreground/60">
-            <Icon icon={icon} iconType={iconType} className="h-5 w-5 text-foreground/60 transition-colors group-hover/card:text-foreground/80" />
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center">
+            <Icon icon={icon} iconType={iconType} className={cn('h-5 w-5', iconClassName)} />
           </span>
         ) : null}
         {title ? <span className="flex min-h-7 items-center text-base font-medium leading-6 text-foreground">{title}</span> : null}

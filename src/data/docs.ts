@@ -168,6 +168,7 @@ export interface DocsJsonFeedback {
 }
 
 export type StructuralTheme = 'default' | 'maple' | 'sharp' | 'minimal'
+export type ContentIconTone = 'neutral' | 'accent'
 
 interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
@@ -179,6 +180,11 @@ interface DocsJsonConfig {
   customScripts?: Array<DocsJsonScript>
   fonts?: DocsJsonFonts
   feedback?: DocsJsonFeedback
+  /** Visual choices that remain independent of the structural theme. */
+  appearance?: {
+    /** Card and tile icons are neutral by default or inherit the live brand accent. */
+    contentIcons?: ContentIconTone
+  }
   /**
    * Structural theme controlling border radius, sidebar active style, and nav
    * tab appearance. Independent of brand colors.
@@ -778,6 +784,11 @@ export function getSeoConfig(): DocsJsonSeo {
 
 export function getStructuralTheme(): StructuralTheme {
   return docsConfig.theme ?? 'default'
+}
+
+/** Resolve the global card/tile icon treatment, defaulting to quiet neutrals. */
+export function getContentIconTone(): ContentIconTone {
+  return docsConfig.appearance?.contentIcons === 'accent' ? 'accent' : 'neutral'
 }
 
 // ---------------------------------------------------------------------------
