@@ -3,11 +3,13 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { shouldInclude, TEMPLATE_REPOSITORY } from '../download.js'
+import { shouldInclude, TEMPLATE_COMMIT_SHA, TEMPLATE_REPOSITORY } from '../download.js'
+import { STABLE_SCAFFOLD_RELEASE, isStableScaffoldRelease } from '../release.js'
 import { resetTrackingConfig, writeTrackingConfig } from '../docs-json.js'
 import {
   MIN_CLI_VERSION,
   MIN_MCP_VERSION,
+  buildStarterFiles,
   patchGitignore,
   patchPackageJson,
   raisePinToFloor,
@@ -25,6 +27,9 @@ describe('scaffold hygiene — agent-ready by default, Track senders remain opt-
     it('excludes monorepo tooling and project-specific Track wiring', () => {
       // Tarball entries look like `docs-main/<path>`.
       expect(TEMPLATE_REPOSITORY).toBe('thallylabs/docs')
+      expect(TEMPLATE_COMMIT_SHA).toBe(STABLE_SCAFFOLD_RELEASE.source.commitSha)
+      expect(STABLE_SCAFFOLD_RELEASE.source.archiveUrl).toContain(TEMPLATE_COMMIT_SHA)
+      expect(isStableScaffoldRelease(structuredClone(STABLE_SCAFFOLD_RELEASE))).toBe(true)
       expect(shouldInclude('docs-main/.github/workflows/thally-agent.yml')).toBe(true)
       expect(shouldInclude('docs-main/packages/mcp/node_modules')).toBe(false)
       expect(shouldInclude('docs-main/packages/mcp/node_modules/zod/index.js')).toBe(false)
@@ -234,6 +239,23 @@ describe('writeStarterContent', () => {
     expect(spanishIntroduction.match(/<CardGroup cols="2">/g)).toHaveLength(2)
     expect(spanishIntroduction).toContain('title="Integra la API" icon="code-simple" href="/es/api"')
   })
+
+  it('writes the exact bytes exposed to hosted creation paths', () => {
+    dir = mkdtempSync(join(tmpdir(), 'thally-scaffold-'))
+    const expected = buildStarterFiles({
+      projectName: 'Acme Docs',
+      enableAiChat: true,
+      repoUrl: 'https://github.com/acme/docs',
+    })
+
+    writeStarterContent(dir, 'Acme Docs', true, 'https://github.com/acme/docs')
+    writeStarterReadme(dir, 'Acme Docs')
+    writeStarterAgentGuide(dir, 'Acme Docs')
+
+    for (const file of expected) {
+      expect(readFileSync(join(dir, file.path), 'utf8'), file.path).toBe(file.content)
+    }
+  })
 })
 
 describe('updateSiteConfig', () => {
@@ -424,13 +446,13 @@ describe('dependency floors — a scaffold never pins below what the template sh
     return JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as ScaffoldedPkg
   }
 
-  // The regression this suite exists for: the template moved to 0.6.0 while the
-  // constant stayed at 0.5.2, so every CLI-created site was silently downgraded.
+  // A future template may move ahead of these floors. Scaffolding must retain
+  // that newer release rather than replacing it with the current minimum.
   it('keeps a template pin that is newer than the floor', () => {
-    const pkg = scaffoldWith('0.6.0', '0.8.0')
+    const pkg = scaffoldWith('0.8.0', '1.0.0')
 
-    expect(pkg.devDependencies['@thallylabs/cli']).toBe('0.6.0')
-    expect(pkg.dependencies['@thallylabs/mcp']).toBe('0.8.0')
+    expect(pkg.devDependencies['@thallylabs/cli']).toBe('0.8.0')
+    expect(pkg.dependencies['@thallylabs/mcp']).toBe('1.0.0')
   })
 
   it('leaves ranges and dist-tags alone rather than guessing their ordering', () => {

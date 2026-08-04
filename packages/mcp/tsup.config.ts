@@ -31,4 +31,14 @@ export default defineConfig([
     target: 'node18',
     dts: true,
   },
+  // Project creation is a library surface as well as an MCP tool. Keeping a
+  // typed entry makes parity smoke tests exercise the published package path.
+  {
+    entry: { 'create-project': 'src/tools/create-project.ts' },
+    format: ['esm'],
+    platform: 'node',
+    target: 'node18',
+    external: ['playwright', 'playwright-core'],
+    dts: true,
+  },
 ])

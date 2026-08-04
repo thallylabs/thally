@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, cpSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 /**
  * Lowest `@thallylabs/cli` release a scaffold may declare.
@@ -12,14 +12,14 @@ import { join } from 'node:path'
  * only alongside a released CLI — `scaffold-hygiene.test.ts` fails if it ever
  * climbs above the version this monorepo publishes.
  */
-export const MIN_CLI_VERSION = '0.6.0'
+export const MIN_CLI_VERSION = '0.7.0'
 
 /**
  * Lowest `@thallylabs/mcp` release a scaffold may declare. Same floor semantics
  * as {@link MIN_CLI_VERSION}; it also stands in for the unresolvable `*` range
  * that older workspace-based templates used.
  */
-export const MIN_MCP_VERSION = '0.8.0'
+export const MIN_MCP_VERSION = '0.9.0'
 
 /**
  * Compare two bare `x.y.z` versions, or return `null` if either is not one.
@@ -415,7 +415,24 @@ La primera versión de la documentación de **{NAME}**.
 `,
 }
 
-function buildStarterDocsJson({
+export interface StarterLocale {
+  code: string
+  label: string
+}
+
+export interface StarterFile {
+  path: string
+  content: string
+}
+
+export interface BuildStarterFilesOptions {
+  projectName: string
+  enableAiChat?: boolean
+  repoUrl?: string
+  i18nLocales?: Array<StarterLocale>
+}
+
+export function buildStarterDocsJson({
   enableAiChat,
   repoUrl,
   i18nLocales,
@@ -464,48 +481,8 @@ function buildStarterDocsJson({
   return JSON.stringify(config, null, 2) + '\n'
 }
 
-export function writeStarterContent(
-  targetDir: string,
-  projectName: string,
-  enableAiChat = true,
-  repoUrl = '',
-  i18nLocales?: Array<{ code: string; label: string }>,
-): void {
-  const contentDir = join(targetDir, 'src', 'content')
-
-  // Clear existing example content
-  if (existsSync(contentDir)) {
-    const entries = readdirSync(contentDir)
-    for (const entry of entries) {
-      const fullPath = join(contentDir, entry)
-      rmSync(fullPath, { recursive: true, force: true })
-    }
-  } else {
-    mkdirSync(contentDir, { recursive: true })
-  }
-
-  // Write starter pages
-  for (const [filename, template] of Object.entries(STARTER_PAGES)) {
-    const content = template.replace(/\{NAME\}/g, projectName)
-    writeFileSync(join(contentDir, filename), content, 'utf8')
-  }
-
-  const spanishDir = join(contentDir, 'es')
-  mkdirSync(spanishDir, { recursive: true })
-  for (const [filename, template] of Object.entries(STARTER_SPANISH_PAGES)) {
-    const content = template.replace(/\{NAME\}/g, projectName)
-    writeFileSync(join(spanishDir, filename), content, 'utf8')
-  }
-
-  writeFileSync(
-    join(targetDir, 'docs.json'),
-    buildStarterDocsJson({ enableAiChat, repoUrl: repoUrl || undefined, i18nLocales }),
-    'utf8',
-  )
-}
-
-export function writeStarterAgentGuide(targetDir: string, projectName: string): void {
-  const guide = `# ${projectName} documentation instructions
+function renderStarterAgentGuide(projectName: string): string {
+  return `# ${projectName} documentation instructions
 
 ## About this project
 
@@ -530,11 +507,10 @@ export function writeStarterAgentGuide(targetDir: string, projectName: string): 
 
 <!-- Define what belongs in public docs and what must remain internal. -->
 `
-  writeFileSync(join(targetDir, 'AGENTS.md'), guide, 'utf8')
 }
 
-export function writeStarterReadme(targetDir: string, projectName: string): void {
-  const readme = `# ${projectName}
+function renderStarterReadme(projectName: string): string {
+  return `# ${projectName}
 
 Documentation powered by [Thally](https://github.com/thallylabs/thally).
 
@@ -569,7 +545,85 @@ Run \`npx create-thally-docs check --ci .\` before publishing. Deploy the site
 anywhere Next.js is supported, or connect the repository to
 [Thally Cloud](https://app.thally.io) for managed hosting and services.
 `
-  writeFileSync(join(targetDir, 'README.md'), readme, 'utf8')
+}
+
+/**
+ * Render the complete site-owned starter layer without reading or writing the
+ * filesystem. CLI, MCP, and Thally Cloud consume these exact bytes so a new
+ * site cannot vary by which creation entry point the user chose.
+ */
+export function buildStarterFiles({
+  projectName,
+  enableAiChat = true,
+  repoUrl = '',
+  i18nLocales,
+}: BuildStarterFilesOptions): Array<StarterFile> {
+  const files: Array<StarterFile> = [
+    {
+      path: 'docs.json',
+      content: buildStarterDocsJson({
+        enableAiChat,
+        repoUrl: repoUrl || undefined,
+        i18nLocales,
+      }),
+    },
+    { path: 'AGENTS.md', content: renderStarterAgentGuide(projectName) },
+    { path: 'README.md', content: renderStarterReadme(projectName) },
+  ]
+  for (const [filename, template] of Object.entries(STARTER_PAGES)) {
+    files.push({
+      path: `src/content/${filename}`,
+      content: template.replace(/\{NAME\}/g, projectName),
+    })
+  }
+  for (const [filename, template] of Object.entries(STARTER_SPANISH_PAGES)) {
+    files.push({
+      path: `src/content/es/${filename}`,
+      content: template.replace(/\{NAME\}/g, projectName),
+    })
+  }
+  return files
+}
+
+export function writeStarterContent(
+  targetDir: string,
+  projectName: string,
+  enableAiChat = true,
+  repoUrl = '',
+  i18nLocales?: Array<{ code: string; label: string }>,
+): void {
+  const contentDir = join(targetDir, 'src', 'content')
+
+  // Clear existing example content
+  if (existsSync(contentDir)) {
+    const entries = readdirSync(contentDir)
+    for (const entry of entries) {
+      const fullPath = join(contentDir, entry)
+      rmSync(fullPath, { recursive: true, force: true })
+    }
+  } else {
+    mkdirSync(contentDir, { recursive: true })
+  }
+
+  for (const file of buildStarterFiles({
+    projectName,
+    enableAiChat,
+    repoUrl,
+    i18nLocales,
+  })) {
+    if (file.path === 'AGENTS.md' || file.path === 'README.md') continue
+    const targetPath = join(targetDir, file.path)
+    mkdirSync(dirname(targetPath), { recursive: true })
+    writeFileSync(targetPath, file.content, 'utf8')
+  }
+}
+
+export function writeStarterAgentGuide(targetDir: string, projectName: string): void {
+  writeFileSync(join(targetDir, 'AGENTS.md'), renderStarterAgentGuide(projectName), 'utf8')
+}
+
+export function writeStarterReadme(targetDir: string, projectName: string): void {
+  writeFileSync(join(targetDir, 'README.md'), renderStarterReadme(projectName), 'utf8')
 }
 
 /**

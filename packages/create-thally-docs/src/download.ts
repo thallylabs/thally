@@ -1,6 +1,7 @@
 import { Readable, pipeline } from 'node:stream'
 import { promisify } from 'node:util'
-import tar from 'tar'
+import { extract } from 'tar'
+import { STABLE_SCAFFOLD_RELEASE } from './release.js'
 
 const pipelineAsync = promisify(pipeline)
 
@@ -10,8 +11,9 @@ const pipelineAsync = promisify(pipeline)
  * docs is available to every subsequent scaffold without maintaining a second
  * template repository.
  */
-export const TEMPLATE_REPOSITORY = 'thallylabs/docs'
-const TARBALL_URL = `https://codeload.github.com/${TEMPLATE_REPOSITORY}/tar.gz/main`
+export const TEMPLATE_REPOSITORY = STABLE_SCAFFOLD_RELEASE.source.repository
+export const TEMPLATE_COMMIT_SHA = STABLE_SCAFFOLD_RELEASE.source.commitSha
+const TARBALL_URL = STABLE_SCAFFOLD_RELEASE.source.archiveUrl
 
 // The source repo is ALSO the live Thally docs project. These paths contain its
 // public documentation, screenshots, generated caches, and maintainer-specific
@@ -76,6 +78,6 @@ export async function downloadTemplate(targetDir: string, siteName?: string): Pr
 
   await pipelineAsync(
     nodeStream,
-    tar.extract({ cwd: targetDir, strip: 1, filter: shouldInclude }),
+    extract({ cwd: targetDir, strip: 1, filter: shouldInclude }),
   )
 }
