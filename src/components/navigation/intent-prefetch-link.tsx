@@ -1,9 +1,13 @@
 'use client'
 
-/** Documentation link that prefetches only after pointer or keyboard intent. */
+/**
+ * Documentation link that warms complete App Router payloads only after a
+ * reader signals intent, without eagerly requesting every sidebar page.
+ */
 
 import Link, { type LinkProps } from 'next/link'
 import { useRouter } from 'next/navigation'
+import { PrefetchKind } from 'next/dist/client/components/router-reducer/router-reducer-types'
 import type {
   AriaAttributes,
   FocusEventHandler,
@@ -12,6 +16,8 @@ import type {
   PointerEventHandler,
   ReactNode,
 } from 'react'
+
+const warmedHrefs = new Set<string>()
 
 interface IntentPrefetchLinkProps extends LinkProps {
   children: ReactNode
@@ -24,12 +30,9 @@ interface IntentPrefetchLinkProps extends LinkProps {
   onPointerEnter?: PointerEventHandler<HTMLAnchorElement>
 }
 
-const warmedHrefs = new Set<string>()
-
 /**
- * Static documentation routes are fully prefetched after reader intent. This
- * follows Next.js's manual-prefetch pattern while deduplicating destinations
- * repeated in the header, sidebar, cards, and footer.
+ * Prefetches same-origin documentation routes on hover or keyboard focus.
+ * External destinations remain normal links and never trigger router work.
  */
 export function IntentPrefetchLink({
   href,
@@ -42,8 +45,16 @@ export function IntentPrefetchLink({
   const warmRoute = () => {
     if (typeof href !== 'string' || !href.startsWith('/') || href.startsWith('//')) return
     if (warmedHrefs.has(href)) return
+
     warmedHrefs.add(href)
-    router.prefetch(href)
+    // `FULL` is intentional: AUTO can issue one request per route segment,
+    // while a complete payload keeps the eventual click in the route cache.
+    router.prefetch(href, {
+      kind: PrefetchKind.FULL,
+      onInvalidate: () => {
+        warmedHrefs.delete(href)
+      },
+    })
   }
 
   return (
