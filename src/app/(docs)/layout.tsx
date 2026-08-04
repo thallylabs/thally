@@ -4,18 +4,10 @@ import { SiteShell } from '@/components/layout/site-shell'
 import { SidebarCollectionsHydrator } from '@/components/layout/sidebar-hydrator'
 import { getSidebarCollections, getAiConfig, getNavbarConfig, getFooterConfig } from '@/data/docs'
 import type { NavigationSection } from '@/data/docs'
-import { getClientSearchCorpus } from '@/lib/search/corpus'
 import { buildApiNavigation } from '@/data/api-reference'
-import { DocsChat } from '@/components/docs/docs-chat'
-import { isAiChatAvailable } from '@/lib/cloud-bridge'
-import { getRequestCloudSiteConfig, getRequestOrigin } from '@/lib/cloud-link/request'
-import { getEffectiveI18nConfig } from '@/lib/i18n/request'
-import { resolveSiteConfig, siteIdentity } from '@/lib/site-config'
-
-// The docs shell resolves request-bound Cloud configuration and origin data.
-// Marking that contract explicitly keeps OpenNext from attempting a static
-// render that fails only on non-root routes with DYNAMIC_SERVER_USAGE.
-export const dynamic = 'force-dynamic'
+import { DocsChatLoader } from '@/components/docs/docs-chat-loader'
+import { getBuildI18nConfig } from '@/lib/i18n/request'
+import { resolveBuildSiteConfig, siteIdentity } from '@/lib/site-config'
 
 interface DocsLayoutProps {
   children: React.ReactNode
@@ -44,30 +36,17 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
     }
     return collection
   })
-  const searchIndex = getClientSearchCorpus()
   const aiConfig = getAiConfig()
-  const i18nConfig = await getEffectiveI18nConfig()
+  const i18nConfig = getBuildI18nConfig()
   const navbarConfig = getNavbarConfig()
   const footerConfig = getFooterConfig()
-  const origin = await getRequestOrigin()
-  // Resolve settings first so linked sites reuse the same cached short-lived
-  // grant when checking the paid AI service immediately afterward.
-  const [cloudConfig, effectiveSite] = await Promise.all([
-    getRequestCloudSiteConfig(),
-    resolveSiteConfig(origin),
-  ])
-  const hasAiService = await isAiChatAvailable(origin)
-  const isAiEnabled = cloudConfig
-    ? Boolean(cloudConfig.entitlements.features?.aiAnswers) &&
-      Boolean(cloudConfig.siteConfig.portable.ai?.enabled)
-    : Boolean(aiConfig.chat)
+  const effectiveSite = resolveBuildSiteConfig()
 
   return (
     <>
       <SidebarCollectionsHydrator collections={collections} />
       <SiteShell
         initialCollections={collections}
-        searchIndex={searchIndex}
         i18nConfig={i18nConfig}
         navbarConfig={navbarConfig}
         footerConfig={footerConfig}
@@ -75,9 +54,7 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
       >
         {children}
       </SiteShell>
-      {isAiEnabled && (
-        <DocsChat label={aiConfig.label} icon={aiConfig.icon} enabled={hasAiService} />
-      )}
+      <DocsChatLoader label={aiConfig.label} icon={aiConfig.icon} />
     </>
   )
 }

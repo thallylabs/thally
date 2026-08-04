@@ -128,7 +128,7 @@ function getCloudUrl(): URL {
  * deployment after the release has been superseded. The snapshot contains only
  * that release's effective settings and entitlements.
  */
-function getManagedSiteConfig(): CloudGrantPayload | null {
+export function getManagedSiteConfigSnapshot(): CloudGrantPayload | null {
   const serialized =
     process.env.THALLY_CLOUD_SITE_CONFIG?.trim() ||
     process.env.DOX_CLOUD_SITE_CONFIG?.trim()
@@ -215,7 +215,7 @@ async function exchangeGrant(siteUrl: string): Promise<CloudLinkResult & { grant
  * The returned status is deliberately sanitized and never includes a secret.
  */
 export async function connectCloudSite(siteUrl: string): Promise<CloudLinkResult> {
-  if (getManagedSiteConfig()) return { status: 'connected' }
+  if (getManagedSiteConfigSnapshot()) return { status: 'connected' }
   const cached = readCachedGrant()
   if (cached) return { status: 'connected' }
   const result = await exchangeGrant(siteUrl)
@@ -239,7 +239,7 @@ export async function getCloudGrant(siteUrl: string): Promise<string | null> {
  * linked external sites reuse their short-lived signed entitlement grant.
  */
 export async function getCloudServiceGrant(siteUrl: string): Promise<string | null> {
-  const managed = getManagedSiteConfig()
+  const managed = getManagedSiteConfigSnapshot()
   if (managed) return managed.runtimeGrant?.trim() || null
   return getCloudGrant(siteUrl)
 }
@@ -251,7 +251,7 @@ export async function getCloudServiceGrant(siteUrl: string): Promise<string | nu
  * null so free/self-hosted sites keep using their repository configuration.
  */
 export async function getCloudSiteConfig(siteUrl: string): Promise<CloudGrantPayload | null> {
-  const managed = getManagedSiteConfig()
+  const managed = getManagedSiteConfigSnapshot()
   if (managed) return managed
 
   const grant = await getCloudGrant(siteUrl)

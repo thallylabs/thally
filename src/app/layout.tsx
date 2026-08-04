@@ -10,15 +10,15 @@ import { cn } from '@/lib/utils'
 import { toHslValue, THEME_VARS } from '@thallylabs/core/theme'
 import { buildOgImageUrl } from '@/lib/og'
 import { buildSiteJsonLd } from '@/lib/json-ld'
-import { getRequestOrigin } from '@/lib/cloud-link/request'
+import { getSiteUrl } from '@/lib/site-url'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { AnalyticsProvider } from '@/components/analytics/analytics-provider'
 import { SiteBanner } from '@/components/layout/site-banner'
 import { WebMcpTools } from '@/components/agent/web-mcp-tools'
 import { CloudHandshake } from '@/components/cloud/cloud-handshake'
 import { localeDirection } from '@/lib/i18n/config'
-import { getEffectiveI18nConfig } from '@/lib/i18n/request'
-import { resolveRequestSiteConfig } from '@/lib/site-config'
+import { getBuildI18nConfig } from '@/lib/i18n/request'
+import { resolveBuildSiteConfig } from '@/lib/site-config'
 
 // Default fonts via next/font (optimal performance — preloaded, no FOUC).
 // The Thally brand pairs Inter (body) with Plus Jakarta Sans (display —
@@ -39,6 +39,10 @@ const fontMono = JetBrains_Mono({
   subsets: ['latin'],
   variable: '--font-mono',
   display: 'swap',
+  // Code appears below the initial documentation heading on most pages. Keep
+  // it in a separate font file, but do not compete with body/display fonts in
+  // the critical preload queue.
+  preload: false,
 })
 
 // ---------------------------------------------------------------------------
@@ -98,10 +102,8 @@ const themeVars = THEME_VARS[structuralTheme] ?? ''
 // ---------------------------------------------------------------------------
 
 export async function generateMetadata(): Promise<Metadata> {
-  const [effectiveSite, siteUrl] = await Promise.all([
-    resolveRequestSiteConfig(),
-    getRequestOrigin(),
-  ])
+  const effectiveSite = resolveBuildSiteConfig()
+  const siteUrl = getSiteUrl()
   const defaultOgImage = buildOgImageUrl({})
   return {
     metadataBase: new URL(siteUrl),
@@ -189,11 +191,9 @@ const runtimeNameShim =
   "globalThis.__name ??= (target, value) => Object.defineProperty(target, 'name', { value, configurable: true });"
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const [i18n, effectiveSite, siteUrl] = await Promise.all([
-    getEffectiveI18nConfig(),
-    resolveRequestSiteConfig(),
-    getRequestOrigin(),
-  ])
+  const i18n = getBuildI18nConfig()
+  const effectiveSite = resolveBuildSiteConfig()
+  const siteUrl = getSiteUrl()
   const defaultLang = i18n.defaultLocale
   const siteJsonLd = buildSiteJsonLd({
     siteUrl,
@@ -244,7 +244,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         {bannerConfig && <SiteBanner banner={bannerConfig} />}
         <Providers>{children}</Providers>
         <CloudHandshake />
-        <AnalyticsProvider />
+        {siteConfig.analytics && <AnalyticsProvider />}
         <WebMcpTools />
         {customScripts.map((script) => (
           <Script

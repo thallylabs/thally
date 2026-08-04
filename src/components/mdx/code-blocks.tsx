@@ -213,6 +213,18 @@ function getRenderableChildren(children: ReactNode) {
   })
 }
 
+/** Find the compiler's source-code payload through MDX/client wrappers. */
+function findCodePayload(node: ReactNode): string | undefined {
+  if (!isValidElement(node)) return undefined
+  const props = node.props as { code?: unknown; children?: ReactNode }
+  if (typeof props.code === 'string' && props.code.length > 0) return props.code
+  for (const child of Children.toArray(props.children)) {
+    const nested = findCodePayload(child)
+    if (nested) return nested
+  }
+  return undefined
+}
+
 function CodePanel({
   children,
   tag,
@@ -280,11 +292,11 @@ function CodePanel({
     }
   }
 
-  if (!resolvedCode) {
-    throw new Error(
-      '`CodePanel` requires a `code` prop, or a child with a `code` prop.',
-    )
-  }
+  // Client-component serialization may place the compiler-added `code` prop
+  // one wrapper below the direct child. Search recursively before treating the
+  // block as malformed; a bad authoring example should never take the entire
+  // pre-rendered documentation site offline.
+  resolvedCode = resolvedCode ?? findCodePayload(content) ?? ''
 
   return (
     <div className="group">
