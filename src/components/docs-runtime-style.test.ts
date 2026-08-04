@@ -36,8 +36,8 @@ describe('documentation visual system', () => {
       ),
     )
 
-    expect(markup).toContain('text-foreground/60')
-    expect(markup).not.toContain('text-accent')
+    expect(markup).toContain('thally-content-icon')
+    expect(markup).toContain('data-content-icon-tone="site"')
     expect(markup).toContain('border border-border')
     expect(markup).toContain('hover:border-foreground/25')
     expect(markup).not.toContain('shadow-')
@@ -51,8 +51,7 @@ describe('documentation visual system', () => {
       createElement(Component, { title: 'Quickstart', icon: 'book-open', iconColor: 'accent' }),
     )
 
-    expect(markup).toContain('text-accent')
-    expect(markup).not.toContain('text-foreground/60')
+    expect(markup).toContain('data-content-icon-tone="accent"')
   })
 
   it('renders a rail-free sidebar with a visible current-page state', () => {

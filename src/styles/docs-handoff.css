@@ -291,6 +291,28 @@ body {
   box-shadow: none;
 }
 
+/* Content icons stay quiet by default. The site-wide accent option and local
+   MDX override both resolve through --thally-accent, including live Cloud
+   branding changes, without importing server config into client components. */
+.thally-content-icon {
+  color: hsl(var(--thally-foreground) / 0.6);
+  transition: color 150ms ease, opacity 150ms ease;
+}
+
+[data-content-icons='accent'] .thally-content-icon[data-content-icon-tone='site'],
+.thally-content-icon[data-content-icon-tone='accent'] {
+  color: hsl(var(--thally-accent));
+}
+
+[data-content-icons='neutral'] .thally-content-icon[data-content-icon-tone='site'],
+.thally-content-icon[data-content-icon-tone='neutral'] {
+  color: hsl(var(--thally-foreground) / 0.6);
+}
+
+.group\/card:hover .thally-content-icon {
+  opacity: 0.8;
+}
+
 .thally-docs-card > .prose {
   font-size: 1rem;
   line-height: 1.5;
