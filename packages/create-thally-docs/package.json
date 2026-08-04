@@ -1,6 +1,6 @@
 {
   "name": "create-thally-docs",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Scaffold the first documentation surface in a Thally product-knowledge pipeline.",
   "type": "module",
   "engines": {
@@ -12,6 +12,14 @@
   "exports": {
     ".": "./dist/index.js",
     "./scaffold": "./dist/scaffold.js",
+    "./starter": {
+      "types": "./dist/customize.d.ts",
+      "import": "./dist/customize.js"
+    },
+    "./release": {
+      "types": "./dist/release.d.ts",
+      "import": "./dist/release.js"
+    },
     "./migrate": "./dist/migrate/index.js",
     "./package.json": "./package.json"
   },
@@ -31,12 +39,11 @@
     "@thallylabs/migrate": "0.2.0",
     "gray-matter": "^4.0.3",
     "p-limit": "^6.1.0",
-    "tar": "^6.2.0",
+    "tar": "^7.5.22",
     "yaml": "^2.6.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/tar": "^6.1.13",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   },

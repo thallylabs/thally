@@ -17,6 +17,14 @@ import {
 } from './customize.js'
 import { slugify, installDeps, initGit } from './utils.js'
 
+export {
+  EXCLUDE_PATHS,
+  TEMPLATE_COMMIT_SHA,
+  TEMPLATE_REPOSITORY,
+  shouldInclude,
+} from './download.js'
+export { STABLE_SCAFFOLD_RELEASE } from './release.js'
+
 export interface ScaffoldOptions {
   projectDir: string
   projectName: string

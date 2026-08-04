@@ -4,13 +4,18 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildStarterDocsJson,
+  MCP_SCAFFOLD_RELEASE_ID,
+  MCP_TEMPLATE_COMMIT_SHA,
   MCP_TEMPLATE_REPOSITORY,
   shouldIncludeMcpTemplatePath,
 } from '../lib/scaffold.js'
+import { STABLE_SCAFFOLD_RELEASE } from 'create-thally-docs/release'
 
 describe('MCP site scaffold source', () => {
   it('uses the canonical docs template and retains the docs-agent receiver', () => {
     expect(MCP_TEMPLATE_REPOSITORY).toBe('thallylabs/docs')
+    expect(MCP_TEMPLATE_COMMIT_SHA).toBe(STABLE_SCAFFOLD_RELEASE.source.commitSha)
+    expect(MCP_SCAFFOLD_RELEASE_ID).toBe(STABLE_SCAFFOLD_RELEASE.id)
     expect(
       shouldIncludeMcpTemplatePath('docs-main/.github/workflows/thally-agent.yml'),
     ).toBe(true)

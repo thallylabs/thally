@@ -1,7 +1,13 @@
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/scaffold.ts', 'src/migrate/index.ts'],
+  entry: [
+    'src/index.ts',
+    'src/scaffold.ts',
+    'src/customize.ts',
+    'src/release.ts',
+    'src/migrate/index.ts',
+  ],
   format: ['esm'],
   platform: 'node',
   target: 'node18',
@@ -10,5 +16,5 @@ export default defineConfig({
   },
   external: ['playwright', 'playwright-core'],
   clean: true,
-  dts: false,
+  dts: true,
 })
