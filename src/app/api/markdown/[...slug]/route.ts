@@ -2,14 +2,20 @@ import { NextResponse } from 'next/server'
 import path from 'node:path'
 import { stripInternalFrontmatter } from '@/lib/provenance'
 import { getContentSource } from '@/lib/content-source'
+import { getCloudSiteConfig } from '@/lib/cloud-link/client'
+import { isMarkdownPagesEnabled } from '@/lib/markdown-pages'
 import { mdxToMarkdown } from '@thallylabs/core'
 
 const localDocsRoot = 'src/content'
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ slug: string[] }> },
 ) {
+  const cloud = await getCloudSiteConfig(new URL(request.url).origin)
+  if (!isMarkdownPagesEnabled(cloud?.siteConfig.portable)) {
+    return new NextResponse('Not Found', { status: 404 })
+  }
 
   const { slug } = await params
   const slugPath = slug.join('/')

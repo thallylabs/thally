@@ -124,6 +124,23 @@ src/
 - **`api`** — auto-generates API reference from an OpenAPI spec
 - **`href`** — links to an internal route or external URL
 
+### Markdown page URLs
+
+Public `.md` versions of documentation pages are available as an opt-in
+delivery surface for readers and AI tools. Enable them in `docs.json`:
+
+```json
+{
+  "markdown": { "enabled": true },
+  "tabs": []
+}
+```
+
+After enabling the setting, append `.md` to a page path: `/quickstart.md`.
+For the homepage, use `/.md`. Thally Cloud sites can manage the same setting
+from **Site settings** without editing the repository. The feature is disabled
+by default, and access protection still applies to Markdown page URLs.
+
 ## API Reference
 
 Drop your OpenAPI 3.x spec as `openapi.yaml` in the project root and configure it in `docs.json`:

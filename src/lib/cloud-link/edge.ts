@@ -4,7 +4,10 @@ const DEFAULT_CLOUD_URL = 'https://app.thally.io'
 const CACHE_TTL_MS = 30_000
 const REQUEST_TIMEOUT_MS = 8_000
 
-interface EdgeCloudConfig {
+export interface EdgeCloudConfig {
+  portable?: {
+    markdown?: { enabled?: boolean }
+  }
   access?: { mode?: 'public' | 'password' }
 }
 

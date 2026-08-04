@@ -209,6 +209,10 @@ interface DocsJsonConfig {
   analytics?: {
     enabled?: boolean
   }
+  /** Optional public Markdown mirrors at `/<page>.md`; disabled by default. */
+  markdown?: {
+    enabled?: boolean
+  }
   i18n?: {
     defaultLocale: string
     locales: Array<{ code: string; label: string }>
