@@ -95,10 +95,11 @@ const config: Config = {
             '--tw-prose-invert-th-borders': 'hsl(var(--thally-border))',
             '--tw-prose-invert-td-borders': 'hsl(var(--thally-border) / 0.7)',
             color: 'var(--tw-prose-body)',
-            // 15px base with a relaxed measure reads more premium than the
-            // former 14px (fontSize.sm) on wide docs columns.
-            fontSize: '0.9375rem',
-            lineHeight: '1.7',
+            // Keep prose on the same 16/24 reading rhythm as cards and page
+            // summaries. Components may narrow the measure, but should not
+            // silently introduce a second body-text scale.
+            fontSize: '1rem',
+            lineHeight: '1.5',
             p: {
               marginTop: theme('spacing.6'),
               marginBottom: theme('spacing.6'),
@@ -222,10 +223,10 @@ const config: Config = {
             // this config styles every heading, MDX or plain markdown.
             h1: {
               color: 'var(--tw-prose-headings)',
-              fontWeight: '600',
+              fontWeight: '500',
               letterSpacing: '-0.02em',
-              fontSize: theme('fontSize.3xl')[0],
-              ...theme('fontSize.3xl')[1],
+              fontSize: theme('fontSize.4xl')[0],
+              ...theme('fontSize.4xl')[1],
               marginBottom: theme('spacing.2'),
             },
             h2: {

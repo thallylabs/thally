@@ -79,11 +79,11 @@ export function Hero({
   return (
     <section className="thally-docs-hero not-prose mb-8 py-7">
       <div className="flex max-w-3xl flex-col items-start text-left">
-        <h1 className="max-w-[17ch] font-heading text-[2.6rem] font-extrabold leading-[1.1] tracking-[-0.035em] text-balance text-foreground">
+        <h1 className="max-w-[17ch] font-heading text-[2rem] font-medium leading-9 tracking-[-0.025em] text-balance text-foreground sm:text-4xl sm:leading-10">
           {title}
         </h1>
         {subtitle ? (
-          <p className="thally-docs-hero-copy max-w-[56ch] text-[1.08rem] leading-[1.65] text-pretty text-foreground/75">
+          <p className="thally-docs-hero-copy max-w-[56ch] text-lg leading-7 text-pretty text-foreground/70">
             {subtitle}
           </p>
         ) : null}
@@ -128,7 +128,7 @@ function isExternalLink(href: string) {
 
 export function Card({ title, href, icon, iconType, img, children }: CardProps) {
   const content = (
-    <article className="thally-docs-card group/card relative flex h-full flex-col gap-3 rounded-[12px] border border-border bg-background p-[18px] transition duration-200 hover:border-accent">
+    <article className="thally-docs-card group/card relative flex h-full flex-col rounded-[12px] border border-border bg-background p-5 transition-colors duration-150 hover:border-foreground/25 hover:bg-muted/20">
       {img ? (
         <div className="relative overflow-hidden rounded-xl border border-border/30">
           <Image
@@ -143,13 +143,13 @@ export function Card({ title, href, icon, iconType, img, children }: CardProps) 
       ) : null}
       <div className="flex min-h-6 items-center gap-2.5">
         {icon ? (
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center text-accent">
-            <Icon icon={icon} iconType={iconType} className="h-[18px] w-[18px]" />
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center text-foreground/60">
+            <Icon icon={icon} iconType={iconType} className="h-[18px] w-[18px] text-foreground/60 transition-colors group-hover/card:text-foreground/80" />
           </span>
         ) : null}
-        {title ? <span className="flex min-h-6 items-center text-base font-semibold leading-5 text-foreground">{title}</span> : null}
+        {title ? <span className="flex min-h-6 items-center text-base font-medium leading-6 text-foreground">{title}</span> : null}
       </div>
-      {children ? <div className="prose prose-sm text-foreground/80 dark:prose-invert">{children}</div> : null}
+      {children ? <div className="prose prose-sm mt-1.5 text-foreground/70 dark:prose-invert">{children}</div> : null}
     </article>
   )
 
@@ -185,7 +185,7 @@ const columnClassnames: Record<number, string> = {
 export function CardGroup({ cols = 3, children }: CardGroupProps) {
   const colCount = typeof cols === 'string' ? parseInt(cols, 10) : cols
   const colClass = columnClassnames[colCount] ?? columnClassnames[3]
-  return <div className={cn('grid grid-cols-1 gap-3', colClass)}>{children}</div>
+  return <div className={cn('grid grid-cols-1 gap-x-6 gap-y-4', colClass)}>{children}</div>
 }
 
 interface ColumnsProps {
@@ -354,7 +354,7 @@ interface TileProps {
 
 export function Tile({ title, href, icon, iconType, img, children }: TileProps & { iconType?: 'solid' | 'outline' }) {
   const content = (
-    <article className="thally-docs-card group relative flex h-full flex-col gap-4 rounded-[12px] border border-border bg-background p-[18px] transition hover:border-accent">
+    <article className="thally-docs-card group/card relative flex h-full flex-col rounded-[12px] border border-border bg-background p-5 transition-colors duration-150 hover:border-foreground/25 hover:bg-muted/20">
       {img ? (
         <div className="relative overflow-hidden rounded-xl border border-border/30 bg-muted">
           <Image
@@ -369,13 +369,13 @@ export function Tile({ title, href, icon, iconType, img, children }: TileProps &
       ) : null}
       <div className="flex min-h-7 items-center gap-3">
         {icon ? (
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center text-accent">
-            <Icon icon={icon} iconType={iconType} className="h-5 w-5" />
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center text-foreground/60">
+            <Icon icon={icon} iconType={iconType} className="h-5 w-5 text-foreground/60 transition-colors group-hover/card:text-foreground/80" />
           </span>
         ) : null}
-        {title ? <span className="flex min-h-7 items-center text-lg font-semibold leading-6 text-foreground">{title}</span> : null}
+        {title ? <span className="flex min-h-7 items-center text-base font-medium leading-6 text-foreground">{title}</span> : null}
       </div>
-      {children ? <div className="prose prose-sm text-foreground/70 dark:prose-invert">{children}</div> : null}
+      {children ? <div className="prose prose-sm mt-1.5 text-foreground/70 dark:prose-invert">{children}</div> : null}
     </article>
   )
 
@@ -398,7 +398,7 @@ interface TileGroupProps {
 export function TileGroup({ cols = 2, children }: TileGroupProps) {
   const colCount = typeof cols === 'string' ? parseInt(cols, 10) : cols
   const colClass = columnClassnames[colCount] ?? columnClassnames[2]
-  return <div className={cn('grid grid-cols-1 gap-3', colClass)}>{children}</div>
+  return <div className={cn('grid grid-cols-1 gap-x-6 gap-y-4', colClass)}>{children}</div>
 }
 
 // ---------------------------------------------------------------------------
