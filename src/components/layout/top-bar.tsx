@@ -1,10 +1,8 @@
 'use client'
 
-import { Suspense } from 'react'
 import { ExternalLink } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
 import type { SidebarCollection, DocsJsonNavbar } from '@/data/docs'
-import type { SearchCorpusRecord } from '@/components/search/command-search'
 import { MobileNav } from '@/components/navigation/mobile-nav'
 import { CommandSearch } from '@/components/search/command-search'
 import { ThemeSwitch } from '@/components/theme/theme-switch'
@@ -40,7 +38,6 @@ interface TopBarProps {
   activeCollectionId: SidebarCollection['id']
   onCollectionChange: (id: SidebarCollection['id']) => void
   activeSections: SidebarCollection['sections']
-  searchIndex: Array<SearchCorpusRecord>
   i18nConfig?: I18nConfig | null
   currentLocale?: string
   currentPath?: string
@@ -53,7 +50,6 @@ export function TopBar({
   activeCollectionId,
   onCollectionChange,
   activeSections,
-  searchIndex,
   i18nConfig,
   currentLocale,
   currentPath,
@@ -145,9 +141,7 @@ export function TopBar({
         </nav>
         <div className="thally-docs-actions ml-auto flex min-w-0 items-center gap-2">
           <div className="thally-docs-search min-w-0">
-            <Suspense fallback={<div className="h-[30px] w-[180px] rounded-[9px] border border-border" />}>
-              <CommandSearch searchIndex={searchIndex} />
-            </Suspense>
+            <CommandSearch />
           </div>
           {navbarConfig?.links && navbarConfig.links.length > 0
             ? navbarConfig.links.map((link) => {

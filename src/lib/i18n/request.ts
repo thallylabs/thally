@@ -10,6 +10,7 @@ import { cache } from 'react'
 import { getI18nConfig } from '@/data/docs'
 import { getAdminSettings } from '@/lib/admin/settings'
 import { getRequestCloudSiteConfig } from '@/lib/cloud-link/request'
+import { getManagedSiteConfigSnapshot } from '@/lib/cloud-link/client'
 import {
   DEFAULT_I18N_CONFIG,
   normalizeI18nConfig,
@@ -20,6 +21,16 @@ import {
 /** Build-time locale config, normalized with the English/Spanish starter. */
 export function getRepositoryI18nConfig(): I18nConfig {
   return normalizeI18nConfig(getI18nConfig(), DEFAULT_I18N_CONFIG)
+}
+
+/** Locale selection safe to embed in an immutable documentation release. */
+export function getBuildI18nConfig(): I18nConfig {
+  const repository = getRepositoryI18nConfig()
+  const localization =
+    getManagedSiteConfigSnapshot()?.siteConfig.portable.localization
+  return localization
+    ? resolveI18nSelection(localization, repository)
+    : repository
 }
 
 /**

@@ -15,14 +15,19 @@ import { getCloudSiteConfig } from './client'
  * needed — or possible.
  */
 export async function getRequestOrigin(): Promise<string> {
+  // Managed releases and production self-hosts already know their canonical
+  // URL. Prefer it before touching `headers()`: reading request headers opts an
+  // otherwise immutable documentation route out of static rendering and the
+  // App Router's full-page prefetch cache.
+  const configured = process.env.THALLY_SITE_URL?.trim()
+  if (configured) return configured
+
   if (!isRemoteContentSource()) {
     const incoming = await headers()
     const host = incoming.get('x-forwarded-host') ?? incoming.get('host')
     const proto = incoming.get('x-forwarded-proto') ?? (process.env.NODE_ENV === 'production' ? 'https' : 'http')
     if (host) return `${proto}://${host}`
   }
-  const configured = process.env.THALLY_SITE_URL?.trim()
-  if (configured) return configured
   if (isRemoteContentSource()) {
     // A managed release always carries THALLY_SITE_URL. Without it the
     // localhost fallback below would be baked into every rendered page as the
@@ -37,4 +42,3 @@ export async function getRequestOrigin(): Promise<string> {
 export async function getRequestCloudSiteConfig() {
   return getCloudSiteConfig(await getRequestOrigin())
 }
-

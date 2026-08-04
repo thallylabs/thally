@@ -10,8 +10,8 @@ import { Feedback } from '@/components/docs/feedback'
 import { TableOfContents } from '@/components/docs/table-of-contents'
 import { ContentStack, DetailColumn, MainColumns } from '@/components/layout/sections'
 import { Prose } from '@/components/mdx/prose'
-import { getRequestCloudSiteConfig, getRequestOrigin } from '@/lib/cloud-link/request'
-import { resolveSiteConfig } from '@/lib/site-config'
+import { getManagedSiteConfigSnapshot } from '@/lib/cloud-link/client'
+import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { localeDirection } from '@/lib/i18n/config'
 
 interface DocLayoutProps {
@@ -20,16 +20,16 @@ interface DocLayoutProps {
   children: React.ReactNode
 }
 
-export async function DocLayout({ doc, locale = 'en', children }: DocLayoutProps) {
+export function DocLayout({ doc, locale = 'en', children }: DocLayoutProps) {
   const { prev, next } = getPrevNextLinks(doc.href)
   const breadcrumbs = getBreadcrumbs(doc.href)
   const mode = doc.mode ?? 'default'
   const feedbackConfig = getFeedbackConfig()
-  const origin = await getRequestOrigin()
-  const [cloud, effectiveSite] = await Promise.all([
-    getRequestCloudSiteConfig(),
-    resolveSiteConfig(origin),
-  ])
+  // Managed releases already carry an immutable, release-scoped settings
+  // snapshot. Reading it here keeps article rendering deterministic and
+  // cacheable; live settings changes take effect with the next atomic release.
+  const cloud = getManagedSiteConfigSnapshot()
+  const effectiveSite = resolveBuildSiteConfig()
   const cloudFeedback = cloud?.siteConfig.portable.feedback
   const hasThumbsRating = cloud ? Boolean(cloudFeedback?.thumbsRating) : true
   const showFeedback = cloud

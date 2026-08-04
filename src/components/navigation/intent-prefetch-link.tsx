@@ -1,9 +1,8 @@
 'use client'
 
 /**
- * Documentation link that warms dynamic App Router payloads only after a
- * reader signals intent. This avoids eagerly requesting every sidebar page
- * while still making the eventual click use Next.js's in-memory route cache.
+ * Documentation link that warms complete App Router payloads only after a
+ * reader signals intent, without eagerly requesting every sidebar page.
  */
 
 import Link, { type LinkProps } from 'next/link'
@@ -48,8 +47,8 @@ export function IntentPrefetchLink({
     if (warmedHrefs.has(href)) return
 
     warmedHrefs.add(href)
-    // `FULL` is intentional: automatic prefetch only warms the shared layout
-    // for dynamic routes, which still leaves the clicked page waiting on RSC.
+    // `FULL` is intentional: AUTO can issue one request per route segment,
+    // while a complete payload keeps the eventual click in the route cache.
     router.prefetch(href, {
       kind: PrefetchKind.FULL,
       onInvalidate: () => {

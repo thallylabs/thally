@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import { ApiLayout } from '@/components/api/api-layout'
 import { OperationPanel } from '@/components/api/operation-panel'
 import { DocLayout } from '@/components/docs/doc-layout'
-import { getRequestOrigin } from '@/lib/cloud-link/request'
+import { getSiteUrl } from '@/lib/site-url'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { apiReferenceConfig, getOpenApiSpecUrl } from '@/config/api-reference'
 import { getAllApiOperationNodes, getApiOperationBySlug, getApiOperationNodes } from '@/data/api-reference'
@@ -13,7 +13,7 @@ import { isRemoteContentSource } from '@/lib/content-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { buildApiOperationJsonLd, buildDocPageJsonLd } from '@/lib/json-ld'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
-import { resolveSiteConfig } from '@/lib/site-config'
+import { resolveBuildSiteConfig } from '@/lib/site-config'
 
 interface PageProps {
   params: Promise<{ slug?: Array<string> }>
@@ -35,7 +35,7 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const resolved = await params
-  const siteUrl = await getRequestOrigin()
+  const siteUrl = getSiteUrl()
   const specUrl = getOpenApiSpecUrl(siteUrl)
 
   const node = await getApiOperationBySlug(resolved.slug)
@@ -109,8 +109,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function ApiReferencePage({ params }: PageProps) {
   const resolved = await params
-  const siteUrl = await getRequestOrigin()
-  const effectiveSite = await resolveSiteConfig(siteUrl)
+  const siteUrl = getSiteUrl()
+  const effectiveSite = resolveBuildSiteConfig()
   const specUrl = getOpenApiSpecUrl(siteUrl)
 
   // No slug — redirect to the first MDX page in the API group if one exists,

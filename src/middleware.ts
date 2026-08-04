@@ -75,10 +75,9 @@ function shouldTrackRequest(request: NextRequest, pathname: string): boolean {
 }
 
 /**
- * Public browser documents are immutable within an atomic deployment. Dynamic
- * RSC responses are intentionally excluded: Next.js finalizes those responses
- * as private/no-store after middleware, so navigation speed comes from full
- * intent prefetching rather than an unreliable CDN header.
+ * Public browser documents are immutable within an atomic deployment. Next.js
+ * applies its own cache policy to pre-rendered RSC payloads; this helper adds
+ * the equivalent long-lived CDN policy only to full HTML documents.
  */
 function isCacheableDocsPage(
   request: NextRequest,

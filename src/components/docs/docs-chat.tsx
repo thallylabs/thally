@@ -58,12 +58,22 @@ interface DocsChatProps {
   /** False when no Anthropic key is configured — show an upfront notice instead
    * of inviting a question that would 503. */
   enabled?: boolean
+  /** Status was already resolved by the lazy loader. */
+  skipStatusCheck?: boolean
 }
 
-export function DocsChat({ label = 'Ask AI', icon, enabled = true }: DocsChatProps) {
+export function DocsChat({
+  label = 'Ask AI',
+  icon,
+  enabled = true,
+  skipStatusCheck = false,
+}: DocsChatProps) {
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
-  const [chatShown, setChatShown] = useState(true)
+  // Keep the optional widget out of first paint. The tiny status endpoint is
+  // deliberately separate so live admin toggles do not make docs pages
+  // dynamic or delay navigation.
+  const [chatShown, setChatShown] = useState(skipStatusCheck)
   // Live admin overrides — SSR'd prop is the first-paint value; the chat-status
   // fetch swaps in the admin's custom name / disclaimer when set. Disclaimer
   // starts on its generic default so a safety notice always shows, even if the
@@ -113,12 +123,13 @@ export function DocsChat({ label = 'Ask AI', icon, enabled = true }: DocsChatPro
   // Respect the admin's live enable/disable toggle (hide if off) and pick up the
   // admin's custom assistant name + disclaimer.
   useEffect(() => {
+    if (skipStatusCheck) return
     let active = true
     fetch('/api/chat-status')
       .then((r) => (r.ok ? r.json() : { show: true }))
       .then((d) => {
         if (!active || !d) return
-        if (d.show === false) setChatShown(false)
+        setChatShown(d.show === true)
         if (typeof d.label === 'string' && d.label) setLiveLabel(d.label)
         if (typeof d.disclaimer === 'string') setDisclaimer(d.disclaimer)
       })
@@ -126,7 +137,7 @@ export function DocsChat({ label = 'Ask AI', icon, enabled = true }: DocsChatPro
     return () => {
       active = false
     }
-  }, [])
+  }, [skipStatusCheck])
 
   const send = useCallback(async (text?: string) => {
     const content = (text ?? input).trim()

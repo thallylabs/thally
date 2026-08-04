@@ -25,7 +25,7 @@
  */
 import { siteConfig, type SiteConfig } from '@/data/site'
 import { getAdminSettings } from '@/lib/admin/settings'
-import { getCloudSiteConfig } from '@/lib/cloud-link/client'
+import { getCloudSiteConfig, getManagedSiteConfigSnapshot } from '@/lib/cloud-link/client'
 import { getRequestOrigin } from '@/lib/cloud-link/request'
 
 export interface SiteIdentity {
@@ -114,6 +114,39 @@ export async function resolveSiteConfig(siteUrl?: string): Promise<SiteConfig> {
 /** Resolve the request-bound identity used by every human and agent surface. */
 export async function resolveRequestSiteConfig(): Promise<SiteConfig> {
   return resolveSiteConfig(await getRequestOrigin())
+}
+
+/**
+ * Resolve the identity that can be embedded in an immutable documentation
+ * release. Managed hosting supplies a release-scoped snapshot; self-hosted
+ * sites use their repository config. Live dashboard edits still hydrate over
+ * `/api/site-config`, without making every documentation navigation a server
+ * request.
+ */
+export function resolveBuildSiteConfig(): SiteConfig {
+  const details = getManagedSiteConfigSnapshot()?.siteConfig.portable.details
+  if (
+    process.env.THALLY_BASELINE_FORK_IDENTITY_REQUIRED === 'true' &&
+    !isCompleteManagedIdentity(details)
+  ) {
+    return unavailableManagedSiteConfig()
+  }
+
+  if (!details) return siteConfig
+  const repoUrl = details.repoUrl ?? siteConfig.repoUrl ?? ''
+  const links =
+    details.repoUrl &&
+    details.repoUrl.replace(/\/+$/, '') !== (siteConfig.repoUrl ?? '').replace(/\/+$/, '')
+      ? managedRepositoryLinks(details.repoUrl)
+      : siteConfig.links
+
+  return {
+    ...siteConfig,
+    name: details.name ?? siteConfig.name,
+    description: details.description ?? siteConfig.description,
+    repoUrl,
+    links,
+  }
 }
 
 /** Narrow the effective config to the serializable identity used by clients. */
