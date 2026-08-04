@@ -1,6 +1,7 @@
 import type { MDXComponents } from 'mdx/types'
 import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 import { Note } from '@/components/mdx/note'
+import { AgentPrompt } from '@/components/mdx/agent-prompt'
 import { Code, CodeGroup, Pre } from '@/components/mdx/code-blocks'
 import {
   Badge, Card, CardGroup, Color, Columns, Frame, Hero, Icon, Panel,
@@ -97,6 +98,7 @@ const components: MDXComponents = {
   Prompt: (props) => <Prompt {...props} />,
   PromptUser: (props) => <PromptUser {...props} />,
   PromptAssistant: (props) => <PromptAssistant {...props} />,
+  AgentPrompt: (props) => <AgentPrompt {...props} />,
   Color: (props) => <Color {...props} />,
   Tree: (props) => <Tree {...props} />,
   Folder: (props) => <Folder {...props} />,
@@ -107,12 +109,12 @@ const components: MDXComponents = {
   Mermaid: (props) => <Mermaid {...(props as { children: string })} />,
   View: (props) => <View {...props} />,
   table: ({ className, ...props }) => (
-    <div className="my-6 overflow-x-auto rounded-2xl border border-border">
-      <table className={cn('w-full text-sm', className)} {...props} />
+    <div className="my-6 overflow-x-auto">
+      <table className={cn('w-full border-collapse text-sm', className)} {...props} />
     </div>
   ),
-  th: (props) => <th className="border-b border-border/60 px-4 py-2 text-left text-xs uppercase tracking-wide text-foreground/70" {...props} />,
-  td: (props) => <td className="border-b border-border/40 px-4 py-2 text-sm text-foreground/80" {...props} />,
+  th: (props) => <th className="border-b border-border py-2 pr-4 text-left font-mono text-[0.68rem] font-medium uppercase tracking-[0.12em] text-foreground/55" {...props} />,
+  td: (props) => <td className="border-b border-border py-3 pr-4 text-[0.88rem] leading-[1.6] text-foreground/80" {...props} />,
 }
 
 export function useMDXComponents(existing: MDXComponents) {
@@ -124,4 +126,3 @@ export function useMDXComponents(existing: MDXComponents) {
     ...customComponents,
   }
 }
-

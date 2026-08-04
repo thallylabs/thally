@@ -23,7 +23,7 @@ export async function ApiLayout({ children }: ApiLayoutProps) {
     ? Boolean(hasThumbsRating || settings?.issueReporting)
     : true
   return (
-    <article className="flex-1">
+    <article className="thally-docs-api flex-1">
       <ContentStack>{children}</ContentStack>
       {showFeedback ? (
         <div className="mt-10">

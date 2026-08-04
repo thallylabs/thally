@@ -6,7 +6,9 @@ import {
   mcpServerCard,
   oauthProtectedResource,
 } from '@/app/api/well-known/[...document]/route'
+import { buildAiTxtBody } from '@/lib/agent-discovery'
 import { agentServerName } from '@/lib/agent-identity'
+import { buildAgentsManifest, buildSkillManifest } from '@/lib/agent-manifest'
 import type { SiteIdentity } from '@/lib/site-config'
 
 const identity: SiteIdentity = {
@@ -37,5 +39,19 @@ describe('agent discovery identity', () => {
       expect(document).not.toContain('Thally documentation')
       expect(document).not.toContain('thally-docs')
     }
+  })
+
+  it('publishes a consistent evidence-first workflow across agent surfaces', () => {
+    const base = 'https://sentinel.example.com'
+    const aiTxt = buildAiTxtBody(identity, base)
+    const skill = buildSkillManifest(identity, base)
+    const agents = buildAgentsManifest(identity, base)
+
+    expect(aiTxt).toContain(`${base}/api/search?q={query}`)
+    expect(aiTxt).toContain(`${base}/AGENTS.md`)
+    expect(skill).toContain('Start with the index or search')
+    expect(skill).toContain('Cite the canonical page URLs')
+    expect(agents).toContain('Read this file, `docs.json`')
+    expect(agents).toContain('Do not invent product behavior')
   })
 })

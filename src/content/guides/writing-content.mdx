@@ -1,9 +1,29 @@
 ---
-title: Writing Content
-description: How to write documentation pages using MDX, frontmatter, and built-in components.
+title: Create and edit pages
+navTitle: Pages
+description: Create task-focused MDX pages with frontmatter, code examples, and built-in documentation components.
 ---
 
 import { GettingStartedTip } from '/snippets/getting-started-tip.mdx'
+
+<AgentPrompt
+  title="Copy a complete prompt to write a page"
+  copyOnly
+>
+
+Create or improve a task-focused page in this Thally project about TASK. You are done when a reader can complete the task without guessing, the page is placed where they will look for it, every product claim is supported by the current implementation, and the project passes its documentation checks and production build.
+
+Start by reading AGENTS.md if present, docs.json, package.json, src/data/site.ts, and the pages returned by a repository search for the task, feature names, commands, settings, and related user language. Inspect the source code, CLI help, configuration types, and tests behind any behavior you plan to document. Treat code and tests as evidence; do not turn assumptions, roadmap notes, generic Next.js behavior, or another product's conventions into Thally claims.
+
+Prefer improving the existing page that owns the task. Create one new MDX file under src/content only when the task needs its own durable URL. Add a new page to the most relevant docs.json group, keep its navTitle short enough for one sidebar line when practical, and link to prerequisites instead of duplicating them.
+
+Write directly to the reader in friendly, concrete language. Include the outcome, prerequisites, ordered steps, exact UI labels or tested commands, realistic examples, expected results, and troubleshooting for the two or three most likely failures. Use code fences with the correct language. Use Note, Warning, Steps, Tabs, Cards, or another built-in component only when it makes the task easier to scan. Never add a second H1 inside the body.
+
+Run every safe command you document when the environment permits. Then run npx thally check and npm run build. Start a local preview, inspect the page in light and dark mode at desktop and narrow widths, and check links, navigation, code contrast, overflow, and headings. Fix regressions caused by your changes.
+
+Report the user outcome, files changed, evidence used for product claims, commands run, visual checks completed, and any facts that still require a product owner. Do not commit, push, deploy, delete content, or modify unrelated framework internals unless I explicitly ask.
+
+</AgentPrompt>
 
 ## MDX basics
 
@@ -27,13 +47,15 @@ Every page needs a frontmatter block at the top:
 ```yaml
 ---
 title: Page Title
+navTitle: Short label
 description: A short summary for search results and meta tags.
 ---
 ```
 
 | Field | Required | Purpose |
 | --- | --- | --- |
-| `title` | Yes | Page heading and sidebar label |
+| `title` | Yes | Page heading, browser title, and search result |
+| `navTitle` | No | Shorter sidebar and previous/next label |
 | `description` | Yes | Meta description and search snippet |
 
 The title from frontmatter is automatically rendered as the page heading — you don't need to add an `# H1` in the body.
@@ -127,7 +149,7 @@ Create a config file and add your API key.
 Use `<CardGroup>` and `<Card>` to create clickable card grids for landing pages or "next steps" sections:
 
 ```mdx
-<CardGroup cols={2}>
+<CardGroup cols="2">
 
 <Card title="Quickstart" href="/quickstart" icon="book-open">
 Get up and running in five minutes.
@@ -162,7 +184,9 @@ Disable zoom with `<Frame zoom={false}>`.
 
 ## Heading anchor links
 
-Every `h2` and `h3` heading is automatically a permalink. Clicking the heading copies the full section URL to the clipboard without adding a visible marker beside the heading. This makes it easy to share links to specific sections while keeping the page visually clean.
+Every `h2` and `h3` heading is a permalink. Selecting the heading copies the
+section URL without adding a visible marker beside it, so you can share a
+specific answer while keeping the page visually clean.
 
 ## Tables
 

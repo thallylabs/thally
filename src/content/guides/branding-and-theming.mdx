@@ -1,6 +1,7 @@
 ---
-title: Branding and Theming
-description: Customize colors, fonts, and site identity to match your product.
+title: Customize your brand and theme
+navTitle: Brand and theme
+description: Apply your product identity, colors, logos, and theme settings to the documentation site.
 ---
 
 ## Two places to set your brand
@@ -52,7 +53,9 @@ const brandPreset: BrandPresetKey = 'primary'  // or 'secondary'
 
 The fastest way to recolor the site is the **dashboard**: under **Branding → Brand accent**, an Owner picks the accent with a color wheel, a set of presets, or by typing a hex/RGB value — for both light and dark mode. A live preview updates as you drag, and **Save** applies it to the running site with no rebuild. The accent drives links, active nav/sidebar states, buttons, and the focus ring; if you set only the light accent, Thally derives a sensible dark-mode shade automatically.
 
-This overrides just the accent (and its ring). The rest of the palette — backgrounds, borders, sidebar tokens — comes from the source-file presets below, so the dashboard is for quick recolors and the files are the versioned baseline.
+This overrides the accent and focus ring. The rest of the palette—backgrounds,
+borders, and sidebar tokens—comes from the source-file presets below. Use the
+dashboard for a live adjustment and the files as the versioned baseline.
 
 ## Custom colors
 
@@ -135,9 +138,11 @@ The body and heading fonts are set from a `fonts` block in `docs.json` — any G
 
 The defaults are **Inter** (body) and **JetBrains Mono** (code). The monospace font is still configured in `src/app/layout.tsx` via `next/font/google`. See [Custom fonts](/guides/custom-fonts) for the full reference.
 
-## Analytics
+## Third-party analytics scripts
 
-Add analytics by setting one or more providers in `siteConfig.analytics`. Scripts load automatically — no code changes needed.
+Initialize Google Analytics, Plausible, or PostHog by setting one or more
+providers in `siteConfig.analytics`. Thally's root layout renders the provider
+loader when this object is present, so you do not need to edit the layout.
 
 ```ts
 export const siteConfig: SiteConfig = {
@@ -153,7 +158,9 @@ export const siteConfig: SiteConfig = {
 }
 ```
 
-Leave `analytics` undefined to disable all tracking.
+Leave `analytics` undefined when you do not want these third-party scripts.
+This setting loads the provider SDKs; it does not replace provider-specific
+single-page navigation, custom-event, privacy, or consent configuration.
 
 ## Version switcher
 

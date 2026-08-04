@@ -1,67 +1,70 @@
 ---
-title: Overview
-description: How this API Reference tab works, and how to point it at your own OpenAPI spec.
+title: Explore the API reference demo
+navTitle: API demo
+description: See how Thally turns the included JSONPlaceholder OpenAPI spec into interactive endpoint pages.
 ---
 
-The pages in this tab are generated automatically from an OpenAPI spec. Every
-operation gets its own page with parameter tables, request and response schemas,
-code samples, and an interactive **Try It** console.
+Thally reads `openapi.yaml` and creates one page for each operation. The generated
+pages include parameters, request and response schemas, a cURL example, and the
+**Try It** panel.
 
-## The example spec
+<Note type="info" title="This is sample content">
+  This tab documents JSONPlaceholder so you can test Thally's API-reference
+  experience. It does not describe a Thally service API. Replace the sample
+  specification before you publish your own documentation.
+</Note>
 
-This demo is wired to [JSONPlaceholder](https://jsonplaceholder.typicode.com) — a
-free, live, public REST API that needs no API key. Because it's a real endpoint,
-the **Try It** console returns real responses, so you can explore the feature
-before swapping in your own API.
+## Try the included specification
 
-- **Base URL:** `https://jsonplaceholder.typicode.com`
-- **Auth:** none — every request works as-is
-- **Resources:** Posts, Comments, and Users
+The sample points to `https://jsonplaceholder.typicode.com` and does not define
+authentication. Open a generated endpoint such as **List posts**, select
+**Try It**, and send the request to see the complete flow.
 
-`GET` requests return real data; write requests (`POST`, `PUT`, `PATCH`, `DELETE`)
-are accepted and echoed back but not persisted.
+`GET` requests return sample data. JSONPlaceholder accepts write requests but
+does not persist the changes.
 
-## Fetch the spec
+## View the source specification
 
-The spec is served from the docs site itself, in both formats:
+Thally serves the configured specification in both formats:
 
 - YAML: [`/openapi.yaml`](/openapi.yaml)
 - JSON: [`/openapi.json`](/openapi.json)
+
+From a local development server:
 
 ```bash
 curl http://localhost:3040/openapi.yaml
 curl http://localhost:3040/openapi.json
 ```
 
-## Use your own API
-
-Replace the example with your real API in three steps:
+## Replace the demo with your API
 
 <Steps>
 
-<Step title="Drop in your spec">
-Put your OpenAPI 3.x file in the project root as `openapi.yaml` (or `openapi.json`).
+<Step title="Add your specification">
+Replace the root `openapi.yaml` file, or add an OpenAPI JSON file.
 </Step>
 
-<Step title="Point docs.json at it">
-The `api` block on the API Reference tab references the file and orders the sidebar by tag.
+<Step title="Update docs.json">
+Point the API Reference tab at your file and list any tags you want to appear first.
 
 ```json
 {
   "tab": "API Reference",
   "api": {
     "source": "openapi.yaml",
-    "tagsOrder": ["Posts", "Comments", "Users"]
+    "tagsOrder": ["Authentication", "Users"]
   }
 }
 ```
 </Step>
 
-<Step title="Run the dev server">
-`npm run dev` regenerates the endpoint pages from your spec — no manual page authoring.
+<Step title="Check the generated pages">
+Run `npx thally dev`, open at least one endpoint, and compare its parameters and
+schemas with your specification.
 </Step>
 
 </Steps>
 
-See [API Reference Setup](/guides/api-reference-setup) for the full list of
-configuration options, including per-operation overrides and custom grouping.
+Next, follow [Generate an API reference](/guides/api-reference-setup) for
+operation overrides, grouping, authentication placeholders, and validation.

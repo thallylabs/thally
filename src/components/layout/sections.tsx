@@ -34,7 +34,7 @@ export function MainColumns({ children, className }: WrapperProps) {
   return (
     <div
       className={cn(
-        'grid gap-12 lg:grid-cols-[minmax(0,1fr)_260px]',
+        'grid gap-12 xl:grid-cols-[minmax(0,1fr)_184px]',
         layout.columnGap,
         className,
       )}
@@ -47,4 +47,3 @@ export function MainColumns({ children, className }: WrapperProps) {
 export function DetailColumn({ children, className }: WrapperProps) {
   return <div className={cn('hidden lg:block', className)}>{children}</div>
 }
-

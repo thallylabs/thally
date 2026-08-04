@@ -1,0 +1,54 @@
+---
+title: Agent prompt
+description: Add a copyable prompt that gives AI coding agents accurate, task-specific instructions.
+---
+
+Use `<AgentPrompt>` when a reader can delegate the documented task to an AI
+coding agent. The page shows a short task label and **Copy prompt** button; the
+full instructions stay hidden until the reader copies them.
+
+## Example
+
+<AgentPrompt
+  title="Copy a prompt to add a page"
+  copyOnly
+>
+
+Add or improve a task-focused page in this Thally project about inviting a team member. You are done when the page is accurate, discoverable in navigation, passes Thally validation, and renders correctly in a production build.
+
+Before editing, read AGENTS.md if present, docs.json, package.json, and the existing pages that discuss teams, roles, access, or invitations. Prefer updating the page that already owns this task. Create a new MDX file only if readers need a distinct durable URL.
+
+Write for a developer or workspace owner completing the task for the first time. State prerequisites, explain permission requirements, give ordered steps with exact UI labels or commands, show a realistic example, cover common failure states, and finish with a success check. Do not invent product behavior: trace each claim to the current repository or identify it for human confirmation.
+
+Keep the sidebar label short with navTitle if necessary. Reuse built-in Thally components only when they improve scanning. Run npx thally check and npm run build, fix issues caused by your changes, and summarize the files changed, facts verified, and questions that remain. Do not commit, push, deploy, or modify unrelated framework files unless I ask.
+
+</AgentPrompt>
+
+```mdx
+<AgentPrompt
+  title="Copy a prompt to add a page"
+  copyOnly
+>
+
+Add or improve a task-focused page in this Thally project about inviting a team member. You are done when the page is accurate, discoverable in navigation, passes Thally validation, and renders correctly in a production build.
+
+Before editing, read AGENTS.md if present, docs.json, package.json, and the existing pages that discuss teams, roles, access, or invitations. Prefer updating the page that already owns this task. Create a new MDX file only if readers need a distinct durable URL.
+
+Write for a developer or workspace owner completing the task for the first time. State prerequisites, explain permission requirements, give ordered steps with exact UI labels or commands, show a realistic example, cover common failure states, and finish with a success check. Do not invent product behavior: trace each claim to the current repository or identify it for human confirmation.
+
+Keep the sidebar label short with navTitle if necessary. Reuse built-in Thally components only when they improve scanning. Run npx thally check and npm run build, fix issues caused by your changes, and summarize the files changed, facts verified, and questions that remain. Do not commit, push, deploy, or modify unrelated framework files unless I ask.
+
+</AgentPrompt>
+```
+
+## Write a reliable prompt
+
+Include the outcome, scope, files or tools the agent should inspect, validation
+commands, and actions that require separate approval. Use placeholders only
+when the reader knows they must replace them.
+
+| Prop | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| `children` | MDX | Required | Prompt instructions and clipboard payload. |
+| `copyOnly` | boolean | `true` | Keep the prompt body hidden while making the complete instructions copyable. |
+| `title` | string | Copy-and-paste instruction | Short context shown beside the copy action. |

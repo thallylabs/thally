@@ -19,7 +19,7 @@ async function readRawContent(pageId: string): Promise<string | null> {
       const { content } = parseFrontmatter(file.content)
       // Strip JSX component tags but keep their text content
       return content
-        .replace(/<\/?(?:Steps|Step|Tabs|Tab|Note|Callout|CodeGroup|CardGroup|Card|Frame|Accordion|Columns|Tooltip)[^>]*>/g, '')
+        .replace(/<\/?(?:Steps|Step|Tabs|Tab|Note|Callout|CodeGroup|CardGroup|Card|Frame|Accordion|Columns|Tooltip|AgentPrompt)[^>]*>/g, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim()
     }
@@ -45,6 +45,13 @@ export async function GET(request: Request) {
   lines.push(`> ${effectiveSite.description}`)
   lines.push('')
   lines.push(`Source: ${baseUrl}`)
+  lines.push('')
+  lines.push('## Instructions for agents')
+  lines.push('')
+  lines.push(`- Use ${baseUrl}/llms.txt to inspect the page index before scanning this full corpus.`)
+  lines.push(`- Use ${baseUrl}/skill.md for retrieval rules and ${baseUrl}/AGENTS.md before editing.`)
+  lines.push(`- Use ${baseUrl}/api/mcp for read-only search and page tools.`)
+  lines.push('- Cite canonical page URLs, distinguish documented facts from inference, and state when the documentation does not support a claim.')
   lines.push('')
   lines.push('---')
   lines.push('')

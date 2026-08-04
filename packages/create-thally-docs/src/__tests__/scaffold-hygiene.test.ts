@@ -46,6 +46,13 @@ describe('scaffold hygiene — agent-ready by default, Track senders remain opt-
       expect(shouldInclude('docs-main/src/app/api/track/webhook/route.ts')).toBe(true)
       expect(shouldInclude('docs-main/src/lib/track/github-app.ts')).toBe(true)
       expect(shouldInclude('docs-main/src/components/admin/github-connect-panel.tsx')).toBe(true)
+      // The visual handoff is runtime infrastructure, so every new scaffold
+      // must retain it from the canonical docs repository.
+      expect(shouldInclude('docs-main/src/styles/docs-handoff.css')).toBe(true)
+      expect(shouldInclude('docs-main/src/components/mdx/agent-prompt.tsx')).toBe(true)
+      expect(shouldInclude('docs-main/src/app/llms.txt/route.ts')).toBe(true)
+      expect(shouldInclude('docs-main/src/app/robots.txt/route.ts')).toBe(true)
+      expect(shouldInclude('docs-main/src/lib/agent-manifest.ts')).toBe(true)
       expect(shouldInclude('docs-main/docs.json')).toBe(true)
       expect(shouldInclude('docs-main/.github/workflows/ci.yml')).toBe(true)
       expect(shouldInclude('docs-main/.github/workflows/thally-agent.yml')).toBe(true)
@@ -201,20 +208,31 @@ describe('writeStarterContent', () => {
       { code: 'en', label: 'English' },
       { code: 'es', label: 'Español' },
     ])
+    expect(config.tabs[0].tab).toBe('Get started')
     expect(config.tabs[0].groups).toEqual([
-      { group: 'Getting Started', icon: 'book-open', pages: ['introduction', 'quickstart'] },
-      { group: 'Explore', icon: 'grid-round', pages: ['components'] },
-      { group: 'Project', icon: 'wrench', pages: ['customization'] },
+      { group: 'Start here', icon: 'book-open', pages: ['introduction', 'quickstart'] },
+      { group: 'Create content', icon: 'grid-round', pages: ['components'] },
+      { group: 'Customize your site', icon: 'wrench', pages: ['customization'] },
     ])
     expect(introduction).toContain('mode: home')
     expect(introduction).toContain('<Hero')
     expect(introduction).toContain('secondaryHref="/components"')
+    expect(introduction).toContain('## Build your documentation')
+    expect(introduction).toContain('## Publish and extend')
+    expect(introduction).toContain('title="Complete the quickstart"')
     expect(introduction).not.toContain('secondaryHref="/es/api"')
-    expect(introduction).toContain('title="API reference" icon="code-simple" href="/api"')
-    expect(introduction).toContain('<CardGroup cols={3}>')
+    expect(introduction).toContain('title="Integrate the API" icon="code-simple" href="/api"')
+    expect(introduction.match(/<CardGroup cols="2">/g)).toHaveLength(2)
+    const quickstart = readFileSync(join(dir, 'src/content/quickstart.mdx'), 'utf8')
+    expect(quickstart).toContain('## Before you begin')
+    expect(quickstart).toContain('<Step title="Verify the result">')
+    expect(quickstart).toContain('## Choose your next task')
     expect(spanishIntroduction).toContain('Te damos la bienvenida a Acme Docs')
     expect(spanishIntroduction).toContain('secondaryHref="/es/components"')
-    expect(spanishIntroduction).toContain('title="Referencia de API" icon="code-simple" href="/es/api"')
+    expect(spanishIntroduction).toContain('## Crea tu documentación')
+    expect(spanishIntroduction).toContain('## Publica y amplía')
+    expect(spanishIntroduction.match(/<CardGroup cols="2">/g)).toHaveLength(2)
+    expect(spanishIntroduction).toContain('title="Integra la API" icon="code-simple" href="/es/api"')
   })
 })
 

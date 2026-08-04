@@ -1,88 +1,179 @@
 ---
 title: Quickstart
-description: Get a Thally documentation site running locally in under five minutes.
+description: Publish your first documentation site with Thally Cloud and confirm the live site is ready to share.
 ---
 
-Follow these steps to go from zero to a running docs site.
+After this guide, you will have a live documentation site at a secure
+`thally.app` address and a GitHub repository your team owns.
 
-![HTML browser window](/images/image2.jpg)
+## Prefer to use a coding agent?
+
+Copy this prompt into Codex, Claude Code, Cursor, or another agent that can use
+a browser and terminal. The prompt makes Thally Cloud the source of site
+creation, tells the agent when it needs you, and keeps it working until the
+published URL loads.
+
+<AgentPrompt
+  title="Copy a complete prompt to publish your Thally site"
+  copyOnly
+>
+
+Get my documentation live on a published Thally Cloud site. You are successfully done when you give me the live URL, confirm it loads, and summarize what was published. Tell me clearly whenever a step needs my input; do everything else yourself. If this prompt was pasted before or the session restarted, inspect the current state and continue from where the work stopped instead of starting over.
+
+Use Thally Cloud at https://app.thally.io/ to create and publish the site. Do not substitute the local scaffold or another hosting provider for site creation. The CLI is only a developer tool for preparing, migrating, validating, and previewing repository content after the Cloud site exists.
+
+1. Ask what documentation content I want to publish. Accept a local directory, a GitHub repository, a public documentation URL, or a clear instruction to start with Thally's starter content. Echo the exact source and list its top-level contents so I can confirm it is correct. If you cannot access the named source, stop and ask; never substitute a different source.
+2. Open https://app.thally.io/. If you cannot control a browser, tell me to open that URL and guide me only through the browser steps that require my account while you handle all repository and terminal work yourself.
+3. Needs me: ask me to sign in or create an account if the browser is not already authenticated. Never request my password, verification code, session cookie, or recovery code in chat.
+4. Select Create a site. Ask me for any missing site name, short description, and preferred thally.app address. Never invent brand or company details.
+5. At Docs source, recommend Create a new docs repository. Use an existing repository only when it is already a current Thally project that I explicitly selected. Needs me: have me install or approve the Thally GitHub App for the intended GitHub organization and repository access. Do not select or modify an unrelated repository.
+6. At Product sources, ask whether I want Thally Track configured now. If yes, show me the available product repositories and confirm the exact selections before continuing. Select no more than five and never select the documentation repository itself. If I do not want Track yet, choose I'll do this later.
+7. Review the site name, thally.app address, documentation repository, production branch, and Track selection with me. Select Publish site only after those values match what I approved.
+8. Wait for Thally Cloud to create or connect the GitHub repository and finish the first production deployment. Do not retry blindly. If publishing fails, report the exact message and preserve the created repository and site state for a safe retry.
+9. Confirm the workspace Home page shows the site as Live. Record the documentation repository and live https://SITE_SLUG.thally.app URL from the site summary.
+10. If I provided existing documentation and the Cloud-created repository still contains starter content, clone the exact documentation repository. For a GitHub repository or public docs URL, import into the existing Thally project with npx create-thally-docs@latest migrate SOURCE --into REPOSITORY_DIRECTORY --yes. For local files, preserve the authored content and adapt it under src/content without deleting unrelated project files. If I connected an existing Thally repository, do not overwrite it.
+11. Before editing, read AGENTS.md if present, docs.json, package.json, and src/data/site.ts. Keep framework internals unchanged. Organize pages around reader tasks, preserve useful redirects and assets, and update navigation only for pages that exist.
+12. Run npx thally check and npm run build. Fix errors caused by the content changes. Start npm run dev when the environment can keep a local server running, inspect the homepage, navigation, representative pages, code blocks, images, and API reference, then stop the server.
+13. Commit only the intended documentation changes with a plain, attribution-free message and push them to the production branch connected in Thally Cloud. The push should trigger a new managed deployment. Do not force-push, rewrite history, delete repositories, or merge unrelated work.
+14. Wait for the managed deployment to finish. Fetch the live URL and confirm it returns a successful response and displays the expected site. If the live content is stale, inspect the deployment status and commit SHA before changing anything else.
+15. Set up future agent work. Read LIVE_URL/AGENTS.md and LIVE_URL/skill.md. If the current client supports MCP, connect the local authoring server with npx -y @thallylabs/mcp and connect the site's read-only remote server at LIVE_URL/api/mcp using the correct client-specific configuration. Tell me if the client must restart before those tools appear.
+16. If I ask for a custom domain, open the site's domain settings, show me the exact DNS records Thally provides, and make it clear that I must add them at my DNS provider. Confirm the custom domain loads before calling that optional work complete.
+
+If a command or platform action fails in a way not covered above, stop and give me the exact error, the step that failed, and the safest next action. Do not guess, silently switch products, or claim the site is live before you have verified the URL.
+
+</AgentPrompt>
+
+For prompts that update pages, migrate content, or audit a site with MCP, see
+[Use Thally with AI coding agents](/guides/ai-coding-agents).
+
+## Before you begin
+
+You need a [Thally Cloud](https://app.thally.io/) account and a GitHub account
+with permission to install or approve the Thally GitHub App for the organization
+that will own the documentation repository. You do not need Node.js or a local
+checkout to publish the starter site.
+
+## Create your site in Thally Cloud
 
 <Steps>
 
-<Step title="Create your project">
+<Step title="Open Thally Cloud">
 
-```bash
-npx create-thally-docs my-docs
-cd my-docs
-npm install
-npm run dev
-```
-
-Open the local URL printed by the server. It starts at
-[http://localhost:3040](http://localhost:3040) and moves to the next available
-port when needed.
+Go to [app.thally.io](https://app.thally.io/), sign in, and select
+**Create a site** from the workspace Home page.
 
 </Step>
 
-<Step title="Add a page">
+<Step title="Choose the site details">
 
-Create `src/content/my-page.mdx`:
-
-```mdx
----
-title: My Page
-description: A new documentation page.
----
-
-Write your content here using Markdown and JSX components.
-```
+Enter a site name, an optional description, and the `thally.app` address you
+want. Thally checks the address before you continue. You can change the brand
+and connect a custom domain later.
 
 </Step>
 
-<Step title="Register it in navigation">
+<Step title="Connect the documentation repository">
 
-Open `docs.json` and add the page to a group:
+Choose **Create a new docs repository** for the recommended path. Thally creates
+a GitHub repository from the maintained template, gives you editable source
+files, and manages the first deployment.
 
-```json
-{
-  "group": "Getting Started",
-  "pages": ["introduction", "quickstart", "my-page"]
-}
-```
-
-The sidebar updates automatically — no restart required.
+Choose **Use an existing repository** only when the repository is already a
+Thally project. Install or approve the Thally GitHub App when prompted, then
+confirm the GitHub account and repository details.
 
 </Step>
 
-<Step title="Add an API reference">
+<Step title="Choose product sources">
 
-Drop an OpenAPI spec (YAML or JSON) into the project root and reference it in `docs.json`:
-
-```json
-{
-  "tab": "API Reference",
-  "api": {
-    "source": "openapi.yaml"
-  }
-}
-```
-
-Thally generates interactive endpoint pages with parameter tables, schemas, code samples, and a "Try It" console.
+Connect the product repositories that Thally Track should watch for merged
+changes, or choose **I'll do this later**. The documentation repository is
+excluded to prevent update loops.
 
 </Step>
 
-<Step title="Deploy">
+<Step title="Review and publish">
 
-```bash
-npm run build
-```
-
-Deploy to any platform that supports Next.js — Vercel, Netlify, Cloudflare, or a Docker container.
-
-<Note type="info" title="Environment variables">
-Set `THALLY_SITE_URL` in your hosting dashboard for correct OpenGraph URLs and metadata.
-</Note>
+Confirm the site address, repository, production branch, and optional Track
+sources. Select **Publish site**. Creating the repository and publishing the
+first version can take about a minute; keep the page open.
 
 </Step>
 
 </Steps>
+
+## View your live site
+
+When publishing finishes, the workspace Home page shows the site as **Live**.
+Open **View live site** from the site summary. Every managed site receives a
+secure address in this format:
+
+```text
+https://your-site.thally.app
+```
+
+<Frame caption="A published site and its repository on the Thally Cloud workspace Home page">
+
+![Thally Cloud workspace showing a live documentation site](/images/thally-cloud-live-site.webp)
+
+</Frame>
+
+The site is ready to share immediately. Its HTML, Markdown, JSON, JSON-LD,
+search index, `llms.txt`, agent manifests, and read-only MCP endpoint are
+published from the same documentation source.
+
+## Update the published content
+
+Open the GitHub repository shown in the site summary and clone it locally. The
+three files you will edit most often are:
+
+| File | What you control |
+| --- | --- |
+| `src/content/*.mdx` | Page content and frontmatter |
+| `docs.json` | Tabs, sidebar groups, page order, and optional features |
+| `src/data/site.ts` | Product name, description, links, and versioned brand defaults |
+
+Before pushing a change, run:
+
+```bash
+npx thally check
+npm run build
+```
+
+Push the reviewed change to the production branch. Thally Cloud builds and
+publishes the new version, and the deployment history records the commit.
+
+## Developer option: start with the CLI
+
+Use the CLI when you need an isolated local evaluation, CI automation, or a
+self-hosted site. It is the secondary setup path, not the recommended managed
+onboarding flow.
+
+```bash
+npx create-thally-docs@latest my-docs --yes --install
+cd my-docs
+npm run dev
+```
+
+Continue to the [CLI overview](/guides/cli-overview) for setup commands,
+migrations, validation, and self-hosted workflows.
+
+## Choose your next task
+
+<CardGroup cols="2">
+  <Card title="Write and format pages" icon="book-open" href="/guides/writing-content">
+    Add frontmatter, code examples, callouts, steps, tabs, and reusable content.
+  </Card>
+  <Card title="Organize the navigation" icon="grid-round" href="/guides/configuring-navigation">
+    Turn your page list into task-based tabs and sidebar groups.
+  </Card>
+  <Card title="Customize the site" icon="wrench" href="/guides/branding-and-theming">
+    Set your product identity, colors, logos, fonts, navbar, and footer.
+  </Card>
+  <Card title="Generate an API reference" icon="link-simple" href="/guides/api-reference-setup">
+    Connect an OpenAPI specification and publish interactive endpoint docs.
+  </Card>
+  <Card title="Use an AI coding agent" icon="message" href="/guides/ai-coding-agents">
+    Copy task-ready prompts or connect Thally's structured MCP tools.
+  </Card>
+</CardGroup>

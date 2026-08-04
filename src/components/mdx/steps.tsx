@@ -33,20 +33,20 @@ interface StepProps {
 export function Step({ title, children }: StepProps) {
   return (
     <div
-      className="thally-step relative grid grid-cols-[40px_1fr] gap-x-4 pb-10 last:pb-0"
+      className="thally-step relative grid grid-cols-[30px_minmax(0,1fr)] gap-x-5 pb-[34px] last:pb-0"
       style={{ counterIncrement: 'step 1' }}
     >
       {/* Vertical connector line — hidden on last step via CSS */}
-      <div className="thally-step-line absolute left-[19px] top-10 bottom-0 w-px bg-border" />
+      <div className="thally-step-line absolute left-[14px] top-[34px] bottom-1 w-px bg-border" />
 
       {/* Numbered circle */}
-      <div className="thally-step-number relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-accent/40 bg-background text-sm font-semibold text-accent before:content-[counter(step)]" />
+      <div className="thally-step-number relative z-10 flex h-[29px] w-[29px] shrink-0 items-center justify-center rounded-full border border-border bg-background font-mono text-[0.78rem] font-medium text-foreground/70 before:content-[counter(step)]" />
 
       {/* Step content */}
-      <div className="pt-1.5">
-        <h3 className="text-xl font-semibold tracking-tight text-foreground">{title}</h3>
+      <div className="min-w-0 pt-1">
+        <h3 className="font-heading text-[1.02rem] font-bold tracking-[-0.012em] text-foreground">{title}</h3>
         {children ? (
-          <div className="prose prose-sm dark:prose-invert mt-3 max-w-none text-foreground/80">
+          <div className="prose prose-sm dark:prose-invert mt-2 max-w-none text-foreground/80">
             {children}
           </div>
         ) : null}

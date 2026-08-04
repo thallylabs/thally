@@ -29,14 +29,14 @@ export function OperationPanel({ operation }: OperationPanelProps) {
   ].filter((group) => group.parameters.length > 0)
 
   return (
-    <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid gap-12 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="space-y-10">
         {/* Header */}
-        <header className="space-y-6 rounded-3xl border border-border/20 bg-gradient-to-br from-background via-background to-muted/20 p-6 shadow-sm">
+        <header className="space-y-6">
           <div className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">{operation.group}</p>
             <div className="space-y-2">
-              <h1 className="text-3xl font-semibold tracking-tight text-foreground">{operation.title}</h1>
+              <h1 className="font-heading text-[2.05rem] font-extrabold leading-[1.12] tracking-[-0.03em] text-foreground">{operation.title}</h1>
               {operation.description ? (
                 <div className="prose prose-neutral dark:prose-invert max-w-none text-base text-foreground/70">
                   <Markdown>{operation.description}</Markdown>
@@ -49,8 +49,8 @@ export function OperationPanel({ operation }: OperationPanelProps) {
               )}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-border/30 bg-background/60 px-4 py-3">
-            <span className={cn('rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-widest', methodToken.bg, methodToken.text)}>{operation.method}</span>
+          <div className="flex flex-wrap items-center gap-4 border-y border-border py-3">
+            <span className={cn('rounded-[5px] px-2 py-1 font-mono text-[0.7rem] font-medium uppercase tracking-[0.02em]', methodToken.bg, methodToken.text)}>{operation.method}</span>
             <code className="flex-1 text-sm font-semibold text-foreground break-all">
               {(operation.servers[0]?.url?.replace(/\/$/, '') ?? '')}
               {operation.path}
@@ -58,7 +58,7 @@ export function OperationPanel({ operation }: OperationPanelProps) {
             <button
               type="button"
               onClick={() => setDialogOpen(true)}
-              className="rounded-full bg-accent px-4 py-2 text-xs font-semibold uppercase tracking-wide text-accent-foreground shadow hover:bg-accent/90"
+              className="rounded-[9px] bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition hover:brightness-125 active:scale-[0.98]"
             >
               Try it
             </button>
@@ -69,9 +69,9 @@ export function OperationPanel({ operation }: OperationPanelProps) {
         {operation.servers.length ? (
           <section className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">Servers</p>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="border-y border-border">
               {operation.servers.map((server) => (
-                <div key={server.url} className="rounded-xl border border-border/30 px-4 py-3">
+                <div key={server.url} className="flex flex-wrap items-baseline gap-x-4 border-b border-border px-0 py-3 last:border-b-0">
                   <p className="text-sm font-semibold text-foreground break-all">{server.url}</p>
                   {server.description ? <p className="text-xs text-foreground/60">{server.description}</p> : null}
                 </div>
@@ -87,7 +87,7 @@ export function OperationPanel({ operation }: OperationPanelProps) {
             {parameterGroups.map((group) => (
               <div key={group.title}>
                 <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">{group.title}</p>
-                <div className="rounded-2xl border border-border/40 px-4">
+                <div className="border-y border-border">
                   {group.parameters.map((param) => (
                     <ParamField
                       key={param.name}
@@ -121,7 +121,7 @@ export function OperationPanel({ operation }: OperationPanelProps) {
                   <span className="rounded border border-border/40 bg-muted px-2 py-0.5 font-mono text-xs text-foreground/70">{content.mediaType}</span>
                   <span className="text-xs text-foreground/50">{operation.requestBody?.required ? 'Required' : 'Optional'}</span>
                 </div>
-                <div className="rounded-2xl border border-border/40 px-4">
+                <div className="border-y border-border">
                   <SchemaAsParamFields schema={content.schema} />
                 </div>
               </div>
@@ -143,11 +143,11 @@ export function OperationPanel({ operation }: OperationPanelProps) {
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">Security</p>
             <div className="space-y-3">
               {operation.security.map((group, index) => (
-                <div key={`${group.map((item) => item.name).join('-')}-${index}`} className="rounded-2xl border border-border/40 p-4">
+                <div key={`${group.map((item) => item.name).join('-')}-${index}`} className="border-y border-border py-4">
                   <p className="text-xs uppercase tracking-[0.3em] text-foreground/60">One of the following</p>
                   <div className="mt-2 space-y-2">
                     {group.map((requirement) => (
-                      <div key={requirement.name} className="rounded-xl border border-border/40 p-3">
+                      <div key={requirement.name} className="border-t border-border py-3">
                         <p className="text-sm font-semibold text-foreground">{requirement.name}</p>
                         {requirement.scopes.length ? (
                           <p className="text-xs text-foreground/60">Scopes: {requirement.scopes.join(', ')}</p>
@@ -236,9 +236,9 @@ function ResponseTabs({ responses }: { responses: Array<NormalizedResponse> }) {
   const active = responses.find((r) => r.code === activeCode) ?? responses[0]
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border/40">
+    <div className="overflow-hidden border-y border-border">
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-border/30 bg-muted/30 px-3 pt-1">
+      <div className="flex gap-1 border-b border-border px-3 pt-1">
         {responses.map((response) => {
           const isActive = response.code === activeCode
           const colorClass = statusColorClass(response.code)

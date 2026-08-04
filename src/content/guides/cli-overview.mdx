@@ -1,0 +1,81 @@
+---
+title: Use the Thally CLI
+navTitle: CLI overview
+description: Learn the small set of Thally commands used to create, edit, validate, publish, and automate documentation.
+---
+
+The `thally` CLI is the main interface for a documentation project. It wraps
+the framework so you can work with content and configuration instead of Next.js
+internals. Generated projects include `@thallylabs/cli`; run it with `npx` from
+the project root.
+
+```bash
+npx thally
+```
+
+## The five-command path
+
+```bash
+npx create-thally-docs@latest my-docs --yes --install
+cd my-docs
+npx thally dev
+npx thally new guides/invite-a-member --title "Invite a team member"
+npx thally check
+```
+
+Use `build` when the project is ready for production and `deploy` when you want
+the CLI to publish it through a supported provider.
+
+## Choose a command by goal
+
+| Goal | Command | Result |
+| --- | --- | --- |
+| Create a project | `create-thally-docs@latest [dir]` | Downloads and runs the current scaffold. |
+| Preview locally | `thally dev` | Starts the docs site and agent endpoints. |
+| Add a page | `thally new PAGE_ID` | Creates MDX and registers it in `docs.json`. |
+| Validate work | `thally check` | Finds broken navigation, missing metadata, and optional readiness issues. |
+| Build production output | `thally build` | Runs the production build. |
+| Publish | `thally deploy` | Builds and deploys through Vercel or Cloudflare. |
+| Migrate documentation | `thally migrate SOURCE [dir]` | Imports a repository or public docs site. |
+| Translate pages | `thally translate --locale CODE` | Writes a localized content tree. |
+| Start local MCP | `thally mcp` | Runs the 15-tool stdio MCP server. |
+| Draft an update | `thally agent` | Produces a reviewable branch or pull request. |
+| Automate product changes | `thally track` | Turns tracked repository changes into docs tasks. |
+
+## `thally` and `create-thally-docs`
+
+Use `npx thally` for routine work inside a project. Use
+`npx create-thally-docs@latest` when you need the newest scaffold before a
+project exists. `thally init` and `thally migrate` delegate to the scaffold
+package, so both interfaces produce the same supported project shape.
+
+## Validate work from an agent
+
+<AgentPrompt
+  title="Copy a complete prompt to check a Thally project"
+  copyOnly
+>
+
+Audit and repair the current Thally documentation project without changing its product meaning, brand intent, or ownership boundaries. You are done when validation and the production build pass, every automatic fix is justified, and I have a precise report of anything that still needs a human decision.
+
+1. Confirm the working directory contains package.json, docs.json, and src/content. Read AGENTS.md or equivalent repository instructions before changing files. Record the current git status and preserve unrelated edits.
+2. Read docs.json, package.json scripts, src/data/site.ts, and any configuration or content files named by existing errors. Do not edit generated output or hidden framework internals when an authored content or configuration fix exists.
+3. Run npx thally check without a fix flag first. Group results into blocking errors, warnings that can be proven from repository state, and warnings that require editorial or product judgment.
+4. Fix only issues you can prove: missing navigation targets, invalid or incomplete frontmatter, duplicate page IDs, broken local links, malformed configuration, and clearly accidental orphan pages. Do not delete or publish orphan content merely to silence a warning. Do not rewrite product claims unless the implementation or tests contradict them.
+5. Run npx thally check again. When it passes, run npm run build. If a command fails, isolate whether the failure came from your edit, existing repository state, the environment, or an external service before changing more files.
+6. Start the local site when possible and inspect the homepage, primary navigation, one representative guide, a code-heavy page, images, and any API reference. Check narrow and wide layouts, light and dark mode, broken links, horizontal overflow, and console errors.
+7. Summarize the initial findings, exact files changed, why each edit was safe, final command results, visual checks, and remaining warnings with a recommended owner and next step.
+
+Do not commit, push, deploy, install unrelated packages, remove content, overwrite user changes, or change framework internals unless I explicitly ask. If a fix would change product meaning or public navigation intent, stop and ask before applying it.
+
+</AgentPrompt>
+
+## CLI or MCP?
+
+Use the CLI when you are in a terminal, writing automation, or debugging a
+specific command. Connect the [local MCP server](/guides/mcp-overview) when you
+want a coding agent to discover structured operations and their parameters.
+Both interfaces act on the same project files and use the same validation
+rules.
+
+For every flag and migration option, continue to the [CLI reference](/guides/cli-reference).

@@ -2,7 +2,6 @@
 
 import * as Dialog from '@radix-ui/react-dialog'
 import { Menu, X } from 'lucide-react'
-import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import type { NavigationSection } from '@/data/docs'
@@ -11,6 +10,7 @@ import { typography } from '@/config/layout'
 import { cn } from '@/lib/utils'
 import { Logo } from '@/components/layout/logo'
 import { useSiteName } from '@/components/layout/use-site-name'
+import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
 
 interface MobileNavProps {
   sections: Array<NavigationSection>
@@ -51,13 +51,13 @@ export function MobileNav({ sections }: MobileNavProps) {
                   {section.items.map((item) => {
                     const isActive = item.href === '/' ? pathname === '/' : pathname === item.href
                     return (
-                      <Link
+                      <IntentPrefetchLink
                         key={item.id}
                         href={item.href}
                         onClick={() => setOpen(false)}
                         className={cn(
                           'flex flex-col rounded-xl border border-transparent px-3 py-2 text-sm font-medium transition hover:border-border',
-                          'focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/30',
+                          'focus:outline-none',
                           isActive && 'border-border bg-muted',
                         )}
                       >
@@ -68,7 +68,7 @@ export function MobileNav({ sections }: MobileNavProps) {
                         {item.description ? (
                         <span className="text-xs font-normal text-foreground/60">{item.description}</span>
                         ) : null}
-                      </Link>
+                      </IntentPrefetchLink>
                     )
                   })}
                 </div>
@@ -80,4 +80,3 @@ export function MobileNav({ sections }: MobileNavProps) {
     </Dialog.Root>
   )
 }
-

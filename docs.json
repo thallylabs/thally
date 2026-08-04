@@ -1,9 +1,5 @@
 {
   "theme": "default",
-  "banner": {
-    "content": "This is a sample documentation site built with the Thally template. [Get started →](/quickstart)",
-    "dismissible": true
-  },
   "ai": {
     "chat": true,
     "label": "ThallyAI",
@@ -77,16 +73,16 @@
         "heading": "Tooling",
         "items": [
           {
-            "label": "CLI Reference",
-            "href": "/guides/cli-reference"
+            "label": "AI coding agents",
+            "href": "/guides/ai-coding-agents"
           },
           {
-            "label": "MCP Server",
-            "href": "/guides/mcp-server"
+            "label": "CLI overview",
+            "href": "/guides/cli-overview"
           },
           {
-            "label": "AI & Agents",
-            "href": "/guides/ai-features"
+            "label": "MCP overview",
+            "href": "/guides/mcp-overview"
           }
         ]
       }
@@ -123,14 +119,24 @@
   },
   "tabs": [
     {
-      "tab": "Overview",
+      "tab": "Get started",
       "groups": [
         {
-          "group": "Getting Started",
+          "group": "Start here",
           "icon": "book-open",
           "pages": [
             "introduction",
             "quickstart"
+          ]
+        },
+        {
+          "group": "Developer tools",
+          "icon": "code-simple",
+          "pages": [
+            "guides/ai-coding-agents",
+            "guides/cli-overview",
+            "guides/mcp-overview",
+            "guides/cli-reference"
           ]
         }
       ]
@@ -139,16 +145,23 @@
       "tab": "Guides",
       "groups": [
         {
-          "group": "Content",
+          "group": "Create content",
           "icon": "book-open",
           "pages": [
             "guides/writing-content",
-            "guides/configuring-navigation",
-            "guides/api-reference-setup"
+            "guides/multi-language"
           ]
         },
         {
-          "group": "Customize",
+          "group": "Organize your docs",
+          "icon": "grid-round",
+          "pages": [
+            "guides/configuring-navigation",
+            "guides/seo-and-visibility"
+          ]
+        },
+        {
+          "group": "Customize your site",
           "icon": "grid-round",
           "pages": [
             "guides/branding-and-theming",
@@ -157,36 +170,33 @@
           ]
         },
         {
-          "group": "Ship",
-          "icon": "wrench",
+          "group": "Document APIs",
+          "icon": "link-simple",
           "pages": [
-            "guides/deploying",
-            "guides/admin-dashboard",
-            "guides/seo-and-visibility"
+            "guides/api-reference-setup",
+            "api/overview"
           ]
         },
         {
-          "group": "AI & Tooling",
-          "icon": "code-simple",
+          "group": "Publish and operate",
+          "icon": "wrench",
+          "pages": [
+            "guides/deploying",
+            "guides/admin-dashboard"
+          ]
+        },
+        {
+          "group": "Connect agents",
+          "icon": "message",
           "pages": [
             "guides/ai-features",
-            "guides/cli-reference",
-            "guides/mcp-server",
-            "guides/multi-language"
+            "guides/mcp-server"
           ]
         }
       ]
     },
     {
       "tab": "API Reference",
-      "groups": [
-        {
-          "group": "Overview",
-          "pages": [
-            "api/overview"
-          ]
-        }
-      ],
       "api": {
         "source": "openapi.yaml",
         "tagsOrder": [
@@ -224,6 +234,7 @@
           "group": "Content",
           "pages": [
             "components/badge",
+            "components/agent-prompt",
             "components/callouts",
             "components/code-blocks",
             "components/panel",

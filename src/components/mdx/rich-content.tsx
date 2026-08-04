@@ -1,5 +1,4 @@
 import Image from 'next/image'
-import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { ZoomableContent } from '@/components/mdx/zoomable-content'
 import {
@@ -17,6 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
 
 type IconName =
   | 'book-open'
@@ -77,38 +77,34 @@ export function Hero({
 }: HeroProps) {
   const hasActions = Boolean(primaryHref || secondaryHref)
   return (
-    <section className="not-prose relative isolate mb-10 overflow-hidden rounded-[var(--theme-radius-xl)] border border-border/50 bg-gradient-to-b from-muted/50 via-background to-background px-6 py-16 sm:mb-12 sm:px-12 sm:py-20">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-28 left-1/2 h-72 w-[46rem] -translate-x-1/2 rounded-full bg-accent/15 blur-3xl"
-      />
-      <div className="relative mx-auto flex max-w-3xl flex-col items-center text-center">
-        <h1 className="text-4xl font-semibold tracking-tight text-balance text-foreground sm:text-5xl">
+    <section className="thally-docs-hero not-prose mb-8 py-7">
+      <div className="flex max-w-3xl flex-col items-start text-left">
+        <h1 className="max-w-[17ch] font-heading text-[2.6rem] font-extrabold leading-[1.1] tracking-[-0.035em] text-balance text-foreground">
           {title}
         </h1>
         {subtitle ? (
-          <p className="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-pretty text-foreground/70">
+          <p className="thally-docs-hero-copy max-w-[56ch] text-[1.08rem] leading-[1.65] text-pretty text-foreground/75">
             {subtitle}
           </p>
         ) : null}
         {hasActions ? (
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+          <div className="mt-8 flex flex-wrap items-center gap-3">
             {primaryHref ? (
-              <Link
+              <IntentPrefetchLink
                 href={primaryHref}
-                className="inline-flex items-center gap-2 rounded-[var(--theme-control-radius)] bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition hover:opacity-90 active:scale-[0.98]"
+                className="inline-flex items-center gap-2 rounded-[9px] bg-primary px-4 py-2 text-[0.84rem] font-semibold text-primary-foreground transition hover:brightness-125 active:scale-[0.98]"
               >
                 {primaryLabel ?? 'Get started'}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
-              </Link>
+              </IntentPrefetchLink>
             ) : null}
             {secondaryHref ? (
-              <Link
+              <IntentPrefetchLink
                 href={secondaryHref}
-                className="inline-flex items-center gap-2 rounded-[var(--theme-control-radius)] border border-border/60 bg-background px-5 py-2.5 text-sm font-semibold text-foreground transition hover:border-accent/50 hover:text-accent"
+                className="inline-flex items-center gap-2 rounded-[9px] border border-border bg-background px-4 py-2 text-[0.84rem] font-semibold text-foreground transition hover:border-accent hover:text-foreground active:scale-[0.98]"
               >
                 {secondaryLabel ?? 'Learn more'}
-              </Link>
+              </IntentPrefetchLink>
             ) : null}
           </div>
         ) : null}
@@ -132,7 +128,7 @@ function isExternalLink(href: string) {
 
 export function Card({ title, href, icon, iconType, img, children }: CardProps) {
   const content = (
-    <article className="group/card flex h-full flex-col gap-3 rounded-2xl border border-border/60 bg-card p-5 transition duration-200 hover:border-accent/60 motion-safe:hover:-translate-y-0.5">
+    <article className="thally-docs-card group/card relative flex h-full flex-col gap-3 rounded-[12px] border border-border bg-background p-[18px] transition duration-200 hover:border-accent">
       {img ? (
         <div className="relative overflow-hidden rounded-xl border border-border/30">
           <Image
@@ -145,15 +141,13 @@ export function Card({ title, href, icon, iconType, img, children }: CardProps) 
           />
         </div>
       ) : null}
-      <div className="flex items-center gap-2">
-        {icon ? <Icon icon={icon} iconType={iconType} /> : null}
-        {title ? <p className="text-base font-semibold text-foreground">{title}</p> : null}
-        {href ? (
-          <ArrowRight
-            className="ml-auto h-4 w-4 text-foreground/25 transition duration-200 group-hover/card:translate-x-0.5 group-hover/card:text-accent"
-            aria-hidden="true"
-          />
+      <div className="flex min-h-6 items-center gap-2.5">
+        {icon ? (
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center text-accent">
+            <Icon icon={icon} iconType={iconType} className="h-[18px] w-[18px]" />
+          </span>
         ) : null}
+        {title ? <span className="flex min-h-6 items-center text-base font-semibold leading-5 text-foreground">{title}</span> : null}
       </div>
       {children ? <div className="prose prose-sm text-foreground/80 dark:prose-invert">{children}</div> : null}
     </article>
@@ -162,14 +156,14 @@ export function Card({ title, href, icon, iconType, img, children }: CardProps) 
   if (href) {
     const external = isExternalLink(href)
     return (
-      <Link
+      <IntentPrefetchLink
         href={href}
         className="block h-full"
         target={external ? '_blank' : undefined}
         rel={external ? 'noreferrer' : undefined}
       >
         {content}
-      </Link>
+      </IntentPrefetchLink>
     )
   }
 
@@ -191,7 +185,7 @@ const columnClassnames: Record<number, string> = {
 export function CardGroup({ cols = 3, children }: CardGroupProps) {
   const colCount = typeof cols === 'string' ? parseInt(cols, 10) : cols
   const colClass = columnClassnames[colCount] ?? columnClassnames[3]
-  return <div className={cn('grid grid-cols-1 gap-6', colClass)}>{children}</div>
+  return <div className={cn('grid grid-cols-1 gap-3', colClass)}>{children}</div>
 }
 
 interface ColumnsProps {
@@ -202,7 +196,7 @@ interface ColumnsProps {
 export function Columns({ cols = 2, children }: ColumnsProps) {
   const colCount = typeof cols === 'string' ? parseInt(cols, 10) : cols
   const colClass = columnClassnames[colCount] ?? columnClassnames[2]
-  return <div className={cn('grid grid-cols-1 gap-6', colClass)}>{children}</div>
+  return <div className={cn('grid grid-cols-1 gap-3', colClass)}>{children}</div>
 }
 
 interface FrameProps {
@@ -213,13 +207,13 @@ interface FrameProps {
 
 export function Frame({ caption, zoom = true, children }: FrameProps) {
   return (
-    <figure className="my-6 overflow-hidden rounded-3xl border border-border/40 bg-background">
+    <figure className="my-6 overflow-hidden rounded-[11px] border border-border bg-muted/40">
       {zoom ? (
         <ZoomableContent><div className="p-5">{children}</div></ZoomableContent>
       ) : (
         <div className="p-5">{children}</div>
       )}
-      {caption ? <figcaption className="border-t border-border/40 px-5 py-3 text-sm text-foreground/70">{caption}</figcaption> : null}
+      {caption ? <figcaption className="border-t border-border px-5 py-3 text-[0.8rem] leading-[1.55] text-foreground/60">{caption}</figcaption> : null}
     </figure>
   )
 }
@@ -276,11 +270,11 @@ interface UpdateProps {
 
 export function Update({ label, date, children }: UpdateProps) {
   return (
-    <div className="not-prose my-8 border-l-2 border-accent pl-6">
+    <div className="not-prose my-8 border-t border-border py-6">
       {(label || date) && (
         <div className="mb-3 flex flex-wrap items-center gap-3">
           {label && (
-            <span className="inline-flex items-center rounded-[var(--theme-badge-radius)] bg-accent/10 px-2.5 py-0.5 text-xs font-semibold text-accent">
+            <span className="inline-flex items-center gap-2 text-xs font-semibold text-accent before:h-1.5 before:w-1.5 before:rounded-full before:bg-current">
               {label}
             </span>
           )}
@@ -339,7 +333,7 @@ interface PanelProps {
 
 export function Panel({ title, children }: PanelProps) {
   return (
-    <div className="not-prose my-6 rounded-2xl border border-border/40 bg-muted/30 px-5 py-4">
+    <div className="not-prose my-6 rounded-[11px] border border-border bg-muted/35 px-5 py-4">
       {title && <p className="mb-3 text-sm font-semibold text-foreground">{title}</p>}
       <div className="prose prose-sm dark:prose-invert text-foreground/80">{children}</div>
     </div>
@@ -360,7 +354,7 @@ interface TileProps {
 
 export function Tile({ title, href, icon, iconType, img, children }: TileProps & { iconType?: 'solid' | 'outline' }) {
   const content = (
-    <article className="group flex h-full flex-col gap-4 rounded-2xl border border-border/60 bg-card p-6 transition hover:border-accent/60">
+    <article className="thally-docs-card group relative flex h-full flex-col gap-4 rounded-[12px] border border-border bg-background p-[18px] transition hover:border-accent">
       {img ? (
         <div className="relative overflow-hidden rounded-xl border border-border/30 bg-muted">
           <Image
@@ -373,9 +367,13 @@ export function Tile({ title, href, icon, iconType, img, children }: TileProps &
           />
         </div>
       ) : null}
-      <div className="flex items-center gap-3">
-        {icon ? <Icon icon={icon} iconType={iconType} className="h-6 w-6" /> : null}
-        {title ? <p className="text-lg font-semibold text-foreground">{title}</p> : null}
+      <div className="flex min-h-7 items-center gap-3">
+        {icon ? (
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center text-accent">
+            <Icon icon={icon} iconType={iconType} className="h-5 w-5" />
+          </span>
+        ) : null}
+        {title ? <span className="flex min-h-7 items-center text-lg font-semibold leading-6 text-foreground">{title}</span> : null}
       </div>
       {children ? <div className="prose prose-sm text-foreground/70 dark:prose-invert">{children}</div> : null}
     </article>
@@ -384,9 +382,9 @@ export function Tile({ title, href, icon, iconType, img, children }: TileProps &
   if (href) {
     const external = isExternalLink(href)
     return (
-      <Link href={href} className="block h-full" target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
+      <IntentPrefetchLink href={href} className="block h-full" target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>
         {content}
-      </Link>
+      </IntentPrefetchLink>
     )
   }
   return content
@@ -400,7 +398,7 @@ interface TileGroupProps {
 export function TileGroup({ cols = 2, children }: TileGroupProps) {
   const colCount = typeof cols === 'string' ? parseInt(cols, 10) : cols
   const colClass = columnClassnames[colCount] ?? columnClassnames[2]
-  return <div className={cn('grid grid-cols-1 gap-8', colClass)}>{children}</div>
+  return <div className={cn('grid grid-cols-1 gap-3', colClass)}>{children}</div>
 }
 
 // ---------------------------------------------------------------------------

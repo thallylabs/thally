@@ -1,0 +1,172 @@
+---
+title: Understand the Thally MCP servers
+navTitle: MCP overview
+description: Choose between Thally's local authoring server and the read-only MCP endpoint published by every deployed site.
+---
+
+Thally provides two Model Context Protocol servers. The **local server** helps
+an AI coding agent work on a repository. The **remote server** helps an agent
+research the documentation already published by a site.
+
+## Local and remote MCP
+
+| | Local authoring server | Deployed site server |
+| --- | --- | --- |
+| Endpoint | `npx -y @thallylabs/mcp` or `npx thally mcp` | `https://docs.example.com/api/mcp` |
+| Transport | stdio | Streamable HTTP |
+| Access | Your machine and filesystem permissions | Public by default; read-only and rate-limited |
+| Tools | 15 project and site tools | 4 site tools |
+| Use it for | Creating, editing, migrating, translating, and validating docs | Searching, reading, listing pages, and checking readiness |
+
+## Connect the local server
+
+<Tabs>
+
+<Tab title="Codex">
+
+```bash
+codex mcp add thally -- npx -y @thallylabs/mcp
+```
+
+</Tab>
+
+<Tab title="Claude Code">
+
+```bash
+claude mcp add thally -- npx -y @thallylabs/mcp
+```
+
+</Tab>
+
+<Tab title="Cursor">
+
+```json
+{
+  "mcpServers": {
+    "thally": {
+      "command": "npx",
+      "args": ["-y", "@thallylabs/mcp"]
+    }
+  }
+}
+```
+
+</Tab>
+
+</Tabs>
+
+Restart or reload the client after adding the configuration.
+
+## What the local server exposes
+
+The local package registers 15 tools from one shared registry:
+
+- **Create and organize:** `create_project`, `add_page`, `update_page`,
+  `add_tab`, `list_pages`
+- **Read and search:** `read_page`, `search_docs`, `get_context`
+- **Migrate and translate:** `migrate_docs`, `import_docs`, `translate_docs`
+- **Validate and inspect:** `lint_project`, `semantic_search`,
+  `agent_readiness`
+- **Automate product changes:** `sync_from_repo`
+
+Most tools act on a local `projectDir`. `semantic_search` and
+`agent_readiness` query a deployed `siteUrl`. The server returns structured
+errors when required paths or values are missing, so your agent can correct the
+call instead of inferring a result.
+
+<AgentPrompt
+  title="Copy a complete prompt to audit a Thally project"
+  copyOnly
+>
+
+Use the connected local Thally MCP server to audit the documentation project at ABSOLUTE_PROJECT_PATH. You are done when I have an evidence-backed audit ordered by reader impact, with exact page IDs or files for every finding and no unapproved edits.
+
+Confirm that ABSOLUTE_PROJECT_PATH is the intended Thally project and that it contains docs.json and package.json. Read AGENTS.md or equivalent repository instructions if present. Record the current git status and do not disturb unrelated work.
+
+Call list_pages first. Use search_docs to test the language a new reader would use for setup, common tasks, API documentation, deployment, troubleshooting, CLI, MCP, and agent workflows. Use read_page on the most relevant results and on pages that appear duplicated, thin, orphaned, or misplaced. Call get_context when you need project-level configuration rather than guessing. Run lint_project with fixes disabled.
+
+Evaluate the documentation against the actual project, not against generic docs conventions. Trace important capability claims to repository configuration, implementation, CLI output, tests, or a clearly labeled external dependency. Distinguish facts, reasonable editorial recommendations, and questions that require a product owner.
+
+Report:
+
+- broken navigation or missing pages;
+- orphan pages, invalid or missing frontmatter, and broken local links;
+- duplicated, contradictory, generic, or unsupported guidance;
+- tasks that lack prerequisites, expected results, troubleshooting, or a clear next step;
+- sidebar labels that obscure scanning or wrap unnecessarily;
+- code examples with missing languages, unsafe placeholders, or commands the repository does not support;
+- agent prompts that lack context, validation, permissions, or success criteria;
+- the five highest-impact improvements, each with the affected page, reader consequence, evidence, and recommended fix.
+
+Do not modify files, run fix mode, install packages, commit, push, or deploy. Show me the audit first and wait for approval of a specific change set.
+
+</AgentPrompt>
+
+## Connect a deployed site
+
+Replace the example URL with the documentation site's origin.
+
+<Tabs>
+
+<Tab title="Codex">
+
+```bash
+codex mcp add product-docs --url https://docs.example.com/api/mcp
+```
+
+</Tab>
+
+<Tab title="Claude Code">
+
+```bash
+claude mcp add --transport http product-docs https://docs.example.com/api/mcp
+```
+
+</Tab>
+
+<Tab title="Cursor">
+
+```json
+{
+  "mcpServers": {
+    "product-docs": {
+      "type": "http",
+      "url": "https://docs.example.com/api/mcp"
+    }
+  }
+}
+```
+
+</Tab>
+
+</Tabs>
+
+The deployed endpoint exposes `search_docs`, `read_page`, `list_pages`, and
+`agent_readiness`. It cannot edit the site. Site owners can disable it from the
+admin dashboard, and public tool calls default to a per-IP limit of 60 per
+minute.
+
+<AgentPrompt
+  title="Copy a complete prompt to research deployed documentation"
+  copyOnly
+>
+
+Use the connected read-only Thally MCP server for PRODUCT_DOCS_URL to answer this question: QUESTION. You are done when the answer is concise, supported by the deployed documentation, linked to the exact source pages, and explicit about anything the site does not establish.
+
+Confirm that the MCP server belongs to PRODUCT_DOCS_URL. Start with list_pages when the information architecture is unfamiliar, then use search_docs with the reader's wording, product terminology, and likely synonyms. Read the most relevant pages in full before answering. Follow prerequisite and reference links when a claim depends on them, but do not browse unrelated sections to manufacture certainty.
+
+For each material claim, cite the exact page URL returned by the tools. Separate direct documentation facts from your inference and label the inference. When pages conflict, report both, prefer the more specific or recently updated source only when the metadata supports that choice, and identify the contradiction. If the documentation does not answer part of the question, state what is missing and suggest the page or product owner that could resolve it.
+
+Do not modify the site, invoke local authoring tools, submit forms, send live API requests, or use uncited general knowledge as if it came from the product documentation. End with a short answer, supporting sources, assumptions, and unresolved gaps.
+
+</AgentPrompt>
+
+## Safe write behavior
+
+The public remote endpoint is always read-only. Local MCP tools inherit the
+permissions of the process that started them, so review any request that writes
+files. `migrate_docs` requires a new or empty target; `import_docs` modifies an
+existing project and should be used only when an in-place merge is intentional.
+
+Continue to [Connect an MCP client](/guides/mcp-server) for the complete local
+tool reference and setup details.
