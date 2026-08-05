@@ -8,6 +8,7 @@
  */
 
 import stableScaffoldRelease from './stable-scaffold-release.json' with { type: 'json' }
+import previousScaffoldReleases from './previous-scaffold-releases.json' with { type: 'json' }
 
 export interface ScaffoldSourceRelease {
   repository: string
@@ -70,6 +71,7 @@ export const STABLE_SCAFFOLD_RELEASE = stableScaffoldRelease as ScaffoldRelease
  */
 export const SUPPORTED_SCAFFOLD_RELEASES: readonly ScaffoldRelease[] = [
   STABLE_SCAFFOLD_RELEASE,
+  ...(previousScaffoldReleases as ScaffoldRelease[]),
 ]
 
 /** True only when an unknown record is the currently supported release. */
