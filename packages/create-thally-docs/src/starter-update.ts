@@ -97,6 +97,7 @@ export function resolveStarterReleaseFromManifest(
 function assertForwardRelease(
   previous: ScaffoldRelease,
   target: ScaffoldRelease,
+  releases: readonly ScaffoldRelease[],
 ): void {
   if (
     previous.source.repository !== target.source.repository ||
@@ -104,11 +105,24 @@ function assertForwardRelease(
   ) {
     throw new Error('Starter updates cannot cross repository or manifest contracts.')
   }
-  if (
-    previous.source.commitSha !== target.source.commitSha &&
-    previous.starterVersion >= target.starterVersion
-  ) {
+  if (previous.source.commitSha === target.source.commitSha) return
+  if (previous.starterVersion > target.starterVersion) {
     throw new Error('The installed CLI does not contain a newer starter release.')
+  }
+  if (previous.starterVersion === target.starterVersion) {
+    // A starterVersion can receive multiple promoted releases. Promotion
+    // prepends to the retained catalog, so within a version the catalog
+    // position is the only recency signal: the update is forward only when
+    // the previous release sits later (older) in the list than the target.
+    const targetIndex = releases.findIndex(
+      (release) => release.source.commitSha === target.source.commitSha,
+    )
+    const previousIndex = releases.findIndex(
+      (release) => release.source.commitSha === previous.source.commitSha,
+    )
+    if (targetIndex === -1 || previousIndex === -1 || previousIndex <= targetIndex) {
+      throw new Error('The installed CLI does not contain a newer starter release.')
+    }
   }
 }
 
@@ -129,7 +143,7 @@ export async function updateStarterProject(
     downstreamManifest,
     releases,
   )
-  assertForwardRelease(previousRelease, targetRelease)
+  assertForwardRelease(previousRelease, targetRelease, releases)
 
   if (previousRelease.source.commitSha === targetRelease.source.commitSha) {
     return {
