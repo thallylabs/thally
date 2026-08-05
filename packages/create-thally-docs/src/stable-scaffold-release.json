@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
-  "id": "2026-08-05.PENDING_.PENDING_",
+  "id": "2026-08-05.9d6194f8.bb8508b2",
   "source": {
     "repository": "thallylabs/starter",
-    "commitSha": "PENDING_STARTER_COMMIT_SHA",
-    "treeSha": "PENDING_STARTER_TREE_SHA",
-    "archiveUrl": "https://codeload.github.com/thallylabs/starter/tar.gz/PENDING_STARTER_COMMIT_SHA",
+    "commitSha": "9d6194f8b7b72134ed94b4344454cb3b2ed2f863",
+    "treeSha": "c35ba0ff729f751b93d5ff0d07314b451f13ffd7",
+    "archiveUrl": "https://codeload.github.com/thallylabs/starter/tar.gz/9d6194f8b7b72134ed94b4344454cb3b2ed2f863",
     "manifestPath": "starter-release.json",
-    "manifestSha256": "PENDING_STARTER_MANIFEST_SHA256"
+    "manifestSha256": "e217a9d885cf48a847d488b2ed8b9842c48c7311346b422beeec5b84ba1b90bd"
   },
   "runtime": {
     "repository": "thallylabs/thally",
-    "commitSha": "PENDING_RUNTIME_COMMIT_SHA",
-    "treeSha": "PENDING_RUNTIME_TREE_SHA",
+    "commitSha": "bb8508b290a27c325936895b94ec9d23517b908f",
+    "treeSha": "d33ad60ad0acabee1cf950880c8bd908e83a002a",
     "contentSource": "assets",
     "identityContractVersion": 1
   },
