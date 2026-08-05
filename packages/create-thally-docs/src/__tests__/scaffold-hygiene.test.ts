@@ -33,6 +33,7 @@ import {
 import { resetTrackingConfig, writeTrackingConfig } from '../docs-json.js'
 import {
   STABLE_SCAFFOLD_RELEASE,
+  SUPPORTED_SCAFFOLD_RELEASES,
   isStableScaffoldRelease,
   type ScaffoldRelease,
   type StarterReleaseManifest,
@@ -131,8 +132,15 @@ describe('stable starter release', () => {
       `https://codeload.github.com/thallylabs/starter/tar.gz/${STARTER_COMMIT_SHA}`,
     )
     expect(STABLE_SCAFFOLD_RELEASE.source.treeSha).toBeTruthy()
-    expect(STABLE_SCAFFOLD_RELEASE.starterVersion).toBe(1)
+    expect(STABLE_SCAFFOLD_RELEASE.starterVersion).toBe(2)
     expect(isStableScaffoldRelease(structuredClone(STABLE_SCAFFOLD_RELEASE))).toBe(true)
+    expect(SUPPORTED_SCAFFOLD_RELEASES.map(({ starterVersion }) => starterVersion)).toEqual([
+      2,
+      1,
+    ])
+    expect(SUPPORTED_SCAFFOLD_RELEASES[1]?.source.commitSha).toBe(
+      'd5fef9167ea81f12a861deec5515a78a0f756781',
+    )
   })
 
   it('accepts every safe file in the whole repository tree', () => {
