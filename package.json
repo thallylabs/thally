@@ -30,7 +30,6 @@
     "packages:build": "node scripts/build-packages.mjs"
   },
   "dependencies": {
-    "@shikijs/langs": "^4.3.0",
     "@anthropic-ai/sdk": "^0.78.0",
     "@headlessui/react": "^2.2.9",
     "@libsql/client": "^0.14.0",

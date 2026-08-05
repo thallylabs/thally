@@ -27,7 +27,8 @@ describe('code-fence metadata', () => {
       'utf8',
     )
     expect(source).toContain("from 'shiki/core'")
-    expect(source).toContain("from '@shikijs/langs/typescript'")
+    expect(source).toContain("from 'shiki/langs/typescript.mjs'")
+    expect(source).not.toContain("from '@shikijs/langs/")
     expect(source).not.toContain('createHighlighter,')
     expect(source).not.toContain('.loadLanguage(')
   })
