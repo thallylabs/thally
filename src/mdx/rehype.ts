@@ -150,6 +150,68 @@ const languageAliases: Record<string, string> = {
 const MAX_HIGHLIGHTED_LINES = 1_000
 const MAX_HIGHLIGHTED_LINE_NUMBER = 100_000
 
+// Syntax highlighting is a presentation enhancement, not a reason for an
+// authored or imported page to exhaust a request Worker. Keep both individual
+// fences and the aggregate page work bounded; fences outside the budget remain
+// ordinary HAST text nodes and are therefore emitted as escaped plaintext.
+const MAX_HIGHLIGHTED_CODE_BLOCKS = 64
+const MAX_HIGHLIGHTED_CODE_BLOCK_BYTES = 64 * 1024
+const MAX_HIGHLIGHTED_CODE_BLOCK_LINES = 2_000
+const MAX_HIGHLIGHTED_PAGE_BYTES = 256 * 1024
+
+/** Return a bounded UTF-8 cost, or null when a fence must remain plaintext. */
+export function measureHighlightableCode(code: string): number | null {
+  // UTF-16 length is a cheap lower bound for UTF-8 bytes. Reject before using
+  // TextEncoder so even the measurement allocation stays bounded.
+  if (code.length > MAX_HIGHLIGHTED_CODE_BLOCK_BYTES) return null
+
+  let lineCount = 1
+  for (let index = 0; index < code.length; index += 1) {
+    if (code.charCodeAt(index) === 10) {
+      lineCount += 1
+      if (lineCount > MAX_HIGHLIGHTED_CODE_BLOCK_LINES) return null
+    }
+  }
+
+  const byteLength = new TextEncoder().encode(code).byteLength
+  return byteLength <= MAX_HIGHLIGHTED_CODE_BLOCK_BYTES ? byteLength : null
+}
+
+export interface SyntaxHighlightBudget {
+  scheduledBlocks: number
+  scheduledBytes: number
+  isExhausted: boolean
+}
+
+/** Reserve bounded page capacity before sending a fence through Shiki. */
+export function scheduleSyntaxHighlight(
+  code: string,
+  budget: SyntaxHighlightBudget,
+): boolean {
+  if (
+    budget.isExhausted ||
+    budget.scheduledBlocks >= MAX_HIGHLIGHTED_CODE_BLOCKS ||
+    budget.scheduledBytes >= MAX_HIGHLIGHTED_PAGE_BYTES
+  ) {
+    budget.isExhausted = true
+    return false
+  }
+
+  const codeBytes = measureHighlightableCode(code)
+  if (codeBytes === null) return false
+  if (budget.scheduledBytes + codeBytes > MAX_HIGHLIGHTED_PAGE_BYTES) {
+    budget.isExhausted = true
+    return false
+  }
+
+  budget.scheduledBlocks += 1
+  budget.scheduledBytes += codeBytes
+  budget.isExhausted =
+    budget.scheduledBlocks >= MAX_HIGHLIGHTED_CODE_BLOCKS ||
+    budget.scheduledBytes >= MAX_HIGHLIGHTED_PAGE_BYTES
+  return true
+}
+
 function normalizeLanguage(language?: string) {
   if (!language) {
     return undefined
@@ -309,6 +371,11 @@ function rehypeShiki() {
     // Scan before initializing Shiki. Most prose pages contain no fenced code,
     // so they should not pay the cold-start cost of constructing every grammar.
     const targets: Array<{ node: Element; code: string; language: string; textNode: { value: string } }> = []
+    const budget: SyntaxHighlightBudget = {
+      scheduledBlocks: 0,
+      scheduledBytes: 0,
+      isExhausted: false,
+    }
 
     visit(tree, 'element', (node: Element) => {
       if (node.tagName !== 'pre') {
@@ -333,6 +400,14 @@ function rehypeShiki() {
 
       const language = node.properties?.language as string | undefined
       if (!language) {
+        return
+      }
+
+      if (!scheduleSyntaxHighlight(code, budget)) {
+        // Grouped code is rendered from trusted Shiki HTML. Preserve that
+        // contract for the plaintext fallback by escaping authored markup
+        // before it reaches the same HTML sink.
+        textNode.value = escapeHtml(code)
         return
       }
 
