@@ -13,10 +13,12 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type {
-  ScaffoldOwnershipContract,
-  ScaffoldRelease,
-  StarterReleaseManifest,
+import {
+  STABLE_SCAFFOLD_RELEASE,
+  SUPPORTED_SCAFFOLD_RELEASES,
+  type ScaffoldOwnershipContract,
+  type ScaffoldRelease,
+  type StarterReleaseManifest,
 } from '../release.js'
 import { starterManifestSha256 } from '../starter-sync.js'
 import {
@@ -63,9 +65,12 @@ const newOwnership: ScaffoldOwnershipContract = {
 function releaseFixture(
   version: number,
   ownership: ScaffoldOwnershipContract,
+  /** Distinguishes multiple promoted releases of the same starterVersion. */
+  revision = 0,
 ): { release: ScaffoldRelease; manifestSource: string; tree: string } {
-  const commitSha = String(version).repeat(40)
-  const runtimeSha = String(version + 2).repeat(40)
+  const label = revision === 0 ? `${version}` : `${version}.${revision}`
+  const commitSha = `${String(version).repeat(39)}${revision}`
+  const runtimeSha = `${String(version + 2).repeat(39)}${revision}`
   const manifest: StarterReleaseManifest = {
     schemaVersion: 1,
     starterVersion: version,
@@ -74,16 +79,16 @@ function releaseFixture(
     runtime: {
       repository: 'thallylabs/thally',
       commitSha: runtimeSha,
-      treeSha: `runtime-tree-${version}`,
+      treeSha: `runtime-tree-${label}`,
     },
     packages: {
-      next: `${version}.0.0`,
-      '@thallylabs/core': `${version}.0.0`,
+      next: `${version}.${revision}.0`,
+      '@thallylabs/core': `${version}.${revision}.0`,
     },
     ownership,
   }
   const manifestSource = `${JSON.stringify(manifest, null, 2)}\n`
-  const tree = directory(`thally-release-${version}-`)
+  const tree = directory(`thally-release-${label}-`)
   write(tree, 'starter-release.json', manifestSource)
   write(
     tree,
@@ -91,32 +96,32 @@ function releaseFixture(
     `${JSON.stringify({
       name: 'thally-starter',
       dependencies: {
-        next: `${version}.0.0`,
-        '@thallylabs/core': `${version}.0.0`,
+        next: `${version}.${revision}.0`,
+        '@thallylabs/core': `${version}.${revision}.0`,
       },
     }, null, 2)}\n`,
   )
-  write(tree, 'framework/runtime.ts', `runtime ${version}\n`)
-  write(tree, 'framework/owner.ts', `starter owner ${version}\n`)
-  write(tree, 'framework/manual.ts', `manual ${version}\n`)
-  write(tree, 'next.config.ts', `config ${version}\n`)
-  write(tree, 'src/content/index.mdx', `customer content ${version}\n`)
+  write(tree, 'framework/runtime.ts', `runtime ${label}\n`)
+  write(tree, 'framework/owner.ts', `starter owner ${label}\n`)
+  write(tree, 'framework/manual.ts', `manual ${label}\n`)
+  write(tree, 'next.config.ts', `config ${label}\n`)
+  write(tree, 'src/content/index.mdx', `customer content ${label}\n`)
   const release: ScaffoldRelease = {
     schemaVersion: 1,
-    id: `starter-${version}`,
+    id: `starter-${label}`,
     starterVersion: version,
     source: {
       repository: 'thallylabs/starter',
       commitSha,
-      treeSha: `starter-tree-${version}`,
-      archiveUrl: `https://example.invalid/starter-${version}.tar.gz`,
+      treeSha: `starter-tree-${label}`,
+      archiveUrl: `https://example.invalid/starter-${label}.tar.gz`,
       manifestPath: 'starter-release.json',
       manifestSha256: starterManifestSha256(manifestSource),
     },
     runtime: {
       repository: 'thallylabs/thally',
       commitSha: runtimeSha,
-      treeSha: `runtime-tree-${version}`,
+      treeSha: `runtime-tree-${label}`,
       contentSource: 'assets',
       identityContractVersion: 1,
     },
@@ -144,6 +149,18 @@ afterEach(() => {
   for (const path of directories.splice(0)) {
     rmSync(path, { recursive: true, force: true })
   }
+})
+
+describe('retained release catalog', () => {
+  // Same-starterVersion forwardness is decided purely by catalog position, so
+  // the shipped catalog must stay newest-first or the downgrade guard inverts.
+  it('keeps the shipped catalog newest-first', () => {
+    expect(SUPPORTED_SCAFFOLD_RELEASES[0]).toBe(STABLE_SCAFFOLD_RELEASE)
+    for (let i = 1; i < SUPPORTED_SCAFFOLD_RELEASES.length; i += 1) {
+      expect(SUPPORTED_SCAFFOLD_RELEASES[i].starterVersion)
+        .toBeLessThanOrEqual(SUPPORTED_SCAFFOLD_RELEASES[i - 1].starterVersion)
+    }
+  })
 })
 
 describe('immutable starter update orchestration', () => {
@@ -245,6 +262,94 @@ describe('immutable starter update orchestration', () => {
     expect(readFileSync(join(target, 'starter-release.json'), 'utf8')).toBe(
       next.manifestSource,
     )
+  })
+
+  it('updates forward between retained releases of the same starterVersion', async () => {
+    const base = releaseFixture(2, newOwnership)
+    const promoted = releaseFixture(2, newOwnership, 1)
+    const target = directory('thally-same-version-forward-')
+    copyTree(base.tree, target)
+    // Newest-first catalog order, exactly as promotion prepends releases.
+    const releases = [promoted.release, base.release]
+
+    const result = await updateStarterProject({
+      targetDir: target,
+      releases,
+      targetRelease: promoted.release,
+      download: fixtureDownload(new Map([
+        [base.release.source.commitSha, base.tree],
+        [promoted.release.source.commitSha, promoted.tree],
+      ])),
+      apply: true,
+      confirmed: true,
+    })
+
+    expect(result.isUpToDate).toBe(false)
+    expect(result.applied).toBe(true)
+    expect(readFileSync(join(target, 'framework/runtime.ts'), 'utf8')).toBe(
+      'runtime 2.1\n',
+    )
+    expect(readFileSync(join(target, 'starter-release.json'), 'utf8')).toBe(
+      promoted.manifestSource,
+    )
+  })
+
+  it('rejects a same-starterVersion downgrade to an older retained release', async () => {
+    const base = releaseFixture(2, newOwnership)
+    const promoted = releaseFixture(2, newOwnership, 1)
+    const target = directory('thally-same-version-downgrade-')
+    copyTree(promoted.tree, target)
+
+    await expect(updateStarterProject({
+      targetDir: target,
+      releases: [promoted.release, base.release],
+      targetRelease: base.release,
+      download: fixtureDownload(new Map([
+        [base.release.source.commitSha, base.tree],
+        [promoted.release.source.commitSha, promoted.tree],
+      ])),
+    })).rejects.toThrow('does not contain a newer starter release')
+    expect(readFileSync(join(target, 'starter-release.json'), 'utf8')).toBe(
+      promoted.manifestSource,
+    )
+  })
+
+  it('rejects a same-starterVersion target that is not in the retained catalog', async () => {
+    const base = releaseFixture(2, newOwnership)
+    const unregistered = releaseFixture(2, newOwnership, 1)
+    const target = directory('thally-same-version-unregistered-')
+    copyTree(base.tree, target)
+
+    await expect(updateStarterProject({
+      targetDir: target,
+      releases: [base.release],
+      targetRelease: unregistered.release,
+      download: fixtureDownload(new Map([
+        [base.release.source.commitSha, base.tree],
+        [unregistered.release.source.commitSha, unregistered.tree],
+      ])),
+    })).rejects.toThrow('does not contain a newer starter release')
+  })
+
+  it('still updates across starterVersions when the catalog retains same-version releases', async () => {
+    const old = releaseFixture(1, oldOwnership)
+    const base = releaseFixture(2, newOwnership)
+    const promoted = releaseFixture(2, newOwnership, 1)
+    const target = directory('thally-cross-version-forward-')
+    copyTree(old.tree, target)
+
+    const result = await updateStarterProject({
+      targetDir: target,
+      releases: [promoted.release, base.release, old.release],
+      targetRelease: promoted.release,
+      download: fixtureDownload(new Map([
+        [old.release.source.commitSha, old.tree],
+        [promoted.release.source.commitSha, promoted.tree],
+      ])),
+    })
+
+    expect(result.isUpToDate).toBe(false)
+    expect(result.plan.copyPaths).toContain('framework/runtime.ts')
   })
 
   it('refuses a customer-edited manifest and unconfirmed apply', async () => {
