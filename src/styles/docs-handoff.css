@@ -313,6 +313,35 @@ body {
   opacity: 0.8;
 }
 
+/* Accent-aware card chrome. When the resolved tone is accent (site-wide via
+   appearance.contentIcons, or a per-card iconColor override), the card border
+   picks up a restrained tint of the site accent and hover deepens it. Alpha
+   blends against the page surface keep contrast usable in both themes, and
+   everything resolves through --thally-accent so owner accent changes (and
+   Cloud branding) flow through with no hardcoded color. Neutral overrides on
+   an accent site fall back to the quiet foreground-based chrome. */
+[data-content-icons='accent'] .thally-docs-card[data-card-tone='site'],
+.thally-docs-card[data-card-tone='accent'] {
+  border-color: hsl(var(--thally-accent) / 0.28);
+}
+
+[data-content-icons='accent'] .thally-docs-card[data-card-tone='site']:hover,
+.thally-docs-card[data-card-tone='accent']:hover {
+  border-color: hsl(var(--thally-accent) / 0.55);
+  background-color: hsl(var(--thally-accent) / 0.05);
+}
+
+[data-content-icons='neutral'] .thally-docs-card[data-card-tone='site'],
+.thally-docs-card[data-card-tone='neutral'] {
+  border-color: hsl(var(--thally-border));
+}
+
+[data-content-icons='neutral'] .thally-docs-card[data-card-tone='site']:hover,
+.thally-docs-card[data-card-tone='neutral']:hover {
+  border-color: hsl(var(--thally-foreground) / 0.25);
+  background-color: hsl(var(--thally-muted) / 0.2);
+}
+
 .thally-docs-card > .prose {
   font-size: 1rem;
   line-height: 1.5;

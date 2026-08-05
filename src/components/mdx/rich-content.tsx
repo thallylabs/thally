@@ -139,7 +139,10 @@ function isExternalLink(href: string) {
 
 export function Card({ title, href, icon, iconType, iconColor, img, children }: CardProps) {
   const content = (
-    <article className="thally-docs-card group/card relative flex h-full flex-col rounded-[12px] border border-border bg-background p-5 transition-colors duration-150 hover:border-foreground/25 hover:bg-muted/20">
+    <article
+      className="thally-docs-card group/card relative flex h-full flex-col rounded-[12px] border border-border bg-background p-5 transition-colors duration-150 hover:border-foreground/25 hover:bg-muted/20"
+      data-card-tone={iconColor ?? 'site'}
+    >
       {img ? (
         <div className="relative overflow-hidden rounded-xl border border-border/30">
           <Image
@@ -372,7 +375,10 @@ interface TileProps {
 
 export function Tile({ title, href, icon, iconType, iconColor, img, children }: TileProps & { iconType?: 'solid' | 'outline' }) {
   const content = (
-    <article className="thally-docs-card group/card relative flex h-full flex-col rounded-[12px] border border-border bg-background p-5 transition-colors duration-150 hover:border-foreground/25 hover:bg-muted/20">
+    <article
+      className="thally-docs-card group/card relative flex h-full flex-col rounded-[12px] border border-border bg-background p-5 transition-colors duration-150 hover:border-foreground/25 hover:bg-muted/20"
+      data-card-tone={iconColor ?? 'site'}
+    >
       {img ? (
         <div className="relative overflow-hidden rounded-xl border border-border/30 bg-muted">
           <Image

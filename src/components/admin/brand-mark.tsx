@@ -22,8 +22,8 @@ export function BrandMark({ size = 30 }: { size?: number }) {
   const src = customOk
     ? `/api/brand/logo${dark ? '?mode=dark' : ''}`
     : dark
-      ? '/brand/thally-logo-dark.svg'
-      : '/brand/thally-logo-light.svg'
+      ? '/brand/default-logo-dark.svg'
+      : '/brand/default-logo-light.svg'
 
   // The <img> is server-rendered, so it can finish (and fail) BEFORE React
   // attaches onError — the event never fires and the broken probe sticks.

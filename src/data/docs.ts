@@ -658,10 +658,12 @@ export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
         // Tab level
         const firstPageHref = collection.sections[0]?.items[0]?.href
         crumbs.push({ label: collection.label, href: firstPageHref })
-        // Group level (section title may contain " • " for nested groups)
+        // Group level (section title may contain " • " for nested groups).
+        // A group named after its tab (e.g. "Get started" › "Get started")
+        // would stutter — collapse consecutive duplicate labels.
         const groupParts = section.title.split(' • ')
         for (const part of groupParts) {
-          crumbs.push({ label: part })
+          if (crumbs[crumbs.length - 1]?.label !== part) crumbs.push({ label: part })
         }
         // Current page
         crumbs.push({ label: match.title })
@@ -671,6 +673,27 @@ export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
   }
 
   return []
+}
+
+/**
+ * The page's nearest navigation group — the "category" shown as an eyebrow
+ * above the page title. Derived from the docs.json navigation model (never
+ * from per-page frontmatter) so it stays correct across tabs, nested groups
+ * and locales: group labels are single-sourced from docs.json, which also
+ * guarantees the eyebrow is identical in every locale. Returns null for pages
+ * that sit outside any navigation group (e.g. direct-link tabs).
+ */
+export function getNavCategory(currentHref: string): string | null {
+  for (const collection of getSidebarCollections()) {
+    for (const section of collection.sections) {
+      if (section.items.some((item) => item.href === currentHref)) {
+        // Nested groups join ancestors with " • " — the leaf group is the category.
+        const parts = section.title.split(' • ')
+        return parts[parts.length - 1] || null
+      }
+    }
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------

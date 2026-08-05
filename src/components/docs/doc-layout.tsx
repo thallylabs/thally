@@ -1,7 +1,7 @@
 /** Documentation page shell and its configurable reader feedback surfaces. */
 
 import type { DocEntry } from '@/data/docs'
-import { getBreadcrumbs, getPrevNextLinks, getFeedbackConfig } from '@/data/docs'
+import { getBreadcrumbs, getNavCategory, getPrevNextLinks, getFeedbackConfig } from '@/data/docs'
 import { DocBreadcrumbs } from '@/components/docs/doc-breadcrumbs'
 import { DocHeader } from '@/components/docs/doc-header'
 import { DocPagination } from '@/components/docs/doc-pagination'
@@ -23,6 +23,7 @@ interface DocLayoutProps {
 export function DocLayout({ doc, locale = 'en', children }: DocLayoutProps) {
   const { prev, next } = getPrevNextLinks(doc.href)
   const breadcrumbs = getBreadcrumbs(doc.href)
+  const eyebrow = getNavCategory(doc.href)
   const mode = doc.mode ?? 'default'
   const feedbackConfig = getFeedbackConfig()
   // Managed releases already carry an immutable, release-scoped settings
@@ -81,7 +82,7 @@ export function DocLayout({ doc, locale = 'en', children }: DocLayoutProps) {
         <ContentStack>
           <div className="not-prose space-y-4">
             <DocBreadcrumbs items={breadcrumbs} />
-            <DocHeader doc={doc} />
+            <DocHeader doc={doc} eyebrow={eyebrow} />
           </div>
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
@@ -101,7 +102,7 @@ export function DocLayout({ doc, locale = 'en', children }: DocLayoutProps) {
         <ContentStack>
           <div className="not-prose space-y-4">
             <DocBreadcrumbs items={breadcrumbs} />
-            <DocHeader doc={doc} />
+            <DocHeader doc={doc} eyebrow={eyebrow} />
           </div>
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
@@ -121,7 +122,7 @@ export function DocLayout({ doc, locale = 'en', children }: DocLayoutProps) {
         <ContentStack>
           <div className="not-prose space-y-4">
             <DocBreadcrumbs items={breadcrumbs} />
-            <DocHeader doc={doc} />
+            <DocHeader doc={doc} eyebrow={eyebrow} />
           </div>
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">

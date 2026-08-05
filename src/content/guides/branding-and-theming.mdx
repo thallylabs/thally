@@ -66,10 +66,13 @@ the current light or dark brand accent, add this to `docs.json`:
 }
 ```
 
-Use `iconColor="accent"` or `iconColor="neutral"` on an individual `<Card>` or
-`<Tile>` when one item needs to override the site-wide choice. Accent icons use
-the same live token as links and controls, so changing the owner-selected brand
-accent updates them automatically.
+Choosing `"accent"` also gives cards and tiles a restrained accent-aware
+border that deepens slightly on hover. Use `iconColor="accent"` or
+`iconColor="neutral"` on an individual `<Card>` or `<Tile>` when one item needs
+to override the site-wide choice — the border treatment follows the same
+per-card override. Accent icons and card chrome use the same live token as
+links and controls, so changing the owner-selected brand accent updates them
+automatically, in both themes and every locale.
 
 ## Custom colors
 
