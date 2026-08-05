@@ -1,0 +1,62 @@
+name: Publish packages
+
+on:
+  workflow_dispatch:
+
+# No registry token or repository secret is permitted in this workflow.
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-packages
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Require protected main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject non-main dispatches
+        run: test "$GITHUB_REF" = refs/heads/main
+
+  publish:
+    name: Verify · Publish
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: npm-production
+    permissions:
+      contents: read
+      # npm exchanges this job's environment-bound OIDC identity for a
+      # short-lived publish credential.
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Publish create-thally-docs
+        run: npx tsx scripts/publish-workspace.mts packages/create-thally-docs
+
+      - name: Publish MCP
+        run: npx tsx scripts/publish-workspace.mts packages/mcp
+
+      - name: Publish CLI
+        run: npx tsx scripts/publish-workspace.mts packages/cli
+
+      - name: Verify registry releases
+        run: |
+          npx tsx scripts/publish-workspace.mts packages/create-thally-docs --verify-only
+          npx tsx scripts/publish-workspace.mts packages/mcp --verify-only
+          npx tsx scripts/publish-workspace.mts packages/cli --verify-only
