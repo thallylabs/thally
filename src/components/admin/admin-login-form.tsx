@@ -91,6 +91,9 @@ export function AdminLoginForm({ siteName = 'Thally', oidcEnabled = false }: { s
             <div className="mt-4 text-center" style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-text-muted)' }}>
               or
             </div>
+            {/* OIDC must perform a full document navigation so the browser follows
+                the provider redirect rather than treating the API route as a page. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
               href="/api/admin/auth/oidc"
               className="ds-btn ds-btn--secondary ds-focusable mt-4 w-full"
