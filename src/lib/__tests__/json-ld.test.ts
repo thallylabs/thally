@@ -4,6 +4,7 @@ import {
   buildBreadcrumbListJsonLd,
   buildDocPageJsonLd,
   buildSiteJsonLd,
+  serializeJsonLd,
 } from '@/lib/json-ld'
 
 const siteUrl = 'https://docs.example.com'
@@ -101,5 +102,33 @@ describe('buildApiOperationJsonLd', () => {
 describe('buildBreadcrumbListJsonLd', () => {
   it('returns null for empty breadcrumbs', () => {
     expect(buildBreadcrumbListJsonLd([], siteUrl, `${siteUrl}/page`)).toBeNull()
+  })
+})
+
+describe('serializeJsonLd', () => {
+  it('escapes angle brackets so values cannot terminate the script tag', () => {
+    const result = buildDocPageJsonLd({
+      siteUrl,
+      pageUrl: `${siteUrl}/guides/example`,
+      id: 'guides/example',
+      title: `Docs</script><script>fetch('https://evil.example')</script>`,
+    })
+
+    const serialized = serializeJsonLd(result)
+
+    expect(serialized).not.toContain('<')
+    expect(serialized).not.toContain('>')
+    expect(serialized).toContain('\\u003c/script\\u003e')
+    expect(JSON.parse(serialized)['@graph'][0].headline).toBe(
+      `Docs</script><script>fetch('https://evil.example')</script>`,
+    )
+  })
+
+  it('escapes U+2028 and U+2029 line separators', () => {
+    const serialized = serializeJsonLd({ name: 'a\u2028b\u2029c' })
+
+    expect(serialized).not.toContain('\u2028')
+    expect(serialized).not.toContain('\u2029')
+    expect(JSON.parse(serialized)).toEqual({ name: 'a\u2028b\u2029c' })
   })
 })
