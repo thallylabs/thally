@@ -193,5 +193,12 @@ export function buildApiOperationJsonLd({
 }
 
 export function serializeJsonLd(data: Record<string, unknown>): string {
+  // Escape characters that could terminate the <script> tag (e.g. a value
+  // containing "</script>") or break JS parsing, since the output is injected
+  // via dangerouslySetInnerHTML.
   return JSON.stringify(data)
+    .replaceAll('<', '\\u003c')
+    .replaceAll('>', '\\u003e')
+    .replaceAll('\u2028', '\\u2028')
+    .replaceAll('\u2029', '\\u2029')
 }
