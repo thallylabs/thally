@@ -10,7 +10,7 @@ import { useCallback, type ReactNode } from 'react'
 
 interface HeadingAnchorProps {
   id: string
-  children: ReactNode
+  children?: ReactNode
 }
 
 /** Wrap a rendered heading in a permalink that copies its canonical URL. */

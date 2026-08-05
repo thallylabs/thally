@@ -53,5 +53,7 @@ describe('agent discovery identity', () => {
     expect(skill).toContain('Cite the canonical page URLs')
     expect(agents).toContain('Read this file, `docs.json`')
     expect(agents).toContain('Do not invent product behavior')
+    expect(agents).toContain('checked-in workflow/tooling lock')
+    expect(agents).not.toContain('npx thally check')
   })
 })
