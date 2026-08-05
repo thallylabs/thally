@@ -12,7 +12,9 @@
     "postinstall": "npm run runtime-sources:build",
     "prebuild": "npm run runtime-sources:build && npm run packages:build && npm run embeddings:build",
     "build": "next build",
-    "build:cloudflare": "opennextjs-cloudflare build",
+    "build:cloudflare": "opennextjs-cloudflare build && npm run package:cloudflare && npm run check:cloudflare-size",
+    "package:cloudflare": "wrangler deploy --dry-run --outdir .thally-upload",
+    "check:cloudflare-size": "tsx scripts/check-cloudflare-worker-size.mts",
     "preview:cloudflare": "npm run build:cloudflare && opennextjs-cloudflare preview",
     "deploy:cloudflare": "npm run build:cloudflare && opennextjs-cloudflare deploy",
     "upload:cloudflare": "npm run build:cloudflare && opennextjs-cloudflare upload",
@@ -28,6 +30,7 @@
     "packages:build": "node scripts/build-packages.mjs"
   },
   "dependencies": {
+    "@shikijs/langs": "^4.3.0",
     "@anthropic-ai/sdk": "^0.78.0",
     "@headlessui/react": "^2.2.9",
     "@libsql/client": "^0.14.0",

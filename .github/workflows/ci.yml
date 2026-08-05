@@ -31,8 +31,8 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build
-        run: npm run build
+      - name: Build and enforce managed Worker size
+        run: npm run build:cloudflare
         env:
           # Keep the build deterministic and offline — embeddings fall back to the
           # local hash provider when no key is present.
