@@ -42,8 +42,36 @@ function runNpm(args: string[], options: { inherit?: boolean } = {}) {
   })
 }
 
-async function registryIntegrity(spec: string): Promise<string | null> {
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+interface RegistryPoll {
+  attempts: number
+  initialDelayMs: number
+  maxDelayMs: number
+}
+
+/**
+ * Pre-publish we only need to learn quickly whether the version already
+ * exists, so a short poll keeps the common path fast. Post-publish the
+ * registry can take minutes to replicate a fresh version to the read
+ * endpoints, so the settle poll backs off exponentially to roughly three
+ * minutes before declaring failure.
+ */
+const existencePoll: RegistryPoll = {
+  attempts: 6,
+  initialDelayMs: 2_000,
+  maxDelayMs: 2_000,
+}
+const settlePoll: RegistryPoll = {
+  attempts: 12,
+  initialDelayMs: 2_000,
+  maxDelayMs: 20_000,
+}
+
+async function registryIntegrity(
+  spec: string,
+  poll: RegistryPoll,
+): Promise<string | null> {
+  let delayMs = poll.initialDelayMs
+  for (let attempt = 0; attempt < poll.attempts; attempt += 1) {
     const result = runNpm(['view', spec, 'dist.integrity', '--json'])
     if (result.status === 0) {
       const value = JSON.parse(result.stdout || 'null') as unknown
@@ -52,7 +80,10 @@ async function registryIntegrity(spec: string): Promise<string | null> {
     if (!result.stderr.includes('E404')) {
       throw new Error(`Unable to inspect ${spec}: ${result.stderr.trim()}`)
     }
-    if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 2_000))
+    if (attempt < poll.attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs))
+      delayMs = Math.min(delayMs * 2, poll.maxDelayMs)
+    }
   }
   return null
 }
@@ -79,7 +110,7 @@ if (
 }
 
 const spec = `${manifest.name}@${manifest.version}`
-const existingIntegrity = await registryIntegrity(spec)
+const existingIntegrity = await registryIntegrity(spec, existencePoll)
 if (existingIntegrity) {
   if (existingIntegrity !== artifact.integrity) {
     throw new Error(`${spec} exists with different package integrity.`)
@@ -94,7 +125,7 @@ if (existingIntegrity) {
   if (publish.status !== 0) throw new Error(`Publishing ${spec} failed.`)
 }
 
-const publishedIntegrity = await registryIntegrity(spec)
+const publishedIntegrity = await registryIntegrity(spec, settlePoll)
 if (publishedIntegrity !== artifact.integrity) {
   throw new Error(`${spec} did not settle with the expected package integrity.`)
 }
