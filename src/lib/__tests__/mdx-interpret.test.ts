@@ -102,6 +102,25 @@ describe('interpretMDX', () => {
     expect(render(content)).toContain('--shiki')
   })
 
+  it('renders unsupported code fences as plaintext without failing the page', async () => {
+    const { content } = await interpretMDX({
+      source: '```brainfuck\n++[>++<-]\n```',
+      components: {},
+    })
+    expect(render(content)).toContain('++[&gt;++&lt;-]')
+  })
+
+  it.each(['java', 'graphql', 'ruby', 'php', 'csharp', 'vue'])(
+    'highlights the supported %s grammar',
+    async (language) => {
+      const { content } = await interpretMDX({
+        source: `\`\`\`${language}\nconst greeting = "hello"\n\`\`\``,
+        components: {},
+      })
+      expect(render(content)).toContain('--shiki')
+    },
+  )
+
   it('ignores leftover export statements without throwing', async () => {
     const { content } = await interpretMDX({
       source: 'export const meta = { a: 1 }\n\nStill renders.',

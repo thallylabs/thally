@@ -22,7 +22,8 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Wrangler 4.111+ requires Node 22 for the exact dry-run package gate.
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -31,8 +32,8 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build
-        run: npm run build
+      - name: Build and enforce managed Worker size
+        run: npm run build:cloudflare
         env:
           # Keep the build deterministic and offline — embeddings fall back to the
           # local hash provider when no key is present.
