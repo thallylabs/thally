@@ -7,7 +7,7 @@
     "node": ">=18"
   },
   "bin": {
-    "create-thally-docs": "./dist/index.js"
+    "create-thally-docs": "dist/index.js"
   },
   "exports": {
     ".": "./dist/index.js",
