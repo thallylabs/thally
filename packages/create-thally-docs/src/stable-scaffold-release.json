@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "2026-08-05.PENDING_.PENDING_",
+  "source": {
+    "repository": "thallylabs/starter",
+    "commitSha": "PENDING_STARTER_COMMIT_SHA",
+    "treeSha": "PENDING_STARTER_TREE_SHA",
+    "archiveUrl": "https://codeload.github.com/thallylabs/starter/tar.gz/PENDING_STARTER_COMMIT_SHA",
+    "manifestPath": "starter-release.json",
+    "manifestSha256": "PENDING_STARTER_MANIFEST_SHA256"
+  },
+  "runtime": {
+    "repository": "thallylabs/thally",
+    "commitSha": "PENDING_RUNTIME_COMMIT_SHA",
+    "treeSha": "PENDING_RUNTIME_TREE_SHA",
+    "contentSource": "assets",
+    "identityContractVersion": 1
+  },
+  "starterVersion": 1
+}

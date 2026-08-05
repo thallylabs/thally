@@ -9,22 +9,16 @@
  */
 
 import {
-  EXCLUDE_PATHS,
   STABLE_SCAFFOLD_RELEASE,
-  TEMPLATE_REPOSITORY,
+  STARTER_REPOSITORY,
   scaffold as scaffoldProject,
-  shouldInclude,
   type ScaffoldOptions,
   type ScaffoldResult,
 } from 'create-thally-docs/scaffold'
-import { buildStarterDocsJson } from 'create-thally-docs/starter'
 
-export const MCP_TEMPLATE_REPOSITORY = TEMPLATE_REPOSITORY
-export const MCP_TEMPLATE_COMMIT_SHA = STABLE_SCAFFOLD_RELEASE.source.commitSha
+export const MCP_STARTER_REPOSITORY = STARTER_REPOSITORY
+export const MCP_STARTER_COMMIT_SHA = STABLE_SCAFFOLD_RELEASE.source.commitSha
 export const MCP_SCAFFOLD_RELEASE_ID = STABLE_SCAFFOLD_RELEASE.id
-export const MCP_EXCLUDE_PATHS = EXCLUDE_PATHS
-export const shouldIncludeMcpTemplatePath = shouldInclude
-export { buildStarterDocsJson }
 
 /** Scaffold an MCP-created site through the canonical package implementation. */
 export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult> {

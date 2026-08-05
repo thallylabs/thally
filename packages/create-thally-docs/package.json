@@ -1,6 +1,6 @@
 {
   "name": "create-thally-docs",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Scaffold the first documentation surface in a Thally product-knowledge pipeline.",
   "type": "module",
   "engines": {
@@ -19,6 +19,14 @@
     "./release": {
       "types": "./dist/release.d.ts",
       "import": "./dist/release.js"
+    },
+    "./starter-sync": {
+      "types": "./dist/starter-sync.d.ts",
+      "import": "./dist/starter-sync.js"
+    },
+    "./starter-update": {
+      "types": "./dist/starter-update.d.ts",
+      "import": "./dist/starter-update.js"
     },
     "./migrate": "./dist/migrate/index.js",
     "./package.json": "./package.json"

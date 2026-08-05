@@ -214,12 +214,12 @@ export async function gatherAnswers(
     doInstall = shouldInstall.trim().toLowerCase().startsWith('y')
   }
 
-  // 8. Every starter includes English and Spanish; owners can add more now or
-  // later from Settings without editing framework code.
+  // 8. English is the source locale. Owners can opt into any additional
+  // locales now or add them later from Settings without editing framework code.
   let i18nLocales: Array<{ code: string; label: string }> | undefined
   if (!useDefaults) {
     const enableI18n = await input({
-      message: '  Add languages beyond English and Spanish? (y/N):',
+      message: '  Add another documentation language? (y/N):',
       default: 'N',
     })
     if (enableI18n.toLowerCase() === 'y') {

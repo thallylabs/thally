@@ -6,6 +6,8 @@ export default defineConfig({
     'src/scaffold.ts',
     'src/customize.ts',
     'src/release.ts',
+    'src/starter-sync.ts',
+    'src/starter-update.ts',
     'src/migrate/index.ts',
   ],
   format: ['esm'],
