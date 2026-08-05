@@ -83,6 +83,10 @@ export interface CloudPortableConfig {
     collectAgentTraffic?: boolean
     retentionDays?: number
   }
+  /** Public Markdown mirrors exposed at each documentation page's `.md` URL. */
+  markdown?: {
+    enabled?: boolean
+  }
 }
 
 export interface CloudSiteConfig {

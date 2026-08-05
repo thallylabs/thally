@@ -45,7 +45,7 @@ export function TeamView({
           Team
         </h1>
         <p className="mt-1.5 max-w-[60ch]" style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-text-muted)' }}>
-          The admin roster lives in <code className="font-mono">docs.json</code> — version-controlled and code-reviewed. You're signed in
+          The admin roster lives in <code className="font-mono">docs.json</code> — version-controlled and code-reviewed. You&apos;re signed in
           as <strong>{viewerEmail}</strong> (<RoleChip role={viewerRole} />).
         </p>
       </header>
@@ -94,7 +94,7 @@ export function TeamView({
         {canManage ? (
           <>
             <p style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-text-muted)' }}>
-              Inviting adds a line to the <code className="font-mono">team.members</code> array. Open a reviewed PR — that's the audit trail.
+              Inviting adds a line to the <code className="font-mono">team.members</code> array. Open a reviewed PR — that&apos;s the audit trail.
             </p>
             <div className="mt-4 flex flex-wrap items-end gap-3">
               <label className="flex-1" style={{ minWidth: 220 }}>

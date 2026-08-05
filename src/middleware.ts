@@ -13,6 +13,7 @@ import { classifyRequest, isAgentRequest } from '@/lib/traffic-classifier'
 import { isMachineEndpoint, isPublicAgentEndpoint } from '@/lib/agent-endpoints'
 import { verifySession, SESSION_COOKIE } from '@/lib/auth/session'
 import { getCloudAccessConfigEdge, getManagedSiteIdEdge } from '@/lib/cloud-link/edge'
+import { isMarkdownPagesEnabled } from '@/lib/markdown-pages'
 
 function shouldTrackPath(pathname: string): boolean {
   // Admin console (pages + its own asset/nav requests) and Next internals are
@@ -273,19 +274,20 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   // /api/well-known route (which can use fs) or the next.config.ts rewrite —
   // both outside this file.
   if (
+    isMarkdownPagesEnabled(cloudAccess?.portable) &&
     pathname.endsWith('.md') &&
     pathname !== '/skill.md' &&
     pathname !== '/AGENTS.md' &&
     pathname !== '/auth.md' &&
     !pathname.startsWith('/.well-known/')
   ) {
-    const slugPath = pathname.slice(1, -3)
-    if (slugPath) {
-      const url = request.nextUrl.clone()
-      url.pathname = `/api/markdown/${slugPath}`
-      // URL-distinct (.md) — safe to fully CDN-cache.
-      return applyManagedContentCacheHeaders(NextResponse.rewrite(url), pathname, contentCachePublic)
-    }
+    // Appending `.md` to the root URL yields `/.md`; map that literal form to
+    // the canonical introduction document. Every non-root page keeps its slug.
+    const slugPath = pathname.slice(1, -3) || 'introduction'
+    const url = request.nextUrl.clone()
+    url.pathname = `/api/markdown/${slugPath}`
+    // URL-distinct (.md) — safe to fully CDN-cache.
+    return applyManagedContentCacheHeaders(NextResponse.rewrite(url), pathname, contentCachePublic)
   }
 
   if (isAgentRequest(request, pathname) && !isMachineEndpoint(pathname)) {

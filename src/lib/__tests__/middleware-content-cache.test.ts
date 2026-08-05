@@ -92,7 +92,10 @@ afterEach(() => {
 function enableManagedAssetsMode(): void {
   process.env.THALLY_CONTENT_SOURCE = 'assets'
   process.env.THALLY_CLOUD_SITE_CONFIG = JSON.stringify({ siteId: 'site_123' })
-  vi.mocked(getCloudAccessConfigEdge).mockResolvedValue({ access: { mode: 'public' } })
+  vi.mocked(getCloudAccessConfigEdge).mockResolvedValue({
+    access: { mode: 'public' },
+    portable: { markdown: { enabled: true } },
+  })
 }
 
 describe('managed content cache headers', () => {
@@ -113,6 +116,28 @@ describe('managed content cache headers', () => {
 
     expect(response.headers.get('x-middleware-rewrite')).toContain('/api/markdown/getting-started')
     expect(response.headers.get('Cache-Tag')).toBe('site:site_123')
+  })
+
+  it('maps the root .md URL to the introduction document', async () => {
+    enableManagedAssetsMode()
+    const response = await middleware(docRequest('/.md'), EVENT)
+
+    expect(response.headers.get('x-middleware-rewrite')).toContain(
+      '/api/markdown/introduction',
+    )
+  })
+
+  it('does not expose .md page URLs when the setting is disabled', async () => {
+    enableManagedAssetsMode()
+    vi.mocked(getCloudAccessConfigEdge).mockResolvedValue({
+      access: { mode: 'public' },
+      portable: { markdown: { enabled: false } },
+    })
+
+    const response = await middleware(docRequest('/getting-started.md'), EVENT)
+
+    expect(response.headers.get('x-middleware-rewrite')).toBeNull()
+    expect(response.headers.get('x-middleware-next')).toBe('1')
   })
 
   it('tags the agent content-negotiation rewrite but never CDN-caches it', async () => {

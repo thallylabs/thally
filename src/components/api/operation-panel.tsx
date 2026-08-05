@@ -36,7 +36,7 @@ export function OperationPanel({ operation }: OperationPanelProps) {
           <div className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">{operation.group}</p>
             <div className="space-y-2">
-              <h1 className="font-heading text-[2.05rem] font-extrabold leading-[1.12] tracking-[-0.03em] text-foreground">{operation.title}</h1>
+              <h1 className="font-heading text-[2rem] font-medium leading-9 tracking-[-0.025em] text-foreground sm:text-4xl sm:leading-10">{operation.title}</h1>
               {operation.description ? (
                 <div className="prose prose-neutral dark:prose-invert max-w-none text-base text-foreground/70">
                   <Markdown>{operation.description}</Markdown>
