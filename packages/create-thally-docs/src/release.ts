@@ -7,11 +7,31 @@
  * runtime" recreates the drift this contract exists to prevent.
  */
 
+import stableScaffoldRelease from './stable-scaffold-release.json' with { type: 'json' }
+
 export interface ScaffoldSourceRelease {
   repository: string
   commitSha: string
   treeSha: string
   archiveUrl: string
+  manifestPath: 'starter-release.json'
+  manifestSha256: string
+}
+
+export interface ScaffoldOwnershipContract {
+  frameworkSyncEligible: readonly string[]
+  userOwnedNeverOverwrite: readonly string[]
+  manualReview: readonly string[]
+}
+
+export interface StarterReleaseManifest {
+  schemaVersion: 1
+  starterVersion: number
+  repository: string
+  defaultBranch: string
+  runtime: Pick<ScaffoldRuntimeRelease, 'repository' | 'commitSha' | 'treeSha'>
+  packages: Record<string, string>
+  ownership: ScaffoldOwnershipContract
 }
 
 export interface ScaffoldRuntimeRelease {
@@ -33,30 +53,24 @@ export interface ScaffoldRelease {
 /**
  * Current stable scaffold release.
  *
- * The source commit is the refreshed public docs template and the runtime
- * commit is the matching engine change. `create-thally-docs`, the CLI, MCP,
- * and Thally Cloud all import this exact record rather than following a moving
- * branch independently.
+ * The source commit is the complete, standalone `thallylabs/starter` tree and
+ * the runtime commit is the matching engine change. `create-thally-docs`, the
+ * CLI, MCP, and Thally Cloud all import this exact record rather than following
+ * a moving branch independently. Promotion replaces the placeholders in the
+ * adjacent JSON record, which is also consumed by Cloud build parity checks.
  */
-export const STABLE_SCAFFOLD_RELEASE = {
-  schemaVersion: 1,
-  id: '2026-08-04.b0094de4.e36d2bcf',
-  source: {
-    repository: 'thallylabs/docs',
-    commitSha: 'b0094de4fea84567eb12c39c6783fdae6820bb98',
-    treeSha: 'ffd0a6fda07341ddd1ba164cb40acef796f89e2d',
-    archiveUrl:
-      'https://codeload.github.com/thallylabs/docs/tar.gz/b0094de4fea84567eb12c39c6783fdae6820bb98',
-  },
-  runtime: {
-    repository: 'thallylabs/thally',
-    commitSha: 'e36d2bcff38f7638a77369e12773a7cab4d5d9ce',
-    treeSha: '1c8b0358d78d8caa14ed039bff6ab47c98b685d8',
-    contentSource: 'assets',
-    identityContractVersion: 1,
-  },
-  starterVersion: 1,
-} as const satisfies ScaffoldRelease
+export const STABLE_SCAFFOLD_RELEASE = stableScaffoldRelease as ScaffoldRelease
+
+/**
+ * Immutable releases this toolchain can use as a three-way update base.
+ *
+ * Promotion prepends the new stable record but retains earlier records. That
+ * lets a project created directly from GitHub carry only the exact manifest
+ * bytes and still resolve its original starter without mutable branch state.
+ */
+export const SUPPORTED_SCAFFOLD_RELEASES: readonly ScaffoldRelease[] = [
+  STABLE_SCAFFOLD_RELEASE,
+]
 
 /** True only when an unknown record is the currently supported release. */
 export function isStableScaffoldRelease(value: unknown): value is ScaffoldRelease {
@@ -70,6 +84,9 @@ export function isStableScaffoldRelease(value: unknown): value is ScaffoldReleas
     candidate.source?.commitSha === STABLE_SCAFFOLD_RELEASE.source.commitSha &&
     candidate.source?.treeSha === STABLE_SCAFFOLD_RELEASE.source.treeSha &&
     candidate.source?.archiveUrl === STABLE_SCAFFOLD_RELEASE.source.archiveUrl &&
+    candidate.source?.manifestPath === STABLE_SCAFFOLD_RELEASE.source.manifestPath &&
+    candidate.source?.manifestSha256 ===
+      STABLE_SCAFFOLD_RELEASE.source.manifestSha256 &&
     candidate.runtime?.repository === STABLE_SCAFFOLD_RELEASE.runtime.repository &&
     candidate.runtime?.commitSha === STABLE_SCAFFOLD_RELEASE.runtime.commitSha &&
     candidate.runtime?.treeSha === STABLE_SCAFFOLD_RELEASE.runtime.treeSha &&

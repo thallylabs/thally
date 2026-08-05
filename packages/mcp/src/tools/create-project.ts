@@ -9,7 +9,7 @@ export const createProjectSchema = z.object({
   repoUrl: z.string().optional().describe('GitHub repository URL (optional)'),
   install: z.boolean().optional().default(true).describe('Whether to run npm install after scaffolding'),
   enableAiChat: z.boolean().optional().default(true).describe('Enable AI chat in docs.json (default true)'),
-  i18nLocales: z.array(z.object({ code: z.string(), label: z.string() })).optional().describe('Additional locales beyond the included English and Spanish defaults (e.g. [{code:"fr",label:"Français"}])'),
+  i18nLocales: z.array(z.object({ code: z.string(), label: z.string() })).optional().describe('Additional documentation locales to include alongside English (e.g. [{code:"fr",label:"Français"}])'),
 })
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>
