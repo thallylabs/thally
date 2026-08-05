@@ -237,6 +237,11 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     // The Thally Track webhook is called by GitHub, which can't hold a docs-access
     // cookie — it authenticates itself via HMAC signature instead.
     !pathname.startsWith('/api/track') &&
+    // Brand assets (logo/favicon and their API resolvers) stay reachable so the
+    // /access page itself — and the browser tab — can show the site's mark.
+    // They expose branding only, never gated content.
+    !pathname.startsWith('/brand/') &&
+    !pathname.startsWith('/api/brand') &&
     pathname !== '/access' &&
     !pathname.startsWith('/_next') &&
     // Public agent-discovery + crawler-control docs (robots.txt, sitemap,

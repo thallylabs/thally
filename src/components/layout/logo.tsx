@@ -55,7 +55,7 @@ export function Logo({ className, showText = true }: LogoProps) {
               on dark); replaced site-wide by an admin upload above. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={isDark ? '/brand/thally-logo-dark.svg' : '/brand/thally-logo-light.svg'}
+            src={isDark ? '/brand/default-logo-dark.svg' : '/brand/default-logo-light.svg'}
             alt=""
             width={28}
             height={28}
