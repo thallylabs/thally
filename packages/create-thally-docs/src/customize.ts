@@ -151,42 +151,45 @@ export function updateSiteConfig(
   const escapedDescription = escapeTypeScriptString(description)
   const escapedRepoUrl = escapeTypeScriptString(repoUrl)
   let source = readFileSync(siteFile, 'utf8')
+  // Keep horizontal and line-break whitespace disjoint. These expressions run
+  // against downloaded starter input, so overlapping `\s*` branches would make
+  // malformed input a polynomial-time denial-of-service surface.
   source = replaceRequired(
     source,
-    /name:\s*'(?:\\.|[^'\\])*'/,
+    /name:[ \t]*'(?:\\.|[^'\\\r\n])*'/,
     `name: '${escapedName}'`,
     'site.name',
   )
   source = replaceRequired(
     source,
-    /description:\s*(?:\n\s*)?'(?:\\.|[^'\\])*'/,
+    /description:[ \t]*(?:\r?\n[ \t]*)?'(?:\\.|[^'\\\r\n])*'/,
     `description:\n    '${escapedDescription}'`,
     'site.description',
   )
   source = replaceRequired(
     source,
-    /const brandPreset:\s*BrandPresetKey\s*=\s*'(?:\\.|[^'\\])*'/,
+    /const brandPreset:[ \t]*BrandPresetKey[ \t]*=[ \t]*'(?:\\.|[^'\\\r\n])*'/,
     `const brandPreset: BrandPresetKey = '${brandPreset}'`,
     'site.brandPreset',
   )
   source = replaceRequired(
     source,
-    /repoUrl:\s*'(?:\\.|[^'\\])*'/,
+    /repoUrl:[ \t]*'(?:\\.|[^'\\\r\n])*'/,
     `repoUrl: '${escapedRepoUrl}'`,
     'site.repoUrl',
   )
 
   source = source.replace(
-    /\{\s*label:\s*'GitHub',\s*href:\s*'(?:\\.|[^'\\])*'\s*\}/,
+    /\{[ \t]*label:[ \t]*'GitHub',[ \t]*href:[ \t]*'(?:\\.|[^'\\\r\n])*'[ \t]*\}/,
     `{ label: 'GitHub', href: '${escapedRepoUrl}' }`,
   )
   source = source.replace(
-    /\{\s*label:\s*'Support',\s*href:\s*'(?:\\.|[^'\\])*'\s*\}/,
+    /\{[ \t]*label:[ \t]*'Support',[ \t]*href:[ \t]*'(?:\\.|[^'\\\r\n])*'[ \t]*\}/,
     `{ label: 'Support', href: '${escapedRepoUrl ? `${escapedRepoUrl}/issues/new` : ''}' }`,
   )
   if (!repoUrl) {
     source = source.replace(
-      /\n\s*\{\s*label:\s*'(?:GitHub|Support)',\s*href:\s*''\s*\},?/g,
+      /\r?\n[ \t]*\{[ \t]*label:[ \t]*'(?:GitHub|Support)',[ \t]*href:[ \t]*''[ \t]*\},?/g,
       '',
     )
   }
