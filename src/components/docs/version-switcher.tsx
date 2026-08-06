@@ -6,10 +6,6 @@ import { siteConfig } from '@/data/site'
 import { cn } from '@/lib/utils'
 
 export function VersionSwitcher() {
-  const versions = siteConfig.versions
-  if (!versions || versions.length < 2) return null
-
-  const current = versions.find((v) => v.current) ?? versions[0]
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -24,6 +20,11 @@ export function VersionSwitcher() {
       return () => document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [open])
+
+  const versions = siteConfig.versions
+  if (!versions || versions.length < 2) return null
+
+  const current = versions.find((v) => v.current) ?? versions[0]
 
   return (
     <div ref={ref} className="relative">

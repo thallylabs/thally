@@ -1,12 +1,49 @@
+/**
+ * Shared MDX presentation transforms for authored and release-backed content.
+ *
+ * Syntax grammars stay explicitly enumerated because a bundled Shiki registry
+ * is duplicated across Next's server graphs and can exceed managed hosting's
+ * bounded Worker upload contract. Unsupported fences remain readable text.
+ */
+
 import type { Element, Root } from 'hast'
 import {
-  createHighlighter,
   createJavaScriptRegexEngine,
   defaultJavaScriptRegexConstructor,
-  type Highlighter,
-  type ThemedToken,
-  type ThemeRegistration,
-} from 'shiki'
+} from 'shiki/engine/javascript'
+import { createHighlighterCore } from 'shiki/core'
+import type { HighlighterCore, ThemedToken, ThemeRegistration } from 'shiki'
+import langBash from 'shiki/langs/bash.mjs'
+import langC from 'shiki/langs/c.mjs'
+import langCpp from 'shiki/langs/cpp.mjs'
+import langCsharp from 'shiki/langs/csharp.mjs'
+import langCss from 'shiki/langs/css.mjs'
+import langDiff from 'shiki/langs/diff.mjs'
+import langDocker from 'shiki/langs/docker.mjs'
+import langGo from 'shiki/langs/go.mjs'
+import langGraphql from 'shiki/langs/graphql.mjs'
+import langHcl from 'shiki/langs/hcl.mjs'
+import langHtml from 'shiki/langs/html.mjs'
+import langJavascript from 'shiki/langs/javascript.mjs'
+import langJava from 'shiki/langs/java.mjs'
+import langJson from 'shiki/langs/json.mjs'
+import langJsonc from 'shiki/langs/jsonc.mjs'
+import langJsx from 'shiki/langs/jsx.mjs'
+import langKotlin from 'shiki/langs/kotlin.mjs'
+import langMarkdown from 'shiki/langs/markdown.mjs'
+import langMdx from 'shiki/langs/mdx.mjs'
+import langPhp from 'shiki/langs/php.mjs'
+import langPython from 'shiki/langs/python.mjs'
+import langRuby from 'shiki/langs/ruby.mjs'
+import langRust from 'shiki/langs/rust.mjs'
+import langSql from 'shiki/langs/sql.mjs'
+import langSvelte from 'shiki/langs/svelte.mjs'
+import langSwift from 'shiki/langs/swift.mjs'
+import langToml from 'shiki/langs/toml.mjs'
+import langTsx from 'shiki/langs/tsx.mjs'
+import langTypescript from 'shiki/langs/typescript.mjs'
+import langVue from 'shiki/langs/vue.mjs'
+import langYaml from 'shiki/langs/yaml.mjs'
 import { visit } from 'unist-util-visit'
 
 /**
@@ -39,11 +76,11 @@ const cssVariablesTheme: ThemeRegistration = {
 
 const FALLBACK_LANGUAGE = 'txt'
 
-let highlighterPromise: Promise<Highlighter> | null = null
+let highlighterPromise: Promise<HighlighterCore> | null = null
 
-function getHighlighter(): Promise<Highlighter> {
+function getHighlighter(): Promise<HighlighterCore> {
   if (!highlighterPromise) {
-    highlighterPromise = createHighlighter({
+    highlighterPromise = createHighlighterCore({
       // Workers disallow runtime WebAssembly code generation. Shiki's
       // JavaScript regex engine preserves highlighting without Oniguruma WASM.
       engine: createJavaScriptRegexEngine({
@@ -53,20 +90,126 @@ function getHighlighter(): Promise<Highlighter> {
           defaultJavaScriptRegexConstructor(pattern, { lazyCompileLength: Infinity }),
       }),
       themes: [cssVariablesTheme],
-      langs: [FALLBACK_LANGUAGE],
+      // Explicit imports keep the request Worker bounded. Unknown fences still
+      // render as plaintext, while the common documentation languages retain
+      // full grammar-aware highlighting.
+      langs: [
+        langBash,
+        langC,
+        langCpp,
+        langCsharp,
+        langCss,
+        langDiff,
+        langDocker,
+        langGo,
+        langGraphql,
+        langHcl,
+        langHtml,
+        langJava,
+        langJavascript,
+        langJson,
+        langJsonc,
+        langJsx,
+        langKotlin,
+        langMarkdown,
+        langMdx,
+        langPhp,
+        langPython,
+        langRuby,
+        langRust,
+        langSql,
+        langSvelte,
+        langSwift,
+        langToml,
+        langTsx,
+        langTypescript,
+        langVue,
+        langYaml,
+      ],
     })
   }
   return highlighterPromise
 }
 
 const languageAliases: Record<string, string> = {
+  'c++': 'cpp',
+  'c#': 'csharp',
   curl: 'bash',
+  gql: 'graphql',
   sh: 'bash',
   shell: 'bash',
   shellscript: 'bash',
   zsh: 'bash',
   md: 'markdown',
   yml: 'yaml',
+}
+
+// Fence metadata is authored input and may arrive through an untrusted pull
+// request. Bound expansion before allocation so a range such as {1-4e9}
+// cannot exhaust a build or Worker request.
+const MAX_HIGHLIGHTED_LINES = 1_000
+const MAX_HIGHLIGHTED_LINE_NUMBER = 100_000
+
+// Syntax highlighting is a presentation enhancement, not a reason for an
+// authored or imported page to exhaust a request Worker. Keep both individual
+// fences and the aggregate page work bounded; fences outside the budget remain
+// ordinary HAST text nodes and are therefore emitted as escaped plaintext.
+const MAX_HIGHLIGHTED_CODE_BLOCKS = 64
+const MAX_HIGHLIGHTED_CODE_BLOCK_BYTES = 64 * 1024
+const MAX_HIGHLIGHTED_CODE_BLOCK_LINES = 2_000
+const MAX_HIGHLIGHTED_PAGE_BYTES = 256 * 1024
+
+/** Return a bounded UTF-8 cost, or null when a fence must remain plaintext. */
+export function measureHighlightableCode(code: string): number | null {
+  // UTF-16 length is a cheap lower bound for UTF-8 bytes. Reject before using
+  // TextEncoder so even the measurement allocation stays bounded.
+  if (code.length > MAX_HIGHLIGHTED_CODE_BLOCK_BYTES) return null
+
+  let lineCount = 1
+  for (let index = 0; index < code.length; index += 1) {
+    if (code.charCodeAt(index) === 10) {
+      lineCount += 1
+      if (lineCount > MAX_HIGHLIGHTED_CODE_BLOCK_LINES) return null
+    }
+  }
+
+  const byteLength = new TextEncoder().encode(code).byteLength
+  return byteLength <= MAX_HIGHLIGHTED_CODE_BLOCK_BYTES ? byteLength : null
+}
+
+export interface SyntaxHighlightBudget {
+  scheduledBlocks: number
+  scheduledBytes: number
+  isExhausted: boolean
+}
+
+/** Reserve bounded page capacity before sending a fence through Shiki. */
+export function scheduleSyntaxHighlight(
+  code: string,
+  budget: SyntaxHighlightBudget,
+): boolean {
+  if (
+    budget.isExhausted ||
+    budget.scheduledBlocks >= MAX_HIGHLIGHTED_CODE_BLOCKS ||
+    budget.scheduledBytes >= MAX_HIGHLIGHTED_PAGE_BYTES
+  ) {
+    budget.isExhausted = true
+    return false
+  }
+
+  const codeBytes = measureHighlightableCode(code)
+  if (codeBytes === null) return false
+  if (budget.scheduledBytes + codeBytes > MAX_HIGHLIGHTED_PAGE_BYTES) {
+    budget.isExhausted = true
+    return false
+  }
+
+  budget.scheduledBlocks += 1
+  budget.scheduledBytes += codeBytes
+  budget.isExhausted =
+    budget.scheduledBlocks >= MAX_HIGHLIGHTED_CODE_BLOCKS ||
+    budget.scheduledBytes >= MAX_HIGHLIGHTED_PAGE_BYTES
+  return true
 }
 
 function normalizeLanguage(language?: string) {
@@ -81,16 +224,10 @@ function normalizeLanguage(language?: string) {
  * Ensure a language grammar is loaded; fall back to plaintext for unknown or
  * unsupported languages so an exotic code fence never breaks the page.
  */
-async function resolveLanguage(highlighter: Highlighter, language: string): Promise<string> {
-  if (highlighter.getLoadedLanguages().includes(language)) {
-    return language
-  }
-  try {
-    await highlighter.loadLanguage(language as Parameters<Highlighter['loadLanguage']>[0])
-    return language
-  } catch {
-    return FALLBACK_LANGUAGE
-  }
+function resolveLanguage(highlighter: HighlighterCore, language: string): string {
+  return highlighter.getLoadedLanguages().includes(language)
+    ? language
+    : FALLBACK_LANGUAGE
 }
 
 const HTML_ESCAPES: Record<string, string> = {
@@ -142,13 +279,24 @@ export interface CodeFenceMeta {
 function expandLineRanges(spec: string): Array<number> {
   const lines: Array<number> = []
   for (const part of spec.split(',')) {
+    if (lines.length >= MAX_HIGHLIGHTED_LINES) break
     const trimmed = part.trim()
     if (!trimmed) continue
     const range = trimmed.match(/^(\d+)-(\d+)$/)
     if (range) {
-      for (let line = Number(range[1]); line <= Number(range[2]); line += 1) lines.push(line)
+      const start = Number(range[1])
+      const end = Math.min(Number(range[2]), MAX_HIGHLIGHTED_LINE_NUMBER)
+      if (start > MAX_HIGHLIGHTED_LINE_NUMBER || start > end) continue
+      for (
+        let line = start;
+        line <= end && lines.length < MAX_HIGHLIGHTED_LINES;
+        line += 1
+      ) {
+        lines.push(line)
+      }
     } else if (/^\d+$/.test(trimmed)) {
-      lines.push(Number(trimmed))
+      const line = Number(trimmed)
+      if (line <= MAX_HIGHLIGHTED_LINE_NUMBER) lines.push(line)
     }
   }
   return lines
@@ -220,10 +368,14 @@ function rehypeParseCodeBlocks() {
 
 function rehypeShiki() {
   return async (tree: Root) => {
-    const highlighter = await getHighlighter()
-
-    // Collect <pre> nodes first so we can await per-node language loading.
+    // Scan before initializing Shiki. Most prose pages contain no fenced code,
+    // so they should not pay the cold-start cost of constructing every grammar.
     const targets: Array<{ node: Element; code: string; language: string; textNode: { value: string } }> = []
+    const budget: SyntaxHighlightBudget = {
+      scheduledBlocks: 0,
+      scheduledBytes: 0,
+      isExhausted: false,
+    }
 
     visit(tree, 'element', (node: Element) => {
       if (node.tagName !== 'pre') {
@@ -251,13 +403,25 @@ function rehypeShiki() {
         return
       }
 
+      if (!scheduleSyntaxHighlight(code, budget)) {
+        // Grouped code is rendered from trusted Shiki HTML. Preserve that
+        // contract for the plaintext fallback by escaping authored markup
+        // before it reaches the same HTML sink.
+        textNode.value = escapeHtml(code)
+        return
+      }
+
       targets.push({ node, code, language, textNode })
     })
 
+    if (targets.length === 0) return
+
+    const highlighter = await getHighlighter()
+
     for (const target of targets) {
-      const language = await resolveLanguage(highlighter, target.language)
+      const language = resolveLanguage(highlighter, target.language)
       const lines = highlighter.codeToTokensBase(target.code, {
-        lang: language as Parameters<Highlighter['codeToTokensBase']>[1]['lang'],
+        lang: language as Parameters<HighlighterCore['codeToTokensBase']>[1]['lang'],
         theme: cssVariablesTheme,
       })
       const highlightSpec = target.node.properties?.highlightLines as string | undefined

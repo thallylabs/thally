@@ -13,6 +13,7 @@ import { classifyRequest, isAgentRequest } from '@/lib/traffic-classifier'
 import { isMachineEndpoint, isPublicAgentEndpoint } from '@/lib/agent-endpoints'
 import { verifySession, SESSION_COOKIE } from '@/lib/auth/session'
 import { getCloudAccessConfigEdge, getManagedSiteIdEdge } from '@/lib/cloud-link/edge'
+import { isMarkdownPagesEnabled } from '@/lib/markdown-pages'
 
 function shouldTrackPath(pathname: string): boolean {
   // Admin console (pages + its own asset/nav requests) and Next internals are
@@ -236,6 +237,11 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     // The Thally Track webhook is called by GitHub, which can't hold a docs-access
     // cookie — it authenticates itself via HMAC signature instead.
     !pathname.startsWith('/api/track') &&
+    // Brand assets (logo/favicon and their API resolvers) stay reachable so the
+    // /access page itself — and the browser tab — can show the site's mark.
+    // They expose branding only, never gated content.
+    !pathname.startsWith('/brand/') &&
+    !pathname.startsWith('/api/brand') &&
     pathname !== '/access' &&
     !pathname.startsWith('/_next') &&
     // Public agent-discovery + crawler-control docs (robots.txt, sitemap,
@@ -273,19 +279,20 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   // /api/well-known route (which can use fs) or the next.config.ts rewrite —
   // both outside this file.
   if (
+    isMarkdownPagesEnabled(cloudAccess?.portable) &&
     pathname.endsWith('.md') &&
     pathname !== '/skill.md' &&
     pathname !== '/AGENTS.md' &&
     pathname !== '/auth.md' &&
     !pathname.startsWith('/.well-known/')
   ) {
-    const slugPath = pathname.slice(1, -3)
-    if (slugPath) {
-      const url = request.nextUrl.clone()
-      url.pathname = `/api/markdown/${slugPath}`
-      // URL-distinct (.md) — safe to fully CDN-cache.
-      return applyManagedContentCacheHeaders(NextResponse.rewrite(url), pathname, contentCachePublic)
-    }
+    // Appending `.md` to the root URL yields `/.md`; map that literal form to
+    // the canonical introduction document. Every non-root page keeps its slug.
+    const slugPath = pathname.slice(1, -3) || 'introduction'
+    const url = request.nextUrl.clone()
+    url.pathname = `/api/markdown/${slugPath}`
+    // URL-distinct (.md) — safe to fully CDN-cache.
+    return applyManagedContentCacheHeaders(NextResponse.rewrite(url), pathname, contentCachePublic)
   }
 
   if (isAgentRequest(request, pathname) && !isMachineEndpoint(pathname)) {

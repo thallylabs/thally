@@ -11,14 +11,22 @@ export const runtime = 'nodejs'
  */
 export async function GET(request: NextRequest) {
   const dark = request.nextUrl.searchParams.get('mode') === 'dark'
-  const cloud = await getCloudSiteConfig(request.nextUrl.origin)
-  const configured = dark
-    ? cloud?.siteConfig.portable.branding?.logoDark ?? cloud?.siteConfig.portable.branding?.logo
-    : cloud?.siteConfig.portable.branding?.logo
-  const publicPath = normalizePublicAssetPath(configured)
-  if (publicPath) return Response.redirect(new URL(publicPath, request.nextUrl.origin), 302)
-  const uri = (dark ? await getBrandAsset('logo-dark') : null) ?? (await getBrandAsset('logo'))
-  const match = uri ? /^data:(image\/[a-z]+);base64,(.+)$/.exec(uri) : null
+  // A 404 is the contract for "no custom logo" — the header <img> probe keys
+  // its default-mark fallback off it. Branding lookup failures must therefore
+  // degrade to 404, never a 5xx.
+  let match: RegExpExecArray | null = null
+  try {
+    const cloud = await getCloudSiteConfig(request.nextUrl.origin)
+    const configured = dark
+      ? cloud?.siteConfig.portable.branding?.logoDark ?? cloud?.siteConfig.portable.branding?.logo
+      : cloud?.siteConfig.portable.branding?.logo
+    const publicPath = normalizePublicAssetPath(configured)
+    if (publicPath) return Response.redirect(new URL(publicPath, request.nextUrl.origin), 302)
+    const uri = (dark ? await getBrandAsset('logo-dark') : null) ?? (await getBrandAsset('logo'))
+    match = uri ? /^data:(image\/[a-z]+);base64,(.+)$/.exec(uri) : null
+  } catch {
+    match = null
+  }
   if (!match) return new Response(null, { status: 404 })
   return new Response(Buffer.from(match[2], 'base64'), {
     headers: { 'content-type': match[1], 'cache-control': 'public, max-age=300' },

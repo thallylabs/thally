@@ -57,6 +57,23 @@ This overrides the accent and focus ring. The rest of the palette—backgrounds,
 borders, and sidebar tokens—comes from the source-file presets below. Use the
 dashboard for a live adjustment and the files as the versioned baseline.
 
+Card and tile icons are neutral by default. To color every content icon with
+the current light or dark brand accent, add this to `docs.json`:
+
+```json
+"appearance": {
+  "contentIcons": "accent"
+}
+```
+
+Choosing `"accent"` also gives cards and tiles a restrained accent-aware
+border that deepens slightly on hover. Use `iconColor="accent"` or
+`iconColor="neutral"` on an individual `<Card>` or `<Tile>` when one item needs
+to override the site-wide choice — the border treatment follows the same
+per-card override. Accent icons and card chrome use the same live token as
+links and controls, so changing the owner-selected brand accent updates them
+automatically, in both themes and every locale.
+
 ## Custom colors
 
 To define your own palette, edit the `brandPresets` object in `site.ts`. Each preset has `light` and `dark` variants with these tokens:

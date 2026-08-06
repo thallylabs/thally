@@ -5,7 +5,13 @@ import './globals.css'
 import '@/styles/docs-handoff.css'
 import { Providers } from '@/app/providers'
 import { siteConfig } from '@/data/site'
-import { getBannerConfig, getCustomScriptsConfig, getFontsConfig, getStructuralTheme } from '@/data/docs'
+import {
+  getBannerConfig,
+  getContentIconTone,
+  getCustomScriptsConfig,
+  getFontsConfig,
+  getStructuralTheme,
+} from '@/data/docs'
 import { cn } from '@/lib/utils'
 import { toHslValue, THEME_VARS } from '@thallylabs/core/theme'
 import { buildOgImageUrl } from '@/lib/og'
@@ -90,6 +96,7 @@ const fontOverrides = [
 // ---------------------------------------------------------------------------
 // Structural theme — read once at module level (same as fonts above)
 const structuralTheme = getStructuralTheme()
+const contentIconTone = getContentIconTone()
 
 // Structural theme CSS variable injection
 // Injected as a <style> tag (same pattern as fontOverrides) so the overrides
@@ -212,6 +219,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       dir={localeDirection(defaultLang)}
       suppressHydrationWarning
       data-theme={structuralTheme}
+      data-content-icons={contentIconTone}
       className={cn(fontSans.variable, fontDisplay.variable, fontMono.variable)}
     >
       <head>

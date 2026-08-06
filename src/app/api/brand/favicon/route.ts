@@ -11,18 +11,26 @@ export const runtime = 'nodejs'
  */
 export async function GET(request: NextRequest) {
   const dark = request.nextUrl.searchParams.get('mode') === 'dark'
-  const cloud = await getCloudSiteConfig(request.nextUrl.origin)
-  const configured = dark
-    ? cloud?.siteConfig.portable.branding?.faviconDark ?? cloud?.siteConfig.portable.branding?.favicon
-    : cloud?.siteConfig.portable.branding?.favicon
-  const publicPath = normalizePublicAssetPath(configured)
-  if (publicPath) return Response.redirect(new URL(publicPath, request.nextUrl.origin), 302)
-  const uri = (dark ? await getBrandAsset('favicon-dark') : null) ?? (await getBrandAsset('favicon'))
-  const match = uri ? /^data:(image\/[a-z]+);base64,(.+)$/.exec(uri) : null
+  // The favicon has no client-side fallback (a failed response means the tab
+  // shows no icon at all), so any error while resolving custom branding must
+  // degrade to the bundled default mark — never a 5xx.
+  let match: RegExpExecArray | null = null
+  try {
+    const cloud = await getCloudSiteConfig(request.nextUrl.origin)
+    const configured = dark
+      ? cloud?.siteConfig.portable.branding?.faviconDark ?? cloud?.siteConfig.portable.branding?.favicon
+      : cloud?.siteConfig.portable.branding?.favicon
+    const publicPath = normalizePublicAssetPath(configured)
+    if (publicPath) return Response.redirect(new URL(publicPath, request.nextUrl.origin), 302)
+    const uri = (dark ? await getBrandAsset('favicon-dark') : null) ?? (await getBrandAsset('favicon'))
+    match = uri ? /^data:(image\/[a-z]+);base64,(.+)$/.exec(uri) : null
+  } catch {
+    match = null
+  }
   if (!match) {
     return new Response(null, {
       status: 302,
-      headers: { Location: `/brand/thally-favicon-${dark ? 'dark' : 'light'}.png` },
+      headers: { Location: `/brand/default-favicon-${dark ? 'dark' : 'light'}.svg` },
     })
   }
   return new Response(Buffer.from(match[2], 'base64'), {

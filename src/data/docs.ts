@@ -168,6 +168,7 @@ export interface DocsJsonFeedback {
 }
 
 export type StructuralTheme = 'default' | 'maple' | 'sharp' | 'minimal'
+export type ContentIconTone = 'neutral' | 'accent'
 
 interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
@@ -179,6 +180,11 @@ interface DocsJsonConfig {
   customScripts?: Array<DocsJsonScript>
   fonts?: DocsJsonFonts
   feedback?: DocsJsonFeedback
+  /** Visual choices that remain independent of the structural theme. */
+  appearance?: {
+    /** Card and tile icons are neutral by default or inherit the live brand accent. */
+    contentIcons?: ContentIconTone
+  }
   /**
    * Structural theme controlling border radius, sidebar active style, and nav
    * tab appearance. Independent of brand colors.
@@ -207,6 +213,10 @@ interface DocsJsonConfig {
     enabled?: boolean
   }
   analytics?: {
+    enabled?: boolean
+  }
+  /** Optional public Markdown mirrors at `/<page>.md`; disabled by default. */
+  markdown?: {
     enabled?: boolean
   }
   i18n?: {
@@ -648,10 +658,12 @@ export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
         // Tab level
         const firstPageHref = collection.sections[0]?.items[0]?.href
         crumbs.push({ label: collection.label, href: firstPageHref })
-        // Group level (section title may contain " • " for nested groups)
+        // Group level (section title may contain " • " for nested groups).
+        // A group named after its tab (e.g. "Get started" › "Get started")
+        // would stutter — collapse consecutive duplicate labels.
         const groupParts = section.title.split(' • ')
         for (const part of groupParts) {
-          crumbs.push({ label: part })
+          if (crumbs[crumbs.length - 1]?.label !== part) crumbs.push({ label: part })
         }
         // Current page
         crumbs.push({ label: match.title })
@@ -661,6 +673,27 @@ export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
   }
 
   return []
+}
+
+/**
+ * The page's nearest navigation group — the "category" shown as an eyebrow
+ * above the page title. Derived from the docs.json navigation model (never
+ * from per-page frontmatter) so it stays correct across tabs, nested groups
+ * and locales: group labels are single-sourced from docs.json, which also
+ * guarantees the eyebrow is identical in every locale. Returns null for pages
+ * that sit outside any navigation group (e.g. direct-link tabs).
+ */
+export function getNavCategory(currentHref: string): string | null {
+  for (const collection of getSidebarCollections()) {
+    for (const section of collection.sections) {
+      if (section.items.some((item) => item.href === currentHref)) {
+        // Nested groups join ancestors with " • " — the leaf group is the category.
+        const parts = section.title.split(' • ')
+        return parts[parts.length - 1] || null
+      }
+    }
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -774,6 +807,11 @@ export function getSeoConfig(): DocsJsonSeo {
 
 export function getStructuralTheme(): StructuralTheme {
   return docsConfig.theme ?? 'default'
+}
+
+/** Resolve the global card/tile icon treatment, defaulting to quiet neutrals. */
+export function getContentIconTone(): ContentIconTone {
+  return docsConfig.appearance?.contentIcons === 'accent' ? 'accent' : 'neutral'
 }
 
 // ---------------------------------------------------------------------------

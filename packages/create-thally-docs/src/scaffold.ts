@@ -1,21 +1,20 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { downloadTemplate } from './download.js'
+import { downloadStarter } from './download.js'
 import { resetTrackingConfig, writeTrackingConfig } from './docs-json.js'
 import {
-  writeStarterAgentGuide,
-  writeStarterContent,
-  writeStarterReadme,
-  writeCloudflareRuntimeConfig,
-  updateSiteConfig,
+  personalizeStarter,
   updateEnvExample,
-  patchApiReferenceGuard,
-  patchTopBarNavigation,
-  patchOpenApiFetch,
-  patchPackageJson,
-  patchGitignore,
 } from './customize.js'
 import { slugify, installDeps, initGit } from './utils.js'
+
+export {
+  STARTER_ARCHIVE_ROOT,
+  STARTER_COMMIT_SHA,
+  STARTER_REPOSITORY,
+  validateStarterArchiveEntry,
+} from './download.js'
+export { STABLE_SCAFFOLD_RELEASE } from './release.js'
 
 export interface ScaffoldOptions {
   projectDir: string
@@ -59,10 +58,23 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
 
   const slug = slugify(projectName)
 
-  // 1. Download template (replaces git clone)
-  await downloadTemplate(targetDir, projectName)
+  // 1. Extract the complete tree from the exact promoted starter commit.
+  await downloadStarter(targetDir, projectName)
 
-  // 1a. Thally Track is opt-in — first drop the template's own tracking block so a
+  // 2. Change only the documented owner fields. Runtime code, authored pages,
+  // navigation, dependencies, CI, and repository policy stay exactly as the
+  // immutable starter release shipped them.
+  personalizeStarter(targetDir, {
+    projectName,
+    packageName: slug,
+    description,
+    brandPreset,
+    repoUrl,
+    enableAiChat,
+    i18nLocales,
+  })
+
+  // 2a. Thally Track is opt-in — first drop the starter's tracking block so a
   // new site never inherits thallylabs/thally, THEN write the user's repos if they
   // opted in during setup. (Order matters: reset, then apply their choice.)
   resetTrackingConfig(targetDir)
@@ -74,43 +86,15 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
     console.log('    then add your ANTHROPIC_API_KEY. See /guides/thally-track.')
   }
 
-  // 2. Write starter content
-  writeStarterContent(targetDir, projectName, enableAiChat, repoUrl, i18nLocales)
-  writeStarterReadme(targetDir, projectName)
-  writeStarterAgentGuide(targetDir, projectName)
-
-  // 3. Update site config
-  updateSiteConfig(targetDir, projectName, description, brandPreset, repoUrl)
-
-  // 4. Patch buildApiNavigation to guard against projects with no API tab
-  patchApiReferenceGuard(targetDir)
-
-  // 5. Patch top-bar to use Next.js <Link> for internal tab hrefs (prevents full reloads)
-  patchTopBarNavigation(targetDir)
-
-  // 6. Patch openapi fetch to resolve /openapi.json relative to public/ (not fs root)
-  patchOpenApiFetch(targetDir)
-
-  // 7. Normalize package.json and regenerate a site-owned lockfile.
-  patchPackageJson(targetDir, slug)
-
-  // 7a. Every generated site is deployable to the managed Cloudflare runtime;
-  // account-owned routes and credentials stay out of the customer repository.
-  writeCloudflareRuntimeConfig(targetDir, slug)
-
-  // 8. Keep dependency folders out of git even if tooling creates one below
-  // the project root.
-  patchGitignore(targetDir)
-
-  // 9. Copy .env.example → .env.local
+  // 3. Copy .env.example → .env.local
   updateEnvExample(targetDir)
 
-  // 10. Install dependencies
+  // 4. Install dependencies
   if (doInstall) {
     installDeps(targetDir)
   }
 
-  // 11. Initialize git
+  // 5. Initialize git
   initGit(targetDir)
 
   return { projectDir: targetDir }
