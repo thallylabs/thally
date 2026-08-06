@@ -107,6 +107,44 @@ describe('documentation visual system', () => {
     expect(withoutEyebrow).not.toContain('thally-docs-eyebrow')
   })
 
+  it('renders the eyebrow as bold sentence case, never uppercase', () => {
+    const doc = {
+      id: 'guides/writing-content',
+      title: 'Write great content',
+      description: 'How to structure pages.',
+      href: '/guides/writing-content',
+    } as DocEntry
+
+    const markup = renderToStaticMarkup(
+      createElement(DocHeader, { doc, eyebrow: 'Design your docs' }),
+    )
+
+    expect(markup).toContain('font-bold')
+    expect(markup).not.toContain('uppercase')
+  })
+
+  it('suppresses a group heading that repeats the tab label', () => {
+    const markup = renderToStaticMarkup(
+      createElement(Sidebar, {
+        title: 'Get started',
+        sections: [
+          {
+            title: 'Get started',
+            items: [{ id: 'introduction', title: 'Introduction', href: '/' }],
+          },
+          {
+            title: 'Design your docs',
+            items: [{ id: 'components', title: 'Components', href: '/components' }],
+          },
+        ],
+      }),
+    )
+
+    // The tab heading renders once; the identical group heading does not.
+    expect(markup.split('Get started').length - 1).toBe(1)
+    expect(markup).toContain('Design your docs')
+  })
+
   it('renders a rail-free sidebar with a visible current-page state', () => {
     const markup = renderToStaticMarkup(
       createElement(Sidebar, {

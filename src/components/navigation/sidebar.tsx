@@ -46,10 +46,14 @@ export function Sidebar({ sections, title, className }: SidebarProps) {
         <nav className="scrollbar-hide mt-5 min-h-0 flex-1 space-y-7 overflow-y-auto overscroll-y-contain pb-5">
           {sections.map((section) => (
             <div key={section.title} className="space-y-2.5">
-              <p className={cn(typography.meta, 'flex items-center gap-1.5 px-2 text-xs font-semibold normal-case leading-4 tracking-normal text-foreground/70')}>
-                {section.icon && <Icon icon={section.icon} className="h-3.5 w-3.5 shrink-0 text-foreground/50" />}
-                <span className="truncate">{section.title}</span>
-              </p>
+              {/* A group named after its tab would repeat the label directly
+                  beneath the tab heading; the items stand on their own. */}
+              {section.title !== title ? (
+                <p className={cn(typography.meta, 'flex items-center gap-1.5 px-2 text-xs font-semibold normal-case leading-4 tracking-normal text-foreground/70')}>
+                  {section.icon && <Icon icon={section.icon} className="h-3.5 w-3.5 shrink-0 text-foreground/50" />}
+                  <span className="truncate">{section.title}</span>
+                </p>
+              ) : null}
               <div>
                 {section.items.map((item) => {
                   const active = isActive(item.href)
