@@ -81,3 +81,35 @@ describe('parseMdxContent', () => {
     expect(nested?.code.some((c) => c.language === 'ts')).toBe(true)
   })
 })
+
+describe('parseMdxContent JSX attribute prose', () => {
+  it('lifts literal prose attributes into section text, in reader order', () => {
+    const parsed = parseMdxContent(
+      '## Cards\n\n<Card title="Shape the navigation" icon="book-open">\nOrganize pages into tabs.\n</Card>\n',
+    )
+    const section = parsed.sections.find((s) => s.title === 'Cards')
+    expect(section?.text).toBe('Shape the navigation\nOrganize pages into tabs.')
+  })
+
+  it('lifts attributes from self-closing elements', () => {
+    const parsed = parseMdxContent('## Media\n\n<Frame caption="Dashboard overview" />\n')
+    expect(parsed.text).toContain('Dashboard overview')
+  })
+
+  it('lifts attributes from inline elements without gluing words', () => {
+    const parsed = parseMdxContent('## Terms\n\nHover the <Tooltip tip="Service level agreement">SLA</Tooltip> badge.\n')
+    expect(parsed.text).toContain('Service level agreement')
+    expect(parsed.text).toContain('SLA')
+  })
+
+  it('ignores expression values, empty strings, and non-prose attributes', () => {
+    const parsed = parseMdxContent(
+      '## Edge\n\n<Card title={dynamicTitle} icon="party-horn" href="/quickstart">\nBody prose.\n</Card>\n\n<Card title="">\nMore prose.\n</Card>\n',
+    )
+    expect(parsed.text).toContain('Body prose.')
+    expect(parsed.text).toContain('More prose.')
+    expect(parsed.text).not.toContain('dynamicTitle')
+    expect(parsed.text).not.toContain('party-horn')
+    expect(parsed.text).not.toContain('/quickstart')
+  })
+})
