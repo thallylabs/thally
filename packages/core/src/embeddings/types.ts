@@ -5,7 +5,7 @@ export type EmbeddingVector = Array<number>
  * deterministic provider so the out-of-box experience needs no API key.
  */
 export interface EmbeddingProvider {
-  /** Stable id used to cache-key the persisted index (e.g. `local-hash-v1`). */
+  /** Stable id used to cache-key the persisted index (e.g. `local-hash-v2`). */
   id: string
   dimensions: number
   embed(texts: Array<string>): Promise<Array<EmbeddingVector>>

@@ -7,7 +7,18 @@ import { chunkDocument } from './chunk.js'
 import { getEmbeddingProvider } from './provider.js'
 import type { Chunk, EmbeddedChunk, EmbeddingIndex, EmbeddingProvider } from './types.js'
 
-const CACHE_DIR = path.join(process.cwd(), '.thally', 'embeddings')
+// Resolved per call, not at import time, so processes that chdir before
+// building (tests, CLIs invoked from another directory) hit the cache that
+// belongs to the site they are building.
+function cacheDir(): string {
+  return path.join(process.cwd(), '.thally', 'embeddings')
+}
+
+// Cache entries key on the page's raw body, so parser/chunker changes do NOT
+// change the key. Bump this whenever chunk *derivation* changes (parsing,
+// chunking, text extraction) so stale vectors are discarded — otherwise a
+// pipeline fix never reaches pages whose source didn't change.
+const CACHE_SCHEMA_VERSION = 2
 
 interface PageCacheEntry {
   hash: string
@@ -15,6 +26,7 @@ interface PageCacheEntry {
 }
 
 interface DiskCache {
+  version?: number
   provider: string
   dimensions: number
   pages: Record<string, PageCacheEntry>
@@ -22,7 +34,7 @@ interface DiskCache {
 
 function cacheFile(providerId: string): string {
   const safe = providerId.replace(/[^a-z0-9._-]/gi, '_')
-  return path.join(CACHE_DIR, `${safe}.json`)
+  return path.join(cacheDir(), `${safe}.json`)
 }
 
 function contentHash(value: string): string {
@@ -40,7 +52,7 @@ function readDiskCache(providerId: string): DiskCache | null {
 
 function writeDiskCache(cache: DiskCache) {
   try {
-    fs.mkdirSync(CACHE_DIR, { recursive: true })
+    fs.mkdirSync(cacheDir(), { recursive: true })
     fs.writeFileSync(cacheFile(cache.provider), JSON.stringify(cache))
   } catch {
     // Read-only filesystem (e.g. some serverless runtimes) — in-memory index
@@ -92,9 +104,16 @@ export async function buildEmbeddingIndex(options: BuildOptions = {}): Promise<E
   const provider = options.provider ?? getEmbeddingProvider()
   const sources = options.sources ?? collectPageSources()
   const disk = options.noCache ? null : readDiskCache(provider.id)
-  const reusable = new Map<string, PageCacheEntry>(
-    disk && disk.provider === provider.id ? Object.entries(disk.pages) : [],
-  )
+  // Reuse only caches from the same provider, vector space, and chunk-derivation
+  // schema; anything else (including a malformed file) re-embeds from scratch.
+  const isReusable =
+    disk != null &&
+    disk.provider === provider.id &&
+    disk.dimensions === provider.dimensions &&
+    disk.version === CACHE_SCHEMA_VERSION &&
+    typeof disk.pages === 'object' &&
+    disk.pages != null
+  const reusable = new Map<string, PageCacheEntry>(isReusable ? Object.entries(disk.pages) : [])
 
   const nextPages: Record<string, PageCacheEntry> = {}
   const allChunks: Array<EmbeddedChunk> = []
@@ -138,7 +157,12 @@ export async function buildEmbeddingIndex(options: BuildOptions = {}): Promise<E
   }
 
   if (!options.noCache) {
-    writeDiskCache({ provider: provider.id, dimensions: provider.dimensions, pages: nextPages })
+    writeDiskCache({
+      version: CACHE_SCHEMA_VERSION,
+      provider: provider.id,
+      dimensions: provider.dimensions,
+      pages: nextPages,
+    })
   }
 
   return { ...index, ...{ reusedPages, embeddedPages: toEmbed.length } } as EmbeddingIndex & {

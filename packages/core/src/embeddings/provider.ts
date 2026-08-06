@@ -1,6 +1,21 @@
 import type { EmbeddingProvider, EmbeddingVector } from './types.js'
 
-const LOCAL_DIMENSIONS = 384
+// 384 dims caused frequent bucket collisions between unrelated words (e.g.
+// "work" and "component"), letting spurious matches outrank true ones. 4096
+// keeps vectors cheap while making collisions rare.
+const LOCAL_DIMENSIONS = 4096
+
+// English function words carry no retrieval signal but dominate short queries
+// ("How does navigation work?" is 3/4 stopwords). Dropping them from both
+// documents and queries keeps cosine scores about content words.
+const STOPWORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'can', 'do', 'does',
+  'for', 'from', 'has', 'have', 'how', 'if', 'in', 'into', 'is', 'it', 'its',
+  'my', 'no', 'not', 'of', 'on', 'or', 'our', 'so', 'than', 'that', 'the',
+  'their', 'them', 'then', 'there', 'these', 'they', 'this', 'to', 'was',
+  'we', 'were', 'what', 'when', 'where', 'which', 'who', 'why', 'will',
+  'with', 'you', 'your',
+])
 
 function fnv1a(input: string, seed = 0x811c9dc5): number {
   let hash = seed
@@ -14,7 +29,7 @@ function fnv1a(input: string, seed = 0x811c9dc5): number {
 function tokenize(text: string): Array<string> {
   const matches = text.toLowerCase().match(/[a-z0-9]+/g)
   if (!matches) return []
-  return matches.filter((token) => token.length >= 2)
+  return matches.filter((token) => token.length >= 2 && !STOPWORDS.has(token))
 }
 
 function l2normalize(vector: EmbeddingVector): EmbeddingVector {
@@ -41,7 +56,9 @@ export function embedLocal(text: string, dimensions = LOCAL_DIMENSIONS): Embeddi
 }
 
 export const localHashProvider: EmbeddingProvider = {
-  id: 'local-hash-v1',
+  // v2: 4096 dims + stopword filtering. The id doubles as the embedding-cache
+  // key, so bumping it discards vectors from the incompatible v1 space.
+  id: 'local-hash-v2',
   dimensions: LOCAL_DIMENSIONS,
   async embed(texts) {
     return texts.map((text) => embedLocal(text, LOCAL_DIMENSIONS))

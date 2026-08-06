@@ -99,6 +99,25 @@ function appendText(state: WalkState, value: string) {
   state.sectionTextParts.push(value)
 }
 
+// JSX attributes that carry reader-visible prose (Card/Step/Tab titles, Frame
+// captions, Update labels, image alt text, …). mdast text extraction only sees
+// element *children*, so without lifting these attributes the sole mention of
+// a topic can vanish from search and AI retrieval — e.g. a page whose only
+// "navigation" text is <Card title="Shape the navigation">.
+const PROSE_JSX_ATTRIBUTES = new Set(['title', 'description', 'label', 'caption', 'alt', 'tip', 'subtitle', 'summary'])
+
+function jsxProseAttributes(node: RootContent): Array<string> {
+  if (node.type !== 'mdxJsxFlowElement' && node.type !== 'mdxJsxTextElement') return []
+  const values: Array<string> = []
+  for (const attribute of node.attributes) {
+    if (attribute.type !== 'mdxJsxAttribute') continue
+    if (!PROSE_JSX_ATTRIBUTES.has(attribute.name)) continue
+    // Only literal strings — expression values are code, not prose.
+    if (typeof attribute.value === 'string' && attribute.value.trim()) values.push(attribute.value.trim())
+  }
+  return values
+}
+
 function walk(state: WalkState, nodes: Array<RootContent>) {
   for (const node of nodes) {
     if (node.type === 'heading') {
@@ -118,6 +137,12 @@ function walk(state: WalkState, nodes: Array<RootContent>) {
       continue
     }
     if ('children' in node && Array.isArray(node.children)) {
+      // Surface prose attributes ahead of the element's children so a card
+      // title reads before its body, the same order a reader sees.
+      for (const value of jsxProseAttributes(node)) {
+        appendText(state, value)
+        if (node.type === 'mdxJsxFlowElement') appendText(state, '\n')
+      }
       walk(state, node.children as Array<RootContent>)
       if (BLOCK_TYPES.has(node.type)) appendText(state, '\n')
     }
