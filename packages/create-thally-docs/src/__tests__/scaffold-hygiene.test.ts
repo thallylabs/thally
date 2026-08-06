@@ -134,19 +134,21 @@ describe('stable starter release', () => {
     expect(STABLE_SCAFFOLD_RELEASE.source.treeSha).toBeTruthy()
     expect(STABLE_SCAFFOLD_RELEASE.starterVersion).toBe(2)
     expect(isStableScaffoldRelease(structuredClone(STABLE_SCAFFOLD_RELEASE))).toBe(true)
-    expect(SUPPORTED_SCAFFOLD_RELEASES.map(({ starterVersion }) => starterVersion)).toEqual([
-      2,
-      2,
-      2,
-      1,
-    ])
-    expect(SUPPORTED_SCAFFOLD_RELEASES[1]?.source.commitSha).toBe(
-      '9d281a7c209fa3ee187e325f87e72e7ad816f191',
+    // The retained chain grows by one v2 record per promotion, so assert its
+    // invariants instead of a literal snapshot: the stable record leads,
+    // versions never increase along the update-base chain, and the frozen v1
+    // base anchors the tail so v1 sites can always compute a three-way update.
+    expect(SUPPORTED_SCAFFOLD_RELEASES[0]).toEqual(STABLE_SCAFFOLD_RELEASE)
+    const chainVersions = SUPPORTED_SCAFFOLD_RELEASES.map(
+      ({ starterVersion }) => starterVersion,
     )
-    expect(SUPPORTED_SCAFFOLD_RELEASES[2]?.source.commitSha).toBe(
-      '04438581a402d02e9f4308ff047c4c4a48d8169f',
-    )
-    expect(SUPPORTED_SCAFFOLD_RELEASES[3]?.source.commitSha).toBe(
+    for (let index = 1; index < chainVersions.length; index += 1) {
+      expect(chainVersions[index]).toBeLessThanOrEqual(chainVersions[index - 1])
+    }
+    const chainIds = SUPPORTED_SCAFFOLD_RELEASES.map(({ id }) => id)
+    expect(new Set(chainIds).size).toBe(chainIds.length)
+    expect(SUPPORTED_SCAFFOLD_RELEASES.at(-1)?.starterVersion).toBe(1)
+    expect(SUPPORTED_SCAFFOLD_RELEASES.at(-1)?.source.commitSha).toBe(
       'd5fef9167ea81f12a861deec5515a78a0f756781',
     )
   })
