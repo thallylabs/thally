@@ -137,12 +137,16 @@ describe('stable starter release', () => {
     expect(SUPPORTED_SCAFFOLD_RELEASES.map(({ starterVersion }) => starterVersion)).toEqual([
       2,
       2,
+      2,
       1,
     ])
     expect(SUPPORTED_SCAFFOLD_RELEASES[1]?.source.commitSha).toBe(
-      '04438581a402d02e9f4308ff047c4c4a48d8169f',
+      '9d281a7c209fa3ee187e325f87e72e7ad816f191',
     )
     expect(SUPPORTED_SCAFFOLD_RELEASES[2]?.source.commitSha).toBe(
+      '04438581a402d02e9f4308ff047c4c4a48d8169f',
+    )
+    expect(SUPPORTED_SCAFFOLD_RELEASES[3]?.source.commitSha).toBe(
       'd5fef9167ea81f12a861deec5515a78a0f756781',
     )
   })

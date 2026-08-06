@@ -55,13 +55,13 @@ describe('thally starter update', () => {
     const mcpPackage = readPackage('mcp')
     const cliPackage = readPackage('cli')
 
-    expect(createPackage.version).toBe('0.10.2')
-    expect(mcpPackage.version).toBe('0.10.2')
-    expect(mcpPackage.dependencies?.['create-thally-docs']).toBe('0.10.2')
-    expect(cliPackage.version).toBe('0.8.2')
+    expect(createPackage.version).toBe('0.10.3')
+    expect(mcpPackage.version).toBe('0.10.3')
+    expect(mcpPackage.dependencies?.['create-thally-docs']).toBe('0.10.3')
+    expect(cliPackage.version).toBe('0.8.3')
     expect(cliPackage.dependencies).toMatchObject({
-      '@thallylabs/mcp': '0.10.2',
-      'create-thally-docs': '0.10.2',
+      '@thallylabs/mcp': '0.10.3',
+      'create-thally-docs': '0.10.3',
     })
   })
 
