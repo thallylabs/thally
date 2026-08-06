@@ -13,7 +13,7 @@ export function DocHeader({ doc, eyebrow }: DocHeaderProps) {
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
           {eyebrow ? (
-            <p className="thally-docs-eyebrow mb-3 text-[0.8125rem] font-medium uppercase tracking-[0.08em] text-accent">
+            <p className="thally-docs-eyebrow mt-2 mb-3 text-sm font-bold text-accent">
               {eyebrow}
             </p>
           ) : null}
