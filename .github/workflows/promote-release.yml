@@ -72,6 +72,16 @@ jobs:
           for pkg in create-thally-docs mcp cli; do
             (cd "packages/$pkg" && npm version patch --no-git-tag-version)
           done
+          # Keep the exact inter-package dependency chain in lockstep and
+          # regenerate the lockfile, or `npm ci` fails on the record branch:
+          # the workspace packages pin each other by exact version.
+          create_version=$(node -p "require('./packages/create-thally-docs/package.json').version")
+          mcp_version=$(node -p "require('./packages/mcp/package.json').version")
+          (cd packages/mcp && npm pkg set "dependencies.create-thally-docs=${create_version}")
+          (cd packages/cli && npm pkg set \
+            "dependencies.create-thally-docs=${create_version}" \
+            "dependencies.@thallylabs/mcp=${mcp_version}")
+          npm install --package-lock-only --no-audit --no-fund
 
       - name: Open the release-record PR
         env:
@@ -88,6 +98,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
           git add \
+            package-lock.json \
             packages/create-thally-docs/src/stable-scaffold-release.json \
             packages/create-thally-docs/src/previous-scaffold-releases.json \
             packages/create-thally-docs/package.json \

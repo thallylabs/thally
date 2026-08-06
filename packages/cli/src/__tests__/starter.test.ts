@@ -55,13 +55,20 @@ describe('thally starter update', () => {
     const mcpPackage = readPackage('mcp')
     const cliPackage = readPackage('cli')
 
-    expect(createPackage.version).toBe('0.10.3')
-    expect(mcpPackage.version).toBe('0.10.3')
-    expect(mcpPackage.dependencies?.['create-thally-docs']).toBe('0.10.3')
-    expect(cliPackage.version).toBe('0.8.3')
+    // Assert the lockstep chain relationally rather than by literal version:
+    // the promote-release workflow patch-bumps all three packages and must
+    // never need a test edit to stay green. Exact-pin format still matters —
+    // a semver range here would let a stale published dependency satisfy it.
+    const exactVersion = /^\d+\.\d+\.\d+$/
+    expect(createPackage.version).toMatch(exactVersion)
+    expect(mcpPackage.version).toMatch(exactVersion)
+    expect(cliPackage.version).toMatch(exactVersion)
+    expect(mcpPackage.dependencies?.['create-thally-docs']).toBe(
+      createPackage.version,
+    )
     expect(cliPackage.dependencies).toMatchObject({
-      '@thallylabs/mcp': '0.10.3',
-      'create-thally-docs': '0.10.3',
+      '@thallylabs/mcp': mcpPackage.version,
+      'create-thally-docs': createPackage.version,
     })
   })
 
