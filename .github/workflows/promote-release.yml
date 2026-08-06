@@ -10,7 +10,10 @@
 # baseline rebuild + scaffold:promote remain explicit operator steps.
 #
 # Requires the repository setting "Allow GitHub Actions to create and approve
-# pull requests"; no secret beyond the workflow's own GITHUB_TOKEN is used.
+# pull requests". Where org policy forbids GITHUB_TOKEN from creating pull
+# requests (this org's enterprise setting does), define a RELEASE_PR_TOKEN
+# repository secret — a fine-grained PAT limited to this repository with
+# Contents and Pull requests read/write — and the PR step uses it instead.
 
 name: Promote release
 
@@ -72,7 +75,9 @@ jobs:
 
       - name: Open the release-record PR
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Org policy blocks github.token from opening PRs; prefer the scoped
+          # secret and keep the ambient token as a fallback for forks/tests.
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || github.token }}
           RELEASE_ID: ${{ steps.record.outputs.release_id }}
           STARTER_SHA: ${{ steps.record.outputs.starter_sha }}
           RUNTIME_SHA: ${{ steps.record.outputs.runtime_sha }}
