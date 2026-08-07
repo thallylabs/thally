@@ -284,5 +284,8 @@
       "tab": "Changelog",
       "href": "/changelog"
     }
-  ]
+  ],
+  "markdown": {
+    "enabled": true
+  }
 }

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
-import { useSiteName } from './use-site-name'
+import { displaySiteName, useSiteName } from './use-site-name'
 
 // Stable no-op subscribe for the hydration gate below.
 const emptySubscribe = () => () => {}
@@ -62,7 +62,7 @@ export function Logo({ className, showText = true }: LogoProps) {
             className="shrink-0"
           />
           {showText ? (
-            <span className="font-heading text-lg font-semibold tracking-tight text-foreground">{siteName}</span>
+            <span className="font-heading text-lg font-semibold tracking-tight text-foreground">{displaySiteName(siteName)}</span>
           ) : null}
         </>
       ) : null}
