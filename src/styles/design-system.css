@@ -701,6 +701,7 @@
   top: 0;
   align-self: flex-start;
   height: 100vh;
+  height: 100dvh; /* avoids footer clipping under mobile browser chrome */
   flex-shrink: 0;
   width: 260px;
   display: flex;
@@ -713,6 +714,7 @@
 
 /* Workspace switcher — the brand block at the rail head */
 .thally-dashboard .ds-sidebar-head {
+  flex-shrink: 0; /* never compress — head is a fixed-height anchor */
   display: flex;
   align-items: center;
   gap: var(--ds-space-8);
@@ -851,8 +853,10 @@
 .thally-dashboard .ds-nav-item[aria-current='page'] > svg { color: var(--ds-accent-mid); }
 
 .thally-dashboard .ds-sidebar-foot {
+  flex-shrink: 0; /* never compress — foot is a fixed-height anchor */
   border-top: 1px solid var(--ds-border);
   padding: var(--ds-space-8) var(--ds-space-12) var(--ds-space-12);
+  padding-bottom: calc(var(--ds-space-12) + env(safe-area-inset-bottom, 0px));
 }
 .thally-dashboard .ds-sidebar-actions {
   display: flex;

@@ -209,11 +209,25 @@ export function AgentReadinessPanel() {
           </div>
         </div>
       ) : error ? (
-        <div className="flex items-center justify-between gap-3 p-4 rounded-lg border border-red-500/20 bg-red-500/5">
-          <p style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-danger)' }}>{error}</p>
+        <div
+          className="flex items-center justify-between gap-3 p-4 rounded-lg"
+          style={{
+            border: '1px solid var(--ds-warn-border)',
+            background: 'var(--ds-warn-bg)',
+          }}
+          role="alert"
+        >
+          <p style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-warn)' }}>{error}</p>
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={() => {
+              setError(null)
+              setLoading(true)
+              fetch('/api/agent-readiness')
+                .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+                .then((data) => { setReport(data as ReadinessResponse); setLoading(false) })
+                .catch(() => { setError('Unable to load the Agent Readiness Score.'); setLoading(false) })
+            }}
             className="ds-btn ds-btn--secondary ds-btn--sm ds-focusable shrink-0"
           >
             Retry
