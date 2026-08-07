@@ -8,9 +8,11 @@ import {
 } from '@/lib/markdown-pages'
 
 describe('Markdown page URLs', () => {
-  it('is disabled by default in the repository scaffold', () => {
-    expect(isRepositoryMarkdownPagesEnabled()).toBe(false)
-    expect(isMarkdownPagesEnabled()).toBe(false)
+  // Markdown mirrors are part of the agent-native default surface: the Copy
+  // page menu, AI handoffs, and llms-oriented consumers all read them.
+  it('is enabled by default in the repository scaffold', () => {
+    expect(isRepositoryMarkdownPagesEnabled()).toBe(true)
+    expect(isMarkdownPagesEnabled()).toBe(true)
   })
 
   it('lets an explicit Cloud setting override the repository default', () => {

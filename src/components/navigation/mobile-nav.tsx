@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { typography } from '@/config/layout'
 import { cn } from '@/lib/utils'
 import { Logo } from '@/components/layout/logo'
-import { useSiteName } from '@/components/layout/use-site-name'
+import { displaySiteName, useSiteName } from '@/components/layout/use-site-name'
 import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
 
 interface MobileNavProps {
@@ -36,7 +36,7 @@ export function MobileNav({ sections }: MobileNavProps) {
           <div className="flex shrink-0 items-center justify-between border-b border-border/50 px-4 py-4">
             <div className="flex items-center gap-2">
               <Logo showText={false} />
-              <span className="text-base font-semibold">{siteName}</span>
+              <span className="text-base font-semibold">{displaySiteName(siteName)}</span>
             </div>
             <Dialog.Close className="rounded-full border border-border p-1.5 transition hover:bg-muted/50">
               <span className="sr-only">Close</span>

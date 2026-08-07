@@ -62,14 +62,16 @@ describe('GET /api/markdown/[...slug]', () => {
     expect(mocks.read).not.toHaveBeenCalled()
   })
 
-  it('defaults to 404 when Cloud has no setting and the repository has not opted in', async () => {
+  it('serves markdown when Cloud has no setting, following the repository default', async () => {
     mocks.getCloudSiteConfig.mockResolvedValue(null)
 
     const response = await GET(request('/api/markdown/guide'), {
       params: Promise.resolve({ slug: ['guide'] }),
     })
 
-    expect(response.status).toBe(404)
-    expect(mocks.read).not.toHaveBeenCalled()
+    // The scaffold enables `.md` mirrors by default; sites opt out through
+    // docs.json or the Cloud portable override (covered above).
+    expect(response.status).toBe(200)
+    expect(mocks.read).toHaveBeenCalledWith('src/content/guide.mdx')
   })
 })

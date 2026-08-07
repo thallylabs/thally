@@ -40,3 +40,14 @@ export function SiteNameProvider({ children, initialName }: SiteNameProviderProp
 export function useSiteName(): string {
   return useContext(SiteNameContext) ?? siteConfig.name
 }
+
+/**
+ * Site name shaped for brand surfaces: leading capital regardless of how the
+ * site was created ("sina" → "Sina"). Display-only — configuration, slugs,
+ * and metadata keep the owner's original casing.
+ */
+export function displaySiteName(name: string): string {
+  const trimmed = name.trim()
+  if (!trimmed) return trimmed
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
+}

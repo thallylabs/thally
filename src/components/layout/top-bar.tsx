@@ -13,7 +13,7 @@ import { shell } from '@/config/layout'
 import { cn } from '@/lib/utils'
 import type { SiteLink } from '@/data/site'
 import { Logo } from '@/components/layout/logo'
-import { useSiteName } from '@/components/layout/use-site-name'
+import { displaySiteName, useSiteName } from '@/components/layout/use-site-name'
 import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
 
 function matchesPath(targetHref: string, pathname: string) {
@@ -81,9 +81,16 @@ export function TopBar({
     <header className="thally-docs-topbar sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-xl">
       <div className={cn('thally-docs-topbar-inner flex h-12 items-center gap-3', shell.topbar)}>
         <MobileNav sections={activeSections} />
-        <IntentPrefetchLink href="/" className="thally-docs-brand flex shrink-0 items-center gap-2 text-foreground">
+        {/* The brand block needs clear separation from the section tabs or
+            "Docs" reads as the first tab; mr-5 marks where the brand ends. */}
+        <IntentPrefetchLink
+          href="/"
+          className="thally-docs-brand mr-5 flex shrink-0 items-center gap-2 text-foreground"
+        >
           <Logo showText={false} className="shrink-0" />
-          <span className="font-heading text-[1rem] font-bold tracking-[-0.015em]">{siteName}</span>
+          <span className="font-heading text-[1rem] font-bold tracking-[-0.015em]">
+            {displaySiteName(siteName)}
+          </span>
           <span className="-ml-1 font-heading text-[1rem] font-medium text-foreground/55">Docs</span>
         </IntentPrefetchLink>
         <nav className="thally-docs-tabs flex h-full items-center gap-[17px]" aria-label="Documentation sections">

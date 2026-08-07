@@ -39,9 +39,11 @@ const HANDOFFS: Array<HandoffItem> = [
   },
 ]
 
+type CopyState = 'idle' | 'copied' | 'failed'
+
 export function CopyPageButton() {
   const pathname = usePathname()
-  const [copied, setCopied] = useState(false)
+  const [copyState, setCopyState] = useState<CopyState>('idle')
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -62,16 +64,26 @@ export function CopyPageButton() {
   }, [open])
 
   async function handleCopy() {
+    // Never fail silently: a button that does nothing reads as broken. The
+    // `.md` mirror can be disabled per site, so fall back to the rendered
+    // article text before reporting failure.
     try {
       const res = await fetch(markdownPath(pathname))
-      if (!res.ok) return
-      const text = await res.text()
+      let text: string | null = null
+      if (res.ok) {
+        text = await res.text()
+      } else {
+        const article = document.querySelector('article')
+        text = article?.innerText ?? null
+      }
+      if (!text) throw new Error('no page content available')
       await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      setCopyState('copied')
     } catch {
-      // clipboard unavailable (e.g. non-secure context) — fail silently
+      // clipboard unavailable (e.g. non-secure context) or nothing to copy
+      setCopyState('failed')
     }
+    setTimeout(() => setCopyState('idle'), 2000)
   }
 
   function absoluteMdUrl(): string {
@@ -93,8 +105,12 @@ export function CopyPageButton() {
         className="gap-1.5 rounded-r-none pr-2 text-xs text-muted-foreground hover:text-foreground"
         aria-label="Copy page as markdown"
       >
-        {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-        {copied ? 'Copied!' : 'Copy page'}
+        {copyState === 'copied' ? (
+          <Check className="h-3.5 w-3.5 text-green-500" />
+        ) : (
+          <Copy className="h-3.5 w-3.5" />
+        )}
+        {copyState === 'copied' ? 'Copied!' : copyState === 'failed' ? "Couldn't copy" : 'Copy page'}
       </Button>
       <Button
         variant="ghost"
