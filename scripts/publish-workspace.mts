@@ -22,6 +22,7 @@ interface PackResult {
 }
 
 const allowedWorkspaces = new Set([
+  'packages/core',
   'packages/create-thally-docs',
   'packages/mcp',
   'packages/cli',
