@@ -1,9 +1,22 @@
+# Requires THALLY_CLOUD_RELEASE_TOKEN: a fine-grained token selected only for
+# thallylabs/thally-cloud with Contents: write. Store it as a repository secret
+# here; it is referenced only by the post-publication handoff job.
+
 name: Publish packages
 
 on:
+  # The release-record PR remains the human review gate. Its merge starts the
+  # package-first tail automatically; manual dispatch remains an idempotent
+  # recovery path for an interrupted publish or handoff.
+  push:
+    branches: [main]
+    paths:
+      - packages/create-thally-docs/src/stable-scaffold-release.json
   workflow_dispatch:
 
-# No registry token or repository secret is permitted in this workflow.
+# No long-lived npm registry token is permitted in this workflow. npm uses an
+# environment-bound OIDC identity. The cloud handoff gets a separate,
+# repository-scoped token only after every registry verification has passed.
 permissions:
   contents: read
 
@@ -66,3 +79,62 @@ jobs:
           npx tsx scripts/publish-workspace.mts packages/create-thally-docs --verify-only
           npx tsx scripts/publish-workspace.mts packages/mcp --verify-only
           npx tsx scripts/publish-workspace.mts packages/cli --verify-only
+
+  handoff:
+    name: Dispatch immutable record to Thally Cloud
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the published record
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Validate and prepare the immutable locator
+        id: release
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: node .github/scripts/prepare-release-handoff.mjs
+
+      - name: Dispatch the cloud release tail
+        env:
+          # Fine-grained token limited to thallylabs/thally-cloud with only
+          # Contents: write, the permission required by repository_dispatch.
+          GH_TOKEN: ${{ secrets.THALLY_CLOUD_RELEASE_TOKEN }}
+          SCHEMA_VERSION: ${{ steps.release.outputs.schema_version }}
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+          RECORD_REPOSITORY: ${{ steps.release.outputs.record_repository }}
+          RECORD_COMMIT_SHA: ${{ steps.release.outputs.record_commit_sha }}
+          RECORD_PATH: ${{ steps.release.outputs.record_path }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::THALLY_CLOUD_RELEASE_TOKEN is not configured"
+            exit 1
+          fi
+          jq -n \
+            --argjson schema_version "$SCHEMA_VERSION" \
+            --arg release_id "$RELEASE_ID" \
+            --arg record_repository "$RECORD_REPOSITORY" \
+            --arg record_commit_sha "$RECORD_COMMIT_SHA" \
+            --arg record_path "$RECORD_PATH" \
+            '{
+              event_type: "scaffold-release-published",
+              client_payload: {
+                schema_version: $schema_version,
+                release_id: $release_id,
+                record_repository: $record_repository,
+                record_commit_sha: $record_commit_sha,
+                record_path: $record_path
+              }
+            }' | gh api \
+              --method POST \
+              repos/thallylabs/thally-cloud/dispatches \
+              --input -
