@@ -91,7 +91,7 @@ export function HomeView({ siteName }: { siteName: string }) {
             <div>
               <div className="ds-eyebrow">Agent readiness</div>
               <div className="ds-panel-title" style={{ margin: 0 }}>
-                How agent-ready are your docs?
+                Complete your agent readiness setup
               </div>
             </div>
             <ChevronRight
