@@ -46,6 +46,11 @@ jobs:
       - name: Test
         run: npm test
 
+      # core ships the shared content pipeline the other packages and every
+      # scaffolded site build against, so it publishes first.
+      - name: Publish core
+        run: npx tsx scripts/publish-workspace.mts packages/core
+
       - name: Publish create-thally-docs
         run: npx tsx scripts/publish-workspace.mts packages/create-thally-docs
 
@@ -57,6 +62,7 @@ jobs:
 
       - name: Verify registry releases
         run: |
+          npx tsx scripts/publish-workspace.mts packages/core --verify-only
           npx tsx scripts/publish-workspace.mts packages/create-thally-docs --verify-only
           npx tsx scripts/publish-workspace.mts packages/mcp --verify-only
           npx tsx scripts/publish-workspace.mts packages/cli --verify-only
