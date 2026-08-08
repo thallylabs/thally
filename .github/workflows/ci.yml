@@ -32,6 +32,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Test release handoff boundary
+        run: node --test .github/scripts/*.test.mjs
+
       - name: Build and enforce managed Worker size
         run: npm run build:cloudflare
         env:

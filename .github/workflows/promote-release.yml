@@ -5,9 +5,9 @@
 # runtime pin actually matches the runtime commit being promoted, and opens a
 # reviewable PR carrying the new stable-scaffold-release.json, the retained
 # previous record, and the three package patch bumps. It deliberately merges
-# nothing and publishes nothing: npm publish stays in publish-packages.yml
-# (dispatched manually after this PR merges), and the thally-cloud vendoring +
-# baseline rebuild + scaffold:promote remain explicit operator steps.
+# nothing and publishes nothing. Merging the reviewed record into protected
+# main starts publish-packages.yml; only after npm verification succeeds does
+# that workflow hand the immutable record locator to Thally Cloud.
 #
 # Requires the repository setting "Allow GitHub Actions to create and approve
 # pull requests". Where org policy forbids GITHUB_TOKEN from creating pull
@@ -127,17 +127,17 @@ jobs:
           \`starter-release.json\` runtime pin was verified against the runtime
           commit above before this record was written.
 
-          ## Remaining manual steps (in order)
+          ## Release gate and automated tail
 
-          1. Merge this PR.
-          2. Dispatch the **Publish packages** workflow (\`publish-packages.yml\`)
-             on \`main\` to publish the three bumped packages to npm.
-          3. Merge the \`thally-cloud\` vendoring PR for this record (the builder
-             image deploys on that merge).
-          4. Rebuild the baseline site ("Publish again"), then run
-             \`npm run scaffold:promote -- <managed release id>\`.
+          Merge this PR after review. The merge is the human release gate and
+          automatically starts **Publish packages** on protected \`main\`. That
+          workflow tests, publishes, verifies every registry artifact, then
+          dispatches this immutable record locator to \`thally-cloud\` for its
+          baseline rebuild, probe, and promotion gates.
 
-          Nothing is auto-merged or auto-published by this workflow.
+          This workflow never auto-merges the reviewable release record. A
+          manual **Publish packages** dispatch remains available as an
+          idempotent recovery path if the automated tail is interrupted.
           EOF
 
           gh pr create \
