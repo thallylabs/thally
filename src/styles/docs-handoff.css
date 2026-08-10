@@ -90,12 +90,12 @@ body {
 }
 
 .thally-docs-search {
-  width: 180px;
+  width: 280px;
 }
 
 .thally-docs-search > button:first-of-type {
   height: 30px;
-  width: 180px;
+  width: 280px;
   gap: 8px;
   border-color: hsl(var(--thally-foreground) / 0.16);
   border-radius: 9px;
@@ -117,6 +117,11 @@ body {
   width: 30px;
   height: 30px;
   border-radius: 9px;
+}
+
+.thally-docs-topbar-inner[data-density='compact'] .thally-docs-search,
+.thally-docs-topbar-inner[data-density='compact'] .thally-docs-search > button:first-of-type {
+  width: 180px;
 }
 
 .thally-docs-actions [aria-label='Toggle theme'],
@@ -391,12 +396,18 @@ a[target='_blank']:hover > .thally-docs-card::after {
 @media (max-width: 1240px) {
   .thally-docs-search,
   .thally-docs-search > button:first-of-type {
+    width: 220px;
+  }
+
+  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search,
+  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search > button:first-of-type {
     width: 150px;
   }
 }
 
 @media (max-width: 1120px) {
-  .thally-docs-search {
+  .thally-docs-search,
+  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search {
     width: 30px;
   }
 
@@ -415,8 +426,10 @@ a[target='_blank']:hover > .thally-docs-card::after {
   }
 
   .thally-docs-search,
-  .thally-docs-search > button:first-of-type {
-    width: 180px;
+  .thally-docs-search > button:first-of-type,
+  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search,
+  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search > button:first-of-type {
+    width: 240px;
   }
 
   .thally-docs-search > button:first-of-type {
@@ -446,7 +459,8 @@ a[target='_blank']:hover > .thally-docs-card::after {
     display: none;
   }
 
-  .thally-docs-search {
+  .thally-docs-search,
+  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search {
     width: 30px;
   }
 

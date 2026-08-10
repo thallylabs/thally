@@ -18,6 +18,7 @@ interface DocsChatLoaderProps {
 interface ChatStatus {
   show: boolean
   label?: string
+  icon?: string
 }
 
 /**
@@ -42,7 +43,7 @@ export function DocsChatLoader({ label, icon }: DocsChatLoaderProps) {
   return (
     <LazyDocsChat
       label={status.label ?? label}
-      icon={icon}
+      icon={status.icon ?? icon}
       skipStatusCheck
     />
   )

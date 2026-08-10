@@ -167,4 +167,38 @@ describe('documentation visual system', () => {
     expect(markup).toContain('aria-current="page"')
     expect(markup).toContain('bg-muted/70')
   })
+
+  it('keeps the standard navbar spacious and reserves compaction for dense navigation', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const [topBar, css, layout, shell, sidebar] = await Promise.all([
+      readFile('src/components/layout/top-bar.tsx', 'utf8'),
+      readFile('src/styles/docs-handoff.css', 'utf8'),
+      readFile('src/config/layout.ts', 'utf8'),
+      readFile('src/components/layout/site-shell.tsx', 'utf8'),
+      readFile('src/components/navigation/sidebar.tsx', 'utf8'),
+    ])
+
+    expect(topBar).toContain("data-density={isCrowded ? 'compact' : 'comfortable'}")
+    expect(topBar).toContain("className={cn('thally-docs-topbar-inner flex h-14")
+    expect(css).toMatch(/\.thally-docs-search \{\s*width: 280px;/)
+    expect(css).toContain("[data-density='compact'] .thally-docs-search")
+    expect(layout).toContain("topbarHeight: 'h-14'")
+    expect(shell).toContain('calc(100dvh-56px)')
+    expect(sidebar).toContain('sticky top-14')
+  })
+
+  it('keeps the page interactive while chat is docked and accepts the live Cloud icon', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const [chat, loader, statusRoute] = await Promise.all([
+      readFile('src/components/docs/docs-chat.tsx', 'utf8'),
+      readFile('src/components/docs/docs-chat-loader.tsx', 'utf8'),
+      readFile('src/app/api/chat-status/route.ts', 'utf8'),
+    ])
+
+    expect(chat).not.toContain("root.style.overflow = 'hidden'")
+    expect(chat).not.toContain('document.body.style.paddingRight')
+    expect(loader).toContain('icon={status.icon ?? icon}')
+    expect(statusRoute).toContain("/^\\/[A-Za-z0-9._/-]+$/")
+    expect(statusRoute).toContain('{ show, label, disclaimer, icon }')
+  })
 })

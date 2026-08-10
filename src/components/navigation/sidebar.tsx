@@ -39,7 +39,7 @@ export function Sidebar({ sections, title, className }: SidebarProps) {
     >
       {/* Stay in the shell's flow so optional site banners reserve their own
           space above the brand, then pin the navigation once they scroll away. */}
-      <div className={cn('sticky top-12 flex h-[calc(100dvh-48px)] flex-col', layout.sidebarWidth, layout.sidebarPadding)}>
+      <div className={cn('sticky top-14 flex h-[calc(100dvh-56px)] flex-col', layout.sidebarWidth, layout.sidebarPadding)}>
         <div className="shrink-0 px-1 pt-1">
           <p className="line-clamp-1 text-xs font-medium leading-4 text-foreground/45">{title}</p>
         </div>
