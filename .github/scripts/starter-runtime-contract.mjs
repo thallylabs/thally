@@ -57,6 +57,14 @@ export const FRAMEWORK_SYNC_ELIGIBLE = Object.freeze([
   "scripts/smoke-cloudflare.mts",
 ]);
 
+// These tests intentionally inspect the public monorepo and its independently
+// published packages. They remain in `thally`; the standalone starter cannot
+// execute them because it has no `packages/` workspace.
+const SOURCE_ONLY_PATHS = new Set([
+  "src/lib/__tests__/frontmatter.test.ts",
+  "src/lib/__tests__/frontmatter-parity.test.ts",
+]);
+
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -216,6 +224,10 @@ function fileMode(filePath) {
   return statSync(filePath).mode & 0o111;
 }
 
+function isSourceOnlyPath(projectPath) {
+  return SOURCE_ONLY_PATHS.has(projectPath);
+}
+
 function comparePath(starterDirectory, runtimeDirectory, projectPath) {
   const starterPath = inside(starterDirectory, projectPath);
   const runtimePath = inside(runtimeDirectory, projectPath);
@@ -286,6 +298,12 @@ export function checkStarterRuntimeContract({
     runtimeRoot,
     manifest.ownership.frameworkSyncEligible,
   )) {
+    if (isSourceOnlyPath(projectPath)) {
+      if (existsSync(inside(starterRoot, projectPath))) {
+        differences.push(`${projectPath} is source-only but exists in starter`);
+      }
+      continue;
+    }
     differences.push(...comparePath(starterRoot, runtimeRoot, projectPath));
   }
   return { differences, identity };
@@ -313,11 +331,13 @@ export function syncStarterRuntimeContract({
     assertNoSymlinks(source, rule.projectPath);
     assertNoSymlinkAncestors(starterRoot, rule.projectPath);
     rmSync(destination, { force: true, recursive: true });
+    if (isSourceOnlyPath(rule.projectPath)) continue;
     if (!existsSync(source)) continue;
     const stats = lstatSync(source);
     if (stats.isDirectory()) {
       mkdirSync(destination, { recursive: true });
       for (const projectPath of listFiles(runtimeRoot, rule.projectPath)) {
+        if (isSourceOnlyPath(projectPath)) continue;
         const sourceFile = inside(runtimeRoot, projectPath);
         const destinationFile = inside(starterRoot, projectPath);
         mkdirSync(dirname(destinationFile), { recursive: true });
