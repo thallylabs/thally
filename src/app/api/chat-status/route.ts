@@ -30,7 +30,15 @@ export async function GET(request: NextRequest) {
     (cloudEnabled ?? settings.chatEnabled ?? Boolean(ai.chat))
   const label = settings.aiLabel ?? ai.label ?? 'Ask AI'
   const disclaimer = settings.aiDisclaimer ?? DEFAULT_AI_DISCLAIMER
-  const cloudIcon = cloudConfig?.siteConfig.portable.ai?.icon
+  // Managed builds roll forward through a protected stable-runtime overlay.
+  // During that window the prior CloudPortableConfig type knows only
+  // `enabled`, even though the signed JSON may already carry an icon. Widen at
+  // this compatibility seam so a new route can build against the prior stable
+  // type while the paired scaffold release is being promoted.
+  const cloudAi = cloudConfig?.siteConfig.portable.ai as
+    | { enabled?: boolean; icon?: unknown }
+    | undefined
+  const cloudIcon = cloudAi?.icon
   // Cloud uploads are committed to a same-origin public path. Do not reflect
   // arbitrary strings from portable configuration into an image source.
   const icon = typeof cloudIcon === 'string' && /^\/[A-Za-z0-9._/-]+$/.test(cloudIcon)
