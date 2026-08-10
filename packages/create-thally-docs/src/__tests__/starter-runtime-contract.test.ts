@@ -44,6 +44,11 @@ function createRuntime(): {
   const directory = temporaryDirectory("thally-runtime-contract");
   write(directory, "src/components/top-bar.tsx", "export const height = 56\n");
   write(directory, "src/lib/runtime.ts", "export const runtime = true\n");
+  write(
+    directory,
+    "src/lib/__tests__/frontmatter-parity.test.ts",
+    "import '../../../packages/core'\n",
+  );
   execFileSync("git", ["init", "-q"], { cwd: directory });
   execFileSync("git", ["add", "."], { cwd: directory });
   execFileSync(
@@ -79,6 +84,11 @@ function createStarter(
   const directory = temporaryDirectory("thally-starter-contract");
   write(directory, "src/components/top-bar.tsx", "export const height = 48\n");
   write(directory, "src/components/removed.tsx", "stale\n");
+  write(
+    directory,
+    "src/lib/__tests__/frontmatter-parity.test.ts",
+    "import '../../../packages/core'\n",
+  );
   write(
     directory,
     "starter-release.json",
@@ -129,6 +139,7 @@ describe("starter runtime contract", () => {
         "src/components/removed.tsx exists only in starter",
         "src/components/top-bar.tsx bytes differ",
         "src/lib/runtime.ts is missing from starter",
+        "src/lib/__tests__/frontmatter-parity.test.ts is source-only but exists in starter",
       ]),
     );
   });
@@ -154,6 +165,12 @@ describe("starter runtime contract", () => {
         "utf8",
       ),
     ).toBe("export const height = 56\n");
+    expect(() =>
+      readFileSync(
+        join(starterDirectory, "src/lib/__tests__/frontmatter-parity.test.ts"),
+        "utf8",
+      ),
+    ).toThrow();
     const manifest = JSON.parse(
       readFileSync(join(starterDirectory, "starter-release.json"), "utf8"),
     );

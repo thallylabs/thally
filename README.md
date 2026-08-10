@@ -58,8 +58,9 @@ Runtime and framework changes are authored only here. Before a scaffold
 release can be promoted, the dependency-free
 `.github/scripts/starter-runtime-contract.mjs` command synchronizes the exact
 runtime-owned paths into `thallylabs/starter` and CI proves byte-for-byte parity
-with the pinned runtime commit. Do not reproduce a runtime fix manually in the
-starter repository.
+with the pinned runtime commit. Source-repository-only test files stay here;
+the standalone starter is validated through its own CI and production build.
+Do not reproduce a runtime fix manually in the starter repository.
 
 The server starts at [http://localhost:3040](http://localhost:3040), or the next
 available port when 3040 is already in use.
