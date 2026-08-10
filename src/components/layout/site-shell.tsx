@@ -146,9 +146,9 @@ export function SiteShell({
           navbarConfig={navbarConfig ?? null}
           siteLinks={identity.links}
         />
-        <div className={`thally-docs-shell flex min-h-[calc(100dvh-48px)] w-full ${shell.wrapper}`}>
+        <div className={`thally-docs-shell flex min-h-[calc(100dvh-56px)] w-full ${shell.wrapper}`}>
           <Sidebar sections={activeCollection.sections} title={activeCollection.label} />
-          <div className="flex min-h-[calc(100dvh-48px)] w-full min-w-0 flex-1 flex-col">
+          <div className="flex min-h-[calc(100dvh-56px)] w-full min-w-0 flex-1 flex-col">
             <main id="main-content" className="thally-docs-main flex-1 py-[34px] pb-24">
               <PageContainer className={layout.pageGap}>{children}</PageContainer>
             </main>

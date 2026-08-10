@@ -76,10 +76,17 @@ export function TopBar({
   const primaryCta = navbarConfig?.primary
     ? { label: navbarConfig.primary.label, href: navbarConfig.primary.href }
     : siteConfigCta
+  const visibleLinkCount = navbarConfig?.links?.length ?? (supportLink ? 1 : 0)
+  // Preserve the generous default search affordance for typical documentation
+  // sites. Only dense, highly customized navbars opt into the compact layout.
+  const isCrowded = collections.length + visibleLinkCount + (primaryCta ? 1 : 0) >= 8
 
   return (
     <header className="thally-docs-topbar sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-xl">
-      <div className={cn('thally-docs-topbar-inner flex h-12 items-center gap-3', shell.topbar)}>
+      <div
+        className={cn('thally-docs-topbar-inner flex h-14 items-center gap-3', shell.topbar)}
+        data-density={isCrowded ? 'compact' : 'comfortable'}
+      >
         <MobileNav sections={activeSections} />
         {/* The brand block needs clear separation from the section tabs or
             "Docs" reads as the first tab; mr-5 marks where the brand ends. */}

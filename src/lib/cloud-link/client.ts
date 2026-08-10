@@ -52,7 +52,7 @@ export interface CloudPortableConfig {
     pageFeedback?: boolean
     agentFeedback?: boolean
   }
-  ai?: { enabled?: boolean }
+  ai?: { enabled?: boolean; icon?: string }
   branding?: {
     logo?: string
     logoDark?: string

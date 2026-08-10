@@ -201,23 +201,6 @@ export function DocsChat({
     }
   }, [input, loading, messages])
 
-  // Lock the page's scroll while the panel is open so its own scrollbar isn't
-  // shown next to the panel's (the "two scrollbars" issue). Pad by the scrollbar
-  // width so hiding it doesn't shift the docs content underneath.
-  useEffect(() => {
-    if (!open) return
-    const root = document.documentElement
-    const scrollbarWidth = window.innerWidth - root.clientWidth
-    const prevOverflow = root.style.overflow
-    const prevPad = document.body.style.paddingRight
-    root.style.overflow = 'hidden'
-    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`
-    return () => {
-      root.style.overflow = prevOverflow
-      document.body.style.paddingRight = prevPad
-    }
-  }, [open])
-
   if (!chatShown) return null
 
   return (

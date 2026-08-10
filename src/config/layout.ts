@@ -6,7 +6,7 @@ export const layout = {
   columnGap: 'gap-12',
   shellPadding: 'px-5 sm:px-[26px]',
   shellWidth: 'max-w-[1320px]',
-  topbarHeight: 'h-12',
+  topbarHeight: 'h-14',
   sidebarWidth: 'w-[216px]',
   sidebarPadding: 'pr-5 py-[30px]',
   sidebarGap: 'gap-7',

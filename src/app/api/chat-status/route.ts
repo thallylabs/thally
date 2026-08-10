@@ -30,5 +30,11 @@ export async function GET(request: NextRequest) {
     (cloudEnabled ?? settings.chatEnabled ?? Boolean(ai.chat))
   const label = settings.aiLabel ?? ai.label ?? 'Ask AI'
   const disclaimer = settings.aiDisclaimer ?? DEFAULT_AI_DISCLAIMER
-  return NextResponse.json({ show, label, disclaimer }, { headers: { 'Cache-Control': 'no-store' } })
+  const cloudIcon = cloudConfig?.siteConfig.portable.ai?.icon
+  // Cloud uploads are committed to a same-origin public path. Do not reflect
+  // arbitrary strings from portable configuration into an image source.
+  const icon = typeof cloudIcon === 'string' && /^\/[A-Za-z0-9._/-]+$/.test(cloudIcon)
+    ? cloudIcon
+    : ai.icon
+  return NextResponse.json({ show, label, disclaimer, icon }, { headers: { 'Cache-Control': 'no-store' } })
 }
