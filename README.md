@@ -38,14 +38,28 @@ npm install
 npm run dev
 ```
 
-Or use the repo directly:
+Or clone the dedicated starter directly:
 
 ```bash
-npx degit thallylabs/thally my-docs
+npx degit thallylabs/starter my-docs
 cd my-docs
 npm install
 npm run dev
 ```
+
+`thallylabs/starter` is the complete site template used by the CLI, MCP, and
+Thally Cloud. This repository is the single authored source for the public
+runtime and toolchain; starter's runtime-owned files are a generated snapshot,
+not a second implementation surface.
+
+### Maintainer release boundary
+
+Runtime and framework changes are authored only here. Before a scaffold
+release can be promoted, the dependency-free
+`.github/scripts/starter-runtime-contract.mjs` command synchronizes the exact
+runtime-owned paths into `thallylabs/starter` and CI proves byte-for-byte parity
+with the pinned runtime commit. Do not reproduce a runtime fix manually in the
+starter repository.
 
 The server starts at [http://localhost:3040](http://localhost:3040), or the next
 available port when 3040 is already in use.
