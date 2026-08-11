@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { getDocEntries, getSidebarCollections } from '@/data/docs'
+import { loadSidebarCollections, loadDocEntries } from '@/data/docs'
 import { getContentSource } from '@/lib/content-source'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { resolveRequestSiteConfig } from '@/lib/site-config'
@@ -34,8 +34,8 @@ export async function GET(request: Request) {
   const effectiveSite = await resolveRequestSiteConfig()
   const baseUrl = new URL(request.url).origin
 
-  const entries = getDocEntries()
-  const collections = getSidebarCollections()
+  const entries = await loadDocEntries()
+  const collections = await loadSidebarCollections()
 
   const lines: Array<string> = []
 

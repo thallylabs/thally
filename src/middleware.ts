@@ -196,6 +196,16 @@ function applyManagedContentCacheHeaders(
 
 export async function middleware(request: NextRequest, event: NextFetchEvent) {
   const { pathname } = request.nextUrl
+  // The ASSETS binding reads this namespace internally, without making an
+  // HTTP request through the Worker. Public requests are routed Worker-first
+  // by wrangler.jsonc and must never expose raw Markdown or site guidance —
+  // especially on password-protected documentation sites.
+  if (pathname === '/_thally/content' || pathname.startsWith('/_thally/content/')) {
+    return new NextResponse(null, {
+      status: 404,
+      headers: { 'Cache-Control': 'private, no-store' },
+    })
+  }
   const cloudAccess = await getCloudAccessConfigEdge(request.nextUrl.origin)
   const docsAccessEnabled =
     isDocsAccessEnabledEdge() || cloudAccess?.access?.mode === 'password'

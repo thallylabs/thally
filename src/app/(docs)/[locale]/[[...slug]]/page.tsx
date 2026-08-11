@@ -7,7 +7,7 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { DocLayout } from '@/components/docs/doc-layout'
-import { getDocEntries, getNavContext } from '@/data/docs'
+import { getDocEntries, loadNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { isRemoteContentSource } from '@/lib/content-source'
 import { getSiteUrl } from '@/lib/site-url'
@@ -86,7 +86,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const hasTranslation = !isLocaleRoute || !doc.isFallback
   const canonicalHref = hasTranslation ? requestedHref : primaryHref
   const availableI18n = await getContentI18nConfig(slug, effectiveI18n)
-  const nav = getNavContext(doc.id)
+  const nav = await loadNavContext(doc.id)
   const ogImageUrl = buildOgImageUrl({
     title: doc.title,
     description: doc.description,
@@ -145,6 +145,7 @@ export default async function LocaleDocsPage({ params }: PageProps) {
       ? localizedPath(primaryHref, resolved.locale, i18n.defaultLocale)
       : primaryHref
   const pageUrl = `${siteUrl}${canonicalHref}`
+  const nav = await loadNavContext(doc.id)
   const jsonLd = buildDocPageJsonLd({
     siteUrl,
     siteName: effectiveSite.name,
@@ -155,7 +156,7 @@ export default async function LocaleDocsPage({ params }: PageProps) {
     keywords: doc.keywords,
     lastUpdated: doc.lastUpdated,
     locale: contentLocale,
-    breadcrumb: getNavContext(doc.id).breadcrumb,
+    breadcrumb: nav.breadcrumb,
   })
   const localeNotice =
     isLocaleRoute && doc.isFallback ? (

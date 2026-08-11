@@ -22,15 +22,18 @@ function normalizedProjectPath(filePath: string): string {
   return relative
 }
 
-function isDevelopmentFilesystemAvailable(): boolean {
-  return process.env.NODE_ENV === 'development'
+function isLocalFilesystemAvailable(): boolean {
+  return (
+    process.env.NODE_ENV === 'development' ||
+    process.env.THALLY_CONTENT_BUILD === '1'
+  )
 }
 
 /** Return true when a generated or development source file exists. */
 export function runtimeSourceExists(filePath: string): boolean {
   const key = normalizedProjectPath(filePath)
   if (
-    isDevelopmentFilesystemAvailable() &&
+    isLocalFilesystemAvailable() &&
     fs.existsSync(path.resolve(/* turbopackIgnore: true */ process.cwd(), key))
   ) {
     return true
@@ -41,7 +44,7 @@ export function runtimeSourceExists(filePath: string): boolean {
 /** Read one UTF-8 project source without exposing arbitrary filesystem paths. */
 export function readRuntimeSource(filePath: string): string {
   const key = normalizedProjectPath(filePath)
-  if (isDevelopmentFilesystemAvailable()) {
+  if (isLocalFilesystemAvailable()) {
     const absolute = path.resolve(/* turbopackIgnore: true */ process.cwd(), key)
     if (fs.existsSync(absolute)) return fs.readFileSync(absolute, 'utf8')
   }
@@ -57,7 +60,7 @@ export function readRuntimeSource(filePath: string): string {
 /** Return the publish-observed modification time used for translation staleness. */
 export function runtimeSourceModifiedAt(filePath: string): number {
   const key = normalizedProjectPath(filePath)
-  if (isDevelopmentFilesystemAvailable()) {
+  if (isLocalFilesystemAvailable()) {
     const absolute = path.resolve(/* turbopackIgnore: true */ process.cwd(), key)
     if (fs.existsSync(absolute)) return fs.statSync(absolute).mtimeMs
   }
@@ -75,7 +78,7 @@ export function runtimeSourceModifiedAt(filePath: string): number {
 /** List embedded file paths below a project-relative directory prefix. */
 export function listRuntimeSources(prefix: string): Array<string> {
   const normalizedPrefix = normalizedProjectPath(prefix).replace(/\/$/, '') + '/'
-  if (isDevelopmentFilesystemAvailable()) {
+  if (isLocalFilesystemAvailable()) {
     const root = path.resolve(/* turbopackIgnore: true */ process.cwd(), normalizedPrefix)
     const files: Array<string> = []
     const walk = (directory: string) => {

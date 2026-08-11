@@ -51,8 +51,10 @@ export const FRAMEWORK_SYNC_ELIGIBLE = Object.freeze([
   "tailwind.config.ts",
   "starter-release.json",
   "scripts/agent-readiness.ts",
+  "scripts/build-cloudflare.mts",
   "scripts/build-embeddings.ts",
   "scripts/build-runtime-sources.mts",
+  "scripts/lib/**",
   "scripts/check-cloudflare-worker-size.mts",
   "scripts/smoke-cloudflare.mts",
 ]);

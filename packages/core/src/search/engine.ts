@@ -1,6 +1,8 @@
+/** Full-text and hybrid search over local or asynchronously resolved content. */
+
 import { create, insertMultiple, search } from '@orama/orama'
 import type { AnyOrama } from '@orama/orama'
-import { buildSearchCorpus } from './corpus.js'
+import { buildSearchCorpusAsync } from './corpus.js'
 import type { SearchRecord } from './corpus.js'
 import { getEmbeddingIndex } from '../embeddings/index-store.js'
 import { getEmbeddingProvider } from '../embeddings/provider.js'
@@ -74,7 +76,7 @@ let enginePromise: Promise<SearchEngine> | null = null
 async function buildEngine(): Promise<SearchEngine> {
   const provider = getEmbeddingProvider()
   const dimensions = provider.dimensions
-  const records = buildSearchCorpus()
+  const records = await buildSearchCorpusAsync()
   const embeddings = await pageEmbeddings(records, dimensions)
 
   const db = create({

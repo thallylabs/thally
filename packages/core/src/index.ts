@@ -21,8 +21,10 @@
 
 // Doc-entry source registry (host-provided page enumeration).
 export {
+  registerAsyncDocEntriesSource,
   registerDocEntriesSource,
   resolveDocEntries,
+  resolveDocEntriesAsync,
 } from './doc-source.js'
 export type { DocEntrySummary } from './doc-source.js'
 
@@ -33,10 +35,13 @@ export { slugify } from './slugify.js'
 export {
   parseMdxContent,
   getContentDocument,
+  loadContentDocument,
+  registerAsyncContentDocumentSource,
   registerContentDocumentSource,
   mdxToMarkdown,
 } from './content/index.js'
 export type {
+  AsyncContentDocumentResolver,
   ContentDocument,
   ContentDocumentResolver,
   ContentHeading,
@@ -56,6 +61,7 @@ export {
 export type { SearchMode, SearchHit } from './search/engine.js'
 export {
   buildSearchCorpus,
+  buildSearchCorpusAsync,
   getClientSearchCorpus,
 } from './search/corpus.js'
 export type { SearchRecord } from './search/corpus.js'

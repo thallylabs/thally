@@ -1,5 +1,5 @@
 import { SidebarCollectionsHydrator } from '@/components/layout/sidebar-hydrator'
-import { getSidebarCollections } from '@/data/docs'
+import { loadSidebarCollections } from '@/data/docs'
 import type { NavigationSection } from '@/data/docs'
 import { buildApiNavigation } from '@/data/api-reference'
 import { getBuildI18nConfig } from '@/lib/i18n/request'
@@ -30,7 +30,7 @@ export default async function LocaleLayout({ children, params }: LocaleLayoutPro
     })),
   }))
 
-  const sidebarCollections = getSidebarCollections(locale)
+  const sidebarCollections = await loadSidebarCollections(locale)
   const collections = sidebarCollections.map((collection) => {
     if (collection.api && collection.api.navigation !== false) {
       const mdxSections = collection.sections ?? []

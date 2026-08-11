@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import { getContentIndex } from '@/lib/content-index'
+import { getContentIndex, loadContentIndex, type ContentIndex } from '@/lib/content-index'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import docsNavigationConfig from '../../docs.json' assert { type: 'json' }
 import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
@@ -289,27 +289,28 @@ interface FrontmatterData {
 
 const frontmatterCache = new Map<string, FrontmatterData>()
 
-function readFrontmatter(pageId: string, locale?: string): FrontmatterData {
-  const cacheKey = locale ? `${locale}:${pageId}` : pageId
-  if (frontmatterCache.has(cacheKey)) {
-    return frontmatterCache.get(cacheKey)!
-  }
-
+function frontmatterCandidates(pageId: string, locale?: string): Array<string> {
   const candidates: Array<string> = []
-
-  // Try locale-specific file first
   if (locale) {
     candidates.push(
       `${CONTENT_ROOT}/${locale}/${pageId}.mdx`,
       `${CONTENT_ROOT}/${locale}/${pageId}/index.mdx`,
     )
   }
-
-  // Fall back to primary
   candidates.push(
     `${CONTENT_ROOT}/${pageId}.mdx`,
     `${CONTENT_ROOT}/${pageId}/index.mdx`,
   )
+  return candidates
+}
+
+function readFrontmatter(pageId: string, locale?: string): FrontmatterData {
+  const cacheKey = locale ? `${locale}:${pageId}` : pageId
+  if (frontmatterCache.has(cacheKey)) {
+    return frontmatterCache.get(cacheKey)!
+  }
+
+  const candidates = frontmatterCandidates(pageId, locale)
 
   // A runtime content index answers frontmatter directly and is authoritative
   // when present: the index describes the content this release actually
@@ -411,8 +412,8 @@ function deriveKeywords(title: string, slug: Array<string>): Array<string> {
   return Array.from(words).slice(0, 12)
 }
 
-function buildDocEntryFromPageId(pageId: string): DocEntry {
-  const fm = readFrontmatter(pageId)
+function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: FrontmatterData): DocEntry {
+  const fm = indexedFrontmatter ?? readFrontmatter(pageId)
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
   const href = slug.length ? `/${slug.join('/')}` : '/'
   const title = fm.title ?? deriveTitleFromSlug(pageId)
@@ -502,12 +503,88 @@ export function getDocEntries(): Array<DocEntry> {
   return getAllDocEntries()
 }
 
+let loadedEntriesPromise: Promise<Array<DocEntry>> | null = null
+let hydratedContentIndex: ContentIndex | null = null
+
+function hydrateContentIndex(index: ContentIndex): void {
+  if (hydratedContentIndex === index) return
+  hydratedContentIndex = index
+  // These caches may have been populated during module initialisation before
+  // a request could fetch the large asset-backed index. Rebuild them once,
+  // using the authoritative release frontmatter now cached by content-index.
+  frontmatterCache.clear()
+  _allEntries = null
+  sidebarCollectionsCache.clear()
+}
+
+function defaultLocalePageIds(index: ContentIndex): Array<string> {
+  const localeCodes = new Set((getI18nConfig()?.locales ?? []).map((locale) => locale.code))
+  return Object.keys(index.pages)
+    .filter((filePath) => filePath.startsWith(`${CONTENT_ROOT}/`) && filePath.endsWith('.mdx'))
+    .map((filePath) => filePath.slice(`${CONTENT_ROOT}/`.length, -'.mdx'.length))
+    .filter((relativePath) => !localeCodes.has(relativePath.split('/')[0] ?? ''))
+    .map((relativePath) =>
+      relativePath.endsWith('/index')
+        ? relativePath.slice(0, -'/index'.length)
+        : relativePath,
+    )
+    .filter(Boolean)
+}
+
+function indexedFrontmatter(index: ContentIndex, pageId: string): FrontmatterData {
+  for (const filePath of frontmatterCandidates(pageId)) {
+    const entry = index.pages[filePath]
+    if (entry) return entry.data as FrontmatterData
+  }
+  return {}
+}
+
+/**
+ * Request-time doc enumeration backed by the immutable content index asset.
+ * The synchronous API remains unchanged for local/build consumers; managed
+ * routes use this async twin when the index is too large for a text binding.
+ */
+export function loadDocEntries(): Promise<Array<DocEntry>> {
+  if (loadedEntriesPromise) return loadedEntriesPromise
+  loadedEntriesPromise = (async () => {
+    const index = await loadContentIndex()
+    if (!index) return getDocEntries()
+    hydrateContentIndex(index)
+    const seen = new Set<string>()
+    const ids: Array<string> = []
+    const add = (id: string) => {
+      if (!id || seen.has(id)) return
+      seen.add(id)
+      ids.push(id)
+    }
+    for (const tab of docsConfig.tabs) {
+      if (tab.groups) {
+        for (const id of collectPageIds(tab.groups)) add(id)
+      } else if (tab.href?.startsWith('/')) {
+        add(tab.href.slice(1) || 'introduction')
+      }
+    }
+    for (const id of defaultLocalePageIds(index)) add(id)
+    return ids.map((id) => buildDocEntryFromPageId(id, indexedFrontmatter(index, id)))
+  })()
+  return loadedEntriesPromise
+}
+
 export function getDocEntryBySlug(slugPath: string): DocEntry | null
 export function getDocEntryBySlug(languageCode: string, slugPath: string): DocEntry | null
 export function getDocEntryBySlug(first: string, second?: string): DocEntry | null {
   const slugPath = second !== undefined ? second : first
   const entries = getAllDocEntries()
   return entries.find((doc) => doc.slug.join('/') === slugPath) ?? null
+}
+
+/** Async managed-release twin of {@link getDocEntryBySlug}. */
+export async function loadDocEntryBySlug(
+  first: string,
+  second?: string,
+): Promise<DocEntry | null> {
+  const slugPath = second !== undefined ? second : first
+  return (await loadDocEntries()).find((doc) => doc.slug.join('/') === slugPath) ?? null
 }
 
 export function getSearchableDocs(): Array<SearchableDoc> {
@@ -602,6 +679,18 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
 
   sidebarCollectionsCache.set(cacheKey, collections)
   return collections
+}
+
+/**
+ * Request-time navigation backed by the release index asset when the index is
+ * too large for a Worker text binding.
+ */
+export async function loadSidebarCollections(
+  locale?: string,
+): Promise<Array<SidebarCollection>> {
+  const index = await loadContentIndex()
+  if (index) hydrateContentIndex(index)
+  return getSidebarCollections(locale)
 }
 
 // ---------------------------------------------------------------------------
@@ -733,6 +822,13 @@ export function getNavContext(pageId: string): NavContext {
   }
 
   return { tab: tabName, group: groupName, prev, next, breadcrumb }
+}
+
+/** Async managed-release twin of {@link getNavContext}. */
+export async function loadNavContext(pageId: string): Promise<NavContext> {
+  const index = await loadContentIndex()
+  if (index) hydrateContentIndex(index)
+  return getNavContext(pageId)
 }
 
 export function getAiConfig(): {

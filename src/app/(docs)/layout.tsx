@@ -2,7 +2,7 @@
 
 import { SiteShell } from '@/components/layout/site-shell'
 import { SidebarCollectionsHydrator } from '@/components/layout/sidebar-hydrator'
-import { getSidebarCollections, getAiConfig, getNavbarConfig, getFooterConfig } from '@/data/docs'
+import { loadSidebarCollections, getAiConfig, getNavbarConfig, getFooterConfig } from '@/data/docs'
 import type { NavigationSection } from '@/data/docs'
 import { buildApiNavigation } from '@/data/api-reference'
 import { DocsChatLoader } from '@/components/docs/docs-chat-loader'
@@ -26,7 +26,7 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
     })),
   }))
 
-  const sidebarCollections = getSidebarCollections()
+  const sidebarCollections = await loadSidebarCollections()
   const collections = sidebarCollections.map((collection) => {
     if (collection.api && collection.api.navigation !== false) {
       // Merge MDX-based sections (from docs.json groups) with OpenAPI-generated sections

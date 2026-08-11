@@ -1,8 +1,10 @@
+/** Build and cache embeddings from the canonical local or remote page source. */
+
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import { getContentDocument } from '../content/index.js'
-import { resolveDocEntries } from '../doc-source.js'
+import { loadContentDocument } from '../content/index.js'
+import { resolveDocEntriesAsync } from '../doc-source.js'
 import { chunkDocument } from './chunk.js'
 import { getEmbeddingProvider } from './provider.js'
 import type { Chunk, EmbeddedChunk, EmbeddingIndex, EmbeddingProvider } from './types.js'
@@ -70,21 +72,28 @@ export interface PageSource {
 }
 
 /** Default enumeration of all doc pages via the content engine. */
-function collectPageSources(): Array<PageSource> {
-  const sources: Array<PageSource> = []
-  for (const entry of resolveDocEntries()) {
-    const document = getContentDocument(entry.id)
-    if (!document) continue
-    const chunks = chunkDocument({
-      pageId: entry.id,
-      href: entry.href,
-      title: entry.title,
-      sections: document.content.sections,
-    })
-    if (chunks.length === 0) continue
-    sources.push({ pageId: entry.id, href: entry.href, title: entry.title, rawBody: document.rawBody, chunks })
-  }
-  return sources
+async function collectPageSources(): Promise<Array<PageSource>> {
+  const sources = await Promise.all(
+    (await resolveDocEntriesAsync()).map(async (entry): Promise<PageSource | null> => {
+      const document = await loadContentDocument(entry.id)
+      if (!document) return null
+      const chunks = chunkDocument({
+        pageId: entry.id,
+        href: entry.href,
+        title: entry.title,
+        sections: document.content.sections,
+      })
+      if (chunks.length === 0) return null
+      return {
+        pageId: entry.id,
+        href: entry.href,
+        title: entry.title,
+        rawBody: document.rawBody,
+        chunks,
+      }
+    }),
+  )
+  return sources.filter((source): source is PageSource => source !== null)
 }
 
 export interface BuildOptions {
@@ -102,7 +111,7 @@ export interface BuildOptions {
  */
 export async function buildEmbeddingIndex(options: BuildOptions = {}): Promise<EmbeddingIndex> {
   const provider = options.provider ?? getEmbeddingProvider()
-  const sources = options.sources ?? collectPageSources()
+  const sources = options.sources ?? (await collectPageSources())
   const disk = options.noCache ? null : readDiskCache(provider.id)
   // Reuse only caches from the same provider, vector space, and chunk-derivation
   // schema; anything else (including a malformed file) re-embeds from scratch.

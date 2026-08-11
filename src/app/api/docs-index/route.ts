@@ -1,11 +1,11 @@
 import { type NextRequest } from 'next/server'
 import { getAllApiOperationNodes } from '@/data/api-reference'
-import { getDocEntries, getSidebarCollections } from '@/data/docs'
+import { loadSidebarCollections, loadDocEntries } from '@/data/docs'
 
 export async function GET(request: NextRequest) {
   const baseUrl = request.nextUrl.origin
-  const entries = getDocEntries()
-  const collections = getSidebarCollections()
+  const entries = await loadDocEntries()
+  const collections = await loadSidebarCollections()
   const apiNodes = await getAllApiOperationNodes()
 
   // Build a lookup: href → { tab, group }

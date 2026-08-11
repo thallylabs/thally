@@ -99,6 +99,19 @@ function enableManagedAssetsMode(): void {
 }
 
 describe('managed content cache headers', () => {
+  it('never exposes the internal authored-content asset namespace', async () => {
+    enableManagedAssetsMode()
+    const response = await middleware(
+      docRequest('/_thally/content/src/content/private-roadmap.mdx'),
+      EVENT,
+    )
+
+    expect(response.status).toBe(404)
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+    expect(getCloudAccessConfigEdge).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   it('adds Cache-Tag and a long CDN TTL to doc pages in assets mode', async () => {
     enableManagedAssetsMode()
     const response = await middleware(docRequest('/getting-started'), EVENT)
