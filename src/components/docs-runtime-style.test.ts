@@ -42,6 +42,7 @@ describe('documentation visual system', () => {
     expect(markup).toContain('data-content-icon-tone="site"')
     expect(markup).toContain('border border-border')
     expect(markup).toContain('hover:border-foreground/25')
+    expect(markup).not.toContain('hover:bg-')
     expect(markup).not.toContain('shadow-')
   })
 
@@ -86,6 +87,7 @@ describe('documentation visual system', () => {
     const cardChrome = css.slice(css.indexOf("[data-content-icons='accent'] .thally-docs-card"))
     const firstBlock = cardChrome.slice(0, cardChrome.indexOf('.thally-docs-card > .prose'))
     expect(firstBlock).toContain('hsl(var(--thally-accent)')
+    expect(firstBlock).not.toContain('background-color')
     expect(firstBlock).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
   })
 
@@ -182,6 +184,10 @@ describe('documentation visual system', () => {
     expect(topBar).toContain("className={cn('thally-docs-topbar-inner flex h-14")
     expect(css).toMatch(/\.thally-docs-search \{\s*width: 280px;/)
     expect(css).toContain("[data-density='compact'] .thally-docs-search")
+    expect(css).toContain('padding-inline: 10px 46px')
+    expect(css).toMatch(
+      /\.thally-docs-search > button:first-of-type kbd \{[\s\S]*?position: absolute;[\s\S]*?inset-inline-end: 4px;/,
+    )
     expect(layout).toContain("topbarHeight: 'h-14'")
     expect(shell).toContain('calc(100dvh-56px)')
     expect(sidebar).toContain('sticky top-14')
