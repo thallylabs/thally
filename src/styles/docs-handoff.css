@@ -94,17 +94,22 @@ body {
 }
 
 .thally-docs-search > button:first-of-type {
+  position: relative;
   height: 30px;
   width: 280px;
   gap: 8px;
   border-color: hsl(var(--thally-foreground) / 0.16);
   border-radius: 9px;
-  padding-inline: 10px;
+  padding-inline: 10px 46px;
   background: hsl(var(--thally-background));
   font-size: 0.85rem;
 }
 
 .thally-docs-search > button:first-of-type kbd {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: 4px;
+  transform: translateY(-50%);
   border-color: hsl(var(--thally-border));
   border-radius: 5px;
   background: hsl(var(--thally-muted));
@@ -333,7 +338,6 @@ body {
 [data-content-icons='accent'] .thally-docs-card[data-card-tone='site']:hover,
 .thally-docs-card[data-card-tone='accent']:hover {
   border-color: hsl(var(--thally-accent) / 0.55);
-  background-color: hsl(var(--thally-accent) / 0.05);
 }
 
 [data-content-icons='neutral'] .thally-docs-card[data-card-tone='site'],
@@ -344,7 +348,6 @@ body {
 [data-content-icons='neutral'] .thally-docs-card[data-card-tone='site']:hover,
 .thally-docs-card[data-card-tone='neutral']:hover {
   border-color: hsl(var(--thally-foreground) / 0.25);
-  background-color: hsl(var(--thally-muted) / 0.2);
 }
 
 .thally-docs-card > .prose {
