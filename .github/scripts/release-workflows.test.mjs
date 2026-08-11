@@ -8,6 +8,7 @@ import test from 'node:test'
 import { parse } from 'yaml'
 
 const workflow = parse(readFileSync('.github/workflows/publish-packages.yml', 'utf8'))
+const promotionWorkflow = parse(readFileSync('.github/workflows/promote-release.yml', 'utf8'))
 
 test('starts only from a reviewed stable-record merge or an operator recovery', () => {
   assert.deepEqual(workflow.on.push.branches, ['main'])
@@ -48,4 +49,14 @@ test('withholds the cross-repository token until the publish job succeeds', () =
   assert.equal(stepsUsingCloudToken.length, 1)
   assert.equal(stepsUsingCloudToken[0].name, 'Dispatch the cloud release tail')
   assert.match(stepsUsingCloudToken[0].run, /scaffold-release-published/)
+})
+
+test('bumps all package manifests atomically before refreshing the lockfile', () => {
+  const bumpStep = promotionWorkflow.jobs.promote.steps.find(
+    (step) => step.name === 'Bump package patch versions',
+  )
+
+  assert.match(bumpStep.run, /bump-release-packages\.mjs/)
+  assert.match(bumpStep.run, /npm install --package-lock-only --ignore-scripts/)
+  assert.doesNotMatch(bumpStep.run, /npm version/)
 })
