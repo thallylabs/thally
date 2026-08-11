@@ -34,8 +34,10 @@ export interface DocEntrySummary {
 }
 
 type DocEntriesResolver = () => Array<DocEntrySummary>
+type AsyncDocEntriesResolver = () => Promise<Array<DocEntrySummary>>
 
 let resolver: DocEntriesResolver | null = null
+let asyncResolver: AsyncDocEntriesResolver | null = null
 
 /**
  * Register the host's page enumerator. Idempotent and last-wins, so importing
@@ -43,6 +45,11 @@ let resolver: DocEntriesResolver | null = null
  */
 export function registerDocEntriesSource(fn: DocEntriesResolver): void {
   resolver = fn
+}
+
+/** Register request-time enumeration for remote content indexes. */
+export function registerAsyncDocEntriesSource(fn: AsyncDocEntriesResolver): void {
+  asyncResolver = fn
 }
 
 /**
@@ -58,4 +65,10 @@ export function resolveDocEntries(): Array<DocEntrySummary> {
     )
   }
   return resolver()
+}
+
+/** Resolve remote entries when registered, otherwise preserve the sync host. */
+export function resolveDocEntriesAsync(): Promise<Array<DocEntrySummary>> {
+  if (asyncResolver) return asyncResolver()
+  return Promise.resolve(resolveDocEntries())
 }

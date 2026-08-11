@@ -25,6 +25,7 @@ packages/*/node_modules/
 /src/generated/runtime-sources.ts
 /src/generated/runtime-docs.ts
 /src/generated/runtime-docs/
+/public/_thally/content/
 
 # production
 /build

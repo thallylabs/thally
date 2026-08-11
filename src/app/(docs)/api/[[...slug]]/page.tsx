@@ -7,7 +7,7 @@ import { getSiteUrl } from '@/lib/site-url'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { apiReferenceConfig, getOpenApiSpecUrl } from '@/config/api-reference'
 import { getAllApiOperationNodes, getApiOperationBySlug, getApiOperationNodes } from '@/data/api-reference'
-import { getBreadcrumbs, getDocEntries } from '@/data/docs'
+import { getBreadcrumbs, getDocEntries, loadDocEntries } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { isRemoteContentSource } from '@/lib/content-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
@@ -116,7 +116,9 @@ export default async function ApiReferencePage({ params }: PageProps) {
   // No slug — redirect to the first MDX page in the API group if one exists,
   // otherwise fall through to the first OpenAPI operation.
   if (!resolved.slug?.length) {
-    const firstMdx = getDocEntries().find((doc) => doc.slug[0] === 'api' && doc.slug.length > 1)
+    const firstMdx = (await loadDocEntries()).find(
+      (doc) => doc.slug[0] === 'api' && doc.slug.length > 1,
+    )
     if (firstMdx) {
       redirect(firstMdx.href)
     }

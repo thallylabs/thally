@@ -1,12 +1,12 @@
-import { getDocEntries, getSidebarCollections } from '@/data/docs'
+import { loadSidebarCollections, loadDocEntries } from '@/data/docs'
 import { siteUrlMismatch } from '@/lib/site-url'
 import { resolveSiteConfig } from '@/lib/site-config'
 
 export async function GET(request: Request) {
   const baseUrl = new URL(request.url).origin
   const effectiveSite = await resolveSiteConfig(baseUrl)
-  const entries = getDocEntries()
-  const collections = getSidebarCollections()
+  const entries = await loadDocEntries()
+  const collections = await loadSidebarCollections()
 
   const lines: Array<string> = []
 

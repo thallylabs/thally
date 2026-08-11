@@ -22,7 +22,13 @@
  * 163 KiB index parses in ~4 ms), so this is deliberately synchronous — the
  * consumers (`src/data/docs.ts`, `src/lib/runtime-sources.ts`) run during
  * module initialisation and cannot await.
+ *
+ * Large managed sites exceed the platform's small plain-text binding budget.
+ * Request-time consumers use {@link loadContentIndex}, which preserves this
+ * synchronous fast path and otherwise reads the same index from ASSETS.
  */
+
+import { getContentAssetFetcher } from '@/lib/content-source/runtime'
 
 interface ContentIndexEntry {
   /** Parsed frontmatter, exactly as gray-matter returned it at publish time. */
@@ -36,6 +42,9 @@ export interface ContentIndex {
   pages: Record<string, ContentIndexEntry>
 }
 
+/** Immutable release index emitted alongside the authored content assets. */
+export const CONTENT_INDEX_ASSET_PATH = '/_thally/content/index.json'
+
 /**
  * Only paths under these roots are ever indexed, so only these roots defer to
  * the index. Everything else (public assets, OpenAPI specs, AGENTS.md) keeps
@@ -44,6 +53,7 @@ export interface ContentIndex {
 const INDEXED_PREFIXES = ['src/content/', 'snippets/'] as const
 
 let resolved: ContentIndex | null | undefined
+let assetIndexPromise: Promise<ContentIndex | null> | null = null
 
 function parseContentIndex(raw: string): ContentIndex | null {
   try {
@@ -101,6 +111,36 @@ export function getContentIndex(): ContentIndex | null {
   return resolved
 }
 
+/**
+ * Load the release content index, using the text binding when it fits and the
+ * immutable ASSETS copy for larger sites. Failures return null so callers can
+ * retain their compiled/self-hosted fallback instead of taking the site down.
+ */
+export function loadContentIndex(): Promise<ContentIndex | null> {
+  const inline = getContentIndex()
+  if (inline) return Promise.resolve(inline)
+  if (assetIndexPromise) return assetIndexPromise
+  const fetchAsset = getContentAssetFetcher()
+  if (!fetchAsset) return Promise.resolve(null)
+  assetIndexPromise = (async () => {
+    try {
+      const response = await fetchAsset(CONTENT_INDEX_ASSET_PATH)
+      if (!response.ok) return null
+      const parsed = parseContentIndex(await response.text())
+      // The synchronous readers that build navigation and page metadata run
+      // after the request entry point has awaited this loader. Seed their
+      // cache with the same immutable release index so they never fall back
+      // to slug-derived labels merely because the index exceeded a binding.
+      if (parsed) resolved = parsed
+      return parsed
+    } catch {
+      assetIndexPromise = null
+      return null
+    }
+  })()
+  return assetIndexPromise
+}
+
 /** Whether index-present releases answer for this project-relative path. */
 export function isIndexedContentPath(projectPath: string): boolean {
   return INDEXED_PREFIXES.some((prefix) => projectPath.startsWith(prefix))
@@ -109,4 +149,5 @@ export function isIndexedContentPath(projectPath: string): boolean {
 /** Test hook mirroring `resetDocsJsonConfigForTests`. */
 export function resetContentIndexForTests(): void {
   resolved = undefined
+  assetIndexPromise = null
 }

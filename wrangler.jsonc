@@ -23,6 +23,10 @@
   },
   "assets": {
     "directory": ".open-next/assets",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    // Authored source assets are an internal Worker data plane. Route public
+    // requests through middleware so protected sites cannot bypass access
+    // control by requesting raw Markdown from the static asset namespace.
+    "run_worker_first": ["/_thally/content/*"]
   }
 }

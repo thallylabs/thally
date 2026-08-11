@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { DocLayout } from '@/components/docs/doc-layout'
-import { getDocEntries, getNavContext } from '@/data/docs'
+import { getDocEntries, loadNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { isRemoteContentSource } from '@/lib/content-source'
 import { getSiteUrl } from '@/lib/site-url'
@@ -46,7 +46,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     resolved.slug,
     getBuildI18nConfig(),
   )
-  const nav = getNavContext(doc.id)
+  const nav = await loadNavContext(doc.id)
 
   const ogImageUrl = buildOgImageUrl({
     title: doc.title,
@@ -93,7 +93,7 @@ export default async function DocsPage({ params }: PageProps) {
   const primaryHref = doc.slug.length ? `/${doc.slug.join('/')}` : '/'
   const pageUrl = `${siteUrl}${primaryHref}`
   const locale = getBuildI18nConfig().defaultLocale
-  const nav = getNavContext(doc.id)
+  const nav = await loadNavContext(doc.id)
   const jsonLd = buildDocPageJsonLd({
     siteUrl,
     siteName: effectiveSite.name,

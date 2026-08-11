@@ -1,5 +1,5 @@
 import { type NextRequest } from 'next/server'
-import { getDocEntries, getI18nConfig, getNavContext } from '@/data/docs'
+import { getDocEntries, getI18nConfig, loadDocEntries, loadNavContext } from '@/data/docs'
 import { mdxToMarkdown } from '@thallylabs/core'
 import { loadContentDocument } from '@/lib/content'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
@@ -61,7 +61,7 @@ export async function GET(
   const wantsLdJson = format === 'ldjson'
 
   // Find matching doc entry
-  const entries = getDocEntries()
+  const entries = await loadDocEntries()
   const entry = entries.find((e) => e.slug.join('/') === slugPath || e.id === slugPath)
 
   if (!entry) {
@@ -111,7 +111,7 @@ export async function GET(
   const effectiveSite = await resolveSiteConfig(request.nextUrl.origin)
   const canonicalUrl = `${baseUrl}${entry.href}`
   const locale = getI18nConfig()?.defaultLocale ?? 'en'
-  const nav = getNavContext(entry.id)
+  const nav = await loadNavContext(entry.id)
   const jsonLd = buildDocPageJsonLd({
     siteUrl: baseUrl,
     siteName: effectiveSite.name,

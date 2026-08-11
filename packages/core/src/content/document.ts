@@ -1,3 +1,10 @@
+/**
+ * Canonical content-document readers for filesystem and host-provided stores.
+ *
+ * The synchronous resolver preserves local/self-hosted compatibility while
+ * the async resolver lets managed runtimes read immutable content assets.
+ */
+
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseFrontmatter } from './frontmatter.js'
@@ -19,7 +26,13 @@ export type ContentDocumentResolver = (
   locale?: string,
 ) => ContentDocument | null
 
+export type AsyncContentDocumentResolver = (
+  pageId: string,
+  locale?: string,
+) => Promise<ContentDocument | null>
+
 let registeredResolver: ContentDocumentResolver | null = null
+let registeredAsyncResolver: AsyncContentDocumentResolver | null = null
 
 /**
  * Register the host's runtime-aware content reader.
@@ -31,6 +44,13 @@ let registeredResolver: ContentDocumentResolver | null = null
  */
 export function registerContentDocumentSource(resolver: ContentDocumentResolver): void {
   registeredResolver = resolver
+}
+
+/** Register a request-time reader for remote/asset-backed content. */
+export function registerAsyncContentDocumentSource(
+  resolver: AsyncContentDocumentResolver,
+): void {
+  registeredAsyncResolver = resolver
 }
 
 function resolveContentFile(pageId: string, locale?: string): string | null {
@@ -84,4 +104,13 @@ export function getContentDocument(pageId: string, locale?: string): ContentDocu
 
   documentCache.set(cacheKey, { mtimeMs: stat.mtimeMs, document })
   return document
+}
+
+/** Async reader for remote content, falling back to the synchronous provider. */
+export async function loadContentDocument(
+  pageId: string,
+  locale?: string,
+): Promise<ContentDocument | null> {
+  if (registeredAsyncResolver) return registeredAsyncResolver(pageId, locale)
+  return getContentDocument(pageId, locale)
 }
