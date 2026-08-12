@@ -8,6 +8,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { mkdirSync, writeFileSync } from 'node:fs'
 
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const environment = {
@@ -27,5 +28,14 @@ function runNpmScript(script: string): void {
 }
 
 runNpmScript('build:cloudflare:opennext')
+// The managed builder reads this build-owned marker before admitting the
+// release as a parent for docs.json-only publishes. Repositories on an older
+// runtime omit it and safely take the full-build path until upgraded.
+mkdirSync('.open-next/assets/_thally', { recursive: true })
+writeFileSync(
+  '.open-next/assets/_thally/runtime-capabilities.json',
+  `${JSON.stringify({ version: 1, docsConfigBinding: true })}\n`,
+  'utf8',
+)
 runNpmScript('package:cloudflare')
 runNpmScript('check:cloudflare-size')

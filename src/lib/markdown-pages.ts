@@ -6,7 +6,7 @@
  * linked sites use the same contract without exposing a control-plane secret.
  */
 
-import docsNavigationConfig from '../../docs.json' assert { type: 'json' }
+import { getDocsJsonConfig } from '@/lib/docs-json-config'
 
 interface MarkdownPagesConfig {
   markdown?: {
@@ -22,7 +22,7 @@ interface MarkdownPagesPortableConfig {
 
 /** Whether the repository explicitly enables page URLs ending in `.md`. */
 export function isRepositoryMarkdownPagesEnabled(): boolean {
-  const config = docsNavigationConfig as MarkdownPagesConfig
+  const config = getDocsJsonConfig<MarkdownPagesConfig>()
   return config.markdown?.enabled === true
 }
 
@@ -30,8 +30,6 @@ export function isRepositoryMarkdownPagesEnabled(): boolean {
  * Resolve the effective setting. An explicit Cloud value wins; absent values
  * preserve the repository-owned behavior for self-hosted and older sites.
  */
-export function isMarkdownPagesEnabled(
-  portable?: MarkdownPagesPortableConfig | null,
-): boolean {
+export function isMarkdownPagesEnabled(portable?: MarkdownPagesPortableConfig | null): boolean {
   return portable?.markdown?.enabled ?? isRepositoryMarkdownPagesEnabled()
 }
