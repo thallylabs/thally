@@ -1,14 +1,17 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref to save CI minutes.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -17,10 +20,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           # Wrangler 4.111+ requires Node 22 for the exact dry-run package gate.
           node-version: 22
@@ -31,6 +36,11 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # Reuse the workspace CLI built by `npm test`; a separate workflow used
+      # to repeat checkout and tool installation for the same candidate.
+      - name: Check authored content
+        run: node packages/cli/dist/index.js check --ci .
 
       - name: Test release handoff boundary
         run: node --test .github/scripts/*.test.mjs
