@@ -1,6 +1,6 @@
 {
   "name": "@thallylabs/mcp",
-  "version": "0.10.7",
+  "version": "0.10.8",
   "description": "MCP server for managing Thally knowledge surfaces and tracing product changes into documentation work.",
   "type": "module",
   "engines": {
@@ -38,7 +38,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.0",
     "@modelcontextprotocol/sdk": "^1.15.0",
-    "create-thally-docs": "0.10.7",
+    "create-thally-docs": "0.10.8",
     "gray-matter": "^4.0.3",
     "p-limit": "^6.1.0",
     "zod": "^3.0.0"
