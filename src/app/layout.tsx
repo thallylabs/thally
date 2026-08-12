@@ -62,49 +62,36 @@ function buildGoogleFontsUrl(family: string, weights: string[]): string {
   return `https://fonts.googleapis.com/css2?family=${familyParam}:wght@${weightParam}&display=swap`
 }
 
-const fontsConfig = getFontsConfig()
+function resolveFontPresentation(): {
+  googleFontUrls: Array<string>
+  fontOverrides: string
+} {
+  const fontsConfig = getFontsConfig()
+  const googleFontUrlSet = new Set<string>()
+  let bodyFontFamily: string | null = null
+  let headingFontFamily: string | null = null
 
-// Deduplicate Google Font URLs (body and heading might be the same family)
-const googleFontUrlSet = new Set<string>()
-let bodyFontFamily: string | null = null
-let headingFontFamily: string | null = null
+  if (fontsConfig.body?.family) {
+    bodyFontFamily = fontsConfig.body.family
+    googleFontUrlSet.add(
+      buildGoogleFontsUrl(fontsConfig.body.family, fontsConfig.body.weight ?? ['400', '500', '600', '700']),
+    )
+  }
+  if (fontsConfig.heading?.family) {
+    headingFontFamily = fontsConfig.heading.family
+    googleFontUrlSet.add(buildGoogleFontsUrl(fontsConfig.heading.family, fontsConfig.heading.weight ?? ['600', '700']))
+  }
 
-if (fontsConfig.body?.family) {
-  bodyFontFamily = fontsConfig.body.family
-  googleFontUrlSet.add(
-    buildGoogleFontsUrl(fontsConfig.body.family, fontsConfig.body.weight ?? ['400', '500', '600', '700']),
-  )
+  return {
+    googleFontUrls: Array.from(googleFontUrlSet),
+    fontOverrides: [
+      bodyFontFamily ? `--font-sans: '${bodyFontFamily}', sans-serif;` : '',
+      headingFontFamily ? `--font-heading: '${headingFontFamily}', sans-serif;` : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
+  }
 }
-
-if (fontsConfig.heading?.family) {
-  headingFontFamily = fontsConfig.heading.family
-  googleFontUrlSet.add(
-    buildGoogleFontsUrl(fontsConfig.heading.family, fontsConfig.heading.weight ?? ['600', '700']),
-  )
-}
-
-const googleFontUrls = Array.from(googleFontUrlSet)
-
-// CSS variable overrides injected into :root when custom fonts are set
-const fontOverrides = [
-  bodyFontFamily ? `--font-sans: '${bodyFontFamily}', sans-serif;` : '',
-  headingFontFamily ? `--font-heading: '${headingFontFamily}', sans-serif;` : '',
-]
-  .filter(Boolean)
-  .join(' ')
-
-// ---------------------------------------------------------------------------
-// Structural theme — read once at module level (same as fonts above)
-const structuralTheme = getStructuralTheme()
-const contentIconTone = getContentIconTone()
-
-// Structural theme CSS variable injection
-// Injected as a <style> tag (same pattern as fontOverrides) so the overrides
-// are SSR'd directly in the HTML. This is more reliable than html[data-theme]
-// CSS attribute selectors, which depend on module-level caching behaviour and
-// Next.js HMR propagation timing.
-// ---------------------------------------------------------------------------
-const themeVars = THEME_VARS[structuralTheme] ?? ''
 
 // ---------------------------------------------------------------------------
 
@@ -128,7 +115,10 @@ export async function generateMetadata(): Promise<Metadata> {
       // dark variant is uploaded, so both links always resolve.
       icon: [
         { url: '/api/brand/favicon', media: '(prefers-color-scheme: light)' },
-        { url: '/api/brand/favicon?mode=dark', media: '(prefers-color-scheme: dark)' },
+        {
+          url: '/api/brand/favicon?mode=dark',
+          media: '(prefers-color-scheme: dark)',
+        },
       ],
       shortcut: '/api/brand/favicon',
     },
@@ -153,12 +143,16 @@ const brandStyle: Record<string, string> = {
   '--brand-light-card': toHslValue(siteConfig.brand.light.card ?? siteConfig.brand.light.background),
   '--brand-light-foreground': toHslValue(siteConfig.brand.light.foreground),
   '--brand-light-muted': toHslValue(siteConfig.brand.light.muted),
-  '--brand-light-muted-foreground': toHslValue(siteConfig.brand.light.mutedForeground ?? siteConfig.brand.light.foreground),
+  '--brand-light-muted-foreground': toHslValue(
+    siteConfig.brand.light.mutedForeground ?? siteConfig.brand.light.foreground,
+  ),
   '--brand-light-border': toHslValue(siteConfig.brand.light.border),
   '--brand-light-accent': toHslValue(siteConfig.brand.light.accent),
   '--brand-light-accent-foreground': toHslValue(siteConfig.brand.light.accentForeground),
   '--brand-light-accent-2': toHslValue(siteConfig.brand.light.accent2 ?? siteConfig.brand.light.accent),
-  '--brand-light-accent-2-foreground': toHslValue(siteConfig.brand.light.accent2Foreground ?? siteConfig.brand.light.accentForeground),
+  '--brand-light-accent-2-foreground': toHslValue(
+    siteConfig.brand.light.accent2Foreground ?? siteConfig.brand.light.accentForeground,
+  ),
   '--brand-light-input': toHslValue(siteConfig.brand.light.input ?? siteConfig.brand.light.border),
   '--brand-light-sidebar': toHslValue(siteConfig.brand.light.sidebar ?? siteConfig.brand.light.background),
   '--brand-light-ring': toHslValue(siteConfig.brand.light.ring),
@@ -168,12 +162,16 @@ const brandStyle: Record<string, string> = {
   '--brand-dark-card': toHslValue(siteConfig.brand.dark.card ?? siteConfig.brand.dark.background),
   '--brand-dark-foreground': toHslValue(siteConfig.brand.dark.foreground),
   '--brand-dark-muted': toHslValue(siteConfig.brand.dark.muted),
-  '--brand-dark-muted-foreground': toHslValue(siteConfig.brand.dark.mutedForeground ?? siteConfig.brand.dark.foreground),
+  '--brand-dark-muted-foreground': toHslValue(
+    siteConfig.brand.dark.mutedForeground ?? siteConfig.brand.dark.foreground,
+  ),
   '--brand-dark-border': toHslValue(siteConfig.brand.dark.border),
   '--brand-dark-accent': toHslValue(siteConfig.brand.dark.accent),
   '--brand-dark-accent-foreground': toHslValue(siteConfig.brand.dark.accentForeground),
   '--brand-dark-accent-2': toHslValue(siteConfig.brand.dark.accent2 ?? siteConfig.brand.dark.accent),
-  '--brand-dark-accent-2-foreground': toHslValue(siteConfig.brand.dark.accent2Foreground ?? siteConfig.brand.dark.accentForeground),
+  '--brand-dark-accent-2-foreground': toHslValue(
+    siteConfig.brand.dark.accent2Foreground ?? siteConfig.brand.dark.accentForeground,
+  ),
   '--brand-dark-input': toHslValue(siteConfig.brand.dark.input ?? siteConfig.brand.dark.border),
   '--brand-dark-sidebar': toHslValue(siteConfig.brand.dark.sidebar ?? siteConfig.brand.dark.background),
   '--brand-dark-ring': toHslValue(siteConfig.brand.dark.ring),
@@ -188,8 +186,6 @@ const brandCss = Object.entries(brandStyle)
   .map(([k, v]) => `${k}:${v}`)
   .join(';')
 
-const bannerConfig = getBannerConfig()
-const customScripts = getCustomScriptsConfig()
 // OpenNext's production transform can add esbuild's `__name` calls to the
 // serialized next-themes bootstrap. The bootstrap runs before client bundles,
 // so provide the tiny helper first or one missing global prevents the entire
@@ -198,6 +194,15 @@ const runtimeNameShim =
   "globalThis.__name ??= (target, value) => Object.defineProperty(target, 'name', { value, configurable: true });"
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // These values belong to the immutable release binding, not the compiled
+  // module. Resolve them during rendering so content-only publishes can reuse
+  // Worker code while presenting the new docs.json immediately.
+  const { googleFontUrls, fontOverrides } = resolveFontPresentation()
+  const structuralTheme = getStructuralTheme()
+  const contentIconTone = getContentIconTone()
+  const themeVars = THEME_VARS[structuralTheme] ?? ''
+  const bannerConfig = getBannerConfig()
+  const customScripts = getCustomScriptsConfig()
   const i18n = getBuildI18nConfig()
   const effectiveSite = resolveBuildSiteConfig()
   const siteUrl = getSiteUrl()
@@ -223,10 +228,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       className={cn(fontSans.variable, fontDisplay.variable, fontMono.variable)}
     >
       <head>
-        <script
-          id="thally-runtime-name-shim"
-          dangerouslySetInnerHTML={{ __html: runtimeNameShim }}
-        />
+        <script id="thally-runtime-name-shim" dangerouslySetInnerHTML={{ __html: runtimeNameShim }} />
         <JsonLdScript data={siteJsonLd} />
         {/* Google Fonts for custom body/heading fonts set in docs.json */}
         {googleFontUrls.length > 0 && (
@@ -255,11 +257,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         {siteConfig.analytics && <AnalyticsProvider />}
         <WebMcpTools />
         {customScripts.map((script) => (
-          <Script
-            key={script.src}
-            src={script.src}
-            strategy={script.strategy ?? 'afterInteractive'}
-          />
+          <Script key={script.src} src={script.src} strategy={script.strategy ?? 'afterInteractive'} />
         ))}
       </body>
     </html>
