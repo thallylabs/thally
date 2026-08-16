@@ -19,6 +19,8 @@ const AGENT_TOOL_NAMES = new Set([
   'get_context',
   'add_page',
   'update_page',
+  'read_api_spec',
+  'update_api_spec',
   'add_tab',
 ])
 

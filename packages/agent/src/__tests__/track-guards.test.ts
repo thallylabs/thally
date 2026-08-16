@@ -11,6 +11,8 @@ describe('agent tool whitelist', () => {
     expect(names).not.toContain('sync_from_repo')
     expect(names).not.toContain('create_project')
     expect(names).toContain('update_page')
+    expect(names).toContain('read_api_spec')
+    expect(names).toContain('update_api_spec')
   })
 })
 
