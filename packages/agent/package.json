@@ -1,6 +1,6 @@
 {
   "name": "@thallylabs/agent",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Thally's review-gated agent for turning product changes into evidence-backed documentation pull requests.",
   "type": "module",
   "engines": {

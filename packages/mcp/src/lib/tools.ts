@@ -18,6 +18,8 @@ import { getContextSchema, handleGetContext } from '../tools/get-context.js'
 import { lintProjectSchema, handleLintProject } from '../tools/lint-project.js'
 import { translateDocsSchema, handleTranslateDocs } from '../tools/translate-docs.js'
 import { syncFromRepoSchema, handleSyncFromRepo } from '../tools/sync-from-repo.js'
+import { readApiSpecSchema, handleReadApiSpec } from '../tools/read-api-spec.js'
+import { updateApiSpecSchema, handleUpdateApiSpec } from '../tools/update-api-spec.js'
 
 /**
  * Where a tool operates:
@@ -85,6 +87,20 @@ export const tools: Array<ToolDefinition> = [
     scope: 'project',
     schema: updatePageSchema,
     handler: handleUpdatePage,
+  }),
+  defineTool({
+    name: 'read_api_spec',
+    description: 'Read an OpenAPI JSON or YAML source explicitly configured by this Thally project',
+    scope: 'project',
+    schema: readApiSpecSchema,
+    handler: handleReadApiSpec,
+  }),
+  defineTool({
+    name: 'update_api_spec',
+    description: 'Replace and validate an OpenAPI JSON or YAML source explicitly configured by this Thally project',
+    scope: 'project',
+    schema: updateApiSpecSchema,
+    handler: handleUpdateApiSpec,
   }),
   defineTool({
     name: 'migrate_docs',
