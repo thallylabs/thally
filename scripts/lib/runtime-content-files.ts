@@ -9,11 +9,12 @@
 
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
+  realpathSync,
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs'
 import path from 'node:path'
@@ -43,12 +44,61 @@ function addTextFile(
   filePath: string,
 ): void {
   if (!existsSync(filePath)) return
-  const stats = statSync(filePath)
+  const stats = lstatSync(filePath)
   if (!stats.isFile()) return
   sources[projectPath(projectRoot, filePath)] = {
     content: readFileSync(filePath, 'utf8'),
     modifiedAtMs: stats.mtimeMs,
   }
+}
+
+function isContainedProjectPath(projectRoot: string, filePath: string): boolean {
+  const relativePath = path.relative(projectRoot, filePath)
+  return (
+    relativePath.length > 0 &&
+    !path.isAbsolute(relativePath) &&
+    relativePath !== '..' &&
+    !relativePath.startsWith(`..${path.sep}`)
+  )
+}
+
+function configuredOpenApiSources(projectRoot: string): Array<string> {
+  const docsJsonPath = path.join(projectRoot, 'docs.json')
+  if (!existsSync(docsJsonPath)) return []
+
+  const config = JSON.parse(readFileSync(docsJsonPath, 'utf8')) as {
+    tabs?: Array<{ api?: { source?: unknown } }>
+  }
+
+  return (config.tabs ?? [])
+    .map((tab) => tab.api?.source)
+    .filter((source): source is string => typeof source === 'string')
+    .filter((source) => !source.startsWith('http://') && !source.startsWith('https://'))
+}
+
+function addConfiguredOpenApiFile(
+  projectRoot: string,
+  sources: RuntimeSourceMap,
+  configuredPath: string,
+): void {
+  const filePath = configuredPath.startsWith('/')
+    ? path.resolve(projectRoot, 'public', configuredPath.slice(1))
+    : path.resolve(projectRoot, configuredPath)
+
+  if (!isContainedProjectPath(projectRoot, filePath)) {
+    throw new Error(`Configured OpenAPI source escapes the project: ${configuredPath}`)
+  }
+  if (!['.json', '.yaml', '.yml'].includes(path.extname(filePath).toLowerCase())) {
+    throw new Error(`Configured OpenAPI source has an unsupported extension: ${configuredPath}`)
+  }
+  if (!existsSync(filePath) || !lstatSync(filePath).isFile()) {
+    throw new Error(`Configured OpenAPI source is not a regular file: ${configuredPath}`)
+  }
+  if (!isContainedProjectPath(realpathSync(projectRoot), realpathSync(filePath))) {
+    throw new Error(`Configured OpenAPI source resolves outside the project: ${configuredPath}`)
+  }
+
+  addTextFile(projectRoot, sources, filePath)
 }
 
 function walkTextFiles(
@@ -88,6 +138,9 @@ export function collectRuntimeContentFiles(projectRoot: string): RuntimeSourceMa
   addTextFile(projectRoot, sources, path.join(projectRoot, 'openapi.yaml'))
   addTextFile(projectRoot, sources, path.join(projectRoot, 'openapi.yml'))
   addTextFile(projectRoot, sources, path.join(projectRoot, 'openapi.json'))
+  for (const configuredPath of configuredOpenApiSources(projectRoot)) {
+    addConfiguredOpenApiFile(projectRoot, sources, configuredPath)
+  }
   addTextFile(projectRoot, sources, path.join(projectRoot, 'docs.json'))
   addTextFile(projectRoot, sources, path.join(projectRoot, 'AGENTS.md'))
   return sources
