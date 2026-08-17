@@ -71,11 +71,11 @@ function parseDocument(
 /**
  * Read one page into the engine's single structured-content representation.
  *
- * Sync path over the build-embedded sources. Kept for callers that register
- * synchronous providers (search indexing, MCP tools, agent-readiness); under
- * the assets ContentSource these read build-time content until the next code
- * release — the publish pipeline re-indexes search out of band. Request-time
- * projections should prefer {@link loadContentDocument}.
+ * Sync path over the build-embedded sources. Kept for local build-time callers
+ * such as search indexing and the CLI readiness check; under the assets
+ * ContentSource these read build-time content until the next code release —
+ * the publish pipeline re-indexes search out of band. Request-time projections
+ * must prefer {@link loadContentDocument}.
  */
 export function getContentDocument(pageId: string, locale?: string): ContentDocument | null {
   const filePath = resolveContentFile(pageId, locale)

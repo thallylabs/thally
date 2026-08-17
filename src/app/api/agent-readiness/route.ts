@@ -1,9 +1,11 @@
-import { computeAgentReadiness } from '@/lib/agent-readiness'
+/** Public readiness report computed from the content this deployment serves. */
+
+import { computePublishedAgentReadiness } from '@/lib/agent-readiness'
 
 export const runtime = 'nodejs'
 
 export async function GET() {
-  const report = computeAgentReadiness()
+  const report = await computePublishedAgentReadiness()
 
   return Response.json(
     {
