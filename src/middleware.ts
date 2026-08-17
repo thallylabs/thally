@@ -14,6 +14,7 @@ import { isMachineEndpoint, isPublicAgentEndpoint } from '@/lib/agent-endpoints'
 import { verifySession, SESSION_COOKIE } from '@/lib/auth/session'
 import { getCloudAccessConfigEdge, getManagedSiteIdEdge } from '@/lib/cloud-link/edge'
 import { isMarkdownPagesEnabled } from '@/lib/markdown-pages'
+import { createDailyVisitorKey, externalReferrerDomain } from '@/lib/analytics/identity'
 
 function shouldTrackPath(pathname: string): boolean {
   // Admin console (pages + its own asset/nav requests) and Next internals are
@@ -80,11 +81,7 @@ function shouldTrackRequest(request: NextRequest, pathname: string): boolean {
  * applies its own cache policy to pre-rendered RSC payloads; this helper adds
  * the equivalent long-lived CDN policy only to full HTML documents.
  */
-function isCacheableDocsPage(
-  request: NextRequest,
-  pathname: string,
-  docsAccessEnabled: boolean,
-): boolean {
+function isCacheableDocsPage(request: NextRequest, pathname: string, docsAccessEnabled: boolean): boolean {
   return (
     request.method === 'GET' &&
     request.headers.get('accept')?.includes('text/html') === true &&
@@ -95,7 +92,7 @@ function isCacheableDocsPage(
   )
 }
 
-function buildAnalyticsPayload(request: NextRequest, pathname: string) {
+async function buildAnalyticsPayload(request: NextRequest, pathname: string) {
   const classification = classifyRequest(request, pathname)
   const slugPath = pathname === '/' ? 'introduction' : pathname.slice(1).replace(/\.md$/, '')
 
@@ -106,6 +103,8 @@ function buildAnalyticsPayload(request: NextRequest, pathname: string) {
   // slugs like '.well-known/mcp.json' and 'auth', masquerading as docs pages.
   const isDiscovery = isPublicAgentEndpoint(pathname) || pathname === '/api/docs-index'
 
+  const isHumanPageView = classification.visitorType === 'human' && !isDiscovery
+
   return {
     type: isDiscovery ? 'discovery' : pathname.startsWith('/api/') ? 'api_fetch' : 'page_view',
     path: pathname,
@@ -114,12 +113,18 @@ function buildAnalyticsPayload(request: NextRequest, pathname: string) {
     visitorType: classification.visitorType,
     agentSignal: classification.agentSignal,
     format: classification.format,
-    referer: request.headers.get('referer') ?? undefined,
+    visitorKey: isHumanPageView ? await createDailyVisitorKey(request, getInternalAnalyticsSecretEdge()) : undefined,
+    referrerDomain: isHumanPageView ? externalReferrerDomain(request.headers.get('referer'), request.url) : undefined,
   }
 }
 
 async function sendAnalyticsEvent(request: NextRequest, pathname: string) {
   if (!shouldTrackRequest(request, pathname)) return
+
+  const payload = await buildAnalyticsPayload(request, pathname)
+  // Ordinary crawlers are useful operational traffic, but counting them as
+  // readers or AI tools corrupts every audience and engagement metric.
+  if (payload.visitorType === 'bot') return
 
   const origin = request.nextUrl.origin
   const secret = getInternalAnalyticsSecretEdge()
@@ -130,7 +135,7 @@ async function sendAnalyticsEvent(request: NextRequest, pathname: string) {
       'content-type': 'application/json',
       'x-thally-analytics-secret': secret,
     },
-    body: JSON.stringify(buildAnalyticsPayload(request, pathname)),
+    body: JSON.stringify(payload),
   }).catch(() => {
     // analytics must never block requests
   })
@@ -207,8 +212,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     })
   }
   const cloudAccess = await getCloudAccessConfigEdge(request.nextUrl.origin)
-  const docsAccessEnabled =
-    isDocsAccessEnabledEdge() || cloudAccess?.access?.mode === 'password'
+  const docsAccessEnabled = isDocsAccessEnabledEdge() || cloudAccess?.access?.mode === 'password'
 
   // Affirmative check for CDN cacheability: the access config must be present
   // AND public. `cloudAccess == null` (self-host, or a failed/timed-out grant
@@ -348,10 +352,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     // immutable within an atomic deploy, so retain browser revalidation while
     // serving full page loads from the CDN.
     const cdnCache = 'public, s-maxage=31536000, stale-while-revalidate=86400'
-    response.headers.set(
-      'Cache-Control',
-      'public, max-age=0, s-maxage=31536000, stale-while-revalidate=86400',
-    )
+    response.headers.set('Cache-Control', 'public, max-age=0, s-maxage=31536000, stale-while-revalidate=86400')
     response.headers.set('CDN-Cache-Control', cdnCache)
     response.headers.set('Netlify-CDN-Cache-Control', cdnCache)
   }

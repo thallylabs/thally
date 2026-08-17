@@ -20,14 +20,23 @@ export const KNOWN_BOT_UA = [
   'Go-http-client',
 ] as const
 
-export type VisitorType = 'agent' | 'human'
+const NON_AGENT_BOT_UA = [
+  'Googlebot',
+  'bingbot',
+  'DuckDuckBot',
+  'Baiduspider',
+  'YandexBot',
+  'Slurp',
+  'facebookexternalhit',
+  'LinkedInBot',
+  'HeadlessChrome',
+  'Lighthouse',
+  'vercel-screenshot',
+] as const
 
-export type AgentSignal =
-  | 'format_param'
-  | 'accept_header'
-  | 'x_thally_client'
-  | 'user_agent'
-  | 'discovery_path'
+export type VisitorType = 'agent' | 'human' | 'bot'
+
+export type AgentSignal = 'format_param' | 'accept_header' | 'x_thally_client' | 'user_agent' | 'discovery_path'
 
 export interface TrafficClassification {
   visitorType: VisitorType
@@ -36,15 +45,26 @@ export interface TrafficClassification {
 }
 
 export function classifyRequest(req: NextRequest, pathname: string): TrafficClassification {
-  if (isDiscoveryPath(pathname)) {
-    return { visitorType: 'agent', agentSignal: 'discovery_path', format: 'html' }
+  const ua = req.headers.get('user-agent') ?? ''
+  if (KNOWN_BOT_UA.some((bot) => ua.includes(bot))) {
+    return { visitorType: 'agent', agentSignal: 'user_agent', format: 'json' }
+  }
+  if (
+    NON_AGENT_BOT_UA.some((bot) => ua.toLowerCase().includes(bot.toLowerCase())) ||
+    /(?:^|[\s/+_-])(bot|crawler|spider)(?:[\s/;:+_-]|$)/i.test(ua)
+  ) {
+    return { visitorType: 'bot', format: 'html' }
   }
 
-  if (
-    req.headers.has('next-router-state-tree') ||
-    req.headers.has('rsc') ||
-    req.headers.has('next-router-prefetch')
-  ) {
+  if (isDiscoveryPath(pathname)) {
+    return {
+      visitorType: 'agent',
+      agentSignal: 'discovery_path',
+      format: 'html',
+    }
+  }
+
+  if (req.headers.has('next-router-state-tree') || req.headers.has('rsc') || req.headers.has('next-router-prefetch')) {
     return { visitorType: 'human', format: 'html' }
   }
 
@@ -57,31 +77,50 @@ export function classifyRequest(req: NextRequest, pathname: string): TrafficClas
     }
   }
   if (format === 'md') {
-    return { visitorType: 'agent', agentSignal: 'format_param', format: 'markdown' }
+    return {
+      visitorType: 'agent',
+      agentSignal: 'format_param',
+      format: 'markdown',
+    }
   }
 
   const accept = req.headers.get('accept') ?? ''
   if (accept.includes('application/ld+json')) {
-    return { visitorType: 'agent', agentSignal: 'accept_header', format: 'ldjson' }
+    return {
+      visitorType: 'agent',
+      agentSignal: 'accept_header',
+      format: 'ldjson',
+    }
   }
   if (accept.includes('application/json')) {
-    return { visitorType: 'agent', agentSignal: 'accept_header', format: 'json' }
+    return {
+      visitorType: 'agent',
+      agentSignal: 'accept_header',
+      format: 'json',
+    }
   }
   if (accept.includes('text/markdown')) {
-    return { visitorType: 'agent', agentSignal: 'accept_header', format: 'markdown' }
+    return {
+      visitorType: 'agent',
+      agentSignal: 'accept_header',
+      format: 'markdown',
+    }
   }
 
   if (req.headers.get('x-thally-client')?.toLowerCase() === 'agent') {
-    return { visitorType: 'agent', agentSignal: 'x_thally_client', format: 'json' }
-  }
-
-  const ua = req.headers.get('user-agent') ?? ''
-  if (KNOWN_BOT_UA.some((bot) => ua.includes(bot))) {
-    return { visitorType: 'agent', agentSignal: 'user_agent', format: 'json' }
+    return {
+      visitorType: 'agent',
+      agentSignal: 'x_thally_client',
+      format: 'json',
+    }
   }
 
   if (pathname.endsWith('.md')) {
-    return { visitorType: 'agent', agentSignal: 'format_param', format: 'markdown' }
+    return {
+      visitorType: 'agent',
+      agentSignal: 'format_param',
+      format: 'markdown',
+    }
   }
 
   return { visitorType: 'human', format: 'html' }
