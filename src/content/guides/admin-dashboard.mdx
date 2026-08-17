@@ -11,7 +11,7 @@ Thally ships with a built-in **admin dashboard** at `/admin`. It lets you contro
 | Section | What it controls |
 | --- | --- |
 | **Home** | At-a-glance overview of the site's status. |
-| **Analytics** | Traffic, top pages, search terms, and content gaps. A [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) service — the panel appears locked until you connect Thally Cloud. |
+| **Analytics** | Privacy-safe visitors, visits, page views, traffic sources, entry pages, AI readership, search terms, and content gaps. A [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) service — the panel appears locked until you connect Thally Cloud. |
 | **Agent Readiness** | Score for how well your docs serve AI agents. Computed from your content — always free. |
 | **MCP server** | Enable or disable the public `/api/mcp` endpoint. |
 | **Team** | Members, domains, and roles for admin access. |
@@ -23,6 +23,29 @@ Everything an Owner changes here applies to the live site immediately — no mer
 <Note type="info" title="Free vs Thally Cloud">
 The admin panel, search, Agent Readiness, and the [agent endpoints](/guides/ai-features) are free in the self-hosted template. Grounded **AI answers**, **Track** (code-triggered docs), and **traffic analytics** are [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) services — their panels appear locked until you connect Thally Cloud.
 </Note>
+
+## How traffic metrics are counted
+
+Thally keeps people and AI traffic separate so an indexing crawl cannot make
+your human readership look larger. Known AI agents are reported under **AI
+tools**; ordinary search crawlers and synthetic monitoring are excluded.
+
+Human analytics use no cookies or persistent browser storage:
+
+- **Visitors** are daily anonymous uniques. The runtime HMACs the request IP
+  and User-Agent with a site-scoped secret and UTC date, sends only the HMAC,
+  and never stores either raw value. The identifier changes the next day.
+- **Visits** group one visitor's page views until there has been 30 minutes of
+  inactivity.
+- **Page views** count full loads and client-side navigation, while speculative
+  prefetches and admin traffic are excluded.
+- **Bounce rate** is the percentage of visits with exactly one page view.
+- **Traffic sources** retain only the external referring hostname. Referrer
+  paths, query strings, and same-site navigation are discarded.
+
+After upgrading an existing site, historical page views remain visible but do
+not have anonymous visitor keys. The dashboard shows identity coverage whenever
+visitor and visit metrics cover only part of the selected range.
 
 ## Turning on the dashboard
 

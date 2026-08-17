@@ -1,12 +1,6 @@
 import type { AgentSignal, VisitorType } from '@/lib/traffic-classifier'
 
-export type AnalyticsEventType =
-  | 'page_view'
-  | 'feedback'
-  | 'chat_message'
-  | 'discovery'
-  | 'api_fetch'
-  | 'search_query'
+export type AnalyticsEventType = 'page_view' | 'feedback' | 'chat_message' | 'discovery' | 'api_fetch' | 'search_query'
 
 export interface AnalyticsEvent {
   id: string
@@ -17,6 +11,10 @@ export interface AnalyticsEvent {
   visitorType?: VisitorType
   agentSignal?: AgentSignal
   format?: string
+  /** Site/day-scoped HMAC; never a raw IP, User-Agent, cookie, or account id. */
+  visitorKey?: string
+  /** External hostname only. Full referrer paths and queries are not retained. */
+  referrerDomain?: string
   referer?: string
   vote?: 'yes' | 'no'
   page?: string
@@ -51,10 +49,25 @@ export interface AnalyticsSummary {
     discoveryHits: number
   }
   dailyTraffic: Array<DailyTrafficPoint>
+  humanAudience: {
+    /** Daily anonymous visitors. A returning reader is new after UTC midnight. */
+    visitors: number
+    /** Human visits separated by at least 30 minutes of inactivity. */
+    visits: number
+    viewsPerVisit: number
+    /** Percentage of visits containing exactly one page view. */
+    bounceRate: number
+    /** Human page views carrying the privacy-safe visitor key. */
+    identifiedViews: number
+    /** identifiedViews / humanViews; consumers must expose partial coverage. */
+    identityCoverage: number
+  }
   topPages: {
     human: Array<{ path: string; views: number }>
     agent: Array<{ path: string; views: number }>
   }
+  topReferrers: Array<{ source: string; visits: number }>
+  entryPages: Array<{ path: string; visits: number }>
   agentSignals: Array<{ signal: string; count: number }>
   recentFeedback: Array<{ ts: number; page: string; vote: 'yes' | 'no' }>
   search: {
