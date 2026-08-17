@@ -1,7 +1,7 @@
 import { searchDocs } from '@/lib/search/engine'
-import { getContentDocument } from '@/lib/content'
+import { loadContentDocument } from '@/lib/content'
 import { getDocEntries } from '@/data/docs'
-import { computeAgentReadiness } from '@/lib/agent-readiness'
+import { computePublishedAgentReadiness } from '@/lib/agent-readiness'
 import { getSiteUrl } from '@/lib/site-url'
 import { toolMetadata, type McpToolMetadata } from '@/lib/mcp/tool-metadata'
 
@@ -46,7 +46,7 @@ const handlers: Record<string, McpTool['handler']> = {
     // and read arbitrary .mdx files on the public endpoint).
     const entry = getDocEntries().find((e) => e.id === raw || e.slug.join('/') === raw)
     if (!entry) return `No page found for "${raw}". Call list_pages to see valid page IDs.`
-    const doc = getContentDocument(entry.id)
+    const doc = await loadContentDocument(entry.id)
     if (!doc) return `No page found for "${raw}". Call list_pages to see valid page IDs.`
     return doc.content.markdown
   },
@@ -56,7 +56,7 @@ const handlers: Record<string, McpTool['handler']> = {
     return entries.map((e) => `- ${e.id} — ${e.title} (${siteUrl}${e.href})`).join('\n')
   },
   agent_readiness: async () => {
-    const report = computeAgentReadiness()
+    const report = await computePublishedAgentReadiness()
     const lines = [
       `Agent Readiness: ${report.score}/100 (grade ${report.grade}) across ${report.totalPages} page${report.totalPages === 1 ? '' : 's'}.`,
       '',

@@ -1,4 +1,9 @@
-import { gatherPageFacts } from '@/lib/agent-readiness/gather'
+/** Public entrypoints for local and deployed agent-readiness evaluation. */
+
+import {
+  gatherPageFacts,
+  loadPageFacts,
+} from '@/lib/agent-readiness/gather'
 import { scoreAgentReadiness, type ScoreOptions } from '@/lib/agent-readiness/score'
 import type { AgentReadinessReport } from '@/lib/agent-readiness/types'
 
@@ -10,8 +15,15 @@ export function computeAgentReadiness(options: ScoreOptions = {}): AgentReadines
   return scoreAgentReadiness(gatherPageFacts(), options)
 }
 
+/** Compute readiness from the content source serving the deployed site. */
+export async function computePublishedAgentReadiness(
+  options: ScoreOptions = {},
+): Promise<AgentReadinessReport> {
+  return scoreAgentReadiness(await loadPageFacts(), options)
+}
+
 export { scoreAgentReadiness } from '@/lib/agent-readiness/score'
-export { gatherPageFacts } from '@/lib/agent-readiness/gather'
+export { gatherPageFacts, loadPageFacts } from '@/lib/agent-readiness/gather'
 export type {
   AgentReadinessReport,
   SubscoreResult,
