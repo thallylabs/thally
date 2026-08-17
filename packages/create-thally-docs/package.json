@@ -1,6 +1,6 @@
 {
   "name": "create-thally-docs",
-  "version": "0.10.12",
+  "version": "0.10.13",
   "description": "Scaffold the first documentation surface in a Thally product-knowledge pipeline.",
   "type": "module",
   "engines": {
