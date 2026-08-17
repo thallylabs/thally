@@ -1,4 +1,9 @@
-import type { ApiReferenceConfig, ApiSpecConfig, ApiSpecSource } from '@/lib/openapi/types'
+/**
+ * Normalizes docs.json API-reference settings for rendering and discovery.
+ * Public links always target Thally's served projection, never source storage.
+ */
+
+import type { ApiReferenceConfig, ApiSpecConfig } from '@/lib/openapi/types'
 import { getSidebarCollections } from '@/data/docs'
 import type { DocsJsonApiConfig } from '@/data/docs'
 import { getSiteUrl } from '@/lib/site-url'
@@ -35,23 +40,7 @@ function buildSpecFromDocsJson(api: DocsJsonApiConfig): ApiSpecConfig {
 
 export const apiReferenceConfig: ApiReferenceConfig = buildApiReferenceConfig()
 
-function normalizePublicSpecPath(path: string) {
-  if (path.startsWith('/')) {
-    return path
-  }
-  return `/${path}`
-}
-
-function resolveSourceUrl(source: ApiSpecSource, siteUrl: string): string | null {
-  if (source.type === 'url') {
-    return source.url
-  }
-  if (source.type === 'file') {
-    return `${siteUrl}${normalizePublicSpecPath(source.path)}`
-  }
-  return null
-}
-
+/** Return the canonical public YAML projection for the configured specification. */
 export function getOpenApiSpecUrl(siteUrl = getSiteUrl()): string | null {
   const spec = apiReferenceConfig.specs.find((entry) => entry.id === apiReferenceConfig.defaultSpecId)
     ?? apiReferenceConfig.specs[0]
@@ -60,6 +49,8 @@ export function getOpenApiSpecUrl(siteUrl = getSiteUrl()): string | null {
     return null
   }
 
-  return resolveSourceUrl(spec.source, siteUrl)
+  // File sources are repository paths, not public routes, and remote sources
+  // may disappear or reject browser traffic. Thally already serves the parsed
+  // default spec at this stable route in both self-hosted and managed sites.
+  return new URL('/openapi.yaml', siteUrl).toString()
 }
-
