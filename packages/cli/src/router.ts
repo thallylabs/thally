@@ -74,7 +74,7 @@ export function helpText(): string {
   lines.push('  thally — keep customer-facing knowledge in sync with product changes')
   lines.push('')
   lines.push('  Connect product evidence, prepare reviewable updates, and publish one trusted source.')
-  lines.push('  You author content/, docs.json, and snippets/.')
+  lines.push('  You author src/content/, docs.json, site.ts, custom MDX, snippets/, and public assets.')
   lines.push('  The framework (Next.js) is a hidden runtime — you never touch src/app/.')
   lines.push('')
   lines.push('  Usage: thally <command> [options]')

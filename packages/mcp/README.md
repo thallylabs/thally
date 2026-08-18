@@ -30,12 +30,13 @@ Or in a `mcp.json` / client config:
 
 ## Tools
 
-15 tools, including:
+17 tools, including:
 
 - **Authoring** — `create_project`, `add_page`, `update_page`, `read_page`, `list_pages`, `add_tab`
 - **Context & search** — `get_context`, `search_docs`, `semantic_search` (against a deployed site)
 - **Quality** — `lint_project`, `agent_readiness` (the Agent Readiness Score of a deployed site)
 - **Migration** — `migrate_docs`, `import_docs`, `translate_docs`
+- **API specifications** — `read_api_spec`, `update_api_spec`
 - **Product changes** — `sync_from_repo`
 
 `search_docs`, `read_page`, and `get_context` work against a local project on
