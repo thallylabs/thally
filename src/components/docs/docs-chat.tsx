@@ -1,13 +1,33 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, ArrowUp, Sparkles, Zap, Bot, Brain, Stars, Wand, Square, Maximize2, Minimize2, type LucideProps } from 'lucide-react'
+import NextImage from 'next/image'
+import { X, ArrowUp, Sparkles, Zap, Bot, Brain, Stars, Wand, Square, Maximize2, Minimize2, BookOpen, ChevronDown, ArrowUpRight, Paperclip, type LucideProps } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { DEFAULT_AI_DISCLAIMER } from '@/lib/ai-defaults'
+import {
+  MAX_AI_CHAT_IMAGES,
+  MAX_AI_CHAT_IMAGE_BYTES,
+  createAiChatRequestMessages,
+  isAiChatImageMediaType,
+  type AiChatImage,
+} from '@/lib/ai-chat-messages'
+import {
+  AI_ANSWER_SOURCES_HEADER,
+  parseAiAnswerSources,
+  type AiAnswerSource,
+} from '@/lib/ai-answer-sources'
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
+  sources?: Array<AiAnswerSource>
+  images?: Array<ChatImage>
+}
+
+interface ChatImage extends AiChatImage {
+  id: string
+  name: string
 }
 
 type IconName = 'sparkles' | 'zap' | 'bot' | 'brain' | 'stars' | 'wand'
@@ -38,6 +58,47 @@ const SUGGESTIONS = [
   'How do I enable the AI chat?',
 ]
 
+const SCREENSHOT_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp'
+
+function screenshotSrc(image: AiChatImage): string {
+  return `data:${image.mediaType};base64,${image.data}`
+}
+
+function screenshotId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `screenshot-${Date.now()}-${Math.random()}`
+}
+
+function readScreenshot(file: File): Promise<ChatImage> {
+  const mediaType = file.type
+  if (!isAiChatImageMediaType(mediaType)) {
+    return Promise.reject(new Error('Use a PNG, JPEG, GIF, or WebP image.'))
+  }
+  if (file.size > MAX_AI_CHAT_IMAGE_BYTES) {
+    return Promise.reject(new Error('Each screenshot must be 3 MB or smaller.'))
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('This screenshot could not be read.'))
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : ''
+      const marker = ';base64,'
+      const markerIndex = result.indexOf(marker)
+      if (markerIndex < 0) {
+        reject(new Error('This screenshot could not be read.'))
+        return
+      }
+      resolve({
+        id: screenshotId(),
+        name: file.name || 'Pasted screenshot',
+        mediaType,
+        data: result.slice(markerIndex + marker.length),
+      })
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
 function TypingDots() {
   return (
     <span className="inline-flex items-center gap-1 py-1">
@@ -49,6 +110,34 @@ function TypingDots() {
         />
       ))}
     </span>
+  )
+}
+
+/** Compact evidence drawer shown before each grounded assistant answer. */
+export function AnswerSources({ sources }: { sources: Array<AiAnswerSource> }) {
+  if (sources.length === 0) return null
+  const label = `Read ${sources.length} ${sources.length === 1 ? 'page' : 'pages'}`
+
+  return (
+    <details className="group mb-3 overflow-hidden rounded-xl border border-border/70 bg-muted/25 text-xs">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 font-medium text-muted-foreground transition-colors hover:bg-muted/45 hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <BookOpen className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>{label}</span>
+        <ChevronDown className="ml-auto h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
+      </summary>
+      <div className="border-t border-border/60 p-1.5">
+        {sources.map((source) => (
+          <a
+            key={source.url}
+            href={source.url}
+            className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-muted-foreground no-underline transition-colors hover:bg-background/80 hover:text-foreground"
+          >
+            <span className="min-w-0 flex-1 truncate">{source.title}</span>
+            <ArrowUpRight className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
+          </a>
+        ))}
+      </div>
+    </details>
   )
 }
 
@@ -82,9 +171,12 @@ export function DocsChat({
   const [disclaimer, setDisclaimer] = useState(DEFAULT_AI_DISCLAIMER)
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
+  const [pendingImages, setPendingImages] = useState<Array<ChatImage>>([])
+  const [attachmentError, setAttachmentError] = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   // Auto-resize textarea
@@ -120,6 +212,42 @@ export function DocsChat({
     setLoading(false)
   }, [])
 
+  const addScreenshots = useCallback(async (files: ReadonlyArray<File>) => {
+    if (files.length === 0) return
+    const availableSlots = MAX_AI_CHAT_IMAGES - pendingImages.length
+    if (availableSlots <= 0) {
+      setAttachmentError(`You can attach up to ${MAX_AI_CHAT_IMAGES} screenshots.`)
+      return
+    }
+    if (files.length > availableSlots) {
+      setAttachmentError(`You can attach up to ${MAX_AI_CHAT_IMAGES} screenshots.`)
+    } else {
+      setAttachmentError('')
+    }
+
+    const selected = files.slice(0, availableSlots)
+    const results = await Promise.allSettled(selected.map(readScreenshot))
+    const images = results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    )
+    const failure = results.find((result) => result.status === 'rejected')
+    if (failure?.status === 'rejected') {
+      setAttachmentError(
+        failure.reason instanceof Error
+          ? failure.reason.message
+          : 'This screenshot could not be attached.',
+      )
+    }
+    if (images.length > 0) {
+      setPendingImages((current) => [...current, ...images].slice(0, MAX_AI_CHAT_IMAGES))
+    }
+  }, [pendingImages.length])
+
+  const removeScreenshot = useCallback((id: string) => {
+    setPendingImages((current) => current.filter((image) => image.id !== id))
+    setAttachmentError('')
+  }, [])
+
   // Respect the admin's live enable/disable toggle (hide if off) and pick up the
   // admin's custom assistant name + disclaimer.
   useEffect(() => {
@@ -140,15 +268,24 @@ export function DocsChat({
   }, [skipStatusCheck])
 
   const send = useCallback(async (text?: string) => {
-    const content = (text ?? input).trim()
-    if (!content || loading) return
+    const typedContent = (text ?? input).trim()
+    if ((!typedContent && pendingImages.length === 0) || loading) return
 
-    const userMsg: Message = { role: 'user', content }
+    const images = pendingImages
+    const content = typedContent || (
+      images.length === 1
+        ? 'What should I know about this screenshot?'
+        : 'What should I know about these screenshots?'
+    )
+
+    const userMsg: Message = { role: 'user', content, images }
     setMessages((prev) => [...prev, userMsg])
     setInput('')
+    setPendingImages([])
+    setAttachmentError('')
     setLoading(true)
 
-    const assistantMsg: Message = { role: 'assistant', content: '' }
+    const assistantMsg: Message = { role: 'assistant', content: '', sources: [] }
     setMessages((prev) => [...prev, assistantMsg])
 
     const controller = new AbortController()
@@ -158,7 +295,9 @@ export function DocsChat({
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...messages, userMsg] }),
+        body: JSON.stringify({
+          messages: createAiChatRequestMessages([...messages, userMsg]),
+        }),
         signal: controller.signal,
       })
 
@@ -172,6 +311,15 @@ export function DocsChat({
         return
       }
 
+      const sources = parseAiAnswerSources(
+        res.headers.get(AI_ANSWER_SOURCES_HEADER),
+      )
+      setMessages((prev) => {
+        const next = [...prev]
+        next[next.length - 1] = { ...next[next.length - 1], sources }
+        return next
+      })
+
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
 
@@ -182,7 +330,7 @@ export function DocsChat({
         setMessages((prev) => {
           const next = [...prev]
           next[next.length - 1] = {
-            role: 'assistant',
+            ...next[next.length - 1],
             content: next[next.length - 1].content + chunk,
           }
           return next
@@ -199,7 +347,7 @@ export function DocsChat({
       setLoading(false)
       abortRef.current = null
     }
-  }, [input, loading, messages])
+  }, [input, loading, messages, pendingImages])
 
   if (!chatShown) return null
 
@@ -296,14 +444,30 @@ export function DocsChat({
 
                     {msg.role === 'user' ? (
                       /* User bubble */
-                      <div className="max-w-[78%] rounded-2xl rounded-br-sm bg-muted px-4 py-2.5 text-sm leading-relaxed">
+                      <div className="max-w-[78%] overflow-hidden rounded-2xl rounded-br-sm bg-muted text-sm leading-relaxed">
+                        {msg.images?.length ? (
+                          <div className={`grid gap-1.5 p-1.5 pb-0 ${msg.images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                            {msg.images.map((image) => (
+                              <NextImage
+                                key={image.id}
+                                src={screenshotSrc(image)}
+                                alt={image.name}
+                                width={280}
+                                height={180}
+                                unoptimized
+                                className="max-h-44 w-full rounded-xl object-cover object-top"
+                              />
+                            ))}
+                          </div>
+                        ) : null}
                         <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                          {msg.content}
+                          <span className="block px-4 py-2.5">{msg.content}</span>
                         </span>
                       </div>
                     ) : (
                       /* Assistant — no bubble, full prose */
                       <div className="min-w-0 flex-1 text-sm leading-relaxed">
+                        <AnswerSources sources={msg.sources ?? []} />
                         {msg.content ? (
                           <div className="prose prose-sm dark:prose-invert max-w-none break-words
                             [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_:not(pre)>code]:break-words
@@ -338,34 +502,105 @@ export function DocsChat({
                 environment to enable it.
               </p>
             ) : null}
-            <div className="flex items-end gap-2 rounded-2xl border border-border bg-muted/30 px-4 py-3 focus-within:border-accent/40 transition-colors">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                rows={1}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    if (enabled) void send()
+            <div className="rounded-2xl border border-border bg-muted/30 p-2 transition-colors focus-within:border-accent/40">
+              {pendingImages.length > 0 ? (
+                <div className="mb-1.5">
+                  <div className="flex gap-2 overflow-x-auto px-1 pt-1">
+                    {pendingImages.map((image) => (
+                      <div
+                        key={image.id}
+                        className="group/image relative h-14 w-20 shrink-0 overflow-hidden rounded-xl border border-border bg-background"
+                      >
+                        <NextImage
+                          src={screenshotSrc(image)}
+                          alt={image.name}
+                          width={80}
+                          height={56}
+                          unoptimized
+                          className="h-full w-full object-cover object-top"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeScreenshot(image.id)}
+                          aria-label={`Remove ${image.name}`}
+                          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/90 text-foreground opacity-80 shadow-sm backdrop-blur transition-opacity hover:opacity-100 focus-visible:opacity-100"
+                        >
+                          <X className="h-3 w-3" aria-hidden="true" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="px-2 pt-1.5 text-[10px] text-muted-foreground">
+                    Screenshots are sent with this chat and not saved by Thally.
+                  </p>
+                </div>
+              ) : null}
+              {attachmentError ? (
+                <p className="px-2 pb-1 text-[11px] text-destructive" role="status">
+                  {attachmentError}
+                </p>
+              ) : null}
+              <div className="flex items-end gap-1.5">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={SCREENSHOT_ACCEPT}
+                  multiple
+                  tabIndex={-1}
+                  className="sr-only"
+                  onChange={(event) => {
+                    void addScreenshots(Array.from(event.target.files ?? []))
+                    event.target.value = ''
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading || !enabled || pendingImages.length >= MAX_AI_CHAT_IMAGES}
+                  aria-label="Attach screenshots"
+                  title="Attach screenshots"
+                  className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:opacity-35"
+                >
+                  <Paperclip className="h-4 w-4" aria-hidden="true" />
+                </button>
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  rows={1}
+                  onChange={(e) => setInput(e.target.value)}
+                  onPaste={(event) => {
+                    const files = Array.from(event.clipboardData.items)
+                      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+                      .flatMap((item) => {
+                        const file = item.getAsFile()
+                        return file ? [file] : []
+                      })
+                    if (files.length > 0) void addScreenshots(files)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      if (enabled) void send()
+                    }
+                  }}
+                  placeholder={enabled ? `Message ${liveLabel} or paste a screenshot…` : 'Add an ANTHROPIC_API_KEY to enable chat'}
+                  disabled={loading || !enabled}
+                  className="min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
+                  style={{ maxHeight: '160px' }}
+                />
+                <button
+                  type="button"
+                  onClick={loading ? stop : () => void send()}
+                  disabled={!loading && !input.trim() && pendingImages.length === 0}
+                  aria-label={loading ? 'Stop' : 'Send'}
+                  className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-all disabled:opacity-30"
+                >
+                  {loading
+                    ? <Square className="h-3 w-3 fill-current" />
+                    : <ArrowUp className="h-4 w-4" />
                   }
-                }}
-                placeholder={enabled ? `Message ${liveLabel}…` : 'Add an ANTHROPIC_API_KEY to enable chat'}
-                disabled={loading || !enabled}
-                className="min-w-0 flex-1 resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
-                style={{ maxHeight: '160px' }}
-              />
-              <button
-                onClick={loading ? stop : () => void send()}
-                disabled={!loading && !input.trim()}
-                aria-label={loading ? 'Stop' : 'Send'}
-                className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-all disabled:opacity-30"
-              >
-                {loading
-                  ? <Square className="h-3 w-3 fill-current" />
-                  : <ArrowUp className="h-4 w-4" />
-                }
-              </button>
+                </button>
+              </div>
             </div>
             {disclaimer ? (
               <p className="mt-2 text-center text-[10px] leading-relaxed text-muted-foreground/70">

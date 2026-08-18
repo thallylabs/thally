@@ -25,6 +25,10 @@ import {
   isCloudAiAvailable,
   recordCloudAnalyticsEvent,
 } from '../services'
+import {
+  AI_ANSWER_SOURCES_HEADER,
+  parseAiAnswerSources,
+} from '@/lib/ai-answer-sources'
 
 const cloudConfig = {
   siteId: 'site-1',
@@ -79,7 +83,15 @@ describe('Thally Cloud service adapters', () => {
     const response = await handleCloudAiChat(
       new Request('https://docs.example.com/api/chat', {
         method: 'POST',
-        body: JSON.stringify({ messages: [{ role: 'user', content: 'How do I install?' }] }),
+        body: JSON.stringify({
+          messages: [
+            {
+              role: 'user',
+              content: 'How do I install?',
+              images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }],
+            },
+          ],
+        }),
       }),
     )
 
@@ -94,6 +106,10 @@ describe('Thally Cloud service adapters', () => {
         body: expect.stringContaining('Install the package.'),
       }),
     )
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toContain('iVBORw0KGgo=')
+    expect(
+      parseAiAnswerSources(response.headers.get(AI_ANSWER_SOURCES_HEADER)),
+    ).toEqual([{ title: 'Quickstart', url: '/quickstart#install' }])
   })
 
   it('posts analytics with the server-only release grant', async () => {

@@ -12,19 +12,20 @@ import 'server-only'
 import '@/lib/search/register-doc-source'
 import { getRelevantChunks } from '@thallylabs/core'
 import { siteConfig } from '@/data/site'
+import {
+  MAX_AI_CHAT_REQUEST_BYTES,
+  parseAiChatMessages,
+  type AiChatMessage,
+} from '@/lib/ai-chat-messages'
+import {
+  AI_ANSWER_SOURCES_HEADER,
+  serializeAiAnswerSources,
+} from '@/lib/ai-answer-sources'
 import type { AnalyticsEvent } from '@/lib/analytics/types'
 import { getCloudServiceGrant, getCloudSiteConfig } from './client'
 
 const DEFAULT_CLOUD_URL = 'https://app.thally.io'
-const REQUEST_TIMEOUT_MS = 15_000
-const MAX_CHAT_MESSAGES = 24
-const MAX_MESSAGE_CHARS = 8_000
-
-interface ChatMessage {
-  role: 'user' | 'assistant'
-  content: string
-}
-
+const REQUEST_TIMEOUT_MS = 30_000
 function cloudUrl(pathname: string): URL {
   const configured =
     process.env.THALLY_CLOUD_URL?.trim() ||
@@ -33,34 +34,39 @@ function cloudUrl(pathname: string): URL {
   return new URL(pathname, configured.endsWith('/') ? configured : `${configured}/`)
 }
 
-function parseChatMessages(value: unknown): Array<ChatMessage> | null {
-  if (!value || typeof value !== 'object') return null
-  const messages = (value as { messages?: unknown }).messages
-  if (!Array.isArray(messages) || messages.length === 0 || messages.length > MAX_CHAT_MESSAGES) {
-    return null
-  }
-  const parsed: Array<ChatMessage> = []
-  for (const message of messages) {
-    if (!message || typeof message !== 'object') return null
-    const { role, content } = message as { role?: unknown; content?: unknown }
-    if (
-      (role !== 'user' && role !== 'assistant') ||
-      typeof content !== 'string' ||
-      !content.trim() ||
-      content.length > MAX_MESSAGE_CHARS
-    ) {
-      return null
-    }
-    parsed.push({ role, content: content.trim() })
-  }
-  return parsed
-}
-
-function latestQuestion(messages: ReadonlyArray<ChatMessage>): string {
+function latestQuestion(messages: ReadonlyArray<AiChatMessage>): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.role === 'user') return messages[index].content
   }
   return ''
+}
+
+async function readBoundedJson(request: Request): Promise<unknown> {
+  const declared = Number(request.headers.get('content-length') ?? '0')
+  if (Number.isFinite(declared) && declared > MAX_AI_CHAT_REQUEST_BYTES) {
+    throw new Error('body_too_large')
+  }
+  const reader = request.body?.getReader()
+  if (!reader) return null
+  const chunks: Array<Uint8Array> = []
+  let length = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    length += value.byteLength
+    if (length > MAX_AI_CHAT_REQUEST_BYTES) {
+      await reader.cancel()
+      throw new Error('body_too_large')
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return JSON.parse(new TextDecoder().decode(bytes))
 }
 
 /** Whether the linked site is entitled, enabled, and credentialed for AI chat. */
@@ -82,8 +88,12 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
   const grant = await getCloudServiceGrant(siteUrl)
   if (!grant) return new Response('AI chat is not enabled for this site.', { status: 403 })
 
-  const body = await request.json().catch(() => null)
-  const messages = parseChatMessages(body)
+  const body = await readBoundedJson(request).catch(() => null)
+  const messages = parseAiChatMessages(
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? (body as { messages?: unknown }).messages
+      : null,
+  )
   if (!messages) {
     return new Response('Invalid request body. Expected a bounded messages array.', {
       status: 400,
@@ -120,6 +130,10 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
     return new Response('Thally AI is temporarily unavailable.', { status: 503 })
   }
 
+  // The retrieval happened in this trusted runtime, so expose that bounded
+  // local evidence rather than accepting link metadata from the remote model.
+  const sourcesHeader = serializeAiAnswerSources(context)
+
   return new Response(response.body, {
     status: response.status,
     headers: {
@@ -127,6 +141,9 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
       'cache-control': 'no-store',
       ...(response.headers.get('retry-after')
         ? { 'retry-after': response.headers.get('retry-after')! }
+        : {}),
+      ...(response.ok && sourcesHeader
+        ? { [AI_ANSWER_SOURCES_HEADER]: sourcesHeader }
         : {}),
     },
   })
