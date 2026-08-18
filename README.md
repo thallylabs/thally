@@ -52,6 +52,22 @@ Thally Cloud. This repository is the single authored source for the public
 runtime and toolchain; starter's runtime-owned files are a generated snapshot,
 not a second implementation surface.
 
+### Platform boundary
+
+This README describes the public runtime and toolchain, not the private Thally
+Cloud control plane. The sole production architecture authority is
+[`thally-cloud/ARCHITECTURE.md`](https://github.com/thallylabs/thally-cloud/blob/main/ARCHITECTURE.md),
+which is available to maintainers with access to the private repository. Cloud
+services attach through the public cloud-bridge contract; the open-source
+distribution provides safe no-op implementations when those services are
+absent.
+
+`create-thally-docs`, `thally init`, and MCP project creation consume an exact
+promoted starter release. Directly cloning `thallylabs/starter` follows that
+repository's current branch instead. Package versions, scaffold releases,
+managed site releases, and Cloud platform releases are independent identities;
+publishing one does not silently upgrade the others.
+
 ### Maintainer release boundary
 
 Runtime and framework changes are authored only here. Before a scaffold
