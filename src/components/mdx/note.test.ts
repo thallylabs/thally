@@ -34,9 +34,10 @@ describe('Note', () => {
   it('uses the live brand accent for the default Note surface', () => {
     const markup = renderCallout('note')
 
-    expect(markup).toContain('border-accent/30')
-    expect(markup).toContain('bg-accent/[0.08]')
+    expect(markup).toContain('border-accent/45')
+    expect(markup).toContain('bg-accent/[0.14]')
     expect(markup).toContain('text-accent')
+    expect(markup).toContain('thally-callout-content')
   })
 
   it.each([

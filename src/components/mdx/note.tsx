@@ -19,12 +19,12 @@ import { cn } from '@/lib/utils'
 export type NoteType = 'note' | 'tip' | 'info' | 'warning' | 'check' | 'danger'
 
 const toneStyles: Record<NoteType, string> = {
-  note: 'border-accent/30 bg-accent/[0.08] text-foreground dark:border-accent/25 dark:bg-accent/[0.10]',
-  tip: 'border-teal-600/25 bg-teal-500/[0.08] text-teal-950 dark:border-teal-300/20 dark:bg-teal-300/[0.10] dark:text-teal-50',
-  info: 'border-sky-600/25 bg-sky-500/[0.08] text-sky-950 dark:border-sky-300/20 dark:bg-sky-300/[0.10] dark:text-sky-50',
-  warning: 'border-amber-600/30 bg-amber-500/[0.10] text-amber-950 dark:border-amber-300/25 dark:bg-amber-300/[0.12] dark:text-amber-50',
-  check: 'border-emerald-600/25 bg-emerald-500/[0.08] text-emerald-950 dark:border-emerald-300/20 dark:bg-emerald-300/[0.10] dark:text-emerald-50',
-  danger: 'border-rose-600/25 bg-rose-500/[0.08] text-rose-950 dark:border-rose-300/20 dark:bg-rose-300/[0.10] dark:text-rose-50',
+  note: 'border-accent/45 bg-accent/[0.14] text-foreground dark:border-accent/40 dark:bg-accent/[0.17]',
+  tip: 'border-teal-600/45 bg-teal-500/[0.14] text-teal-950 dark:border-teal-300/35 dark:bg-teal-300/[0.16] dark:text-teal-50',
+  info: 'border-sky-600/45 bg-sky-500/[0.14] text-sky-950 dark:border-sky-300/35 dark:bg-sky-300/[0.16] dark:text-sky-50',
+  warning: 'border-amber-600/50 bg-amber-500/[0.16] text-amber-950 dark:border-amber-300/40 dark:bg-amber-300/[0.18] dark:text-amber-50',
+  check: 'border-emerald-600/45 bg-emerald-500/[0.14] text-emerald-950 dark:border-emerald-300/35 dark:bg-emerald-300/[0.16] dark:text-emerald-50',
+  danger: 'border-rose-600/45 bg-rose-500/[0.14] text-rose-950 dark:border-rose-300/35 dark:bg-rose-300/[0.16] dark:text-rose-50',
 }
 
 const toneAccent: Record<NoteType, string> = {
@@ -104,7 +104,7 @@ export function Note({ type, className, children }: NoteProps) {
         >
           <Icon className="h-4 w-4" aria-hidden="true" />
         </span>
-        <div className="prose prose-sm max-w-none text-current/90 prose-p:my-0 prose-li:my-1 prose-ol:my-2 prose-ul:my-2 dark:prose-invert">
+        <div className="thally-callout-content prose prose-sm max-w-none text-current/90 prose-p:my-0 prose-li:my-1 prose-ol:my-2 prose-ul:my-2 dark:prose-invert">
           {children}
         </div>
       </div>
