@@ -60,6 +60,8 @@ const components: MDXComponents = {
   CodeGroup: (props) => <CodeGroup {...(props as CodeGroupProps)} />,
   Info: (props) => <Note type="info" {...props} />,
   Warning: (props) => <Note type="warning" {...props} />,
+  Check: (props) => <Note type="check" {...props} />,
+  Danger: (props) => <Note type="danger" {...props} />,
   Error: (props) => <Note type="danger" {...props} />,
   Note: (props) => <Note type="note" {...props} />,
   Tip: (props) => <Note type="tip" {...props} />,
@@ -69,6 +71,9 @@ const components: MDXComponents = {
     if (type === 'warning') return <Note type="warning">{children}</Note>
     if (type === 'danger' || type === 'error') return <Note type="danger">{children}</Note>
     if (type === 'info') return <Note type="info">{children}</Note>
+    if (type === 'tip') return <Note type="tip">{children}</Note>
+    if (type === 'check' || type === 'success') return <Note type="check">{children}</Note>
+    if (type === 'note') return <Note type="note">{children}</Note>
     return <Note>{children}</Note>
   },
   // AccordionGroup: Mintlify wrapper — Thally uses <Accordion> directly, no group needed
