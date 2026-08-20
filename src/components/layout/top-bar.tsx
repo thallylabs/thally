@@ -174,7 +174,7 @@ export function TopBar({
                 <IntentPrefetchLink href={supportLink.href} className="thally-docs-topbar-link hidden whitespace-nowrap text-[0.86rem] font-medium text-foreground/70 hover:text-foreground sm:inline-flex">{supportLink.label}</IntentPrefetchLink>
               ) : null}
           {primaryCta ? (
-            <IntentPrefetchLink href={primaryCta.href} className="thally-docs-primary inline-flex h-[30px] items-center rounded-[9px] bg-primary px-3 text-[0.84rem] font-semibold text-primary-foreground transition hover:brightness-125 active:scale-[0.98]">{primaryCta.label}</IntentPrefetchLink>
+            <IntentPrefetchLink href={primaryCta.href} className="thally-docs-primary inline-flex h-[30px] shrink-0 items-center whitespace-nowrap rounded-[9px] bg-primary px-3 text-[0.84rem] font-semibold text-primary-foreground transition hover:brightness-125 active:scale-[0.98]">{primaryCta.label}</IntentPrefetchLink>
           ) : null}
           <VersionSwitcher />
           {i18nConfig && i18nConfig.locales.length >= 2 ? (

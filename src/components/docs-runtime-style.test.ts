@@ -182,11 +182,21 @@ describe('documentation visual system', () => {
 
     expect(topBar).toContain("data-density={isCrowded ? 'compact' : 'comfortable'}")
     expect(topBar).toContain("className={cn('thally-docs-topbar-inner flex h-14")
+    expect(topBar).toContain('thally-docs-primary inline-flex h-[30px] shrink-0')
     expect(css).toMatch(/\.thally-docs-search \{\s*width: 280px;/)
     expect(css).toContain("[data-density='compact'] .thally-docs-search")
     expect(css).toContain('padding-inline: 10px 46px')
     expect(css).toMatch(
       /\.thally-docs-search > button:first-of-type kbd \{[\s\S]*?position: absolute;[\s\S]*?inset-inline-end: 4px;/,
+    )
+    expect(css).toMatch(
+      /@media \(max-width: 1010px\) \{[\s\S]*?\.thally-docs-topbar-inner > button\[aria-haspopup='dialog'\][\s\S]*?display: inline-flex;/,
+    )
+    expect(css).toMatch(
+      /@media \(max-width: 860px\) \{[\s\S]*?\.thally-docs-brand > span:last-child[\s\S]*?\.thally-docs-search,[\s\S]*?width: 30px;/,
+    )
+    expect(css).toMatch(
+      /\.thally-callout-content > :last-child \{\s*margin-bottom: 0;/,
     )
     expect(layout).toContain("topbarHeight: 'h-14'")
     expect(shell).toContain('calc(100dvh-56px)')

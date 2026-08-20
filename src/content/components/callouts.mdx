@@ -3,7 +3,7 @@ title: "Callouts"
 description: "Highlight important information with styled callout blocks."
 ---
 
-Use `<Note>`, `<Tip>`, `<Warning>`, and `<Info>` to draw attention to important content. Each maps to a visual style that signals intent.
+Use `<Note>`, `<Tip>`, `<Warning>`, `<Info>`, `<Check>`, and `<Danger>` to draw attention to important content. Each maps to a visual style that signals intent.
 
 ## Types
 
@@ -23,6 +23,14 @@ Use `<Note>`, `<Tip>`, `<Warning>`, and `<Info>` to draw attention to important 
   This is an **Info** callout — neutral informational content.
 </Info>
 
+<Check>
+  This is a **Check** — confirmation that a step or requirement is complete.
+</Check>
+
+<Danger>
+  This is a **Danger** callout — critical information that needs immediate attention.
+</Danger>
+
 ```mdx
 <Note>
   Standard note callout.
@@ -39,6 +47,14 @@ Use `<Note>`, `<Tip>`, `<Warning>`, and `<Info>` to draw attention to important 
 <Info>
   Additional context.
 </Info>
+
+<Check>
+  This step is complete.
+</Check>
+
+<Danger>
+  Do not expose this credential.
+</Danger>
 ```
 
 ## Generic `<Callout>`
@@ -46,8 +62,8 @@ Use `<Note>`, `<Tip>`, `<Warning>`, and `<Info>` to draw attention to important 
 Migrated content from other platforms may use the generic `<Callout type="...">` form — this is supported as an alias:
 
 ```mdx
-<Callout type="warning">
-  This maps to a Warning callout.
+<Callout type="check">
+  This maps to a Check callout.
 </Callout>
 ```
 

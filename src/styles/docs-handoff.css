@@ -214,6 +214,12 @@ body {
   text-wrap: pretty;
 }
 
+/* Callouts own their vertical padding. The article rhythm must not leave a
+   trailing paragraph margin inside the tinted surface. */
+.thally-callout-content > :last-child {
+  margin-bottom: 0;
+}
+
 /* Separators are author-controlled. A heading alone should not imply a hard
    section break, while an explicit Markdown rule receives enough air to mark
    a genuine change of subject without adding a new surface or shadow. */
@@ -424,6 +430,10 @@ a[target='_blank']:hover > .thally-docs-card::after {
 }
 
 @media (max-width: 1010px) {
+  .thally-docs-topbar-inner > button[aria-haspopup='dialog'] {
+    display: inline-flex;
+  }
+
   .thally-docs-tabs {
     display: none;
   }
@@ -445,7 +455,27 @@ a[target='_blank']:hover > .thally-docs-card::after {
 }
 
 @media (max-width: 860px) {
-  .thally-docs-topbar-inner > button[aria-haspopup='dialog'] { display: inline-flex; }
+  .thally-docs-brand {
+    margin-inline-end: 8px;
+  }
+
+  .thally-docs-brand > span:last-child {
+    display: none;
+  }
+
+  .thally-docs-search,
+  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search {
+    width: 30px;
+  }
+
+  .thally-docs-search > button:first-of-type {
+    display: none;
+  }
+
+  .thally-docs-search > button:nth-of-type(2) {
+    display: flex;
+  }
+
   .thally-docs-sidebar {
     display: none;
   }
@@ -456,7 +486,6 @@ a[target='_blank']:hover > .thally-docs-card::after {
 }
 
 @media (max-width: 640px) {
-  .thally-docs-brand > span:last-child,
   .thally-docs-topbar-link,
   .thally-docs-primary {
     display: none;
