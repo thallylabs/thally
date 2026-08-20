@@ -1,36 +1,48 @@
 ---
 title: "Panel"
-description: "A neutral bordered container for grouping related content."
+description: "Place supporting content in the page’s contextual right column."
 ---
 
-`<Panel>` is a visually contained section without the opinionated color of callouts. Use it to group related content or highlight a block without implying urgency.
-
-## Example
-
-<Panel title="Configuration">
-  Set your API key in the `.env` file before running the application.
-
-  ```bash
-  API_KEY=sk-your-key-here
-  ```
-</Panel>
+`<Panel>` replaces the desktop **On this page** column with authored supporting
+content. On smaller screens, the panel stays at its authored location in the
+reading flow.
 
 <Panel>
-  Panels without a title are also supported.
+  <RequestExample>
+  ```bash cURL
+  curl https://api.example.com/v1/projects \
+    -H "Authorization: Bearer $API_KEY"
+  ```
+  </RequestExample>
+
+  <ResponseExample>
+  ```json 200
+  { "data": [{ "id": "project_7fd2" }] }
+  ```
+  </ResponseExample>
 </Panel>
 
 ```mdx
-<Panel title="Configuration">
-  Set your API key in the `.env` file.
-</Panel>
-
 <Panel>
-  Content without a title.
+  <RequestExample>
+  \`\`\`bash cURL
+  curl https://api.example.com/v1/projects
+  \`\`\`
+  </RequestExample>
+
+  <ResponseExample>
+  \`\`\`json 200
+  { "data": [] }
+  \`\`\`
+  </ResponseExample>
 </Panel>
 ```
 
-## Props
+## Legacy inline panel
 
-| Prop | Type | Default | Description |
-|---|---|---|---|
-| `title` | `string` | — | Optional heading shown above the content |
+Use `<InlinePanel title="Configuration">` for the bordered content container
+that earlier Thally releases called `<Panel>`.
+
+<InlinePanel title="Configuration">
+  Set `THALLY_API_KEY` before running the synchronization command.
+</InlinePanel>

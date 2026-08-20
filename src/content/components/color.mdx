@@ -1,72 +1,41 @@
 ---
 title: "Color"
-description: "Display a color swatch with hex value — ideal for brand and design token documentation."
+description: "Publish copyable design tokens as compact palettes or reference tables."
 ---
 
-`<Color>` renders a color preview chip with an optional name and hex label. Use it on brand guidelines pages or design system documentation.
+Use compound color items for complete palettes. Readers can copy each value
+directly from the swatch.
 
-## Example
+## Compact palette
 
-<Color hex="#10B981" name="Emerald" />
-<Color hex="#8B5CF6" name="Violet" />
-<Color hex="#F59E0B" name="Amber" />
-<Color hex="#EF4444" name="Rose" />
-
-```mdx
-<Color hex="#10B981" name="Emerald" />
-<Color hex="#8B5CF6" name="Violet" />
-<Color hex="#F59E0B" name="Amber" />
-<Color hex="#EF4444" name="Rose" />
-```
-
-## In a grid
-
-Use `<Columns>` to lay out multiple swatches side by side:
-
-<Columns cols={4}>
-  <Color hex="#10B981" name="Emerald" />
-  <Color hex="#8B5CF6" name="Violet" />
-  <Color hex="#F59E0B" name="Amber" />
-  <Color hex="#EF4444" name="Rose" />
-</Columns>
+<Color variant="compact">
+  <Color.Item name="Accent" light="#7AA600" dark="#B8EC36" />
+  <Color.Item name="Warning" value="#F2B84B" />
+  <Color.Item name="Danger" value="#F05B61" />
+</Color>
 
 ```mdx
-<Columns cols={4}>
-  <Color hex="#10B981" name="Emerald" />
-  <Color hex="#8B5CF6" name="Violet" />
-  <Color hex="#F59E0B" name="Amber" />
-  <Color hex="#EF4444" name="Rose" />
-</Columns>
+<Color variant="compact">
+  <Color.Item name="Accent" light="#7AA600" dark="#B8EC36" />
+  <Color.Item name="Warning" value="#F2B84B" />
+</Color>
 ```
 
-## Full brand palette
+## Reference table
 
-<Columns cols={4}>
-  <Color hex="#0F172A" name="Slate 900" />
-  <Color hex="#1E293B" name="Slate 800" />
-  <Color hex="#334155" name="Slate 700" />
-  <Color hex="#64748B" name="Slate 500" />
-</Columns>
+<Color variant="table">
+  <Color.Row title="Brand">
+    <Color.Item name="Leaf" value="#B8EC36" />
+    <Color.Item name="Ink" value="#10140B" />
+  </Color.Row>
+</Color>
 
-<Columns cols={4}>
-  <Color hex="#3B82F6" name="Blue 500" />
-  <Color hex="#6366F1" name="Indigo 500" />
-  <Color hex="#8B5CF6" name="Violet 500" />
-  <Color hex="#A855F7" name="Purple 500" />
-</Columns>
-
-```mdx
-<Columns cols={4}>
-  <Color hex="#0F172A" name="Slate 900" />
-  <Color hex="#1E293B" name="Slate 800" />
-  <Color hex="#334155" name="Slate 700" />
-  <Color hex="#64748B" name="Slate 500" />
-</Columns>
-```
+The original `<Color hex="#B8EC36" name="Leaf" />` form remains supported.
 
 ## Props
 
-| Prop | Type | Description |
+| Component | Props | Description |
 |---|---|---|
-| `hex` | `string` | Hex color value including `#` (e.g. `#10B981`) |
-| `name` | `string` | Optional display name shown above the hex code |
+| `<Color>` | `variant="compact" \| "table"` | Palette layout |
+| `<Color.Item>` | `name`, `value`, `light`, `dark` | Named copyable value; use `light` and `dark` together for a theme pair |
+| `<Color.Row>` | `title` | Labeled group used in table layouts |

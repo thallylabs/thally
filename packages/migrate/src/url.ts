@@ -29,11 +29,13 @@ const MAX_SITEMAP_DOCUMENTS = 25
 const PORTABLE_MDX_COMPONENTS = new Set([
   'Accordion', 'AccordionGroup', 'Badge', 'Callout', 'Card', 'CardGroup',
   'Check', 'CodeGroup', 'Color', 'Column', 'Columns', 'Danger', 'Error', 'Expandable',
-  'File', 'Folder', 'Frame', 'Hero', 'Icon', 'Info', 'Latex', 'Mermaid',
-  'Note', 'Panel', 'ParamField', 'Prompt', 'PromptAssistant', 'PromptUser',
+  'Agent', 'Embed', 'File', 'Folder', 'Frame', 'GitHub', 'Github', 'Hero', 'Human',
+  'Icon', 'Info', 'InlinePanel', 'InlineRequestExample', 'InlineResponseExample',
+  'Latex', 'LegacyView', 'Mermaid', 'Note', 'Panel', 'ParamField', 'Prompt',
+  'PromptAssistant', 'PromptUser',
   'RequestExample', 'ResponseExample', 'ResponseField', 'Step', 'Steps',
-  'Tab', 'Tabs', 'Tile', 'TileGroup', 'Tip', 'Tooltip', 'Tree', 'Update',
-  'View', 'Warning',
+  'Tab', 'Tabs', 'Terminal', 'TerminalInput', 'TerminalOutput', 'Tile', 'TileGroup',
+  'Tip', 'Tooltip', 'Tree', 'Update', 'View', 'Visibility', 'Warning',
 ])
 const LOCALE_CODES = new Set([
   'ar', 'cs', 'da', 'de', 'el', 'es', 'fi', 'fr', 'he', 'hi', 'hu', 'id',

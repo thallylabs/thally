@@ -15,7 +15,7 @@ description: "Document response object properties returned by API endpoints."
   The pet's display name.
 </ResponseField>
 
-<ResponseField name="status" type="string">
+<ResponseField name="status" type="string" post={['enum']}>
   Current status. One of `available`, `pending`, or `sold`.
 </ResponseField>
 
@@ -54,6 +54,10 @@ description: "Document response object properties returned by API endpoints."
 | `name` | `string` | Property name |
 | `type` | `string` | Data type (e.g. `string`, `integer`, `boolean`, `object`) |
 | `required` | `boolean` | Shows a "required" badge |
+| `default` | `string` | Default value shown inline |
+| `deprecated` | `boolean` | Marks the response property as deprecated |
+| `pre` | `string[]` | Labels rendered before the property name |
+| `post` | `string[]` | Labels rendered after the property name |
 
 <Tip>
   Use `<Expandable>` inside a `<ResponseField>` to document nested object properties without cluttering the top-level response schema.

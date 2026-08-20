@@ -8,6 +8,8 @@
  * so mixing them never duplicates code.
  */
 export { parseMdxContent } from './parse.js'
+export { projectMdxAudience } from './audience.js'
+export type { ContentAudience } from './audience.js'
 export {
   getContentDocument,
   loadContentDocument,

@@ -208,8 +208,19 @@ body {
   display: flex;
   justify-content: center;
   padding: 0.625rem 1rem;
-  background: hsl(var(--brand-dark-background, 120 27% 2%));
+  background: var(--thally-banner-light, hsl(var(--brand-dark-background, 120 27% 2%)));
   color: #efefe9;
+}
+.dark .thally-ink-banner {
+  background: var(--thally-banner-dark, var(--thally-banner-light, hsl(var(--brand-dark-background, 120 27% 2%))));
+}
+.thally-ink-banner[data-variant='warning'] {
+  --thally-banner-light: #78350f;
+  --thally-banner-dark: #451a03;
+}
+.thally-ink-banner[data-variant='critical'] {
+  --thally-banner-light: #881337;
+  --thally-banner-dark: #4c0519;
 }
 .thally-ink-banner-inner {
   display: flex;

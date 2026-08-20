@@ -13,6 +13,8 @@ import type {
   ContentTocItem,
   ParsedContent,
 } from './types.js'
+import { projectMdxAudience, type ContentAudience } from './audience.js'
+import { mdxToMarkdown } from './to-markdown.js'
 
 // Single shared MDX → mdast parser. This is the one place content is parsed;
 // every structured projection below is derived from the same tree.
@@ -171,19 +173,13 @@ function buildToc(headings: Array<ContentHeading>): Array<ContentTocItem> {
   return toc
 }
 
-const JSX_WRAPPER_PATTERN =
-  /<\/?(?:Steps|Step|Tabs|Tab|Note|Callout|CodeGroup|CardGroup|Card|Frame|Accordion|Columns|Tooltip)[^>]*>/g
-
-function cleanMarkdown(markdown: string): string {
-  return markdown.replace(JSX_WRAPPER_PATTERN, '').replace(/\n{3,}/g, '\n\n').trim()
-}
-
 /**
  * Parse an MDX body into the typed content graph. This is the single source of
  * truth for all structured representations of a document. One parse, one walk.
  */
-export function parseMdxContent(markdown: string): ParsedContent {
-  const tree = parseToTree(markdown)
+export function parseMdxContent(markdown: string, audience: ContentAudience = 'all'): ParsedContent {
+  const projectedMarkdown = projectMdxAudience(markdown, audience)
+  const tree = parseToTree(projectedMarkdown)
 
   const preamble: ContentSection = { id: '', title: '', depth: 0, headingPath: [], text: '', code: [] }
   const state: WalkState = {
@@ -215,6 +211,6 @@ export function parseMdxContent(markdown: string): ParsedContent {
     sections,
     links: state.links,
     text: cleanText(state.textParts.join(' ')),
-    markdown: cleanMarkdown(markdown),
+    markdown: mdxToMarkdown(projectedMarkdown, 'all'),
   }
 }

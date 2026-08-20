@@ -182,9 +182,11 @@ export default async function ApiReferencePage({ params }: PageProps) {
 
   const Content = doc.component
   return (
-    <DocLayout doc={doc}>
+    <>
       <JsonLdScript data={jsonLd} />
-      <Content />
-    </DocLayout>
+      <DocLayout doc={doc}>
+        <Content />
+      </DocLayout>
+    </>
   )
 }

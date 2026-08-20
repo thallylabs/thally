@@ -61,7 +61,9 @@ function parseDocument(
     pageId,
     frontmatter: data,
     rawBody: content,
-    content: parseMdxContent(content),
+    // All structured consumers share the agent projection while the browser
+    // continues to render authored MDX with the human Visibility components.
+    content: parseMdxContent(content, 'agents'),
   }
 
   documentCache.set(cacheKey, { modifiedAtMs, document })
