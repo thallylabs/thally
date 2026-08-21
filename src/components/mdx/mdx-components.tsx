@@ -33,6 +33,7 @@ import { Mermaid } from '@/components/mdx/mermaid'
 import { Embed, LegacyView, View } from '@/components/mdx/view'
 import { GitHub } from '@/components/mdx/github-card'
 import { Agent, Human, Visibility } from '@/components/mdx/visibility'
+import { BannerPreview } from '@/components/layout/site-banner'
 import { Steps, Step } from '@/components/mdx/steps'
 import { Tabs, Tab } from '@/components/mdx/content-tabs'
 import { HeadingAnchor } from '@/components/mdx/heading-anchor'
@@ -150,6 +151,7 @@ const components: MDXComponents = {
   Visibility: (props) => <Visibility {...props} />,
   Human: (props) => <Human {...props} />,
   Agent: (props) => <Agent {...props} />,
+  BannerPreview: (props) => <BannerPreview {...props} />,
   // Documentation screenshots are commonly below the fold. Native lazy
   // loading keeps them out of the critical request queue while preserving
   // standard Markdown image authoring and Frame zoom behavior.

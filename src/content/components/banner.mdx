@@ -8,11 +8,17 @@ supports safe inline links, and can optionally be dismissed by each reader.
 
 ## Example
 
+<BannerPreview
+  content="API v2 is available. [Read the migration guide](/guides/writing-content)"
+  type="info"
+  dismissible
+/>
+
 ```json
 {
   "banner": {
     "id": "api-v2-launch",
-    "content": "API v2 is available. [Read the migration guide](/guides/migrating)",
+    "content": "API v2 is available. [Read the migration guide](/guides/writing-content)",
     "type": "info",
     "dismissible": true
   }
@@ -46,4 +52,3 @@ site theme unless you provide validated light and dark hex values.
 | `type` | `"info" \| "warning" \| "critical"` | `"info"` | Visual intent |
 | `dismissible` | `boolean` | `false` | Allows the reader to hide the current revision |
 | `color` | `{ light?: string, dark?: string }` | Theme colors | Validated per-theme text color |
-

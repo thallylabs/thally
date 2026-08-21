@@ -9,7 +9,7 @@
 import { createElement, Fragment } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { parseBannerContent, SiteBanner } from '@/components/layout/site-banner'
+import { BannerPreview, parseBannerContent, SiteBanner } from '@/components/layout/site-banner'
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/' }))
 
@@ -68,5 +68,20 @@ describe('parseBannerContent', () => {
     )
     expect(safe).toContain('--thally-banner-light:#123abc')
     expect(unsafe).not.toContain('javascript')
+  })
+
+  it('renders the documentation preview with the production banner treatment', () => {
+    const html = renderToStaticMarkup(
+      createElement(BannerPreview, {
+        content: 'Maintenance starts Saturday at 02:00 UTC.',
+        type: 'warning',
+        dismissible: true,
+      }),
+    )
+
+    expect(html).toContain('Site banner preview')
+    expect(html).toContain('data-variant="warning"')
+    expect(html).toContain('Maintenance starts Saturday at 02:00 UTC.')
+    expect(html).toContain('aria-label="Dismiss banner"')
   })
 })

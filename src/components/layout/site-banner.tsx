@@ -1,6 +1,6 @@
 'use client'
 
-import { useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
+import { useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import type { DocsJsonBanner } from '@/data/docs'
@@ -9,6 +9,13 @@ interface SiteBannerProps {
   banner: DocsJsonBanner
   defaultLocale?: string
   locales?: Array<string>
+}
+
+export interface BannerPreviewProps {
+  content: string
+  type?: 'info' | 'warning' | 'critical'
+  color?: DocsJsonBanner['color']
+  dismissible?: boolean
 }
 
 const STORAGE_KEY = 'thally-banner-dismissed'
@@ -104,6 +111,45 @@ export function SiteBanner({ banner, defaultLocale = 'en', locales = [defaultLoc
   return banner.dismissible
     ? <DismissibleBanner banner={banner} content={content} />
     : <BannerPresentation banner={banner} content={content} />
+}
+
+/**
+ * Show the production banner treatment inside authored documentation.
+ *
+ * This intentionally delegates to BannerPresentation so the component guide
+ * cannot drift from the site-wide banner that readers actually configure.
+ */
+export function BannerPreview({ content, type = 'info', color, dismissible = false }: BannerPreviewProps) {
+  const [isVisible, setIsVisible] = useState(true)
+  const banner: DocsJsonBanner = { content, type, color, dismissible }
+
+  return (
+    <figure className="not-prose my-6 overflow-hidden rounded-xl border border-border bg-background shadow-sm">
+      <figcaption className="flex min-h-10 items-center justify-between border-b border-border px-4 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-foreground/45">
+        <span>Site banner preview</span>
+        {!isVisible ? (
+          <button
+            type="button"
+            onClick={() => setIsVisible(true)}
+            className="rounded-md px-2 py-1 text-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+          >
+            Show again
+          </button>
+        ) : null}
+      </figcaption>
+      {isVisible ? (
+        <BannerPresentation
+          banner={banner}
+          content={content}
+          onDismiss={dismissible ? () => setIsVisible(false) : undefined}
+        />
+      ) : (
+        <div className="flex min-h-14 items-center justify-center px-4 text-sm text-foreground/45">
+          Preview dismissed
+        </div>
+      )}
+    </figure>
+  )
 }
 
 function safeBannerHref(rawHref: string): string | null {
