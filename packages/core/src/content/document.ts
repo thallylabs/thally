@@ -99,7 +99,9 @@ export function getContentDocument(pageId: string, locale?: string): ContentDocu
     pageId,
     frontmatter: data,
     rawBody: content,
-    content: parseMdxContent(content),
+    // ContentDocument is the machine-readable projection consumed by search,
+    // embeddings, and agent APIs, so it intentionally selects agent content.
+    content: parseMdxContent(content, 'agents'),
   }
 
   documentCache.set(cacheKey, { mtimeMs: stat.mtimeMs, document })

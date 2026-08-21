@@ -13,6 +13,7 @@ import { Prose } from '@/components/mdx/prose'
 import { getManagedSiteConfigSnapshot } from '@/lib/cloud-link/client'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { localeDirection } from '@/lib/i18n/config'
+import { PagePanelSlot, PageSlotsProvider } from '@/components/mdx/page-slots'
 
 interface DocLayoutProps {
   doc: DocEntry
@@ -20,7 +21,7 @@ interface DocLayoutProps {
   children: React.ReactNode
 }
 
-export function DocLayout({ doc, locale = 'en', children }: DocLayoutProps) {
+function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
   const { prev, next } = getPrevNextLinks(doc.href)
   const breadcrumbs = getBreadcrumbs(doc.href)
   const eyebrow = getNavCategory(doc.href)
@@ -133,8 +134,17 @@ export function DocLayout({ doc, locale = 'en', children }: DocLayoutProps) {
         </ContentStack>
       </article>
       <DetailColumn>
-        <TableOfContents />
+        <PagePanelSlot fallback={<TableOfContents />} />
       </DetailColumn>
     </MainColumns>
+  )
+}
+
+/** Render a documentation page with page-scoped MDX coordination. */
+export function DocLayout(props: DocLayoutProps) {
+  return (
+    <PageSlotsProvider>
+      <DocLayoutContent {...props} />
+    </PageSlotsProvider>
   )
 }

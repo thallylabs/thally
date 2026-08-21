@@ -45,5 +45,7 @@ export function MainColumns({ children, className }: WrapperProps) {
 }
 
 export function DetailColumn({ children, className }: WrapperProps) {
-  return <div className={cn('hidden lg:block', className)}>{children}</div>
+  // MainColumns does not create the detail track until xl. Showing this at lg
+  // would place the TOC or MDX Panel below the article as an orphaned row.
+  return <div className={cn('hidden xl:block', className)}>{children}</div>
 }

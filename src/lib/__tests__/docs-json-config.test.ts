@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import repositoryDocsConfig from '../../../docs.json'
 import { getDocsJsonConfig, resetDocsJsonConfigForTests } from '@/lib/docs-json-config'
-import { getContentIconTone, getSidebarCollections, getStructuralTheme } from '@/data/docs'
+import { getBannerConfig, getContentIconTone, getSidebarCollections, getStructuralTheme } from '@/data/docs'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -48,6 +48,30 @@ describe('release-bound docs.json', () => {
     vi.stubEnv('DOX_DOCS_CONFIG', JSON.stringify({ tabs: [{ tab: 'Legacy release', groups: [] }] }))
 
     expect(getSidebarCollections()[0]?.label).toBe('Legacy release')
+  })
+
+  it('preserves localized banner copy for request-path selection', () => {
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+      tabs: [],
+      i18n: { defaultLocale: 'es', locales: [{ code: 'es', label: 'Español' }] },
+      banner: { content: { en: 'Hello', es: 'Hola' }, variant: 'warning' },
+    }))
+    expect(getBannerConfig()).toMatchObject({ content: { en: 'Hello', es: 'Hola' }, type: 'warning' })
+  })
+
+  it('normalizes malformed nested banner settings without throwing', () => {
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+      tabs: [],
+      banner: { content: { en: 'Hello', bad: 42 }, type: 'javascript', dismissible: 'yes', color: { light: 12 } },
+    }))
+    expect(getBannerConfig()).toEqual({
+      content: { en: 'Hello' },
+      dismissible: undefined,
+      id: undefined,
+      revision: undefined,
+      type: undefined,
+      color: { light: undefined, dark: undefined },
+    })
   })
 
   it('resolves presentation settings inside the request-time root layout', async () => {

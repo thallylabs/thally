@@ -1,0 +1,29 @@
+---
+title: "GitHub"
+description: "Link to a public GitHub repository with a branded repository card."
+---
+
+`<GitHub>` renders a deterministic repository card without making the page
+depend on GitHub's API availability or rate limits.
+
+## Example
+
+<GitHub repo="thallylabs/thally" description="The open-source Thally documentation runtime." />
+
+```mdx
+<GitHub
+  repo="thallylabs/thally"
+  description="The open-source Thally documentation runtime."
+/>
+```
+
+`repo` must use the `owner/repository` form. URLs, query strings, credentials,
+and extra path segments are rejected rather than converted into links.
+
+## Props
+
+| Prop | Type | Description |
+|---|---|---|
+| `repo` | `string` | Required public repository in `owner/name` form |
+| `description` | `string` | Optional authored repository summary |
+

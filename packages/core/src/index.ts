@@ -34,12 +34,14 @@ export { slugify } from './slugify.js'
 // Content pipeline.
 export {
   parseMdxContent,
+  projectMdxAudience,
   getContentDocument,
   loadContentDocument,
   registerAsyncContentDocumentSource,
   registerContentDocumentSource,
   mdxToMarkdown,
 } from './content/index.js'
+export type { ContentAudience } from './content/index.js'
 export type {
   AsyncContentDocumentResolver,
   ContentDocument,

@@ -1,32 +1,58 @@
 ---
-title: "Accordion"
-description: "Collapsible sections for FAQs and progressive disclosure."
+title: "Accordions"
+description: "Reveal supporting details without interrupting the main reading flow."
 ---
 
-`<Accordion>` renders a collapsible `<details>` element. Use it for FAQs, optional deep-dives, or content that should stay hidden until needed.
+Use `<Accordion>` for progressive disclosure. Opening an accordion with an
+`id` updates the URL hash, so readers can link directly to that section.
 
-## Example
+## Single accordion
 
-<Accordion title="What is an API key?">
-  An API key is a unique identifier that authenticates requests from your application. Keep it secret — treat it like a password. Never expose it in client-side code.
-</Accordion>
-
-<Accordion title="How do I reset my API key?">
-  Go to your dashboard, navigate to **Settings → API Keys**, and click **Regenerate**. Your old key will be immediately invalidated.
+<Accordion
+  title="What is an API key?"
+  description="Authentication and safe storage"
+  icon="key-round"
+  id="what-is-an-api-key"
+>
+  An API key authenticates requests from your application. Store it in a
+  server-side secret manager and never expose it in browser code.
 </Accordion>
 
 ```mdx
-<Accordion title="What is an API key?">
+<Accordion
+  title="What is an API key?"
+  description="Authentication and safe storage"
+  icon="key-round"
+  id="what-is-an-api-key"
+>
   An API key authenticates requests from your application.
 </Accordion>
 ```
 
+## Accordion group
+
+`<AccordionGroup>` joins related items into one visually continuous control
+and preserves Radix keyboard navigation between triggers.
+
+<AccordionGroup>
+  <Accordion title="Create a key" icon="plus">
+    Open **Settings → API keys** and choose **Create key**.
+  </Accordion>
+  <Accordion title="Rotate a key" icon="refresh-cw">
+    Create the replacement first, update your service, then revoke the old key.
+  </Accordion>
+  <Accordion title="Revoke a key" icon="trash-2">
+    Revocation is immediate and cannot be undone.
+  </Accordion>
+</AccordionGroup>
+
 ## Props
 
-| Prop | Type | Description |
-|---|---|---|
-| `title` | `string` | The clickable heading shown when collapsed |
-
-<Note>
-  To group multiple accordions, place them one after another — no wrapper component is needed. Migrated content using `<AccordionGroup>` renders the children directly.
-</Note>
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `title` | `string` | — | Required trigger label |
+| `description` | `string` | — | Supporting text below the title |
+| `defaultOpen` | `boolean` | `false` | Opens the item on first render |
+| `id` | `string` | Derived from title | Stable anchor used for deep links |
+| `icon` | `string` | — | Icon name displayed before the title |
+| `iconType` | `string` | `"outline"` | Requested icon style |

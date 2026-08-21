@@ -1,0 +1,42 @@
+---
+title: "Visibility"
+description: "Tailor parts of a page for human readers or AI agents."
+---
+
+`<Visibility>` keeps one authored page while projecting the right content to
+the website and to Thally's Markdown, structured JSON, search, and embedding
+surfaces.
+
+## Example
+
+<Visibility for="humans">
+  Open **Settings → API keys**, then choose **Create key**.
+</Visibility>
+
+<Visibility for="agents">
+  Create a key with `POST /v1/api-keys`; the caller needs the `keys:write` scope.
+</Visibility>
+
+```mdx
+<Visibility for="humans">
+  Open **Settings → API keys**, then choose **Create key**.
+</Visibility>
+
+<Visibility for="agents">
+  Create a key with `POST /v1/api-keys`.
+</Visibility>
+```
+
+The shorter `<Human>` and `<Agent>` wrappers are equivalent aliases.
+
+```mdx
+<Human>Instructions for the rendered documentation site.</Human>
+<Agent>Precise context included in agent-facing projections.</Agent>
+```
+
+## Props
+
+| Prop | Type | Description |
+|---|---|---|
+| `for` | `"humans" \| "agents"` | Audience that receives the wrapped content |
+

@@ -114,8 +114,18 @@ export interface DocsJsonRedirect {
 }
 
 export interface DocsJsonBanner {
-  content: string
+  /** Banner copy, or locale-keyed copy resolved against the default locale. */
+  content: string | Record<string, string>
   dismissible?: boolean
+  /** Stable identity used to scope dismissal state across banner revisions. */
+  id?: string
+  /** Change this value to show a previously dismissed banner again. */
+  revision?: string
+  /** Mintlify-compatible intent name. */
+  type?: 'info' | 'warning' | 'critical'
+  variant?: 'info' | 'warning' | 'critical'
+  /** Optional, validated hex colors for the light and dark banner surfaces. */
+  color?: { light?: string; dark?: string }
 }
 
 export interface DocsJsonNavLink {
@@ -888,7 +898,45 @@ export function getTrackingConfig(): TrackingConfig {
 }
 
 export function getBannerConfig(): DocsJsonBanner | null {
-  return docsConfig().banner ?? null
+  const candidate = docsConfig().banner as unknown
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null
+  const raw = candidate as Record<string, unknown>
+  let content: string | Record<string, string> | null = null
+  if (typeof raw.content === 'string' && raw.content.trim()) {
+    content = raw.content
+  } else if (raw.content && typeof raw.content === 'object' && !Array.isArray(raw.content)) {
+    const localized = Object.fromEntries(
+      Object.entries(raw.content).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim()),
+      ),
+    )
+    if (Object.keys(localized).length > 0) content = localized
+  }
+  if (!content) return null
+
+  const intent = raw.type === 'info' || raw.type === 'warning' || raw.type === 'critical'
+    ? raw.type
+    : raw.variant === 'info' || raw.variant === 'warning' || raw.variant === 'critical'
+      ? raw.variant
+      : undefined
+  const rawColor = raw.color && typeof raw.color === 'object' && !Array.isArray(raw.color)
+    ? raw.color as Record<string, unknown>
+    : null
+  const color = rawColor
+    ? {
+        light: typeof rawColor.light === 'string' ? rawColor.light : undefined,
+        dark: typeof rawColor.dark === 'string' ? rawColor.dark : undefined,
+      }
+    : undefined
+
+  return {
+    content,
+    dismissible: typeof raw.dismissible === 'boolean' ? raw.dismissible : undefined,
+    id: typeof raw.id === 'string' ? raw.id : undefined,
+    revision: typeof raw.revision === 'string' ? raw.revision : undefined,
+    type: intent,
+    color,
+  }
 }
 
 export function getNavbarConfig(): DocsJsonNavbar | null {

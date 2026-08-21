@@ -1,0 +1,54 @@
+---
+title: "Banner"
+description: "Show a site-wide announcement above the documentation navigation."
+---
+
+Configure the banner in `docs.json`. It appears across the documentation site,
+supports safe inline links, and can optionally be dismissed by each reader.
+
+## Example
+
+<BannerPreview
+  content="API v2 is available. [Read the migration guide](/guides/writing-content)"
+  type="info"
+  dismissible
+/>
+
+```json
+{
+  "banner": {
+    "id": "api-v2-launch",
+    "content": "API v2 is available. [Read the migration guide](/guides/writing-content)",
+    "type": "info",
+    "dismissible": true
+  }
+}
+```
+
+Use `warning` for changes that require attention and `critical` only for
+outages or urgent breaking changes. Banner colors remain derived from the
+site theme unless you provide validated light and dark hex values.
+
+```json
+{
+  "banner": {
+    "id": "scheduled-maintenance",
+    "content": "Maintenance starts Saturday at 02:00 UTC.",
+    "type": "warning",
+    "color": {
+      "light": "#7C5200",
+      "dark": "#FFD166"
+    }
+  }
+}
+```
+
+## Props
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `string` | Derived from content | Stable dismissal identity |
+| `content` | `string \| Record<string, string>` | — | Announcement text or locale-specific text |
+| `type` | `"info" \| "warning" \| "critical"` | `"info"` | Visual intent |
+| `dismissible` | `boolean` | `false` | Allows the reader to hide the current revision |
+| `color` | `{ light?: string, dark?: string }` | Theme colors | Validated per-theme text color |

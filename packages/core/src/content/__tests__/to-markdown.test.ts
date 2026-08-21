@@ -45,4 +45,27 @@ describe('mdxToMarkdown', () => {
     expect(out).toContain('step 1 of 3 is easy')
     expect(out).toContain('`3`')
   })
+
+  it('projects visibility for agents while preserving authored examples in code', () => {
+    const source = `<Human>Browser instructions.</Human>
+<Agent>Machine instructions.</Agent>
+<Visibility for="humans">Dashboard only.</Visibility>
+<Visibility for="agents">API only.</Visibility>
+
+\`\`\`mdx
+<Human>Example remains literal.</Human>
+\`\`\``
+    const out = mdxToMarkdown(source)
+    expect(out).toContain('Machine instructions.')
+    expect(out).toContain('API only.')
+    expect(out).not.toContain('Browser instructions.')
+    expect(out).not.toContain('Dashboard only.')
+    expect(out).toContain('<Human>Example remains literal.</Human>')
+  })
+
+  it('projects compound components and GitHub cards into clean Markdown', () => {
+    const out = mdxToMarkdown('<Color><Color.Item name="Leaf" value="#b8ec36" /></Color>\n<GitHub repo="thallylabs/thally" />')
+    expect(out).not.toContain('<Color')
+    expect(out).toContain('[thallylabs/thally](https://github.com/thallylabs/thally)')
+  })
 })

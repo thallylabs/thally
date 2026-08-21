@@ -131,9 +131,11 @@ export default async function DocsPage({ params }: PageProps) {
   const Content = doc.component
 
   return (
-    <DocLayout doc={doc} locale={locale}>
+    <>
       <JsonLdScript data={jsonLd} />
-      <Content />
-    </DocLayout>
+      <DocLayout doc={doc} locale={locale}>
+        <Content />
+      </DocLayout>
+    </>
   )
 }

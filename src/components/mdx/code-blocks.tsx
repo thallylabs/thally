@@ -16,6 +16,7 @@ import { create } from 'zustand'
 
 import { useDocsCodeActions } from '@/components/docs/code-actions-provider'
 import { Tag } from '@/components/ui/tag'
+import { Mermaid } from '@/components/mdx/mermaid'
 
 const languageNames: Record<string, string> = {
   bash: 'Shell',
@@ -504,11 +505,22 @@ export function Code({
   return <code {...props}>{children}</code>
 }
 
+interface PreProps extends Omit<ComponentPropsWithoutRef<typeof CodeGroup>, 'children'> {
+  children?: ReactNode
+}
+
 export function Pre({
   children,
   ...props
-}: ComponentPropsWithoutRef<typeof CodeGroup>) {
+}: PreProps) {
   const isGrouped = useContext(CodeGroupContext)
+
+  // Mermaid fences are diagrams, not syntax-highlighted code panels. The
+  // compiler lifts the untouched source onto `code`; the recursive fallback
+  // preserves compatibility with content produced by older MDX pipelines.
+  if (props.language === 'mermaid') {
+    return <Mermaid chart={props.code ?? findCodePayload(children)} />
+  }
 
   if (isGrouped) {
     return children

@@ -1,0 +1,40 @@
+---
+title: "Icons"
+description: "Use consistent icons in cards, accordions, prompts, and inline content."
+---
+
+Use `<Icon>` directly or pass the same icon name to components such as
+`<Card>`, `<Accordion>`, and `<Prompt>`.
+
+## Named icons
+
+<Columns cols={4}>
+  <Card title="Book" icon="book-open" />
+  <Card title="Code" icon="code-simple" />
+  <Card title="Link" icon="link-simple" />
+  <Card title="Settings" icon="settings" />
+</Columns>
+
+```mdx
+<Icon icon="book-open" size={20} color="#B8EC36" />
+```
+
+## Custom source
+
+Use `src` for a project-owned SVG or image URL. Remote URLs are rendered as
+ordinary images and should come from a host you trust.
+
+```mdx
+<Icon src="/brand/product-mark.svg" size={24} />
+```
+
+## Props
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `icon` | `string` | — | Supported icon name |
+| `src` | `string` | — | Custom icon path or URL |
+| `iconType` | `"regular" \| "solid" \| "outline"` | `"outline"` | Requested icon style when available |
+| `color` | `string` | Theme accent | Valid CSS color |
+| `size` | `number \| string` | `20` | Icon width and height |
+

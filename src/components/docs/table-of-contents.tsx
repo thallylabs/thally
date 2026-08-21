@@ -21,14 +21,20 @@ export function TableOfContents() {
   const [activeId, setActiveId] = useState<string>()
 
   useEffect(() => {
-    const headingElements = Array.from(
-      document.querySelectorAll<HTMLElement>('[data-heading]'),
-    ).map((element) => ({
-      id: element.id,
-      text: element.dataset.heading ?? element.textContent ?? '',
-      level: Number(element.dataset.level ?? 2),
-    }))
-    startTransition(() => setItems(headingElements))
+    function refreshHeadings() {
+      const headingElements = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-heading]'),
+      ).filter((element) => element.getClientRects().length > 0).map((element) => ({
+        id: element.id,
+        text: element.dataset.heading ?? element.textContent ?? '',
+        level: Number(element.dataset.level ?? 2),
+      }))
+      startTransition(() => setItems(headingElements))
+    }
+
+    refreshHeadings()
+    window.addEventListener('thally:view-change', refreshHeadings)
+    return () => window.removeEventListener('thally:view-change', refreshHeadings)
   }, [pathname])
 
   useEffect(() => {

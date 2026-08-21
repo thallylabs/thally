@@ -4,15 +4,36 @@ import { Note } from '@/components/mdx/note'
 import { AgentPrompt } from '@/components/mdx/agent-prompt'
 import { Code, CodeGroup, Pre } from '@/components/mdx/code-blocks'
 import {
-  Badge, Card, CardGroup, Color, Columns, Frame, Hero, Icon, Panel,
-  Prompt, PromptAssistant, PromptUser, RequestExample, ResponseExample,
-  Tile, TileGroup, Tooltip, Update,
+  Columns, Frame, Hero,
 } from '@/components/mdx/rich-content'
-import { Accordion } from '@/components/mdx/accordion'
+import { Accordion, AccordionGroup } from '@/components/mdx/accordion'
+import { Card, CardGroup, Tile, TileGroup } from '@/components/mdx/content-cards'
+import { Icon } from '@/components/mdx/content-icon'
+import { Badge, Tooltip } from '@/components/mdx/content-inline'
+import { Color } from '@/components/mdx/color'
+import { Update } from '@/components/mdx/content-metadata'
+import { Panel, ContentPanel, InlinePanel } from '@/components/mdx/panel'
+import {
+  RequestExample,
+  ResponseExample,
+  InlineRequestExample,
+  InlineResponseExample,
+} from '@/components/mdx/examples'
+import {
+  Prompt,
+  PromptAssistant,
+  PromptUser,
+  Terminal,
+  TerminalInput,
+  TerminalOutput,
+} from '@/components/mdx/prompt'
 import { Tree, Folder, File } from '@/components/mdx/file-tree'
 import { ResponseField, ParamField, Expandable } from '@/components/mdx/api-fields'
 import { Mermaid } from '@/components/mdx/mermaid'
-import { View } from '@/components/mdx/view'
+import { Embed, LegacyView, View } from '@/components/mdx/view'
+import { GitHub } from '@/components/mdx/github-card'
+import { Agent, Human, Visibility } from '@/components/mdx/visibility'
+import { BannerPreview } from '@/components/layout/site-banner'
 import { Steps, Step } from '@/components/mdx/steps'
 import { Tabs, Tab } from '@/components/mdx/content-tabs'
 import { HeadingAnchor } from '@/components/mdx/heading-anchor'
@@ -76,8 +97,7 @@ const components: MDXComponents = {
     if (type === 'note') return <Note type="note">{children}</Note>
     return <Note>{children}</Note>
   },
-  // AccordionGroup: Mintlify wrapper — Thally uses <Accordion> directly, no group needed
-  AccordionGroup: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  AccordionGroup: (props) => <AccordionGroup {...props} />,
   // Latex: Mintlify LaTeX component — render as inline code (no renderer available)
   Latex: ({ children }: { children?: ReactNode }) => <code className="font-mono text-sm">{children}</code>,
   Hero: (props) => <Hero {...props} />,
@@ -98,13 +118,24 @@ const components: MDXComponents = {
   RequestExample: (props) => <RequestExample {...props} />,
   ResponseExample: (props) => <ResponseExample {...props} />,
   Panel: (props) => <Panel {...props} />,
+  ContentPanel: (props) => <ContentPanel {...props} />,
+  InlinePanel: (props) => <InlinePanel {...props} />,
+  InlineRequestExample: (props) => <InlineRequestExample {...props} />,
+  InlineResponseExample: (props) => <InlineResponseExample {...props} />,
   Tile: (props) => <Tile {...props} />,
   TileGroup: (props) => <TileGroup {...props} />,
   Prompt: (props) => <Prompt {...props} />,
   PromptUser: (props) => <PromptUser {...props} />,
   PromptAssistant: (props) => <PromptAssistant {...props} />,
+  Terminal: (props) => <Terminal {...props} />,
+  TerminalInput: (props) => <TerminalInput {...props} />,
+  TerminalOutput: (props) => <TerminalOutput {...props} />,
   AgentPrompt: (props) => <AgentPrompt {...props} />,
-  Color: (props) => <Color {...props} />,
+  // Preserve compound members used by generated MDX (`Color.Item` and
+  // `Color.Row`). A wrapper component would discard those static properties.
+  Color,
+  'Color.Item': (props) => <Color.Item {...props} />,
+  'Color.Row': (props) => <Color.Row {...props} />,
   Tree: (props) => <Tree {...props} />,
   Folder: (props) => <Folder {...props} />,
   File: (props) => <File {...props} />,
@@ -113,6 +144,14 @@ const components: MDXComponents = {
   Expandable: (props) => <Expandable {...props} />,
   Mermaid: (props) => <Mermaid {...(props as { children: string })} />,
   View: (props) => <View {...props} />,
+  Embed: (props) => <Embed {...props} />,
+  LegacyView: (props) => <LegacyView {...props} />,
+  GitHub: (props) => <GitHub {...props} />,
+  Github: (props) => <GitHub {...props} />,
+  Visibility: (props) => <Visibility {...props} />,
+  Human: (props) => <Human {...props} />,
+  Agent: (props) => <Agent {...props} />,
+  BannerPreview: (props) => <BannerPreview {...props} />,
   // Documentation screenshots are commonly below the fold. Native lazy
   // loading keeps them out of the critical request queue while preserving
   // standard Markdown image authoring and Frame zoom behavior.
