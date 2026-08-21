@@ -22,10 +22,13 @@ export function View({ title, icon, iconType, children }: ViewProps) {
   // Keep server output complete for crawlers; registration selects the first
   // view immediately after hydration.
   const isActive = !activeView || activeView === title
+  // The selector must live inside the visible View. Keeping it permanently in
+  // the first View would hide the controls as soon as another View is chosen.
+  const rendersSwitcher = activeView ? isActive : isFirst
 
   return (
     <section className={isActive ? 'contents' : 'hidden'} data-mdx-view={title} aria-hidden={!isActive}>
-      {isFirst ? (
+      {rendersSwitcher ? (
         <div className="not-prose mb-6 flex flex-wrap gap-2" role="group" aria-label="Content view">
           {views.map((view) => (
             <button
