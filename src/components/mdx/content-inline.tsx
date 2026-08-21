@@ -1,7 +1,7 @@
 /** Inline labels and accessible explanatory popovers for authored MDX. */
 'use client'
 
-import { useId, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { ArrowUpRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Icon } from '@/components/mdx/content-icon'
@@ -83,23 +83,70 @@ function isSafeLink(href: string): boolean {
   return href.startsWith('#') || (href.startsWith('/') && !href.startsWith('//') && !href.includes('\\')) || /^(https?:|mailto:)/i.test(href)
 }
 
+interface TooltipPosition {
+  isBelow: boolean
+  shiftX: number
+}
+
+const TOOLTIP_GAP = 8
+const TOOLTIP_VIEWPORT_PADDING = 12
+
 /**
  * Add a keyboard- and pointer-accessible explanatory popover to inline text.
- * The surface expands in document flow so authored headings, prose, and code
- * remain readable while it is open instead of being covered by a floating card.
+ * The surface floats without reflowing authored content and corrects its
+ * position at viewport edges so the full explanation remains reachable.
  */
 export function Tooltip({ tip, headline, cta, href, children }: TooltipProps) {
   const tooltipId = useId()
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const surfaceRef = useRef<HTMLSpanElement>(null)
+  const [position, setPosition] = useState<TooltipPosition>({ isBelow: false, shiftX: 0 })
+
+  const updatePosition = useCallback(() => {
+    const trigger = triggerRef.current
+    const surface = surfaceRef.current
+    if (!trigger || !surface) return
+
+    const triggerRect = trigger.getBoundingClientRect()
+    const surfaceWidth = surface.offsetWidth
+    const surfaceHeight = surface.offsetHeight
+    const centeredLeft = triggerRect.left + triggerRect.width / 2 - surfaceWidth / 2
+    const maximumLeft = Math.max(TOOLTIP_VIEWPORT_PADDING, window.innerWidth - TOOLTIP_VIEWPORT_PADDING - surfaceWidth)
+    const clampedLeft = Math.min(Math.max(centeredLeft, TOOLTIP_VIEWPORT_PADDING), maximumLeft)
+    const availableBelow = window.innerHeight - triggerRect.bottom
+    const isBelow = triggerRect.top < surfaceHeight + TOOLTIP_GAP && availableBelow >= surfaceHeight + TOOLTIP_GAP
+    const shiftX = clampedLeft - centeredLeft
+
+    setPosition((current) => current.isBelow === isBelow && Math.abs(current.shiftX - shiftX) < 0.5
+      ? current
+      : { isBelow, shiftX })
+  }, [])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(updatePosition)
+    window.addEventListener('resize', updatePosition)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', updatePosition)
+    }
+  }, [updatePosition])
+
   return (
-    <span className="group/tooltip inline-grid max-w-full grid-cols-[auto] items-baseline align-baseline">
-      <button type="button" aria-describedby={tooltipId} className="col-start-1 row-start-1 cursor-help justify-self-start border-0 bg-transparent p-0 font-inherit text-inherit underline decoration-dotted underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+    <span className="group/tooltip relative inline-flex align-baseline" onPointerEnter={updatePosition} onFocus={updatePosition}>
+      <button ref={triggerRef} type="button" aria-describedby={tooltipId} className="cursor-pointer border-0 bg-transparent p-0 font-inherit text-inherit underline decoration-dotted underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
         {children}
       </button>
       <span
+        ref={surfaceRef}
         id={tooltipId}
         role="tooltip"
         data-tooltip-surface=""
-        className="pointer-events-none invisible col-start-1 row-start-2 mt-2 hidden w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-popover px-3 py-2 text-left text-sm font-normal leading-5 text-popover-foreground opacity-0 shadow-lg group-hover/tooltip:pointer-events-auto group-hover/tooltip:visible group-hover/tooltip:block group-hover/tooltip:opacity-100 group-focus-within/tooltip:pointer-events-auto group-focus-within/tooltip:visible group-focus-within/tooltip:block group-focus-within/tooltip:opacity-100"
+        data-tooltip-placement={position.isBelow ? 'bottom' : 'top'}
+        style={{ marginLeft: position.shiftX }}
+        className={cn(
+          'pointer-events-none invisible absolute left-1/2 z-50 w-72 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-lg border border-border bg-card px-3 py-2 text-left text-sm font-normal leading-5 text-foreground opacity-0 shadow-lg transition duration-150 group-hover/tooltip:pointer-events-auto group-hover/tooltip:visible group-hover/tooltip:opacity-100 group-focus-within/tooltip:pointer-events-auto group-focus-within/tooltip:visible group-focus-within/tooltip:opacity-100',
+          position.isBelow ? 'top-full mt-2' : 'bottom-full mb-2',
+        )}
       >
         {headline ? <strong className="mb-0.5 block font-semibold text-foreground">{headline}</strong> : null}
         {tip ? <span className="block text-foreground/70">{tip}</span> : null}
