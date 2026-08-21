@@ -26,7 +26,12 @@ import { pathToFileURL } from "node:url";
 const MANIFEST_PATH = "starter-release.json";
 const EXPECTED_STARTER_REPOSITORY = "thallylabs/starter";
 const EXPECTED_RUNTIME_REPOSITORY = "thallylabs/thally";
+const CORE_PACKAGE_NAME = "@thallylabs/core";
+const CORE_PACKAGE_PATH = "packages/core/package.json";
+const STARTER_PACKAGE_PATH = "package.json";
+const STARTER_LOCK_PATH = "package-lock.json";
 const SHA_1 = /^[0-9a-f]{40}$/;
+const STABLE_SEMVER = /^\d+\.\d+\.\d+$/;
 
 // This is the authoritative runtime ownership boundary. The starter manifest
 // carries a generated copy for update tooling, but may not broaden the set of
@@ -160,6 +165,36 @@ function runtimeIdentity(runtimeDirectory) {
   return { commitSha, treeSha };
 }
 
+function runtimeCoreIdentity(runtimeDirectory) {
+  const packagePath = inside(runtimeDirectory, CORE_PACKAGE_PATH);
+  const manifest = JSON.parse(readFileSync(packagePath, "utf8"));
+  invariant(
+    manifest.name === CORE_PACKAGE_NAME && STABLE_SEMVER.test(manifest.version),
+    `${CORE_PACKAGE_PATH} has an invalid publishable identity.`,
+  );
+  return { version: manifest.version, constraint: `^${manifest.version}` };
+}
+
+function readStarterPackage(starterDirectory) {
+  const packagePath = inside(starterDirectory, STARTER_PACKAGE_PATH);
+  const manifest = JSON.parse(readFileSync(packagePath, "utf8"));
+  invariant(
+    manifest.dependencies && typeof manifest.dependencies === "object",
+    `${STARTER_PACKAGE_PATH} is missing dependencies.`,
+  );
+  return { manifest, packagePath };
+}
+
+function readStarterLock(starterDirectory) {
+  const lockPath = inside(starterDirectory, STARTER_LOCK_PATH);
+  const manifest = JSON.parse(readFileSync(lockPath, "utf8"));
+  invariant(
+    manifest.packages && typeof manifest.packages === "object",
+    `${STARTER_LOCK_PATH} is missing package entries.`,
+  );
+  return manifest;
+}
+
 function assertCleanRuntimeCheckout(runtimeDirectory) {
   const status = execFileSync(
     "git",
@@ -284,6 +319,9 @@ export function checkStarterRuntimeContract({
   const runtimeRoot = resolve(runtimeDirectory);
   const { manifest } = readManifest(starterRoot);
   const identity = runtimeIdentity(runtimeRoot);
+  const expectedCore = runtimeCoreIdentity(runtimeRoot);
+  const { manifest: starterPackage } = readStarterPackage(starterRoot);
+  const starterLock = readStarterLock(starterRoot);
   const differences = [];
   if (manifest.runtime.commitSha !== identity.commitSha) {
     differences.push(
@@ -293,6 +331,34 @@ export function checkStarterRuntimeContract({
   if (manifest.runtime.treeSha !== identity.treeSha) {
     differences.push(
       `starter-release.json pins tree ${manifest.runtime.treeSha}, expected ${identity.treeSha}`,
+    );
+  }
+  if (manifest.packages?.[CORE_PACKAGE_NAME] !== expectedCore.constraint) {
+    differences.push(
+      `starter-release.json pins ${CORE_PACKAGE_NAME} ${manifest.packages?.[CORE_PACKAGE_NAME] ?? "nothing"}, expected ${expectedCore.constraint}`,
+    );
+  }
+  if (
+    starterPackage.dependencies[CORE_PACKAGE_NAME] !== expectedCore.constraint
+  ) {
+    differences.push(
+      `${STARTER_PACKAGE_PATH} pins ${CORE_PACKAGE_NAME} ${starterPackage.dependencies[CORE_PACKAGE_NAME] ?? "nothing"}, expected ${expectedCore.constraint}`,
+    );
+  }
+  if (
+    starterLock.packages[""]?.dependencies?.[CORE_PACKAGE_NAME] !==
+    expectedCore.constraint
+  ) {
+    differences.push(
+      `${STARTER_LOCK_PATH} root pins ${CORE_PACKAGE_NAME} ${starterLock.packages[""]?.dependencies?.[CORE_PACKAGE_NAME] ?? "nothing"}, expected ${expectedCore.constraint}`,
+    );
+  }
+  if (
+    starterLock.packages[`node_modules/${CORE_PACKAGE_NAME}`]?.version !==
+    expectedCore.version
+  ) {
+    differences.push(
+      `${STARTER_LOCK_PATH} resolves ${CORE_PACKAGE_NAME} ${starterLock.packages[`node_modules/${CORE_PACKAGE_NAME}`]?.version ?? "nothing"}, expected ${expectedCore.version}`,
     );
   }
   for (const projectPath of ownedPaths(
@@ -315,6 +381,7 @@ export function checkStarterRuntimeContract({
 export function syncStarterRuntimeContract({
   starterDirectory,
   runtimeDirectory,
+  refreshLockfile = refreshStarterLockfile,
 }) {
   const starterRoot = resolve(starterDirectory);
   const runtimeRoot = resolve(runtimeDirectory);
@@ -322,6 +389,9 @@ export function syncStarterRuntimeContract({
   const { manifest, manifestPath } = readManifest(starterRoot, {
     allowOwnershipDrift: true,
   });
+  const expectedCore = runtimeCoreIdentity(runtimeRoot);
+  const { manifest: starterPackage, packagePath: starterPackagePath } =
+    readStarterPackage(starterRoot);
   manifest.ownership.frameworkSyncEligible = [...FRAMEWORK_SYNC_ELIGIBLE];
   const identity = runtimeIdentity(runtimeRoot);
   const rules = FRAMEWORK_SYNC_ELIGIBLE.map(parseRule);
@@ -358,7 +428,18 @@ export function syncStarterRuntimeContract({
     commitSha: identity.commitSha,
     treeSha: identity.treeSha,
   };
+  manifest.packages = {
+    ...manifest.packages,
+    [CORE_PACKAGE_NAME]: expectedCore.constraint,
+  };
+  starterPackage.dependencies[CORE_PACKAGE_NAME] = expectedCore.constraint;
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  writeFileSync(
+    starterPackagePath,
+    `${JSON.stringify(starterPackage, null, 2)}\n`,
+    "utf8",
+  );
+  refreshLockfile(starterRoot, expectedCore);
 
   const result = checkStarterRuntimeContract({
     starterDirectory: starterRoot,
@@ -369,6 +450,20 @@ export function syncStarterRuntimeContract({
     `Runtime synchronization failed:\n${result.differences.join("\n")}`,
   );
   return result;
+}
+
+function refreshStarterLockfile(starterDirectory) {
+  execFileSync(
+    "npm",
+    [
+      "install",
+      "--package-lock-only",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+    ],
+    { cwd: resolve(starterDirectory), stdio: "inherit" },
+  );
 }
 
 function readCliArguments(argv) {
