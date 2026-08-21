@@ -54,6 +54,7 @@ describe('standalone rich-content primitives', () => {
     expect(tooltip).toContain('data-tooltip-placement="top"')
     expect(tooltip).toContain('absolute left-1/2')
     expect(tooltip).toContain('bg-card')
+    expect(tooltip).toContain('before:top-full before:h-2')
     expect(tooltip).toContain('cursor-pointer')
     expect(tooltip).toContain('href="/auth"')
     const unsafe = renderToStaticMarkup(createElement(Tooltip, { tip: 'No link', cta: 'Run', href: 'javascript:alert(1)' }, 'token'))

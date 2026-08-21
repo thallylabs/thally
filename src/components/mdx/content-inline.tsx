@@ -145,12 +145,14 @@ export function Tooltip({ tip, headline, cta, href, children }: TooltipProps) {
         style={{ marginLeft: position.shiftX }}
         className={cn(
           'pointer-events-none invisible absolute left-1/2 z-50 w-72 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-lg border border-border bg-card px-3 py-2 text-left text-sm font-normal leading-5 text-foreground opacity-0 shadow-lg transition duration-150 group-hover/tooltip:pointer-events-auto group-hover/tooltip:visible group-hover/tooltip:opacity-100 group-focus-within/tooltip:pointer-events-auto group-focus-within/tooltip:visible group-focus-within/tooltip:opacity-100',
-          position.isBelow ? 'top-full mt-2' : 'bottom-full mb-2',
+          position.isBelow
+            ? 'top-full mt-2 before:absolute before:inset-x-0 before:bottom-full before:h-2 before:content-[""]'
+            : 'bottom-full mb-2 before:absolute before:inset-x-0 before:top-full before:h-2 before:content-[""]',
         )}
       >
         {headline ? <strong className="mb-0.5 block font-semibold text-foreground">{headline}</strong> : null}
         {tip ? <span className="block text-foreground/70">{tip}</span> : null}
-        {cta && href && isSafeLink(href) ? <a href={href} className="mt-1.5 inline-flex items-center gap-1 font-semibold text-accent">{cta}<ArrowUpRight className="h-3 w-3" aria-hidden="true" /></a> : null}
+        {cta && href && isSafeLink(href) ? <a href={href} className="mt-1.5 inline-flex cursor-pointer items-center gap-1 font-semibold text-accent">{cta}<ArrowUpRight className="h-3 w-3" aria-hidden="true" /></a> : null}
       </span>
     </span>
   )
