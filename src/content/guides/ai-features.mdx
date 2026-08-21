@@ -31,7 +31,7 @@ The rest of this page documents the free, agent-facing surfaces. The AI chat wid
 
 ## AI chat widget (Thally Cloud)
 
-Thally Cloud adds a floating chat button that lets readers ask questions and get answers grounded in your actual documentation, with inline citations back to the exact pages and anchors.
+Thally Cloud adds an assistant button to the documentation navbar that lets readers ask questions and get answers grounded in your actual documentation, with inline citations back to the exact pages and anchors. Readers can also open it with <kbd>⌘I</kbd> (or <kbd>Ctrl+I</kbd>).
 
 When enabled, the `/api/chat` route embeds the question, retrieves only the most relevant content chunks (RAG) within a small token budget, and streams back an answer that cites its sources — or says the answer isn't in your docs rather than guessing. In the self-hosted template the widget's panel appears but stays inactive until you connect Thally Cloud.
 

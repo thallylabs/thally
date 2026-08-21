@@ -196,10 +196,10 @@ interface DocsJsonConfig {
   theme?: StructuralTheme
   ai?: {
     chat?: boolean
-    /** Label shown on the FAB and in the chat header. Defaults to "Ask AI". */
+    /** Label shown in the navbar assistant button and chat header. Defaults to "Ask AI". */
     label?: string
     /**
-     * Icon shown on the FAB. Either a named icon ("sparkles" | "zap" | "bot" |
+     * Icon shown in the chat panel. Either a named icon ("sparkles" | "zap" | "bot" |
      * "brain" | "stars" | "wand") or a URL / path to an image (e.g. "/logo.png").
      * Defaults to "sparkles".
      */

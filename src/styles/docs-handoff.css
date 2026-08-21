@@ -124,6 +124,10 @@ body {
   border-radius: 9px;
 }
 
+.thally-docs-assistant-trigger {
+  max-width: 220px;
+}
+
 .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search,
 .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search > button:first-of-type {
   width: 180px;
@@ -427,6 +431,46 @@ a[target='_blank']:hover > .thally-docs-card::after {
   .thally-docs-search > button:nth-of-type(2) {
     display: flex;
   }
+
+  .thally-docs-assistant-trigger {
+    width: 30px;
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .thally-docs-assistant-trigger > span,
+  .thally-docs-assistant-shortcut {
+    display: none;
+  }
+}
+
+/* The full tab row needs more horizontal room than the compact controls. Once
+   it no longer fits comfortably, prefer the existing navigation drawer and
+   keep the assistant's label intact instead of letting controls overlap. */
+@media (max-width: 1440px) {
+  .thally-docs-topbar-inner > button[aria-haspopup='dialog'] {
+    display: inline-flex;
+  }
+
+  .thally-docs-tabs {
+    display: none;
+  }
+
+  .thally-docs-assistant-trigger {
+    width: auto;
+    max-width: 160px;
+    gap: 6px;
+    justify-content: flex-start;
+    padding-inline: 10px;
+  }
+
+  .thally-docs-assistant-trigger > span {
+    display: block;
+  }
+
+  .thally-docs-assistant-shortcut {
+    display: none;
+  }
 }
 
 @media (max-width: 1010px) {
@@ -504,6 +548,24 @@ a[target='_blank']:hover > .thally-docs-card::after {
     display: flex;
   }
 
+  /* Secondary links are hidden here, leaving room for a short, explicit
+     assistant action instead of an ambiguous sparkle-only affordance. */
+  .thally-docs-assistant-trigger {
+    width: auto;
+    max-width: 140px;
+    gap: 6px;
+    justify-content: flex-start;
+    padding-inline: 10px;
+  }
+
+  .thally-docs-assistant-trigger > span {
+    display: block;
+  }
+
+  .thally-docs-assistant-shortcut {
+    display: none;
+  }
+
   .thally-docs-topbar-inner {
     gap: 8px;
     padding-inline: 14px;
@@ -511,6 +573,20 @@ a[target='_blank']:hover > .thally-docs-card::after {
 
   .thally-docs-main {
     padding-top: 26px;
+  }
+}
+
+@media (max-width: 420px) {
+  .thally-docs-assistant-trigger {
+    width: 34px;
+    max-width: 34px;
+    height: 34px;
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .thally-docs-assistant-trigger > span {
+    display: none;
   }
 }
 

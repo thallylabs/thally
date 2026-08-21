@@ -144,18 +144,26 @@ export function AnswerSources({ sources }: { sources: Array<AiAnswerSource> }) {
 interface DocsChatProps {
   label?: string
   icon?: string
-  /** False when no Anthropic key is configured — show an upfront notice instead
-   * of inviting a question that would 503. */
+  /** False when this deployment cannot currently answer questions. */
   enabled?: boolean
+  /** Explains why this site cannot currently answer questions. */
+  unavailableMessage?: string
   /** Status was already resolved by the lazy loader. */
   skipStatusCheck?: boolean
+  /** Code-sample action awaiting display when this lazy panel mounts. */
+  initialPrompt?: string | null
+  /** Increments for each external request to open the chat panel. */
+  openRequestId?: number
 }
 
 export function DocsChat({
   label = 'Ask AI',
   icon,
   enabled = true,
+  unavailableMessage = 'Ask AI is not available for this site.',
   skipStatusCheck = false,
+  initialPrompt,
+  openRequestId,
 }: DocsChatProps) {
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -191,17 +199,11 @@ export function DocsChat({
     if (open) setTimeout(() => textareaRef.current?.focus(), 60)
   }, [open])
 
-  // Code-block actions use one document-level contract so every renderer can
-  // open the configured assistant without coupling MDX to this panel.
   useEffect(() => {
-    function handleAskAssistant(event: Event) {
-      const prompt = (event as CustomEvent<{ prompt?: string }>).detail?.prompt
-      if (prompt) setInput(prompt)
-      setOpen(true)
-    }
-    window.addEventListener('thally:ask-assistant', handleAskAssistant)
-    return () => window.removeEventListener('thally:ask-assistant', handleAskAssistant)
-  }, [])
+    if (!openRequestId) return
+    if (initialPrompt) setInput(initialPrompt)
+    setOpen(true)
+  }, [initialPrompt, openRequestId])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -351,23 +353,9 @@ export function DocsChat({
 
   if (!chatShown) return null
 
-  return (
-    <>
-      {/* FAB — opens the panel (hidden while open; the panel has its own close) */}
-      {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          aria-label={`Open ${liveLabel}`}
-          className="fixed bottom-6 right-6 z-50 flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-2xl bg-primary text-primary-foreground shadow-lg transition-all hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        >
-          <FabIcon icon={icon} className="h-5 w-5" />
-          <span className="text-[9px] font-semibold tracking-wide opacity-90">{liveLabel}</span>
-        </button>
-      )}
-
-      {/* Panel — full-height right dock */}
-      {open && (
-        <div
+  return open ? (
+    /* Panel — full-height right dock */
+    <div
           className="fixed inset-y-0 right-0 z-50 flex flex-col overflow-hidden border-l border-border shadow-2xl backdrop-blur-xl"
           style={{
             width: expanded ? 'min(680px, 100vw)' : 'min(420px, 100vw)',
@@ -498,8 +486,7 @@ export function DocsChat({
           <div className="shrink-0 px-4 pb-4 pt-2">
             {!enabled ? (
               <p className="mb-2 rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                AI chat is turned on but needs a key. Set <code className="font-mono">ANTHROPIC_API_KEY</code> in your
-                environment to enable it.
+                {unavailableMessage}
               </p>
             ) : null}
             <div className="rounded-2xl border border-border bg-muted/30 p-2 transition-colors focus-within:border-accent/40">
@@ -608,8 +595,6 @@ export function DocsChat({
               </p>
             ) : null}
           </div>
-        </div>
-      )}
-    </>
-  )
+    </div>
+  ) : null
 }
