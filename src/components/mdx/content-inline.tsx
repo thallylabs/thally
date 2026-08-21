@@ -85,16 +85,22 @@ function isSafeLink(href: string): boolean {
 
 /**
  * Add a keyboard- and pointer-accessible explanatory popover to inline text.
- * The popover is descriptive content rather than an interaction trap.
+ * The surface expands in document flow so authored headings, prose, and code
+ * remain readable while it is open instead of being covered by a floating card.
  */
 export function Tooltip({ tip, headline, cta, href, children }: TooltipProps) {
   const tooltipId = useId()
   return (
-    <span className="group/tooltip relative inline-flex align-baseline">
-      <button type="button" aria-describedby={tooltipId} className="cursor-help border-0 bg-transparent p-0 font-inherit text-inherit underline decoration-dotted underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+    <span className="group/tooltip inline-grid max-w-full grid-cols-[auto] items-baseline align-baseline">
+      <button type="button" aria-describedby={tooltipId} className="col-start-1 row-start-1 cursor-help justify-self-start border-0 bg-transparent p-0 font-inherit text-inherit underline decoration-dotted underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
         {children}
       </button>
-      <span id={tooltipId} role="tooltip" className="pointer-events-none invisible absolute bottom-full left-1/2 z-50 mb-2 w-max max-w-72 -translate-x-1/2 rounded-lg border border-border bg-popover px-3 py-2 text-left text-sm font-normal leading-5 text-popover-foreground opacity-0 shadow-lg transition duration-150 group-hover/tooltip:pointer-events-auto group-hover/tooltip:visible group-hover/tooltip:opacity-100 group-focus-within/tooltip:pointer-events-auto group-focus-within/tooltip:visible group-focus-within/tooltip:opacity-100">
+      <span
+        id={tooltipId}
+        role="tooltip"
+        data-tooltip-surface=""
+        className="pointer-events-none invisible col-start-1 row-start-2 mt-2 hidden w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-popover px-3 py-2 text-left text-sm font-normal leading-5 text-popover-foreground opacity-0 shadow-lg group-hover/tooltip:pointer-events-auto group-hover/tooltip:visible group-hover/tooltip:block group-hover/tooltip:opacity-100 group-focus-within/tooltip:pointer-events-auto group-focus-within/tooltip:visible group-focus-within/tooltip:block group-focus-within/tooltip:opacity-100"
+      >
         {headline ? <strong className="mb-0.5 block font-semibold text-foreground">{headline}</strong> : null}
         {tip ? <span className="block text-foreground/70">{tip}</span> : null}
         {cta && href && isSafeLink(href) ? <a href={href} className="mt-1.5 inline-flex items-center gap-1 font-semibold text-accent">{cta}<ArrowUpRight className="h-3 w-3" aria-hidden="true" /></a> : null}
