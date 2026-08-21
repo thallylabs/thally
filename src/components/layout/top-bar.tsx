@@ -2,6 +2,7 @@
 
 import { ExternalLink, Sparkles } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { SidebarCollection, DocsJsonNavbar } from '@/data/docs'
 import { MobileNav } from '@/components/navigation/mobile-nav'
 import { CommandSearch } from '@/components/search/command-search'
@@ -60,6 +61,8 @@ export function TopBar({
   const pathname = usePathname()
   const router = useRouter()
   const siteName = useSiteName()
+  const topbarRef = useRef<HTMLDivElement>(null)
+  const [isNavigationCompact, setIsNavigationCompact] = useState(false)
   const {
     hasAssistantEntryPoint,
     assistantLabel,
@@ -90,11 +93,60 @@ export function TopBar({
   // sites. Only dense, highly customized navbars opt into the compact layout.
   const isCrowded = collections.length + visibleLinkCount + (primaryCta ? 1 : 0) >= 8
 
+  // Site-defined tab labels, links, and CTAs vary too much for viewport-only
+  // breakpoints. Once the rendered header overflows—or the fixed-width search
+  // control touches the assistant—latch the compact menu until the viewport
+  // changes. The collision check matters because CSS overflow can paint outside
+  // a flex item without contributing to its parent's scroll width.
+  useLayoutEffect(() => {
+    if (isNavigationCompact) return
+    const topbar = topbarRef.current
+    if (!topbar) return
+
+    const detectOverflow = () => {
+      const assistant = topbar.querySelector<HTMLElement>('.thally-docs-assistant-trigger')
+      const searchButtons = Array.from(
+        topbar.querySelectorAll<HTMLElement>('.thally-docs-search > button'),
+      ).filter((button) => button.offsetParent !== null)
+      const assistantBounds = assistant?.getBoundingClientRect()
+      const hasAssistantCollision = assistantBounds
+        ? searchButtons.some((button) => {
+          const searchBounds = button.getBoundingClientRect()
+          return searchBounds.left < assistantBounds.right && searchBounds.right > assistantBounds.left
+        })
+        : false
+      if (topbar.scrollWidth > topbar.clientWidth + 1 || hasAssistantCollision) {
+        setIsNavigationCompact(true)
+      }
+    }
+
+    detectOverflow()
+    const observer = new ResizeObserver(detectOverflow)
+    observer.observe(topbar)
+    return () => observer.disconnect()
+  }, [isNavigationCompact])
+
+  useEffect(() => {
+    if (!isNavigationCompact) return
+    let animationFrame = 0
+    const retryFullNavigation = () => {
+      cancelAnimationFrame(animationFrame)
+      animationFrame = requestAnimationFrame(() => setIsNavigationCompact(false))
+    }
+    window.addEventListener('resize', retryFullNavigation)
+    return () => {
+      cancelAnimationFrame(animationFrame)
+      window.removeEventListener('resize', retryFullNavigation)
+    }
+  }, [isNavigationCompact])
+
   return (
     <header className="thally-docs-topbar sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-xl">
       <div
+        ref={topbarRef}
         className={cn('thally-docs-topbar-inner flex h-14 items-center gap-3', shell.topbar)}
         data-density={isCrowded ? 'compact' : 'comfortable'}
+        data-navigation-mode={isNavigationCompact ? 'compact' : 'full'}
       >
         <MobileNav sections={activeSections} />
         {/* The brand block needs clear separation from the section tabs or
@@ -162,8 +214,8 @@ export function TopBar({
             )
           })}
         </nav>
-        <div className="thally-docs-actions ml-auto flex min-w-0 items-center gap-2">
-          <div className="thally-docs-search min-w-0">
+        <div className="thally-docs-actions ml-auto flex shrink-0 items-center gap-2">
+          <div className="thally-docs-search shrink-0">
             <CommandSearch />
           </div>
           {hasAssistantEntryPoint ? (
