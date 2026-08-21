@@ -403,6 +403,11 @@ function rehypeShiki() {
         return
       }
 
+      // Mermaid consumes the original fence payload directly in `Pre`.
+      // Highlighting would only spend the bounded Shiki budget on HTML that
+      // is never displayed.
+      if (language === 'mermaid') return
+
       if (!scheduleSyntaxHighlight(code, budget)) {
         // Grouped code is rendered from trusted Shiki HTML. Preserve that
         // contract for the plaintext fallback by escaping authored markup

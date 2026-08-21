@@ -3,21 +3,24 @@ title: "Mermaid"
 description: "Render Mermaid diagrams inline in your documentation."
 ---
 
-Use `<Mermaid>` to embed flowcharts, sequence diagrams, entity-relationship diagrams, and any other [Mermaid](https://mermaid.js.org)-supported diagram type. Diagrams are rendered client-side on first view.
+Use a `mermaid` code fence to embed flowcharts, sequence diagrams,
+entity-relationship diagrams, and any other
+[Mermaid](https://mermaid.js.org)-supported diagram type. Diagrams are rendered
+client-side on first view.
 
 ## Flowchart
 
-<Mermaid>{`
+```mermaid
 flowchart LR
     A[Client] -->|Request| B(API Gateway)
     B --> C{Auth}
     C -->|Valid| D[Service]
     C -->|Invalid| E[401 Error]
-`}</Mermaid>
+```
 
 ## Sequence diagram
 
-<Mermaid>{`
+```mermaid
 sequenceDiagram
     participant U as User
     participant A as API
@@ -26,21 +29,22 @@ sequenceDiagram
     A->>D: SELECT user WHERE email=?
     D-->>A: user row
     A-->>U: 200 OK + JWT
-`}</Mermaid>
-
-```mdx
-<Mermaid>{`
-flowchart LR
-    A[Start] --> B[Process] --> C[End]
-`}</Mermaid>
 ```
 
+````mdx
+```mermaid
+flowchart LR
+    A[Start] --> B[Process] --> C[End]
+```
+````
+
 <Note>
-  The Mermaid definition must be passed as a template literal string child (`{\`...\`}`), not as JSX children.
+  Existing `<Mermaid chart={\`...\`} />` usage remains supported for migrated
+  content, but the fenced syntax is recommended for new pages.
 </Note>
 
 ## Props
 
 | Prop | Type | Description |
 |---|---|---|
-| `children` | `string` | Mermaid diagram definition string |
+| `chart` | `string` | Backward-compatible component definition string |

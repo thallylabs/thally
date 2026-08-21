@@ -14,11 +14,11 @@ import {
   type SyntaxHighlightBudget,
 } from './rehype'
 
-function codeBlock(value: string): Element {
+function codeBlock(value: string, language = 'txt'): Element {
   return {
     type: 'element',
     tagName: 'pre',
-    properties: { language: 'txt' },
+    properties: { language },
     children: [
       {
         type: 'element',
@@ -108,6 +108,14 @@ describe('code-fence metadata', () => {
     const overflow = codeBlock('<img src=x onerror=alert(1)>')
     await transformCodeBlocks([...blocks, overflow])
     expect(codeText(overflow).value).toBe('&lt;img src=x onerror=alert(1)&gt;')
+  })
+
+  it('preserves Mermaid source for the strict diagram renderer', async () => {
+    const block = codeBlock('flowchart LR\nA[Client] --> B[API]', 'mermaid')
+    await transformCodeBlocks([block])
+
+    expect(block.properties?.code).toBe('flowchart LR\nA[Client] --> B[API]')
+    expect(codeText(block).value).toBe('flowchart LR\nA[Client] --> B[API]')
   })
 
   it('ignores reversed and wholly out-of-bounds highlight ranges', () => {
