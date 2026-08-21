@@ -5,7 +5,7 @@ import { SidebarCollectionsHydrator } from '@/components/layout/sidebar-hydrator
 import { loadSidebarCollections, getAiConfig, getNavbarConfig, getFooterConfig } from '@/data/docs'
 import type { NavigationSection } from '@/data/docs'
 import { buildApiNavigation } from '@/data/api-reference'
-import { DocsChatLoader } from '@/components/docs/docs-chat-loader'
+import { DocsCodeActionsProvider } from '@/components/docs/code-actions-provider'
 import { getBuildI18nConfig } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig, siteIdentity } from '@/lib/site-config'
 
@@ -41,20 +41,29 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
   const navbarConfig = getNavbarConfig()
   const footerConfig = getFooterConfig()
   const effectiveSite = resolveBuildSiteConfig()
+  const codeReportRepositoryUrl =
+    effectiveSite.repoUrl ||
+    effectiveSite.links.find((link) => link.label.toLowerCase() === 'github')?.href ||
+    ''
 
   return (
     <>
       <SidebarCollectionsHydrator collections={collections} />
-      <SiteShell
-        initialCollections={collections}
-        i18nConfig={i18nConfig}
-        navbarConfig={navbarConfig}
-        footerConfig={footerConfig}
-        identity={siteIdentity(effectiveSite)}
+      <DocsCodeActionsProvider
+        initialRepositoryUrl={codeReportRepositoryUrl}
+        label={aiConfig.label}
+        icon={aiConfig.icon}
       >
-        {children}
-      </SiteShell>
-      <DocsChatLoader label={aiConfig.label} icon={aiConfig.icon} />
+        <SiteShell
+          initialCollections={collections}
+          i18nConfig={i18nConfig}
+          navbarConfig={navbarConfig}
+          footerConfig={footerConfig}
+          identity={siteIdentity(effectiveSite)}
+        >
+          {children}
+        </SiteShell>
+      </DocsCodeActionsProvider>
     </>
   )
 }

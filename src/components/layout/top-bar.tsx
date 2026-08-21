@@ -1,6 +1,6 @@
 'use client'
 
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, Sparkles } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
 import type { SidebarCollection, DocsJsonNavbar } from '@/data/docs'
 import { MobileNav } from '@/components/navigation/mobile-nav'
@@ -15,6 +15,7 @@ import type { SiteLink } from '@/data/site'
 import { Logo } from '@/components/layout/logo'
 import { displaySiteName, useSiteName } from '@/components/layout/use-site-name'
 import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
+import { useDocsCodeActions } from '@/components/docs/code-actions-provider'
 
 function matchesPath(targetHref: string, pathname: string) {
   if (!targetHref || /^https?:\/\//i.test(targetHref)) {
@@ -59,6 +60,14 @@ export function TopBar({
   const pathname = usePathname()
   const router = useRouter()
   const siteName = useSiteName()
+  const {
+    hasAssistantEntryPoint,
+    assistantLabel,
+    openAssistant,
+  } = useDocsCodeActions()
+  const assistantActionLabel = /^ask\b/i.test(assistantLabel)
+    ? assistantLabel
+    : `Ask ${assistantLabel}`
 
   // Request-bound site fallbacks (used when navbarConfig is not set).
   const supportLink =
@@ -157,6 +166,21 @@ export function TopBar({
           <div className="thally-docs-search min-w-0">
             <CommandSearch />
           </div>
+          {hasAssistantEntryPoint ? (
+            <button
+              type="button"
+              aria-label={assistantActionLabel}
+              aria-keyshortcuts="Meta+I Control+I"
+              className="thally-docs-assistant-trigger inline-flex h-[30px] shrink-0 items-center gap-2 rounded-full border border-transparent bg-muted/55 px-3 text-[0.84rem] font-semibold text-foreground/80 transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={openAssistant}
+            >
+              <Sparkles className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">{assistantActionLabel}</span>
+              <kbd className="thally-docs-assistant-shortcut rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[0.66rem] font-medium text-foreground/60">
+                ⌘I
+              </kbd>
+            </button>
+          ) : null}
           {navbarConfig?.links && navbarConfig.links.length > 0
             ? navbarConfig.links.map((link) => {
                 const isExternal = /^https?:\/\//.test(link.href)
