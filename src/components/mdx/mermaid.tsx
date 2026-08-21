@@ -3,6 +3,7 @@
 'use client'
 
 import { useEffect, useId, useState, type ReactNode } from 'react'
+import { useTheme } from 'next-themes'
 
 interface MermaidProps {
   /** Preferred explicit diagram definition for component-style usage. */
@@ -12,6 +13,33 @@ interface MermaidProps {
 }
 
 const MAX_DEFINITION_CHARACTERS = 64 * 1024
+let renderQueue: Promise<void> = Promise.resolve()
+
+type MermaidTheme = 'dark' | 'neutral'
+
+interface RenderedDiagram {
+  definition: string
+  theme?: MermaidTheme
+  svg: string
+  error: string
+}
+
+/**
+ * Mermaid owns mutable global configuration and a temporary render container.
+ * Serialize the initialize/render pair so sibling diagrams cannot overwrite
+ * one another while React mounts them concurrently.
+ */
+function renderDiagram(id: string, definition: string, theme: MermaidTheme): Promise<string> {
+  const pending = renderQueue.then(async () => {
+    const mermaid = (await import('mermaid')).default
+    mermaid.initialize({ startOnLoad: false, theme, securityLevel: 'strict' })
+    const result = await mermaid.render(`mermaid-${id}`, definition)
+    if (!result.svg.trim()) throw new Error('Mermaid returned an empty diagram.')
+    return result.svg
+  })
+  renderQueue = pending.then(() => undefined, () => undefined)
+  return pending
+}
 
 function resolveDefinition(chart: string | undefined, children: ReactNode): string {
   if (typeof chart === 'string') return chart.trim()
@@ -24,40 +52,48 @@ function resolveDefinition(chart: string | undefined, children: ReactNode): stri
 
 export function Mermaid({ chart, children }: MermaidProps) {
   const id = useId().replace(/:/g, '')
-  const [svg, setSvg] = useState<string>('')
-  const [error, setError] = useState<string>('')
+  const { resolvedTheme } = useTheme()
+  const [rendered, setRendered] = useState<RenderedDiagram>({
+    definition: '',
+    svg: '',
+    error: '',
+  })
   const definition = resolveDefinition(chart, children)
+  const diagramTheme: MermaidTheme | undefined = resolvedTheme === 'dark'
+    ? 'dark'
+    : resolvedTheme === 'light'
+      ? 'neutral'
+      : undefined
   const definitionError = !definition
     ? 'a diagram definition is required.'
     : definition.length > MAX_DEFINITION_CHARACTERS
       ? 'the diagram definition is too large to render safely.'
       : ''
+  const isCurrentRender = rendered.definition === definition && rendered.theme === diagramTheme
+  const svg = isCurrentRender ? rendered.svg : ''
+  const error = isCurrentRender ? rendered.error : ''
 
   useEffect(() => {
     let cancelled = false
-    setSvg('')
-    setError('')
-    if (definitionError) return () => { cancelled = true }
+    if (definitionError || !diagramTheme) return () => { cancelled = true }
 
-    void import('mermaid')
-      .then((module) => {
-        if (cancelled) return
-        const mermaid = module.default
-        // Migrated diagrams are untrusted input. Strict mode sanitizes labels
-        // and link targets before the generated SVG enters the DOM below.
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'strict' })
-        return mermaid.render(`mermaid-${id}`, definition)
-      })
-      .then((result) => {
-        if (!cancelled && result) setSvg(result.svg)
+    // Migrated diagrams are untrusted input. `renderDiagram` always uses
+    // strict Mermaid security before the generated SVG enters the DOM below.
+    void renderDiagram(id, definition, diagramTheme)
+      .then((renderedSvg) => {
+        if (!cancelled) {
+          setRendered({ definition, theme: diagramTheme, svg: renderedSvg, error: '' })
+        }
       })
       .catch((renderError: unknown) => {
-        if (!cancelled) setError(String(renderError))
+        if (!cancelled) {
+          setRendered({ definition, theme: diagramTheme, svg: '', error: String(renderError) })
+        }
       })
     return () => {
       cancelled = true
     }
-  }, [definition, definitionError, id])
+  }, [definition, definitionError, diagramTheme, id])
 
   if (definitionError) {
     return (
