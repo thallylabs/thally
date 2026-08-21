@@ -1,24 +1,31 @@
 ---
-title: "Tooltip"
-description: "Inline hover tooltip for defining terms or providing context."
+title: "Tooltips"
+description: "Add accessible supporting context to a term without leaving the page."
 ---
 
-`<Tooltip>` adds a hover tooltip to any inline text. The wrapped text gets a dotted underline indicating it is interactive.
+Tooltips open on hover or keyboard focus and remain usable on touch devices.
+They can include a short headline and an optional destination.
 
 ## Example
 
-The <Tooltip tip="A JSON Web Token used for authentication">JWT</Tooltip> is sent in the `Authorization` header with every request.
+The <Tooltip tip="A signed token sent with each authenticated request." headline="JSON Web Token" cta="Read API setup" href="/guides/api-reference-setup">JWT</Tooltip> belongs in the `Authorization` header.
 
 ```mdx
-The <Tooltip tip="A JSON Web Token used for authentication">JWT</Tooltip> is sent in the `Authorization` header.
+<Tooltip
+  tip="A signed token sent with each authenticated request."
+  headline="JSON Web Token"
+  cta="Read API setup"
+  href="/guides/api-reference-setup"
+>
+  JWT
+</Tooltip>
 ```
 
 ## Props
 
 | Prop | Type | Description |
 |---|---|---|
-| `tip` | `string` | Text shown in the tooltip on hover |
-
-<Note>
-  `<Tooltip>` uses the native `title` attribute for maximum compatibility. For richer tooltips with interactive content or markdown support, use a custom React component.
-</Note>
+| `tip` | `string` | Required supporting text |
+| `headline` | `string` | Optional heading |
+| `cta` | `string` | Optional link label |
+| `href` | `string` | Safe internal or external destination for the CTA |

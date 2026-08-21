@@ -193,10 +193,12 @@ export default async function LocaleDocsPage({ params }: PageProps) {
   const Content = doc.component
 
   return (
-    <DocLayout doc={doc} locale={contentLocale}>
+    <>
       <JsonLdScript data={jsonLd} />
-      {localeNotice}
-      <Content />
-    </DocLayout>
+      <DocLayout doc={doc} locale={contentLocale}>
+        {localeNotice}
+        <Content />
+      </DocLayout>
+    </>
   )
 }

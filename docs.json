@@ -233,32 +233,37 @@
         {
           "group": "Content",
           "pages": [
+            "components/accordion",
             "components/badge",
+            "components/banner",
             "components/agent-prompt",
             "components/callouts",
+            "components/color",
             "components/code-blocks",
-            "components/panel",
+            "components/prompt",
             "components/update"
           ]
         },
         {
           "group": "Layout",
           "pages": [
-            "components/accordion",
             "components/card",
             "components/columns",
             "components/frame",
+            "components/panel",
             "components/steps",
             "components/tabs",
-            "components/tile"
+            "components/tile",
+            "components/view"
           ]
         },
         {
           "group": "Media & Diagrams",
           "pages": [
+            "components/github",
+            "components/icons",
             "components/mermaid",
-            "components/view",
-            "components/color"
+            "components/file-tree"
           ]
         },
         {
@@ -273,9 +278,8 @@
         {
           "group": "Navigation",
           "pages": [
-            "components/file-tree",
             "components/tooltip",
-            "components/prompt"
+            "components/visibility"
           ]
         }
       ]

@@ -251,7 +251,13 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <link rel="stylesheet" href="/api/brand.css" />
       </head>
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
-        {bannerConfig && <SiteBanner banner={bannerConfig} />}
+        {bannerConfig && (
+          <SiteBanner
+            banner={bannerConfig}
+            defaultLocale={i18n.defaultLocale}
+            locales={i18n.locales.map((locale) => locale.code)}
+          />
+        )}
         <Providers>{children}</Providers>
         <CloudHandshake />
         {siteConfig.analytics && <AnalyticsProvider />}

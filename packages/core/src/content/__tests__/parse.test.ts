@@ -113,3 +113,53 @@ describe('parseMdxContent JSX attribute prose', () => {
     expect(parsed.text).not.toContain('/quickstart')
   })
 })
+
+describe('parseMdxContent audience projection', () => {
+  const source = `## Shared
+
+Visible to everyone.
+
+<Visibility for="humans">
+
+## Human setup
+
+Use the dashboard.
+
+</Visibility>
+
+<Visibility for="agents">
+
+## Agent setup
+
+Use the API.
+
+</Visibility>
+
+<Human>Human shorthand.</Human>
+<Agent>Agent shorthand.</Agent>`
+
+  it('projects structured content for the agent audience', () => {
+    const parsed = parseMdxContent(source, 'agents')
+    expect(parsed.text).toContain('Visible to everyone.')
+    expect(parsed.text).toContain('Use the API.')
+    expect(parsed.text).toContain('Agent shorthand.')
+    expect(parsed.text).not.toContain('Use the dashboard.')
+    expect(parsed.text).not.toContain('Human shorthand.')
+    expect(parsed.headings.map((heading) => heading.text)).toContain('Agent setup')
+    expect(parsed.headings.map((heading) => heading.text)).not.toContain('Human setup')
+  })
+
+  it('preserves all authored audiences by default for API compatibility', () => {
+    const parsed = parseMdxContent(source)
+    expect(parsed.text).toContain('Use the dashboard.')
+    expect(parsed.text).toContain('Use the API.')
+  })
+
+  it('can project the human audience without leaking agent-only content', () => {
+    const parsed = parseMdxContent(source, 'humans')
+    expect(parsed.text).toContain('Use the dashboard.')
+    expect(parsed.text).toContain('Human shorthand.')
+    expect(parsed.text).not.toContain('Use the API.')
+    expect(parsed.text).not.toContain('Agent shorthand.')
+  })
+})

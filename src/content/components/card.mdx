@@ -1,103 +1,50 @@
 ---
-title: "Card & CardGroup"
-description: "Clickable cards for feature overviews, link grids, and navigation."
+title: "Cards"
+description: "Create scannable navigation, feature, and intent-aware content cards."
 ---
 
-Use `<Card>` for individual feature or navigation cards, and `<CardGroup>` to lay them out in a responsive grid.
+Use `<Card>` on its own or place related cards in a responsive `<CardGroup>`.
 
 ## Example
 
-<CardGroup cols="2">
-  <Card title="Quickstart" icon="party-horn" href="/quickstart">
-    Get your docs site running in under five minutes.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="party-horn" href="/quickstart" cta="Start building">
+    Get a documentation site running locally in a few minutes.
   </Card>
-  <Card title="API Reference" icon="code-simple" href="/api">
-    Explore every endpoint with live examples and generated types.
-  </Card>
-  <Card title="Guides" icon="book-open" href="/guides/writing-content">
-    In-depth walkthroughs for common configuration scenarios.
-  </Card>
-  <Card title="GitHub" icon="link-simple" href="https://github.com/your-org/your-docs">
-    Browse the source, open issues, and contribute.
+  <Card title="API reference" icon="code-simple" href="/api" type="info">
+    Explore generated endpoints, schemas, and request examples.
   </Card>
 </CardGroup>
 
 ```mdx
-<CardGroup cols="2">
-  <Card title="Quickstart" icon="party-horn" href="/quickstart">
-    Get running in five minutes.
-  </Card>
-  <Card title="API Reference" icon="code-simple" href="/api">
-    Explore every endpoint.
-  </Card>
-</CardGroup>
+<Card
+  title="Quickstart"
+  icon="party-horn"
+  href="/quickstart"
+  cta="Start building"
+>
+  Get a documentation site running locally in a few minutes.
+</Card>
 ```
 
-## Card with image
+## Horizontal card
 
-Cards can include a top image — useful for showcasing screenshots, product previews, or visual documentation.
-
-<CardGroup cols="2">
-  <Card title="Analytics Dashboard" img="/images/image1.jpg" href="/quickstart">
-    Monitor active users, conversion rates, and retention in real time.
-  </Card>
-  <Card title="API Explorer" img="/images/image2.jpg" href="/api">
-    Send live requests directly from the docs with your own API key.
-  </Card>
-</CardGroup>
-
-```mdx
-<CardGroup cols="2">
-  <Card title="Analytics Dashboard" img="/images/dashboard.svg" href="/quickstart">
-    Monitor active users and conversion rates.
-  </Card>
-  <Card title="API Explorer" img="/images/explorer.svg" href="/api">
-    Send live requests from the docs.
-  </Card>
-</CardGroup>
-```
-
-## Three columns
-
-<CardGroup cols={3}>
-  <Card title="Navigation" icon="link-simple" href="/guides/configuring-navigation">
-    Structure tabs, sidebar groups, and page order with docs.json.
-  </Card>
-  <Card title="Custom Fonts" icon="book-open" href="/guides/custom-fonts">
-    Switch to any Google Font from docs.json — no code changes.
-  </Card>
-  <Card title="Deploying" icon="party-horn" href="/guides/deploying">
-    Ship to Vercel, Netlify, Cloudflare, or a Docker container.
-  </Card>
-</CardGroup>
-
-```mdx
-<CardGroup cols={3}>
-  <Card title="Navigation" icon="link-simple" href="/guides/configuring-navigation">
-    Structure tabs and groups with docs.json.
-  </Card>
-  <Card title="Custom Fonts" icon="book-open" href="/guides/custom-fonts">
-    Switch fonts from docs.json.
-  </Card>
-  <Card title="Deploying" icon="party-horn" href="/guides/deploying">
-    Ship to any Next.js host.
-  </Card>
-</CardGroup>
-```
+<Card title="Writing guide" icon="refresh-cw" href="/guides/writing-content" horizontal arrow>
+  Structure durable documentation without losing authored context.
+</Card>
 
 ## Props
 
-### `<Card>`
-
-| Prop | Type | Description |
-|---|---|---|
-| `title` | `string` | Card heading |
-| `href` | `string` | Destination URL — makes the entire card clickable |
-| `icon` | `string` | Icon name (see [available icons](/components/tooltip)) |
-| `img` | `string` | Image path shown at the top of the card |
-
-### `<CardGroup>`
-
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `cols` | `1 \| 2 \| 3 \| 4` | `3` | Number of columns in the grid |
+| `title` | `string` | — | Card heading |
+| `href` | `string` | — | Internal or external destination |
+| `icon` | `string` | — | [Icon name](/components/icons) |
+| `color` | `string` | Theme accent | Icon color |
+| `img` | `string` | — | Image displayed above or beside the content |
+| `horizontal` | `boolean` | `false` | Uses a horizontal layout |
+| `cta` | `string` | — | Explicit action label |
+| `arrow` | `boolean` | Inferred from `href` | Shows the directional arrow |
+| `type` | `info \| warning \| note \| tip \| check \| danger` | — | Intent-aware surface treatment |
+
+`<CardGroup cols={1|2|3|4}>` controls the responsive grid.

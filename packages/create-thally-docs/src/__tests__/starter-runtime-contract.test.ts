@@ -36,6 +36,27 @@ function write(root: string, path: string, content: string): void {
   writeFileSync(destination, content, "utf8");
 }
 
+function writeCoreLock(
+  starterDirectory: string,
+  core: { version: string; constraint: string },
+): void {
+  write(
+    starterDirectory,
+    "package-lock.json",
+    `${JSON.stringify(
+      {
+        lockfileVersion: 3,
+        packages: {
+          "": { dependencies: { "@thallylabs/core": core.constraint } },
+          "node_modules/@thallylabs/core": { version: core.version },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
 function createRuntime(): {
   directory: string;
   commitSha: string;
@@ -44,6 +65,11 @@ function createRuntime(): {
   const directory = temporaryDirectory("thally-runtime-contract");
   write(directory, "src/components/top-bar.tsx", "export const height = 56\n");
   write(directory, "src/lib/runtime.ts", "export const runtime = true\n");
+  write(
+    directory,
+    "packages/core/package.json",
+    `${JSON.stringify({ name: "@thallylabs/core", version: "0.2.3" }, null, 2)}\n`,
+  );
   write(
     directory,
     "src/lib/__tests__/frontmatter-parity.test.ts",
@@ -91,6 +117,12 @@ function createStarter(
   );
   write(
     directory,
+    "package.json",
+    `${JSON.stringify({ dependencies: { "@thallylabs/core": "^0.2.2" } }, null, 2)}\n`,
+  );
+  writeCoreLock(directory, { version: "0.2.2", constraint: "^0.2.2" });
+  write(
+    directory,
     "starter-release.json",
     `${JSON.stringify(
       {
@@ -103,7 +135,7 @@ function createStarter(
           commitSha: "0".repeat(40),
           treeSha: "1".repeat(40),
         },
-        packages: {},
+        packages: { "@thallylabs/core": "^0.2.2" },
         ownership: {
           frameworkSyncEligible: rules ?? FRAMEWORK_SYNC_ELIGIBLE,
           userOwnedNeverOverwrite: ["src/content/**"],
@@ -151,6 +183,7 @@ describe("starter runtime contract", () => {
     syncStarterRuntimeContract({
       starterDirectory,
       runtimeDirectory: runtime.directory,
+      refreshLockfile: writeCoreLock,
     });
 
     expect(
@@ -179,6 +212,41 @@ describe("starter runtime contract", () => {
       commitSha: runtime.commitSha,
       treeSha: runtime.treeSha,
     });
+    expect(manifest.packages).toEqual({ "@thallylabs/core": "^0.2.3" });
+    expect(
+      JSON.parse(readFileSync(join(starterDirectory, "package.json"), "utf8"))
+        .dependencies["@thallylabs/core"],
+    ).toBe("^0.2.3");
+    const lock = JSON.parse(
+      readFileSync(join(starterDirectory, "package-lock.json"), "utf8"),
+    );
+    expect(lock.packages[""].dependencies["@thallylabs/core"]).toBe("^0.2.3");
+    expect(lock.packages["node_modules/@thallylabs/core"].version).toBe(
+      "0.2.3",
+    );
+  });
+
+  it("rejects a stale dependency lock even when package metadata is current", () => {
+    const runtime = createRuntime();
+    const starterDirectory = createStarter(runtime);
+    syncStarterRuntimeContract({
+      starterDirectory,
+      runtimeDirectory: runtime.directory,
+      refreshLockfile: writeCoreLock,
+    });
+    writeCoreLock(starterDirectory, {
+      version: "0.2.2",
+      constraint: "^0.2.3",
+    });
+
+    expect(
+      checkStarterRuntimeContract({
+        starterDirectory,
+        runtimeDirectory: runtime.directory,
+      }).differences,
+    ).toContain(
+      "package-lock.json resolves @thallylabs/core 0.2.2, expected 0.2.3",
+    );
   });
 
   it("rejects ownership rules that can escape or ambiguously expand", () => {

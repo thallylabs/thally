@@ -71,6 +71,17 @@ describe('interpretMDX', () => {
     expect(html).toContain('data-flag="true"')
   })
 
+  it('evaluates expression-free template literals in component children', async () => {
+    const Probe: ComponentType<Record<string, unknown>> = ({ children }) =>
+      createElement('div', { 'data-definition': children as string })
+    const { content } = await interpretMDX({
+      source: '<Probe>{`flowchart LR\nA --> B`}</Probe>',
+      components: { Probe },
+    })
+
+    expect(render(content)).toContain('data-definition="flowchart LR\nA --&gt; B"')
+  })
+
   it('renders dynamic expressions as nothing instead of failing the page', async () => {
     const { content } = await interpretMDX({
       source: 'Before {process.env.SECRET} after.',
