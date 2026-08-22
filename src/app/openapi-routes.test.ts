@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   specs: [] as Array<Record<string, unknown>>,
   loadSpecDocument: vi.fn(),
   resolveSiteConfig: vi.fn(),
-  resolveDocumentationApiAccessMode: vi.fn(),
+  resolveDocumentationAccessMode: vi.fn(),
 }))
 
 vi.mock('@/config/api-reference', () => ({
@@ -28,7 +28,7 @@ vi.mock('@/lib/site-config', () => ({
 }))
 
 vi.mock('@/lib/openapi/documentation-access', () => ({
-  resolveDocumentationApiAccessMode: mocks.resolveDocumentationApiAccessMode,
+  resolveDocumentationAccessMode: mocks.resolveDocumentationAccessMode,
 }))
 
 import { GET as getJson } from '@/app/openapi.json/route'
@@ -40,11 +40,11 @@ describe('public OpenAPI routes', () => {
     mocks.loadSpecDocument.mockReset()
     mocks.resolveSiteConfig.mockReset()
     mocks.resolveSiteConfig.mockResolvedValue({ name: 'Example Docs' })
-    mocks.resolveDocumentationApiAccessMode.mockReset().mockResolvedValue('public')
+    mocks.resolveDocumentationAccessMode.mockReset().mockResolvedValue('public')
   })
 
   it('publishes the enforced cookie requirement for password-protected sites', async () => {
-    mocks.resolveDocumentationApiAccessMode.mockResolvedValue('password')
+    mocks.resolveDocumentationAccessMode.mockResolvedValue('password')
 
     const response = await getJson(
       new NextRequest('https://private.example.com/openapi.json'),

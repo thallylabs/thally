@@ -15,9 +15,9 @@ vi.mock('@/lib/cloud-link/edge', () => ({
   getCloudAccessConfigEdge: mocks.getCloudAccessConfigEdge,
 }))
 
-import { resolveDocumentationApiAccessMode } from '@/lib/openapi/documentation-access'
+import { resolveDocumentationAccessMode } from '@/lib/openapi/documentation-access'
 
-describe('resolveDocumentationApiAccessMode', () => {
+describe('resolveDocumentationAccessMode', () => {
   beforeEach(() => {
     mocks.isDocsAccessEnabledEdge.mockReset().mockReturnValue(false)
     mocks.getCloudAccessConfigEdge.mockReset().mockResolvedValue(null)
@@ -27,7 +27,7 @@ describe('resolveDocumentationApiAccessMode', () => {
     mocks.isDocsAccessEnabledEdge.mockReturnValue(true)
 
     await expect(
-      resolveDocumentationApiAccessMode('https://docs.example.com'),
+      resolveDocumentationAccessMode('https://docs.example.com'),
     ).resolves.toBe('password')
   })
 
@@ -37,7 +37,7 @@ describe('resolveDocumentationApiAccessMode', () => {
     })
 
     await expect(
-      resolveDocumentationApiAccessMode('https://docs.example.com'),
+      resolveDocumentationAccessMode('https://docs.example.com'),
     ).resolves.toBe('password')
   })
 
@@ -47,7 +47,7 @@ describe('resolveDocumentationApiAccessMode', () => {
     })
 
     await expect(
-      resolveDocumentationApiAccessMode('https://docs.example.com'),
+      resolveDocumentationAccessMode('https://docs.example.com'),
     ).resolves.toBe('public')
   })
 })

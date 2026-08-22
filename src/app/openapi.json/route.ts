@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { apiReferenceConfig } from '@/config/api-reference'
 import { getSpecConfig, loadSpecDocument } from '@/lib/openapi/fetch'
 import { buildDocumentationApiOpenApi } from '@/lib/openapi/documentation-api'
-import { resolveDocumentationApiAccessMode } from '@/lib/openapi/documentation-access'
+import { resolveDocumentationAccessMode } from '@/lib/openapi/documentation-access'
 import { problemResponse } from '@/lib/http/problem'
 import { resolveSiteConfig } from '@/lib/site-config'
 import type { OpenAPIDocument } from '@/lib/openapi/types'
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   if (!specConfig) {
     const [site, accessMode] = await Promise.all([
       resolveSiteConfig(request.nextUrl.origin),
-      resolveDocumentationApiAccessMode(request.nextUrl.origin),
+      resolveDocumentationAccessMode(request.nextUrl.origin),
     ])
     return NextResponse.json(
       buildDocumentationApiOpenApi(request.nextUrl.origin, site.name, {

@@ -8,12 +8,12 @@
 import { isDocsAccessEnabledEdge } from '@/lib/admin/auth-edge'
 import { getCloudAccessConfigEdge } from '@/lib/cloud-link/edge'
 
-export type DocumentationApiAccessMode = 'public' | 'password'
+export type DocumentationAccessMode = 'public' | 'password'
 
 /** Return the effective access mode for a request origin. */
-export async function resolveDocumentationApiAccessMode(
+export async function resolveDocumentationAccessMode(
   origin: string,
-): Promise<DocumentationApiAccessMode> {
+): Promise<DocumentationAccessMode> {
   const cloudAccess = await getCloudAccessConfigEdge(origin)
   return isDocsAccessEnabledEdge() || cloudAccess?.access?.mode === 'password'
     ? 'password'
