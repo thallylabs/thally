@@ -19,7 +19,6 @@ import {
  * and the effective public or password-protected read model. Standards covered:
  *  - RFC 9727 api-catalog (linkset)
  *  - MCP Server Card (/.well-known/mcp.json, /.well-known/mcp/server-card.json)
- *  - A2A Agent Card (/.well-known/agent-card.json)
  *  - Agent Skills discovery (/.well-known/agent-skills/*)
  *  - RFC 9728 OAuth Protected Resource Metadata
  *  - auth.md (agent-readable auth documentation)
@@ -109,56 +108,6 @@ export function mcpServerCard(
       inputSchema: tool.inputSchema,
     })),
     documentation: `${origin}/auth.md`,
-  })
-}
-
-export function a2aAgentCard(
-  origin: string,
-  identity: SiteIdentity,
-  accessMode: DocumentationAccessMode = 'public',
-): Response {
-  // Finding (6): /api/mcp speaks MCP, NOT A2A. It implements only the MCP
-  // JSON-RPC methods `initialize`, `ping`, `tools/list`, and `tools/call`
-  // (see src/app/api/mcp/route.ts) — and ZERO A2A methods (`message/send`,
-  // `tasks/*`). So advertising it under an A2A transport (`preferredTransport:
-  // 'JSONRPC'`, which in A2A means "send A2A JSON-RPC here") is categorically
-  // false: a compliant A2A client would POST `message/send` and get -32601.
-  //
-  // Honest fix (keep the discovery document, drop the false protocol claim):
-  // the only advertised interface uses transport `MCP` — a value NOT in A2A's
-  // transport enum (JSONRPC / GRPC / HTTP+JSON). A spec-compliant A2A client
-  // finds no interface it can speak and therefore CANNOT be told to send A2A
-  // methods to this MCP endpoint. It routes agents to the canonical MCP
-  // discovery doc (mcp-server-card.json) instead. This advertises only what
-  // /api/mcp actually implements.
-  return json({
-    protocolVersion: '0.3.0',
-    name: `${identity.name} Docs Agent`,
-    description: accessMode === 'password'
-      ? `Documentation agent for ${identity.name}. Answers questions from the password-protected docs corpus after docs-access cookie authentication. Read-only and accessible over MCP (not A2A).`
-      : `Documentation agent for ${identity.name}. Answers questions from the docs corpus via search, Markdown page reads, and a machine-readable page index. Read-only and public. Accessible over MCP (not A2A) — attach with an MCP client.`,
-    // No A2A service URL is advertised: this agent exposes no A2A transport.
-    // The MCP interface is described below via a non-A2A transport annotation.
-    url: `${origin}/.well-known/mcp-server-card.json`,
-    preferredTransport: 'MCP',
-    supportedInterfaces: [
-      { url: `${origin}/api/mcp`, transport: 'MCP', protocol: 'MCP' },
-    ],
-    version: '1.0.0',
-    capabilities: {
-      streaming: false,
-      pushNotifications: false,
-      stateTransitionHistory: false,
-    },
-    defaultInputModes: ['text/plain'],
-    defaultOutputModes: ['text/markdown', 'application/json'],
-    skills: toolMetadata.map((tool) => ({
-      id: tool.name,
-      name: tool.name,
-      description: tool.description,
-      tags: ['documentation', 'read-only'],
-    })),
-    documentationUrl: `${origin}/llms.txt`,
   })
 }
 
@@ -456,8 +405,6 @@ export async function GET(
       return apiCatalog(origin)
     case 'mcp-server-card':
       return mcpServerCard(origin, identity, accessMode)
-    case 'agent-card':
-      return a2aAgentCard(origin, identity, accessMode)
     case 'oauth-protected-resource':
       return oauthProtectedResource(origin, identity, accessMode)
     case 'auth-md':

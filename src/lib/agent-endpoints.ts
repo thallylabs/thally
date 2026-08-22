@@ -41,7 +41,7 @@ export function isMachineEndpoint(pathname: string): boolean {
  * (robots.txt, sitemap.xml), discovery indexes (llms.txt, llms-full.txt,
  * ai.txt), the OpenAPI description, the RSS changelog, the packaged agent
  * guides (skill.md, AGENTS.md, auth.md), and everything under /.well-known/
- * (MCP card, A2A agent card, Agent Skills, OAuth Protected Resource metadata,
+ * (MCP card, Agent Skills, OAuth Protected Resource metadata,
  * api-catalog). Redirecting any of these to the HTML /access gate would hand an
  * MCP client or crawler a login page instead of the JSON/markdown it expects,
  * preventing it from discovering the site's actual public or password-cookie

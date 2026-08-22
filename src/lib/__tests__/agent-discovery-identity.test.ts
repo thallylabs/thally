@@ -13,7 +13,6 @@ vi.mock('@/lib/openapi/documentation-access', () => ({
 
 import {
   GET,
-  a2aAgentCard,
   mcpServerCard,
   oauthProtectedResource,
 } from '@/app/api/well-known/[...document]/route'
@@ -38,10 +37,18 @@ describe('agent discovery identity', () => {
     expect(agentServerName(identity.name)).toBe('launch-sentinel-docs')
   })
 
+  it('does not advertise an A2A Agent Card without an A2A transport', async () => {
+    const response = await GET(
+      new NextRequest('https://sentinel.example.com/.well-known/agent-card.json'),
+      { params: Promise.resolve({ document: ['agent-card'] }) },
+    )
+
+    expect(response.status).toBe(404)
+  })
+
   it('keeps every discovery card free of baseline identity', async () => {
     const responses = [
       mcpServerCard('https://sentinel.example.com', identity),
-      a2aAgentCard('https://sentinel.example.com', identity),
       oauthProtectedResource('https://sentinel.example.com', identity),
     ]
     const documents = await Promise.all(
