@@ -7,6 +7,7 @@
  */
 
 import { appendFileSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export const RELEASE_HANDOFF_SCHEMA_VERSION = 1
@@ -121,7 +122,10 @@ const isDirectRun =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
 
 if (isDirectRun) {
-  const record = JSON.parse(readFileSync(RELEASE_RECORD_PATH, 'utf8'))
+  const releaseSourceDirectory = process.env.RELEASE_SOURCE_DIRECTORY ?? '.'
+  const record = JSON.parse(
+    readFileSync(join(releaseSourceDirectory, RELEASE_RECORD_PATH), 'utf8'),
+  )
   const payload = createReleaseHandoffPayload({
     record,
     recordRepository: process.env.GITHUB_REPOSITORY,

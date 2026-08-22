@@ -27,6 +27,7 @@
     "pretest": "npm run packages:build",
     "test": "vitest run",
     "check:agents": "tsx scripts/agent-readiness.ts",
+    "release:full": "node .github/scripts/start-full-release.mjs",
     "runtime-sources:build": "tsx scripts/build-runtime-sources.mts",
     "packages:build": "node scripts/build-packages.mjs"
   },

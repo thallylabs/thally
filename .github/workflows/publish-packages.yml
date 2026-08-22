@@ -1,13 +1,16 @@
-# Requires THALLY_CLOUD_RELEASE_TOKEN: a fine-grained token selected only for
-# thallylabs/thally-cloud with Contents: write. Store it as a repository secret
-# here; it is referenced only by the post-publication handoff job.
+# The Cloud handoff mints a short-lived GitHub App token only after publication
+# succeeds. It is narrowed to Actions write + Contents read on thally-cloud and
+# stored behind the main-only release-control environment.
 
 name: Publish packages
 
+run-name: >-
+  Publish packages${{ inputs.request_id && format(' · {0}', inputs.request_id) || '' }}
+
 on:
-  # The release-record PR remains the human review gate. Its merge starts the
-  # package-first tail automatically; manual dispatch remains an idempotent
-  # recovery path for an interrupted publish or handoff.
+  # CI-gated release-record merges start the package-first tail automatically;
+  # manual dispatch remains an idempotent recovery path for an interrupted
+  # publish or handoff.
   push:
     branches: [main]
     paths:
@@ -15,6 +18,15 @@ on:
       - packages/core/package.json
       - packages/migrate/package.json
   workflow_dispatch:
+    inputs:
+      request_id:
+        description: Release-controller correlation id for recovery
+        required: false
+        type: string
+      release_commit_sha:
+        description: Exact reviewed main commit to recover and publish
+        required: true
+        type: string
 
 # No long-lived npm registry token is permitted in this workflow. npm uses an
 # environment-bound OIDC identity. The cloud handoff gets a separate,
@@ -31,16 +43,64 @@ jobs:
     name: Plan package release
     runs-on: ubuntu-latest
     outputs:
+      release_sha: ${{ steps.source.outputs.sha }}
       should_handoff: ${{ steps.release.outputs.should_handoff }}
     steps:
       - name: Reject non-main dispatches
         run: test "$GITHUB_REF" = refs/heads/main
 
-      - name: Checkout release source
+      - name: Checkout trusted release policy
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout immutable release source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          path: release-source
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Resolve immutable release source
+        id: source
+        shell: bash
+        env:
+          RELEASE_COMMIT_SHA: ${{ inputs.release_commit_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && ! "$RELEASE_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::release_commit_sha must be a full lowercase commit SHA."
+            exit 1
+          fi
+          git -C release-source fetch --no-tags origin main
+          selected_sha="${RELEASE_COMMIT_SHA:-$GITHUB_SHA}"
+          if [[ ! "$selected_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The selected release must be a full lowercase commit SHA."
+            exit 1
+          fi
+          git -C release-source merge-base --is-ancestor "$selected_sha" origin/main
+          if [[ -n "$RELEASE_COMMIT_SHA" ]]; then
+            record_path='packages/create-thally-docs/src/stable-scaffold-release.json'
+            authoritative_sha="$(
+              git -C release-source log -1 --format=%H origin/main -- "$record_path"
+            )"
+            if [[ "$selected_sha" != "$authoritative_sha" ]]; then
+              echo "::error::release_commit_sha is not the commit that introduced the current stable record."
+              exit 1
+            fi
+            git -C release-source show "$selected_sha:packages/create-thally-docs/src/stable-scaffold-release.json" \
+              > "$RUNNER_TEMP/selected-stable.json"
+            git -C release-source show "origin/main:packages/create-thally-docs/src/stable-scaffold-release.json" \
+              > "$RUNNER_TEMP/current-stable.json"
+            cmp --silent "$RUNNER_TEMP/selected-stable.json" "$RUNNER_TEMP/current-stable.json" || {
+              echo "::error::The selected release is no longer the public stable record."
+              exit 1
+            }
+          fi
+          git -C release-source checkout --detach "$selected_sha"
+          echo "sha=$selected_sha" >> "$GITHUB_OUTPUT"
 
       - name: Classify immutable scaffold handoff
         id: release
@@ -57,26 +117,104 @@ jobs:
           if [[ ! "$base" =~ ^[0-9a-f]{40}$ ]] || [[ "$base" =~ ^0{40}$ ]]; then
             base="HEAD^"
           fi
-          if git diff --quiet "$base" HEAD -- \
+          if git -C release-source diff --quiet "$base" HEAD -- \
             packages/create-thally-docs/src/stable-scaffold-release.json; then
             echo "should_handoff=false" >> "$GITHUB_OUTPUT"
           else
             echo "should_handoff=true" >> "$GITHUB_OUTPUT"
           fi
 
-  publish:
-    name: Verify · Publish
+  verify:
+    name: Test · Pack once
     needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted release policy
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout immutable release source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select the authorized immutable release source
+        env:
+          RELEASE_SHA: ${{ needs.plan.outputs.release_sha }}
+        run: git -C release-source checkout --detach "$RELEASE_SHA"
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install dependencies
+        working-directory: release-source
+        run: npm ci
+
+      - name: Test
+        working-directory: release-source
+        run: npm test
+
+      - name: Pack immutable release artifacts
+        env:
+          SHOULD_HANDOFF: ${{ needs.plan.outputs.should_handoff }}
+        run: |
+          arguments=("$GITHUB_WORKSPACE/.release-artifacts")
+          [[ "$SHOULD_HANDOFF" == "true" ]] && arguments+=(--include-scaffold)
+          cd release-source
+          node ../.github/scripts/pack-release-workspaces.mjs "${arguments[@]}"
+
+      - name: Upload immutable release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-release-${{ needs.plan.outputs.release_sha }}
+          path: .release-artifacts
+          if-no-files-found: error
+          retention-days: 7
+
+  attest:
+    name: Attest package bytes
+    needs: [plan, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Download immutable release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-release-${{ needs.plan.outputs.release_sha }}
+          path: .release-artifacts
+
+      - name: Attest package provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: .release-artifacts/*.tgz
+
+  publish:
+    name: Publish exact package bytes
+    needs: [plan, verify, attest]
     runs-on: ubuntu-latest
     environment: npm-production
     permissions:
       contents: read
-      # npm exchanges this job's environment-bound OIDC identity for a
-      # short-lived publish credential.
+      # No dependency installation, tests, builds, or lifecycle scripts run in
+      # this job. npm exchanges OIDC only while publishing pre-attested bytes.
       id-token: write
     steps:
-      - name: Checkout
+      - name: Checkout trusted publish policy
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.sha }}
+          persist-credentials: false
 
       - name: Set up Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -85,54 +223,53 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Download attested release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-release-${{ needs.plan.outputs.release_sha }}
+          path: .release-artifacts
 
-      - name: Test
-        run: npm test
-
-      # core ships the shared content pipeline the other packages and every
-      # scaffolded site build against, so it publishes first.
-      - name: Publish core
-        run: npx tsx scripts/publish-workspace.mts packages/core
-
-      - name: Publish migrate
-        run: npx tsx scripts/publish-workspace.mts packages/migrate
-
-      - name: Publish create-thally-docs
-        if: needs.plan.outputs.should_handoff == 'true'
-        run: npx tsx scripts/publish-workspace.mts packages/create-thally-docs
-
-      - name: Publish MCP
-        if: needs.plan.outputs.should_handoff == 'true'
-        run: npx tsx scripts/publish-workspace.mts packages/mcp
-
-      - name: Publish CLI
-        if: needs.plan.outputs.should_handoff == 'true'
-        run: npx tsx scripts/publish-workspace.mts packages/cli
-
-      - name: Verify prerequisite registry releases
-        run: |
-          npx tsx scripts/publish-workspace.mts packages/core --verify-only
-          npx tsx scripts/publish-workspace.mts packages/migrate --verify-only
-
-      - name: Verify scaffold registry releases
-        if: needs.plan.outputs.should_handoff == 'true'
-        run: |
-          npx tsx scripts/publish-workspace.mts packages/create-thally-docs --verify-only
-          npx tsx scripts/publish-workspace.mts packages/mcp --verify-only
-          npx tsx scripts/publish-workspace.mts packages/cli --verify-only
+      - name: Publish and verify exact tarballs
+        run: node .github/scripts/publish-release-artifacts.mjs .release-artifacts/manifest.json
 
   handoff:
     name: Dispatch immutable record to Thally Cloud
     needs: [plan, publish]
     if: needs.plan.outputs.should_handoff == 'true'
     runs-on: ubuntu-latest
+    environment: release-control
     permissions:
       contents: read
     steps:
+      - name: Mint the Cloud workflow token
+        id: cloud-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_COORDINATOR_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_COORDINATOR_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: thally-cloud
+          permission-actions: write
+          permission-contents: read
+
+      - name: Checkout trusted handoff policy
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.sha }}
+          persist-credentials: false
+
       - name: Checkout the published record
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select the authorized published record
+        env:
+          RELEASE_SHA: ${{ needs.plan.outputs.release_sha }}
+        run: git -C release-source checkout --detach "$RELEASE_SHA"
 
       - name: Set up Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -144,41 +281,22 @@ jobs:
         id: release
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_SHA: ${{ needs.plan.outputs.release_sha }}
+          RELEASE_SOURCE_DIRECTORY: release-source
         run: node .github/scripts/prepare-release-handoff.mjs
 
       - name: Dispatch the cloud release tail
         env:
-          # Fine-grained token limited to thallylabs/thally-cloud with only
-          # Contents: write, the permission required by repository_dispatch.
-          GH_TOKEN: ${{ secrets.THALLY_CLOUD_RELEASE_TOKEN }}
-          SCHEMA_VERSION: ${{ steps.release.outputs.schema_version }}
+          GH_TOKEN: ${{ steps.cloud-token.outputs.token }}
           RELEASE_ID: ${{ steps.release.outputs.release_id }}
-          RECORD_REPOSITORY: ${{ steps.release.outputs.record_repository }}
           RECORD_COMMIT_SHA: ${{ steps.release.outputs.record_commit_sha }}
-          RECORD_PATH: ${{ steps.release.outputs.record_path }}
         run: |
           set -euo pipefail
-          if [[ -z "${GH_TOKEN:-}" ]]; then
-            echo "::error::THALLY_CLOUD_RELEASE_TOKEN is not configured"
-            exit 1
-          fi
-          jq -n \
-            --argjson schema_version "$SCHEMA_VERSION" \
-            --arg release_id "$RELEASE_ID" \
-            --arg record_repository "$RECORD_REPOSITORY" \
-            --arg record_commit_sha "$RECORD_COMMIT_SHA" \
-            --arg record_path "$RECORD_PATH" \
-            '{
-              event_type: "scaffold-release-published",
-              client_payload: {
-                schema_version: $schema_version,
-                release_id: $release_id,
-                record_repository: $record_repository,
-                record_commit_sha: $record_commit_sha,
-                record_path: $record_path
-              }
-            }' | gh api \
-              --method POST \
-              repos/thallylabs/thally-cloud/dispatches \
-              --input -
+          gh workflow run promote-scaffold-release.yml \
+            --repo thallylabs/thally-cloud \
+            --ref main \
+            -f target_environment=production \
+            -f release_id="$RELEASE_ID" \
+            -f record_commit_sha="$RECORD_COMMIT_SHA" \
+            -f automated=true \
+            -f request_id="handoff-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
