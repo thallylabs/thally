@@ -41,6 +41,12 @@ test("starts only from a reviewed stable-record merge or an operator recovery", 
     ).run,
     /stable-scaffold-release\.json/,
   );
+  const sourceStep = workflow.jobs.plan.steps.find(
+    (step) => step.name === "Resolve immutable release source",
+  );
+  assert.match(sourceStep.run, /authoritative_sha/);
+  assert.match(sourceStep.run, /log -1 --format=%H origin\/main/);
+  assert.match(sourceStep.run, /selected_sha.*authoritative_sha/);
 });
 
 test("tests and packs before the minimal OIDC publish job", () => {
@@ -93,6 +99,11 @@ test("recovers immutable sources with the current trusted release policy", () =>
   assert.ok(planSteps.some((step) => step.name === "Checkout immutable release source"));
   assert.ok(verifySteps.some((step) => step.name === "Checkout trusted release policy"));
   assert.ok(verifySteps.some((step) => step.name === "Checkout immutable release source"));
+  assert.ok(
+    verifySteps.some(
+      (step) => step.name === "Select the authorized immutable release source",
+    ),
+  );
   assert.ok(handoffSteps.some((step) => step.name === "Checkout trusted handoff policy"));
   const prepare = handoffSteps.find(
     (step) => step.name === "Validate and prepare the immutable locator",

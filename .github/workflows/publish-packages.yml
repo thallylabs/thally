@@ -58,7 +58,7 @@ jobs:
       - name: Checkout immutable release source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_commit_sha || github.sha }}
+          ref: main
           path: release-source
           fetch-depth: 0
           persist-credentials: false
@@ -74,14 +74,22 @@ jobs:
             echo "::error::release_commit_sha must be a full lowercase commit SHA."
             exit 1
           fi
-          selected_sha="$(git -C release-source rev-parse HEAD)"
-          if [[ -n "$RELEASE_COMMIT_SHA" && "$selected_sha" != "$RELEASE_COMMIT_SHA" ]]; then
-            echo "::error::The release checkout does not match release_commit_sha."
+          git -C release-source fetch --no-tags origin main
+          selected_sha="${RELEASE_COMMIT_SHA:-$GITHUB_SHA}"
+          if [[ ! "$selected_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The selected release must be a full lowercase commit SHA."
             exit 1
           fi
-          git -C release-source fetch --no-tags origin main
           git -C release-source merge-base --is-ancestor "$selected_sha" origin/main
           if [[ -n "$RELEASE_COMMIT_SHA" ]]; then
+            record_path='packages/create-thally-docs/src/stable-scaffold-release.json'
+            authoritative_sha="$(
+              git -C release-source log -1 --format=%H origin/main -- "$record_path"
+            )"
+            if [[ "$selected_sha" != "$authoritative_sha" ]]; then
+              echo "::error::release_commit_sha is not the commit that introduced the current stable record."
+              exit 1
+            fi
             git -C release-source show "$selected_sha:packages/create-thally-docs/src/stable-scaffold-release.json" \
               > "$RUNNER_TEMP/selected-stable.json"
             git -C release-source show "origin/main:packages/create-thally-docs/src/stable-scaffold-release.json" \
@@ -91,6 +99,7 @@ jobs:
               exit 1
             }
           fi
+          git -C release-source checkout --detach "$selected_sha"
           echo "sha=$selected_sha" >> "$GITHUB_OUTPUT"
 
       - name: Classify immutable scaffold handoff
@@ -129,9 +138,15 @@ jobs:
       - name: Checkout immutable release source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ needs.plan.outputs.release_sha }}
+          ref: main
           path: release-source
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Select the authorized immutable release source
+        env:
+          RELEASE_SHA: ${{ needs.plan.outputs.release_sha }}
+        run: git -C release-source checkout --detach "$RELEASE_SHA"
 
       - name: Set up Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -246,9 +261,15 @@ jobs:
       - name: Checkout the published record
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ needs.plan.outputs.release_sha }}
+          ref: main
           path: release-source
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Select the authorized published record
+        env:
+          RELEASE_SHA: ${{ needs.plan.outputs.release_sha }}
+        run: git -C release-source checkout --detach "$RELEASE_SHA"
 
       - name: Set up Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
