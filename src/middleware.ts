@@ -77,6 +77,21 @@ function shouldTrackRequest(request: NextRequest, pathname: string): boolean {
 }
 
 /**
+ * Next's router payloads vary on request headers that shared CDNs do not
+ * consistently include in their cache key. Treat any router signal as
+ * authoritative so a stripped companion header cannot make the response look
+ * like an ordinary document.
+ */
+function isNextRouterPayloadRequest(request: NextRequest): boolean {
+  return (
+    request.headers.get('rsc') === '1' ||
+    request.headers.has('next-router-state-tree') ||
+    request.headers.has('next-router-prefetch') ||
+    request.headers.has('next-router-segment-prefetch')
+  )
+}
+
+/**
  * Public browser documents are immutable within an atomic deployment. Next.js
  * applies its own cache policy to pre-rendered RSC payloads; this helper adds
  * the equivalent long-lived CDN policy only to full HTML documents.
@@ -85,6 +100,7 @@ function isCacheableDocsPage(request: NextRequest, pathname: string, docsAccessE
   return (
     request.method === 'GET' &&
     request.headers.get('accept')?.includes('text/html') === true &&
+    !isNextRouterPayloadRequest(request) &&
     !docsAccessEnabled &&
     !pathname.startsWith('/api') &&
     !pathname.startsWith('/admin') &&
@@ -175,11 +191,11 @@ function isManagedContentCachePath(pathname: string): boolean {
  * fails open for availability, but a possibly-password-gated page must never
  * be frozen into a shared cache for a year.
  *
- * `cdnCacheable: false` sets the purge tag without a TTL. Used for the
- * agent content-negotiation rewrite: it varies on User-Agent/Accept while
- * sharing the browser URL's cache key (CDNs do not honor Vary on those), so
- * a cached agent response would poison the URL for human visitors. Agents
- * that want cached responses have URL-distinct forms (`.md`, `?format=`).
+ * `cdnCacheable: false` sets the purge tag without a TTL. Used for responses
+ * that vary on request headers a shared CDN may not honor: agent content
+ * negotiation (User-Agent/Accept) and Next router payloads (RSC/state/prefetch
+ * headers). Caching either variant under the browser pathname can poison the
+ * corresponding human document or client-side navigation.
  */
 function applyManagedContentCacheHeaders(
   response: NextResponse,
@@ -356,10 +372,13 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     response.headers.set('CDN-Cache-Control', cdnCache)
     response.headers.set('Netlify-CDN-Cache-Control', cdnCache)
   }
-  // Full caching is safe here: RSC payload requests share doc-page pathnames
-  // but stay cache-distinct via their `_rsc` query param, and every other
-  // variant agents use is URL-distinct (`.md`, `?format=`).
-  return applyManagedContentCacheHeaders(response, pathname, contentCachePublic)
+  // Keep router payloads purgeable, but never impose a shared CDN lifetime on
+  // them. The `_rsc` query is only one part of Next's cache key; prefetch and
+  // navigation responses also vary on headers, and replaying the wrong variant
+  // can leave the page's Suspense boundary permanently empty.
+  return applyManagedContentCacheHeaders(response, pathname, contentCachePublic, {
+    cdnCacheable: !isNextRouterPayloadRequest(request),
+  })
 }
 
 export const config = {
