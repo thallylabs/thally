@@ -1,6 +1,5 @@
 import { getDocEntries } from '@/data/docs'
 import { getSiteUrl } from '@/lib/site-url'
-import { apiReferenceConfig } from '@/config/api-reference'
 import type { SiteIdentity } from '@/lib/site-config'
 
 /**
@@ -10,7 +9,6 @@ import type { SiteIdentity } from '@/lib/site-config'
  */
 export function buildSkillManifest(identity: SiteIdentity, base = getSiteUrl()): string {
   const entries = getDocEntries()
-  const hasApi = apiReferenceConfig.specs.length > 0
   const lines: Array<string> = []
 
   lines.push(`# ${identity.name} — documentation skill`)
@@ -36,7 +34,9 @@ export function buildSkillManifest(identity: SiteIdentity, base = getSiteUrl()):
   lines.push(`- Structured index (JSON): ${base}/api/docs-index`)
   lines.push(`- MCP server (attach as native tools over HTTP): ${base}/api/mcp`)
   lines.push(`- Agent readiness report: ${base}/api/agent-readiness`)
-  if (hasApi) lines.push(`- OpenAPI spec: ${base}/openapi.yaml`)
+  // A configured customer spec is served when present; otherwise this URL
+  // describes Thally's built-in read APIs, so it is always dereferenceable.
+  lines.push(`- OpenAPI description: ${base}/openapi.yaml`)
   lines.push('')
   lines.push('## Remote MCP tools')
   lines.push('- `search_docs` — find relevant pages before reading deeply')

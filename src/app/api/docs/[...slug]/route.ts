@@ -4,6 +4,7 @@ import { mdxToMarkdown } from '@thallylabs/core'
 import { loadContentDocument } from '@/lib/content'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
 import { resolveSiteConfig } from '@/lib/site-config'
+import { problemResponse } from '@/lib/http/problem'
 
 /** Nearest valid pages for a missing slug, so a 404'd agent can self-correct. */
 function suggestSlugs(
@@ -67,15 +68,20 @@ export async function GET(
   if (!entry) {
     const suggestions = suggestSlugs(slugPath, entries)
     if (wantsJson || wantsLdJson) {
-      return Response.json(
-        {
-          error: 'not_found',
-          message: 'No documentation page matches this path.',
+      return problemResponse({
+        status: 404,
+        code: 'not_found',
+        title: 'Documentation page not found',
+        detail: 'No documentation page matches this path.',
+        resolution: suggestions.length
+          ? 'Retry with one of the suggested page identifiers.'
+          : 'Read `/api/docs-index` for the complete list of published page identifiers.',
+        instance: request.nextUrl.pathname,
+        extensions: {
           docs_index: `${baseUrl}/llms.txt`,
           did_you_mean: suggestions,
         },
-        { status: 404 },
-      )
+      })
     }
     const hint = suggestions.length
       ? `\n\nDid you mean:\n${suggestions.map((s) => `- ${s.href}`).join('\n')}`
@@ -92,14 +98,17 @@ export async function GET(
   const document = await loadContentDocument(entry.id)
   if (!document) {
     if (wantsJson || wantsLdJson) {
-      return Response.json(
-        {
-          error: 'content_not_found',
-          message: 'The source file for this page could not be read.',
+      return problemResponse({
+        status: 404,
+        code: 'content_not_found',
+        title: 'Documentation content unavailable',
+        detail: 'The source file for this page could not be read.',
+        resolution: 'Read `/api/docs-index` and retry with another published page identifier.',
+        instance: request.nextUrl.pathname,
+        extensions: {
           docs_index: `${baseUrl}/llms.txt`,
         },
-        { status: 404 },
-      )
+      })
     }
     return new Response(
       `# 404 — Content not found\n\nThe source file for this page could not be read. See ${baseUrl}/llms.txt for the full page index.`,

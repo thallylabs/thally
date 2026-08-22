@@ -2,7 +2,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getCloudAccessConfigEdge, getManagedSiteIdEdge } from '../edge'
+import {
+  getCloudAccessConfigEdge,
+  getManagedSiteIdEdge,
+  isCloudAccessConfiguredEdge,
+} from '../edge'
 
 describe('Thally Cloud edge configuration', () => {
   beforeEach(() => {
@@ -42,6 +46,7 @@ describe('Thally Cloud edge configuration', () => {
     vi.stubEnv('THALLY_CLOUD_SITE_CONFIG', '{not-json')
     const fetchMock = vi.spyOn(globalThis, 'fetch')
 
+    expect(isCloudAccessConfiguredEdge()).toBe(true)
     await expect(
       getCloudAccessConfigEdge('https://docs.example.com'),
     ).resolves.toBeNull()
@@ -61,5 +66,12 @@ describe('Thally Cloud edge configuration', () => {
 
     vi.stubEnv('THALLY_CLOUD_SITE_CONFIG', JSON.stringify({ siteId: 42 }))
     expect(getManagedSiteIdEdge()).toBeNull()
+  })
+
+  it('distinguishes Cloud-managed runtimes from self-hosted sites', () => {
+    expect(isCloudAccessConfiguredEdge()).toBe(false)
+
+    vi.stubEnv('THALLY_CLOUD_SITE_TOKEN', 'site-token')
+    expect(isCloudAccessConfiguredEdge()).toBe(true)
   })
 })

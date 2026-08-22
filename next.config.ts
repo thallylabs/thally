@@ -65,7 +65,6 @@ const nextConfig: NextConfig = {
       { source: '/.well-known/api-catalog', destination: '/api/well-known/api-catalog' },
       { source: '/.well-known/mcp.json', destination: '/api/well-known/mcp-server-card' },
       { source: '/.well-known/mcp/server-card.json', destination: '/api/well-known/mcp-server-card' },
-      { source: '/.well-known/agent-card.json', destination: '/api/well-known/agent-card' },
       { source: '/.well-known/oauth-protected-resource', destination: '/api/well-known/oauth-protected-resource' },
       { source: '/.well-known/agent-skills/index.json', destination: '/api/well-known/agent-skills-index' },
       { source: '/.well-known/agent-skills/:file', destination: '/api/well-known/agent-skills-file/:file' },

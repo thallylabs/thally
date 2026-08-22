@@ -2,6 +2,12 @@ import { type NextRequest } from 'next/server'
 import { toolMetadata } from '@/lib/mcp/tool-metadata'
 import { resolveSiteConfig, type SiteIdentity } from '@/lib/site-config'
 import { agentIdentitySlug, agentServerName } from '@/lib/agent-identity'
+import { problemResponse } from '@/lib/http/problem'
+import { DOCS_ACCESS_COOKIE } from '@/lib/admin/auth-edge'
+import {
+  resolveDocumentationAccessMode,
+  type DocumentationAccessMode,
+} from '@/lib/openapi/documentation-access'
 
 /**
  * Agent-discovery documents served under `/.well-known/*` (and `/auth.md`),
@@ -10,10 +16,9 @@ import { agentIdentitySlug, agentServerName } from '@/lib/agent-identity'
  *
  * Everything published here describes capability the site actually has:
  * the MCP server at /api/mcp, the search API, Markdown content negotiation,
- * and the public no-auth read model. Standards covered:
+ * and the effective public or password-protected read model. Standards covered:
  *  - RFC 9727 api-catalog (linkset)
  *  - MCP Server Card (/.well-known/mcp.json, /.well-known/mcp/server-card.json)
- *  - A2A Agent Card (/.well-known/agent-card.json)
  *  - Agent Skills discovery (/.well-known/agent-skills/*)
  *  - RFC 9728 OAuth Protected Resource Metadata
  *  - auth.md (agent-readable auth documentation)
@@ -72,7 +77,12 @@ function apiCatalog(origin: string): Response {
   )
 }
 
-export function mcpServerCard(origin: string, identity: SiteIdentity): Response {
+export function mcpServerCard(
+  origin: string,
+  identity: SiteIdentity,
+  accessMode: DocumentationAccessMode = 'public',
+): Response {
+  const isPasswordProtected = accessMode === 'password'
   return json({
     name: agentServerName(identity.name),
     title: `${identity.name} documentation MCP server`,
@@ -83,7 +93,14 @@ export function mcpServerCard(origin: string, identity: SiteIdentity): Response 
     url: `${origin}/api/mcp`,
     endpoint: `${origin}/api/mcp`,
     transport: ['streamable-http'],
-    authentication: { type: 'none' },
+    authentication: isPasswordProtected
+      ? {
+          type: 'cookie',
+          in: 'cookie',
+          name: DOCS_ACCESS_COOKIE,
+          documentation: `${origin}/auth.md`,
+        }
+      : { type: 'none' },
     capabilities: { tools: { listChanged: false } },
     tools: toolMetadata.map((tool) => ({
       name: tool.name,
@@ -94,73 +111,126 @@ export function mcpServerCard(origin: string, identity: SiteIdentity): Response 
   })
 }
 
-export function a2aAgentCard(origin: string, identity: SiteIdentity): Response {
-  // Finding (6): /api/mcp speaks MCP, NOT A2A. It implements only the MCP
-  // JSON-RPC methods `initialize`, `ping`, `tools/list`, and `tools/call`
-  // (see src/app/api/mcp/route.ts) — and ZERO A2A methods (`message/send`,
-  // `tasks/*`). So advertising it under an A2A transport (`preferredTransport:
-  // 'JSONRPC'`, which in A2A means "send A2A JSON-RPC here") is categorically
-  // false: a compliant A2A client would POST `message/send` and get -32601.
-  //
-  // Honest fix (keep the discovery document, drop the false protocol claim):
-  // the only advertised interface uses transport `MCP` — a value NOT in A2A's
-  // transport enum (JSONRPC / GRPC / HTTP+JSON). A spec-compliant A2A client
-  // finds no interface it can speak and therefore CANNOT be told to send A2A
-  // methods to this MCP endpoint. It routes agents to the canonical MCP
-  // discovery doc (mcp-server-card.json) instead. This advertises only what
-  // /api/mcp actually implements.
-  return json({
-    protocolVersion: '0.3.0',
-    name: `${identity.name} Docs Agent`,
-    description:
-      `Documentation agent for ${identity.name}. Answers questions from the docs corpus via search, Markdown page reads, and a machine-readable page index. Read-only and public. Accessible over MCP (not A2A) — attach with an MCP client.`,
-    // No A2A service URL is advertised: this agent exposes no A2A transport.
-    // The MCP interface is described below via a non-A2A transport annotation.
-    url: `${origin}/.well-known/mcp-server-card.json`,
-    preferredTransport: 'MCP',
-    supportedInterfaces: [
-      { url: `${origin}/api/mcp`, transport: 'MCP', protocol: 'MCP' },
-    ],
-    version: '1.0.0',
-    capabilities: {
-      streaming: false,
-      pushNotifications: false,
-      stateTransitionHistory: false,
-    },
-    defaultInputModes: ['text/plain'],
-    defaultOutputModes: ['text/markdown', 'application/json'],
-    skills: toolMetadata.map((tool) => ({
-      id: tool.name,
-      name: tool.name,
-      description: tool.description,
-      tags: ['documentation', 'read-only'],
-    })),
-    documentationUrl: `${origin}/llms.txt`,
-  })
-}
-
 export function oauthProtectedResource(
   origin: string,
   identity: SiteIdentity,
+  accessMode: DocumentationAccessMode = 'public',
 ): Response {
-  // RFC 9728. Honest shape for this site: the docs corpus and its agent
-  // surfaces are public and unauthenticated; `authorization_servers` is
-  // intentionally absent (it is OPTIONAL) because no OAuth server fronts
-  // this resource. auth.md carries the human/agent-readable version.
+  const isPasswordProtected = accessMode === 'password'
+  // RFC 9728 metadata never advertises an authorization server or OAuth
+  // scopes because neither access mode supports bearer tokens. The namespaced
+  // extension makes the real non-OAuth cookie gate machine-discoverable.
   return json({
     resource: origin,
     resource_name: `${identity.name} documentation`,
-    // Empty by declaration, not omission: no OAuth authorization server
-    // fronts this resource (RFC 9728 §2 — the array lists AS issuers).
-    authorization_servers: [],
+    // RFC 9728 explicitly permits [] to declare that bearer tokens are not
+    // accepted, while `authorization_servers` must be omitted when empty.
     bearer_methods_supported: [],
     resource_documentation: `${origin}/auth.md`,
+    ...(isPasswordProtected
+      ? {
+          x_thally_access: {
+            mode: 'password',
+            credential: 'cookie',
+            cookie_name: DOCS_ACCESS_COOKIE,
+            authentication_endpoint: `${origin}/api/access/auth`,
+            interactive_login: `${origin}/access`,
+          },
+        }
+      : {}),
   })
 }
 
-function authMd(origin: string, identity: SiteIdentity): Response {
+function oauthAuthorizationServerUnavailable(
+  request: NextRequest,
+  accessMode: DocumentationAccessMode,
+): Response {
+  const isPasswordProtected = accessMode === 'password'
+  return problemResponse({
+    status: 404,
+    code: 'oauth_not_supported',
+    title: 'OAuth authorization server not available',
+    detail: isPasswordProtected
+      ? 'This password-protected documentation site uses a signed docs-access session cookie and is not an OAuth authorization server.'
+      : 'This documentation site exposes a public anonymous read surface and is not an OAuth authorization server.',
+    resolution: isPasswordProtected
+      ? 'Authenticate at `/access` or submit the site password to `POST /api/access/auth`, then retry with the issued docs-access cookie. Read `/auth.md` for the complete non-OAuth flow.'
+      : 'Use the endpoints without credentials and read `/auth.md` for the supported access model.',
+    instance: request.nextUrl.pathname,
+    headers: { 'Cache-Control': 'public, max-age=300' },
+  })
+}
+
+function authMd(
+  origin: string,
+  identity: SiteIdentity,
+  accessMode: DocumentationAccessMode,
+): Response {
   const host = new URL(origin).host
   const localMcpName = agentIdentitySlug(identity.name)
+  if (accessMode === 'password') {
+    return markdown(`# auth.md
+
+You are an agent. This document tells you how to access **${host}** — a
+password-protected documentation service. This site does not support OAuth,
+OpenID Connect, bearer tokens, API keys, dynamic client registration, or
+permission scopes for documentation readers.
+
+Supported credential type: **signed docs-access session cookie**. Obtain it
+with the site password, retain the \`Set-Cookie\` response in a cookie jar, and
+send it on protected documentation API and MCP requests. Never place the site
+password in a URL, log, prompt transcript, or committed file.
+
+## Step 1 — Create a docs-access session
+
+\`\`\`http
+POST /api/access/auth HTTP/1.1
+Host: ${host}
+Content-Type: application/json
+
+{"password":"<site-password>"}
+\`\`\`
+
+A successful response sets the HTTP-only \`${DOCS_ACCESS_COOKIE}\` cookie.
+Human readers can complete the same flow at [${origin}/access](${origin}/access).
+
+## Step 2 — Use the protected API
+
+\`\`\`http
+GET /api/search?q=example HTTP/1.1
+Host: ${host}
+Cookie: ${DOCS_ACCESS_COOKIE}=<session-value>
+User-Agent: your-agent/1.0
+\`\`\`
+
+The cookie is required for documentation pages, search, the page index, page
+reads, and the MCP server. Public discovery documents such as \`/openapi.json\`,
+\`/.well-known/oauth-protected-resource\`, and this guide remain reachable
+without the cookie so clients can discover the access model.
+
+## Step 3 — Attach over MCP (optional)
+
+Configure your MCP client to retain and send the same docs-access cookie when
+connecting to \`${origin}/api/mcp\`. The server is read-only; authentication
+does not grant write or operator permissions.
+
+## OAuth status
+
+OAuth is **not supported**. There is no authorization server, token endpoint,
+client registration endpoint, bearer token, or OAuth scope to request. Do not
+send an \`Authorization: Bearer\` header.
+
+## Errors
+
+- \`401 docs_access_required\` — the cookie is missing, invalid, or expired.
+  Create a new session and retry.
+- \`401\` from \`POST /api/access/auth\` — the supplied site password is invalid.
+- \`429\` — back off and retry after the rate-limit window.
+- \`403\` on \`/admin\` or \`/api/admin/*\` — operator access is separate and the
+  docs-access cookie does not authorize it.
+`)
+  }
+
   return markdown(`# auth.md
 
 You are an agent. This document tells you how to access **${host}** — a
@@ -221,14 +291,14 @@ The MCP server accepts anonymous \`initialize\` and \`tools/call\` requests.
 interface SkillDoc {
   name: string
   description: string
-  body: (origin: string) => string
+  body: (origin: string, accessMode: DocumentationAccessMode) => string
 }
 
 const SKILLS: Record<string, SkillDoc> = {
   'search-docs': {
     name: 'search-docs',
     description: 'Search this documentation site and retrieve ranked, cited results.',
-    body: (origin) => `---
+    body: (origin, accessMode) => `---
 name: search-docs
 description: Search this documentation site and retrieve ranked, cited results.
 ---
@@ -242,13 +312,13 @@ GET ${origin}/api/search?q=<query>&limit=8
 \`\`\`
 
 Returns JSON hits with \`title\`, \`url\`, and a matching snippet, ranked by
-relevance. No authentication required. Prefer this over crawling pages.
+relevance. ${accessMode === 'password' ? `Authenticate first as described in ${origin}/auth.md and send the issued \`${DOCS_ACCESS_COOKIE}\` cookie.` : 'No authentication is required.'} Prefer this over crawling pages.
 `,
   },
   'read-page-markdown': {
     name: 'read-page-markdown',
     description: 'Fetch any documentation page as clean Markdown instead of HTML.',
-    body: (origin) => `---
+    body: (origin, accessMode) => `---
 name: read-page-markdown
 description: Fetch any documentation page as clean Markdown instead of HTML.
 ---
@@ -264,25 +334,27 @@ curl -H "Accept: text/markdown" ${origin}/<page-path>
 
 The full page index lives at \`${origin}/llms.txt\`; the entire corpus in one
 file at \`${origin}/llms-full.txt\`.
+${accessMode === 'password' ? `Protected page reads require the docs-access cookie described in ${origin}/auth.md.` : ''}
 `,
   },
   'connect-mcp': {
     name: 'connect-mcp',
     description: 'Attach an MCP client to this site and use its docs as native tools.',
-    body: (origin) => `---
+    body: (origin, accessMode) => `---
 name: connect-mcp
 description: Attach an MCP client to this site and use its docs as native tools.
 ---
 
 # Connecting over MCP
 
-This site runs a read-only MCP server (streamable HTTP, no auth):
+This site runs a read-only MCP server (streamable HTTP${accessMode === 'password' ? ', docs-access cookie required' : ', no auth'}):
 
 \`\`\`
 claude mcp add --transport http docs ${origin}/api/mcp
 \`\`\`
 
 Available tools: ${toolMetadata.map((tool) => `\`${tool.name}\``).join(', ')}.
+${accessMode === 'password' ? `Authenticate first as described in ${origin}/auth.md and configure the client to retain the issued cookie.` : ''}
 `,
   },
 }
@@ -298,13 +370,17 @@ function agentSkillsIndex(origin: string): Response {
   })
 }
 
-function agentSkillFile(origin: string, file: string | null): Response {
+function agentSkillFile(
+  origin: string,
+  file: string | null,
+  accessMode: DocumentationAccessMode,
+): Response {
   const name = (file ?? '').replace(/\.md$/, '')
   const skill = SKILLS[name]
   if (!skill) {
     return new Response('Skill not found', { status: 404, headers: { 'content-type': 'text/plain' } })
   }
-  return markdown(skill.body(origin))
+  return markdown(skill.body(origin, accessMode))
 }
 
 // ---------------------------------------------------------------------------
@@ -318,23 +394,25 @@ export async function GET(
   const { document } = await params
   const [name, arg] = document
   const origin = request.nextUrl.origin
+  const accessMode = await resolveDocumentationAccessMode(origin)
+  if (name === 'oauth-authorization-server') {
+    return oauthAuthorizationServerUnavailable(request, accessMode)
+  }
   const identity = await resolveSiteConfig(origin)
 
   switch (name) {
     case 'api-catalog':
       return apiCatalog(origin)
     case 'mcp-server-card':
-      return mcpServerCard(origin, identity)
-    case 'agent-card':
-      return a2aAgentCard(origin, identity)
+      return mcpServerCard(origin, identity, accessMode)
     case 'oauth-protected-resource':
-      return oauthProtectedResource(origin, identity)
+      return oauthProtectedResource(origin, identity, accessMode)
     case 'auth-md':
-      return authMd(origin, identity)
+      return authMd(origin, identity, accessMode)
     case 'agent-skills-index':
       return agentSkillsIndex(origin)
     case 'agent-skills-file':
-      return agentSkillFile(origin, arg ?? null)
+      return agentSkillFile(origin, arg ?? null, accessMode)
     default:
       return new Response('Not found', { status: 404, headers: { 'content-type': 'text/plain' } })
   }

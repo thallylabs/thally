@@ -1,5 +1,11 @@
+import { type NextRequest } from 'next/server'
 import { apiReferenceConfig } from '@/config/api-reference'
 import { getSpecConfig, loadSpecDocument } from '@/lib/openapi/fetch'
+import { buildDocumentationApiOpenApi } from '@/lib/openapi/documentation-api'
+import { resolveDocumentationAccessMode } from '@/lib/openapi/documentation-access'
+import { problemResponse } from '@/lib/http/problem'
+import { resolveSiteConfig } from '@/lib/site-config'
+import type { OpenAPIDocument } from '@/lib/openapi/types'
 import { stringify as stringifyYaml } from 'yaml'
 
 function getDefaultSpecConfig() {
@@ -10,16 +16,33 @@ function getDefaultSpecConfig() {
   return getSpecConfig(apiReferenceConfig, apiReferenceConfig.defaultSpecId)
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const specConfig = getDefaultSpecConfig()
-  if (!specConfig) {
-    return Response.json(
-      { error: 'openapi_not_configured', message: 'No OpenAPI specification is configured.' },
-      { status: 404 },
-    )
+  let document: OpenAPIDocument
+
+  if (specConfig) {
+    try {
+      document = await loadSpecDocument(specConfig)
+    } catch {
+      return problemResponse({
+        status: 502,
+        code: 'openapi_unavailable',
+        title: 'OpenAPI specification unavailable',
+        detail: 'The configured OpenAPI specification could not be loaded.',
+        resolution: 'Check the configured specification source and try again.',
+        instance: request.nextUrl.pathname,
+      })
+    }
+  } else {
+    const [site, accessMode] = await Promise.all([
+      resolveSiteConfig(request.nextUrl.origin),
+      resolveDocumentationAccessMode(request.nextUrl.origin),
+    ])
+    document = buildDocumentationApiOpenApi(request.nextUrl.origin, site.name, {
+      accessMode,
+    })
   }
 
-  const document = await loadSpecDocument(specConfig)
   const body = stringifyYaml(document)
 
   return new Response(body, {

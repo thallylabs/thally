@@ -38,18 +38,33 @@ vi.mock('@/lib/agent-endpoints', () => ({
   isPublicAgentEndpoint: vi.fn().mockReturnValue(false),
 }))
 
+vi.mock('@/lib/site-config', () => ({
+  resolveSiteConfig: vi.fn().mockResolvedValue({
+    name: 'Example Docs',
+    description: 'Example documentation',
+    repoUrl: 'https://github.com/example/docs',
+    links: [],
+  }),
+}))
+
 vi.mock('@/lib/cloud-link/edge', async () => {
   const actual = await vi.importActual<typeof import('@/lib/cloud-link/edge')>('@/lib/cloud-link/edge')
   return {
     getCloudAccessConfigEdge: vi.fn().mockResolvedValue(null),
+    isCloudAccessConfiguredEdge: vi.fn().mockReturnValue(false),
     // Real implementation: it only parses THALLY_CLOUD_SITE_CONFIG from env.
     getManagedSiteIdEdge: actual.getManagedSiteIdEdge,
   }
 })
 
+import { GET as getWellKnownDocument } from '@/app/api/well-known/[...document]/route'
 import { middleware } from '@/middleware'
 import { isDocsAccessEnabledEdge, isDocsAccessGrantedEdge } from '@/lib/admin/auth-edge'
-import { getCloudAccessConfigEdge } from '@/lib/cloud-link/edge'
+import { isPublicAgentEndpoint } from '@/lib/agent-endpoints'
+import {
+  getCloudAccessConfigEdge,
+  isCloudAccessConfiguredEdge,
+} from '@/lib/cloud-link/edge'
 import { classifyRequest, isAgentRequest } from '@/lib/traffic-classifier'
 
 const EVENT = { waitUntil: vi.fn() } as never
@@ -66,6 +81,9 @@ let fetchSpy: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(isDocsAccessEnabledEdge).mockReturnValue(false)
+  vi.mocked(isPublicAgentEndpoint).mockReturnValue(false)
+  vi.mocked(getCloudAccessConfigEdge).mockReset().mockResolvedValue(null)
+  vi.mocked(isCloudAccessConfiguredEdge).mockReturnValue(false)
   vi.mocked(isAgentRequest).mockReturnValue(false)
   vi.mocked(classifyRequest).mockReturnValue({
     visitorType: 'human',
@@ -108,6 +126,19 @@ describe('managed content cache headers', () => {
 
     expect(response.status).toBe(404)
     expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+    expect(getCloudAccessConfigEdge).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('routes OAuth discovery through the framework-owned runtime', async () => {
+    const response = await middleware(
+      docRequest('/.well-known/oauth-authorization-server'),
+      EVENT,
+    )
+
+    expect(response.headers.get('x-middleware-rewrite')).toContain(
+      '/api/well-known/oauth-authorization-server',
+    )
     expect(getCloudAccessConfigEdge).not.toHaveBeenCalled()
     expect(fetchSpy).not.toHaveBeenCalled()
   })
@@ -191,6 +222,38 @@ describe('managed content cache headers', () => {
     expect(admin.headers.get('Cache-Tag')).toBeNull()
   })
 
+  it('returns Problem Details for an unknown machine API request', async () => {
+    const response = await middleware(docRequest('/api/does-not-exist'), EVENT)
+
+    expect(response.status).toBe(404)
+    expect(response.headers.get('content-type')).toContain(
+      'application/problem+json',
+    )
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'api_endpoint_not_found',
+      status: 404,
+      instance: '/api/does-not-exist',
+    })
+  })
+
+  it('preserves browser API-reference pages and RSC navigation', async () => {
+    const browser = await middleware(
+      docRequest('/api/default/posts/get', { accept: 'text/html' }),
+      EVENT,
+    )
+    const rsc = await middleware(
+      docRequest('/api/default/posts/get?_rsc=route-state', {
+        rsc: '1',
+        'next-router-state-tree': '%5B%22%22%5D',
+      }),
+      EVENT,
+    )
+
+    expect(browser.headers.get('x-middleware-next')).toBe('1')
+    expect(rsc.headers.get('x-middleware-next')).toBe('1')
+    expect(rsc.headers.get('x-middleware-rewrite')).toBeNull()
+  })
+
   it('never emits cache headers when the access config is unavailable (fail closed)', async () => {
     // Grant exchange failed or timed out: request gating fails open for
     // availability, but a possibly-gated page must not enter a shared cache.
@@ -211,6 +274,62 @@ describe('managed content cache headers', () => {
     const response = await middleware(docRequest('/getting-started'), EVENT)
     expect(response.headers.get('Cache-Tag')).toBeNull()
     expect(response.headers.get('CDN-Cache-Control')).toBeNull()
+  })
+
+  it('returns a structured 401 instead of an HTML redirect for a protected API', async () => {
+    vi.mocked(getCloudAccessConfigEdge).mockResolvedValue({ access: { mode: 'password' } })
+    vi.mocked(isDocsAccessGrantedEdge).mockResolvedValue(false)
+
+    const response = await middleware(docRequest('/api/docs-index'), EVENT)
+    const problem = await response.json()
+
+    expect(response.status).toBe(401)
+    expect(response.headers.get('content-type')).toContain('application/problem+json')
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    expect(response.headers.get('location')).toBeNull()
+    expect(problem).toMatchObject({
+      type: 'https://thally.io/problems/docs_access_required',
+      code: 'docs_access_required',
+      status: 401,
+      instance: '/api/docs-index',
+    })
+  })
+
+  it('fails discovery closed when middleware resolves password access but the route lookup fails', async () => {
+    vi.mocked(isPublicAgentEndpoint).mockReturnValue(true)
+    vi.mocked(isCloudAccessConfiguredEdge).mockReturnValue(true)
+    vi.mocked(getCloudAccessConfigEdge)
+      .mockResolvedValueOnce({ access: { mode: 'password' } })
+      .mockResolvedValueOnce(null)
+
+    const request = docRequest('/auth.md')
+    const middlewareResponse = await middleware(request, EVENT)
+    const routeResponse = await getWellKnownDocument(request, {
+      params: Promise.resolve({ document: ['auth-md'] }),
+    })
+    const authGuide = await routeResponse.text()
+
+    expect(middlewareResponse.headers.get('x-middleware-next')).toBe('1')
+    expect(middlewareResponse.headers.get('location')).toBeNull()
+    expect(getCloudAccessConfigEdge).toHaveBeenCalledTimes(2)
+    expect(authGuide).toContain('password-protected documentation service')
+    expect(authGuide).toContain('Cookie: docs-access=<session-value>')
+    expect(authGuide).not.toContain('access is anonymous')
+  })
+
+  it('keeps the interactive access redirect for a protected browser page', async () => {
+    vi.mocked(getCloudAccessConfigEdge).mockResolvedValue({ access: { mode: 'password' } })
+    vi.mocked(isDocsAccessGrantedEdge).mockResolvedValue(false)
+
+    const response = await middleware(
+      docRequest('/getting-started', { accept: 'text/html' }),
+      EVENT,
+    )
+
+    expect(response.status).toBe(307)
+    expect(response.headers.get('location')).toBe(
+      'https://docs.example.com/access?next=%2Fgetting-started',
+    )
   })
 
   it('never tags while docs-access protection is on (no shared cache of gated pages)', async () => {
