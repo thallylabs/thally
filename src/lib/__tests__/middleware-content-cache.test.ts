@@ -342,19 +342,26 @@ describe('managed content cache headers', () => {
     expect(response.headers.get('Cache-Tag')).toBeNull()
   })
 
-  it('leaves RSC navigation payloads uncached without changing routing', async () => {
+  it.each([
+    ['the RSC marker', { rsc: '1' }],
+    ['the router state tree', { 'next-router-state-tree': '%5B%22%22%5D' }],
+    ['the router prefetch marker', { 'next-router-prefetch': '1' }],
+    ['the segment prefetch marker', { 'next-router-segment-prefetch': '/children' }],
+    ['an HTML accept header alongside a router marker', { accept: 'text/html', rsc: '1' }],
+  ])('tags managed router payloads for purge but never CDN-caches %s', async (_label, headers) => {
+    enableManagedAssetsMode()
     const response = await middleware(
-      docRequest('/getting-started?_rsc=route-state', {
-        rsc: '1',
-        'next-router-state-tree': '%5B%22%22%5D',
-      }),
+      docRequest('/getting-started?_rsc=route-state', headers),
       EVENT,
     )
 
-    // Client-side navigation must never be rewritten or redirected.
+    // A CDN does not reliably key React Server Component variants on Next's
+    // request headers. Keep the purge tag, but always let Next own these
+    // responses so a prefetched shell can never replace navigated content.
     expect(response.headers.get('x-middleware-next')).toBe('1')
     expect(response.headers.get('location')).toBeNull()
     expect(response.headers.get('x-middleware-rewrite')).toBeNull()
+    expect(response.headers.get('Cache-Tag')).toBe('site:site_123')
     expect(response.headers.get('CDN-Cache-Control')).toBeNull()
     expect(response.headers.get('Netlify-CDN-Cache-Control')).toBeNull()
   })
