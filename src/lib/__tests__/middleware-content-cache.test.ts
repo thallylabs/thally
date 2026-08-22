@@ -112,6 +112,19 @@ describe('managed content cache headers', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  it('routes OAuth discovery through the framework-owned runtime', async () => {
+    const response = await middleware(
+      docRequest('/.well-known/oauth-authorization-server'),
+      EVENT,
+    )
+
+    expect(response.headers.get('x-middleware-rewrite')).toContain(
+      '/api/well-known/oauth-authorization-server',
+    )
+    expect(getCloudAccessConfigEdge).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   it('adds Cache-Tag and a long CDN TTL to doc pages in assets mode', async () => {
     enableManagedAssetsMode()
     const response = await middleware(docRequest('/getting-started'), EVENT)
@@ -189,6 +202,38 @@ describe('managed content cache headers', () => {
 
     const admin = await middleware(docRequest('/admin'), EVENT)
     expect(admin.headers.get('Cache-Tag')).toBeNull()
+  })
+
+  it('returns Problem Details for an unknown machine API request', async () => {
+    const response = await middleware(docRequest('/api/does-not-exist'), EVENT)
+
+    expect(response.status).toBe(404)
+    expect(response.headers.get('content-type')).toContain(
+      'application/problem+json',
+    )
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'api_endpoint_not_found',
+      status: 404,
+      instance: '/api/does-not-exist',
+    })
+  })
+
+  it('preserves browser API-reference pages and RSC navigation', async () => {
+    const browser = await middleware(
+      docRequest('/api/default/posts/get', { accept: 'text/html' }),
+      EVENT,
+    )
+    const rsc = await middleware(
+      docRequest('/api/default/posts/get?_rsc=route-state', {
+        rsc: '1',
+        'next-router-state-tree': '%5B%22%22%5D',
+      }),
+      EVENT,
+    )
+
+    expect(browser.headers.get('x-middleware-next')).toBe('1')
+    expect(rsc.headers.get('x-middleware-next')).toBe('1')
+    expect(rsc.headers.get('x-middleware-rewrite')).toBeNull()
   })
 
   it('never emits cache headers when the access config is unavailable (fail closed)', async () => {

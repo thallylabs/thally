@@ -1,7 +1,9 @@
 /** Tenant-isolation coverage for public agent discovery documents. */
 
 import { describe, expect, it } from 'vitest'
+import { NextRequest } from 'next/server'
 import {
+  GET,
   a2aAgentCard,
   mcpServerCard,
   oauthProtectedResource,
@@ -41,6 +43,35 @@ describe('agent discovery identity', () => {
     }
   })
 
+  it('omits empty OAuth server and scope arrays as RFC 9728 requires', async () => {
+    const metadata = await oauthProtectedResource(
+      'https://sentinel.example.com',
+      identity,
+    ).json()
+
+    expect(metadata.authorization_servers).toBeUndefined()
+    expect(metadata.scopes_supported).toBeUndefined()
+    expect(metadata.bearer_methods_supported).toEqual([])
+  })
+
+  it('answers authorization-server discovery honestly with Problem Details', async () => {
+    const response = await GET(
+      new NextRequest(
+        'https://sentinel.example.com/.well-known/oauth-authorization-server',
+      ),
+      { params: Promise.resolve({ document: ['oauth-authorization-server'] }) },
+    )
+
+    expect(response.status).toBe(404)
+    expect(response.headers.get('content-type')).toContain(
+      'application/problem+json',
+    )
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'oauth_not_supported',
+      status: 404,
+    })
+  })
+
   it('publishes a consistent evidence-first workflow across agent surfaces', () => {
     const base = 'https://sentinel.example.com'
     const aiTxt = buildAiTxtBody(identity, base)
@@ -51,6 +82,7 @@ describe('agent discovery identity', () => {
     expect(aiTxt).toContain(`${base}/AGENTS.md`)
     expect(skill).toContain('Start with the index or search')
     expect(skill).toContain('Cite the canonical page URLs')
+    expect(skill).toContain(`${base}/openapi.yaml`)
     expect(agents).toContain('Read this file, `docs.json`')
     expect(agents).toContain('Do not invent product behavior')
     expect(agents).toContain('checked-in workflow/tooling lock')

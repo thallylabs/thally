@@ -15,6 +15,52 @@ import { verifySession, SESSION_COOKIE } from '@/lib/auth/session'
 import { getCloudAccessConfigEdge, getManagedSiteIdEdge } from '@/lib/cloud-link/edge'
 import { isMarkdownPagesEnabled } from '@/lib/markdown-pages'
 import { createDailyVisitorKey, externalReferrerDomain } from '@/lib/analytics/identity'
+import { problemResponse } from '@/lib/http/problem'
+
+// Static API paths are known without importing the Node-only content graph.
+// Paths outside this set may still be visual API-reference pages, so browser
+// and RSC navigation bypass the JSON fallback below.
+const PUBLIC_API_PATHS = new Set([
+  '/api/access/auth',
+  '/api/agent-readiness',
+  '/api/analytics/collect',
+  '/api/brand.css',
+  '/api/chat',
+  '/api/chat-status',
+  '/api/cloud/handshake',
+  '/api/docs-index',
+  '/api/feedback',
+  '/api/mcp',
+  '/api/og',
+  '/api/search',
+  '/api/search/track',
+  '/api/site-config',
+  '/api/track/webhook',
+  '/api/try-it',
+])
+const PUBLIC_API_PREFIXES = [
+  '/api/admin/',
+  '/api/brand/',
+  '/api/docs/',
+  '/api/markdown/',
+  '/api/well-known/',
+]
+
+function isKnownApiPath(pathname: string): boolean {
+  return (
+    PUBLIC_API_PATHS.has(pathname) ||
+    PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  )
+}
+
+function isBrowserOrRscNavigation(request: NextRequest): boolean {
+  return (
+    request.headers.get('accept')?.includes('text/html') === true ||
+    request.headers.has('rsc') ||
+    request.headers.has('next-router-state-tree') ||
+    request.headers.has('next-router-prefetch')
+  )
+}
 
 function shouldTrackPath(pathname: string): boolean {
   // Admin console (pages + its own asset/nav requests) and Next internals are
@@ -211,6 +257,14 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
       headers: { 'Cache-Control': 'private, no-store' },
     })
   }
+  // Keep this standards-defined discovery path inside the framework-owned
+  // runtime boundary. Unlike next.config.ts, middleware is automatically
+  // eligible for safe three-way updates in existing scaffolded sites.
+  if (pathname === '/.well-known/oauth-authorization-server') {
+    const discoveryUrl = request.nextUrl.clone()
+    discoveryUrl.pathname = '/api/well-known/oauth-authorization-server'
+    return NextResponse.rewrite(discoveryUrl)
+  }
   const cloudAccess = await getCloudAccessConfigEdge(request.nextUrl.origin)
   const docsAccessEnabled = isDocsAccessEnabledEdge() || cloudAccess?.access?.mode === 'password'
 
@@ -274,6 +328,24 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
 
   if (shouldTrackRequest(request, pathname)) {
     event.waitUntil(sendAnalyticsEvent(request, pathname))
+  }
+
+  // The `/api` URL space also contains browser-rendered API-reference pages.
+  // Preserve those pages and every RSC navigation request, while ensuring a
+  // machine client never receives Next's HTML 404 for an unknown API root.
+  if (
+    pathname.startsWith('/api/') &&
+    !isKnownApiPath(pathname) &&
+    !isBrowserOrRscNavigation(request)
+  ) {
+    return problemResponse({
+      status: 404,
+      code: 'api_endpoint_not_found',
+      title: 'API endpoint not found',
+      detail: 'No public API endpoint matches this request path.',
+      resolution: 'Read `/openapi.json` for supported operations or `/api/docs-index` for published pages.',
+      instance: pathname,
+    })
   }
 
   // `.md` page mirrors rewrite to the markdown API — but /skill.md, /AGENTS.md,

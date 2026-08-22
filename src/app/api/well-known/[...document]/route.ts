@@ -2,6 +2,7 @@ import { type NextRequest } from 'next/server'
 import { toolMetadata } from '@/lib/mcp/tool-metadata'
 import { resolveSiteConfig, type SiteIdentity } from '@/lib/site-config'
 import { agentIdentitySlug, agentServerName } from '@/lib/agent-identity'
+import { problemResponse } from '@/lib/http/problem'
 
 /**
  * Agent-discovery documents served under `/.well-known/*` (and `/auth.md`),
@@ -144,17 +145,27 @@ export function oauthProtectedResource(
   identity: SiteIdentity,
 ): Response {
   // RFC 9728. Honest shape for this site: the docs corpus and its agent
-  // surfaces are public and unauthenticated; `authorization_servers` is
-  // intentionally absent (it is OPTIONAL) because no OAuth server fronts
-  // this resource. auth.md carries the human/agent-readable version.
+  // surfaces are public and unauthenticated. Zero-value arrays must be
+  // omitted, so no authorization server or scope metadata is published.
   return json({
     resource: origin,
     resource_name: `${identity.name} documentation`,
-    // Empty by declaration, not omission: no OAuth authorization server
-    // fronts this resource (RFC 9728 §2 — the array lists AS issuers).
-    authorization_servers: [],
+    // RFC 9728 explicitly permits [] to declare that bearer tokens are not
+    // accepted, while `authorization_servers` must be omitted when empty.
     bearer_methods_supported: [],
     resource_documentation: `${origin}/auth.md`,
+  })
+}
+
+function oauthAuthorizationServerUnavailable(request: NextRequest): Response {
+  return problemResponse({
+    status: 404,
+    code: 'oauth_not_supported',
+    title: 'OAuth authorization server not available',
+    detail: 'This documentation site exposes a public anonymous read surface and is not an OAuth authorization server.',
+    resolution: 'Use the endpoints without credentials and read `/auth.md` for the supported access model.',
+    instance: request.nextUrl.pathname,
+    headers: { 'Cache-Control': 'public, max-age=300' },
   })
 }
 
@@ -318,6 +329,9 @@ export async function GET(
   const { document } = await params
   const [name, arg] = document
   const origin = request.nextUrl.origin
+  if (name === 'oauth-authorization-server') {
+    return oauthAuthorizationServerUnavailable(request)
+  }
   const identity = await resolveSiteConfig(origin)
 
   switch (name) {

@@ -2,6 +2,7 @@ import { type NextRequest } from 'next/server'
 import { searchDocs, type SearchMode } from '@/lib/search/engine'
 import { recordAnalyticsEvent } from '@/lib/cloud-bridge'
 import { classifyRequest } from '@/lib/traffic-classifier'
+import { problemResponse } from '@/lib/http/problem'
 
 export const runtime = 'nodejs'
 
@@ -13,10 +14,14 @@ export async function GET(request: NextRequest) {
   const mode: SearchMode = params.get('mode') === 'fulltext' ? 'fulltext' : 'hybrid'
 
   if (!query) {
-    return Response.json(
-      { error: 'missing_query', message: 'Provide a query via the `q` parameter.' },
-      { status: 400 },
-    )
+    return problemResponse({
+      status: 400,
+      code: 'missing_query',
+      title: 'Search query required',
+      detail: 'The `q` query parameter is required.',
+      resolution: 'Retry with a non-empty query, for example `/api/search?q=authentication`.',
+      instance: request.nextUrl.pathname,
+    })
   }
 
   const hits = await searchDocs(query, { limit, mode })
