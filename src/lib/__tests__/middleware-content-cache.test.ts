@@ -258,6 +258,40 @@ describe('managed content cache headers', () => {
     expect(response.headers.get('CDN-Cache-Control')).toBeNull()
   })
 
+  it('returns a structured 401 instead of an HTML redirect for a protected API', async () => {
+    vi.mocked(getCloudAccessConfigEdge).mockResolvedValue({ access: { mode: 'password' } })
+    vi.mocked(isDocsAccessGrantedEdge).mockResolvedValue(false)
+
+    const response = await middleware(docRequest('/api/docs-index'), EVENT)
+    const problem = await response.json()
+
+    expect(response.status).toBe(401)
+    expect(response.headers.get('content-type')).toContain('application/problem+json')
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    expect(response.headers.get('location')).toBeNull()
+    expect(problem).toMatchObject({
+      type: 'https://thally.io/problems/docs_access_required',
+      code: 'docs_access_required',
+      status: 401,
+      instance: '/api/docs-index',
+    })
+  })
+
+  it('keeps the interactive access redirect for a protected browser page', async () => {
+    vi.mocked(getCloudAccessConfigEdge).mockResolvedValue({ access: { mode: 'password' } })
+    vi.mocked(isDocsAccessGrantedEdge).mockResolvedValue(false)
+
+    const response = await middleware(
+      docRequest('/getting-started', { accept: 'text/html' }),
+      EVENT,
+    )
+
+    expect(response.status).toBe(307)
+    expect(response.headers.get('location')).toBe(
+      'https://docs.example.com/access?next=%2Fgetting-started',
+    )
+  })
+
   it('never tags while docs-access protection is on (no shared cache of gated pages)', async () => {
     enableManagedAssetsMode()
     vi.mocked(isDocsAccessEnabledEdge).mockReturnValue(true)

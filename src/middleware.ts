@@ -320,6 +320,21 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     !isPublicAgentEndpoint(pathname) &&
     !(await isDocsAccessGrantedEdge(request.cookies.get(DOCS_ACCESS_COOKIE)?.value, docsAccessEnabled))
   ) {
+    // API clients need a parseable authentication failure. Browser pages keep
+    // the interactive redirect below, while protected APIs avoid returning an
+    // HTML login page after an automatic redirect.
+    if (pathname.startsWith('/api/')) {
+      return problemResponse({
+        status: 401,
+        code: 'docs_access_required',
+        title: 'Documentation access required',
+        detail: 'This documentation site is password protected.',
+        resolution:
+          'Authenticate at `/access` or submit the password to `POST /api/access/auth`, then retry with the issued docs-access cookie.',
+        instance: pathname,
+        headers: { 'Cache-Control': 'private, no-store' },
+      })
+    }
     const accessUrl = request.nextUrl.clone()
     accessUrl.pathname = '/access'
     accessUrl.searchParams.set('next', pathname)

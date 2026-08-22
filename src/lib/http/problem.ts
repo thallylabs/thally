@@ -16,6 +16,13 @@ export interface ProblemResponseOptions {
   headers?: HeadersInit
 }
 
+const PROBLEM_TYPE_BASE = 'https://thally.io/problems/'
+
+/** Return the stable identifier for a Thally problem category. */
+function problemType(code: string): string {
+  return `${PROBLEM_TYPE_BASE}${encodeURIComponent(code)}`
+}
+
 /** Return a machine-actionable HTTP error without exposing internal details. */
 export function problemResponse({
   status,
@@ -30,7 +37,10 @@ export function problemResponse({
   return Response.json(
     {
       ...extensions,
-      type: 'about:blank',
+      // Custom codes, resolution hints, and titles carry semantics beyond an
+      // HTTP status. RFC 9457 therefore requires a dedicated problem type
+      // instead of `about:blank`.
+      type: problemType(code),
       title,
       status,
       code,

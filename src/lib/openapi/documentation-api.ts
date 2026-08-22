@@ -2,11 +2,13 @@
  * OpenAPI description for the read-only APIs built into every Thally site.
  *
  * Customer API specifications remain authoritative when configured. This
- * document is the truthful fallback for sites that only expose Thally's
- * anonymous documentation, search, and readiness endpoints.
+ * document is the truthful fallback for sites that expose Thally's built-in
+ * documentation, search, and readiness endpoints. Password-protected sites
+ * advertise the same cookie gate enforced by middleware.
  */
 
 import type { OpenAPIDocument } from '@/lib/openapi/types'
+import { DOCS_ACCESS_COOKIE } from '@/lib/admin/auth-edge'
 
 const PROBLEM_RESPONSE = {
   description: 'A machine-actionable error response.',
@@ -17,32 +19,74 @@ const PROBLEM_RESPONSE = {
   },
 }
 
-/** Build a request-origin-bound OpenAPI 3.1 description for public site APIs. */
+const DOCUMENTATION_NOT_FOUND_RESPONSE = {
+  description:
+    'The page identifier is not published. The representation follows the requested or default response format.',
+  content: {
+    'application/problem+json': {
+      schema: { $ref: '#/components/schemas/Problem' },
+    },
+    'text/markdown': {
+      schema: { type: 'string' },
+    },
+  },
+}
+
+const ACCESS_REQUIRED_RESPONSE = {
+  description: 'The documentation site requires a valid docs-access session cookie.',
+  content: {
+    'application/problem+json': {
+      schema: { $ref: '#/components/schemas/Problem' },
+    },
+  },
+}
+
+export interface DocumentationApiOpenApiOptions {
+  accessMode?: 'public' | 'password'
+  accessCookieName?: string
+}
+
+/** Build a request-origin-bound OpenAPI 3.1 description for site APIs. */
 export function buildDocumentationApiOpenApi(
   origin: string,
   siteName = 'Thally',
+  {
+    accessMode = 'public',
+    accessCookieName = DOCS_ACCESS_COOKIE,
+  }: DocumentationApiOpenApiOptions = {},
 ): OpenAPIDocument {
   const serverOrigin = new URL(origin).origin
   const displayName = siteName.trim() || 'Thally'
+  const isPasswordProtected = accessMode === 'password'
+  const security = isPasswordProtected ? [{ docsAccess: [] }] : []
+  const accessResponses = isPasswordProtected
+    ? { '401': ACCESS_REQUIRED_RESPONSE }
+    : {}
 
   return {
     openapi: '3.1.1',
     info: {
       title: `${displayName} documentation API`,
       version: '1.0.0',
-      description:
-        'Read-only access to this documentation site. Every operation is public and anonymous; no OAuth server, bearer token, API key, or permission scope is required.',
+      description: isPasswordProtected
+        ? 'Read-only access to this password-protected documentation site. Authenticate through `/access` or `POST /api/access/auth`, then send the issued docs-access cookie with each operation.'
+        : 'Read-only access to this documentation site. Every operation is public and anonymous; no OAuth server, bearer token, API key, or permission scope is required.',
     },
     externalDocs: {
-      description: 'Authentication and access model',
-      url: `${serverOrigin}/auth.md`,
+      description: isPasswordProtected
+        ? 'Interactive documentation access'
+        : 'Authentication and access model',
+      url: isPasswordProtected
+        ? `${serverOrigin}/access`
+        : `${serverOrigin}/auth.md`,
     },
     servers: [{ url: serverOrigin }],
-    // OpenAPI defines an empty security requirement array as anonymous access.
-    security: [],
+    // An empty array means anonymous access; protected sites instead inherit
+    // the real signed-cookie requirement enforced by middleware.
+    security,
     tags: [
       { name: 'Discovery', description: 'Discover published pages and capabilities.' },
-      { name: 'Content', description: 'Read and search the public documentation corpus.' },
+      { name: 'Content', description: 'Read and search the published documentation corpus.' },
       { name: 'Readiness', description: 'Inspect machine-readability health.' },
     ],
     paths: {
@@ -51,7 +95,6 @@ export function buildDocumentationApiOpenApi(
           operationId: 'listDocumentationPages',
           summary: 'List published documentation pages',
           tags: ['Discovery'],
-          security: [],
           responses: {
             '200': {
               description: 'The machine-readable documentation index.',
@@ -61,6 +104,7 @@ export function buildDocumentationApiOpenApi(
                 },
               },
             },
+            ...accessResponses,
           },
         },
       },
@@ -69,7 +113,6 @@ export function buildDocumentationApiOpenApi(
           operationId: 'searchDocumentation',
           summary: 'Search the documentation corpus',
           tags: ['Content'],
-          security: [],
           parameters: [
             {
               name: 'q',
@@ -103,6 +146,7 @@ export function buildDocumentationApiOpenApi(
               },
             },
             '400': PROBLEM_RESPONSE,
+            ...accessResponses,
           },
         },
       },
@@ -113,7 +157,6 @@ export function buildDocumentationApiOpenApi(
           description:
             'Use a page identifier returned by `/api/docs-index`. Select JSON, JSON-LD, or Markdown with the `Accept` header or `format` query parameter.',
           tags: ['Content'],
-          security: [],
           parameters: [
             {
               name: 'page_id',
@@ -139,7 +182,8 @@ export function buildDocumentationApiOpenApi(
                 'text/markdown': { schema: { type: 'string' } },
               },
             },
-            '404': PROBLEM_RESPONSE,
+            '404': DOCUMENTATION_NOT_FOUND_RESPONSE,
+            ...accessResponses,
           },
         },
       },
@@ -148,7 +192,6 @@ export function buildDocumentationApiOpenApi(
           operationId: 'getAgentReadiness',
           summary: 'Inspect documentation readiness',
           tags: ['Readiness'],
-          security: [],
           responses: {
             '200': {
               description: 'An explainable readiness report for the published corpus.',
@@ -158,11 +201,25 @@ export function buildDocumentationApiOpenApi(
                 },
               },
             },
+            ...accessResponses,
           },
         },
       },
     },
     components: {
+      ...(isPasswordProtected
+        ? {
+            securitySchemes: {
+              docsAccess: {
+                type: 'apiKey',
+                in: 'cookie',
+                name: accessCookieName,
+                description:
+                  'Signed HTTP-only session cookie issued after a successful password submission to `POST /api/access/auth`. Browser users can authenticate at `/access`.',
+              },
+            },
+          }
+        : {}),
       schemas: {
         Problem: {
           type: 'object',

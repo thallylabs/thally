@@ -20,7 +20,7 @@ describe('problemResponse', () => {
       'application/problem+json; charset=utf-8',
     )
     await expect(response.json()).resolves.toEqual({
-      type: 'about:blank',
+      type: 'https://thally.io/problems/missing_resource',
       title: 'Resource missing',
       status: 404,
       code: 'missing_resource',

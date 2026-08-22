@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   specs: [] as Array<Record<string, unknown>>,
   loadSpecDocument: vi.fn(),
   resolveSiteConfig: vi.fn(),
+  resolveDocumentationApiAccessMode: vi.fn(),
 }))
 
 vi.mock('@/config/api-reference', () => ({
@@ -26,6 +27,10 @@ vi.mock('@/lib/site-config', () => ({
   resolveSiteConfig: mocks.resolveSiteConfig,
 }))
 
+vi.mock('@/lib/openapi/documentation-access', () => ({
+  resolveDocumentationApiAccessMode: mocks.resolveDocumentationApiAccessMode,
+}))
+
 import { GET as getJson } from '@/app/openapi.json/route'
 import { GET as getYaml } from '@/app/openapi.yaml/route'
 
@@ -35,6 +40,24 @@ describe('public OpenAPI routes', () => {
     mocks.loadSpecDocument.mockReset()
     mocks.resolveSiteConfig.mockReset()
     mocks.resolveSiteConfig.mockResolvedValue({ name: 'Example Docs' })
+    mocks.resolveDocumentationApiAccessMode.mockReset().mockResolvedValue('public')
+  })
+
+  it('publishes the enforced cookie requirement for password-protected sites', async () => {
+    mocks.resolveDocumentationApiAccessMode.mockResolvedValue('password')
+
+    const response = await getJson(
+      new NextRequest('https://private.example.com/openapi.json'),
+    )
+    const document = await response.json()
+
+    expect(document.security).toEqual([{ docsAccess: [] }])
+    expect(document.components.securitySchemes.docsAccess).toMatchObject({
+      type: 'apiKey',
+      in: 'cookie',
+      name: 'thally_docs_access',
+    })
+    expect(document.paths['/api/docs/{page_id}'].get.responses['401']).toBeDefined()
   })
 
   it('serves the built-in site API as JSON when no customer spec exists', async () => {

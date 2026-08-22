@@ -27,4 +27,17 @@ describe('GET /api/docs/[...slug]', () => {
     })
     expect(problem.resolution).toContain('/api/docs-index')
   })
+
+  it('returns the documented Markdown problem when no JSON format is requested', async () => {
+    const response = await GET(
+      new NextRequest('https://docs.example.com/api/docs/not-a-real-page'),
+      { params: Promise.resolve({ slug: ['not-a-real-page'] }) },
+    )
+    const body = await response.text()
+
+    expect(response.status).toBe(404)
+    expect(response.headers.get('content-type')).toContain('text/markdown')
+    expect(body).toContain('# 404 — Page not found')
+    expect(body).toContain('https://docs.example.com/llms.txt')
+  })
 })
