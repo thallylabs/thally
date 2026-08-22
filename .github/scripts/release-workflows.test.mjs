@@ -219,7 +219,8 @@ test("computes and correlates releases from frozen source commits", () => {
   assert.match(controllerScript, /actor\.login == \$actor/);
   assert.match(controllerScript, /scaffold-production · automated/);
   assert.match(controllerScript, /event=repository_dispatch/);
-  assert.match(controllerScript, /created_at >= \$created/);
+  assert.match(controllerScript, /LEGACY_RELEASE_ACTOR/);
+  assert.match(controllerScript, /legacy_log/);
 });
 
 test("does not bump runtime packages after the starter source is frozen", () => {

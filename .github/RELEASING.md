@@ -77,6 +77,12 @@ JSON
     --env release-control \
     --body "$RELEASE_APP_ACTOR"
 done
+
+# One-time compatibility for releases produced by the retired PAT handoff.
+gh variable set LEGACY_RELEASE_ACTOR \
+  --repo thallylabs/thally \
+  --env release-control \
+  --body 'kenny-io'
 ```
 
 Thally Cloud receives only an immutable locator from the verified npm workflow.

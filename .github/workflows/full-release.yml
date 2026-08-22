@@ -165,6 +165,7 @@ jobs:
         env:
           COORDINATOR_ACTOR: ${{ vars.RELEASE_COORDINATOR_ACTOR }}
           GH_TOKEN: ${{ steps.coordinator.outputs.token }}
+          LEGACY_RELEASE_ACTOR: ${{ vars.LEGACY_RELEASE_ACTOR }}
           RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
           STARTER_SHA: ${{ steps.release.outputs.stable_starter_sha || steps.starter.outputs.starter_sha }}
         run: |
@@ -208,22 +209,28 @@ jobs:
                   '.workflow_runs[] | select(.display_title | startswith("scaffold-production · automated · handoff-") and endswith($suffix)) | select(.actor.login == $actor and .conclusion == "success") | .conclusion' \
                 | head -n 1
             )"
-            if [[ "$cloud_complete" != "success" ]]; then
-              # Releases completed before this controller used the legacy
-              # repository-dispatch path. That event was production-only. A
-              # successful run after the latest stable-record commit can only
-              # represent this release (or an idempotent retry of it).
-              record_created_at="$(
-                gh api "repos/thallylabs/thally/commits/$record_sha" --jq .commit.committer.date
-              )"
-              cloud_complete="$(
+            if [[ "$cloud_complete" != "success" && -n "$LEGACY_RELEASE_ACTOR" ]]; then
+              # Pre-controller repository dispatches had no correlated title,
+              # so compatibility requires both exact immutable locator fields
+              # from a successful run by the allowlisted legacy publisher.
+              while read -r legacy_run; do
+                legacy_log="$(
+                  gh run view "$legacy_run" \
+                    --repo thallylabs/thally-cloud \
+                    --log
+                )"
+                if grep -Fq "\"release_id\": \"$release_id\"" <<<"$legacy_log" && \
+                   grep -Fq "\"record_commit_sha\": \"$record_sha\"" <<<"$legacy_log"; then
+                  cloud_complete=success
+                  break
+                fi
+              done < <(
                 gh api \
-                  'repos/thallylabs/thally-cloud/actions/workflows/promote-scaffold-release.yml/runs?event=repository_dispatch&per_page=100' \
+                  'repos/thallylabs/thally-cloud/actions/workflows/promote-scaffold-release.yml/runs?event=repository_dispatch&status=success&per_page=100' \
                   | jq -r \
-                    --arg created "$record_created_at" \
-                    '.workflow_runs[] | select(.created_at >= $created and .conclusion == "success") | .conclusion' \
-                  | head -n 1
-              )"
+                    --arg actor "$LEGACY_RELEASE_ACTOR" \
+                    '.workflow_runs[] | select(.actor.login == $actor) | .id'
+              )
             fi
             echo "needed=false" >> "$GITHUB_OUTPUT"
             echo "cloud_complete=$([[ "$cloud_complete" == "success" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
