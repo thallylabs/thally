@@ -100,7 +100,7 @@ test("recovers immutable sources with the current trusted release policy", () =>
   assert.equal(prepare.env.RELEASE_SOURCE_DIRECTORY, "release-source");
 });
 
-test("bumps all package manifests atomically before refreshing the lockfile", () => {
+test("bumps the scaffold package graph before refreshing the lockfile", () => {
   const bumpStep = promotionWorkflow.jobs.promote.steps.find(
     (step) => step.name === "Bump package patch versions",
   );
@@ -154,6 +154,23 @@ test("coordinates the exact starter, package, and Cloud release workflows", () =
   assert.match(script, /gh run watch/);
 });
 
+test("recovers the current stable record before selecting another runtime", () => {
+  const steps = fullReleaseWorkflow.jobs.release.steps;
+  const detectIndex = steps.findIndex(
+    (step) => step.name === "Detect an already-stable release before selecting new work",
+  );
+  const syncIndex = steps.findIndex(
+    (step) => step.name === "Synchronize and merge the standalone starter",
+  );
+  const detect = steps[detectIndex];
+  const sync = steps[syncIndex];
+  assert.ok(detectIndex >= 0 && detectIndex < syncIndex);
+  assert.match(detect.run, /runtime_head.*record_sha/);
+  assert.match(detect.run, /starter_head.*source\.commitSha/);
+  assert.match(detect.run, /current_stable=true/);
+  assert.equal(sync.if, "steps.release.outputs.current_stable != 'true'");
+});
+
 test("auto-merges release records only after the exact PR CI run succeeds", () => {
   assert.equal(promotionWorkflow.jobs.promote.environment, "release-control");
   const mergeStep = promotionWorkflow.jobs.promote.steps.find(
@@ -203,4 +220,12 @@ test("computes and correlates releases from frozen source commits", () => {
   assert.match(controllerScript, /scaffold-production · automated/);
   assert.match(controllerScript, /event=repository_dispatch/);
   assert.match(controllerScript, /created_at >= \$created/);
+});
+
+test("does not bump runtime packages after the starter source is frozen", () => {
+  const openPullRequest = promotionWorkflow.jobs.promote.steps.find(
+    (step) => step.name === "Open the release-record PR",
+  );
+  assert.doesNotMatch(openPullRequest.run, /packages\/core\/package\.json/);
+  assert.doesNotMatch(openPullRequest.run, /packages\/migrate\/package\.json/);
 });

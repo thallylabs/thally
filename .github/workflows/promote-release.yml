@@ -4,7 +4,7 @@
 # One dispatch computes the record from the live heads, verifies the starter's
 # runtime pin actually matches the runtime commit being promoted, and opens a
 # reviewable PR carrying the new stable-scaffold-release.json, the retained
-# previous record, and the complete five-package patch bump. Manual dispatches
+# previous record, and the three scaffold-package patch bumps. Manual dispatches
 # leave the pull request for review; the full-release controller may merge only
 # after the exact head and base pass CI. The main merge starts
 # publish-packages.yml; only after npm verification succeeds does that workflow
@@ -196,8 +196,6 @@ jobs:
           git checkout -B "$branch"
           git add \
             package-lock.json \
-            packages/core/package.json \
-            packages/migrate/package.json \
             packages/create-thally-docs/src/stable-scaffold-release.json \
             packages/create-thally-docs/src/previous-scaffold-releases.json \
             packages/create-thally-docs/package.json \

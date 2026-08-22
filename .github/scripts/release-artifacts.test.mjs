@@ -46,7 +46,7 @@ test('rejects partial scaffold package chains', async () => {
     manifestPath,
     JSON.stringify({
       schemaVersion: 1,
-      packages: Array.from({ length: 3 }, () => ({})),
+      packages: Array.from({ length: 4 }, () => ({})),
     }),
   )
   await assert.rejects(

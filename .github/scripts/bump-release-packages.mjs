@@ -12,8 +12,6 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const PACKAGE_PATHS = Object.freeze({
-  core: 'packages/core/package.json',
-  migrate: 'packages/migrate/package.json',
   create: 'packages/create-thally-docs/package.json',
   mcp: 'packages/mcp/package.json',
   cli: 'packages/cli/package.json',
@@ -44,31 +42,24 @@ function writePackage({ absolutePath, manifest }) {
  * any manifest is written.
  */
 export function bumpReleasePackages(rootDirectory = process.cwd()) {
-  const core = readPackage(rootDirectory, PACKAGE_PATHS.core)
-  const migrate = readPackage(rootDirectory, PACKAGE_PATHS.migrate)
   const create = readPackage(rootDirectory, PACKAGE_PATHS.create)
   const mcp = readPackage(rootDirectory, PACKAGE_PATHS.mcp)
   const cli = readPackage(rootDirectory, PACKAGE_PATHS.cli)
 
   const versions = {
-    core: incrementPatch(core.manifest.version, core.manifest.name),
-    migrate: incrementPatch(migrate.manifest.version, migrate.manifest.name),
     create: incrementPatch(create.manifest.version, create.manifest.name),
     mcp: incrementPatch(mcp.manifest.version, mcp.manifest.name),
     cli: incrementPatch(cli.manifest.version, cli.manifest.name),
   }
 
-  core.manifest.version = versions.core
-  migrate.manifest.version = versions.migrate
   create.manifest.version = versions.create
   mcp.manifest.version = versions.mcp
   cli.manifest.version = versions.cli
-  create.manifest.dependencies['@thallylabs/migrate'] = versions.migrate
   mcp.manifest.dependencies['create-thally-docs'] = versions.create
   cli.manifest.dependencies['create-thally-docs'] = versions.create
   cli.manifest.dependencies['@thallylabs/mcp'] = versions.mcp
 
-  for (const packageRecord of [core, migrate, create, mcp, cli]) writePackage(packageRecord)
+  for (const packageRecord of [create, mcp, cli]) writePackage(packageRecord)
 
   return versions
 }
@@ -76,6 +67,6 @@ export function bumpReleasePackages(rootDirectory = process.cwd()) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const versions = bumpReleasePackages()
   console.log(
-    `Prepared @thallylabs/core@${versions.core}, @thallylabs/migrate@${versions.migrate}, create-thally-docs@${versions.create}, @thallylabs/mcp@${versions.mcp}, and @thallylabs/cli@${versions.cli}.`,
+    `Prepared create-thally-docs@${versions.create}, @thallylabs/mcp@${versions.mcp}, and @thallylabs/cli@${versions.cli}.`,
   )
 }

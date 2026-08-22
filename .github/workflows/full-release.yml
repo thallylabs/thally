@@ -51,19 +51,57 @@ jobs:
           permission-actions: write
           permission-contents: read
 
-      - name: Freeze the runtime selection
+      - name: Detect an already-stable release before selecting new work
         id: release
         shell: bash
         env:
           GH_TOKEN: ${{ steps.coordinator.outputs.token }}
         run: |
           set -euo pipefail
-          runtime_sha="$(gh api repos/thallylabs/thally/commits/main --jq .sha)"
+          runtime_head="$(gh api repos/thallylabs/thally/commits/main --jq .sha)"
+          starter_head="$(gh api repos/thallylabs/starter/commits/main --jq .sha)"
+          record="$(
+            gh api 'repos/thallylabs/thally/contents/packages/create-thally-docs/src/stable-scaffold-release.json?ref=main' --jq .content \
+              | tr -d '\n' \
+              | base64 --decode
+          )"
+          release_id="$(jq -r .id <<<"$record")"
+          record_sha=""
+          while read -r candidate_sha; do
+            candidate_id="$(
+              gh api "repos/thallylabs/thally/contents/packages/create-thally-docs/src/stable-scaffold-release.json?ref=$candidate_sha" --jq .content \
+                | tr -d '\n' \
+                | base64 --decode \
+                | jq -r .id
+            )"
+            if [[ "$candidate_id" == "$release_id" ]]; then
+              record_sha="$candidate_sha"
+              break
+            fi
+          done < <(
+            gh api \
+              'repos/thallylabs/thally/commits?path=packages/create-thally-docs/src/stable-scaffold-release.json&sha=main&per_page=100' \
+              --jq '.[].sha'
+          )
+          if [[ -z "$record_sha" ]]; then
+            echo "::error::The current stable release-record commit could not be resolved."
+            exit 1
+          fi
+
+          if [[ "$runtime_head" == "$record_sha" && \
+                "$starter_head" == "$(jq -r .source.commitSha <<<"$record")" ]]; then
+            echo "current_stable=true" >> "$GITHUB_OUTPUT"
+            echo "runtime_sha=$(jq -r .runtime.commitSha <<<"$record")" >> "$GITHUB_OUTPUT"
+            echo "stable_starter_sha=$starter_head" >> "$GITHUB_OUTPUT"
+          else
+            echo "current_stable=false" >> "$GITHUB_OUTPUT"
+            echo "runtime_sha=$runtime_head" >> "$GITHUB_OUTPUT"
+          fi
           request_id="full-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          echo "runtime_sha=$runtime_sha" >> "$GITHUB_OUTPUT"
           echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
 
       - name: Synchronize and merge the standalone starter
+        if: steps.release.outputs.current_stable != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ steps.coordinator.outputs.token }}
@@ -100,6 +138,7 @@ jobs:
           gh run watch "$run_id" --repo thallylabs/starter --exit-status
 
       - name: Freeze and verify the starter selection
+        if: steps.release.outputs.current_stable != 'true'
         id: starter
         shell: bash
         env:
@@ -127,7 +166,7 @@ jobs:
           COORDINATOR_ACTOR: ${{ vars.RELEASE_COORDINATOR_ACTOR }}
           GH_TOKEN: ${{ steps.coordinator.outputs.token }}
           RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
-          STARTER_SHA: ${{ steps.starter.outputs.starter_sha }}
+          STARTER_SHA: ${{ steps.release.outputs.stable_starter_sha || steps.starter.outputs.starter_sha }}
         run: |
           set -euo pipefail
           record="$(
@@ -201,7 +240,7 @@ jobs:
           GH_TOKEN: ${{ steps.coordinator.outputs.token }}
           REQUEST_ID: ${{ steps.release.outputs.request_id }}
           RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
-          STARTER_SHA: ${{ steps.starter.outputs.starter_sha }}
+          STARTER_SHA: ${{ steps.release.outputs.stable_starter_sha || steps.starter.outputs.starter_sha }}
         run: |
           set -euo pipefail
           gh workflow run promote-release.yml \
@@ -403,7 +442,7 @@ jobs:
           EXISTING_RELEASE_ID: ${{ steps.stable.outputs.release_id }}
           NEW_RELEASE_ID: ${{ steps.published.outputs.release_id }}
           RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
-          STARTER_SHA: ${{ steps.starter.outputs.starter_sha }}
+          STARTER_SHA: ${{ steps.release.outputs.stable_starter_sha || steps.starter.outputs.starter_sha }}
         run: |
           release_id="${NEW_RELEASE_ID:-$EXISTING_RELEASE_ID}"
           {

@@ -32,9 +32,7 @@ async function sha512Integrity(path) {
 export async function packReleaseWorkspaces({ outputDirectory, includeScaffold }) {
   if (!outputDirectory) throw new Error('An artifact output directory is required.')
   await mkdir(outputDirectory, { recursive: true })
-  const workspaces = includeScaffold
-    ? [...prerequisiteWorkspaces, ...scaffoldWorkspaces]
-    : prerequisiteWorkspaces
+  const workspaces = includeScaffold ? scaffoldWorkspaces : prerequisiteWorkspaces
   const packages = []
 
   for (const workspace of workspaces) {

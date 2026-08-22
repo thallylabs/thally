@@ -9,8 +9,8 @@ npm run release:full
 
 The workflow resolves the current runtime `main`, synchronizes the standalone
 starter, waits for its CI, merges the generated snapshot, creates and verifies
-the immutable release record, publishes all npm packages through trusted
-publishing, and waits for Thally Cloud to promote the exact scaffold. A failed
+the immutable release record, publishes the three scaffold packages through
+trusted publishing, and waits for Thally Cloud to promote the exact scaffold. A failed
 phase stops the controller and leaves its pull request or workflow run visible
 for diagnosis. Re-running the controller is safe; already-stable inputs are a
 successful no-op.

@@ -12,9 +12,12 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
-const allowedPackages = [
+const prerequisitePackages = [
   ['packages/core', '@thallylabs/core'],
   ['packages/migrate', '@thallylabs/migrate'],
+]
+
+const scaffoldPackages = [
   ['packages/create-thally-docs', 'create-thally-docs'],
   ['packages/mcp', '@thallylabs/mcp'],
   ['packages/cli', '@thallylabs/cli'],
@@ -57,8 +60,12 @@ export async function publishReleaseArtifacts(manifestPath) {
   if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.packages)) {
     throw new Error('The npm release artifact manifest is invalid.')
   }
-  const expected = allowedPackages.slice(0, manifest.packages.length)
-  if (manifest.packages.length !== 2 && manifest.packages.length !== 5) {
+  const expected = manifest.packages.length === 2
+    ? prerequisitePackages
+    : manifest.packages.length === 3
+      ? scaffoldPackages
+      : null
+  if (!expected) {
     throw new Error('The npm release artifact set is incomplete.')
   }
 
