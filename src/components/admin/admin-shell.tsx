@@ -137,6 +137,18 @@ export function AdminShell({ siteName, children }: { siteName: string; children:
               <span className="ds-workspace-sub">Admin console</span>
             </span>
           </Link>
+          {/* Collapse toggle — desktop only, right-aligned via ml-auto */}
+          <button
+            type="button"
+            onClick={() => setCollapsed((v) => !v)}
+            className="ds-iconbtn ds-focusable ds-desktop-only"
+            style={{ marginLeft: 'auto' }}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </button>
+          {/* Mobile close button */}
           <button
             type="button"
             onClick={() => setMobileOpen(false)}
@@ -207,15 +219,6 @@ export function AdminShell({ siteName, children }: { siteName: string; children:
               {isDark ? <Sun className="h-[18px] w-[18px]" /> : <MoonStar className="h-[18px] w-[18px]" />}
               <span className="ds-rail-label truncate">{isDark ? 'Light theme' : 'Dark theme'}</span>
             </button>
-            <button
-              type="button"
-              onClick={() => setCollapsed((v) => !v)}
-              className="ds-nav-item ds-focusable ds-desktop-only w-full"
-              title={collapsed ? 'Expand' : 'Collapse'}
-            >
-              {collapsed ? <PanelLeft className="h-[18px] w-[18px]" /> : <PanelLeftClose className="h-[18px] w-[18px]" />}
-              <span className="ds-rail-label truncate">Collapse</span>
-            </button>
           </div>
 
           <div className="ds-account">
@@ -266,7 +269,7 @@ export function AdminShell({ siteName, children }: { siteName: string; children:
             </a>
           </div>
         </header>
-        <main className="mx-auto max-w-6xl px-6 py-8 md:px-8 md:py-10">{children}</main>
+        <main className="mx-auto max-w-7xl px-6 py-8 md:px-8 md:py-10">{children}</main>
       </div>
     </div>
   )

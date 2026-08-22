@@ -17,15 +17,46 @@ interface ManifestStart {
   githubUrl: string
 }
 
-/** Map the ?github_app=… callback result to a human message. */
-const RESULT_MESSAGES: Record<string, { text: string; ok: boolean }> = {
+interface ResultMessage {
+  text: string
+  ok: boolean
+  /** Recovery action shown as a link after the message text. */
+  action?: { label: string; href: string }
+}
+
+/** Map the ?github_app=… callback result to a human message + optional recovery action. */
+const RESULT_MESSAGES: Record<string, ResultMessage> = {
   connected: { text: 'GitHub App connected and installed — Thally Track can now watch your selected repos.', ok: true },
-  bad_state: { text: 'The connect link expired or was tampered with. Start again.', ok: false },
-  exchange_failed: { text: 'GitHub could not complete the app creation. Start again.', ok: false },
-  no_auth_secret: { text: 'THALLY_AUTH_SECRET is required to store the app credentials securely.', ok: false },
-  missing_code: { text: 'GitHub returned no app code. Start again.', ok: false },
-  not_connected: { text: 'No app to attach the installation to — start the connect flow again.', ok: false },
-  forbidden: { text: 'Owner access is required to connect GitHub.', ok: false },
+  bad_state: {
+    text: 'The connect link expired or was tampered with.',
+    ok: false,
+    action: { label: 'Try again', href: '#connect' },
+  },
+  exchange_failed: {
+    text: 'GitHub could not complete the app creation.',
+    ok: false,
+    action: { label: 'Try again', href: '#connect' },
+  },
+  no_auth_secret: {
+    text: 'THALLY_AUTH_SECRET is required to store the app credentials securely.',
+    ok: false,
+    action: { label: 'Open settings', href: '/admin/settings' },
+  },
+  missing_code: {
+    text: 'GitHub returned no app code.',
+    ok: false,
+    action: { label: 'Try again', href: '#connect' },
+  },
+  not_connected: {
+    text: 'No app to attach the installation to.',
+    ok: false,
+    action: { label: 'Start connect flow', href: '#connect' },
+  },
+  forbidden: {
+    text: 'Owner access is required to connect GitHub.',
+    ok: false,
+    action: { label: 'Open settings', href: '/admin/settings' },
+  },
 }
 
 /**
@@ -39,7 +70,7 @@ export function GithubConnectPanel({ canEdit }: { canEdit: boolean }) {
   const [org, setOrg] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<{ text: string; ok: boolean } | null>(null)
+  const [result, setResult] = useState<ResultMessage | null>(null)
 
   useEffect(() => {
     fetch('/api/admin/github-app')
@@ -180,12 +211,30 @@ export function GithubConnectPanel({ canEdit }: { canEdit: boolean }) {
           </>
         )}
         {error ? (
-          <span className="ds-settings-caption" style={{ color: 'var(--ds-danger)' }}>
+          <span className="ds-settings-caption" role="alert" style={{ color: 'var(--ds-danger)' }}>
             {error}
           </span>
         ) : result ? (
-          <span className="ds-settings-caption" style={{ color: result.ok ? 'var(--ds-success)' : 'var(--ds-danger)' }}>
+          <span
+            className="ds-settings-caption"
+            role="alert"
+            style={{ color: result.ok ? 'var(--ds-success)' : 'var(--ds-danger)' }}
+          >
             {result.text}
+            {result.action && !result.ok ? (
+              <>
+                {' '}
+                <a
+                  href={result.action.href === '#connect' ? undefined : result.action.href}
+                  role={result.action.href === '#connect' ? 'button' : undefined}
+                  onClick={result.action.href === '#connect' ? (e) => { e.preventDefault(); void connect() } : undefined}
+                  className="ds-linkbtn ds-focusable"
+                  style={{ display: 'inline' }}
+                >
+                  {result.action.label}
+                </a>
+              </>
+            ) : null}
           </span>
         ) : null}
       </div>
