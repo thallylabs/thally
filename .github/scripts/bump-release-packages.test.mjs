@@ -22,9 +22,18 @@ function readPackage(rootDirectory, packagePath) {
 test('bumps the package chain before repinning internal dependencies', () => {
   const rootDirectory = mkdtempSync(join(tmpdir(), 'thally-release-packages-'))
   try {
+    writePackage(rootDirectory, 'packages/core/package.json', {
+      name: '@thallylabs/core',
+      version: '0.2.3',
+    })
+    writePackage(rootDirectory, 'packages/migrate/package.json', {
+      name: '@thallylabs/migrate',
+      version: '0.2.1',
+    })
     writePackage(rootDirectory, 'packages/create-thally-docs/package.json', {
       name: 'create-thally-docs',
       version: '0.10.5',
+      dependencies: { '@thallylabs/migrate': '0.2.1' },
     })
     writePackage(rootDirectory, 'packages/mcp/package.json', {
       name: '@thallylabs/mcp',
@@ -41,10 +50,18 @@ test('bumps the package chain before repinning internal dependencies', () => {
     })
 
     assert.deepEqual(bumpReleasePackages(rootDirectory), {
+      core: '0.2.4',
+      migrate: '0.2.2',
       create: '0.10.6',
       mcp: '0.10.6',
       cli: '0.8.6',
     })
+    assert.equal(
+      readPackage(rootDirectory, 'packages/create-thally-docs/package.json').dependencies[
+        '@thallylabs/migrate'
+      ],
+      '0.2.2',
+    )
     assert.equal(
       readPackage(rootDirectory, 'packages/mcp/package.json').dependencies['create-thally-docs'],
       '0.10.6',
@@ -65,7 +82,16 @@ test('rejects prerelease versions before changing any manifest', () => {
   const rootDirectory = mkdtempSync(join(tmpdir(), 'thally-release-packages-'))
   try {
     const manifests = [
-      ['packages/create-thally-docs/package.json', { name: 'create-thally-docs', version: '0.10.5' }],
+      ['packages/core/package.json', { name: '@thallylabs/core', version: '0.2.3' }],
+      ['packages/migrate/package.json', { name: '@thallylabs/migrate', version: '0.2.1' }],
+      [
+        'packages/create-thally-docs/package.json',
+        {
+          name: 'create-thally-docs',
+          version: '0.10.5',
+          dependencies: { '@thallylabs/migrate': '0.2.1' },
+        },
+      ],
       [
         'packages/mcp/package.json',
         {

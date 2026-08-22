@@ -4,18 +4,21 @@
 # One dispatch computes the record from the live heads, verifies the starter's
 # runtime pin actually matches the runtime commit being promoted, and opens a
 # reviewable PR carrying the new stable-scaffold-release.json, the retained
-# previous record, and the three package patch bumps. It deliberately merges
-# nothing and publishes nothing. Merging the reviewed record into protected
-# main starts publish-packages.yml; only after npm verification succeeds does
-# that workflow hand the immutable record locator to Thally Cloud.
+# previous record, and the complete five-package patch bump. Manual dispatches
+# leave the pull request for review; the full-release controller may merge only
+# after the exact head and base pass CI. The main merge starts
+# publish-packages.yml; only after npm verification succeeds does that workflow
+# hand the immutable record locator to Thally Cloud.
 #
-# Requires the repository setting "Allow GitHub Actions to create and approve
-# pull requests". Where org policy forbids GITHUB_TOKEN from creating pull
-# requests (this org's enterprise setting does), define a RELEASE_PR_TOKEN
-# repository secret — a fine-grained PAT limited to this repository with
-# Contents and Pull requests read/write — and the PR step uses it instead.
+# Repository writes use a short-lived GitHub App token narrowed to Actions
+# read, Contents/Pull requests write, and Issues write for the release label.
+# Its private key is available only through the main-restricted
+# `release-control` environment shared with the one-click controller.
 
 name: Promote release
+
+run-name: >-
+  Promote release${{ inputs.request_id && format(' · {0}', inputs.request_id) || '' }}
 
 on:
   workflow_dispatch:
@@ -27,12 +30,28 @@ on:
           starter-release.json.
         required: false
         type: string
+      starter_sha:
+        description: >-
+          Exact starter main commit to bind. Leave empty only for manual
+          recovery against the current starter main.
+        required: false
+        type: string
+      release_base_sha:
+        description: Exact thally main commit whose package tree is promoted
+        required: false
+        type: string
+      auto_merge:
+        description: Merge the generated release PR after CI succeeds
+        required: false
+        default: false
+        type: boolean
+      request_id:
+        description: Release-controller correlation id
+        required: false
+        type: string
 
 permissions:
-  contents: write
-  pull-requests: write
-  # Labels live on the Issues API; needed to ensure `release-promotion` exists.
-  issues: write
+  contents: read
 
 concurrency:
   group: promote-release
@@ -50,23 +69,98 @@ jobs:
     name: Compute record · Open PR
     needs: guard
     runs-on: ubuntu-latest
+    environment: release-control
     steps:
+      - name: Mint the destination PR token
+        id: pr-bot
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_COORDINATOR_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_COORDINATOR_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: thally
+          permission-actions: read
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          token: ${{ steps.pr-bot.outputs.token }}
 
       - name: Checkout the current starter
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: thallylabs/starter
-          ref: main
+          ref: ${{ inputs.starter_sha || 'main' }}
           path: starter-source
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Checkout the selected runtime
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.runtime_sha || github.sha }}
+          path: runtime-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove the selected sources are on main
+        id: sources
+        shell: bash
+        env:
+          REQUEST_ID: ${{ inputs.request_id }}
+          RELEASE_BASE_SHA: ${{ inputs.release_base_sha }}
+          RUNTIME_SHA_INPUT: ${{ inputs.runtime_sha }}
+          STARTER_SHA_INPUT: ${{ inputs.starter_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$REQUEST_ID" && ! "$REQUEST_ID" =~ ^[a-zA-Z0-9._-]{1,80}$ ]]; then
+            echo "::error::request_id must contain only letters, numbers, dots, underscores, or hyphens."
+            exit 1
+          fi
+          if [[ -n "$STARTER_SHA_INPUT" && ! "$STARTER_SHA_INPUT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::starter_sha must be a full lowercase commit SHA."
+            exit 1
+          fi
+          if [[ -n "$RUNTIME_SHA_INPUT" && ! "$RUNTIME_SHA_INPUT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::runtime_sha must be a full lowercase commit SHA."
+            exit 1
+          fi
+          selected_release_base="$(git rev-parse HEAD)"
+          if [[ -n "$RELEASE_BASE_SHA" && "$RELEASE_BASE_SHA" != "$selected_release_base" ]]; then
+            echo "::error::The release checkout does not match the controller's frozen package source."
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if [[ "$(git rev-parse origin/main)" != "$selected_release_base" ]]; then
+            echo "::error::thally main changed before the release promotion was prepared."
+            exit 1
+          fi
+          git -C starter-source fetch --no-tags origin main
+          git -C runtime-source fetch --no-tags origin main
+          selected_sha="$(git -C starter-source rev-parse HEAD)"
+          selected_runtime_sha="$(git -C runtime-source rev-parse HEAD)"
+          git -C starter-source merge-base --is-ancestor "$selected_sha" origin/main
+          git -C runtime-source merge-base --is-ancestor "$selected_runtime_sha" origin/main
+          if [[ -n "$STARTER_SHA_INPUT" && "$selected_sha" != "$STARTER_SHA_INPUT" ]]; then
+            echo "::error::The starter checkout does not match starter_sha."
+            exit 1
+          fi
+          if [[ -n "$RUNTIME_SHA_INPUT" && "$selected_runtime_sha" != "$RUNTIME_SHA_INPUT" ]]; then
+            echo "::error::The runtime checkout does not match runtime_sha."
+            exit 1
+          fi
+          echo "starter_sha=$selected_sha" >> "$GITHUB_OUTPUT"
+          echo "runtime_sha=$selected_runtime_sha" >> "$GITHUB_OUTPUT"
+          echo "release_base_sha=$selected_release_base" >> "$GITHUB_OUTPUT"
 
       - name: Prove starter runtime parity
         run: >-
           node .github/scripts/starter-runtime-contract.mjs check
           --starter-dir starter-source
-          --runtime-dir .
+          --runtime-dir runtime-source
 
       - name: Set up Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -78,7 +172,8 @@ jobs:
         id: record
         env:
           GH_TOKEN: ${{ github.token }}
-          RUNTIME_SHA_INPUT: ${{ inputs.runtime_sha }}
+          RUNTIME_SHA_INPUT: ${{ steps.sources.outputs.runtime_sha }}
+          STARTER_SHA_INPUT: ${{ steps.sources.outputs.starter_sha }}
         run: node .github/scripts/compute-scaffold-release.mjs
 
       - name: Bump package patch versions
@@ -87,10 +182,9 @@ jobs:
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
       - name: Open the release-record PR
+        id: pull-request
         env:
-          # Org policy blocks github.token from opening PRs; prefer the scoped
-          # secret and keep the ambient token as a fallback for forks/tests.
-          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.pr-bot.outputs.token }}
           RELEASE_ID: ${{ steps.record.outputs.release_id }}
           STARTER_SHA: ${{ steps.record.outputs.starter_sha }}
           RUNTIME_SHA: ${{ steps.record.outputs.runtime_sha }}
@@ -99,16 +193,26 @@ jobs:
           branch="release/promote-${RELEASE_ID}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$branch"
+          git checkout -B "$branch"
           git add \
             package-lock.json \
+            packages/core/package.json \
+            packages/migrate/package.json \
             packages/create-thally-docs/src/stable-scaffold-release.json \
             packages/create-thally-docs/src/previous-scaffold-releases.json \
             packages/create-thally-docs/package.json \
             packages/mcp/package.json \
             packages/cli/package.json
           git commit -m "release: promote scaffold release ${RELEASE_ID}"
-          git push -u origin "$branch"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin "$branch"
+            if [[ "$(git rev-parse HEAD^{tree})" != "$(git rev-parse FETCH_HEAD^{tree})" ]]; then
+              echo "::error::Existing release branch $branch contains different bytes."
+              exit 1
+            fi
+          else
+            git push -u origin "$branch"
+          fi
 
           # Idempotently ensure the label exists before referencing it.
           gh label create release-promotion \
@@ -132,20 +236,75 @@ jobs:
 
           ## Release gate and automated tail
 
-          Merge this PR after review. The merge is the human release gate and
-          automatically starts **Publish packages** on protected \`main\`. That
-          workflow tests, publishes, verifies every registry artifact, then
-          dispatches this immutable record locator to \`thally-cloud\` for its
-          baseline rebuild, probe, and promotion gates.
-
-          This workflow never auto-merges the reviewable release record. A
-          manual **Publish packages** dispatch remains available as an
-          idempotent recovery path if the automated tail is interrupted.
+          The full-release controller merges this PR only after CI verifies the
+          exact head against an unchanged \`main\` base. A manual promotion leaves
+          it open for maintainer review. Either merge automatically starts
+          **Publish packages**, which tests, publishes, verifies every registry
+          artifact, then dispatches this immutable record to \`thally-cloud\` for
+          its baseline rebuild, probes, and promotion gates. Manual **Publish
+          packages** dispatch remains an idempotent recovery path.
           EOF
 
-          gh pr create \
-            --base main \
-            --head "$branch" \
-            --label release-promotion \
-            --title "release: promote scaffold release ${RELEASE_ID}" \
-            --body-file /tmp/promote-pr-body.md
+          if pr_json="$(gh pr view "$branch" --json number,url 2>/dev/null)"; then
+            pr_url="$(jq -r .url <<<"$pr_json")"
+            pr_number="$(jq -r .number <<<"$pr_json")"
+          else
+            pr_url="$(gh pr create \
+              --base main \
+              --head "$branch" \
+              --label release-promotion \
+              --title "release: promote scaffold release ${RELEASE_ID}" \
+              --body-file /tmp/promote-pr-body.md)"
+            pr_number="$(gh pr view "$branch" --json number --jq .number)"
+          fi
+          echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+          echo "url=$pr_url" >> "$GITHUB_OUTPUT"
+          echo "$pr_url"
+
+      - name: Merge after CI succeeds
+        if: >-
+          inputs.auto_merge &&
+          github.actor == vars.RELEASE_COORDINATOR_ACTOR
+        shell: bash
+        env:
+          EXPECTED_BASE_SHA: ${{ steps.sources.outputs.release_base_sha }}
+          GH_TOKEN: ${{ steps.pr-bot.outputs.token }}
+          PR_NUMBER: ${{ steps.pull-request.outputs.number }}
+        run: |
+          set -euo pipefail
+          pr_identity="$(gh pr view "$PR_NUMBER" --json baseRefOid,headRefOid)"
+          base_sha="$(jq -r .baseRefOid <<<"$pr_identity")"
+          head_sha="$(jq -r .headRefOid <<<"$pr_identity")"
+          if [[ "$base_sha" != "$EXPECTED_BASE_SHA" ]]; then
+            echo "::error::thally main advanced before CI was bound to the release PR."
+            exit 1
+          fi
+          run_id=""
+          for attempt in {1..60}; do
+            run_id="$(
+              gh run list \
+                --workflow ci.yml \
+                --event pull_request \
+                --limit 50 \
+                --json databaseId,headSha \
+                --jq ".[] | select(.headSha == \"$head_sha\") | .databaseId" \
+                | head -n 1
+            )"
+            [[ -n "$run_id" ]] && break
+            sleep 5
+          done
+          if [[ -z "$run_id" ]]; then
+            echo "::error::CI did not start for pull request #$PR_NUMBER."
+            exit 1
+          fi
+          gh run watch "$run_id" --exit-status
+          current_base="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          final_base="$(gh pr view "$PR_NUMBER" --json baseRefOid --jq .baseRefOid)"
+          if [[ "$current_base" != "$EXPECTED_BASE_SHA" || "$final_base" != "$EXPECTED_BASE_SHA" ]]; then
+            echo "::error::main advanced after CI; rerun promotion against the new base."
+            exit 1
+          fi
+          gh pr merge "$PR_NUMBER" \
+            --squash \
+            --delete-branch \
+            --match-head-commit "$head_sha"
