@@ -6,7 +6,10 @@
  */
 
 import { isDocsAccessEnabledEdge } from '@/lib/admin/auth-edge'
-import { getCloudAccessConfigEdge } from '@/lib/cloud-link/edge'
+import {
+  getCloudAccessConfigEdge,
+  isCloudAccessConfiguredEdge,
+} from '@/lib/cloud-link/edge'
 
 export type DocumentationAccessMode = 'public' | 'password'
 
@@ -14,8 +17,14 @@ export type DocumentationAccessMode = 'public' | 'password'
 export async function resolveDocumentationAccessMode(
   origin: string,
 ): Promise<DocumentationAccessMode> {
+  if (isDocsAccessEnabledEdge()) return 'password'
+
   const cloudAccess = await getCloudAccessConfigEdge(origin)
-  return isDocsAccessEnabledEdge() || cloudAccess?.access?.mode === 'password'
-    ? 'password'
-    : 'public'
+  if (cloudAccess?.access?.mode === 'public') return 'public'
+  if (cloudAccess?.access?.mode === 'password') return 'password'
+
+  // A missing grant is only evidence of public access for a self-hosted site.
+  // Managed runtimes fail closed so a transient Cloud lookup failure cannot
+  // publish and cache an anonymous contract for password-protected docs.
+  return isCloudAccessConfiguredEdge() ? 'password' : 'public'
 }

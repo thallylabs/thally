@@ -38,18 +38,33 @@ vi.mock('@/lib/agent-endpoints', () => ({
   isPublicAgentEndpoint: vi.fn().mockReturnValue(false),
 }))
 
+vi.mock('@/lib/site-config', () => ({
+  resolveSiteConfig: vi.fn().mockResolvedValue({
+    name: 'Example Docs',
+    description: 'Example documentation',
+    repoUrl: 'https://github.com/example/docs',
+    links: [],
+  }),
+}))
+
 vi.mock('@/lib/cloud-link/edge', async () => {
   const actual = await vi.importActual<typeof import('@/lib/cloud-link/edge')>('@/lib/cloud-link/edge')
   return {
     getCloudAccessConfigEdge: vi.fn().mockResolvedValue(null),
+    isCloudAccessConfiguredEdge: vi.fn().mockReturnValue(false),
     // Real implementation: it only parses THALLY_CLOUD_SITE_CONFIG from env.
     getManagedSiteIdEdge: actual.getManagedSiteIdEdge,
   }
 })
 
+import { GET as getWellKnownDocument } from '@/app/api/well-known/[...document]/route'
 import { middleware } from '@/middleware'
 import { isDocsAccessEnabledEdge, isDocsAccessGrantedEdge } from '@/lib/admin/auth-edge'
-import { getCloudAccessConfigEdge } from '@/lib/cloud-link/edge'
+import { isPublicAgentEndpoint } from '@/lib/agent-endpoints'
+import {
+  getCloudAccessConfigEdge,
+  isCloudAccessConfiguredEdge,
+} from '@/lib/cloud-link/edge'
 import { classifyRequest, isAgentRequest } from '@/lib/traffic-classifier'
 
 const EVENT = { waitUntil: vi.fn() } as never
@@ -66,6 +81,9 @@ let fetchSpy: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(isDocsAccessEnabledEdge).mockReturnValue(false)
+  vi.mocked(isPublicAgentEndpoint).mockReturnValue(false)
+  vi.mocked(getCloudAccessConfigEdge).mockReset().mockResolvedValue(null)
+  vi.mocked(isCloudAccessConfiguredEdge).mockReturnValue(false)
   vi.mocked(isAgentRequest).mockReturnValue(false)
   vi.mocked(classifyRequest).mockReturnValue({
     visitorType: 'human',
@@ -275,6 +293,28 @@ describe('managed content cache headers', () => {
       status: 401,
       instance: '/api/docs-index',
     })
+  })
+
+  it('fails discovery closed when middleware resolves password access but the route lookup fails', async () => {
+    vi.mocked(isPublicAgentEndpoint).mockReturnValue(true)
+    vi.mocked(isCloudAccessConfiguredEdge).mockReturnValue(true)
+    vi.mocked(getCloudAccessConfigEdge)
+      .mockResolvedValueOnce({ access: { mode: 'password' } })
+      .mockResolvedValueOnce(null)
+
+    const request = docRequest('/auth.md')
+    const middlewareResponse = await middleware(request, EVENT)
+    const routeResponse = await getWellKnownDocument(request, {
+      params: Promise.resolve({ document: ['auth-md'] }),
+    })
+    const authGuide = await routeResponse.text()
+
+    expect(middlewareResponse.headers.get('x-middleware-next')).toBe('1')
+    expect(middlewareResponse.headers.get('location')).toBeNull()
+    expect(getCloudAccessConfigEdge).toHaveBeenCalledTimes(2)
+    expect(authGuide).toContain('password-protected documentation service')
+    expect(authGuide).toContain('Cookie: docs-access=<session-value>')
+    expect(authGuide).not.toContain('access is anonymous')
   })
 
   it('keeps the interactive access redirect for a protected browser page', async () => {

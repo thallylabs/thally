@@ -18,6 +18,23 @@ interface EdgeGrantPayload {
 
 let cached: { value: EdgeCloudConfig; expiresAt: number } | null = null
 
+/**
+ * Whether this runtime is attached to Thally Cloud for managed site policy.
+ *
+ * This intentionally checks for configuration presence rather than validity:
+ * an invalid snapshot or failed grant exchange is still a managed deployment
+ * whose access policy is unknown, and security-sensitive callers must fail
+ * closed instead of treating that uncertainty as anonymous access.
+ */
+export function isCloudAccessConfiguredEdge(): boolean {
+  return Boolean(
+    process.env.THALLY_CLOUD_SITE_CONFIG?.trim() ||
+      process.env.DOX_CLOUD_SITE_CONFIG?.trim() ||
+      process.env.THALLY_CLOUD_SITE_TOKEN?.trim() ||
+      process.env.DOX_CLOUD_SITE_TOKEN?.trim(),
+  )
+}
+
 function managedSiteConfig(): EdgeCloudConfig | null {
   const serialized =
     process.env.THALLY_CLOUD_SITE_CONFIG?.trim() ||
