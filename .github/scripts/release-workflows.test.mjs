@@ -65,6 +65,10 @@ test("tests and packs before the minimal OIDC publish job", () => {
     verify.steps.map((step) => step.name).slice(-2),
     ["Pack immutable release artifacts", "Upload immutable release artifacts"],
   );
+  const uploadStep = verify.steps.find(
+    (step) => step.name === "Upload immutable release artifacts",
+  );
+  assert.equal(uploadStep.with["include-hidden-files"], true);
   const publishScript = publish.steps.map((step) => step.run ?? "").join("\n");
   assert.match(publishScript, /publish-release-artifacts\.mjs/);
   assert.doesNotMatch(publishScript, /npm ci|npm test|npm pack|--workspace/);

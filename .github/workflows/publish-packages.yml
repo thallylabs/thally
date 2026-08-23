@@ -176,6 +176,9 @@ jobs:
         with:
           name: npm-release-${{ needs.plan.outputs.release_sha }}
           path: .release-artifacts
+          # upload-artifact excludes hidden paths by default. The leading dot
+          # is intentional so package bytes remain isolated from the checkout.
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
