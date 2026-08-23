@@ -124,12 +124,15 @@ function shouldTrackRequest(request: NextRequest, pathname: string): boolean {
 
 /**
  * Next's router payloads vary on request headers that shared CDNs do not
- * consistently include in their cache key. Treat any router signal as
- * authoritative so a stripped companion header cannot make the response look
- * like an ordinary document.
+ * consistently include in their cache key. Runtimes expose different subsets
+ * of the internal headers and `_rsc` cache-buster, so treat any visible signal
+ * as authoritative. Callers that must survive Next's production middleware
+ * adapter cannot rely on this helper alone because that adapter hides all of
+ * these signals from application middleware.
  */
 function isNextRouterPayloadRequest(request: NextRequest): boolean {
   return (
+    request.nextUrl.searchParams.has('_rsc') ||
     request.headers.get('rsc') === '1' ||
     request.headers.has('next-router-state-tree') ||
     request.headers.has('next-router-prefetch') ||
@@ -221,6 +224,18 @@ function isManagedContentCachePath(pathname: string): boolean {
 }
 
 /**
+ * Machine-readable projections have stable representations at their own URLs,
+ * unlike browser document paths that also carry App Router payloads.
+ */
+function isManagedContentProjectionPath(pathname: string): boolean {
+  return (
+    isPublicAgentEndpoint(pathname) ||
+    CONTENT_PROJECTION_API_PATHS.includes(pathname) ||
+    CONTENT_PROJECTION_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  )
+}
+
+/**
  * Under the assets ContentSource, doc responses are served from the CDN and
  * invalidated by tag when a content publish lands: `Cache-Tag: site:{siteId}`
  * is the purge handle, and the long CDN TTL makes the tag the only eviction
@@ -237,11 +252,10 @@ function isManagedContentCachePath(pathname: string): boolean {
  * fails open for availability, but a possibly-password-gated page must never
  * be frozen into a shared cache for a year.
  *
- * `cdnCacheable: false` sets the purge tag without a TTL. Used for responses
- * that vary on request headers a shared CDN may not honor: agent content
- * negotiation (User-Agent/Accept) and Next router payloads (RSC/state/prefetch
- * headers). Caching either variant under the browser pathname can poison the
- * corresponding human document or client-side navigation.
+ * `cdnCacheable: false` sets the purge tag without a TTL. Browser document
+ * paths always use this mode here because Next removes RSC headers and `_rsc`
+ * before invoking production middleware. Full HTML documents receive their
+ * CDN policy separately through the visible `Accept: text/html` signal.
  */
 function applyManagedContentCacheHeaders(
   response: NextResponse,
@@ -459,12 +473,12 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     response.headers.set('CDN-Cache-Control', cdnCache)
     response.headers.set('Netlify-CDN-Cache-Control', cdnCache)
   }
-  // Keep router payloads purgeable, but never impose a shared CDN lifetime on
-  // them. The `_rsc` query is only one part of Next's cache key; prefetch and
-  // navigation responses also vary on headers, and replaying the wrong variant
-  // can leave the page's Suspense boundary permanently empty.
+  // Next's production middleware adapter deliberately hides its RSC headers
+  // and `_rsc` query from application code. Browser document paths therefore
+  // stay tag-only here; the HTML-only block above owns their CDN lifetime.
+  // Machine projections have dedicated URLs and remain safe to cache by URL.
   return applyManagedContentCacheHeaders(response, pathname, contentCachePublic, {
-    cdnCacheable: !isNextRouterPayloadRequest(request),
+    cdnCacheable: isManagedContentProjectionPath(pathname),
   })
 }
 
