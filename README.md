@@ -78,6 +78,12 @@ with the pinned runtime commit. Source-repository-only test files stay here;
 the standalone starter is validated through its own CI and production build.
 Do not reproduce a runtime fix manually in the starter repository.
 
+After either repository's change is merged, the maintainer path is one **Full
+release** workflow dispatch (or `npm run release:full`). It waits for generated
+PR CI, publishes through npm trusted publishing, and confirms the Cloud scaffold
+promotion. See [the release runbook](.github/RELEASING.md) for one-time App
+permissions, setup, recovery, and the exact copy-paste command.
+
 The server starts at [http://localhost:3040](http://localhost:3040), or the next
 available port when 3040 is already in use.
 

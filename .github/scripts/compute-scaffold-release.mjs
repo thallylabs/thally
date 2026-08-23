@@ -2,9 +2,10 @@
  * Compute the next immutable scaffold release record from the live heads.
  *
  * Runs only inside promote-release.yml. Reads the current
- * `thallylabs/starter` main head and its checked-in `starter-release.json`
- * manifest, verifies the manifest's runtime pin matches the `thallylabs/thally`
- * commit being promoted (main head, or an explicit `RUNTIME_SHA_INPUT`), and
+ * exact `thallylabs/starter` commit selected by the controller (or its main
+ * head during manual recovery) and its checked-in `starter-release.json`
+ * manifest. It verifies the manifest's runtime pin matches the
+ * `thallylabs/thally` commit being promoted, and
  * rewrites the two JSON records consumed by create-thally-docs, the CLI, MCP,
  * and Thally Cloud:
  *
@@ -50,11 +51,8 @@ async function resolveCommit(repository, ref) {
   return { commitSha: commit.sha, treeSha: commit.commit.tree.sha }
 }
 
-const starterHead = await githubJson(`/repos/${STARTER_REPOSITORY}/branches/main`)
-const starter = {
-  commitSha: starterHead.commit.sha,
-  treeSha: starterHead.commit.commit.tree.sha,
-}
+const starterRef = process.env.STARTER_SHA_INPUT?.trim() || 'main'
+const starter = await resolveCommit(STARTER_REPOSITORY, starterRef)
 
 // The manifest bytes at the exact starter commit are the release's identity:
 // its sha256 lets a scaffolded project prove which starter produced it.

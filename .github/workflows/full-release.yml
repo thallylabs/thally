@@ -1,0 +1,468 @@
+# One operator dispatch drives the complete public release: synchronize the
+# standalone starter, promote an immutable release record, publish and verify
+# npm packages, then wait for Thally Cloud to promote the exact scaffold.
+# Destination workflows retain their own validation and recovery entrypoints;
+# this controller only coordinates fixed workflows on protected main.
+
+name: Full release
+
+run-name: Full release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-public-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Sync · Publish · Promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # This no-review environment is restricted to main. It prevents a workflow
+    # revision on another branch from receiving the coordinator App key while
+    # keeping the dispatch itself as the single operator authorization.
+    environment: release-control
+    steps:
+      - name: Checkout trusted release policy
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Reject non-main dispatches
+        run: test "$GITHUB_REF" = refs/heads/main
+
+      - name: Mint the release coordinator token
+        id: coordinator
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_COORDINATOR_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_COORDINATOR_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            thally
+            starter
+            thally-cloud
+          permission-actions: write
+          permission-contents: read
+
+      - name: Detect an already-stable release before selecting new work
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.coordinator.outputs.token }}
+        run: |
+          set -euo pipefail
+          runtime_head="$(gh api repos/thallylabs/thally/commits/main --jq .sha)"
+          starter_head="$(gh api repos/thallylabs/starter/commits/main --jq .sha)"
+          record="$(
+            gh api 'repos/thallylabs/thally/contents/packages/create-thally-docs/src/stable-scaffold-release.json?ref=main' --jq .content \
+              | tr -d '\n' \
+              | base64 --decode
+          )"
+          release_id="$(jq -r .id <<<"$record")"
+          record_sha=""
+          while read -r candidate_sha; do
+            candidate_id="$(
+              gh api "repos/thallylabs/thally/contents/packages/create-thally-docs/src/stable-scaffold-release.json?ref=$candidate_sha" --jq .content \
+                | tr -d '\n' \
+                | base64 --decode \
+                | jq -r .id
+            )"
+            if [[ "$candidate_id" == "$release_id" ]]; then
+              record_sha="$candidate_sha"
+              break
+            fi
+          done < <(
+            gh api \
+              'repos/thallylabs/thally/commits?path=packages/create-thally-docs/src/stable-scaffold-release.json&sha=main&per_page=100' \
+              --jq '.[].sha'
+          )
+          if [[ -z "$record_sha" ]]; then
+            echo "::error::The current stable release-record commit could not be resolved."
+            exit 1
+          fi
+
+          if [[ "$runtime_head" == "$record_sha" && \
+                "$starter_head" == "$(jq -r .source.commitSha <<<"$record")" ]]; then
+            echo "current_stable=true" >> "$GITHUB_OUTPUT"
+            echo "runtime_sha=$(jq -r .runtime.commitSha <<<"$record")" >> "$GITHUB_OUTPUT"
+            echo "stable_starter_sha=$starter_head" >> "$GITHUB_OUTPUT"
+          else
+            echo "current_stable=false" >> "$GITHUB_OUTPUT"
+            echo "runtime_sha=$runtime_head" >> "$GITHUB_OUTPUT"
+          fi
+          request_id="full-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+
+      - name: Synchronize and merge the standalone starter
+        if: steps.release.outputs.current_stable != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.coordinator.outputs.token }}
+          REQUEST_ID: ${{ steps.release.outputs.request_id }}
+          RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
+        run: |
+          set -euo pipefail
+          gh workflow run sync-runtime.yml \
+            --repo thallylabs/starter \
+            --ref main \
+            -f runtime_ref="$RUNTIME_SHA" \
+            -f auto_merge=true \
+            -f request_id="$REQUEST_ID"
+
+          run_id=""
+          for attempt in {1..60}; do
+            run_id="$(
+              gh run list \
+                --repo thallylabs/starter \
+                --workflow sync-runtime.yml \
+                --event workflow_dispatch \
+                --limit 50 \
+                --json databaseId,displayTitle \
+                --jq ".[] | select(.displayTitle | contains(\"$REQUEST_ID\")) | .databaseId" \
+                | head -n 1
+            )"
+            [[ -n "$run_id" ]] && break
+            sleep 5
+          done
+          if [[ -z "$run_id" ]]; then
+            echo "::error::The starter synchronization run did not start."
+            exit 1
+          fi
+          gh run watch "$run_id" --repo thallylabs/starter --exit-status
+
+      - name: Freeze and verify the starter selection
+        if: steps.release.outputs.current_stable != 'true'
+        id: starter
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.coordinator.outputs.token }}
+          RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
+        run: |
+          set -euo pipefail
+          starter_sha="$(gh api repos/thallylabs/starter/commits/main --jq .sha)"
+          pinned_runtime="$(
+            gh api "repos/thallylabs/starter/contents/starter-release.json?ref=$starter_sha" --jq .content \
+              | tr -d '\n' \
+              | base64 --decode \
+              | jq -r .runtime.commitSha
+          )"
+          if [[ "$pinned_runtime" != "$RUNTIME_SHA" ]]; then
+            echo "::error::Starter main pins $pinned_runtime, not $RUNTIME_SHA."
+            exit 1
+          fi
+          echo "starter_sha=$starter_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this pair is already stable
+        id: stable
+        shell: bash
+        env:
+          COORDINATOR_ACTOR: ${{ vars.RELEASE_COORDINATOR_ACTOR }}
+          GH_TOKEN: ${{ steps.coordinator.outputs.token }}
+          LEGACY_RELEASE_ACTOR: ${{ vars.LEGACY_RELEASE_ACTOR }}
+          RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
+          STARTER_SHA: ${{ steps.release.outputs.stable_starter_sha || steps.starter.outputs.starter_sha }}
+        run: |
+          set -euo pipefail
+          record="$(
+            gh api 'repos/thallylabs/thally/contents/packages/create-thally-docs/src/stable-scaffold-release.json?ref=main' --jq .content \
+              | tr -d '\n' \
+              | base64 --decode
+          )"
+          if [[ "$(jq -r .runtime.commitSha <<<"$record")" == "$RUNTIME_SHA" && \
+                "$(jq -r .source.commitSha <<<"$record")" == "$STARTER_SHA" ]]; then
+            release_id="$(jq -r .id <<<"$record")"
+            record_sha=""
+            while read -r candidate_sha; do
+              candidate_id="$(
+                gh api "repos/thallylabs/thally/contents/packages/create-thally-docs/src/stable-scaffold-release.json?ref=$candidate_sha" --jq .content \
+                  | tr -d '\n' \
+                  | base64 --decode \
+                  | jq -r .id
+              )"
+              if [[ "$candidate_id" == "$release_id" ]]; then
+                record_sha="$candidate_sha"
+                break
+              fi
+            done < <(
+              gh api \
+                'repos/thallylabs/thally/commits?path=packages/create-thally-docs/src/stable-scaffold-release.json&sha=main&per_page=100' \
+                --jq '.[].sha'
+            )
+            if [[ -z "$record_sha" ]]; then
+              echo "::error::The stable release-record commit could not be resolved."
+              exit 1
+            fi
+            expected_suffix=" · ${release_id} · ${record_sha}"
+            cloud_complete="$(
+              gh api \
+                'repos/thallylabs/thally-cloud/actions/workflows/promote-scaffold-release.yml/runs?event=workflow_dispatch&per_page=100' \
+                | jq -r \
+                  --arg actor "$COORDINATOR_ACTOR" \
+                  --arg suffix "$expected_suffix" \
+                  '.workflow_runs[] | select(.display_title | startswith("scaffold-production · automated · handoff-") and endswith($suffix)) | select(.actor.login == $actor and .conclusion == "success") | .conclusion' \
+                | head -n 1
+            )"
+            if [[ "$cloud_complete" != "success" && -n "$LEGACY_RELEASE_ACTOR" ]]; then
+              # Pre-controller repository dispatches had no correlated title,
+              # so compatibility requires both exact immutable locator fields
+              # from a successful run by the allowlisted legacy publisher.
+              while read -r legacy_run; do
+                legacy_log="$(
+                  gh run view "$legacy_run" \
+                    --repo thallylabs/thally-cloud \
+                    --log
+                )"
+                if grep -Fq "\"release_id\": \"$release_id\"" <<<"$legacy_log" && \
+                   grep -Fq "\"record_commit_sha\": \"$record_sha\"" <<<"$legacy_log"; then
+                  cloud_complete=success
+                  break
+                fi
+              done < <(
+                gh api \
+                  'repos/thallylabs/thally-cloud/actions/workflows/promote-scaffold-release.yml/runs?event=repository_dispatch&status=success&per_page=100' \
+                  | jq -r \
+                    --arg actor "$LEGACY_RELEASE_ACTOR" \
+                    '.workflow_runs[] | select(.actor.login == $actor) | .id'
+              )
+            fi
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "cloud_complete=$([[ "$cloud_complete" == "success" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+            echo "record_sha=$record_sha" >> "$GITHUB_OUTPUT"
+            echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Promote and merge the immutable release record
+        if: steps.stable.outputs.needed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.coordinator.outputs.token }}
+          REQUEST_ID: ${{ steps.release.outputs.request_id }}
+          RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
+          STARTER_SHA: ${{ steps.release.outputs.stable_starter_sha || steps.starter.outputs.starter_sha }}
+        run: |
+          set -euo pipefail
+          gh workflow run promote-release.yml \
+            --repo thallylabs/thally \
+            --ref main \
+            -f runtime_sha="$RUNTIME_SHA" \
+            -f starter_sha="$STARTER_SHA" \
+            -f release_base_sha="$RUNTIME_SHA" \
+            -f auto_merge=true \
+            -f request_id="$REQUEST_ID"
+
+          run_id=""
+          for attempt in {1..60}; do
+            run_id="$(
+              gh run list \
+                --repo thallylabs/thally \
+                --workflow promote-release.yml \
+                --event workflow_dispatch \
+                --limit 50 \
+                --json databaseId,displayTitle \
+                --jq ".[] | select(.displayTitle | contains(\"$REQUEST_ID\")) | .databaseId" \
+                | head -n 1
+            )"
+            [[ -n "$run_id" ]] && break
+            sleep 5
+          done
+          if [[ -z "$run_id" ]]; then
+            echo "::error::The release promotion run did not start."
+            exit 1
+          fi
+          gh run watch "$run_id" --repo thallylabs/thally --exit-status
+
+      - name: Resolve the published release record
+        if: steps.stable.outputs.needed == 'true'
+        id: published
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.coordinator.outputs.token }}
+          RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
+          STARTER_SHA: ${{ steps.starter.outputs.starter_sha }}
+        run: |
+          set -euo pipefail
+          record_sha=""
+          record=""
+          while read -r candidate_sha; do
+            candidate_record="$(
+              gh api "repos/thallylabs/thally/contents/packages/create-thally-docs/src/stable-scaffold-release.json?ref=$candidate_sha" --jq .content \
+                | tr -d '\n' \
+                | base64 --decode
+            )"
+            if [[ "$(jq -r .runtime.commitSha <<<"$candidate_record")" == "$RUNTIME_SHA" && \
+                  "$(jq -r .source.commitSha <<<"$candidate_record")" == "$STARTER_SHA" ]]; then
+              record_sha="$candidate_sha"
+              record="$candidate_record"
+              break
+            fi
+          done < <(
+            gh api \
+              'repos/thallylabs/thally/commits?path=packages/create-thally-docs/src/stable-scaffold-release.json&sha=main&per_page=100' \
+              --jq '.[].sha'
+          )
+          if [[ -z "$record_sha" ]]; then
+            echo "::error::The merged release-record commit could not be resolved."
+            exit 1
+          fi
+          echo "record_sha=$record_sha" >> "$GITHUB_OUTPUT"
+          echo "release_id=$(jq -r .id <<<"$record")" >> "$GITHUB_OUTPUT"
+
+      - name: Re-drive an interrupted stable release
+        if: steps.stable.outputs.needed == 'false' && steps.stable.outputs.cloud_complete != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.coordinator.outputs.token }}
+          RECORD_SHA: ${{ steps.stable.outputs.record_sha }}
+          REQUEST_ID: ${{ steps.release.outputs.request_id }}
+        run: |
+          set -euo pipefail
+          gh workflow run publish-packages.yml \
+            --repo thallylabs/thally \
+            --ref main \
+            -f request_id="$REQUEST_ID" \
+            -f release_commit_sha="$RECORD_SHA"
+
+      - name: Resolve the active release
+        if: steps.stable.outputs.needed == 'true' || steps.stable.outputs.cloud_complete != 'true'
+        id: active-release
+        shell: bash
+        env:
+          NEW_RECORD_SHA: ${{ steps.published.outputs.record_sha }}
+          NEW_RELEASE_ID: ${{ steps.published.outputs.release_id }}
+          EXISTING_RECORD_SHA: ${{ steps.stable.outputs.record_sha }}
+          EXISTING_RELEASE_ID: ${{ steps.stable.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          record_sha="${NEW_RECORD_SHA:-$EXISTING_RECORD_SHA}"
+          release_id="${NEW_RELEASE_ID:-$EXISTING_RELEASE_ID}"
+          echo "record_sha=$record_sha" >> "$GITHUB_OUTPUT"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for npm publication
+        if: steps.stable.outputs.needed == 'true' || steps.stable.outputs.cloud_complete != 'true'
+        id: publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.coordinator.outputs.token }}
+          IS_NEW_RELEASE: ${{ steps.stable.outputs.needed }}
+          RECORD_SHA: ${{ steps.active-release.outputs.record_sha }}
+          RELEASE_ID: ${{ steps.active-release.outputs.release_id }}
+          REQUEST_ID: ${{ steps.release.outputs.request_id }}
+        run: |
+          set -euo pipefail
+          publish_run=""
+          for attempt in {1..120}; do
+            if [[ "$IS_NEW_RELEASE" == "true" ]]; then
+              publish_run="$(
+                gh run list \
+                  --repo thallylabs/thally \
+                  --workflow publish-packages.yml \
+                  --event push \
+                  --limit 50 \
+                  --json databaseId,headSha \
+                  --jq ".[] | select(.headSha == \"$RECORD_SHA\") | .databaseId" \
+                  | head -n 1
+              )"
+            else
+              publish_run="$(
+                gh run list \
+                  --repo thallylabs/thally \
+                  --workflow publish-packages.yml \
+                  --event workflow_dispatch \
+                  --limit 50 \
+                  --json databaseId,displayTitle \
+                  --jq ".[] | select(.displayTitle | contains(\"$REQUEST_ID\")) | .databaseId" \
+                  | head -n 1
+              )"
+            fi
+            [[ -n "$publish_run" ]] && break
+            sleep 5
+          done
+          if [[ -z "$publish_run" ]]; then
+            echo "::error::Package publication did not start for $RECORD_SHA."
+            exit 1
+          fi
+          gh run watch "$publish_run" --repo thallylabs/thally --exit-status
+          publish_attempt="$(
+            gh api "repos/thallylabs/thally/actions/runs/$publish_run" --jq .run_attempt
+          )"
+          handoff_id="handoff-${publish_run}-${publish_attempt}"
+          echo "expected_cloud_title=scaffold-production · automated · ${handoff_id} · ${RELEASE_ID} · ${RECORD_SHA}" >> "$GITHUB_OUTPUT"
+
+      # Installation tokens expire after one hour. Mint this observer only
+      # after npm completes so a long baseline build retains a fresh token.
+      - name: Mint the Cloud observer token
+        if: steps.stable.outputs.needed == 'true' || steps.stable.outputs.cloud_complete != 'true'
+        id: cloud-observer
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_COORDINATOR_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_COORDINATOR_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: thally-cloud
+          permission-actions: read
+          permission-contents: read
+
+      - name: Wait for exact Cloud production handoff
+        if: steps.stable.outputs.needed == 'true' || steps.stable.outputs.cloud_complete != 'true'
+        shell: bash
+        env:
+          COORDINATOR_ACTOR: ${{ vars.RELEASE_COORDINATOR_ACTOR }}
+          EXPECTED_TITLE: ${{ steps.publication.outputs.expected_cloud_title }}
+          GH_TOKEN: ${{ steps.cloud-observer.outputs.token }}
+          RELEASE_ID: ${{ steps.active-release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          cloud_run=""
+          for attempt in {1..120}; do
+            cloud_run="$(
+              gh api \
+                'repos/thallylabs/thally-cloud/actions/workflows/promote-scaffold-release.yml/runs?event=workflow_dispatch&per_page=100' \
+                | jq -r \
+                  --arg actor "$COORDINATOR_ACTOR" \
+                  --arg title "$EXPECTED_TITLE" \
+                  '.workflow_runs[] | select(.display_title == $title and .actor.login == $actor) | .id' \
+                | head -n 1
+            )"
+            [[ -n "$cloud_run" ]] && break
+            sleep 5
+          done
+          if [[ -z "$cloud_run" ]]; then
+            echo "::error::Cloud scaffold promotion did not start for $RELEASE_ID."
+            exit 1
+          fi
+          gh run watch "$cloud_run" --repo thallylabs/thally-cloud --exit-status
+
+      - name: Write release summary
+        shell: bash
+        env:
+          EXISTING_CLOUD_COMPLETE: ${{ steps.stable.outputs.cloud_complete }}
+          EXISTING_RELEASE_ID: ${{ steps.stable.outputs.release_id }}
+          NEW_RELEASE_ID: ${{ steps.published.outputs.release_id }}
+          RUNTIME_SHA: ${{ steps.release.outputs.runtime_sha }}
+          STARTER_SHA: ${{ steps.release.outputs.stable_starter_sha || steps.starter.outputs.starter_sha }}
+        run: |
+          release_id="${NEW_RELEASE_ID:-$EXISTING_RELEASE_ID}"
+          {
+            echo "## Full release complete"
+            echo
+            echo "- Release: \`$release_id\`"
+            echo "- Runtime: \`$RUNTIME_SHA\`"
+            echo "- Starter: \`$STARTER_SHA\`"
+            if [[ -n "$NEW_RELEASE_ID" ]]; then
+              echo "- Result: packages verified and Cloud scaffold promoted"
+            elif [[ "$EXISTING_CLOUD_COMPLETE" == "true" ]]; then
+              echo "- Result: this exact pair was already the stable release"
+            else
+              echo "- Result: interrupted package/Cloud promotion recovered"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -65,7 +65,16 @@ test('rejects prerelease versions before changing any manifest', () => {
   const rootDirectory = mkdtempSync(join(tmpdir(), 'thally-release-packages-'))
   try {
     const manifests = [
-      ['packages/create-thally-docs/package.json', { name: 'create-thally-docs', version: '0.10.5' }],
+      ['packages/core/package.json', { name: '@thallylabs/core', version: '0.2.3' }],
+      ['packages/migrate/package.json', { name: '@thallylabs/migrate', version: '0.2.1' }],
+      [
+        'packages/create-thally-docs/package.json',
+        {
+          name: 'create-thally-docs',
+          version: '0.10.5',
+          dependencies: { '@thallylabs/migrate': '0.2.1' },
+        },
+      ],
       [
         'packages/mcp/package.json',
         {
