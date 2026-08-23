@@ -1,9 +1,10 @@
 /**
  * Managed content cache headers: under THALLY_CONTENT_SOURCE=assets, doc
  * responses must carry `Cache-Tag: site:{siteId}` (the purge handle for
- * content publishes) plus a long CDN TTL — and must NOT leak onto admin
- * surfaces, non-content APIs, gated sites, or the default filesystem mode.
- * Also regression-checks that pass-through and rewrite behavior is unchanged.
+ * content publishes). Only unambiguous full HTML and machine projections may
+ * receive a long CDN TTL; browser paths without that evidence stay tag-only.
+ * Headers must not leak onto admin surfaces, non-content APIs, gated sites, or
+ * the default filesystem mode. Pass-through and rewrite behavior is unchanged.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -143,15 +144,39 @@ describe('managed content cache headers', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('adds Cache-Tag and a long CDN TTL to doc pages in assets mode', async () => {
+  it('adds Cache-Tag and a long CDN TTL to full HTML doc pages in assets mode', async () => {
     enableManagedAssetsMode()
-    const response = await middleware(docRequest('/getting-started'), EVENT)
+    const response = await middleware(
+      docRequest('/getting-started', { accept: 'text/html' }),
+      EVENT,
+    )
 
     expect(response.headers.get('x-middleware-next')).toBe('1')
     expect(response.headers.get('Cache-Tag')).toBe('site:site_123')
-    expect(response.headers.get('CDN-Cache-Control')).toBe('public, s-maxage=31536000')
+    expect(response.headers.get('CDN-Cache-Control')).toBe(
+      'public, s-maxage=31536000, stale-while-revalidate=86400',
+    )
     // Existing doc-page headers survive alongside the cache headers.
     expect(response.headers.get('X-Llms-Txt')).toBe('https://docs.example.com/llms.txt')
+  })
+
+  it('keeps ambiguous browser document requests tag-only', async () => {
+    enableManagedAssetsMode()
+    const response = await middleware(docRequest('/getting-started'), EVENT)
+
+    // Next strips RSC headers and `_rsc` before production middleware runs.
+    // A request without an explicit HTML Accept header can therefore be an App
+    // Router payload and must never receive a shared CDN lifetime.
+    expect(response.headers.get('Cache-Tag')).toBe('site:site_123')
+    expect(response.headers.get('CDN-Cache-Control')).toBeNull()
+  })
+
+  it('retains the long CDN TTL for URL-stable machine projections', async () => {
+    enableManagedAssetsMode()
+    const response = await middleware(docRequest('/api/docs-index'), EVENT)
+
+    expect(response.headers.get('Cache-Tag')).toBe('site:site_123')
+    expect(response.headers.get('CDN-Cache-Control')).toBe('public, s-maxage=31536000')
   })
 
   it('tags the .md mirror rewrite so publishes purge it too', async () => {
@@ -343,21 +368,19 @@ describe('managed content cache headers', () => {
   })
 
   it.each([
-    ['the RSC marker', { rsc: '1' }],
-    ['the router state tree', { 'next-router-state-tree': '%5B%22%22%5D' }],
-    ['the router prefetch marker', { 'next-router-prefetch': '1' }],
-    ['the segment prefetch marker', { 'next-router-segment-prefetch': '/children' }],
-    ['an HTML accept header alongside a router marker', { accept: 'text/html', rsc: '1' }],
-  ])('tags managed router payloads for purge but never CDN-caches %s', async (_label, headers) => {
+    ['the RSC query marker', '/getting-started?_rsc=route-state', {}],
+    ['the RSC marker', '/getting-started', { rsc: '1' }],
+    ['the router state tree', '/getting-started', { 'next-router-state-tree': '%5B%22%22%5D' }],
+    ['the router prefetch marker', '/getting-started', { 'next-router-prefetch': '1' }],
+    ['the segment prefetch marker', '/getting-started', { 'next-router-segment-prefetch': '/children' }],
+    ['an HTML accept header alongside a router marker', '/getting-started', { accept: 'text/html', rsc: '1' }],
+  ])('tags managed router payloads for purge but never CDN-caches %s', async (_label, path, headers) => {
     enableManagedAssetsMode()
-    const response = await middleware(
-      docRequest('/getting-started?_rsc=route-state', headers),
-      EVENT,
-    )
+    const response = await middleware(docRequest(path, headers), EVENT)
 
-    // A CDN does not reliably key React Server Component variants on Next's
-    // request headers. Keep the purge tag, but always let Next own these
-    // responses so a prefetched shell can never replace navigated content.
+    // Direct runtimes can expose one or more router signals. Keep the purge
+    // tag, but always let Next own these responses so a prefetched shell can
+    // never replace navigated content.
     expect(response.headers.get('x-middleware-next')).toBe('1')
     expect(response.headers.get('location')).toBeNull()
     expect(response.headers.get('x-middleware-rewrite')).toBeNull()
