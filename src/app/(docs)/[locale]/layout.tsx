@@ -1,7 +1,4 @@
-import { SidebarCollectionsHydrator } from '@/components/layout/sidebar-hydrator'
-import { loadSidebarCollections } from '@/data/docs'
-import type { NavigationSection } from '@/data/docs'
-import { buildApiNavigation } from '@/data/api-reference'
+import { LocalizedSidebarHydrator } from '@/components/layout/localized-sidebar-hydrator'
 import { getBuildI18nConfig } from '@/lib/i18n/request'
 
 interface LocaleLayoutProps {
@@ -18,42 +15,9 @@ export default async function LocaleLayout({ children, params }: LocaleLayoutPro
   const isValid = i18n.locales.some((l) => l.code === locale && l.code !== i18n.defaultLocale)
   if (!isValid) return <>{children}</>
 
-  const navigation = await buildApiNavigation()
-  const apiSections: Array<NavigationSection> = navigation.map((group) => ({
-    title: group.title,
-    items: group.items.map((item) => ({
-      id: item.id,
-      title: item.title,
-      href: item.href,
-      badge: item.badge,
-      description: `${item.method} ${item.path}`,
-    })),
-  }))
-
-  const sidebarCollections = await loadSidebarCollections(locale)
-  const collections = sidebarCollections.map((collection) => {
-    if (collection.api && collection.api.navigation !== false) {
-      const mdxSections = collection.sections ?? []
-      // Prefix API operation hrefs so navigation stays within the locale
-      const localizedApiSections = apiSections.map((section) => ({
-        ...section,
-        items: section.items.map((item) => ({ ...item, href: `/${locale}${item.href}` })),
-      }))
-      return { ...collection, sections: [...mdxSections, ...localizedApiSections] }
-    }
-    if (!collection.href && collection.id === 'overview') {
-      return { ...collection, href: `/${locale}` }
-    }
-    // Prefix any direct-link tab hrefs (e.g. Changelog: /changelog → /es/changelog)
-    if (collection.href && !/^https?:\/\//i.test(collection.href)) {
-      return { ...collection, href: `/${locale}${collection.href}` }
-    }
-    return collection
-  })
-
   return (
     <>
-      <SidebarCollectionsHydrator collections={collections} />
+      <LocalizedSidebarHydrator locale={locale} />
       {children}
     </>
   )
