@@ -15,9 +15,29 @@ import { buildToolBridge } from './tools.js'
 import { runDocsCheck } from './validate.js'
 import { runAgentLoop, type AnthropicLike } from './agent.js'
 import { loadAgentsGuidance } from './config.js'
-import { buildSystemPrompt, buildUserPrompt, buildRepairPrompt } from './prompt.js'
+import { buildSystemPrompt, buildUserPrompt, buildRepairPrompt, buildAbstentionRepairPrompt } from './prompt.js'
 import { resolveAgentModel } from './model.js'
 import type { DocsTask, AgentOptions, AgentResult } from './types.js'
+
+/** Reconcile the model's terminal claim with the repository state it left behind. */
+export function assertDocumentationDecisionMatchesState(
+  decision: AgentResult['decision'],
+  hasRepositoryChanges: boolean,
+): void {
+  if (
+    (hasRepositoryChanges && decision.outcome !== 'drafted') ||
+    (!hasRepositoryChanges && decision.outcome !== 'abstained')
+  ) {
+    throw new Error('agent_result_invalid')
+  }
+}
+
+/** A clean repair is a valid abstention only after its final docs check passes. */
+export function assertCleanDocumentationResultIsValid(
+  validation: AgentResult['validation'],
+): void {
+  if (!validation.ok) throw new Error('agent_validation_failed')
+}
 
 /** Keep generated documentation PRs based on the branch the agent checked out. */
 export function buildPullRequestCreateArgs(
@@ -78,6 +98,7 @@ export async function runAgent(client: AnthropicLike, task: DocsTask, options: A
   try {
     const { claudeTools, dispatch } = buildToolBridge(projectDir)
     const system = buildSystemPrompt(loadAgentsGuidance(projectDir))
+    const taskPrompt = buildUserPrompt(task)
 
     emit('Drafting documentation…')
     const first = await runAgentLoop({
@@ -85,18 +106,38 @@ export async function runAgent(client: AnthropicLike, task: DocsTask, options: A
       model,
       maxSteps,
       system,
-      userPrompt: buildUserPrompt(task),
+      userPrompt: taskPrompt,
       tools: claudeTools,
       dispatch,
       onEvent: (e) => emit(`  → ${e}`),
     })
     let summary = first.summary
     let steps = first.steps
+    let decision = first.decision
+
+    if (!hasChanges(projectDir) && options.requireChanges) {
+      emit('No documentation diff — attempting one grounded repair…')
+      const retry = await runAgentLoop({
+        client,
+        model,
+        maxSteps,
+        system,
+        userPrompt: `${taskPrompt}\n\n${buildAbstentionRepairPrompt(decision)}`,
+        tools: claudeTools,
+        dispatch,
+        onEvent: (e) => emit(`  → ${e}`),
+      })
+      summary = retry.summary || summary
+      steps += retry.steps
+      decision = retry.decision
+    }
 
     if (!hasChanges(projectDir)) {
+      assertDocumentationDecisionMatchesState(decision, false)
       restore()
-      return { branch, summary, steps, diff: '', validation: { ok: true, errors: [], warnings: [] }, noChanges: true }
+      return { branch, summary, steps, diff: '', validation: { ok: true, errors: [], warnings: [] }, noChanges: true, decision }
     }
+    assertDocumentationDecisionMatchesState(decision, true)
 
     // Self-validate against the workspace `thally check`; one repair round on failure.
     let validation = runDocsCheck(projectDir)
@@ -107,21 +148,33 @@ export async function runAgent(client: AnthropicLike, task: DocsTask, options: A
         model,
         maxSteps,
         system,
-        userPrompt: buildRepairPrompt(validation.errors),
+        userPrompt: `${taskPrompt}\n\n${buildRepairPrompt(validation.errors)}`,
         tools: claudeTools,
         dispatch,
         onEvent: (e) => emit(`  → ${e}`),
       })
       if (repair.summary) summary = repair.summary
       steps += repair.steps
+      decision = repair.decision
       validation = runDocsCheck(projectDir)
+    }
+
+    // A repair may remove every rejected edit. Re-read git state instead of
+    // carrying the pre-validation dirty bit forward, then preserve the same
+    // drafted/dirty and abstained/clean contract used by the initial pass.
+    const hasFinalChanges = hasChanges(projectDir)
+    assertDocumentationDecisionMatchesState(decision, hasFinalChanges)
+    if (!hasFinalChanges) {
+      assertCleanDocumentationResultIsValid(validation)
+      restore()
+      return { branch, summary, steps, diff: '', validation, noChanges: true, decision }
     }
 
     const diff = stagedDiff(projectDir)
 
     if (mode === 'dry-run') {
       restore()
-      return { branch, summary, steps, diff, validation, noChanges: false }
+      return { branch, summary, steps, diff, validation, noChanges: false, decision }
     }
 
     if (mode === 'pr') {
@@ -142,11 +195,11 @@ export async function runAgent(client: AnthropicLike, task: DocsTask, options: A
           `Changes committed and pushed to "${branch}", but opening the PR failed (is gh authenticated?): ${err instanceof Error ? err.message : String(err)}`,
         )
       }
-      return { branch, summary, steps, diff, validation, prUrl, noChanges: false }
+      return { branch, summary, steps, diff, validation, prUrl, noChanges: false, decision }
     }
 
     // mode === 'write': leave the edits staged on the agent branch for review.
-    return { branch, summary, steps, diff, validation, noChanges: false }
+    return { branch, summary, steps, diff, validation, noChanges: false, decision }
   } catch (err) {
     restore()
     throw err

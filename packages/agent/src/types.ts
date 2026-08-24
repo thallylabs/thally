@@ -26,7 +26,30 @@ export interface AgentOptions {
   maxSteps?: number
   /** Progress callback (tool calls, phases). */
   onEvent?: (event: string) => void
+  /** Give an evidence-backed task one clean retry before accepting abstention. */
+  requireChanges?: boolean
 }
+
+export type DocumentationAbstentionReason =
+  | 'already_documented'
+  | 'insufficient_evidence'
+  | 'internal_only'
+  | 'unsupported_destination'
+
+export type DocumentationDecision =
+  | {
+      outcome: 'drafted'
+      explanation: string
+      inspectedPaths: Array<string>
+      changeIds: Array<string>
+    }
+  | {
+      outcome: 'abstained'
+      reason: DocumentationAbstentionReason
+      explanation: string
+      inspectedPaths: Array<string>
+      changeIds: Array<string>
+    }
 
 export interface AgentResult {
   /** The branch the agent worked on. */
@@ -42,4 +65,6 @@ export interface AgentResult {
   prUrl?: string
   /** True when nothing was changed. */
   noChanges: boolean
+  /** Required terminal protocol; never inferred from prose or git state. */
+  decision: DocumentationDecision
 }

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type { ParsedArgs } from '../router.js'
 import Anthropic from '@anthropic-ai/sdk'
 import {
@@ -54,6 +54,7 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
   const diffRef = args.getFlag('--diff')
   const contextFile = args.getFlag('--context-file')
   const requester = args.getFlag('--requester')?.trim()
+  const resultFile = args.getFlag('--result-file')?.trim()
 
   if (!instruction && !fromPr && !contextFile) {
     process.stderr.write(
@@ -99,15 +100,29 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
     const result = await runAgent(client, task, {
       projectDir: process.cwd(),
       mode,
+      requireChanges: args.hasFlag('--require-changes'),
       onEvent: (event) => process.stdout.write(`  ${event}\n`),
     })
+    if (resultFile) {
+      const temporaryResultFile = `${resultFile}.${process.pid}.tmp`
+      writeFileSync(temporaryResultFile, `${JSON.stringify(result.decision)}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+        flag: 'wx',
+      })
+      renameSync(temporaryResultFile, resultFile)
+    }
 
+    const v = result.validation
+    if (result.noChanges && !v.ok) {
+      process.stderr.write(`\n  Validation failed: ${v.errors.join('; ')}\n\n`)
+      return 1
+    }
     if (result.noChanges) {
       process.stdout.write('\n  No documentation changes were needed.\n\n')
       return 0
     }
 
-    const v = result.validation
     process.stdout.write(`\n  ${result.summary}\n`)
     process.stdout.write(
       `\n  Validation: ${v.ok ? '✓ passed' : `✗ ${v.errors.length} error(s)`}${v.warnings.length ? ` · ${v.warnings.length} warning(s)` : ''}\n`,
