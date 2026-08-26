@@ -1,10 +1,14 @@
-import fs from 'node:fs'
-import path from 'node:path'
-import { AGENT_BRANCH_PREFIX, DOCS_PREVIEW_LABEL, buildTrackInstruction } from '@thallylabs/mcp/track'
-import { DEFAULT_AGENT_MODEL } from './model.js'
+import fs from "node:fs";
+import path from "node:path";
+import {
+  DOCS_PREVIEW_LABEL,
+  TRACK_OWNED_BRANCH_PREFIXES,
+  buildTrackInstruction,
+} from "@thallylabs/mcp/track";
+import { DEFAULT_AGENT_MODEL } from "./model.js";
 
 /** Version marker used by Cloud Track to offer reviewable workflow upgrades. */
-export const DOCS_AGENT_WORKFLOW_CONTRACT = 'thally-track/v4'
+export const DOCS_AGENT_WORKFLOW_CONTRACT = "thally-track/v4";
 
 /**
  * The docs-repo "hub" workflow: it listens for a dispatched docs task (from a
@@ -168,13 +172,13 @@ jobs:
             npm run packages:build
             node packages/cli/dist/index.js check --drift --ci
           fi
-`
+`;
 
 export interface DocsAgentWorkflowOptions {
   /** Branch containing the production docs; repository_dispatch still reads this workflow from the default branch. */
-  docsBranch?: string
+  docsBranch?: string;
   /** Repository-relative directory containing docs.json for monorepo sites. */
-  docsRootDir?: string | null
+  docsRootDir?: string | null;
 }
 
 /**
@@ -185,31 +189,37 @@ export interface DocsAgentWorkflowOptions {
  * ref and working directory keep agent edits on the site's configured docs
  * branch/root.
  */
-export function buildDocsAgentWorkflow(options: DocsAgentWorkflowOptions = {}): string {
-  const docsBranch = options.docsBranch?.trim()
-  const docsRootDir = options.docsRootDir?.replace(/^\/+|\/+$/g, '')
-  if (docsRootDir?.split('/').some((segment) => !segment || segment === '.' || segment === '..')) {
-    throw new Error('The docs root must be a repository-relative directory.')
+export function buildDocsAgentWorkflow(
+  options: DocsAgentWorkflowOptions = {},
+): string {
+  const docsBranch = options.docsBranch?.trim();
+  const docsRootDir = options.docsRootDir?.replace(/^\/+|\/+$/g, "");
+  if (
+    docsRootDir
+      ?.split("/")
+      .some((segment) => !segment || segment === "." || segment === "..")
+  ) {
+    throw new Error("The docs root must be a repository-relative directory.");
   }
 
-  let workflow = DOCS_AGENT_WORKFLOW_TEMPLATE
+  let workflow = DOCS_AGENT_WORKFLOW_TEMPLATE;
   if (docsBranch) {
     workflow = workflow.replaceAll(
-      '          fetch-depth: 0',
+      "          fetch-depth: 0",
       `          fetch-depth: 0\n          ref: ${JSON.stringify(docsBranch)}`,
-    )
+    );
   }
   if (docsRootDir) {
     workflow = workflow.replaceAll(
-      '    runs-on: ubuntu-latest\n    steps:',
+      "    runs-on: ubuntu-latest\n    steps:",
       `    runs-on: ubuntu-latest\n    defaults:\n      run:\n        working-directory: ${JSON.stringify(docsRootDir)}\n    steps:`,
-    )
+    );
   }
-  return workflow
+  return workflow;
 }
 
 /** Generic root/default-branch receiver scaffolded by the public CLI. */
-export const DOCS_AGENT_WORKFLOW = buildDocsAgentWorkflow()
+export const DOCS_AGENT_WORKFLOW = buildDocsAgentWorkflow();
 
 /** Product-repo sender: a `@thally` comment on a PR dispatches a task to the docs repo. */
 export function mentionSenderWorkflow(docsRepo: string): string {
@@ -238,7 +248,7 @@ jobs:
             -F "client_payload[instruction]=\${INSTRUCTION#@thally }" \\
             -F "client_payload[from_pr]=$PR_URL" \\
             -F "client_payload[requester]=\${{ github.event.comment.user.login }}"
-`
+`;
 }
 
 /**
@@ -267,16 +277,16 @@ jobs:
           gh api repos/${docsRepo}/dispatches -f event_type=thally-document \\
             -F "client_payload[instruction]=Document the changes merged in \${{ github.repository }}@\${{ github.sha }}" \\
             -F "client_payload[from_pr]=\${{ github.event.head_commit.url }}"
-`
+`;
 }
 
 export interface TrackSenderRepo {
-  owner: string
-  repo: string
-  branch?: string
-  paths?: Array<string>
-  outputTab?: string
-  outputGroup?: string
+  owner: string;
+  repo: string;
+  branch?: string;
+  paths?: Array<string>;
+  outputTab?: string;
+  outputGroup?: string;
 }
 
 /**
@@ -285,34 +295,45 @@ export interface TrackSenderRepo {
  * labelled `docs-preview` (draft the docs BEFORE the feature ships). The
  * pure-GitHub-Actions alternative to the webhook relay — no server in the loop.
  *
- * Two safeguards mirror the webhook: a loop guard skips the docs agent's own
- * `thally/agent-*` branches (so a self-tracking repo doesn't chase its own tail),
+ * Two safeguards mirror the webhook: a loop guard skips every Track-owned
+ * branch namespace (so a self-tracking repo doesn't chase its own tail),
  * and everything untrusted (PR number/url/login) flows through ENV so bash never
  * re-parses it. The placement directive is baked from the tracking config —
  * escaped for the double-quoted bash context so a tab/group name containing a
  * quote, backtick, `$`, or backslash can't break out of the string.
  */
-export function trackSenderWorkflow(docsRepo: string, repo: TrackSenderRepo): string {
-  const branch = repo.branch ?? 'main'
+export function trackSenderWorkflow(
+  docsRepo: string,
+  repo: TrackSenderRepo,
+): string {
+  const branch = repo.branch ?? "main";
   const pathsBlock = repo.paths?.length
-    ? `\n    paths:\n${repo.paths.map((p) => `      - '${p}'`).join('\n')}`
-    : ''
+    ? `\n    paths:\n${repo.paths.map((p) => `      - '${p}'`).join("\n")}`
+    : "";
   // Escape values baked into the double-quoted INSTRUCTION="…" bash string.
-  const bashDq = (s: string) => s.replace(/([\\"$`])/g, '\\$1')
+  const bashDq = (s: string) => s.replace(/([\\"$`])/g, "\\$1");
   // ONE source of truth for the instruction prose: build it the same way the
   // webhook relay does (buildTrackInstruction), with the runtime PR number as a
   // token we swap for the bash env var AFTER escaping (so the $ isn't escaped).
-  const PR_TOKEN = '__THALLY_PR_NUMBER__'
+  const PR_TOKEN = "__THALLY_PR_NUMBER__";
   const bake = (preview: boolean) =>
-    bashDq(buildTrackInstruction(repo, { number: PR_TOKEN as unknown as number }, { preview })).replace(
-      PR_TOKEN,
-      '${THALLY_PR_NUMBER}',
-    )
-  const mergedInstruction = bake(false)
-  const previewInstruction = bake(true)
+    bashDq(
+      buildTrackInstruction(
+        repo,
+        { number: PR_TOKEN as unknown as number },
+        { preview },
+      ),
+    ).replace(PR_TOKEN, "${THALLY_PR_NUMBER}");
+  const mergedInstruction = bake(false);
+  const previewInstruction = bake(true);
+  const trackOwnedBranchGuard = TRACK_OWNED_BRANCH_PREFIXES.map(
+    (prefix) => `!startsWith(github.event.pull_request.head.ref, '${prefix}')`,
+  ).join(" &&\n      ");
   // docsRepo lands UNQUOTED in the `gh api repos/<docsRepo>/dispatches` path —
   // constrain it to a valid owner/repo so it can't inject a shell metachar.
-  const safeDocsRepo = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(docsRepo) ? docsRepo : 'OWNER/DOCS-REPO'
+  const safeDocsRepo = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(docsRepo)
+    ? docsRepo
+    : "OWNER/DOCS-REPO";
   return `name: Thally track dispatch
 
 on:
@@ -325,9 +346,9 @@ on:
 jobs:
   dispatch:
     # Fire when the PR MERGED, or when it's an OPEN, docs-preview-labelled PR —
-    # but never for the docs agent's own branches (loop guard).
+    # but never for any Track-owned writer branch (loop guard).
     if: >-
-      !startsWith(github.event.pull_request.head.ref, '${AGENT_BRANCH_PREFIX}') &&
+      ${trackOwnedBranchGuard} &&
       (github.event.pull_request.merged == true ||
        (github.event.action != 'closed' &&
         contains(github.event.pull_request.labels.*.name, '${DOCS_PREVIEW_LABEL}')))
@@ -353,7 +374,7 @@ jobs:
             -F "client_payload[from_pr]=\${THALLY_PR_URL}" \\
             -F "client_payload[requester]=\${THALLY_REQUESTER}" \\
             -F "client_payload[preview]=\${PREVIEW}"
-`
+`;
 }
 
 /**
@@ -361,34 +382,37 @@ jobs:
  * designated owner's approval. Pair with branch protection on main. This is the
  * answer to "can anyone invite themselves via a PR?" — no, not without approval.
  */
-export function codeownersFor(team = '@your-org/docs-admins'): string {
+export function codeownersFor(team = "@your-org/docs-admins"): string {
   return `# Changes to the admin team roster (the "team" block) require approval from a
 # designated owner. REQUIRES branch protection on main (PRs + required review),
 # otherwise a direct push bypasses this.
 /docs.json   ${team}
-`
+`;
 }
 
 export interface ScaffoldResult {
-  written: Array<string>
-  senderSnippet: string
+  written: Array<string>;
+  senderSnippet: string;
 }
 
 /** Write the docs-repo agent workflow + a CODEOWNERS roster gate; return the sender snippet. */
-export function scaffoldAgentWorkflow(projectDir: string, docsRepo = '<owner>/<docs-repo>'): ScaffoldResult {
-  const written: Array<string> = []
+export function scaffoldAgentWorkflow(
+  projectDir: string,
+  docsRepo = "<owner>/<docs-repo>",
+): ScaffoldResult {
+  const written: Array<string> = [];
 
-  const wfDir = path.join(projectDir, '.github', 'workflows')
-  fs.mkdirSync(wfDir, { recursive: true })
-  const wf = path.join(wfDir, 'thally-agent.yml')
-  fs.writeFileSync(wf, DOCS_AGENT_WORKFLOW)
-  written.push(path.relative(projectDir, wf))
+  const wfDir = path.join(projectDir, ".github", "workflows");
+  fs.mkdirSync(wfDir, { recursive: true });
+  const wf = path.join(wfDir, "thally-agent.yml");
+  fs.writeFileSync(wf, DOCS_AGENT_WORKFLOW);
+  written.push(path.relative(projectDir, wf));
 
-  const co = path.join(projectDir, '.github', 'CODEOWNERS')
+  const co = path.join(projectDir, ".github", "CODEOWNERS");
   if (!fs.existsSync(co)) {
-    fs.writeFileSync(co, codeownersFor())
-    written.push(path.relative(projectDir, co))
+    fs.writeFileSync(co, codeownersFor());
+    written.push(path.relative(projectDir, co));
   }
 
-  return { written, senderSnippet: mentionSenderWorkflow(docsRepo) }
+  return { written, senderSnippet: mentionSenderWorkflow(docsRepo) };
 }
