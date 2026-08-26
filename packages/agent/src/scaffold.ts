@@ -181,6 +181,15 @@ export interface DocsAgentWorkflowOptions {
   docsRootDir?: string | null;
 }
 
+/** Strip only boundary slashes in linear time, even for hostile long input. */
+function trimBoundarySlashes(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) === 47) start += 1;
+  while (end > start && value.charCodeAt(end - 1) === 47) end -= 1;
+  return value.slice(start, end);
+}
+
 /**
  * Build the docs-side receiver for a specific connected site.
  *
@@ -193,7 +202,10 @@ export function buildDocsAgentWorkflow(
   options: DocsAgentWorkflowOptions = {},
 ): string {
   const docsBranch = options.docsBranch?.trim();
-  const docsRootDir = options.docsRootDir?.replace(/^\/+|\/+$/g, "");
+  const docsRootDir =
+    options.docsRootDir == null
+      ? undefined
+      : trimBoundarySlashes(options.docsRootDir);
   if (
     docsRootDir
       ?.split("/")

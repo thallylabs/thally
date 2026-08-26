@@ -30,6 +30,16 @@ describe("generated workflow shell-safety (Thally Track injection hardening)", (
     );
   });
 
+  it("normalizes long boundary-slash input in linear time", async () => {
+    const { buildDocsAgentWorkflow } = await import("../scaffold.js");
+    const boundary = "/".repeat(100_000);
+    const yaml = buildDocsAgentWorkflow({
+      docsRootDir: `${boundary}apps/docs${boundary}`,
+    });
+
+    expect(yaml).toContain('working-directory: "apps/docs"');
+  });
+
   it("targets the checked-out production branch when opening the docs PR", () => {
     expect(
       buildPullRequestCreateArgs(
