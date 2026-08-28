@@ -653,6 +653,54 @@ describe("runAgentLoop", () => {
     ).rejects.toThrow("agent_result_missing");
   });
 
+  it("reserves two policy-bound turns for a provider-enforced terminal result", async () => {
+    const common = {
+      outcome: "abstained",
+      reason: "insufficient_evidence",
+      explanation: "No grounded edit.",
+      inspectedPaths: [],
+      changeIds: [],
+    };
+    const { client, calls } = stubClient([
+      {
+        content: [
+          { type: "tool_use", id: "read", name: "list_pages", input: {} },
+        ],
+        stop_reason: "tool_use",
+      },
+      terminal({ ...common, reason: "unknown" }, "malformed"),
+      terminal(common, "valid"),
+    ]);
+
+    const result = await runAgentLoop({
+      ...base,
+      client,
+      maxSteps: 3,
+      terminalProfile: "policy-bound",
+      tools: [
+        {
+          name: "list_pages",
+          description: "List pages.",
+          input_schema: { type: "object" },
+        },
+      ],
+      dispatch: async () => "pages",
+    });
+
+    expect(result.steps).toBe(3);
+    expect(result.decision).toMatchObject(common);
+    for (const request of calls.slice(1)) {
+      expect(request.tools?.map((tool) => tool.name)).toEqual([
+        "submit_documentation_result",
+      ]);
+      expect(request.tool_choice).toEqual({
+        type: "tool",
+        name: "submit_documentation_result",
+        disable_parallel_tool_use: true,
+      });
+    }
+  });
+
   it("rejects prose-only completion until the structured terminal tool is called", async () => {
     const { client, calls } = stubClient([
       {

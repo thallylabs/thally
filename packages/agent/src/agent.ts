@@ -34,6 +34,11 @@ export interface AnthropicRequest {
   max_tokens: number;
   system?: string;
   tools?: Array<ClaudeTool>;
+  tool_choice?: {
+    type: "tool";
+    name: string;
+    disable_parallel_tool_use: true;
+  };
   messages: Array<Message>;
 }
 
@@ -543,8 +548,25 @@ export async function runAgentLoop(input: LoopInput): Promise<{
 
   while (steps < input.maxSteps) {
     steps++;
+    // Policy-bound automation must always leave a durable structured result.
+    // Reserve two attempts so one malformed terminal call can be repaired,
+    // and use the provider's tool-choice contract to prevent another edit
+    // from consuming the final session turn.
+    const isForcedTerminalTurn =
+      terminalProfile === "policy-bound" &&
+      steps >= Math.max(1, input.maxSteps - 1);
     const request: AnthropicRequest = {
       ...requestBase,
+      ...(isForcedTerminalTurn
+        ? {
+            tools: [terminalTool],
+            tool_choice: {
+              type: "tool" as const,
+              name: TERMINAL_TOOL_NAME,
+              disable_parallel_tool_use: true as const,
+            },
+          }
+        : {}),
       messages,
     };
     // Track signs and transports context separately, but the model gateway
@@ -587,12 +609,14 @@ export async function runAgentLoop(input: LoopInput): Promise<{
           ? " Drafted results require between 1 and 500 factualClaims; abstained results must omit factualClaims."
           : "";
       const terminalErrors: Array<ToolResultBlock | ContentBlock> = [
-        ...toolUses.map((use): ToolResultBlock => ({
-          type: "tool_result",
-          tool_use_id: use.id,
-          content: `Error: submit_documentation_result must be one valid, standalone terminal call.${terminalContractGuidance}`,
-          is_error: true,
-        })),
+        ...toolUses.map(
+          (use): ToolResultBlock => ({
+            type: "tool_result",
+            tool_use_id: use.id,
+            content: `Error: submit_documentation_result must be one valid, standalone terminal call.${terminalContractGuidance}`,
+            is_error: true,
+          }),
+        ),
         {
           type: "text",
           text: `Call submit_documentation_result once, by itself, with a bounded drafted or abstained decision.${terminalContractGuidance}`,
