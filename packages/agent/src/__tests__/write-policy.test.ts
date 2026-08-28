@@ -174,7 +174,7 @@ describe("agent write policy parsing", () => {
 });
 
 describe("agent tool write authority", () => {
-  it("requires an evidence reference for policy-bound exact replacements", () => {
+  it("exposes only evidence-bound exact replacements for existing Track pages", () => {
     const directory = repository();
     const bridge = buildToolBridge(directory, {
       writePolicy: parseAgentWritePolicy(policy())!,
@@ -186,23 +186,23 @@ describe("agent tool write authority", () => {
     const updateTool = bridge.claudeTools.find(
       (candidate) => candidate.name === "update_page",
     );
-    expect(updateTool?.input_schema.required).toEqual(
-      expect.arrayContaining(["evidenceReferenceId", "citationAnchor"]),
-    );
+    expect(updateTool).toBeUndefined();
   });
 
   it("fails closed for a future unclassified tool", () => {
     expect(agentWriteToolTargets(".", "future_write_tool", {})).toBeNull();
   });
 
-  it("allows the exact existing page and blocks every other page before mutation", async () => {
+  it("allows an exact existing-page span and rejects whole-page replacement", async () => {
     const directory = repository();
     const parsed = parseAgentWritePolicy(policy())!;
     const bridge = buildToolBridge(directory, { writePolicy: parsed });
 
-    const rejected = await bridge.dispatch("update_page", {
+    const rejected = await bridge.dispatch("replace_page_text", {
       pageId: "other",
-      content: "Nope",
+      oldText: "Old",
+      newText: "Nope",
+      evidenceReferenceId: "evidence:1",
     });
     expect(rejected).toBe(
       "Error: this write is outside the controller-approved documentation plan.",
@@ -211,20 +211,31 @@ describe("agent tool write authority", () => {
       readFileSync(join(directory, "src", "content", "api.mdx"), "utf8"),
     ).toContain("Old");
 
-    const accepted = await bridge.dispatch("update_page", {
+    expect(
+      await bridge.dispatch("update_page", {
+        pageId: "api",
+        content: "New",
+        evidenceReferenceId: "evidence:1",
+        citationAnchor: "New",
+      }),
+    ).toBe(
+      "Error: Track updates to existing pages require an exact text replacement.",
+    );
+
+    const accepted = await bridge.dispatch("replace_page_text", {
       pageId: "api",
-      content: "  New  \n",
+      oldText: "Old",
+      newText: "New",
       evidenceReferenceId: "evidence:1",
-      citationAnchor: "New",
     });
-    expect(accepted).toContain("Page updated");
-    expect(accepted).toContain("Final evidence span lines: 4-5.");
+    expect(accepted).toContain("Page text replaced");
+    expect(accepted).toContain("Final replacement lines: 5-6.");
     const finalLines = readFileSync(
       join(directory, "src", "content", "api.mdx"),
       "utf8",
     ).split("\n");
-    expect(finalLines[3]).toBe("New");
-    expect(finalLines[4]).toMatch(/^<!-- thally-cite:v1:[a-f0-9]{64} -->$/u);
+    expect(finalLines[4]).toBe("New");
+    expect(finalLines[5]).toMatch(/^<!-- thally-cite:v1:[a-f0-9]{64} -->$/u);
   });
 
   it("rejects missing or invalid replacement evidence before mutation", async () => {
@@ -307,9 +318,11 @@ describe("agent tool write authority", () => {
       )!,
     });
     expect(
-      await bridge.dispatch("update_page", {
+      await bridge.dispatch("replace_page_text", {
         pageId: "linked",
-        content: "Nope",
+        oldText: "outside",
+        newText: "Nope",
+        evidenceReferenceId: "evidence:1",
       }),
     ).toContain("outside the controller-approved");
     expect(readFileSync(outside, "utf8")).toBe("outside");

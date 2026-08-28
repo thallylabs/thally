@@ -60,6 +60,14 @@ const AGENT_TOOL_NAMES = new Set([
   "add_tab",
 ]);
 
+// Managed Track updates are evidence-scoped patches to existing customer
+// documentation. Replacing an entire existing page gives a model far more
+// mutation authority than the sealed plan requires and can erase unrelated
+// prose while still staying inside the approved path. Exact-span replacement
+// preserves the untouched file byte-for-byte; new pages remain available via
+// add_page when the controller explicitly authorizes navigation changes.
+const POLICY_BOUND_DISALLOWED_TOOLS = new Set(["update_page"]);
+
 export interface ToolBridge {
   claudeTools: Array<ClaudeTool>;
   dispatch: (name: string, input: Record<string, unknown>) => Promise<string>;
@@ -79,7 +87,11 @@ export function buildToolBridge(
   projectDir: string,
   options: ToolBridgeOptions = {},
 ): ToolBridge {
-  const selected = mcpTools.filter((tool) => AGENT_TOOL_NAMES.has(tool.name));
+  const selected = mcpTools.filter(
+    (tool) =>
+      AGENT_TOOL_NAMES.has(tool.name) &&
+      !(options.writePolicy && POLICY_BOUND_DISALLOWED_TOOLS.has(tool.name)),
+  );
 
   const claudeTools: Array<ClaudeTool> = selected.map((tool) => {
     // Cast the erased ZodObject<ZodRawShape> to a plain ZodType: its generic
@@ -140,6 +152,9 @@ export function buildToolBridge(
     const tool = getTool(name);
     if (!tool || !AGENT_TOOL_NAMES.has(name)) {
       return `Error: tool "${name}" is not available to the docs agent.`;
+    }
+    if (options.writePolicy && POLICY_BOUND_DISALLOWED_TOOLS.has(name)) {
+      return "Error: Track updates to existing pages require an exact text replacement.";
     }
     if (
       options.writePolicy &&
