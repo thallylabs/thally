@@ -94,6 +94,27 @@ export function createAgentTurnBudget(
   };
 }
 
+/**
+ * Resolve the first model-loop allowance for one execution authority.
+ *
+ * Policy-bound Track sessions persist one 32-turn capability. Their initial
+ * loop must be allowed to consume that same ceiling; otherwise the public
+ * agent can stop at its historical 24-turn CLI default while the durable
+ * session still has valid unused authority.
+ */
+export function resolveAgentLoopMaximumSteps(
+  requestedMaximumSteps: number | undefined,
+  hasWritePolicy: boolean,
+): number {
+  const defaultMaximumSteps = hasWritePolicy
+    ? TRACK_AGENT_MAX_TOTAL_STEPS
+    : 24;
+  const maximumSteps = requestedMaximumSteps ?? defaultMaximumSteps;
+  return hasWritePolicy
+    ? Math.min(maximumSteps, TRACK_AGENT_MAX_TOTAL_STEPS)
+    : maximumSteps;
+}
+
 /** Build the exact prompt roles used by initial and repair model turns. */
 export function buildAgentPromptEnvelope(
   projectDir: string,
@@ -175,10 +196,10 @@ export async function runAgent(
 ): Promise<AgentResult> {
   const { projectDir, mode } = options;
   const model = resolveAgentModel(options.model);
-  const requestedMaxSteps = options.maxSteps ?? 24;
-  const maxSteps = options.writePolicy
-    ? Math.min(requestedMaxSteps, 24)
-    : requestedMaxSteps;
+  const maxSteps = resolveAgentLoopMaximumSteps(
+    options.maxSteps,
+    Boolean(options.writePolicy),
+  );
   const emit = options.onEvent ?? (() => {});
 
   assertCleanGitRepo(projectDir);

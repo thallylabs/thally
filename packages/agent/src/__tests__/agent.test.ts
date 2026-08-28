@@ -17,6 +17,7 @@ import {
   assertCleanDocumentationResultIsValid,
   assertDocumentationDecisionMatchesState,
   createAgentTurnBudget,
+  resolveAgentLoopMaximumSteps,
 } from "../run";
 import { buildSystemPrompt, buildUserPrompt } from "../prompt";
 import { buildToolBridge } from "../tools";
@@ -1122,6 +1123,14 @@ describe("post-repair documentation result state", () => {
 });
 
 describe("policy-bound total turn budget", () => {
+  it("gives the initial policy-bound loop the durable 32-turn ceiling", () => {
+    expect(resolveAgentLoopMaximumSteps(undefined, true)).toBe(32);
+    expect(resolveAgentLoopMaximumSteps(40, true)).toBe(32);
+    expect(resolveAgentLoopMaximumSteps(12, true)).toBe(12);
+    expect(resolveAgentLoopMaximumSteps(undefined, false)).toBe(24);
+    expect(resolveAgentLoopMaximumSteps(40, false)).toBe(40);
+  });
+
   it("admits 23 plus 9 turns and denies a thirty-third before execution", async () => {
     const admitted: Array<number> = [];
     const budget = createAgentTurnBudget(24, 32);
