@@ -12,27 +12,25 @@ import {
   type AnthropicLike,
   type AnthropicRequest,
   type CreateResponse,
-  type Message,
 } from "../agent";
 import {
   assertCleanDocumentationResultIsValid,
   assertDocumentationDecisionMatchesState,
+  createAgentTurnBudget,
 } from "../run";
 import { buildSystemPrompt, buildUserPrompt } from "../prompt";
 import { buildToolBridge } from "../tools";
 
 function stubClient(responses: Array<CreateResponse>): {
   client: AnthropicLike;
-  calls: Array<{ messages: Array<Message> }>;
+  calls: Array<AnthropicRequest>;
 } {
-  const calls: Array<{ messages: Array<Message> }> = [];
+  const calls: Array<AnthropicRequest> = [];
   let i = 0;
   const client: AnthropicLike = {
     messages: {
       create: async (body) => {
-        calls.push({
-          messages: JSON.parse(JSON.stringify(body.messages)) as Array<Message>,
-        });
+        calls.push(JSON.parse(JSON.stringify(body)) as AnthropicRequest);
         return (
           responses[i++] ?? {
             content: [{ type: "text", text: "done" }],
@@ -63,6 +61,120 @@ const terminal = (
 });
 
 describe("runAgentLoop", () => {
+  it("advertises a provider-compatible terminal tool schema", async () => {
+    const { client, calls } = stubClient([
+      terminal({
+        outcome: "abstained",
+        reason: "insufficient_evidence",
+        explanation: "No grounded edit.",
+        inspectedPaths: [],
+        changeIds: [],
+      }),
+    ]);
+
+    await runAgentLoop({ ...base, client, dispatch: async () => "unused" });
+
+    const terminalTool = calls[0]!.tools!.find(
+      (tool) => tool.name === "submit_documentation_result",
+    )!;
+    expect(terminalTool.input_schema).not.toHaveProperty("oneOf");
+    expect(JSON.stringify(terminalTool.input_schema)).not.toContain('"not"');
+    expect(terminalTool.input_schema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["outcome", "explanation", "inspectedPaths", "changeIds"],
+    });
+  });
+
+  it("advertises the policy-bound factual-claim contract on the first request", async () => {
+    const { client, calls } = stubClient([
+      terminal({
+        outcome: "abstained",
+        reason: "insufficient_evidence",
+        explanation: "No grounded edit.",
+        inspectedPaths: [],
+        changeIds: [],
+      }),
+    ]);
+
+    await runAgentLoop({
+      ...base,
+      client,
+      terminalProfile: "policy-bound",
+      dispatch: async () => "unused",
+    });
+
+    const terminalTool = calls[0]!.tools!.find(
+      (tool) => tool.name === "submit_documentation_result",
+    )!;
+    expect(terminalTool.description).toContain(
+      "Drafted results require factualClaims",
+    );
+    expect(terminalTool.input_schema).not.toHaveProperty("oneOf");
+    expect(JSON.stringify(terminalTool.input_schema)).not.toContain('"not"');
+    expect(terminalTool.input_schema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["outcome", "explanation", "inspectedPaths", "changeIds"],
+      properties: {
+        factualClaims: {
+          type: "array",
+          minItems: 1,
+          maxItems: 500,
+          description:
+            "Required when outcome is drafted; omit this property when outcome is abstained.",
+        },
+      },
+    });
+  });
+
+  it("repairs policy-bound drafted results that omit or empty factual claims", async () => {
+    const common = {
+      outcome: "drafted",
+      explanation: "Updated the guide.",
+      inspectedPaths: ["src/content/guide.mdx"],
+      changeIds: ["change-1"],
+    };
+    const claim = {
+      path: "src/content/guide.mdx",
+      startLine: 12,
+      endLine: 13,
+      changeIds: ["change-1"],
+      evidenceReferenceIds: ["evidence:guide"],
+    };
+    const { client, calls } = stubClient([
+      terminal(common, "missing-claims"),
+      terminal({ ...common, factualClaims: [] }, "empty-claims"),
+      terminal({ ...common, factualClaims: [claim] }, "valid-claims"),
+    ]);
+
+    const result = await runAgentLoop({
+      ...base,
+      client,
+      terminalProfile: "policy-bound",
+      dispatch: async () => "unused",
+    });
+
+    expect(result).toMatchObject({
+      steps: 3,
+      decision: { outcome: "drafted", factualClaims: [claim] },
+    });
+    expect(calls).toHaveLength(3);
+    for (const request of calls.slice(1)) {
+      const schema = request.tools!.find(
+        (tool) => tool.name === "submit_documentation_result",
+      )!.input_schema;
+      expect(schema).toMatchObject({
+        properties: { factualClaims: { minItems: 1, maxItems: 500 } },
+      });
+    }
+    expect(JSON.stringify(calls[1]!.messages)).toContain("missing-claims");
+    expect(JSON.stringify(calls[2]!.messages)).toContain("empty-claims");
+    expect(JSON.stringify(calls[1]!.messages)).toContain(
+      "Drafted results require between 1 and 500 factualClaims",
+    );
+  });
+
   it("keeps the public output budget and admits Track's larger bounded result profile", async () => {
     const response = terminal({
       outcome: "abstained",
@@ -475,6 +587,55 @@ describe("runAgentLoop", () => {
     });
   });
 
+  it("redacts policy-bound tool inputs from progress events", async () => {
+    const customerProse = "private customer prose";
+    const events: Array<string> = [];
+    const { client } = stubClient([
+      {
+        content: [
+          {
+            type: "tool_use",
+            id: "write-1",
+            name: "update_page",
+            input: {
+              pageId: "private/customer-path",
+              content: customerProse,
+              evidenceReferenceId: "evidence:private",
+            },
+          },
+        ],
+        stop_reason: "tool_use",
+      },
+      terminal({
+        outcome: "abstained",
+        reason: "insufficient_evidence",
+        explanation: "No authorized edit completed.",
+        inspectedPaths: [],
+        changeIds: [],
+      }),
+    ]);
+
+    await runAgentLoop({
+      ...base,
+      client,
+      tools: [
+        {
+          name: "update_page",
+          description: "Update one page.",
+          input_schema: { type: "object" },
+        },
+      ],
+      terminalProfile: "policy-bound",
+      dispatch: async () => "Error: rejected",
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(events).toEqual(["update_page"]);
+    expect(JSON.stringify(events)).not.toContain(customerProse);
+    expect(JSON.stringify(events)).not.toContain("customer-path");
+    expect(JSON.stringify(events)).not.toContain("evidence:private");
+  });
+
   it("fails at maxSteps when the model never submits a terminal decision", async () => {
     const forever: CreateResponse = {
       content: [{ type: "tool_use", id: "t", name: "list_pages", input: {} }],
@@ -556,11 +717,19 @@ describe("runAgentLoop", () => {
       type: string;
       tool_use_id?: string;
       is_error?: boolean;
+      content?: string;
+      text?: string;
     }>;
     expect(repair[0]).toMatchObject({
       type: "tool_result",
       tool_use_id: "bad-result",
       is_error: true,
+      content:
+        "Error: submit_documentation_result must be one valid, standalone terminal call.",
+    });
+    expect(repair[1]).toEqual({
+      type: "text",
+      text: "Call submit_documentation_result once, by itself, with a bounded drafted or abstained decision.",
     });
   });
 
@@ -728,6 +897,53 @@ describe("documentation factual claim protocol", () => {
         ...common,
         factualClaims: [],
       }),
+    ).toBeNull();
+  });
+
+  it("requires non-empty claims only for policy-bound drafts and forbids them on abstention", () => {
+    const common = {
+      explanation: "Finished.",
+      inspectedPaths: ["src/content/a.mdx"],
+      changeIds: ["change-1"],
+    };
+    const factualClaims = [
+      {
+        path: "src/content/a.mdx",
+        startLine: 1,
+        endLine: 1,
+        changeIds: ["change-1"],
+        evidenceReferenceIds: ["evidence:1"],
+      },
+    ];
+
+    expect(
+      parseDocumentationDecision(
+        { outcome: "drafted", ...common },
+        "policy-bound",
+      ),
+    ).toBeNull();
+    expect(
+      parseDocumentationDecision(
+        { outcome: "drafted", ...common, factualClaims: [] },
+        "policy-bound",
+      ),
+    ).toBeNull();
+    expect(
+      parseDocumentationDecision(
+        { outcome: "drafted", ...common, factualClaims },
+        "policy-bound",
+      ),
+    ).toEqual({ outcome: "drafted", ...common, factualClaims });
+    expect(
+      parseDocumentationDecision(
+        {
+          outcome: "abstained",
+          reason: "already_documented",
+          ...common,
+          factualClaims,
+        },
+        "policy-bound",
+      ),
     ).toBeNull();
   });
 
@@ -902,5 +1118,41 @@ describe("post-repair documentation result state", () => {
         warnings: [],
       }),
     ).not.toThrow();
+  });
+});
+
+describe("policy-bound total turn budget", () => {
+  it("admits 23 plus 9 turns and denies a thirty-third before execution", async () => {
+    const admitted: Array<number> = [];
+    const budget = createAgentTurnBudget(24, 32);
+
+    await budget.run(async (maximumSteps) => {
+      admitted.push(maximumSteps);
+      return { steps: 23 };
+    });
+    await budget.run(async (maximumSteps) => {
+      admitted.push(maximumSteps);
+      return { steps: 9 };
+    });
+    await expect(
+      budget.run(async (maximumSteps) => {
+        admitted.push(maximumSteps);
+        return { steps: 1 };
+      }),
+    ).rejects.toThrow("agent_total_step_limit_exceeded");
+
+    expect(admitted).toEqual([24, 9]);
+  });
+
+  it("leaves generic per-loop turn behavior unchanged", async () => {
+    const admitted: Array<number> = [];
+    const budget = createAgentTurnBudget(40);
+    for (const steps of [40, 40]) {
+      await budget.run(async (maximumSteps) => {
+        admitted.push(maximumSteps);
+        return { steps };
+      });
+    }
+    expect(admitted).toEqual([40, 40]);
   });
 });

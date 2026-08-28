@@ -174,6 +174,23 @@ describe("agent write policy parsing", () => {
 });
 
 describe("agent tool write authority", () => {
+  it("requires an evidence reference for policy-bound exact replacements", () => {
+    const directory = repository();
+    const bridge = buildToolBridge(directory, {
+      writePolicy: parseAgentWritePolicy(policy())!,
+    });
+    const tool = bridge.claudeTools.find(
+      (candidate) => candidate.name === "replace_page_text",
+    );
+    expect(tool?.input_schema.required).toContain("evidenceReferenceId");
+    const updateTool = bridge.claudeTools.find(
+      (candidate) => candidate.name === "update_page",
+    );
+    expect(updateTool?.input_schema.required).toEqual(
+      expect.arrayContaining(["evidenceReferenceId", "citationAnchor"]),
+    );
+  });
+
   it("fails closed for a future unclassified tool", () => {
     expect(agentWriteToolTargets(".", "future_write_tool", {})).toBeNull();
   });
@@ -196,9 +213,42 @@ describe("agent tool write authority", () => {
 
     const accepted = await bridge.dispatch("update_page", {
       pageId: "api",
-      content: "New",
+      content: "  New  \n",
+      evidenceReferenceId: "evidence:1",
+      citationAnchor: "New",
     });
     expect(accepted).toContain("Page updated");
+    expect(accepted).toContain("Final evidence span lines: 4-5.");
+    const finalLines = readFileSync(
+      join(directory, "src", "content", "api.mdx"),
+      "utf8",
+    ).split("\n");
+    expect(finalLines[3]).toBe("New");
+    expect(finalLines[4]).toMatch(/^<!-- thally-cite:v1:[a-f0-9]{64} -->$/u);
+  });
+
+  it("rejects missing or invalid replacement evidence before mutation", async () => {
+    const directory = repository();
+    const path = join(directory, "src", "content", "api.mdx");
+    const original = readFileSync(path);
+    const bridge = buildToolBridge(directory, {
+      writePolicy: parseAgentWritePolicy(policy())!,
+    });
+
+    for (const evidenceReferenceId of [undefined, " invalid"]) {
+      const input: Record<string, unknown> = {
+        pageId: "api",
+        oldText: "Old",
+        newText: "New",
+      };
+      if (evidenceReferenceId !== undefined) {
+        input.evidenceReferenceId = evidenceReferenceId;
+      }
+      expect(await bridge.dispatch("replace_page_text", input)).toBe(
+        "Error: Track evidence binding is invalid.",
+      );
+      expect(readFileSync(path)).toEqual(original);
+    }
   });
 
   it("requires both the new page and docs.json before add_page can run", async () => {

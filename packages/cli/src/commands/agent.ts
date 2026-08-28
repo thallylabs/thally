@@ -29,6 +29,36 @@ import {
 
 export const TRACK_CONTEXT_MAX_BYTES = TRACK_AGENT_CONTEXT_MAX_BYTES;
 const TRACK_CONTEXT_INVALID = "track_context_invalid";
+export const TRACK_AGENT_PROVIDER_TIMEOUT_MS = 300_000;
+
+/**
+ * Keep ordinary Track turns small enough for the synchronous managed gateway,
+ * while retaining the full terminal budget for genuinely large sealed plans.
+ * The buckets are intentionally derived only from controller-issued change
+ * authority; repository or model text cannot inflate them.
+ */
+export function resolveTrackAgentOutputTokens(
+  writePolicy: ReturnType<typeof readAgentWritePolicyFile> | undefined,
+): number {
+  const changeCount = writePolicy?.requiredChangeIds.length ?? 0;
+  if (changeCount <= 32) return 8_192;
+  if (changeCount <= 128) return 16_384;
+  if (changeCount <= 256) return 32_768;
+  return TRACK_AGENT_MAX_OUTPUT_TOKENS;
+}
+
+/**
+ * Managed Track already owns retries and a six-minute writer deadline.
+ * Supplying the narrower provider budget also prevents the Anthropic SDK from
+ * rejecting Track's bounded 64k output ceiling before it contacts the gateway.
+ */
+export function resolveAgentProviderClientOptions(
+  contextFile: string | undefined,
+): { timeout?: number; maxRetries?: number } {
+  return contextFile
+    ? { timeout: TRACK_AGENT_PROVIDER_TIMEOUT_MS, maxRetries: 0 }
+    : {};
+}
 
 /** Classify every provider-resolved context handoff as automated Track work. */
 export function resolveAgentTaskSource(
@@ -239,7 +269,10 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
     source: resolveAgentTaskSource(fromPr, contextFile),
   };
 
-  const real = new Anthropic({ apiKey });
+  const real = new Anthropic({
+    apiKey,
+    ...resolveAgentProviderClientOptions(contextFile),
+  });
   const client: AnthropicLike = {
     messages: {
       create: (body) => real.messages.create(body as never) as never,
@@ -257,7 +290,7 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
         ? TRACK_AGENT_REQUEST_MAX_BYTES
         : undefined,
       maximumOutputTokens: contextFile
-        ? TRACK_AGENT_MAX_OUTPUT_TOKENS
+        ? resolveTrackAgentOutputTokens(writePolicy)
         : undefined,
       onEvent: (event) => process.stdout.write(`  ${event}\n`),
     });

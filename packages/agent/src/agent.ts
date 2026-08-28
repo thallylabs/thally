@@ -60,90 +60,120 @@ export interface LoopInput {
   maximumOutputTokens?: number;
   /** Exact outer Anthropic JSON-body ceiling for a managed Track gateway. */
   maximumRequestBytes?: number;
+  /** Selects the terminal contract enforced for this model session. */
+  terminalProfile?: AgentTerminalProfile;
   dispatch: (name: string, input: Record<string, unknown>) => Promise<string>;
   onEvent?: (event: string) => void;
 }
 
-const TERMINAL_TOOL: ClaudeTool = {
-  name: "submit_documentation_result",
-  description:
-    "Finish the task with a structured result. This must be the final and only tool call in the turn.",
-  input_schema: {
-    type: "object",
-    additionalProperties: false,
-    required: ["outcome", "explanation", "inspectedPaths", "changeIds"],
-    oneOf: [
-      {
-        properties: { outcome: { enum: ["drafted"] } },
-        not: { required: ["reason"] },
-      },
-      {
-        properties: { outcome: { enum: ["abstained"] } },
-        required: ["reason"],
-        not: { required: ["factualClaims"] },
-      },
-    ],
-    properties: {
-      outcome: { type: "string", enum: ["drafted", "abstained"] },
-      reason: {
-        type: "string",
-        enum: [
-          "already_documented",
-          "insufficient_evidence",
-          "internal_only",
-          "unsupported_destination",
-        ],
-      },
-      explanation: { type: "string", minLength: 1, maxLength: 500 },
-      inspectedPaths: {
-        type: "array",
-        maxItems: 50,
-        uniqueItems: true,
-        items: { type: "string", minLength: 1, maxLength: 240 },
-      },
-      changeIds: {
-        type: "array",
-        maxItems: 500,
-        uniqueItems: true,
-        items: { type: "string", minLength: 1, maxLength: 128 },
-      },
-      factualClaims: {
-        type: "array",
-        maxItems: 500,
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: [
-            "path",
-            "startLine",
-            "endLine",
-            "changeIds",
-            "evidenceReferenceIds",
+export type AgentTerminalProfile = "generic" | "policy-bound";
+
+const TERMINAL_TOOL_NAME = "submit_documentation_result";
+
+/**
+ * Build the terminal schema for one execution authority.
+ *
+ * Anthropic-compatible gateways accept the flat tool-schema subset used here,
+ * but not portable conditional constructs such as `oneOf` plus `not`. The
+ * policy-bound schema therefore advertises the drafted/abstained rule in the
+ * relevant property descriptions and applies `minItems` to any supplied claim
+ * inventory. `parseDocumentationDecision` remains the enforcement boundary.
+ */
+function buildTerminalTool(profile: AgentTerminalProfile): ClaudeTool {
+  const isPolicyBound = profile === "policy-bound";
+  return {
+    name: TERMINAL_TOOL_NAME,
+    description: isPolicyBound
+      ? "Finish the policy-bound Track task with a structured result. Drafted results require factualClaims; abstained results must omit factualClaims. This must be the final and only tool call in the turn."
+      : "Finish the task with a structured result. This must be the final and only tool call in the turn.",
+    input_schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["outcome", "explanation", "inspectedPaths", "changeIds"],
+      properties: {
+        outcome: {
+          type: "string",
+          enum: ["drafted", "abstained"],
+          ...(isPolicyBound
+            ? {
+                description:
+                  "Use drafted only with one or more factualClaims. Use abstained only when factualClaims is omitted.",
+              }
+            : {}),
+        },
+        reason: {
+          type: "string",
+          ...(isPolicyBound
+            ? {
+                description:
+                  "Required when outcome is abstained; omit this property when outcome is drafted.",
+              }
+            : {}),
+          enum: [
+            "already_documented",
+            "insufficient_evidence",
+            "internal_only",
+            "unsupported_destination",
           ],
-          properties: {
-            path: { type: "string", minLength: 1, maxLength: 512 },
-            startLine: { type: "integer", minimum: 1, maximum: 1000000 },
-            endLine: { type: "integer", minimum: 1, maximum: 1000000 },
-            changeIds: {
-              type: "array",
-              minItems: 1,
-              maxItems: 500,
-              uniqueItems: true,
-              items: { type: "string", minLength: 1, maxLength: 128 },
-            },
-            evidenceReferenceIds: {
-              type: "array",
-              minItems: 1,
-              maxItems: 32,
-              uniqueItems: true,
-              items: { type: "string", minLength: 1, maxLength: 128 },
+        },
+        explanation: { type: "string", minLength: 1, maxLength: 500 },
+        inspectedPaths: {
+          type: "array",
+          maxItems: 50,
+          uniqueItems: true,
+          items: { type: "string", minLength: 1, maxLength: 240 },
+        },
+        changeIds: {
+          type: "array",
+          maxItems: 500,
+          uniqueItems: true,
+          items: { type: "string", minLength: 1, maxLength: 128 },
+        },
+        factualClaims: {
+          type: "array",
+          ...(isPolicyBound
+            ? {
+                minItems: 1,
+                description:
+                  "Required when outcome is drafted; omit this property when outcome is abstained.",
+              }
+            : {}),
+          maxItems: 500,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "path",
+              "startLine",
+              "endLine",
+              "changeIds",
+              "evidenceReferenceIds",
+            ],
+            properties: {
+              path: { type: "string", minLength: 1, maxLength: 512 },
+              startLine: { type: "integer", minimum: 1, maximum: 1000000 },
+              endLine: { type: "integer", minimum: 1, maximum: 1000000 },
+              changeIds: {
+                type: "array",
+                minItems: 1,
+                maxItems: 500,
+                uniqueItems: true,
+                items: { type: "string", minLength: 1, maxLength: 128 },
+              },
+              evidenceReferenceIds: {
+                type: "array",
+                minItems: 1,
+                maxItems: 32,
+                uniqueItems: true,
+                items: { type: "string", minLength: 1, maxLength: 128 },
+              },
             },
           },
         },
       },
     },
-  },
-};
+  };
+}
 
 /**
  * Smallest outer request-body limit across the models admitted by Track.
@@ -156,6 +186,8 @@ export const TRACK_AGENT_REQUEST_MAX_BYTES = 1_000_000;
 export const DEFAULT_AGENT_MAX_OUTPUT_TOKENS = 4_096;
 export const TRACK_AGENT_MAX_OUTPUT_TOKENS = 64_000;
 export const TRACK_AGENT_RESULT_MAX_BYTES = 1_000_000;
+/** Total model turns admitted across every phase of one policy-bound run. */
+export const TRACK_AGENT_MAX_TOTAL_STEPS = 32;
 /** Maximum one tool result may add before JSON framing and transcript receipts. */
 export const TRACK_AGENT_TOOL_RESULT_MAX_BYTES = 192 * 1_024;
 
@@ -410,7 +442,10 @@ function boundedStrings(
 /** Validate the model's terminal decision before it can affect run state. */
 export function parseDocumentationDecision(
   value: Record<string, unknown>,
+  terminalProfile: AgentTerminalProfile = "generic",
 ): DocumentationDecision | null {
+  if (terminalProfile !== "generic" && terminalProfile !== "policy-bound")
+    return null;
   const allowed = new Set([
     "outcome",
     "reason",
@@ -436,10 +471,13 @@ export function parseDocumentationDecision(
     return null;
   }
   const common = { explanation, inspectedPaths, changeIds };
+  const isPolicyBound = terminalProfile === "policy-bound";
   if (
     value.outcome === "drafted" &&
     value.reason === undefined &&
-    (value.factualClaims === undefined || claims.length > 0)
+    (isPolicyBound
+      ? value.factualClaims !== undefined && claims.length > 0
+      : value.factualClaims === undefined || claims.length > 0)
   ) {
     return {
       outcome: "drafted",
@@ -489,12 +527,18 @@ export async function runAgentLoop(input: LoopInput): Promise<{
   }
   let steps = 0;
   let summary = "";
+  const terminalProfile = input.terminalProfile ?? "generic";
+  if (terminalProfile !== "generic" && terminalProfile !== "policy-bound") {
+    throw new Error("agent_terminal_profile_invalid");
+  }
+  const terminalTool = buildTerminalTool(terminalProfile);
+  const advertisedToolNames = new Set(input.tools.map((tool) => tool.name));
 
   const requestBase: Omit<AnthropicRequest, "messages"> = {
     model: input.model,
     max_tokens: maximumOutputTokens,
     system: input.system,
-    tools: [...input.tools, TERMINAL_TOOL],
+    tools: [...input.tools, terminalTool],
   };
 
   while (steps < input.maxSteps) {
@@ -530,25 +574,28 @@ export async function runAgentLoop(input: LoopInput): Promise<{
         b.type === "tool_use",
     );
     const terminalUses = toolUses.filter(
-      (use) => use.name === TERMINAL_TOOL.name,
+      (use) => use.name === TERMINAL_TOOL_NAME,
     );
     if (terminalUses.length > 0) {
       const decision =
         terminalUses.length === 1 && toolUses.length === 1
-          ? parseDocumentationDecision(terminalUses[0]!.input)
+          ? parseDocumentationDecision(terminalUses[0]!.input, terminalProfile)
           : null;
       if (decision) return { summary, steps, decision };
+      const terminalContractGuidance =
+        terminalProfile === "policy-bound"
+          ? " Drafted results require between 1 and 500 factualClaims; abstained results must omit factualClaims."
+          : "";
       const terminalErrors: Array<ToolResultBlock | ContentBlock> = [
         ...toolUses.map((use): ToolResultBlock => ({
           type: "tool_result",
           tool_use_id: use.id,
-          content:
-            "Error: submit_documentation_result must be one valid, standalone terminal call.",
+          content: `Error: submit_documentation_result must be one valid, standalone terminal call.${terminalContractGuidance}`,
           is_error: true,
         })),
         {
           type: "text",
-          text: "Call submit_documentation_result once, by itself, with a bounded drafted or abstained decision.",
+          text: `Call submit_documentation_result once, by itself, with a bounded drafted or abstained decision.${terminalContractGuidance}`,
         },
       ];
       messages.push({
@@ -568,7 +615,13 @@ export async function runAgentLoop(input: LoopInput): Promise<{
 
     const pending: Array<PendingToolResult> = [];
     for (const use of toolUses) {
-      input.onEvent?.(`${use.name} ${JSON.stringify(use.input).slice(0, 100)}`);
+      input.onEvent?.(
+        terminalProfile === "policy-bound"
+          ? advertisedToolNames.has(use.name)
+            ? use.name
+            : "unknown_tool"
+          : `${use.name} ${JSON.stringify(use.input).slice(0, 100)}`,
+      );
       let content: string;
       let isError = false;
       try {

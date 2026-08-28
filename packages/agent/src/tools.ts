@@ -1,10 +1,40 @@
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { tools as mcpTools, getTool } from "@thallylabs/mcp/tools";
 
 import {
+  agentWriteToolTargets,
   isAgentWriteToolAuthorized,
   type AgentWritePolicy,
 } from "./write-policy.js";
+
+const EVIDENCE_REFERENCE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+
+function evidenceMarker(evidenceReferenceId: string): string {
+  return `<!-- thally-cite:v1:${createHash("sha256")
+    .update(`evidence\0${evidenceReferenceId}`, "utf8")
+    .digest("hex")} -->`;
+}
+
+function writtenEvidenceLineRange(
+  source: string,
+  marker: string,
+  citationAnchor: string,
+): string | null {
+  const lines = source.split("\n");
+  const markerIndexes = lines.flatMap((line, index) =>
+    line.replace(/\r$/u, "") === marker ? [index] : [],
+  );
+  if (markerIndexes.length !== 1) return null;
+  const anchor = citationAnchor.trim();
+  if (!anchor) return null;
+  const anchorLineCount = anchor.split(/\r?\n/u).length;
+  const markerLine = markerIndexes[0]! + 1;
+  const startLine = markerLine - anchorLineCount;
+  return startLine >= 1 ? `${startLine}-${markerLine}` : null;
+}
 
 export interface ClaudeTool {
   name: string;
@@ -24,6 +54,7 @@ const AGENT_TOOL_NAMES = new Set([
   "get_context",
   "add_page",
   "update_page",
+  "replace_page_text",
   "read_api_spec",
   "update_api_spec",
   "add_tab",
@@ -65,6 +96,36 @@ export function buildToolBridge(
         (r) => r !== "projectDir",
       );
     }
+    if (
+      options.writePolicy &&
+      (tool.name === "replace_page_text" || tool.name === "update_page")
+    ) {
+      if (props && tool.name === "update_page") {
+        props.evidenceReferenceId = {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+          description: "Exact evidence reference ID supplied by Track.",
+        };
+        props.citationAnchor = {
+          type: "string",
+          minLength: 1,
+          maxLength: 65536,
+          description:
+            "Exact unique new prose span after which Track should attach the evidence marker.",
+        };
+      }
+      const required = Array.isArray(schema.required)
+        ? (schema.required as Array<string>)
+        : [];
+      schema.required = [
+        ...new Set([
+          ...required,
+          "evidenceReferenceId",
+          ...(tool.name === "update_page" ? ["citationAnchor"] : []),
+        ]),
+      ];
+    }
     return {
       name: tool.name,
       description: tool.description,
@@ -93,7 +154,86 @@ export function buildToolBridge(
       // may contain private repository metadata or prompt-injection content.
       return "Error: this write is outside the controller-approved documentation plan.";
     }
-    return tool.handler({ ...input, projectDir });
+    let toolInput = input;
+    let evidenceLineRange: string | null = null;
+    let marker: string | null = null;
+    let evidenceTarget:
+      { path: string; original: Buffer; citationAnchor: string } | undefined;
+    if (
+      options.writePolicy &&
+      (name === "replace_page_text" || name === "update_page")
+    ) {
+      const evidenceReferenceId = input.evidenceReferenceId;
+      if (
+        typeof evidenceReferenceId !== "string" ||
+        !EVIDENCE_REFERENCE_ID.test(evidenceReferenceId)
+      ) {
+        // The agent bridge invokes handlers directly, so the advertised Zod
+        // schema is not an enforcement boundary. Reject before any write.
+        return "Error: Track evidence binding is invalid.";
+      }
+      marker = evidenceMarker(evidenceReferenceId);
+    }
+    if (options.writePolicy && name === "update_page") {
+      const citationAnchor = input.citationAnchor;
+      const content = input.content;
+      if (
+        typeof citationAnchor !== "string" ||
+        citationAnchor.trim().length === 0 ||
+        typeof content !== "string" ||
+        !marker ||
+        content.includes(marker)
+      ) {
+        return "Error: Track evidence binding is invalid.";
+      }
+      const first = content.indexOf(citationAnchor);
+      if (
+        first < 0 ||
+        content.indexOf(citationAnchor, first + citationAnchor.length) >= 0
+      ) {
+        return "Error: citationAnchor must match exactly one new prose span.";
+      }
+      const insertion = `${citationAnchor.replace(/\s*$/u, "")}\n${marker}`;
+      const boundContent = `${content.slice(0, first)}${insertion}${content.slice(first + citationAnchor.length)}`;
+      const targets = agentWriteToolTargets(projectDir, name, input);
+      if (!targets || targets.length !== 1) {
+        return "Error: Track evidence binding is invalid.";
+      }
+      const targetPath = resolve(projectDir, targets[0]!);
+      try {
+        evidenceTarget = {
+          path: targetPath,
+          original: readFileSync(targetPath),
+          citationAnchor,
+        };
+      } catch {
+        return "Error: Track evidence binding is invalid.";
+      }
+      toolInput = { ...input, content: boundContent };
+      delete toolInput.evidenceReferenceId;
+      delete toolInput.citationAnchor;
+    }
+    const result = await tool.handler({ ...toolInput, projectDir });
+    if (evidenceTarget && marker) {
+      try {
+        evidenceLineRange = writtenEvidenceLineRange(
+          readFileSync(evidenceTarget.path, "utf8"),
+          marker,
+          evidenceTarget.citationAnchor,
+        );
+      } catch {
+        evidenceLineRange = null;
+      }
+      if (!evidenceLineRange) {
+        // Keep a failed evidence receipt atomic with its mutation. A later
+        // model turn must not inherit an unclaimable partial update.
+        writeFileSync(evidenceTarget.path, evidenceTarget.original);
+        return "Error: Track evidence binding is invalid.";
+      }
+    }
+    return evidenceLineRange
+      ? `${result}\nFinal evidence span lines: ${evidenceLineRange}. Use this exact range for the factual claim.`
+      : result;
   };
 
   return { claudeTools, dispatch };

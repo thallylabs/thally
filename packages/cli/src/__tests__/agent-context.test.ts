@@ -14,10 +14,26 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TRACK_AGENT_RESULT_MAX_BYTES } from "@thallylabs/agent";
 import {
   readTrackContextFile,
+  resolveAgentProviderClientOptions,
   resolveAgentTaskSource,
+  resolveTrackAgentOutputTokens,
   serializeTrackAgentResult,
+  TRACK_AGENT_PROVIDER_TIMEOUT_MS,
   TRACK_CONTEXT_MAX_BYTES,
 } from "../commands/agent.js";
+
+function policy(changeCount: number) {
+  return {
+    version: 1 as const,
+    requiredPaths: ["src/content/docs/test.mdx"],
+    requiredChangeIds: Array.from(
+      { length: changeCount },
+      (_, index) => `change-${index}`,
+    ),
+    maximumFiles: 1,
+    maximumBytes: 1024,
+  };
+}
 
 const directories: string[] = [];
 
@@ -118,7 +134,57 @@ describe("resolveAgentTaskSource", () => {
   );
 });
 
+describe("resolveAgentProviderClientOptions", () => {
+  it("gives managed Track one bounded non-streaming provider attempt", () => {
+    expect(
+      resolveAgentProviderClientOptions("/tmp/sealed-context.json"),
+    ).toEqual({
+      timeout: TRACK_AGENT_PROVIDER_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+    expect(TRACK_AGENT_PROVIDER_TIMEOUT_MS).toBeLessThan(10 * 60_000);
+  });
+
+  it("preserves the public CLI client's defaults without sealed context", () => {
+    expect(resolveAgentProviderClientOptions(undefined)).toEqual({});
+  });
+});
+
+describe("resolveTrackAgentOutputTokens", () => {
+  it("uses a small gateway-safe budget for the ordinary focused Track plan", () => {
+    expect(resolveTrackAgentOutputTokens(policy(1))).toBe(8_192);
+    expect(resolveTrackAgentOutputTokens(policy(32))).toBe(8_192);
+  });
+
+  it("retains progressively larger terminal capacity for large sealed plans", () => {
+    expect(resolveTrackAgentOutputTokens(policy(33))).toBe(16_384);
+    expect(resolveTrackAgentOutputTokens(policy(129))).toBe(32_768);
+    expect(resolveTrackAgentOutputTokens(policy(257))).toBe(64_000);
+    expect(resolveTrackAgentOutputTokens(policy(500))).toBe(64_000);
+  });
+});
+
 describe("serializeTrackAgentResult", () => {
+  it("preserves a policy-bound factual-claim inventory verbatim", () => {
+    const decision = {
+      outcome: "drafted",
+      explanation: "Updated the authorized guide.",
+      inspectedPaths: ["src/content/docs/test.mdx"],
+      changeIds: ["change-1"],
+      factualClaims: [
+        {
+          path: "src/content/docs/test.mdx",
+          startLine: 8,
+          endLine: 9,
+          changeIds: ["change-1"],
+          evidenceReferenceIds: ["evidence:test"],
+        },
+      ],
+    };
+
+    expect(JSON.parse(serializeTrackAgentResult(decision))).toEqual(decision);
+  });
+
   it("accepts the exact private result-file boundary", () => {
     const framingBytes = Buffer.byteLength(
       JSON.stringify({ value: "" }) + "\n",

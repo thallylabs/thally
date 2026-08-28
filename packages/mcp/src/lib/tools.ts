@@ -8,6 +8,10 @@ import { addTabSchema, handleAddTab } from "../tools/add-tab.js";
 import { listPagesSchema, handleListPages } from "../tools/list-pages.js";
 import { updatePageSchema, handleUpdatePage } from "../tools/update-page.js";
 import {
+  replacePageTextSchema,
+  handleReplacePageText,
+} from "../tools/replace-page-text.js";
+import {
   importDocsSchema,
   handleImportDocs,
   migrateDocsSchema,
@@ -113,6 +117,14 @@ export const tools: Array<ToolDefinition> = [
     scope: "project",
     schema: updatePageSchema,
     handler: handleUpdatePage,
+  }),
+  defineTool({
+    name: "replace_page_text",
+    description:
+      "Replace one exact unique span in an existing MDX page; prefer this for small edits so the full page never travels through the model response",
+    scope: "project",
+    schema: replacePageTextSchema,
+    handler: handleReplacePageText,
   }),
   defineTool({
     name: "read_api_spec",

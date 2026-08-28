@@ -13,7 +13,12 @@ import {
 } from "./git.js";
 import { buildToolBridge } from "./tools.js";
 import { runDocsCheck } from "./validate.js";
-import { runAgentLoop, type AnthropicLike } from "./agent.js";
+import {
+  runAgentLoop,
+  TRACK_AGENT_MAX_TOTAL_STEPS,
+  type AgentTerminalProfile,
+  type AnthropicLike,
+} from "./agent.js";
 import {
   loadSystemPromptAgentsGuidance,
   type AgentExecutionAuthority,
@@ -41,6 +46,52 @@ export function resolveAgentExecutionAuthority(
 export interface AgentPromptEnvelope {
   system: string;
   userPrompt: string;
+}
+
+interface AgentTurnResult {
+  steps: number;
+}
+
+export interface AgentTurnBudget {
+  run<T extends AgentTurnResult>(
+    execute: (maximumSteps: number) => Promise<T>,
+  ): Promise<T>;
+}
+
+/**
+ * Share one controller-owned turn allowance across otherwise independent model
+ * loops. Generic callers omit `maximumTotalSteps` and retain their historical
+ * per-loop behavior.
+ */
+export function createAgentTurnBudget(
+  maximumStepsPerLoop: number,
+  maximumTotalSteps?: number,
+): AgentTurnBudget {
+  let remainingSteps = maximumTotalSteps;
+  return {
+    async run<T extends AgentTurnResult>(
+      execute: (maximumSteps: number) => Promise<T>,
+    ): Promise<T> {
+      if (remainingSteps !== undefined && remainingSteps < 1) {
+        throw new Error("agent_total_step_limit_exceeded");
+      }
+      const admittedSteps =
+        remainingSteps === undefined
+          ? maximumStepsPerLoop
+          : Math.min(maximumStepsPerLoop, remainingSteps);
+      const result = await execute(admittedSteps);
+      if (
+        remainingSteps !== undefined &&
+        (!Number.isSafeInteger(result.steps) ||
+          result.steps < 0 ||
+          result.steps > admittedSteps)
+      ) {
+        throw new Error("agent_step_accounting_invalid");
+      }
+      if (remainingSteps !== undefined) remainingSteps -= result.steps;
+      return result;
+    },
+  };
 }
 
 /** Build the exact prompt roles used by initial and repair model turns. */
@@ -124,7 +175,10 @@ export async function runAgent(
 ): Promise<AgentResult> {
   const { projectDir, mode } = options;
   const model = resolveAgentModel(options.model);
-  const maxSteps = options.maxSteps ?? 24;
+  const requestedMaxSteps = options.maxSteps ?? 24;
+  const maxSteps = options.writePolicy
+    ? Math.min(requestedMaxSteps, 24)
+    : requestedMaxSteps;
   const emit = options.onEvent ?? (() => {});
 
   assertCleanGitRepo(projectDir);
@@ -159,38 +213,44 @@ export async function runAgent(
       task,
       Boolean(options.writePolicy),
     );
+    const terminalProfile: AgentTerminalProfile = options.writePolicy
+      ? "policy-bound"
+      : "generic";
+    const turnBudget = createAgentTurnBudget(
+      maxSteps,
+      options.writePolicy ? TRACK_AGENT_MAX_TOTAL_STEPS : undefined,
+    );
+    // Every turn in one run must share the same terminal authority. Keeping
+    // this wrapper as the only loop entrypoint prevents repair rounds from
+    // silently falling back to the generic, claim-optional contract.
+    const runTurn = (userPrompt: string) =>
+      turnBudget.run((maximumSteps) =>
+        runAgentLoop({
+          client,
+          model,
+          maxSteps: maximumSteps,
+          system,
+          userPrompt,
+          tools: claudeTools,
+          maximumRequestBytes: options.maximumRequestBytes,
+          maximumOutputTokens: options.maximumOutputTokens,
+          terminalProfile,
+          dispatch,
+          onEvent: (event) => emit(`  → ${event}`),
+        }),
+      );
 
     emit("Drafting documentation…");
-    const first = await runAgentLoop({
-      client,
-      model,
-      maxSteps,
-      system,
-      userPrompt: taskPrompt,
-      tools: claudeTools,
-      maximumRequestBytes: options.maximumRequestBytes,
-      maximumOutputTokens: options.maximumOutputTokens,
-      dispatch,
-      onEvent: (e) => emit(`  → ${e}`),
-    });
+    const first = await runTurn(taskPrompt);
     let summary = first.summary;
     let steps = first.steps;
     let decision = first.decision;
 
     if (!hasChanges(projectDir) && options.requireChanges) {
       emit("No documentation diff — attempting one grounded repair…");
-      const retry = await runAgentLoop({
-        client,
-        model,
-        maxSteps,
-        system,
-        userPrompt: `${taskPrompt}\n\n${buildAbstentionRepairPrompt(decision)}`,
-        tools: claudeTools,
-        maximumRequestBytes: options.maximumRequestBytes,
-        maximumOutputTokens: options.maximumOutputTokens,
-        dispatch,
-        onEvent: (e) => emit(`  → ${e}`),
-      });
+      const retry = await runTurn(
+        `${taskPrompt}\n\n${buildAbstentionRepairPrompt(decision)}`,
+      );
       summary = retry.summary || summary;
       steps += retry.steps;
       decision = retry.decision;
@@ -222,18 +282,9 @@ export async function runAgent(
     let validation = runDocsCheck(projectDir);
     if (!validation.ok) {
       emit("Validation failed — attempting a repair…");
-      const repair = await runAgentLoop({
-        client,
-        model,
-        maxSteps,
-        system,
-        userPrompt: `${taskPrompt}\n\n${buildRepairPrompt(validation.errors)}`,
-        tools: claudeTools,
-        maximumRequestBytes: options.maximumRequestBytes,
-        maximumOutputTokens: options.maximumOutputTokens,
-        dispatch,
-        onEvent: (e) => emit(`  → ${e}`),
-      });
+      const repair = await runTurn(
+        `${taskPrompt}\n\n${buildRepairPrompt(validation.errors)}`,
+      );
       if (repair.summary) summary = repair.summary;
       steps += repair.steps;
       decision = repair.decision;

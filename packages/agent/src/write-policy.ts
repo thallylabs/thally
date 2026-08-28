@@ -177,6 +177,7 @@ export function agentWriteToolTargets(
     case "add_page":
       return pageTargets(projectDir, input.pageId, true);
     case "update_page":
+    case "replace_page_text":
       return pageTargets(projectDir, input.pageId, false);
     case "update_api_spec":
       // Policy-bound runs require an explicit configured source. The generic
