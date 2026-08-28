@@ -1,25 +1,50 @@
-import { z } from 'zod'
-import { createProjectSchema, handleCreateProject } from '../tools/create-project.js'
-import { addPageSchema, handleAddPage } from '../tools/add-page.js'
-import { addTabSchema, handleAddTab } from '../tools/add-tab.js'
-import { listPagesSchema, handleListPages } from '../tools/list-pages.js'
-import { updatePageSchema, handleUpdatePage } from '../tools/update-page.js'
+import { z } from "zod";
+import {
+  createProjectSchema,
+  handleCreateProject,
+} from "../tools/create-project.js";
+import { addPageSchema, handleAddPage } from "../tools/add-page.js";
+import { addTabSchema, handleAddTab } from "../tools/add-tab.js";
+import { listPagesSchema, handleListPages } from "../tools/list-pages.js";
+import { updatePageSchema, handleUpdatePage } from "../tools/update-page.js";
+import {
+  replacePageTextSchema,
+  handleReplacePageText,
+} from "../tools/replace-page-text.js";
 import {
   importDocsSchema,
   handleImportDocs,
   migrateDocsSchema,
   handleMigrateDocs,
-} from '../tools/migrate-docs.js'
-import { searchDocsSchema, handleSearchDocs } from '../tools/search-docs.js'
-import { semanticSearchSchema, handleSemanticSearch } from '../tools/semantic-search.js'
-import { agentReadinessSchema, handleAgentReadiness } from '../tools/agent-readiness.js'
-import { readPageSchema, handleReadPage } from '../tools/read-page.js'
-import { getContextSchema, handleGetContext } from '../tools/get-context.js'
-import { lintProjectSchema, handleLintProject } from '../tools/lint-project.js'
-import { translateDocsSchema, handleTranslateDocs } from '../tools/translate-docs.js'
-import { syncFromRepoSchema, handleSyncFromRepo } from '../tools/sync-from-repo.js'
-import { readApiSpecSchema, handleReadApiSpec } from '../tools/read-api-spec.js'
-import { updateApiSpecSchema, handleUpdateApiSpec } from '../tools/update-api-spec.js'
+} from "../tools/migrate-docs.js";
+import { searchDocsSchema, handleSearchDocs } from "../tools/search-docs.js";
+import {
+  semanticSearchSchema,
+  handleSemanticSearch,
+} from "../tools/semantic-search.js";
+import {
+  agentReadinessSchema,
+  handleAgentReadiness,
+} from "../tools/agent-readiness.js";
+import { readPageSchema, handleReadPage } from "../tools/read-page.js";
+import { getContextSchema, handleGetContext } from "../tools/get-context.js";
+import { lintProjectSchema, handleLintProject } from "../tools/lint-project.js";
+import {
+  translateDocsSchema,
+  handleTranslateDocs,
+} from "../tools/translate-docs.js";
+import {
+  syncFromRepoSchema,
+  handleSyncFromRepo,
+} from "../tools/sync-from-repo.js";
+import {
+  readApiSpecSchema,
+  handleReadApiSpec,
+} from "../tools/read-api-spec.js";
+import {
+  updateApiSpecSchema,
+  handleUpdateApiSpec,
+} from "../tools/update-api-spec.js";
 
 /**
  * Where a tool operates:
@@ -30,156 +55,176 @@ import { updateApiSpecSchema, handleUpdateApiSpec } from '../tools/update-api-sp
  * agent (A1) drives the `project` tools against a checked-out docs repo. Both
  * consume this one registry instead of re-declaring the tools.
  */
-export type ToolScope = 'project' | 'site'
+export type ToolScope = "project" | "site";
 
 export interface ToolDefinition {
-  name: string
-  description: string
-  scope: ToolScope
-  schema: z.ZodObject<z.ZodRawShape>
-  handler: (input: unknown) => Promise<string>
+  name: string;
+  description: string;
+  scope: ToolScope;
+  schema: z.ZodObject<z.ZodRawShape>;
+  handler: (input: unknown) => Promise<string>;
 }
 
 /** Type-checks each tool's handler against its schema, then erases to ToolDefinition. */
 function defineTool<S extends z.ZodRawShape>(def: {
-  name: string
-  description: string
-  scope: ToolScope
-  schema: z.ZodObject<S>
-  handler: (input: z.infer<z.ZodObject<S>>) => Promise<string>
+  name: string;
+  description: string;
+  scope: ToolScope;
+  schema: z.ZodObject<S>;
+  handler: (input: z.infer<z.ZodObject<S>>) => Promise<string>;
 }): ToolDefinition {
-  return def as unknown as ToolDefinition
+  return def as unknown as ToolDefinition;
 }
 
 /** The single source of truth for Thally's MCP/agent tools. */
 export const tools: Array<ToolDefinition> = [
   defineTool({
-    name: 'create_project',
-    description: 'Scaffold a new Thally documentation project from the GitHub template',
-    scope: 'project',
+    name: "create_project",
+    description:
+      "Scaffold a new Thally documentation project from the GitHub template",
+    scope: "project",
     schema: createProjectSchema,
     handler: handleCreateProject,
   }),
   defineTool({
-    name: 'add_page',
-    description: 'Add a new MDX page to a Thally project and register it in docs.json navigation',
-    scope: 'project',
+    name: "add_page",
+    description:
+      "Add a new MDX page to a Thally project and register it in docs.json navigation",
+    scope: "project",
     schema: addPageSchema,
     handler: handleAddPage,
   }),
   defineTool({
-    name: 'add_tab',
-    description: 'Add a new top-level tab to a Thally project navigation (content tab or redirect link)',
-    scope: 'project',
+    name: "add_tab",
+    description:
+      "Add a new top-level tab to a Thally project navigation (content tab or redirect link)",
+    scope: "project",
     schema: addTabSchema,
     handler: handleAddTab,
   }),
   defineTool({
-    name: 'list_pages',
-    description: 'List all pages in a Thally project, organized by tab and group',
-    scope: 'project',
+    name: "list_pages",
+    description:
+      "List all pages in a Thally project, organized by tab and group",
+    scope: "project",
     schema: listPagesSchema,
     handler: handleListPages,
   }),
   defineTool({
-    name: 'update_page',
-    description: 'Update the frontmatter or body content of an existing MDX page in a Thally project',
-    scope: 'project',
+    name: "update_page",
+    description:
+      "Update the frontmatter or body content of an existing MDX page in a Thally project",
+    scope: "project",
     schema: updatePageSchema,
     handler: handleUpdatePage,
   }),
   defineTool({
-    name: 'read_api_spec',
-    description: 'Read an OpenAPI JSON or YAML source explicitly configured by this Thally project',
-    scope: 'project',
+    name: "replace_page_text",
+    description:
+      "Replace one exact unique span in an existing MDX page; prefer this for small edits so the full page never travels through the model response",
+    scope: "project",
+    schema: replacePageTextSchema,
+    handler: handleReplacePageText,
+  }),
+  defineTool({
+    name: "read_api_spec",
+    description:
+      "Read a bounded UTF-8 window from an OpenAPI JSON or YAML source configured by this project; follow next-start-byte until complete",
+    scope: "project",
     schema: readApiSpecSchema,
     handler: handleReadApiSpec,
   }),
   defineTool({
-    name: 'update_api_spec',
-    description: 'Replace and validate an OpenAPI JSON or YAML source explicitly configured by this Thally project',
-    scope: 'project',
+    name: "update_api_spec",
+    description:
+      "Replace and validate an OpenAPI JSON or YAML source explicitly configured by this Thally project",
+    scope: "project",
     schema: updateApiSpecSchema,
     handler: handleUpdateApiSpec,
   }),
   defineTool({
-    name: 'migrate_docs',
+    name: "migrate_docs",
     description:
-      'Create a fresh canonical Thally template, then migrate a GitHub repository or public docs site into it; the target must be new or empty',
-    scope: 'project',
+      "Create a fresh canonical Thally template, then migrate a GitHub repository or public docs site into it; the target must be new or empty",
+    scope: "project",
     schema: migrateDocsSchema,
     handler: handleMigrateDocs,
   }),
   defineTool({
-    name: 'import_docs',
+    name: "import_docs",
     description:
-      'Import content into an existing Thally project without scaffolding; use only when an in-place import is explicitly requested',
-    scope: 'project',
+      "Import content into an existing Thally project without scaffolding; use only when an in-place import is explicitly requested",
+    scope: "project",
     schema: importDocsSchema,
     handler: handleImportDocs,
   }),
   defineTool({
-    name: 'search_docs',
-    description: 'Search documentation pages by keyword — returns ranked list of matching pages',
-    scope: 'project',
+    name: "search_docs",
+    description:
+      "Search documentation pages by keyword — returns ranked list of matching pages",
+    scope: "project",
     schema: searchDocsSchema,
     handler: handleSearchDocs,
   }),
   defineTool({
-    name: 'semantic_search',
+    name: "semantic_search",
     description:
-      'Hybrid (full-text + vector) semantic search against a deployed Thally site — uses the same index as the in-app command palette and /api/search',
-    scope: 'site',
+      "Hybrid (full-text + vector) semantic search against a deployed Thally site — uses the same index as the in-app command palette and /api/search",
+    scope: "site",
     schema: semanticSearchSchema,
     handler: handleSemanticSearch,
   }),
   defineTool({
-    name: 'agent_readiness',
+    name: "agent_readiness",
     description:
-      'Fetch the Agent Readiness Score (0-100) for a deployed Thally site — the same report as /api/agent-readiness and `thally check`, with per-signal subscores and fixable offenders',
-    scope: 'site',
+      "Fetch the Agent Readiness Score (0-100) for a deployed Thally site — the same report as /api/agent-readiness and `thally check`, with per-signal subscores and fixable offenders",
+    scope: "site",
     schema: agentReadinessSchema,
     handler: handleAgentReadiness,
   }),
   defineTool({
-    name: 'read_page',
-    description: 'Read the full content of a documentation page by its page ID',
-    scope: 'project',
+    name: "read_page",
+    description:
+      "Read a bounded UTF-8 body window from a documentation page; follow next-start-byte until complete before replacing a page",
+    scope: "project",
     schema: readPageSchema,
     handler: handleReadPage,
   }),
   defineTool({
-    name: 'get_context',
-    description: 'Get the most relevant documentation context for a topic or question, within a token budget',
-    scope: 'project',
+    name: "get_context",
+    description:
+      "Get the most relevant documentation context for a topic or question, within a token budget",
+    scope: "project",
     schema: getContextSchema,
     handler: handleGetContext,
   }),
   defineTool({
-    name: 'lint_project',
-    description: 'Check a Thally project for issues: broken nav references, orphan files, missing frontmatter',
-    scope: 'project',
+    name: "lint_project",
+    description:
+      "Check a Thally project for issues: broken nav references, orphan files, missing frontmatter",
+    scope: "project",
     schema: lintProjectSchema,
     handler: handleLintProject,
   }),
   defineTool({
-    name: 'translate_docs',
-    description: 'Translate Thally documentation pages to a secondary locale using Claude AI',
-    scope: 'project',
+    name: "translate_docs",
+    description:
+      "Translate Thally documentation pages to a secondary locale using Claude AI",
+    scope: "project",
     schema: translateDocsSchema,
     handler: handleTranslateDocs,
   }),
   defineTool({
-    name: 'sync_from_repo',
+    name: "sync_from_repo",
     description:
-      'Thally Track: analyze a merged pull request in a tracked product repo and preview the docs task it would produce (dryRun), or dispatch it to the docs repo so the docs agent drafts a documentation PR',
-    scope: 'project',
+      "Thally Track: analyze a merged pull request in a tracked product repo and preview the docs task it would produce (dryRun), or dispatch it to the docs repo so the docs agent drafts a documentation PR",
+    scope: "project",
     schema: syncFromRepoSchema,
     handler: handleSyncFromRepo,
   }),
-]
+];
 
 /** Look up a tool by its registered name. */
 export function getTool(name: string): ToolDefinition | undefined {
-  return tools.find((tool) => tool.name === name)
+  return tools.find((tool) => tool.name === name);
 }

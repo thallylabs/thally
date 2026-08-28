@@ -1,6 +1,6 @@
 {
   "name": "@thallylabs/agent",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "description": "Thally's review-gated agent for turning product changes into evidence-backed documentation pull requests.",
   "type": "module",
   "engines": {
@@ -14,6 +14,10 @@
     "./scaffold": {
       "types": "./dist/scaffold.d.ts",
       "import": "./dist/scaffold.js"
+    },
+    "./write-policy-contract": {
+      "types": "./dist/write-policy-contract.d.ts",
+      "import": "./dist/write-policy-contract.js"
     },
     "./package.json": "./package.json"
   },
