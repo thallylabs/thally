@@ -193,7 +193,7 @@ export function buildToolBridge(
       ) {
         return "Error: citationAnchor must match exactly one new prose span.";
       }
-      const insertion = `${citationAnchor.replace(/\s*$/u, "")}\n${marker}`;
+      const insertion = `${citationAnchor.trimEnd()}\n${marker}`;
       const boundContent = `${content.slice(0, first)}${insertion}${content.slice(first + citationAnchor.length)}`;
       const targets = agentWriteToolTargets(projectDir, name, input);
       if (!targets || targets.length !== 1) {
