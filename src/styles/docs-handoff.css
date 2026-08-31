@@ -128,17 +128,6 @@ body {
   max-width: 220px;
 }
 
-/* The client measures the complete rendered header, including site-specific
-   labels and CTAs. This preserves the tab row whenever it fits and switches to
-   the existing menu before controls collide when it does not. */
-.thally-docs-topbar-inner[data-navigation-mode='compact'] > button[aria-haspopup='dialog'] {
-  display: inline-flex;
-}
-
-.thally-docs-topbar-inner[data-navigation-mode='compact'] .thally-docs-tabs {
-  display: none;
-}
-
 .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search,
 .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search > button:first-of-type {
   width: 180px;
