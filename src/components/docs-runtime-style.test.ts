@@ -181,6 +181,8 @@ describe('documentation visual system', () => {
     ])
 
     expect(topBar).toContain("data-density={isCrowded ? 'compact' : 'comfortable'}")
+    expect(topBar).not.toContain('data-navigation-mode')
+    expect(topBar).not.toContain('isNavigationCompact')
     expect(topBar).toContain("className={cn('thally-docs-topbar-inner flex h-14")
     expect(topBar).toContain('thally-docs-primary inline-flex h-[30px] shrink-0')
     expect(css).toMatch(/\.thally-docs-search \{\s*width: 280px;/)
@@ -192,6 +194,7 @@ describe('documentation visual system', () => {
     expect(css).toMatch(
       /@media \(max-width: 1010px\) \{[\s\S]*?\.thally-docs-topbar-inner > button\[aria-haspopup='dialog'\][\s\S]*?display: inline-flex;/,
     )
+    expect(css).not.toContain("[data-navigation-mode='compact']")
     expect(css).toMatch(
       /@media \(max-width: 860px\) \{[\s\S]*?\.thally-docs-brand > span:last-child[\s\S]*?\.thally-docs-search,[\s\S]*?width: 30px;/,
     )
