@@ -1,8 +1,7 @@
 'use client'
 
 import { ExternalLink, Sparkles } from 'lucide-react'
-import { usePathname, useRouter } from 'next/navigation'
-import type { SidebarCollection, DocsJsonNavbar } from '@/data/docs'
+import type { SidebarCollection, DocsJsonNavbar, NavigationPresentation } from '@/data/docs'
 import { MobileNav } from '@/components/navigation/mobile-nav'
 import { CommandSearch } from '@/components/search/command-search'
 import { ThemeSwitch } from '@/components/theme/theme-switch'
@@ -17,28 +16,12 @@ import { displaySiteName, useSiteName } from '@/components/layout/use-site-name'
 import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
 import { useDocsCodeActions } from '@/components/docs/code-actions-provider'
 
-function matchesPath(targetHref: string, pathname: string) {
-  if (!targetHref || /^https?:\/\//i.test(targetHref)) {
-    return false
-  }
-  const normalize = (value: string) => {
-    if (!value) return '/'
-    if (value === '/') return '/'
-    return value.endsWith('/') ? value.slice(0, -1) : value
-  }
-  const normalizedTarget = normalize(targetHref)
-  const normalizedPath = normalize(pathname)
-  if (normalizedTarget === '/') {
-    return normalizedPath === '/'
-  }
-  return normalizedPath === normalizedTarget || normalizedPath.startsWith(`${normalizedTarget}/`)
-}
-
 interface TopBarProps {
   collections: Array<SidebarCollection>
   activeCollectionId: SidebarCollection['id']
   onCollectionChange: (id: SidebarCollection['id']) => void
   activeSections: SidebarCollection['sections']
+  navigationPresentation: NavigationPresentation
   i18nConfig?: I18nConfig | null
   currentLocale?: string
   currentPath?: string
@@ -51,14 +34,13 @@ export function TopBar({
   activeCollectionId,
   onCollectionChange,
   activeSections,
+  navigationPresentation,
   i18nConfig,
   currentLocale,
   currentPath,
   navbarConfig,
   siteLinks,
 }: TopBarProps) {
-  const pathname = usePathname()
-  const router = useRouter()
   const siteName = useSiteName()
   const {
     hasAssistantEntryPoint,
@@ -88,7 +70,8 @@ export function TopBar({
   const visibleLinkCount = navbarConfig?.links?.length ?? (supportLink ? 1 : 0)
   // Preserve the generous default search affordance for typical documentation
   // sites. Only dense, highly customized navbars opt into the compact layout.
-  const isCrowded = collections.length + visibleLinkCount + (primaryCta ? 1 : 0) >= 8
+  const visibleCollectionCount = navigationPresentation.display === 'tabs' ? collections.length : 0
+  const isCrowded = visibleCollectionCount + visibleLinkCount + (primaryCta ? 1 : 0) >= 8
 
   return (
     <header className="thally-docs-topbar sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-xl">
@@ -96,7 +79,12 @@ export function TopBar({
         className={cn('thally-docs-topbar-inner flex h-14 items-center gap-3', shell.topbar)}
         data-density={isCrowded ? 'compact' : 'comfortable'}
       >
-        <MobileNav sections={activeSections} />
+        <MobileNav
+          sections={activeSections}
+          collections={collections}
+          activeCollectionId={activeCollectionId}
+          onCollectionChange={onCollectionChange}
+        />
         {/* The brand block needs clear separation from the section tabs or
             "Docs" reads as the first tab; mr-5 marks where the brand ends. */}
         <IntentPrefetchLink
@@ -109,59 +97,56 @@ export function TopBar({
           </span>
           <span className="-ml-1 font-heading text-[1rem] font-medium text-foreground/55">Docs</span>
         </IntentPrefetchLink>
-        <nav className="thally-docs-tabs flex h-full items-center gap-[17px]" aria-label="Documentation sections">
-          {collections.map((collection) => {
-            const isActive = collection.id === activeCollectionId
-            const baseClasses = cn(
-              'thally-nav-tab-item group relative flex h-full shrink-0 items-center whitespace-nowrap border-b-[1.5px] px-0 pt-px text-left text-[0.88rem] font-medium transition',
-              isActive
-                ? 'thally-nav-tab-active border-foreground font-semibold text-foreground'
-                : 'border-transparent text-foreground/60 hover:text-foreground',
-            )
-            if (collection.href) {
-              const isExternal = /^https?:\/\//.test(collection.href)
-              if (isExternal) {
+        {navigationPresentation.display === 'tabs' ? (
+          <nav className="thally-docs-tabs flex h-full items-center gap-[17px]" aria-label="Documentation sections">
+            {collections.map((collection) => {
+              const isActive = collection.id === activeCollectionId
+              const destination = collection.href ?? collection.sections[0]?.items[0]?.href
+              const baseClasses = cn(
+                'thally-nav-tab-item group relative flex h-full shrink-0 items-center whitespace-nowrap border-b-[1.5px] px-0 pt-px text-left text-[0.88rem] font-medium transition',
+                isActive
+                  ? 'thally-nav-tab-active border-foreground font-semibold text-foreground'
+                  : 'border-transparent text-foreground/60 hover:text-foreground',
+              )
+              if (destination) {
+                const isExternal = /^https?:\/\//.test(destination)
+                if (isExternal) {
+                  return (
+                    <a
+                      key={collection.id}
+                      href={destination}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={baseClasses}
+                    >
+                      {collection.label}
+                    </a>
+                  )
+                }
                 return (
-                  <a
+                  <IntentPrefetchLink
                     key={collection.id}
-                    href={collection.href}
-                    target="_blank"
-                    rel="noreferrer"
+                    href={destination}
+                    onClick={() => onCollectionChange(collection.id)}
                     className={baseClasses}
                   >
                     {collection.label}
-                  </a>
+                  </IntentPrefetchLink>
                 )
               }
               return (
-                <IntentPrefetchLink
+                <button
                   key={collection.id}
-                  href={collection.href}
+                  type="button"
+                  onClick={() => onCollectionChange(collection.id)}
                   className={baseClasses}
                 >
                   {collection.label}
-                </IntentPrefetchLink>
+                </button>
               )
-            }
-            return (
-              <button
-                key={collection.id}
-                type="button"
-                onClick={() => {
-                  const targetHref = collection.href
-                  const alreadyActive = targetHref ? matchesPath(targetHref, pathname) : false
-                  onCollectionChange(collection.id)
-                  if (!alreadyActive && targetHref && !matchesPath(targetHref, pathname)) {
-                    router.push(targetHref)
-                  }
-                }}
-                className={baseClasses}
-              >
-                {collection.label}
-              </button>
-            )
-          })}
-        </nav>
+            })}
+          </nav>
+        ) : null}
         <div className="thally-docs-actions ml-auto flex shrink-0 items-center gap-2">
           <div className="thally-docs-search shrink-0">
             <CommandSearch />

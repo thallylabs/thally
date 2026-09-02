@@ -9,6 +9,7 @@ export interface DocsJsonNavigationGroup {
 export interface DocsJsonTab {
   tab: string
   href?: string
+  pages?: Array<string | DocsJsonNavigationGroup>
   groups?: Array<DocsJsonNavigationGroup>
   api?: { source: string; navigation?: boolean }
 }

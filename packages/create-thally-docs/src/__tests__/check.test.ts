@@ -52,4 +52,44 @@ describe('thally check OpenAPI migrations', () => {
     expect(output.join('\n')).not.toContain('orphan')
     expect(output.join('\n')).not.toContain('Very short body')
   })
+
+  it('validates interleaved root pages and groups as authored navigation', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-root-pages-'))
+    mkdirSync(join(projectDir, 'src/content/guides'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({
+      tabs: [{
+        tab: 'Documentation',
+        pages: [
+          'introduction',
+          { group: 'Guides', pages: ['guides/install'] },
+        ],
+      }],
+    }))
+    writeFileSync(join(projectDir, 'src/content/introduction.mdx'), [
+      '---',
+      'title: Introduction',
+      'description: Product documentation introduction.',
+      '---',
+      '',
+      'Welcome to the product documentation and its complete setup guide.',
+    ].join('\n'))
+    writeFileSync(join(projectDir, 'src/content/guides/install.mdx'), [
+      '---',
+      'title: Install',
+      'description: Install the product.',
+      '---',
+      '',
+      'Install the product and verify that the generated project works.',
+    ].join('\n'))
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+
+    try {
+      await expect(runCheck(projectDir, { fix: false, ci: true })).resolves.toBe(0)
+    } finally {
+      log.mockRestore()
+    }
+    expect(output.join('\n')).not.toContain('has no groups')
+    expect(output.join('\n')).not.toContain('orphan')
+  })
 })

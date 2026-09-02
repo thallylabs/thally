@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseFrontmatter } from '../lib/frontmatter.js'
 import { readDocsJson, writeDocsJson } from '../lib/docs-json.js'
@@ -35,9 +35,17 @@ function collectNavPageIds(groups: Array<string | DocsJsonNavigationGroup>, seen
 
 function addOrphanToNav(projectDir: string, pageId: string): void {
   const config = readDocsJson(projectDir)
-  // Find first content tab (not href, not api)
-  const tab = config.tabs.find((t) => !t.href && !t.api && t.groups && t.groups.length > 0)
-  if (!tab || !tab.groups) return
+  const tab = config.tabs.find((candidate) => !candidate.href && !candidate.api
+    && (candidate.pages?.length || candidate.groups?.length))
+  if (!tab) return
+  if (tab.pages) {
+    if (!tab.pages.includes(pageId)) {
+      tab.pages.push(pageId)
+      writeDocsJson(projectDir, config)
+    }
+    return
+  }
+  if (!tab.groups) return
   const lastGroup = tab.groups[tab.groups.length - 1]
   const existing = lastGroup.pages.filter((p): p is string => typeof p === 'string')
   if (!existing.includes(pageId)) {
@@ -62,12 +70,14 @@ export async function handleLintProject(input: LintProjectInput): Promise<string
   const duplicates = new Set<string>()
 
   for (const tab of config.tabs) {
-    if (tab.href || tab.api) continue
-    if (!tab.groups || tab.groups.length === 0) {
+    const hasNavigationNodes = Boolean(tab.pages?.length || tab.groups?.length)
+    if ((tab.href || tab.api) && !hasNavigationNodes) continue
+    if (!hasNavigationNodes) {
       issues.push({ severity: 'error', message: `Tab "${tab.tab}" has no groups and no href — it will render empty` })
       continue
     }
-    collectNavPageIds(tab.groups.map((g) => g as unknown as string | DocsJsonNavigationGroup), navPageIds, duplicates)
+    collectNavPageIds(tab.pages ?? [], navPageIds, duplicates)
+    collectNavPageIds(tab.groups ?? [], navPageIds, duplicates)
   }
 
   for (const dup of duplicates) {

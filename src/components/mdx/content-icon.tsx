@@ -2,7 +2,7 @@
 import {
   AlertCircle, ArrowRight, Bell, BookOpen, Bot, Box, Check, CheckCircle, CircleHelp,
   Clipboard, Cloud, Code2, Database, ExternalLink, File, Folder, Github, Globe,
-  Grid3X3, Heart, Info, Key, Lightbulb, Link2, Lock, Mail, Menu, MessageSquare,
+  Grid3X3, Heart, Info, Key, LibraryBig, Lightbulb, Link2, Lock, Mail, Menu, MessageSquare,
   Package, PartyPopper, Plus, RefreshCw, Search, Send, Settings, Shield, Sparkles,
   Star, Terminal, Trash2, TriangleAlert, Twitter, User, Users, Wand2, Wrench, Zap,
   type LucideIcon,
@@ -17,7 +17,7 @@ const iconMap: Record<string, LucideIcon> = {
   'check-circle': CheckCircle, help: CircleHelp, clipboard: Clipboard, cloud: Cloud,
   code: Code2, 'code-simple': Code2, database: Database, external: ExternalLink,
   'external-link': ExternalLink, file: File, folder: Folder, github: Github, globe: Globe,
-  grid: Grid3X3, 'grid-round': Grid3X3, heart: Heart, info: Info, key: Key,
+  grid: Grid3X3, 'grid-round': Grid3X3, heart: Heart, info: Info, key: Key, books: LibraryBig,
   'key-round': Key, lightbulb: Lightbulb, link: Link2, 'link-simple': Link2, lock: Lock, envelope: Mail,
   mail: Mail, menu: Menu, message: MessageSquare, package: Package, 'party-horn': PartyPopper,
   plus: Plus, 'refresh-cw': RefreshCw, search: Search, telegram: Send, send: Send, settings: Settings, shield: Shield,

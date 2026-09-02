@@ -5,9 +5,9 @@ import { TopBar } from '@/components/layout/top-bar'
 import { Sidebar } from '@/components/navigation/sidebar'
 import { PageContainer } from '@/components/layout/sections'
 import { layout, shell } from '@/config/layout'
-import type { SidebarCollection, DocsJsonNavbar, DocsJsonFooter } from '@/data/docs'
+import type { SidebarCollection, DocsJsonNavbar, DocsJsonFooter, NavigationPresentation } from '@/data/docs'
 import { useSidebarCollectionsStore } from './sidebar-store'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { SiteNameProvider } from '@/components/layout/use-site-name'
 import type { SiteIdentity } from '@/lib/site-config'
@@ -53,12 +53,28 @@ function normalizePath(value: string) {
   return value.endsWith('/') ? value.slice(0, -1) : value
 }
 
+function navigationScopeKey(
+  currentLocale: string,
+  currentPath: string,
+  i18nConfig?: I18nConfig | null,
+) {
+  if (i18nConfig && currentLocale !== i18nConfig.defaultLocale) {
+    return `locale:${currentLocale}`
+  }
+  if (matchesPath('/api', currentPath)) {
+    const specId = currentPath.split('/').filter(Boolean)[1] ?? 'default'
+    return `api:${specId}`
+  }
+  return 'default'
+}
+
 interface SiteShellProps {
   children: React.ReactNode
   initialCollections: Array<SidebarCollection>
   i18nConfig?: I18nConfig | null
   navbarConfig?: DocsJsonNavbar | null
   footerConfig?: DocsJsonFooter | null
+  navigationPresentation: NavigationPresentation
   identity: SiteIdentity
 }
 
@@ -68,12 +84,10 @@ export function SiteShell({
   i18nConfig,
   navbarConfig,
   footerConfig,
+  navigationPresentation,
   identity,
 }: SiteShellProps) {
-  const hydratedCollections = useSidebarCollectionsStore((state) => state.collections)
-  const collections = hydratedCollections.length > 0 ? hydratedCollections : initialCollections
   const pathname = usePathname()
-  const router = useRouter()
 
   // Derive currentLocale and strip locale prefix from pathname
   let currentLocale = i18nConfig?.defaultLocale ?? 'en'
@@ -88,6 +102,11 @@ export function SiteShell({
       }
     }
   }
+  const scopeKey = navigationScopeKey(currentLocale, currentPath, i18nConfig)
+  const hydratedCollections = useSidebarCollectionsStore(
+    (state) => state.collectionsByScope[scopeKey],
+  )
+  const collections = hydratedCollections ?? initialCollections
   const navigableCollections = collections.filter((collection) => collection.sections.length > 0)
   const matchedCollection =
     navigableCollections.find((collection) => collectionContainsPath(collection, pathname, currentPath)) ??
@@ -129,17 +148,9 @@ export function SiteShell({
             const target = collections.find((collection) => collection.id === id)
             if (!target) return
             setSelectedCollectionId(target.id)
-            const targetHref = target.href
-            const firstHref = target.sections[0]?.items[0]?.href
-            if (targetHref && !matchesPath(targetHref, pathname)) {
-              router.push(targetHref)
-              return
-            }
-            if (firstHref && !collectionContainsPath(target, pathname)) {
-              router.push(firstHref)
-            }
           }}
           activeSections={activeCollection.sections}
+          navigationPresentation={navigationPresentation}
           i18nConfig={i18nConfig ?? null}
           currentLocale={currentLocale}
           currentPath={currentPath}
@@ -147,7 +158,14 @@ export function SiteShell({
           siteLinks={identity.links}
         />
         <div className={`thally-docs-shell flex min-h-[calc(100dvh-56px)] w-full ${shell.wrapper}`}>
-          <Sidebar sections={activeCollection.sections} title={activeCollection.label} />
+          <Sidebar
+            sections={activeCollection.sections}
+            title={activeCollection.label}
+            collections={collections}
+            activeCollectionId={activeCollection.id}
+            onCollectionChange={setSelectedCollectionId}
+            navigationPresentation={navigationPresentation}
+          />
           <div className="flex min-h-[calc(100dvh-56px)] w-full min-w-0 flex-1 flex-col">
             <main id="main-content" className="thally-docs-main flex-1 py-[34px] pb-24">
               <PageContainer className={layout.pageGap}>{children}</PageContainer>

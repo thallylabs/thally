@@ -121,8 +121,17 @@ function scanMdx(dir: string, results: string[]): void {
 
 function addOrphanToNav(projectDir: string, pageId: string): void {
   const config = readDocsJson(projectDir)
-  const tab = config.tabs.find((t) => !t.href && !t.api && t.groups && t.groups.length > 0)
-  if (!tab?.groups) return
+  const tab = config.tabs.find((candidate) => !candidate.href && !candidate.api
+    && (candidate.pages?.length || candidate.groups?.length))
+  if (!tab) return
+  if (tab.pages) {
+    if (!tab.pages.includes(pageId)) {
+      tab.pages.push(pageId)
+      writeDocsJson(projectDir, config)
+    }
+    return
+  }
+  if (!tab.groups) return
   const lastGroup = tab.groups[tab.groups.length - 1]
   const existing = lastGroup.pages.filter((p): p is string => typeof p === 'string')
   if (!existing.includes(pageId)) {
@@ -268,7 +277,8 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   const duplicates = new Set<string>()
 
   for (const tab of config.tabs) {
-    if (tab.href && (!tab.groups || tab.groups.length === 0)) {
+    const hasNavigationNodes = Boolean(tab.pages?.length || tab.groups?.length)
+    if (tab.href && !hasNavigationNodes) {
       // A standalone href tab (e.g. Changelog) references a real page — not an orphan.
       if (tab.href.startsWith('/')) navPageIds.add(tab.href.slice(1) || 'introduction')
       continue
@@ -277,11 +287,12 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     // migrations set `navigation: false` because their authored groups retain
     // the source hierarchy and should participate in ordinary page checks.
     if (tab.api && tab.api.navigation !== false) continue
-    if (!tab.groups || tab.groups.length === 0) {
+    if (!hasNavigationNodes) {
       issues.push({ severity: 'error', message: `Tab "${tab.tab}" has no groups and no href — it will render empty` })
       continue
     }
-    collectNavPageIds(tab.groups.map((g) => g as unknown as string | DocsJsonNavigationGroup), navPageIds, duplicates)
+    collectNavPageIds(tab.pages ?? [], navPageIds, duplicates)
+    collectNavPageIds(tab.groups ?? [], navPageIds, duplicates)
   }
 
   for (const dup of duplicates) {

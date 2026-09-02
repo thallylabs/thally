@@ -39,43 +39,64 @@ export function mergeMigrationConfig(
   const tabs = existing.tabs.filter((tab) => tab.tab.toLowerCase() !== 'changelog')
   const names = new Set(tabs.map((tab) => tab.tab.toLowerCase()))
   const seenPages = new Set<string>()
-  function recordPages(groups: MigrationDocsConfig['tabs'][number]['groups']): void {
-    for (const group of groups ?? []) {
-      for (const page of group.pages) {
-        if (typeof page === 'string') seenPages.add(page)
-        else recordPages([page])
-      }
+  function recordPages(pages: Array<string | MigrationNavigationGroup> = []): void {
+    for (const page of pages) {
+      if (typeof page === 'string') seenPages.add(page)
+      else recordPages(page.pages)
     }
   }
-  for (const tab of tabs) recordPages(tab.groups)
+  for (const tab of tabs) {
+    recordPages(tab.pages)
+    recordPages(tab.groups)
+  }
+  function uniquePages(
+    pages: Array<string | MigrationNavigationGroup> = [],
+  ): Array<string | MigrationNavigationGroup> {
+    return pages.flatMap<string | MigrationNavigationGroup>((page) => {
+      if (typeof page === 'string') {
+        if (seenPages.has(page)) return []
+        seenPages.add(page)
+        return [page]
+      }
+      const children = uniquePages(page.pages)
+      return children.length > 0 ? [{ ...page, pages: children }] : []
+    })
+  }
   function uniqueGroups(
     groups: Array<MigrationNavigationGroup> | undefined,
   ): Array<MigrationNavigationGroup> {
-    return (groups ?? []).flatMap<MigrationNavigationGroup>((group) => {
-      const pages = group.pages.flatMap<string | MigrationNavigationGroup>((page) => {
-        if (typeof page === 'string') {
-          if (seenPages.has(page)) return []
-          seenPages.add(page)
-          return [page]
-        }
-        const [nested]: Array<MigrationNavigationGroup> = uniqueGroups([page])
-        return nested ? [nested] : []
-      })
-      return pages.length > 0 ? [{ ...group, pages }] : []
-    })
+    return uniquePages(groups ?? []) as Array<MigrationNavigationGroup>
   }
   for (const tab of incoming.tabs) {
     if (tab.tab.toLowerCase() === 'changelog') continue
-    const uniqueTab = { ...tab, ...(tab.groups ? { groups: uniqueGroups(tab.groups) } : {}) }
-    if (tab.groups && uniqueTab.groups?.length === 0 && !tab.href && !tab.api) continue
+    const uniqueTab = {
+      ...tab,
+      ...(tab.pages ? { pages: uniquePages(tab.pages) } : {}),
+      ...(tab.groups ? { groups: uniqueGroups(tab.groups) } : {}),
+    }
+    if ((tab.pages || tab.groups)
+      && !uniqueTab.pages?.length
+      && !uniqueTab.groups?.length
+      && !tab.href
+      && !tab.api) continue
     if (!names.has(tab.tab.toLowerCase())) {
       tabs.push(uniqueTab)
       names.add(tab.tab.toLowerCase())
       continue
     }
     const target = tabs.find((item) => item.tab.toLowerCase() === tab.tab.toLowerCase())
-    if (!target || !uniqueTab.groups) continue
-    target.groups = [...(target.groups ?? []), ...uniqueTab.groups]
+    if (!target) continue
+    const incomingRootNodes = [
+      ...(uniqueTab.pages ?? []),
+      ...(uniqueTab.groups ?? []),
+    ]
+    if (uniqueTab.pages?.length) {
+      target.pages = [...(target.pages ?? target.groups ?? []), ...incomingRootNodes]
+      delete target.groups
+    } else if (uniqueTab.groups?.length) {
+      if (target.pages) target.pages = [...target.pages, ...uniqueTab.groups]
+      else target.groups = [...(target.groups ?? []), ...uniqueTab.groups]
+    }
   }
   const changelog = existing.tabs.find((tab) => tab.tab.toLowerCase() === 'changelog')
     ?? incoming.tabs.find((tab) => tab.tab.toLowerCase() === 'changelog')
@@ -93,6 +114,9 @@ export function mergeMigrationConfig(
     ...incoming,
     ...existing,
     tabs,
+    // Collection presentation belongs to the imported information
+    // architecture; starter defaults must not coerce source dropdowns to tabs.
+    navigation: incoming.navigation ?? existing.navigation,
     ...(i18n ? { i18n } : {}),
   }
 }

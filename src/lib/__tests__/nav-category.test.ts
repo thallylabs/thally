@@ -18,7 +18,7 @@ describe('getNavCategory', () => {
     const collections = getSidebarCollections()
     const section = collections.flatMap((c) => c.sections).find((s) => s.items.length > 0)
     expect(section).toBeDefined()
-    const leaf = section!.title.split(' • ').at(-1)
+    const leaf = section!.items[0].groupPath?.at(-1) ?? section!.title
     expect(getNavCategory(section!.items[0].href)).toBe(leaf)
   })
 
@@ -40,7 +40,7 @@ describe('getNavCategory', () => {
         for (const item of section.items) {
           const category = getNavCategory(item.href)
           expect(category, `category for ${item.href}`).toBeTruthy()
-          expect(section.title.endsWith(category as string)).toBe(true)
+          expect(category).toBe(item.groupPath?.at(-1) ?? section.title)
         }
       }
     }

@@ -1,30 +1,18 @@
 'use client'
 
-import { create } from 'zustand'
+/** Route-scoped navigation snapshots used by preserved App Router layouts. */
 
-interface SidebarCollectionShape {
-  id: string
-  label: string
-  sections: Array<{
-    title: string
-    items: Array<{
-      id: string
-      title: string
-      href: string
-      badge?: string
-      description?: string
-    }>
-  }>
-  href?: string
-}
+import { create } from 'zustand'
+import type { SidebarCollection } from '@/data/docs'
 
 interface SidebarCollectionsState {
-  collections: Array<SidebarCollectionShape>
-  setCollections: (collections: Array<SidebarCollectionShape>) => void
+  collectionsByScope: Record<string, Array<SidebarCollection>>
+  setCollections: (scope: string, collections: Array<SidebarCollection>) => void
 }
 
 export const useSidebarCollectionsStore = create<SidebarCollectionsState>((set) => ({
-  collections: [],
-  setCollections: (collections) => set({ collections }),
+  collectionsByScope: {},
+  setCollections: (scope, collections) => set((state) => ({
+    collectionsByScope: { ...state.collectionsByScope, [scope]: collections },
+  })),
 }))
-

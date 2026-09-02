@@ -24,6 +24,7 @@ interface DocsJsonConfig {
   tabs: Array<{
     tab: string
     href?: string
+    pages?: Array<string | NavGroup>
     groups?: Array<NavGroup>
     api?: object
   }>
@@ -59,12 +60,12 @@ function getAllPageIds(config: DocsJsonConfig): {
   const hrefOnlyPages: Array<{ tab: string; pageId: string }> = []
 
   for (const tab of config.tabs) {
-    if (tab.api) {
+    if (tab.api && !tab.pages && !tab.groups) {
       skippedApiTabs.push(tab.tab)
       continue
     }
     // Tab with a direct href and no groups (e.g. Changelog) — derive page ID from the href
-    if (!tab.groups && tab.href) {
+    if (!tab.pages && !tab.groups && tab.href) {
       const pageId = tab.href.replace(/^\//, '')
       if (pageId && !seen.has(pageId)) {
         seen.add(pageId)
@@ -73,13 +74,10 @@ function getAllPageIds(config: DocsJsonConfig): {
       }
       continue
     }
-    if (!tab.groups) continue
-    for (const group of tab.groups) {
-      for (const id of collectPageIds(group.pages)) {
-        if (!seen.has(id)) {
-          seen.add(id)
-          ids.push(id)
-        }
+    for (const id of collectPageIds([...(tab.pages ?? []), ...(tab.groups ?? [])])) {
+      if (!seen.has(id)) {
+        seen.add(id)
+        ids.push(id)
       }
     }
   }

@@ -219,6 +219,18 @@ function iconName(value: unknown): string | undefined {
   return typeof icon?.name === 'string' && icon.name ? icon.name : undefined
 }
 
+function containerPresentation(value: Record<string, unknown>): {
+  description?: string
+  icon?: string
+} {
+  return {
+    ...(typeof value.description === 'string' && value.description.trim()
+      ? { description: value.description.trim() }
+      : {}),
+    ...(iconName(value.icon) ? { icon: iconName(value.icon) } : {}),
+  }
+}
+
 function registerReference(value: string, context: ProjectionContext): string | null {
   const localePrefix = context.locale ? `${context.locale}/` : ''
   const localizedValue = localePrefix && value.replace(/^\/+/, '').startsWith(localePrefix)
@@ -275,66 +287,93 @@ function convertPage(
   return null
 }
 
-function convertGroups(
+function convertNavigationValues(
   values: Array<unknown>,
   context: ProjectionContext,
-  fallbackGroup: string,
-): Array<MigrationNavigationGroup> {
-  const groups: Array<MigrationNavigationGroup> = []
-  const loosePages: Array<string | MigrationNavigationGroup> = []
-  for (const value of values) {
-    const converted = convertPage(value, context)
-    if (!converted) continue
-    if (typeof converted === 'string') loosePages.push(converted)
-    else groups.push(converted)
-  }
-  if (loosePages.length > 0) groups.unshift({ group: fallbackGroup, pages: loosePages })
-  return groups
+): Array<string | MigrationNavigationGroup> {
+  return values.flatMap<string | MigrationNavigationGroup>((value) => {
+    const page = convertPage(value, context)
+    return page ? [page] : []
+  })
+}
+
+interface NavigationProjectionTrace {
+  rootContainerKind?: 'tabs' | 'anchors' | 'products' | 'dropdowns' | 'versions' | 'menus'
 }
 
 function convertContainerToTabs(
   containerValue: unknown,
   context: ProjectionContext,
   fallbackTab: string,
+  trace?: NavigationProjectionTrace,
+  depth = 0,
 ): Array<MigrationNavigationTab> {
   const container = objectValue(containerValue)
   if (!container) return []
-  for (const key of ['tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus']) {
+  const containerKeys = ['tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus'] as const
+  for (const key of containerKeys) {
     if (!Array.isArray(container[key])) continue
-    const tabs = (container[key] as Array<unknown>).flatMap((value, index) => {
+    const entries = [...container[key] as Array<unknown>]
+    if (key === 'versions') {
+      entries.sort((left, right) => Number(objectValue(right)?.default === true) - Number(objectValue(left)?.default === true))
+    }
+    const tabs = entries.flatMap((value, index) => {
       const object = objectValue(value)
       if (!object) return []
       const tab = labelFor(object, `${fallbackTab} ${index + 1}`)
       const href = projectedHref(object.href)
-      if (href && !object.pages && !object.groups) {
-        return [{ tab, href, ...(object.hidden === true ? { hidden: true } : {}) }]
+      const hasNestedContainers = containerKeys.some((containerKey) => Array.isArray(object[containerKey]))
+      if (href && !object.pages && !object.groups && !hasNestedContainers) {
+        return [{
+          tab,
+          href,
+          ...containerPresentation(object),
+          ...(object.hidden === true ? { hidden: true } : {}),
+        }]
       }
-      const nested = convertContainerToTabs(object, context, tab)
+      const nested = convertContainerToTabs(object, context, tab, trace, depth + 1)
       if (nested.length > 0) {
         if (nested.length === 1) {
           return [{
             ...nested[0],
             tab,
+            ...containerPresentation(object),
             ...(href ? { href } : {}),
             ...(object.hidden === true ? { hidden: true } : {}),
           }]
         }
-        return nested.map((item) => ({ ...item, tab: `${tab}: ${item.tab}` }))
+        const presentation = containerPresentation(object)
+        return nested.map((item, childIndex) => ({
+          ...presentation,
+          ...item,
+          tab: `${tab}: ${item.tab}`,
+          ...(childIndex === 0 && href && !item.href ? { href } : {}),
+          ...(object.hidden === true ? { hidden: true } : {}),
+        }))
       }
       return []
     })
-    if (tabs.length > 0) return tabs
+    if (tabs.length > 0) {
+      if (depth === 0 && trace) trace.rootContainerKind = key
+      return tabs
+    }
   }
-  const rawPages = [
-    ...(Array.isArray(container.groups) ? container.groups : []),
-    ...(Array.isArray(container.pages) ? container.pages : []),
+  const rawGroups = Array.isArray(container.groups) ? container.groups : []
+  const rawPages = Array.isArray(container.pages) ? container.pages : []
+  const hasRootNodes = typeof container.root === 'string' || rawPages.length > 0
+  const values = [
+    ...(typeof container.root === 'string' ? [container.root] : []),
+    ...rawGroups,
+    ...rawPages,
   ]
-  if (typeof container.root === 'string') rawPages.unshift(container.root)
-  const groups = convertGroups(rawPages, context, 'Overview')
-  return groups.length > 0
+  const children = convertNavigationValues(values, context)
+  return children.length > 0
     ? [{
         tab: fallbackTab,
-        groups,
+        ...(hasRootNodes
+          ? { pages: children }
+          : { groups: children as Array<MigrationNavigationGroup> }),
+        ...containerPresentation(container),
         ...(projectedHref(container.href) ? { href: projectedHref(container.href) } : {}),
         ...(container.hidden === true ? { hidden: true } : {}),
       }]
@@ -505,10 +544,11 @@ export function projectMintlifyNavigation(
     : []
   let tabs: Array<MigrationNavigationTab> = []
   let i18n: MigrationDocsConfig['i18n']
+  const projectionTrace: NavigationProjectionTrace = {}
 
   if (languages.length > 0) {
     const defaultLanguage = languages.find((entry) => entry.default === true) ?? languages[0]
-    const defaultLocale = String(defaultLanguage.language ?? 'en')
+    const defaultLocale = String(defaultLanguage.language ?? defaultLanguage.locale ?? 'en')
     const locales = languages.map((entry) => {
       const code = String(entry.language ?? entry.locale ?? 'en')
       let label: string | undefined = LANGUAGE_LABELS[code]
@@ -530,15 +570,28 @@ export function projectMintlifyNavigation(
         warnings,
         warningKeys,
       }
-      const languageTabs = convertContainerToTabs(language, context, 'Documentation')
+      const languageTabs = convertContainerToTabs(
+        language,
+        context,
+        'Documentation',
+        language === defaultLanguage ? projectionTrace : undefined,
+      )
       if (language === defaultLanguage) tabs = languageTabs
     }
   } else {
     const context = { references, seenReferences, warnings, warningKeys, pathPrefix: options.pathPrefix }
-    tabs = convertContainerToTabs(navigation, context, 'Documentation')
+    tabs = convertContainerToTabs(navigation, context, 'Documentation', projectionTrace)
     if (tabs.length === 0 && Array.isArray(config.navigation)) {
-      const groups = convertGroups(config.navigation, context, 'Overview')
-      if (groups.length > 0) tabs = [{ tab: 'Documentation', groups }]
+      const children = convertNavigationValues(config.navigation, context)
+      if (children.length > 0) {
+        const hasRootPages = children.some((page) => typeof page === 'string')
+        tabs = [{
+          tab: 'Documentation',
+          ...(hasRootPages
+            ? { pages: children }
+            : { groups: children as Array<MigrationNavigationGroup> }),
+        }]
+      }
     }
   }
 
@@ -566,6 +619,9 @@ export function projectMintlifyNavigation(
   return {
     docsConfig: {
       tabs,
+      ...(projectionTrace.rootContainerKind === 'dropdowns'
+        ? { navigation: { display: 'dropdown' as const } }
+        : {}),
       ...projectedCompatibleConfig(config),
       ...(i18n ? { i18n } : {}),
       ...(redirects.length > 0 ? { redirects } : {}),

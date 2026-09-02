@@ -12,7 +12,8 @@ export default async function ApiLayoutProvider({ children, params }: ApiLayoutP
   const resolved = await params
   const specId = resolved.slug?.[0]
   const navigation = await buildApiNavigation(specId)
-  const apiSections: Array<NavigationSection> = navigation.map((group) => ({
+  const apiSections: Array<NavigationSection> = navigation.map((group, index) => ({
+    id: `openapi-${index}`,
     title: group.title,
     items: group.items.map((item) => ({
       id: item.id,
@@ -32,7 +33,10 @@ export default async function ApiLayoutProvider({ children, params }: ApiLayoutP
 
   return (
     <>
-      <SidebarCollectionsHydrator collections={updatedCollections} />
+      <SidebarCollectionsHydrator
+        collections={updatedCollections}
+        scope={`api:${specId ?? 'default'}`}
+      />
       {children}
     </>
   )

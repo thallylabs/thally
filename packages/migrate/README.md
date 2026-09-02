@@ -5,12 +5,13 @@ Cloud. It imports documentation repositories and public documentation URLs
 into one canonical bundle before any caller writes files.
 
 Repository migration includes dedicated Mintlify and Docusaurus adapters.
-Mintlify repositories are located inside monorepos automatically and their
-`docs.json`/`mint.json` configuration is projected without flattening the
-information architecture. The adapter preserves nested groups, tabs,
-dropdowns, products, versions, languages, reusable `$ref` navigation files,
-page route casing, redirects, local snippets, static assets, compatible page
-frontmatter, site identity, and OpenAPI configuration. For public Mintlify
+Mintlify repositories are located inside monorepos automatically. Their
+`docs.json`/`mint.json` page and group trees are projected without flattening
+authored nesting or order. The adapter supports tabs, dropdowns, products,
+versions, languages, and reusable `$ref` navigation files; it also preserves
+dropdown presentation, collection descriptions and icons, explicit default
+versions, page route casing, redirects, local snippets, static assets,
+compatible page frontmatter, site identity, and OpenAPI configuration. For public Mintlify
 sites, the URL adapter reads the structured configuration embedded in the
 rendered application before falling back to DOM link inference.
 
