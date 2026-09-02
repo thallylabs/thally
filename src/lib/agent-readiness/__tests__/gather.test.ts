@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   getContentDocument: vi.fn(),
   loadContentDocument: vi.fn(),
+  loadDocEntries: vi.fn(),
 }))
 
 vi.mock('@/lib/content', () => ({
@@ -18,11 +19,12 @@ vi.mock('@/data/docs', () => ({
       id: 'quickstart',
       href: '/quickstart',
       title: 'Quickstart',
-      description: 'Ship the first integration.',
+      description: '',
       keywords: ['quickstart'],
       openapi: null,
     },
   ],
+  loadDocEntries: mocks.loadDocEntries,
   getNavigablePageIds: () => new Set(['quickstart']),
 }))
 
@@ -44,6 +46,16 @@ describe('agent readiness page facts', () => {
     vi.clearAllMocks()
     mocks.getContentDocument.mockReturnValue(null)
     mocks.loadContentDocument.mockResolvedValue(RUNTIME_DOCUMENT)
+    mocks.loadDocEntries.mockResolvedValue([
+      {
+        id: 'quickstart',
+        href: '/quickstart',
+        title: 'Published quickstart',
+        description: 'Metadata loaded from the active release content index.',
+        keywords: ['published', 'quickstart'],
+        openapi: null,
+      },
+    ])
   })
 
   it('reads managed content through the async runtime source', async () => {
@@ -62,5 +74,21 @@ describe('agent readiness page facts', () => {
       }),
     ])
     expect(mocks.loadContentDocument).toHaveBeenCalledWith('quickstart')
+  })
+
+  it('scores metadata from the active release content index', async () => {
+    expect(gatherPageFacts()[0]).toMatchObject({
+      title: 'Quickstart',
+      description: '',
+    })
+
+    await expect(loadPageFacts()).resolves.toEqual([
+      expect.objectContaining({
+        title: 'Published quickstart',
+        description: 'Metadata loaded from the active release content index.',
+        keywords: ['published', 'quickstart'],
+      }),
+    ])
+    expect(mocks.loadDocEntries).toHaveBeenCalledOnce()
   })
 })
