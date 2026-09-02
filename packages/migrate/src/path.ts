@@ -2,10 +2,29 @@
 
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 
-const SAFE_SEGMENT = /[^a-z0-9._-]+/g
+const SAFE_SEGMENT = /[^a-z0-9._-]+/gi
+
+/**
+ * Remove trailing forward slashes in linear time. Keeping leading slashes is
+ * important because callers may still need to reject absolute paths.
+ */
+export function trimTrailingSlashes(value: string): string {
+  let end = value.length
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end--
+  return value.slice(0, end)
+}
+
+/** Remove forward slashes from both ends without a backtracking expression. */
+export function trimEdgeSlashes(value: string): string {
+  let start = 0
+  let end = value.length
+  while (start < end && value.charCodeAt(start) === 47) start++
+  while (end > start && value.charCodeAt(end - 1) === 47) end--
+  return value.slice(start, end)
+}
 
 /** Turn a source path segment into a stable URL/file-system slug. */
-export function slugifySegment(value: string): string {
+export function slugifySegment(value: string, preserveCase = false): string {
   let decoded = value
   try {
     decoded = decodeURIComponent(value)
@@ -13,8 +32,8 @@ export function slugifySegment(value: string): string {
     // Malformed percent escapes are legal in source filenames. Treat them as
     // literal slug input instead of letting one file abort the whole import.
   }
-  return decoded
-    .toLowerCase()
+  const normalized = preserveCase ? decoded : decoded.toLowerCase()
+  return normalized
     .replace(/\.(?:html?|mdx?)$/i, '')
     .replace(SAFE_SEGMENT, '-')
     .replace(/(^-|-$)/g, '')
@@ -24,7 +43,7 @@ export function slugifySegment(value: string): string {
  * Normalize a page reference to a Thally content id. Invalid or traversal
  * references return `null` instead of being allowed near the file system.
  */
-export function pageIdFromReference(value: string): string | null {
+export function pageIdFromReference(value: string, preserveCase = false): string | null {
   const withoutQuery = value.split(/[?#]/, 1)[0].replace(/\\/g, '/').replace(/^\/+/, '')
   if (!withoutQuery || withoutQuery.includes('\0')) return null
   const rawSegments = withoutQuery.split('/').filter(Boolean)
@@ -34,7 +53,7 @@ export function pageIdFromReference(value: string): string | null {
   if (!/^(?:index|readme)$/i.test(last)) {
     baseSegments[baseSegments.length - 1] = last
   }
-  const segments = baseSegments.map(slugifySegment).filter(Boolean)
+  const segments = baseSegments.map((segment) => slugifySegment(segment, preserveCase)).filter(Boolean)
   return segments.join('/') || 'introduction'
 }
 

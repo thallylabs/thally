@@ -45,6 +45,16 @@ describe('standalone rich-content primitives', () => {
     expect(unsafe).not.toContain('href=')
   })
 
+  it('renders Mintlify cards with authored JSX icons', () => {
+    const markup = renderToStaticMarkup(createElement(Card, {
+      title: 'Follow us',
+      icon: createElement('svg', { viewBox: '0 0 20 20', 'data-custom-icon': 'x' },
+        createElement('path', { d: 'M1 1h18v18H1z' })),
+    }))
+    expect(markup).toContain('data-custom-icon="x"')
+    expect(markup).toContain('<path')
+  })
+
   it('renders rich badge and tooltip semantics', () => {
     const badge = renderToStaticMarkup(createElement(Badge, { variant: 'outline', size: 'lg' }, 'Beta'))
     const tooltip = renderToStaticMarkup(createElement(Tooltip, { headline: 'JWT', tip: 'Authentication token', cta: 'Learn', href: '/auth' }, 'token'))

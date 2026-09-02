@@ -14,7 +14,8 @@ type CardCallout = 'info' | 'success' | 'warning' | 'danger' | 'note' | 'tip' | 
 export interface ContentCardProps {
   title?: string
   href?: string
-  icon?: string
+  /** Mintlify accepts either an icon name or authored inline SVG/JSX. */
+  icon?: string | ReactNode
   iconType?: 'regular' | 'solid' | 'outline'
   /** Theme tone or any valid CSS color for the icon. */
   iconColor?: ContentIconTone | string
@@ -96,7 +97,9 @@ function ContentCardSurface({ kind, title, href, icon, iconType, iconColor, colo
         <div className="flex min-h-6 items-center gap-2.5">
           {icon ? (
             <span className="flex h-7 w-7 shrink-0 items-center justify-center" style={customIconStyle}>
-              <Icon icon={icon} iconType={iconType} className="thally-content-icon h-[18px] w-[18px]" color={customIconStyle?.color} data-content-icon-tone={tone} />
+              {typeof icon === 'string'
+                ? <Icon icon={icon} iconType={iconType} className="thally-content-icon h-[18px] w-[18px]" color={customIconStyle?.color} data-content-icon-tone={tone} />
+                : icon}
             </span>
           ) : null}
           {title ? <span className="min-w-0 flex-1 text-base font-medium leading-6 text-foreground">{title}</span> : null}

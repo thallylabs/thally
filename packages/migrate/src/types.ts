@@ -18,19 +18,52 @@ export type MigrationPlatform =
 export interface MigrationNavigationGroup {
   group: string
   icon?: string
+  hidden?: boolean
   pages: Array<string | MigrationNavigationGroup>
 }
 
 export interface MigrationNavigationTab {
   tab: string
   href?: string
+  hidden?: boolean
   groups?: Array<MigrationNavigationGroup>
   api?: { source: string; navigation?: boolean }
+}
+
+export interface MigrationBannerConfig {
+  content: string | Record<string, string>
+  dismissible?: boolean
+  id?: string
+  revision?: string
+  type?: 'info' | 'warning' | 'critical'
+  color?: { light?: string; dark?: string }
+}
+
+export interface MigrationNavbarConfig {
+  links?: Array<{ label: string; href: string; type?: 'github' }>
+  primary?: { label: string; href: string }
+}
+
+export interface MigrationFooterConfig {
+  socials?: Record<string, string>
+  links?: Array<{
+    heading: string
+    items: Array<{ label: string; href: string }>
+  }>
 }
 
 export interface MigrationDocsConfig {
   tabs: Array<MigrationNavigationTab>
   theme?: 'default' | 'maple' | 'sharp' | 'minimal'
+  banner?: MigrationBannerConfig
+  navbar?: MigrationNavbarConfig
+  footer?: MigrationFooterConfig
+  seo?: { indexing?: 'navigable' | 'all' }
+  fonts?: {
+    body?: { family: string; weight?: Array<string> }
+    heading?: { family: string; weight?: Array<string> }
+  }
+  feedback?: { thumbsRating?: boolean }
   ai?: { chat?: boolean; label?: string; icon?: string }
   admin?: { enabled?: boolean }
   analytics?: { enabled?: boolean }
@@ -48,8 +81,13 @@ export interface MigrationPage {
   navigationId: string
   locale?: string
   title: string
+  navTitle?: string
   description: string
+  badge?: string
   keywords: Array<string>
+  mode?: 'default' | 'wide' | 'custom' | 'center' | 'home'
+  hidden?: boolean
+  noindex?: boolean
   /** OpenAPI operation key rendered by Thally instead of ordinary MDX. */
   openapi?: string
   body: string
@@ -82,6 +120,10 @@ export interface MigrationBundle {
   pages: Array<MigrationPage>
   assets: Array<MigrationAsset>
   docsConfig: MigrationDocsConfig
+  site?: {
+    name?: string
+    description?: string
+  }
   warnings: Array<MigrationWarning>
   stats: {
     discovered: number

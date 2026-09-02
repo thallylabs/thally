@@ -1,12 +1,12 @@
 /** End-to-end repository fixtures for platform-specific navigation and assets. */
 
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { migrateRepository, renderMigrationFiles } from '../index.js'
+import { migrateRepository, readMintlifyConfig, renderMigrationFiles } from '../index.js'
 
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repository-'))
@@ -32,7 +32,7 @@ function fixture(): string {
   }))
   writeFileSync(join(root, 'README.md'), '# Repository readme\n\nThis must not become a docs page.')
   writeFileSync(join(root, 'en', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\n# Welcome\n\nEnglish docs.')
-  writeFileSync(join(root, 'en', 'guides', 'install.mdx'), '---\ntitle: Install\n---\n\nimport Prerequisite from \'/snippets/prerequisite.mdx\'\n\n<Prerequisite />\n\n<Danger>Back up first.</Danger>')
+  writeFileSync(join(root, 'en', 'guides', 'install.mdx'), '---\ntitle: Install\n---\n\nimport Prerequisite from \'/snippets/prerequisite.mdx\'\n\n<Prerequisite />\n\n<Danger>Back up first.</Danger>\n\n<Warn>Review the result.</Warn>')
   writeFileSync(join(root, 'es', 'introduction.mdx'), '---\ntitle: Bienvenido\n---\n\nDocumentación española.')
   writeFileSync(join(root, 'es', 'guides', 'install.mdx'), '---\ntitle: Instalar\n---\n\nPasos de instalación.')
   writeFileSync(join(root, 'images', 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
@@ -41,6 +41,29 @@ function fixture(): string {
 }
 
 describe('Mintlify repository migration', () => {
+  it('resolves JSON pointers into arrays without allowing refs through symlinks', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-refs-'))
+    writeFileSync(join(root, 'navigation.json'), JSON.stringify({
+      fragments: [{ groups: [{ group: 'Start', pages: ['introduction'] }] }],
+    }))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { $ref: './navigation.json#/fragments/0' },
+    }))
+    expect(readMintlifyConfig(root)).toMatchObject({
+      navigation: { groups: [{ group: 'Start', pages: ['introduction'] }] },
+    })
+
+    const outside = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-outside-'))
+    writeFileSync(join(outside, 'navigation.json'), JSON.stringify({ pages: ['private'] }))
+    symlinkSync(join(outside, 'navigation.json'), join(root, 'outside.json'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { $ref: './outside.json' },
+    }))
+    expect(() => readMintlifyConfig(root)).toThrow('not a regular file')
+  })
+
   it('resolves navigation refs, preserves locales, excludes repo metadata, and renders assets', () => {
     const bundle = migrateRepository({
       repositoryDir: fixture(),
@@ -55,6 +78,7 @@ describe('Mintlify repository migration', () => {
       'es/guides/install',
     ])
     expect(bundle.pages[1].body).toContain('<Error>Back up first.</Error>')
+    expect(bundle.pages[1].body).toContain('<Warning>Review the result.</Warning>')
     expect(bundle.pages[1].body).toContain('Install Node.js before continuing.')
     expect(bundle.pages.map((page) => page.id)).not.toContain('snippets/prerequisite')
     expect(bundle.docsConfig.i18n).toEqual({
@@ -71,6 +95,151 @@ describe('Mintlify repository migration', () => {
     const files = renderMigrationFiles(bundle)
     expect(files.map((file) => file.path)).toContain('public/images/logo.svg')
     expect(files.map((file) => file.path)).not.toContain('src/content/readme.mdx')
+  })
+
+  it('uses a nested Mintlify project as the config, content, snippet, and asset root', () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-monorepo-'))
+    const docsRoot = join(repositoryDir, 'apps', 'docs')
+    mkdirSync(join(docsRoot, 'management'), { recursive: true })
+    mkdirSync(join(docsRoot, 'guides'), { recursive: true })
+    mkdirSync(join(docsRoot, 'images'), { recursive: true })
+    mkdirSync(join(docsRoot, 'snippets'), { recursive: true })
+    writeFileSync(join(docsRoot, 'navigation.json'), JSON.stringify({
+      dropdowns: [{ dropdown: 'Discarded navigation', pages: ['discarded'] }],
+    }))
+    writeFileSync(join(docsRoot, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      theme: 'maple',
+      navigation: {
+        $ref: './navigation.json',
+        global: { anchors: [{ anchor: 'Community', href: 'https://community.example.com' }] },
+        dropdowns: [
+          {
+            dropdown: 'Documentation',
+            groups: [{
+              group: 'Getting started',
+              icon: { name: 'play' },
+              pages: ['introduction', { group: 'CLI', pages: ['manualSetup'] }],
+            }],
+          },
+          {
+            dropdown: 'API reference',
+            groups: [{ group: 'Runs API', pages: ['management/runs'] }],
+          },
+          {
+            dropdown: 'Guides & examples',
+            groups: [{ group: 'Guides', pages: ['guides/introduction'] }],
+          },
+        ],
+      },
+      api: { openapi: 'service.openapi.yml' },
+      redirects: [{ source: '/unsafe', destination: 'javascript:alert(1)' }],
+      navbar: {
+        links: [
+          { label: 'Status', href: 'https://status.example.com' },
+          { label: 'Unsafe', href: 'javascript:alert(1)' },
+        ],
+        primary: { type: 'github', href: 'https://github.com/acme/product' },
+      },
+      footer: {
+        socials: {
+          github: 'https://github.com/acme/product',
+          unsafe: 'data:text/html,bad',
+        },
+        links: [{ header: 'Developers', items: [{ label: 'Changelog', href: '/changelog' }] }],
+      },
+    }))
+    writeFileSync(join(docsRoot, 'introduction.mdx'), [
+      '---',
+      'title: Product docs',
+      'sidebarTitle: Introduction',
+      'tag: NEW',
+      'mode: center',
+      'noindex: true',
+      '---',
+      '',
+      "import Shared from '/snippets/shared.mdx'",
+      '',
+      '<Shared tool={"CLI"} />',
+    ].join('\n'))
+    writeFileSync(join(docsRoot, 'manualSetup.mdx'), '---\ntitle: Manual setup\n---\n\n<Shared tool={"Setup"} />\n\n<SoftLimit />\n\n![Diagram](./images/setup.png?raw=1#preview)')
+    writeFileSync(join(docsRoot, 'management', 'runs.mdx'), '---\ntitle: Runs\n---\n\nRuns API.')
+    writeFileSync(join(docsRoot, 'guides', 'introduction.mdx'), '---\ntitle: Guides\n---\n\nGuides.')
+    writeFileSync(join(docsRoot, 'snippets', 'shared.mdx'), 'Shared {tool} prerequisite.\n\n```tsx\nconst literal = {tool}\n```')
+    writeFileSync(join(docsRoot, 'snippets', 'soft-limit.mdx'), 'This limit can be raised.')
+    writeFileSync(join(docsRoot, 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+    writeFileSync(join(docsRoot, 'images', 'setup.png'), 'image')
+    writeFileSync(join(docsRoot, 'service.openapi.yml'), 'openapi: 3.1.0\ninfo: { title: Service, version: 1.0.0 }\npaths: {}')
+
+    const bundle = migrateRepository({
+      repositoryDir,
+      sourceUrl: 'https://github.com/acme/monorepo/tree/main/apps/docs',
+      docsDir: 'apps/docs',
+    })
+
+    expect(bundle.platform).toBe('mintlify')
+    expect(bundle.docsConfig.tabs.map((tab) => tab.tab)).toEqual([
+      'Documentation',
+      'API reference',
+      'Guides & examples',
+    ])
+    expect(bundle.docsConfig.tabs[0].groups).toEqual([{
+      group: 'Getting started',
+      icon: 'play',
+      pages: ['introduction', { group: 'CLI', pages: ['manualSetup'] }],
+    }])
+    expect(bundle.docsConfig.tabs[1]).toMatchObject({
+      tab: 'API reference',
+      groups: [{ group: 'Runs API', pages: ['management/runs'] }],
+      api: { source: '/service.openapi.yml', navigation: false },
+    })
+    expect(bundle.docsConfig).toMatchObject({
+      theme: 'maple',
+      navbar: {
+        links: [
+          { label: 'Status', href: 'https://status.example.com' },
+          { label: 'Community', href: 'https://community.example.com' },
+        ],
+        primary: { label: 'GitHub', href: 'https://github.com/acme/product' },
+      },
+      footer: {
+        socials: { github: 'https://github.com/acme/product' },
+        links: [{ heading: 'Developers', items: [{ label: 'Changelog', href: '/changelog' }] }],
+      },
+      redirects: [
+        { source: '/guides', destination: '/guides/introduction', permanent: false },
+      ],
+    })
+    expect(bundle.pages.map((page) => page.id)).toEqual([
+      'introduction',
+      'manualSetup',
+      'management/runs',
+      'guides/introduction',
+    ])
+    expect(bundle.pages[0]).toMatchObject({
+      navTitle: 'Introduction',
+      badge: 'NEW',
+      mode: 'center',
+      noindex: true,
+    })
+    expect(bundle.pages[0].body).toContain('Shared CLI prerequisite.')
+    expect(bundle.pages[0].body).toContain('const literal = {tool}')
+    expect(bundle.pages[1].body).toContain('![Diagram](/images/setup.png?raw=1#preview)')
+    expect(bundle.pages[1].body).toContain('Shared Setup prerequisite.')
+    expect(bundle.pages[1].body).toContain('This limit can be raised.')
+    expect(bundle.assets.map((asset) => asset.path)).toEqual(expect.arrayContaining([
+      'logo.svg',
+      'images/setup.png',
+      'service.openapi.yml',
+    ]))
+    expect(bundle.warnings).toEqual([])
+
+    const introduction = renderMigrationFiles(bundle)
+      .find((file) => file.path === 'src/content/introduction.mdx')
+    expect(introduction?.content).toContain('navTitle: "Introduction"')
+    expect(introduction?.content).toContain('badge: "NEW"')
+    expect(introduction?.content).toContain('mode: "center"')
+    expect(introduction?.content).toContain('noindex: true')
   })
 })
 

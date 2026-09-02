@@ -257,6 +257,12 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     '/api',
     ...Array.from(secondaryLocales, (locale) => `/${locale}/api`),
   ])
+  const redirectDestinations = new Map(
+    (config.redirects ?? []).map((redirect) => [
+      redirect.source.replace(/\/$/, '') || '/',
+      redirect.destination.replace(/\/$/, '') || '/',
+    ]),
+  )
 
   const navPageIds = new Set<string>()
   const duplicates = new Set<string>()
@@ -279,7 +285,10 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   }
 
   for (const dup of duplicates) {
-    issues.push({ severity: 'error', message: `[duplicate] "${dup}" appears more than once in docs.json` })
+    // Reusing one page in multiple sections is supported by both Mintlify and
+    // Thally. Surface the editorial ambiguity without failing an otherwise
+    // valid migration or CI run.
+    issues.push({ severity: 'warning', message: `[duplicate] "${dup}" appears more than once in docs.json` })
   }
 
   for (const pageId of navPageIds) {
@@ -363,7 +372,8 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
         (prefix) => path === prefix || path.startsWith(`${prefix}/`),
       )
       if (isGeneratedApiPath || path.startsWith('/_next') || /\.[a-z0-9]+$/i.test(path)) continue // generated/assets
-      if (!validPaths.has(path)) {
+      const redirectedPath = redirectDestinations.get(path)
+      if (!validPaths.has(path) && !(redirectedPath && validPaths.has(redirectedPath))) {
         issues.push({ severity: 'error', message: `Broken link: "${target}" — no page at "${path}"`, file, line })
       } else if (anchor && !anchorsByPath.get(path)?.has(anchor)) {
         issues.push({ severity: 'warning', message: `Broken anchor: "${target}" — no heading "#${anchor}" on that page`, file, line })
