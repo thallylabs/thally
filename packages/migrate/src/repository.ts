@@ -23,6 +23,7 @@ import {
 } from './docusaurus.js'
 import { parseMarkdownPage } from './mdx.js'
 import {
+  addMintlifyDirectoryRedirects,
   buildNavigationFromPages,
   isDocumentationExtension,
   projectMintlifyNavigation,
@@ -100,6 +101,46 @@ function hasDocusaurusConfig(directory: string): boolean {
     const path = resolveWithin(directory, filename)
     return existsSync(path) && lstatSync(path).isFile()
   })
+}
+
+function hasMintlifyConfig(directory: string): boolean {
+  return ['docs.json', 'mint.json'].some((filename) => {
+    const path = resolveWithin(directory, filename)
+    if (!existsSync(path) || !lstatSync(path).isFile()) return false
+    if (filename === 'mint.json') return true
+    try {
+      const config = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+      return String(config.$schema ?? '').includes('mintlify') || 'navigation' in config
+    } catch {
+      return false
+    }
+  })
+}
+
+function findMintlifyProjectRoot(repositoryDir: string, docsDir?: string): string | null {
+  if (docsDir !== undefined) {
+    let candidate = docsDir.replace(/\/+$/, '')
+    while (true) {
+      const path = resolveWithin(repositoryDir, candidate || '.')
+      if (hasMintlifyConfig(path)) return path
+      if (!candidate) break
+      const parent = dirname(candidate)
+      candidate = parent === '.' ? '' : parent
+    }
+  }
+  const queue: Array<{ directory: string; depth: number }> = [{ directory: repositoryDir, depth: 0 }]
+  let visited = 0
+  while (queue.length > 0 && visited < 500) {
+    const current = queue.shift()!
+    visited++
+    if (hasMintlifyConfig(current.directory)) return current.directory
+    if (current.depth >= 4) continue
+    for (const entry of readdirSync(current.directory, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || IGNORED_DIRECTORIES.has(entry.name)) continue
+      queue.push({ directory: resolveWithin(current.directory, entry.name), depth: current.depth + 1 })
+    }
+  }
+  return null
 }
 
 function findDocusaurusProjectRoot(repositoryDir: string, docsDir?: string): string | null {
@@ -226,13 +267,13 @@ export async function cloneGitHubRepository(
 }
 
 /** Detect a supported repository docs platform from unambiguous config files. */
-export function detectRepositoryPlatform(repositoryDir: string): MigrationPlatform {
-  if (existsSync(resolveWithin(repositoryDir, 'mint.json'))) return 'mintlify'
-  const docsJson = resolveWithin(repositoryDir, 'docs.json')
+export function detectRepositoryPlatform(repositoryDir: string, docsDir?: string): MigrationPlatform {
+  if (findMintlifyProjectRoot(repositoryDir, docsDir)) return 'mintlify'
+  const selectedRoot = docsDir === undefined ? repositoryDir : resolveWithin(repositoryDir, docsDir || '.')
+  const docsJson = resolveWithin(selectedRoot, 'docs.json')
   if (existsSync(docsJson)) {
     try {
       const config = JSON.parse(readFileSync(docsJson, 'utf8')) as Record<string, unknown>
-      if (String(config.$schema ?? '').includes('mintlify') || 'navigation' in config) return 'mintlify'
       if (Array.isArray(config.tabs)) return 'thally'
     } catch {
       // A malformed source config is reported later; platform detection falls through.
@@ -300,12 +341,177 @@ function normalizedReferenceKey(value: string): string {
     .replace(/^(?:index|readme)$/i, '') || 'introduction'
 }
 
+function exactReferenceKey(value: string): string {
+  return value.split(/[?#]/, 1)[0]
+    .replace(/^\/+/, '')
+    .replace(/\\/g, '/')
+    .replace(/\.(?:mdx?|rst|txt)$/i, '')
+}
+
 function findOpenApi(files: Array<ScannedFile>): ScannedFile | null {
   return files.find((file) => OPENAPI_FILENAMES.has(basename(file.relativePath).toLowerCase())) ?? null
 }
 
+function findConfiguredMintlifyOpenApi(
+  config: Record<string, unknown> | null,
+  files: Array<ScannedFile>,
+): ScannedFile | null {
+  const api = config?.api && typeof config.api === 'object' && !Array.isArray(config.api)
+    ? config.api as Record<string, unknown>
+    : null
+  const configured = typeof api?.openapi === 'string'
+    ? [api.openapi]
+    : Array.isArray(api?.openapi) ? api.openapi.filter((value): value is string => typeof value === 'string') : []
+  for (const reference of configured) {
+    if (/^(?:https?:)?\/\//i.test(reference)) continue
+    const key = reference.split(/[?#]/, 1)[0].replace(/^\/+/, '').replace(/\\/g, '/')
+    const match = files.find((file) => file.relativePath === key)
+    if (match) return match
+  }
+  return null
+}
+
 function withoutFrontmatter(value: string): string {
   return value.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim()
+}
+
+function staticSnippetProperties(attributes: string): Map<string, string> {
+  const properties = new Map<string, string>()
+  const matcher = /\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*"([^"]*)"\s*\}|\{\s*'([^']*)'\s*\})/g
+  for (const match of attributes.matchAll(matcher)) {
+    properties.set(match[1], match[2] ?? match[3] ?? match[4] ?? match[5] ?? '')
+  }
+  return properties
+}
+
+function interpolateSnippet(snippet: string, attributes: string): string {
+  const properties = staticSnippetProperties(attributes)
+  if (properties.size === 0) return snippet
+  let fence = ''
+  return snippet.split('\n').map((line) => {
+    const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1]
+    if (marker) {
+      if (!fence) fence = marker[0]
+      else if (marker[0] === fence) fence = ''
+      return line
+    }
+    if (fence) return line
+    return line.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (original, name: string) => {
+      return properties.get(name) ?? original
+    })
+  }).join('\n')
+}
+
+function resolveSnippetPath(
+  sourcePath: string,
+  currentFile: string,
+  repositoryRoot: string,
+  siteRoot: string,
+): string {
+  const repositoryRelative = sourcePath.startsWith('@site/')
+    ? relative(repositoryRoot, resolveWithin(siteRoot, sourcePath.slice('@site/'.length))).replace(/\\/g, '/')
+    : sourcePath.startsWith('/')
+      ? relative(repositoryRoot, resolveWithin(siteRoot, sourcePath.replace(/^\/+/, ''))).replace(/\\/g, '/')
+      : relative(repositoryRoot, resolvePath(dirname(currentFile), sourcePath)).replace(/\\/g, '/')
+  const candidate = resolveWithin(repositoryRoot, repositoryRelative)
+  resolveWithin(repositoryRoot, relative(repositoryRoot, candidate))
+  return candidate
+}
+
+function globalSnippetAliases(
+  files: Array<ScannedFile>,
+  repositoryRoot: string,
+  siteRoot: string,
+): Map<string, string> {
+  const aliases = new Map<string, string>()
+  const matcher = /^import\s+(?:\{\s*default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}?\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm
+  for (const file of files) {
+    const segments = file.relativePath.split('/')
+    if (!segments.some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))) continue
+    const basenameWithoutExtension = basename(file.relativePath).replace(/\.mdx?$/i, '')
+    const conventionalAlias = basenameWithoutExtension
+      .split(/[^A-Za-z0-9]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join('')
+    if (conventionalAlias) aliases.set(conventionalAlias, file.absolutePath)
+  }
+  for (const file of files) {
+    if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())) continue
+    const raw = readFileSync(file.absolutePath, 'utf8')
+    for (const match of raw.matchAll(matcher)) {
+      try {
+        const candidate = resolveSnippetPath(match[2], file.absolutePath, repositoryRoot, siteRoot)
+        if (existsSync(candidate) && lstatSync(candidate).isFile()) {
+          aliases.set(match[1], candidate)
+        }
+      } catch {
+        // The page-local inliner emits the actionable warning when it reaches
+        // an unsafe or missing import. Global discovery is best-effort only.
+      }
+    }
+  }
+  return aliases
+}
+
+function repositoryAssetHref(
+  value: string,
+  currentFile: string,
+  siteRoot: string,
+): string | null {
+  const isBracketed = value.startsWith('<') && value.endsWith('>')
+  const raw = isBracketed ? value.slice(1, -1) : value
+  if (!raw || raw.startsWith('#') || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(raw)) return null
+  const suffixIndex = raw.search(/[?#]/)
+  const pathname = suffixIndex >= 0 ? raw.slice(0, suffixIndex) : raw
+  const suffix = suffixIndex >= 0 ? raw.slice(suffixIndex) : ''
+  let decodedPath: string
+  try {
+    decodedPath = decodeURIComponent(pathname)
+  } catch {
+    return null
+  }
+  if (!ASSET_EXTENSIONS.has(extname(decodedPath).toLowerCase())) return null
+  try {
+    const candidate = decodedPath.startsWith('/')
+      ? resolveWithin(siteRoot, decodedPath.replace(/^\/+/, ''))
+      : resolveWithin(dirname(currentFile), decodedPath)
+    // Mintlify's deploy root is the directory containing docs.json. Do not
+    // copy or expose a relative reference that escapes that project boundary.
+    const siteRelative = relative(siteRoot, candidate).replace(/\\/g, '/')
+    resolveWithin(siteRoot, siteRelative)
+    if (!existsSync(candidate) || !lstatSync(candidate).isFile()) return null
+    const normalized = normalizeAssetPath(siteRelative)
+    if (!normalized) return null
+    const rewritten = `/${normalized}${suffix}`
+    // Markdown destinations containing parentheses must stay angle-bracketed;
+    // removing the wrapper makes CommonMark terminate the URL too early.
+    return isBracketed ? `<${rewritten}>` : rewritten
+  } catch {
+    return null
+  }
+}
+
+function rewriteRepositoryAssetLinks(body: string, currentFile: string, siteRoot: string): string {
+  return body
+    .replace(/(!?\[[^\]]*\]\()(<[^>]+>|[^)\s]+)([^)]*\))/g, (
+      original,
+      opening: string,
+      destination: string,
+      closing: string,
+    ) => {
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot)
+      return rewritten ? `${opening}${rewritten}${closing}` : original
+    })
+    .replace(/\b(src|img|image|href)=(['"])([^'"]+)\2/g, (
+      original,
+      property: string,
+      quote: string,
+      destination: string,
+    ) => {
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot)
+      return rewritten ? `${property}=${quote}${rewritten}${quote}` : original
+    })
 }
 
 function inlineMdxSnippets(
@@ -315,6 +521,7 @@ function inlineMdxSnippets(
   warnings: Array<MigrationWarning>,
   depth = 0,
   siteRoot = repositoryRoot,
+  globalAliases: Map<string, string> = new Map(),
 ): string {
   if (depth >= 8) return raw
   const snippets = new Map<string, string>()
@@ -322,15 +529,7 @@ function inlineMdxSnippets(
     /^import\s+(?:\{\s*default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}?\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm,
     (_statement, componentName: string, sourcePath: string) => {
       try {
-        const repositoryRelative = sourcePath.startsWith('@site/')
-          ? relative(repositoryRoot, resolveWithin(siteRoot, sourcePath.slice('@site/'.length))).replace(/\\/g, '/')
-          : sourcePath.startsWith('/')
-            ? sourcePath.replace(/^\/+/, '')
-            : relative(repositoryRoot, resolvePath(dirname(currentFile), sourcePath)).replace(/\\/g, '/')
-        const candidate = resolveWithin(repositoryRoot, repositoryRelative)
-        // Prove a relative import resolved under the repository, not merely
-        // under the current directory's parent chain.
-        resolveWithin(repositoryRoot, relative(repositoryRoot, candidate))
+        const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
         if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
         const nested = inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
@@ -339,6 +538,7 @@ function inlineMdxSnippets(
           warnings,
           depth + 1,
           siteRoot,
+          globalAliases,
         )
         snippets.set(componentName, nested)
         return ''
@@ -353,31 +553,51 @@ function inlineMdxSnippets(
       }
     },
   )
+  // Mintlify resolves snippet imports across its MDX compilation graph. Some
+  // real sites consequently reuse an alias on a page that does not repeat the
+  // import declaration. Recover those aliases deterministically from imports
+  // elsewhere in the same docs project.
+  for (const [componentName, candidate] of globalAliases) {
+    if (snippets.has(componentName) || !new RegExp(`<${componentName}(?:\\s|/?>)`).test(withoutImports)) continue
+    const nested = inlineMdxSnippets(
+      withoutFrontmatter(readFileSync(candidate, 'utf8')),
+      candidate,
+      repositoryRoot,
+      warnings,
+      depth + 1,
+      siteRoot,
+      globalAliases,
+    )
+    snippets.set(componentName, nested)
+  }
   let result = withoutImports
   for (const [componentName, snippet] of snippets) {
     result = result
-      .replace(new RegExp(`<${componentName}(?:\\s[^>]*)?\\s*/>`, 'g'), snippet)
-      .replace(new RegExp(`<${componentName}(?:\\s[^>]*)?>(?:[\\s\\S]*?)<\\/${componentName}>`, 'g'), snippet)
+      .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)\\s*/>`, 'g'), (_tag, attributes: string) => {
+        return interpolateSnippet(snippet, attributes)
+      })
+      .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)>(?:[\\s\\S]*?)<\\/${componentName}>`, 'g'), (_tag, attributes: string) => {
+        return interpolateSnippet(snippet, attributes)
+      })
   }
   return result
 }
 
 function injectOpenApi(config: MigrationDocsConfig, filename: string): MigrationDocsConfig {
-  const tabs = config.tabs.filter((tab) => !tab.tab.toLowerCase().includes('api'))
-  const apiTab: MigrationDocsConfig['tabs'][number] = {
-    tab: 'API Reference',
-    api: { source: `/${filename}` },
-  }
-  const changelog = tabs.findIndex((tab) => tab.tab.toLowerCase() === 'changelog')
-  if (changelog >= 0) tabs.splice(changelog, 0, apiTab)
-  else tabs.push(apiTab)
+  const tabs = config.tabs.map((tab) => ({ ...tab }))
+  const apiTab = tabs.find((tab) => tab.tab.toLowerCase().includes('api'))
+  if (apiTab) apiTab.api = { source: `/${filename}`, navigation: false }
+  else tabs.push({ tab: 'API Reference', api: { source: `/${filename}` } })
   return { ...config, tabs }
 }
 
 /** Import an already-available repository directory into a canonical bundle. */
 export function migrateRepository(options: RepositoryMigrationOptions): MigrationBundle {
   const repositoryDir = options.repositoryDir
-  const platform = options.platform ?? detectRepositoryPlatform(repositoryDir)
+  const platform = options.platform ?? detectRepositoryPlatform(repositoryDir, options.docsDir)
+  const mintlifyProjectRoot = platform === 'mintlify'
+    ? findMintlifyProjectRoot(repositoryDir, options.docsDir)
+    : null
   const docusaurusProjectRoot = platform === 'docusaurus'
     ? findDocusaurusProjectRoot(repositoryDir, options.docsDir)
     : null
@@ -394,24 +614,31 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const projectRelative = relative(repositoryDir, docusaurusProjectRoot).replace(/\\/g, '/')
       return [projectRelative, primaryDocusaurusDocsDirectory(docusaurusProjectRoot)].filter(Boolean).join('/')
     }
+    if (platform === 'mintlify' && mintlifyProjectRoot) {
+      return relative(repositoryDir, mintlifyProjectRoot).replace(/\\/g, '/')
+    }
     return platform === 'mintlify' ? '' : detectRepositoryDocsDir(repositoryDir)
   })()
   const warnings: Array<MigrationWarning> = []
   let docsConfig: MigrationDocsConfig = { tabs: [] }
   const referenceMap = new Map<string, { navigationId: string; locale?: string }>()
+  const exactReferenceMap = new Map<string, { navigationId: string; locale?: string }>()
   const referenceOrder = new Map<string, number>()
   let docusaurusSidebars: DocusaurusSidebars | null = null
+  let mintlifyConfig: Record<string, unknown> | null = null
 
   if (platform === 'mintlify') {
     try {
-      const config = readMintlifyConfig(repositoryDir)
+      const config = readMintlifyConfig(mintlifyProjectRoot ?? repositoryDir)
       if (config) {
+        mintlifyConfig = config
         const projected = projectMintlifyNavigation(config)
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
         for (const [index, reference] of projected.pageReferences.entries()) {
           const key = normalizedReferenceKey(reference.ref)
           referenceMap.set(key, reference)
+          exactReferenceMap.set(exactReferenceKey(reference.ref), reference)
           referenceOrder.set(key, index)
         }
       }
@@ -454,6 +681,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const rightOrder = referenceOrder.get(normalizedReferenceKey(right.relativePath)) ?? Number.MAX_SAFE_INTEGER
     return leftOrder - rightOrder || left.relativePath.localeCompare(right.relativePath)
   })
+  const snippetAliases = platform === 'mintlify' && mintlifyProjectRoot
+    ? globalSnippetAliases(files, repositoryDir, mintlifyProjectRoot)
+    : new Map<string, string>()
   for (const file of pageFiles) {
     if (!isDocumentationExtension(file.relativePath)) continue
     const sourceSegments = file.relativePath.split('/')
@@ -463,7 +693,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       continue
     }
     const rootFilename = !file.relativePath.includes('/') ? basename(file.relativePath).toLowerCase() : ''
-    if (!configuredDocsDir && REPOSITORY_ONLY_DOCUMENTS.has(rootFilename)) {
+    if (REPOSITORY_ONLY_DOCUMENTS.has(rootFilename) && !exactReferenceMap.has(exactReferenceKey(file.relativePath))) {
       skipped++
       continue
     }
@@ -479,14 +709,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       continue
     }
     const key = normalizedReferenceKey(file.relativePath)
-    const referenced = referenceMap.get(key)
+    const referenced = exactReferenceMap.get(exactReferenceKey(file.relativePath)) ?? referenceMap.get(key)
     let locale = referenced?.locale
-    let navigationId = referenced?.navigationId ?? pageIdFromReference(file.relativePath)
+    let navigationId = referenced?.navigationId ?? pageIdFromReference(file.relativePath, platform === 'mintlify')
     if (!referenced && localeConfig) {
       const prefix = file.relativePath.split('/', 1)[0]
       if (localeConfig.locales.some((entry) => entry.code === prefix)) {
         locale = prefix
-        navigationId = pageIdFromReference(file.relativePath.slice(prefix.length + 1))
+        navigationId = pageIdFromReference(file.relativePath.slice(prefix.length + 1), platform === 'mintlify')
       }
     }
     if (!navigationId) {
@@ -502,7 +732,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       repositoryDir,
       warnings,
       0,
-      docusaurusProjectRoot ?? repositoryDir,
+      mintlifyProjectRoot ?? docusaurusProjectRoot ?? repositoryDir,
+      snippetAliases,
     )
     let docusaurusDescriptor: Omit<DocusaurusPageDescriptor, 'title'> | undefined
     const page = parseMarkdownPage({
@@ -510,7 +741,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       navigationId,
       ...(locale ? { locale } : {}),
       raw,
-      source: `${options.sourceUrl}#${file.relativePath}`,
+      source: `${options.sourceUrl}#${relative(repositoryDir, file.absolutePath).replace(/\\/g, '/')}`,
       ...(platform === 'docusaurus' ? {
         resolveIdentity: (frontmatter, fallback) => {
           const resolved = resolveDocusaurusPageIdentity(file.relativePath, frontmatter, fallback)
@@ -540,6 +771,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (!page) {
       skipped++
       continue
+    }
+    if (platform === 'mintlify' && mintlifyProjectRoot) {
+      page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot)
     }
     if (seenPageIds.has(page.id)) {
       skipped++
@@ -574,7 +808,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let totalAssetBytes = 0
   for (const file of [...files, ...repositoryAssets]) {
     const firstSegment = file.relativePath.split('/', 1)[0].toLowerCase()
-    if (!ASSET_DIRECTORIES.has(firstSegment) || !ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
+    if (!ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
+    if (platform !== 'mintlify' && !ASSET_DIRECTORIES.has(firstSegment)) continue
     const size = lstatSync(file.absolutePath).size
     if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
       warnings.push({ code: 'limit-reached', message: 'An asset was skipped because the migration asset budget was exhausted.', source: file.relativePath })
@@ -618,7 +853,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
   if (docsConfig.tabs.length === 0) docsConfig = buildNavigationFromPages(pages)
-  const openApi = findOpenApi(files)
+  const openApi = findConfiguredMintlifyOpenApi(mintlifyConfig, files) ?? findOpenApi(files)
   if (openApi) {
     const filename = basename(openApi.relativePath)
     if (!assets.some((asset) => asset.path === filename)) {
@@ -626,6 +861,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     docsConfig = injectOpenApi(docsConfig, filename)
   }
+  if (platform === 'mintlify') docsConfig = addMintlifyDirectoryRedirects(docsConfig, pages)
 
   if (platform === 'docusaurus' && docusaurusProjectRoot && !options.docusaurusSkipPlugins) {
     for (const plugin of additionalDocusaurusPluginRoots(repositoryDir, docusaurusProjectRoot)) {
@@ -673,6 +909,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     pages,
     assets,
     docsConfig,
+    ...(mintlifyConfig ? {
+      site: {
+        ...(typeof mintlifyConfig.name === 'string' ? { name: mintlifyConfig.name } : {}),
+        ...(typeof mintlifyConfig.description === 'string' ? { description: mintlifyConfig.description } : {}),
+      },
+    } : {}),
     warnings,
     stats: { discovered, imported: pages.length, skipped },
   }

@@ -2,10 +2,10 @@
 
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 
-const SAFE_SEGMENT = /[^a-z0-9._-]+/g
+const SAFE_SEGMENT = /[^a-z0-9._-]+/gi
 
 /** Turn a source path segment into a stable URL/file-system slug. */
-export function slugifySegment(value: string): string {
+export function slugifySegment(value: string, preserveCase = false): string {
   let decoded = value
   try {
     decoded = decodeURIComponent(value)
@@ -13,8 +13,8 @@ export function slugifySegment(value: string): string {
     // Malformed percent escapes are legal in source filenames. Treat them as
     // literal slug input instead of letting one file abort the whole import.
   }
-  return decoded
-    .toLowerCase()
+  const normalized = preserveCase ? decoded : decoded.toLowerCase()
+  return normalized
     .replace(/\.(?:html?|mdx?)$/i, '')
     .replace(SAFE_SEGMENT, '-')
     .replace(/(^-|-$)/g, '')
@@ -24,7 +24,7 @@ export function slugifySegment(value: string): string {
  * Normalize a page reference to a Thally content id. Invalid or traversal
  * references return `null` instead of being allowed near the file system.
  */
-export function pageIdFromReference(value: string): string | null {
+export function pageIdFromReference(value: string, preserveCase = false): string | null {
   const withoutQuery = value.split(/[?#]/, 1)[0].replace(/\\/g, '/').replace(/^\/+/, '')
   if (!withoutQuery || withoutQuery.includes('\0')) return null
   const rawSegments = withoutQuery.split('/').filter(Boolean)
@@ -34,7 +34,7 @@ export function pageIdFromReference(value: string): string | null {
   if (!/^(?:index|readme)$/i.test(last)) {
     baseSegments[baseSegments.length - 1] = last
   }
-  const segments = baseSegments.map(slugifySegment).filter(Boolean)
+  const segments = baseSegments.map((segment) => slugifySegment(segment, preserveCase)).filter(Boolean)
   return segments.join('/') || 'introduction'
 }
 

@@ -7,7 +7,7 @@ export {
   migrateRepository,
   parseGitHubRepositoryUrl,
 } from './repository.js'
-export { buildNavigationFromPages, projectMintlifyNavigation, readMintlifyConfig } from './navigation.js'
+export { addMintlifyDirectoryRedirects, buildNavigationFromPages, projectMintlifyNavigation, readMintlifyConfig } from './navigation.js'
 export { normalizeMdx, parseMarkdownPage } from './mdx.js'
 export { mergeMigrationConfig, renderMigrationFiles } from './render.js'
 export { defaultMigrationFetcher, migrateUrl, validateMigrationUrl } from './url.js'

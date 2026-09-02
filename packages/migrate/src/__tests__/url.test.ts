@@ -9,6 +9,101 @@ function response(url: string, body: string, contentType: string) {
 }
 
 describe('public URL migration', () => {
+  it('uses Mintlify React Flight config instead of promoting sidebar pages to tabs', async () => {
+    const sourceUrl = 'https://product.test/docs/introduction'
+    const navigation = {
+      global: null,
+      dropdowns: [
+        {
+          dropdown: 'Documentation',
+          groups: [{
+            group: 'Getting started',
+            pages: [
+              { title: 'Welcome', sidebarTitle: 'Introduction', href: '/introduction' },
+              { title: 'Quick start', href: '/quick-start' },
+              { group: 'Advanced', pages: [{ title: 'Manual setup', href: '/manual-setup' }] },
+            ],
+          }],
+        },
+        {
+          dropdown: 'API reference',
+          groups: [{ group: 'Runs API', pages: [{ title: 'Runs', href: '/management/runs' }] }],
+        },
+        {
+          dropdown: 'Guides & examples',
+          groups: [{ group: 'Guides', pages: [{ title: 'Examples', href: '/guides/examples' }] }],
+        },
+      ],
+    }
+    const docsConfig = {
+      $schema: 'https://mintlify.com/docs.json',
+      theme: 'maple',
+      navbar: { primary: { type: 'github', href: 'https://github.com/acme/product' } },
+      footer: { links: [{ header: 'Docs', items: [{ label: 'Home', href: '/introduction' }] }] },
+      navigation: { pages: [] },
+    }
+    const flight = [
+      `18:["$","$Provider",null,{"value":{"docsConfig":${JSON.stringify(docsConfig)}}}]`,
+      `19:["$","$Scoped",null,{"scopedNav":${JSON.stringify(navigation)}}]`,
+    ].join('\n')
+    const misleadingTabs = Array.from({ length: 20 }, (_, index) => (
+      `<a href="/page-${index}">Page ${index}</a>`
+    )).join('')
+    const html = `<html><head><link href="/docs/_mintlify/site.css"></head><body><div class="nav-tabs">${misleadingTabs}</div><script>self.__next_f.push([1,${JSON.stringify(flight)}])</script></body></html>`
+    const pages = new Map([
+      ['/docs/introduction', '# Welcome\n\nWelcome to the product.'],
+      ['/docs/quick-start', '# Quick start\n\nInstall the product.'],
+      ['/docs/manual-setup', '# Manual setup\n\nConfigure it manually.'],
+      ['/docs/management/runs', '# Runs\n\nManage runs.'],
+      ['/docs/guides/examples', '# Examples\n\nExplore examples.'],
+    ])
+    const fetcher: MigrationFetcher = async (url, request) => {
+      if (url.toString() === sourceUrl && request.accept.startsWith('text/html')) {
+        return response(sourceUrl, html, 'text/html')
+      }
+      if (url.toString() === sourceUrl) {
+        return {
+          ...response(sourceUrl, pages.get('/docs/introduction')!, 'text/markdown'),
+          headers: { 'x-llms-txt': '/docs/llms.txt' },
+        }
+      }
+      if (url.pathname === '/docs/llms.txt') {
+        return response(url.toString(), [...pages.keys()].map((path) => `- [Page](${path})`).join('\n'), 'text/plain')
+      }
+      const page = pages.get(url.pathname.replace(/\.md$/, ''))
+      if (page) return response(url.toString(), page, 'text/markdown')
+      throw new Error(`missing fixture: ${url}`)
+    }
+
+    const bundle = await migrateUrl({ sourceUrl, platform: 'mintlify', fetcher })
+
+    expect(bundle.docsConfig.tabs.map((tab) => tab.tab)).toEqual([
+      'Documentation',
+      'API reference',
+      'Guides & examples',
+    ])
+    expect(bundle.docsConfig.tabs[0].groups).toEqual([{
+      group: 'Getting started',
+      pages: ['introduction', 'quick-start', {
+        group: 'Advanced',
+        pages: ['manual-setup'],
+      }],
+    }])
+    expect(bundle.docsConfig).toMatchObject({
+      theme: 'maple',
+      navbar: { primary: { label: 'GitHub', href: 'https://github.com/acme/product' } },
+      footer: { links: [{ heading: 'Docs', items: [{ label: 'Home', href: '/introduction' }] }] },
+    })
+    expect(bundle.docsConfig.tabs.some((tab) => tab.tab === 'Page 0')).toBe(false)
+    expect(bundle.pages.map((page) => page.id)).toEqual([
+      'introduction',
+      'quick-start',
+      'manual-setup',
+      'management/runs',
+      'guides/examples',
+    ])
+  })
+
   it('imports only the submitted docs path and prefers llms Markdown pages', async () => {
     const documents = new Map([
       ['https://example.com/docs', response(

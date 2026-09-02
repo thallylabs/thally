@@ -56,6 +56,14 @@ keeps backward-compatible auto-detection when no platform flag is supplied.
 Explicit `--platform auto` and `--yes` runs print the live-site limitation
 without introducing an interactive prompt.
 
+Mintlify repository migrations preserve the source information architecture
+instead of rebuilding navigation from folders: nested project roots, `$ref`
+navigation files, tabs, groups, dropdowns, products, versions, languages,
+redirects, page metadata, snippets, assets, and compatible OpenAPI settings are
+projected into Thally. A live Mintlify URL uses the structured configuration
+embedded by Mintlify when it is available, with bounded same-site crawling as a
+fallback.
+
 Prefer a single binary? Install [`@thallylabs/cli`](https://www.npmjs.com/package/@thallylabs/cli)
 and use `thally init`, which delegates here.
 

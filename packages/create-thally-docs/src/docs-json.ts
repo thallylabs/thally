@@ -15,6 +15,7 @@ export interface DocsJsonTab {
 
 export interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
+  redirects?: Array<{ source: string; destination: string; permanent?: boolean }>
   ai?: { chat?: boolean }
   i18n?: {
     defaultLocale: string

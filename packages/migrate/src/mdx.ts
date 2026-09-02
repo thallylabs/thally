@@ -93,6 +93,8 @@ export function normalizeMdx(body: string): string {
     .replace(/<!--([\s\S]*?)-->/g, (_match, content: string) => `{/*${content}*/}`)
     .replace(/<Danger(\s[^>]*)?>/g, '<Error$1>')
     .replace(/<\/Danger>/g, '</Error>')
+    .replace(/<Warn(\s[^>]*)?>/g, '<Warning$1>')
+    .replace(/<\/Warn>/g, '</Warning>')
     .replace(/<Check(\s[^>]*)?>/g, '<Note$1>')
     .replace(/<\/Check>/g, '</Note>')
     .replace(/<Tree\.Folder/g, '<Folder')
@@ -128,6 +130,24 @@ export function parseMarkdownPage(input: {
   const title = typeof parsed.data.title === 'string' && parsed.data.title.trim()
     ? parsed.data.title.trim()
     : titleFromId(identity.navigationId)
+  const navTitle = typeof parsed.data.sidebarTitle === 'string' && parsed.data.sidebarTitle.trim()
+    ? parsed.data.sidebarTitle.trim()
+    : typeof parsed.data.navTitle === 'string' && parsed.data.navTitle.trim()
+      ? parsed.data.navTitle.trim()
+      : undefined
+  const badge = typeof parsed.data.tag === 'string' && parsed.data.tag.trim()
+    ? parsed.data.tag.trim()
+    : typeof parsed.data.badge === 'string' && parsed.data.badge.trim()
+      ? parsed.data.badge.trim()
+      : undefined
+  const sourceMode = typeof parsed.data.mode === 'string' ? parsed.data.mode : undefined
+  // Mintlify's frame mode and Thally's wide mode both retain the sidebar while
+  // removing the on-page table of contents. Other shared modes map directly.
+  const mode = sourceMode === 'frame'
+    ? 'wide'
+    : ['default', 'wide', 'custom', 'center', 'home'].includes(sourceMode ?? '')
+      ? sourceMode as MigrationPage['mode']
+      : undefined
   const description = typeof parsed.data.description === 'string' && parsed.data.description.trim()
     ? parsed.data.description.trim()
     : firstParagraph(body)
@@ -136,8 +156,13 @@ export function parseMarkdownPage(input: {
     navigationId: identity.navigationId,
     locale: identity.locale,
     title,
+    navTitle,
     description,
+    badge,
     keywords,
+    mode,
+    hidden: parsed.data.hidden === true ? true : undefined,
+    noindex: parsed.data.noindex === true || parsed.data.noindex === 'true' ? true : undefined,
     openapi: typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined,
     body,
     source: input.source,

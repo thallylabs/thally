@@ -9,7 +9,7 @@ import TurndownService from 'turndown'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
 import { parseMarkdownPage } from './mdx.js'
-import { buildNavigationFromPages } from './navigation.js'
+import { addMintlifyDirectoryRedirects, buildNavigationFromPages, projectMintlifyNavigation } from './navigation.js'
 import { pageIdFromReference } from './path.js'
 import type {
   MigrationBundle,
@@ -28,8 +28,8 @@ const MAX_LOCAL_RESPONSE_BYTES = 2_000_000
 const MAX_SITEMAP_DOCUMENTS = 25
 const PORTABLE_MDX_COMPONENTS = new Set([
   'Accordion', 'AccordionGroup', 'Badge', 'Callout', 'Card', 'CardGroup',
-  'Check', 'CodeGroup', 'Color', 'Column', 'Columns', 'Danger', 'Error', 'Expandable',
-  'Agent', 'Embed', 'File', 'Folder', 'Frame', 'GitHub', 'Github', 'Hero', 'Human',
+  'Check', 'CodeGroup', 'Color', 'Column', 'Columns', 'ContentPanel', 'Danger', 'Error', 'Expandable',
+  'Agent', 'AgentPrompt', 'BannerPreview', 'Embed', 'File', 'Folder', 'Frame', 'GitHub', 'Github', 'Hero', 'Human',
   'Icon', 'Info', 'InlinePanel', 'InlineRequestExample', 'InlineResponseExample',
   'Latex', 'LegacyView', 'Mermaid', 'Note', 'Panel', 'ParamField', 'Prompt',
   'PromptAssistant', 'PromptUser',
@@ -192,7 +192,7 @@ function pageIdForUrl(url: URL, scopePath: string): string | null {
     else if (path === scopePath) path = ''
     else if (path.startsWith(`${scopePath}/`)) path = path.slice(scopePath.length + 1)
   }
-  return pageIdFromReference(path.replace(/^\/+/, '') || 'introduction')
+  return pageIdFromReference(path.replace(/^\/+/, '') || 'introduction', true)
 }
 
 function canonicalLocalizedPageId(id: string): string {
@@ -218,6 +218,82 @@ function detectUrlPlatform(document: MigrationFetchResponse): MigrationPlatform 
   if (value.includes('vitepress')) return 'vitepress'
   if (value.includes('starlight')) return 'starlight'
   return 'generic'
+}
+
+function jsonObjectAfterKey(value: string, key: string): Record<string, unknown> | null {
+  let cursor = 0
+  const marker = `"${key}":`
+  while (cursor < value.length) {
+    const markerIndex = value.indexOf(marker, cursor)
+    if (markerIndex < 0) return null
+    let start = markerIndex + marker.length
+    while (/\s/.test(value[start] ?? '')) start += 1
+    if (value[start] !== '{') {
+      cursor = start + 1
+      continue
+    }
+    let depth = 0
+    let isQuoted = false
+    let isEscaped = false
+    for (let index = start; index < value.length; index += 1) {
+      const character = value[index]
+      if (isQuoted) {
+        if (isEscaped) isEscaped = false
+        else if (character === '\\') isEscaped = true
+        else if (character === '"') isQuoted = false
+        continue
+      }
+      if (character === '"') {
+        isQuoted = true
+        continue
+      }
+      if (character === '{') depth += 1
+      if (character === '}') {
+        depth -= 1
+        if (depth !== 0) continue
+        try {
+          const parsed = JSON.parse(value.slice(start, index + 1)) as unknown
+          return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? parsed as Record<string, unknown>
+            : null
+        } catch {
+          break
+        }
+      }
+    }
+    cursor = start + 1
+  }
+  return null
+}
+
+/**
+ * Current Mintlify themes embed the resolved docs config and scoped navigation
+ * in React Flight. Reading that data is substantially more faithful than
+ * inferring information architecture from whichever responsive nav is visible.
+ */
+function embeddedMintlifyConfig(body: string): Record<string, unknown> | null {
+  const $ = load(body)
+  const flightPayloads: Array<string> = []
+  $('script').each((_index, element) => {
+    const script = $(element).text()
+    for (const match of script.matchAll(/self\.__next_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)/g)) {
+      try {
+        const payload = JSON.parse(match[1])
+        if (typeof payload === 'string') flightPayloads.push(payload)
+      } catch {
+        // Older or customized shells fall back to bounded DOM inference.
+      }
+    }
+  })
+  if (flightPayloads.length === 0) return null
+  const payload = flightPayloads.join('\n')
+  const docsConfig = jsonObjectAfterKey(payload, 'docsConfig')
+  const scopedNavigation = jsonObjectAfterKey(payload, 'scopedNav')
+  if (!docsConfig && !scopedNavigation) return null
+  return {
+    ...(docsConfig ?? {}),
+    ...(scopedNavigation ? { navigation: scopedNavigation } : {}),
+  }
 }
 
 function plainDescription(value: string): string {
@@ -499,6 +575,11 @@ function remoteMarkdownMetadata(body: string): {
   content: string
   title?: string
   description?: string
+  sidebarTitle?: string
+  tag?: string
+  mode?: string
+  hidden?: boolean
+  noindex?: boolean
 } {
   if (!/^---\r?\n/.test(body)) return { content: body }
   const end = body.slice(4, 65_540).search(/\r?\n---(?:\r?\n|$)/)
@@ -522,6 +603,11 @@ function remoteMarkdownMetadata(body: string): {
     content: body.slice(contentStart),
     title: scalar('title'),
     description: scalar('description'),
+    sidebarTitle: scalar('sidebarTitle'),
+    tag: scalar('tag'),
+    mode: scalar('mode'),
+    hidden: scalar('hidden') === 'true' ? true : undefined,
+    noindex: scalar('noindex') === 'true' ? true : undefined,
   }
 }
 
@@ -597,6 +683,11 @@ function markdownPage(document: MigrationFetchResponse, id: string): {
     '---',
     `title: ${JSON.stringify(title)}`,
     ...(description ? [`description: ${JSON.stringify(description)}`] : []),
+    ...(parsed.sidebarTitle ? [`sidebarTitle: ${JSON.stringify(parsed.sidebarTitle)}`] : []),
+    ...(parsed.tag ? [`tag: ${JSON.stringify(parsed.tag)}`] : []),
+    ...(parsed.mode ? [`mode: ${JSON.stringify(parsed.mode)}`] : []),
+    ...(parsed.hidden ? ['hidden: true'] : []),
+    ...(parsed.noindex ? ['noindex: true'] : []),
     ...(embeddedOpenApi.openapi ? [`openapi: ${JSON.stringify(embeddedOpenApi.openapi)}`] : []),
     '---',
     '',
@@ -1104,11 +1195,38 @@ function htmlTopLevelNavigation(
   const candidates = tabCandidates.length > 0
     ? tabCandidates
     : collectCandidates('nav, [role="navigation"]')
-  return candidates.sort((left, right) => {
+  const entries = candidates.sort((left, right) => {
     const densityDifference = (right.entries.length / right.anchorCount)
       - (left.entries.length / left.anchorCount)
     return densityDifference || right.entries.length - left.entries.length
   })[0]?.entries ?? []
+  // A product switcher with dozens of entries is invariably a sidebar or
+  // responsive page strip, not authored top-level navigation. Refuse to turn
+  // that ambiguity into an unusable header.
+  const normalizedLabels = entries.map((entry) => entry.label.trim().toLowerCase())
+  if (entries.length > 12 || new Set(normalizedLabels).size !== normalizedLabels.length) return []
+  return entries
+}
+
+function remapNavigationHome(
+  config: MigrationBundle['docsConfig'],
+  sourceHomePageId: string | undefined,
+): MigrationBundle['docsConfig'] {
+  if (!sourceHomePageId || sourceHomePageId === 'introduction') return config
+  const remapGroups = (groups: Array<MigrationNavigationGroup>): Array<MigrationNavigationGroup> => groups.map((group) => ({
+    ...group,
+    pages: group.pages.map((page) => typeof page === 'string'
+      ? page === sourceHomePageId ? 'introduction' : page
+      : remapGroups([page])[0]),
+  }))
+  return {
+    ...config,
+    tabs: config.tabs.map((tab) => ({
+      ...tab,
+      ...(tab.href === `/${sourceHomePageId}` ? { href: '/' } : {}),
+      ...(tab.groups ? { groups: remapGroups(tab.groups) } : {}),
+    })),
+  }
 }
 
 function markdownLinks(body: string): Array<string> {
@@ -1200,14 +1318,26 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
   const scopePath = platform === 'mintlify'
     ? machineIndexScopePath(source, [initial, scopedHtmlProbe]) ?? submittedScopePath
     : docusaurusDiscovery?.scopePath ?? submittedScopePath
-  const sourceTopLevelNavigation = platform === 'mintlify' && scopedHtmlProbe && /html/i.test(scopedHtmlProbe.contentType)
+  const sourceMintlifyConfig = platform === 'mintlify' && scopedHtmlProbe && /html/i.test(scopedHtmlProbe.contentType)
+    ? embeddedMintlifyConfig(scopedHtmlProbe.body)
+    : null
+  const sourceMintlifyProjection = sourceMintlifyConfig
+    ? projectMintlifyNavigation(sourceMintlifyConfig, { pathPrefix: scopePath })
+    : null
+  const hasStructuredMintlifyNavigation = Boolean(
+    sourceMintlifyProjection?.docsConfig.tabs.length
+      && sourceMintlifyProjection.pageReferences.length,
+  )
+  const sourceTopLevelNavigation = platform === 'mintlify' && !hasStructuredMintlifyNavigation
+    && scopedHtmlProbe && /html/i.test(scopedHtmlProbe.contentType)
     ? htmlTopLevelNavigation(scopedHtmlProbe, source, scopePath)
     : undefined
   // The submitted URL can be any page. Mintlify's first authored product tab,
   // rather than the submitted page, defines which source page becomes `/`.
   // Older single-section themes do not expose a tab strip, so they retain the
   // legacy dedicated-origin fallback when no authored home can be recovered.
-  const sourceHomePageId = sourceTopLevelNavigation?.[0]?.pageId
+  const sourceHomePageId = sourceMintlifyProjection?.pageReferences[0]?.navigationId
+    ?? sourceTopLevelNavigation?.[0]?.pageId
     ?? (platform === 'mintlify' && scopePath === '/'
       ? canonicalLocalizedPageId(pageIdForUrl(source, scopePath) ?? '') || undefined
       : undefined)
@@ -1233,6 +1363,15 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
     })) return
     queued.add(candidateIdentity(url))
     queue.push(url)
+  }
+
+  for (const reference of sourceMintlifyProjection?.pageReferences ?? []) {
+    let href = reference.ref
+    if (scopePath !== '/' && href.startsWith('/')
+      && href !== scopePath && !href.startsWith(`${scopePath}/`)) {
+      href = `${scopePath}${href}`
+    }
+    enqueue(href, source)
   }
 
   // Mintlify renders the authored navigation into the HTML shell. Seed the
@@ -1466,12 +1605,15 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
     ...entry,
     pageId: entry.pageId === sourceHomePageId ? 'introduction' : entry.pageId,
   }))
-  const docsConfig = platform === 'docusaurus'
+  let docsConfig = platform === 'docusaurus'
     ? docusaurusNavigationFromSnapshots(docusaurusSidebars, pages, scopePath)
-    : buildNavigationFromPages(pages, {
-        topLevelTabs: platform === 'mintlify',
-        topLevelNavigation,
-      })
+    : hasStructuredMintlifyNavigation && sourceMintlifyProjection
+      ? remapNavigationHome(sourceMintlifyProjection.docsConfig, sourceHomePageId)
+      : buildNavigationFromPages(pages, {
+          topLevelTabs: platform === 'mintlify',
+          topLevelNavigation,
+        })
+  if (sourceMintlifyProjection) warnings.push(...sourceMintlifyProjection.warnings)
   if (docusaurusRedirects.length > 0) {
     docsConfig.redirects = [...new Map(docusaurusRedirects.map((redirect) => [
       `${redirect.source}:${redirect.destination}`,
@@ -1504,6 +1646,7 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
       ],
     }
   }
+  if (platform === 'mintlify') docsConfig = addMintlifyDirectoryRedirects(docsConfig, pages)
   return {
     sourceUrl: source.toString(),
     sourceKind: 'url',
@@ -1511,6 +1654,12 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
     pages,
     assets: openApiAsset ? [{ path: 'openapi.yaml', content: openApiAsset }] : [],
     docsConfig,
+    ...(sourceMintlifyConfig ? {
+      site: {
+        ...(typeof sourceMintlifyConfig.name === 'string' ? { name: sourceMintlifyConfig.name } : {}),
+        ...(typeof sourceMintlifyConfig.description === 'string' ? { description: sourceMintlifyConfig.description } : {}),
+      },
+    } : {}),
     warnings,
     stats: {
       discovered: visited.size,

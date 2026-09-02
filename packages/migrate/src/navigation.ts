@@ -4,7 +4,7 @@
  * flattened predictably while preserving page order and nested groups.
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, extname, relative } from 'node:path'
 
 import { pageIdFromReference, resolveWithin } from './path.js'
@@ -22,10 +22,37 @@ interface MintlifyPageReference {
   locale?: string
 }
 
+const MAX_MINTLIFY_CONFIG_BYTES = 2_000_000
+
 export interface MintlifyNavigationResult {
   docsConfig: MigrationDocsConfig
   pageReferences: Array<MintlifyPageReference>
   warnings: Array<MigrationWarning>
+}
+
+export interface MintlifyProjectionOptions {
+  /** Public URL migrations may expose page hrefs including the docs mount path. */
+  pathPrefix?: string
+}
+
+/** Preserve Mintlify's implicit `/section` route for section landing pages. */
+export function addMintlifyDirectoryRedirects(
+  config: MigrationDocsConfig,
+  pages: Array<MigrationPage>,
+): MigrationDocsConfig {
+  const pageIds = new Set(pages.filter((page) => !page.locale).map((page) => page.navigationId))
+  const redirects = [...(config.redirects ?? [])]
+  const redirectSources = new Set(redirects.map((redirect) => redirect.source.replace(/\/$/, '') || '/'))
+  for (const page of pages) {
+    if (page.locale || !/(?:^|\/)(?:overview|introduction)$/.test(page.navigationId)) continue
+    const parent = page.navigationId.replace(/\/(?:overview|introduction)$/, '')
+    if (!parent || pageIds.has(parent)) continue
+    const source = `/${parent}`
+    if (redirectSources.has(source)) continue
+    redirects.push({ source, destination: `/${page.navigationId}`, permanent: false })
+    redirectSources.add(source)
+  }
+  return redirects.length > 0 ? { ...config, redirects } : config
 }
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -53,6 +80,16 @@ function objectValue(value: unknown): Record<string, unknown> | null {
     : null
 }
 
+function projectedHref(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const href = value.trim()
+  if (!href || /[\u0000-\u001f\u007f]/.test(href)) return undefined
+  if (/^(?:javascript|data|vbscript|file):/i.test(href)) return undefined
+  const scheme = href.match(/^([a-z][a-z0-9+.-]*):/i)?.[1].toLowerCase()
+  if (scheme && !['http', 'https', 'mailto', 'tel'].includes(scheme)) return undefined
+  return href
+}
+
 function labelFor(value: Record<string, unknown>, fallback: string): string {
   for (const key of ['tab', 'group', 'anchor', 'product', 'dropdown', 'version', 'menu', 'label', 'name', 'title']) {
     if (typeof value[key] === 'string' && value[key]) return String(value[key])
@@ -68,10 +105,27 @@ function jsonPointer(root: unknown, pointer: string): unknown {
   if (!pointer || pointer === '#') return root
   const tokens = pointer.replace(/^#\/?/, '').split('/').filter(Boolean)
   return tokens.reduce<unknown>((current, token) => {
+    if (Array.isArray(current)) {
+      const index = Number(token)
+      return Number.isSafeInteger(index) && index >= 0 ? current[index] : undefined
+    }
     const object = objectValue(current)
     if (!object) return undefined
     return object[token.replace(/~1/g, '/').replace(/~0/g, '~')]
   }, root)
+}
+
+function readMintlifyJson(path: string, repositoryRoot: string): unknown {
+  if (!existsSync(path) || !lstatSync(path).isFile()) {
+    throw new Error(`Mintlify config reference is not a regular file: ${relative(repositoryRoot, path)}`)
+  }
+  const realPath = realpathSync(path)
+  const realRoot = realpathSync(repositoryRoot)
+  resolveWithin(realRoot, relative(realRoot, realPath))
+  if (lstatSync(realPath).size > MAX_MINTLIFY_CONFIG_BYTES) {
+    throw new Error(`Mintlify config reference exceeded ${MAX_MINTLIFY_CONFIG_BYTES / 1_000_000} MB: ${relative(repositoryRoot, path)}`)
+  }
+  return JSON.parse(readFileSync(realPath, 'utf8')) as unknown
 }
 
 function resolveJsonReferences(
@@ -95,11 +149,22 @@ function resolveJsonReferences(
     const stackKey = `${referencedFile}#${pointer}`
     if (stack.has(stackKey)) throw new Error(`Circular Mintlify $ref: ${object.$ref}`)
     stack.add(stackKey)
-    const referencedRoot = JSON.parse(readFileSync(referencedFile, 'utf8')) as unknown
+    const referencedRoot = readMintlifyJson(referencedFile, repositoryRoot)
     const referenced = jsonPointer(referencedRoot, pointer ? `#${pointer}` : '')
     const resolved = resolveJsonReferences(referenced, referencedFile, repositoryRoot, stack)
     stack.delete(stackKey)
-    return resolved
+    const siblings = Object.fromEntries(
+      Object.entries(object)
+        .filter(([key]) => key !== '$ref')
+        .map(([key, entry]) => [
+          key,
+          resolveJsonReferences(entry, currentFile, repositoryRoot, stack),
+        ]),
+    )
+    // Mintlify merges sibling keys over object-valued references. Retaining
+    // this behavior matters for split navigation files that override one
+    // label, link, or visibility flag at the reference site.
+    return objectValue(resolved) ? { ...resolved as Record<string, unknown>, ...siblings } : resolved
   }
   return Object.fromEntries(
     Object.entries(object).map(([key, entry]) => [
@@ -115,20 +180,43 @@ export function readMintlifyConfig(repositoryRoot: string): Record<string, unkno
     .map((filename) => resolveWithin(repositoryRoot, filename))
     .find(existsSync)
   if (!configPath) return null
-  const raw = JSON.parse(readFileSync(configPath, 'utf8')) as unknown
+  const raw = readMintlifyJson(configPath, repositoryRoot)
   return resolveJsonReferences(raw, configPath, repositoryRoot, new Set()) as Record<string, unknown>
 }
 
-function normalizePageRef(value: string): string | null {
+function normalizePageRef(value: string, pathPrefix = ''): string | null {
   if (/^(?:https?:)?\/\//i.test(value) || value.startsWith('#')) return null
-  const ref = localReference(value).replace(/^\/+/, '').replace(/\.(?:mdx?|rst|txt)$/i, '')
-  return pageIdFromReference(ref)
+  let ref = localReference(value).split('?', 1)[0].replace(/^\/+/, '')
+  const prefix = pathPrefix.replace(/^\/+|\/+$/g, '')
+  if (prefix && (ref === prefix || ref.startsWith(`${prefix}/`))) {
+    ref = ref === prefix ? 'introduction' : ref.slice(prefix.length + 1)
+  }
+  ref = ref.replace(/\.(?:mdx?|rst|txt)$/i, '')
+  // Mintlify routes are case-sensitive and commonly use camelCase filenames
+  // (for example `additionalFiles`). Lowercasing here breaks both authored
+  // navigation and links even though the source site resolves them correctly.
+  return pageIdFromReference(ref, true)
 }
 
 interface ProjectionContext {
   locale?: string
+  pathPrefix?: string
   references: Array<MintlifyPageReference>
   seenReferences: Set<string>
+  warnings: Array<MigrationWarning>
+  warningKeys: Set<string>
+}
+
+function warnOnce(context: ProjectionContext, key: string, message: string): void {
+  if (context.warningKeys.has(key)) return
+  context.warningKeys.add(key)
+  context.warnings.push({ code: 'unsupported-config', message })
+}
+
+function iconName(value: unknown): string | undefined {
+  if (typeof value === 'string' && value) return value
+  const icon = objectValue(value)
+  return typeof icon?.name === 'string' && icon.name ? icon.name : undefined
 }
 
 function registerReference(value: string, context: ProjectionContext): string | null {
@@ -136,7 +224,7 @@ function registerReference(value: string, context: ProjectionContext): string | 
   const localizedValue = localePrefix && value.replace(/^\/+/, '').startsWith(localePrefix)
     ? value.replace(/^\/+/, '').slice(localePrefix.length)
     : value
-  const navigationId = normalizePageRef(localizedValue)
+  const navigationId = normalizePageRef(localizedValue, context.pathPrefix)
   if (!navigationId) return null
   const key = `${context.locale ?? ''}:${value}`
   if (!context.seenReferences.has(key)) {
@@ -154,6 +242,17 @@ function convertPage(
   const object = objectValue(value)
   if (!object) return null
   if (typeof object.page === 'string') return registerReference(object.page, context)
+  const href = projectedHref(object.href)
+  if (href && !object.pages && !object.groups) {
+    const page = registerReference(href, context)
+    if (page) return page
+    warnOnce(
+      context,
+      'external-page-link',
+      'External links nested inside a Mintlify sidebar cannot be represented as Thally pages and were omitted.',
+    )
+    return null
+  }
   const pages = Array.isArray(object.pages) ? object.pages : []
   if ('group' in object || pages.length > 0) {
     const children: Array<string | MigrationNavigationGroup> = []
@@ -168,7 +267,8 @@ function convertPage(
     if (children.length === 0) return null
     return {
       group: labelFor(object, 'Documentation'),
-      ...(typeof object.icon === 'string' ? { icon: object.icon } : {}),
+      ...(iconName(object.icon) ? { icon: iconName(object.icon) } : {}),
+      ...(object.hidden === true ? { hidden: true } : {}),
       pages: children,
     }
   }
@@ -205,12 +305,20 @@ function convertContainerToTabs(
       const object = objectValue(value)
       if (!object) return []
       const tab = labelFor(object, `${fallbackTab} ${index + 1}`)
-      if (typeof object.href === 'string' && !object.pages && !object.groups) {
-        return [{ tab, href: object.href }]
+      const href = projectedHref(object.href)
+      if (href && !object.pages && !object.groups) {
+        return [{ tab, href, ...(object.hidden === true ? { hidden: true } : {}) }]
       }
       const nested = convertContainerToTabs(object, context, tab)
       if (nested.length > 0) {
-        if (nested.length === 1) return [{ ...nested[0], tab }]
+        if (nested.length === 1) {
+          return [{
+            ...nested[0],
+            tab,
+            ...(href ? { href } : {}),
+            ...(object.hidden === true ? { hidden: true } : {}),
+          }]
+        }
         return nested.map((item) => ({ ...item, tab: `${tab}: ${item.tab}` }))
       }
       return []
@@ -223,14 +331,174 @@ function convertContainerToTabs(
   ]
   if (typeof container.root === 'string') rawPages.unshift(container.root)
   const groups = convertGroups(rawPages, context, 'Overview')
-  return groups.length > 0 ? [{ tab: fallbackTab, groups }] : []
+  return groups.length > 0
+    ? [{
+        tab: fallbackTab,
+        groups,
+        ...(projectedHref(container.href) ? { href: projectedHref(container.href) } : {}),
+        ...(container.hidden === true ? { hidden: true } : {}),
+      }]
+    : []
+}
+
+function projectedTheme(value: unknown): MigrationDocsConfig['theme'] {
+  if (value === 'maple') return 'maple'
+  if (['aspen', 'luma', 'sequoia'].includes(String(value))) return 'sharp'
+  if (['almond', 'palm'].includes(String(value))) return 'minimal'
+  return typeof value === 'string' ? 'default' : undefined
+}
+
+function projectedNavbar(value: unknown): MigrationDocsConfig['navbar'] {
+  const navbar = objectValue(value)
+  if (!navbar) return undefined
+  const links = Array.isArray(navbar.links)
+    ? navbar.links.flatMap((entry) => {
+        const link = objectValue(entry)
+        const href = projectedHref(link?.href)
+        if (!link || !href) return []
+        const label = typeof link.label === 'string' ? link.label : typeof link.name === 'string' ? link.name : ''
+        if (!label) return []
+        return [{ label, href, ...(link.type === 'github' ? { type: 'github' as const } : {}) }]
+      })
+    : []
+  const primaryValue = objectValue(navbar.primary)
+  const primaryHref = projectedHref(primaryValue?.href)
+  const primary = primaryValue && primaryHref
+    ? {
+        label: typeof primaryValue.label === 'string'
+          ? primaryValue.label
+          : primaryValue.type === 'github' ? 'GitHub' : 'Get started',
+        href: primaryHref,
+      }
+    : undefined
+  return links.length > 0 || primary ? { ...(links.length > 0 ? { links } : {}), ...(primary ? { primary } : {}) } : undefined
+}
+
+function projectedGlobalNavigationLinks(
+  value: unknown,
+): NonNullable<NonNullable<MigrationDocsConfig['navbar']>['links']> {
+  const global = objectValue(value)
+  if (!global) return []
+  const links: Array<{ label: string; href: string }> = []
+  const visit = (entry: unknown): void => {
+    if (Array.isArray(entry)) {
+      entry.forEach(visit)
+      return
+    }
+    const item = objectValue(entry)
+    if (!item) return
+    const href = projectedHref(item.href)
+    if (href) {
+      const label = labelFor(item, '')
+      if (label) links.push({ label, href })
+    }
+    for (const key of ['tabs', 'anchors', 'dropdowns', 'products', 'versions', 'languages', 'menus']) {
+      if (Array.isArray(item[key])) visit(item[key])
+    }
+  }
+  visit(global)
+  return links
+}
+
+function projectedFooter(value: unknown): MigrationDocsConfig['footer'] {
+  const footer = objectValue(value)
+  if (!footer) return undefined
+  const socials = objectValue(footer.socials)
+  const socialLinks = socials
+    ? Object.fromEntries(Object.entries(socials).flatMap(([key, value]) => {
+        const href = projectedHref(value)
+        return href ? [[key, href]] : []
+      }))
+    : undefined
+  const links = Array.isArray(footer.links)
+    ? footer.links.flatMap((entry) => {
+        const column = objectValue(entry)
+        if (!column || !Array.isArray(column.items)) return []
+        const heading = typeof column.heading === 'string'
+          ? column.heading
+          : typeof column.header === 'string' ? column.header : ''
+        const items = column.items.flatMap((item) => {
+          const link = objectValue(item)
+          const href = projectedHref(link?.href)
+          return link && typeof link.label === 'string' && href
+            ? [{ label: link.label, href }]
+            : []
+        })
+        return heading && items.length > 0 ? [{ heading, items }] : []
+      })
+    : []
+  return (socialLinks && Object.keys(socialLinks).length > 0) || links.length > 0
+    ? { ...(socialLinks && Object.keys(socialLinks).length > 0 ? { socials: socialLinks } : {}), ...(links.length > 0 ? { links } : {}) }
+    : undefined
+}
+
+function projectedFont(value: unknown): { family: string; weight?: Array<string> } | undefined {
+  if (typeof value === 'string' && value) return { family: value }
+  const font = objectValue(value)
+  if (!font) return undefined
+  const family = typeof font.family === 'string'
+    ? font.family
+    : typeof font.name === 'string' ? font.name : undefined
+  if (!family) return undefined
+  const weight = Array.isArray(font.weight)
+    ? font.weight.map(String)
+    : Array.isArray(font.weights) ? font.weights.map(String) : undefined
+  return { family, ...(weight && weight.length > 0 ? { weight } : {}) }
+}
+
+function projectedCompatibleConfig(config: Record<string, unknown>): Omit<MigrationDocsConfig, 'tabs' | 'i18n' | 'redirects'> {
+  const banner = objectValue(config.banner)
+  const bannerContent = banner && (typeof banner.content === 'string' || objectValue(banner.content))
+    ? banner.content as string | Record<string, string>
+    : undefined
+  const bannerType = banner && ['info', 'warning', 'critical'].includes(String(banner.type ?? banner.variant))
+    ? String(banner.type ?? banner.variant) as 'info' | 'warning' | 'critical'
+    : undefined
+  const bannerColor = objectValue(banner?.color)
+  const bodyFont = projectedFont(objectValue(config.fonts)?.body ?? config.fonts)
+  const headingFont = projectedFont(objectValue(config.fonts)?.heading)
+  const feedback = objectValue(config.feedback)
+  const seo = objectValue(config.seo)
+  const navbar = projectedNavbar(config.navbar)
+  const globalLinks = projectedGlobalNavigationLinks(objectValue(config.navigation)?.global)
+  const navbarLinks = [...new Map(
+    [...(navbar?.links ?? []), ...globalLinks].map((link) => [`${link.label}:${link.href}`, link]),
+  ).values()]
+  const projectedNavigation = navbarLinks.length > 0 || navbar?.primary
+    ? { ...(navbarLinks.length > 0 ? { links: navbarLinks } : {}), ...(navbar?.primary ? { primary: navbar.primary } : {}) }
+    : undefined
+  return {
+    ...(projectedTheme(config.theme) ? { theme: projectedTheme(config.theme) } : {}),
+    ...(bannerContent ? {
+      banner: {
+        content: bannerContent,
+        ...(banner?.dismissible === false ? { dismissible: false } : {}),
+        ...(typeof banner?.id === 'string' ? { id: banner.id } : {}),
+        ...(typeof banner?.revision === 'string' ? { revision: banner.revision } : {}),
+        ...(bannerType ? { type: bannerType } : {}),
+        ...(bannerColor ? { color: {
+          ...(typeof bannerColor.light === 'string' ? { light: bannerColor.light } : {}),
+          ...(typeof bannerColor.dark === 'string' ? { dark: bannerColor.dark } : {}),
+        } } : {}),
+      },
+    } : {}),
+    ...(projectedNavigation ? { navbar: projectedNavigation } : {}),
+    ...(projectedFooter(config.footer) ? { footer: projectedFooter(config.footer) } : {}),
+    ...(bodyFont || headingFont ? { fonts: { ...(bodyFont ? { body: bodyFont } : {}), ...(headingFont ? { heading: headingFont } : {}) } } : {}),
+    ...(seo?.indexing === 'all' ? { seo: { indexing: 'all' } } : {}),
+    ...(typeof feedback?.thumbsRating === 'boolean' ? { feedback: { thumbsRating: feedback.thumbsRating } } : {}),
+  }
 }
 
 /** Convert current and legacy Mintlify navigation into Thally's schema. */
-export function projectMintlifyNavigation(config: Record<string, unknown>): MintlifyNavigationResult {
+export function projectMintlifyNavigation(
+  config: Record<string, unknown>,
+  options: MintlifyProjectionOptions = {},
+): MintlifyNavigationResult {
   const warnings: Array<MigrationWarning> = []
   const references: Array<MintlifyPageReference> = []
   const seenReferences = new Set<string>()
+  const warningKeys = new Set<string>()
   const navigation = objectValue(config.navigation) ?? config
   const languages = Array.isArray(navigation.languages)
     ? navigation.languages.map(objectValue).filter((value): value is Record<string, unknown> => Boolean(value))
@@ -239,27 +507,37 @@ export function projectMintlifyNavigation(config: Record<string, unknown>): Mint
   let i18n: MigrationDocsConfig['i18n']
 
   if (languages.length > 0) {
-    const defaultLanguage = languages.find((entry) => entry.language === 'en') ?? languages[0]
+    const defaultLanguage = languages.find((entry) => entry.default === true) ?? languages[0]
     const defaultLocale = String(defaultLanguage.language ?? 'en')
     const locales = languages.map((entry) => {
       const code = String(entry.language ?? entry.locale ?? 'en')
-      return { code, label: LANGUAGE_LABELS[code] ?? code.toUpperCase() }
+      let label: string | undefined = LANGUAGE_LABELS[code]
+      try {
+        label ??= new Intl.DisplayNames(['en'], { type: 'language' }).of(code) ?? undefined
+      } catch {
+        // Unknown extension tags remain readable as their normalized code.
+      }
+      return { code, label: label ?? code.toUpperCase() }
     })
     i18n = { defaultLocale, locales }
     for (const language of languages) {
       const locale = String(language.language ?? language.locale ?? defaultLocale)
       const context: ProjectionContext = {
         locale,
+        pathPrefix: options.pathPrefix,
         references,
         seenReferences,
+        warnings,
+        warningKeys,
       }
       const languageTabs = convertContainerToTabs(language, context, 'Documentation')
       if (language === defaultLanguage) tabs = languageTabs
     }
   } else {
-    tabs = convertContainerToTabs(navigation, { references, seenReferences }, 'Documentation')
+    const context = { references, seenReferences, warnings, warningKeys, pathPrefix: options.pathPrefix }
+    tabs = convertContainerToTabs(navigation, context, 'Documentation')
     if (tabs.length === 0 && Array.isArray(config.navigation)) {
-      const groups = convertGroups(config.navigation, { references, seenReferences }, 'Overview')
+      const groups = convertGroups(config.navigation, context, 'Overview')
       if (groups.length > 0) tabs = [{ tab: 'Documentation', groups }]
     }
   }
@@ -270,22 +548,28 @@ export function projectMintlifyNavigation(config: Record<string, unknown>): Mint
       message: 'Mintlify navigation could not be projected; generated navigation will be used.',
     })
   }
-  if (!tabs.some((tab) => tab.tab.toLowerCase() === 'changelog')) {
-    tabs.push({ tab: 'Changelog', href: '/changelog' })
-  }
   const redirects = Array.isArray(config.redirects)
     ? config.redirects.flatMap((value) => {
         const redirect = objectValue(value)
         if (!redirect || typeof redirect.source !== 'string' || typeof redirect.destination !== 'string') return []
+        const source = redirect.source.trim()
+        const destination = redirect.destination.trim()
+        if (!source.startsWith('/') || !destination.startsWith('/')
+          || source.startsWith('//') || destination.startsWith('//')) return []
         return [{
-          source: redirect.source,
-          destination: redirect.destination,
+          source,
+          destination,
           ...(typeof redirect.permanent === 'boolean' ? { permanent: redirect.permanent } : {}),
         }]
       })
     : []
   return {
-    docsConfig: { tabs, ...(i18n ? { i18n } : {}), ...(redirects.length > 0 ? { redirects } : {}) },
+    docsConfig: {
+      tabs,
+      ...projectedCompatibleConfig(config),
+      ...(i18n ? { i18n } : {}),
+      ...(redirects.length > 0 ? { redirects } : {}),
+    },
     pageReferences: references,
     warnings,
   }

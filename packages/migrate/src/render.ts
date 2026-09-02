@@ -15,8 +15,13 @@ function renderPage(bundle: MigrationBundle, page: MigrationBundle['pages'][numb
   return [
     '---',
     `title: ${yamlString(page.title)}`,
+    page.navTitle ? `navTitle: ${yamlString(page.navTitle)}` : null,
     `description: ${yamlString(page.description)}`,
+    page.badge ? `badge: ${yamlString(page.badge)}` : null,
     page.keywords.length > 0 ? `keywords: [${page.keywords.map(yamlString).join(', ')}]` : null,
+    page.mode ? `mode: ${yamlString(page.mode)}` : null,
+    page.hidden ? 'hidden: true' : null,
+    page.noindex ? 'noindex: true' : null,
     page.openapi ? `openapi: ${yamlString(page.openapi)}` : null,
     bundle.sourceKind === 'url' ? `source: ${yamlString(page.source)}` : null,
     '---',

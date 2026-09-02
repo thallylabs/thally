@@ -120,8 +120,8 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     console.log(`\n  🏗  Scaffolding new project at ${projectDir}...`)
     await scaffold({
       projectDir,
-      projectName: options.projectName ?? 'My Docs',
-      description: `Documentation migrated from ${new URL(options.sourceUrl).hostname}`,
+      projectName: options.projectName ?? bundle.site?.name ?? 'My Docs',
+      description: bundle.site?.description ?? `Documentation migrated from ${new URL(options.sourceUrl).hostname}`,
       brandPreset: 'primary',
       repoUrl: bundle.sourceKind === 'repository' ? options.sourceUrl : '',
       doInstall: false,
