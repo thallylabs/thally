@@ -1,6 +1,6 @@
 {
   "name": "@thallylabs/cli",
-  "version": "0.8.27",
+  "version": "0.8.28",
   "description": "The Thally CLI for authoring knowledge surfaces, tracing product changes, and keeping documentation checked.",
   "type": "module",
   "engines": {
@@ -24,8 +24,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "@thallylabs/mcp": "0.10.26",
-    "create-thally-docs": "0.10.24"
+    "@thallylabs/mcp": "0.10.27",
+    "create-thally-docs": "0.10.25"
   },
   "devDependencies": {
     "@thallylabs/agent": "*",
