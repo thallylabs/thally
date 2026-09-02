@@ -2,7 +2,7 @@ import { randomBytes, createHash } from 'node:crypto'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 
 /**
- * Google/Microsoft OIDC sign-in (C1). Verification-critical steps (JWKS,
+ * Google/Microsoft OIDC sign-in. Verification-critical steps (JWKS,
  * signature, iss/aud/exp, nonce) go through `jose` — never hand-rolled. The flow
  * is standard authorization-code + PKCE.
  */

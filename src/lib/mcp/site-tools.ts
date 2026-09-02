@@ -6,7 +6,7 @@ import { getSiteUrl } from '@/lib/site-url'
 import { toolMetadata, type McpToolMetadata } from '@/lib/mcp/tool-metadata'
 
 /**
- * The tools the remote MCP endpoint (A6) exposes to any attached agent. Unlike
+ * The tools the remote MCP endpoint exposes to any attached agent. Unlike
  * the `packages/mcp` tools (which operate on a local project directory), these
  * run against the deployed site's own content engine — so an agent attached over
  * HTTP reads exactly what the site serves.

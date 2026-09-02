@@ -4,8 +4,8 @@ import type { Role } from '@/lib/auth/types'
 import type { I18nConfig } from '@/lib/i18n/config'
 
 /**
- * Runtime, admin-editable settings (F1-backed) — the layer that makes the admin
- * dashboard *control* v2.1 features rather than just display config. Values here
+ * Runtime, admin-editable settings — the layer that lets the admin dashboard
+ * *control* features rather than just display config. Values here
  * override the git-committed defaults at request time.
  */
 export interface AdminSettings {

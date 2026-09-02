@@ -1,9 +1,17 @@
 /** No-JavaScript regression coverage for the precompiled documentation home. */
 
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
 import { runtimeDocs } from '@/generated/runtime-docs'
 import { useMDXComponents } from '@/components/mdx/mdx-components'
+
+// Client navigation helpers need the App Router; static rendering has none.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ prefetch: () => undefined, push: () => undefined }),
+  usePathname: () => '/',
+  useSearchParams: () => new URLSearchParams(),
+}))
 
 describe('documentation homepage SSR', () => {
   it('ships a substantive H1-led heading hierarchy in raw HTML', () => {

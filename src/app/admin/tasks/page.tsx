@@ -8,7 +8,7 @@ export default async function AdminTasksPage() {
   await requireAdminPageSession()
 
   // Track is a cloud-tier service — free self-hosted deployments see the
-  // locked upsell panel instead (notes/thally-architecture-plan.md §1).
+  // locked panel instead.
   const track = getCloud()?.track
   if (!track) return <CloudLockedPanel feature="track" />
 

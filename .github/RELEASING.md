@@ -9,24 +9,20 @@ npm run release:full
 
 The workflow resolves the current runtime `main`, synchronizes the standalone
 starter, waits for its CI, merges the generated snapshot, creates and verifies
-the immutable release record, publishes the three scaffold packages through
-trusted publishing, and waits for Thally Cloud to promote the exact scaffold. A failed
-phase stops the controller and leaves its pull request or workflow run visible
-for diagnosis. Re-running the controller is safe; already-stable inputs are a
-successful no-op.
+the immutable release record, publishes the scaffold packages through npm
+trusted publishing, and waits for the managed scaffold promotion to complete.
+A failed phase stops the controller and leaves its pull request or workflow
+run visible for diagnosis. Re-running the controller is safe; already-stable
+inputs are a successful no-op.
 
-The separate **Sync Thally runtime**, **Promote release**, **Publish packages**,
-and Cloud promotion dispatches remain break-glass recovery tools.
-
-When rolling out this automation itself, merge its `starter` and `thally-cloud`
-changes before the `thally` controller change. That ensures the controller's
-new inputs and release-id run correlation exist before the button is available.
+The separate **Sync Thally runtime**, **Promote release**, and **Publish
+packages** dispatches remain break-glass recovery tools.
 
 ## One-time coordinator setup
 
-Create a GitHub App named `Thally Release Coordinator` in the `thallylabs`
-organization and install it only on `thally`, `starter`, and `thally-cloud`.
-Grant these repository permissions and nothing else:
+Create a GitHub App named `Thally Release Coordinator` and install it on the
+repositories the release touches. Grant these repository permissions and
+nothing else:
 
 - Actions: read and write
 - Contents: read and write
@@ -77,39 +73,9 @@ JSON
     --env release-control \
     --body "$RELEASE_APP_ACTOR"
 done
-
-# One-time compatibility for releases produced by the retired PAT handoff.
-gh variable set LEGACY_RELEASE_ACTOR \
-  --repo thallylabs/thally \
-  --env release-control \
-  --body 'kenny-io'
-```
-
-Thally Cloud receives only an immutable locator from the verified npm workflow.
-Its automatic path uses a separate no-review `scaffold-production` environment,
-also restricted to `main`. Manual production recovery continues to use the
-review-protected `production` environment.
-
-```bash
-gh api --method PUT \
-  repos/thallylabs/thally-cloud/environments/scaffold-production \
-  --input - <<'JSON'
-{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}
-JSON
-
-if ! gh api \
-  repos/thallylabs/thally-cloud/environments/scaffold-production/deployment-branch-policies \
-  --jq '.branch_policies[] | select(.name == "main") | .id' | grep -q .; then
-  gh api --method POST \
-    repos/thallylabs/thally-cloud/environments/scaffold-production/deployment-branch-policies \
-    -f name=main -f type=branch
-fi
-
-gh variable set RELEASE_COORDINATOR_ACTOR \
-  --repo thallylabs/thally-cloud \
-  --body "$RELEASE_APP_ACTOR"
 ```
 
 Keep npm trusted publishing bound to the existing `npm-production` environment.
 Do not add npm or cross-repository PATs. The verified package workflow mints a
-short-lived Actions-only token to start the fixed Cloud workflow on `main`.
+short-lived Actions-only token to hand the immutable release locator to the
+managed scaffold promotion.

@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { verifySession, SESSION_COOKIE } from '@/lib/auth/session'
 import { resolveRoleFromRoster } from '@/lib/auth/roster'
-import { isAdminAuthenticated, ADMIN_SESSION_COOKIE } from '@/lib/admin/auth'
+import { isAdminAuthenticated } from '@/lib/admin/auth'
 import { getTeamConfig } from '@/data/docs'
 import { getAdminSettings } from '@/lib/admin/settings'
 import { roleAllows, type Capability, type Role } from '@/lib/auth/types'

@@ -12,7 +12,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'packages/*/src/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}', 'packages/*/src/**/*.test.ts'],
     coverage: {
       reporter: ['text', 'html'],
     },

@@ -304,15 +304,15 @@ describe('documentation visual system', () => {
 
   it('keeps the page interactive while chat is docked and accepts the live Cloud icon', async () => {
     const { readFile } = await import('node:fs/promises')
-    const [chat, loader, statusRoute] = await Promise.all([
+    const [chat, provider, statusRoute] = await Promise.all([
       readFile('src/components/docs/docs-chat.tsx', 'utf8'),
-      readFile('src/components/docs/docs-chat-loader.tsx', 'utf8'),
+      readFile('src/components/docs/code-actions-provider.tsx', 'utf8'),
       readFile('src/app/api/chat-status/route.ts', 'utf8'),
     ])
 
     expect(chat).not.toContain("root.style.overflow = 'hidden'")
     expect(chat).not.toContain('document.body.style.paddingRight')
-    expect(loader).toContain('icon={status.icon ?? icon}')
+    expect(provider).toContain('icon={chatStatus.icon ?? icon}')
     expect(statusRoute).toContain("/^\\/[A-Za-z0-9._/-]+$/")
     expect(statusRoute).toContain('{ show, label, disclaimer, icon }')
   })

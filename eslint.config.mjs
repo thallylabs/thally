@@ -20,7 +20,7 @@ const eslintConfig = defineConfig([
     "demo/**",
     "**/dist/**",
   ]),
-  // Engine ↔ cloud boundary (notes/thally-architecture-plan.md §3): engine code
+  // Engine ↔ cloud boundary: engine code
   // must consume cloud-tier services only via @/lib/cloud-bridge, so the OSS
   // build keeps working when src/cloud is reduced to its no-op stub.
   {

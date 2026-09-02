@@ -21,7 +21,7 @@
  *  - `/api/brand/logo` and `/api/brand/favicon` return image *bytes* from
  *    `getBrandAsset`, not config. A `SiteConfig` hook is the wrong shape for
  *    them. Both are intentionally left as-is.
- * These are documented deferrals, not oversights — see step-3 migration notes.
+ * These are deliberate exclusions, not oversights.
  */
 import { siteConfig, type SiteConfig } from '@/data/site'
 import { getAdminSettings } from '@/lib/admin/settings'

@@ -90,7 +90,7 @@ export interface SiteConfig {
 }
 
 const brandPresets: Record<BrandPresetKey, BrandConfig> = {
-  // Thally's canonical Ink + Iris brand (see Thally-Design-System).
+  // Thally's default Ink + Iris brand.
   // Warm off-white surfaces in light mode become near-black ink surfaces in
   // dark mode. Lime remains the primary action color; iris is a restrained
   // secondary accent for visual distinction and chart series.

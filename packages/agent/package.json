@@ -30,7 +30,6 @@
     "dev": "tsup --watch"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
     "@thallylabs/mcp": "*",
     "create-thally-docs": "*",
     "zod-to-json-schema": "^3.23.0"

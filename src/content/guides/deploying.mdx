@@ -26,7 +26,7 @@ Depending on which features you use, you may also want to set:
 | --- | --- |
 | `THALLY_SITE_URL` | OpenGraph metadata and canonical URLs (recommended for every deploy) |
 | `THALLY_CLOUD_SITE_TOKEN` | Connects this deployment to its Thally Cloud site (server-only) |
-| `THALLY_CLOUD_URL` | Overrides the Thally Cloud control-plane URL for staging or a public development tunnel |
+| `THALLY_CLOUD_URL` | Overrides the Thally Cloud URL this site connects to (defaults to `https://app.thally.io`) |
 | `THALLY_CLOUD_SITE_CONFIG` | Managed-hosting settings snapshot injected automatically by Thally Cloud; do not set this yourself |
 | `THALLY_ADMIN_PASSWORD` | Break-glass Owner access to the `/admin` dashboard |
 | `THALLY_OIDC_ISSUER` / `THALLY_OIDC_CLIENT_ID` / `THALLY_OIDC_CLIENT_SECRET` | Team sign-in to the dashboard via your IdP |
@@ -48,11 +48,7 @@ THALLY_CLOUD_SITE_TOKEN=thally_site_...
 
 Keep it server-side: do not commit it, put it in `docs.json`, or rename it with a `NEXT_PUBLIC_` prefix. Redeploy or restart the site, then visit any documentation page. The runtime calls its own server-only handshake route, exchanges the credential for a short-lived entitlement grant, and reports the deployment URL to Thally Cloud automatically. It reports `THALLY_SITE_URL` when configured; otherwise it uses the origin that served the page. This behavior is provider-independent and requires no Vercel, Netlify, or other hosting API.
 
-Production sites use `https://app.thally.io` by default. For local Thally Cloud development, a deployed docs site cannot reach `localhost` on your laptop. Expose Thally Cloud through a secure public tunnel and set its URL on the docs deployment instead:
-
-```bash
-THALLY_CLOUD_URL=https://your-cloud-tunnel.example
-```
+Sites connect to `https://app.thally.io` unless `THALLY_CLOUD_URL` overrides it.
 
 The token never enters browser JavaScript, and Thally Cloud does not need access to your hosting provider's environment variables.
 

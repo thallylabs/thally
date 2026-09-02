@@ -334,8 +334,8 @@
 /* ============================================================================
    MINIMAL COMPONENT BASE CLASSES
    Token-driven, every selector prefixed with `.thally-dashboard` so nothing
-   leaks. These are starters for the core dashboard patterns — extend in JSX;
-   see notes/design-system.md for the full pattern catalog. Not a component
+   leaks. These are starters for the core dashboard patterns — extend in JSX.
+   Not a component
    library, just the load-bearing primitives.
    ============================================================================ */
 
