@@ -8,7 +8,7 @@ import {
   loadContentDocument,
   type ContentDocument,
 } from '@/lib/content'
-import { getDocEntries, getNavigablePageIds } from '@/data/docs'
+import { getDocEntries, getNavigablePageIds, loadDocEntries } from '@/data/docs'
 import type { PageFact } from '@/lib/agent-readiness/types'
 
 type DocEntry = ReturnType<typeof getDocEntries>[number]
@@ -55,9 +55,14 @@ export function gatherPageFacts(): Array<PageFact> {
  * Local checks retain {@link gatherPageFacts} for their filesystem-fast path.
  */
 export async function loadPageFacts(): Promise<Array<PageFact>> {
+  // Large managed sites keep their release content index in immutable assets
+  // instead of a Worker text binding. Hydrate that index before reading entry
+  // metadata; otherwise readiness combines current page bodies with titles and
+  // descriptions from the compiled fallback bundle.
+  const entries = await loadDocEntries()
   const navPages = getNavigablePageIds()
   return Promise.all(
-    getDocEntries().map(async (entry) =>
+    entries.map(async (entry) =>
       buildPageFact(entry, await loadContentDocument(entry.id), navPages),
     ),
   )
