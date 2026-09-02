@@ -9,6 +9,9 @@ cloud-bridge contract, and the public packages under `packages/`.
 are generated from this repository, so runtime and framework changes belong
 here, not in the starter.
 
+<!-- Cross-repository maintainers: consult thallylabs/thally-cloud/AGENTS.md
+before changing shared contracts or release behavior. -->
+
 ## Ownership boundaries
 
 - Runtime, rendering, structured content, search, machine projections, the
