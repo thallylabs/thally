@@ -28,6 +28,7 @@ export interface DocsJsonApiConfig {
 export interface DocsJsonTab {
   tab: string
   href?: string
+  pages?: Array<string | DocsJsonNavigationGroup>
   groups?: Array<DocsJsonNavigationGroup>
   api?: DocsJsonApiConfig
 }

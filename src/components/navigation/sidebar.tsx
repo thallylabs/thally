@@ -1,37 +1,36 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
-import type { NavigationSection } from '@/data/docs'
-import { Badge } from '@/components/ui/badge'
+import type { NavigationNode, NavigationPresentation, NavigationSection, SidebarCollection } from '@/data/docs'
 import { Icon } from '@/components/mdx/rich-content'
 import { layout, typography } from '@/config/layout'
 import { cn } from '@/lib/utils'
-import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
+import { NavigationTree } from '@/components/navigation/navigation-tree'
+import { CollectionSelector } from '@/components/navigation/collection-selector'
 
 interface SidebarProps {
   sections: Array<NavigationSection>
   title: string
+  collections?: Array<SidebarCollection>
+  activeCollectionId?: string
+  onCollectionChange?: (id: string) => void
+  navigationPresentation?: NavigationPresentation
   className?: string
 }
 
-export function Sidebar({ sections, title, className }: SidebarProps) {
+export function Sidebar({
+  sections,
+  title,
+  collections = [],
+  activeCollectionId,
+  onCollectionChange,
+  navigationPresentation = { display: 'tabs' },
+  className,
+}: SidebarProps) {
   const pathname = usePathname()
-
-  function isActive(href: string) {
-    if (!href || /^https?:\/\//i.test(href)) {
-      return false
-    }
-    const normalizedHref = normalizePath(href)
-    const normalizedPath = normalizePath(pathname)
-    if (normalizedHref === '/') {
-      return normalizedPath === '/'
-    }
-    const segments = normalizedHref.split('/').filter(Boolean)
-    if (segments.length <= 1) {
-      return normalizedPath === normalizedHref
-    }
-    return normalizedPath === normalizedHref || normalizedPath.startsWith(`${normalizedHref}/`)
-  }
+  const shouldShowSelector = navigationPresentation.display === 'dropdown'
+    && collections.length >= 2
+    && Boolean(activeCollectionId && onCollectionChange)
 
   return (
     <aside
@@ -41,62 +40,38 @@ export function Sidebar({ sections, title, className }: SidebarProps) {
           space above the brand, then pin the navigation once they scroll away. */}
       <div className={cn('sticky top-14 flex h-[calc(100dvh-56px)] flex-col', layout.sidebarWidth, layout.sidebarPadding)}>
         <div className="shrink-0 px-1 pt-1">
-          <p className="line-clamp-1 text-xs font-medium leading-4 text-foreground/45">{title}</p>
+          {shouldShowSelector ? (
+            <CollectionSelector
+              collections={collections}
+              activeCollectionId={activeCollectionId!}
+              onCollectionChange={onCollectionChange!}
+            />
+          ) : (
+            <p className="line-clamp-1 text-xs font-medium leading-4 text-foreground/45">{title}</p>
+          )}
         </div>
-        <nav className="scrollbar-hide mt-5 min-h-0 flex-1 space-y-7 overflow-y-auto overscroll-y-contain pb-5">
-          {sections.map((section) => (
-            <div key={section.title} className="space-y-2.5">
-              {/* A group named after its tab would repeat the label directly
-                  beneath the tab heading; the items stand on their own. */}
-              {section.title !== title ? (
-                <p className={cn(typography.meta, 'flex items-center gap-1.5 px-2 text-xs font-semibold normal-case leading-4 tracking-normal text-foreground/70')}>
-                  {section.icon && <Icon icon={section.icon} className="h-3.5 w-3.5 shrink-0 text-foreground/50" />}
-                  <span className="truncate">{section.title}</span>
-                </p>
-              ) : null}
-              <div>
-                {section.items.map((item) => {
-                  const active = isActive(item.href)
-                  return (
-                    <IntentPrefetchLink
-                      key={item.id}
-                      href={item.href}
-                      aria-current={active ? 'page' : undefined}
-                      className={cn(
-                        'group relative block rounded-md px-2 py-1.5 text-left transition-colors duration-150',
-                        'focus:outline-none',
-                        active
-                          ? 'bg-muted/70 text-foreground shadow-none'
-                          : 'text-foreground/60 hover:bg-muted/40 hover:text-foreground',
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          'flex min-h-5 items-center gap-2 text-sm leading-5',
-                          active ? 'font-semibold' : 'font-medium',
-                        )}
-                      >
-                        <span className="line-clamp-2 break-words">{item.title}</span>
-                        {item.badge ? <Badge className="shrink-0 text-[10px] uppercase">{item.badge}</Badge> : null}
-                      </span>
-                    </IntentPrefetchLink>
-                  )
-                })}
+        <nav className="scrollbar-hide mt-5 min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-y-contain pb-5">
+          {sections.map((section, index) => {
+            const nodes: Array<NavigationNode> = section.nodes
+              ?? section.items.map((item) => ({ type: 'page' as const, item }))
+            return (
+              <div key={section.id ?? `${section.title}-${index}`} className="space-y-2">
+                {/* A group named after its tab would repeat the label directly
+                    beneath the tab heading; the items stand on their own. */}
+                {section.title !== title ? (
+                  <p className={cn(typography.meta, 'flex items-center gap-1.5 px-2 text-xs font-semibold normal-case leading-4 tracking-normal text-foreground/70')}>
+                    {section.icon && <Icon icon={section.icon} className="h-3.5 w-3.5 shrink-0 text-foreground/50" />}
+                    <span className="truncate">{section.title}</span>
+                  </p>
+                ) : null}
+                <div className="ml-1 border-l border-border/55 pl-1.5">
+                  <NavigationTree nodes={nodes} pathname={pathname} />
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </nav>
       </div>
     </aside>
   )
-}
-
-function normalizePath(value: string) {
-  if (!value) {
-    return '/'
-  }
-  if (value === '/') {
-    return '/'
-  }
-  return value.endsWith('/') ? value.slice(0, -1) : value
 }

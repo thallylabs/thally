@@ -116,6 +116,8 @@ describe('Mintlify repository migration', () => {
         dropdowns: [
           {
             dropdown: 'Documentation',
+            description: 'Resources for Acme developers',
+            icon: 'book-open',
             groups: [{
               group: 'Getting started',
               icon: { name: 'play' },
@@ -188,6 +190,12 @@ describe('Mintlify repository migration', () => {
       icon: 'play',
       pages: ['introduction', { group: 'CLI', pages: ['manualSetup'] }],
     }])
+    expect(bundle.docsConfig.navigation).toEqual({ display: 'dropdown' })
+    expect(bundle.docsConfig.tabs[0]).toMatchObject({
+      tab: 'Documentation',
+      description: 'Resources for Acme developers',
+      icon: 'book-open',
+    })
     expect(bundle.docsConfig.tabs[1]).toMatchObject({
       tab: 'API reference',
       groups: [{ group: 'Runs API', pages: ['management/runs'] }],

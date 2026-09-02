@@ -11,6 +11,7 @@ interface DocsJsonTab {
   tab?: string
   href?: string
   api?: unknown
+  pages?: Array<string | DocsJsonGroup>
   groups?: Array<DocsJsonGroup>
 }
 
@@ -66,9 +67,15 @@ export function runNewPage(args: ParsedArgs, cwd = process.cwd()): number {
   let registered = false
   try {
     const docs = JSON.parse(readFileSync(docsJsonPath, 'utf8')) as DocsJson
-    const tab = docs.tabs?.find((t) => !t.href && !t.api && t.groups && t.groups.length > 0)
+    const tab = docs.tabs?.find((candidate) => !candidate.href && !candidate.api
+      && (candidate.pages?.length || candidate.groups?.length))
+    if (tab?.pages) {
+      if (!tab.pages.includes(normalized)) tab.pages.push(normalized)
+      writeFileSync(docsJsonPath, `${JSON.stringify(docs, null, 2)}\n`, 'utf8')
+      registered = true
+    }
     const group = tab?.groups?.[tab.groups.length - 1]
-    if (group) {
+    if (!registered && group) {
       group.pages = group.pages ?? []
       if (!group.pages.includes(normalized)) group.pages.push(normalized)
       writeFileSync(docsJsonPath, `${JSON.stringify(docs, null, 2)}\n`, 'utf8')

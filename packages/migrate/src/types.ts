@@ -24,8 +24,12 @@ export interface MigrationNavigationGroup {
 
 export interface MigrationNavigationTab {
   tab: string
+  description?: string
+  icon?: string
   href?: string
   hidden?: boolean
+  /** Root page/group nodes used when the source has no synthetic section heading. */
+  pages?: Array<string | MigrationNavigationGroup>
   groups?: Array<MigrationNavigationGroup>
   api?: { source: string; navigation?: boolean }
 }
@@ -54,6 +58,10 @@ export interface MigrationFooterConfig {
 
 export interface MigrationDocsConfig {
   tabs: Array<MigrationNavigationTab>
+  navigation?: {
+    /** How sibling documentation collections are presented to readers. */
+    display?: 'tabs' | 'dropdown'
+  }
   theme?: 'default' | 'maple' | 'sharp' | 'minimal'
   banner?: MigrationBannerConfig
   navbar?: MigrationNavbarConfig

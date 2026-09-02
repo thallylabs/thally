@@ -6,7 +6,7 @@ description: Structure tabs and sidebar groups around the tasks your readers nee
 
 ## The docs.json file
 
-All navigation is controlled by a single file at the project root: `docs.json`. It defines the tabs in the top bar, the sidebar groups within each tab, and the order of pages.
+All navigation is controlled by a single file at the project root: `docs.json`. It defines the collections readers can switch between, the sidebar groups within each collection, and the order of pages.
 
 ## Structure
 
@@ -26,9 +26,31 @@ All navigation is controlled by a single file at the project root: `docs.json`. 
 }
 ```
 
-## Tabs
+## Collections
 
-Each entry in the `tabs` array creates a top-level navigation tab. There are three types:
+Each entry in the `tabs` array creates a top-level documentation collection. By default, collections appear as tabs in the top bar. Set `navigation.display` to `"dropdown"` to present them in a sidebar selector instead:
+
+```json
+{
+  "navigation": { "display": "dropdown" },
+  "tabs": [
+    {
+      "tab": "Documentation",
+      "description": "Guides and concepts",
+      "icon": "book-open",
+      "groups": []
+    },
+    {
+      "tab": "API",
+      "description": "Endpoints and schemas",
+      "icon": "code",
+      "groups": []
+    }
+  ]
+}
+```
+
+The optional `description` and `icon` fields appear in the collection selector. There are three collection types:
 
 ### Content tab
 
@@ -77,6 +99,26 @@ Groups create labeled sections in the sidebar. Each group has:
 - **`group`** — the section heading displayed in the sidebar
 - **`pages`** — an ordered array of page IDs
 
+`pages` may also contain nested group objects. Thally preserves their authored position and renders them as collapsible branches:
+
+```json
+{
+  "group": "Writing tasks",
+  "pages": [
+    "writing-tasks/overview",
+    {
+      "group": "Wait",
+      "pages": ["wait/overview", "wait/for", "wait/until"]
+    },
+    "writing-tasks/idempotency"
+  ]
+}
+```
+
+For a collection with ungrouped root pages, put `pages` directly on the tab.
+This keeps root pages and nested groups in one exact authored sequence without
+adding a synthetic section heading.
+
 Page IDs map to file paths under `src/content/`. For example:
 
 | Page ID | File path |
@@ -102,7 +144,7 @@ To add a new sidebar section, add a group object to the relevant tab:
 
 ## Reordering
 
-Pages appear in the sidebar in the exact order listed in the `pages` array. Groups appear in the order they're defined in the `groups` array. Tabs appear left-to-right in the order defined in the `tabs` array.
+Pages and nested groups appear in the sidebar in the exact order listed in the `pages` array. Top-level groups appear in the order they're defined in the `groups` array. Collections appear in the order defined in the `tabs` array.
 
 ## Group icons
 

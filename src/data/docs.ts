@@ -39,14 +39,36 @@ export interface OpenApiReference {
 }
 
 export interface NavigationSection {
+  /** Stable structural identity; unlike a title, this remains unique when a group is split. */
+  id?: string
   title: string
   icon?: string
+  /** All descendant pages in authored order for routing and machine projections. */
   items: Array<NavigationItem>
+  /** Recursive reader-facing tree. Omitted for generated flat sections such as OpenAPI tags. */
+  nodes?: Array<NavigationNode>
+}
+
+export interface NavigationGroup {
+  id: string
+  title: string
+  icon?: string
+  nodes: Array<NavigationNode>
+}
+
+export type NavigationNode =
+  | { type: 'page'; item: NavigationItem }
+  | { type: 'group'; group: NavigationGroup }
+
+export interface NavigationPresentation {
+  display: 'tabs' | 'dropdown'
 }
 
 export interface SidebarCollection {
   id: string
   label: string
+  description?: string
+  icon?: string
   sections: Array<NavigationSection>
   href?: string
   api?: DocsJsonApiConfig
@@ -58,6 +80,8 @@ export interface NavigationItem {
   href: string
   badge?: string
   description?: string
+  /** Authored group ancestry, used by breadcrumbs without flattening the visible sidebar. */
+  groupPath?: Array<string>
 }
 
 export interface SearchableDoc {
@@ -101,8 +125,11 @@ export interface DocsJsonApiConfig {
 
 interface DocsJsonTab {
   tab: string
+  description?: string
+  icon?: string
   href?: string
   hidden?: boolean
+  pages?: Array<string | DocsJsonNavigationGroup>
   groups?: Array<DocsJsonNavigationGroup>
   api?: DocsJsonApiConfig
 }
@@ -185,6 +212,9 @@ export type ContentIconTone = 'neutral' | 'accent'
 
 interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
+  navigation?: {
+    display?: 'tabs' | 'dropdown'
+  }
   redirects?: Array<DocsJsonRedirect>
   banner?: DocsJsonBanner
   navbar?: DocsJsonNavbar
@@ -391,14 +421,18 @@ function slugifyId(value: string) {
 // ---------------------------------------------------------------------------
 
 function collectPageIds(groups: Array<DocsJsonNavigationGroup>): Array<string> {
+  return groups.flatMap((group) => collectPageIdsFromPages(group.pages))
+}
+
+function collectPageIdsFromPages(
+  pages: Array<string | DocsJsonNavigationGroup>,
+): Array<string> {
   const ids: Array<string> = []
-  for (const group of groups) {
-    for (const page of group.pages) {
-      if (typeof page === 'string') {
-        ids.push(page)
-      } else {
-        ids.push(...collectPageIds([page]))
-      }
+  for (const page of pages) {
+    if (typeof page === 'string') {
+      ids.push(page)
+    } else {
+      ids.push(...collectPageIdsFromPages(page.pages))
     }
   }
   return ids
@@ -500,6 +534,9 @@ function getAllDocEntries(): Array<DocEntry> {
   // 1. Nav-group pages first (preserves nav order), plus standalone href tabs
   //    (e.g. Changelog) which reference a real page outside any group.
   for (const tab of config.tabs) {
+    if (tab.pages) {
+      for (const id of collectPageIdsFromPages(tab.pages)) add(id)
+    }
     if (tab.groups) {
       for (const id of collectPageIds(tab.groups)) add(id)
     } else if (tab.href && tab.href.startsWith('/')) {
@@ -519,6 +556,9 @@ function getAllDocEntries(): Array<DocEntry> {
 export function getNavigablePageIds(): Set<string> {
   const ids = new Set<string>()
   for (const tab of docsConfig().tabs) {
+    if (tab.pages) {
+      for (const id of collectPageIdsFromPages(tab.pages)) ids.add(id)
+    }
     if (tab.groups) {
       for (const id of collectPageIds(tab.groups)) ids.add(id)
     } else if (tab.href && tab.href.startsWith('/')) {
@@ -588,6 +628,9 @@ export function loadDocEntries(): Promise<Array<DocEntry>> {
       ids.push(id)
     }
     for (const tab of docsConfig().tabs) {
+      if (tab.pages) {
+        for (const id of collectPageIdsFromPages(tab.pages)) add(id)
+      }
       if (tab.groups) {
         for (const id of collectPageIds(tab.groups)) add(id)
       } else if (tab.href?.startsWith('/')) {
@@ -628,7 +671,11 @@ export function getSearchableDocs(): Array<SearchableDoc> {
 // Sidebar construction from docs.json
 // ---------------------------------------------------------------------------
 
-function resolveNavItem(pageId: string, locale?: string): NavigationItem {
+function resolveNavItem(
+  pageId: string,
+  locale?: string,
+  groupPath?: Array<string>,
+): NavigationItem {
   const fm = readFrontmatter(pageId, locale)
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
   const baseHref = slug.length ? `/${slug.join('/')}` : '/'
@@ -639,41 +686,48 @@ function resolveNavItem(pageId: string, locale?: string): NavigationItem {
     href,
     badge: fm.badge,
     description: fm.description,
+    ...(groupPath?.length ? { groupPath } : {}),
   }
 }
 
-function buildNavigationSections(
+function buildNavigationGroup(
   group: DocsJsonNavigationGroup,
+  indexPath: Array<number>,
   ancestors: Array<string> = [],
   locale?: string,
-): Array<NavigationSection> {
-  if (group.hidden) return []
+): NavigationGroup | null {
+  if (group.hidden) return null
 
-  const titleSegments = [...ancestors, group.group].filter(Boolean)
-  const title = titleSegments.length ? titleSegments.join(' • ') : 'General'
+  const groupPath = [...ancestors, group.group].filter(Boolean)
+  const nodes = buildNavigationNodes(group.pages, indexPath, groupPath, locale)
 
-  const sections: Array<NavigationSection> = []
-  let bufferedItems: Array<NavigationItem> = []
-
-  group.pages.forEach((page) => {
-    if (typeof page === 'string') {
-      bufferedItems.push(resolveNavItem(page, locale))
-      return
-    }
-
-    if (bufferedItems.length) {
-      sections.push({ title, icon: group.icon, items: bufferedItems })
-      bufferedItems = []
-    }
-
-    sections.push(...buildNavigationSections(page, titleSegments, locale))
-  })
-
-  if (bufferedItems.length) {
-    sections.push({ title, icon: group.icon, items: bufferedItems })
+  return {
+    id: `nav-group-${indexPath.join('-')}-${slugifyId(group.group) || 'group'}`,
+    title: group.group || 'General',
+    icon: group.icon,
+    nodes,
   }
+}
 
-  return sections
+function buildNavigationNodes(
+  pages: Array<string | DocsJsonNavigationGroup>,
+  indexPath: Array<number>,
+  ancestors: Array<string>,
+  locale?: string,
+): Array<NavigationNode> {
+  return pages.flatMap<NavigationNode>((page, index) => {
+    if (typeof page === 'string') {
+      return [{ type: 'page', item: resolveNavItem(page, locale, ancestors) }]
+    }
+    const child = buildNavigationGroup(page, [...indexPath, index], ancestors, locale)
+    return child ? [{ type: 'group', group: child }] : []
+  })
+}
+
+function collectNavigationItems(nodes: Array<NavigationNode>): Array<NavigationItem> {
+  return nodes.flatMap((node) => node.type === 'page'
+    ? [node.item]
+    : collectNavigationItems(node.group.nodes))
 }
 
 const sidebarCollectionsCache = new Map<string, Array<SidebarCollection>>()
@@ -690,11 +744,35 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
     .map((tab) => {
       const id = slugifyId(tab.tab) || tab.tab.toLowerCase()
       const groups = tab.groups ?? []
-      const sections = groups.flatMap((group) => buildNavigationSections(group, [], locale))
+      const groupSections = groups.flatMap((group, index) => {
+        const tree = buildNavigationGroup(group, [index], [], locale)
+        if (!tree) return []
+        return [{
+          id: tree.id,
+          title: tree.title,
+          icon: tree.icon,
+          items: collectNavigationItems(tree.nodes),
+          nodes: tree.nodes,
+        }]
+      })
+      const rootNodes = tab.pages
+        ? buildNavigationNodes(tab.pages, [groups.length], [], locale)
+        : []
+      const sections = [
+        ...(rootNodes.length > 0 ? [{
+          id: `nav-root-${id}`,
+          title: tab.tab,
+          items: collectNavigationItems(rootNodes),
+          nodes: rootNodes,
+        }] : []),
+        ...groupSections,
+      ]
 
       return {
         id,
         label: tab.tab,
+        description: tab.description,
+        icon: tab.icon,
         sections,
         href: tab.href,
         api: tab.api,
@@ -761,6 +839,11 @@ export interface BreadcrumbItem {
   href?: string
 }
 
+function navigationGroupParts(section: NavigationSection, item: NavigationItem): Array<string> {
+  if (item.groupPath) return item.groupPath
+  return section.id?.startsWith('nav-root-') ? [] : [section.title]
+}
+
 export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
   const collections = getSidebarCollections()
 
@@ -772,10 +855,11 @@ export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
         // Tab level
         const firstPageHref = collection.sections[0]?.items[0]?.href
         crumbs.push({ label: collection.label, href: firstPageHref })
-        // Group level (section title may contain " • " for nested groups).
+        // Group level follows the authored recursive path without flattening
+        // those groups into duplicate visual sections.
         // A group named after its tab (e.g. "Get started" › "Get started")
         // would stutter — collapse consecutive duplicate labels.
-        const groupParts = section.title.split(' • ')
+        const groupParts = navigationGroupParts(section, match)
         for (const part of groupParts) {
           if (crumbs[crumbs.length - 1]?.label !== part) crumbs.push({ label: part })
         }
@@ -800,9 +884,9 @@ export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
 export function getNavCategory(currentHref: string): string | null {
   for (const collection of getSidebarCollections()) {
     for (const section of collection.sections) {
-      if (section.items.some((item) => item.href === currentHref)) {
-        // Nested groups join ancestors with " • " — the leaf group is the category.
-        const parts = section.title.split(' • ')
+      const item = section.items.find((candidate) => candidate.href === currentHref)
+      if (item) {
+        const parts = navigationGroupParts(section, item)
         return parts[parts.length - 1] || null
       }
     }
@@ -836,11 +920,11 @@ export function getNavContext(pageId: string): NavContext {
 
   outer: for (const collection of collections) {
     for (const section of collection.sections) {
-      if (section.items.some((item) => item.href === href)) {
+      const item = section.items.find((candidate) => candidate.href === href)
+      if (item) {
         tabName = collection.label
-        // Strip dot-separated ancestors — take the leaf group name
-        const parts = section.title.split(' • ')
-        groupName = parts[parts.length - 1] ?? section.title
+        const parts = navigationGroupParts(section, item)
+        groupName = parts[parts.length - 1] ?? ''
         break outer
       }
     }
@@ -941,6 +1025,13 @@ export function getBannerConfig(): DocsJsonBanner | null {
 
 export function getNavbarConfig(): DocsJsonNavbar | null {
   return docsConfig().navbar ?? null
+}
+
+/** Resolve how sibling navigation collections are exposed in the docs chrome. */
+export function getNavigationPresentation(): NavigationPresentation {
+  return {
+    display: docsConfig().navigation?.display === 'dropdown' ? 'dropdown' : 'tabs',
+  }
 }
 
 export function getFooterConfig(): DocsJsonFooter | null {

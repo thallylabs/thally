@@ -1213,17 +1213,21 @@ function remapNavigationHome(
   sourceHomePageId: string | undefined,
 ): MigrationBundle['docsConfig'] {
   if (!sourceHomePageId || sourceHomePageId === 'introduction') return config
+  const remapPages = (
+    pages: Array<string | MigrationNavigationGroup>,
+  ): Array<string | MigrationNavigationGroup> => pages.map((page) => typeof page === 'string'
+    ? page === sourceHomePageId ? 'introduction' : page
+    : { ...page, pages: remapPages(page.pages) })
   const remapGroups = (groups: Array<MigrationNavigationGroup>): Array<MigrationNavigationGroup> => groups.map((group) => ({
     ...group,
-    pages: group.pages.map((page) => typeof page === 'string'
-      ? page === sourceHomePageId ? 'introduction' : page
-      : remapGroups([page])[0]),
+    pages: remapPages(group.pages),
   }))
   return {
     ...config,
     tabs: config.tabs.map((tab) => ({
       ...tab,
       ...(tab.href === `/${sourceHomePageId}` ? { href: '/' } : {}),
+      ...(tab.pages ? { pages: remapPages(tab.pages) } : {}),
       ...(tab.groups ? { groups: remapGroups(tab.groups) } : {}),
     })),
   }
@@ -1623,12 +1627,14 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
   const openApiAsset = mergeEmbeddedOpenApi(openApiFragments)
   if (openApiAsset) {
     const operationPageIds = new Set(pages.filter((page) => page.openapi).map((page) => page.navigationId))
-    const apiTab = docsConfig.tabs.find((tab) => tab.groups?.some((group) => {
-      const containsOperation = (pages: typeof group.pages): boolean => pages.some((page) => {
-        return typeof page === 'string' ? operationPageIds.has(page) : containsOperation(page.pages)
-      })
-      return containsOperation(group.pages)
-    })) ?? docsConfig.tabs[0]
+    const containsOperation = (
+      navigationPages: Array<string | MigrationNavigationGroup> = [],
+    ): boolean => navigationPages.some((page) => typeof page === 'string'
+      ? operationPageIds.has(page)
+      : containsOperation(page.pages))
+    const apiTab = docsConfig.tabs.find((tab) => (
+      containsOperation(tab.pages) || containsOperation(tab.groups)
+    )) ?? docsConfig.tabs[0]
     if (apiTab) {
       // Migrated operation pages preserve the source URLs and sidebar order.
       // The spec is still configured for operation rendering, but its derived

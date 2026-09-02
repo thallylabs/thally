@@ -170,6 +170,102 @@ describe('documentation visual system', () => {
     expect(markup).toContain('bg-muted/70')
   })
 
+  it('renders nested groups recursively instead of flattening duplicate headings', () => {
+    const triggering = { id: 'triggering', title: 'Triggering', href: '/triggering' }
+    const overview = { id: 'tasks-overview', title: 'Overview', href: '/tasks/overview' }
+    const runs = { id: 'runs', title: 'Runs', href: '/runs' }
+    const markup = renderToStaticMarkup(
+      createElement(Sidebar, {
+        title: 'Documentation',
+        sections: [{
+          id: 'fundamentals',
+          title: 'Fundamentals',
+          items: [triggering, overview, runs],
+          nodes: [
+            { type: 'page', item: triggering },
+            {
+              type: 'group',
+              group: {
+                id: 'fundamentals-tasks',
+                title: 'Tasks',
+                nodes: [{ type: 'page', item: overview }],
+              },
+            },
+            { type: 'page', item: runs },
+          ],
+        }],
+      }),
+    )
+
+    expect(markup).toContain('aria-expanded="false"')
+    expect(markup).toContain('Tasks')
+    expect(markup).not.toContain('Fundamentals • Tasks')
+    expect(markup.indexOf('Triggering')).toBeLessThan(markup.indexOf('Tasks'))
+    expect(markup.indexOf('Tasks')).toBeLessThan(markup.indexOf('Runs'))
+  })
+
+  it('renders source dropdown metadata as a sidebar collection selector', () => {
+    const sections = [{
+      id: 'start',
+      title: 'Getting started',
+      items: [{ id: 'introduction', title: 'Introduction', href: '/' }],
+    }]
+    const markup = renderToStaticMarkup(
+      createElement(Sidebar, {
+        title: 'Documentation',
+        sections,
+        collections: [
+          {
+            id: 'documentation',
+            label: 'Documentation',
+            description: 'Resources for developers',
+            icon: 'book-open',
+            sections,
+          },
+          {
+            id: 'api-reference',
+            label: 'API reference',
+            description: 'The product API',
+            icon: 'code',
+            sections: [{
+              id: 'api',
+              title: 'API reference',
+              items: [{ id: 'api-overview', title: 'Overview', href: '/api/overview' }],
+            }],
+          },
+        ],
+        activeCollectionId: 'documentation',
+        onCollectionChange: vi.fn(),
+        navigationPresentation: { display: 'dropdown' },
+      }),
+    )
+
+    expect(markup).toContain('thally-collection-selector')
+    expect(markup).toContain('Resources for developers')
+    expect(markup).toContain('href="/api/overview"')
+  })
+
+  it('keeps a readable sidebar title when a dropdown has only one collection', () => {
+    const sections = [{
+      id: 'start',
+      title: 'Getting started',
+      items: [{ id: 'introduction', title: 'Introduction', href: '/' }],
+    }]
+    const markup = renderToStaticMarkup(
+      createElement(Sidebar, {
+        title: 'Documentation',
+        sections,
+        collections: [{ id: 'documentation', label: 'Documentation', sections }],
+        activeCollectionId: 'documentation',
+        onCollectionChange: vi.fn(),
+        navigationPresentation: { display: 'dropdown' },
+      }),
+    )
+
+    expect(markup).not.toContain('thally-collection-selector')
+    expect(markup).toContain('Documentation')
+  })
+
   it('keeps the standard navbar spacious and reserves compaction for dense navigation', async () => {
     const { readFile } = await import('node:fs/promises')
     const [topBar, css, layout, shell, sidebar] = await Promise.all([
