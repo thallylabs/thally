@@ -1,6 +1,26 @@
 [
   {
     "schemaVersion": 1,
+    "id": "2026-08-31.9dd1433e.eec83f6d",
+    "source": {
+      "repository": "thallylabs/starter",
+      "commitSha": "9dd1433ee31298bbc6de8bd20ed8ef9fefcc8b4c",
+      "treeSha": "b6fe39efe2e4c856b8570e6ec36113b64266fedd",
+      "archiveUrl": "https://codeload.github.com/thallylabs/starter/tar.gz/9dd1433ee31298bbc6de8bd20ed8ef9fefcc8b4c",
+      "manifestPath": "starter-release.json",
+      "manifestSha256": "4252038bfa8a20799f06a4bc35e32ec012d72ef2372463a916f1481592734b6d"
+    },
+    "runtime": {
+      "repository": "thallylabs/thally",
+      "commitSha": "eec83f6d9f12409a098ad1b6a77a2ade8aa7e371",
+      "treeSha": "6d08201b5210ac526c7098647dbfc241da19bd01",
+      "contentSource": "assets",
+      "identityContractVersion": 1
+    },
+    "starterVersion": 2
+  },
+  {
+    "schemaVersion": 1,
     "id": "2026-08-24.00be91d7.192bce3c",
     "source": {
       "repository": "thallylabs/starter",
