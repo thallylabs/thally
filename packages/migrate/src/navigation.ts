@@ -7,7 +7,7 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, extname, relative } from 'node:path'
 
-import { pageIdFromReference, resolveWithin } from './path.js'
+import { pageIdFromReference, resolveWithin, trimEdgeSlashes } from './path.js'
 import type {
   MigrationDocsConfig,
   MigrationNavigationGroup,
@@ -187,7 +187,7 @@ export function readMintlifyConfig(repositoryRoot: string): Record<string, unkno
 function normalizePageRef(value: string, pathPrefix = ''): string | null {
   if (/^(?:https?:)?\/\//i.test(value) || value.startsWith('#')) return null
   let ref = localReference(value).split('?', 1)[0].replace(/^\/+/, '')
-  const prefix = pathPrefix.replace(/^\/+|\/+$/g, '')
+  const prefix = trimEdgeSlashes(pathPrefix)
   if (prefix && (ref === prefix || ref.startsWith(`${prefix}/`))) {
     ref = ref === prefix ? 'introduction' : ref.slice(prefix.length + 1)
   }

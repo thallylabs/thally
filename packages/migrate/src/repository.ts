@@ -29,7 +29,13 @@ import {
   projectMintlifyNavigation,
   readMintlifyConfig,
 } from './navigation.js'
-import { normalizeAssetPath, pageIdFromReference, resolveWithin } from './path.js'
+import {
+  normalizeAssetPath,
+  pageIdFromReference,
+  resolveWithin,
+  trimEdgeSlashes,
+  trimTrailingSlashes,
+} from './path.js'
 import type {
   MigrationAsset,
   MigrationBundle,
@@ -119,7 +125,7 @@ function hasMintlifyConfig(directory: string): boolean {
 
 function findMintlifyProjectRoot(repositoryDir: string, docsDir?: string): string | null {
   if (docsDir !== undefined) {
-    let candidate = docsDir.replace(/\/+$/, '')
+    let candidate = trimTrailingSlashes(docsDir)
     while (true) {
       const path = resolveWithin(repositoryDir, candidate || '.')
       if (hasMintlifyConfig(path)) return path
@@ -145,7 +151,7 @@ function findMintlifyProjectRoot(repositoryDir: string, docsDir?: string): strin
 
 function findDocusaurusProjectRoot(repositoryDir: string, docsDir?: string): string | null {
   if (docsDir !== undefined) {
-    let candidate = docsDir.replace(/\/+$/, '')
+    let candidate = trimTrailingSlashes(docsDir)
     while (true) {
       const path = resolveWithin(repositoryDir, candidate || '.')
       if (hasDocusaurusConfig(path)) return path
@@ -184,7 +190,7 @@ function readDocusaurusConfigSource(projectRoot: string): string {
 function primaryDocusaurusDocsDirectory(projectRoot: string): string {
   const source = readDocusaurusConfigSource(projectRoot)
   const configured = source.match(/\bdocs\s*:\s*\{[\s\S]{0,4000}?\bpath\s*:\s*(['"])([^'"]+)\1/)?.[2]
-  return configured?.replace(/^\.\//, '').replace(/\/+$/, '') || 'docs'
+  return trimTrailingSlashes(configured?.replace(/^\.\//, '') ?? '') || 'docs'
 }
 
 function additionalDocusaurusPluginRoots(
@@ -196,8 +202,8 @@ function additionalDocusaurusPluginRoots(
   const plugins: Array<DocusaurusPluginRoot> = []
   const matcher = /['"]@docusaurus\/plugin-content-docs['"][\s\S]{0,3000}?\bpath\s*:\s*(['"])([^'"]+)\1[\s\S]{0,1000}?\brouteBasePath\s*:\s*(['"])([^'"]+)\3/g
   for (const match of source.matchAll(matcher)) {
-    const localPath = match[2].replace(/^\.\//, '').replace(/\/+$/, '')
-    const routePrefix = match[4].replace(/^\/+|\/+$/g, '')
+    const localPath = trimTrailingSlashes(match[2].replace(/^\.\//, ''))
+    const routePrefix = trimEdgeSlashes(match[4])
     if (!localPath || !routePrefix) continue
     const docsDir = [projectRelative, localPath].filter(Boolean).join('/')
     const absolute = resolveWithin(repositoryDir, docsDir)
@@ -745,7 +751,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       ...(platform === 'docusaurus' ? {
         resolveIdentity: (frontmatter, fallback) => {
           const resolved = resolveDocusaurusPageIdentity(file.relativePath, frontmatter, fallback)
-          const routePrefix = options.docusaurusRoutePrefix?.replace(/^\/+|\/+$/g, '')
+          const routePrefix = options.docusaurusRoutePrefix === undefined
+            ? undefined
+            : trimEdgeSlashes(options.docusaurusRoutePrefix)
           if (!routePrefix) {
             docusaurusDescriptor = resolved.descriptor
             return resolved.identity

@@ -4,6 +4,25 @@ import { isAbsolute, relative, resolve, sep } from 'node:path'
 
 const SAFE_SEGMENT = /[^a-z0-9._-]+/gi
 
+/**
+ * Remove trailing forward slashes in linear time. Keeping leading slashes is
+ * important because callers may still need to reject absolute paths.
+ */
+export function trimTrailingSlashes(value: string): string {
+  let end = value.length
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end--
+  return value.slice(0, end)
+}
+
+/** Remove forward slashes from both ends without a backtracking expression. */
+export function trimEdgeSlashes(value: string): string {
+  let start = 0
+  let end = value.length
+  while (start < end && value.charCodeAt(start) === 47) start++
+  while (end > start && value.charCodeAt(end - 1) === 47) end--
+  return value.slice(start, end)
+}
+
 /** Turn a source path segment into a stable URL/file-system slug. */
 export function slugifySegment(value: string, preserveCase = false): string {
   let decoded = value
