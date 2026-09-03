@@ -55,7 +55,7 @@ export function buildSkillManifest(identity: SiteIdentity, base = getSiteUrl()):
 
 /**
  * `AGENTS.md` — repo-agent-shaped guidance for an agent *editing* this docs
- * project. Doubles as the config surface the `thally agent` (v2.1) reads. A
+ * project. Doubles as the config surface the `thally agent` command reads. A
  * physical `AGENTS.md` at the project root overrides this generated default.
  */
 export function buildAgentsManifest(identity: SiteIdentity, base = getSiteUrl()): string {

@@ -267,7 +267,7 @@ interface DocsJsonConfig {
     locales: Array<{ code: string; label: string }>
   }
   /**
-   * Admin-dashboard team — the git-committed roster (C1). Version-controlled and
+   * Admin-dashboard team — the git-committed roster. Version-controlled and
    * code-reviewed, so team-mode needs no database, even on serverless. Explicit
    * members win over domain defaults.
    */
@@ -968,7 +968,7 @@ export function getI18nConfig(): {
   return docsConfig().i18n ?? null
 }
 
-/** The git-committed admin team roster (C1). Always returns arrays. */
+/** The git-committed admin team roster. Always returns arrays. */
 export function getTeamConfig(): TeamConfig {
   return {
     members: docsConfig().team?.members ?? [],

@@ -3,8 +3,8 @@
  * analytics). This is the ONLY module allowed to import `@/cloud` — an ESLint
  * boundary enforces it. See src/lib/cloud-bridge/types.ts for the contract.
  *
- * `@/cloud` always resolves: to the real services in this repo (and in Thally
- * Thally Cloud deployments), or to the no-op stub the OSS distribution ships. Every
+ * `@/cloud` always resolves: to the real services in Thally Cloud deployments,
+ * or to the no-op stub the OSS distribution ships. Every
  * consumer handles `getCloud()` returning null-ish services gracefully.
  */
 
@@ -43,9 +43,9 @@ const FREE_ENTITLEMENTS: Entitlements = {
 
 /**
  * The single tier oracle for engine code (admin panels read ONLY this to
- * decide locked vs active). Transitional: presence of the cloud subtree grants
- * `self-hosted-full`; the token-backed control plane replaces this resolution
- * (notes/thally-cloud-plan.md §4) without changing any consumer.
+ * decide locked vs active). Presence of the cloud subtree grants
+ * `self-hosted-full`; a token-backed resolution can replace this without
+ * changing any consumer.
  */
 export function getEntitlements(): Entitlements {
   const cloud = getCloud()

@@ -1,5 +1,5 @@
 /**
- * The engine ↔ cloud contract (notes/thally-architecture-plan.md §3).
+ * The engine ↔ cloud contract.
  *
  * Engine code (everything outside `src/cloud/`) may consume cloud-tier features
  * ONLY through these interfaces, resolved via `getCloud()` in
@@ -118,9 +118,8 @@ export interface CloudServices {
 // ---------------------------------------------------------------------------
 
 /**
- * Transitional tiers. `self-hosted-full` is what a deployment with the cloud
- * subtree present gets today; token-backed Thally Cloud plans replace this when the
- * control plane exists (notes/thally-cloud-plan.md §4).
+ * Plan tiers. `self-hosted-full` is what a deployment with the cloud subtree
+ * present gets; token-backed Thally Cloud plans supersede it.
  */
 export type PlanTier = 'free' | 'self-hosted-full'
 

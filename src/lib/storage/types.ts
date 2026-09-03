@@ -1,16 +1,16 @@
 /**
- * Thally durable storage (F1).
+ * Thally durable storage.
  *
- * A small, adapter-based key–value layer that new v2.1 surfaces build on:
- * durable rate-limiting for the public MCP endpoint (A6), assistant insights and
- * the docs-task queue (A5), and the audit log (C3). Two adapters ship — `memory`
+ * A small, adapter-based key–value layer for durable rate-limiting on the
+ * public MCP endpoint, assistant insights, the docs-task queue, and the audit
+ * log. Two adapters ship — `memory`
  * (tests / opt-out) and `libsql` (zero-config file by default, Turso/libSQL via
  * `THALLY_DATABASE_URL`) — resolved once via {@link getStorage}.
  *
  * Scope note: this is intentionally KV-only. An append-only event log with a
- * typed query surface is deferred to its first real consumer (A5/C3), because
- * the v2.0 analytics store already showed aggregation wants typed columns, not
- * generic JSON events — so the query shape should be pinned by real use.
+ * typed query surface belongs with its first real consumer, because
+ * aggregation wants typed columns, not generic JSON events — so the query
+ * shape should be pinned by real use.
  */
 
 export interface KvSetOptions {

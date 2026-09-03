@@ -12,10 +12,6 @@ export function run(cmd: string, cwd?: string): void {
   execSync(cmd, { cwd, stdio: 'inherit' })
 }
 
-export function runSilent(cmd: string, cwd?: string): string {
-  return execSync(cmd, { cwd, encoding: 'utf8' }).trim()
-}
-
 export function initGit(targetDir: string): void {
   try {
     run('git init', targetDir)

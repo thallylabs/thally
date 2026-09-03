@@ -9,10 +9,10 @@ import { agentServerName } from '@/lib/agent-identity'
 export const runtime = 'nodejs'
 
 /**
- * Remote MCP endpoint (A6) — streamable-HTTP, stateless. Any MCP client attaches
+ * Remote MCP endpoint — streamable-HTTP, stateless. Any MCP client attaches
  * with `claude mcp add --transport http https://<site>/api/mcp` and gets the
  * site's docs as native tools (search, read, list, readiness). Read-only and
- * public; write tools and private-docs auth land with A1/C1.
+ * public.
  *
  * Implemented as plain JSON-RPC 2.0 (no SDK — the app carries none, and the
  * SDK's transport targets Node req/res, not Web Requests).

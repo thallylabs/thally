@@ -28,7 +28,7 @@ export function createServer(): McpServer {
   ) => void
 
   // Register every tool from the shared registry. The stdio server, the remote
-  // MCP route (A6), and the docs agent (A1) all draw from the same source.
+  // MCP route, and the docs agent all draw from the same source.
   for (const tool of tools) {
     register(tool.name, tool.description, tool.schema.shape, async (input) => {
       try {

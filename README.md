@@ -14,7 +14,7 @@ agents as structured JSON, JSON-LD, and Markdown from the same URL.
 ## Features
 
 - **MDX content** — write docs in Markdown with React components
-- **Unified content engine** — each page is parsed once into a typed content graph; HTML, JSON, JSON-LD, Markdown, search, and embeddings are projections of that single source of truth
+- **Unified content engine** — each page is parsed once into a typed content graph; HTML, JSON, JSON-LD, Markdown, search, and embeddings are all projections of that one model
 - **Auto-generated API reference** — drop in an OpenAPI spec and get interactive docs with a "Try It" console
 - **Sidebar & tabs** — configured from a single `docs.json` file
 - **Hybrid search** — instant client-side command palette plus a server-side full-text + vector `/api/search`
@@ -46,43 +46,6 @@ cd my-docs
 npm install
 npm run dev
 ```
-
-`thallylabs/starter` is the complete site template used by the CLI, MCP, and
-Thally Cloud. This repository is the single authored source for the public
-runtime and toolchain; starter's runtime-owned files are a generated snapshot,
-not a second implementation surface.
-
-### Platform boundary
-
-This README describes the public runtime and toolchain, not the private Thally
-Cloud control plane. The sole production architecture authority is
-[`thally-cloud/ARCHITECTURE.md`](https://github.com/thallylabs/thally-cloud/blob/main/ARCHITECTURE.md),
-which is available to maintainers with access to the private repository. Cloud
-services attach through the public cloud-bridge contract; the open-source
-distribution provides safe no-op implementations when those services are
-absent.
-
-`create-thally-docs`, `thally init`, and MCP project creation consume an exact
-promoted starter release. Directly cloning `thallylabs/starter` follows that
-repository's current branch instead. Package versions, scaffold releases,
-managed site releases, and Cloud platform releases are independent identities;
-publishing one does not silently upgrade the others.
-
-### Maintainer release boundary
-
-Runtime and framework changes are authored only here. Before a scaffold
-release can be promoted, the dependency-free
-`.github/scripts/starter-runtime-contract.mjs` command synchronizes the exact
-runtime-owned paths into `thallylabs/starter` and CI proves byte-for-byte parity
-with the pinned runtime commit. Source-repository-only test files stay here;
-the standalone starter is validated through its own CI and production build.
-Do not reproduce a runtime fix manually in the starter repository.
-
-After either repository's change is merged, the maintainer path is one **Full
-release** workflow dispatch (or `npm run release:full`). It waits for generated
-PR CI, publishes through npm trusted publishing, and confirms the Cloud scaffold
-promotion. See [the release runbook](.github/RELEASING.md) for one-time App
-permissions, setup, recovery, and the exact copy-paste command.
 
 The server starts at [http://localhost:3040](http://localhost:3040), or the next
 available port when 3040 is already in use.
@@ -220,7 +183,7 @@ cp .env.example .env.local
 |---|---|
 | `THALLY_SITE_URL` | Production URL for OpenGraph metadata, canonical URLs, and agent endpoints (legacy `NEXT_PUBLIC_SITE_URL` still honored) |
 | `THALLY_CLOUD_SITE_TOKEN` | Optional server-only credential from Thally Cloud. The deployed site exchanges it automatically on its next visit; never prefix it with `NEXT_PUBLIC_` |
-| `THALLY_CLOUD_URL` | Optional Thally Cloud control-plane base URL. Defaults to `https://app.thally.io`; set this only for staging or a public development tunnel |
+| `THALLY_CLOUD_URL` | Optional Thally Cloud base URL. Defaults to `https://app.thally.io` |
 | `THALLY_CLOUD_SITE_CONFIG` | Managed-hosting release snapshot injected by Thally Cloud. Self-hosted sites should leave this unset and use `THALLY_CLOUD_SITE_TOKEN` |
 | `THALLY_CONTENT_SOURCE` | Optional — where doc content is read from: `filesystem` (default; build-embedded, SSG) or `assets` (managed hosting; content served from the deployment's static assets and rendered per request). Self-hosted sites should leave this unset |
 | `THALLY_DOCS_CONFIG` | Optional managed-hosting snapshot of `docs.json`, used to publish presentation and navigation settings without recompiling the Worker. Self-hosted sites should leave this unset and edit `docs.json` |
@@ -252,6 +215,21 @@ Deploy anywhere that supports Next.js — Vercel, Netlify, Cloudflare, Docker, e
 - MDX via `next-mdx-remote` + Shiki syntax highlighting
 - `next-themes` for dark mode, `nuqs` for URL state, `zustand` for sidebar state
 - `gray-matter` for frontmatter parsing, `yaml` for OpenAPI spec loading
+
+## Contributing
+
+Pull requests target `main`. Before opening one, run:
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
+Runtime, rendering, search, and package changes belong in this repository.
+`thallylabs/starter` is the standalone site template that `create-thally-docs`,
+`thally init`, and MCP project creation scaffold from; its runtime files are
+generated from here, so please do not patch them in the starter repository.
 
 ## License
 

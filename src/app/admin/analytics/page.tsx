@@ -6,7 +6,7 @@ import { getCloud } from '@/lib/cloud-bridge'
 export default async function AdminAnalyticsPage() {
   await requireAdminPageSession()
   // Analytics is a cloud-tier service — free self-hosted deployments see the
-  // locked upsell panel instead (notes/thally-architecture-plan.md §1).
+  // locked panel instead.
   if (!getCloud()?.analytics) return <CloudLockedPanel feature="analytics" />
   return <AnalyticsView />
 }

@@ -1,9 +1,9 @@
 /**
- * Admin-team RBAC (C1). This is about the **admin dashboard team** — the people
+ * Admin-team RBAC. This is about the **admin dashboard team** — the people
  * who manage docs, view analytics, and set the private-docs password — not about
  * gating docs for visitors (that's a simple shared password).
  *
- * The roster lives in the customer's own store (F1); identity is delegated to
+ * The roster lives in the customer's own store; identity is delegated to
  * their IdP (Google/Microsoft OIDC). Nothing is hosted by Thally → no per-seat cost.
  */
 

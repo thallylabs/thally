@@ -7,7 +7,7 @@ export interface EffectiveSiteConfig {
 }
 
 /**
- * Build-config site identity with the dashboard (F1) overrides applied.
+ * Build-config site identity with the dashboard overrides applied.
  *
  * Thin projection over {@link resolveSiteConfig} — the single site-config
  * resolution point — exposing just the identity triple that the public

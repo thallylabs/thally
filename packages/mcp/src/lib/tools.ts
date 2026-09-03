@@ -51,8 +51,8 @@ import {
  * - `project` — reads/writes a local Thally project directory (`projectDir`).
  * - `site` — queries a deployed Thally site over HTTP (`siteUrl`).
  *
- * The remote MCP endpoint (A6) exposes only what's safe over HTTP; the docs
- * agent (A1) drives the `project` tools against a checked-out docs repo. Both
+ * The remote MCP endpoint exposes only what's safe over HTTP; the docs
+ * agent drives the `project` tools against a checked-out docs repo. Both
  * consume this one registry instead of re-declaring the tools.
  */
 export type ToolScope = "project" | "site";

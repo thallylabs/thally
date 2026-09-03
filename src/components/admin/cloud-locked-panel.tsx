@@ -1,8 +1,8 @@
 /**
  * Locked state for cloud-tier admin panels (Track, AI answers, analytics…).
- * Free self-hosted deployments render this where the feature UI would be —
- * the upsell surface from notes/thally-cloud-plan.md §4. Engine-side by
- * design: the panel exists in OSS; only the service behind it is cloud.
+ * Free self-hosted deployments render this where the feature UI would be.
+ * Engine-side by design: the panel exists in OSS; only the service behind it
+ * is cloud.
  */
 
 const FEATURE_COPY: Record<string, { eyebrow: string; title: string; body: string }> = {
