@@ -1,3 +1,6 @@
+/** Entry point for the public Thally command-line interface. */
+
+import { createRequire } from 'node:module'
 import { helpText, parseArgs } from './router.js'
 import { isThallyProject, runFramework, runPackageBin } from './process.js'
 import { runNewPage } from './commands/new-page.js'
@@ -6,6 +9,13 @@ import { runDeploy } from './commands/deploy.js'
 import { runAgentCommand } from './commands/agent.js'
 import { runTrackCommand } from './commands/track.js'
 import { runStarterCommand } from './commands/starter.js'
+
+// Both src/ and dist/ sit one level below the package root, so the published
+// package metadata is the single source of truth for version discovery.
+const packageMetadata = createRequire(import.meta.url)('../package.json') as {
+  version: string
+}
+const versionArguments = new Set(['--version', '-v', '-V', 'version'])
 
 const [major] = process.versions.node.split('.').map(Number)
 if (major < 18) {
@@ -23,6 +33,11 @@ function requireProject(): void {
 async function main(): Promise<number> {
   const argv = process.argv.slice(2)
   const args = parseArgs(argv)
+
+  if (argv.length === 1 && versionArguments.has(argv[0])) {
+    process.stdout.write(`${packageMetadata.version}\n`)
+    return 0
+  }
 
   if (!args.command || args.command === 'help') {
     process.stdout.write(helpText())
