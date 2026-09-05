@@ -243,6 +243,8 @@ describe('managed content cache headers', () => {
 
     const search = await middleware(docRequest('/api/search'), EVENT)
     expect(search.headers.get('Cache-Tag')).toBeNull()
+    expect(search.headers.get('X-Llms-Txt')).toBeNull()
+    expect(search.headers.get('Link')).toBeNull()
 
     const admin = await middleware(docRequest('/admin'), EVENT)
     expect(admin.headers.get('Cache-Tag')).toBeNull()
@@ -256,6 +258,7 @@ describe('managed content cache headers', () => {
   })
 
   it('negotiates explicit machine formats for API-prefixed docs pages', async () => {
+    enableManagedAssetsMode()
     vi.mocked(isAgentRequest).mockReturnValue(true)
     vi.mocked(isMachineEndpoint).mockReturnValue(true)
 
@@ -267,9 +270,12 @@ describe('managed content cache headers', () => {
     expect(response.headers.get('x-middleware-rewrite')).toContain(
       '/api/docs/api/overview',
     )
+    expect(response.headers.get('Cache-Tag')).toBeNull()
+    expect(response.headers.get('CDN-Cache-Control')).toBeNull()
   })
 
   it('preserves browser API-reference pages and RSC navigation', async () => {
+    enableManagedAssetsMode()
     const browser = await middleware(
       docRequest('/api/default/posts/get', { accept: 'text/html' }),
       EVENT,
@@ -283,8 +289,27 @@ describe('managed content cache headers', () => {
     )
 
     expect(browser.headers.get('x-middleware-next')).toBe('1')
+    expect(browser.headers.get('X-Llms-Txt')).toBe('https://docs.example.com/llms.txt')
+    expect(browser.headers.get('Link')).toContain('</llms.txt>; rel="llms-txt"')
+    expect(browser.headers.get('Link')).toContain(
+      '</llms.txt>; rel="alternate"; type="text/markdown"',
+    )
+    expect(browser.headers.get('Link')).toContain(
+      '</openapi.yaml>; rel="service-desc"; type="application/yaml"',
+    )
+    expect(browser.headers.get('Link')).toContain(
+      '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"',
+    )
+    // Discovery must not broaden the existing cache eligibility of the shared
+    // `/api` namespace, where service endpoints and rendered pages coexist.
+    expect(browser.headers.get('Cache-Tag')).toBeNull()
+    expect(browser.headers.get('Cache-Control')).toBeNull()
+    expect(browser.headers.get('CDN-Cache-Control')).toBeNull()
+    expect(browser.headers.get('Netlify-CDN-Cache-Control')).toBeNull()
     expect(rsc.headers.get('x-middleware-next')).toBe('1')
     expect(rsc.headers.get('x-middleware-rewrite')).toBeNull()
+    expect(rsc.headers.get('Cache-Tag')).toBeNull()
+    expect(rsc.headers.get('CDN-Cache-Control')).toBeNull()
   })
 
   it('never emits cache headers when the access config is unavailable (fail closed)', async () => {

@@ -56,6 +56,20 @@ function isKnownApiPath(pathname: string): boolean {
 }
 
 /**
+ * Identify paths that may resolve to a rendered documentation page.
+ *
+ * API reference pages share the `/api` namespace with service endpoints. The
+ * edge runtime cannot load the Node-only content graph, so unknown paths stay
+ * eligible and the App Router remains responsible for resolving or 404ing
+ * them. Known service endpoints must never advertise page-level discovery.
+ */
+function isPotentialDocsPagePath(pathname: string): boolean {
+  if (pathname.startsWith('/admin') || pathname.startsWith('/_next')) return false
+  if (pathname === '/api' || pathname.startsWith('/api/')) return !isKnownApiPath(pathname)
+  return true
+}
+
+/**
  * Decide whether a machine request targets a canonical documentation page.
  *
  * `/api/*` cannot be treated as API-only: authors may legitimately place MDX
@@ -441,9 +455,10 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   // agents and crawlers find the index without guessing. The `Link` header stays
   // relative (resolved against the request URL per RFC 8288); `X-Llms-Txt` is a
   // custom header agents read directly, so it carries an absolute URL. Only
-  // content pages get the headers (not API/admin/_next).
+  // potential content pages get the headers, including API-reference pages;
+  // known service APIs, admin routes, and Next internals do not.
   const response = NextResponse.next()
-  if (!pathname.startsWith('/api') && !pathname.startsWith('/admin') && !pathname.startsWith('/_next')) {
+  if (isPotentialDocsPagePath(pathname)) {
     response.headers.append('Link', '</llms.txt>; rel="llms-txt"')
     // Standard relation types agents actually dereference (RFC 8288): the
     // Markdown alternate of the corpus, the OpenAPI description
