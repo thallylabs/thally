@@ -36,12 +36,41 @@ focused formatting, link, and content checks.
 Pull requests target `main` directly. The pull request's CI and deploy preview
 are the release-candidate gate.
 
+## Repository operations
+
+Coding agents may perform authenticated git and GitHub operations when the
+user requests them or when they are normal, in-scope steps of the requested
+workflow. This includes staging files, committing, pushing branches, creating
+or updating issues and pull requests, submitting reviews, merging approved
+pull requests, and dispatching documented workflows. Do not ask the user to
+repeat these operations merely because an agent is performing the work.
+
+Before committing or publishing repository metadata, confirm that the commit
+message, issue or pull-request text, review, and other agent-authored metadata
+contain no AI attribution. Never add `Co-Authored-By` trailers naming an AI,
+phrases such as "Generated with Codex" or "Made with Claude Code", badges,
+watermarks, or equivalent attribution. If a hook or tool could inject
+attribution and the final output cannot be verified, do not perform that
+operation; give the user one complete copy-pasteable command instead.
+
+Destructive-action safeguards still apply. Features, fixes, and maintenance
+pull requests target `main`, and agents must not bypass required CI, review,
+deploy-preview, or documented release gates.
+
+Because this repository is public, keep agent-authored commit messages, issue
+descriptions, pull-request descriptions, and review comments deliberately
+discreet. State only the minimum accurate context a maintainer needs, avoid
+internal operational details, and do not publish private repository names,
+infrastructure identifiers, customer data, audit narratives, or security
+details that belong in a private channel.
+
 ## Commit messages
 
 Use plain conventional-commit messages written for an open-source audience.
 Keep the subject at or below 72 characters and use the body only for
-maintainer-relevant context. Do not add AI-attribution trailers, badges, or
-watermarks of any kind.
+essential maintainer context. Prefer concise, general descriptions when the
+specific operational context is private. Do not add AI-attribution trailers,
+badges, or watermarks of any kind.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
