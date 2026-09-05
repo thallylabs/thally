@@ -1,10 +1,14 @@
 /** Black-box coverage for help and invalid-option behavior in the published CLI. */
 
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const cliPath = fileURLToPath(new URL('../../dist/index.js', import.meta.url))
+const packageMetadata = createRequire(import.meta.url)('../../package.json') as {
+  version: string
+}
 
 function runCli(...args: Array<string>) {
   return spawnSync(process.execPath, [cliPath, ...args], {
@@ -15,6 +19,14 @@ function runCli(...args: Array<string>) {
 }
 
 describe('create-thally-docs help', () => {
+  it.each(['--version', '-v', '-V', 'version'])('prints the package version for %s', (argument) => {
+    const result = runCli(argument)
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe(`${packageMetadata.version}\n`)
+    expect(result.stderr).toBe('')
+  })
+
   it.each(['--help', '-h'])('prints root help without prompting for %s', (flag) => {
     const result = runCli(flag)
 

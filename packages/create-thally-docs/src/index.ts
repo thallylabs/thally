@@ -1,6 +1,7 @@
 /** CLI entry point for scaffolding, migration, validation, and translation. */
 
 import { existsSync, readdirSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { logo, success, slugify } from './utils.js'
 import {
@@ -14,8 +15,15 @@ import { migrateDocs } from './migrate/index.js'
 import { runCheck } from './check.js'
 import { runTranslateCommand } from './translate.js'
 
+// Both src/ and dist/ sit one level below the package root, so the published
+// package metadata is the single source of truth for version discovery.
+const packageMetadata = createRequire(import.meta.url)('../package.json') as {
+  version: string
+}
+
 const args = process.argv.slice(2)
 const flags = args.filter((a) => a.startsWith('-'))
+const versionArguments = new Set(['--version', '-v', '-V', 'version'])
 const valueFlags = new Set([
   '--api-key',
   '--branch',
@@ -71,6 +79,7 @@ Scaffold options:
   --install       Install project dependencies after scaffolding
   --no-install    Skip dependency installation without prompting
   -h, --help      Show this help
+  -v, -V, --version  Show the installed version
 
 Run create-thally-docs <command> --help for command-specific options.
 `
@@ -308,6 +317,11 @@ async function runTranslateSubcommand(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  if (args.length === 1 && versionArguments.has(args[0])) {
+    console.log(packageMetadata.version)
+    return
+  }
+
   const subcommand = positional[0]
   const command = resolveCommand(subcommand)
 
