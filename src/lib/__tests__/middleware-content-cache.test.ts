@@ -4,7 +4,7 @@
  * content publishes). Only unambiguous full HTML and machine projections may
  * receive a long CDN TTL; browser paths without that evidence stay tag-only.
  * Headers must not leak onto admin surfaces, non-content APIs, gated sites, or
- * the default filesystem mode. Pass-through and rewrite behavior is unchanged.
+ * the default filesystem mode. Routing assertions cover the same edge paths.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -61,7 +61,7 @@ vi.mock('@/lib/cloud-link/edge', async () => {
 import { GET as getWellKnownDocument } from '@/app/api/well-known/[...document]/route'
 import { middleware } from '@/middleware'
 import { isDocsAccessEnabledEdge, isDocsAccessGrantedEdge } from '@/lib/admin/auth-edge'
-import { isPublicAgentEndpoint } from '@/lib/agent-endpoints'
+import { isMachineEndpoint, isPublicAgentEndpoint } from '@/lib/agent-endpoints'
 import {
   getCloudAccessConfigEdge,
   isCloudAccessConfiguredEdge,
@@ -83,6 +83,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(isDocsAccessEnabledEdge).mockReturnValue(false)
   vi.mocked(isPublicAgentEndpoint).mockReturnValue(false)
+  vi.mocked(isMachineEndpoint).mockReturnValue(false)
   vi.mocked(getCloudAccessConfigEdge).mockReset().mockResolvedValue(null)
   vi.mocked(isCloudAccessConfiguredEdge).mockReturnValue(false)
   vi.mocked(isAgentRequest).mockReturnValue(false)
@@ -247,18 +248,25 @@ describe('managed content cache headers', () => {
     expect(admin.headers.get('Cache-Tag')).toBeNull()
   })
 
-  it('returns Problem Details for an unknown machine API request', async () => {
+  it('lets routing resolve ambiguous API-prefixed paths', async () => {
     const response = await middleware(docRequest('/api/does-not-exist'), EVENT)
 
-    expect(response.status).toBe(404)
-    expect(response.headers.get('content-type')).toContain(
-      'application/problem+json',
+    expect(response.headers.get('x-middleware-next')).toBe('1')
+    expect(response.headers.get('x-middleware-rewrite')).toBeNull()
+  })
+
+  it('negotiates explicit machine formats for API-prefixed docs pages', async () => {
+    vi.mocked(isAgentRequest).mockReturnValue(true)
+    vi.mocked(isMachineEndpoint).mockReturnValue(true)
+
+    const response = await middleware(
+      docRequest('/api/overview', { accept: 'application/json' }),
+      EVENT,
     )
-    await expect(response.json()).resolves.toMatchObject({
-      code: 'api_endpoint_not_found',
-      status: 404,
-      instance: '/api/does-not-exist',
-    })
+
+    expect(response.headers.get('x-middleware-rewrite')).toContain(
+      '/api/docs/api/overview',
+    )
   })
 
   it('preserves browser API-reference pages and RSC navigation', async () => {
