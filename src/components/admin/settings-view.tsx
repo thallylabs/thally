@@ -157,7 +157,7 @@ export async function SettingsView({ role = 'viewer' }: { role?: Role }) {
         />
       </Group>
 
-      <Group title="Agents" desc="Machine-readable surfaces that make your docs agent-native.">
+      <Group title="AI tools" desc="Machine-readable formats that keep people and AI tools on the same current source.">
         <Row label="Agent endpoints" value="Live" tone="success" hint="llms.txt, ai.txt, docs-index, agent-readiness" />
         <Row label="Structured data" value="JSON-LD" tone="success" />
       </Group>

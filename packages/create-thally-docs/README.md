@@ -1,10 +1,9 @@
 # create-thally-docs
 
-Scaffold the first customer-facing knowledge surface in a
-[Thally](https://github.com/thallylabs/thally) product-knowledge pipeline. The
-result is an open documentation site that serves every page to humans as
-polished HTML and to agents as structured JSON, JSON-LD, and Markdown from the
-same URL.
+Scaffold an open-source [Thally](https://github.com/thallylabs/thally) docs
+site for people, search engines, and AI tools. The result keeps your source in
+Git and publishes each page as HTML, Markdown, structured JSON, JSON-LD, and
+agent discovery files.
 
 ## Quick start
 

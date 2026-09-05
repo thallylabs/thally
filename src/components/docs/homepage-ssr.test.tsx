@@ -24,6 +24,8 @@ describe('documentation homepage SSR', () => {
     expect(html.match(/<h1\b/g)).toHaveLength(1)
     expect((html.match(/<h2\b/g) ?? []).length).toBeGreaterThanOrEqual(2)
     expect(text.length).toBeGreaterThanOrEqual(500)
-    expect(text).toContain('Build and publish documentation with Thally')
+    expect(text).toContain(
+      'Your product changed. Did your docs, website, and help center?',
+    )
   })
 })

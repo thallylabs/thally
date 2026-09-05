@@ -1,7 +1,7 @@
 {
   "name": "create-thally-docs",
   "version": "0.10.25",
-  "description": "Scaffold the first documentation surface in a Thally product-knowledge pipeline.",
+  "description": "Scaffold an open-source Thally docs site for people, search engines, and AI tools.",
   "type": "module",
   "engines": {
     "node": ">=18"
@@ -64,7 +64,7 @@
     "mdx",
     "nextjs",
     "ai",
-    "agent-native",
+    "product-knowledge",
     "mcp",
     "create"
   ],

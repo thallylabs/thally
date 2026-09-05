@@ -1,7 +1,9 @@
-# `thally` — the unified Thally CLI
+# `thally` CLI
 
-One tool, one mental model. You author **content + config**; the framework
-(Next.js) is a hidden runtime you never touch.
+Use one CLI to scaffold, write, check, migrate, and publish Thally docs. You
+author **content + config** while Thally keeps the Next.js runtime out of your
+way. The same toolchain can trace a product change into documentation work your
+team reviews before it publishes.
 
 ## The model
 

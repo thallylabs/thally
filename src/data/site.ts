@@ -165,7 +165,7 @@ const brandPreset: BrandPresetKey = 'primary'
 export const siteConfig: SiteConfig = {
   name: 'Thally',
   description:
-    'Thally connects product changes to customer-facing knowledge, preparing evidence-backed documentation updates for human review on an open, agent-readable stack.',
+    'Thally is the product knowledge layer for software teams. It keeps your docs, website, and support platform in sync as your product changes.',
   repoUrl: '',
   links: [
     { label: 'Get started', href: '/quickstart' },
