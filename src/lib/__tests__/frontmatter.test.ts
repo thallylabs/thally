@@ -1,8 +1,8 @@
 /**
  * Frontmatter parsing is a code-execution sink if it is done with
- * `gray-matter`'s defaults, so this file guards both halves of the fix: the
- * helper neutralizes the JavaScript engines, and no other module in the repo
- * parses frontmatter without it.
+ * a parser that accepts executable language engines, so this file guards both
+ * halves of the fix: the YAML-only helper stays inert, and legacy parser
+ * dependencies cannot re-enter another source module.
  */
 
 import { readdirSync, readFileSync } from 'node:fs'
@@ -22,6 +22,7 @@ describe('parseFrontmatter', () => {
 
     expect(globals[marker]).toBeUndefined()
     expect(parsed.data.title).toBeUndefined()
+    expect(parsed.content.trim()).toBe('Body.')
   })
 
   it('still parses the documented yaml frontmatter', () => {
@@ -36,18 +37,20 @@ describe('parseFrontmatter', () => {
     expect(raw.startsWith('---\n')).toBe(true)
     expect(parseFrontmatter(raw).data.title).toBe('Hello')
   })
-})
 
-// The vulnerability was never the parser alone — it was call sites reaching
-// for `gray-matter` directly. Adding a new one must fail here rather than in
-// production.
-const HARDENED_PARSERS = [
-  'src/lib/frontmatter.ts',
-  'packages/core/src/content/frontmatter.ts',
-  'packages/create-thally-docs/src/frontmatter.ts',
-  'packages/mcp/src/lib/frontmatter.ts',
-  'packages/migrate/src/frontmatter.ts',
-]
+  it('accepts a BOM, CRLF delimiters, and explicit YAML tags', () => {
+    const parsed = parseFrontmatter('\ufeff--- yml\r\ntitle: Hello\r\n---\r\nBody.\r\n')
+
+    expect(parsed.data.title).toBe('Hello')
+    expect(parsed.content).toBe('Body.\r\n')
+  })
+
+  it('does not treat a longer thematic break as frontmatter', () => {
+    const raw = '----\ntitle: prose\n---\nBody.'
+
+    expect(parseFrontmatter(raw)).toMatchObject({ content: raw, data: {} })
+  })
+})
 
 // Derived rather than listed so the next workspace package is covered the day
 // it is added, not the day someone remembers to extend this array.
@@ -71,19 +74,17 @@ function sourceFilesUnder(root: string): Array<string> {
 }
 
 describe('frontmatter parsing call sites', () => {
-  it('imports gray-matter only in the hardened parsers', () => {
+  it('does not import gray-matter from source modules', () => {
     // Assembled from parts so this assertion does not match its own source
     // file; quoted on both sides so prose mentions of the package don't count.
     const specifier = new RegExp(`['"]${'gray' + '-matter'}['"]`)
     const files = SOURCE_ROOTS.flatMap(sourceFilesUnder)
-    const offenders = files.filter((file) => {
-      if (HARDENED_PARSERS.includes(file)) return false
-      return specifier.test(readFileSync(path.join(process.cwd(), file), 'utf8'))
-    })
+    const offenders = files.filter((file) =>
+      specifier.test(readFileSync(path.join(process.cwd(), file), 'utf8')),
+    )
 
     // A scan that walked nothing would "pass"; assert it actually looked.
     expect(files.length).toBeGreaterThan(200)
-    expect(files).toEqual(expect.arrayContaining(HARDENED_PARSERS))
     expect(offenders).toEqual([])
   })
 })

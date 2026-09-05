@@ -44,8 +44,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.0",
     "@inquirer/prompts": "^7.0.0",
-    "@thallylabs/migrate": "0.2.3",
-    "gray-matter": "^4.0.3",
+    "@thallylabs/migrate": "0.2.4",
     "p-limit": "^6.1.0",
     "tar": "^7.5.22",
     "yaml": "^2.6.0"

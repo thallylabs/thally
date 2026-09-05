@@ -63,6 +63,7 @@ function createRuntime(): {
   treeSha: string;
 } {
   const directory = temporaryDirectory("thally-runtime-contract");
+  write(directory, "BUILD-WARNINGS.md", "# Build warning register\n");
   write(directory, "src/components/top-bar.tsx", "export const height = 56\n");
   write(directory, "src/lib/runtime.ts", "export const runtime = true\n");
   write(
@@ -171,6 +172,7 @@ describe("starter runtime contract", () => {
         "src/components/removed.tsx exists only in starter",
         "src/components/top-bar.tsx bytes differ",
         "src/lib/runtime.ts is missing from starter",
+        "BUILD-WARNINGS.md is missing from starter",
         "src/lib/__tests__/frontmatter-parity.test.ts is source-only but exists in starter",
       ]),
     );
@@ -198,6 +200,9 @@ describe("starter runtime contract", () => {
         "utf8",
       ),
     ).toBe("export const height = 56\n");
+    expect(readFileSync(join(starterDirectory, "BUILD-WARNINGS.md"), "utf8")).toBe(
+      "# Build warning register\n",
+    );
     expect(() =>
       readFileSync(
         join(starterDirectory, "src/lib/__tests__/frontmatter-parity.test.ts"),

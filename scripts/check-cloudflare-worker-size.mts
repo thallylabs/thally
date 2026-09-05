@@ -10,7 +10,10 @@ import { readdir, stat } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 
 const MAX_WORKER_MODULE_COUNT = 32
-const MAX_WORKER_BUNDLE_BYTES = 32 * 1024 * 1024
+const PLATFORM_WORKER_BUNDLE_BYTES = 32 * 1024 * 1024
+// Fail before the provider does. Three MiB keeps dependency updates from
+// turning an otherwise-valid release into a limit-edge deployment.
+const MAX_WORKER_BUNDLE_BYTES = 29 * 1024 * 1024
 const uploadRoot = resolve(process.cwd(), '.thally-upload')
 
 function isWorkerModule(path: string): boolean {
@@ -57,10 +60,10 @@ const sizes = await Promise.all(modules.map(({ absolutePath }) => stat(absoluteP
 const totalBytes = sizes.reduce((sum, module) => sum + module.size, 0)
 if (totalBytes > MAX_WORKER_BUNDLE_BYTES) {
   throw new Error(
-    `Cloudflare Worker bundle is ${totalBytes} bytes, exceeding the managed-hosting limit of ${MAX_WORKER_BUNDLE_BYTES} bytes.`,
+    `Cloudflare Worker bundle is ${totalBytes} bytes, exceeding the ${MAX_WORKER_BUNDLE_BYTES}-byte regression budget (${PLATFORM_WORKER_BUNDLE_BYTES}-byte platform limit).`,
   )
 }
 
 console.log(
-  `Cloudflare Worker bundle: ${modules.length}/32 modules · ${(totalBytes / 1024 / 1024).toFixed(2)} MiB / 32.00 MiB`,
+  `Cloudflare Worker bundle: ${modules.length}/32 modules · ${(totalBytes / 1024 / 1024).toFixed(2)} MiB / 29.00 MiB budget (32.00 MiB platform limit)`,
 )
