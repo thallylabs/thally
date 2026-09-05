@@ -28,6 +28,94 @@ const valueFlags = new Set([
   '--platform',
 ])
 
+const commandFlags = {
+  scaffold: new Set(['--help', '-h', '--yes', '-y', '--install', '--no-install']),
+  migrate: new Set([
+    '--help',
+    '-h',
+    '--api-key',
+    '--branch',
+    '--docs-dir',
+    '--into',
+    '--max-pages',
+    '--platform',
+    '--yes',
+    '-y',
+  ]),
+  check: new Set(['--help', '-h', '--fix', '--ci', '--external', '--drift']),
+  translate: new Set([
+    '--help',
+    '-h',
+    '--api-key',
+    '--force',
+    '--locale',
+    '--model',
+    '--pages',
+    '--yes',
+    '-y',
+  ]),
+} as const
+
+const mainHelp = `
+Usage:
+  create-thally-docs [project-dir] [options]
+  create-thally-docs <command> [arguments] [options]
+
+Commands:
+  migrate <source> [output-dir]  Import an existing documentation project
+  check [project-dir]            Validate content and navigation
+  translate [project-dir]        Translate documentation into another locale
+
+Scaffold options:
+  -y, --yes       Accept defaults and skip interactive prompts
+  --install       Install project dependencies after scaffolding
+  --no-install    Skip dependency installation without prompting
+  -h, --help      Show this help
+
+Run create-thally-docs <command> --help for command-specific options.
+`
+
+const commandHelp = {
+  migrate: `
+Usage:
+  create-thally-docs migrate <github-or-docs-url> [output-dir] [options]
+
+Options:
+  --into <dir>         Migrate into an existing Thally project
+  --branch <name>      Override the detected Git branch
+  --docs-dir <path>    Override the detected documentation directory
+  --max-pages <count>  Limit a public URL crawl to 1-1000 pages
+  --platform <name>    Use mintlify, docusaurus, or auto
+  --api-key <key>      Anthropic API key for non-Markdown conversion
+  -y, --yes            Skip interactive prompts
+  -h, --help           Show this help
+`,
+  check: `
+Usage:
+  create-thally-docs check [project-dir] [options]
+
+Options:
+  --fix       Add orphan pages to navigation when possible
+  --ci        Use CI-oriented validation behavior
+  --external  Check external links
+  --drift     Check documentation provenance and freshness
+  -h, --help  Show this help
+`,
+  translate: `
+Usage:
+  create-thally-docs translate [project-dir] --locale <code> [options]
+
+Options:
+  --locale <code>  Target locale code (required)
+  --pages <ids>    Translate only the comma-separated page IDs
+  --force          Overwrite existing translations
+  --api-key <key>  Anthropic API key (defaults to ANTHROPIC_API_KEY)
+  --model <id>     Claude model to use
+  -y, --yes        Skip the confirmation prompt
+  -h, --help       Show this help
+`,
+} as const
+
 // Build positionals by skipping values consumed by named flags (e.g. --locale es)
 const positional: Array<string> = []
 for (let i = 0; i < args.length; i++) {
@@ -48,6 +136,27 @@ function getFlagValue(flag: string): string | undefined {
     return args[idx + 1]
   }
   return undefined
+}
+
+function resolveCommand(subcommand: string | undefined): keyof typeof commandFlags {
+  if (subcommand === 'migrate' || subcommand === 'check' || subcommand === 'translate') {
+    return subcommand
+  }
+  return 'scaffold'
+}
+
+/** Print help before command execution so informational calls never open prompts. */
+function printHelp(command: keyof typeof commandFlags): void {
+  console.log(command === 'scaffold' ? mainHelp : commandHelp[command])
+}
+
+/** Reject unsupported options instead of silently falling through to a command. */
+function validateFlags(command: keyof typeof commandFlags): void {
+  const unknownFlag = flags.find((flag) => !commandFlags[command].has(flag))
+  if (!unknownFlag) return
+
+  const helpCommand = command === 'scaffold' ? '' : ` ${command}`
+  throw new Error(`Unknown option "${unknownFlag}". Run create-thally-docs${helpCommand} --help for usage.`)
 }
 
 async function runMigrateCommand(): Promise<void> {
@@ -200,6 +309,14 @@ async function runTranslateSubcommand(): Promise<void> {
 
 async function main(): Promise<void> {
   const subcommand = positional[0]
+  const command = resolveCommand(subcommand)
+
+  if (flags.includes('--help') || flags.includes('-h')) {
+    printHelp(command)
+    return
+  }
+
+  validateFlags(command)
 
   if (subcommand === 'migrate') {
     await runMigrateCommand()
