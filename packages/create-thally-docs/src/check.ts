@@ -283,10 +283,10 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       if (tab.href.startsWith('/')) navPageIds.add(tab.href.slice(1) || 'introduction')
       continue
     }
-    // API tabs normally derive navigation from their specification. URL
-    // migrations set `navigation: false` because their authored groups retain
-    // the source hierarchy and should participate in ordinary page checks.
-    if (tab.api && tab.api.navigation !== false) continue
+    // API tabs without authored nodes derive navigation from their
+    // specification. When pages or groups are present, the runtime merges
+    // those MDX sections with generated operations, so they remain reachable.
+    if (tab.api && tab.api.navigation !== false && !hasNavigationNodes) continue
     if (!hasNavigationNodes) {
       issues.push({ severity: 'error', message: `Tab "${tab.tab}" has no groups and no href — it will render empty` })
       continue
