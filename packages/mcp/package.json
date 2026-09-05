@@ -1,7 +1,7 @@
 {
   "name": "@thallylabs/mcp",
   "version": "0.10.27",
-  "description": "MCP server for managing Thally knowledge surfaces and tracing product changes into documentation work.",
+  "description": "MCP server for managing Thally docs and tracing product changes into evidence-backed updates for human review.",
   "type": "module",
   "engines": {
     "node": ">=18"

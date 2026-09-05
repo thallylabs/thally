@@ -1,7 +1,7 @@
 {
   "name": "@thallylabs/core",
   "version": "0.2.3",
-  "description": "Framework-agnostic content engine for Thally's product-knowledge pipeline: structured content, search, embeddings, and brand tokens.",
+  "description": "Framework-agnostic content engine for publishing Thally docs to people, search engines, and AI tools.",
   "type": "module",
   "sideEffects": false,
   "publishConfig": {

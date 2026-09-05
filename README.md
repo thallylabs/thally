@@ -1,37 +1,13 @@
 # Thally
 
-**Every product change. Every knowledge surface. Automatically in sync.**
+Build and publish Git-owned docs for people and AI tools with Thally's
+MIT-licensed documentation engine and public toolchain. One MDX source can
+serve HTML, Markdown, structured JSON, JSON-LD, `llms.txt`, RSS, and a live MCP
+endpoint. Self-host it or connect the site to Thally Cloud.
 
-Thally is the open product-knowledge pipeline for software teams. It starts
-with documentation: connect product repositories, identify the customer-facing
-knowledge a change affects, and turn that work into evidence-backed pull
-requests for people to review.
-
-The documentation engine stays self-hosted, open, extensible, and free to
-commercialize. Every page is served to humans as pre-rendered HTML and to AI
-agents as structured JSON, JSON-LD, and Markdown from the same URL.
-
-## Features
-
-- **MDX content** — write docs in Markdown with React components
-- **Unified content engine** — each page is parsed once into a typed content graph; HTML, JSON, JSON-LD, Markdown, search, and embeddings are all projections of that one model
-- **Auto-generated API reference** — drop in an OpenAPI spec and get interactive docs with a "Try It" console
-- **Sidebar & tabs** — configured from a single `docs.json` file
-- **Hybrid search** — instant client-side command palette plus a server-side full-text + vector `/api/search`
-- **Retrieval-grounded AI chat** — Claude-powered Q&A with RAG retrieval and inline citations; works out of the box on a rate-limited trial key, then on your own `ANTHROPIC_API_KEY`
-- **Agent endpoints** — `/llms.txt`, `/ai.txt`, `/api/docs-index`, `/api/docs/{slug}`, and an **Agent Readiness Score** at `/api/agent-readiness`
-- **Remote MCP server** — every deployed site is an MCP endpoint at `/api/mcp`; attach with `claude mcp add --transport http <site>/api/mcp`
-- **Docs agent** — `thally agent "…"` (or `@thally` on a product PR) drafts docs as a **reviewed pull request**, self-checked with `thally check`; it never merges
-- **Provenance & drift** — machine-legible `lastVerified` dates + `thally check --drift` to catch pages stale against the code they document
-- **Team accounts & roles** — Google/Microsoft OIDC sign-in + Owner/Editor/Viewer from a git-committed roster in `docs.json` (no database, no per-seat)
-- **Unified `thally` CLI + `@thallylabs/mcp`** — one toolchain to scaffold, develop, deploy, check, and drive your docs from any MCP client
-- **TOC, dark mode, responsive** — built-in with zero config; persistent sidebar, mobile drawer, command palette
-- **Syntax highlighting** — Shiki with CSS variables for theme-aware code blocks
-
-## Quick Start
+## Start a docs site
 
 ```bash
-# Scaffold a new project (recommended)
 npx create-thally-docs my-docs
 cd my-docs
 npm install
@@ -49,6 +25,33 @@ npm run dev
 
 The server starts at [http://localhost:3040](http://localhost:3040), or the next
 available port when 3040 is already in use.
+
+## Keep product knowledge aligned
+
+**The product knowledge layer for software teams.**
+
+Your product changed. Did your docs, website, and help center? Connect the
+repositories that define your product and the places customers learn about it.
+When a pull request merges, Thally Track gathers the evidence, traces the
+impact, and opens evidence-backed pull requests for your team to review. A
+no-change result is valid. Nothing publishes without human approval.
+
+## Features
+
+- **MDX content** — write docs in Markdown with React components
+- **Unified content engine** — each page is parsed once into a typed content graph; HTML, JSON, JSON-LD, Markdown, search, and embeddings are all projections of that one model
+- **Auto-generated API reference** — drop in an OpenAPI spec and get interactive docs with a "Try It" console
+- **Sidebar & tabs** — configured from a single `docs.json` file
+- **Hybrid search** — instant client-side command palette plus a server-side full-text + vector `/api/search`
+- **Retrieval-grounded AI chat** — Claude-powered Q&A with RAG retrieval and inline citations; works out of the box on a rate-limited trial key, then on your own `ANTHROPIC_API_KEY`
+- **Agent endpoints** — `/llms.txt`, `/ai.txt`, `/api/docs-index`, `/api/docs/{slug}`, and an **Agent Readiness Score** at `/api/agent-readiness`
+- **Remote MCP server** — every deployed site is an MCP endpoint at `/api/mcp`; attach with `claude mcp add --transport http <site>/api/mcp`
+- **Docs agent** — `thally agent "…"` (or `@thally` on a product PR) drafts docs as a **reviewed pull request**, self-checked with `thally check`; it never merges
+- **Provenance & drift** — machine-legible `lastVerified` dates + `thally check --drift` to catch pages stale against the code they document
+- **Team accounts & roles** — Google/Microsoft OIDC sign-in + Owner/Editor/Viewer from a git-committed roster in `docs.json` (no database, no per-seat)
+- **Unified `thally` CLI + `@thallylabs/mcp`** — one toolchain to scaffold, develop, deploy, check, and drive your docs from any MCP client
+- **TOC, dark mode, responsive** — built-in with zero config; persistent sidebar, mobile drawer, command palette
+- **Syntax highlighting** — Shiki with CSS variables for theme-aware code blocks
 
 ## Project Structure
 

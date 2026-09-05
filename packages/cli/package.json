@@ -1,7 +1,7 @@
 {
   "name": "@thallylabs/cli",
   "version": "0.8.28",
-  "description": "The Thally CLI for authoring knowledge surfaces, tracing product changes, and keeping documentation checked.",
+  "description": "CLI for publishing Thally docs from Git and turning product changes into evidence-backed updates for human review.",
   "type": "module",
   "engines": {
     "node": ">=18"
@@ -43,7 +43,7 @@
     "mdx",
     "nextjs",
     "ai",
-    "agent-native"
+    "product-knowledge"
   ],
   "repository": {
     "type": "git",
