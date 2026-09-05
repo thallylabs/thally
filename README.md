@@ -217,7 +217,7 @@ Deploy anywhere that supports Next.js — Vercel, Netlify, Cloudflare, Docker, e
 - Radix UI (dialog, scroll-area, accordion, slot)
 - MDX via `next-mdx-remote` + Shiki syntax highlighting
 - `next-themes` for dark mode, `nuqs` for URL state, `zustand` for sidebar state
-- `gray-matter` for frontmatter parsing, `yaml` for OpenAPI spec loading
+- `yaml` for inert frontmatter and OpenAPI parsing
 
 ## Contributing
 
@@ -233,6 +233,8 @@ Runtime, rendering, search, and package changes belong in this repository.
 `thallylabs/starter` is the standalone site template that `create-thally-docs`,
 `thally init`, and MCP project creation scaffold from; its runtime files are
 generated from here, so please do not patch them in the starter repository.
+Known warnings that are pinned to upstream toolchains are tracked in
+[`BUILD-WARNINGS.md`](BUILD-WARNINGS.md).
 
 ## License
 

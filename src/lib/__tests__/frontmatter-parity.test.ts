@@ -1,21 +1,13 @@
 /**
  * Every frontmatter parser in this repository must refuse to execute content.
  *
- * The helper is deliberately duplicated rather than shared. `packages/*` are
- * separately published units: importing one from another means a runtime
- * dependency, and `@thallylabs/core` is at 0.2.0 in this workspace while only
- * 0.1.0 exists on npm. Adding `@thallylabs/core@^0.2.0` to `mcp`, `migrate`,
- * or `create-thally-docs` — all of which ARE published at their current
- * versions — would produce packages that cannot install until core ships.
- * That is a worse failure than duplication.
+ * The helper is deliberately duplicated because every `packages/*` unit is
+ * independently published and several do not otherwise depend on core.
  *
  * What duplication costs is silent drift: a fix applied to one copy and
  * forgotten in four. This test buys back the guarantee that matters. It walks
  * every copy and asserts the security property directly, so a new copy that
- * forgets the engine override, or an old copy quietly reverted to a bare
- * `matter()`, fails here rather than in production.
- *
- * When core 0.2.0 is published, collapse the copies and delete this test.
+ * accepts an executable engine fails here rather than in production.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -26,7 +18,10 @@ import { parseFrontmatter as mcpParse } from '../../../packages/mcp/src/lib/fron
 import { parseFrontmatter as migrateParse } from '../../../packages/migrate/src/frontmatter'
 import { parseFrontmatter as scaffoldParse } from '../../../packages/create-thally-docs/src/frontmatter'
 
-const PARSERS: Array<[string, (raw: string) => { data: Record<string, unknown> }]> = [
+const PARSERS: Array<[
+  string,
+  (raw: string) => { content: string; data: Record<string, unknown> },
+]> = [
   ['engine src/lib', engineParse],
   ['packages/core', coreParse],
   ['packages/mcp', mcpParse],
@@ -59,7 +54,15 @@ describe.each(PARSERS)('%s frontmatter parser', (name, parse) => {
   })
 
   it('still reads ordinary YAML frontmatter', () => {
-    const { data } = parse('---\ntitle: Hello\n---\n\nBody.')
+    const { content, data } = parse('---\ntitle: Hello\n---\n\nBody.')
     expect(data.title).toBe('Hello')
+    expect(content.trim()).toBe('Body.')
+  })
+
+  it('keeps BOM and CRLF behavior aligned', () => {
+    const { content, data } = parse('\ufeff--- yaml\r\ntitle: Hello\r\n---\r\nBody.\r\n')
+
+    expect(data.title).toBe('Hello')
+    expect(content).toBe('Body.\r\n')
   })
 })

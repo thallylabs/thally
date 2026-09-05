@@ -37,6 +37,7 @@ const STABLE_SEMVER = /^\d+\.\d+\.\d+$/;
 // carries a generated copy for update tooling, but may not broaden the set of
 // files that synchronization can overwrite.
 export const FRAMEWORK_SYNC_ELIGIBLE = Object.freeze([
+  "BUILD-WARNINGS.md",
   "src/app/**",
   "src/cloud/**",
   "src/components/**",

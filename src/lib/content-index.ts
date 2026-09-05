@@ -31,7 +31,7 @@
 import { getContentAssetFetcher } from '@/lib/content-source/runtime'
 
 interface ContentIndexEntry {
-  /** Parsed frontmatter, exactly as gray-matter returned it at publish time. */
+  /** Parsed YAML frontmatter captured at publish time. */
   data: Record<string, unknown>
   /** Publish-observed modification time; drives translation staleness only. */
   modifiedAtMs: number

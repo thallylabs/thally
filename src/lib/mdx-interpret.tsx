@@ -242,10 +242,8 @@ const processor = unified()
  * compiled path uses; snippet imports must already have been extracted.
  */
 export async function interpretMDX(input: InterpretMdxInput): Promise<InterpretMdxResult> {
-  // `parseFrontmatter` is the hardened parser: authored `---js` frontmatter
-  // would otherwise reach a gray-matter engine whose parser is `eval`, a
-  // code-execution sink inside a module whose whole premise is that there
-  // isn't one.
+  // `parseFrontmatter` is YAML-only: authored `---js` frontmatter stays opaque
+  // instead of becoming a code-execution sink inside this static interpreter.
   const { content: body, data } = input.parseFrontmatter
     ? parseFrontmatter(input.source)
     : { content: input.source, data: {} }
@@ -263,7 +261,6 @@ export async function interpretMDX(input: InterpretMdxInput): Promise<InterpretM
     elementAttributeNameCase: 'react',
   })
 
-  // gray-matter hands back a cached object for repeated identical sources;
-  // copying keeps a downstream mutation from contaminating later renders.
+  // Copying keeps a downstream mutation from contaminating later renders.
   return { content, frontmatter: { ...(data as Record<string, unknown>) } }
 }

@@ -1,3 +1,5 @@
+/** Edge-safe request gating, machine negotiation, analytics, and cache policy. */
+
 import { NextResponse } from 'next/server'
 import type { NextFetchEvent, NextRequest } from 'next/server'
 import {

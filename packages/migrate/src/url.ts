@@ -675,9 +675,9 @@ function markdownPage(document: MigrationFetchResponse, id: string): {
       content = content.slice(quoteMatch[0].length).trimStart()
     }
   }
-  // Re-emit only scalar metadata we parsed ourselves. `gray-matter` remains in
-  // the shared page parser for trusted repository sources, but never receives
-  // attacker-controlled YAML aliases from a public URL.
+  // Re-emit only scalar metadata we parsed ourselves. The shared YAML parser
+  // handles trusted repository sources but never receives attacker-controlled
+  // aliases from a public URL.
   const embeddedOpenApi = extractEmbeddedOpenApi(content)
   const raw = [
     '---',
