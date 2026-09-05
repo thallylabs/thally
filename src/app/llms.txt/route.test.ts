@@ -1,4 +1,8 @@
-/** End-to-end contract coverage for every canonical page emitted by llms.txt. */
+/**
+ * End-to-end contract coverage for every canonical page emitted by llms.txt.
+ * Page slugs are user-owned, so this runtime test derives its matrix from the
+ * current navigation instead of assuming any starter-content path exists.
+ */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -74,7 +78,6 @@ describe('llms.txt canonical page matrix', () => {
     const entriesByHref = new Map((await loadDocEntries()).map((entry) => [entry.href, entry]))
 
     expect(pageUrls.length).toBeGreaterThan(0)
-    expect(pageUrls).toContain(`${BASE_URL}/api/overview`)
 
     for (const pageUrl of pageUrls) {
       const url = new URL(pageUrl)
