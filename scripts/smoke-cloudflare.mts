@@ -18,6 +18,12 @@ interface SmokeCheck {
   validateHydrationBootstrap?: boolean
 }
 
+interface PageRepresentation {
+  accept: string
+  contentType: string
+  bodyFormat: 'html' | 'markdown' | 'json'
+}
+
 const checks: ReadonlyArray<SmokeCheck> = [
   {
     name: 'home',
@@ -49,6 +55,104 @@ const checks: ReadonlyArray<SmokeCheck> = [
   },
   { name: 'Open Graph image', path: '/api/og?title=Worker', contentType: 'image/png' },
 ]
+
+const pageRepresentations: ReadonlyArray<PageRepresentation> = [
+  { accept: '*/*', contentType: 'text/html', bodyFormat: 'html' },
+  { accept: 'text/html', contentType: 'text/html', bodyFormat: 'html' },
+  { accept: 'text/markdown', contentType: 'text/markdown', bodyFormat: 'markdown' },
+  { accept: 'application/json', contentType: 'application/json', bodyFormat: 'json' },
+  { accept: 'application/ld+json', contentType: 'application/ld+json', bodyFormat: 'json' },
+]
+
+/** Keep every advertised path pinned to the explicitly selected smoke origin. */
+function smokeUrl(baseUrl: string, pathAndSearch: string): URL {
+  const targetUrl = new URL(baseUrl)
+  const queryIndex = pathAndSearch.indexOf('?')
+  targetUrl.pathname = queryIndex === -1 ? pathAndSearch : pathAndSearch.slice(0, queryIndex)
+  targetUrl.search = queryIndex === -1 ? '' : pathAndSearch.slice(queryIndex)
+  return targetUrl
+}
+
+/** Verify each canonical page advertised by llms.txt through real workerd. */
+async function verifyLlmsPageMatrix(baseUrl: string): Promise<void> {
+  const indexResponse = await fetch(`${baseUrl}/llms.txt`)
+  if (!indexResponse.ok) throw new Error(`llms.txt returned ${indexResponse.status}.`)
+  const body = await indexResponse.text()
+  const documentationUrl = body.match(/^- Documentation: (https?:\/\/\S+)$/m)?.[1]
+  if (!documentationUrl) throw new Error('llms.txt did not advertise its documentation URL.')
+  const advertisedOrigin = new URL(documentationUrl).origin
+  const firstPartyPaths = Array.from(
+    new Set(
+      Array.from(body.matchAll(/https?:\/\/[^\s)>\]`]+/g), (match) => match[0])
+        .map((url) => url.replace(/[.,;:]$/, ''))
+        .filter((url) => new URL(url).origin === advertisedOrigin)
+        .map((url) => {
+          const resolvedUrl = new URL(
+            url.replace('{page-id}', 'introduction').replace('{query}', 'Thally'),
+          )
+          return `${resolvedUrl.pathname}${resolvedUrl.search}`
+        }),
+    ),
+  )
+  const pagePaths = Array.from(
+    body.matchAll(/^- \[[^\]]+\]\((https?:\/\/[^)]+)\)/gm),
+    (match) => {
+      const advertisedUrl = new URL(match[1])
+      return `${advertisedUrl.pathname}${advertisedUrl.search}`
+    },
+  )
+
+  if (pagePaths.length === 0) throw new Error('llms.txt did not emit any canonical page links.')
+
+  for (const firstPartyPath of firstPartyPaths) {
+    const targetUrl = smokeUrl(baseUrl, firstPartyPath)
+    const response = await fetch(targetUrl, {
+      headers: { Accept: '*/*' },
+    })
+    const expectedStatus = targetUrl.pathname === '/api/mcp' ? 405 : 200
+    if (response.status !== expectedStatus) {
+      throw new Error(
+        `${firstPartyPath} returned ${response.status} for Accept: */*; expected ${expectedStatus}.`,
+      )
+    }
+  }
+
+  for (const pagePath of pagePaths) {
+    const pageUrl = smokeUrl(baseUrl, pagePath).toString()
+    for (const representation of pageRepresentations) {
+      const response = await fetch(pageUrl, {
+        headers: { Accept: representation.accept },
+      })
+      if (!response.ok) {
+        throw new Error(`${pageUrl} returned ${response.status} for Accept: ${representation.accept}.`)
+      }
+      const contentType = response.headers.get('content-type') ?? ''
+      if (!contentType.includes(representation.contentType)) {
+        throw new Error(
+          `${pageUrl} returned ${contentType || 'no content type'} for Accept: ${representation.accept}; expected ${representation.contentType}.`,
+        )
+      }
+      const responseBody = await response.text()
+      if (representation.bodyFormat === 'html' && !responseBody.includes('<!DOCTYPE html')) {
+        throw new Error(`${pageUrl} declared HTML but did not serialize an HTML document.`)
+      }
+      if (representation.bodyFormat === 'markdown' && !responseBody.startsWith('---\n')) {
+        throw new Error(`${pageUrl} declared Markdown but did not serialize Markdown frontmatter.`)
+      }
+      if (representation.bodyFormat === 'json') {
+        try {
+          JSON.parse(responseBody)
+        } catch {
+          throw new Error(`${pageUrl} declared JSON but did not serialize valid JSON.`)
+        }
+      }
+    }
+  }
+
+  console.log(
+    `[cloudflare-smoke] llms.txt matrix: ${firstPartyPaths.length} first-party link(s), ${pagePaths.length} canonical page(s)`,
+  )
+}
 
 async function availablePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -150,6 +254,7 @@ async function main(): Promise<void> {
       }
       console.log(`[cloudflare-smoke] ${check.name}: ${response.status}`)
     }
+    await verifyLlmsPageMatrix(baseUrl)
   } finally {
     if (child) await stopPreview(child)
   }
