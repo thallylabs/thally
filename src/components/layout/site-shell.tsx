@@ -76,6 +76,7 @@ interface SiteShellProps {
   i18nConfig?: I18nConfig | null
   navbarConfig?: DocsJsonNavbar | null
   showPoweredBy?: boolean
+  showSidebarGroupIcons?: boolean
   footerConfig?: DocsJsonFooter | null
   navigationPresentation: NavigationPresentation
   identity: SiteIdentity
@@ -89,6 +90,7 @@ export function SiteShell({
   navbarConfig,
   footerConfig,
   showPoweredBy = true,
+  showSidebarGroupIcons = true,
   navigationPresentation,
   identity,
 }: SiteShellProps) {
@@ -161,6 +163,7 @@ export function SiteShell({
           currentPath={currentPath}
           navbarConfig={navbarConfig ?? null}
           siteLinks={identity.links}
+          showSidebarGroupIcons={showSidebarGroupIcons}
         />
         <div className={`thally-docs-shell flex min-h-[calc(100dvh-60px)] w-full ${shell.wrapper}`}>
           <Sidebar
@@ -170,6 +173,7 @@ export function SiteShell({
             activeCollectionId={activeCollection.id}
             onCollectionChange={setSelectedCollectionId}
             navigationPresentation={navigationPresentation}
+            showGroupIcons={showSidebarGroupIcons}
           />
           <div className="flex min-h-[calc(100dvh-60px)] w-full min-w-0 flex-1 flex-col">
             <main id="main-content" className="thally-docs-main flex-1 py-10 pb-24">

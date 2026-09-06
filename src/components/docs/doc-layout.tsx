@@ -12,6 +12,7 @@ import { TableOfContents } from '@/components/docs/table-of-contents'
 import { ContentStack, DetailColumn, MainColumns } from '@/components/layout/sections'
 import { Prose } from '@/components/mdx/prose'
 import { getManagedSiteConfigSnapshot } from '@/lib/cloud-link/client'
+import { getBuildContentControls } from '@/lib/cloud-link/content-controls'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { localeDirection } from '@/lib/i18n/config'
 import { PagePanelSlot, PageSlotsProvider } from '@/components/mdx/page-slots'
@@ -32,6 +33,7 @@ function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
   // snapshot. Reading it here keeps article rendering deterministic and
   // cacheable; live settings changes take effect with the next atomic release.
   const cloud = getManagedSiteConfigSnapshot()
+  const contentControls = getBuildContentControls()
   const effectiveSite = resolveBuildSiteConfig()
   const cloudFeedback = cloud?.siteConfig.portable.feedback
   const hasThumbsRating = cloud ? Boolean(cloudFeedback?.thumbsRating) : true
@@ -104,8 +106,8 @@ function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
       <article className="thally-docs-article mx-auto w-full max-w-2xl" lang={locale} dir={localeDirection(locale)}>
         <ContentStack>
           <div className="not-prose space-y-4">
-            <DocBreadcrumbs items={breadcrumbs} />
-            <DocHeader doc={doc} eyebrow={eyebrow} />
+            {contentControls.showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
+            <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
           </div>
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
@@ -124,8 +126,8 @@ function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
       <article className="thally-docs-article flex-1" lang={locale} dir={localeDirection(locale)}>
         <ContentStack>
           <div className="not-prose space-y-4">
-            <DocBreadcrumbs items={breadcrumbs} />
-            <DocHeader doc={doc} eyebrow={eyebrow} />
+            {contentControls.showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
+            <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
           </div>
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
@@ -144,8 +146,8 @@ function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
       <article className="thally-docs-article flex-1" lang={locale} dir={localeDirection(locale)}>
         <ContentStack>
           <div className="not-prose space-y-4">
-            <DocBreadcrumbs items={breadcrumbs} />
-            <DocHeader doc={doc} eyebrow={eyebrow} />
+            {contentControls.showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
+            <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
           </div>
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
@@ -155,7 +157,10 @@ function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
         </ContentStack>
       </article>
       <DetailColumn>
-        <PagePanelSlot fallback={<TableOfContents />} footer={pageActionsRail} />
+        <PagePanelSlot
+          fallback={contentControls.showTableOfContents ? <TableOfContents /> : null}
+          footer={pageActionsRail}
+        />
       </DetailColumn>
     </MainColumns>
   )

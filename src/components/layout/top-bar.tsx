@@ -27,6 +27,7 @@ interface TopBarProps {
   currentPath?: string
   navbarConfig?: DocsJsonNavbar | null
   siteLinks: Array<SiteLink>
+  showSidebarGroupIcons?: boolean
 }
 
 export function TopBar({
@@ -40,6 +41,7 @@ export function TopBar({
   currentPath,
   navbarConfig,
   siteLinks,
+  showSidebarGroupIcons = true,
 }: TopBarProps) {
   const siteName = useSiteName()
   const {
@@ -84,6 +86,7 @@ export function TopBar({
           collections={collections}
           activeCollectionId={activeCollectionId}
           onCollectionChange={onCollectionChange}
+          showGroupIcons={showSidebarGroupIcons}
         />
         {/* The brand block needs clear separation from the section tabs or
             "Docs" reads as the first tab; mr-5 marks where the brand ends. */}
