@@ -93,6 +93,29 @@ function resolveFontPresentation(): {
   }
 }
 
+interface OptionalPrimaryPalette {
+  primary?: string
+  primaryForeground?: string
+}
+
+/**
+ * Reads the expanded theme colors without requiring older, user-authored
+ * site config types to declare them. Generated starters keep their own
+ * `src/data/site.ts`, so runtime-owned code must remain compatible with the
+ * narrower palette contract already present in existing sites.
+ */
+function resolvePrimaryPalette(
+  palette: { foreground: string; background: string; accent: string; accentForeground: string },
+  fallback: { primary: string; primaryForeground: string },
+): { primary: string; primaryForeground: string } {
+  const optionalPalette = palette as typeof palette & OptionalPrimaryPalette
+
+  return {
+    primary: optionalPalette.primary ?? fallback.primary,
+    primaryForeground: optionalPalette.primaryForeground ?? fallback.primaryForeground,
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -138,6 +161,15 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 }
 
+const lightPrimaryPalette = resolvePrimaryPalette(siteConfig.brand.light, {
+  primary: siteConfig.brand.light.foreground,
+  primaryForeground: siteConfig.brand.light.background,
+})
+const darkPrimaryPalette = resolvePrimaryPalette(siteConfig.brand.dark, {
+  primary: siteConfig.brand.dark.accent,
+  primaryForeground: siteConfig.brand.dark.accentForeground,
+})
+
 const brandStyle: Record<string, string> = {
   '--brand-light-background': toHslValue(siteConfig.brand.light.background),
   '--brand-light-card': toHslValue(siteConfig.brand.light.card ?? siteConfig.brand.light.background),
@@ -153,12 +185,8 @@ const brandStyle: Record<string, string> = {
   '--brand-light-accent-2-foreground': toHslValue(
     siteConfig.brand.light.accent2Foreground ?? siteConfig.brand.light.accentForeground,
   ),
-  '--brand-light-primary': toHslValue(
-    siteConfig.brand.light.primary ?? siteConfig.brand.light.foreground,
-  ),
-  '--brand-light-primary-foreground': toHslValue(
-    siteConfig.brand.light.primaryForeground ?? siteConfig.brand.light.background,
-  ),
+  '--brand-light-primary': toHslValue(lightPrimaryPalette.primary),
+  '--brand-light-primary-foreground': toHslValue(lightPrimaryPalette.primaryForeground),
   '--brand-light-input': toHslValue(siteConfig.brand.light.input ?? siteConfig.brand.light.border),
   '--brand-light-sidebar': toHslValue(siteConfig.brand.light.sidebar ?? siteConfig.brand.light.background),
   '--brand-light-ring': toHslValue(siteConfig.brand.light.ring),
@@ -178,12 +206,8 @@ const brandStyle: Record<string, string> = {
   '--brand-dark-accent-2-foreground': toHslValue(
     siteConfig.brand.dark.accent2Foreground ?? siteConfig.brand.dark.accentForeground,
   ),
-  '--brand-dark-primary': toHslValue(
-    siteConfig.brand.dark.primary ?? siteConfig.brand.dark.accent,
-  ),
-  '--brand-dark-primary-foreground': toHslValue(
-    siteConfig.brand.dark.primaryForeground ?? siteConfig.brand.dark.accentForeground,
-  ),
+  '--brand-dark-primary': toHslValue(darkPrimaryPalette.primary),
+  '--brand-dark-primary-foreground': toHslValue(darkPrimaryPalette.primaryForeground),
   '--brand-dark-input': toHslValue(siteConfig.brand.dark.input ?? siteConfig.brand.dark.border),
   '--brand-dark-sidebar': toHslValue(siteConfig.brand.dark.sidebar ?? siteConfig.brand.dark.background),
   '--brand-dark-ring': toHslValue(siteConfig.brand.dark.ring),
