@@ -162,7 +162,7 @@ export function SiteShell({
           navbarConfig={navbarConfig ?? null}
           siteLinks={identity.links}
         />
-        <div className={`thally-docs-shell flex min-h-[calc(100dvh-56px)] w-full ${shell.wrapper}`}>
+        <div className={`thally-docs-shell flex min-h-[calc(100dvh-60px)] w-full ${shell.wrapper}`}>
           <Sidebar
             sections={activeCollection.sections}
             title={activeCollection.label}
@@ -171,8 +171,8 @@ export function SiteShell({
             onCollectionChange={setSelectedCollectionId}
             navigationPresentation={navigationPresentation}
           />
-          <div className="flex min-h-[calc(100dvh-56px)] w-full min-w-0 flex-1 flex-col">
-            <main id="main-content" className="thally-docs-main flex-1 py-[34px] pb-24">
+          <div className="flex min-h-[calc(100dvh-60px)] w-full min-w-0 flex-1 flex-col">
+            <main id="main-content" className="thally-docs-main flex-1 py-10 pb-24">
               <PageContainer className={layout.pageGap}>{children}</PageContainer>
             </main>
             <Footer

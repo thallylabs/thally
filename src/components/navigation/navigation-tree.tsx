@@ -67,8 +67,8 @@ function NavigationGroupBranch({
           setClosedActivePath(null)
         }}
         className={cn(
-          'flex w-full items-center gap-1.5 rounded-md py-1 text-left text-foreground/65 transition hover:text-foreground',
-          mobile ? 'px-2 text-sm font-semibold' : 'px-2 text-[0.8rem] font-medium',
+          'flex w-full items-center gap-1.5 rounded-lg py-1.5 text-left text-muted-foreground transition hover:bg-muted hover:text-foreground',
+          mobile ? 'px-2 text-sm font-semibold' : 'px-2 text-base font-medium',
         )}
       >
         <ChevronRight
@@ -81,7 +81,7 @@ function NavigationGroupBranch({
         <span className="min-w-0 truncate">{group.title}</span>
       </button>
       {isOpen ? (
-        <div className="ml-3 border-l border-border/65 pl-2">
+        <div className="ml-3 pl-2">
           <NavigationNodes
             nodes={group.nodes}
             pathname={pathname}
@@ -129,11 +129,11 @@ function NavigationNodes({
         aria-current={active ? 'page' : undefined}
         onClick={onNavigate}
         className={cn(
-          'group relative block rounded-md px-2 text-left transition-colors duration-150 focus:outline-none',
-          mobile ? 'py-1.5 text-sm' : 'py-1 text-[0.8rem] leading-5',
+          'group relative block rounded-lg px-2.5 text-left transition-colors duration-150 focus:outline-none',
+          mobile ? 'py-1.5 text-sm' : 'py-1.5 text-base leading-6',
           active
-            ? 'bg-muted/70 font-semibold text-foreground'
-            : 'font-medium text-foreground/60 hover:bg-muted/40 hover:text-foreground',
+            ? 'bg-accent/10 font-medium text-accent'
+            : 'font-normal text-muted-foreground hover:bg-muted hover:text-foreground',
         )}
       >
         <span className="flex min-h-5 items-center gap-2">
