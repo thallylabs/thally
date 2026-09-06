@@ -1,5 +1,7 @@
 'use server'
 
+/** Load authored MDX while keeping route identity independent of display metadata. */
+
 import { createElement, type ComponentType, type ReactNode } from 'react'
 import { compileMDX } from 'next-mdx-remote/rsc'
 import { interpretMDX } from '@/lib/mdx-interpret'
@@ -44,6 +46,7 @@ export interface DocSourceResult {
 
 const dynamicDocCache = new Map<string, Promise<(DocEntry & { isFallback: boolean; isStale: boolean }) | null>>()
 
+/** Resolve a documentation route to its authored content and stable page identity. */
 export async function getDocFromParams(slugSegments?: Array<string>, locale?: string) {
   // Remote content must never be baked into a static or ISR-cached render —
   // a no-op under the default filesystem source. Called before the cache
@@ -235,7 +238,9 @@ async function compileDocEntry(
   const openapi = parseOpenApiReference(frontmatter?.openapi)
 
   return {
-    id: slugPath || frontmatter?.title || 'doc',
+    // The empty route resolves introduction.mdx; titles are display metadata,
+    // not source identifiers used by navigation, feedback, and GitHub edit links.
+    id: slugPath || 'introduction',
     title: frontmatter?.title ?? deriveTitleFromSlug(slugPath),
     description: frontmatter?.description ?? '',
     slug: slugSegments,
