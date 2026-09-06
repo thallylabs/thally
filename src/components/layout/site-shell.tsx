@@ -1,3 +1,5 @@
+/** Interactive docs shell; server props preserve attribution through hydration. */
+
 'use client'
 
 import { Footer } from '@/components/layout/footer'
@@ -73,17 +75,20 @@ interface SiteShellProps {
   initialCollections: Array<SidebarCollection>
   i18nConfig?: I18nConfig | null
   navbarConfig?: DocsJsonNavbar | null
+  showPoweredBy?: boolean
   footerConfig?: DocsJsonFooter | null
   navigationPresentation: NavigationPresentation
   identity: SiteIdentity
 }
 
+/** Compose navigation and the shared footer with request-resolved site policy. */
 export function SiteShell({
   children,
   initialCollections,
   i18nConfig,
   navbarConfig,
   footerConfig,
+  showPoweredBy = true,
   navigationPresentation,
   identity,
 }: SiteShellProps) {
@@ -172,6 +177,7 @@ export function SiteShell({
             </main>
             <Footer
               footerConfig={footerConfig ?? null}
+              showPoweredBy={showPoweredBy}
               siteName={identity.name}
               siteLinks={identity.links}
             />

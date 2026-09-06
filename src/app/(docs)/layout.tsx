@@ -1,5 +1,6 @@
 /** Request-bound documentation shell shared by every rendered content route. */
 
+import { shouldShowPoweredBy } from '@/lib/cloud-link/powered-by'
 import { SiteShell } from '@/components/layout/site-shell'
 import { SidebarCollectionsHydrator } from '@/components/layout/sidebar-hydrator'
 import { loadSidebarCollections, getAiConfig, getNavbarConfig, getFooterConfig, getNavigationPresentation } from '@/data/docs'
@@ -13,7 +14,9 @@ interface DocsLayoutProps {
   children: React.ReactNode
 }
 
+/** Resolve attribution on the server so paid removal never emits footer markup. */
 export default async function DocsLayout({ children }: DocsLayoutProps) {
+  const showPoweredBy = await shouldShowPoweredBy()
   const navigation = await buildApiNavigation()
   const apiSections: Array<NavigationSection> = navigation.map((group, index) => ({
     id: `openapi-${index}`,
@@ -61,6 +64,7 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
           i18nConfig={i18nConfig}
           navbarConfig={navbarConfig}
           footerConfig={footerConfig}
+          showPoweredBy={showPoweredBy}
           navigationPresentation={navigationPresentation}
           identity={siteIdentity(effectiveSite)}
         >

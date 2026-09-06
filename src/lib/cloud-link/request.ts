@@ -8,17 +8,14 @@ import { getCloudSiteConfig } from './client'
  * Resolve the canonical request origin without trusting a browser-supplied URL
  * body.
  *
- * Under a remote content source (managed releases) doc pages render via
- * on-demand static generation, where `headers()` is a dynamic API and throws
- * DYNAMIC_SERVER_USAGE. There the canonical origin is baked into the release
- * as `THALLY_SITE_URL` by the managed builder, so no request inspection is
- * needed — or possible.
+ * Managed releases carry their canonical origin in `THALLY_SITE_URL`. Their
+ * documentation shell reads live branding policy separately; canonical URL
+ * resolution never needs to depend on visitor-supplied forwarding headers.
  */
 export async function getRequestOrigin(): Promise<string> {
   // Managed releases and production self-hosts already know their canonical
-  // URL. Prefer it before touching `headers()`: reading request headers opts an
-  // otherwise immutable documentation route out of static rendering and the
-  // App Router's full-page prefetch cache.
+  // URL. Prefer it before touching `headers()` so unlinked self-hosted routes
+  // retain static rendering, and managed canonical links stay operator-owned.
   const configured = process.env.THALLY_SITE_URL?.trim()
   if (configured) return configured
 

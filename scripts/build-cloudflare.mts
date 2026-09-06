@@ -34,7 +34,7 @@ runNpmScript('build:cloudflare:opennext')
 mkdirSync('.open-next/assets/_thally', { recursive: true })
 writeFileSync(
   '.open-next/assets/_thally/runtime-capabilities.json',
-  `${JSON.stringify({ version: 1, docsConfigBinding: true })}\n`,
+  `${JSON.stringify({ version: 1, docsConfigBinding: true, showPoweredByPolicy: true })}\n`,
   'utf8',
 )
 runNpmScript('package:cloudflare')
