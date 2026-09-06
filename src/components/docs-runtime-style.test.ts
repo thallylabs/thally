@@ -7,7 +7,7 @@
  * current-page state.
  */
 
-import { createElement } from 'react'
+import { createElement, type ComponentProps } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -17,6 +17,7 @@ vi.mock('next/navigation', () => ({
 }))
 
 import { Card, Tile } from '@/components/mdx/rich-content'
+import { AgentPrompt } from '@/components/mdx/agent-prompt'
 import { DocHeader } from '@/components/docs/doc-header'
 import { Sidebar } from '@/components/navigation/sidebar'
 import type { DocEntry } from '@/data/docs'
@@ -109,7 +110,7 @@ describe('documentation visual system', () => {
     expect(withoutEyebrow).not.toContain('thally-docs-eyebrow')
   })
 
-  it('renders the eyebrow as bold sentence case, never uppercase', () => {
+  it('renders the eyebrow as semibold sentence case, never uppercase', () => {
     const doc = {
       id: 'guides/writing-content',
       title: 'Write great content',
@@ -121,8 +122,23 @@ describe('documentation visual system', () => {
       createElement(DocHeader, { doc, eyebrow: 'Design your docs' }),
     )
 
-    expect(markup).toContain('font-bold')
+    expect(markup).toContain('font-semibold')
     expect(markup).not.toContain('uppercase')
+  })
+
+  it('keeps agent prompts as two-line callouts with a secondary copy action', () => {
+    const props: ComponentProps<typeof AgentPrompt> = {
+      title: 'Copy a complete prompt to write a page',
+      children: createElement('p', null, 'Write one task-focused page.'),
+    }
+    const markup = renderToStaticMarkup(
+      createElement(AgentPrompt, props),
+    )
+
+    expect(markup).toContain('Prefer to let an agent do it?')
+    expect(markup).toContain('Copy a complete prompt to write a page')
+    expect(markup).toContain('border border-input bg-transparent')
+    expect(markup).not.toContain('bg-primary')
   })
 
   it('suppresses a group heading that repeats the tab label', () => {
@@ -167,7 +183,9 @@ describe('documentation visual system', () => {
     expect(markup).not.toContain('thally-sidebar-indicator')
     expect(markup).not.toContain('bg-border')
     expect(markup).toContain('aria-current="page"')
-    expect(markup).toContain('bg-muted/70')
+    expect(markup).toContain('bg-accent/10')
+    expect(markup).toContain('text-accent')
+    expect(markup).toContain('text-base')
   })
 
   it('renders nested groups recursively instead of flattening duplicate headings', () => {
@@ -279,30 +297,30 @@ describe('documentation visual system', () => {
     expect(topBar).toContain("data-density={isCrowded ? 'compact' : 'comfortable'}")
     expect(topBar).not.toContain('data-navigation-mode')
     expect(topBar).not.toContain('isNavigationCompact')
-    expect(topBar).toContain("className={cn('thally-docs-topbar-inner flex h-14")
-    expect(topBar).toContain('thally-docs-primary inline-flex h-[30px] shrink-0')
-    expect(css).toMatch(/\.thally-docs-search \{\s*width: 280px;/)
+    expect(topBar).toContain("className={cn('thally-docs-topbar-inner flex h-[60px]")
+    expect(topBar).toContain('thally-docs-primary inline-flex h-9 shrink-0')
+    expect(css).toMatch(/\.thally-docs-search \{\s*width: 230px;/)
     expect(css).toContain("[data-density='compact'] .thally-docs-search")
-    expect(css).toContain('padding-inline: 10px 46px')
+    expect(css).toContain('padding-inline: 12px 44px')
     expect(css).toMatch(
       /\.thally-docs-search > button:first-of-type kbd \{[\s\S]*?position: absolute;[\s\S]*?inset-inline-end: 4px;/,
     )
     expect(css).toMatch(
-      /@media \(max-width: 1010px\) \{[\s\S]*?\.thally-docs-topbar-inner > button\[aria-haspopup='dialog'\][\s\S]*?display: inline-flex;/,
+      /@media \(max-width: 880px\) \{[\s\S]*?\.thally-docs-topbar-inner > button\[aria-haspopup='dialog'\][\s\S]*?display: inline-flex;/,
     )
     expect(css).not.toContain("[data-navigation-mode='compact']")
     expect(css).toMatch(
-      /@media \(max-width: 860px\) \{[\s\S]*?\.thally-docs-brand > span:last-child[\s\S]*?\.thally-docs-search,[\s\S]*?width: 30px;/,
+      /@media \(max-width: 880px\) \{[\s\S]*?\.thally-docs-brand > span:last-child[\s\S]*?\.thally-docs-search,[\s\S]*?width: 36px;/,
     )
     expect(css).toMatch(
       /\.thally-callout-content > :last-child \{\s*margin-bottom: 0;/,
     )
-    expect(layout).toContain("topbarHeight: 'h-14'")
-    expect(shell).toContain('calc(100dvh-56px)')
-    expect(sidebar).toContain('sticky top-14')
+    expect(layout).toContain("topbarHeight: 'h-[60px]'")
+    expect(shell).toContain('calc(100dvh-60px)')
+    expect(sidebar).toContain('sticky top-[60px]')
   })
 
-  it('keeps the page interactive while chat is docked and accepts the live Cloud icon', async () => {
+  it('docks chat over a dismissible scrim with the fixed Thally identity', async () => {
     const { readFile } = await import('node:fs/promises')
     const [chat, provider, statusRoute] = await Promise.all([
       readFile('src/components/docs/docs-chat.tsx', 'utf8'),
@@ -310,8 +328,11 @@ describe('documentation visual system', () => {
       readFile('src/app/api/chat-status/route.ts', 'utf8'),
     ])
 
-    expect(chat).not.toContain("root.style.overflow = 'hidden'")
-    expect(chat).not.toContain('document.body.style.paddingRight')
+    expect(chat).toContain('thally-docs-chat-scrim')
+    expect(chat).toContain("event.key === 'Escape'")
+    expect(chat).toContain('/brand/default-favicon-light.svg')
+    expect(chat).toContain("width: expanded ? 'min(680px, 100vw)' : 'min(460px, 100vw)'")
+    expect(chat).not.toContain('<FabIcon')
     expect(provider).toContain('icon={chatStatus.icon ?? icon}')
     expect(statusRoute).toContain("/^\\/[A-Za-z0-9._/-]+$/")
     expect(statusRoute).toContain('{ show, label, disclaimer, icon }')

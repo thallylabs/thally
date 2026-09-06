@@ -30,12 +30,12 @@ export function CommandSearch() {
         type="button"
         aria-haspopup="dialog"
         aria-label="Search the docs"
-        className="hidden h-10 flex-1 items-center gap-3 rounded-[var(--theme-control-radius)] border border-border/70 px-4 text-left text-sm text-foreground/70 transition hover:border-border lg:flex"
+        className="hidden h-9 flex-1 items-center gap-3 rounded-[10px] border-0 bg-muted px-3 text-left text-sm text-foreground/70 transition hover:text-foreground lg:flex"
         onClick={() => setOpen(true)}
       >
         <Search className="h-4 w-4 text-foreground/50" />
         <span className="flex-1 truncate">Search the docs</span>
-        <kbd className="rounded-md border border-border/70 bg-muted px-2 py-0.5 text-[10px] text-foreground/60">
+        <kbd className="rounded-[5px] border border-border bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-foreground/60">
           ⌘K
         </kbd>
       </button>
@@ -44,7 +44,7 @@ export function CommandSearch() {
         type="button"
         aria-haspopup="dialog"
         aria-label="Search the docs"
-        className="flex h-10 w-10 items-center justify-center rounded-[var(--theme-control-radius)] border border-border/70 text-foreground/60 lg:hidden"
+        className="flex h-9 w-9 items-center justify-center rounded-[10px] border-0 text-foreground/60 hover:bg-muted hover:text-foreground lg:hidden"
         onClick={() => setOpen(true)}
       >
         <Search className="h-4 w-4" />

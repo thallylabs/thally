@@ -20,8 +20,9 @@ interface PageProps {
 }
 
 export async function generateStaticParams() {
-  // Remote content sources resolve pages at request time (see [[...slug]]).
-  if (isRemoteContentSource()) return []
+  // Visit the optional catch-all root so the shell can mark assets builds
+  // dynamic; returning no params incorrectly selects on-demand SSG.
+  if (isRemoteContentSource()) return [{ slug: [] }]
   const apiNodes = await getAllApiOperationNodes()
   const apiParams = apiNodes.map((node) => ({ slug: node.slug }))
 

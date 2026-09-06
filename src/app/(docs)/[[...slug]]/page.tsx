@@ -37,9 +37,11 @@ interface PageProps {
 }
 
 export async function generateStaticParams() {
-  // Remote content resolves at request time so managed deployments never bake
-  // the runtime repository's own pages into the customer-facing route table.
-  if (isRemoteContentSource()) return []
+  // Render the optional catch-all root once during the build so the shell
+  // can establish its request boundary. An empty params array would select
+  // on-demand SSG and reject live policy headers at runtime. The dynamic
+  // bailout prevents repository content from being baked into managed pages.
+  if (isRemoteContentSource()) return [{ slug: [] }]
 
   const docs = getDocEntries()
   const i18n = getRepositoryI18nConfig()

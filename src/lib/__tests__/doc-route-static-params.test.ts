@@ -1,11 +1,10 @@
 /**
- * Prerender guard parity across the two non-overlapping doc routes.
+ * Prerender guard parity across document and localized API routes.
  *
- * Under `THALLY_CONTENT_SOURCE=assets` every doc route must return an empty
- * param list, so nothing is baked into static HTML at build time. A route that
- * forgets the guard still prerenders the build's own content, and those pages
- * shadow the dynamic route on a managed site — it then serves the build's docs
- * instead of the customer's published ones.
+ * Assets builds visit only each optional catch-all root. That lets the shared
+ * shell establish its live-policy request boundary without enumerating the
+ * repository's own pages. An empty list incorrectly chooses on-demand SSG and
+ * rejects the shell's headers() call when a managed page is requested.
  *
  * The routes are asserted together, by import, precisely because the failure
  * mode is drift: the guard was added to one route while the API reference
@@ -13,11 +12,12 @@
  * docs.json — removing any single route's guard fails that row alone.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { resetContentSourceForTests } from '@/lib/content-source'
 import { generateStaticParams as rootParams } from '../../app/(docs)/[[...slug]]/page'
+import { generateStaticParams as localizedApiParams } from '../../app/(docs)/[locale]/api/[[...slug]]/page'
 import { generateStaticParams as apiParams } from '../../app/(docs)/api/[[...slug]]/page'
 
 const savedEnv = process.env.THALLY_CONTENT_SOURCE
@@ -33,6 +33,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.unstubAllEnvs()
   if (savedEnv === undefined) delete process.env.THALLY_CONTENT_SOURCE
   else process.env.THALLY_CONTENT_SOURCE = savedEnv
   resetContentSourceForTests()
@@ -50,16 +51,28 @@ describe('doc route generateStaticParams', () => {
     ).toBe(false)
   })
 
-  it.each(routes)('$name prerenders nothing under the assets source', async ({ generateStaticParams }) => {
+  it.each(routes)('$name visits only its root to establish live policy under the assets source', async ({ generateStaticParams }) => {
     process.env.THALLY_CONTENT_SOURCE = 'assets'
     resetContentSourceForTests()
 
-    await expect(generateStaticParams()).resolves.toEqual([])
+    await expect(generateStaticParams()).resolves.toEqual([{ slug: [] }])
   })
 
-  // Guards the guard: an unconditional `return []` would satisfy the assertions
-  // above while silently dropping SSG for self-hosted and OSS builds.
+  it('establishes the localized API request boundary before any secondary locale exists', async () => {
+    process.env.THALLY_CONTENT_SOURCE = 'assets'
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+      tabs: [],
+      i18n: { defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }] },
+    }))
+    resetContentSourceForTests()
+
+    await expect(localizedApiParams()).resolves.toEqual([{ locale: 'en', slug: [] }])
+  })
+
+  // Self-hosted builds must still enumerate real content paths rather than
+  // taking the managed shell probe unconditionally.
   it.each(routes)('$name still prerenders under the default filesystem source', async ({ generateStaticParams }) => {
-    await expect(generateStaticParams()).resolves.not.toEqual([])
+    const params = await generateStaticParams()
+    expect(params.some((entry) => entry.slug.length > 0)).toBe(true)
   })
 })

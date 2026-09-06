@@ -1,4 +1,7 @@
+/** Localized API navigation, with request-policy rendering for managed assets. */
+
 import type { Metadata } from 'next'
+import { isRemoteContentSource } from '@/lib/content-source'
 import { notFound, redirect } from 'next/navigation'
 import { ApiLayout } from '@/components/api/api-layout'
 import { OperationPanel } from '@/components/api/operation-panel'
@@ -25,8 +28,13 @@ function isValidSecondaryLocale(locale: string, i18n: I18nConfig): boolean {
   return i18n.locales.some((l) => l.code === locale && l.code !== i18n.defaultLocale)
 }
 
+/** Keep managed routes dynamic even before a secondary locale or spec exists. */
 export async function generateStaticParams() {
   const i18n = getRepositoryI18nConfig()
+  // Always visit one well-formed locale root to establish the shell's request
+  // boundary. A default-only scaffold has no localized pages yet; enumerating
+  // its locales/specs would return [] and freeze the route into on-demand SSG.
+  if (isRemoteContentSource()) return [{ locale: i18n.defaultLocale, slug: [] }]
   const secondaryLocales = i18n.locales.filter((l) => l.code !== i18n.defaultLocale)
   const nodes = await getAllApiOperationNodes()
   return secondaryLocales.flatMap(({ code }) => nodes.map((node) => ({ locale: code, slug: node.slug })))

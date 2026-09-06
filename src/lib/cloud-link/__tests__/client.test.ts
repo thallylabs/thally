@@ -111,6 +111,24 @@ describe('Thally Cloud link client', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
   })
 
+  it('fetches fresh policy after a downgrade and never falls back to cached paid authority', async () => {
+    vi.stubEnv('THALLY_CLOUD_SITE_TOKEN', 'thally_site_secret')
+    const payload = {
+      siteId: 'site-1', orgId: 'org-1',
+      entitlements: { plan: 'cloud' },
+      siteConfig: { portable: { branding: { showPoweredBy: false } }, access: { mode: 'public', passwordHash: null } },
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(Response.json({ grant: unsignedGrant(payload) }))
+      .mockResolvedValueOnce(Response.json({ grant: unsignedGrant({ ...payload, entitlements: { plan: 'free' } }) }))
+      .mockRejectedValueOnce(new Error('offline'))
+
+    await expect(getCloudSiteConfig('https://docs.example.com')).resolves.toMatchObject({ entitlements: { plan: 'cloud' } })
+    await expect(getCloudSiteConfig('https://docs.example.com', { fresh: true })).resolves.toMatchObject({ entitlements: { plan: 'free' } })
+    await expect(getCloudSiteConfig('https://docs.example.com', { fresh: true })).resolves.toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
   it('distinguishes rejected credentials from unreachable Thally Cloud without throwing', async () => {
     vi.stubEnv('THALLY_CLOUD_SITE_TOKEN', 'thally_site_secret')
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ error: 'invalid_token' }, { status: 401 }))

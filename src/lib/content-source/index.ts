@@ -8,19 +8,18 @@
  *   - `assets` — content read from the deployed Worker's static assets under
  *     `/_thally/content/…`, so a content-only publish (new assets, the build's
  *     Worker modules reused verbatim) goes live without a build. Doc routes
- *     render as on-demand static generation: every publish is a new immutable
- *     release deployed under its own Worker script name, so a cached render
- *     can never outlive the content it was built from.
+ *     read immutable content from each release. The documentation shell reads
+ *     request policy so branding changes and downgrades apply without publishing
+ *     another release; the content source itself remains release-scoped.
  *
  * Managed hosting sets the variable in the injected Worker bindings AND at
  * build time — `generateStaticParams` consults it during `next build`, so it
  * must be present then for doc routes to skip prerendering.
  *
- * Doc routes deliberately do NOT force a dynamic render under `assets`.
- * `connection()` throws DYNAMIC_SERVER_USAGE inside on-demand static
- * generation on workerd, and Turbopack rejects a computed `export const
- * dynamic`, so per-request rendering cannot be declared conditionally anyway.
- * Static-per-release is both permitted and semantically right here.
+ * Assets-mode documentation shells establish a request boundary through their
+ * attribution resolver. That boundary must be visible at build time even though
+ * the managed site snapshot is injected only when the Worker is deployed.
+ * Filesystem-only, unlinked sites retain static generation.
  */
 
 import type { ContentSource, ContentSourceKind } from './types'

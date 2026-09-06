@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Globe, Check, ChevronDown } from 'lucide-react'
+import { Globe, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface LocaleSwitcherProps {
@@ -33,19 +33,16 @@ export function LocaleSwitcher({ locales, currentLocale, currentPath, defaultLoc
 
   if (locales.length < 2) return null
 
-  const current = locales.find((l) => l.code === currentLocale) ?? locales[0]
-
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="flex items-center gap-1.5 rounded-[var(--theme-control-radius)] border border-border/50 px-3 py-1.5 text-xs font-medium text-foreground/70 transition hover:border-border hover:text-foreground"
+        className="flex h-9 w-9 items-center justify-center rounded-[10px] text-foreground/70 transition hover:bg-muted hover:text-foreground"
         aria-label="Switch language"
+        title="Switch language"
       >
-        <Globe className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">{current.label}</span>
-        <ChevronDown className={cn('h-3 w-3 transition', open && 'rotate-180')} />
+        <Globe className="h-4 w-4" aria-hidden="true" />
       </button>
 
       {open ? (

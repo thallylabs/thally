@@ -153,6 +153,12 @@ const brandStyle: Record<string, string> = {
   '--brand-light-accent-2-foreground': toHslValue(
     siteConfig.brand.light.accent2Foreground ?? siteConfig.brand.light.accentForeground,
   ),
+  '--brand-light-primary': toHslValue(
+    siteConfig.brand.light.primary ?? siteConfig.brand.light.foreground,
+  ),
+  '--brand-light-primary-foreground': toHslValue(
+    siteConfig.brand.light.primaryForeground ?? siteConfig.brand.light.background,
+  ),
   '--brand-light-input': toHslValue(siteConfig.brand.light.input ?? siteConfig.brand.light.border),
   '--brand-light-sidebar': toHslValue(siteConfig.brand.light.sidebar ?? siteConfig.brand.light.background),
   '--brand-light-ring': toHslValue(siteConfig.brand.light.ring),
@@ -171,6 +177,12 @@ const brandStyle: Record<string, string> = {
   '--brand-dark-accent-2': toHslValue(siteConfig.brand.dark.accent2 ?? siteConfig.brand.dark.accent),
   '--brand-dark-accent-2-foreground': toHslValue(
     siteConfig.brand.dark.accent2Foreground ?? siteConfig.brand.dark.accentForeground,
+  ),
+  '--brand-dark-primary': toHslValue(
+    siteConfig.brand.dark.primary ?? siteConfig.brand.dark.accent,
+  ),
+  '--brand-dark-primary-foreground': toHslValue(
+    siteConfig.brand.dark.primaryForeground ?? siteConfig.brand.dark.accentForeground,
   ),
   '--brand-dark-input': toHslValue(siteConfig.brand.dark.input ?? siteConfig.brand.dark.border),
   '--brand-dark-sidebar': toHslValue(siteConfig.brand.dark.sidebar ?? siteConfig.brand.dark.background),

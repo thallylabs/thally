@@ -16,6 +16,8 @@ export interface BrandPalette {
   accentForeground: string
   accent2?: string
   accent2Foreground?: string
+  primary?: string
+  primaryForeground?: string
   input?: string
   sidebar?: string
   ring: string
@@ -90,47 +92,47 @@ export interface SiteConfig {
 }
 
 const brandPresets: Record<BrandPresetKey, BrandConfig> = {
-  // Thally's default Ink + Iris brand.
-  // Warm off-white surfaces in light mode become near-black ink surfaces in
-  // dark mode. Lime remains the primary action color; iris is a restrained
-  // secondary accent for visual distinction and chart series.
+  // Thally's default docs theme uses the handoff's warm paper surface and
+  // deep green-black dark canvas. Site owners can still replace every brand
+  // color without changing the shared shell.
   primary: {
     light: {
-      background: '#FCFCF7',
-      // The docs handoff uses the page surface for cards; hierarchy comes from
-      // hairline borders rather than white tiles or elevation.
-      card: '#FCFCF7',
-      foreground: '#1A2018',
-      muted: '#EFEFE9',
-      mutedForeground: '#747B72',
-      border: '#E5E6E1',
-      accent: '#007852',
+      background: '#FDFDFA',
+      card: '#FDFDFA',
+      foreground: '#121811',
+      muted: '#F6F7F3',
+      mutedForeground: '#656B64',
+      border: '#EAEAE7',
+      accent: '#1F6538',
       accentForeground: '#FFFFFF',
       accent2: '#755FBB',
       accent2Foreground: '#0B0A13',
-      input: '#E5E6E1',
-      sidebar: '#F7F7F2',
-      ring: '#397059',
-      // Olive-family tint (the leaf's own green) for the active sidebar item
-      sidebarActiveBg: '68 40% 88% / 0.65',
-      sidebarActiveText: '#454A22',
+      primary: '#121811',
+      primaryForeground: '#FDFDFA',
+      input: '#EFF1EB',
+      sidebar: '#FDFDFA',
+      ring: '#1F6538',
+      sidebarActiveBg: '141 53% 26% / 0.1',
+      sidebarActiveText: '#1F6538',
     },
     dark: {
-      background: '#040704',
-      card: '#060906',
-      foreground: '#EFEFE7',
-      muted: '#0E130F',
-      mutedForeground: '#929C90',
-      border: '#1B1E1A',
-      accent: '#BAE43E',
-      accentForeground: '#101911',
+      background: '#060907',
+      card: '#060907',
+      foreground: '#EFEFE9',
+      muted: '#0B100C',
+      mutedForeground: '#888E86',
+      border: '#191B19',
+      accent: '#99D973',
+      accentForeground: '#0D160F',
       accent2: '#AC9CF0',
       accent2Foreground: '#0B0A13',
-      input: '#29302A',
-      sidebar: '#060906',
-      ring: '#BAE43E',
-      sidebarActiveBg: '132 15% 6%',
-      sidebarActiveText: '#BAE43E',
+      primary: '#B6E551',
+      primaryForeground: '#0D160F',
+      input: '#131713',
+      sidebar: '#060907',
+      ring: '#99D973',
+      sidebarActiveBg: '96 55% 65% / 0.12',
+      sidebarActiveText: '#99D973',
     },
   },
   // Alternate preset — violet. Still a first-class, ready-to-use accent.
@@ -166,7 +168,7 @@ export const siteConfig: SiteConfig = {
   name: 'Thally',
   description:
     'Thally is the product knowledge layer for software teams. It keeps your docs, website, and support platform in sync as your product changes.',
-  repoUrl: '',
+  repoUrl: 'https://github.com/thallylabs/thally',
   links: [
     { label: 'Get started', href: '/quickstart' },
     { label: 'Support', href: 'https://github.com/thallylabs/thally/issues/new' },

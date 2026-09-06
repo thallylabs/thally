@@ -30,6 +30,8 @@ interface GrantResponse {
 }
 
 export interface CloudEntitlements {
+  /** Current billing plan, required before removing the hosted attribution. */
+  plan?: 'free' | 'cloud' | 'enterprise'
   features?: {
     settingsSync?: boolean
     passwordProtection?: boolean
@@ -54,6 +56,8 @@ export interface CloudPortableConfig {
   }
   ai?: { enabled?: boolean; icon?: string }
   branding?: {
+    /** Paid sites may explicitly disable attribution; omission keeps it on. */
+    showPoweredBy?: boolean
     logo?: string
     logoDark?: string
     favicon?: string
@@ -253,12 +257,19 @@ export async function getCloudServiceGrant(siteUrl: string): Promise<string | nu
  * The grant is obtained directly from Thally Cloud over authenticated TLS and
  * is never exposed to browser code. Invalid or legacy grants safely resolve to
  * null so free/self-hosted sites keep using their repository configuration.
+ * Fresh reads bypass the external grant cache for revocable request policy.
  */
-export async function getCloudSiteConfig(siteUrl: string): Promise<CloudGrantPayload | null> {
+export async function getCloudSiteConfig(
+  siteUrl: string,
+  options?: { fresh?: boolean },
+): Promise<CloudGrantPayload | null> {
   const managed = getManagedSiteConfigSnapshot()
   if (managed) return managed
 
-  const grant = await getCloudGrant(siteUrl)
+  // Revocable presentation policy must not reuse a grant from before a downgrade.
+  const grant = options?.fresh
+    ? (await exchangeGrant(siteUrl)).grant
+    : await getCloudGrant(siteUrl)
   if (!grant) return null
 
   try {

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import NextImage from 'next/image'
-import { X, ArrowUp, Sparkles, Zap, Bot, Brain, Stars, Wand, Square, Maximize2, Minimize2, BookOpen, ChevronDown, ArrowUpRight, Paperclip, type LucideProps } from 'lucide-react'
+import { X, ArrowUp, Square, Maximize2, Minimize2, BookOpen, ChevronDown, ArrowUpRight, Paperclip, Copy, ThumbsUp, ThumbsDown, RefreshCw } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { DEFAULT_AI_DISCLAIMER } from '@/lib/ai-defaults'
 import {
@@ -30,25 +30,19 @@ interface ChatImage extends AiChatImage {
   name: string
 }
 
-type IconName = 'sparkles' | 'zap' | 'bot' | 'brain' | 'stars' | 'wand'
-
-const ICON_MAP: Record<IconName, React.ComponentType<LucideProps>> = {
-  sparkles: Sparkles,
-  zap: Zap,
-  bot: Bot,
-  brain: Brain,
-  stars: Stars,
-  wand: Wand,
-}
-
-function FabIcon({ icon, className }: { icon?: string; className?: string }) {
-  // URL or path → render as image
-  if (icon && (icon.startsWith('/') || icon.startsWith('http'))) {
-    return <img src={icon} alt="" className={className} style={{ objectFit: 'contain' }} />
-  }
-  // Named icon → look up in map, fall back to Sparkles
-  const Icon = ICON_MAP[(icon as IconName) ?? 'sparkles'] ?? Sparkles
-  return <Icon className={className} />
+/** The assistant identity is a Thally-owned surface, so its leaf never adopts
+ * a customer's accent or a configurable assistant glyph. */
+function ThallyBrandMark({ className }: { className?: string }) {
+  return (
+    <NextImage
+      src="/brand/default-favicon-light.svg"
+      alt=""
+      width={24}
+      height={24}
+      className={className}
+      aria-hidden="true"
+    />
+  )
 }
 
 const SUGGESTIONS = [
@@ -119,18 +113,18 @@ export function AnswerSources({ sources }: { sources: Array<AiAnswerSource> }) {
   const label = `Read ${sources.length} ${sources.length === 1 ? 'page' : 'pages'}`
 
   return (
-    <details className="group mb-3 overflow-hidden rounded-xl border border-border/70 bg-muted/25 text-xs">
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 font-medium text-muted-foreground transition-colors hover:bg-muted/45 hover:text-foreground [&::-webkit-details-marker]:hidden">
+    <details className="thally-docs-chat-sources group mb-3 border-b text-xs">
+      <summary className="flex cursor-pointer list-none items-center gap-2 py-2 font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
         <BookOpen className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>{label}</span>
         <ChevronDown className="ml-auto h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
       </summary>
-      <div className="border-t border-border/60 p-1.5">
+      <div className="border-t border-border/60 py-1.5">
         {sources.map((source) => (
           <a
             key={source.url}
             href={source.url}
-            className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-muted-foreground no-underline transition-colors hover:bg-background/80 hover:text-foreground"
+            className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-muted-foreground no-underline transition-colors hover:bg-muted hover:text-foreground"
           >
             <span className="min-w-0 flex-1 truncate">{source.title}</span>
             <ArrowUpRight className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
@@ -158,7 +152,6 @@ interface DocsChatProps {
 
 export function DocsChat({
   label = 'Ask AI',
-  icon,
   enabled = true,
   unavailableMessage = 'Ask AI is not available for this site.',
   skipStatusCheck = false,
@@ -181,6 +174,7 @@ export function DocsChat({
   const [input, setInput] = useState('')
   const [pendingImages, setPendingImages] = useState<Array<ChatImage>>([])
   const [attachmentError, setAttachmentError] = useState('')
+  const [feedbackByMessage, setFeedbackByMessage] = useState<Record<number, 'up' | 'down'>>({})
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -192,11 +186,20 @@ export function DocsChat({
     const ta = textareaRef.current
     if (!ta) return
     ta.style.height = 'auto'
-    ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`
+    ta.style.height = `${Math.min(ta.scrollHeight, 140)}px`
   }, [input])
 
   useEffect(() => {
     if (open) setTimeout(() => textareaRef.current?.focus(), 60)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
   }, [open])
 
   useEffect(() => {
@@ -354,23 +357,28 @@ export function DocsChat({
   if (!chatShown) return null
 
   return open ? (
-    /* Panel — full-height right dock */
-    <div
-          className="fixed inset-y-0 right-0 z-50 flex flex-col overflow-hidden border-l border-border shadow-2xl backdrop-blur-xl"
+    <>
+      <button
+        type="button"
+        className="thally-docs-chat-scrim fixed inset-0 z-50 cursor-default"
+        onClick={() => setOpen(false)}
+        aria-label="Close Ask ThallyAI"
+      />
+      {/* Full-height dock layered over a quiet page scrim. */}
+      <aside
+          className="thally-docs-chat-panel fixed inset-y-0 right-0 z-[60] flex flex-col overflow-hidden border-l border-border"
+          aria-label={liveLabel}
           style={{
-            width: expanded ? 'min(680px, 100vw)' : 'min(420px, 100vw)',
-            background: 'color-mix(in srgb, var(--background) 92%, transparent)',
+            width: expanded ? 'min(680px, 100vw)' : 'min(460px, 100vw)',
             transition: 'width 0.2s var(--ds-ease-out, ease)',
           }}
         >
           {/* Header */}
-          <div className="flex shrink-0 items-center justify-between border-b border-border/60 px-5 py-4">
+          <div className="flex h-14 shrink-0 items-center justify-between border-b border-border/60 px-5">
             <div className="flex items-center gap-2.5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/10">
-                <FabIcon icon={icon} className="h-3.5 w-3.5 text-accent" />
-              </div>
+              <ThallyBrandMark className="thally-docs-chat-brand h-5 w-5" />
               <span className="text-sm font-semibold">{liveLabel}</span>
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <span className="text-[10px] font-medium text-muted-foreground">
                 Beta
               </span>
             </div>
@@ -393,14 +401,12 @@ export function DocsChat({
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 pb-2">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 pb-2 pt-6">
             {messages.length === 0 ? (
               /* Welcome state */
               <div className="flex h-full flex-col items-center justify-center gap-6 pb-4">
                 <div className="flex flex-col items-center gap-3 text-center">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent/10">
-                    <FabIcon icon={icon} className="h-6 w-6 text-accent" />
-                  </div>
+                  <ThallyBrandMark className="thally-docs-chat-brand h-8 w-8" />
                   <div>
                     <p className="font-semibold">How can I help?</p>
                     <p className="mt-1 text-sm text-muted-foreground">
@@ -413,7 +419,7 @@ export function DocsChat({
                     <button
                       key={s}
                       onClick={() => void send(s)}
-                      className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-accent/40 hover:bg-accent/5 hover:text-foreground"
+                      className="rounded-[10px] border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-accent/40 hover:bg-accent/5 hover:text-foreground"
                     >
                       {s}
                     </button>
@@ -421,18 +427,16 @@ export function DocsChat({
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col gap-6 py-2">
+              <div className="flex flex-col gap-[22px]">
                 {messages.map((msg, i) => (
                   <div key={i} className={`flex min-w-0 gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                     {msg.role === 'assistant' && (
-                      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/10">
-                        <FabIcon icon={icon} className="h-3 w-3 text-accent" />
-                      </div>
+                      <ThallyBrandMark className="thally-docs-chat-brand mt-0.5 h-6 w-6 shrink-0" />
                     )}
 
                     {msg.role === 'user' ? (
                       /* User bubble */
-                      <div className="max-w-[78%] overflow-hidden rounded-2xl rounded-br-sm bg-muted text-sm leading-relaxed">
+                      <div className="thally-docs-chat-user max-w-[78%] overflow-hidden text-sm leading-relaxed">
                         {msg.images?.length ? (
                           <div className={`grid gap-1.5 p-1.5 pb-0 ${msg.images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                             {msg.images.map((image) => (
@@ -457,6 +461,7 @@ export function DocsChat({
                       <div className="min-w-0 flex-1 text-sm leading-relaxed">
                         <AnswerSources sources={msg.sources ?? []} />
                         {msg.content ? (
+                          <>
                           <div className="prose prose-sm dark:prose-invert max-w-none break-words
                             [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_:not(pre)>code]:break-words
                             prose-p:leading-relaxed prose-p:my-2 first:prose-p:mt-0
@@ -470,6 +475,16 @@ export function DocsChat({
                           >
                             <ReactMarkdown>{msg.content}</ReactMarkdown>
                           </div>
+                          <div className="thally-docs-chat-feedback mt-2 flex items-center gap-0.5" aria-label="Answer actions">
+                            <button type="button" onClick={() => void navigator.clipboard?.writeText(msg.content)} aria-label="Copy response" title="Copy response" className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors"><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>
+                            <button type="button" onClick={() => setFeedbackByMessage((current) => ({ ...current, [i]: 'up' }))} aria-label="Helpful response" title="Helpful response" aria-pressed={feedbackByMessage[i] === 'up'} className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors"><ThumbsUp className="h-3.5 w-3.5" aria-hidden="true" /></button>
+                            <button type="button" onClick={() => setFeedbackByMessage((current) => ({ ...current, [i]: 'down' }))} aria-label="Unhelpful response" title="Unhelpful response" aria-pressed={feedbackByMessage[i] === 'down'} className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors"><ThumbsDown className="h-3.5 w-3.5" aria-hidden="true" /></button>
+                            <button type="button" onClick={() => {
+                              const previousQuestion = messages.slice(0, i).reverse().find((message) => message.role === 'user')
+                              if (previousQuestion) void send(previousQuestion.content)
+                            }} disabled={loading} aria-label="Regenerate response" title="Regenerate response" className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors disabled:opacity-35"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /></button>
+                          </div>
+                          </>
                         ) : loading && i === messages.length - 1 ? (
                           <TypingDots />
                         ) : null}
@@ -489,7 +504,7 @@ export function DocsChat({
                 {unavailableMessage}
               </p>
             ) : null}
-            <div className="rounded-2xl border border-border bg-muted/30 p-2 transition-colors focus-within:border-accent/40">
+            <div className="thally-docs-chat-composer rounded-[14px] border p-2 transition-colors">
               {pendingImages.length > 0 ? (
                 <div className="mb-1.5">
                   <div className="flex gap-2 overflow-x-auto px-1 pt-1">
@@ -573,7 +588,7 @@ export function DocsChat({
                   placeholder={enabled ? `Message ${liveLabel} or paste a screenshot…` : 'Add an ANTHROPIC_API_KEY to enable chat'}
                   disabled={loading || !enabled}
                   className="min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
-                  style={{ maxHeight: '160px' }}
+                  style={{ maxHeight: '140px' }}
                 />
                 <button
                   type="button"
@@ -595,6 +610,7 @@ export function DocsChat({
               </p>
             ) : null}
           </div>
-    </div>
+      </aside>
+    </>
   ) : null
 }

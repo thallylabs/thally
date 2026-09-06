@@ -19,14 +19,33 @@
   --theme-nav-bar-border-color: transparent;
   --theme-nav-tab-active-bg: transparent;
   --theme-nav-tab-active-shadow: none;
-  --docs-panel: hsl(var(--thally-muted) / 0.48);
-  --docs-code: #11150f;
+  /* These semantic aliases let the shell follow each site's configured brand
+     while keeping the approved surface hierarchy and contrast relationships. */
+  --docs-bg: hsl(var(--thally-background));
+  --docs-surface: hsl(var(--thally-muted));
+  --docs-surface-2: hsl(var(--thally-input));
+  --docs-ink: hsl(var(--thally-foreground));
+  --docs-ink-2: color-mix(in oklab, var(--docs-ink) 82%, var(--docs-bg));
+  --docs-mute: hsl(var(--thally-muted-foreground));
+  --docs-faint: color-mix(in oklab, var(--docs-mute) 70%, var(--docs-bg));
+  --docs-line: color-mix(in oklab, var(--docs-ink) 8%, transparent);
+  --docs-line-2: color-mix(in oklab, var(--docs-ink) 14%, transparent);
+  --docs-accent: hsl(var(--thally-accent));
+  --docs-accent-soft: hsl(var(--thally-accent) / 0.1);
+  --docs-primary: hsl(var(--thally-primary));
+  --docs-brand: #737938;
+  --docs-code-bg: color-mix(in oklab, var(--docs-bg) 96%, var(--docs-ink));
+  --docs-sky: #256b8a;
+  --docs-iris: #7257a8;
+  --docs-amber: #9b6418;
+  --docs-panel: color-mix(in oklab, var(--docs-surface) 48%, transparent);
 }
 
 .dark {
-  /* A deeper neutral than the surrounding dark surfaces keeps bright syntax
-     tokens legible without turning the code panel into another card. */
-  --docs-code: #070a07;
+  --docs-code-bg: color-mix(in oklab, var(--docs-bg) 92%, white 3%);
+  --docs-sky: #7cc9ee;
+  --docs-iris: #b7a2ed;
+  --docs-amber: #e7b460;
 }
 html {
   scroll-behavior: auto;
@@ -67,11 +86,14 @@ body {
 }
 
 .thally-docs-topbar {
-  background: color-mix(in oklab, hsl(var(--thally-background)) 92%, transparent);
+  background: color-mix(in oklab, var(--docs-bg) 84%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
 }
 
 .thally-docs-topbar-inner {
+  max-width: 1280px;
   padding-block: 0;
+  padding-inline: 28px;
 }
 
 .thally-docs-brand:hover {
@@ -80,28 +102,28 @@ body {
 
 .thally-docs-brand img,
 .thally-docs-brand svg {
-  width: 19px !important;
-  height: 19px !important;
+  width: 22px !important;
+  height: 22px !important;
 }
 
 .thally-docs-actions > button,
 .thally-docs-actions > div > button {
-  min-height: 30px;
+  min-height: 36px;
 }
 
 .thally-docs-search {
-  width: 280px;
+  width: 230px;
 }
 
 .thally-docs-search > button:first-of-type {
   position: relative;
-  height: 30px;
-  width: 280px;
+  height: 36px;
+  width: 230px;
   gap: 8px;
-  border-color: hsl(var(--thally-foreground) / 0.16);
-  border-radius: 9px;
-  padding-inline: 10px 46px;
-  background: hsl(var(--thally-background));
+  border: 0;
+  border-radius: 10px;
+  padding-inline: 12px 44px;
+  background: var(--docs-surface);
   font-size: 0.85rem;
 }
 
@@ -110,18 +132,19 @@ body {
   top: 50%;
   inset-inline-end: 4px;
   transform: translateY(-50%);
-  border-color: hsl(var(--thally-border));
+  border-color: var(--docs-line-2);
   border-radius: 5px;
-  background: hsl(var(--thally-muted));
+  background: color-mix(in oklab, var(--docs-bg) 72%, transparent);
   padding: 1px 6px;
   font-family: var(--font-mono);
   font-size: 0.7rem;
 }
 
 .thally-docs-search > button:nth-of-type(2) {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
 }
 
 .thally-docs-assistant-trigger {
@@ -135,11 +158,12 @@ body {
 
 .thally-docs-actions [aria-label='Toggle theme'],
 .thally-docs-actions [aria-label='Switch language'] {
-  height: 30px;
-  min-height: 30px;
-  border-color: hsl(var(--thally-foreground) / 0.16);
-  border-radius: 9px;
-  background: hsl(var(--thally-background));
+  height: 36px;
+  min-height: 36px;
+  width: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
   box-shadow: none;
 }
 
@@ -149,9 +173,9 @@ body {
 
 .thally-docs-topbar-inner > button[aria-haspopup='dialog'] {
   display: none;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
 }
 
 .thally-docs-shell {
@@ -160,12 +184,12 @@ body {
 
 .thally-docs-sidebar {
   align-self: stretch;
-  background: hsl(var(--thally-background));
+  background: var(--docs-bg);
 }
 
 .thally-docs-sidebar a[aria-current='page'] {
-  background: transparent !important;
-  color: hsl(var(--thally-foreground)) !important;
+  background: var(--docs-accent-soft) !important;
+  color: var(--docs-accent) !important;
 }
 
 .thally-docs-main {
@@ -178,9 +202,9 @@ body {
 
 .thally-docs-prose {
   min-width: 0;
-  color: hsl(var(--thally-foreground) / 0.78);
+  color: var(--docs-ink-2);
   font-size: 1rem;
-  line-height: 1.5;
+  line-height: 1.65;
 }
 
 .thally-docs-prose > :where(p, ul, ol, blockquote),
@@ -195,26 +219,26 @@ body {
 }
 
 .thally-docs-prose :where(h2) {
-  margin-top: 3.75rem;
-  margin-bottom: 0.875rem;
-  font-size: 1.625rem;
-  font-weight: 600;
-  line-height: 1.3;
+  margin-top: 3.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.35;
   letter-spacing: -0.02em;
 }
 
 .thally-docs-prose :where(h3) {
   margin-top: 2.5rem;
   margin-bottom: 0.625rem;
-  font-size: 1.125rem;
-  font-weight: 600;
+  font-size: 1.08rem;
+  font-weight: 700;
   line-height: 1.45;
   letter-spacing: -0.012em;
 }
 
 .thally-docs-prose :where(p) {
   margin-block: 0 1rem;
-  color: hsl(var(--thally-foreground) / 0.78);
+  color: var(--docs-ink-2);
   text-wrap: pretty;
 }
 
@@ -289,17 +313,27 @@ body {
   width: 100%;
   max-width: 54rem;
   min-width: 0;
-  border-color: rgb(255 255 255 / 0.12);
-  background: var(--docs-code);
-  color: #f4f5ee;
+  border-color: var(--docs-line);
+  background: var(--docs-code-bg);
+  color: var(--docs-ink-2);
   box-shadow: none;
+  --shiki-color-text: var(--docs-ink-2);
+  --shiki-token-property: var(--docs-sky);
+  --shiki-token-constant: var(--docs-amber);
+  --shiki-token-string: var(--docs-accent);
+  --shiki-token-comment: var(--docs-faint);
+  --shiki-token-keyword: var(--docs-iris);
+  --shiki-token-parameter: var(--docs-iris);
+  --shiki-token-function: var(--docs-amber);
+  --shiki-token-string-expression: var(--docs-accent);
+  --shiki-token-punctuation: var(--docs-mute);
 }
 
 .thally-docs-code pre {
   max-width: 100%;
   margin: 0;
   background: transparent !important;
-  color: #f4f5ee !important;
+  color: var(--docs-ink-2) !important;
   overflow-x: auto;
 }
 
@@ -390,6 +424,15 @@ a[target='_blank']:hover > .thally-docs-card::after {
   padding-top: 0;
 }
 
+.thally-docs-toc nav {
+  border-inline-start-color: var(--docs-line);
+}
+
+.thally-docs-toc a[aria-current='true'],
+.thally-docs-toc a[data-active='true'] {
+  color: var(--docs-accent);
+}
+
 .thally-docs-root footer {
   border-color: hsl(var(--thally-border));
   background: hsl(var(--thally-background));
@@ -400,41 +443,109 @@ a[target='_blank']:hover > .thally-docs-card::after {
   scrollbar-width: none;
 }
 
-@media (max-width: 1360px) {
+/* Ask ThallyAI is one docked workspace. Sources, answer tools, and the
+   composer use hairlines and the shared surface ramp instead of nested cards. */
+.thally-docs-chat-scrim {
+  background: rgb(0 0 0 / 0.24);
+  animation: thally-docs-fade-in 160ms ease-out;
+}
+
+.thally-docs-chat-panel {
+  background: var(--docs-bg);
+  box-shadow: -20px 0 54px rgb(0 0 0 / 0.12);
+  animation: thally-docs-dock-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dark .thally-docs-chat-panel {
+  box-shadow: -20px 0 54px rgb(0 0 0 / 0.42);
+}
+
+.thally-docs-chat-brand {
+  color: var(--docs-brand);
+}
+
+.thally-docs-chat-user {
+  border-radius: 14px 14px 4px 14px;
+  background: var(--docs-surface-2);
+}
+
+.thally-docs-chat-sources {
+  border-color: var(--docs-line);
+}
+
+.thally-docs-chat-feedback button {
+  color: var(--docs-faint);
+}
+
+.thally-docs-chat-feedback button:hover,
+.thally-docs-chat-feedback button[aria-pressed='true'] {
+  background: var(--docs-surface);
+  color: var(--docs-ink);
+}
+
+.thally-docs-chat-composer {
+  border-color: var(--docs-line-2);
+  background: var(--docs-bg);
+}
+
+.thally-docs-chat-composer:focus-within {
+  border-color: var(--docs-accent);
+}
+
+@keyframes thally-docs-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes thally-docs-dock-in {
+  from { transform: translateX(18px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (max-width: 1180px) {
+  .thally-docs-toc {
+    display: none;
+  }
+
   .thally-docs-topbar-link span {
     display: none;
   }
 }
 
-@media (max-width: 1240px) {
+@media (max-width: 1280px) {
   .thally-docs-search,
   .thally-docs-search > button:first-of-type {
-    width: 220px;
-  }
-
-  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search,
-  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search > button:first-of-type {
-    width: 150px;
+    width: 170px;
   }
 }
 
 @media (max-width: 1120px) {
   .thally-docs-search,
-  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search {
-    width: 30px;
+  .thally-docs-search > button:first-of-type {
+    width: 150px;
   }
 
-  .thally-docs-search > button:first-of-type {
+  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search,
+  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search > button:first-of-type {
+    width: 120px;
+  }
+}
+
+@media (max-width: 1040px) {
+  .thally-docs-assistant-trigger > span,
+  .thally-docs-action-divider {
     display: none;
   }
 
-  .thally-docs-search > button:nth-of-type(2) {
-    display: flex;
+  .thally-docs-assistant-trigger {
+    width: 36px;
+    max-width: 36px;
+    justify-content: center;
+    padding-inline: 0;
   }
-
 }
 
-@media (max-width: 1010px) {
+@media (max-width: 880px) {
   .thally-docs-topbar-inner > button[aria-haspopup='dialog'] {
     display: inline-flex;
   }
@@ -443,23 +554,6 @@ a[target='_blank']:hover > .thally-docs-card::after {
     display: none;
   }
 
-  .thally-docs-search,
-  .thally-docs-search > button:first-of-type,
-  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search,
-  .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search > button:first-of-type {
-    width: 240px;
-  }
-
-  .thally-docs-search > button:first-of-type {
-    display: flex;
-  }
-
-  .thally-docs-search > button:nth-of-type(2) {
-    display: none;
-  }
-}
-
-@media (max-width: 860px) {
   .thally-docs-brand {
     margin-inline-end: 8px;
   }
@@ -470,7 +564,7 @@ a[target='_blank']:hover > .thally-docs-card::after {
 
   .thally-docs-search,
   .thally-docs-topbar-inner[data-density='compact'] .thally-docs-search {
-    width: 30px;
+    width: 36px;
   }
 
   .thally-docs-search > button:first-of-type {
@@ -510,7 +604,7 @@ a[target='_blank']:hover > .thally-docs-card::after {
   }
 
   .thally-docs-topbar-inner {
-    gap: 8px;
+    gap: 6px;
     padding-inline: 14px;
   }
 
@@ -520,15 +614,7 @@ a[target='_blank']:hover > .thally-docs-card::after {
 }
 
 @media (max-width: 420px) {
-  .thally-docs-assistant-trigger {
-    width: 34px;
-    max-width: 34px;
-    height: 34px;
-    justify-content: center;
-    padding-inline: 0;
-  }
-
-  .thally-docs-assistant-trigger > span {
+  .thally-docs-brand > span {
     display: none;
   }
 }

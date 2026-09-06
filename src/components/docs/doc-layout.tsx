@@ -7,6 +7,7 @@ import { DocHeader } from '@/components/docs/doc-header'
 import { DocPagination } from '@/components/docs/doc-pagination'
 import { EditOnGithub } from '@/components/docs/edit-on-github'
 import { Feedback } from '@/components/docs/feedback'
+import { ReportAnIssue } from '@/components/docs/report-an-issue'
 import { TableOfContents } from '@/components/docs/table-of-contents'
 import { ContentStack, DetailColumn, MainColumns } from '@/components/layout/sections'
 import { Prose } from '@/components/mdx/prose'
@@ -34,6 +35,7 @@ function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
   const effectiveSite = resolveBuildSiteConfig()
   const cloudFeedback = cloud?.siteConfig.portable.feedback
   const hasThumbsRating = cloud ? Boolean(cloudFeedback?.thumbsRating) : true
+  const hasIssueReporting = cloud ? Boolean(cloudFeedback?.issueReporting) : true
   const showFeedback = cloud
     ? Boolean(
         hasThumbsRating || cloudFeedback?.editSuggestions || cloudFeedback?.issueReporting,
@@ -49,6 +51,26 @@ function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
       editSuggestions={Boolean(cloudFeedback?.editSuggestions)}
       issueReporting={Boolean(cloudFeedback?.issueReporting)}
     />
+  ) : null
+  const pageSourceActions = effectiveSite.repoUrl && !effectiveSite.repoUrl.includes('your-org') ? (
+    <div className="flex flex-col items-start gap-1.5">
+      <EditOnGithub
+        pageId={doc.id}
+        repoUrl={effectiveSite.repoUrl}
+        label="Edit this page"
+        className="text-[0.83rem] text-foreground/55"
+      />
+      {hasIssueReporting ? (
+        <ReportAnIssue
+          pagePath={doc.href}
+          repoUrl={effectiveSite.repoUrl}
+          className="text-[0.83rem] text-foreground/55"
+        />
+      ) : null}
+    </div>
+  ) : null
+  const pageActionsRail = pageSourceActions ? (
+    <div className="mt-5 border-t border-border pt-4">{pageSourceActions}</div>
   ) : null
 
   // custom mode: render children directly, no shell chrome
@@ -88,7 +110,7 @@ function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
             {feedback}
-            <EditOnGithub pageId={doc.id} repoUrl={effectiveSite.repoUrl} />
+            {pageSourceActions}
             <DocPagination prev={prev} next={next} />
           </div>
         </ContentStack>
@@ -108,7 +130,7 @@ function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
             {feedback}
-            <EditOnGithub pageId={doc.id} repoUrl={effectiveSite.repoUrl} />
+            {pageSourceActions}
             <DocPagination prev={prev} next={next} />
           </div>
         </ContentStack>
@@ -128,13 +150,12 @@ function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
             {feedback}
-            <EditOnGithub pageId={doc.id} repoUrl={effectiveSite.repoUrl} />
             <DocPagination prev={prev} next={next} />
           </div>
         </ContentStack>
       </article>
       <DetailColumn>
-        <PagePanelSlot fallback={<TableOfContents />} />
+        <PagePanelSlot fallback={<TableOfContents />} footer={pageActionsRail} />
       </DetailColumn>
     </MainColumns>
   )

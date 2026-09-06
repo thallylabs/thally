@@ -15,12 +15,22 @@ describe('semantic compatibility components', () => {
       createElement(PageSlotsProvider, null,
         createElement('main', null,
           createElement(Panel, null, createElement('p', null, 'Contextual example')),
-          createElement(PagePanelSlot, { fallback: createElement('span', null, 'On this page') }),
+          createElement(PagePanelSlot, {
+            fallback: createElement('span', null, 'On this page'),
+            footer: createElement(
+              'div',
+              null,
+              createElement('a', { href: '/edit' }, 'Edit this page'),
+              createElement('a', { href: '/issues/new' }, 'Report an issue'),
+            ),
+          }),
         ),
       ),
     )
     expect(markup).toContain('Contextual example')
     expect(markup).toContain('On this page')
+    expect(markup).toContain('Edit this page')
+    expect(markup).toContain('Report an issue')
   })
 
   it('preserves the explicit inline panel alias', () => {
