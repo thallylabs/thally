@@ -10,8 +10,8 @@ interface DocHeaderProps {
 export function DocHeader({ doc, eyebrow }: DocHeaderProps) {
   return (
     <header className="thally-docs-header">
-      <div>
-        <div>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1">
           {eyebrow ? (
             <p className="thally-docs-eyebrow mb-2.5 text-[0.82rem] font-semibold text-accent">
               {eyebrow}
@@ -22,8 +22,6 @@ export function DocHeader({ doc, eyebrow }: DocHeaderProps) {
           </h1>
           <p className="mt-3.5 max-w-[60ch] text-[1.1rem] leading-[1.6] text-foreground/80">{doc.description}</p>
         </div>
-      </div>
-      <div className="mt-[30px] flex items-center">
         <CopyPageButton />
       </div>
     </header>
