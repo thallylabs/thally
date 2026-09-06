@@ -128,13 +128,12 @@ function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
             {feedback}
-            <EditOnGithub pageId={doc.id} repoUrl={effectiveSite.repoUrl} />
             <DocPagination prev={prev} next={next} />
           </div>
         </ContentStack>
       </article>
       <DetailColumn>
-        <PagePanelSlot fallback={<TableOfContents />} />
+        <PagePanelSlot fallback={<TableOfContents pageId={doc.id} repoUrl={effectiveSite.repoUrl} />} />
       </DetailColumn>
     </MainColumns>
   )

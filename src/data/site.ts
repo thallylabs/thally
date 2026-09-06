@@ -168,7 +168,7 @@ export const siteConfig: SiteConfig = {
   name: 'Thally',
   description:
     'Thally is the product knowledge layer for software teams. It keeps your docs, website, and support platform in sync as your product changes.',
-  repoUrl: '',
+  repoUrl: 'https://github.com/thallylabs/thally',
   links: [
     { label: 'Get started', href: '/quickstart' },
     { label: 'Support', href: 'https://github.com/thallylabs/thally/issues/new' },
