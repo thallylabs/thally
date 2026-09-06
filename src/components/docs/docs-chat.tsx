@@ -49,7 +49,6 @@ const SUGGESTIONS = [
   'How do I get started?',
   'How does navigation work?',
   'How do I add an API reference?',
-  'How do I enable the AI chat?',
 ]
 
 const SCREENSHOT_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp'
@@ -104,6 +103,26 @@ function TypingDots() {
         />
       ))}
     </span>
+  )
+}
+
+function SuggestionLinks({ onSelect }: { onSelect: (suggestion: string) => void }) {
+  return (
+    <nav className="mt-6 border-t border-border/60 pt-4" aria-label="Suggested questions">
+      <p className="mb-2 text-xs font-medium text-muted-foreground">Suggestions</p>
+      <div className="flex flex-col items-start gap-1.5">
+        {SUGGESTIONS.map((suggestion) => (
+          <button
+            key={suggestion}
+            type="button"
+            onClick={() => onSelect(suggestion)}
+            className="text-left text-sm text-accent transition-colors hover:text-foreground"
+          >
+            {suggestion}
+          </button>
+        ))}
+      </div>
+    </nav>
   )
 }
 
@@ -192,6 +211,15 @@ export function DocsChat({
   useEffect(() => {
     if (open) setTimeout(() => textareaRef.current?.focus(), 60)
   }, [open])
+
+  useEffect(() => {
+    const root = document.documentElement
+    root.classList.toggle('thally-docs-ai-open', open)
+    root.classList.toggle('thally-docs-ai-expanded', open && expanded)
+    return () => {
+      root.classList.remove('thally-docs-ai-open', 'thally-docs-ai-expanded')
+    }
+  }, [expanded, open])
 
   useEffect(() => {
     if (!open) return
@@ -358,18 +386,12 @@ export function DocsChat({
 
   return open ? (
     <>
-      <button
-        type="button"
-        className="thally-docs-chat-scrim fixed inset-0 z-50 cursor-default"
-        onClick={() => setOpen(false)}
-        aria-label="Close Ask ThallyAI"
-      />
-      {/* Full-height dock layered over a quiet page scrim. */}
+      {/* The dock starts below the shared top bar so navigation stays usable. */}
       <aside
-          className="thally-docs-chat-panel fixed inset-y-0 right-0 z-[60] flex flex-col overflow-hidden border-l border-border"
+          className="thally-docs-chat-panel fixed bottom-0 right-0 top-[60px] z-[60] flex flex-col overflow-hidden border-l border-border"
           aria-label={liveLabel}
           style={{
-            width: expanded ? 'min(680px, 100vw)' : 'min(460px, 100vw)',
+            width: expanded ? 'min(680px, 100vw)' : 'min(420px, 100vw)',
             transition: 'width 0.2s var(--ds-ease-out, ease)',
           }}
         >
@@ -399,6 +421,11 @@ export function DocsChat({
               </button>
             </div>
           </div>
+          {disclaimer ? (
+            <p className="shrink-0 border-b border-border/60 px-5 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
+              {disclaimer}
+            </p>
+          ) : null}
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 pb-2 pt-6">
@@ -414,17 +441,7 @@ export function DocsChat({
                     </p>
                   </div>
                 </div>
-                <div className="flex w-full flex-wrap justify-center gap-2">
-                  {SUGGESTIONS.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => void send(s)}
-                      className="rounded-[10px] border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-accent/40 hover:bg-accent/5 hover:text-foreground"
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
+                <SuggestionLinks onSelect={(suggestion) => void send(suggestion)} />
               </div>
             ) : (
               <div className="flex flex-col gap-[22px]">
@@ -492,6 +509,7 @@ export function DocsChat({
                     )}
                   </div>
                 ))}
+                <SuggestionLinks onSelect={(suggestion) => void send(suggestion)} />
                 <div ref={bottomRef} />
               </div>
             )}
@@ -604,11 +622,6 @@ export function DocsChat({
                 </button>
               </div>
             </div>
-            {disclaimer ? (
-              <p className="mt-2 text-center text-[10px] leading-relaxed text-muted-foreground/70">
-                {disclaimer}
-              </p>
-            ) : null}
           </div>
       </aside>
     </>

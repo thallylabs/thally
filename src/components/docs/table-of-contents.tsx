@@ -2,7 +2,7 @@
 
 import { usePathname } from 'next/navigation'
 import { startTransition, useCallback, useEffect, useState } from 'react'
-import { layout, typography } from '@/config/layout'
+import { layout } from '@/config/layout'
 import { cn } from '@/lib/utils'
 
 interface TocItem {
@@ -89,7 +89,7 @@ export function TableOfContents() {
 
   return (
     <aside className={cn('thally-docs-toc sticky top-[82px] max-h-[calc(100dvh-82px)] overflow-y-auto text-sm', layout.tocWidth)}>
-      <p className={cn('mb-2.5 font-mono text-[0.68rem] tracking-[0.14em]', typography.meta)}>On this page</p>
+      <p className="mb-0 text-sm font-medium leading-6 text-foreground">On this page</p>
       <ul className="border-l border-border">
         {items.map((item) => {
           const isActive = activeId === item.id
@@ -99,10 +99,10 @@ export function TableOfContents() {
                 href={`#${item.id}`}
                 onClick={(event) => handleClick(event, item.id)}
                 className={cn(
-                  '-ml-px flex items-center border-l-2 py-1 pr-2 text-left text-[0.83rem] leading-[1.45] transition-colors duration-200 hover:text-foreground',
+                  '-ml-px flex items-center border-l-2 py-1 pr-2 text-left text-sm font-medium leading-6 transition-colors duration-200 hover:text-foreground',
                   item.level > 2 ? 'pl-7' : 'pl-4',
                   isActive
-                    ? 'border-foreground font-semibold text-foreground'
+                    ? 'border-foreground text-foreground'
                     : 'border-transparent text-foreground/55',
                 )}
               >

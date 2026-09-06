@@ -24,6 +24,7 @@ import langGo from 'shiki/langs/go.mjs'
 import langGraphql from 'shiki/langs/graphql.mjs'
 import langHcl from 'shiki/langs/hcl.mjs'
 import langHtml from 'shiki/langs/html.mjs'
+import langHttp from 'shiki/langs/http.mjs'
 import langJavascript from 'shiki/langs/javascript.mjs'
 import langJava from 'shiki/langs/java.mjs'
 import langJson from 'shiki/langs/json.mjs'
@@ -105,6 +106,7 @@ function getHighlighter(): Promise<HighlighterCore> {
         langGraphql,
         langHcl,
         langHtml,
+        langHttp,
         langJava,
         langJavascript,
         langJson,
@@ -141,6 +143,8 @@ const languageAliases: Record<string, string> = {
   shellscript: 'bash',
   zsh: 'bash',
   md: 'markdown',
+  plaintext: 'txt',
+  text: 'txt',
   yml: 'yaml',
 }
 
@@ -265,6 +269,7 @@ function tokensToHtml(lines: Array<Array<ThemedToken>>, highlightedLines: Set<nu
 // Fence meta parsing — supports:
 //   ```ts api-client.ts          (bare token → title)
 //   ```ts title="api-client.ts"  (explicit title/filename attribute)
+//   ```tsx framework="Next.js"   (visible framework tag, TSX grammar)
 //   ```ts {2,4-6}                (highlighted lines)
 //   ```ts highlight={2,4-6}      (highlighted lines, explicit form)
 //   ```bash wrap                 (soft-wrap long lines)
@@ -272,6 +277,7 @@ function tokensToHtml(lines: Array<Array<ThemedToken>>, highlightedLines: Set<nu
 
 export interface CodeFenceMeta {
   title?: string
+  tag?: string
   wrap?: boolean
   highlight?: Array<number>
 }
@@ -302,7 +308,7 @@ function expandLineRanges(spec: string): Array<number> {
   return lines
 }
 
-/** Parse portable code-fence metadata without exposing framework-only props. */
+/** Parse portable code-fence metadata and ignore renderer-only props. */
 export function parseCodeFenceMeta(meta: string): CodeFenceMeta {
   const result: CodeFenceMeta = {}
   const tokens = meta.match(/[^\s"{]+="[^"]*"|\{[^}]*\}|\S+/g) ?? []
@@ -319,6 +325,11 @@ export function parseCodeFenceMeta(meta: string): CodeFenceMeta {
     const titleMatch = token.match(/^(?:title|filename)=["']?([^"']+)["']?$/)
     if (titleMatch) {
       result.title = titleMatch[1]
+      continue
+    }
+    const tagMatch = token.match(/^(?:framework|tag)=["']?([^"']+)["']?$/)
+    if (tagMatch) {
+      result.tag = tagMatch[1]
       continue
     }
     // Mintlify emits presentation props such as `theme={"system"}` in the
@@ -357,6 +368,7 @@ function rehypeParseCodeBlocks() {
         ...parent.properties,
         language,
         ...(parsedMeta.title ? { title: parsedMeta.title } : {}),
+        ...(parsedMeta.tag ? { tag: parsedMeta.tag } : {}),
         ...(parsedMeta.wrap ? { wrap: '' } : {}),
         ...(parsedMeta.highlight?.length
           ? { highlightLines: parsedMeta.highlight.join(',') }

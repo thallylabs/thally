@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Globe, Check } from 'lucide-react'
+import { Check, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface LocaleSwitcherProps {
@@ -32,21 +32,22 @@ export function LocaleSwitcher({ locales, currentLocale, currentPath, defaultLoc
   }, [open])
 
   if (locales.length < 2) return null
+  const currentLabel = locales.find((locale) => locale.code === currentLocale)?.label ?? currentLocale
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="thally-docs-language relative -ml-2 mr-3">
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="flex h-9 w-9 items-center justify-center rounded-[10px] text-foreground/70 transition hover:bg-muted hover:text-foreground"
+        className="flex h-[34px] items-center gap-1.5 rounded-[9px] px-2.5 text-[0.88rem] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground"
         aria-label="Switch language"
-        title="Switch language"
       >
-        <Globe className="h-4 w-4" aria-hidden="true" />
+        <span>{currentLabel}</span>
+        <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform', open && 'rotate-180')} aria-hidden="true" />
       </button>
 
       {open ? (
-        <div className="absolute right-0 top-full z-50 mt-2 min-w-[160px] overflow-hidden rounded-xl border border-border/60 bg-background shadow-lg">
+        <div className="absolute left-0 top-full z-50 mt-2 min-w-[160px] overflow-hidden rounded-xl border border-border/60 bg-background shadow-lg">
           {locales.map((locale) => {
             const isCurrent = locale.code === currentLocale
             return (

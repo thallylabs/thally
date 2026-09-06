@@ -13,7 +13,6 @@ Add a `navbar` block to `docs.json` to control the links and CTA button in the t
 ```json
 "navbar": {
   "links": [
-    { "label": "GitHub", "href": "https://github.com/your-org/repo", "type": "github" },
     { "label": "Support", "href": "https://support.example.com" }
   ],
   "primary": { "label": "Get started", "href": "/quickstart" }
@@ -28,15 +27,11 @@ An array of navigation links rendered to the left of the CTA button.
 | --- | --- | --- |
 | `label` | `string` | Link text |
 | `href` | `string` | Destination URL (internal or external) |
-| `type` | `"github"` _(optional)_ | Set to `"github"` to render the GitHub icon alongside the label |
-
-When `type: "github"` is set, the GitHub mark is shown to the left of the label:
-
-```json
-{ "label": "GitHub", "href": "https://github.com/your-org/repo", "type": "github" }
-```
-
 External links open in a new tab automatically.
+
+GitHub belongs in `footer.socials`. Existing sites that still declare a
+`navbar.links` item with `type: "github"` keep the destination, but Thally moves
+that icon to the footer when the site is upgraded.
 
 ### `navbar.primary`
 
@@ -121,9 +116,6 @@ When `footer` is not defined in `docs.json`, Thally renders a minimal single-lin
 ```json
 {
   "navbar": {
-    "links": [
-      { "label": "GitHub", "href": "https://github.com/your-org/repo", "type": "github" }
-    ],
     "primary": { "label": "Get started", "href": "/quickstart" }
   },
   "footer": {

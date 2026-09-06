@@ -69,7 +69,11 @@ export function TopBar({
   const primaryCta = navbarConfig?.primary
     ? { label: navbarConfig.primary.label, href: navbarConfig.primary.href }
     : siteConfigCta
-  const visibleLinkCount = navbarConfig?.links?.length ?? (supportLink ? 1 : 0)
+  // GitHub is part of the footer's social cluster in the default docs shell.
+  // SiteShell carries legacy navbar-only GitHub links into the footer so an
+  // existing site does not lose its repository destination during upgrade.
+  const navbarLinks = navbarConfig?.links?.filter((link) => link.type !== 'github') ?? []
+  const visibleLinkCount = navbarConfig?.links ? navbarLinks.length : (supportLink ? 1 : 0)
   // Preserve the generous default search affordance for typical documentation
   // sites. Only dense, highly customized navbars opt into the compact layout.
   const visibleCollectionCount = navigationPresentation.display === 'tabs' ? collections.length : 0
@@ -95,11 +99,14 @@ export function TopBar({
           className="thally-docs-brand mr-5 flex shrink-0 items-center gap-2 text-foreground"
         >
           <Logo showText={false} className="shrink-0" />
-          <span className="font-heading text-[1rem] font-bold tracking-[-0.015em]">
+          <span className="font-heading text-[1rem] font-semibold tracking-[-0.015em]">
             {displaySiteName(siteName)}
           </span>
           <span className="-ml-1 font-heading text-[1rem] font-medium text-foreground/55">Docs</span>
         </IntentPrefetchLink>
+        {i18nConfig && i18nConfig.locales.length >= 2 ? (
+          <LocaleSwitcher locales={i18nConfig.locales} currentLocale={currentLocale ?? i18nConfig.defaultLocale} currentPath={currentPath ?? '/'} defaultLocale={i18nConfig.defaultLocale} />
+        ) : null}
         {navigationPresentation.display === 'tabs' ? (
           <nav className="thally-docs-tabs flex h-full items-center gap-4" aria-label="Documentation sections">
             {collections.map((collection) => {
@@ -169,16 +176,13 @@ export function TopBar({
           {hasAssistantEntryPoint ? (
             <span className="thally-docs-action-divider h-5 w-px bg-border" aria-hidden="true" />
           ) : null}
-          {navbarConfig?.links && navbarConfig.links.length > 0
-            ? navbarConfig.links.map((link) => {
+          {navbarConfig?.links
+            ? navbarLinks.map((link) => {
                 const isExternal = /^https?:\/\//.test(link.href)
-                const isGithub = link.type === 'github'
                 return (
-                  <a key={link.href} href={link.href} target={isExternal ? '_blank' : undefined} rel={isExternal ? 'noreferrer' : undefined} aria-label={link.label} title={link.label} data-topbar-link data-icon-link={isGithub ? 'true' : undefined} className="thally-docs-topbar-link inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-[10px] px-2 text-[0.86rem] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground">
-                    {isGithub ? (
-                      <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current" aria-hidden="true"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z" /></svg>
-                    ) : isExternal ? <ExternalLink className="h-3.5 w-3.5" /> : null}
-                    {isGithub ? null : <span>{link.label}</span>}
+                  <a key={link.href} href={link.href} target={isExternal ? '_blank' : undefined} rel={isExternal ? 'noreferrer' : undefined} aria-label={link.label} title={link.label} data-topbar-link className="thally-docs-topbar-link inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-[10px] px-2 text-[0.86rem] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground">
+                    {isExternal ? <ExternalLink className="h-3.5 w-3.5" /> : null}
+                    <span>{link.label}</span>
                   </a>
                 )
               })
@@ -186,9 +190,6 @@ export function TopBar({
                 <IntentPrefetchLink href={supportLink.href} className="thally-docs-topbar-link hidden whitespace-nowrap text-[0.86rem] font-medium text-foreground/70 hover:text-foreground sm:inline-flex">{supportLink.label}</IntentPrefetchLink>
               ) : null}
           <VersionSwitcher />
-          {i18nConfig && i18nConfig.locales.length >= 2 ? (
-            <LocaleSwitcher locales={i18nConfig.locales} currentLocale={currentLocale ?? i18nConfig.defaultLocale} currentPath={currentPath ?? '/'} defaultLocale={i18nConfig.defaultLocale} />
-          ) : null}
           <ThemeSwitch />
           {primaryCta ? (
             <IntentPrefetchLink href={primaryCta.href} className="thally-docs-primary inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-[10px] bg-primary px-[15px] text-[0.84rem] font-semibold text-primary-foreground transition hover:brightness-110 active:scale-[0.98]">{primaryCta.label}</IntentPrefetchLink>

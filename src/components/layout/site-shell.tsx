@@ -142,6 +142,7 @@ export function SiteShell({
         !/^https?:\/\//.test(collection.href) &&
         (matchesPath(collection.href, pathname) || matchesPath(collection.href, currentPath)),
     )?.id ?? activeCollection.id
+  const relocatedGithubHref = navbarConfig?.links?.find((link) => link.type === 'github')?.href
 
   // `clip` contains horizontal spill without creating a scroll container,
   // which lets the banner-aware desktop sidebar remain sticky.
@@ -181,6 +182,7 @@ export function SiteShell({
             </main>
             <Footer
               footerConfig={footerConfig ?? null}
+              githubHref={relocatedGithubHref}
               showPoweredBy={showPoweredBy}
               siteName={identity.name}
               siteLinks={identity.links}

@@ -3,7 +3,10 @@ title: "Code blocks"
 description: "Syntax-highlighted code blocks with language labels and copy support."
 ---
 
-Code blocks are rendered automatically from fenced Markdown syntax. Use `<CodeGroup>` to group multiple language variants into a tabbed view.
+Code blocks are rendered automatically from fenced Markdown syntax. Every
+fence must include a language identifier: it selects the syntax grammar and
+appears as the block's language tag. Use `<CodeGroup>` to group multiple
+language variants into a tabbed view.
 
 ## Single code block
 
@@ -20,6 +23,16 @@ import { ApiClient } from '@company/sdk'
 export const client = new ApiClient({
   apiKey: process.env.API_KEY!,
 })
+```
+
+When a framework name is more useful to readers, add `framework="..."`. The
+fence language still controls syntax highlighting, while the framework becomes
+the visible tag:
+
+```tsx framework="Next.js" filename="app/page.tsx"
+export default function Page() {
+  return <main>Documentation</main>
+}
 ```
 
 ## CodeGroup

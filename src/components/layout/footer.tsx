@@ -50,6 +50,8 @@ interface FooterProps {
   siteName: string
   siteLinks: Array<SiteLink>
   showPoweredBy?: boolean
+  /** Legacy navbar GitHub links move here so upgrades preserve the destination. */
+  githubHref?: string
 }
 
 /** Render the quiet attribution in the copyright row only when authorized. */
@@ -70,11 +72,18 @@ function PoweredByThally() {
 }
 
 /** Render configured and default footers with the same server-decided policy. */
-export function Footer({ footerConfig, siteName, siteLinks, showPoweredBy = true }: FooterProps) {
-  const hasSocials = footerConfig?.socials && Object.keys(footerConfig.socials).length > 0
+export function Footer({ footerConfig, siteName, siteLinks, showPoweredBy = true, githubHref }: FooterProps) {
+  const socials: Record<string, string> = {
+    ...footerConfig?.socials,
+    ...(githubHref && !footerConfig?.socials?.github ? { github: githubHref } : {}),
+  }
+  const hasSocials = Object.keys(socials).length > 0
+  const hasConfiguredSocials = Boolean(
+    footerConfig?.socials && Object.keys(footerConfig.socials).length > 0,
+  )
   const hasColumns = footerConfig?.links && footerConfig.links.length > 0
 
-  if (hasColumns || hasSocials) {
+  if (hasColumns || hasConfiguredSocials) {
     return (
       <footer className="border-t border-border/60 bg-muted/30">
         <div className="px-4 py-8 sm:px-6 lg:px-8">
@@ -117,7 +126,7 @@ export function Footer({ footerConfig, siteName, siteLinks, showPoweredBy = true
             {showPoweredBy && <PoweredByThally />}
             {hasSocials && (
               <div className="ml-auto flex items-center gap-4">
-                {Object.entries(footerConfig!.socials!).map(([key, href]) => {
+                {Object.entries(socials).map(([key, href]) => {
                   const Icon = SOCIAL_ICONS[key.toLowerCase()]
                   return (
                     <a
@@ -146,12 +155,29 @@ export function Footer({ footerConfig, siteName, siteLinks, showPoweredBy = true
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-6 text-sm text-muted-foreground sm:px-6 lg:px-8">
         <p>© {new Date().getFullYear()} {siteName}. All rights reserved.</p>
         {showPoweredBy && <PoweredByThally />}
-        <div className="ml-auto flex flex-wrap gap-4">
+        <div className="ml-auto flex flex-wrap items-center gap-4">
           {siteLinks.map((link) => (
             <IntentPrefetchLink key={link.href} href={link.href} className="hover:text-foreground">
               {link.label}
             </IntentPrefetchLink>
           ))}
+          {hasSocials
+            ? Object.entries(socials).map(([key, href]) => {
+                const Icon = SOCIAL_ICONS[key.toLowerCase()]
+                return (
+                  <a
+                    key={key}
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hover:text-foreground"
+                    aria-label={key}
+                  >
+                    {Icon ? <Icon className="h-4 w-4" /> : <span className="text-xs capitalize">{key}</span>}
+                  </a>
+                )
+              })
+            : null}
         </div>
       </div>
     </footer>

@@ -70,7 +70,7 @@ function NavigationGroupBranch({
         }}
         className={cn(
           'flex w-full items-center gap-1.5 rounded-lg py-1.5 text-left text-muted-foreground transition hover:bg-muted hover:text-foreground',
-          mobile ? 'px-2 text-sm font-semibold' : 'px-2 text-base font-medium',
+          mobile ? 'px-2 text-sm font-semibold' : 'px-2 text-sm font-medium leading-6',
         )}
       >
         <ChevronRight
@@ -83,7 +83,7 @@ function NavigationGroupBranch({
         <span className="min-w-0 truncate">{group.title}</span>
       </button>
       {isOpen ? (
-        <div className="ml-3 pl-2">
+        <div className="ml-3 space-y-px pl-2">
           <NavigationNodes
             nodes={group.nodes}
             pathname={pathname}
@@ -135,9 +135,9 @@ function NavigationNodes({
         onClick={onNavigate}
         className={cn(
           'group relative block rounded-lg px-2.5 text-left transition-colors duration-150 focus:outline-none',
-          mobile ? 'py-1.5 text-sm' : 'py-1.5 text-base leading-6',
+          mobile ? 'py-1.5 text-sm' : 'py-1.5 text-sm leading-6',
           active
-            ? 'bg-accent/10 font-medium text-accent'
+            ? 'bg-accent/10 font-normal text-accent'
             : 'font-normal text-muted-foreground hover:bg-muted hover:text-foreground',
         )}
       >

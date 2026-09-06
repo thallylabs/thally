@@ -23,6 +23,18 @@ afterEach(() => {
 })
 
 describe('release-bound docs.json', () => {
+  it('uses accent content icons unless a site explicitly selects neutral icons', () => {
+    expect(getContentIconTone()).toBe('accent')
+
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+      appearance: { contentIcons: 'neutral' },
+      tabs: [{ tab: 'Documentation', groups: [] }],
+    }))
+    resetDocsJsonConfigForTests()
+
+    expect(getContentIconTone()).toBe('neutral')
+  })
+
   it('uses a valid managed binding for navigation and appearance', () => {
     vi.stubEnv(
       'THALLY_DOCS_CONFIG',

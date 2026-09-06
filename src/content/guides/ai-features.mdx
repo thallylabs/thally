@@ -53,7 +53,7 @@ Thally exposes your documentation in plain-text formats for AI tools that prefer
 
 A concise, structured summary of your entire documentation — links to every page, organized by tab and group. Follows the [llmstxt.org](https://llmstxt.org) standard.
 
-```
+```http Request
 GET /llms.txt
 ```
 
@@ -61,7 +61,7 @@ GET /llms.txt
 
 The complete content of every documentation page in a single plain-text file, stripped of JSX and ready for LLM context windows.
 
-```
+```http Request
 GET /llms-full.txt
 ```
 
@@ -151,7 +151,7 @@ Agents that visit a human-facing URL (e.g. `/guides/authentication`) with `Accep
 
 Every `/api/docs` response includes cache and discovery headers:
 
-```
+```http title="Response headers"
 Content-Type: application/json
 Cache-Control: public, s-maxage=3600, stale-while-revalidate=86400
 Vary: Accept
@@ -209,7 +209,7 @@ Fetching the index once lets an agent build the full navigation graph and decide
 
 Thally ships `/ai.txt` at a well-known path that agents check before doing anything else. It tells agents how to interact with this site — format options, API patterns, and what's allowed:
 
-```
+```text filename="ai.txt"
 Docs-Format: application/json, text/markdown
 Docs-API: /api/docs/{slug}
 Docs-Index: /api/docs-index
@@ -306,7 +306,7 @@ The `@thallylabs/mcp` server includes tools that let AI agents search and read y
 
 Searches all pages by keyword and returns ranked results.
 
-```
+```text Prompt
 Search the acme-docs project for anything about rate limiting
 ```
 
@@ -316,7 +316,7 @@ Results are scored by match quality in title (3 pts), description (2 pts), keywo
 
 Reads the full content of a single page by its ID.
 
-```
+```text Prompt
 Read the "guides/webhooks" page from the acme-docs project
 ```
 
@@ -324,7 +324,7 @@ Read the "guides/webhooks" page from the acme-docs project
 
 Returns the most relevant documentation for a given topic, fitting within a token budget. This is the right tool when you want to answer a question using your docs as a knowledge base.
 
-```
+```text Prompt
 Get context from acme-docs about the webhook authentication flow, up to 4000 tokens
 ```
 

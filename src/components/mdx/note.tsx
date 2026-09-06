@@ -47,6 +47,7 @@ const toneIcon: Record<NoteType, typeof Info> = {
 
 interface NoteProps {
   type?: NoteType
+  title?: ReactNode
   className?: string
   children: ReactNode
 }
@@ -83,31 +84,44 @@ function resolveTypeFromContent(children: ReactNode): NoteType {
   return 'info'
 }
 
-export function Note({ type, className, children }: NoteProps) {
+export function Note({ type, title, className, children }: NoteProps) {
   const resolvedType = type ?? resolveTypeFromContent(children)
   const Icon = toneIcon[resolvedType]
+  const content = (
+    <div className="thally-callout-content prose prose-sm max-w-none text-current/90 prose-p:my-0 prose-li:my-1 prose-ol:my-2 prose-ul:my-2 dark:prose-invert">
+      {children}
+    </div>
+  )
   return (
     <aside
       data-callout={resolvedType}
       className={cn(
-        'not-prose my-6 max-w-[70ch] rounded-xl border px-4 py-3 text-sm leading-6',
+        'not-prose my-6 max-w-none rounded-xl border px-[18px] py-4 text-sm leading-6',
         toneStyles[resolvedType],
         className,
       )}
     >
-      <div className="flex items-start gap-3 text-current">
-        <span
-          className={cn(
-            'flex h-6 w-5 shrink-0 items-center justify-center text-current',
-            toneAccent[resolvedType],
-          )}
-        >
-          <Icon className="h-4 w-4" aria-hidden="true" />
-        </span>
-        <div className="thally-callout-content prose prose-sm max-w-none text-current/90 prose-p:my-0 prose-li:my-1 prose-ol:my-2 prose-ul:my-2 dark:prose-invert">
-          {children}
+      {title ? (
+        <div className="text-current">
+          <div className={cn('mb-2 flex items-center gap-2 text-[0.94rem] font-medium', toneAccent[resolvedType])}>
+            <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{title}</span>
+          </div>
+          {content}
         </div>
-      </div>
+      ) : (
+        <div className="flex items-start gap-3 text-current">
+          <span
+            className={cn(
+              'flex h-6 w-5 shrink-0 items-center justify-center text-current',
+              toneAccent[resolvedType],
+            )}
+          >
+            <Icon className="h-4 w-4" aria-hidden="true" />
+          </span>
+          {content}
+        </div>
+      )}
     </aside>
   )
 }

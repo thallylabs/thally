@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from 'next/font/google'
+import { Inter, JetBrains_Mono } from 'next/font/google'
 import Script from 'next/script'
 import './globals.css'
 import '@/styles/docs-handoff.css'
@@ -27,17 +27,11 @@ import { getBuildI18nConfig } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 
 // Default fonts via next/font (optimal performance — preloaded, no FOUC).
-// The Thally brand pairs Inter (body) with Plus Jakarta Sans (display —
-// headings, wordmark); JetBrains Mono covers machine-facing text.
+// Inter covers both reading and display text so the public docs keep one
+// consistent typographic voice; JetBrains Mono covers machine-facing text.
 const fontSans = Inter({
   subsets: ['latin'],
   variable: '--font-sans',
-  display: 'swap',
-})
-
-const fontDisplay = Plus_Jakarta_Sans({
-  subsets: ['latin'],
-  variable: '--font-display',
   display: 'swap',
 })
 
@@ -261,7 +255,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       suppressHydrationWarning
       data-theme={structuralTheme}
       data-content-icons={contentIconTone}
-      className={cn(fontSans.variable, fontDisplay.variable, fontMono.variable)}
+      className={cn(fontSans.variable, fontMono.variable)}
     >
       <head>
         <script id="thally-runtime-name-shim" dangerouslySetInnerHTML={{ __html: runtimeNameShim }} />

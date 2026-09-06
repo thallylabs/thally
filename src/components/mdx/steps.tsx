@@ -44,7 +44,7 @@ export function Step({ title, children }: StepProps) {
 
       {/* Step content */}
       <div className="min-w-0 pt-1">
-        <h3 className="font-heading text-[1.02rem] font-bold tracking-[-0.012em] text-foreground">{title}</h3>
+        <h3 className="font-heading text-[1.02rem] font-semibold tracking-[-0.012em] text-foreground">{title}</h3>
         {children ? (
           <div className="prose prose-sm dark:prose-invert mt-2 max-w-none text-foreground/80">
             {children}

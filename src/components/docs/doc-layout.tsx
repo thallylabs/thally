@@ -60,13 +60,13 @@ function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
         pageId={doc.id}
         repoUrl={effectiveSite.repoUrl}
         label="Edit this page"
-        className="text-[0.83rem] text-foreground/55"
+        className="text-sm leading-6 text-foreground/55"
       />
       {hasIssueReporting ? (
         <ReportAnIssue
           pagePath={doc.href}
           repoUrl={effectiveSite.repoUrl}
-          className="text-[0.83rem] text-foreground/55"
+          className="text-sm leading-6 text-foreground/55"
         />
       ) : null}
     </div>
