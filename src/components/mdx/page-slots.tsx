@@ -85,12 +85,19 @@ export function usePageSlots(): PageSlotsValue {
   return value
 }
 
-/** Desktop destination for canonical Panel content. */
-export function PagePanelSlot({ fallback }: { fallback: ReactNode }) {
+/** Desktop destination for canonical Panel content and persistent rail actions. */
+export function PagePanelSlot({
+  fallback,
+  footer,
+}: {
+  fallback: ReactNode
+  footer?: ReactNode
+}) {
   const { panelCount, setPanelTarget } = usePageSlots()
   return (
-    <div ref={setPanelTarget} className="sticky top-[82px] max-h-[calc(100dvh-82px)] overflow-y-auto">
-      {panelCount === 0 ? fallback : null}
+    <div className="sticky top-[82px] max-h-[calc(100dvh-82px)] overflow-y-auto">
+      <div ref={setPanelTarget}>{panelCount === 0 ? fallback : null}</div>
+      {footer}
     </div>
   )
 }

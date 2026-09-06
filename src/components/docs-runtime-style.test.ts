@@ -7,7 +7,7 @@
  * current-page state.
  */
 
-import { createElement } from 'react'
+import { createElement, type ComponentProps } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -17,6 +17,7 @@ vi.mock('next/navigation', () => ({
 }))
 
 import { Card, Tile } from '@/components/mdx/rich-content'
+import { AgentPrompt } from '@/components/mdx/agent-prompt'
 import { DocHeader } from '@/components/docs/doc-header'
 import { Sidebar } from '@/components/navigation/sidebar'
 import type { DocEntry } from '@/data/docs'
@@ -123,6 +124,21 @@ describe('documentation visual system', () => {
 
     expect(markup).toContain('font-semibold')
     expect(markup).not.toContain('uppercase')
+  })
+
+  it('keeps agent prompts as two-line callouts with a secondary copy action', () => {
+    const props: ComponentProps<typeof AgentPrompt> = {
+      title: 'Copy a complete prompt to write a page',
+      children: createElement('p', null, 'Write one task-focused page.'),
+    }
+    const markup = renderToStaticMarkup(
+      createElement(AgentPrompt, props),
+    )
+
+    expect(markup).toContain('Prefer to let an agent do it?')
+    expect(markup).toContain('Copy a complete prompt to write a page')
+    expect(markup).toContain('border border-input bg-transparent')
+    expect(markup).not.toContain('bg-primary')
   })
 
   it('suppresses a group heading that repeats the tab label', () => {

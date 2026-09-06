@@ -2,7 +2,6 @@
 
 import { usePathname } from 'next/navigation'
 import { startTransition, useCallback, useEffect, useState } from 'react'
-import { EditOnGithub } from '@/components/docs/edit-on-github'
 import { layout, typography } from '@/config/layout'
 import { cn } from '@/lib/utils'
 
@@ -12,16 +11,11 @@ interface TocItem {
   level: number
 }
 
-interface TableOfContentsProps {
-  pageId: string
-  repoUrl: string
-}
-
 // Distance from the top of the viewport (px) at which a heading is considered
 // "active". Matches the scroll-mt offset applied to headings.
 const ACTIVE_OFFSET = 120
 
-export function TableOfContents({ pageId, repoUrl }: TableOfContentsProps) {
+export function TableOfContents() {
   const pathname = usePathname()
   const [items, setItems] = useState<Array<TocItem>>([])
   const [activeId, setActiveId] = useState<string>()
@@ -118,14 +112,6 @@ export function TableOfContents({ pageId, repoUrl }: TableOfContentsProps) {
           )
         })}
       </ul>
-      <div className="mt-5 border-t border-border pt-4">
-        <EditOnGithub
-          pageId={pageId}
-          repoUrl={repoUrl}
-          label="Edit this page"
-          className="text-[0.83rem] text-foreground/55"
-        />
-      </div>
     </aside>
   )
 }

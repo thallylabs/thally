@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { getDocFromParams } from './get-doc'
 import { EditOnGithub } from '@/components/docs/edit-on-github'
+import { ReportAnIssue } from '@/components/docs/report-an-issue'
 
 vi.mock('@/data/docs', () => ({
   deriveTitleFromSlug: (slug: string) => slug,
@@ -49,6 +50,12 @@ describe('document source identity', () => {
       repoUrl: 'https://github.com/example/docs',
     }))
     expect(html).toContain('href="https://github.com/example/docs/edit/main/src/content/introduction.mdx"')
+
+    const issueHtml = renderToStaticMarkup(createElement(ReportAnIssue, {
+      pagePath: doc!.href,
+      repoUrl: 'https://github.com/example/docs',
+    }))
+    expect(issueHtml).toContain('href="https://github.com/example/docs/issues/new?title=Docs%20feedback%3A%20%2F"')
   })
 
   it('keeps non-root identity separate from the display title', async () => {

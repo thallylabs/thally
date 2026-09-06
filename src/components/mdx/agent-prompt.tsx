@@ -9,6 +9,7 @@ import { Check, Copy } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 interface AgentPromptProps {
+  heading?: string
   title?: string
   copyOnly?: boolean
   children: ReactNode
@@ -61,6 +62,7 @@ function promptText(root: HTMLDivElement): string {
 
 /** Render one prompt with an explicit, accessible copy action. */
 export function AgentPrompt({
+  heading = 'Prefer to let an agent do it?',
   title = 'Copy and paste this prompt into your coding agent',
   copyOnly = true,
   children,
@@ -77,14 +79,17 @@ export function AgentPrompt({
   return (
     <section className="not-prose my-7 overflow-hidden rounded-xl border border-border bg-muted/20">
       <div
-        className={`flex flex-wrap items-center justify-between gap-3 ${
-          copyOnly ? 'px-5 py-5' : 'border-b border-border px-4 py-3'
+        className={`flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center ${
+          copyOnly ? 'px-[18px] py-4' : 'border-b border-border px-[18px] py-4'
         }`}
       >
-        <p className="text-sm font-semibold text-foreground">{title}</p>
+        <p className="text-[0.92rem] leading-6 text-foreground/75">
+          <strong className="block font-semibold text-foreground">{heading}</strong>
+          <span>{title}</span>
+        </p>
         <button
           type="button"
-          className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-[10px] border border-input bg-transparent px-[15px] py-2 text-sm font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           aria-live="polite"
           onClick={() => {
             const value = contentRef.current

@@ -4,8 +4,9 @@ description: Add a copyable prompt that gives AI coding agents accurate, task-sp
 ---
 
 Use `<AgentPrompt>` when a reader can delegate the documented task to an AI
-coding agent. The page shows a short task label and **Copy prompt** button; the
-full instructions stay hidden until the reader copies them.
+coding agent. The callout leads with **Prefer to let an agent do it?**, adds a
+task-specific description and secondary **Copy prompt** action, and keeps the
+full instructions hidden until the reader copies them.
 
 ## Example
 
@@ -51,4 +52,5 @@ when the reader knows they must replace them.
 | --- | --- | --- | --- |
 | `children` | MDX | Required | Prompt instructions and clipboard payload. |
 | `copyOnly` | boolean | `true` | Keep the prompt body hidden while making the complete instructions copyable. |
-| `title` | string | Copy-and-paste instruction | Short context shown beside the copy action. |
+| `heading` | string | `Prefer to let an agent do it?` | Short invitation above the task-specific description. |
+| `title` | string | Copy-and-paste instruction | Task-specific description shown beside the copy action. |
