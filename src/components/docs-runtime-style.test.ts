@@ -110,6 +110,22 @@ describe('documentation visual system', () => {
     expect(withoutEyebrow).not.toContain('thally-docs-eyebrow')
   })
 
+  it('can remove the copy action without removing the document header', () => {
+    const doc = {
+      id: 'guides/writing-content',
+      title: 'Write great content',
+      description: 'How to structure pages.',
+      href: '/guides/writing-content',
+    } as DocEntry
+
+    const markup = renderToStaticMarkup(
+      createElement(DocHeader, { doc, showCopyPage: false }),
+    )
+
+    expect(markup).toContain(doc.title)
+    expect(markup).not.toContain('Copy page')
+  })
+
   it('renders the eyebrow as semibold sentence case, never uppercase', () => {
     const doc = {
       id: 'guides/writing-content',
@@ -220,6 +236,43 @@ describe('documentation visual system', () => {
     expect(markup).not.toContain('Fundamentals • Tasks')
     expect(markup.indexOf('Triggering')).toBeLessThan(markup.indexOf('Tasks'))
     expect(markup.indexOf('Tasks')).toBeLessThan(markup.indexOf('Runs'))
+  })
+
+  it('can suppress authored group icons without removing group headings', () => {
+    const sections = [{
+      id: 'guides',
+      title: 'Guides',
+      icon: 'book-open',
+      items: [{ id: 'quickstart', title: 'Quickstart', href: '/guides/quickstart' }],
+      nodes: [{
+        type: 'group' as const,
+        group: {
+          id: 'tools',
+          title: 'Developer tools',
+          icon: 'code',
+          nodes: [{
+            type: 'page' as const,
+            item: { id: 'quickstart', title: 'Quickstart', href: '/guides/quickstart' },
+          }],
+        },
+      }],
+    }]
+    const withIcons = renderToStaticMarkup(
+      createElement(Sidebar, { title: 'Documentation', sections }),
+    )
+    const withoutIcons = renderToStaticMarkup(
+      createElement(Sidebar, {
+        title: 'Documentation',
+        sections,
+        showGroupIcons: false,
+      }),
+    )
+
+    expect(withIcons).toContain('data-icon-name="book-open"')
+    expect(withIcons).toContain('data-icon-name="code"')
+    expect(withoutIcons).not.toContain('data-icon-name="book-open"')
+    expect(withoutIcons).not.toContain('data-icon-name="code"')
+    expect(withoutIcons).toContain('Developer tools')
   })
 
   it('renders source dropdown metadata as a sidebar collection selector', () => {

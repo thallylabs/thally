@@ -16,6 +16,7 @@ interface MobileNavProps {
   collections: Array<SidebarCollection>
   activeCollectionId: string
   onCollectionChange: (id: string) => void
+  showGroupIcons?: boolean
 }
 
 export function MobileNav({
@@ -23,6 +24,7 @@ export function MobileNav({
   collections,
   activeCollectionId,
   onCollectionChange,
+  showGroupIcons = true,
 }: MobileNavProps) {
   const siteName = useSiteName()
   const [open, setOpen] = useState(false)
@@ -72,6 +74,7 @@ export function MobileNav({
                       pathname={pathname}
                       onNavigate={() => setOpen(false)}
                       mobile
+                      showGroupIcons={showGroupIcons}
                     />
                   </div>
                 </div>

@@ -15,6 +15,7 @@ interface SidebarProps {
   activeCollectionId?: string
   onCollectionChange?: (id: string) => void
   navigationPresentation?: NavigationPresentation
+  showGroupIcons?: boolean
   className?: string
 }
 
@@ -25,6 +26,7 @@ export function Sidebar({
   activeCollectionId,
   onCollectionChange,
   navigationPresentation = { display: 'tabs' },
+  showGroupIcons = true,
   className,
 }: SidebarProps) {
   const pathname = usePathname()
@@ -60,12 +62,18 @@ export function Sidebar({
                     beneath the tab heading; the items stand on their own. */}
                 {section.title !== title ? (
                   <p className={cn(typography.meta, 'flex items-center gap-2 px-2 text-base font-semibold normal-case leading-6 tracking-normal text-foreground')}>
-                    {section.icon && <Icon icon={section.icon} className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                    {showGroupIcons && section.icon ? (
+                      <Icon icon={section.icon} className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    ) : null}
                     <span className="truncate">{section.title}</span>
                   </p>
                 ) : null}
                 <div>
-                  <NavigationTree nodes={nodes} pathname={pathname} />
+                  <NavigationTree
+                    nodes={nodes}
+                    pathname={pathname}
+                    showGroupIcons={showGroupIcons}
+                  />
                 </div>
               </div>
             )

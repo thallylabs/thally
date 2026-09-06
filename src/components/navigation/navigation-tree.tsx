@@ -15,6 +15,7 @@ interface NavigationTreeProps {
   pathname: string
   onNavigate?: () => void
   mobile?: boolean
+  showGroupIcons?: boolean
 }
 
 function normalizePath(value: string) {
@@ -43,6 +44,7 @@ function NavigationGroupBranch({
   mobile,
   depth,
   path,
+  showGroupIcons = true,
 }: NavigationTreeProps & { group: NavigationGroup; depth: number; path: string }) {
   const hasActivePath = groupContainsPath(group, pathname)
   const [isManuallyOpen, setIsManuallyOpen] = useState(false)
@@ -75,7 +77,7 @@ function NavigationGroupBranch({
           className={cn('h-3.5 w-3.5 shrink-0 transition-transform', isOpen && 'rotate-90')}
           aria-hidden="true"
         />
-        {group.icon ? (
+        {showGroupIcons && group.icon ? (
           <Icon icon={group.icon} className="h-3.5 w-3.5 shrink-0 text-foreground/50" />
         ) : null}
         <span className="min-w-0 truncate">{group.title}</span>
@@ -89,6 +91,7 @@ function NavigationGroupBranch({
             mobile={mobile}
             depth={depth + 1}
             path={path}
+            showGroupIcons={showGroupIcons}
           />
         </div>
       ) : null}
@@ -103,6 +106,7 @@ function NavigationNodes({
   mobile = false,
   depth = 0,
   path = 'root',
+  showGroupIcons = true,
 }: NavigationTreeProps & { depth?: number; path?: string }) {
   return nodes.map((node, index) => {
     const nodePath = `${path}-${index}`
@@ -117,6 +121,7 @@ function NavigationNodes({
           mobile={mobile}
           depth={depth}
           path={nodePath}
+          showGroupIcons={showGroupIcons}
         />
       )
     }

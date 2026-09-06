@@ -87,6 +87,13 @@ export interface CloudPortableConfig {
     collectAgentTraffic?: boolean
     retentionDays?: number
   }
+  /** Reader-facing page chrome controlled from Thally Cloud Site settings. */
+  content?: {
+    showSidebarGroupIcons?: boolean
+    showBreadcrumbs?: boolean
+    showTableOfContents?: boolean
+    showCopyPage?: boolean
+  }
   /** Public Markdown mirrors exposed at each documentation page's `.md` URL. */
   markdown?: {
     enabled?: boolean
