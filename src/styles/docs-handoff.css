@@ -92,10 +92,51 @@ body {
   backdrop-filter: blur(14px) saturate(1.3);
 }
 
-.thally-docs-topbar-inner {
+.thally-docs-topbar-inner,
+.thally-docs-collection-row {
   max-width: 1280px;
   padding-block: 0;
   padding-inline: 28px;
+}
+
+.thally-docs-root {
+  --docs-header-height: 60px;
+}
+
+.thally-docs-collection-row {
+  height: 44px;
+}
+
+.thally-docs-tabs {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  gap: clamp(0px, calc(80px / var(--collection-count)), 16px);
+}
+
+.thally-docs-tabs .thally-nav-tab-item {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding-inline: clamp(0px, calc(80px / var(--collection-count)), 11px);
+  border-bottom-width: 2px;
+  white-space: nowrap;
+  text-align: start;
+  font-size: 0.88rem;
+  transition: color 150ms;
+}
+
+@media (min-width: 881px) {
+  .thally-docs-root[data-navigation='tabs'] {
+    --docs-header-height: 104px;
+  }
+
+  /* The second row must not cover headings reached through the page TOC. */
+  .thally-docs-root[data-navigation='tabs'] :is([data-heading], .scroll-mt-24) {
+    scroll-margin-top: 128px;
+  }
 }
 
 .thally-docs-brand:hover {
@@ -566,7 +607,7 @@ a[target='_blank']:hover > .thally-docs-card::after {
     display: inline-flex;
   }
 
-  .thally-docs-tabs {
+  .thally-docs-collection-row {
     display: none;
   }
 

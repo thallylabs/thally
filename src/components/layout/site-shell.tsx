@@ -153,7 +153,7 @@ export function SiteShell({
   // which lets the banner-aware desktop sidebar remain sticky.
   return (
     <SiteNameProvider initialName={identity.name}>
-      <div className="thally-docs-root min-h-screen w-full overflow-x-clip bg-background text-foreground">
+      <div className="thally-docs-root min-h-screen w-full overflow-x-clip bg-background text-foreground" data-navigation={navigationPresentation.display}>
         <TopBar
           collections={collections}
           activeCollectionId={activeTabId}
@@ -171,7 +171,7 @@ export function SiteShell({
           siteLinks={identity.links}
           showSidebarGroupIcons={showSidebarGroupIcons}
         />
-        <div className={`thally-docs-shell flex min-h-[calc(100dvh-60px)] w-full ${shell.wrapper}`}>
+        <div className={`thally-docs-shell flex min-h-[calc(100dvh-var(--docs-header-height,60px))] w-full ${shell.wrapper}`}>
           <Sidebar
             sections={activeCollection.sections}
             title={activeCollection.label}
@@ -181,7 +181,7 @@ export function SiteShell({
             navigationPresentation={navigationPresentation}
             showGroupIcons={showSidebarGroupIcons}
           />
-          <div className="flex min-h-[calc(100dvh-60px)] w-full min-w-0 flex-1 flex-col">
+          <div className="flex min-h-[calc(100dvh-var(--docs-header-height,60px))] w-full min-w-0 flex-1 flex-col">
             <main id="main-content" className="thally-docs-main flex-1 py-10 pb-24">
               <PageContainer className={layout.pageGap}>{children}</PageContainer>
             </main>

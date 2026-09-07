@@ -370,8 +370,13 @@ describe('documentation visual system', () => {
       /\.thally-callout-content > :last-child \{\s*margin-bottom: 0;/,
     )
     expect(layout).toContain("topbarHeight: 'h-[60px]'")
-    expect(shell).toContain('calc(100dvh-60px)')
-    expect(sidebar).toContain('sticky top-[60px]')
+    expect(shell).toContain('calc(100dvh-var(--docs-header-height,60px))')
+    expect(sidebar).toContain('sticky top-[var(--docs-header-height,60px)]')
+    expect(css).toContain('--docs-header-height: 60px')
+    expect(css).toMatch(/@media \(min-width: 881px\) \{\s*\.thally-docs-root\[data-navigation='tabs'\] \{\s*--docs-header-height: 104px;/)
+    expect(css).toContain('scroll-margin-top: 128px')
+    expect(css).toMatch(/\.thally-docs-tabs \.thally-nav-tab-item \{[\s\S]*?flex: 0 1 auto;[\s\S]*?min-width: 0;/)
+    expect(css).toContain('calc(80px / var(--collection-count))')
   })
 
   it('moves legacy navbar GitHub destinations into the footer', async () => {
