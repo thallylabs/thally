@@ -376,8 +376,10 @@ describe('documentation visual system', () => {
     expect(css).toMatch(/@media \(min-width: 881px\) \{\s*\.thally-docs-root\[data-navigation='tabs'\] \{\s*--docs-header-height: 104px;/)
     expect(css).toContain('scroll-margin-top: 128px')
     expect(css).toMatch(/\.thally-docs-tabs \.thally-nav-tab-item \{[\s\S]*?flex: 0 0 auto;[\s\S]*?min-width: max-content;/)
-    expect(css).toContain('calc(160px / var(--collection-count))')
-    expect(css).toMatch(/\.thally-docs-collection-row \{[^}]*max-width: none;/)
+    expect(css).toContain('calc(280px / var(--collection-count))')
+    expect(css).toMatch(/\.thally-docs-topbar-inner,\s*\.thally-docs-collection-row \{[^}]*max-width: 1280px;[^}]*padding-inline: 28px;/)
+    expect(css).not.toMatch(/\.thally-docs-collection-row \{[^}]*max-width: none;/)
+    expect(css).toMatch(/\.thally-docs-tabs \{[^}]*font-size: 0.875rem;/)
     expect(css).toMatch(/\.thally-docs-tabs \{[^}]*overflow-x: auto;/)
   })
 

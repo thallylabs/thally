@@ -105,20 +105,18 @@ body {
 
 .thally-docs-collection-row {
   height: 44px;
-  /* Navigation can use the viewport even when the prose shell is capped. */
-  max-width: none;
-  container-type: inline-size;
+  /* Both header rows inherit the same centered shell and inline gutters. */
 }
 
 .thally-docs-tabs {
   display: flex;
   height: 100%;
   min-width: 0;
-  gap: clamp(8px, calc(160px / var(--collection-count)), 24px);
+  gap: clamp(1rem, calc(280px / var(--collection-count)), 1.5rem);
   overflow-x: auto;
   scrollbar-width: thin;
-  /* Tighten typography only within a readable range; never cut off labels. */
-  font-size: clamp(0.75rem, calc(14cqi / var(--collection-count)), 0.88rem);
+  /* Density changes spacing, never the reader's text size. */
+  font-size: 0.875rem;
 }
 
 .thally-docs-tabs::-webkit-scrollbar {
