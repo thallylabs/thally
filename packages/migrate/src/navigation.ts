@@ -43,13 +43,69 @@ export function addMintlifyDirectoryRedirects(
   const pageIds = new Set(pages.map((page) => page.id))
   const redirects = [...(config.redirects ?? [])]
   const redirectSources = new Set(redirects.map((redirect) => redirect.source.replace(/\/$/, '') || '/'))
+  function hasAuthoredRedirect(source: string): boolean {
+    if (redirectSources.has(source)) return true
+    return (config.redirects ?? []).some((redirect) => {
+      // A trailing catch-all also owns its empty suffix. Do not insert an
+      // exact alias that competes with that authored directory behavior.
+      const match = redirect.source.match(/^(.*)\/:[A-Za-z_][A-Za-z0-9_]*\*\/?$/)
+      return match ? source === match[1] || source.startsWith(`${match[1]}/`) : false
+    })
+  }
   for (const page of pages) {
     if (!/\/(?:overview|introduction)$/.test(page.navigationId)) continue
     const parent = page.id.replace(/\/(?:overview|introduction)$/, '')
     if (!parent || pageIds.has(parent)) continue
     const source = `/${parent}`
-    if (redirectSources.has(source)) continue
+    if (hasAuthoredRedirect(source)) continue
     redirects.push({ source, destination: `/${page.id}`, permanent: false })
+    redirectSources.add(source)
+  }
+
+  const navigationOrder: Array<string> = []
+  function collectPages(nodes: Array<string | MigrationNavigationGroup>): void {
+    for (const node of nodes) {
+      if (typeof node === 'string') navigationOrder.push(node)
+      else if (!node.hidden) collectPages(node.pages)
+    }
+  }
+  for (const tab of config.tabs) {
+    if (!tab.hidden) collectPages([...(tab.pages ?? []), ...(tab.groups ?? [])])
+  }
+  const pagesByNavigationId = new Map<string, Array<MigrationPage>>()
+  for (const page of pages) {
+    if (page.hidden) continue
+    const variants = pagesByNavigationId.get(page.navigationId) ?? []
+    variants.push(page)
+    pagesByNavigationId.set(page.navigationId, variants)
+  }
+  const firstDescendantByDirectory = new Map<string, MigrationPage>()
+  for (const navigationId of navigationOrder) {
+    for (const page of pagesByNavigationId.get(navigationId) ?? []) {
+      const segments = page.id.split('/')
+      for (let length = 1; length < segments.length; length++) {
+        const directory = segments.slice(0, length).join('/')
+        if (!firstDescendantByDirectory.has(directory)) firstDescendantByDirectory.set(directory, page)
+      }
+    }
+  }
+  for (const redirect of config.redirects ?? []) {
+    // An authored redirect is evidence that a directory itself was a public
+    // route, even when its landing page has no overview/introduction filename.
+    // Resolve only that destination, using source navigation order rather than
+    // filesystem order. Required parameters and arbitrary patterns stay intact.
+    const destination = redirect.destination.split(/[?#]/, 1)[0]
+      .replace(/\/:[A-Za-z_][A-Za-z0-9_]*\*\/?$/, '')
+    if (!destination.startsWith('/') || destination.startsWith('//') || /[:*()[\]{}]/.test(destination)) continue
+    const directory = trimEdgeSlashes(destination)
+    if (!directory || pageIds.has(directory)) continue
+    const source = `/${directory}`
+    if (hasAuthoredRedirect(source)) continue
+    const landing = firstDescendantByDirectory.get(directory)
+    if (!landing) continue
+    // Match full stored ids, not locale-independent navigation ids: a French
+    // directory must never be redirected to an English descendant.
+    redirects.push({ source, destination: `/${landing.id}`, permanent: false })
     redirectSources.add(source)
   }
   return redirects.length > 0 ? { ...config, redirects } : config
