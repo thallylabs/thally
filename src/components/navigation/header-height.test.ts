@@ -15,8 +15,14 @@ describe('header height observation', () => {
       setProperty: (name: string, value: string) => values.set(name, value),
       removeProperty: (name: string) => values.delete(name),
     } }
+    const dockValues = new Map<string, string>()
+    const layout = { style: {
+      getPropertyValue: (name: string) => dockValues.get(name) ?? '',
+      setProperty: (name: string, value: string) => dockValues.set(name, value),
+      removeProperty: (name: string) => dockValues.delete(name),
+    } }
     const header = {
-      closest: vi.fn(() => root),
+      closest: vi.fn((selector: string) => selector === '.thally-docs-root' ? root : layout),
       getBoundingClientRect: () => ({ height }),
     } as unknown as HTMLElement
     const observe = vi.fn()
@@ -29,18 +35,22 @@ describe('header height observation', () => {
     expect(header.closest).toHaveBeenCalledWith('.thally-docs-root')
     expect(observe).toHaveBeenCalledWith(header)
     expect(values.get('--docs-header-height')).toBe('104px')
+    expect(dockValues.get('--docs-header-height')).toBe('104px')
     height = 148
     resize()
     expect(values.get('--docs-header-height')).toBe('148px')
+    expect(dockValues.get('--docs-header-height')).toBe('148px')
     height = 0
     resize()
     expect(values.get('--docs-header-height')).toBe('148px')
     height = 60
     resize()
     expect(values.get('--docs-header-height')).toBe('60px')
+    expect(dockValues.get('--docs-header-height')).toBe('60px')
     cleanup()
     expect(disconnect).toHaveBeenCalledOnce()
     expect(values.get('--docs-header-height')).toBe('60px')
+    expect(dockValues.has('--docs-header-height')).toBe(false)
   })
 
   it('leaves an unscoped header alone', () => {

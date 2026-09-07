@@ -121,11 +121,14 @@ body {
   display: flex;
   align-items: center;
   flex: 0 0 auto;
-  min-width: max-content;
+  min-width: 0;
+  max-width: 100%;
   min-height: 44px;
   padding-inline: 0;
   border-bottom-width: 2px;
-  white-space: nowrap;
+  /* Wrap whole items first, but let a label wider than the shell remain readable. */
+  white-space: normal;
+  overflow-wrap: anywhere;
   text-align: start;
   font-size: inherit;
   transition: color 150ms;

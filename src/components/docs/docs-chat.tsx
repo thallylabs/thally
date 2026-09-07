@@ -1,5 +1,7 @@
 'use client'
 
+/** Documentation assistant dock; its scoped header offset follows wrapped navigation. */
+
 import { useState, useRef, useEffect, useCallback } from 'react'
 import NextImage from 'next/image'
 import { X, ArrowUp, Square, Maximize2, Minimize2, BookOpen, ChevronDown, ArrowUpRight, Paperclip, Copy, ThumbsUp, ThumbsDown, RefreshCw } from 'lucide-react'
@@ -388,7 +390,7 @@ export function DocsChat({
     <>
       {/* The dock starts below the shared top bar so navigation stays usable. */}
       <aside
-          className="thally-docs-chat-panel fixed bottom-0 right-0 top-[60px] z-[60] flex flex-col overflow-hidden border-l border-border"
+          className="thally-docs-chat-panel fixed bottom-0 right-0 top-[var(--docs-header-height,60px)] z-[60] flex flex-col overflow-hidden border-l border-border"
           aria-label={liveLabel}
           style={{
             width: expanded ? 'min(680px, 100vw)' : 'min(420px, 100vw)',
