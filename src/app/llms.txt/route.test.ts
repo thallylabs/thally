@@ -43,6 +43,10 @@ import { middleware } from '@/middleware'
 
 const BASE_URL = 'http://localhost:3040'
 const EVENT = { waitUntil: vi.fn() } as never
+// This is a full customer-corpus integration matrix, not a fixed-size unit
+// fixture. Large imported sites must retain every assertion beyond the default
+// five-second unit-test budget; keep an explicit bounded integration timeout.
+const CORPUS_MATRIX_TIMEOUT_MS = 60_000
 
 const originalFetch = globalThis.fetch
 
@@ -127,5 +131,5 @@ describe('llms.txt canonical page matrix', () => {
         ).toContain(`/api/docs/${entry!.id}`)
       }
     }
-  })
+  }, CORPUS_MATRIX_TIMEOUT_MS)
 })

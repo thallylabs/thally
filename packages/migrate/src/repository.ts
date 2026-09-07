@@ -13,6 +13,8 @@ import {
 } from 'node:fs'
 import { basename, dirname, extname, relative, resolve as resolvePath } from 'node:path'
 
+import { createComponentMigrator } from './components.js'
+
 import {
   projectDocusaurusNavigation,
   readDocusaurusSidebars,
@@ -24,6 +26,7 @@ import {
 import { parseMarkdownPage } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
+  addMintlifyHomepageRedirects,
   buildNavigationFromPages,
   isDocumentationExtension,
   projectMintlifyNavigation,
@@ -31,6 +34,7 @@ import {
 } from './navigation.js'
 import {
   normalizeAssetPath,
+  mintlifyLocalizedReference,
   pageIdFromReference,
   resolveWithin,
   trimEdgeSlashes,
@@ -597,6 +601,20 @@ function injectOpenApi(config: MigrationDocsConfig, filename: string): Migration
   return { ...config, tabs }
 }
 
+/** Identify component ownership independently of checkout paths and URL syntax. */
+function componentSourceIdentity(sourceUrl: string, repositoryDir: string, siteRoot: string): string {
+  const url = new URL(sourceUrl)
+  // A GitHub tree URL and the repository root identify the same source. Branch
+  // changes should update its components, while separate monorepo sites must
+  // retain independent namespaces even if their snippet filenames coincide.
+  // Credentials, queries and fragments are not source identity and never feed
+  // generated names; only the canonical origin/path and docs root participate.
+  const repository = url.hostname.toLowerCase() === 'github.com'
+    ? `https://github.com/${url.pathname.split('/').filter(Boolean).slice(0, 2).join('/').replace(/\.git$/i, '').toLowerCase()}`
+    : `${url.origin}${trimTrailingSlashes(url.pathname)}`
+  return JSON.stringify([repository, relative(repositoryDir, siteRoot).replace(/\\/g, '/')])
+}
+
 /** Import an already-available repository directory into a canonical bundle. */
 export function migrateRepository(options: RepositoryMigrationOptions): MigrationBundle {
   const repositoryDir = options.repositoryDir
@@ -626,6 +644,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     return platform === 'mintlify' ? '' : detectRepositoryDocsDir(repositoryDir)
   })()
   const warnings: Array<MigrationWarning> = []
+  const componentRoot = mintlifyProjectRoot ?? repositoryDir
+  const componentMigrator = platform === 'mintlify'
+    ? createComponentMigrator(componentRoot, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
+    : undefined
   let docsConfig: MigrationDocsConfig = { tabs: [] }
   const referenceMap = new Map<string, { navigationId: string; locale?: string }>()
   const exactReferenceMap = new Map<string, { navigationId: string; locale?: string }>()
@@ -643,9 +665,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         warnings.push(...projected.warnings)
         for (const [index, reference] of projected.pageReferences.entries()) {
           const key = normalizedReferenceKey(reference.ref)
-          referenceMap.set(key, reference)
-          exactReferenceMap.set(exactReferenceKey(reference.ref), reference)
-          referenceOrder.set(key, index)
+          // Shared source pages may appear in several language menus. The
+          // projector visits the default language first; retain that primary
+          // file so other locales can use the runtime's content fallback.
+          if (!referenceMap.has(key)) referenceMap.set(key, reference)
+          const exactKey = exactReferenceKey(reference.ref)
+          if (!exactReferenceMap.has(exactKey)) exactReferenceMap.set(exactKey, reference)
+          if (!referenceOrder.has(key)) referenceOrder.set(key, index)
         }
       }
     } catch (error) {
@@ -682,6 +708,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let discovered = files.length
 
   const localeConfig = docsConfig.i18n
+  const defaultPageIds = new Set([...referenceMap.values()]
+    .filter((reference) => !reference.locale || reference.locale === localeConfig?.defaultLocale)
+    .map((reference) => reference.navigationId))
+  const routeAliases: NonNullable<MigrationDocsConfig['redirects']> = []
   const pageFiles = [...files].sort((left, right) => {
     const leftOrder = referenceOrder.get(normalizedReferenceKey(left.relativePath)) ?? Number.MAX_SAFE_INTEGER
     const rightOrder = referenceOrder.get(normalizedReferenceKey(right.relativePath)) ?? Number.MAX_SAFE_INTEGER
@@ -719,10 +749,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     let locale = referenced?.locale
     let navigationId = referenced?.navigationId ?? pageIdFromReference(file.relativePath, platform === 'mintlify')
     if (!referenced && localeConfig) {
-      const prefix = file.relativePath.split('/', 1)[0]
-      if (localeConfig.locales.some((entry) => entry.code === prefix)) {
-        locale = prefix
-        navigationId = pageIdFromReference(file.relativePath.slice(prefix.length + 1), platform === 'mintlify')
+      for (const entry of localeConfig.locales) {
+        const localized = mintlifyLocalizedReference(file.relativePath, entry.code, defaultPageIds)
+        if (localized === file.relativePath) continue
+        locale = entry.code
+        navigationId = pageIdFromReference(localized, platform === 'mintlify')
+        break
       }
     }
     if (!navigationId) {
@@ -732,7 +764,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     const isDefaultLocale = !locale || locale === localeConfig?.defaultLocale
     const id = isDefaultLocale ? navigationId : `${locale}/${navigationId}`
-    const raw = inlineMdxSnippets(
+    let raw = inlineMdxSnippets(
       readFileSync(file.absolutePath, 'utf8'),
       file.absolutePath,
       repositoryDir,
@@ -741,6 +773,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       mintlifyProjectRoot ?? docusaurusProjectRoot ?? repositoryDir,
       snippetAliases,
     )
+    if (componentMigrator) raw = componentMigrator.transform(raw, file.absolutePath)
     let docusaurusDescriptor: Omit<DocusaurusPageDescriptor, 'title'> | undefined
     const page = parseMarkdownPage({
       id,
@@ -790,6 +823,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     seenPageIds.add(page.id)
     pages.push(page)
+    if (platform === 'mintlify') {
+      const sourcePath = exactReferenceKey(file.relativePath)
+      // Only literal portable paths become Next redirects: source filenames
+      // must never introduce route patterns such as `:param` or wildcards.
+      if (sourcePath !== page.id && /^[A-Za-z0-9_./-]+$/.test(sourcePath)) {
+        routeAliases.push({ source: `/${sourcePath}`, destination: `/${page.id}`, permanent: false })
+      }
+    }
     if (docusaurusDescriptor) {
       docusaurusDescriptors.push({ ...docusaurusDescriptor, title: page.title })
     }
@@ -869,7 +910,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     docsConfig = injectOpenApi(docsConfig, filename)
   }
-  if (platform === 'mintlify') docsConfig = addMintlifyDirectoryRedirects(docsConfig, pages)
+  if (platform === 'mintlify') {
+    const sources = new Set((docsConfig.redirects ?? []).map((redirect) => redirect.source))
+    const aliases = routeAliases.filter((redirect) => !sources.has(redirect.source))
+    if (aliases.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...aliases] }
+    docsConfig = addMintlifyHomepageRedirects(addMintlifyDirectoryRedirects(docsConfig, pages), pages)
+  }
 
   if (platform === 'docusaurus' && docusaurusProjectRoot && !options.docusaurusSkipPlugins) {
     for (const plugin of additionalDocusaurusPluginRoots(repositoryDir, docusaurusProjectRoot)) {
@@ -916,6 +962,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     platform,
     pages,
     assets,
+    ...(componentMigrator ? { componentFiles: componentMigrator.files() } : {}),
     docsConfig,
     ...(mintlifyConfig ? {
       site: {

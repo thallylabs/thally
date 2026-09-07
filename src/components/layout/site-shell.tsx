@@ -4,6 +4,7 @@
 
 import { Footer } from '@/components/layout/footer'
 import { TopBar } from '@/components/layout/top-bar'
+import { getHeaderNavigationLayout } from '@/components/navigation/header-layout'
 import { Sidebar } from '@/components/navigation/sidebar'
 import { PageContainer } from '@/components/layout/sections'
 import { layout, shell } from '@/config/layout'
@@ -19,8 +20,8 @@ export interface I18nConfig {
   locales: Array<{ code: string; label: string }>
 }
 
-function collectionContainsPath(collection: SidebarCollection, pathname: string, currentPath?: string) {
-  if (collection.href && matchesPath(collection.href, pathname)) {
+function collectionContainsPath(collection: SidebarCollection, pathname: string, currentPath?: string, localeRoot?: string) {
+  if (collection.href && (matchesPath(collection.href, pathname, localeRoot) || matchesPath(collection.href, currentPath ?? pathname))) {
     return true
   }
   // API collections own all /api/* routes — check both full pathname and locale-stripped path
@@ -29,18 +30,22 @@ function collectionContainsPath(collection: SidebarCollection, pathname: string,
     return true
   }
   return collection.sections.some((section) =>
-    section.items.some((item) => matchesPath(item.href, pathname)),
+    // Until the locale snapshot hydrates, the root layout still has primary
+    // language hrefs. Those identify the same collection after removing locale.
+    section.items.some((item) => matchesPath(item.href, pathname, localeRoot) || matchesPath(item.href, currentPath ?? pathname)),
   )
 }
 
-function matchesPath(targetHref: string, pathname: string) {
+function matchesPath(targetHref: string, pathname: string, localeRoot?: string) {
   if (!targetHref || /^https?:\/\//i.test(targetHref)) {
     return false
   }
   const normalizedTarget = normalizePath(targetHref)
   const normalizedPath = normalizePath(pathname)
-  if (normalizedTarget === '/') {
-    return normalizedPath === '/'
+  // A translated home link has the same exact-match ownership as `/`; its
+  // locale prefix must not turn it into the parent of every translated page.
+  if (normalizedTarget === '/' || normalizedTarget === localeRoot) {
+    return normalizedPath === normalizedTarget
   }
   return normalizedPath === normalizedTarget || normalizedPath.startsWith(`${normalizedTarget}/`)
 }
@@ -110,13 +115,14 @@ export function SiteShell({
     }
   }
   const scopeKey = navigationScopeKey(currentLocale, currentPath, i18nConfig)
+  const localeRoot = pathname !== currentPath ? `/${currentLocale}` : undefined
   const hydratedCollections = useSidebarCollectionsStore(
     (state) => state.collectionsByScope[scopeKey],
   )
   const collections = hydratedCollections ?? initialCollections
   const navigableCollections = collections.filter((collection) => collection.sections.length > 0)
   const matchedCollection =
-    navigableCollections.find((collection) => collectionContainsPath(collection, pathname, currentPath)) ??
+    navigableCollections.find((collection) => collectionContainsPath(collection, pathname, currentPath, localeRoot)) ??
     navigableCollections[0] ??
     collections[0]
   // Manual override: set when the user clicks a tab and ignored once navigation
@@ -124,7 +130,7 @@ export function SiteShell({
   const [selectedCollectionId, setSelectedCollectionId] = useState<SidebarCollection['id'] | null>(null)
   const selectedCollection = navigableCollections.find((collection) => collection.id === selectedCollectionId)
   const activeCollection =
-    selectedCollection && collectionContainsPath(selectedCollection, pathname, currentPath)
+    selectedCollection && collectionContainsPath(selectedCollection, pathname, currentPath, localeRoot)
       ? selectedCollection
       : matchedCollection
 
@@ -140,7 +146,7 @@ export function SiteShell({
       (collection) =>
         collection.href &&
         !/^https?:\/\//.test(collection.href) &&
-        (matchesPath(collection.href, pathname) || matchesPath(collection.href, currentPath)),
+        (matchesPath(collection.href, pathname, localeRoot) || matchesPath(collection.href, currentPath)),
     )?.id ?? activeCollection.id
   const relocatedGithubHref = navbarConfig?.links?.find((link) => link.type === 'github')?.href
 
@@ -148,7 +154,7 @@ export function SiteShell({
   // which lets the banner-aware desktop sidebar remain sticky.
   return (
     <SiteNameProvider initialName={identity.name}>
-      <div className="thally-docs-root min-h-screen w-full overflow-x-clip bg-background text-foreground">
+      <div className="thally-docs-root min-h-screen w-full overflow-x-clip bg-background text-foreground" data-navigation={navigationPresentation.display} data-header-layout={getHeaderNavigationLayout(navigationPresentation.display, collections.length)}>
         <TopBar
           collections={collections}
           activeCollectionId={activeTabId}
@@ -166,7 +172,7 @@ export function SiteShell({
           siteLinks={identity.links}
           showSidebarGroupIcons={showSidebarGroupIcons}
         />
-        <div className={`thally-docs-shell flex min-h-[calc(100dvh-60px)] w-full ${shell.wrapper}`}>
+        <div className={`thally-docs-shell flex min-h-[calc(100dvh-var(--docs-header-height,60px))] w-full ${shell.wrapper}`}>
           <Sidebar
             sections={activeCollection.sections}
             title={activeCollection.label}
@@ -176,7 +182,7 @@ export function SiteShell({
             navigationPresentation={navigationPresentation}
             showGroupIcons={showSidebarGroupIcons}
           />
-          <div className="flex min-h-[calc(100dvh-60px)] w-full min-w-0 flex-1 flex-col">
+          <div className="flex min-h-[calc(100dvh-var(--docs-header-height,60px))] w-full min-w-0 flex-1 flex-col">
             <main id="main-content" className="thally-docs-main flex-1 py-10 pb-24">
               <PageContainer className={layout.pageGap}>{children}</PageContainer>
             </main>

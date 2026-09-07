@@ -57,6 +57,28 @@ export function pageIdFromReference(value: string, preserveCase = false): string
   return segments.join('/') || 'introduction'
 }
 
+/**
+ * Resolve language directories and legacy language-prefixed sections to the
+ * same content identity used by default-language navigation. A hyphenated
+ * section is only an alias when its unprefixed counterpart actually exists.
+ */
+export function mintlifyLocalizedReference(
+  value: string,
+  locale: string,
+  defaultPageIds: ReadonlySet<string> = new Set(),
+): string {
+  const reference = value.replace(/^\/+/, '')
+  const localePrefix = `${locale.toLowerCase()}/`
+  if (reference.toLowerCase().startsWith(localePrefix)) return reference.slice(localePrefix.length)
+  const sectionPrefix = `${locale.toLowerCase()}-`
+  if (reference.toLowerCase().startsWith(sectionPrefix)) {
+    const candidate = reference.slice(sectionPrefix.length)
+    const candidateId = pageIdFromReference(candidate, true)
+    if (candidateId && defaultPageIds.has(candidateId)) return candidate
+  }
+  return value
+}
+
 /** Resolve an untrusted relative path and prove it remains below `root`. */
 export function resolveWithin(root: string, candidate: string): string {
   if (isAbsolute(candidate) || candidate.includes('\0')) {

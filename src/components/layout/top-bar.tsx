@@ -1,8 +1,12 @@
 'use client'
 
+/** Shared documentation header: up to six inline tabs, then a dedicated second row. */
+
 import { ExternalLink, Sparkles } from 'lucide-react'
 import type { SidebarCollection, DocsJsonNavbar, NavigationPresentation } from '@/data/docs'
 import { MobileNav } from '@/components/navigation/mobile-nav'
+import { CollectionTabs } from '@/components/navigation/collection-tabs'
+import { getHeaderNavigationLayout } from '@/components/navigation/header-layout'
 import { CommandSearch } from '@/components/search/command-search'
 import { ThemeSwitch } from '@/components/theme/theme-switch'
 import { VersionSwitcher } from '@/components/docs/version-switcher'
@@ -44,6 +48,7 @@ export function TopBar({
   showSidebarGroupIcons = true,
 }: TopBarProps) {
   const siteName = useSiteName()
+  const headerNavigationLayout = getHeaderNavigationLayout(navigationPresentation.display, collections.length)
   const {
     hasAssistantEntryPoint,
     assistantLabel,
@@ -76,8 +81,7 @@ export function TopBar({
   const visibleLinkCount = navbarConfig?.links ? navbarLinks.length : (supportLink ? 1 : 0)
   // Preserve the generous default search affordance for typical documentation
   // sites. Only dense, highly customized navbars opt into the compact layout.
-  const visibleCollectionCount = navigationPresentation.display === 'tabs' ? collections.length : 0
-  const isCrowded = visibleCollectionCount + visibleLinkCount + (primaryCta ? 1 : 0) >= 8
+  const isCrowded = visibleLinkCount + (primaryCta ? 1 : 0) >= 8
 
   return (
     <header className="thally-docs-topbar sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-xl">
@@ -92,8 +96,8 @@ export function TopBar({
           onCollectionChange={onCollectionChange}
           showGroupIcons={showSidebarGroupIcons}
         />
-        {/* The brand block needs clear separation from the section tabs or
-            "Docs" reads as the first tab; mr-5 marks where the brand ends. */}
+        {/* Compact navigation keeps the original brand → locale → tabs → actions
+            order; seven or more collection links move below this row. */}
         <IntentPrefetchLink
           href="/"
           className="thally-docs-brand mr-5 flex shrink-0 items-center gap-2 text-foreground"
@@ -107,55 +111,10 @@ export function TopBar({
         {i18nConfig && i18nConfig.locales.length >= 2 ? (
           <LocaleSwitcher locales={i18nConfig.locales} currentLocale={currentLocale ?? i18nConfig.defaultLocale} currentPath={currentPath ?? '/'} defaultLocale={i18nConfig.defaultLocale} />
         ) : null}
-        {navigationPresentation.display === 'tabs' ? (
-          <nav className="thally-docs-tabs flex h-full items-center gap-4" aria-label="Documentation sections">
-            {collections.map((collection) => {
-              const isActive = collection.id === activeCollectionId
-              const destination = collection.href ?? collection.sections[0]?.items[0]?.href
-              const baseClasses = cn(
-                'thally-nav-tab-item group relative flex h-full shrink-0 items-center whitespace-nowrap border-b-2 px-[11px] pt-px text-left text-[0.88rem] font-medium transition',
-                isActive
-                  ? 'thally-nav-tab-active border-foreground font-semibold text-foreground'
-                  : 'border-transparent text-foreground/60 hover:text-foreground',
-              )
-              if (destination) {
-                const isExternal = /^https?:\/\//.test(destination)
-                if (isExternal) {
-                  return (
-                    <a
-                      key={collection.id}
-                      href={destination}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={baseClasses}
-                    >
-                      {collection.label}
-                    </a>
-                  )
-                }
-                return (
-                  <IntentPrefetchLink
-                    key={collection.id}
-                    href={destination}
-                    onClick={() => onCollectionChange(collection.id)}
-                    className={baseClasses}
-                  >
-                    {collection.label}
-                  </IntentPrefetchLink>
-                )
-              }
-              return (
-                <button
-                  key={collection.id}
-                  type="button"
-                  onClick={() => onCollectionChange(collection.id)}
-                  className={baseClasses}
-                >
-                  {collection.label}
-                </button>
-              )
-            })}
-          </nav>
+        {headerNavigationLayout === 'inline' ? (
+          <div className="thally-docs-inline-collections">
+            <CollectionTabs collections={collections} activeCollectionId={activeCollectionId} onCollectionChange={onCollectionChange} />
+          </div>
         ) : null}
         <div className="thally-docs-actions ml-auto flex shrink-0 items-center gap-2">
           <div className="thally-docs-search shrink-0">
@@ -196,6 +155,11 @@ export function TopBar({
           ) : null}
         </div>
       </div>
+      {headerNavigationLayout === 'stacked' ? (
+        <div className={cn('thally-docs-collection-row', shell.topbar)}>
+          <CollectionTabs collections={collections} activeCollectionId={activeCollectionId} onCollectionChange={onCollectionChange} />
+        </div>
+      ) : null}
     </header>
   )
 }

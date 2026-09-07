@@ -1,6 +1,6 @@
 /** Regression coverage for the optional public Markdown page projection. */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getCloudSiteConfig: vi.fn(),
@@ -22,7 +22,10 @@ function request(path: string): Request {
 }
 
 describe('GET /api/markdown/[...slug]', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
   beforeEach(() => {
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], markdown: { enabled: true } }))
     vi.clearAllMocks()
     mocks.getCloudSiteConfig.mockResolvedValue({
       siteConfig: {
@@ -69,9 +72,17 @@ describe('GET /api/markdown/[...slug]', () => {
       params: Promise.resolve({ slug: ['guide'] }),
     })
 
-    // The scaffold enables `.md` mirrors by default; sites opt out through
-    // docs.json or the Cloud portable override (covered above).
     expect(response.status).toBe(200)
     expect(mocks.read).toHaveBeenCalledWith('src/content/guide.mdx')
+  })
+
+  it('respects a repository opt-out when Cloud has no setting', async () => {
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], markdown: { enabled: false } }))
+    mocks.getCloudSiteConfig.mockResolvedValue(null)
+    const response = await GET(request('/api/markdown/guide'), {
+      params: Promise.resolve({ slug: ['guide'] }),
+    })
+    expect(response.status).toBe(404)
+    expect(mocks.read).not.toHaveBeenCalled()
   })
 })

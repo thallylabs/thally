@@ -23,6 +23,7 @@ import {
 
 import { scaffold } from '../scaffold.js'
 import { initGit, installDeps } from '../utils.js'
+import { validateMigration, type MigrationValidation } from './validate.js'
 
 export interface MigrateOptions {
   sourceUrl: string
@@ -39,6 +40,10 @@ export interface MigrateOptions {
   platform?: MigrationPlatform
   /** Optional host fetch boundary; used by Thally Cloud adapters and tests. */
   fetcher?: MigrationFetcher
+  /** Explicitly opt out of content/build gates; the report remains unverified. */
+  skipValidation?: boolean
+  /** Explicitly allow local installation/build execution of reviewed source. Never implied by yes. */
+  trustSource?: boolean
 }
 
 export interface MigrateResult {
@@ -47,6 +52,8 @@ export interface MigrateResult {
   projectDir: string
   platform: MigrationBundle['platform']
   warnings: Array<MigrationWarning>
+  validation: MigrationValidation
+  reportPath: string
 }
 
 function projectPath(projectDir: string, candidate: string): string {
@@ -123,7 +130,9 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
       projectName: options.projectName ?? bundle.site?.name ?? 'My Docs',
       description: bundle.site?.description ?? `Documentation migrated from ${new URL(options.sourceUrl).hostname}`,
       brandPreset: 'primary',
-      repoUrl: bundle.sourceKind === 'repository' ? options.sourceUrl : '',
+      // Source provenance is not the destination repository. Migrated pages
+      // live at new paths, so source URLs cannot power edit/issue actions.
+      repoUrl: '',
       doInstall: false,
     })
     resetFreshMigrationContent(projectDir)
@@ -131,8 +140,21 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     throw new Error(`Project directory "${projectDir}" does not exist. Use without --into to scaffold a new one.`)
   }
 
+  // Preserve portable runtime capabilities, not the starter's sample pages,
+  // navigation or locale setup. Mintlify has no equivalent Markdown toggle.
+  if (!options.into) {
+    const starterConfig = readExistingConfig(projectDir)
+    if (starterConfig?.markdown) bundle.docsConfig.markdown = starterConfig.markdown
+    // An absent locale block invokes the runtime's legacy bilingual fallback.
+    // A single-language source must not acquire a phantom translation menu.
+    bundle.docsConfig.i18n ??= { defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }] }
+  }
+
   const rendered = renderMigrationFiles(bundle, {
     existingConfig: options.into ? readExistingConfig(projectDir) : undefined,
+    existingComponentRegistry: existsSync(projectPath(projectDir, 'src/mdx/custom-components.tsx'))
+      ? readFileSync(projectPath(projectDir, 'src/mdx/custom-components.tsx'), 'utf8')
+      : undefined,
   })
   for (const file of rendered) {
     const destination = projectPath(projectDir, file.path)
@@ -145,15 +167,44 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   }
   console.log(`  ✓ Imported ${bundle.pages.length} pages and ${bundle.assets.length} assets from ${bundle.platform}.`)
 
-  if (!options.into) {
-    installDeps(projectDir)
-    initGit(projectDir)
+  let installationFailed = false
+  if (!options.into && options.trustSource === true && !options.skipValidation) {
+    try {
+      installDeps(projectDir)
+    } catch {
+      // Imported files and static diagnostics remain useful when a registry or
+      // lifecycle step fails. Always produce the same machine-readable report.
+      installationFailed = true
+    }
   }
+  console.log('\n  Validating imported documentation...')
+  const validation = await validateMigration(projectDir, options.skipValidation, options.trustSource === true, installationFailed)
+  const reportPath = projectPath(projectDir, 'migration-report.json')
+  writeFileSync(reportPath, `${JSON.stringify({
+    version: 1,
+    sourceUrl: `${new URL(options.sourceUrl).origin}${new URL(options.sourceUrl).pathname}`,
+    platform: bundle.platform,
+    pages: bundle.pages.length,
+    assets: bundle.assets.length,
+    components: bundle.componentFiles?.length ?? 0,
+    warnings: bundle.warnings,
+    validation,
+  }, null, 2)}\n`)
+  for (const message of validation.messages) console.warn(`  ⚠  ${message}`)
+  console.log(`  Migration report: ${reportPath}`)
+  if (validation.content === 'passed' && validation.build === 'passed') {
+    console.log(`  ✓ Content and production build passed.${bundle.warnings.length ? ' Review the migration warnings for compatibility limitations.' : ''}`)
+  } else {
+    console.warn('  Import retained, but validation is incomplete. Do not publish without reviewing the report.')
+  }
+  if (!options.into) initGit(projectDir)
   return {
     pagesWritten: bundle.pages.length,
     assetsWritten: bundle.assets.length,
     projectDir,
     platform: bundle.platform,
     warnings: bundle.warnings,
+    validation,
+    reportPath,
   }
 }

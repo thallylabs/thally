@@ -37,6 +37,13 @@ customer-owned paths during upgrades.
 | `thally starter update [--apply]`           | Plan or explicitly apply an immutable three-way runtime update |
 | `thally mcp`                                | Start the Model Context Protocol server (stdio)                |
 
+`thally migrate` writes a `migration-report.json` with content and production
+build check statuses. Failed checks return a nonzero status while retaining imported
+files for review. `--skip-validation` explicitly performs an unverified import.
+Installation and builds execute project code and require the interactive trust
+confirmation or `--trust-source`; `--yes` alone does not authorize execution.
+Without authorization, static checks still run and the build is marked skipped.
+
 `thally migrate` asks which platform currently hosts the docs and dispatches to
 the Mintlify or Docusaurus adapter. Non-interactive callers can pass
 `--platform mintlify`, `--platform docusaurus`, or `--platform auto`.

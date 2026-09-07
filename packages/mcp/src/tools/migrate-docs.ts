@@ -18,6 +18,7 @@ const migrationSourceShape = {
   apiKey: z.string().optional().describe('Anthropic API key for non-Markdown file conversion'),
   maxPages: z.number().int().min(1).max(1000).optional().describe('Maximum public URL pages to import'),
   platform: z.enum(['mintlify', 'docusaurus']).optional().describe('Source platform (default: auto-detect)'),
+  trustSource: z.boolean().optional().describe('Only set true after the user explicitly authorizes executing this source locally. Enables dependency installation and production build; imported MDX/components are executable code, not sandboxed data. Default false, even for unattended runs.'),
 }
 
 export const migrateDocsSchema = z.object({
@@ -42,6 +43,7 @@ interface RunMigrationInput {
   apiKey?: string
   maxPages?: number
   platform?: 'mintlify' | 'docusaurus'
+  trustSource?: boolean
 }
 
 async function runMigration(
@@ -62,6 +64,7 @@ async function runMigration(
     maxPages: input.maxPages,
     platform: input.platform,
     yes: true,
+    trustSource: input.trustSource === true,
   })
 }
 
@@ -71,7 +74,7 @@ async function runMigration(
 export async function handleMigrateDocs(input: z.infer<typeof migrateDocsSchema>): Promise<string> {
   const result = await runMigration(input, false)
 
-  return `Migration complete! Created a fresh Thally template at ${result.projectDir} and imported ${result.pagesWritten} pages.`
+  return `Created a fresh Thally template at ${result.projectDir} and imported ${result.pagesWritten} pages. ${validationSummary(result)}`
 }
 
 /**
@@ -80,5 +83,14 @@ export async function handleMigrateDocs(input: z.infer<typeof migrateDocsSchema>
 export async function handleImportDocs(input: z.infer<typeof importDocsSchema>): Promise<string> {
   const result = await runMigration(input, true)
 
-  return `Import complete! Imported ${result.pagesWritten} pages into the existing Thally project at ${result.projectDir}.`
+  return `Imported ${result.pagesWritten} pages into the existing Thally project at ${result.projectDir}. ${validationSummary(result)}`
+}
+
+/** Keep agent callers from mistaking file creation for a verified migration. */
+function validationSummary(result: Awaited<ReturnType<typeof migrateDocs>>): string {
+  const { validation } = result
+  const status = validation.content === 'passed' && validation.build === 'passed'
+    ? 'Content and production build passed.'
+    : 'Validation is incomplete; review the failures or skipped checks before publishing.'
+  return `${status} ${result.warnings.length} migration warning(s). Report: ${result.reportPath}`
 }

@@ -57,6 +57,7 @@ export interface MigrationFooterConfig {
 }
 
 export interface MigrationDocsConfig {
+  markdown?: { enabled?: boolean }
   tabs: Array<MigrationNavigationTab>
   navigation?: {
     /** How sibling documentation collections are presented to readers. */
@@ -127,6 +128,8 @@ export interface MigrationBundle {
   platform: MigrationPlatform
   pages: Array<MigrationPage>
   assets: Array<MigrationAsset>
+  /** Customer-owned component source and registry; paths are repository-relative. */
+  componentFiles?: Array<RenderedMigrationFile>
   docsConfig: MigrationDocsConfig
   site?: {
     name?: string

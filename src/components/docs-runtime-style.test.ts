@@ -370,8 +370,19 @@ describe('documentation visual system', () => {
       /\.thally-callout-content > :last-child \{\s*margin-bottom: 0;/,
     )
     expect(layout).toContain("topbarHeight: 'h-[60px]'")
-    expect(shell).toContain('calc(100dvh-60px)')
-    expect(sidebar).toContain('sticky top-[60px]')
+    expect(shell).toContain('calc(100dvh-var(--docs-header-height,60px))')
+    expect(sidebar).toContain('sticky top-[var(--docs-header-height,60px)]')
+    expect(css).toContain('--docs-header-height: 60px')
+    expect(css).toMatch(/@media \(min-width: 881px\) \{\s*\.thally-docs-root\[data-header-layout='stacked'\] \{\s*--docs-header-height: 104px;/)
+    expect(css).not.toContain(".thally-docs-root[data-navigation='tabs']")
+    expect(css).toMatch(/@media \(max-width: 880px\) \{[\s\S]*?\.thally-docs-collection-row,\s*\.thally-docs-inline-collections \{\s*display: none;/)
+    expect(css).toContain('scroll-margin-top: 128px')
+    expect(css).toMatch(/\.thally-docs-tabs \.thally-nav-tab-item \{[\s\S]*?flex: 0 0 auto;[\s\S]*?min-width: max-content;/)
+    expect(css).toContain('calc(280px / var(--collection-count))')
+    expect(css).toMatch(/\.thally-docs-topbar-inner,\s*\.thally-docs-collection-row \{[^}]*max-width: 1280px;[^}]*padding-inline: 28px;/)
+    expect(css).not.toMatch(/\.thally-docs-collection-row \{[^}]*max-width: none;/)
+    expect(css).toMatch(/\.thally-docs-tabs \{[^}]*font-size: 0.875rem;/)
+    expect(css).toMatch(/\.thally-docs-tabs \{[^}]*overflow-x: auto;/)
   })
 
   it('moves legacy navbar GitHub destinations into the footer', async () => {

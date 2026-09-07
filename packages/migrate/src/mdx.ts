@@ -1,5 +1,9 @@
 /** Markdown/MDX normalization that preserves every component Thally supports. */
 
+import remarkMdx from 'remark-mdx'
+import remarkParse from 'remark-parse'
+import { unified } from 'unified'
+
 import { parseFrontmatter } from './frontmatter.js'
 import type { MigrationPage } from './types.js'
 
@@ -19,13 +23,43 @@ function titleFromId(id: string): string {
     .join(' ')
 }
 
+interface DescriptionNode {
+  type: string
+  value?: string
+  alt?: string | null
+  children?: Array<DescriptionNode>
+}
+
+const descriptionParser = unified().use(remarkParse).use(remarkMdx)
+
 function firstParagraph(content: string): string {
-  for (const block of content.split(/\n\s*\n/)) {
-    const value = block.replace(/\s+/g, ' ').trim()
-    if (!value || /^(?:#|```|:::|<|import\s|export\s)/.test(value)) continue
-    return value.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').slice(0, 240)
+  function plainText(node: DescriptionNode): string {
+    if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
+    if (node.type === 'image') return node.alt ?? ''
+    if (node.type === 'break') return ' '
+    return (node.children ?? []).map(plainText).join('')
   }
-  return ''
+  function findParagraph(node: DescriptionNode): string {
+    if (node.type === 'paragraph') {
+      const value = plainText(node).replace(/\s+/g, ' ').trim()
+      if (value) return value.slice(0, 240)
+    }
+    for (const child of node.children ?? []) {
+      const value = findParagraph(child)
+      if (value) return value
+    }
+    return ''
+  }
+  // Component wrappers, imports, expressions, and code fences are syntax, not
+  // description copy. Reading paragraph nodes also finds prose nested inside
+  // accordions without leaking their closing tags into page metadata.
+  try {
+    return findParagraph(descriptionParser.parse(content) as DescriptionNode)
+  } catch {
+    // Unparseable source is already retained for the migration validator. An
+    // empty generated description is safer than exposing source-code fragments.
+    return ''
+  }
 }
 
 function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'Warning' {

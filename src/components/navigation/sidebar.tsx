@@ -40,7 +40,7 @@ export function Sidebar({
     >
       {/* Stay in the shell's flow so optional site banners reserve their own
           space above the brand, then pin the navigation once they scroll away. */}
-      <div className={cn('sticky top-[60px] flex h-[calc(100dvh-60px)] flex-col', layout.sidebarWidth, layout.sidebarPadding)}>
+      <div className={cn('sticky top-[var(--docs-header-height,60px)] flex h-[calc(100dvh-var(--docs-header-height,60px))] flex-col', layout.sidebarWidth, layout.sidebarPadding)}>
         <div className="shrink-0 px-1 pt-1">
           {shouldShowSelector ? (
             <CollectionSelector

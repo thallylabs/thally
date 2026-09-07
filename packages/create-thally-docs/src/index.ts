@@ -3,6 +3,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
+import { confirm } from '@inquirer/prompts'
 import { logo, success, slugify } from './utils.js'
 import {
   gatherAnswers,
@@ -47,6 +48,8 @@ const commandFlags = {
     '--into',
     '--max-pages',
     '--platform',
+    '--skip-validation',
+    '--trust-source',
     '--yes',
     '-y',
   ]),
@@ -95,6 +98,8 @@ Options:
   --docs-dir <path>    Override the detected documentation directory
   --max-pages <count>  Limit a public URL crawl to 1-1000 pages
   --platform <name>    Use mintlify, docusaurus, or auto
+  --skip-validation   Import only; explicitly skip content and build verification
+  --trust-source      Allow installation and build execution of trusted source code
   --api-key <key>      Anthropic API key for non-Markdown conversion
   -y, --yes            Skip interactive prompts
   -h, --help           Show this help
@@ -235,7 +240,16 @@ async function runMigrateCommand(): Promise<void> {
   console.log(`  Platform: ${platform ?? 'auto-detect'}`)
   console.log('')
 
-  await migrateDocs({
+  // --yes accepts setup defaults, not execution of downloaded MDX/components.
+  // Automated callers must make the same explicit trust decision as a person.
+  let trustSource = flags.includes('--trust-source')
+  if (!trustSource && !yes && !flags.includes('--skip-validation') && process.stdin.isTTY && process.stdout.isTTY) {
+    trustSource = await confirm({
+      message: 'Installation and build validation execute imported code on this machine. Do you trust this source and authorize execution?',
+      default: false,
+    })
+  }
+  const result = await migrateDocs({
     sourceUrl,
     projectDir,
     into: isInto,
@@ -245,7 +259,10 @@ async function runMigrateCommand(): Promise<void> {
     maxPages,
     platform,
     yes,
+    skipValidation: flags.includes('--skip-validation'),
+    trustSource,
   })
+  if (result.validation.content === 'failed' || result.validation.build === 'failed') process.exitCode = 1
 }
 
 async function runScaffoldCommand(): Promise<void> {

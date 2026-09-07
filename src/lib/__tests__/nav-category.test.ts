@@ -7,14 +7,23 @@
  * navigation structure or appearance tokens around it.
  */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getNavCategory, getSidebarCollections } from '@/data/docs'
-import docsConfig from '../../../docs.json'
+
+// Customer-owned navigation may have no groups, use a different home page, or
+// contain direct links. Exercise the runtime contract with explicit fixtures.
+beforeEach(() => {
+  vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+    tabs: [{ tab: 'Documentation', groups: [{
+      group: 'Guides',
+      pages: ['introduction', { group: 'Advanced', pages: ['guides/advanced'] }],
+    }] }],
+  }))
+})
+afterEach(() => vi.unstubAllEnvs())
 
 describe('getNavCategory', () => {
   it('returns the containing group for a grouped page', () => {
-    // Config-driven so the same framework-synced test passes in the runtime
-    // and in scaffolded sites: pick the first grouped page from the model.
     const collections = getSidebarCollections()
     const section = collections.flatMap((c) => c.sections).find((s) => s.items.length > 0)
     expect(section).toBeDefined()
@@ -23,9 +32,14 @@ describe('getNavCategory', () => {
   })
 
   it('resolves the first group of the first tab for the home page', () => {
-    const firstGroup = (docsConfig as { tabs: Array<{ groups?: Array<{ group: string }> }> })
-      .tabs[0]?.groups?.[0]?.group
-    expect(getNavCategory('/')).toBe(firstGroup)
+    expect(getNavCategory('/')).toBe('Guides')
+  })
+
+  it('does not invent a home-page category for navigation without an introduction', () => {
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+      tabs: [{ tab: 'Documentation', groups: [{ group: 'Guides', pages: ['guides/advanced'] }] }],
+    }))
+    expect(getNavCategory('/')).toBeNull()
   })
 
   it('returns null for pages outside any navigation group', () => {
