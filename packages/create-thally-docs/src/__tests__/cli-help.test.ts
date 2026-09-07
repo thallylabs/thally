@@ -60,6 +60,11 @@ describe('create-thally-docs help', () => {
     expect(result.stderr).toContain('create-thally-docs --help')
     expect(result.stdout).not.toContain('Project directory:')
   })
+  it('documents execution authorization separately from accepting defaults', () => {
+    const result = runCli('migrate', '--help')
+    expect(result.stdout).toContain('--trust-source')
+    expect(result.stdout).toContain('execution of trusted source code')
+  })
 
   it('rejects options outside a subcommand scope', () => {
     const result = runCli('check', '--install')

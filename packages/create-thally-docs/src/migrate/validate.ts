@@ -17,7 +17,7 @@ export interface MigrationValidation {
 }
 
 /** Validate content and production rendering without repairing authored content. */
-export async function validateMigration(projectDir: string, skip = false): Promise<MigrationValidation> {
+export async function validateMigration(projectDir: string, skip = false, trustSource = false, installationFailed = false): Promise<MigrationValidation> {
   const result: MigrationValidation = { content: 'skipped', build: 'skipped', messages: [], diagnostics: [] }
   if (skip) {
     result.messages.push('Validation was explicitly skipped; this import is not verified.')
@@ -29,6 +29,17 @@ export async function validateMigration(projectDir: string, skip = false): Promi
   } catch (error) {
     result.content = 'failed'
     result.messages.push(`Content validation failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (installationFailed) {
+    result.build = 'failed'
+    result.messages.push('Dependency installation failed; production build was not attempted. Review the installation output before retrying.')
+    return result
+  }
+  // Parsing MDX and resolving imports never proves that source code is safe to
+  // execute. Keep static checks available without granting project execution.
+  if (trustSource !== true) {
+    result.messages.push('Production build skipped: source execution was not authorized. Review the imported code before running npm install and npm run build, or explicitly authorize a trusted migration with --trust-source.')
+    return result
   }
   const packagePath = join(projectDir, 'package.json')
   try {

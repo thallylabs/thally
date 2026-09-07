@@ -601,6 +601,20 @@ function injectOpenApi(config: MigrationDocsConfig, filename: string): Migration
   return { ...config, tabs }
 }
 
+/** Identify component ownership independently of checkout paths and URL syntax. */
+function componentSourceIdentity(sourceUrl: string, repositoryDir: string, siteRoot: string): string {
+  const url = new URL(sourceUrl)
+  // A GitHub tree URL and the repository root identify the same source. Branch
+  // changes should update its components, while separate monorepo sites must
+  // retain independent namespaces even if their snippet filenames coincide.
+  // Credentials, queries and fragments are not source identity and never feed
+  // generated names; only the canonical origin/path and docs root participate.
+  const repository = url.hostname.toLowerCase() === 'github.com'
+    ? `https://github.com/${url.pathname.split('/').filter(Boolean).slice(0, 2).join('/').replace(/\.git$/i, '').toLowerCase()}`
+    : `${url.origin}${trimTrailingSlashes(url.pathname)}`
+  return JSON.stringify([repository, relative(repositoryDir, siteRoot).replace(/\\/g, '/')])
+}
+
 /** Import an already-available repository directory into a canonical bundle. */
 export function migrateRepository(options: RepositoryMigrationOptions): MigrationBundle {
   const repositoryDir = options.repositoryDir
@@ -630,8 +644,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     return platform === 'mintlify' ? '' : detectRepositoryDocsDir(repositoryDir)
   })()
   const warnings: Array<MigrationWarning> = []
+  const componentRoot = mintlifyProjectRoot ?? repositoryDir
   const componentMigrator = platform === 'mintlify'
-    ? createComponentMigrator(mintlifyProjectRoot ?? repositoryDir, warnings)
+    ? createComponentMigrator(componentRoot, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
     : undefined
   let docsConfig: MigrationDocsConfig = { tabs: [] }
   const referenceMap = new Map<string, { navigationId: string; locale?: string }>()

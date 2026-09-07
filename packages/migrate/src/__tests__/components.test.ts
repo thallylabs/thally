@@ -23,6 +23,59 @@ function fixture(files: Record<string, string>): string {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('repository component migration', () => {
+  it('isolates components and inline handlers from different sources across sequential imports', () => {
+    function source(pageName: string, label: string): string {
+      return fixture({
+        'docs.json': JSON.stringify({ navigation: { pages: [pageName] } }),
+        [`${pageName}.mdx`]: `import Widget, { Counter } from './snippets/widget.jsx'\n\n<Widget />\n\n<Counter />`,
+        'shared.mdx': `<button onClick={() => {}}>${label}</button>`,
+        'snippets/widget.jsx': `export default () => <p>${label}</p>; export const Counter = () => <p>Counter ${label}</p>`,
+      })
+    }
+    const first = migrateRepository({ repositoryDir: source('first', 'First'), sourceUrl: 'https://github.com/first/docs' })
+    const second = migrateRepository({ repositoryDir: source('second', 'Second'), sourceUrl: 'https://github.com/second/docs' })
+    const firstFiles = renderMigrationFiles(first)
+    const firstRegistry = String(firstFiles.find((file) => file.path === 'src/mdx/custom-components.tsx')!.content)
+    const secondFiles = renderMigrationFiles(second, { existingConfig: first.docsConfig, existingComponentRegistry: firstRegistry })
+    const firstGraph = firstFiles.filter((file) => file.path.startsWith('src/mdx/migrated/'))
+    const secondGraph = secondFiles.filter((file) => file.path.startsWith('src/mdx/migrated/'))
+    expect(firstGraph.length).toBeGreaterThan(1)
+    expect(secondGraph.length).toBeGreaterThan(1)
+    expect(secondGraph.every((file) => !firstGraph.some((prior) => prior.path === file.path))).toBe(true)
+    expect(first.pages.find((page) => page.id === 'first')!.body).not.toBe(second.pages.find((page) => page.id === 'second')!.body)
+    expect(first.pages.find((page) => page.id === 'first')!.body.match(/Migrated[a-f0-9]+/g)).toHaveLength(2)
+    expect(new Set(first.pages.find((page) => page.id === 'first')!.body.match(/Migrated[a-f0-9]+/g)).size).toBe(2)
+    const mergedRegistry = String(secondFiles.find((file) => file.path === 'src/mdx/custom-components.tsx')!.content)
+    for (const line of firstRegistry.split('\n').filter((line) => line.startsWith('import '))) expect(mergedRegistry).toContain(line)
+    expect(mergedRegistry).toContain('...MigratedRegistry')
+    expect(second.warnings).toEqual([])
+  })
+
+  it('keeps repeat imports stable across clone directories and equivalent GitHub URLs', () => {
+    const files = {
+      'site/docs.json': JSON.stringify({ navigation: { pages: ['introduction'] } }),
+      'site/introduction.mdx': "import Widget from './widget.jsx'\n\n<div onClick={() => {}}><Widget /></div>",
+      'site/widget.jsx': 'export default () => <p>Stable component</p>',
+    }
+    const first = migrateRepository({ repositoryDir: fixture(files), sourceUrl: 'https://github.com/Example/Docs.git' })
+    const repeated = migrateRepository({ repositoryDir: fixture(files), sourceUrl: 'https://github.com/example/docs/tree/main/site' })
+    expect(first.componentFiles).toEqual(repeated.componentFiles)
+    expect(first.pages[0].body).toBe(repeated.pages[0].body)
+    const inline = String(first.componentFiles!.find((file) => file.path.includes('/inline-'))!.content)
+    expect(inline).toContain('"./source/widget.jsx"')
+  })
+
+  it('separates sibling documentation roots within the same repository', () => {
+    const files = Object.fromEntries(['first', 'second'].flatMap((directory) => [
+      [`${directory}/docs.json`, JSON.stringify({ navigation: { pages: ['introduction'] } })],
+      [`${directory}/introduction.mdx`, `<button onClick={() => {}}>${directory}</button>`],
+    ]))
+    const repositoryDir = fixture(files)
+    const first = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/example/docs', docsDir: 'first' })
+    const second = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/example/docs', docsDir: 'second' })
+    expect(first.componentFiles![0].path).not.toBe(second.componentFiles![0].path)
+  })
+
   it('merges an authored registry without replacing its imports, comments, or overrides', () => {
     const existing = `/** Customer explanation */\nimport { Highlight } from './highlight'\nexport const customComponents = { Highlight } satisfies Record<string, unknown>\nexport const other = 42\n`
     const incoming = `export const customComponents = { Imported: () => null }\n`
@@ -52,7 +105,7 @@ describe('repository component migration', () => {
       'explicit.jsx': `import { useState as useCounter, useEffect } from 'react'; const useState = () => [7]; export default function Widget() { const [n] = useState(); useEffect(() => {}, []); return <p>{n}</p> }`,
     })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings)
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
     migrator.transform("import Implicit from './implicit.jsx'\nimport Explicit from './explicit.jsx'\n\n<Implicit />\n\n<Explicit />", join(root, 'index.mdx'))
     const implicit = migrator.files().find((file) => file.path.endsWith('/implicit.jsx'))!
     expect(implicit.content).toContain("import * as React from 'react'")
@@ -90,7 +143,7 @@ describe('repository component migration', () => {
   it('keeps identically named imports page-local and leaves fenced examples untouched', () => {
     const root = fixture({ 'one.jsx': 'export default () => <p>One</p>', 'two.jsx': 'export default () => <p>Two</p>' })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings)
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
     const first = migrator.transform("import Widget from './one.jsx'\n\n<Widget />\n\n```jsx\nimport Widget from './missing.jsx'\n<Widget />\n```", join(root, 'one.mdx'))
     const second = migrator.transform("import Widget from './two.jsx'\n\n<Widget />", join(root, 'two.mdx'))
     expect(first.match(/<Migrated[^ ]+/)?.[0]).not.toBe(second.match(/<Migrated[^ ]+/)?.[0])
@@ -101,7 +154,7 @@ describe('repository component migration', () => {
   it('extracts HTML event handlers into client JSX while preserving passive MDX', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings)
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
     const body = migrator.transform(`---\ntitle: Welcome\nmode: custom\n---\nexport function openSearch() { document.getElementById('search-bar-entry').click(); }\n\n<div><button onClick={openSearch}>Search docs</button></div>\n\n<CardGroup cols={2}>\n  <Card title="Start" href="/start">Read the guide</Card>\n</CardGroup>`, join(root, 'home.mdx'))
     expect(body).toContain('title: Welcome')
     expect(body).toContain('<CardGroup cols={2}>')
@@ -118,7 +171,7 @@ describe('repository component migration', () => {
   it('preserves shared declarations when passive page expressions still reference them', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings)
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
     const source = `export const label = 'Visible';\n\n<div onClick={() => {}}>{label}</div>\n\n{label}`
     expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
     expect(migrator.files()).toEqual([])
@@ -132,7 +185,7 @@ describe('repository component migration', () => {
   ])('preserves shared declarations referenced through JSX spreads or component tags: %s', (declaration, usage) => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings)
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
     const source = `${declaration}\n\n<div onClick={() => {}}>Click</div>\n\n${usage}`
     expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
     expect(migrator.files()).toEqual([])
@@ -148,7 +201,7 @@ describe('repository component migration', () => {
   ])('preserves an imported binding used outside a direct JSX tag: %s', (usage) => {
     const root = fixture({ 'widget.jsx': 'export default () => <p>Widget</p>' })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings)
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
     const source = `import Widget from './widget.jsx'\n\n${usage}`
     expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
     expect(migrator.files()).toEqual([])
@@ -161,7 +214,7 @@ describe('repository component migration', () => {
       'helper.js': "import './widget.jsx';\nexport const value = 1;",
     })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings)
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
     expect(() => migrator.transform("import Widget from './widget.jsx'\n\n<Widget />", join(root, 'index.mdx'))).not.toThrow()
     expect(migrator.files()).toHaveLength(3)
     expect(warnings).toEqual([])
@@ -176,7 +229,7 @@ describe('repository component migration', () => {
   ])('warns and preserves unsupported %s source without a partial registry', (_name, dependency) => {
     const root = fixture({ 'widget.jsx': `${dependency};\nexport default () => <div />` })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings)
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
     const source = "import Widget from './widget.jsx'\n\n<Widget />"
     expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
     expect(migrator.files()).toEqual([])
@@ -189,7 +242,7 @@ describe('repository component migration', () => {
     const outside = fixture({ 'widget.jsx': 'export default () => <div />' })
     symlinkSync(outside, join(root, 'linked'), 'dir')
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings)
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
     const source = "import Widget from './linked/widget.jsx'\n\n<Widget />"
     expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
     expect(migrator.files()).toEqual([])

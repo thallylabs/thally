@@ -115,11 +115,15 @@ function imports(statement: ts.ImportDeclaration): Array<Binding> {
 }
 
 /** Create one bounded component graph and registry for a repository migration. */
-export function createComponentMigrator(siteRoot: string, warnings: Array<MigrationWarning>): {
+export function createComponentMigrator(siteRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
   transform: (raw: string, currentFile: string) => string
   files: () => Array<RenderedMigrationFile>
 } {
   const root = resolve(siteRoot)
+  // A destination can contain imports from several repositories with identical
+  // snippet names. Stable source identity isolates their graphs without tying
+  // registry names to a temporary checkout path or changing repeat imports.
+  const destinationRoot = `src/mdx/migrated/${hash(sourceIdentity)}`
   const copied = new Map<string, RenderedMigrationFile>()
   const registrations = new Map<string, { path: string; imported: string }>()
   let copiedBytes = 0
@@ -160,7 +164,7 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
   }
 
   function outputPath(path: string): string {
-    return `src/mdx/migrated/source/${relative(root, path).replace(/\\/g, '/')}`
+    return `${destinationRoot}/source/${relative(root, path).replace(/\\/g, '/')}`
   }
 
   function copyGraph(entry: string): string {
@@ -335,7 +339,7 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
           for (const binding of bindings) {
             const name = register(path, binding.imported)
             aliases.set(binding.local, name)
-            moduleImports.push(`import { ${binding.imported} as ${binding.local} } from ${JSON.stringify(portableSpecifier(`./${relative('src/mdx/migrated', path).replace(/\\/g, '/')}`))};`)
+            moduleImports.push(`import { ${binding.imported} as ${binding.local} } from ${JSON.stringify(portableSpecifier(`./${relative(destinationRoot, path).replace(/\\/g, '/')}`))};`)
           }
           edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
         } catch (error) {
@@ -405,7 +409,7 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       extracted.length = 0
     }
     if (extracted.length) {
-      const path = `src/mdx/migrated/inline-${hash(relative(root, currentFile))}.jsx`
+      const path = `${destinationRoot}/inline-${hash(relative(root, currentFile))}.jsx`
       let declarationSource = [...new Set(declarations.map((entry) => entry.source))].join('\n\n')
       // Mintlify exposes this DOM id as its documented search trigger. Thally
       // opens search through the same keyboard event handled by CommandSearch.

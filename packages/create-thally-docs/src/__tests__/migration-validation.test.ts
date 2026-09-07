@@ -23,7 +23,7 @@ describe('migration validation', () => {
   })
   it('validates content without auto-fixing and runs the project production build', async () => {
     const directory = project()
-    expect(await validateMigration(directory)).toMatchObject({ content: 'passed', build: 'passed' })
+    expect(await validateMigration(directory, false, true)).toMatchObject({ content: 'passed', build: 'passed' })
     expect(mocks.check).toHaveBeenCalledWith(directory, { fix: false, ci: true, onIssues: expect.any(Function) })
     expect(mocks.build).toHaveBeenCalledWith(expect.stringMatching(/^npm(?:\.cmd)?$/), ['run', 'build'], expect.objectContaining({ cwd: directory, stdio: 'inherit' }))
   })
@@ -31,16 +31,34 @@ describe('migration validation', () => {
     const diagnostic = { severity: 'error', message: 'Broken link', file: 'src/content/start.mdx', line: 4 }
     mocks.check.mockImplementation(async (_directory, options) => { options.onIssues([diagnostic]); return 1 })
     mocks.build.mockReturnValue({ status: 1 })
-    expect(await validateMigration(project())).toMatchObject({ content: 'failed', build: 'failed', diagnostics: [diagnostic] })
+    expect(await validateMigration(project(), false, true)).toMatchObject({ content: 'failed', build: 'failed', diagnostics: [diagnostic] })
   })
   it('never describes explicitly skipped validation as passed', async () => {
-    expect(await validateMigration(project(), true)).toMatchObject({ content: 'skipped', build: 'skipped' })
+    expect(await validateMigration(project(), true, true)).toMatchObject({ content: 'skipped', build: 'skipped' })
     expect(mocks.check).not.toHaveBeenCalled()
     expect(mocks.build).not.toHaveBeenCalled()
   })
   it('does not claim a build passed when an in-place project has no build script', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'thally-no-build-'))
-    expect(await validateMigration(directory)).toMatchObject({ content: 'passed', build: 'skipped' })
+    expect(await validateMigration(directory, false, true)).toMatchObject({ content: 'passed', build: 'skipped' })
+    expect(mocks.build).not.toHaveBeenCalled()
+  })
+  it('checks content without executing source by default', async () => {
+    const result = await validateMigration(project())
+    expect(result).toMatchObject({ content: 'passed', build: 'skipped' })
+    expect(result.messages.join(' ')).toContain('--trust-source')
+    expect(mocks.check).toHaveBeenCalledOnce()
+    expect(mocks.build).not.toHaveBeenCalled()
+  })
+  it('requires a literal true execution authorization', async () => {
+    expect(await validateMigration(project(), false, 'true' as unknown as boolean)).toMatchObject({ build: 'skipped' })
+    expect(mocks.build).not.toHaveBeenCalled()
+  })
+  it('retains static diagnostics after installation failure without attempting a build', async () => {
+    const result = await validateMigration(project(), false, true, true)
+    expect(result).toMatchObject({ content: 'passed', build: 'failed' })
+    expect(result.messages.join(' ')).toContain('Dependency installation failed')
+    expect(mocks.check).toHaveBeenCalledOnce()
     expect(mocks.build).not.toHaveBeenCalled()
   })
 })

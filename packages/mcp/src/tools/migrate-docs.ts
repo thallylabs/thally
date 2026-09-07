@@ -18,6 +18,7 @@ const migrationSourceShape = {
   apiKey: z.string().optional().describe('Anthropic API key for non-Markdown file conversion'),
   maxPages: z.number().int().min(1).max(1000).optional().describe('Maximum public URL pages to import'),
   platform: z.enum(['mintlify', 'docusaurus']).optional().describe('Source platform (default: auto-detect)'),
+  trustSource: z.boolean().optional().describe('Only set true after the user explicitly authorizes executing this source locally. Enables dependency installation and production build; imported MDX/components are executable code, not sandboxed data. Default false, even for unattended runs.'),
 }
 
 export const migrateDocsSchema = z.object({
@@ -42,6 +43,7 @@ interface RunMigrationInput {
   apiKey?: string
   maxPages?: number
   platform?: 'mintlify' | 'docusaurus'
+  trustSource?: boolean
 }
 
 async function runMigration(
@@ -62,6 +64,7 @@ async function runMigration(
     maxPages: input.maxPages,
     platform: input.platform,
     yes: true,
+    trustSource: input.trustSource === true,
   })
 }
 

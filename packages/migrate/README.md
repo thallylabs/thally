@@ -28,6 +28,8 @@ are registered through the customer-owned `src/mdx/custom-components.tsx`;
 existing object-literal registries are merged rather than replaced. Repeated
 imports of the same registry are idempotent. Registry shapes that cannot be
 merged safely stop materialization with an actionable error.
+Component output is namespaced by repository and documentation root, so
+separate imports can preserve components with identical source filenames.
 
 The importer creates a root redirect to the first available page in source
 navigation when no root introduction exists, while retaining a separate custom

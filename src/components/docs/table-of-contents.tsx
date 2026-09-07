@@ -1,5 +1,7 @@
 'use client'
 
+/** Visible document headings and scroll tracking share the page's anchor offsets. */
+
 import { usePathname } from 'next/navigation'
 import { startTransition, useCallback, useEffect, useState } from 'react'
 import { layout } from '@/config/layout'
@@ -11,10 +13,10 @@ interface TocItem {
   level: number
 }
 
-// Distance from the top of the viewport (px) at which a heading is considered
-// "active". Matches the scroll-mt offset applied to headings.
+// Preserve the original reading threshold when the header uses a single row.
 const ACTIVE_OFFSET = 120
 
+/** Follow the visible document outline as navigation and scroll position change. */
 export function TableOfContents() {
   const pathname = usePathname()
   const [items, setItems] = useState<Array<TocItem>>([])
@@ -49,7 +51,12 @@ export function TableOfContents() {
 
       let current = headings[0].id
       for (const heading of headings) {
-        if (heading.getBoundingClientRect().top - ACTIVE_OFFSET <= 0) {
+        // A stacked header raises the anchor margin above the normal threshold.
+        // Read the applied margin so a completed anchor scroll stays selected,
+        // including after responsive header changes or custom heading styles.
+        const anchorOffset = Number.parseFloat(getComputedStyle(heading).scrollMarginTop) || 0
+        const activeOffset = Math.max(ACTIVE_OFFSET, anchorOffset)
+        if (heading.getBoundingClientRect().top - activeOffset <= 1) {
           current = heading.id
         } else {
           break

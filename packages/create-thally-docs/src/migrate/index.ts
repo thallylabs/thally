@@ -42,6 +42,8 @@ export interface MigrateOptions {
   fetcher?: MigrationFetcher
   /** Explicitly opt out of content/build gates; the report remains unverified. */
   skipValidation?: boolean
+  /** Explicitly allow local installation/build execution of reviewed source. Never implied by yes. */
+  trustSource?: boolean
 }
 
 export interface MigrateResult {
@@ -128,7 +130,9 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
       projectName: options.projectName ?? bundle.site?.name ?? 'My Docs',
       description: bundle.site?.description ?? `Documentation migrated from ${new URL(options.sourceUrl).hostname}`,
       brandPreset: 'primary',
-      repoUrl: bundle.sourceKind === 'repository' ? options.sourceUrl : '',
+      // Source provenance is not the destination repository. Migrated pages
+      // live at new paths, so source URLs cannot power edit/issue actions.
+      repoUrl: '',
       doInstall: false,
     })
     resetFreshMigrationContent(projectDir)
@@ -163,14 +167,22 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   }
   console.log(`  ✓ Imported ${bundle.pages.length} pages and ${bundle.assets.length} assets from ${bundle.platform}.`)
 
-  if (!options.into) {
-    installDeps(projectDir)
+  let installationFailed = false
+  if (!options.into && options.trustSource === true && !options.skipValidation) {
+    try {
+      installDeps(projectDir)
+    } catch {
+      // Imported files and static diagnostics remain useful when a registry or
+      // lifecycle step fails. Always produce the same machine-readable report.
+      installationFailed = true
+    }
   }
   console.log('\n  Validating imported documentation...')
-  const validation = await validateMigration(projectDir, options.skipValidation)
+  const validation = await validateMigration(projectDir, options.skipValidation, options.trustSource === true, installationFailed)
   const reportPath = projectPath(projectDir, 'migration-report.json')
   writeFileSync(reportPath, `${JSON.stringify({
     version: 1,
+    sourceUrl: `${new URL(options.sourceUrl).origin}${new URL(options.sourceUrl).pathname}`,
     platform: bundle.platform,
     pages: bundle.pages.length,
     assets: bundle.assets.length,
