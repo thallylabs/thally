@@ -42,8 +42,6 @@ export interface MigrateOptions {
   fetcher?: MigrationFetcher
   /** Explicitly opt out of content/build gates; the report remains unverified. */
   skipValidation?: boolean
-  /** Explicitly allow local installation/build execution of reviewed source. Never implied by yes. */
-  trustSource?: boolean
 }
 
 export interface MigrateResult {
@@ -168,7 +166,10 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   console.log(`  ✓ Imported ${bundle.pages.length} pages and ${bundle.assets.length} assets from ${bundle.platform}.`)
 
   let installationFailed = false
-  if (!options.into && options.trustSource === true && !options.skipValidation) {
+  // Migration is a developer build workflow for owner-selected project code.
+  // Disclose execution without adding another confirmation to that workflow.
+  if (!options.skipValidation) console.log('  Migration validation runs project code locally, including imported MDX and components.')
+  if (!options.into && !options.skipValidation) {
     try {
       installDeps(projectDir)
     } catch {
@@ -178,7 +179,7 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     }
   }
   console.log('\n  Validating imported documentation...')
-  const validation = await validateMigration(projectDir, options.skipValidation, options.trustSource === true, installationFailed)
+  const validation = await validateMigration(projectDir, options.skipValidation, installationFailed)
   const reportPath = projectPath(projectDir, 'migration-report.json')
   writeFileSync(reportPath, `${JSON.stringify({
     version: 1,

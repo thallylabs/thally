@@ -51,7 +51,6 @@ describe('MCP documentation migration modes', () => {
       expect.objectContaining({
         into: false,
         yes: true,
-        trustSource: false,
       }),
     )
   })
@@ -92,12 +91,13 @@ describe('MCP documentation migration modes', () => {
     expect(message).toContain('migration-report.json')
     expect(message).not.toContain('Migration complete')
   })
-  it('only authorizes source execution with an explicit boolean', async () => {
-    await handleMigrateDocs({ sourceUrl: 'https://github.com/example/docs', projectDir: '/tmp/site', trustSource: true })
-    expect(mocks.migrateDocs).toHaveBeenLastCalledWith(expect.objectContaining({ trustSource: true }))
-    expect(migrateDocsSchema.safeParse({ sourceUrl: 'https://github.com/example/docs', projectDir: '/tmp/site', trustSource: 'true' }).success).toBe(false)
+  it('uses default validation without a separate source-trust field', async () => {
+    expect('trustSource' in migrateDocsSchema.shape).toBe(false)
+    await handleMigrateDocs({ sourceUrl: 'https://github.com/example/docs', projectDir: '/tmp/site' })
+    expect(mocks.migrateDocs.mock.calls.at(-1)?.[0]).not.toHaveProperty('trustSource')
+    expect(mocks.migrateDocs.mock.calls.at(-1)?.[0]).not.toHaveProperty('skipValidation')
   })
-  it('describes an untrusted import as unverified', async () => {
+  it('describes a skipped build as unverified', async () => {
     mocks.migrateDocs.mockResolvedValueOnce({ ...migrationResult, validation: { content: 'passed', build: 'skipped', messages: [] } })
     expect(await handleMigrateDocs({ sourceUrl: 'https://docs.example.com', projectDir: '/tmp/site' })).toContain('Validation is incomplete')
   })

@@ -68,7 +68,8 @@ into the customer-owned MDX registry. Simple interactive HTML blocks are moved
 into client components, and locale/root routing is normalized. Unsupported
 customizations remain visible as warnings rather than being silently dropped.
 
-After importing, the CLI runs static content checks and writes
+After importing, the CLI automatically installs dependencies for fresh projects,
+runs static content checks and a production build, and writes
 `migration-report.json`. A failed check or build returns a nonzero exit status;
 the imported files remain available for inspection. Warnings may include
 pre-existing source problems and compatibility limitations even when a build
@@ -76,14 +77,10 @@ passes. Review them before publishing. Use `--skip-validation` for an explicit
 import-only run; its report is marked unverified. An existing `--into` project
 without a build script is also reported as unverified.
 
-Dependency installation and production builds require explicit authorization:
-answer the interactive trust prompt or pass `--trust-source` for a source you
-have reviewed. `--yes` does not grant that authorization. Without it, files are
-imported and statically checked, but the build is skipped and the report stays
-unverified. MCP callers use `trustSource: true` only after the user authorizes
-execution. `--skip-validation` also skips installation, even with trust granted.
-Imported MDX and JSX/TSX are executable code; static migration analysis is not a
-sandbox. Review the imported files before installing or building them manually.
+Migration is a local build workflow for projects you own or trust. Dependency
+installation and builds execute project code, including imported MDX and
+JSX/TSX; they are not sandboxed. No additional confirmation or execution flag
+is needed. `--skip-validation` also skips dependency installation.
 
 A fresh migration leaves the destination repository unset. After creating the
 new repository, set `site.repoUrl` in `src/data/site.ts` to its root GitHub URL
