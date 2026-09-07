@@ -111,6 +111,7 @@ describe('CLI migration flow', () => {
     expect(existsSync(join(projectDir, 'src/content/es/introduction.mdx'))).toBe(false)
     expect(existsSync(join(projectDir, 'openapi.yaml'))).toBe(false)
     expect(JSON.parse(readFileSync(join(projectDir, 'docs.json'), 'utf8')).markdown).toEqual({ enabled: true })
+    expect(JSON.parse(readFileSync(join(projectDir, 'docs.json'), 'utf8')).i18n).toEqual({ defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }] })
     expect(installDepsMock).toHaveBeenCalledWith(projectDir)
     expect(initGitMock).toHaveBeenCalledWith(projectDir)
   })

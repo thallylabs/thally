@@ -141,6 +141,9 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   if (!options.into) {
     const starterConfig = readExistingConfig(projectDir)
     if (starterConfig?.markdown) bundle.docsConfig.markdown = starterConfig.markdown
+    // An absent locale block invokes the runtime's legacy bilingual fallback.
+    // A single-language source must not acquire a phantom translation menu.
+    bundle.docsConfig.i18n ??= { defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }] }
   }
 
   const rendered = renderMigrationFiles(bundle, {

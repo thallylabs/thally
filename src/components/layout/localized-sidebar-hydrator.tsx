@@ -33,9 +33,8 @@ export async function LocalizedSidebarHydrator({
         sections: [...(collection.sections ?? []), ...apiSections],
       }
     }
-    if (!collection.href && collection.id === 'overview') {
-      return { ...collection, href: `/${locale}` }
-    }
+    // Keep collection destinations source-owned. Inventing a locale-root href
+    // for Overview makes its prefix match every page in every other collection.
     if (collection.href && !/^https?:\/\//i.test(collection.href)) {
       return { ...collection, href: `/${locale}${collection.href}` }
     }
