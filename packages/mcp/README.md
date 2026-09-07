@@ -46,11 +46,11 @@ site over HTTP.
 imports content. To preserve an existing Thally runtime and import content in
 place, the caller must explicitly choose `import_docs`.
 
-Migration imports and static checks do not authorize source execution. Set
-`trustSource: true` only after the user explicitly approves local dependency
-installation and build execution of that source. Otherwise the production
-build is skipped and the migration report remains unverified. Imported MDX and
-components are executable code; static analysis is not a sandbox.
+Migration automatically installs dependencies and validates the production
+build, with no additional execution option or confirmation. This is a local
+build workflow for sources the user owns or trusts: installation and builds
+execute project code, including imported MDX and components, without sandboxing.
+Failed checks are reported; skipped builds remain unverified.
 
 ## License
 

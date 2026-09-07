@@ -59,7 +59,7 @@ describe('CLI migration flow', () => {
 
     expect(result.pagesWritten).toBe(1)
     expect(result.validation.build).toBe('passed')
-    expect(validateMigrationMock).toHaveBeenCalledWith(projectDir, undefined, false, false)
+    expect(validateMigrationMock).toHaveBeenCalledWith(projectDir, undefined, false)
     expect(JSON.parse(readFileSync(result.reportPath, 'utf8')).pages).toBe(1)
     expect(readFileSync(join(projectDir, 'src/content/introduction.mdx'), 'utf8')).toContain('The imported page body.')
     const config = JSON.parse(readFileSync(join(projectDir, 'docs.json'), 'utf8')) as { tabs: Array<{ tab: string }> }
@@ -67,13 +67,17 @@ describe('CLI migration flow', () => {
   })
 
   it.each([
-    { trustSource: false, failsInstallation: false },
-    { trustSource: true, failsInstallation: false },
-    { trustSource: true, failsInstallation: true },
-  ])('retains fresh imports and reports with trust=$trustSource and install failure=$failsInstallation', async ({ trustSource, failsInstallation }) => {
+    { yes: false, skipValidation: false, failsInstallation: false },
+    { yes: true, skipValidation: false, failsInstallation: false },
+    { yes: true, skipValidation: false, failsInstallation: true },
+    { yes: true, skipValidation: true, failsInstallation: false },
+  ])('retains fresh imports and reports with yes=$yes, skip=$skipValidation, install failure=$failsInstallation', async ({ yes, skipValidation, failsInstallation }) => {
     if (failsInstallation) {
       installDepsMock.mockImplementationOnce(() => { throw new Error('Registry unavailable') })
       validateMigrationMock.mockResolvedValueOnce({ content: 'passed', build: 'failed', messages: ['Dependency installation failed'] })
+    }
+    if (skipValidation) {
+      validateMigrationMock.mockResolvedValueOnce({ content: 'skipped', build: 'skipped', messages: ['Validation skipped'] })
     }
     const parentDir = mkdtempSync(join(tmpdir(), 'thally-cli-fresh-migrate-'))
     const projectDir = join(parentDir, 'site')
@@ -111,8 +115,8 @@ describe('CLI migration flow', () => {
       sourceUrl: 'https://docs.example.com/docs',
       projectDir,
       into: false,
-      yes: true,
-      trustSource,
+      yes,
+      skipValidation,
       fetcher,
     })
 
@@ -122,10 +126,10 @@ describe('CLI migration flow', () => {
     expect(existsSync(join(projectDir, 'openapi.yaml'))).toBe(false)
     expect(JSON.parse(readFileSync(join(projectDir, 'docs.json'), 'utf8')).markdown).toEqual({ enabled: true })
     expect(JSON.parse(readFileSync(join(projectDir, 'docs.json'), 'utf8')).i18n).toEqual({ defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }] })
-    if (trustSource) expect(installDepsMock).toHaveBeenCalledWith(projectDir)
-    else expect(installDepsMock).not.toHaveBeenCalled()
-    expect(validateMigrationMock).toHaveBeenCalledWith(projectDir, undefined, trustSource, failsInstallation)
-    expect(JSON.parse(readFileSync(result.reportPath, 'utf8')).validation.build).toBe(failsInstallation ? 'failed' : 'passed')
+    if (skipValidation) expect(installDepsMock).not.toHaveBeenCalled()
+    else expect(installDepsMock).toHaveBeenCalledWith(projectDir)
+    expect(validateMigrationMock).toHaveBeenCalledWith(projectDir, skipValidation, failsInstallation)
+    expect(JSON.parse(readFileSync(result.reportPath, 'utf8')).validation.build).toBe(skipValidation ? 'skipped' : failsInstallation ? 'failed' : 'passed')
     expect(initGitMock).toHaveBeenCalledWith(projectDir)
     expect(scaffoldMock).toHaveBeenCalledWith(expect.objectContaining({ repoUrl: '' }))
   })
