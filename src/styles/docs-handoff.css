@@ -118,7 +118,7 @@ body {
   overflow-x: auto;
   scrollbar-width: thin;
   /* Tighten typography only within a readable range; never cut off labels. */
-  font-size: clamp(0.75rem, calc(16cqi / var(--collection-count)), 0.88rem);
+  font-size: clamp(0.75rem, calc(14cqi / var(--collection-count)), 0.88rem);
 }
 
 .thally-docs-tabs::-webkit-scrollbar {
