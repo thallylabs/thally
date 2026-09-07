@@ -71,7 +71,7 @@ async function runMigration(
 export async function handleMigrateDocs(input: z.infer<typeof migrateDocsSchema>): Promise<string> {
   const result = await runMigration(input, false)
 
-  return `Migration complete! Created a fresh Thally template at ${result.projectDir} and imported ${result.pagesWritten} pages.`
+  return `Created a fresh Thally template at ${result.projectDir} and imported ${result.pagesWritten} pages. ${validationSummary(result)}`
 }
 
 /**
@@ -80,5 +80,14 @@ export async function handleMigrateDocs(input: z.infer<typeof migrateDocsSchema>
 export async function handleImportDocs(input: z.infer<typeof importDocsSchema>): Promise<string> {
   const result = await runMigration(input, true)
 
-  return `Import complete! Imported ${result.pagesWritten} pages into the existing Thally project at ${result.projectDir}.`
+  return `Imported ${result.pagesWritten} pages into the existing Thally project at ${result.projectDir}. ${validationSummary(result)}`
+}
+
+/** Keep agent callers from mistaking file creation for a verified migration. */
+function validationSummary(result: Awaited<ReturnType<typeof migrateDocs>>): string {
+  const { validation } = result
+  const status = validation.content === 'passed' && validation.build === 'passed'
+    ? 'Content and production build passed.'
+    : 'Validation is incomplete; review the failures or skipped checks before publishing.'
+  return `${status} ${result.warnings.length} migration warning(s). Report: ${result.reportPath}`
 }

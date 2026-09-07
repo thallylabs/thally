@@ -26,6 +26,8 @@ const migrationResult = {
   projectDir: '/tmp/procta-docs',
   platform: 'thally' as const,
   warnings: [],
+  validation: { content: 'passed', build: 'passed', messages: [] },
+  reportPath: '/tmp/procta-docs/migration-report.json',
 }
 
 describe('MCP documentation migration modes', () => {
@@ -80,5 +82,13 @@ describe('MCP documentation migration modes', () => {
     const tool = getTool('import_docs')
     expect(tool?.description).toContain('explicitly requested')
     expect(getTool('migrate_docs')?.description).toContain('fresh canonical Thally template')
+  })
+
+  it('does not claim completion when production validation fails', async () => {
+    mocks.migrateDocs.mockResolvedValueOnce({ ...migrationResult, validation: { content: 'passed', build: 'failed', messages: [] } })
+    const message = await handleMigrateDocs({ sourceUrl: 'https://docs.example.com', projectDir: '/tmp/site' })
+    expect(message).toContain('Validation is incomplete')
+    expect(message).toContain('migration-report.json')
+    expect(message).not.toContain('Migration complete')
   })
 })

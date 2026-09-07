@@ -1,8 +1,11 @@
 'use client'
 
+/** Shared documentation header; collection navigation adapts to the remaining control space. */
+
 import { ExternalLink, Sparkles } from 'lucide-react'
 import type { SidebarCollection, DocsJsonNavbar, NavigationPresentation } from '@/data/docs'
 import { MobileNav } from '@/components/navigation/mobile-nav'
+import { CollectionTabs } from '@/components/navigation/collection-tabs'
 import { CommandSearch } from '@/components/search/command-search'
 import { ThemeSwitch } from '@/components/theme/theme-switch'
 import { VersionSwitcher } from '@/components/docs/version-switcher'
@@ -108,54 +111,7 @@ export function TopBar({
           <LocaleSwitcher locales={i18nConfig.locales} currentLocale={currentLocale ?? i18nConfig.defaultLocale} currentPath={currentPath ?? '/'} defaultLocale={i18nConfig.defaultLocale} />
         ) : null}
         {navigationPresentation.display === 'tabs' ? (
-          <nav className="thally-docs-tabs flex h-full items-center gap-4" aria-label="Documentation sections">
-            {collections.map((collection) => {
-              const isActive = collection.id === activeCollectionId
-              const destination = collection.href ?? collection.sections[0]?.items[0]?.href
-              const baseClasses = cn(
-                'thally-nav-tab-item group relative flex h-full shrink-0 items-center whitespace-nowrap border-b-2 px-[11px] pt-px text-left text-[0.88rem] font-medium transition',
-                isActive
-                  ? 'thally-nav-tab-active border-foreground font-semibold text-foreground'
-                  : 'border-transparent text-foreground/60 hover:text-foreground',
-              )
-              if (destination) {
-                const isExternal = /^https?:\/\//.test(destination)
-                if (isExternal) {
-                  return (
-                    <a
-                      key={collection.id}
-                      href={destination}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={baseClasses}
-                    >
-                      {collection.label}
-                    </a>
-                  )
-                }
-                return (
-                  <IntentPrefetchLink
-                    key={collection.id}
-                    href={destination}
-                    onClick={() => onCollectionChange(collection.id)}
-                    className={baseClasses}
-                  >
-                    {collection.label}
-                  </IntentPrefetchLink>
-                )
-              }
-              return (
-                <button
-                  key={collection.id}
-                  type="button"
-                  onClick={() => onCollectionChange(collection.id)}
-                  className={baseClasses}
-                >
-                  {collection.label}
-                </button>
-              )
-            })}
-          </nav>
+          <CollectionTabs collections={collections} activeCollectionId={activeCollectionId} onCollectionChange={onCollectionChange} />
         ) : null}
         <div className="thally-docs-actions ml-auto flex shrink-0 items-center gap-2">
           <div className="thally-docs-search shrink-0">

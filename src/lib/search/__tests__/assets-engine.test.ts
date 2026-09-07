@@ -1,6 +1,6 @@
 /** Managed search coverage over an asset index and asset-backed page bodies. */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   CONTENT_MANIFEST_PATH,
   resetContentSourceForTests,
@@ -52,6 +52,11 @@ const pages = {
 }
 
 beforeEach(() => {
+  // Runtime tests ship to customer sites, whose navigation need not contain
+  // any of the pages in this isolated asset fixture.
+  vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+    tabs: [{ tab: 'Docs', groups: [{ group: 'Guides', pages: ['introduction', 'enterprise/quantum-widgets', 'enterprise/audit-logs'] }] }],
+  }))
   process.env.THALLY_CONTENT_SOURCE = 'assets'
   delete process.env.THALLY_CONTENT_INDEX
   resetContentIndexForTests()
@@ -102,6 +107,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.unstubAllEnvs()
   if (originalContentSource === undefined) delete process.env.THALLY_CONTENT_SOURCE
   else process.env.THALLY_CONTENT_SOURCE = originalContentSource
   if (originalContentIndex === undefined) delete process.env.THALLY_CONTENT_INDEX

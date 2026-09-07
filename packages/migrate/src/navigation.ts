@@ -7,7 +7,7 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, extname, relative } from 'node:path'
 
-import { pageIdFromReference, resolveWithin, trimEdgeSlashes } from './path.js'
+import { mintlifyLocalizedReference, pageIdFromReference, resolveWithin, trimEdgeSlashes } from './path.js'
 import type {
   MigrationDocsConfig,
   MigrationNavigationGroup,
@@ -40,19 +40,58 @@ export function addMintlifyDirectoryRedirects(
   config: MigrationDocsConfig,
   pages: Array<MigrationPage>,
 ): MigrationDocsConfig {
-  const pageIds = new Set(pages.filter((page) => !page.locale).map((page) => page.navigationId))
+  const pageIds = new Set(pages.map((page) => page.id))
   const redirects = [...(config.redirects ?? [])]
   const redirectSources = new Set(redirects.map((redirect) => redirect.source.replace(/\/$/, '') || '/'))
   for (const page of pages) {
-    if (page.locale || !/(?:^|\/)(?:overview|introduction)$/.test(page.navigationId)) continue
-    const parent = page.navigationId.replace(/\/(?:overview|introduction)$/, '')
+    if (!/\/(?:overview|introduction)$/.test(page.navigationId)) continue
+    const parent = page.id.replace(/\/(?:overview|introduction)$/, '')
     if (!parent || pageIds.has(parent)) continue
     const source = `/${parent}`
     if (redirectSources.has(source)) continue
-    redirects.push({ source, destination: `/${page.navigationId}`, permanent: false })
+    redirects.push({ source, destination: `/${page.id}`, permanent: false })
     redirectSources.add(source)
   }
   return redirects.length > 0 ? { ...config, redirects } : config
+}
+
+/**
+ * Keep authored page URLs while resolving bare documentation roots to the
+ * first visible navigation page. An unrelated `home.mdx` is not evidence that
+ * Mintlify served it at `/`; explicit source redirects always take priority.
+ */
+export function addMintlifyHomepageRedirects(
+  config: MigrationDocsConfig,
+  pages: Array<MigrationPage>,
+): MigrationDocsConfig {
+  const defaultPages = new Set(pages
+    .filter((page) => !page.locale || page.locale === config.i18n?.defaultLocale)
+    .map((page) => page.navigationId))
+  function firstPage(nodes: Array<string | MigrationNavigationGroup>): string | undefined {
+    for (const node of nodes) {
+      if (typeof node === 'string') {
+        if (defaultPages.has(node)) return node
+      } else if (!node.hidden) {
+        const page = firstPage(node.pages)
+        if (page) return page
+      }
+    }
+  }
+  const homepage = config.tabs.filter((tab) => !tab.hidden)
+    .map((tab) => firstPage([...(tab.pages ?? []), ...(tab.groups ?? [])]))
+    .find(Boolean)
+  if (!homepage || homepage === 'introduction') return config
+  const redirects = [...(config.redirects ?? [])]
+  const sources = new Set(redirects.map((redirect) => redirect.source.replace(/\/$/, '') || '/'))
+  const roots = ['', ...(config.i18n?.locales ?? [])
+    .filter((locale) => locale.code !== config.i18n?.defaultLocale)
+    .map((locale) => locale.code)]
+  for (const locale of roots) {
+    const source = locale ? `/${locale}` : '/'
+    if (sources.has(source)) continue
+    redirects.push({ source, destination: `${locale ? `/${locale}` : ''}/${homepage}`, permanent: false })
+  }
+  return { ...config, redirects }
 }
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -200,6 +239,7 @@ function normalizePageRef(value: string, pathPrefix = ''): string | null {
 
 interface ProjectionContext {
   locale?: string
+  defaultPageIds?: ReadonlySet<string>
   pathPrefix?: string
   references: Array<MintlifyPageReference>
   seenReferences: Set<string>
@@ -232,9 +272,8 @@ function containerPresentation(value: Record<string, unknown>): {
 }
 
 function registerReference(value: string, context: ProjectionContext): string | null {
-  const localePrefix = context.locale ? `${context.locale}/` : ''
-  const localizedValue = localePrefix && value.replace(/^\/+/, '').startsWith(localePrefix)
-    ? value.replace(/^\/+/, '').slice(localePrefix.length)
+  const localizedValue = context.locale
+    ? mintlifyLocalizedReference(value, context.locale, context.defaultPageIds)
     : value
   const navigationId = normalizePageRef(localizedValue, context.pathPrefix)
   if (!navigationId) return null
@@ -540,7 +579,17 @@ export function projectMintlifyNavigation(
   const warningKeys = new Set<string>()
   const navigation = objectValue(config.navigation) ?? config
   const languages = Array.isArray(navigation.languages)
-    ? navigation.languages.map(objectValue).filter((value): value is Record<string, unknown> => Boolean(value))
+    ? navigation.languages.flatMap((value): Array<Record<string, unknown>> => {
+        const language = objectValue(value)
+        if (!language) return []
+        try {
+          const code = Intl.getCanonicalLocales(String(language.language ?? language.locale ?? 'en'))[0]
+          return [{ ...language, language: code }]
+        } catch {
+          warnings.push({ code: 'unsupported-config', message: 'A navigation language with an invalid locale code was skipped.' })
+          return []
+        }
+      })
     : []
   let tabs: Array<MigrationNavigationTab> = []
   let i18n: MigrationDocsConfig['i18n']
@@ -548,9 +597,9 @@ export function projectMintlifyNavigation(
 
   if (languages.length > 0) {
     const defaultLanguage = languages.find((entry) => entry.default === true) ?? languages[0]
-    const defaultLocale = String(defaultLanguage.language ?? defaultLanguage.locale ?? 'en')
+    const defaultLocale = String(defaultLanguage.language)
     const locales = languages.map((entry) => {
-      const code = String(entry.language ?? entry.locale ?? 'en')
+      const code = String(entry.language)
       let label: string | undefined = LANGUAGE_LABELS[code]
       try {
         label ??= new Intl.DisplayNames(['en'], { type: 'language' }).of(code) ?? undefined
@@ -560,10 +609,14 @@ export function projectMintlifyNavigation(
       return { code, label: label ?? code.toUpperCase() }
     })
     i18n = { defaultLocale, locales }
-    for (const language of languages) {
-      const locale = String(language.language ?? language.locale ?? defaultLocale)
+    const defaultPageIds = new Set<string>()
+    // The default language supplies canonical page identities even when it
+    // appears after translations in the authored language picker.
+    for (const language of [defaultLanguage, ...languages.filter((entry) => entry !== defaultLanguage)]) {
+      const locale = String(language.language)
       const context: ProjectionContext = {
         locale,
+        defaultPageIds,
         pathPrefix: options.pathPrefix,
         references,
         seenReferences,
@@ -576,7 +629,10 @@ export function projectMintlifyNavigation(
         'Documentation',
         language === defaultLanguage ? projectionTrace : undefined,
       )
-      if (language === defaultLanguage) tabs = languageTabs
+      if (language === defaultLanguage) {
+        tabs = languageTabs
+        for (const reference of references) defaultPageIds.add(reference.navigationId)
+      }
     }
   } else {
     const context = { references, seenReferences, warnings, warningKeys, pathPrefix: options.pathPrefix }

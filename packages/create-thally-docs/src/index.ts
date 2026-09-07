@@ -47,6 +47,7 @@ const commandFlags = {
     '--into',
     '--max-pages',
     '--platform',
+    '--skip-validation',
     '--yes',
     '-y',
   ]),
@@ -95,6 +96,7 @@ Options:
   --docs-dir <path>    Override the detected documentation directory
   --max-pages <count>  Limit a public URL crawl to 1-1000 pages
   --platform <name>    Use mintlify, docusaurus, or auto
+  --skip-validation   Import only; explicitly skip content and build verification
   --api-key <key>      Anthropic API key for non-Markdown conversion
   -y, --yes            Skip interactive prompts
   -h, --help           Show this help
@@ -235,7 +237,7 @@ async function runMigrateCommand(): Promise<void> {
   console.log(`  Platform: ${platform ?? 'auto-detect'}`)
   console.log('')
 
-  await migrateDocs({
+  const result = await migrateDocs({
     sourceUrl,
     projectDir,
     into: isInto,
@@ -245,7 +247,9 @@ async function runMigrateCommand(): Promise<void> {
     maxPages,
     platform,
     yes,
+    skipValidation: flags.includes('--skip-validation'),
   })
+  if (result.validation.content === 'failed' || result.validation.build === 'failed') process.exitCode = 1
 }
 
 async function runScaffoldCommand(): Promise<void> {

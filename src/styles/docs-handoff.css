@@ -519,7 +519,7 @@ a[target='_blank']:hover > .thally-docs-card::after {
     display: none;
   }
 
-  .thally-docs-language {
+  .thally-docs-language-label {
     display: none;
   }
 

@@ -1,18 +1,19 @@
 /** Effective `.md` page configuration across repository and Cloud settings. */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   isMarkdownPagesEnabled,
   isRepositoryMarkdownPagesEnabled,
 } from '@/lib/markdown-pages'
 
+afterEach(() => vi.unstubAllEnvs())
+
 describe('Markdown page URLs', () => {
-  // Markdown mirrors are part of the agent-native default surface: the Copy
-  // page menu, AI handoffs, and llms-oriented consumers all read them.
-  it('is enabled by default in the repository scaffold', () => {
-    expect(isRepositoryMarkdownPagesEnabled()).toBe(true)
-    expect(isMarkdownPagesEnabled()).toBe(true)
+  it.each([true, false, undefined])('uses the repository setting %s when Cloud has no override', (enabled) => {
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], markdown: { enabled } }))
+    expect(isRepositoryMarkdownPagesEnabled()).toBe(enabled === true)
+    expect(isMarkdownPagesEnabled()).toBe(enabled === true)
   })
 
   it('lets an explicit Cloud setting override the repository default', () => {

@@ -7,20 +7,23 @@ import { join } from 'node:path'
 import type { MigrationFetcher } from '@thallylabs/migrate'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { scaffoldMock, installDepsMock, initGitMock } = vi.hoisted(() => ({
+const { scaffoldMock, installDepsMock, initGitMock, validateMigrationMock } = vi.hoisted(() => ({
   scaffoldMock: vi.fn(),
   installDepsMock: vi.fn(),
   initGitMock: vi.fn(),
+  validateMigrationMock: vi.fn(),
 }))
 
 vi.mock('../scaffold.js', () => ({ scaffold: scaffoldMock }))
 vi.mock('../utils.js', () => ({ installDeps: installDepsMock, initGit: initGitMock }))
+vi.mock('../migrate/validate.js', () => ({ validateMigration: validateMigrationMock }))
 
 import { migrateDocs } from '../migrate/index.js'
 
 describe('CLI migration flow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    validateMigrationMock.mockResolvedValue({ content: 'passed', build: 'passed', messages: [] })
   })
 
   it('discovers, merges, and writes a live docs migration into an existing project', async () => {
@@ -55,6 +58,8 @@ describe('CLI migration flow', () => {
     })
 
     expect(result.pagesWritten).toBe(1)
+    expect(result.validation.build).toBe('passed')
+    expect(JSON.parse(readFileSync(result.reportPath, 'utf8')).pages).toBe(1)
     expect(readFileSync(join(projectDir, 'src/content/introduction.mdx'), 'utf8')).toContain('The imported page body.')
     const config = JSON.parse(readFileSync(join(projectDir, 'docs.json'), 'utf8')) as { tabs: Array<{ tab: string }> }
     expect(config.tabs.map((tab) => tab.tab)).toEqual(['Existing'])
@@ -66,6 +71,7 @@ describe('CLI migration flow', () => {
     scaffoldMock.mockImplementationOnce(async ({ projectDir: targetDir }: { projectDir: string }) => {
       mkdirSync(join(targetDir, 'src/content/es'), { recursive: true })
       writeFileSync(join(targetDir, 'docs.json'), JSON.stringify({
+        markdown: { enabled: true },
         tabs: [{ tab: 'Starter', groups: [{ group: 'Start', pages: ['introduction', 'quickstart'] }] }],
       }))
       writeFileSync(join(targetDir, 'src/content/introduction.mdx'), 'Starter introduction')
@@ -104,6 +110,7 @@ describe('CLI migration flow', () => {
     expect(existsSync(join(projectDir, 'src/content/quickstart.mdx'))).toBe(false)
     expect(existsSync(join(projectDir, 'src/content/es/introduction.mdx'))).toBe(false)
     expect(existsSync(join(projectDir, 'openapi.yaml'))).toBe(false)
+    expect(JSON.parse(readFileSync(join(projectDir, 'docs.json'), 'utf8')).markdown).toEqual({ enabled: true })
     expect(installDepsMock).toHaveBeenCalledWith(projectDir)
     expect(initGitMock).toHaveBeenCalledWith(projectDir)
   })

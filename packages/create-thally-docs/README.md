@@ -63,6 +63,22 @@ projected into Thally. A live Mintlify URL uses the structured configuration
 embedded by Mintlify when it is available, with bounded same-site crawling as a
 fallback.
 
+Repository-local JSX/TSX components and supported static dependencies are copied
+into the customer-owned MDX registry. Simple interactive HTML blocks are moved
+into client components, and locale/root routing is normalized. Unsupported
+customizations remain visible as warnings rather than being silently dropped.
+
+After importing, the CLI runs content checks and a production build and writes
+`migration-report.json`. A failed check or build returns a nonzero exit status;
+the imported files remain available for inspection. Warnings may include
+pre-existing source problems and compatibility limitations even when a build
+passes. Review them before publishing. Use `--skip-validation` for an explicit
+import-only run; its report is marked unverified. An existing `--into` project
+without a build script is also reported as unverified.
+
+Only migrate repositories you trust. Dependency installation and production
+builds execute project code locally; static migration analysis is not a sandbox.
+
 Prefer a single binary? Install [`@thallylabs/cli`](https://www.npmjs.com/package/@thallylabs/cli)
 and use `thally init`, which delegates here.
 

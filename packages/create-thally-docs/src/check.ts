@@ -1,3 +1,9 @@
+/**
+ * Validate authored navigation and links against the routes the runtime can
+ * serve, including locale fallback and literal redirect chains. Validation is
+ * read-only unless the caller explicitly enables orphan-navigation fixes.
+ */
+
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, extname, relative } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -6,7 +12,7 @@ import { parse as parseYaml } from 'yaml'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
 import type { DocsJsonNavigationGroup } from './docs-json.js'
 
-interface LintIssue {
+export interface LintIssue {
   severity: 'error' | 'warning'
   message: string
   file?: string
@@ -20,6 +26,8 @@ export interface CheckOptions {
   external?: boolean
   /** Flag pages whose `sources` changed since their `verifiedCommit` (needs git history). */
   drift?: boolean
+  /** Optional structured diagnostics sink used by migration reports. */
+  onIssues?: (issues: Array<LintIssue>) => void
 }
 
 /** Run a git command in the project, returning success + trimmed stdout. */
@@ -203,6 +211,32 @@ function pageIdToPath(pageId: string, secondaryLocales: Set<string>): string {
   return locale ? `/${locale}${basePath === '/' ? '' : basePath}` : basePath
 }
 
+interface ResolvedLink {
+  path: string
+  anchor?: string
+  external?: boolean
+  cycle?: boolean
+}
+
+/** Follow literal site redirects without accepting cycles as reachable pages. */
+function resolveLink(target: string, redirects: ReadonlyMap<string, string>): ResolvedLink {
+  let current = target
+  let anchor: string | undefined
+  const seen = new Set<string>()
+  while (true) {
+    if (/^(?:https?:)?\/\//i.test(current)) return { path: current, external: true }
+    const hash = current.indexOf('#')
+    if (hash >= 0) anchor = current.slice(hash + 1)
+    const beforeHash = hash >= 0 ? current.slice(0, hash) : current
+    const path = beforeHash.split('?', 1)[0].replace(/\/$/, '') || '/'
+    if (seen.has(path)) return { path, anchor, cycle: true }
+    seen.add(path)
+    const redirected = redirects.get(path)
+    if (!redirected) return { path, anchor }
+    current = redirected
+  }
+}
+
 function validateOpenApi(projectDir: string, source: string, issues: LintIssue[]): void {
   // Runtime URL-style sources are author-owned files below `public/`, while
   // relative sources are resolved from the project root.
@@ -246,6 +280,7 @@ function validateOpenApi(projectDir: string, source: string, issues: LintIssue[]
   }
 }
 
+/** Check a site's content and return a CLI-compatible success or failure code. */
 export async function runCheck(projectDir: string, options: CheckOptions): Promise<number> {
   const { fix, ci } = options
 
@@ -269,7 +304,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   const redirectDestinations = new Map(
     (config.redirects ?? []).map((redirect) => [
       redirect.source.replace(/\/$/, '') || '/',
-      redirect.destination.replace(/\/$/, '') || '/',
+      redirect.destination,
     ]),
   )
 
@@ -359,8 +394,24 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     const path = pageIdToPath(pageId, secondaryLocales)
     const anchors = extractHeadingAnchors(content)
     validPaths.add(path)
+    // The runtime accepts the explicit introduction slug as well as `/`.
+    validPaths.add(`/${pageId}`)
     anchorsByPath.set(path, anchors)
+    anchorsByPath.set(`/${pageId}`, anchors)
     linksByFile.push({ file: rel2, path, anchors, links: extractLinks(content), offset: lineOffset })
+  }
+
+  // Reader routes fall back to the primary document when no translated file
+  // exists. Use its anchors only for those fallback paths; real translations
+  // retain their own headings and may differ from the source language.
+  for (const [path, anchors] of [...anchorsByPath]) {
+    if (secondaryLocales.has(path.split('/')[1])) continue
+    for (const locale of secondaryLocales) {
+      const localized = `/${locale}${path === '/' ? '' : path}`
+      if (validPaths.has(localized)) continue
+      validPaths.add(localized)
+      anchorsByPath.set(localized, anchors)
+    }
   }
 
   // Broken internal link + anchor detection (after all valid paths are known).
@@ -376,15 +427,13 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
         continue
       }
       if (!target.startsWith('/')) continue // relative/asset links — not validated
-      const [beforeHash, anchor] = target.split('#')
-      let path = beforeHash.split('?')[0] // strip query string
-      if (path.length > 1) path = path.replace(/\/$/, '')
+      const { path, anchor, cycle, external } = resolveLink(target, redirectDestinations)
+      if (external) continue
       const isGeneratedApiPath = Array.from(generatedApiPaths).some(
         (prefix) => path === prefix || path.startsWith(`${prefix}/`),
       )
-      if (isGeneratedApiPath || path.startsWith('/_next') || /\.[a-z0-9]+$/i.test(path)) continue // generated/assets
-      const redirectedPath = redirectDestinations.get(path)
-      if (!validPaths.has(path) && !(redirectedPath && validPaths.has(redirectedPath))) {
+      if (!cycle && (isGeneratedApiPath || path.startsWith('/_next') || /\.[a-z0-9]+$/i.test(path))) continue // generated/assets
+      if (cycle || !validPaths.has(path)) {
         issues.push({ severity: 'error', message: `Broken link: "${target}" — no page at "${path}"`, file, line })
       } else if (anchor && !anchorsByPath.get(path)?.has(anchor)) {
         issues.push({ severity: 'warning', message: `Broken anchor: "${target}" — no heading "#${anchor}" on that page`, file, line })
@@ -398,6 +447,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   }
 
   const errors = issues.filter((i) => i.severity === 'error')
+  options.onIssues?.(issues)
   const warnings = issues.filter((i) => i.severity === 'warning')
 
   if (ci) {

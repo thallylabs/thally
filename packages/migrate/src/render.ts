@@ -1,5 +1,7 @@
 /** Render canonical migration bundles into a portable Thally repository tree. */
 
+import { mergeComponentRegistry } from './components.js'
+
 import type {
   MigrationBundle,
   MigrationDocsConfig,
@@ -124,7 +126,7 @@ export function mergeMigrationConfig(
 /** Materialize every canonical page, asset, and config as repository file changes. */
 export function renderMigrationFiles(
   bundle: MigrationBundle,
-  options: { existingConfig?: MigrationDocsConfig } = {},
+  options: { existingConfig?: MigrationDocsConfig; existingComponentRegistry?: string } = {},
 ): Array<RenderedMigrationFile> {
   const config = options.existingConfig
     ? mergeMigrationConfig(options.existingConfig, bundle.docsConfig)
@@ -135,6 +137,10 @@ export function renderMigrationFiles(
       content: renderPage(bundle, page),
     })),
     ...bundle.assets.map((asset) => ({ path: `public/${asset.path}`, content: asset.content })),
+    ...(bundle.componentFiles ?? []).flatMap((file) => file.path === 'src/mdx/custom-components.tsx'
+      && options.existingComponentRegistry !== undefined && typeof file.content === 'string'
+      ? mergeComponentRegistry(options.existingComponentRegistry, file.content)
+      : [file]),
     { path: 'docs.json', content: `${JSON.stringify(config, null, 2)}\n` },
   ]
 }
