@@ -1062,7 +1062,7 @@ export function getStructuralTheme(): StructuralTheme {
   return docsConfig().theme ?? 'default'
 }
 
-/** Resolve the global card/tile icon treatment, defaulting to quiet neutrals. */
+/** Resolve the global card/tile icon treatment, defaulting to the site accent. */
 export function getContentIconTone(): ContentIconTone {
-  return docsConfig().appearance?.contentIcons === 'accent' ? 'accent' : 'neutral'
+  return docsConfig().appearance?.contentIcons === 'neutral' ? 'neutral' : 'accent'
 }

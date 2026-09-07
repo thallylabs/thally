@@ -14,14 +14,14 @@ export function DocHeader({ doc, eyebrow, showCopyPage = true }: DocHeaderProps)
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
           {eyebrow ? (
-            <p className="thally-docs-eyebrow mb-2.5 text-[0.82rem] font-semibold text-accent">
+            <p className="thally-docs-eyebrow mb-2.5 text-sm font-semibold leading-5 text-accent">
               {eyebrow}
             </p>
           ) : null}
-          <h1 className="font-heading text-[2.25rem] font-bold leading-[1.15] tracking-[-0.03em] text-foreground">
+          <h1 className="font-heading text-4xl font-semibold leading-10 tracking-[-0.025em] text-foreground">
             {doc.title}
           </h1>
-          <p className="mt-3.5 max-w-[60ch] text-[1.1rem] leading-[1.6] text-foreground/80">{doc.description}</p>
+          <p className="mt-2 max-w-[58ch] text-lg leading-7 text-foreground/80">{doc.description}</p>
         </div>
         {showCopyPage ? <CopyPageButton /> : null}
       </div>

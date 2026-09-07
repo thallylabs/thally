@@ -10,6 +10,7 @@ import { useMDXComponents } from '@/components/mdx/mdx-components'
 
 const RenderableNote = Note as ComponentType<{
   type?: NoteType
+  title?: ReactNode
   children?: ReactNode
 }>
 
@@ -38,6 +39,16 @@ describe('Note', () => {
     expect(markup).toContain('bg-accent/[0.14]')
     expect(markup).toContain('text-accent')
     expect(markup).toContain('thally-callout-content')
+  })
+
+  it('renders an authored title beside the callout icon', () => {
+    const markup = renderToStaticMarkup(
+      createElement(RenderableNote, { type: 'info', title: 'Good to know' }, 'Callout content'),
+    )
+
+    expect(markup).toContain('Good to know')
+    expect(markup.indexOf('Good to know')).toBeLessThan(markup.indexOf('Callout content'))
+    expect(markup).toContain('font-medium')
   })
 
   it.each([

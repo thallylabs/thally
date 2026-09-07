@@ -15,7 +15,7 @@ const config: Config = {
     extend: {
       fontFamily: {
         sans: ['var(--font-sans)', 'Inter', 'system-ui', 'sans-serif'],
-        heading: ['var(--font-heading)', 'var(--font-display)', 'var(--font-sans)', 'Plus Jakarta Sans', 'Inter', 'sans-serif'],
+        heading: ['var(--font-heading)', 'var(--font-sans)', 'Inter', 'sans-serif'],
         mono: ['var(--font-mono)', 'JetBrains Mono', 'IBM Plex Mono', 'monospace'],
       },
       fontSize: {
@@ -95,14 +95,13 @@ const config: Config = {
             '--tw-prose-invert-th-borders': 'hsl(var(--thally-border))',
             '--tw-prose-invert-td-borders': 'hsl(var(--thally-border) / 0.7)',
             color: 'var(--tw-prose-body)',
-            // Keep prose on the same 16/24 reading rhythm as cards and page
-            // summaries. Components may narrow the measure, but should not
-            // silently introduce a second body-text scale.
+            // Keep prose on the 16/28 reading rhythm used across the public
+            // documentation surface.
             fontSize: '1rem',
-            lineHeight: '1.5',
+            lineHeight: '1.75',
             p: {
-              marginTop: theme('spacing.6'),
-              marginBottom: theme('spacing.6'),
+              marginTop: theme('spacing.5'),
+              marginBottom: theme('spacing.5'),
             },
             '[class~="lead"]': {
               fontSize: theme('fontSize.base')[0],
@@ -223,29 +222,29 @@ const config: Config = {
             // this config styles every heading, MDX or plain markdown.
             h1: {
               color: 'var(--tw-prose-headings)',
-              fontWeight: '500',
-              letterSpacing: '-0.02em',
+              fontWeight: '600',
+              letterSpacing: '-0.025em',
               fontSize: theme('fontSize.4xl')[0],
               ...theme('fontSize.4xl')[1],
-              marginBottom: theme('spacing.2'),
+              marginBottom: '0',
             },
             h2: {
               color: 'var(--tw-prose-headings)',
               fontWeight: '600',
-              letterSpacing: '-0.02em',
+              letterSpacing: '-0.025em',
               fontSize: theme('fontSize.2xl')[0],
               ...theme('fontSize.2xl')[1],
-              marginTop: theme('spacing.16'),
-              marginBottom: theme('spacing.2'),
+              marginTop: theme('spacing.9'),
+              marginBottom: '1.125rem',
             },
             h3: {
               color: 'var(--tw-prose-headings)',
               fontSize: theme('fontSize.xl')[0],
               ...theme('fontSize.xl')[1],
               fontWeight: '600',
-              letterSpacing: '-0.015em',
-              marginTop: theme('spacing.10'),
-              marginBottom: theme('spacing.2'),
+              letterSpacing: '-0.025em',
+              marginTop: theme('spacing.8'),
+              marginBottom: theme('spacing.3.5'),
             },
             'img, video, figure': {
               marginTop: theme('spacing.8'),

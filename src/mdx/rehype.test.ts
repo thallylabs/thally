@@ -53,6 +53,15 @@ describe('code-fence metadata', () => {
     })
   })
 
+  it('keeps framework tags separate from the syntax grammar and filename', () => {
+    expect(
+      parseCodeFenceMeta('framework="Next.js" filename="app/page.tsx"'),
+    ).toEqual({
+      tag: 'Next.js',
+      title: 'app/page.tsx',
+    })
+  })
+
   it('keeps syntax grammars fine-grained for managed Worker bundles', () => {
     const source = readFileSync(
       fileURLToPath(new URL('./rehype.ts', import.meta.url)),

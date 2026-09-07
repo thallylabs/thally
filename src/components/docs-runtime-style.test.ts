@@ -19,6 +19,7 @@ vi.mock('next/navigation', () => ({
 import { Card, Tile } from '@/components/mdx/rich-content'
 import { AgentPrompt } from '@/components/mdx/agent-prompt'
 import { DocHeader } from '@/components/docs/doc-header'
+import { Footer } from '@/components/layout/footer'
 import { Sidebar } from '@/components/navigation/sidebar'
 import type { DocEntry } from '@/data/docs'
 
@@ -30,7 +31,7 @@ describe('documentation visual system', () => {
   it.each([
     ['card', Card],
     ['tile', Tile],
-  ])('keeps %s icons neutral while preserving border-only surfaces', (_, Component) => {
+  ])('keeps %s icons token-driven while preserving border-only surfaces', (_, Component) => {
     const markup = renderToStaticMarkup(
       createElement(
         Component,
@@ -42,7 +43,7 @@ describe('documentation visual system', () => {
     expect(markup).toContain('thally-content-icon')
     expect(markup).toContain('data-content-icon-tone="site"')
     expect(markup).toContain('border border-border')
-    expect(markup).toContain('hover:border-foreground/25')
+    expect(markup).toContain('hover:border-accent')
     expect(markup).not.toContain('hover:bg-')
     expect(markup).not.toContain('shadow-')
   })
@@ -153,7 +154,7 @@ describe('documentation visual system', () => {
 
     expect(markup).toContain('Prefer to let an agent do it?')
     expect(markup).toContain('Copy a complete prompt to write a page')
-    expect(markup).toContain('border border-input bg-transparent')
+    expect(markup).toContain('border border-input bg-background')
     expect(markup).not.toContain('bg-primary')
   })
 
@@ -201,7 +202,7 @@ describe('documentation visual system', () => {
     expect(markup).toContain('aria-current="page"')
     expect(markup).toContain('bg-accent/10')
     expect(markup).toContain('text-accent')
-    expect(markup).toContain('text-base')
+    expect(markup).toContain('text-sm')
   })
 
   it('renders nested groups recursively instead of flattening duplicate headings', () => {
@@ -373,7 +374,23 @@ describe('documentation visual system', () => {
     expect(sidebar).toContain('sticky top-[60px]')
   })
 
-  it('docks chat over a dismissible scrim with the fixed Thally identity', async () => {
+  it('moves legacy navbar GitHub destinations into the footer', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const topBar = await readFile('src/components/layout/top-bar.tsx', 'utf8')
+    expect(topBar).toContain("filter((link) => link.type !== 'github')")
+
+    const markup = renderToStaticMarkup(createElement(Footer, {
+      footerConfig: null,
+      githubHref: 'https://github.com/example/docs',
+      siteName: 'Example',
+      siteLinks: [{ label: 'Support', href: '/support' }],
+    }))
+
+    expect(markup).toContain('href="https://github.com/example/docs"')
+    expect(markup).toContain('href="/support"')
+  })
+
+  it('docks chat below the top bar with the fixed Thally identity', async () => {
     const { readFile } = await import('node:fs/promises')
     const [chat, provider, statusRoute] = await Promise.all([
       readFile('src/components/docs/docs-chat.tsx', 'utf8'),
@@ -381,10 +398,10 @@ describe('documentation visual system', () => {
       readFile('src/app/api/chat-status/route.ts', 'utf8'),
     ])
 
-    expect(chat).toContain('thally-docs-chat-scrim')
+    expect(chat).not.toContain('thally-docs-chat-scrim')
     expect(chat).toContain("event.key === 'Escape'")
     expect(chat).toContain('/brand/default-favicon-light.svg')
-    expect(chat).toContain("width: expanded ? 'min(680px, 100vw)' : 'min(460px, 100vw)'")
+    expect(chat).toContain("width: expanded ? 'min(680px, 100vw)' : 'min(420px, 100vw)'")
     expect(chat).not.toContain('<FabIcon')
     expect(provider).toContain('icon={chatStatus.icon ?? icon}')
     expect(statusRoute).toContain("/^\\/[A-Za-z0-9._/-]+$/")

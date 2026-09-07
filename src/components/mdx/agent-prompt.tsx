@@ -83,13 +83,13 @@ export function AgentPrompt({
           copyOnly ? 'px-[18px] py-4' : 'border-b border-border px-[18px] py-4'
         }`}
       >
-        <p className="text-[0.92rem] leading-6 text-foreground/75">
-          <strong className="block font-semibold text-foreground">{heading}</strong>
+        <p className="text-[0.94rem] leading-6 text-foreground/75">
+          <strong className="block font-medium text-foreground">{heading}</strong>
           <span>{title}</span>
         </p>
         <button
           type="button"
-          className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-[10px] border border-input bg-transparent px-[15px] py-2 text-sm font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="inline-flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-input bg-background px-2.5 text-[0.82rem] font-medium text-foreground/80 transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           aria-live="polite"
           onClick={() => {
             const value = contentRef.current
@@ -101,7 +101,7 @@ export function AgentPrompt({
             })
           }}
         >
-          {isCopied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
+          {isCopied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
           {isCopied ? 'Copied' : 'Copy prompt'}
         </button>
       </div>

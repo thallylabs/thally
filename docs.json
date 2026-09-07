@@ -12,13 +12,7 @@
     "enabled": true
   },
   "navbar": {
-    "links": [
-      {
-        "label": "GitHub",
-        "href": "https://github.com/thallylabs/thally",
-        "type": "github"
-      }
-    ],
+    "links": [],
     "primary": {
       "label": "Get started",
       "href": "/quickstart"

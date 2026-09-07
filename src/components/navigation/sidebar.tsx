@@ -49,26 +49,26 @@ export function Sidebar({
               onCollectionChange={onCollectionChange!}
             />
           ) : (
-            <p className="line-clamp-1 px-2 text-base font-semibold leading-6 text-foreground">{title}</p>
+            <p className="line-clamp-1 px-2 text-sm font-semibold leading-6 text-foreground">{title}</p>
           )}
         </div>
-        <nav className="scrollbar-hide mt-5 min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-y-contain pb-5">
+        <nav className="scrollbar-hide mt-2.5 min-h-0 flex-1 space-y-8 overflow-y-auto overscroll-y-contain pb-5">
           {sections.map((section, index) => {
             const nodes: Array<NavigationNode> = section.nodes
               ?? section.items.map((item) => ({ type: 'page' as const, item }))
             return (
-              <div key={section.id ?? `${section.title}-${index}`} className="thally-docs-sidebar-group space-y-1.5">
+              <div key={section.id ?? `${section.title}-${index}`} className="thally-docs-sidebar-group space-y-2.5">
                 {/* A group named after its tab would repeat the label directly
                     beneath the tab heading; the items stand on their own. */}
                 {section.title !== title ? (
-                  <p className={cn(typography.meta, 'flex items-center gap-2 px-2 text-base font-semibold normal-case leading-6 tracking-normal text-foreground')}>
+                  <p className={cn(typography.meta, 'flex items-center gap-2 px-2 text-sm font-semibold normal-case leading-6 tracking-normal text-foreground')}>
                     {showGroupIcons && section.icon ? (
                       <Icon icon={section.icon} className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     ) : null}
                     <span className="truncate">{section.title}</span>
                   </p>
                 ) : null}
-                <div>
+                <div className="space-y-px">
                   <NavigationTree
                     nodes={nodes}
                     pathname={pathname}

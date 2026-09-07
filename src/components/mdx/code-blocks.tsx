@@ -1,5 +1,10 @@
 'use client'
 
+/**
+ * Interactive code panels for authored MDX, including language/framework
+ * labels, synchronized variant tabs, syntax output, and reader actions.
+ */
+
 import { Tab, TabGroup, TabList, TabPanel, TabPanels } from '@headlessui/react'
 import clsx from 'clsx'
 import {
@@ -20,11 +25,22 @@ import { Mermaid } from '@/components/mdx/mermaid'
 
 const languageNames: Record<string, string> = {
   bash: 'Shell',
+  c: 'C',
+  cpp: 'C++',
+  csharp: 'C#',
   sh: 'Shell',
   shell: 'Shell',
   zsh: 'Shell',
   css: 'CSS',
+  diff: 'Diff',
+  docker: 'Dockerfile',
+  dockerfile: 'Dockerfile',
+  graphql: 'GraphQL',
+  gql: 'GraphQL',
+  hcl: 'HCL',
   html: 'HTML',
+  http: 'HTTP',
+  java: 'Java',
   js: 'JavaScript',
   ts: 'TypeScript',
   javascript: 'JavaScript',
@@ -33,26 +49,41 @@ const languageNames: Record<string, string> = {
   tsx: 'TSX',
   json: 'JSON',
   jsonc: 'JSONC',
+  kotlin: 'Kotlin',
   md: 'Markdown',
   markdown: 'Markdown',
   mdx: 'MDX',
+  plaintext: 'Plain text',
+  text: 'Plain text',
+  txt: 'Plain text',
   yaml: 'YAML',
   yml: 'YAML',
   php: 'PHP',
   python: 'Python',
   ruby: 'Ruby',
   go: 'Go',
+  rust: 'Rust',
+  sql: 'SQL',
+  svelte: 'Svelte',
+  swift: 'Swift',
+  toml: 'TOML',
+  vue: 'Vue',
 }
 
 function getPanelTitle({
   title,
+  tag,
   language,
 }: {
   title?: string
+  tag?: string
   language?: string
 }) {
   if (title) {
     return title
+  }
+  if (tag) {
+    return tag
   }
   if (language && language in languageNames) {
     return languageNames[language]
@@ -246,6 +277,7 @@ function CodePanel({
   let resolvedTag = tag
   let resolvedLabel = label
   let resolvedCode = code
+  let resolvedLanguage = language
   let resolvedWrap = wrap
 
   const referenceElement = renderableChildren.find((child) =>
@@ -256,12 +288,15 @@ function CodePanel({
     const props = referenceElement.props as {
       tag?: string
       label?: string
+      title?: string
       code?: string
+      language?: string
       wrap?: boolean | string
     }
     resolvedTag = props.tag ?? resolvedTag
-    resolvedLabel = props.label ?? resolvedLabel
+    resolvedLabel = props.label ?? props.title ?? resolvedLabel
     resolvedCode = props.code ?? resolvedCode
+    resolvedLanguage = props.language ?? resolvedLanguage
     // MDX may serialize the boolean fence flag as an empty-string attribute.
     resolvedWrap = resolvedWrap ?? (props.wrap === '' ? true : Boolean(props.wrap))
   } else if (!resolvedCode) {
@@ -279,6 +314,11 @@ function CodePanel({
   // block as malformed; a bad authoring example should never take the entire
   // pre-rendered documentation site offline.
   resolvedCode = resolvedCode ?? findCodePayload(content) ?? ''
+  resolvedTag =
+    resolvedTag ??
+    (resolvedLanguage
+      ? getPanelTitle({ language: resolvedLanguage })
+      : 'Code')
 
   return (
     <div className="group">
@@ -289,7 +329,7 @@ function CodePanel({
       ) : (
         <CodePanelHeader
           tag={resolvedTag}
-          label={resolvedLabel ?? getPanelTitle({ language })}
+          label={resolvedLabel}
           code={resolvedCode}
         />
       )}
@@ -344,7 +384,11 @@ function CodeGroupHeader({
             >
               {getPanelTitle(
                 isValidElement(child)
-                  ? (child.props as { title?: string })
+                  ? (child.props as {
+                      title?: string
+                      tag?: string
+                      language?: string
+                    })
                   : {},
               )}
             </Tab>
@@ -442,7 +486,13 @@ export function CodeGroup({
     () =>
     Children.map(children, (child) =>
       getPanelTitle(
-        isValidElement(child) ? (child.props as { title?: string }) : {},
+        isValidElement(child)
+          ? (child.props as {
+              title?: string
+              tag?: string
+              language?: string
+            })
+          : {},
       ),
       ) ?? [],
     [children],
@@ -511,6 +561,7 @@ interface PreProps extends Omit<ComponentPropsWithoutRef<typeof CodeGroup>, 'chi
 
 export function Pre({
   children,
+  title,
   ...props
 }: PreProps) {
   const isGrouped = useContext(CodeGroupContext)
@@ -526,5 +577,5 @@ export function Pre({
     return children
   }
 
-  return <CodeGroup {...props}>{children}</CodeGroup>
+  return <CodeGroup {...props} label={title}>{children}</CodeGroup>
 }

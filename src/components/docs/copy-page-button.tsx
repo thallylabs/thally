@@ -97,7 +97,7 @@ export function CopyPageButton() {
   }
 
   return (
-    <div ref={containerRef} className="relative flex shrink-0 items-center">
+    <div ref={containerRef} className="relative flex h-[34px] shrink-0 items-stretch rounded-[9px] border border-border">
       <Button
         variant="ghost"
         size="sm"

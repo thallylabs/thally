@@ -87,15 +87,15 @@ const components: MDXComponents = {
   Note: (props) => <Note type="note" {...props} />,
   Tip: (props) => <Note type="tip" {...props} />,
   // Callout: safety net for migrated content that uses <Callout type="...">
-  Callout: ({ type, children }: { type?: string; children?: ReactNode }) => {
+  Callout: ({ type, title, children }: { type?: string; title?: ReactNode; children?: ReactNode }) => {
     if (!children) return null
-    if (type === 'warning') return <Note type="warning">{children}</Note>
-    if (type === 'danger' || type === 'error') return <Note type="danger">{children}</Note>
-    if (type === 'info') return <Note type="info">{children}</Note>
-    if (type === 'tip') return <Note type="tip">{children}</Note>
-    if (type === 'check' || type === 'success') return <Note type="check">{children}</Note>
-    if (type === 'note') return <Note type="note">{children}</Note>
-    return <Note>{children}</Note>
+    if (type === 'warning') return <Note type="warning" title={title}>{children}</Note>
+    if (type === 'danger' || type === 'error') return <Note type="danger" title={title}>{children}</Note>
+    if (type === 'info') return <Note type="info" title={title}>{children}</Note>
+    if (type === 'tip') return <Note type="tip" title={title}>{children}</Note>
+    if (type === 'check' || type === 'success') return <Note type="check" title={title}>{children}</Note>
+    if (type === 'note') return <Note type="note" title={title}>{children}</Note>
+    return <Note title={title}>{children}</Note>
   },
   AccordionGroup: (props) => <AccordionGroup {...props} />,
   // Latex: Mintlify LaTeX component — render as inline code (no renderer available)
