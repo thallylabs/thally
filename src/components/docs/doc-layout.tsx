@@ -1,6 +1,6 @@
 /** Documentation page shell and its configurable reader feedback surfaces. */
 
-import type { DocEntry } from '@/data/docs'
+import type { DocEntry, NavContext } from '@/data/docs'
 import { getBreadcrumbs, getNavCategory, getPrevNextLinks, getFeedbackConfig } from '@/data/docs'
 import { DocBreadcrumbs } from '@/components/docs/doc-breadcrumbs'
 import { DocHeader } from '@/components/docs/doc-header'
@@ -20,12 +20,15 @@ import { PagePanelSlot, PageSlotsProvider } from '@/components/mdx/page-slots'
 interface DocLayoutProps {
   doc: DocEntry
   locale?: string
+  navigation?: Pick<NavContext, 'prev' | 'next' | 'breadcrumb'>
   children: React.ReactNode
 }
 
-function DocLayoutContent({ doc, locale = 'en', children }: DocLayoutProps) {
-  const { prev, next } = getPrevNextLinks(doc.href)
-  const breadcrumbs = getBreadcrumbs(doc.href)
+function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayoutProps) {
+  const { prev, next, breadcrumb: breadcrumbs } = navigation ?? {
+    ...getPrevNextLinks(doc.href),
+    breadcrumb: getBreadcrumbs(doc.href),
+  }
   const eyebrow = getNavCategory(doc.href)
   const mode = doc.mode ?? 'default'
   const feedbackConfig = getFeedbackConfig()
