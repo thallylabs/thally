@@ -76,6 +76,17 @@ describe('localized collection selection', () => {
     expect(markup).toContain('<aside data-active="guides"')
   })
 
+  it('keeps header offsets synchronized when localized collections cross the row threshold', () => {
+    const initial = [...collections(), ...Array.from({ length: 4 }, (_, index) => ({
+      id: `extra-${index}`, label: `Extra ${index}`, href: `/extra-${index}`, sections: [],
+    }))]
+    expect(shellMarkup(initial)).toContain('data-header-layout="inline"')
+    mocks.snapshots['locale:zh-Hans'] = [...initial, { id: 'seventh', label: 'Seventh', href: '/seventh', sections: [] }]
+    expect(shellMarkup(initial)).toContain('data-header-layout="stacked"')
+    mocks.snapshots['locale:zh-Hans'] = initial
+    expect(shellMarkup(initial)).toContain('data-header-layout="inline"')
+  })
+
   it('localizes authored collection destinations without inventing new ones', async () => {
     mocks.loadCollections.mockResolvedValue([
       ...collections('/zh-Hans'),

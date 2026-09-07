@@ -99,6 +99,12 @@ body {
   padding-inline: 28px;
 }
 
+.thally-docs-inline-collections {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: stretch;
+}
+
 .thally-docs-root {
   --docs-header-height: 60px;
 }
@@ -139,12 +145,12 @@ body {
 }
 
 @media (min-width: 881px) {
-  .thally-docs-root[data-navigation='tabs'] {
+  .thally-docs-root[data-header-layout='stacked'] {
     --docs-header-height: 104px;
   }
 
   /* The second row must not cover headings reached through the page TOC. */
-  .thally-docs-root[data-navigation='tabs'] :is([data-heading], .scroll-mt-24) {
+  .thally-docs-root[data-header-layout='stacked'] :is([data-heading], .scroll-mt-24) {
     scroll-margin-top: 128px;
   }
 }
@@ -617,7 +623,8 @@ a[target='_blank']:hover > .thally-docs-card::after {
     display: inline-flex;
   }
 
-  .thally-docs-collection-row {
+  .thally-docs-collection-row,
+  .thally-docs-inline-collections {
     display: none;
   }
 

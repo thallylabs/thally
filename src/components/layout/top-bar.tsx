@@ -1,11 +1,12 @@
 'use client'
 
-/** Shared documentation header with an independent, shrinkable collection row. */
+/** Shared documentation header: up to six inline tabs, then a dedicated second row. */
 
 import { ExternalLink, Sparkles } from 'lucide-react'
 import type { SidebarCollection, DocsJsonNavbar, NavigationPresentation } from '@/data/docs'
 import { MobileNav } from '@/components/navigation/mobile-nav'
 import { CollectionTabs } from '@/components/navigation/collection-tabs'
+import { getHeaderNavigationLayout } from '@/components/navigation/header-layout'
 import { CommandSearch } from '@/components/search/command-search'
 import { ThemeSwitch } from '@/components/theme/theme-switch'
 import { VersionSwitcher } from '@/components/docs/version-switcher'
@@ -47,6 +48,7 @@ export function TopBar({
   showSidebarGroupIcons = true,
 }: TopBarProps) {
   const siteName = useSiteName()
+  const headerNavigationLayout = getHeaderNavigationLayout(navigationPresentation.display, collections.length)
   const {
     hasAssistantEntryPoint,
     assistantLabel,
@@ -94,8 +96,8 @@ export function TopBar({
           onCollectionChange={onCollectionChange}
           showGroupIcons={showSidebarGroupIcons}
         />
-        {/* Keep the brand separate from the language control. Collection links
-            have their own row and never compete with header actions for room. */}
+        {/* Compact navigation keeps the original brand → locale → tabs → actions
+            order; seven or more collection links move below this row. */}
         <IntentPrefetchLink
           href="/"
           className="thally-docs-brand mr-5 flex shrink-0 items-center gap-2 text-foreground"
@@ -108,6 +110,11 @@ export function TopBar({
         </IntentPrefetchLink>
         {i18nConfig && i18nConfig.locales.length >= 2 ? (
           <LocaleSwitcher locales={i18nConfig.locales} currentLocale={currentLocale ?? i18nConfig.defaultLocale} currentPath={currentPath ?? '/'} defaultLocale={i18nConfig.defaultLocale} />
+        ) : null}
+        {headerNavigationLayout === 'inline' ? (
+          <div className="thally-docs-inline-collections">
+            <CollectionTabs collections={collections} activeCollectionId={activeCollectionId} onCollectionChange={onCollectionChange} />
+          </div>
         ) : null}
         <div className="thally-docs-actions ml-auto flex shrink-0 items-center gap-2">
           <div className="thally-docs-search shrink-0">
@@ -148,7 +155,7 @@ export function TopBar({
           ) : null}
         </div>
       </div>
-      {navigationPresentation.display === 'tabs' ? (
+      {headerNavigationLayout === 'stacked' ? (
         <div className={cn('thally-docs-collection-row', shell.topbar)}>
           <CollectionTabs collections={collections} activeCollectionId={activeCollectionId} onCollectionChange={onCollectionChange} />
         </div>

@@ -4,6 +4,7 @@
 
 import { Footer } from '@/components/layout/footer'
 import { TopBar } from '@/components/layout/top-bar'
+import { getHeaderNavigationLayout } from '@/components/navigation/header-layout'
 import { Sidebar } from '@/components/navigation/sidebar'
 import { PageContainer } from '@/components/layout/sections'
 import { layout, shell } from '@/config/layout'
@@ -153,7 +154,7 @@ export function SiteShell({
   // which lets the banner-aware desktop sidebar remain sticky.
   return (
     <SiteNameProvider initialName={identity.name}>
-      <div className="thally-docs-root min-h-screen w-full overflow-x-clip bg-background text-foreground" data-navigation={navigationPresentation.display}>
+      <div className="thally-docs-root min-h-screen w-full overflow-x-clip bg-background text-foreground" data-navigation={navigationPresentation.display} data-header-layout={getHeaderNavigationLayout(navigationPresentation.display, collections.length)}>
         <TopBar
           collections={collections}
           activeCollectionId={activeTabId}

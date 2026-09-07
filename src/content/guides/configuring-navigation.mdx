@@ -28,7 +28,9 @@ All navigation is controlled by a single file at the project root: `docs.json`. 
 
 ## Collections
 
-Each entry in the `tabs` array creates a top-level documentation collection. By default, collections appear as tabs in the top bar. Set `navigation.display` to `"dropdown"` to present them in a sidebar selector instead:
+Each entry in the `tabs` array creates a top-level documentation collection. By default, one to six collections share a single header row with the logo, language selector, and search. Adding a seventh collection automatically moves the tabs into a second, aligned row. Removing items back to six restores the single row. Only collection tabs count toward this threshold—not search, language, Support, or CTA controls. Labels keep their full text; a row that cannot fit can scroll horizontally. Mobile navigation stays in its drawer.
+
+This behavior comes with the shared runtime: new sites inherit it from their selected starter release, and existing sites receive it when their runtime is updated and the site is rebuilt. No site-specific configuration is needed. Set `navigation.display` to `"dropdown"` to present collections in a sidebar selector instead; the automatic row threshold does not change that explicit choice:
 
 ```json
 {
