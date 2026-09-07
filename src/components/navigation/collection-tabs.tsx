@@ -1,6 +1,6 @@
 'use client'
 
-/** Always-visible collection links share a row and shrink like browser tabs. */
+/** Collection links keep their complete labels as spacing adapts to the row. */
 
 import type { CSSProperties } from 'react'
 import type { SidebarCollection } from '@/data/docs'
@@ -31,9 +31,9 @@ export function CollectionTabs({ collections, activeCollectionId, onCollectionCh
           ),
           'aria-current': isActive ? 'page' as const : undefined,
         }
-        // Truncation is visual only. Keep the full accessible name and native
-        // hover label even when a very crowded row leaves little text space.
-        const label = <span className="truncate" title={collection.label}>{collection.label}</span>
+        // Labels are navigation, not expendable decoration: never ellipsize
+        // them. A narrow viewport may scroll the row instead of losing words.
+        const label = <span title={collection.label}>{collection.label}</span>
         const onClick = () => onCollectionChange(collection.id)
         return destination
           ? /^https?:\/\//.test(destination)

@@ -15,7 +15,7 @@ function render(collections: Array<SidebarCollection>) {
   return renderToStaticMarkup(<CollectionTabs collections={collections} activeCollectionId="0" onCollectionChange={() => {}} />)
 }
 
-describe('shrinkable collection tabs', () => {
+describe('fully readable collection tabs', () => {
   it.each([1, 8, 14, 30])('renders every link for %i collections in the initial HTML', (count) => {
     const collections = Array.from({ length: count }, (_, index) => ({
       id: String(index), label: `Collection ${index}`, href: `/collection-${index}`, sections: [],
@@ -24,7 +24,7 @@ describe('shrinkable collection tabs', () => {
     expect(html.match(/<a /g)).toHaveLength(count)
     expect(html).toContain(`--collection-count:${count}`)
     expect(html.match(/aria-current="page"/g)).toHaveLength(1)
-    expect(html).not.toMatch(/aria-haspopup|role="menu|aria-hidden|inert/)
+    expect(html).not.toMatch(/aria-haspopup|role="menu|aria-hidden|inert|truncate|text-ellipsis|line-clamp/)
     for (const collection of collections) expect(html).toContain(`title="${collection.label}"`)
   })
 

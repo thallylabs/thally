@@ -375,8 +375,10 @@ describe('documentation visual system', () => {
     expect(css).toContain('--docs-header-height: 60px')
     expect(css).toMatch(/@media \(min-width: 881px\) \{\s*\.thally-docs-root\[data-navigation='tabs'\] \{\s*--docs-header-height: 104px;/)
     expect(css).toContain('scroll-margin-top: 128px')
-    expect(css).toMatch(/\.thally-docs-tabs \.thally-nav-tab-item \{[\s\S]*?flex: 0 1 auto;[\s\S]*?min-width: 0;/)
-    expect(css).toContain('calc(80px / var(--collection-count))')
+    expect(css).toMatch(/\.thally-docs-tabs \.thally-nav-tab-item \{[\s\S]*?flex: 0 0 auto;[\s\S]*?min-width: max-content;/)
+    expect(css).toContain('calc(160px / var(--collection-count))')
+    expect(css).toMatch(/\.thally-docs-collection-row \{[^}]*max-width: none;/)
+    expect(css).toMatch(/\.thally-docs-tabs \{[^}]*overflow-x: auto;/)
   })
 
   it('moves legacy navbar GitHub destinations into the footer', async () => {
