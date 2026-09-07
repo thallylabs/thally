@@ -32,7 +32,7 @@ export function CollectionTabs({ collections, activeCollectionId, onCollectionCh
           'aria-current': isActive ? 'page' as const : undefined,
         }
         // Labels are navigation, not expendable decoration: never ellipsize
-        // them. A narrow viewport may scroll the row instead of losing words.
+        // them. A narrow desktop wraps whole links instead of losing words.
         const label = <span title={collection.label}>{collection.label}</span>
         const onClick = () => onCollectionChange(collection.id)
         return destination

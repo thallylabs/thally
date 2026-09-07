@@ -99,46 +99,36 @@ body {
   padding-inline: 28px;
 }
 
-.thally-docs-inline-collections {
-  flex: 1 1 auto;
-  min-width: 0;
-  align-self: stretch;
-}
-
 .thally-docs-root {
   --docs-header-height: 60px;
 }
 
 .thally-docs-collection-row {
-  height: 44px;
+  min-height: 44px;
   /* Both header rows inherit the same centered shell and inline gutters. */
 }
 
 .thally-docs-tabs {
   display: flex;
-  height: 100%;
+  flex-wrap: wrap;
   min-width: 0;
-  gap: clamp(1rem, calc(280px / var(--collection-count)), 1.5rem);
-  overflow-x: auto;
-  scrollbar-width: thin;
+  column-gap: clamp(1rem, calc(280px / var(--collection-count)), 1.5rem);
   /* Density changes spacing, never the reader's text size. */
   font-size: 0.875rem;
-}
-
-.thally-docs-tabs::-webkit-scrollbar {
-  display: block;
-  height: 4px;
 }
 
 .thally-docs-tabs .thally-nav-tab-item {
   display: flex;
   align-items: center;
   flex: 0 0 auto;
-  min-width: max-content;
-  height: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
   padding-inline: 0;
   border-bottom-width: 2px;
-  white-space: nowrap;
+  /* Wrap whole items first, but let a label wider than the shell remain readable. */
+  white-space: normal;
+  overflow-wrap: anywhere;
   text-align: start;
   font-size: inherit;
   transition: color 150ms;
@@ -151,7 +141,7 @@ body {
 
   /* The second row must not cover headings reached through the page TOC. */
   .thally-docs-root[data-header-layout='stacked'] :is([data-heading], .scroll-mt-24) {
-    scroll-margin-top: 128px;
+    scroll-margin-top: calc(var(--docs-header-height, 104px) + 24px);
   }
 }
 
@@ -623,8 +613,7 @@ a[target='_blank']:hover > .thally-docs-card::after {
     display: inline-flex;
   }
 
-  .thally-docs-collection-row,
-  .thally-docs-inline-collections {
+  .thally-docs-collection-row {
     display: none;
   }
 

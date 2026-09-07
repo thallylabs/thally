@@ -1,12 +1,14 @@
 'use client'
 
-/** Shared documentation header: up to six inline tabs, then a dedicated second row. */
+/** Shared documentation header with a dedicated full-width collection row. */
 
+import { useEffect, useRef } from 'react'
 import { ExternalLink, Sparkles } from 'lucide-react'
 import type { SidebarCollection, DocsJsonNavbar, NavigationPresentation } from '@/data/docs'
 import { MobileNav } from '@/components/navigation/mobile-nav'
 import { CollectionTabs } from '@/components/navigation/collection-tabs'
 import { getHeaderNavigationLayout } from '@/components/navigation/header-layout'
+import { observeHeaderHeight } from '@/components/navigation/header-height'
 import { CommandSearch } from '@/components/search/command-search'
 import { ThemeSwitch } from '@/components/theme/theme-switch'
 import { VersionSwitcher } from '@/components/docs/version-switcher'
@@ -47,6 +49,10 @@ export function TopBar({
   siteLinks,
   showSidebarGroupIcons = true,
 }: TopBarProps) {
+  const headerRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (headerRef.current) return observeHeaderHeight(headerRef.current)
+  }, [])
   const siteName = useSiteName()
   const headerNavigationLayout = getHeaderNavigationLayout(navigationPresentation.display, collections.length)
   const {
@@ -84,7 +90,7 @@ export function TopBar({
   const isCrowded = visibleLinkCount + (primaryCta ? 1 : 0) >= 8
 
   return (
-    <header className="thally-docs-topbar sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-xl">
+    <header ref={headerRef} className="thally-docs-topbar sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-xl">
       <div
         className={cn('thally-docs-topbar-inner flex h-[60px] items-center gap-3', shell.topbar)}
         data-density={isCrowded ? 'compact' : 'comfortable'}
@@ -96,8 +102,6 @@ export function TopBar({
           onCollectionChange={onCollectionChange}
           showGroupIcons={showSidebarGroupIcons}
         />
-        {/* Compact navigation keeps the original brand → locale → tabs → actions
-            order; seven or more collection links move below this row. */}
         <IntentPrefetchLink
           href="/"
           className="thally-docs-brand mr-5 flex shrink-0 items-center gap-2 text-foreground"
@@ -110,11 +114,6 @@ export function TopBar({
         </IntentPrefetchLink>
         {i18nConfig && i18nConfig.locales.length >= 2 ? (
           <LocaleSwitcher locales={i18nConfig.locales} currentLocale={currentLocale ?? i18nConfig.defaultLocale} currentPath={currentPath ?? '/'} defaultLocale={i18nConfig.defaultLocale} />
-        ) : null}
-        {headerNavigationLayout === 'inline' ? (
-          <div className="thally-docs-inline-collections">
-            <CollectionTabs collections={collections} activeCollectionId={activeCollectionId} onCollectionChange={onCollectionChange} />
-          </div>
         ) : null}
         <div className="thally-docs-actions ml-auto flex shrink-0 items-center gap-2">
           <div className="thally-docs-search shrink-0">

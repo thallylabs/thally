@@ -1,4 +1,4 @@
-/** The seventh collection changes header rows without duplicating links or counting actions. */
+/** Every tab collection gets its own header row without duplicating navigation links. */
 
 import { createElement, type AnchorHTMLAttributes } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -35,24 +35,14 @@ function markup(count: number, display: 'tabs' | 'dropdown' = 'tabs') {
 }
 
 describe('automatic header navigation rows', () => {
-  it.each([1, 4, 6])('keeps %i collections inline even with extra header actions', (count) => {
-    const html = markup(count)
-    expect(getHeaderNavigationLayout('tabs', count)).toBe('inline')
-    expect(html).toContain('thally-docs-inline-collections')
-    expect(html).not.toContain('thally-docs-collection-row')
-    expect(html.match(/aria-label="Documentation sections"/g)).toHaveLength(1)
-    expect(html.match(/href="\/section-/g)).toHaveLength(count)
-    expect(html.indexOf('Language')).toBeLessThan(html.indexOf('thally-docs-inline-collections'))
-    expect(html.indexOf('thally-docs-inline-collections')).toBeLessThan(html.indexOf('thally-docs-actions'))
-  })
-
-  it.each([7, 14])('moves %i collections into a single aligned second row', (count) => {
+  it.each([1, 4, 6, 7, 14])('places %i collections in an aligned second row even with extra header actions', (count) => {
     const html = markup(count)
     expect(getHeaderNavigationLayout('tabs', count)).toBe('stacked')
     expect(html).toContain('thally-docs-collection-row')
     expect(html).not.toContain('thally-docs-inline-collections')
     expect(html.indexOf('thally-docs-collection-row')).toBeGreaterThan(html.indexOf('thally-docs-actions'))
     expect(html.match(/href="\/section-/g)).toHaveLength(count)
+    expect(html.match(/aria-label="Documentation sections"/g)).toHaveLength(1)
   })
 
   it.each([0, 6, 7, 14])('preserves explicit dropdown navigation with %i collections', (count) => {
@@ -60,9 +50,9 @@ describe('automatic header navigation rows', () => {
     expect(markup(count, 'dropdown')).not.toMatch(/thally-docs-inline-collections|thally-docs-collection-row|aria-label="Documentation sections"/)
   })
 
-  it('has no empty tab row and reverses the layout when the count falls to six', () => {
+  it('has no empty tab row and keeps the same layout when the count changes', () => {
     expect(getHeaderNavigationLayout('tabs', 0)).toBe('none')
     expect(markup(0)).not.toContain('aria-label="Documentation sections"')
-    expect([6, 7, 6].map(count => getHeaderNavigationLayout('tabs', count))).toEqual(['inline', 'stacked', 'inline'])
+    expect([6, 7, 6].map(count => getHeaderNavigationLayout('tabs', count))).toEqual(['stacked', 'stacked', 'stacked'])
   })
 })

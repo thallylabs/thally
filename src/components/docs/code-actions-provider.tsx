@@ -154,17 +154,20 @@ export function DocsCodeActionsProvider({
 
   return (
     <CodeActionsContext.Provider value={actions}>
-      {children}
-      {assistantRequestId > 0 ? (
-        <LazyDocsChat
-          label={chatStatus.label ?? label}
-          icon={chatStatus.icon ?? icon}
-          enabled={chatStatus.show}
-          initialPrompt={assistantPrompt}
-          openRequestId={assistantRequestId}
-          skipStatusCheck
-        />
-      ) : null}
+      {/* Share shell measurements with the sibling dock without adding a layout box. */}
+      <div className="contents" data-docs-layout>
+        {children}
+        {assistantRequestId > 0 ? (
+          <LazyDocsChat
+            label={chatStatus.label ?? label}
+            icon={chatStatus.icon ?? icon}
+            enabled={chatStatus.show}
+            initialPrompt={assistantPrompt}
+            openRequestId={assistantRequestId}
+            skipStatusCheck
+          />
+        ) : null}
+      </div>
     </CodeActionsContext.Provider>
   )
 }
