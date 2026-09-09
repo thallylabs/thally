@@ -57,7 +57,7 @@ Open **Admin → Settings → Localization**, open the language menu, and select
 
 The source language is intentionally fixed to the repository default (English in new sites). It owns the unprefixed URLs and the root `<html lang>` value, which keeps the initial DOM truthful for crawlers and assistive technology.
 
-<Note type="info" title="Repository configuration remains the fallback">
+<Note title="Repository configuration remains the fallback">
 Self-hosted teams can still commit the same selection in `docs.json`. Live Settings override the selected languages, while `defaultLocale` continues to identify the language used by the root content tree.
 </Note>
 
@@ -111,7 +111,7 @@ npx create-thally-docs translate --locale es --force
 | `--model <id>` | Claude model to use. Default: `claude-sonnet-4-6`. |
 | `--yes`, `-y` | Skip the confirmation prompt. |
 
-<Note type="info" title="API key required">
+<Note title="API key required">
 The translate command calls Claude via the Anthropic API. Set `ANTHROPIC_API_KEY` in your environment or pass `--api-key` directly. Translating a typical docs page costs a fraction of a cent.
 </Note>
 
@@ -197,7 +197,7 @@ The API Reference tab is auto-generated from your OpenAPI spec. Its content is a
 
 When navigating to the API Reference tab from a locale page, the URL prefix is preserved so you remain in the locale context (`/es/api/...`). The sidebar and tab bar stay locale-aware; only the operation content itself comes from the spec unchanged.
 
-<Note type="info" title="Localising API content">
+<Note title="Localising API content">
 To change the language of API Reference descriptions and summaries, update them directly in your OpenAPI spec file.
 </Note>
 

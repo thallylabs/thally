@@ -52,7 +52,7 @@ Sites connect to `https://app.thally.io` unless `THALLY_CLOUD_URL` overrides it.
 
 The token never enters browser JavaScript, and Thally Cloud does not need access to your hosting provider's environment variables.
 
-<Note type="info" title="Thally Cloud services">
+<Note title="Thally Cloud services">
   AI chat answers, [Track](/guides/ai-features#free-vs-thally-cloud), and traffic analytics are Thally Cloud services. They carry their own variables (for example `ANTHROPIC_API_KEY` and `THALLY_ANALYTICS_DB_URL`) that light up when a deployment connects Thally Cloud; in the free, self-hosted template their admin panels stay locked and none are needed to ship your docs.
 </Note>
 
@@ -89,7 +89,7 @@ THALLY_DATABASE_TOKEN=…
 
 3. Redeploy. Thally creates the required tables on first connect — you do not run migrations by hand.
 
-<Note type="info" title="Local data stays local">
+<Note title="Local data stays local">
   Your laptop's `.data/` files are not uploaded to production. Runtime settings you make in the deployed dashboard are stored in the remote database.
 </Note>
 

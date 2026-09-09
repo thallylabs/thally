@@ -20,7 +20,7 @@ Thally ships with a built-in **admin dashboard** at `/admin`. It lets you contro
 
 Everything an Owner changes here applies to the live site immediately — no merge, no rebuild.
 
-<Note type="info" title="Free vs Thally Cloud">
+<Note title="Free vs Thally Cloud">
 The admin panel, search, Agent Readiness, and the [agent endpoints](/guides/ai-features) are free in the self-hosted template. Grounded **AI answers**, **Track** (code-triggered docs), and **traffic analytics** are [Thally Cloud](/guides/ai-features#free-vs-thally-cloud) services — their panels appear locked until you connect Thally Cloud.
 </Note>
 
@@ -63,9 +63,9 @@ Set a single environment variable and sign in with that password. Anyone who kno
 THALLY_ADMIN_PASSWORD=a-long-random-string
 ```
 
-<Note type="info" title="Keep it strong">
+<Warning title="Keep it strong">
 This is a shared secret that grants full control. Use a long, random value and store it in your host's secret manager, not in git.
-</Note>
+</Warning>
 
 ### Option 2 — Team sign-in with OIDC (recommended for teams)
 
@@ -88,7 +88,7 @@ https://your-docs-domain.com/api/admin/auth/callback
 
 Thally uses OIDC discovery and requests the `openid email profile` scopes, with PKCE. On the [Google Cloud console](https://console.cloud.google.com/apis/credentials) or your provider's app registration, create an OAuth client and paste its ID and secret into the variables above.
 
-<Note type="info" title="You can run both">
+<Note title="You can run both">
 If both a password and OIDC are configured, team members sign in with their identity and the password stays available as a break-glass fallback.
 </Note>
 

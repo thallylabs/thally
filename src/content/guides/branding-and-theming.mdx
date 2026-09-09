@@ -11,7 +11,7 @@ Thally reads branding from two layers:
 1. **The admin dashboard** (`/admin/branding`) — an Owner picks the structural theme, brand accent, logo, and favicon and hits **Save**. Changes apply to the live docs site immediately, with **no rebuild or redeploy**. These settings are stored at runtime and layered *on top of* the file defaults below.
 2. **Source files** (`src/data/site.ts`, `docs.json`) — the git-committed defaults. They define what a freshly scaffolded site looks like and what renders before any dashboard override exists. Anything not overridden in the dashboard falls back to these.
 
-<Note type="info" title="Which should I use?">
+<Note title="Which should I use?">
 Use the **dashboard** for day-to-day changes — theme, brand accent, logo, favicon — with no deploy. Edit the **source files** to set the baseline for a new project, to keep branding in version control, or when you don't run the admin dashboard.
 </Note>
 
@@ -253,9 +253,9 @@ Set the baseline theme in `docs.json` (or switch it live from the dashboard unde
 | `sharp` | Technical, precise | Tight (0.25 rem) | Left indicator only, no background | Flat tabs, underline accent |
 | `minimal` | Content-first | None (0) | Text color change only | Text tabs, underline accent |
 
-<Note type="info" title="Tip">
+<Tip>
 Structural themes and brand colors are orthogonal. You can use the `maple` theme with either the `primary` (green) or `secondary` (purple) brand preset.
-</Note>
+</Tip>
 
 ## Layout tokens
 
