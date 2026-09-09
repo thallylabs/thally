@@ -367,7 +367,7 @@ describe('documentation visual system', () => {
       /@media \(max-width: 880px\) \{[\s\S]*?\.thally-docs-brand > span:last-child[\s\S]*?\.thally-docs-search,[\s\S]*?width: 36px;/,
     )
     expect(css).toMatch(
-      /\.thally-callout-content > :last-child \{\s*margin-bottom: 0;/,
+      /\.thally-callout-content > :not\(\.thally-callout-title\):last-child \{\s*margin-bottom: 0;/,
     )
     expect(layout).toContain("topbarHeight: 'h-[60px]'")
     expect(shell).toContain('calc(100dvh-var(--docs-header-height,60px))')
