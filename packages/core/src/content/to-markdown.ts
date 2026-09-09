@@ -24,7 +24,20 @@ function getAttr(tag: string, ...names: Array<string>): string | null {
   return null
 }
 
-const CALLOUTS = ['Note', 'Warning', 'Tip', 'Info', 'Check', 'Danger'] as const
+const CALLOUTS = ['Note', 'Warning', 'Tip', 'Info', 'Check', 'Danger', 'Callout'] as const
+
+/**
+ * Label for a callout's blockquote line. An authored title is the most
+ * specific signal; a generic `<Callout type="...">` falls back to its type,
+ * and an untyped one reads as a plain note.
+ */
+function calloutLabel(tag: string, name: string): string {
+  const title = getAttr(tag, 'title')
+  if (title) return title
+  if (name !== 'Callout') return name
+  const type = getAttr(tag, 'type')
+  return type ? type.charAt(0).toUpperCase() + type.slice(1).toLowerCase() : 'Note'
+}
 
 export function mdxToMarkdown(body: string, audience: ContentAudience = 'agents'): string {
   // 1. Stash code so nothing inside it is transformed. Fenced blocks first,
@@ -56,7 +69,7 @@ export function mdxToMarkdown(body: string, audience: ContentAudience = 'agents'
   })
 
   // 3. Callouts → a labelled blockquote line; the body follows as prose.
-  out = out.replace(new RegExp(`<(${CALLOUTS.join('|')})\\b[^>]*>`, 'g'), (_m, name) => `\n> **${name}:** `)
+  out = out.replace(new RegExp(`<(${CALLOUTS.join('|')})\\b[^>]*>`, 'g'), (tag, name) => `\n> **${calloutLabel(tag, name)}:** `)
 
   // 4. API field components → a list item carrying the name and type.
   out = out.replace(/<(?:ParamField|ResponseField)\b[^>]*>/g, (tag) => {

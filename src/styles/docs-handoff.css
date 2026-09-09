@@ -40,6 +40,14 @@
   --docs-amber: #9b6418;
   --docs-str: oklch(0.5 0.08 160);
   --docs-panel: color-mix(in oklab, var(--docs-surface) 48%, transparent);
+  /* Callout hues: deeper on light, brighter on dark, one per type. Every
+     other callout colour derives from these in the callout block below. */
+  --docs-callout-note: #0757b8;
+  --docs-callout-tip: #1a7f37;
+  --docs-callout-check: #0f7a5e;
+  --docs-callout-warning: #9a6700;
+  --docs-callout-danger: #cf222e;
+  --docs-callout-info: #57606a;
 }
 
 .dark {
@@ -48,6 +56,12 @@
   --docs-iris: #b7a2ed;
   --docs-amber: #e7b460;
   --docs-str: oklch(0.8 0.1 150);
+  --docs-callout-note: #79b8ff;
+  --docs-callout-tip: #5fd068;
+  --docs-callout-check: #4bd4a3;
+  --docs-callout-warning: #f2c230;
+  --docs-callout-danger: #ff7b72;
+  --docs-callout-info: #c9d1d9;
 }
 html {
   scroll-behavior: auto;
@@ -292,10 +306,158 @@ body {
   text-wrap: pretty;
 }
 
+/* ----------------------------------------------------------------------------
+   Callouts: one hue per type.
+
+   `--co` is the only colour the rules below read. It resolves from three
+   slots: an author's inline `--co-light` / `--co-dark` (custom callouts),
+   then the type's `--co-tone` token, then the site accent. Fill, border,
+   icon, title, single-line text, links, and inline code all derive from it
+   with color-mix, so light and dark keep the same relationship. The border
+   wraps all four sides; there is no accent bar, no icon background, and no
+   pill around the title.
+
+   The root opts out of Tailwind's prose plugin (`not-prose`) so this block
+   owns the typography inside the surface. Layout is chosen by the component:
+   `solo` (one line, takes the hue), `titled` (title takes the hue, body stays
+   in ink), or `body` (several blocks, all in ink).
+   ------------------------------------------------------------------------- */
+.thally-callout {
+  --co: var(--co-light, var(--co-tone, var(--docs-accent)));
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin: 24px 0 30px;
+  padding: 15px 18px;
+  max-width: none;
+  border: 1px solid color-mix(in oklab, var(--co) 34%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--co) 9%, transparent);
+  color: var(--docs-ink-2);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.dark .thally-callout {
+  --co: var(--co-dark, var(--co-tone, var(--docs-accent)));
+  border-color: color-mix(in oklab, var(--co) 42%, transparent);
+  background: color-mix(in oklab, var(--co) 13%, transparent);
+}
+
+.thally-callout[data-callout='note'] { --co-tone: var(--docs-callout-note); }
+.thally-callout[data-callout='tip'] { --co-tone: var(--docs-callout-tip); }
+.thally-callout[data-callout='check'] { --co-tone: var(--docs-callout-check); }
+.thally-callout[data-callout='warning'] { --co-tone: var(--docs-callout-warning); }
+.thally-callout[data-callout='danger'] { --co-tone: var(--docs-callout-danger); }
+.thally-callout[data-callout='info'] { --co-tone: var(--docs-callout-info); }
+
+/* Info is the neutral exception: it sits on the page surface with a hairline
+   instead of derived tints, and its title or single line reads in ink. An
+   author-supplied colour turns it back into an ordinary derived surface. */
+.thally-callout[data-callout='info']:not([data-callout-color='custom']) {
+  background: var(--docs-surface);
+  border-color: var(--docs-line-2);
+}
+
+.thally-callout[data-callout='info']:not([data-callout-color='custom']) .thally-callout-title,
+.thally-callout[data-callout='info']:not([data-callout-color='custom'])[data-callout-layout='solo'] .thally-callout-content {
+  color: var(--docs-ink);
+}
+
+/* The 3px offset centres an 18px glyph on the first 1.6-line-height line. */
+.thally-callout > .thally-callout-icon {
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  color: var(--co);
+}
+
+.thally-callout .thally-callout-content {
+  min-width: 0;
+}
+
+.thally-callout .thally-callout-content :where(p) {
+  margin: 0 0 10px;
+  max-width: none;
+  color: inherit;
+}
+
+.thally-callout .thally-callout-content :where(ul, ol) {
+  margin: 0 0 10px;
+  padding-left: 1.25em;
+}
+
+.thally-callout .thally-callout-content :where(ul) {
+  list-style: disc;
+}
+
+.thally-callout .thally-callout-content :where(ol) {
+  list-style: decimal;
+}
+
+.thally-callout .thally-callout-content :where(li) {
+  margin: 4px 0;
+}
+
 /* Callouts own their vertical padding. The article rhythm must not leave a
-   trailing paragraph margin inside the tinted surface. */
-.thally-callout-content > :last-child {
+   trailing block margin inside the tinted surface. The title keeps its gap
+   when the body is bare text, since it is then the last element child. */
+.thally-callout .thally-callout-content > :not(.thally-callout-title):last-child {
   margin-bottom: 0;
+}
+
+.thally-callout .thally-callout-title {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--co);
+  font-weight: 500;
+}
+
+.thally-callout[data-callout-layout='solo'] .thally-callout-content {
+  color: var(--co);
+  font-weight: 500;
+}
+
+.thally-callout .thally-callout-content a {
+  color: var(--co);
+  font-weight: 500;
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in oklab, var(--co) 45%, transparent);
+  text-underline-offset: 3px;
+}
+
+.thally-callout .thally-callout-content a:hover {
+  color: var(--co);
+  text-decoration-color: currentColor;
+}
+
+.thally-callout .thally-callout-content :where(strong, b) {
+  color: var(--docs-ink);
+  font-weight: 600;
+}
+
+.thally-callout[data-callout-layout='solo'] .thally-callout-content :where(strong, b) {
+  color: inherit;
+}
+
+/* Inline code keeps the article's chip metrics (the transparent border holds
+   the box size) and takes the hue for its fill and text. */
+.thally-callout .thally-callout-content :where(code):not(:where(pre *)) {
+  border-color: transparent;
+  background: color-mix(in oklab, var(--co) 14%, transparent);
+  color: var(--co);
+}
+
+/* A code block that follows a callout directly reads as its continuation, so
+   it is pulled up into the callout's bottom margin; a callout that follows a
+   code block gets a little more air than the article default. */
+.thally-callout + .thally-docs-code {
+  margin-top: -16px;
+}
+
+.thally-docs-code + .thally-callout {
+  margin-top: 34px;
 }
 
 /* Separators are author-controlled. A heading alone should not imply a hard

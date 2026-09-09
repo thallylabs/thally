@@ -18,6 +18,9 @@ describe('mdxToMarkdown', () => {
 
   it('turns callouts into labelled blockquotes and API fields into list items', () => {
     expect(mdxToMarkdown('<Note>Be careful.</Note>')).toContain('> **Note:** Be careful.')
+    expect(mdxToMarkdown('<Warning title="Rotate first">Then deploy.</Warning>')).toContain('> **Rotate first:** Then deploy.')
+    expect(mdxToMarkdown('<Callout icon="key" color="#C77DFF">Custom.</Callout>')).toContain('> **Note:** Custom.')
+    expect(mdxToMarkdown('<Callout type="warning">Careful.</Callout>')).toContain('> **Warning:** Careful.')
     expect(mdxToMarkdown('<ParamField path="limit" type="integer">Max rows</ParamField>')).toContain(
       '- **limit** (integer): Max rows',
     )

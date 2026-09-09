@@ -78,19 +78,19 @@ escaped plaintext, so an uncommon fence never prevents a page from rendering.
 
 ## Callouts and notes
 
-Use the `<Note>` component to highlight important information:
+Use `<Note>`, `<Tip>`, `<Info>`, `<Warning>`, `<Check>`, or `<Danger>` to highlight important information. A single sentence takes the callout colour; add a `title` when the callout carries more, and the body stays in ink:
 
 ```mdx
-<Note type="info" title="Good to know">
-  Notes support **Markdown** inside them.
-</Note>
+<Tip>
+  A single sentence reads in the callout colour.
+</Tip>
 
-<Note type="warning" title="Heads up">
-  This is a warning callout.
-</Note>
+<Warning title="Heads up">
+  Titled callouts support **Markdown**, links, and lists in the body.
+</Warning>
 ```
 
-Available types: `info`, `warning`, `danger`, `tip`.
+The generic `<Callout icon="key" color="#C77DFF">` form makes a custom callout from one colour. See [Callouts](/components/callouts) for every type and prop.
 
 ## Links
 

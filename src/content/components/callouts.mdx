@@ -3,63 +3,115 @@ title: "Callouts"
 description: "Highlight important information with styled callout blocks."
 ---
 
-Use `<Note>`, `<Tip>`, `<Warning>`, `<Info>`, `<Check>`, and `<Danger>` to draw attention to important content. Each maps to a visual style that signals intent.
+Use `<Note>`, `<Tip>`, `<Info>`, `<Warning>`, `<Check>`, and `<Danger>` to draw attention to content, or make a custom callout. Each type carries one colour; the fill, border, icon and text all derive from it.
 
 ## Types
 
 <Note>
-  This is a **Note** — general information the reader should be aware of.
+  This adds a note in the content
 </Note>
-
-<Tip>
-  This is a **Tip** — a helpful suggestion or best practice.
-</Tip>
-
-<Warning>
-  This is a **Warning** — something that could cause problems if ignored.
-</Warning>
-
-<Info>
-  This is an **Info** callout — neutral informational content.
-</Info>
-
-<Check>
-  This is a **Check** — confirmation that a step or requirement is complete.
-</Check>
-
-<Danger>
-  This is a **Danger** callout — critical information that needs immediate attention.
-</Danger>
 
 ```mdx
 <Note>
-  Standard note callout.
+  This adds a note in the content
 </Note>
+```
 
 <Tip>
-  A helpful tip.
+  This suggests a helpful tip
 </Tip>
 
+```mdx
+<Tip>
+  This suggests a helpful tip
+</Tip>
+```
+
 <Warning>
-  Be careful about this.
+  This raises a warning to watch out for
 </Warning>
 
+```mdx
+<Warning>
+  This raises a warning to watch out for
+</Warning>
+```
+
 <Info>
-  Additional context.
+  This draws attention to important information
 </Info>
 
+```mdx
+<Info>
+  This draws attention to important information
+</Info>
+```
+
 <Check>
-  This step is complete.
+  This brings us a checked status
 </Check>
 
+```mdx
+<Check>
+  This brings us a checked status
+</Check>
+```
+
 <Danger>
-  Do not expose this credential.
+  This is a danger callout
+</Danger>
+
+```mdx
+<Danger>
+  This is a danger callout
 </Danger>
 ```
 
-## Generic `<Callout>`
+## With a title and body
 
-Migrated content from other platforms may use the generic `<Callout type="...">` form — this is supported as an alias:
+Add a title when the callout carries more than a sentence. The title takes the colour; the body stays in ink so paragraphs and links remain readable.
+
+<Note title="Check workspace capacity before you publish">
+  Review [managed-site capacity](/guides/deploying) before creating another site. If the workspace is at its active-site limit, an owner can add recurring capacity or delete another Cloud site without deleting that site's GitHub repository or documentation files.
+</Note>
+
+<Warning title="Rotating the signing secret invalidates in-flight webhooks">
+  Deliveries signed with the previous secret fail verification after rotation. Drain the queue or accept both secrets for the `grace_period` before you rotate.
+</Warning>
+
+```mdx
+<Warning title="Rotating the signing secret invalidates in-flight webhooks">
+  Deliveries signed with the previous secret fail verification after rotation.
+</Warning>
+```
+
+A callout without a title but with several paragraphs or a list also keeps its body in ink. Only a single sentence takes the colour.
+
+## Custom callouts
+
+The generic `<Callout>` takes any icon and a colour. Fill, border and text derive from the one colour you pass.
+
+<Callout icon="key" color="#C77DFF">
+  This is a custom callout
+</Callout>
+
+```mdx
+<Callout icon="key" color="#C77DFF">
+  This is a custom callout
+</Callout>
+```
+
+Custom callouts get exactly one colour, and no dark variant is generated for it. Pick a colour that stays readable on both page backgrounds (at least 4.5:1 against the light and the dark surface), or pass `colorDark` to use a different colour when the dark theme is active.
+
+```mdx
+<Callout icon="key" color="#7B3FB8" colorDark="#C77DFF">
+  This callout uses a deeper purple on light and a brighter one on dark
+</Callout>
+```
+
+Icon names come from the same allowlist as the [Icon component](/components/icons). An unknown name falls back to a neutral help glyph.
+
+Content migrated from other platforms may use the generic form with a `type` instead of a colour. That form is supported as an alias:
 
 ```mdx
 <Callout type="check">
@@ -69,4 +121,12 @@ Migrated content from other platforms may use the generic `<Callout type="...">`
 
 ## Props
 
-All callout components accept arbitrary MDX children including inline code, links, and lists. No additional props are required.
+Every callout accepts arbitrary MDX children including inline code, links, and lists.
+
+| Prop | Applies to | Description |
+| --- | --- | --- |
+| `title` | All | Optional heading. It takes the callout colour while the body stays in ink. |
+| `icon` | All | Replaces the type icon with a named icon from the allowlist. |
+| `color` | All | One CSS colour that drives the fill, border, icon and text. |
+| `colorDark` | All | Colour used instead of `color` when the dark theme is active. |
+| `type` | `<Callout>` | One of `note`, `tip`, `info`, `warning`, `check`, `danger`, plus the aliases `success` and `error`. |

@@ -1,6 +1,6 @@
 import type { MDXComponents } from 'mdx/types'
 import type { ComponentPropsWithoutRef, ReactNode } from 'react'
-import { Note } from '@/components/mdx/note'
+import { Note, type NoteProps } from '@/components/mdx/note'
 import { AgentPrompt } from '@/components/mdx/agent-prompt'
 import { Code, CodeGroup, Pre } from '@/components/mdx/code-blocks'
 import {
@@ -73,6 +73,12 @@ function createHeading(level: 2 | 3) {
 
 type CodeGroupProps = ComponentPropsWithoutRef<typeof CodeGroup>
 
+// Migrated content may pass `type` as anything; Note normalises it.
+interface CalloutProps extends Omit<NoteProps, 'type' | 'children'> {
+  type?: unknown
+  children?: ReactNode
+}
+
 const components: MDXComponents = {
   h2: createHeading(2),
   h3: createHeading(3),
@@ -86,16 +92,13 @@ const components: MDXComponents = {
   Error: (props) => <Note type="danger" {...props} />,
   Note: (props) => <Note type="note" {...props} />,
   Tip: (props) => <Note type="tip" {...props} />,
-  // Callout: safety net for migrated content that uses <Callout type="...">
-  Callout: ({ type, title, children }: { type?: string; title?: ReactNode; children?: ReactNode }) => {
+  // Callout: the generic form. Authors use it for custom callouts
+  // (`<Callout icon="key" color="#C77DFF">`); migrated content uses it with a
+  // `type`, which Note resolves through its alias map (`success`, `error`) or
+  // infers from the wording when the value is unknown.
+  Callout: ({ type, children, ...props }: CalloutProps) => {
     if (!children) return null
-    if (type === 'warning') return <Note type="warning" title={title}>{children}</Note>
-    if (type === 'danger' || type === 'error') return <Note type="danger" title={title}>{children}</Note>
-    if (type === 'info') return <Note type="info" title={title}>{children}</Note>
-    if (type === 'tip') return <Note type="tip" title={title}>{children}</Note>
-    if (type === 'check' || type === 'success') return <Note type="check" title={title}>{children}</Note>
-    if (type === 'note') return <Note type="note" title={title}>{children}</Note>
-    return <Note title={title}>{children}</Note>
+    return <Note type={typeof type === 'string' ? type : undefined} {...props}>{children}</Note>
   },
   AccordionGroup: (props) => <AccordionGroup {...props} />,
   // Latex: Mintlify LaTeX component — render as inline code (no renderer available)
