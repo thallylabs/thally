@@ -1,8 +1,15 @@
 'use client'
 
-/** Reader-facing page ratings and optional negative-feedback follow-ups. */
+/**
+ * Reader-facing page ratings and optional negative-feedback follow-ups.
+ *
+ * Repository links are deliberately minimal here. Doc pages render "Edit this
+ * page" and "Report an issue" in the detail rail (see doc-layout.tsx), so the
+ * card must not repeat them. The issue link stays available only for shells
+ * without a rail, such as the API reference layout.
+ */
 
-import { AlertCircle, Pencil, Send, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { AlertCircle, Send, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -10,11 +17,10 @@ import { MutedPanel, Panel } from '@/components/layout/sections'
 
 interface FeedbackProps {
   endpoint?: string
-  pageId?: string
   repoUrl?: string
   thumbsRating?: boolean
   pageFeedback?: boolean
-  editSuggestions?: boolean
+  /** Show a pre-titled "Report an issue" link; only for layouts without a rail. */
   issueReporting?: boolean
 }
 
@@ -33,11 +39,9 @@ export function shouldShowFeedbackMessage(
 
 export function Feedback({
   endpoint = '/api/feedback',
-  pageId,
   repoUrl,
   thumbsRating = true,
   pageFeedback = false,
-  editSuggestions = false,
   issueReporting = false,
 }: FeedbackProps) {
   const pathname = usePathname()
@@ -94,10 +98,6 @@ export function Feedback({
   }
 
   const normalizedRepo = repoUrl?.replace(/\/$/, '')
-  const editUrl =
-    editSuggestions && normalizedRepo && pageId
-      ? `${normalizedRepo}/edit/main/src/content/${pageId}.mdx`
-      : null
   const issueUrl = issueReporting && normalizedRepo
     ? `${normalizedRepo}/issues/new?title=${encodeURIComponent(`Docs feedback: ${pathname}`)}`
     : null
@@ -166,18 +166,11 @@ export function Feedback({
       ) : (
         <p className="text-sm font-medium text-foreground/80">Help us improve this page</p>
       )}
-      <div className="flex flex-wrap gap-2">
-        {editUrl ? (
-          <Button asChild variant="ghost" size="sm">
-            <a href={editUrl} target="_blank" rel="noreferrer"><Pencil className="mr-1.5 h-4 w-4" />Suggest an edit</a>
-          </Button>
-        ) : null}
-        {issueUrl ? (
-          <Button asChild variant="ghost" size="sm">
-            <a href={issueUrl} target="_blank" rel="noreferrer"><AlertCircle className="mr-1.5 h-4 w-4" />Report an issue</a>
-          </Button>
-        ) : null}
-      </div>
+      {issueUrl ? (
+        <Button asChild variant="ghost" size="sm">
+          <a href={issueUrl} target="_blank" rel="noreferrer"><AlertCircle className="mr-1.5 h-4 w-4" />Report an issue</a>
+        </Button>
+      ) : null}
     </Panel>
   )
 }
