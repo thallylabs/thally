@@ -43,7 +43,6 @@ const DISALLOW = [
   '/access',
   '/api/chat',
   '/api/feedback',
-  '/api/og',
   '/api/try-it',
   '/api/admin',
   '/api/analytics',
