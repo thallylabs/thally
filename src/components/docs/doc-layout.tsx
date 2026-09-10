@@ -40,35 +40,37 @@ function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayou
   const effectiveSite = resolveBuildSiteConfig()
   const cloudFeedback = cloud?.siteConfig.portable.feedback
   const hasThumbsRating = cloud ? Boolean(cloudFeedback?.thumbsRating) : true
+  const hasEditSuggestions = cloud ? Boolean(cloudFeedback?.editSuggestions) : true
   const hasIssueReporting = cloud ? Boolean(cloudFeedback?.issueReporting) : true
-  const showFeedback = cloud
-    ? Boolean(
-        hasThumbsRating || cloudFeedback?.editSuggestions || cloudFeedback?.issueReporting,
-      )
-    : true
-  const feedback = showFeedback ? (
+  // The card only carries the rating. Repository links ("Edit this page",
+  // "Report an issue") live once, in the page-actions rail below, so the two
+  // surfaces never show the same actions side by side.
+  const feedback = hasThumbsRating ? (
     <Feedback
       endpoint={feedbackConfig.endpoint ?? '/api/feedback'}
-      pageId={doc.id}
-      repoUrl={effectiveSite.repoUrl}
-      thumbsRating={hasThumbsRating}
-      pageFeedback={hasThumbsRating && Boolean(cloudFeedback?.pageFeedback)}
-      editSuggestions={Boolean(cloudFeedback?.editSuggestions)}
-      issueReporting={Boolean(cloudFeedback?.issueReporting)}
+      thumbsRating
+      pageFeedback={Boolean(cloudFeedback?.pageFeedback)}
     />
   ) : null
-  const pageSourceActions = effectiveSite.repoUrl && !effectiveSite.repoUrl.includes('your-org') ? (
+  // Placeholder repo URLs from a fresh scaffold must not produce dead links.
+  const repoUrl =
+    effectiveSite.repoUrl && !effectiveSite.repoUrl.includes('your-org')
+      ? effectiveSite.repoUrl
+      : null
+  const pageSourceActions = repoUrl && (hasEditSuggestions || hasIssueReporting) ? (
     <div className="flex flex-col items-start gap-1.5">
-      <EditOnGithub
-        pageId={doc.id}
-        repoUrl={effectiveSite.repoUrl}
-        label="Edit this page"
-        className="text-sm leading-6 text-foreground/55"
-      />
+      {hasEditSuggestions ? (
+        <EditOnGithub
+          pageId={doc.id}
+          repoUrl={repoUrl}
+          label="Edit this page"
+          className="text-sm leading-6 text-foreground/55"
+        />
+      ) : null}
       {hasIssueReporting ? (
         <ReportAnIssue
           pagePath={doc.href}
-          repoUrl={effectiveSite.repoUrl}
+          repoUrl={repoUrl}
           className="text-sm leading-6 text-foreground/55"
         />
       ) : null}
