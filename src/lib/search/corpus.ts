@@ -6,5 +6,5 @@
  */
 import './register-doc-source'
 
-export { buildSearchCorpus, getClientSearchCorpus } from '@thallylabs/core'
-export type { SearchRecord } from '@thallylabs/core'
+export { buildSearchCorpus, getClientSearchCorpus } from '@thallylabs/core/search'
+export type { SearchRecord } from '@thallylabs/core/search'

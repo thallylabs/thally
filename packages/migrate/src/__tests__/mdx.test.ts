@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { parseMarkdownPage } from '../mdx.js'
+import { normalizeMdx, parseMarkdownPage } from '../mdx.js'
 
 function description(raw: string): string | undefined {
   return parseMarkdownPage({ id: 'faq', raw, source: 'https://example.com/faq' })?.description
@@ -26,5 +26,20 @@ describe('migration description fallback', () => {
 
   it('does not invent description text for code-only pages', () => {
     expect(description('```jsx\n<Widget />\n```')).toBe('')
+  })
+})
+
+describe('Docusaurus import normalization', () => {
+  it('removes injected global component imports', () => {
+    expect(normalizeMdx("import Tabs from '@theme/Tabs';\n\n<Tabs />"))
+      .toBe('\n<Tabs />')
+  })
+
+  it('handles adversarial whitespace in linear time', () => {
+    const source = `import${' '.repeat(100_000)}Widget from '@theme/Widget'`
+    const startedAt = performance.now()
+
+    expect(normalizeMdx(source)).toBe(source)
+    expect(performance.now() - startedAt).toBeLessThan(1_000)
   })
 })

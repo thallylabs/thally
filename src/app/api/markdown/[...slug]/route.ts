@@ -4,7 +4,7 @@ import { stripInternalFrontmatter } from '@/lib/provenance'
 import { getContentSource } from '@/lib/content-source'
 import { getCloudSiteConfig } from '@/lib/cloud-link/client'
 import { isMarkdownPagesEnabled } from '@/lib/markdown-pages'
-import { mdxToMarkdown } from '@thallylabs/core'
+import { mdxToMarkdown } from '@thallylabs/core/markdown'
 
 const localDocsRoot = 'src/content'
 

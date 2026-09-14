@@ -106,12 +106,39 @@ function normalizeDocusaurusAdmonitions(body: string): string {
   }).join('\n')
 }
 
+const GLOBAL_DOCUSARUS_COMPONENTS = new Set([
+  'Tabs',
+  'TabItem',
+  'Link',
+  'DocCardList',
+  'TOCInline',
+])
+
+/** Match the one simple import form Docusaurus injects without backtracking. */
+function isGlobalDocusaurusImport(line: string): boolean {
+  const trimmed = line.trim().replace(/;$/, '').trimEnd()
+  if (!trimmed.startsWith('import ')) return false
+  const separator = trimmed.indexOf(' from ', 'import '.length)
+  if (separator < 0) return false
+  const component = trimmed.slice('import '.length, separator).trim()
+  if (!GLOBAL_DOCUSARUS_COMPONENTS.has(component)) return false
+  const source = trimmed.slice(separator + ' from '.length)
+  if (source.length < 3) return false
+  const quote = source[0]
+  if ((quote !== "'" && quote !== '"') || source.at(-1) !== quote) return false
+  const moduleName = source.slice(1, -1)
+  return moduleName.startsWith('@theme/') || moduleName.startsWith('@docusaurus/')
+}
+
 /** Normalize only syntax Thally cannot render; supported source JSX stays intact. */
 export function normalizeMdx(body: string): string {
-  return normalizeDocusaurusAdmonitions(body)
-    // Docusaurus injects these theme components globally. Thally also exposes
-    // its equivalents globally, so source-only imports must not survive.
-    .replace(/^import\s+(?:Tabs|TabItem|Link|DocCardList|TOCInline)\s+from\s+['"]@(?:theme|docusaurus)\/[^'"]+['"]\s*;?\s*$/gm, '')
+  // Docusaurus injects these theme components globally. Thally also exposes
+  // its equivalents globally, so source-only imports must not survive.
+  const withoutGlobalImports = body
+    .split('\n')
+    .filter((line) => !isGlobalDocusaurusImport(line))
+    .join('\n')
+  return normalizeDocusaurusAdmonitions(withoutGlobalImports)
     .replace(/<TabItem\b([^>]*)>/g, (_match, attributes: string) => {
       const title = attributes.match(/\blabel=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
         ?? attributes.match(/\bvalue=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
