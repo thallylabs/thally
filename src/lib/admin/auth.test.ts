@@ -16,7 +16,9 @@ describe('session token scopes', () => {
   it('never accepts a docs-access token as an admin session', () => {
     vi.stubEnv('NODE_ENV', 'production')
     vi.stubEnv('THALLY_ADMIN_PASSWORD', 'admin-password')
+    vi.stubEnv('THALLY_ADMIN_SECRET', 'admin-signing-secret')
     vi.stubEnv('THALLY_ACCESS_PASSWORD', 'docs-password')
+    vi.stubEnv('THALLY_ACCESS_SECRET', 'docs-signing-secret')
 
     const docsToken = createDocsAccessToken()
 
@@ -28,7 +30,9 @@ describe('session token scopes', () => {
   it('never accepts an admin token as a docs-access token', () => {
     vi.stubEnv('NODE_ENV', 'production')
     vi.stubEnv('THALLY_ADMIN_PASSWORD', 'admin-password')
+    vi.stubEnv('THALLY_ADMIN_SECRET', 'admin-signing-secret')
     vi.stubEnv('THALLY_ACCESS_PASSWORD', 'docs-password')
+    vi.stubEnv('THALLY_ACCESS_SECRET', 'docs-signing-secret')
 
     const adminToken = createAdminSessionToken()
 

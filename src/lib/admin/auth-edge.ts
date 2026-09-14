@@ -4,12 +4,9 @@ export const ADMIN_SESSION_COOKIE = 'thally_admin_session'
 export const DOCS_ACCESS_COOKIE = 'thally_docs_access'
 
 function getAdminSigningSecret(): string | null {
-  const configured = [
-    process.env.THALLY_ADMIN_SECRET,
-    process.env.DOX_ADMIN_SECRET,
-    process.env.THALLY_ADMIN_PASSWORD,
-    process.env.DOX_ADMIN_PASSWORD,
-  ].find((value) => Boolean(value?.trim()))
+  const configured = [process.env.THALLY_ADMIN_SECRET, process.env.DOX_ADMIN_SECRET].find(
+    (value) => Boolean(value?.trim()),
+  )
   if (configured) return configured
 
   // A stable development key keeps zero-config local previews usable. It must
@@ -19,10 +16,10 @@ function getAdminSigningSecret(): string | null {
 
 function getDocsSigningSecret(): string | null {
   return [
+    process.env.THALLY_ACCESS_SECRET,
+    process.env.DOX_ACCESS_SECRET,
     process.env.THALLY_ADMIN_SECRET,
     process.env.DOX_ADMIN_SECRET,
-    process.env.THALLY_ACCESS_PASSWORD,
-    process.env.DOX_ACCESS_PASSWORD,
   ].find((value) => Boolean(value?.trim())) ??
     (process.env.NODE_ENV === 'production' ? null : 'thally-dev-docs')
 }
