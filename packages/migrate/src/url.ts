@@ -46,11 +46,24 @@ const LOCALE_CODES = new Set([
   'th', 'tr', 'uk', 'vi', 'zh', 'pt-br', 'zh-hans', 'zh-hant',
 ])
 const PORTABLE_URL_PROPS = 'href|src|img|primaryHref|secondaryHref'
+const PORTABLE_URL_PROP_NAMES = new Set(PORTABLE_URL_PROPS.split('|'))
 const remoteMarkdownParser = unified().use(remarkParse).use(remarkMdx)
+
+interface RemoteMarkdownAttributeValue {
+  type: string
+  value: string
+}
+
+interface RemoteMarkdownAttribute {
+  type: string
+  name?: string
+  value?: string | null | RemoteMarkdownAttributeValue
+}
 
 interface RemoteMarkdownNode {
   type: string
   alt?: string | null
+  attributes?: Array<RemoteMarkdownAttribute>
   identifier?: string
   url?: string
   value?: string
@@ -513,6 +526,47 @@ function sanitizeMarkdownUrls(value: string): string | null {
   } catch {
     return null
   }
+
+  let hasUnsafeMdxSyntax = false
+  const validateMdxSyntax = (node: RemoteMarkdownNode) => {
+    if (node.type === 'mdxTextExpression'
+      || node.type === 'mdxFlowExpression'
+      || node.type === 'mdxjsEsm') {
+      hasUnsafeMdxSyntax = true
+      return
+    }
+    if (node.type === 'mdxJsxTextElement' || node.type === 'mdxJsxFlowElement') {
+      for (const attribute of node.attributes ?? []) {
+        if (attribute.type !== 'mdxJsxAttribute' || !attribute.name
+          || /^on[A-Z]/.test(attribute.name)) {
+          hasUnsafeMdxSyntax = true
+          return
+        }
+        let staticValue: unknown = attribute.value
+        if (attribute.value && typeof attribute.value === 'object') {
+          if (attribute.value.type !== 'mdxJsxAttributeValueExpression') {
+            hasUnsafeMdxSyntax = true
+            return
+          }
+          try {
+            staticValue = JSON.parse(attribute.value.value)
+          } catch {
+            hasUnsafeMdxSyntax = true
+            return
+          }
+        }
+        if (PORTABLE_URL_PROP_NAMES.has(attribute.name)
+          && (typeof staticValue !== 'string'
+            || !isSafePortableUrl(decodeHtmlAttribute(staticValue)))) {
+          hasUnsafeMdxSyntax = true
+          return
+        }
+      }
+    }
+    for (const child of node.children ?? []) validateMdxSyntax(child)
+  }
+  validateMdxSyntax(root)
+  if (hasUnsafeMdxSyntax) return null
 
   const unsafeDefinitions = new Set<string>()
   const visitDefinitions = (node: RemoteMarkdownNode) => {

@@ -427,10 +427,13 @@ describe('public URL migration', () => {
     expect(bundle.pages[0].body).not.toContain('javascript:')
   })
 
-  it('fails closed when unsafe MDX has no rendered HTML fallback', async () => {
+  it.each([
+    ['an entity-encoded URL prop', '<Hero primaryHref="java&#x73;cript:alert(1)">Run code</Hero>'],
+    ['a non-string URL prop expression', '<Hero primaryHref={["javascript:alert(1)"]}>Run code</Hero>'],
+  ])('fails closed on %s when unsafe MDX has no rendered HTML fallback', async (_case, content) => {
     const fetcher: MigrationFetcher = async (url) => response(
       url.toString(),
-      '# Unsafe docs\n\n<Hero primaryHref="java&#x73;cript:alert(1)">Run code</Hero>',
+      `# Unsafe docs\n\n${content}`,
       'text/markdown',
     )
 
@@ -438,6 +441,26 @@ describe('public URL migration', () => {
       sourceUrl: 'https://unsafe.example.com/docs',
       fetcher,
     })).rejects.toThrow('No readable documentation pages were found')
+  })
+
+  it('fails closed when mismatched code delimiters expose an MDX expression', async () => {
+    const probeName = '__MIGRATION_SANITIZER_PROBE__'
+    Reflect.deleteProperty(globalThis, probeName)
+    const fetcher: MigrationFetcher = async (url) => response(
+      url.toString(),
+      '# Unsafe docs\n\n`prefix {globalThis.__MIGRATION_SANITIZER_PROBE__ = 1} suffix ``',
+      'text/markdown',
+    )
+
+    try {
+      await expect(migrateUrl({
+        sourceUrl: 'https://unsafe.example.com/docs',
+        fetcher,
+      })).rejects.toThrow('No readable documentation pages were found')
+      expect(Reflect.get(globalThis, probeName)).toBeUndefined()
+    } finally {
+      Reflect.deleteProperty(globalThis, probeName)
+    }
   })
 
   it('sanitizes encoded schemes and Markdown delimiters from remote content', async () => {
