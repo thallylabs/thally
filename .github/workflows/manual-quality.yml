@@ -13,6 +13,11 @@ on:
           - lint
           - core-web-vitals
 
+# These diagnostics only read the checked-out repository. Keep the default
+# token unable to write even if a future dependency or build step is compromised.
+permissions:
+  contents: read
+
 # Manual checks for diagnostics that are useful but too slow or noisy to gate
 # every pull request. Select a branch in the Actions UI before starting a run.
 jobs:

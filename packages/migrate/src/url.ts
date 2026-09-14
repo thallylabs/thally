@@ -5,7 +5,10 @@
  */
 
 import { load } from 'cheerio'
+import remarkMdx from 'remark-mdx'
+import remarkParse from 'remark-parse'
 import TurndownService from 'turndown'
+import { unified } from 'unified'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
 import { parseMarkdownPage } from './mdx.js'
@@ -43,6 +46,20 @@ const LOCALE_CODES = new Set([
   'th', 'tr', 'uk', 'vi', 'zh', 'pt-br', 'zh-hans', 'zh-hant',
 ])
 const PORTABLE_URL_PROPS = 'href|src|img|primaryHref|secondaryHref'
+const remoteMarkdownParser = unified().use(remarkParse).use(remarkMdx)
+
+interface RemoteMarkdownNode {
+  type: string
+  alt?: string | null
+  identifier?: string
+  url?: string
+  value?: string
+  children?: Array<RemoteMarkdownNode>
+  position?: {
+    start: { offset?: number }
+    end: { offset?: number }
+  }
+}
 
 interface EmbeddedOpenApiFragment {
   method: string
@@ -213,7 +230,7 @@ function detectUrlPlatform(document: MigrationFetchResponse): MigrationPlatform 
   if (value.includes('__mintlify') || value.includes('/mintlify-assets/')
     || value.includes('x-mintlify-') || value.includes('/_mintlify/')) return 'mintlify'
   if (value.includes('docusaurus') || value.includes('__docusaurus')) return 'docusaurus'
-  if (value.includes('gitbook') || value.includes('gitbook.io')) return 'gitbook'
+  if (value.includes('gitbook')) return 'gitbook'
   if (value.includes('nextra')) return 'nextra'
   if (value.includes('vitepress')) return 'vitepress'
   if (value.includes('starlight')) return 'starlight'
@@ -373,23 +390,180 @@ function stripEventHandlerProps(line: string): string {
   return cursor === 0 ? line : `${result}${line.slice(cursor)}`
 }
 
-function hasUnsafeUrlScheme(value: string): boolean {
-  const normalized = value
-    .trim()
-    .replace(/[\u0000-\u0020]/g, '')
-    .replace(/&(?:#x0*3a|#0*58|colon);/gi, ':')
-  return /^(?:javascript|data|vbscript):/i.test(normalized)
+function isSafePortableUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value, 'https://relative.thally.invalid')
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(parsed.protocol)
+  } catch {
+    return false
+  }
+}
+
+function decodeHtmlAttribute(value: string): string {
+  const document = load(`<i data-thally-value="${value.replace(/"/g, '&quot;')}"></i>`)
+  return document('i').attr('data-thally-value') ?? ''
+}
+
+/** Escape imported copy for Markdown text and MDX's additional delimiters. */
+function escapeMarkdownText(value: string, escapeTableSeparator = false): string {
+  let escaped = ''
+  for (const character of value) {
+    if (character === '\\') escaped += '\\\\'
+    else if (character === '[' || character === ']') escaped += `\\${character}`
+    else if (character === '<') escaped += '&lt;'
+    else if (character === '>') escaped += '&gt;'
+    else if (character === '{') escaped += '&#123;'
+    else if (character === '}') escaped += '&#125;'
+    else if (character === '|' && escapeTableSeparator) escaped += '\\|'
+    else escaped += character
+  }
+  return escaped
+}
+
+function markdownLinkDestination(value: string): string | null {
+  try {
+    return encodeURI(value)
+      .replace(/\(/g, '%28')
+      .replace(/\)/g, '%29')
+      .replace(/&/g, '&amp;')
+  } catch {
+    return null
+  }
+}
+
+function htmlOpeningTagEnd(value: string, start: number): number | null {
+  let quote = ''
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote) {
+      if (character === quote) quote = ''
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+      continue
+    }
+    if (character === '>') return index + 1
+  }
+  return null
+}
+
+function replacePortableHtmlImages(value: string): string {
+  const matcher = /<img\b/gi
+  let cursor = 0
+  let output = ''
+  for (const match of value.matchAll(matcher)) {
+    const start = match.index
+    if (start < cursor) continue
+    const end = htmlOpeningTagEnd(value, start + match[0].length)
+    if (end === null) continue
+    const fragment = load(value.slice(start, end))
+    const image = fragment('img').first()
+    const source = image.attr('src')
+    const destination = source && isSafePortableUrl(source) ? markdownLinkDestination(source) : null
+    const alternative = escapeMarkdownText(image.attr('alt') ?? '')
+    output += value.slice(cursor, start)
+    output += destination ? `![${alternative}](${destination})` : alternative
+    cursor = end
+  }
+  return cursor === 0 ? value : `${output}${value.slice(cursor)}`
+}
+
+function replacePortableHtmlAnchors(value: string): string {
+  const matcher = /<a\b/gi
+  let cursor = 0
+  let output = ''
+  for (const match of value.matchAll(matcher)) {
+    const start = match.index
+    if (start < cursor) continue
+    const openingEnd = htmlOpeningTagEnd(value, start + match[0].length)
+    if (openingEnd === null) continue
+    const closingMatch = /<\/a\s*>/gi
+    closingMatch.lastIndex = openingEnd
+    const closing = closingMatch.exec(value)
+    if (!closing) continue
+    const end = closing.index + closing[0].length
+    const fragment = load(value.slice(start, end))
+    const anchor = fragment('a').first()
+    const href = anchor.attr('href')
+    const label = escapeMarkdownText(anchor.text().replace(/\s+/g, ' ').trim())
+    const destination = href && isSafePortableUrl(href) ? markdownLinkDestination(href) : null
+    output += value.slice(cursor, start)
+    output += destination ? `[${label}](${destination})` : label
+    cursor = end
+  }
+  return cursor === 0 ? value : `${output}${value.slice(cursor)}`
+}
+
+function markdownNodeText(node: RemoteMarkdownNode): string {
+  if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
+  if (node.type === 'image' || node.type === 'imageReference') return node.alt ?? ''
+  return (node.children ?? []).map(markdownNodeText).join('')
+}
+
+/**
+ * Remove unsafe Markdown links using the actual Markdown/MDX parse tree. This
+ * catches entity-encoded schemes and balanced destinations that regexes cannot
+ * classify reliably, while leaving code fences and ordinary prose untouched.
+ */
+function sanitizeMarkdownUrls(value: string): string | null {
+  let root: RemoteMarkdownNode
+  try {
+    root = remoteMarkdownParser.parse(value) as RemoteMarkdownNode
+  } catch {
+    return null
+  }
+
+  const unsafeDefinitions = new Set<string>()
+  const visitDefinitions = (node: RemoteMarkdownNode) => {
+    if (node.type === 'definition' && node.identifier && node.url
+      && !isSafePortableUrl(node.url)) unsafeDefinitions.add(node.identifier.toLowerCase())
+    for (const child of node.children ?? []) visitDefinitions(child)
+  }
+  visitDefinitions(root)
+
+  const replacements: Array<{ start: number; end: number; value: string }> = []
+  const replaceNode = (node: RemoteMarkdownNode, replacement: string): boolean => {
+    const start = node.position?.start.offset
+    const end = node.position?.end.offset
+    if (start === undefined || end === undefined) return false
+    replacements.push({ start, end, value: replacement })
+    return true
+  }
+  const visitUrls = (node: RemoteMarkdownNode) => {
+    const hasUnsafeDirectUrl = (node.type === 'link' || node.type === 'image')
+      && typeof node.url === 'string'
+      && !isSafePortableUrl(node.url)
+    const hasUnsafeReference = (node.type === 'linkReference' || node.type === 'imageReference')
+      && typeof node.identifier === 'string'
+      && unsafeDefinitions.has(node.identifier.toLowerCase())
+    if (hasUnsafeDirectUrl || hasUnsafeReference) {
+      if (replaceNode(node, escapeMarkdownText(markdownNodeText(node)))) return
+    }
+    if (node.type === 'definition' && node.identifier
+      && unsafeDefinitions.has(node.identifier.toLowerCase())) {
+      if (replaceNode(node, '')) return
+    }
+    for (const child of node.children ?? []) visitUrls(child)
+  }
+  visitUrls(root)
+
+  return replacements
+    .sort((left, right) => right.start - left.start)
+    .reduce((result, replacement) => (
+      `${result.slice(0, replacement.start)}${replacement.value}${result.slice(replacement.end)}`
+    ), value)
 }
 
 function hasUnsafePortableUrlProp(value: string): boolean {
   const quotedProps = new RegExp(`\\b(?:${PORTABLE_URL_PROPS})\\s*=\\s*(['"])([^'"\\r\\n]*)\\1`, 'gi')
   for (const match of value.matchAll(quotedProps)) {
-    if (hasUnsafeUrlScheme(match[2])) return true
+    if (!isSafePortableUrl(decodeHtmlAttribute(match[2]))) return true
   }
   const expressionProps = new RegExp(`\\b(?:${PORTABLE_URL_PROPS})\\s*=\\s*\\{\\s*("(?:\\\\.|[^"\\\\])*")\\s*\\}`, 'gi')
   for (const match of value.matchAll(expressionProps)) {
     try {
-      if (hasUnsafeUrlScheme(JSON.parse(match[1]))) return true
+      if (!isSafePortableUrl(decodeHtmlAttribute(JSON.parse(match[1])))) return true
     } catch {
       return true
     }
@@ -398,14 +572,8 @@ function hasUnsafePortableUrlProp(value: string): boolean {
 }
 
 function portableHtmlToMarkdown(value: string): string {
-  return value
+  return replacePortableHtmlAnchors(replacePortableHtmlImages(value))
     .replace(/<span\b[^>]*>|<\/span>/gi, '')
-    .replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_original, attributes: string, label: string) => {
-      const href = attributes.match(/\bhref\s*=\s*(['"])(.*?)\1/i)?.[2]
-      const plainLabel = label.replace(/<[^>]+>/g, '').trim()
-      if (!href || hasUnsafeUrlScheme(href)) return plainLabel
-      return `[${plainLabel.replace(/]/g, '\\]')}](${href})`
-    })
     .replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_original, level: string, content: string) => {
       return `\n${'#'.repeat(Number(level))} ${content.trim()}\n`
     })
@@ -467,17 +635,18 @@ function sanitizeRemoteMarkdown(body: string): string | null {
     }
     if (fenceCharacter) return line
     return portableHtmlToMarkdown(stripEventHandlerProps(line
-      .replace(/!\[([^\]]*)\]\(\s*([^)]+)\)/g, (original, alternative: string, destination: string) => {
-        return hasUnsafeUrlScheme(destination.replace(/^<|>$/g, '')) ? alternative : original
-      })
-      .replace(/<img\s+([^>]*?)\/?\s*>/gi, (original, attributes: string) => {
-        const source = attributes.match(/\bsrc\s*=\s*(['"])(.*?)\1/i)?.[2]
-        const alternative = attributes.match(/\balt\s*=\s*(['"])(.*?)\1/i)?.[2] ?? ''
-        if (!source || hasUnsafeUrlScheme(source)) return ''
-        return `![${alternative.replace(/]/g, '\\]')}](${source})`
-      })))
+      // Remove obviously unsafe image destinations before MDX parsing. A data
+      // URL can itself contain raw `<svg ...>` syntax that makes an otherwise
+      // removable Markdown image fail the MDX grammar before the AST exists.
+      .replace(/!\[([^\]]*)\]\(\s*([^)]+)\)/g, (original, alternative: string, destination: string) => (
+        isSafePortableUrl(decodeHtmlAttribute(destination.replace(/^<|>$/g, '')))
+          ? original
+          : escapeMarkdownText(alternative)
+      ))))
   }).join('\n')
-  const executable = withoutFencedCode(sanitized)
+  const urlSafeMarkdown = sanitizeMarkdownUrls(sanitized)
+  if (urlSafeMarkdown === null) return null
+  const executable = withoutFencedCode(urlSafeMarkdown)
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
     .replace(/<(?:https?:\/\/|mailto:)[^>]+>/gi, '')
     .replace(/(`+)[\s\S]*?\1/g, '')
@@ -502,7 +671,7 @@ function sanitizeRemoteMarkdown(body: string): string | null {
     const component = match[1].split('.', 1)[0]
     if (!PORTABLE_MDX_COMPONENTS.has(component)) return null
   }
-  return sanitized
+  return urlSafeMarkdown
 }
 
 function migratedHref(
@@ -851,14 +1020,10 @@ function htmlPage(
     replacement: (_content, node) => {
       const fragment = load((node as HTMLElement).outerHTML)
       const rows = fragment('tr').toArray().map((row) => (
-        fragment(row).children('th,td').toArray().map((cell) => fragment(cell).text()
-          .replace(/\s+/g, ' ')
-          .replace(/\|/g, '\\|')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/\{/g, '&#123;')
-          .replace(/\}/g, '&#125;')
-          .trim())
+        fragment(row).children('th,td').toArray().map((cell) => escapeMarkdownText(
+          fragment(cell).text().replace(/\s+/g, ' ').trim(),
+          true,
+        ))
       )).filter((row) => row.length > 0)
       if (rows.length === 0) return ''
       const width = Math.max(...rows.map((row) => row.length))
