@@ -10,7 +10,7 @@
 import 'server-only'
 
 import '@/lib/search/register-doc-source'
-import { getRelevantChunks } from '@thallylabs/core'
+import { getRelevantChunks } from '@thallylabs/core/embeddings'
 import { siteConfig } from '@/data/site'
 import {
   MAX_AI_CHAT_REQUEST_BYTES,

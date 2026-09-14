@@ -427,10 +427,13 @@ describe('public URL migration', () => {
     expect(bundle.pages[0].body).not.toContain('javascript:')
   })
 
-  it('fails closed when unsafe MDX has no rendered HTML fallback', async () => {
+  it.each([
+    ['an entity-encoded URL prop', '<Hero primaryHref="java&#x73;cript:alert(1)">Run code</Hero>'],
+    ['a non-string URL prop expression', '<Hero primaryHref={["javascript:alert(1)"]}>Run code</Hero>'],
+  ])('fails closed on %s when unsafe MDX has no rendered HTML fallback', async (_case, content) => {
     const fetcher: MigrationFetcher = async (url) => response(
       url.toString(),
-      '# Unsafe docs\n\n<Hero primaryHref={"javascript:alert(1)"}>Run code</Hero>',
+      `# Unsafe docs\n\n${content}`,
       'text/markdown',
     )
 
@@ -438,6 +441,56 @@ describe('public URL migration', () => {
       sourceUrl: 'https://unsafe.example.com/docs',
       fetcher,
     })).rejects.toThrow('No readable documentation pages were found')
+  })
+
+  it('fails closed when mismatched code delimiters expose an MDX expression', async () => {
+    const probeName = '__MIGRATION_SANITIZER_PROBE__'
+    Reflect.deleteProperty(globalThis, probeName)
+    const fetcher: MigrationFetcher = async (url) => response(
+      url.toString(),
+      '# Unsafe docs\n\n`prefix {globalThis.__MIGRATION_SANITIZER_PROBE__ = 1} suffix ``',
+      'text/markdown',
+    )
+
+    try {
+      await expect(migrateUrl({
+        sourceUrl: 'https://unsafe.example.com/docs',
+        fetcher,
+      })).rejects.toThrow('No readable documentation pages were found')
+      expect(Reflect.get(globalThis, probeName)).toBeUndefined()
+    } finally {
+      Reflect.deleteProperty(globalThis, probeName)
+    }
+  })
+
+  it('sanitizes encoded schemes and Markdown delimiters from remote content', async () => {
+    const fetcher: MigrationFetcher = async (url) => response(
+      url.toString(),
+      [
+        '# Portable links',
+        '',
+        String.raw`<a href="java&#x73;cript:alert(1)">Unsafe \] <<script></a>`,
+        '',
+        String.raw`<img src="https://cdn.example.com/diagram.png" alt="Diagram \] <<script>" />`,
+        '',
+        '[Encoded link](javascript&#58;alert(1))',
+        '',
+        '[Reference link][unsafe-reference]',
+        '',
+        '[unsafe-reference]: data:text/html,unsafe',
+      ].join('\n'),
+      'text/markdown',
+    )
+
+    const bundle = await migrateUrl({ sourceUrl: 'https://portable.example.com/docs', fetcher })
+    const body = bundle.pages[0].body
+
+    expect(body).toContain('Unsafe')
+    expect(body).toContain('![Diagram')
+    expect(body).toContain('Encoded link')
+    expect(body).toContain('Reference link')
+    expect(body).not.toMatch(/(?:javascript|data):/i)
+    expect(body).not.toContain('<script')
   })
 
   it('preserves known documentation components with static props', async () => {
@@ -625,7 +678,7 @@ describe('public URL migration', () => {
         return page(url.toString(), 'Start', 'guide', `
           <div class="theme-admonition theme-admonition-warning"><div class="admonitionHeading">Caution</div><div><p>Back up first.</p></div></div>
           <div class="tabs-container"><ul class="tabs"><li>npm</li><li>pnpm</li></ul><div role="tabpanel"><pre><code class="language-bash">npm install</code></pre></div><div role="tabpanel"><pre><code class="language-bash">pnpm install</code></pre></div></div>
-          <table><thead><tr><th>Option</th><th>Value</th></tr></thead><tbody><tr><td>endpoint</td><td>https://&lt;host&gt;/{project}</td></tr></tbody></table>`)
+          <table><thead><tr><th>Option</th><th>Value</th></tr></thead><tbody><tr><td>endpoint</td><td>https://&lt;host&gt;/C:\\docs\\|{project}</td></tr></tbody></table>`)
       }
       if (url.pathname === '/docs/API/Type') {
         return page(url.toString(), 'Type', 'api', '<p>Case-sensitive reference content.</p>')
@@ -655,6 +708,6 @@ describe('public URL migration', () => {
     expect(guide?.body).toContain('<Tabs>')
     expect(guide?.body).toContain('<Tab title="npm">')
     expect(guide?.body).toContain('| Option | Value |')
-    expect(guide?.body).toContain('https://&lt;host&gt;/&#123;project&#125;')
+    expect(guide?.body).toContain(String.raw`https://&lt;host&gt;/C:\\docs\\\|&#123;project&#125;`)
   })
 })

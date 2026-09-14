@@ -132,6 +132,13 @@ Team access above is about the **admin dashboard**. To gate the public docs them
 
 This is independent of the admin team: a visitor password protects reading the docs; the team roster protects managing them.
 
+Password endpoints include a bounded, per-instance attempt limiter before
+password verification. Serverless instances and Workers do not share that
+memory globally, so production deployments should also configure a durable
+provider-side WAF or rate-limit rule for `POST /api/admin/auth` and
+`POST /api/access/auth`. Treat the application limiter as defense in depth,
+not as a replacement for an edge rule shared across every instance.
+
 ## Live overrides vs. file defaults
 
 Anything you set in the dashboard is a runtime override that layers over the committed config:

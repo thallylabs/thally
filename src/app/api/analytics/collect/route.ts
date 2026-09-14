@@ -9,7 +9,8 @@ export const runtime = 'nodejs'
 
 export async function POST(request: NextRequest) {
   const secret = request.headers.get('x-thally-analytics-secret')
-  if (secret !== getInternalAnalyticsSecret()) {
+  const expectedSecret = getInternalAnalyticsSecret()
+  if (!expectedSecret || secret !== expectedSecret) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 

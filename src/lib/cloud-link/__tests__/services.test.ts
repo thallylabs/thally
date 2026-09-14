@@ -12,8 +12,10 @@ vi.mock('../client', () => ({
   getCloudServiceGrant: mocks.getCloudServiceGrant,
   getCloudSiteConfig: mocks.getCloudSiteConfig,
 }))
-vi.mock('@thallylabs/core', () => ({
+vi.mock('@thallylabs/core/embeddings', () => ({
   getRelevantChunks: mocks.getRelevantChunks,
+}))
+vi.mock('@thallylabs/core/registry', () => ({
   registerAsyncContentDocumentSource: vi.fn(),
   registerAsyncDocEntriesSource: vi.fn(),
   registerContentDocumentSource: vi.fn(),
