@@ -53,6 +53,8 @@ interface ChatStatus {
   show: boolean
   label?: string
   icon?: string
+  /** Opening questions derived from this site's navigation. */
+  suggestions?: Array<string>
 }
 
 interface DocsCodeActionsProviderProps {
@@ -162,6 +164,7 @@ export function DocsCodeActionsProvider({
             label={chatStatus.label ?? label}
             icon={chatStatus.icon ?? icon}
             enabled={chatStatus.show}
+            starterSuggestions={chatStatus.suggestions}
             initialPrompt={assistantPrompt}
             openRequestId={assistantRequestId}
             skipStatusCheck

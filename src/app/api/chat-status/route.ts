@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import { getAdminSettings } from '@/lib/admin/settings'
-import { getAiConfig } from '@/data/docs'
+import { getAiConfig, loadSidebarCollections } from '@/data/docs'
+import { deriveStarterSuggestions } from '@/lib/ai-chat-suggestions'
 import { DEFAULT_AI_DISCLAIMER } from '@/lib/ai-defaults'
+import { resolveSiteConfig } from '@/lib/site-config'
 import { isAiChatAvailable } from '@/lib/cloud-bridge'
 import type { NextRequest } from 'next/server'
 import { getCloudSiteConfig } from '@/lib/cloud-link/client'
@@ -44,5 +46,12 @@ export async function GET(request: NextRequest) {
   const icon = typeof cloudIcon === 'string' && /^\/[A-Za-z0-9._/-]+$/.test(cloudIcon)
     ? cloudIcon
     : ai.icon
-  return NextResponse.json({ show, label, disclaimer, icon }, { headers: { 'Cache-Control': 'no-store' } })
+  // Opening questions reflect this site's own navigation. They are advisory:
+  // a failure here must never hide an otherwise available assistant.
+  const suggestions = show
+    ? await Promise.all([loadSidebarCollections(), resolveSiteConfig(request.nextUrl.origin)])
+        .then(([collections, site]) => deriveStarterSuggestions({ siteName: site.name, collections }))
+        .catch(() => [])
+    : []
+  return NextResponse.json({ show, label, disclaimer, icon, suggestions }, { headers: { 'Cache-Control': 'no-store' } })
 }

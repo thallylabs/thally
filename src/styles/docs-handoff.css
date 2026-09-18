@@ -751,13 +751,27 @@ a[target='_blank']:hover > .thally-docs-card:not([data-card-arrow])::after {
   color: var(--docs-ink);
 }
 
+/* The composer is a quiet raised field. Focus deepens the hairline and adds a
+   soft halo instead of switching to a saturated accent outline, which read as
+   an error state against dark surfaces. */
 .thally-docs-chat-composer {
   border-color: var(--docs-line-2);
-  background: var(--docs-bg);
+  background: var(--docs-surface);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .thally-docs-chat-composer:focus-within {
-  border-color: var(--docs-accent);
+  border-color: color-mix(in oklab, var(--docs-accent) 38%, var(--docs-line-2));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--docs-accent) 10%, transparent);
+}
+
+.thally-docs-chat-attach {
+  color: var(--docs-mute);
+}
+
+.thally-docs-chat-attach:hover:not(:disabled) {
+  background: var(--docs-surface-2);
+  color: var(--docs-ink);
 }
 
 @keyframes thally-docs-dock-in {

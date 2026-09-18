@@ -19,11 +19,19 @@ import {
   parseAiAnswerSources,
   type AiAnswerSource,
 } from '@/lib/ai-answer-sources'
+import {
+  AI_FOLLOW_UPS_HEADER,
+  deriveFollowUpSuggestions,
+  normalizeAiSuggestions,
+  parseAiFollowUps,
+} from '@/lib/ai-chat-suggestions'
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
   sources?: Array<AiAnswerSource>
+  /** Model-written next questions supplied with this answer, when available. */
+  followUps?: Array<string>
   images?: Array<ChatImage>
 }
 
@@ -46,12 +54,6 @@ function ThallyBrandMark({ className }: { className?: string }) {
     />
   )
 }
-
-const SUGGESTIONS = [
-  'How do I get started?',
-  'How does navigation work?',
-  'How do I add an API reference?',
-]
 
 const SCREENSHOT_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp'
 
@@ -108,12 +110,26 @@ function TypingDots() {
   )
 }
 
-function SuggestionLinks({ onSelect }: { onSelect: (suggestion: string) => void }) {
+/**
+ * Suggested questions. The list is always supplied by the caller — opening
+ * questions from the site's navigation, follow-ups from the conversation — and
+ * the block disappears entirely when there is nothing relevant to offer.
+ */
+export function SuggestionLinks({
+  label,
+  suggestions,
+  onSelect,
+}: {
+  label: string
+  suggestions: ReadonlyArray<string>
+  onSelect: (suggestion: string) => void
+}) {
+  if (suggestions.length === 0) return null
   return (
-    <nav className="mt-6 border-t border-border/60 pt-4" aria-label="Suggested questions">
-      <p className="mb-2 text-xs font-medium text-muted-foreground">Suggestions</p>
+    <nav className="mt-6 border-t border-border/60 pt-4" aria-label={label}>
+      <p className="mb-2 text-xs font-medium text-muted-foreground">{label}</p>
       <div className="flex flex-col items-start gap-1.5">
-        {SUGGESTIONS.map((suggestion) => (
+        {suggestions.map((suggestion) => (
           <button
             key={suggestion}
             type="button"
@@ -165,6 +181,8 @@ interface DocsChatProps {
   unavailableMessage?: string
   /** Status was already resolved by the lazy loader. */
   skipStatusCheck?: boolean
+  /** Opening questions derived from this site's navigation by the status route. */
+  starterSuggestions?: ReadonlyArray<string>
   /** Code-sample action awaiting display when this lazy panel mounts. */
   initialPrompt?: string | null
   /** Increments for each external request to open the chat panel. */
@@ -176,9 +194,13 @@ export function DocsChat({
   enabled = true,
   unavailableMessage = 'Ask AI is not available for this site.',
   skipStatusCheck = false,
+  starterSuggestions,
   initialPrompt,
   openRequestId,
 }: DocsChatProps) {
+  // Set only when this component resolves status itself; otherwise the lazy
+  // loader's prop is the source, including when it arrives after mount.
+  const [fetchedStarters, setFetchedStarters] = useState<Array<string> | null>(null)
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   // Keep the optional widget out of first paint. The tiny status endpoint is
@@ -295,6 +317,7 @@ export function DocsChat({
         setChatShown(d.show === true)
         if (typeof d.label === 'string' && d.label) setLiveLabel(d.label)
         if (typeof d.disclaimer === 'string') setDisclaimer(d.disclaimer)
+        setFetchedStarters(normalizeAiSuggestions(d.suggestions))
       })
       .catch(() => {})
     return () => {
@@ -349,9 +372,10 @@ export function DocsChat({
       const sources = parseAiAnswerSources(
         res.headers.get(AI_ANSWER_SOURCES_HEADER),
       )
+      const followUps = parseAiFollowUps(res.headers.get(AI_FOLLOW_UPS_HEADER))
       setMessages((prev) => {
         const next = [...prev]
-        next[next.length - 1] = { ...next[next.length - 1], sources }
+        next[next.length - 1] = { ...next[next.length - 1], sources, followUps }
         return next
       })
 
@@ -385,6 +409,20 @@ export function DocsChat({
   }, [input, loading, messages, pendingImages])
 
   if (!chatShown) return null
+
+  const starters = fetchedStarters ?? normalizeAiSuggestions(starterSuggestions ?? [])
+  // Follow-ups belong to the latest finished answer. Prefer the questions the
+  // answer service wrote for this conversation; otherwise derive them from the
+  // pages retrieved for the latest question, which already track the topic.
+  const latest = messages[messages.length - 1]
+  const followUps = !loading && latest?.role === 'assistant' && latest.content
+    ? latest.followUps?.length
+      ? latest.followUps
+      : deriveFollowUpSuggestions({
+          sources: latest.sources ?? [],
+          asked: messages.filter((message) => message.role === 'user').map((message) => message.content),
+        })
+    : []
 
   return open ? (
     <>
@@ -443,7 +481,7 @@ export function DocsChat({
                     </p>
                   </div>
                 </div>
-                <SuggestionLinks onSelect={(suggestion) => void send(suggestion)} />
+                <SuggestionLinks label="Suggestions" suggestions={starters} onSelect={(suggestion) => void send(suggestion)} />
               </div>
             ) : (
               <div className="flex flex-col gap-[22px]">
@@ -511,7 +549,7 @@ export function DocsChat({
                     )}
                   </div>
                 ))}
-                <SuggestionLinks onSelect={(suggestion) => void send(suggestion)} />
+                <SuggestionLinks label="Follow-ups" suggestions={followUps} onSelect={(suggestion) => void send(suggestion)} />
                 <div ref={bottomRef} />
               </div>
             )}
@@ -524,7 +562,9 @@ export function DocsChat({
                 {unavailableMessage}
               </p>
             ) : null}
-            <div className="thally-docs-chat-composer rounded-[14px] border p-2 transition-colors">
+            {/* The question sits on its own full-width line; attach and send share
+                the row beneath it, so a long draft never crowds the controls. */}
+            <div className="thally-docs-chat-composer rounded-[18px] border px-3 pb-2.5 pt-3">
               {pendingImages.length > 0 ? (
                 <div className="mb-1.5">
                   <div className="flex gap-2 overflow-x-auto px-1 pt-1">
@@ -562,33 +602,23 @@ export function DocsChat({
                   {attachmentError}
                 </p>
               ) : null}
-              <div className="flex items-end gap-1.5">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept={SCREENSHOT_ACCEPT}
-                  multiple
-                  tabIndex={-1}
-                  className="sr-only"
-                  onChange={(event) => {
-                    void addScreenshots(Array.from(event.target.files ?? []))
-                    event.target.value = ''
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={loading || !enabled || pendingImages.length >= MAX_AI_CHAT_IMAGES}
-                  aria-label="Attach screenshots"
-                  title="Attach screenshots"
-                  className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:opacity-35"
-                >
-                  <Paperclip className="h-4 w-4" aria-hidden="true" />
-                </button>
-                <textarea
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={SCREENSHOT_ACCEPT}
+                multiple
+                tabIndex={-1}
+                className="sr-only"
+                onChange={(event) => {
+                  void addScreenshots(Array.from(event.target.files ?? []))
+                  event.target.value = ''
+                }}
+              />
+              <textarea
                   ref={textareaRef}
                   value={input}
-                  rows={1}
+                  rows={2}
+                  aria-label={`Message ${liveLabel}`}
                   onChange={(e) => setInput(e.target.value)}
                   onPaste={(event) => {
                     const files = Array.from(event.clipboardData.items)
@@ -605,17 +635,28 @@ export function DocsChat({
                       if (enabled) void send()
                     }
                   }}
-                  placeholder={enabled ? `Message ${liveLabel} or paste a screenshot…` : 'Add an ANTHROPIC_API_KEY to enable chat'}
+                  placeholder={enabled ? 'Ask a question…' : 'Add an ANTHROPIC_API_KEY to enable chat'}
                   disabled={loading || !enabled}
-                  className="min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
-                  style={{ maxHeight: '140px' }}
+                  className="block w-full resize-none bg-transparent px-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
+                  style={{ maxHeight: '160px' }}
                 />
+              <div className="mt-2 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading || !enabled || pendingImages.length >= MAX_AI_CHAT_IMAGES}
+                  aria-label="Attach screenshots"
+                  title="Attach or paste screenshots"
+                  className="thally-docs-chat-attach -ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-35"
+                >
+                  <Paperclip className="h-4 w-4" aria-hidden="true" />
+                </button>
                 <button
                   type="button"
                   onClick={loading ? stop : () => void send()}
                   disabled={!loading && !input.trim() && pendingImages.length === 0}
                   aria-label={loading ? 'Stop' : 'Send'}
-                  className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-all disabled:opacity-30"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-all disabled:opacity-30"
                 >
                   {loading
                     ? <Square className="h-3 w-3 fill-current" />

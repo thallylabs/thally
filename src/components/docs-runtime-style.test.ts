@@ -434,6 +434,28 @@ describe('documentation visual system', () => {
     expect(chat).not.toContain('<FabIcon')
     expect(provider).toContain('icon={chatStatus.icon ?? icon}')
     expect(statusRoute).toContain("/^\\/[A-Za-z0-9._/-]+$/")
-    expect(statusRoute).toContain('{ show, label, disclaimer, icon }')
+    expect(statusRoute).toContain('{ show, label, disclaimer, icon, suggestions }')
+  })
+
+  it('never ships a fixed list of assistant suggestions', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const [chat, provider, statusRoute, css] = await Promise.all([
+      readFile('src/components/docs/docs-chat.tsx', 'utf8'),
+      readFile('src/components/docs/code-actions-provider.tsx', 'utf8'),
+      readFile('src/app/api/chat-status/route.ts', 'utf8'),
+      readFile('src/styles/docs-handoff.css', 'utf8'),
+    ])
+
+    // Opening questions come from the site's navigation and follow-ups from
+    // the conversation; product-specific copy must not be compiled in.
+    expect(chat).not.toContain('How does navigation work?')
+    expect(chat).not.toContain('How do I add an API reference?')
+    expect(statusRoute).toContain('deriveStarterSuggestions')
+    expect(provider).toContain('starterSuggestions={chatStatus.suggestions}')
+    expect(chat).toContain('AI_FOLLOW_UPS_HEADER')
+    expect(chat).toContain('deriveFollowUpSuggestions')
+    // Focus is a soft halo on the composer, not a saturated accent outline.
+    const composerFocus = css.slice(css.indexOf('.thally-docs-chat-composer:focus-within'))
+    expect(composerFocus.slice(0, composerFocus.indexOf('}'))).toContain('color-mix')
   })
 })
