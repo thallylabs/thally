@@ -92,10 +92,13 @@ function ContentCardSurface({ kind, title, href, icon, iconType, iconColor, colo
     <span className={cn('thally-docs-card-title block min-w-0 font-heading text-base font-semibold leading-6 text-foreground', !horizontal && iconNode && 'mt-4')}>{title}</span>
   ) : null
 
+  // The radius is a literal on purpose. Tailwind's `rounded-2xl` maps to
+  // `--theme-radius-lg`, which the `sharp` and `minimal` presets shrink to 4px
+  // and 0; cards have always kept their own rounding regardless of the preset.
   const content = (
     <article
       className={cn(
-        'thally-docs-card group/card relative flex h-full overflow-hidden rounded-2xl border border-border bg-background transition-colors duration-150 hover:border-accent',
+        'thally-docs-card group/card relative flex h-full overflow-hidden rounded-[16px] border border-border bg-background transition-colors duration-150 hover:border-accent',
         horizontal ? 'flex-row items-start gap-4 px-6 py-5' : 'flex-col',
         resolvedCallout && calloutClassnames[resolvedCallout],
       )}
