@@ -4,7 +4,6 @@ import { parseFrontmatter } from '@/lib/frontmatter'
 import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 import { getDocsJsonConfig, getDocsJsonConfigRevision } from '@/lib/docs-json-config'
 import { resolveIconLibrary, type IconLibrary } from '@/lib/icon-library'
-import { getManagedSiteConfigSnapshot } from '@/lib/cloud-link/client'
 
 // ---------------------------------------------------------------------------
 // Public interfaces (consumed by components, pages, and stores)
@@ -1075,11 +1074,10 @@ export function getContentIconTone(): ContentIconTone {
 }
 
 /**
- * Resolve the icon library content names render through, defaulting to Lucide.
- * A Thally Cloud site setting wins over the repository's docs.json so owners
- * can switch libraries from the dashboard without a content change.
+ * Resolve the repository's icon library, defaulting to Lucide. Managed sites
+ * layer the Thally Cloud branding choice on top in `@/lib/cloud-link/icon-library`;
+ * this reader stays free of server-only imports so Node build scripts can use it.
  */
 export function getIconLibrary(): IconLibrary {
-  const cloudChoice = getManagedSiteConfigSnapshot()?.siteConfig.portable.branding?.iconLibrary
-  return resolveIconLibrary(cloudChoice ?? docsConfig().icons?.library)
+  return resolveIconLibrary(docsConfig().icons?.library)
 }

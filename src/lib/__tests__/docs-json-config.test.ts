@@ -4,12 +4,6 @@ import { readFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import repositoryDocsConfig from '../../../docs.json'
 import { getDocsJsonConfig, resetDocsJsonConfigForTests } from '@/lib/docs-json-config'
-
-const cloud = vi.hoisted(() => ({ snapshot: null as null | Record<string, unknown> }))
-vi.mock('@/lib/cloud-link/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/cloud-link/client')>()),
-  getManagedSiteConfigSnapshot: () => cloud.snapshot,
-}))
 import {
   getBannerConfig,
   getBreadcrumbs,
@@ -27,7 +21,6 @@ afterEach(() => {
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
   resetDocsJsonConfigForTests()
-  cloud.snapshot = null
 })
 
 describe('release-bound docs.json', () => {
@@ -58,20 +51,6 @@ describe('release-bound docs.json', () => {
       tabs: [{ tab: 'Documentation', groups: [] }],
     }))
     resetDocsJsonConfigForTests()
-    expect(getIconLibrary()).toBe('lucide')
-  })
-
-  it('lets a Thally Cloud branding setting override the repository icon library', () => {
-    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
-      icons: { library: 'fontawesome' },
-      tabs: [{ tab: 'Documentation', groups: [] }],
-    }))
-    resetDocsJsonConfigForTests()
-    cloud.snapshot = { siteConfig: { portable: { branding: { iconLibrary: 'tabler' } } } }
-    expect(getIconLibrary()).toBe('tabler')
-
-    // An unknown dashboard value never breaks rendering.
-    cloud.snapshot = { siteConfig: { portable: { branding: { iconLibrary: 'noto' } } } }
     expect(getIconLibrary()).toBe('lucide')
   })
 
