@@ -29,6 +29,7 @@ import {
   AI_ANSWER_SOURCES_HEADER,
   parseAiAnswerSources,
 } from '@/lib/ai-answer-sources'
+import { parseAiFollowUps } from '@/lib/ai-chat-suggestions'
 
 const cloudConfig = {
   siteId: 'site-1',
@@ -110,6 +111,34 @@ describe('Thally Cloud service adapters', () => {
     expect(
       parseAiAnswerSources(response.headers.get(AI_ANSWER_SOURCES_HEADER)),
     ).toEqual([{ title: 'Quickstart', url: '/quickstart#install' }])
+    // The runtime opts in to follow-ups; with none returned, none are relayed.
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toContain('"followUps":true')
+    expect(response.headers.get('x-thally-ai-follow-ups')).toBeNull()
+  })
+
+  it('re-normalizes model-written follow-ups before relaying them to the browser', async () => {
+    vi.stubEnv('THALLY_CLOUD_URL', 'https://cloud.example.com')
+    mocks.getRelevantChunks.mockResolvedValue([])
+    const remote = encodeURIComponent(JSON.stringify([
+      'How do tabs work?', 'how do tabs work?', 'Line\nbreak?', 'x'.repeat(200), 'Third?', 'Fourth?',
+    ]))
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('Grounded answer', {
+        status: 200,
+        headers: { 'content-type': 'text/plain; charset=utf-8', 'x-thally-ai-follow-ups': remote },
+      }),
+    )
+
+    const response = await handleCloudAiChat(
+      new Request('https://docs.example.com/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({ messages: [{ role: 'user', content: 'How does navigation work?' }] }),
+      }),
+    )
+
+    expect(parseAiFollowUps(response.headers.get('x-thally-ai-follow-ups'))).toEqual([
+      'How do tabs work?', 'Line break?', 'Third?',
+    ])
   })
 
   it('posts analytics with the server-only release grant', async () => {
