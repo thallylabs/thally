@@ -593,6 +593,10 @@ function projectedCompatibleConfig(config: Record<string, unknown>): Omit<Migrat
   const headingFont = projectedFont(objectValue(config.fonts)?.heading)
   const feedback = objectValue(config.feedback)
   const seo = objectValue(config.seo)
+  const iconLibrary = objectValue(config.icons)?.library
+  const projectedIconLibrary = ['lucide', 'fontawesome', 'tabler'].includes(String(iconLibrary))
+    ? String(iconLibrary) as 'lucide' | 'fontawesome' | 'tabler'
+    : undefined
   const navbar = projectedNavbar(config.navbar)
   const globalLinks = projectedGlobalNavigationLinks(objectValue(config.navigation)?.global)
   const navbarLinks = [...new Map(
@@ -603,6 +607,7 @@ function projectedCompatibleConfig(config: Record<string, unknown>): Omit<Migrat
     : undefined
   return {
     ...(projectedTheme(config.theme) ? { theme: projectedTheme(config.theme) } : {}),
+    ...(projectedIconLibrary ? { icons: { library: projectedIconLibrary } } : {}),
     ...(bannerContent ? {
       banner: {
         content: bannerContent,

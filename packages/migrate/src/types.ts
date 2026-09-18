@@ -64,6 +64,8 @@ export interface MigrationDocsConfig {
     display?: 'tabs' | 'dropdown'
   }
   theme?: 'default' | 'maple' | 'sharp' | 'minimal'
+  /** Icon set for content `icon` names; Mintlify's `icons.library` carries through. */
+  icons?: { library?: 'lucide' | 'fontawesome' | 'tabler' }
   banner?: MigrationBannerConfig
   navbar?: MigrationNavbarConfig
   footer?: MigrationFooterConfig

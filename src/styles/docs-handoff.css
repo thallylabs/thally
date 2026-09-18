@@ -561,6 +561,47 @@ body {
   border-color: var(--docs-accent);
 }
 
+/* Library-aware icons. Bundled Lucide glyphs render inline; every other name
+   resolves to the selected library's pinned CDN asset through a CSS mask. The
+   layout stamps html[data-icon-library] from docs.json, so the same markup
+   serves all three libraries and client components never read config. */
+.thally-icon {
+  --thally-icon-mask: var(--thally-icon-lucide);
+}
+
+html[data-icon-library='fontawesome'] .thally-icon {
+  --thally-icon-mask: var(--thally-icon-fontawesome);
+}
+
+html[data-icon-library='tabler'] .thally-icon {
+  --thally-icon-mask: var(--thally-icon-tabler);
+}
+
+.thally-icon-mask {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-color: currentColor;
+  -webkit-mask: var(--thally-icon-mask) center / contain no-repeat;
+  mask: var(--thally-icon-mask) center / contain no-repeat;
+}
+
+/* A bundled Lucide glyph is the offline default; other libraries swap it for
+   their own mask of the same name. */
+.thally-icon[data-icon-source='lucide'] > .thally-icon-mask {
+  display: none;
+}
+
+html[data-icon-library='fontawesome'] .thally-icon[data-icon-source='lucide'] > .thally-icon-glyph,
+html[data-icon-library='tabler'] .thally-icon[data-icon-source='lucide'] > .thally-icon-glyph {
+  display: none;
+}
+
+html[data-icon-library='fontawesome'] .thally-icon[data-icon-source='lucide'] > .thally-icon-mask,
+html[data-icon-library='tabler'] .thally-icon[data-icon-source='lucide'] > .thally-icon-mask {
+  display: block;
+}
+
 /* Content icons use the site accent by default. A site-wide neutral option or
    local MDX override still resolves through the live branding tokens. */
 .thally-content-icon {

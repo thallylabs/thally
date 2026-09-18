@@ -74,6 +74,22 @@ per-card override. Accent icons and card chrome use the same live token as
 links and controls, so changing the owner-selected brand accent updates them
 automatically, in both themes and every locale.
 
+### Icon library
+
+Icon names in cards, accordions, and prompts resolve through one library for
+the whole site. Lucide is the default; sites written for Font Awesome or Tabler
+names keep them by selecting that library:
+
+```json
+"icons": {
+  "library": "fontawesome"
+}
+```
+
+Brand marks such as `python` or `github` render inline under every library.
+See [Icons](/components/icons) for the full behaviour and the list of bundled
+names.
+
 ## Custom colors
 
 To define your own palette, edit the `brandPresets` object in `site.ts`. Each preset has `light` and `dark` variants with these tokens:

@@ -63,6 +63,8 @@ export interface CloudPortableConfig {
     favicon?: string
     faviconDark?: string
     themePreset?: string
+    /** Icon set chosen in Thally Cloud site settings; overrides docs.json `icons.library`. */
+    iconLibrary?: string
     colors?: {
       light?: { primary?: string; accent?: string }
       dark?: { primary?: string; accent?: string }

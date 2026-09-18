@@ -12,6 +12,7 @@ import {
   getFontsConfig,
   getStructuralTheme,
 } from '@/data/docs'
+import { getBuildIconLibrary } from '@/lib/cloud-link/icon-library'
 import { cn } from '@/lib/utils'
 import { toHslValue, THEME_VARS } from '@thallylabs/core/theme'
 import { buildOgImageUrl } from '@/lib/og'
@@ -230,6 +231,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const { googleFontUrls, fontOverrides } = resolveFontPresentation()
   const structuralTheme = getStructuralTheme()
   const contentIconTone = getContentIconTone()
+  const iconLibrary = getBuildIconLibrary()
   const themeVars = THEME_VARS[structuralTheme] ?? ''
   const bannerConfig = getBannerConfig()
   const customScripts = getCustomScriptsConfig()
@@ -255,6 +257,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       suppressHydrationWarning
       data-theme={structuralTheme}
       data-content-icons={contentIconTone}
+      data-icon-library={iconLibrary}
       className={cn(fontSans.variable, fontMono.variable)}
     >
       <head>
