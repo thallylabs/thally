@@ -120,7 +120,7 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: new URL(siteUrl),
     title: {
       default: `${effectiveSite.name} Documentation`,
-      template: `%s • ${effectiveSite.name}`,
+      template: `%s | ${effectiveSite.name}`,
     },
     description: effectiveSite.description,
     // Derived from the request-bound site config so a fork never inherits
