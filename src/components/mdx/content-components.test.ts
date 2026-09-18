@@ -1,5 +1,5 @@
 /** Focused rendering contracts for the standalone rich-content primitives. */
-import { createElement } from 'react'
+import { createElement, type ComponentType, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -8,7 +8,7 @@ vi.mock('next/navigation', () => ({
 }))
 
 import { Accordion, AccordionGroup } from '@/components/mdx/accordion'
-import { Card, Tile } from '@/components/mdx/content-cards'
+import { Card, CardGroup, Tile } from '@/components/mdx/content-cards'
 import { Icon } from '@/components/mdx/content-icon'
 import { Badge, Tooltip } from '@/components/mdx/content-inline'
 import { Color, Update } from '@/components/mdx/content-metadata'
@@ -43,6 +43,38 @@ describe('standalone rich-content primitives', () => {
     expect(markup).toContain('stroke="#0ea5e9"')
     const unsafe = renderToStaticMarkup(createElement(Component, { title: 'Unsafe', href: 'javascript:alert(1)' }))
     expect(unsafe).not.toContain('href=')
+  })
+
+  it('stacks the icon above the title and hides the arrow unless asked', () => {
+    const markup = renderToStaticMarkup(createElement(Card, {
+      title: 'Python SDK', icon: 'terminal', href: '/sdks/python',
+    }, 'For Python apps.'))
+    expect(markup).toContain('data-card-layout="stacked"')
+    expect(markup.indexOf('thally-docs-card-icon')).toBeLessThan(markup.indexOf('Python SDK'))
+    expect(markup).toContain('rounded-2xl')
+    expect(markup).toContain('px-6 py-5')
+    expect(markup).not.toContain('thally-docs-card-arrow')
+    expect(markup).not.toContain('data-card-arrow')
+
+    const withArrow = renderToStaticMarkup(createElement(Card, { title: 'Go', href: '/go', arrow: true }))
+    expect(withArrow).toContain('data-card-arrow=""')
+    expect(withArrow).toContain('thally-docs-card-arrow absolute right-5 top-5')
+
+    const horizontal = renderToStaticMarkup(createElement(Card, { title: 'Guide', icon: 'book', horizontal: true }))
+    expect(horizontal).toContain('data-card-layout="horizontal"')
+  })
+
+  it('lays card groups out in two columns unless told otherwise', () => {
+    // CardGroup requires children in its prop type; createElement passes them positionally.
+    const Group = CardGroup as ComponentType<{ cols?: number | string; children?: ReactNode }>
+    const child = createElement(Card, { title: 'A' })
+    const grid = renderToStaticMarkup(createElement(Group, null, child))
+    expect(grid).toContain('grid grid-cols-1 gap-4 sm:grid-cols-2')
+    expect(grid).not.toContain('lg:grid-cols-3')
+    const three = renderToStaticMarkup(createElement(Group, { cols: 3 }, child))
+    expect(three).toContain('lg:grid-cols-3')
+    const fromString = renderToStaticMarkup(createElement(Group, { cols: '4' }, child))
+    expect(fromString).toContain('lg:grid-cols-4')
   })
 
   it('renders Mintlify cards with authored JSX icons', () => {

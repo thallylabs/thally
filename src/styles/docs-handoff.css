@@ -609,12 +609,29 @@ body {
   border-color: hsl(var(--thally-foreground) / 0.25);
 }
 
-.thally-docs-card > .prose {
-  font-size: 1rem;
+/* Card copy sits under the title at Mintlify's reading size; the Card body
+   is nested inside the padded column, so target its own class rather than a
+   direct-child selector. */
+.thally-docs-card-body {
+  font-size: 0.9375rem;
   line-height: 1.5;
 }
 
-a[target='_blank'] > .thally-docs-card::after {
+.thally-docs-card-body :where(p, ul, ol) {
+  margin-block: 0.35em;
+}
+
+.thally-docs-card-body > :first-child {
+  margin-top: 0;
+}
+
+.thally-docs-card-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* External cards reveal a corner glyph on hover unless an explicit arrow
+   already occupies that corner. */
+a[target='_blank'] > .thally-docs-card:not([data-card-arrow])::after {
   position: absolute;
   top: 12px;
   right: 15px;
@@ -626,7 +643,7 @@ a[target='_blank'] > .thally-docs-card::after {
   transition: opacity 120ms ease;
 }
 
-a[target='_blank']:hover > .thally-docs-card::after {
+a[target='_blank']:hover > .thally-docs-card:not([data-card-arrow])::after {
   opacity: 1;
 }
 

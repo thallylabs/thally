@@ -87,7 +87,7 @@ describe('documentation visual system', () => {
     // (and Cloud branding) apply — a hardcoded color would freeze the default
     // green and break locale/theme consistency guarantees.
     const cardChrome = css.slice(css.indexOf("[data-content-icons='accent'] .thally-docs-card"))
-    const firstBlock = cardChrome.slice(0, cardChrome.indexOf('.thally-docs-card > .prose'))
+    const firstBlock = cardChrome.slice(0, cardChrome.indexOf('.thally-docs-card-body'))
     expect(firstBlock).toContain('hsl(var(--thally-accent)')
     expect(firstBlock).not.toContain('background-color')
     expect(firstBlock).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
