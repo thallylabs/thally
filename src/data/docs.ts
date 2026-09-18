@@ -3,6 +3,8 @@ import { getContentIndex, loadContentIndex, type ContentIndex } from '@/lib/cont
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 import { getDocsJsonConfig, getDocsJsonConfigRevision } from '@/lib/docs-json-config'
+import { resolveIconLibrary, type IconLibrary } from '@/lib/icon-library'
+import { getManagedSiteConfigSnapshot } from '@/lib/cloud-link/client'
 
 // ---------------------------------------------------------------------------
 // Public interfaces (consumed by components, pages, and stores)
@@ -227,6 +229,11 @@ interface DocsJsonConfig {
   appearance?: {
     /** Card and tile icons are neutral by default or inherit the live brand accent. */
     contentIcons?: ContentIconTone
+  }
+  /** Icon set used for every `icon` name in content. Mirrors Mintlify's `icons.library`. */
+  icons?: {
+    /** "lucide" (default) | "fontawesome" | "tabler" */
+    library?: IconLibrary
   }
   /**
    * Structural theme controlling border radius, sidebar active style, and nav
@@ -1065,4 +1072,14 @@ export function getStructuralTheme(): StructuralTheme {
 /** Resolve the global card/tile icon treatment, defaulting to the site accent. */
 export function getContentIconTone(): ContentIconTone {
   return docsConfig().appearance?.contentIcons === 'neutral' ? 'neutral' : 'accent'
+}
+
+/**
+ * Resolve the icon library content names render through, defaulting to Lucide.
+ * A Thally Cloud site setting wins over the repository's docs.json so owners
+ * can switch libraries from the dashboard without a content change.
+ */
+export function getIconLibrary(): IconLibrary {
+  const cloudChoice = getManagedSiteConfigSnapshot()?.siteConfig.portable.branding?.iconLibrary
+  return resolveIconLibrary(cloudChoice ?? docsConfig().icons?.library)
 }

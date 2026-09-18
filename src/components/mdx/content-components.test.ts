@@ -26,10 +26,42 @@ describe('standalone rich-content primitives', () => {
     expect(markup.match(/data-radix-collection-item/g)).toHaveLength(2)
   })
 
-  it('uses an explicit unknown icon fallback instead of a content glyph', () => {
-    const markup = renderToStaticMarkup(createElement(Icon, { icon: 'not-real' }))
-    expect(markup).toContain('data-icon-name="unknown"')
+  it('resolves unknown names through the configured icon library instead of a placeholder glyph', () => {
+    const markup = renderToStaticMarkup(createElement(Icon, { icon: 'sunrise-over-hills' }))
+    expect(markup).toContain('data-icon-source="library"')
+    expect(markup).toContain('data-icon-name="sunrise-over-hills"')
+    expect(markup).toContain('thally-icon-mask')
+    expect(markup).toContain('lucide-static@')
+    expect(markup).toContain('fontawesome-free@')
+    expect(markup).toContain('@tabler/icons@')
+    expect(markup).not.toContain('<svg')
     expect(markup).toContain('aria-hidden="true"')
+    // Names that cannot form a safe URL render nothing at all.
+    expect(renderToStaticMarkup(createElement(Icon, { icon: 'not real!' }))).toBe('')
+    expect(renderToStaticMarkup(createElement(Icon, { icon: '../etc' }))).toBe('')
+  })
+
+  it('renders brand marks inline under every icon library', () => {
+    for (const name of ['python', 'node', 'golang', 'java', 'rust', 'php', 'x-twitter', 'fa-brands fa-github']) {
+      const markup = renderToStaticMarkup(createElement(Icon, { icon: name }))
+      expect(markup, name).toContain('data-icon-source="brand"')
+      expect(markup, name).toContain('<path')
+    }
+    // Font Awesome brands without an inline mark fall back to the brands set for all libraries.
+    const microsoft = renderToStaticMarkup(createElement(Icon, { icon: 'microsoft' }))
+    expect(microsoft).toContain('data-icon-source="library"')
+    expect(microsoft.match(/svgs\/brands\/microsoft\.svg/g)).toHaveLength(3)
+  })
+
+  it('keeps a bundled Lucide glyph beside the library mask for the same name', () => {
+    const markup = renderToStaticMarkup(createElement(Icon, { icon: 'gear' }))
+    expect(markup).toContain('data-icon-source="lucide"')
+    expect(markup).toContain('data-icon-name="gear"')
+    expect(markup).toContain('thally-icon-glyph')
+    expect(markup).toContain('svgs/solid/gear.svg')
+    expect(markup).toContain('icons/outline/gear.svg')
+    expect(renderToStaticMarkup(createElement(Icon, { icon: 'bell', iconType: 'regular' }))).toContain('svgs/regular/bell.svg')
+    expect(renderToStaticMarkup(createElement(Icon, { icon: 'star', iconType: 'solid' }))).toContain('icons/filled/star.svg')
   })
 
   it.each([Card, Tile])('supports richer linked surface metadata', (Component) => {

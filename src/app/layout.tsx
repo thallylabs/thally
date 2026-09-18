@@ -10,6 +10,7 @@ import {
   getContentIconTone,
   getCustomScriptsConfig,
   getFontsConfig,
+  getIconLibrary,
   getStructuralTheme,
 } from '@/data/docs'
 import { cn } from '@/lib/utils'
@@ -230,6 +231,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const { googleFontUrls, fontOverrides } = resolveFontPresentation()
   const structuralTheme = getStructuralTheme()
   const contentIconTone = getContentIconTone()
+  const iconLibrary = getIconLibrary()
   const themeVars = THEME_VARS[structuralTheme] ?? ''
   const bannerConfig = getBannerConfig()
   const customScripts = getCustomScriptsConfig()
@@ -255,6 +257,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       suppressHydrationWarning
       data-theme={structuralTheme}
       data-content-icons={contentIconTone}
+      data-icon-library={iconLibrary}
       className={cn(fontSans.variable, fontMono.variable)}
     >
       <head>

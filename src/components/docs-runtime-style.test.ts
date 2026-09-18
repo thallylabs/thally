@@ -93,6 +93,17 @@ describe('documentation visual system', () => {
     expect(firstBlock).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
   })
 
+  it('selects the icon library mask from the html attribute the layout stamps', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const css = await readFile('src/styles/docs-handoff.css', 'utf8')
+
+    expect(css).toContain("html[data-icon-library='fontawesome'] .thally-icon {")
+    expect(css).toContain("html[data-icon-library='tabler'] .thally-icon {")
+    expect(css).toContain('--thally-icon-mask: var(--thally-icon-lucide)')
+    // Bundled Lucide glyphs hide only when another library is active.
+    expect(css).toContain("html[data-icon-library='fontawesome'] .thally-icon[data-icon-source='lucide'] > .thally-icon-glyph")
+  })
+
   it('renders the category eyebrow above the page title', () => {
     const doc = {
       id: 'guides/writing-content',

@@ -4,10 +4,17 @@ import { readFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import repositoryDocsConfig from '../../../docs.json'
 import { getDocsJsonConfig, resetDocsJsonConfigForTests } from '@/lib/docs-json-config'
+
+const cloud = vi.hoisted(() => ({ snapshot: null as null | Record<string, unknown> }))
+vi.mock('@/lib/cloud-link/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/cloud-link/client')>()),
+  getManagedSiteConfigSnapshot: () => cloud.snapshot,
+}))
 import {
   getBannerConfig,
   getBreadcrumbs,
   getContentIconTone,
+  getIconLibrary,
   getNavCategory,
   getNavContext,
   getNavigablePageIds,
@@ -20,6 +27,7 @@ afterEach(() => {
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
   resetDocsJsonConfigForTests()
+  cloud.snapshot = null
 })
 
 describe('release-bound docs.json', () => {
@@ -33,6 +41,38 @@ describe('release-bound docs.json', () => {
     resetDocsJsonConfigForTests()
 
     expect(getContentIconTone()).toBe('neutral')
+  })
+
+  it('renders icon names through Lucide unless docs.json selects another library', () => {
+    expect(getIconLibrary()).toBe('lucide')
+
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+      icons: { library: 'fontawesome' },
+      tabs: [{ tab: 'Documentation', groups: [] }],
+    }))
+    resetDocsJsonConfigForTests()
+    expect(getIconLibrary()).toBe('fontawesome')
+
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+      icons: { library: 'noto' },
+      tabs: [{ tab: 'Documentation', groups: [] }],
+    }))
+    resetDocsJsonConfigForTests()
+    expect(getIconLibrary()).toBe('lucide')
+  })
+
+  it('lets a Thally Cloud branding setting override the repository icon library', () => {
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+      icons: { library: 'fontawesome' },
+      tabs: [{ tab: 'Documentation', groups: [] }],
+    }))
+    resetDocsJsonConfigForTests()
+    cloud.snapshot = { siteConfig: { portable: { branding: { iconLibrary: 'tabler' } } } }
+    expect(getIconLibrary()).toBe('tabler')
+
+    // An unknown dashboard value never breaks rendering.
+    cloud.snapshot = { siteConfig: { portable: { branding: { iconLibrary: 'noto' } } } }
+    expect(getIconLibrary()).toBe('lucide')
   })
 
   it('uses a valid managed binding for navigation and appearance', () => {
