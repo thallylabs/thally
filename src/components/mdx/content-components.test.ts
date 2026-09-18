@@ -83,7 +83,10 @@ describe('standalone rich-content primitives', () => {
     }, 'For Python apps.'))
     expect(markup).toContain('data-card-layout="stacked"')
     expect(markup.indexOf('thally-docs-card-icon')).toBeLessThan(markup.indexOf('Python SDK'))
-    expect(markup).toContain('rounded-2xl')
+    // A literal radius keeps cards rounded under the sharp and minimal presets,
+    // where the theme-mapped `rounded-2xl` utility collapses to 4px or 0.
+    expect(markup).toContain('rounded-[16px]')
+    expect(markup).not.toMatch(/thally-docs-card[^"]*rounded-(?:md|lg|xl|2xl|3xl)\b/)
     expect(markup).toContain('px-6 py-5')
     expect(markup).not.toContain('thally-docs-card-arrow')
     expect(markup).not.toContain('data-card-arrow')
