@@ -50,6 +50,8 @@ export function resolveSiteBackground(repository?: SiteBackground, managed?: Sit
 
 /** The locked system bootstrap runs before body content and ignores reader storage. */
 export function lockedAppearanceScript(mode: Required<SiteAppearance>['default']): string {
-  const selected = mode === 'system' ? "(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')" : JSON.stringify(mode)
+  // Inline HTML scripts must contain only fixed code: JSON escaping cannot stop
+  // a closing script tag if an untyped caller passes an unexpected mode.
+  const selected = mode === 'dark' ? "'dark'" : mode === 'light' ? "'light'" : "(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')"
   return `(()=>{const d=document.documentElement,t=${selected};d.classList.remove('light','dark');d.classList.add(t);d.style.colorScheme=t})()`
 }

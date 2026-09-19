@@ -4,6 +4,11 @@ import { describe, expect, it } from 'vitest'
 import { lockedAppearanceScript, resolveBackgroundImage, resolveSiteAppearance, resolveSiteBackground } from '../site-appearance'
 
 describe('reader appearance', () => {
+  it.each(['</script><script>alert(1)</script>', "';alert(1);//", 'unknown'])('never interpolates an unexpected mode: %s', mode => {
+    const script = lockedAppearanceScript(mode as Parameters<typeof lockedAppearanceScript>[0])
+    expect(script).toBe(lockedAppearanceScript('system'))
+    expect(script).not.toContain(mode)
+  })
   it('preserves system mode and reader controls by default', () => {
     expect(resolveSiteAppearance()).toEqual({ default: 'system', showToggle: true })
   })
