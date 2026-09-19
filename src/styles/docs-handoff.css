@@ -117,6 +117,55 @@ body {
   --docs-header-height: 60px;
 }
 
+/* Opt-in canvas layers stay behind the complete document, including long pages.
+   Omitted settings leave all existing site surfaces and stacking unchanged. */
+[data-site-background='enabled'] .thally-docs-root {
+  isolation: isolate;
+  position: relative;
+  --site-background-image: var(--site-background-light, none);
+}
+
+.dark[data-site-background='enabled'] .thally-docs-root {
+  --site-background-image: var(--site-background-dark, none);
+}
+
+[data-site-background='enabled'] .thally-docs-root::before,
+[data-site-background='enabled'] .thally-docs-root::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+[data-site-background='enabled'] .thally-docs-root::before {
+  background-image: var(--site-background-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+[data-site-background='enabled'] .thally-docs-root::after {
+  background-image: var(--site-background-decoration, none);
+  background-size: var(--site-background-decoration-size, cover);
+}
+
+/* Keep reading and navigation surfaces legible over arbitrary owner imagery. */
+[data-site-background='enabled'] .thally-docs-main,
+[data-site-background='enabled'] .thally-docs-sidebar,
+[data-site-background='enabled'] .thally-docs-root footer {
+  background: transparent;
+}
+
+[data-site-background-image='enabled'] .thally-docs-main {
+  background: hsl(var(--thally-background) / 0.9);
+}
+
+[data-site-background-image='enabled'] .thally-docs-sidebar,
+[data-site-background-image='enabled'] .thally-docs-root footer {
+  background: hsl(var(--thally-background) / 0.92);
+}
+
 .thally-docs-collection-row {
   min-height: 44px;
   /* Both header rows inherit the same centered shell and inline gutters. */

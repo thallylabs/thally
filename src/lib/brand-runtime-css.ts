@@ -7,6 +7,7 @@
  */
 
 import { hexToHslString } from '@thallylabs/core/theme'
+import { resolveBackgroundImage, type SiteBackground } from '@/lib/site-appearance'
 
 export interface RuntimeBrandColorMode {
   primary?: string
@@ -23,6 +24,7 @@ export interface RuntimeBrandFont {
 }
 
 export interface RuntimeBrandingConfig {
+  background?: SiteBackground
   colors?: {
     light?: RuntimeBrandColorMode
     dark?: RuntimeBrandColorMode
@@ -31,6 +33,25 @@ export interface RuntimeBrandingConfig {
     body?: RuntimeBrandFont
     heading?: RuntimeBrandFont
   }
+}
+
+/** Image strings are validated before entering quoted CSS; decorations are fixed CSS. */
+function backgroundDeclarations(background: SiteBackground | undefined): string[] {
+  if (!background) return []
+  const light = resolveBackgroundImage(background.image)
+  const dark = resolveBackgroundImage(background.imageDark) ?? light
+  const imageValue = (value: string | null) => value ? `url(${JSON.stringify(value)})` : 'none'
+  const decoration = background.decoration === 'grid'
+    ? 'linear-gradient(hsl(var(--thally-foreground)/0.06) 1px,transparent 1px),linear-gradient(90deg,hsl(var(--thally-foreground)/0.06) 1px,transparent 1px)'
+    : background.decoration === 'gradient'
+      ? 'radial-gradient(ellipse at top left,hsl(var(--thally-accent)/0.12),transparent 65%)'
+      : 'none'
+  return [
+    `--site-background-light:${imageValue(light)}`,
+    `--site-background-dark:${imageValue(dark)}`,
+    `--site-background-decoration:${decoration}`,
+    `--site-background-decoration-size:${background.decoration === 'grid' ? '24px 24px' : 'cover'}`,
+  ]
 }
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
@@ -130,7 +151,7 @@ export function brandRuntimeCss(config: RuntimeBrandingConfig | null | undefined
   if (!config) return ''
   const imports = new Set<string>()
   const faces: string[] = []
-  const declarations = colorDeclarations(config)
+  const declarations = [...colorDeclarations(config), ...backgroundDeclarations(config.background)]
 
   for (const role of ['body', 'heading'] as const) {
     const font = config.fonts?.[role]
