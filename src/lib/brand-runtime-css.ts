@@ -75,6 +75,29 @@ function readableForeground(hex: string): '#000000' | '#ffffff' {
   return luminance > 0.179 ? '#000000' : '#ffffff'
 }
 
+/** Derive opaque companion tones from an already validated canvas color. */
+function backgroundPalette(hex: string): Record<string, string> {
+  const isLight = readableForeground(hex) === '#000000'
+  const target = isLight ? 0 : 255
+  const mix = (amount: number) => {
+    const channels = [1, 3, 5].map((start) => {
+      const channel = Number.parseInt(hex.slice(start, start + 2), 16)
+      return Math.round(channel + (target - channel) * amount).toString(16).padStart(2, '0')
+    })
+    return hexToHslString(`#${channels.join('')}`)
+  }
+
+  // Neutral lifts retain the canvas hue without tinting every control with the
+  // brand accent. Opaque HSL channels also preserve existing alpha utilities.
+  // Follow actual canvas luminance, not the mode label, for unusual palettes.
+  return {
+    muted: mix(isLight ? 0.04 : 0.06),
+    input: mix(isLight ? 0.08 : 0.1),
+    border: mix(isLight ? 0.12 : 0.14),
+    'muted-foreground': mix(isLight ? 0.64 : 0.66),
+  }
+}
+
 function colorDeclarations(config: RuntimeBrandingConfig): string[] {
   const declarations: string[] = []
   for (const mode of ['light', 'dark'] as const) {
@@ -85,6 +108,11 @@ function colorDeclarations(config: RuntimeBrandingConfig): string[] {
       // Override all three so an owner gets one continuous site background.
       for (const surface of ['background', 'sidebar', 'card']) {
         declarations.push(`--brand-${mode}-${surface}:${background}`)
+      }
+      // Search, navigation hover, inline code, and form controls all consume
+      // these semantic tokens; leaving them unchanged leaks the old palette.
+      for (const [token, value] of Object.entries(backgroundPalette(colors.background))) {
+        declarations.push(`--brand-${mode}-${token}:${value}`)
       }
     }
     if (colors?.primary && HEX_COLOR.test(colors.primary)) {
