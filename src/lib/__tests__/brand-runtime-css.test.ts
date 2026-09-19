@@ -5,6 +5,24 @@ import { describe, expect, it } from 'vitest'
 import { brandRuntimeCss } from '../brand-runtime-css'
 
 describe('brandRuntimeCss', () => {
+  it('applies independent backgrounds to the full shell in each mode', () => {
+    const css = brandRuntimeCss({ colors: { light: { background: '#ffffff' }, dark: { background: '#000000' } } })
+    for (const surface of ['background', 'sidebar', 'card']) {
+      expect(css).toContain(`--brand-light-${surface}:0 0% 100%`)
+      expect(css).toContain(`--brand-dark-${surface}:0 0% 0%`)
+    }
+    // Background changes must not replace text or brand choices.
+    expect(css).not.toContain('foreground')
+    expect(css).not.toContain('primary')
+  })
+
+  it('preserves repository defaults when backgrounds are omitted or invalid', () => {
+    expect(brandRuntimeCss({ colors: { light: {}, dark: { background: '' } } })).toBe('')
+    expect(brandRuntimeCss({ colors: { light: { background: '#fff' }, dark: { background: '#000000;}body{display:none' } } })).toBe('')
+    const css = brandRuntimeCss({ colors: { dark: { background: '#000000' } } })
+    expect(css).not.toContain('--brand-light-')
+  })
+
   it('renders per-theme colors with readable foregrounds', () => {
     expect(
       brandRuntimeCss({

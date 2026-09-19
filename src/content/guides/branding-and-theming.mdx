@@ -17,6 +17,23 @@ Use the **dashboard** for day-to-day changes — theme, brand accent, logo, favi
 
 The dashboard overrides the structural theme, the **brand accent** (and its focus ring), the logo, and the favicon. The rest of the palette (backgrounds, borders, sidebar tokens) is defined in the source files described below.
 
+### Site backgrounds in Thally Cloud
+
+In your site's **Settings → Branding → Site background**, choose a separate
+background for light and dark mode. Use the color picker or enter a hex color.
+The preview updates as you edit; the contrast readouts compare your brand color
+and the default text palette with the selected background.
+
+The override covers the page canvas, header, sidebar, and cards. It keeps text,
+borders, code blocks, and other semantic colors in their existing palette.
+Choose a light background for light mode and a dark background for dark mode,
+then check readability in both previews.
+
+Choose **Use site default** to remove an override. With no override, the
+background comes from `src/data/site.ts`. Managed sites publish these changes
+with the next site version. Sites pinned to an older runtime must first upgrade
+to a runtime that supports background overrides.
+
 ## Site configuration
 
 All site-level settings live in `src/data/site.ts`. Edit this file to set your product name, description, and links. (Name, description, and repo URL can also be overridden live from the dashboard.)

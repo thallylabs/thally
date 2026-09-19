@@ -11,6 +11,8 @@ import { hexToHslString } from '@thallylabs/core/theme'
 export interface RuntimeBrandColorMode {
   primary?: string
   accent?: string
+  /** Optional canvas override; omission preserves the repository palette. */
+  background?: string
 }
 
 export interface RuntimeBrandFont {
@@ -56,6 +58,14 @@ function colorDeclarations(config: RuntimeBrandingConfig): string[] {
   const declarations: string[] = []
   for (const mode of ['light', 'dark'] as const) {
     const colors = config.colors?.[mode]
+    if (colors?.background && HEX_COLOR.test(colors.background)) {
+      const background = hexToHslString(colors.background)
+      // The shell uses separate tokens for its canvas, sidebar, and cards.
+      // Override all three so an owner gets one continuous site background.
+      for (const surface of ['background', 'sidebar', 'card']) {
+        declarations.push(`--brand-${mode}-${surface}:${background}`)
+      }
+    }
     if (colors?.primary && HEX_COLOR.test(colors.primary)) {
       declarations.push(
         `--brand-${mode}-primary:${hexToHslString(colors.primary)}`,

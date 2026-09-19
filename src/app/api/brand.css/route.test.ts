@@ -26,7 +26,10 @@ describe('GET /api/brand.css', () => {
         portable: {
           branding: {
             themePreset: 'sharp',
-            colors: { light: { primary: '#111827', accent: '#0f766e' } },
+            colors: {
+              light: { primary: '#111827', accent: '#0f766e', background: '#ffffff' },
+              dark: { background: '#000000' },
+            },
             fonts: { body: { source: 'google', family: 'IBM Plex Sans' } },
           },
         },
@@ -38,6 +41,10 @@ describe('GET /api/brand.css', () => {
 
     expect(css).toContain('family=IBM+Plex+Sans')
     expect(css).toContain('--brand-light-primary:221 39% 11%')
+    for (const surface of ['background', 'sidebar', 'card']) {
+      expect(css).toContain(`--brand-light-${surface}:0 0% 100%`)
+      expect(css).toContain(`--brand-dark-${surface}:0 0% 0%`)
+    }
     expect(css).toContain('--brand-sidebar-active-bg-light:175 77% 26% / 0.12')
     expect(css).toContain('--brand-sidebar-active-text-light:175 77% 26%')
     expect(css).toContain('--theme-radius-sm:0.125rem')
