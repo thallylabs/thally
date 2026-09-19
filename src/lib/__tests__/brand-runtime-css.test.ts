@@ -5,6 +5,40 @@ import { describe, expect, it } from 'vitest'
 import { brandRuntimeCss } from '../brand-runtime-css'
 
 describe('brandRuntimeCss', () => {
+  it('uses the shared image in both modes and allows a dark-only background', () => {
+    const shared = brandRuntimeCss({ background: { image: 'public/brand/background-light.png' } })
+    expect(shared).toContain('--site-background-light:url("/brand/background-light.png")')
+    expect(shared).toContain('--site-background-dark:url("/brand/background-light.png")')
+    const dark = brandRuntimeCss({ background: { imageDark: '/brand/background-dark.png' } })
+    expect(dark).toContain('--site-background-light:none')
+    expect(dark).toContain('--site-background-dark:url("/brand/background-dark.png")')
+  })
+
+  it('renders only allowlisted decorations and keeps mode images independent', () => {
+    const css = brandRuntimeCss({ background: { image: '/light.png', imageDark: '/dark.webp', decoration: 'grid' } })
+    expect(css).toContain('--site-background-dark:url("/dark.webp")')
+    expect(css).toContain('--site-background-decoration-size:24px 24px')
+    expect(brandRuntimeCss({ background: { decoration: 'gradient' } })).toContain('radial-gradient(ellipse at top left')
+    expect(brandRuntimeCss({ background: { image: 'https://x.test/\";}body{display:none}', decoration: 'none' } })).not.toContain('body')
+  })
+  it('applies independent backgrounds to the full shell in each mode', () => {
+    const css = brandRuntimeCss({ colors: { light: { background: '#ffffff' }, dark: { background: '#000000' } } })
+    for (const surface of ['background', 'sidebar', 'card']) {
+      expect(css).toContain(`--brand-light-${surface}:0 0% 100%`)
+      expect(css).toContain(`--brand-dark-${surface}:0 0% 0%`)
+    }
+    // Background changes must not replace text or brand choices.
+    expect(css).not.toContain('foreground')
+    expect(css).not.toContain('primary')
+  })
+
+  it('preserves repository defaults when backgrounds are omitted or invalid', () => {
+    expect(brandRuntimeCss({ colors: { light: {}, dark: { background: '' } } })).toBe('')
+    expect(brandRuntimeCss({ colors: { light: { background: '#fff' }, dark: { background: '#000000;}body{display:none' } } })).toBe('')
+    const css = brandRuntimeCss({ colors: { dark: { background: '#000000' } } })
+    expect(css).not.toContain('--brand-light-')
+  })
+
   it('renders per-theme colors with readable foregrounds', () => {
     expect(
       brandRuntimeCss({

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { useTheme } from 'next-themes'
+import { useReaderTheme } from '@/components/theme/reader-theme'
 import { cn } from '@/lib/utils'
 import { displaySiteName, useSiteName } from './use-site-name'
 
@@ -26,7 +26,7 @@ export function Logo({ className, showText = true }: LogoProps) {
   // the SSR output on the very first render — gate on hydration so the src
   // attribute matches the server HTML, then settle to the real theme.
   const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false)
-  const { resolvedTheme } = useTheme()
+  const { resolvedTheme } = useReaderTheme()
   const isDark = mounted && resolvedTheme === 'dark'
   const src = isDark ? '/api/brand/logo?mode=dark' : '/api/brand/logo'
 

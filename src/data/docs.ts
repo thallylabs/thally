@@ -226,8 +226,16 @@ interface DocsJsonConfig {
   feedback?: DocsJsonFeedback
   /** Visual choices that remain independent of the structural theme. */
   appearance?: {
+    /** Initial reader mode; hidden controls enforce this preference. */
+    default?: 'system' | 'light' | 'dark'
+    showToggle?: boolean
     /** Card and tile icons are neutral by default or inherit the live brand accent. */
     contentIcons?: ContentIconTone
+  }
+  background?: {
+    image?: string
+    imageDark?: string
+    decoration?: 'none' | 'grid' | 'gradient'
   }
   /** Icon set used for every `icon` name in content. Mirrors Mintlify's `icons.library`. */
   icons?: {

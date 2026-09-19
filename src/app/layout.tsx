@@ -26,6 +26,9 @@ import { CloudHandshake } from '@/components/cloud/cloud-handshake'
 import { localeDirection } from '@/lib/i18n/config'
 import { getBuildI18nConfig } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
+import { getBuildSiteAppearance } from '@/lib/cloud-link/appearance'
+import { lockedAppearanceScript } from '@/lib/site-appearance'
+import { brandRuntimeCss } from '@/lib/brand-runtime-css'
 
 // Default fonts via next/font (optimal performance — preloaded, no FOUC).
 // Inter covers both reading and display text so the public docs keep one
@@ -230,6 +233,8 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   // Worker code while presenting the new docs.json immediately.
   const { googleFontUrls, fontOverrides } = resolveFontPresentation()
   const structuralTheme = getStructuralTheme()
+  const { appearance, background } = getBuildSiteAppearance()
+  const hasBackground = Boolean(background.image || background.imageDark || background.decoration !== 'none')
   const contentIconTone = getContentIconTone()
   const iconLibrary = getBuildIconLibrary()
   const themeVars = THEME_VARS[structuralTheme] ?? ''
@@ -258,10 +263,15 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       data-theme={structuralTheme}
       data-content-icons={contentIconTone}
       data-icon-library={iconLibrary}
+      data-site-background={hasBackground ? 'enabled' : undefined}
+      data-site-background-image={background.image || background.imageDark ? 'enabled' : undefined}
       className={cn(fontSans.variable, fontMono.variable)}
     >
       <head>
         <script id="thally-runtime-name-shim" dangerouslySetInnerHTML={{ __html: runtimeNameShim }} />
+        {!appearance.showToggle && (
+          <script id="thally-locked-appearance" dangerouslySetInnerHTML={{ __html: lockedAppearanceScript(appearance.default) }} />
+        )}
         <JsonLdScript data={siteJsonLd} />
         {/* Google Fonts for custom body/heading fonts set in docs.json */}
         {googleFontUrls.length > 0 && (
@@ -275,6 +285,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         )}
         {/* Brand palette (default) — a :root rule so /api/brand.css can override it */}
         <style>{`:root { ${brandCss} }`}</style>
+        {hasBackground && <style>{brandRuntimeCss({ background })}</style>}
         {/* CSS variable overrides for custom fonts */}
         {fontOverrides && <style>{`:root { ${fontOverrides} }`}</style>}
         {/* CSS variable overrides for structural theme (radius, sidebar, nav tabs) */}
@@ -291,7 +302,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
             locales={i18n.locales.map((locale) => locale.code)}
           />
         )}
-        <Providers>{children}</Providers>
+        <Providers appearance={appearance}>{children}</Providers>
         <CloudHandshake />
         {siteConfig.analytics && <AnalyticsProvider />}
         <WebMcpTools />

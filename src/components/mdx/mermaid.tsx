@@ -3,7 +3,7 @@
 'use client'
 
 import { useEffect, useId, useState, type ReactNode } from 'react'
-import { useTheme } from 'next-themes'
+import { useReaderTheme } from '@/components/theme/reader-theme'
 
 interface MermaidProps {
   /** Preferred explicit diagram definition for component-style usage. */
@@ -52,7 +52,7 @@ function resolveDefinition(chart: string | undefined, children: ReactNode): stri
 
 export function Mermaid({ chart, children }: MermaidProps) {
   const id = useId().replace(/:/g, '')
-  const { resolvedTheme } = useTheme()
+  const { resolvedTheme } = useReaderTheme()
   const [rendered, setRendered] = useState<RenderedDiagram>({
     definition: '',
     svg: '',
