@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   effects: [] as Array<() => void | (() => void)>,
   setActive: vi.fn(),
+  activeId: undefined as string | undefined,
   items: [{ id: 'first', text: 'First', level: 2 }, { id: 'second', text: 'Second', level: 2 }],
 }))
 
@@ -15,7 +16,7 @@ vi.mock('react', async (importOriginal) => ({
   useEffect: (effect: () => void | (() => void)) => mocks.effects.push(effect),
   useState: (initial: unknown) => Array.isArray(initial)
     ? [mocks.items, vi.fn()]
-    : [undefined, mocks.setActive],
+    : [mocks.activeId, mocks.setActive],
 }))
 
 import { TableOfContents } from './table-of-contents'
@@ -24,8 +25,20 @@ describe('table of contents scroll tracking', () => {
   beforeEach(() => {
     mocks.effects = []
     mocks.setActive.mockReset()
+    mocks.activeId = undefined
   })
   afterEach(() => vi.unstubAllGlobals())
+
+  it.each(['first', 'second'])('marks only the current heading %s for accent styling and assistive technology', (activeId) => {
+    mocks.activeId = activeId
+    const html = renderToStaticMarkup(<TableOfContents />)
+    expect(html.match(/aria-current="location"/g)).toHaveLength(1)
+    expect(html).toContain(`href="#${activeId}" aria-current="location"`)
+  })
+
+  it('does not mark a heading current before scroll tracking resolves it', () => {
+    expect(renderToStaticMarkup(<TableOfContents />)).not.toContain('aria-current')
+  })
 
   it.each([
     ['inline', 96],

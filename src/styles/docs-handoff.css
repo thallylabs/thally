@@ -197,6 +197,11 @@ body {
   transition: color 150ms;
 }
 
+.thally-docs-tabs .thally-nav-tab-item[aria-current='page'] {
+  /* Brand the selection marker while keeping collection labels neutral. */
+  border-bottom-color: var(--docs-accent);
+}
+
 @media (min-width: 881px) {
   .thally-docs-root[data-header-layout='stacked'] {
     --docs-header-height: 104px;
@@ -750,9 +755,11 @@ a[target='_blank']:hover > .thally-docs-card:not([data-card-arrow])::after {
   border-inline-start-color: var(--docs-line);
 }
 
+.thally-docs-toc a[aria-current='location'],
 .thally-docs-toc a[aria-current='true'],
 .thally-docs-toc a[data-active='true'] {
   color: var(--docs-accent);
+  border-inline-start-color: var(--docs-accent);
 }
 
 .thally-docs-root footer {
