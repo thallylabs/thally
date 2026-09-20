@@ -28,6 +28,23 @@ describe('documentation visual system', () => {
     vi.clearAllMocks()
   })
 
+  it('brands only the active collection underline, not its neutral label', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const css = await readFile('src/styles/docs-handoff.css', 'utf8')
+    const rule = css.match(/\.thally-docs-tabs \.thally-nav-tab-item\[aria-current='page'\] \{([^}]+)\}/)?.[1]
+    expect(rule).toContain('border-bottom-color: var(--docs-accent)')
+    expect(rule).not.toMatch(/(?:^|[;\n])\s*color\s*:/)
+  })
+
+  it('brands the active page-outline label and indicator with the live theme accent', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const css = await readFile('src/styles/docs-handoff.css', 'utf8')
+    const rule = css.match(/\.thally-docs-toc a\[aria-current='location'\][^{]*\{([^}]+)\}/)?.[1]
+    expect(rule).toContain('color: var(--docs-accent)')
+    expect(rule).toContain('border-inline-start-color: var(--docs-accent)')
+    expect(css).toContain('--docs-accent: hsl(var(--thally-accent))')
+  })
+
   it.each([
     ['card', Card],
     ['tile', Tile],
