@@ -5,6 +5,7 @@ import { useSyncExternalStore } from 'react'
 import { ThemeProvider } from 'next-themes'
 import { NuqsAdapter } from 'nuqs/adapters/next/app'
 import { ReaderThemeControlsContext } from '@/components/theme/reader-theme'
+import { ThemeFavicon } from '@/components/theme/theme-favicon'
 import type { SiteAppearance } from '@/lib/site-appearance'
 
 const darkQuery = '(prefers-color-scheme: dark)'
@@ -38,6 +39,7 @@ export function Providers({ children, appearance = { default: 'system', showTogg
       scriptProps={appearance.showToggle ? undefined : { type: 'text/plain' }}
     >
       <ReaderThemeControlsContext.Provider value={appearance.showToggle}>
+        <ThemeFavicon />
         <NuqsAdapter>{children}</NuqsAdapter>
       </ReaderThemeControlsContext.Provider>
     </ThemeProvider>
