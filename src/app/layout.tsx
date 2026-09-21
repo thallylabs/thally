@@ -131,9 +131,9 @@ export async function generateMetadata(): Promise<Metadata> {
     // the baseline's marketing keywords.
     keywords: [effectiveSite.name, `${effectiveSite.name} documentation`, 'docs'],
     icons: {
-      // The dark link wins on OS dark scheme (link media can't follow the
-      // in-site theme toggle); the route falls back to the light asset when no
-      // dark variant is uploaded, so both links always resolve.
+      // Media supplies the pre-hydration/no-JavaScript fallback. ThemeFavicon
+      // then follows the reader's resolved mode, including manual and locked
+      // modes. The route falls back to the light upload when dark is absent.
       icon: [
         { url: '/api/brand/favicon', media: '(prefers-color-scheme: light)' },
         {
