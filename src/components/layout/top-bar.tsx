@@ -104,13 +104,13 @@ export function TopBar({
         />
         <IntentPrefetchLink
           href="/"
-          className="thally-docs-brand mr-5 flex shrink-0 items-center gap-2 text-foreground"
+          className="thally-docs-brand mr-5 flex min-w-0 items-center gap-2 text-foreground"
         >
-          <Logo showText={false} className="shrink-0" />
-          <span className="font-heading text-[1rem] font-semibold tracking-[-0.015em]">
+          <Logo showText={false} />
+          <span className="truncate font-heading text-[1rem] font-semibold tracking-[-0.015em]">
             {displaySiteName(siteName)}
           </span>
-          <span className="-ml-1 font-heading text-[1rem] font-medium text-foreground/55">Docs</span>
+          <span className="-ml-1 shrink-0 font-heading text-[1rem] font-medium text-foreground/55">Docs</span>
         </IntentPrefetchLink>
         {i18nConfig && i18nConfig.locales.length >= 2 ? (
           <LocaleSwitcher locales={i18nConfig.locales} currentLocale={currentLocale ?? i18nConfig.defaultLocale} currentPath={currentPath ?? '/'} defaultLocale={i18nConfig.defaultLocale} />

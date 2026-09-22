@@ -28,6 +28,13 @@ describe('documentation visual system', () => {
     vi.clearAllMocks()
   })
 
+  it('keeps the default mark square without constraining custom wordmarks', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const css = await readFile('src/styles/docs-handoff.css', 'utf8')
+    expect(css).toContain('.thally-docs-brand img:not([data-custom-logo])')
+    expect(css).not.toMatch(/\.thally-docs-brand (?:img|svg)\s*[,\{]/)
+  })
+
   it('brands only the active collection underline, not its neutral label', async () => {
     const { readFile } = await import('node:fs/promises')
     const css = await readFile('src/styles/docs-handoff.css', 'utf8')

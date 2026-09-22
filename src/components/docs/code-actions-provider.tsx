@@ -67,8 +67,8 @@ interface DocsCodeActionsProviderProps {
 /**
  * Provide functional code-sample actions to every documentation route.
  *
- * The assistant remains lazily loaded, but a prompt selected before its status
- * request resolves is retained and applied as soon as the panel mounts.
+ * Availability must be confirmed before exposing any assistant entry point.
+ * Once available, selected prompts survive the lazy panel's loading window.
  */
 export function DocsCodeActionsProvider({
   children,
@@ -113,11 +113,12 @@ export function DocsCodeActionsProvider({
   }, [repositoryUrl])
 
   const requestAssistant = useCallback((prompt: string | null) => {
+    if (!chatStatus.show) return
     setAssistantPrompt(prompt)
     // A monotonically increasing request id also reopens a panel after it was
     // closed with the same selected code still in state.
     setAssistantRequestId((requestId) => requestId + 1)
-  }, [])
+  }, [chatStatus.show])
 
   const askAssistant = useCallback((code: string) => {
     requestAssistant(createCodeAssistantPrompt(code))
@@ -128,6 +129,7 @@ export function DocsCodeActionsProvider({
   }, [requestAssistant])
 
   useEffect(() => {
+    if (!chatStatus.show) return
     function handleAssistantShortcut(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'i') {
         event.preventDefault()
@@ -136,7 +138,7 @@ export function DocsCodeActionsProvider({
     }
     document.addEventListener('keydown', handleAssistantShortcut)
     return () => document.removeEventListener('keydown', handleAssistantShortcut)
-  }, [openAssistant])
+  }, [chatStatus.show, openAssistant])
 
   const actions = useMemo<CodeActionsContextValue>(() => ({
     canReportCode: Boolean(buildCodeReportUrl({
@@ -144,10 +146,9 @@ export function DocsCodeActionsProvider({
       pageUrl: 'https://docs.example.com',
       code: '',
     })),
-    // The navigation entry point is always available in a docs shell. When a
-    // deployment has no AI service, its panel explains that state instead of
-    // making the feature appear to have disappeared.
-    hasAssistantEntryPoint: true,
+    // Pending, failed, and unavailable status checks all keep reader entry
+    // points hidden; configuration instructions belong in the owner's admin.
+    hasAssistantEntryPoint: chatStatus.show,
     assistantLabel: chatStatus?.label ?? label ?? 'Ask AI',
     reportCode,
     askAssistant,
@@ -159,7 +160,7 @@ export function DocsCodeActionsProvider({
       {/* Share shell measurements with the sibling dock without adding a layout box. */}
       <div className="contents" data-docs-layout>
         {children}
-        {assistantRequestId > 0 ? (
+        {chatStatus.show && assistantRequestId > 0 ? (
           <LazyDocsChat
             label={chatStatus.label ?? label}
             icon={chatStatus.icon ?? icon}
