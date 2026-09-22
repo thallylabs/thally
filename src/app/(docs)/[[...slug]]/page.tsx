@@ -87,16 +87,36 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const canonicalHref = hasTranslation ? requestedHref : primaryHref
   const availableI18n = await getContentI18nConfig(route.docSlug, buildI18n)
   const nav = await loadNavContext(doc.id)
-  const ogImageUrl = buildOgImageUrl({
-    title: doc.title,
-    description: doc.description,
-    crumb: formatOgBreadcrumb(nav.breadcrumb, doc.title, doc.group),
-    url: formatOgDisplayUrl(canonicalHref, siteUrl),
-  })
   const isNoindex = doc.noindex || doc.hidden || !hasTranslation
 
+  // The homepage's content title ("Introduction", "Home", etc.) buries the
+  // one thing a reader or search engine looks for when they search
+  // "<product> docs": the product name next to the word "docs". Give the
+  // default-locale homepage an absolute title built from the effective site
+  // name instead of inheriting the content title, so a forked/white-labeled
+  // deployment gets its own name here too. Localized homepages keep their
+  // translated content title. The site name may already include "Docs"
+  // (some deployments' fallback config does), so only append it when it's
+  // not already there, rather than risk "Thally Docs Docs". Used for the
+  // page title, the OG/Twitter title, and the generated OG image's heading
+  // so every surface agrees on what the homepage is called.
+  const isDefaultLocaleHome = doc.mode === 'home' && !route.isLocaleRoute
+  const homeTitle = (() => {
+    if (!isDefaultLocaleHome) return null
+    const siteName = resolveBuildSiteConfig().name.trim()
+    return /\bdocs\b/i.test(siteName) ? siteName : `${siteName} Docs`
+  })()
+  const socialTitle = homeTitle ?? doc.title
+
+  const ogImageUrl = buildOgImageUrl({
+    title: socialTitle,
+    description: doc.description,
+    crumb: formatOgBreadcrumb(nav.breadcrumb, socialTitle, doc.group),
+    url: formatOgDisplayUrl(canonicalHref, siteUrl),
+  })
+
   return {
-    title: doc.title,
+    title: homeTitle ? { absolute: homeTitle } : doc.title,
     description: doc.description,
     ...(isNoindex
       ? { robots: { index: false, follow: !doc.noindex && !doc.hidden } }
@@ -107,13 +127,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       types: buildAgentAlternateLinks(primaryHref, siteUrl),
     },
     openGraph: {
-      title: doc.title,
+      title: socialTitle,
       description: doc.description,
       images: [{ url: ogImageUrl, width: 1200, height: 630 }],
     },
     twitter: {
       card: 'summary_large_image',
-      title: doc.title,
+      title: socialTitle,
       description: doc.description,
       images: [ogImageUrl],
     },
