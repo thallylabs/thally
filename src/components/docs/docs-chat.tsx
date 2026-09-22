@@ -192,7 +192,7 @@ interface DocsChatProps {
 export function DocsChat({
   label = 'Ask AI',
   enabled = true,
-  unavailableMessage = 'Ask AI is not available for this site.',
+  unavailableMessage = 'AI chat is unavailable. Try searching the documentation.',
   skipStatusCheck = false,
   starterSuggestions,
   initialPrompt,
@@ -238,12 +238,12 @@ export function DocsChat({
 
   useEffect(() => {
     const root = document.documentElement
-    root.classList.toggle('thally-docs-ai-open', open)
-    root.classList.toggle('thally-docs-ai-expanded', open && expanded)
+    root.classList.toggle('thally-docs-ai-open', open && chatShown)
+    root.classList.toggle('thally-docs-ai-expanded', open && chatShown && expanded)
     return () => {
       root.classList.remove('thally-docs-ai-open', 'thally-docs-ai-expanded')
     }
-  }, [expanded, open])
+  }, [chatShown, expanded, open])
 
   useEffect(() => {
     if (!open) return
@@ -311,7 +311,7 @@ export function DocsChat({
     if (skipStatusCheck) return
     let active = true
     fetch('/api/chat-status')
-      .then((r) => (r.ok ? r.json() : { show: true }))
+      .then((r) => (r.ok ? r.json() : { show: false }))
       .then((d) => {
         if (!active || !d) return
         setChatShown(d.show === true)
@@ -327,7 +327,7 @@ export function DocsChat({
 
   const send = useCallback(async (text?: string) => {
     const typedContent = (text ?? input).trim()
-    if ((!typedContent && pendingImages.length === 0) || loading) return
+    if (!enabled || !chatShown || (!typedContent && pendingImages.length === 0) || loading) return
 
     const images = pendingImages
     const content = typedContent || (
@@ -406,7 +406,7 @@ export function DocsChat({
       setLoading(false)
       abortRef.current = null
     }
-  }, [input, loading, messages, pendingImages])
+  }, [chatShown, enabled, input, loading, messages, pendingImages])
 
   if (!chatShown) return null
 
@@ -635,7 +635,7 @@ export function DocsChat({
                       if (enabled) void send()
                     }
                   }}
-                  placeholder={enabled ? 'Ask a question…' : 'Add an ANTHROPIC_API_KEY to enable chat'}
+                  placeholder={enabled ? 'Ask a question…' : 'AI chat is unavailable.'}
                   disabled={loading || !enabled}
                   className="block w-full resize-none bg-transparent px-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
                   style={{ maxHeight: '160px' }}
@@ -654,7 +654,7 @@ export function DocsChat({
                 <button
                   type="button"
                   onClick={loading ? stop : () => void send()}
-                  disabled={!loading && !input.trim() && pendingImages.length === 0}
+                  disabled={!loading && (!enabled || (!input.trim() && pendingImages.length === 0))}
                   aria-label={loading ? 'Stop' : 'Send'}
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-all disabled:opacity-30"
                 >
