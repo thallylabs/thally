@@ -1,6 +1,6 @@
 {
   "name": "create-thally-docs",
-  "version": "0.10.37",
+  "version": "0.10.45",
   "description": "Scaffold an open-source Thally docs site for people, search engines, and AI tools.",
   "type": "module",
   "engines": {
@@ -72,7 +72,7 @@
     "url": "git+https://github.com/thallylabs/thally.git",
     "directory": "packages/create-thally-docs"
   },
-  "homepage": "https://github.com/thallylabs/thally#readme",
+  "homepage": "https://thally.io",
   "bugs": {
     "url": "https://github.com/thallylabs/thally/issues"
   }

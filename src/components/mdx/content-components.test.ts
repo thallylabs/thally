@@ -1,5 +1,5 @@
 /** Focused rendering contracts for the standalone rich-content primitives. */
-import { createElement } from 'react'
+import { createElement, type ComponentType, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -8,7 +8,7 @@ vi.mock('next/navigation', () => ({
 }))
 
 import { Accordion, AccordionGroup } from '@/components/mdx/accordion'
-import { Card, Tile } from '@/components/mdx/content-cards'
+import { Card, CardGroup, Tile } from '@/components/mdx/content-cards'
 import { Icon } from '@/components/mdx/content-icon'
 import { Badge, Tooltip } from '@/components/mdx/content-inline'
 import { Color, Update } from '@/components/mdx/content-metadata'
@@ -26,10 +26,42 @@ describe('standalone rich-content primitives', () => {
     expect(markup.match(/data-radix-collection-item/g)).toHaveLength(2)
   })
 
-  it('uses an explicit unknown icon fallback instead of a content glyph', () => {
-    const markup = renderToStaticMarkup(createElement(Icon, { icon: 'not-real' }))
-    expect(markup).toContain('data-icon-name="unknown"')
+  it('resolves unknown names through the configured icon library instead of a placeholder glyph', () => {
+    const markup = renderToStaticMarkup(createElement(Icon, { icon: 'sunrise-over-hills' }))
+    expect(markup).toContain('data-icon-source="library"')
+    expect(markup).toContain('data-icon-name="sunrise-over-hills"')
+    expect(markup).toContain('thally-icon-mask')
+    expect(markup).toContain('lucide-static@')
+    expect(markup).toContain('fontawesome-free@')
+    expect(markup).toContain('@tabler/icons@')
+    expect(markup).not.toContain('<svg')
     expect(markup).toContain('aria-hidden="true"')
+    // Names that cannot form a safe URL render nothing at all.
+    expect(renderToStaticMarkup(createElement(Icon, { icon: 'not real!' }))).toBe('')
+    expect(renderToStaticMarkup(createElement(Icon, { icon: '../etc' }))).toBe('')
+  })
+
+  it('renders brand marks inline under every icon library', () => {
+    for (const name of ['python', 'node', 'golang', 'java', 'rust', 'php', 'x-twitter', 'fa-brands fa-github']) {
+      const markup = renderToStaticMarkup(createElement(Icon, { icon: name }))
+      expect(markup, name).toContain('data-icon-source="brand"')
+      expect(markup, name).toContain('<path')
+    }
+    // Font Awesome brands without an inline mark fall back to the brands set for all libraries.
+    const microsoft = renderToStaticMarkup(createElement(Icon, { icon: 'microsoft' }))
+    expect(microsoft).toContain('data-icon-source="library"')
+    expect(microsoft.match(/svgs\/brands\/microsoft\.svg/g)).toHaveLength(3)
+  })
+
+  it('keeps a bundled Lucide glyph beside the library mask for the same name', () => {
+    const markup = renderToStaticMarkup(createElement(Icon, { icon: 'gear' }))
+    expect(markup).toContain('data-icon-source="lucide"')
+    expect(markup).toContain('data-icon-name="gear"')
+    expect(markup).toContain('thally-icon-glyph')
+    expect(markup).toContain('svgs/solid/gear.svg')
+    expect(markup).toContain('icons/outline/gear.svg')
+    expect(renderToStaticMarkup(createElement(Icon, { icon: 'bell', iconType: 'regular' }))).toContain('svgs/regular/bell.svg')
+    expect(renderToStaticMarkup(createElement(Icon, { icon: 'star', iconType: 'solid' }))).toContain('icons/filled/star.svg')
   })
 
   it.each([Card, Tile])('supports richer linked surface metadata', (Component) => {
@@ -43,6 +75,41 @@ describe('standalone rich-content primitives', () => {
     expect(markup).toContain('stroke="#0ea5e9"')
     const unsafe = renderToStaticMarkup(createElement(Component, { title: 'Unsafe', href: 'javascript:alert(1)' }))
     expect(unsafe).not.toContain('href=')
+  })
+
+  it('stacks the icon above the title and hides the arrow unless asked', () => {
+    const markup = renderToStaticMarkup(createElement(Card, {
+      title: 'Python SDK', icon: 'terminal', href: '/sdks/python',
+    }, 'For Python apps.'))
+    expect(markup).toContain('data-card-layout="stacked"')
+    expect(markup.indexOf('thally-docs-card-icon')).toBeLessThan(markup.indexOf('Python SDK'))
+    // A literal radius keeps cards rounded under the sharp and minimal presets,
+    // where the theme-mapped `rounded-2xl` utility collapses to 4px or 0.
+    expect(markup).toContain('rounded-[16px]')
+    expect(markup).not.toMatch(/thally-docs-card[^"]*rounded-(?:md|lg|xl|2xl|3xl)\b/)
+    expect(markup).toContain('px-6 py-5')
+    expect(markup).not.toContain('thally-docs-card-arrow')
+    expect(markup).not.toContain('data-card-arrow')
+
+    const withArrow = renderToStaticMarkup(createElement(Card, { title: 'Go', href: '/go', arrow: true }))
+    expect(withArrow).toContain('data-card-arrow=""')
+    expect(withArrow).toContain('thally-docs-card-arrow absolute right-5 top-5')
+
+    const horizontal = renderToStaticMarkup(createElement(Card, { title: 'Guide', icon: 'book', horizontal: true }))
+    expect(horizontal).toContain('data-card-layout="horizontal"')
+  })
+
+  it('lays card groups out in two columns unless told otherwise', () => {
+    // CardGroup requires children in its prop type; createElement passes them positionally.
+    const Group = CardGroup as ComponentType<{ cols?: number | string; children?: ReactNode }>
+    const child = createElement(Card, { title: 'A' })
+    const grid = renderToStaticMarkup(createElement(Group, null, child))
+    expect(grid).toContain('grid grid-cols-1 gap-4 sm:grid-cols-2')
+    expect(grid).not.toContain('lg:grid-cols-3')
+    const three = renderToStaticMarkup(createElement(Group, { cols: 3 }, child))
+    expect(three).toContain('lg:grid-cols-3')
+    const fromString = renderToStaticMarkup(createElement(Group, { cols: '4' }, child))
+    expect(fromString).toContain('lg:grid-cols-4')
   })
 
   it('renders Mintlify cards with authored JSX icons', () => {

@@ -21,6 +21,11 @@ import {
   AI_ANSWER_SOURCES_HEADER,
   serializeAiAnswerSources,
 } from '@/lib/ai-answer-sources'
+import {
+  AI_FOLLOW_UPS_HEADER,
+  parseAiFollowUps,
+  serializeAiFollowUps,
+} from '@/lib/ai-chat-suggestions'
 import type { AnalyticsEvent } from '@/lib/analytics/types'
 import { getCloudServiceGrant, getCloudSiteConfig } from './client'
 
@@ -122,6 +127,9 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
         siteName: cloud.siteConfig.portable.details?.name ?? siteConfig.name,
         messages,
         context,
+        // Opt in to model-written follow-up questions. Cloud ignores unknown
+        // fields, so an older service simply answers without them.
+        followUps: true,
       }),
       cache: 'no-store',
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -133,6 +141,11 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
   // The retrieval happened in this trusted runtime, so expose that bounded
   // local evidence rather than accepting link metadata from the remote model.
   const sourcesHeader = serializeAiAnswerSources(context)
+  // Follow-ups are model text from a remote service: re-normalize them here
+  // rather than relaying the raw header to the browser.
+  const followUpsHeader = serializeAiFollowUps(
+    parseAiFollowUps(response.headers.get(AI_FOLLOW_UPS_HEADER)),
+  )
 
   return new Response(response.body, {
     status: response.status,
@@ -144,6 +157,9 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
         : {}),
       ...(response.ok && sourcesHeader
         ? { [AI_ANSWER_SOURCES_HEADER]: sourcesHeader }
+        : {}),
+      ...(response.ok && followUpsHeader
+        ? { [AI_FOLLOW_UPS_HEADER]: followUpsHeader }
         : {}),
     },
   })

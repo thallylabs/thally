@@ -38,6 +38,7 @@ describe('public URL migration', () => {
     const docsConfig = {
       $schema: 'https://mintlify.com/docs.json',
       theme: 'maple',
+      icons: { library: 'fontawesome' },
       navbar: { primary: { type: 'github', href: 'https://github.com/acme/product' } },
       footer: { links: [{ header: 'Docs', items: [{ label: 'Home', href: '/introduction' }] }] },
       navigation: { pages: [] },
@@ -91,6 +92,7 @@ describe('public URL migration', () => {
     }])
     expect(bundle.docsConfig).toMatchObject({
       theme: 'maple',
+      icons: { library: 'fontawesome' },
       navbar: { primary: { label: 'GitHub', href: 'https://github.com/acme/product' } },
       footer: { links: [{ heading: 'Docs', items: [{ label: 'Home', href: '/introduction' }] }] },
     })

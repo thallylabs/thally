@@ -117,6 +117,55 @@ body {
   --docs-header-height: 60px;
 }
 
+/* Opt-in canvas layers stay behind the complete document, including long pages.
+   Omitted settings leave all existing site surfaces and stacking unchanged. */
+[data-site-background='enabled'] .thally-docs-root {
+  isolation: isolate;
+  position: relative;
+  --site-background-image: var(--site-background-light, none);
+}
+
+.dark[data-site-background='enabled'] .thally-docs-root {
+  --site-background-image: var(--site-background-dark, none);
+}
+
+[data-site-background='enabled'] .thally-docs-root::before,
+[data-site-background='enabled'] .thally-docs-root::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+[data-site-background='enabled'] .thally-docs-root::before {
+  background-image: var(--site-background-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+[data-site-background='enabled'] .thally-docs-root::after {
+  background-image: var(--site-background-decoration, none);
+  background-size: var(--site-background-decoration-size, cover);
+}
+
+/* Keep reading and navigation surfaces legible over arbitrary owner imagery. */
+[data-site-background='enabled'] .thally-docs-main,
+[data-site-background='enabled'] .thally-docs-sidebar,
+[data-site-background='enabled'] .thally-docs-root footer {
+  background: transparent;
+}
+
+[data-site-background-image='enabled'] .thally-docs-main {
+  background: hsl(var(--thally-background) / 0.9);
+}
+
+[data-site-background-image='enabled'] .thally-docs-sidebar,
+[data-site-background-image='enabled'] .thally-docs-root footer {
+  background: hsl(var(--thally-background) / 0.92);
+}
+
 .thally-docs-collection-row {
   min-height: 44px;
   /* Both header rows inherit the same centered shell and inline gutters. */
@@ -148,6 +197,11 @@ body {
   transition: color 150ms;
 }
 
+.thally-docs-tabs .thally-nav-tab-item[aria-current='page'] {
+  /* Brand the selection marker while keeping collection labels neutral. */
+  border-bottom-color: var(--docs-accent);
+}
+
 @media (min-width: 881px) {
   .thally-docs-root[data-header-layout='stacked'] {
     --docs-header-height: 104px;
@@ -163,10 +217,10 @@ body {
   color: hsl(var(--thally-foreground));
 }
 
-.thally-docs-brand img,
-.thally-docs-brand svg {
-  width: 22px !important;
-  height: 22px !important;
+/* Only the default mark is square. Uploaded wordmarks own their aspect ratio. */
+.thally-docs-brand img:not([data-custom-logo]) {
+  width: 22px;
+  height: 22px;
 }
 
 .thally-docs-actions > button,
@@ -561,6 +615,47 @@ body {
   border-color: var(--docs-accent);
 }
 
+/* Library-aware icons. Bundled Lucide glyphs render inline; every other name
+   resolves to the selected library's pinned CDN asset through a CSS mask. The
+   layout stamps html[data-icon-library] from docs.json, so the same markup
+   serves all three libraries and client components never read config. */
+.thally-icon {
+  --thally-icon-mask: var(--thally-icon-lucide);
+}
+
+html[data-icon-library='fontawesome'] .thally-icon {
+  --thally-icon-mask: var(--thally-icon-fontawesome);
+}
+
+html[data-icon-library='tabler'] .thally-icon {
+  --thally-icon-mask: var(--thally-icon-tabler);
+}
+
+.thally-icon-mask {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-color: currentColor;
+  -webkit-mask: var(--thally-icon-mask) center / contain no-repeat;
+  mask: var(--thally-icon-mask) center / contain no-repeat;
+}
+
+/* A bundled Lucide glyph is the offline default; other libraries swap it for
+   their own mask of the same name. */
+.thally-icon[data-icon-source='lucide'] > .thally-icon-mask {
+  display: none;
+}
+
+html[data-icon-library='fontawesome'] .thally-icon[data-icon-source='lucide'] > .thally-icon-glyph,
+html[data-icon-library='tabler'] .thally-icon[data-icon-source='lucide'] > .thally-icon-glyph {
+  display: none;
+}
+
+html[data-icon-library='fontawesome'] .thally-icon[data-icon-source='lucide'] > .thally-icon-mask,
+html[data-icon-library='tabler'] .thally-icon[data-icon-source='lucide'] > .thally-icon-mask {
+  display: block;
+}
+
 /* Content icons use the site accent by default. A site-wide neutral option or
    local MDX override still resolves through the live branding tokens. */
 .thally-content-icon {
@@ -609,12 +704,29 @@ body {
   border-color: hsl(var(--thally-foreground) / 0.25);
 }
 
-.thally-docs-card > .prose {
-  font-size: 1rem;
+/* Card copy sits under the title at Mintlify's reading size; the Card body
+   is nested inside the padded column, so target its own class rather than a
+   direct-child selector. */
+.thally-docs-card-body {
+  font-size: 0.9375rem;
   line-height: 1.5;
 }
 
-a[target='_blank'] > .thally-docs-card::after {
+.thally-docs-card-body :where(p, ul, ol) {
+  margin-block: 0.35em;
+}
+
+.thally-docs-card-body > :first-child {
+  margin-top: 0;
+}
+
+.thally-docs-card-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* External cards reveal a corner glyph on hover unless an explicit arrow
+   already occupies that corner. */
+a[target='_blank'] > .thally-docs-card:not([data-card-arrow])::after {
   position: absolute;
   top: 12px;
   right: 15px;
@@ -626,7 +738,7 @@ a[target='_blank'] > .thally-docs-card::after {
   transition: opacity 120ms ease;
 }
 
-a[target='_blank']:hover > .thally-docs-card::after {
+a[target='_blank']:hover > .thally-docs-card:not([data-card-arrow])::after {
   opacity: 1;
 }
 
@@ -643,9 +755,11 @@ a[target='_blank']:hover > .thally-docs-card::after {
   border-inline-start-color: var(--docs-line);
 }
 
+.thally-docs-toc a[aria-current='location'],
 .thally-docs-toc a[aria-current='true'],
 .thally-docs-toc a[data-active='true'] {
   color: var(--docs-accent);
+  border-inline-start-color: var(--docs-accent);
 }
 
 .thally-docs-root footer {
@@ -693,13 +807,27 @@ a[target='_blank']:hover > .thally-docs-card::after {
   color: var(--docs-ink);
 }
 
+/* The composer is a quiet raised field. Focus deepens the hairline and adds a
+   soft halo instead of switching to a saturated accent outline, which read as
+   an error state against dark surfaces. */
 .thally-docs-chat-composer {
   border-color: var(--docs-line-2);
-  background: var(--docs-bg);
+  background: var(--docs-surface);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .thally-docs-chat-composer:focus-within {
-  border-color: var(--docs-accent);
+  border-color: color-mix(in oklab, var(--docs-accent) 38%, var(--docs-line-2));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--docs-accent) 10%, transparent);
+}
+
+.thally-docs-chat-attach {
+  color: var(--docs-mute);
+}
+
+.thally-docs-chat-attach:hover:not(:disabled) {
+  background: var(--docs-surface-2);
+  color: var(--docs-ink);
 }
 
 @keyframes thally-docs-dock-in {

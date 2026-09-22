@@ -87,7 +87,7 @@
     "url": "git+https://github.com/thallylabs/thally.git",
     "directory": "packages/core"
   },
-  "homepage": "https://github.com/thallylabs/thally#readme",
+  "homepage": "https://thally.io",
   "bugs": {
     "url": "https://github.com/thallylabs/thally/issues"
   }

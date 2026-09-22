@@ -24,6 +24,7 @@ export interface ContentCardProps {
   img?: string
   horizontal?: boolean
   cta?: ReactNode
+  /** Show a directional arrow in the top-right corner. Off by default, as in Mintlify. */
   arrow?: boolean
   callout?: CardCallout
   /** Mintlify-compatible intent alias. */
@@ -71,47 +72,67 @@ interface SharedCardProps extends ContentCardProps {
   kind: 'card' | 'tile'
 }
 
-function ContentCardSurface({ kind, title, href, icon, iconType, iconColor, color, img, horizontal = false, cta, arrow, callout, type, children }: SharedCardProps) {
+function ContentCardSurface({ kind, title, href, icon, iconType, iconColor, color, img, horizontal = false, cta, arrow = false, callout, type, children }: SharedCardProps) {
   const resolvedIconColor = color ?? iconColor
   const resolvedCallout = type ?? callout
-  const showArrow = arrow ?? Boolean(href)
   const tone = isTone(resolvedIconColor) ? resolvedIconColor : 'site'
   const customIconStyle = resolvedIconColor && !isTone(resolvedIconColor) ? ({ color: resolvedIconColor } as CSSProperties) : undefined
+  const showImage = Boolean(img && isSafeImageSource(img))
+
+  // Stacked cards read top to bottom (icon, title, copy) like Mintlify's Card;
+  // horizontal cards keep the icon beside the title so the row stays compact.
+  const iconNode = icon ? (
+    <span className="thally-docs-card-icon flex h-6 w-6 shrink-0 items-center justify-center" style={customIconStyle}>
+      {typeof icon === 'string'
+        ? <Icon icon={icon} iconType={iconType} className="thally-content-icon h-6 w-6" color={customIconStyle?.color} data-content-icon-tone={tone} />
+        : icon}
+    </span>
+  ) : null
+  const titleNode = title ? (
+    <span className={cn('thally-docs-card-title block min-w-0 font-heading text-base font-semibold leading-6 text-foreground', !horizontal && iconNode && 'mt-4')}>{title}</span>
+  ) : null
+
+  // The radius is a literal on purpose. Tailwind's `rounded-2xl` maps to
+  // `--theme-radius-lg`, which the `sharp` and `minimal` presets shrink to 4px
+  // and 0; cards have always kept their own rounding regardless of the preset.
   const content = (
     <article
       className={cn(
-        'thally-docs-card group/card relative flex h-full overflow-hidden rounded-[14px] border border-border bg-background p-5 transition-colors duration-150 hover:border-accent',
-        horizontal ? 'flex-row items-start gap-4' : 'flex-col',
+        'thally-docs-card group/card relative flex h-full overflow-hidden rounded-[16px] border border-border bg-background transition-colors duration-150 hover:border-accent',
+        horizontal ? 'flex-row items-start gap-4 px-6 py-5' : 'flex-col',
         resolvedCallout && calloutClassnames[resolvedCallout],
       )}
       data-card-tone={tone}
       data-card-kind={kind}
+      data-card-layout={horizontal ? 'horizontal' : 'stacked'}
+      data-card-arrow={arrow ? '' : undefined}
       data-callout={resolvedCallout}
     >
-      {img && isSafeImageSource(img) ? (
-        <div className={cn('relative shrink-0 overflow-hidden rounded-lg border border-border/40 bg-muted', horizontal ? 'h-20 w-28' : 'mb-4 w-full', kind === 'tile' && !horizontal && 'h-40')}>
-          <Image src={img} alt={title ?? ''} width={1280} height={720} sizes="(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw" className={cn('h-full w-full object-cover', kind === 'tile' && 'transition-transform duration-300 group-hover/card:scale-[1.03]')} />
+      {showImage ? (
+        <div className={cn('relative shrink-0 overflow-hidden bg-muted', horizontal ? 'h-20 w-28 rounded-lg border border-border/40' : cn('w-full', kind === 'tile' ? 'h-44' : 'aspect-[16/9]'))}>
+          <Image src={img as string} alt={title ?? ''} width={1280} height={720} sizes="(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw" className={cn('h-full w-full object-cover', kind === 'tile' && 'transition-transform duration-300 group-hover/card:scale-[1.03]')} />
         </div>
       ) : null}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex min-h-6 items-center gap-2.5">
-          {icon ? (
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center" style={customIconStyle}>
-              {typeof icon === 'string'
-                ? <Icon icon={icon} iconType={iconType} className="thally-content-icon h-[18px] w-[18px]" color={customIconStyle?.color} data-content-icon-tone={tone} />
-                : icon}
-            </span>
-          ) : null}
-          {title ? <span className="min-w-0 flex-1 font-heading text-base font-semibold leading-6 text-foreground">{title}</span> : null}
-          {showArrow && !cta ? <ArrowRight className="thally-docs-card-arrow h-4 w-4 shrink-0 text-foreground/40 transition group-hover/card:translate-x-[3px] group-hover/card:text-accent" aria-hidden="true" /> : null}
-        </div>
-        {children ? <div className="prose prose-sm mt-1.5 text-foreground/70 dark:prose-invert">{children}</div> : null}
+      <div className={cn('flex min-w-0 flex-1 flex-col', !horizontal && 'px-6 py-5', arrow && (horizontal ? 'pr-4' : 'pr-10'))}>
+        {horizontal ? (
+          <div className="flex min-h-6 items-center gap-3">
+            {iconNode}
+            {titleNode}
+          </div>
+        ) : (
+          <>
+            {iconNode}
+            {titleNode}
+          </>
+        )}
+        {children ? <div className={cn('thally-docs-card-body prose text-foreground/70 dark:prose-invert', (iconNode || titleNode) && 'mt-1')}>{children}</div> : null}
         {cta ? (
           <span className="mt-auto inline-flex items-center gap-1.5 pt-4 text-sm font-semibold text-accent">
             {cta}<ArrowRight className="h-3.5 w-3.5 transition-transform group-hover/card:translate-x-0.5" aria-hidden="true" />
           </span>
         ) : null}
       </div>
+      {arrow ? <ArrowRight className="thally-docs-card-arrow absolute right-5 top-5 h-4 w-4 text-foreground/40 transition group-hover/card:translate-x-[3px] group-hover/card:text-accent" aria-hidden="true" /> : null}
     </article>
   )
 
@@ -133,12 +154,12 @@ export function Tile(props: ContentCardProps) {
 function ContentCardGroup({ cols, children, className, defaultCols }: ContentCardGroupProps & { defaultCols: number }) {
   const parsedCols = typeof cols === 'string' ? Number.parseInt(cols, 10) : cols
   const columnClassName = columnClassnames[parsedCols ?? defaultCols] ?? columnClassnames[defaultCols]
-  return <div className={cn('grid grid-cols-1 gap-x-6 gap-y-4', columnClassName, className)}>{children}</div>
+  return <div className={cn('grid grid-cols-1 gap-4', columnClassName, className)}>{children}</div>
 }
 
 /** Lay out cards in a responsive grid. */
 export function CardGroup(props: ContentCardGroupProps) {
-  return <ContentCardGroup {...props} defaultCols={3} />
+  return <ContentCardGroup {...props} defaultCols={2} />
 }
 
 /** Lay out tiles in a responsive grid. */

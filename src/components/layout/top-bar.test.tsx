@@ -2,7 +2,7 @@
 
 import { createElement, type AnchorHTMLAttributes } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getHeaderNavigationLayout } from '@/components/navigation/header-layout'
 
 vi.mock('@/components/navigation/mobile-nav', () => ({ MobileNav: () => null }))
@@ -12,8 +12,9 @@ vi.mock('@/components/docs/version-switcher', () => ({ VersionSwitcher: () => nu
 vi.mock('@/components/layout/locale-switcher', () => ({ LocaleSwitcher: () => <button>Language</button> }))
 vi.mock('@/components/layout/logo', () => ({ Logo: () => null }))
 vi.mock('@/components/layout/use-site-name', () => ({ useSiteName: () => 'Example', displaySiteName: (name: string) => name }))
+const assistant = vi.hoisted(() => ({ available: true }))
 vi.mock('@/components/docs/code-actions-provider', () => ({
-  useDocsCodeActions: () => ({ hasAssistantEntryPoint: true, assistantLabel: 'Assistant', openAssistant: vi.fn() }),
+  useDocsCodeActions: () => ({ hasAssistantEntryPoint: assistant.available, assistantLabel: 'Assistant', openAssistant: vi.fn() }),
 }))
 vi.mock('@/components/navigation/intent-prefetch-link', () => ({
   IntentPrefetchLink: (props: AnchorHTMLAttributes<HTMLAnchorElement>) => createElement('a', props),
@@ -35,6 +36,15 @@ function markup(count: number, display: 'tabs' | 'dropdown' = 'tabs') {
 }
 
 describe('automatic header navigation rows', () => {
+  beforeEach(() => { assistant.available = true })
+
+  it('omits the assistant action when unavailable and preserves search', () => {
+    expect(markup(1)).toContain('Assistant')
+    assistant.available = false
+    expect(markup(1)).not.toContain('Assistant')
+    expect(markup(1)).toContain('Search')
+  })
+
   it.each([1, 4, 6, 7, 14])('places %i collections in an aligned second row even with extra header actions', (count) => {
     const html = markup(count)
     expect(getHeaderNavigationLayout('tabs', count)).toBe('stacked')

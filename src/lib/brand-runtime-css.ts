@@ -7,10 +7,13 @@
  */
 
 import { hexToHslString } from '@thallylabs/core/theme'
+import { resolveBackgroundImage, type SiteBackground } from '@/lib/site-appearance'
 
 export interface RuntimeBrandColorMode {
   primary?: string
   accent?: string
+  /** Optional canvas override; omission preserves the repository palette. */
+  background?: string
 }
 
 export interface RuntimeBrandFont {
@@ -21,6 +24,7 @@ export interface RuntimeBrandFont {
 }
 
 export interface RuntimeBrandingConfig {
+  background?: SiteBackground
   colors?: {
     light?: RuntimeBrandColorMode
     dark?: RuntimeBrandColorMode
@@ -29,6 +33,25 @@ export interface RuntimeBrandingConfig {
     body?: RuntimeBrandFont
     heading?: RuntimeBrandFont
   }
+}
+
+/** Image strings are validated before entering quoted CSS; decorations are fixed CSS. */
+function backgroundDeclarations(background: SiteBackground | undefined): string[] {
+  if (!background) return []
+  const light = resolveBackgroundImage(background.image)
+  const dark = resolveBackgroundImage(background.imageDark) ?? light
+  const imageValue = (value: string | null) => value ? `url(${JSON.stringify(value)})` : 'none'
+  const decoration = background.decoration === 'grid'
+    ? 'linear-gradient(hsl(var(--thally-foreground)/0.06) 1px,transparent 1px),linear-gradient(90deg,hsl(var(--thally-foreground)/0.06) 1px,transparent 1px)'
+    : background.decoration === 'gradient'
+      ? 'radial-gradient(ellipse at top left,hsl(var(--thally-accent)/0.12),transparent 65%)'
+      : 'none'
+  return [
+    `--site-background-light:${imageValue(light)}`,
+    `--site-background-dark:${imageValue(dark)}`,
+    `--site-background-decoration:${decoration}`,
+    `--site-background-decoration-size:${background.decoration === 'grid' ? '24px 24px' : 'cover'}`,
+  ]
 }
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
@@ -52,10 +75,46 @@ function readableForeground(hex: string): '#000000' | '#ffffff' {
   return luminance > 0.179 ? '#000000' : '#ffffff'
 }
 
+/** Derive opaque companion tones from an already validated canvas color. */
+function backgroundPalette(hex: string): Record<string, string> {
+  const isLight = readableForeground(hex) === '#000000'
+  const target = isLight ? 0 : 255
+  const mix = (amount: number) => {
+    const channels = [1, 3, 5].map((start) => {
+      const channel = Number.parseInt(hex.slice(start, start + 2), 16)
+      return Math.round(channel + (target - channel) * amount).toString(16).padStart(2, '0')
+    })
+    return hexToHslString(`#${channels.join('')}`)
+  }
+
+  // Neutral lifts retain the canvas hue without tinting every control with the
+  // brand accent. Opaque HSL channels also preserve existing alpha utilities.
+  // Follow actual canvas luminance, not the mode label, for unusual palettes.
+  return {
+    muted: mix(isLight ? 0.04 : 0.06),
+    input: mix(isLight ? 0.08 : 0.1),
+    border: mix(isLight ? 0.12 : 0.14),
+    'muted-foreground': mix(isLight ? 0.64 : 0.66),
+  }
+}
+
 function colorDeclarations(config: RuntimeBrandingConfig): string[] {
   const declarations: string[] = []
   for (const mode of ['light', 'dark'] as const) {
     const colors = config.colors?.[mode]
+    if (colors?.background && HEX_COLOR.test(colors.background)) {
+      const background = hexToHslString(colors.background)
+      // The shell uses separate tokens for its canvas, sidebar, and cards.
+      // Override all three so an owner gets one continuous site background.
+      for (const surface of ['background', 'sidebar', 'card']) {
+        declarations.push(`--brand-${mode}-${surface}:${background}`)
+      }
+      // Search, navigation hover, inline code, and form controls all consume
+      // these semantic tokens; leaving them unchanged leaks the old palette.
+      for (const [token, value] of Object.entries(backgroundPalette(colors.background))) {
+        declarations.push(`--brand-${mode}-${token}:${value}`)
+      }
+    }
     if (colors?.primary && HEX_COLOR.test(colors.primary)) {
       declarations.push(
         `--brand-${mode}-primary:${hexToHslString(colors.primary)}`,
@@ -120,7 +179,7 @@ export function brandRuntimeCss(config: RuntimeBrandingConfig | null | undefined
   if (!config) return ''
   const imports = new Set<string>()
   const faces: string[] = []
-  const declarations = colorDeclarations(config)
+  const declarations = [...colorDeclarations(config), ...backgroundDeclarations(config.background)]
 
   for (const role of ['body', 'heading'] as const) {
     const font = config.fonts?.[role]

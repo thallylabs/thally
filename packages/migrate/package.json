@@ -48,5 +48,6 @@
     "type": "git",
     "url": "git+https://github.com/thallylabs/thally.git",
     "directory": "packages/migrate"
-  }
+  },
+  "homepage": "https://thally.io"
 }

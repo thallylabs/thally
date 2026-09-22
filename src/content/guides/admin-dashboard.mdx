@@ -57,11 +57,16 @@ If you deploy with **neither** `THALLY_ADMIN_PASSWORD` nor OIDC set, Thally does
 
 ### Option 1 — Break-glass password (quickest)
 
-Set a single environment variable and sign in with that password. Anyone who knows it gets **Owner** access — best for a solo maintainer or a quick setup.
+Set the password and sign in with it. Anyone who knows it gets **Owner** access — best for a solo maintainer or a quick setup. Production also requires an independent session-signing secret.
 
 ```bash
 THALLY_ADMIN_PASSWORD=a-long-random-string
+THALLY_ADMIN_SECRET=an-independent-random-signing-secret
 ```
+
+Generate the signing secret with `openssl rand -hex 32` and save it in your
+host's secret manager. Keep it stable across deployments. Changing it signs
+out existing password sessions; production login returns `503` if it is absent.
 
 <Warning title="Keep it strong">
 This is a shared secret that grants full control. Use a long, random value and store it in your host's secret manager, not in git.
@@ -131,6 +136,12 @@ The **Team** page shows the current members and domains, and generates the JSON 
 Team access above is about the **admin dashboard**. To gate the public docs themselves behind a shared password, an Editor or Owner sets a **docs-access password** under **Settings → Access & authentication**. Visitors are then prompted for it before they can read any page. The password is stored as a salted hash — never in plaintext, never returned by the API.
 
 This is independent of the admin team: a visitor password protects reading the docs; the team roster protects managing them.
+
+Self-hosted production sites also need `THALLY_ACCESS_SECRET`, generated with
+`openssl rand -hex 32`. If it is absent, the runtime uses `THALLY_ADMIN_SECRET`;
+it never uses the visitor password as a signing key. Configure the secret before
+enabling password access. Managed hosting provisions the signing key when it
+publishes the site.
 
 Password endpoints include a bounded, per-instance attempt limiter before
 password verification. Serverless instances and Workers do not share that
