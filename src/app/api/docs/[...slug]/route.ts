@@ -1,6 +1,6 @@
 import { type NextRequest } from 'next/server'
 import { getDocEntries, getI18nConfig, loadDocEntries, loadNavContext } from '@/data/docs'
-import { mdxToMarkdown } from '@thallylabs/core'
+import { mdxToMarkdown } from '@thallylabs/core/markdown'
 import { loadContentDocument } from '@/lib/content'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
 import { resolveSiteConfig } from '@/lib/site-config'

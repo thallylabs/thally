@@ -13,6 +13,11 @@ on:
           - lint
           - core-web-vitals
 
+# These diagnostics only read the checked-out repository. Keep the default
+# token unable to write even if a future dependency or build step is compromised.
+permissions:
+  contents: read
+
 # Manual checks for diagnostics that are useful but too slow or noisy to gate
 # every pull request. Select a branch in the Actions UI before starting a run.
 jobs:
@@ -22,10 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 20
           cache: npm
@@ -42,10 +47,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 20
           cache: npm

@@ -8,7 +8,8 @@
  * source map on the legacy sync path.
  */
 
-import { parseMdxContent, type ContentDocument } from '@thallylabs/core'
+import type { ContentDocument } from '@thallylabs/core/content'
+import { parseMdxContent } from '@thallylabs/core/markdown'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import {
   readRuntimeSource,

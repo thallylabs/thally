@@ -35,6 +35,8 @@ vi.mock('@/lib/traffic-classifier', () => ({
 }))
 
 vi.mock('@/lib/agent-endpoints', () => ({
+  isAgentDiscoveryEndpoint: vi.fn().mockReturnValue(false),
+  isContentBearingAgentEndpoint: vi.fn().mockReturnValue(false),
   isMachineEndpoint: vi.fn().mockReturnValue(false),
   isPublicAgentEndpoint: vi.fn().mockReturnValue(false),
 }))
@@ -331,7 +333,7 @@ describe('managed content cache headers', () => {
 
     const response = await middleware(docRequest('/getting-started'), EVENT)
     expect(response.headers.get('Cache-Tag')).toBeNull()
-    expect(response.headers.get('CDN-Cache-Control')).toBeNull()
+    expect(response.headers.get('CDN-Cache-Control')).toBe('private, no-store')
   })
 
   it('returns a structured 401 instead of an HTML redirect for a protected API', async () => {
@@ -432,8 +434,8 @@ describe('managed content cache headers', () => {
     )
 
     expect(response.headers.get('x-middleware-next')).toBe('1')
-    expect(response.headers.get('CDN-Cache-Control')).toBeNull()
-    expect(response.headers.get('Netlify-CDN-Cache-Control')).toBeNull()
+    expect(response.headers.get('CDN-Cache-Control')).toBe('private, no-store')
+    expect(response.headers.get('Netlify-CDN-Cache-Control')).toBe('private, no-store')
   })
 
   it('does not count intent-prefetched routes as page views', async () => {
