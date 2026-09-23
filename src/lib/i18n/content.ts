@@ -6,7 +6,7 @@
 
 import 'server-only'
 
-import { getIndexableDocTranslation } from '@/data/get-doc'
+import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 import type { I18nConfig } from './config'
 
 /**

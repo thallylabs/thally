@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NavContext } from '@/data/docs'
 
 const mocks = vi.hoisted(() => ({ hasDocTranslation: vi.fn() }))
-vi.mock('@/data/get-doc', () => ({ hasDocTranslation: mocks.hasDocTranslation }))
+vi.mock('@/lib/i18n/translation-source', () => ({ hasDocTranslation: mocks.hasDocTranslation }))
 
 import { localizeDocNavigation } from '../navigation'
 

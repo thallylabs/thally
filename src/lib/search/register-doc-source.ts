@@ -20,7 +20,7 @@ import {
 } from '@thallylabs/core/registry'
 import { getDocEntries, loadDocEntries } from '@/data/docs'
 import { getContentDocument, loadContentDocument } from '@/lib/content/document'
-import { getIndexableDocTranslation } from '@/data/get-doc'
+import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 import { localizedPath } from '@/lib/i18n/config'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 

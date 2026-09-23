@@ -1,7 +1,7 @@
 import { type NextRequest } from 'next/server'
 import { getAllApiOperationNodes } from '@/data/api-reference'
 import { loadSidebarCollections, loadDocEntries } from '@/data/docs'
-import { getIndexableDocTranslation } from '@/data/get-doc'
+import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 import { localizedPath } from '@/lib/i18n/config'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { problemResponse } from '@/lib/http/problem'

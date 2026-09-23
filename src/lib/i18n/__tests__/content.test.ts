@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   getIndexableDocTranslation: vi.fn(),
 }))
 
-vi.mock('@/data/get-doc', () => ({
+vi.mock('@/lib/i18n/translation-source', () => ({
   getIndexableDocTranslation: mocks.getIndexableDocTranslation,
 }))
 

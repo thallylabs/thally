@@ -7,7 +7,7 @@ import { localizedPath } from '@/lib/i18n/config'
 import { getContentI18nConfig } from '@/lib/i18n/content'
 import { buildLocaleAlternates } from '@/lib/i18n/metadata'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
-import { getIndexableDocTranslation } from '@/data/get-doc'
+import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = await getRequestOrigin()

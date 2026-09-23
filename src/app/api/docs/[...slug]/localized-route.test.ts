@@ -14,7 +14,7 @@ vi.mock('@/data/docs', () => ({
   }],
   loadNavContext: async () => ({ tab: 'Docs', group: 'Guide', prev: null, next: null, breadcrumb: [] }),
 }))
-vi.mock('@/data/get-doc', () => ({ hasDocTranslation: mocks.hasDocTranslation }))
+vi.mock('@/lib/i18n/translation-source', () => ({ hasDocTranslation: mocks.hasDocTranslation }))
 vi.mock('@/lib/i18n/request', () => ({
   getEffectiveI18nConfig: async () => ({
     defaultLocale: 'en',

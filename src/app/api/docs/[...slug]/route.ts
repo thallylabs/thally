@@ -1,6 +1,6 @@
 import { type NextRequest } from 'next/server'
 import { getDocEntries, loadDocEntries, loadNavContext } from '@/data/docs'
-import { hasDocTranslation } from '@/data/get-doc'
+import { hasDocTranslation } from '@/lib/i18n/translation-source'
 import { mdxToMarkdown } from '@thallylabs/core/markdown'
 import { loadContentDocument } from '@/lib/content'
 import { buildDocPageJsonLd } from '@/lib/json-ld'

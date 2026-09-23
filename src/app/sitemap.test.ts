@@ -16,7 +16,7 @@ vi.mock('@/lib/i18n/request', () => ({
     locales: [{ code: 'en', label: 'English' }, { code: 'fr', label: 'Français' }],
   }),
 }))
-vi.mock('@/data/get-doc', () => ({ getIndexableDocTranslation: mocks.translated }))
+vi.mock('@/lib/i18n/translation-source', () => ({ getIndexableDocTranslation: mocks.translated }))
 
 import sitemap from './sitemap'
 

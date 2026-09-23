@@ -3,7 +3,7 @@
 import 'server-only'
 
 import type { NavContext } from '@/data/docs'
-import { hasDocTranslation } from '@/data/get-doc'
+import { hasDocTranslation } from '@/lib/i18n/translation-source'
 import { localizedPath } from './config'
 
 /** Localize breadcrumb and adjacent-page destinations without changing navigation order or source fallbacks. */

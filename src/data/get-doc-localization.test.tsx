@@ -34,7 +34,9 @@ vi.mock('@/generated/runtime-docs', () => ({
   },
 }))
 
-import { getDocFromParams, getIndexableDocTranslation, hasDocTranslation } from './get-doc'
+import { getDocFromParams } from './get-doc'
+import { findDocSource, getIndexableDocTranslation, hasDocTranslation } from '@/lib/i18n/translation-source'
+import { getContentSource } from '@/lib/content-source'
 
 const primary = '---\ntitle: Guide\n---\nSource content\n'
 const primaryPath = 'src/content/guide.mdx'
@@ -87,6 +89,9 @@ describe('translated document eligibility', () => {
       modifiedAtMs: 1,
     })
     expect(await getDocFromParams(['guide'], 'fr')).toMatchObject({ isStale: false })
+    fixture.files.set(primaryPath, { content: `${primary}Updated source`, modifiedAtMs: 2 })
+    expect(await getIndexableDocTranslation(['guide'], 'fr')).not.toBeNull()
+    expect(await findDocSource(getContentSource(), 'guide', 'fr')).toMatchObject({ isStale: true })
   })
 
   it('does not infer human translation freshness from deployment mtimes', async () => {

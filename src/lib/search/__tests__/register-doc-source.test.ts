@@ -22,7 +22,7 @@ vi.mock('@/data/docs', () => ({
     { id: 'draft', slug: ['draft'], href: '/draft', title: 'Draft', description: 'Draft', keywords: [], noindex: true },
   ],
 }))
-vi.mock('@/data/get-doc', () => ({ getIndexableDocTranslation: mocks.getIndexableDocTranslation }))
+vi.mock('@/lib/i18n/translation-source', () => ({ getIndexableDocTranslation: mocks.getIndexableDocTranslation }))
 vi.mock('@/lib/content/document', () => ({ getContentDocument: vi.fn(), loadContentDocument: vi.fn() }))
 vi.mock('@/lib/i18n/request', () => ({
   getEffectiveI18nConfig: async () => ({
