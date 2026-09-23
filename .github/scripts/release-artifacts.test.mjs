@@ -8,7 +8,12 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { gzipSync } from 'node:zlib'
 
-import { publishReleaseArtifacts, tarPayloadSha256 } from './publish-release-artifacts.mjs'
+import {
+  publishReleaseArtifacts,
+  registryMetadata,
+  REGISTRY_SETTLE_ATTEMPTS,
+  tarPayloadSha256,
+} from './publish-release-artifacts.mjs'
 
 function releasePlan() {
   return {
@@ -41,6 +46,45 @@ test('compares tar payloads independent of gzip compression level', () => {
   const compact = gzipSync(payload, { level: 9 })
   assert.notDeepEqual(fast, compact)
   assert.equal(tarPayloadSha256(fast), tarPayloadSha256(compact))
+})
+
+test('waits beyond twelve absent registry reads after an acknowledged publish', async () => {
+  let reads = 0
+  const delays = []
+  const metadata = {
+    integrity: `sha512-${'a'.repeat(86)}==`,
+    tarball: 'https://registry.npmjs.org/example/-/example-1.0.0.tgz',
+  }
+  const settled = await registryMetadata('example@1.0.0', REGISTRY_SETTLE_ATTEMPTS, {
+    runCommand: () => {
+      reads += 1
+      return reads === 13
+        ? { status: 0, stdout: JSON.stringify(metadata) }
+        : { status: 1, stderr: 'npm error code E404' }
+    },
+    sleep: async (delayMs) => { delays.push(delayMs) },
+  })
+
+  assert.equal(REGISTRY_SETTLE_ATTEMPTS, 18)
+  assert.equal(reads, 13)
+  assert.equal(delays.length, 12)
+  assert.equal(Math.max(...delays), 20_000)
+  assert.deepEqual(settled, metadata)
+})
+
+test('does not retry unrelated registry failures', async () => {
+  let reads = 0
+  await assert.rejects(
+    registryMetadata('example@1.0.0', REGISTRY_SETTLE_ATTEMPTS, {
+      runCommand: () => {
+        reads += 1
+        return { status: 1, stderr: 'npm error code E401' }
+      },
+      sleep: async () => { throw new Error('unexpected retry') },
+    }),
+    /Unable to inspect example@1\.0\.0: npm error code E401/,
+  )
+  assert.equal(reads, 1)
 })
 
 test('rejects an omitted planned package before any registry call', async () => {

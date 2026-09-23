@@ -26,10 +26,17 @@ async function sha512Integrity(path) {
   return `sha512-${createHash('sha512').update(bytes).digest('base64')}`
 }
 
-async function registryMetadata(spec, attempts) {
+/** npm can acknowledge a publish before its metadata reaches every registry reader. */
+export const REGISTRY_SETTLE_ATTEMPTS = 18
+
+/** Retry only absent metadata; malformed or unrelated registry failures remain fatal. */
+export async function registryMetadata(spec, attempts, {
+  runCommand = run,
+  sleep = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+} = {}) {
   let delayMs = 2_000
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const result = run('npm', ['view', spec, 'dist', '--json'])
+    const result = runCommand('npm', ['view', spec, 'dist', '--json'])
     if (result.status === 0) {
       const value = JSON.parse(result.stdout || 'null')
       if (typeof value?.integrity !== 'string' || !value.integrity || typeof value.tarball !== 'string') {
@@ -41,7 +48,7 @@ async function registryMetadata(spec, attempts) {
       throw new Error(`Unable to inspect ${spec}: ${result.stderr.trim()}`)
     }
     if (attempt < attempts - 1) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs))
+      await sleep(delayMs)
       delayMs = Math.min(delayMs * 2, 20_000)
     }
   }
@@ -186,7 +193,7 @@ export async function publishReleaseArtifacts(manifestPath, expectedPlanSha256, 
       )
       if (published.status !== 0) throw new Error(`Publishing ${spec} failed.`)
     }
-    const settled = await registryMetadata(spec, 12)
+    const settled = await registryMetadata(spec, REGISTRY_SETTLE_ATTEMPTS)
     if (settled?.integrity !== (existing?.integrity ?? artifact.integrity)) {
       throw new Error(`${spec} did not settle with the expected integrity.`)
     }
