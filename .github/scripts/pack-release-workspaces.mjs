@@ -12,13 +12,6 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
-const prerequisiteWorkspaces = ['packages/core', 'packages/migrate']
-const scaffoldWorkspaces = [
-  'packages/create-thally-docs',
-  'packages/mcp',
-  'packages/cli',
-]
-
 function runNpm(argumentsList) {
   return spawnSync('npm', argumentsList, { encoding: 'utf8' })
 }
@@ -29,13 +22,25 @@ async function sha512Integrity(path) {
 }
 
 /** Pack and describe the exact package files selected for this release. */
-export async function packReleaseWorkspaces({ outputDirectory, includeScaffold }) {
-  if (!outputDirectory) throw new Error('An artifact output directory is required.')
+export async function packReleaseWorkspaces({ outputDirectory, planPath }) {
+  if (!outputDirectory || !planPath) throw new Error('An artifact output directory and plan are required.')
   await mkdir(outputDirectory, { recursive: true })
-  const workspaces = includeScaffold ? scaffoldWorkspaces : prerequisiteWorkspaces
+  const planBytes = await readFile(planPath)
+  const plan = JSON.parse(planBytes.toString('utf8'))
+  if (plan.schemaVersion !== 1 || !Array.isArray(plan.packages) || plan.packages.length === 0) {
+    throw new Error('The npm release plan has no publishable packages.')
+  }
+  if (plan.packages.some((entry) =>
+    !/^packages\/[a-z0-9-]+$/.test(entry.workspace ?? '') ||
+    !/^(@[a-z0-9-]+\/)?[a-z0-9-]+$/.test(entry.name ?? '') ||
+    !/^\d+\.\d+\.\d+$/.test(entry.version ?? ''),
+  )) {
+    throw new Error('The npm release plan contains an invalid package identity.')
+  }
   const packages = []
 
-  for (const workspace of workspaces) {
+  for (const expected of plan.packages) {
+    const { workspace } = expected
     const result = runNpm([
       'pack',
       '--workspace',
@@ -51,8 +56,8 @@ export async function packReleaseWorkspaces({ outputDirectory, includeScaffold }
     const [artifact] = JSON.parse(result.stdout || '[]')
     const filename = basename(artifact?.filename ?? '')
     if (
-      !artifact?.name ||
-      !artifact?.version ||
+      artifact?.name !== expected.name ||
+      artifact?.version !== expected.version ||
       !artifact?.integrity ||
       !filename.endsWith('.tgz') ||
       filename !== artifact.filename
@@ -72,7 +77,12 @@ export async function packReleaseWorkspaces({ outputDirectory, includeScaffold }
     })
   }
 
-  const manifest = { schemaVersion: 1, packages }
+  const manifest = {
+    schemaVersion: 2,
+    planSha256: createHash('sha256').update(planBytes).digest('hex'),
+    plan,
+    packages,
+  }
   await writeFile(
     join(outputDirectory, 'manifest.json'),
     `${JSON.stringify(manifest, null, 2)}\n`,
@@ -82,6 +92,6 @@ export async function packReleaseWorkspaces({ outputDirectory, includeScaffold }
 
 if (process.argv[1]?.endsWith('pack-release-workspaces.mjs')) {
   const outputDirectory = process.argv[2]
-  const includeScaffold = process.argv.includes('--include-scaffold')
-  await packReleaseWorkspaces({ outputDirectory, includeScaffold })
+  const planPath = process.argv[3]
+  await packReleaseWorkspaces({ outputDirectory, planPath })
 }

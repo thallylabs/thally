@@ -7,8 +7,10 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
+import { missingNavigationRoutes, navigationPagePath, projectNavigationContract } from '@thallylabs/core/navigation'
 
 interface SmokeCheck {
   name: string
@@ -24,6 +26,11 @@ interface PageRepresentation {
   bodyFormat: 'html' | 'markdown' | 'json'
 }
 
+const navigationConfig = JSON.parse(readFileSync(path.join(process.cwd(), 'docs.json'), 'utf8'))
+const navigation = projectNavigationContract(navigationConfig)
+const expectedNavigationPaths = navigation.visiblePageIds.map(navigationPagePath)
+const firstContentPath = expectedNavigationPaths.find((pagePath) => pagePath !== '/')
+
 const checks: ReadonlyArray<SmokeCheck> = [
   {
     name: 'home',
@@ -31,7 +38,7 @@ const checks: ReadonlyArray<SmokeCheck> = [
     contentType: 'text/html',
     validateHydrationBootstrap: true,
   },
-  { name: 'guide', path: '/guides/deploying', contentType: 'text/html' },
+  ...(firstContentPath ? [{ name: 'navigable page', path: firstContentPath, contentType: 'text/html' }] : []),
   { name: 'docs index', path: '/api/docs-index', contentType: 'application/json' },
   {
     name: 'structured document',
@@ -103,6 +110,11 @@ async function verifyLlmsPageMatrix(baseUrl: string): Promise<void> {
   )
 
   if (pagePaths.length === 0) throw new Error('llms.txt did not emit any canonical page links.')
+
+  const missingRoutes = missingNavigationRoutes(navigation, pagePaths)
+  if (missingRoutes.length > 0) {
+    throw new Error(`Visible navigation routes absent from llms.txt: ${missingRoutes.join(', ')}.`)
+  }
 
   for (const firstPartyPath of firstPartyPaths) {
     const targetUrl = smokeUrl(baseUrl, firstPartyPath)

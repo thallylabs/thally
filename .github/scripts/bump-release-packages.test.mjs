@@ -41,9 +41,9 @@ test('bumps the package chain before repinning internal dependencies', () => {
     })
 
     assert.deepEqual(bumpReleasePackages(rootDirectory), {
-      create: '0.10.6',
-      mcp: '0.10.6',
-      cli: '0.8.6',
+      'create-thally-docs': '0.10.6',
+      '@thallylabs/mcp': '0.10.6',
+      '@thallylabs/cli': '0.8.6',
     })
     assert.equal(
       readPackage(rootDirectory, 'packages/mcp/package.json').dependencies['create-thally-docs'],
@@ -104,6 +104,34 @@ test('rejects prerelease versions before changing any manifest', () => {
       readPackage(rootDirectory, 'packages/create-thally-docs/package.json').version,
       '0.10.5',
     )
+  } finally {
+    rmSync(rootDirectory, { recursive: true, force: true })
+  }
+})
+
+test('discovers a new publishable dependent without bumping a private workspace', () => {
+  const rootDirectory = mkdtempSync(join(tmpdir(), 'thally-release-packages-'))
+  try {
+    writePackage(rootDirectory, 'packages/create-thally-docs/package.json', {
+      name: 'create-thally-docs', version: '1.0.0',
+    })
+    writePackage(rootDirectory, 'packages/widget/package.json', {
+      name: '@thallylabs/widget', version: '2.0.0', dependencies: { 'create-thally-docs': '1.0.0' },
+    })
+    writePackage(rootDirectory, 'packages/agent/package.json', {
+      name: '@thallylabs/agent', version: '3.0.0', private: true,
+      dependencies: { 'create-thally-docs': '*' },
+    })
+
+    assert.deepEqual(bumpReleasePackages(rootDirectory), {
+      'create-thally-docs': '1.0.1',
+      '@thallylabs/widget': '2.0.1',
+    })
+    assert.equal(
+      readPackage(rootDirectory, 'packages/widget/package.json').dependencies['create-thally-docs'],
+      '1.0.1',
+    )
+    assert.equal(readPackage(rootDirectory, 'packages/agent/package.json').version, '3.0.0')
   } finally {
     rmSync(rootDirectory, { recursive: true, force: true })
   }
