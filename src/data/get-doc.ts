@@ -14,6 +14,7 @@ import { resolveSnippetComponent } from '@/mdx/snippet-registry'
 import { runtimeDocs } from '@/generated/runtime-docs'
 import { readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 import { getContentSource, type ContentSource } from '@/lib/content-source'
+import { docPathFromSlug } from '@/lib/i18n/doc-route'
 
 interface DocFrontmatter {
   title?: string
@@ -229,7 +230,7 @@ async function compileDocEntry(
   }
 
   const slugPath = slugSegments.join('/')
-  const href = slugPath ? `/${slugPath}` : '/'
+  const href = docPathFromSlug(slugSegments)
   const GeneratedDoc: ComponentType<Record<string, unknown>> = function GeneratedDoc() {
     return content
   }

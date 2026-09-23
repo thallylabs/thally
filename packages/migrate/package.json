@@ -1,6 +1,6 @@
 {
   "name": "@thallylabs/migrate",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Shared repository and live-site migration engine for Thally",
   "type": "module",
   "publishConfig": {
@@ -50,5 +50,6 @@
     "type": "git",
     "url": "git+https://github.com/thallylabs/thally.git",
     "directory": "packages/migrate"
-  }
+  },
+  "homepage": "https://thally.io"
 }

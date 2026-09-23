@@ -1,6 +1,6 @@
 {
   "name": "@thallylabs/core",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Framework-agnostic content engine for publishing Thally docs to people, search engines, and AI tools.",
   "type": "module",
   "sideEffects": false,
@@ -20,6 +20,26 @@
       "types": "./dist/content.d.ts",
       "import": "./dist/content.js",
       "default": "./dist/content.js"
+    },
+    "./markdown": {
+      "types": "./dist/markdown.d.ts",
+      "import": "./dist/markdown.js",
+      "default": "./dist/markdown.js"
+    },
+    "./embeddings": {
+      "types": "./dist/embeddings.d.ts",
+      "import": "./dist/embeddings.js",
+      "default": "./dist/embeddings.js"
+    },
+    "./registry": {
+      "types": "./dist/registry.d.ts",
+      "import": "./dist/registry.js",
+      "default": "./dist/registry.js"
+    },
+    "./search": {
+      "types": "./dist/search.d.ts",
+      "import": "./dist/search.js",
+      "default": "./dist/search.js"
     },
     "./theme": {
       "types": "./dist/theme.d.ts",
@@ -67,7 +87,7 @@
     "url": "git+https://github.com/thallylabs/thally.git",
     "directory": "packages/core"
   },
-  "homepage": "https://github.com/thallylabs/thally#readme",
+  "homepage": "https://thally.io",
   "bugs": {
     "url": "https://github.com/thallylabs/thally/issues"
   }

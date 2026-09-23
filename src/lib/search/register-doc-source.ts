@@ -17,7 +17,7 @@ import {
   registerAsyncDocEntriesSource,
   registerContentDocumentSource,
   registerDocEntriesSource,
-} from '@thallylabs/core'
+} from '@thallylabs/core/registry'
 import { getDocEntries, loadDocEntries } from '@/data/docs'
 import { getContentDocument, loadContentDocument } from '@/lib/content/document'
 

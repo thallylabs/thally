@@ -107,6 +107,8 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
           'content-type': 'application/json',
         },
         body: JSON.stringify({
+          specId: operation.specId,
+          operationPath: operation.path,
           url: preparedRequest.url,
           method: preparedRequest.method,
           headers: preparedRequest.headers,
@@ -120,7 +122,7 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
     } finally {
       setIsSending(false)
     }
-  }, [preparedRequest])
+  }, [operation.path, operation.specId, preparedRequest])
 
   return {
     operation,
@@ -155,4 +157,3 @@ function buildCurlCommand(method: string, url: string, headers: Record<string, s
   }
   return lines
 }
-

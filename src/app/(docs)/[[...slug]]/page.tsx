@@ -19,7 +19,7 @@ import { getDocEntries, loadNavContext } from '@/data/docs'
 import { getDocFromParams, hasDocTranslation } from '@/data/get-doc'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { isRemoteContentSource } from '@/lib/content-source'
-import { resolveDocRoute } from '@/lib/i18n/doc-route'
+import { docPathFromSlug, resolveDocRoute } from '@/lib/i18n/doc-route'
 import { getContentI18nConfig } from '@/lib/i18n/content'
 import { localizeDocNavigation } from '@/lib/i18n/navigation'
 import { localizedPath } from '@/lib/i18n/config'
@@ -79,7 +79,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!doc) return {}
 
   const siteUrl = getSiteUrl()
-  const primaryHref = doc.slug.length ? `/${doc.slug.join('/')}` : '/'
+  const primaryHref = docPathFromSlug(doc.slug)
   const requestedHref = route.isLocaleRoute
     ? localizedPath(primaryHref, route.locale, buildI18n.defaultLocale)
     : primaryHref
@@ -132,7 +132,7 @@ export default async function DocsPage({ params }: PageProps) {
 
   const siteUrl = getSiteUrl()
   const effectiveSite = resolveBuildSiteConfig()
-  const primaryHref = doc.slug.length ? `/${doc.slug.join('/')}` : '/'
+  const primaryHref = docPathFromSlug(doc.slug)
   const contentLocale =
     route.isLocaleRoute && !doc.isFallback
       ? route.locale

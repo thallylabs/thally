@@ -6,6 +6,8 @@ import { defineConfig } from 'tsup'
  *  - `content` — the content pipeline alone (parse, document, markdown
  *                projection), so consumers that only transform content don't
  *                drag the search/embeddings graph into their bundles.
+ *  - `markdown` — pure parsing/projection with no filesystem document reader,
+ *                 for request-time serverless bundles.
  *  - `theme`   — pure brand-token helpers, client-safe (no Node/MDX/search deps).
  *
  * Entries share code via tsup's ESM chunk splitting, so `content` and the
@@ -18,6 +20,10 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     content: 'src/content/index.ts',
+    embeddings: 'src/embeddings/index.ts',
+    markdown: 'src/markdown.ts',
+    registry: 'src/registry.ts',
+    search: 'src/search/index.ts',
     theme: 'src/theme/index.ts',
   },
   format: ['esm'],

@@ -106,6 +106,30 @@ function normalizeDocusaurusAdmonitions(body: string): string {
   }).join('\n')
 }
 
+const GLOBAL_DOCUSARUS_COMPONENTS = new Set([
+  'Tabs',
+  'TabItem',
+  'Link',
+  'DocCardList',
+  'TOCInline',
+])
+
+/** Match the one simple import form Docusaurus injects without backtracking. */
+function isGlobalDocusaurusImport(line: string): boolean {
+  const trimmed = line.trim().replace(/;$/, '').trimEnd()
+  if (!trimmed.startsWith('import ')) return false
+  const separator = trimmed.indexOf(' from ', 'import '.length)
+  if (separator < 0) return false
+  const component = trimmed.slice('import '.length, separator).trim()
+  if (!GLOBAL_DOCUSARUS_COMPONENTS.has(component)) return false
+  const source = trimmed.slice(separator + ' from '.length)
+  if (source.length < 3) return false
+  const quote = source[0]
+  if ((quote !== "'" && quote !== '"') || source.at(-1) !== quote) return false
+  const moduleName = source.slice(1, -1)
+  return moduleName.startsWith('@theme/') || moduleName.startsWith('@docusaurus/')
+}
+
 const FERN_UNSUPPORTED_COMPONENTS = [
   'EndpointRequestSnippet', 'EndpointResponseSnippet', 'EndpointExample',
   'Schema', 'Button', 'Aside', 'Markdown', 'RequestExample', 'ResponseExample',
@@ -418,10 +442,13 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform): string
 
   let rewritten = normalizeDocusaurusAdmonitions(runFern ? normalizeFernCallouts(body) : body)
   if (runDocusaurus) {
-    rewritten = normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(rewritten))
-      // Docusaurus injects these theme components globally. Thally also
-      // exposes its equivalents globally, so source-only imports must not survive.
-      .replace(/^import\s+(?:Tabs|TabItem|Link|DocCardList|TOCInline)\s+from\s+['"]@(?:theme|docusaurus)\/[^'"]+['"]\s*;?\s*$/gm, '')
+    // Docusaurus injects these theme components globally. Thally also
+    // exposes its equivalents globally, so source-only imports must not survive.
+    const withoutGlobalImports = rewritten
+      .split('\n')
+      .filter((line) => !isGlobalDocusaurusImport(line))
+      .join('\n')
+    rewritten = normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(withoutGlobalImports))
   }
   rewritten = replaceOutsideCode(rewritten, (segment) => {
     let result = segment
