@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { parseFrontmatter } from './frontmatter.js'
 import { parseMdxContent } from './parse.js'
+import { isSafeContentIdentifier } from './identifiers.js'
 import {
   resolveRegisteredAsyncContentDocument,
   resolveRegisteredContentDocument,
@@ -33,23 +34,38 @@ export interface ContentDocument {
 }
 
 function resolveContentFile(pageId: string, locale?: string): string | null {
+  if (!isSafeContentIdentifier(pageId, locale)) return null
+  let root: string
+  try {
+    root = fs.realpathSync(CONTENT_ROOT)
+  } catch {
+    return null
+  }
   const candidates: Array<string> = []
   if (locale) {
     candidates.push(
-      path.join(CONTENT_ROOT, locale, `${pageId}.mdx`),
-      path.join(CONTENT_ROOT, locale, `${pageId}/index.mdx`),
+      path.resolve(root, locale, `${pageId}.mdx`),
+      path.resolve(root, locale, `${pageId}/index.mdx`),
     )
   }
   candidates.push(
-    path.join(CONTENT_ROOT, `${pageId}.mdx`),
-    path.join(CONTENT_ROOT, `${pageId}/index.mdx`),
+    path.resolve(root, `${pageId}.mdx`),
+    path.resolve(root, `${pageId}/index.mdx`),
   )
 
   for (const filePath of candidates) {
     // Deployed hosts register an embedded/asset reader before search runs.
     // This fallback is for local Node tools only; tracing a dynamic absolute
     // path would otherwise package the entire repository into server output.
-    if (fs.existsSync(/*turbopackIgnore: true*/ filePath)) return filePath
+    if (!filePath.startsWith(`${root}${path.sep}`)) continue
+    try {
+      // A repository can contain symlinks. Resolve those before accepting a
+      // file, so a valid-looking page ID cannot escape the content root.
+      const realFile = fs.realpathSync(/*turbopackIgnore: true*/ filePath)
+      if (realFile.startsWith(`${root}${path.sep}`) && fs.statSync(realFile).isFile()) return realFile
+    } catch {
+      // The candidate does not exist; try the next supported MDX path.
+    }
   }
   return null
 }
@@ -63,6 +79,7 @@ const documentCache = new Map<string, { mtimeMs: number; document: ContentDocume
  * embeddings should use — no ad-hoc regex extraction anywhere else.
  */
 export function getContentDocument(pageId: string, locale?: string): ContentDocument | null {
+  if (!isSafeContentIdentifier(pageId, locale)) return null
   const registered = resolveRegisteredContentDocument(pageId, locale)
   if (registered !== undefined) return registered
 
@@ -96,6 +113,7 @@ export async function loadContentDocument(
   pageId: string,
   locale?: string,
 ): Promise<ContentDocument | null> {
+  if (!isSafeContentIdentifier(pageId, locale)) return null
   const registered = resolveRegisteredAsyncContentDocument(pageId, locale)
   if (registered) return registered
   return getContentDocument(pageId, locale)
