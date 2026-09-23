@@ -137,7 +137,13 @@ export interface MigrationBundle {
   site?: {
     name?: string
     description?: string
-    /** Source theme accent color(s), each a `#rrggbb`/`#rgb` hex string. */
+    /**
+     * Source theme accent color(s), each a `#rrggbb`/`#rgb` hex string.
+     * Follows Mintlify's own `colors` schema: `light` is the color used in
+     * dark mode and `dark` is the color used in light mode. Fern's colors
+     * are normal (its `light`/`dark` match the mode they paint), so
+     * extraction swaps them onto this shape for a single downstream contract.
+     */
     colors?: {
       primary?: string
       light?: string

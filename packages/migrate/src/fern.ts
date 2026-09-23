@@ -8,6 +8,7 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs'
 
 import { parse as parseYaml } from 'yaml'
 
+import { isRedirectPathSafe, translateRedirectWildcards } from './navigation.js'
 import { resolveWithin } from './path.js'
 import type {
   MigrationDocsConfig,
@@ -28,6 +29,10 @@ export interface FernNavigationResult {
   docsConfig: MigrationDocsConfig
   descriptors: Array<FernPageDescriptor>
   warnings: Array<MigrationWarning>
+  /** The first `api:` node's own value (a display name or, in multi-API repos, a `fern/apis/<name>` identifier), if any. */
+  apiName?: string
+  /** Label of the tab that owns the first `api:` node, if that tab also has other content and survived projection. */
+  apiTabLabel?: string
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -67,6 +72,10 @@ interface WalkContext {
   descriptors: Array<FernPageDescriptor>
   seenNavigationIds: Set<string>
   sawApi: boolean
+  /** The first `api:` node's own value, used to locate its OpenAPI spec via generators.yml/fern/apis/<name>. */
+  apiName?: string
+  /** Label of the tab that owns the first `api:` node, so the OpenAPI spec attaches to that exact tab. */
+  apiTabLabel?: string
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
   /** Bare tab/section routes with no page of their own, soft-redirected to their first descendant. */
@@ -218,6 +227,8 @@ function convertNode(
   if (typeof object.api === 'string') {
     if (context.sawApi) {
       warnOnce(context, 'fern-multiple-api', 'Multiple Fern API sections were found; only the first was imported.')
+    } else {
+      context.apiName = object.api
     }
     context.sawApi = true
     return null
@@ -266,10 +277,17 @@ function resolveVersionedNavigation(
     const version = objectValue(entry)
     return version ? [version] : []
   })
-  if (versions.length > 0) {
-    warnOnce(context, 'fern-versions', 'Only the default Fern version was imported; other versions were skipped.')
-  }
   const chosen = versions.find((version) => version.default === true) ?? versions[0]
+  const skipped = versions.filter((version) => version !== chosen)
+    .map((version) => (typeof version.version === 'string' ? version.version : undefined))
+    .filter((name): name is string => Boolean(name))
+  if (skipped.length > 0) {
+    warnOnce(
+      context,
+      'fern-versions',
+      `Only the default Fern version was imported; other versions were skipped: ${skipped.join(', ')}.`,
+    )
+  }
   if (!chosen || typeof chosen.path !== 'string') return config
   try {
     const versionPath = resolveWithin(fernRoot, chosen.path)
@@ -280,7 +298,12 @@ function resolveVersionedNavigation(
     const versionConfig = objectValue(readBoundedYaml(versionPath))
     if (!versionConfig) return config
     return { ...config, navigation: versionConfig.navigation, tabs: versionConfig.tabs ?? config.tabs }
-  } catch {
+  } catch (error) {
+    warnOnce(
+      context,
+      'fern-version-read-failed',
+      `Fern version file "${chosen.path}" could not be read (${error instanceof Error ? error.message : String(error)}) and was skipped.`,
+    )
     return config
   }
 }
@@ -314,7 +337,9 @@ export function projectFernNavigation(input: {
       const label = typeof meta['display-name'] === 'string' ? meta['display-name'] : titleCase(id)
       const tabSegment = segmentFor(meta, label)
       const layout = Array.isArray(entry.layout) ? entry.layout : []
+      const sawApiBefore = context.sawApi
       const groups = groupsFromConverted(convertNodes(layout, tabSegment ? [tabSegment] : [], context))
+      if (!sawApiBefore && context.sawApi) context.apiTabLabel = label
       if (groups.length === 0) return []
       if (tabSegment) addBareRouteRedirect([tabSegment], groups, context)
       return [{
@@ -352,24 +377,35 @@ export function projectFernNavigation(input: {
     ? (config.redirects as Array<unknown>).flatMap((value) => {
         const redirect = objectValue(value)
         if (!redirect || typeof redirect.source !== 'string' || typeof redirect.destination !== 'string') return []
-        const source = redirect.source.trim()
-        const destination = redirect.destination.trim()
-        if (!source.startsWith('/') || !destination.startsWith('/')) return []
+        const rawSource = redirect.source.trim()
+        const rawDestination = redirect.destination.trim()
+        if (!isRedirectPathSafe(rawSource, rawDestination)) return []
+        const translated = translateRedirectWildcards(rawSource, rawDestination)
+        if (!translated) {
+          warnOnce(
+            context,
+            `fern-redirect-wildcard-${rawSource}`,
+            `Redirect from ${rawSource} uses a wildcard Next.js cannot express and was dropped.`,
+          )
+          return []
+        }
         return [{
-          source,
-          destination,
+          source: translated.source,
+          destination: translated.destination,
           ...(typeof redirect.permanent === 'boolean' ? { permanent: redirect.permanent } : {}),
         }]
       })
     : []
 
   // `title`/`colors.accent-primary` are mapped by the repository adapter into
-  // `MigrationBundle.site`; logo/favicon have no equivalent Thally field yet.
+  // `MigrationBundle.site`; logo/favicon files live under `public/brand/` by
+  // fixed filename rather than a docs.json-style config field, so they can
+  // only be flagged for manual follow-up here.
   if (config.logo || config.favicon) {
     warnOnce(
       context,
       'fern-branding',
-      'Fern logo/favicon configuration is not migrated; set branding in Thally Settings.',
+      'Fern logo and favicon were not migrated; add them to public/brand/ (default-logo-light.svg, default-logo-dark.svg, default-favicon-light.svg, default-favicon-dark.svg).',
     )
   }
 
@@ -387,5 +423,7 @@ export function projectFernNavigation(input: {
     },
     descriptors: context.descriptors,
     warnings: context.warnings,
+    ...(context.apiName ? { apiName: context.apiName } : {}),
+    ...(context.apiTabLabel ? { apiTabLabel: context.apiTabLabel } : {}),
   }
 }

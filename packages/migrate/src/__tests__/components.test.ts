@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createComponentMigrator, mergeComponentRegistry } from '../components.js'
+import { createComponentMigrator, mergeComponentRegistry, propsTargetExtractedClientComponent } from '../components.js'
 import { migrateRepository } from '../repository.js'
 import { renderMigrationFiles } from '../render.js'
 import type { MigrationWarning } from '../types.js'
@@ -277,6 +277,51 @@ describe('repository component migration', () => {
     })])
   })
 
+  it('does not embed a YouTube iframe for an unrelated player package, even when its usage looks video-shaped', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    // "VimeoEmbed"/"react-vimeo-embed" match the old, too-broad
+    // `video|embed|player` heuristic, but Vimeo ids don't resolve on
+    // youtube.com, so this must fall back to the comment stub, not a
+    // silently-broken (or wrong-video) iframe.
+    const source = "import VimeoEmbed from 'react-vimeo-embed';\n\n<VimeoEmbed id=\"12345678\" />"
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).not.toContain('<iframe')
+    expect(result).toContain("{/* Removed <VimeoEmbed>: unsupported import 'react-vimeo-embed' */}")
+  })
+
+  it('rejects an id that is not a bare YouTube video id instead of interpolating it unescaped', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const source = 'import LiteYouTubeEmbed from \'react-lite-youtube-embed\';\n\n<LiteYouTubeEmbed id="x onerror=alert(1)" />'
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).not.toContain('<iframe')
+    expect(result).not.toContain('onerror')
+    expect(result).toContain("unsupported import 'react-lite-youtube-embed'")
+  })
+
+  it('does not embed a JSX-expression id, since its literal source text is not the runtime value', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const source = "import LiteYouTubeEmbed from 'react-lite-youtube-embed';\n\nconst videoId = '3YDiloj8_d0';\n\n<LiteYouTubeEmbed id={videoId} />"
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).not.toContain('<iframe')
+    expect(result).toContain("unsupported import 'react-lite-youtube-embed'")
+  })
+
+  it('embeds a YouTube URL passed to react-player, extracting the video id', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const source = "import ReactPlayer from 'react-player';\n\n<ReactPlayer url=\"https://www.youtube.com/watch?v=3YDiloj8_d0\" />"
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).toContain('<iframe')
+    expect(result).toContain('3YDiloj8_d0')
+  })
+
   it('replaces a non-video unsupported import usage with a comment naming the removed component and package', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
@@ -306,5 +351,32 @@ describe('repository component migration', () => {
     expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
     expect(migrator.files()).toEqual([])
     expect(warnings[0].message).toContain('symbolic links')
+  })
+})
+
+describe('propsTargetExtractedClientComponent', () => {
+  it('is true when a declared name is passed as a bare prop to a Migrated<hash> tag', () => {
+    const body = '<Migrated0123456789ab RenderComponent={CustomBlock} />'
+    expect(propsTargetExtractedClientComponent(body, new Set(['CustomBlock']))).toBe(true)
+  })
+
+  it('is true for an inline-extracted Inline<n> tag', () => {
+    const body = '<Inline0 onClick={handleClick} />'
+    expect(propsTargetExtractedClientComponent(body, new Set(['handleClick']))).toBe(true)
+  })
+
+  it('is false when the tag is not one this migration extracted, even with a matching prop', () => {
+    const body = '<Accordion RenderComponent={CustomBlock} />'
+    expect(propsTargetExtractedClientComponent(body, new Set(['CustomBlock']))).toBe(false)
+  })
+
+  it('is false when no declared name matches the prop value', () => {
+    const body = '<Migrated0123456789ab RenderComponent={SomethingElse} />'
+    expect(propsTargetExtractedClientComponent(body, new Set(['CustomBlock']))).toBe(false)
+  })
+
+  it('is false when declaredNames is empty', () => {
+    const body = '<Migrated0123456789ab RenderComponent={CustomBlock} />'
+    expect(propsTargetExtractedClientComponent(body, new Set())).toBe(false)
   })
 })

@@ -633,13 +633,16 @@ const NEXT_REDIRECT_PARAM_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 /**
  * Next.js redirects compile through path-to-regexp and reject a bare `*`
- * segment (Mintlify's wildcard syntax) with "Invalid redirects found",
- * crashing the whole build. Mintlify only documents `*` as a trailing
- * catch-all segment, so it is translated to Next's named catch-all
- * (`/:path*`) there; a `*` anywhere else, or a syntax Next can't express, is
- * dropped rather than guessed at.
+ * segment (Mintlify and Fern's trailing wildcard syntax) with "Invalid
+ * redirects found", crashing the whole build. Both platforms only document
+ * `*` as a trailing catch-all segment, so it is translated to Next's named
+ * catch-all (`/:path*`) here; a `*` anywhere else, or a syntax Next can't
+ * express, is dropped rather than guessed at. Source text already written as
+ * path-to-regexp (e.g. `:path*`) passes through unchanged: only a literal
+ * `*` segment is rewritten, and the final `isValidNextRedirectPath` check
+ * still accepts it.
  */
-function translateMintlifyRedirectPaths(
+function translateRedirectWildcards(
   source: string,
   destination: string,
 ): { source: string; destination: string } | null {
@@ -672,6 +675,31 @@ function isValidNextRedirectPath(path: string): boolean {
     return NEXT_REDIRECT_PARAM_NAME.test(name)
   })
 }
+
+/**
+ * Shared redirect-safety check for Mintlify and Fern: both require a
+ * site-relative, `/`-rooted source and destination (Mintlify's own redirect
+ * docs give only rooted examples; neither documents an absolute-URL
+ * destination), so a protocol-relative or absolute value (`//evil.example`
+ * reads as same-scheme cross-origin to a browser and to Next.js) is rejected.
+ */
+export function isRedirectPathSafe(rawSource: string, rawDestination: string): boolean {
+  for (const value of [rawSource, rawDestination]) {
+    if (!value.startsWith('/')) return false
+    if (value.startsWith('//') || value.startsWith('/\\')) return false
+    if (value.includes('\\')) return false
+    // Browsers unescape a leading `%2f%2f`/`%5c` before treating it as `//`/`\`.
+    const lower = value.toLowerCase()
+    if (lower.startsWith('/%2f%2f') || lower.startsWith('/%5c')) return false
+  }
+  return true
+}
+
+/**
+ * Translate a redirect's trailing wildcard for Next.js, once its source and
+ * destination have already passed {@link isRedirectPathSafe}.
+ */
+export { translateRedirectWildcards }
 
 /** Convert current and legacy Mintlify navigation into Thally's schema. */
 export function projectMintlifyNavigation(
@@ -768,9 +796,8 @@ export function projectMintlifyNavigation(
         if (!redirect || typeof redirect.source !== 'string' || typeof redirect.destination !== 'string') return []
         const rawSource = redirect.source.trim()
         const rawDestination = redirect.destination.trim()
-        if (!rawSource.startsWith('/') || !rawDestination.startsWith('/')
-          || rawSource.startsWith('//') || rawDestination.startsWith('//')) return []
-        const translated = translateMintlifyRedirectPaths(rawSource, rawDestination)
+        if (!isRedirectPathSafe(rawSource, rawDestination)) return []
+        const translated = translateRedirectWildcards(rawSource, rawDestination)
         if (!translated) {
           warnings.push({
             code: 'unsupported-config',

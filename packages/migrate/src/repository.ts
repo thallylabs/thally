@@ -15,7 +15,9 @@ import {
 import { createRequire } from 'node:module'
 import { basename, dirname, extname, relative, resolve as resolvePath } from 'node:path'
 
-import { createComponentMigrator } from './components.js'
+import { parse as parseYaml } from 'yaml'
+
+import { createComponentMigrator, propsTargetExtractedClientComponent } from './components.js'
 
 import {
   projectDocusaurusNavigation,
@@ -440,17 +442,24 @@ function mintlifyThemeColors(value: unknown): { primary?: string; light?: string
   return Object.keys(colors).length > 0 ? colors : undefined
 }
 
-/** Extract Fern's `colors.accent-primary` (a hex string, or `{light, dark}`), if valid. */
+/**
+ * Extract Fern's `colors.accent-primary` (a hex string, or `{light, dark}`),
+ * if valid. Fern's `light`/`dark` are normal (each names the mode it
+ * paints), unlike Mintlify's inverted schema that `site.colors` otherwise
+ * follows, so they're swapped onto Mintlify's `{light, dark}` keys here to
+ * give downstream consumers (`updateSiteConfig`) one consistent contract.
+ */
 function fernThemeColors(value: unknown): { primary?: string; light?: string; dark?: string } | undefined {
   if (!value || typeof value !== 'object') return undefined
   const accent = (value as Record<string, unknown>)['accent-primary']
   if (typeof accent === 'string') return HEX_COLOR.test(accent) ? { primary: accent } : undefined
   if (!accent || typeof accent !== 'object') return undefined
+  const source = accent as Record<string, unknown>
+  const lightMode = typeof source.light === 'string' && HEX_COLOR.test(source.light) ? source.light : undefined
+  const darkMode = typeof source.dark === 'string' && HEX_COLOR.test(source.dark) ? source.dark : undefined
   const colors: { light?: string; dark?: string } = {}
-  for (const key of ['light', 'dark'] as const) {
-    const entry = (accent as Record<string, unknown>)[key]
-    if (typeof entry === 'string' && HEX_COLOR.test(entry)) colors[key] = entry
-  }
+  if (darkMode) colors.light = darkMode
+  if (lightMode) colors.dark = lightMode
   return Object.keys(colors).length > 0 ? colors : undefined
 }
 
@@ -491,6 +500,90 @@ function findConfiguredMintlifyOpenApi(
     if (match) return match
   }
   return null
+}
+
+const MAX_FERN_GENERATORS_BYTES = 2_000_000
+
+function fernGeneratorsOpenApiPaths(config: Record<string, unknown>): Array<string> {
+  const api = config.api
+  if (typeof api === 'string') return [api]
+  if (!api || typeof api !== 'object' || Array.isArray(api)) return []
+  const specs = (api as Record<string, unknown>).specs
+  if (!Array.isArray(specs)) return []
+  return specs.flatMap((spec) => {
+    if (typeof spec === 'string') return [spec]
+    if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return []
+    const openapi = (spec as Record<string, unknown>).openapi
+    return typeof openapi === 'string' ? [openapi] : []
+  })
+}
+
+function readFernGeneratorsConfig(path: string): Record<string, unknown> | null {
+  if (!existsSync(path) || !lstatSync(path).isFile() || lstatSync(path).size > MAX_FERN_GENERATORS_BYTES) return null
+  const parsed = parseYaml(readFileSync(path, 'utf8'))
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null
+}
+
+/**
+ * Resolve the OpenAPI spec Fern's `generators.yml` configures for an API:
+ * modern `api.specs[].openapi`, or the legacy top-level `api:` string.
+ * Multi-API repos keep a `generators.yml` per API under `fern/apis/<name>/`;
+ * single-API repos keep one at the Fern project root. Checked in that order
+ * so a resolvable `apiName` (a `fern/apis/<name>` folder, not just a display
+ * label) wins over the root config.
+ */
+function findFernConfiguredOpenApi(
+  fernRoot: string,
+  repositoryDir: string,
+  apiName: string | undefined,
+): ScannedFile | null {
+  const candidateDirs: Array<string> = []
+  if (apiName) {
+    try {
+      candidateDirs.push(resolveWithin(fernRoot, `apis/${apiName}`))
+    } catch {
+      // Not a safe relative path (e.g. a display label, not a folder name).
+    }
+  }
+  candidateDirs.push(fernRoot)
+  for (const dir of candidateDirs) {
+    let config: Record<string, unknown> | null = null
+    try {
+      config = readFernGeneratorsConfig(resolveWithin(dir, 'generators.yml'))
+    } catch {
+      continue
+    }
+    if (!config) continue
+    for (const specPath of fernGeneratorsOpenApiPaths(config)) {
+      if (/^(?:https?:)?\/\//i.test(specPath)) continue
+      try {
+        const absolute = resolveWithin(dir, specPath)
+        if (!existsSync(absolute) || !lstatSync(absolute).isFile()) continue
+        return { absolutePath: absolute, relativePath: relative(repositoryDir, absolute).replace(/\\/g, '/') }
+      } catch {
+        // Outside the Fern root or otherwise unsafe; skip.
+      }
+    }
+  }
+  return null
+}
+
+/** Whether a Fern Definition (as opposed to a plain OpenAPI/AsyncAPI spec) backs this API. */
+function fernDefinitionExists(fernRoot: string, apiName: string | undefined): boolean {
+  const candidateDirs: Array<string> = []
+  if (apiName) {
+    try {
+      candidateDirs.push(resolveWithin(fernRoot, `apis/${apiName}/definition`))
+    } catch {
+      // Not a safe relative path; skip.
+    }
+  }
+  try {
+    candidateDirs.push(resolveWithin(fernRoot, 'definition'))
+  } catch {
+    // Unreachable: 'definition' is always a safe relative segment.
+  }
+  return candidateDirs.some((dir) => existsSync(dir) && lstatSync(dir).isDirectory())
 }
 
 function withoutFrontmatter(value: string): string {
@@ -764,11 +857,12 @@ function inlineMdxSnippets(
   return result
 }
 
-function injectOpenApi(config: MigrationDocsConfig, filename: string): MigrationDocsConfig {
+function injectOpenApi(config: MigrationDocsConfig, filename: string, preferredTabLabel?: string): MigrationDocsConfig {
   const tabs = config.tabs.map((tab) => ({ ...tab }))
-  const apiTab = tabs.find((tab) => tab.tab.toLowerCase().includes('api'))
+  const apiTab = (preferredTabLabel ? tabs.find((tab) => tab.tab === preferredTabLabel) : undefined)
+    ?? tabs.find((tab) => tab.tab.toLowerCase().includes('api'))
   if (apiTab) apiTab.api = { source: `/${filename}`, navigation: false }
-  else tabs.push({ tab: 'API Reference', api: { source: `/${filename}` } })
+  else tabs.push({ tab: preferredTabLabel ?? 'API Reference', api: { source: `/${filename}` } })
   return { ...config, tabs }
 }
 
@@ -864,6 +958,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let docusaurusSidebars: DocusaurusSidebars | null = null
   let mintlifyConfig: Record<string, unknown> | null = null
   let fernRawConfig: Record<string, unknown> | null = null
+  let fernApiName: string | undefined
+  let fernApiTabLabel: string | undefined
 
   if (platform === 'mintlify') {
     try {
@@ -900,6 +996,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         const projected = projectFernNavigation({ config: fernConfig.config, fernRoot: fernProjectRoot })
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
+        fernApiName = projected.apiName
+        fernApiTabLabel = projected.apiTabLabel
         for (const [index, descriptor] of projected.descriptors.entries()) {
           const key = normalizedReferenceKey(descriptor.sourcePath)
           if (!referenceMap.has(key)) referenceMap.set(key, { navigationId: descriptor.navigationId })
@@ -1034,7 +1132,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         warnedFernComponents.add(key)
         warnings.push({
           code: 'unsupported-config',
-          message: `Fern component <${name}> is not supported by Thally and was left as-is.`,
+          message: `Fern component <${name}> is not supported by Thally; the page compiles but will likely fail to render. Edit or remove the tag.`,
           source: file.relativePath,
         })
       }
@@ -1107,16 +1205,33 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       })
       continue
     }
+    // `hasClientBoundaryFunctionProp` only proves a page-authored function is
+    // passed as *some* bare JSX prop; it does not know which tag receives it.
+    // Only a prop landing on a component this migration actually extracted
+    // as 'use client' (`Migrated<hash>`/`Inline<n>`, see components.ts)
+    // is confirmed to cross the server/client boundary and throw at render —
+    // a prop on an ordinary tag (a Thally built-in, an unregistered/removed
+    // component) is not confirmed either way, so exclusion (a last resort)
+    // is reserved for the confirmed case; the unconfirmed case is warned
+    // instead, so it is never silently dropped or silently shipped broken.
     if (hasClientBoundaryFunctionProp(page.body)) {
-      skipped++
+      const declaredNames = new Set([...page.body.matchAll(/export const (\w+)\s*=/g)].map((match) => match[1]))
+      if (propsTargetExtractedClientComponent(page.body, declaredNames)) {
+        skipped++
+        warnings.push({
+          code: 'skipped-file',
+          message: "This page passes a function to an interactive component, which can't be rendered on the server. "
+            + 'Move the function into the component or edit the page manually.',
+          source: file.relativePath,
+        })
+        continue
+      }
       warnings.push({
-        code: 'skipped-file',
-        message: 'Page was excluded because it passes a page-authored function as a prop into an interactive '
-          + 'client component; Next throws "Functions cannot be passed directly to Client Components" for this '
-          + 'shape even though the MDX itself compiles. Renders fine on Mintlify, which has no server/client split.',
+        code: 'unsupported-config',
+        message: "This page might pass a function to an interactive component, which can't be rendered on the "
+          + 'server; review it manually if the built page fails to render.',
         source: file.relativePath,
       })
-      continue
     }
     if (seenPageIds.has(page.id)) {
       skipped++
@@ -1232,13 +1347,20 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
   if (docsConfig.tabs.length === 0) docsConfig = buildNavigationFromPages(pages)
-  const openApi = findConfiguredMintlifyOpenApi(mintlifyConfig, files) ?? findOpenApi(files)
+  const openApi = platform === 'fern' && fernProjectRoot
+    ? findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, fernApiName) ?? findOpenApi(files)
+    : findConfiguredMintlifyOpenApi(mintlifyConfig, files) ?? findOpenApi(files)
   if (openApi) {
     const filename = basename(openApi.relativePath)
     if (!assets.some((asset) => asset.path === filename)) {
       assets.push({ path: filename, content: readFileSync(openApi.absolutePath) })
     }
-    docsConfig = injectOpenApi(docsConfig, filename)
+    docsConfig = injectOpenApi(docsConfig, filename, platform === 'fern' ? fernApiTabLabel : undefined)
+  } else if (platform === 'fern' && fernProjectRoot && fernApiName !== undefined && fernDefinitionExists(fernProjectRoot, fernApiName)) {
+    warnings.push({
+      code: 'unsupported-config',
+      message: 'This API is defined with a Fern Definition, not an OpenAPI/AsyncAPI document; generating a spec from a Fern Definition is not supported. Export an OpenAPI document and reference it from generators.yml, or add it manually.',
+    })
   }
   if (platform === 'mintlify') {
     const sources = new Set((docsConfig.redirects ?? []).map((redirect) => redirect.source))

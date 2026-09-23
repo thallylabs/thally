@@ -28,6 +28,36 @@ interface MdxNode {
 interface Replacement { start: number; end: number; value: string }
 interface Binding { local: string; imported: string; source: string }
 
+/** A bare `id`/`videoId`-style attribute value is safe to embed in an `iframe src` only when it looks like a real YouTube video id. */
+const YOUTUBE_VIDEO_ID = /^[\w-]{1,64}$/
+/** Packages known to take a literal YouTube video id prop (as opposed to a URL, or a non-YouTube player). */
+const YOUTUBE_ID_PACKAGES = new Set(['react-lite-youtube-embed', 'react-youtube', '@justinribeiro/lite-youtube'])
+const YOUTUBE_URL = /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{1,64})/i
+
+/**
+ * Only a small, known set of YouTube embed packages get a working `<iframe>`
+ * replacement; every other removed component (Vimeo, Loom, a bespoke
+ * in-house player, or any package this doesn't recognize) falls back to the
+ * plain comment stub, since guessing at an unfamiliar player's embed URL
+ * shape would silently render the wrong video or nothing at all.
+ */
+function youtubeEmbedVideoId(node: MdxNode, specifier: string): string | undefined {
+  const attribute = (attributeName: string): string | undefined => {
+    const raw = node.attributes?.find((entry) => entry.name === attributeName)?.value
+    return typeof raw === 'string' ? raw : undefined
+  }
+  if (YOUTUBE_ID_PACKAGES.has(specifier)) {
+    const id = attribute('id') ?? attribute('videoId')
+    return id && YOUTUBE_VIDEO_ID.test(id) ? id : undefined
+  }
+  if (specifier === 'react-player') {
+    const url = attribute('url')
+    const match = url ? YOUTUBE_URL.exec(url) : null
+    return match ? match[1] : undefined
+  }
+  return undefined
+}
+
 const parser = unified().use(remarkParse).use(remarkMdx)
 const CODE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs'])
 const DATA_EXTENSIONS = new Set(['.json', '.css', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.woff', '.woff2'])
@@ -112,6 +142,41 @@ function imports(statement: ts.ImportDeclaration): Array<Binding> {
     }
   }
   return bindings
+}
+
+/**
+ * Every component this migrator actually renders in a client boundary — a
+ * copied import (`register`, always prefixed 'use client' by `copyGraph`) or
+ * an inline-extracted interactive block (`Inline<n>`) — is renamed to one of
+ * these two shapes in the transformed body. No other JSX tag (a Thally
+ * built-in, an unregistered/removed component) ever matches.
+ */
+const EXTRACTED_CLIENT_COMPONENT_TAG = /^(?:Migrated[0-9a-f]+|Inline\d+)$/
+
+/**
+ * True when a name in `declaredNames` (typically a page's `export const`
+ * identifiers) is passed as a bare JSX prop (`prop={Name}`) into a component
+ * this migrator actually extracted as a 'use client' module. This is the
+ * only shape that really throws "Functions cannot be passed directly to
+ * Client Components" at render — the same check against an ordinary,
+ * non-extracted tag would over-fire and drop pages that render just fine.
+ */
+export function propsTargetExtractedClientComponent(body: string, declaredNames: ReadonlySet<string>): boolean {
+  if (declaredNames.size === 0) return false
+  const tree = parser.parse(body) as MdxNode
+  let found = false
+  walk(tree, (node) => {
+    if (found || !node.name || !EXTRACTED_CLIENT_COMPONENT_TAG.test(node.name)) return
+    for (const attribute of node.attributes ?? []) {
+      const raw = attribute.value
+      const value = raw && typeof raw === 'object' ? raw.value : undefined
+      if (typeof value === 'string' && declaredNames.has(value.trim())) {
+        found = true
+        return
+      }
+    }
+  })
+  return found
 }
 
 /** Create one bounded component graph and registry for a repository migration. */
@@ -324,6 +389,16 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
             // normalizeMdx right after this pass; just drop the now-redundant
             // import and leave JSX usage untouched for that pass to rewrite.
             edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+          } else if (hasExpressionReference(new Set(bindings.map((binding) => binding.local)))) {
+            // Only JSX usage (`<Widget />`) is rewritten below; a reference
+            // in `{pkg.fn()}`, a prop, or an inline `export const` would
+            // become an undefined identifier once the import is dropped and
+            // crash at render. Preserving the import here matches how every
+            // other un-migratable case in this function is handled: the page
+            // still needs manual attention, but it is never left compiling
+            // against a name nothing defines.
+            warn(`MDX import '${rawSpecifier}' is used outside JSX (in an expression, prop, or inline declaration) and requires manual migration; the import was preserved.`, currentFile)
+            hasUnsupportedImports = true
           } else {
             // An npm package Thally's runtime does not ship is not installed
             // in the migrated project; leaving the import in place breaks
@@ -481,10 +556,9 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       if (!specifier || node.position?.start.offset === undefined || node.position.end.offset === undefined) return
       const start = node.position.start.offset
       const end = node.position.end.offset
-      const id = node.attributes?.find((attribute) => attribute.name === 'id')?.value
-      const idValue = typeof id === 'string' ? id : typeof id === 'object' ? id?.value : undefined
-      const value = idValue && /video|embed|player/i.test(`${node.name} ${specifier}`)
-        ? `<iframe width="560" height="315" src="https://www.youtube.com/embed/${idValue}" title="Embedded video" allowFullScreen />`
+      const videoId = youtubeEmbedVideoId(node, specifier)
+      const value = videoId
+        ? `<iframe width="560" height="315" src="https://www.youtube.com/embed/${videoId}" title="Embedded video" allowFullScreen />`
         : `{/* Removed <${node.name}>: unsupported import '${specifier}' */}`
       edits.push({ start, end, value })
     })

@@ -7,6 +7,7 @@ import {
   projectMintlifyNavigation,
   pruneMissingNavigationPages,
 } from '../index.js'
+import { projectFernNavigation } from '../fern.js'
 import type { MigrationDocsConfig, MigrationPage } from '../types.js'
 
 function page(id: string, navigationId = id, locale?: string): MigrationPage {
@@ -230,6 +231,37 @@ describe('Mintlify navigation projection', () => {
     expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
     expect(result.warnings.filter((warning) => warning.code === 'unsupported-config'
       && warning.message.includes('wildcard'))).toHaveLength(2)
+  })
+
+  it('drops a backslash-prefixed or percent-encoded browser-cross-origin redirect destination', () => {
+    const result = projectMintlifyNavigation({
+      navigation: { pages: ['introduction'] },
+      redirects: [
+        { source: '/legit', destination: '/\\evil.example' },
+        { source: '/legit-2', destination: '/%5Cevil.example' },
+        { source: '/kept', destination: '/still-kept' },
+      ],
+    })
+
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+  })
+})
+
+describe('Fern redirect safety shares the Mintlify guard', () => {
+  it('drops a backslash-prefixed or percent-encoded browser-cross-origin redirect destination', () => {
+    const result = projectFernNavigation({
+      config: {
+        navigation: [{ page: 'Introduction', path: 'introduction.mdx' }],
+        redirects: [
+          { source: '/legit', destination: '/\\evil.example' },
+          { source: '/legit-2', destination: '/%5Cevil.example' },
+          { source: '/kept', destination: '/still-kept' },
+        ],
+      },
+      fernRoot: '/tmp/fern-root-unused',
+    })
+
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
   })
 })
 

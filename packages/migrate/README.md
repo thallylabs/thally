@@ -22,12 +22,15 @@ supported.
 
 Fern repositories are located by their `fern/docs.yml` + `fern/fern.config.json`
 pair. `docs.yml` is parsed as bounded YAML—never executed—and preserves tabs,
-nested sections (including `slug`/`skip-slug`), navbar links, redirects, and
-the default Fern version's navigation. Only pages referenced from `docs.yml`
-are imported, matching Fern's own publishing model. The first `api:` section's
-OpenAPI document is attached to its tab; Fern Definition (non-OpenAPI) APIs,
-`changelog`/`products` sections, and logo/color branding are not supported and
-are reported as warnings instead of being silently dropped.
+nested sections (including `slug`/`skip-slug`), navbar links, redirects, the
+default Fern version's navigation, and theme accent colors. Only pages
+referenced from `docs.yml` are imported, matching Fern's own publishing model.
+The first `api:` section's OpenAPI document is resolved from `generators.yml`
+(`api.specs[].openapi`, or the legacy `api:` string; per-API `fern/apis/<name>/`
+layouts are checked before the project root) and attached to that tab. A Fern
+Definition (a non-OpenAPI API with no document to attach) is reported as a
+warning instead of being silently dropped, as are `changelog`/`products`
+sections and logo/favicon branding, which have no equivalent Thally field yet.
 
 ## Mintlify compatibility
 

@@ -405,17 +405,71 @@ describe('starter owner personalization', () => {
   primary: {
     light: {
       accent: '#007852',
+      ring: '#007852',
+      accentForeground: '#ffffff',
+      sidebarActiveText: '#007852',
     },
     dark: {
       accent: '#BAE43E',
+      ring: '#BAE43E',
+      accentForeground: '#000000',
+      sidebarActiveText: '#BAE43E',
     },
   },
   secondary: {
     light: {
       accent: '#8B5CF6',
+      ring: '#8B5CF6',
+      accentForeground: '#ffffff',
+      sidebarActiveText: '#8B5CF6',
     },
     dark: {
       accent: '#C084FC',
+      ring: '#C084FC',
+      accentForeground: '#000000',
+      sidebarActiveText: '#C084FC',
+    },
+  },
+}
+const brandPreset: BrandPresetKey = 'primary'
+export const siteConfig = {
+  name: 'Your product',
+  description:
+    'Documentation for your product.',
+  repoUrl: '',
+}
+`,
+    )
+
+    // Mintlify's own schema (which `colors` here follows) inverts light/dark:
+    // `light` paints dark mode, `dark` paints light mode.
+    updateSiteConfig(directory, 'Acme Docs', 'Acme documentation.', 'primary', '', {
+      primary: '#16A34A',
+      light: '#07C983',
+      dark: '#15803D',
+    })
+
+    const site = readFileSync(join(directory, 'src', 'data', 'site.ts'), 'utf8')
+    // `colors.dark` (`#15803D`) paints light mode; `colors.light` (`#07C983`) paints dark mode.
+    expect(site).toContain("light: {\n      accent: '#15803D',\n      ring: '#15803D',\n      accentForeground: '#ffffff',\n      sidebarActiveText: '#15803D',\n    },")
+    expect(site).toContain("dark: {\n      accent: '#07C983',\n      ring: '#07C983',\n      accentForeground: '#000000',\n      sidebarActiveText: '#07C983',\n    },")
+    // The unselected preset keeps its own accents untouched.
+    expect(site).toContain("accent: '#8B5CF6'")
+    expect(site).toContain("accent: '#C084FC'")
+  })
+
+  it('rejects a malformed accent color and keeps the preset default', () => {
+    const directory = temporaryDirectory('thally-starter-colors-invalid-')
+    mkdirSync(join(directory, 'src', 'data'), { recursive: true })
+    writeFileSync(
+      join(directory, 'src', 'data', 'site.ts'),
+      `const brandPresets = {
+  primary: {
+    light: {
+      accent: '#007852',
+    },
+    dark: {
+      accent: '#BAE43E',
     },
   },
 }
@@ -430,17 +484,87 @@ export const siteConfig = {
     )
 
     updateSiteConfig(directory, 'Acme Docs', 'Acme documentation.', 'primary', '', {
-      primary: '#16A34A',
-      light: '#07C983',
-      dark: '#15803D',
+      dark: "javascript:alert(1)//",
     })
 
     const site = readFileSync(join(directory, 'src', 'data', 'site.ts'), 'utf8')
-    expect(site).toContain("accent: '#07C983'")
-    expect(site).toContain("accent: '#15803D'")
-    // The unselected preset keeps its own accents untouched.
-    expect(site).toContain("accent: '#8B5CF6'")
-    expect(site).toContain("accent: '#C084FC'")
+    expect(site).toContain("accent: '#007852'")
+  })
+
+  it('rejects 5- and 7-digit hex colors as invalid CSS hex lengths', () => {
+    const directory = temporaryDirectory('thally-starter-colors-badlen-')
+    mkdirSync(join(directory, 'src', 'data'), { recursive: true })
+    writeFileSync(
+      join(directory, 'src', 'data', 'site.ts'),
+      `const brandPresets = {
+  primary: {
+    light: {
+      accent: '#007852',
+    },
+    dark: {
+      accent: '#BAE43E',
+    },
+  },
+}
+const brandPreset: BrandPresetKey = 'primary'
+export const siteConfig = {
+  name: 'Your product',
+  description:
+    'Documentation for your product.',
+  repoUrl: '',
+}
+`,
+    )
+
+    updateSiteConfig(directory, 'Acme Docs', 'Acme documentation.', 'primary', '', {
+      dark: '#12345',
+      light: '#1234567',
+    })
+
+    const site = readFileSync(join(directory, 'src', 'data', 'site.ts'), 'utf8')
+    expect(site).toContain("accent: '#007852'")
+    expect(site).toContain("accent: '#BAE43E'")
+  })
+
+  it('handles a 4-digit hex shorthand, ignoring its alpha nibble for contrast', () => {
+    const directory = temporaryDirectory('thally-starter-colors-4digit-')
+    mkdirSync(join(directory, 'src', 'data'), { recursive: true })
+    writeFileSync(
+      join(directory, 'src', 'data', 'site.ts'),
+      `const brandPresets = {
+  primary: {
+    light: {
+      accent: '#007852',
+      ring: '#007852',
+      accentForeground: '#ffffff',
+      sidebarActiveText: '#007852',
+    },
+    dark: {
+      accent: '#BAE43E',
+      ring: '#BAE43E',
+      accentForeground: '#000000',
+      sidebarActiveText: '#BAE43E',
+    },
+  },
+}
+const brandPreset: BrandPresetKey = 'primary'
+export const siteConfig = {
+  name: 'Your product',
+  description:
+    'Documentation for your product.',
+  repoUrl: '',
+}
+`,
+    )
+
+    // `#000f` shorthand expands to `#000000` (black), ignoring the trailing
+    // alpha nibble; contrastForeground must pick white text for it.
+    updateSiteConfig(directory, 'Acme Docs', 'Acme documentation.', 'primary', '', {
+      dark: '#000f',
+    })
+
+    const site = readFileSync(join(directory, 'src', 'data', 'site.ts'), 'utf8')
+    expect(site).toContain("light: {\n      accent: '#000f',\n      ring: '#000f',\n      accentForeground: '#ffffff',\n      sidebarActiveText: '#000f',\n    },")
   })
 })
 

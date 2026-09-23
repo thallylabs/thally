@@ -332,16 +332,50 @@ describe('Mintlify repository migration', () => {
     expect(page?.body.match(/export const Generator/g)).toHaveLength(1)
   })
 
-  it('excludes a page that passes a page-authored function as a prop into an interactive client component', () => {
+  it('excludes a page that passes a page-authored function as a prop into a component this migration extracted as a client module', () => {
     const root = fixture()
-    // Next renders an MDX page as a Server Component by default. An extracted
-    // interactive snippet it imports is `'use client'`; passing a plain
-    // function into it as a prop throws "Functions cannot be passed directly
-    // to Client Components" at render, even though the MDX compiles fine —
-    // Mintlify's own renderer has no such server/client split.
+    // Next renders an MDX page as a Server Component by default. A component
+    // this migration copies (see components.ts's `copyGraph`) is always
+    // marked `'use client'`; passing a plain function into it as a prop
+    // throws "Functions cannot be passed directly to Client Components" at
+    // render, even though the MDX compiles fine — Mintlify's own renderer
+    // has no such server/client split.
+    writeFileSync(join(root, 'en', 'panel.jsx'), 'export const Panel = ({ children }) => <div>{children}</div>;\n')
     writeFileSync(join(root, 'en', 'widget.mdx'), [
       '---',
       'title: Widget',
+      '---',
+      '',
+      "import { Panel } from './panel.jsx'",
+      '',
+      'export const CustomBlock = ({ children }) => <div>{children}</div>;',
+      '',
+      '<Panel title="x" RenderComponent={CustomBlock}>Body</Panel>',
+    ].join('\n'))
+
+    const bundle = migrateRepository({
+      repositoryDir: root,
+      sourceUrl: 'https://github.com/acme/docs',
+    })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('widget')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'skipped-file',
+      source: 'en/widget.mdx',
+      message: expect.stringContaining("passes a function to an interactive component, which can't be rendered on the server"),
+    }))
+  })
+
+  it('keeps (but warns on) a page that passes a function to a component this migration never extracted', () => {
+    const root = fixture()
+    // `Accordion` is a Thally runtime built-in, not something this migration
+    // copied or extracted — `propsTargetExtractedClientComponent` cannot
+    // confirm it crosses the server/client boundary, so exclusion (a last
+    // resort) does not apply; the page is kept and flagged for manual review
+    // instead of being dropped on an unconfirmed heuristic.
+    writeFileSync(join(root, 'en', 'builtin-target.mdx'), [
+      '---',
+      'title: Builtin Target',
       '---',
       '',
       'export const CustomBlock = ({ children }) => <div>{children}</div>;',
@@ -354,12 +388,49 @@ describe('Mintlify repository migration', () => {
       sourceUrl: 'https://github.com/acme/docs',
     })
 
-    expect(bundle.pages.map((page) => page.id)).not.toContain('widget')
+    expect(bundle.pages.map((page) => page.id)).toContain('builtin-target')
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
-      code: 'skipped-file',
-      source: 'en/widget.mdx',
-      message: expect.stringContaining('Functions cannot be passed directly to Client Components'),
+      code: 'unsupported-config',
+      source: 'en/builtin-target.mdx',
+      message: expect.stringContaining('might pass a function'),
     }))
+  })
+
+  it('does not flag a fenced-code example of this exact shape', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'en', 'fenced-example.mdx'), [
+      '---',
+      'title: Fenced Example',
+      '---',
+      '',
+      '```jsx',
+      'export const CustomBlock = () => <div />;',
+      '<Accordion RenderComponent={CustomBlock} />',
+      '```',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('fenced-example')
+    expect(bundle.warnings.some((warning) => warning.message.includes('function'))).toBe(false)
+  })
+
+  it('does not flag a plain value prop whose initializer merely contains =>', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'en', 'value-prop.mdx'), [
+      '---',
+      'title: Value Prop',
+      '---',
+      '',
+      'export const items = [1, 2, 3].map((x) => x);',
+      '',
+      '<Table rows={items} />',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('value-prop')
+    expect(bundle.warnings.some((warning) => warning.message.includes('function'))).toBe(false)
   })
 
   it('drops an excluded page from navigation instead of leaving a dangling reference', () => {
@@ -386,14 +457,17 @@ describe('Mintlify repository migration', () => {
         },
       ],
     }))
+    writeFileSync(join(root, 'en', 'panel.jsx'), 'export const Panel = ({ children }) => <div>{children}</div>;\n')
     writeFileSync(join(root, 'en', 'widget.mdx'), [
       '---',
       'title: Widget',
       '---',
       '',
+      "import { Panel } from './panel.jsx'",
+      '',
       'export const CustomBlock = ({ children }) => <div>{children}</div>;',
       '',
-      '<Accordion title="x" RenderComponent={CustomBlock}>Body</Accordion>',
+      '<Panel title="x" RenderComponent={CustomBlock}>Body</Panel>',
     ].join('\n'))
 
     const bundle = migrateRepository({
@@ -684,6 +758,59 @@ describe('Fern repository migration', () => {
     expect(projected.docsConfig.tabs).toEqual([])
     expect(projected.descriptors).toEqual([])
     expect(projected.warnings.some((warning) => warning.message.includes('not a regular file'))).toBe(true)
+    // A failed read is reported through the same warning, not swallowed.
+    expect(projected.warnings.some((warning) => warning.message.includes('could not be read'))).toBe(false)
+    // Exactly one version exists (and it's the one imported), so nothing was
+    // actually skipped — the warning must not fire.
+    expect(projected.warnings.some((warning) => warning.message.includes('were skipped'))).toBe(false)
+  })
+
+  it('reports which Fern versions were skipped, and only when more than one exists', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-versions-multi-'))
+    writeFileSync(join(root, 'v1.yml'), 'navigation:\n  - page: V1\n    path: v1.mdx\n')
+    writeFileSync(join(root, 'v2.yml'), 'navigation:\n  - page: V2\n    path: v2.mdx\n')
+    const config = {
+      versions: [
+        { version: 'v1', path: 'v1.yml' },
+        { version: 'v2', path: 'v2.yml', default: true },
+        { version: 'v3', path: 'v3.yml' },
+      ],
+    }
+    const projected = projectFernNavigation({ config, fernRoot: root })
+    const warning = projected.warnings.find((entry) => entry.message.includes('were skipped'))
+    expect(warning?.message).toContain('v1')
+    expect(warning?.message).toContain('v3')
+    expect(warning?.message).not.toContain('v2')
+  })
+
+  it('warns instead of silently skipping when a chosen version file cannot be read', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-versions-unreadable-'))
+    // Oversized rather than malformed: the `yaml` parser is lenient about
+    // syntax, but `readBoundedYaml` throws once a file exceeds its 2 MB cap,
+    // which previously hit the bare `catch {}` and vanished without a trace.
+    writeFileSync(join(root, 'v1.yml'), `navigation:\n${'  # padding\n'.repeat(180_000)}`)
+    const config = { versions: [{ version: 'v1', path: 'v1.yml', default: true }] }
+    const projected = projectFernNavigation({ config, fernRoot: root })
+    expect(projected.warnings.some((warning) => warning.message.includes('could not be read'))).toBe(true)
+  })
+
+  it('rejects a protocol-relative redirect destination and translates a trailing wildcard', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-redirects-'))
+    const config = {
+      navigation: [{ page: 'Welcome', path: 'welcome.mdx' }],
+      redirects: [
+        { source: '/evil', destination: '//evil.example' },
+        { source: '/old/*', destination: '/new/*' },
+      ],
+    }
+    const projected = projectFernNavigation({ config, fernRoot: root })
+    expect(projected.docsConfig.redirects).not.toContainEqual(
+      expect.objectContaining({ source: '/evil' }),
+    )
+    expect(projected.docsConfig.redirects).toContainEqual({
+      source: '/old/:path*',
+      destination: '/new/:path*',
+    })
   })
 
   it('projects tabs, nested sections with skip-slug, navbar links, redirects, OpenAPI, assets, and component renames', () => {
@@ -748,7 +875,62 @@ describe('Fern repository migration', () => {
     // unreferenced file must not be imported as an orphan (unlike Mintlify).
     expect(bundle.pages.map((page) => page.id)).not.toContain('orphan')
     // `title`/`colors.accent-primary` map into the same `site` field Mintlify
-    // branding already populates.
-    expect(bundle.site).toEqual({ name: 'Acme Docs', colors: { light: '#008700', dark: '#70E155' } })
+    // branding already populates. Fern's light/dark are normal (each names
+    // the mode it paints); they're swapped here onto Mintlify's inverted
+    // `{light, dark}` keys so `updateSiteConfig` has one consistent contract.
+    expect(bundle.site).toEqual({ name: 'Acme Docs', colors: { light: '#70E155', dark: '#008700' } })
+  })
+
+  it("resolves the first api: node's spec from generators.yml instead of the first OpenAPI file on disk", () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-generators-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(fernRoot, { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - api: API Reference
+`)
+    writeFileSync(join(fernRoot, 'generators.yml'), `
+api:
+  specs:
+    - openapi: openapi/configured.yml
+`)
+    // A decoy that `findOpenApi`'s naive on-disk scan would otherwise pick up
+    // first, proving generators.yml is now consulted first.
+    writeFileSync(join(fernRoot, 'openapi.yml'), 'openapi: 3.0.0\ninfo:\n  title: Decoy\n  version: "0"\npaths: {}\n')
+    mkdirSync(join(fernRoot, 'openapi'), { recursive: true })
+    writeFileSync(join(fernRoot, 'openapi', 'configured.yml'), 'openapi: 3.0.0\ninfo:\n  title: Acme API\n  version: "1.0"\npaths: {}\n')
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
+    expect(apiTab?.api?.source).toBe('/configured.yml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('configured.yml')
+  })
+
+  it('warns that a Fern Definition API was not migrated when no OpenAPI document is configured', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-definition-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'definition'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - api: API Reference
+`)
+    writeFileSync(join(fernRoot, 'definition', 'api.yml'), 'types: {}\n')
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('Fern Definition'),
+    }))
+    expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
   })
 })

@@ -141,110 +141,201 @@ export function detectUnsupportedFernComponents(body: string): Array<string> {
 }
 
 const JS_LITERAL_KEYWORDS = new Set(['true', 'false', 'null', 'undefined'])
+const BARE_IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/
+
+interface MdxOffsetNode {
+  type: string
+  value?: string
+  children?: Array<MdxOffsetNode>
+  position?: { start: { offset?: number }; end: { offset?: number } }
+}
+
+/**
+ * Bind every name a page's own ESM statement introduces — an import
+ * (default, namespace, or named/destructured) or a top-level `const`/`let`/
+ * `var`/`function`/`class` — so a prose brace referencing one of them is
+ * treated as real, already-bound code rather than ambiguous Fern prose. This
+ * is a tolerant textual scan of the statement's own source, not a full JS
+ * parse: good enough to recognize a binding, never used to execute anything.
+ */
+function collectEsmBindings(source: string, declared: Set<string>): void {
+  for (const match of source.matchAll(/\bimport\s+([^'";]+?)\s+from\s+['"][^'"]*['"]/g)) {
+    const clause = match[1].trim()
+    const namespace = clause.match(/^\*\s+as\s+(\w+)$/)
+    if (namespace) {
+      declared.add(namespace[1])
+      continue
+    }
+    for (const part of clause.split(/,(?![^{]*\})/).map((piece) => piece.trim()).filter(Boolean)) {
+      const named = part.match(/^\{([^}]*)\}$/)
+      if (named) {
+        for (const entry of named[1].split(',')) {
+          const name = entry.split(/\s+as\s+/).pop()?.trim()
+          if (name) declared.add(name)
+        }
+      } else if (/^\w+$/.test(part)) {
+        declared.add(part)
+      }
+    }
+  }
+  for (const match of source.matchAll(/\b(?:export\s+)?(?:const|let|var)\s+(\{[^}]*\}|\[[^\]]*\]|\w+)\s*=/g)) {
+    const target = match[1]
+    if (target.startsWith('{') || target.startsWith('[')) {
+      for (const name of target.replace(/[{}[\]]/g, '').split(',')) {
+        const clean = name.split(':').pop()?.split('=')[0]?.trim()
+        if (clean && /^\w+$/.test(clean)) declared.add(clean)
+      }
+    } else {
+      declared.add(target)
+    }
+  }
+  for (const match of source.matchAll(/\b(?:export\s+)?function\s+(\w+)/g)) declared.add(match[1])
+  for (const match of source.matchAll(/\b(?:export\s+)?class\s+(\w+)/g)) declared.add(match[1])
+}
 
 /**
  * Fern's own MDX renderer tolerates a bare `{word}` in prose as literal text
  * (e.g. `"connection to {vendor} failed"`); Thally's MDX pipeline evaluates
  * `{...}` as a JS expression and throws `ReferenceError` when the identifier
- * isn't defined. Escape only unambiguous prose braces: a single bare word,
- * never inside a fenced/inline code span or a JSX attribute expression
- * (`prop={word}`, where it is genuinely code).
+ * isn't defined. `{vendor}` is syntactically valid MDX either way — a text
+ * expression — so the fix isn't a character scan but telling real code from
+ * prose: parse the page, then escape only a bare identifier/dotted-path text
+ * expression (`mdxTextExpression`/`mdxFlowExpression`) that sits in ordinary
+ * prose — never one inside a JSX element (a real component expression, e.g.
+ * `{children}` or `{props.x}`) and never one the page's own ESM already
+ * imports or declares. A page whose source doesn't parse is left untouched;
+ * the migration's MDX-compile check reports the real problem instead.
  */
 export function escapeFernLiteralBraces(body: string): string {
-  let codeFence: string | null = null
-  return body.split('\n').map((line) => {
-    const fence = line.match(/^\s*(`{3,}|~{3,})/)
-    if (fence) {
-      if (!codeFence) codeFence = fence[1][0]
-      else if (fence[1][0] === codeFence) codeFence = null
-      return line
-    }
-    if (codeFence) return line
-    let result = ''
-    let inInlineCode = false
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i]
-      if (char === '`') {
-        inInlineCode = !inInlineCode
-        result += char
-        continue
+  let root: MdxOffsetNode
+  try {
+    root = descriptionParser.parse(body) as MdxOffsetNode
+  } catch {
+    return body
+  }
+
+  const declared = new Set<string>()
+  const collectEsm = (node: MdxOffsetNode) => {
+    if (node.type === 'mdxjsEsm' && node.value) collectEsmBindings(node.value, declared)
+    for (const child of node.children ?? []) collectEsm(child)
+  }
+  collectEsm(root)
+
+  const edits: Array<{ start: number; end: number; value: string }> = []
+  const visit = (node: MdxOffsetNode, insideJsx: boolean) => {
+    const isJsx = node.type === 'mdxJsxTextElement' || node.type === 'mdxJsxFlowElement'
+    if ((node.type === 'mdxTextExpression' || node.type === 'mdxFlowExpression') && !insideJsx) {
+      const value = (node.value ?? '').trim()
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (BARE_IDENTIFIER_PATH.test(value) && !JS_LITERAL_KEYWORDS.has(value)
+        && !declared.has(value.split('.')[0]) && start !== undefined && end !== undefined) {
+        edits.push({ start, end, value: `\\{${value}\\}` })
       }
-      // Skip a `{` the source already escaped (`\{`) or that is part of a
-      // literal `{{mustache}}`-style double brace; only a lone, unescaped
-      // single-brace word is the ambiguous case Thally's MDX would choke on.
-      if (!inInlineCode && char === '{' && line[i - 1] !== '=' && line[i - 1] !== '\\' && line[i - 1] !== '{') {
-        // Also covers a bare dotted reference (`{http.Server}`), a common way
-        // Fern prose spells a parameter's type without it being real code.
-        const match = /^\{([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\}(?!\})/.exec(line.slice(i))
-        if (match && !JS_LITERAL_KEYWORDS.has(match[1])) {
-          result += `\\{${match[1]}\\}`
-          i += match[0].length - 1
-          continue
-        }
-      }
-      result += char
     }
-    return result
-  }).join('\n')
+    for (const child of node.children ?? []) visit(child, insideJsx || isJsx)
+  }
+  visit(root, false)
+  if (edits.length === 0) return body
+
+  return edits
+    .sort((left, right) => right.start - left.start)
+    .reduce((result, edit) => `${result.slice(0, edit.start)}${edit.value}${result.slice(edit.end)}`, body)
 }
 
 /**
- * Walk `body` line by line, tracking fenced code blocks, and hand every line
- * outside a fence to `visitLine` together with its fence state. A textual
- * rename applied to raw source (rather than a parsed AST) must never fire
- * inside a fenced code block or an inline `code span` — that content documents
- * syntax rather than using it (e.g. prose reading "`<Tree>` and `<FileTree>`
- * are aliases" must not become "`<Tree>` and `<Tree>`"). Every platform's
- * line-based renamer in this module goes through this one fence tracker
- * instead of re-implementing it.
+ * Replace every fenced code block and inline `code span` in `body` with an
+ * opaque single-line placeholder, so a textual rename can run as one pass
+ * over the WHOLE body — including a tag or comment that spans multiple
+ * lines — without ever matching inside code, then restore the original code
+ * text afterward. A rename that only ever sees one line at a time (the old
+ * approach) misses anything spanning lines: a `<!--\n...\n-->` comment, a
+ * `<Warn\n  title="x">` opening tag whose `</Warn>` gets renamed with no
+ * matching open, a Docusaurus `<Link\n  to="/a">` likewise. Every rename in
+ * this module that isn't already AST-based goes through this one masker
+ * instead of re-implementing fence tracking.
  */
-function mapOutsideCodeFences(body: string, visitLine: (line: string) => string): string {
+function maskCode(body: string): { masked: string; unmask: (text: string) => string } {
+  // NUL is never valid in MDX; strip it so it can't collide with the \u0000
+  // placeholder markers stashed below.
+  const source = body.replace(/\u0000/g, '')
+
+  const blocks: Array<string> = []
+  const stash = (text: string): string => {
+    blocks.push(text)
+    return `\u0000${blocks.length - 1}\u0000`
+  }
+
+  const lines: Array<string> = []
   let codeFence: string | null = null
-  return body.split('\n').map((line) => {
-    const codeMatch = line.match(/^\s*(`{3,}|~{3,})/)
-    if (codeMatch) {
-      if (!codeFence) codeFence = codeMatch[1][0]
-      else if (codeMatch[1][0] === codeFence) codeFence = null
-      return line
+  let fenceBuffer: Array<string> = []
+  // Note: MDX (mdx-js) disables CommonMark indented code blocks, so
+  // 4-space-indented text is never code here and is intentionally left
+  // unmasked, matching @mdx-js/mdx's own parsing.
+  for (const line of source.split('\n')) {
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/)
+    if (codeFence) {
+      fenceBuffer.push(line)
+      if (fenceMatch && fenceMatch[1][0] === codeFence) {
+        lines.push(stash(fenceBuffer.join('\n')))
+        codeFence = null
+        fenceBuffer = []
+      }
+      continue
     }
-    if (codeFence) return line
-    return visitLine(line)
-  }).join('\n')
+    if (fenceMatch) {
+      codeFence = fenceMatch[1][0]
+      fenceBuffer = [line]
+      continue
+    }
+    lines.push(line.split(/(`[^`]*`)/).map((segment, index) => (
+      index % 2 === 1 ? stash(segment) : segment
+    )).join(''))
+  }
+  // An unterminated fence (malformed source) still must not be rewritten.
+  if (fenceBuffer.length) lines.push(stash(fenceBuffer.join('\n')))
+
+  return {
+    masked: lines.join('\n'),
+    unmask: (text) => text.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => blocks[Number(index)]),
+  }
 }
 
 /**
- * Apply a textual rename only to prose: outside fenced code blocks (via
- * `mapOutsideCodeFences`) and outside inline `code spans` within a surviving
- * line, where the same characters are documentation about syntax, not syntax.
+ * Apply a textual rename to the WHOLE body outside fenced/inline code (via
+ * `maskCode`), so a match may span multiple lines.
  */
-function replaceOutsideCode(body: string, transform: (segment: string) => string): string {
-  return mapOutsideCodeFences(body, (line) => (
-    line.split(/(`[^`]*`)/).map((segment, index) => (index % 2 === 0 ? transform(segment) : segment)).join('')
-  ))
+function replaceOutsideCode(body: string, transform: (whole: string) => string): string {
+  const { masked, unmask } = maskCode(body)
+  return unmask(transform(masked))
 }
 
 /**
  * Rewrite Fern's callout intents to Thally's fixed callout tags without
  * touching fenced code. Delimiters are tracked with a stack so nested and
- * sibling callouts each close with the tag their own opening intent chose.
+ * sibling callouts each close with the tag their own opening intent chose;
+ * the stack order only holds up when both passes run over the whole body in
+ * document order, which `replaceOutsideCode` provides.
  */
 function normalizeFernCallouts(body: string): string {
-  const openTags: Array<string> = []
-  return mapOutsideCodeFences(body, (line) => line
-    .replace(/<Callout\s+intent=(?:"([^"]*)"|'([^']*)')([^>]*?)(\/?)>/g, (_match, doubleQuoted: string, singleQuoted: string, rest: string, selfClose: string) => {
-      const intent = (doubleQuoted ?? singleQuoted ?? '').toLowerCase()
-      const tag = intent === 'warning'
-        ? 'Warning'
-        : intent === 'success' || intent === 'tip'
-          ? 'Tip'
-          : intent === 'error' || intent === 'danger' ? 'Error' : 'Note'
-      if (!selfClose) openTags.push(tag)
-      return `<${tag}${rest}${selfClose}>`
-    })
-    // Only rewrite closes paired with a Fern `<Callout intent="...">` we
-    // actually opened; a bare Mintlify `<Callout>...</Callout>` (no
-    // `intent`) never pushed a tag, so its closing tag must stay as-is.
-    .replace(/<\/Callout>/g, (match) => openTags.length ? `</${openTags.pop()}>` : match))
+  return replaceOutsideCode(body, (whole) => {
+    const openTags: Array<string> = []
+    return whole
+      .replace(/<Callout\s+intent=(?:"([^"]*)"|'([^']*)')([^>]*?)(\/?)>/g, (_match, doubleQuoted: string, singleQuoted: string, rest: string, selfClose: string) => {
+        const intent = (doubleQuoted ?? singleQuoted ?? '').toLowerCase()
+        const tag = intent === 'warning'
+          ? 'Warning'
+          : intent === 'success' || intent === 'tip'
+            ? 'Tip'
+            : intent === 'error' || intent === 'danger' ? 'Error' : 'Note'
+        if (!selfClose) openTags.push(tag)
+        return `<${tag}${rest}${selfClose}>`
+      })
+      // Only rewrite closes paired with a Fern `<Callout intent="...">` we
+      // actually opened; a bare Mintlify `<Callout>...</Callout>` (no
+      // `intent`) never pushed a tag, so its closing tag must stay as-is.
+      .replace(/<\/Callout>/g, (match) => openTags.length ? `</${openTags.pop()}>` : match)
+  })
 }
 
 /**
@@ -255,18 +346,23 @@ function normalizeFernCallouts(body: string): string {
  * nests inside a `<CodeGroup>`, so it survives untouched.
  */
 function unwrapFernCodeBlockTabs(body: string): string {
-  let groupDepth = 0
-  return mapOutsideCodeFences(body, (line) => {
-    if (/<CodeGroup\b/.test(line)) groupDepth++
-    const result = groupDepth > 0
-      ? line.replace(/<CodeBlock\b[^>]*>\n?/g, '').replace(/<\/CodeBlock>/g, '')
-      : line
-    if (/<\/CodeGroup>/.test(line)) groupDepth = Math.max(0, groupDepth - 1)
-    return result
+  return replaceOutsideCode(body, (whole) => {
+    let groupDepth = 0
+    return whole.replace(/<CodeGroup\b[^>]*>|<\/CodeGroup>|<CodeBlock\b[^>]*>|<\/CodeBlock>/g, (match) => {
+      if (match.startsWith('<CodeGroup')) {
+        groupDepth++
+        return match
+      }
+      if (match === '</CodeGroup>') {
+        groupDepth = Math.max(0, groupDepth - 1)
+        return match
+      }
+      return groupDepth > 0 ? '' : match
+    })
   })
 }
 
-// ponytail: a plain <pre>/<code> shim, not Thally's styled Pre/CodeGroup —
+// TODO: a plain <pre>/<code> shim, not Thally's styled Pre/CodeGroup —
 // upgrade to a registered `CodeBlock` MDX built-in (mirroring Code/CodeGroup)
 // once the scaffold template ships one.
 const STANDALONE_CODE_BLOCK_SHIM = [
@@ -298,9 +394,47 @@ function exportDeclarationBodies(body: string): Array<string> {
 }
 
 /**
- * Detects a page-authored function (`export const Name = ... =>`) passed as
- * a bare JSX prop value (`someProp={Name}`) elsewhere on the same page. Next
- * renders an MDX page as a Server Component by default; an extracted
+ * True when `export const NAME = ` (ending right at `sourceIndex`) assigns a
+ * real function expression — `function` or an arrow function — rather than a
+ * plain value whose initializer merely contains `=>` further in, the way
+ * `list.map((x) => x)` does. Only a genuine function reference crosses the
+ * server/client boundary as a prop; a value like `items` above does not.
+ */
+function isFunctionInitializer(source: string, sourceIndex: number): boolean {
+  let index = sourceIndex
+  const skipSpace = () => { while (/\s/.test(source[index] ?? '')) index++ }
+  skipSpace()
+  if (source.startsWith('async', index) && /\s/.test(source[index + 5] ?? '')) {
+    index += 5
+    skipSpace()
+  }
+  if (source.startsWith('function', index)) return true
+  if (source[index] === '(') {
+    let depth = 0
+    for (; index < source.length; index++) {
+      if (source[index] === '(') depth++
+      else if (source[index] === ')') {
+        depth--
+        if (depth === 0) {
+          index++
+          break
+        }
+      }
+    }
+    skipSpace()
+    return source.startsWith('=>', index)
+  }
+  const identifier = /^[A-Za-z_$][\w$]*/.exec(source.slice(index))
+  if (!identifier) return false
+  index += identifier[0].length
+  skipSpace()
+  return source.startsWith('=>', index)
+}
+
+/**
+ * Detects a page-authored function (`export const Name = () => ...`) passed
+ * as a bare JSX prop value (`someProp={Name}`) elsewhere on the same page.
+ * Next renders an MDX page as a Server Component by default; an extracted
  * interactive snippet it imports is `'use client'` (see `components.ts`).
  * Passing a plain function across that boundary as a prop throws at render
  * ("Functions cannot be passed directly to Client Components") even though
@@ -308,10 +442,19 @@ function exportDeclarationBodies(body: string): Array<string> {
  * server/client split, so this content is valid there. Thally has no import
  * mechanism that moves the declaration into the client module instead, so
  * the page is reported and excluded rather than shipped broken.
+ *
+ * Two things keep this from over-firing: fenced/inline code (a doc example
+ * showing this exact shape) never counts, via `maskCode`; and only a real
+ * function initializer counts as "a function" — `export const items =
+ * list.map((x) => x)` is a plain value, not one, even though its own
+ * initializer happens to contain `=>`.
  */
 export function hasClientBoundaryFunctionProp(body: string): boolean {
-  const declared = [...body.matchAll(/export const (\w+) = [^\n]*=>/g)].map((match) => match[1])
-  return declared.some((name) => new RegExp(`\\w+=\\{${name}\\}`).test(body))
+  const { masked } = maskCode(body)
+  const declared = [...masked.matchAll(/export const (\w+)\s*=\s*/g)]
+    .filter((match) => isFunctionInitializer(masked, (match.index ?? 0) + match[0].length))
+    .map((match) => match[1])
+  return declared.some((name) => new RegExp(`\\w+=\\{${name}\\}`).test(masked))
 }
 
 /**
@@ -430,15 +573,16 @@ function normalizeDocusaurusTabBlocks(body: string): string {
 
 /** Normalize only syntax Thally cannot render; supported source JSX stays intact. */
 export function normalizeMdx(body: string, platform?: MigrationPlatform): string {
-  // A caller that already knows the source platform (a real migration) must
-  // not let another platform's textual renames leak into this content — e.g.
-  // a Mintlify page's own `<Success>` component must not become `<Tip>`,
-  // which is a Fern-only alias. Direct unit tests exercise these renames
-  // without picking a platform, so an omitted platform keeps every rename
-  // available, as before.
-  const runFern = platform === undefined || platform === 'fern'
-  const runMintlify = platform === undefined || platform === 'mintlify'
-  const runDocusaurus = platform === undefined || platform === 'docusaurus'
+  // A caller that doesn't know the source platform (the URL crawler, when it
+  // can't identify one) must not guess — applying every platform's textual
+  // renames to a page of unknown origin corrupts one that happens to use the
+  // same component name for something else, e.g. a Mintlify page's own
+  // `<Success>` becoming `<Tip>`, a Fern-only alias. An omitted platform
+  // therefore runs no platform-specific renames; a caller exercising one
+  // must pass it explicitly.
+  const runFern = platform === 'fern'
+  const runMintlify = platform === 'mintlify'
+  const runDocusaurus = platform === 'docusaurus'
 
   let rewritten = normalizeDocusaurusAdmonitions(runFern ? normalizeFernCallouts(body) : body)
   if (runDocusaurus) {
