@@ -314,6 +314,31 @@ export function hasAnyFunctionValuedProp(body: string, declaredNames: ReadonlySe
   return found
 }
 
+/**
+ * True when a page's own inline `export const`/`export function` declaration
+ * (kept in place, not extracted into a 'use client' module — see the
+ * `mdxjsEsm` note above) references `document` or `window` as an identifier.
+ * Next renders an MDX page as a Server Component by default, where neither
+ * global exists; callers use this to warn rather than let the page fail at
+ * render. Identifiers are found via the TS AST, so a string, comment, or
+ * fenced code sample using the same words never counts.
+ */
+export function declarationsReferenceBrowserGlobal(body: string): boolean {
+  const tree = parser.parse(body) as MdxNode
+  let found = false
+  function inspect(node: ts.Node): void {
+    if (ts.isIdentifier(node) && (node.text === 'document' || node.text === 'window')) found = true
+    ts.forEachChild(node, inspect)
+  }
+  for (const node of tree.children ?? []) {
+    if (found || node.type !== 'mdxjsEsm' || node.value === undefined) continue
+    for (const statement of sourceFile(node.value, 'inline.tsx').statements) {
+      if (ts.isVariableStatement(statement) || ts.isFunctionDeclaration(statement)) inspect(statement)
+    }
+  }
+  return found
+}
+
 /** Create one bounded component graph and registry for a repository migration. */
 export function createComponentMigrator(siteRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
   transform: (raw: string, currentFile: string) => string

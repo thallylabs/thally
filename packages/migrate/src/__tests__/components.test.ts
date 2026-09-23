@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createComponentMigrator, hasAnyFunctionValuedProp, mergeComponentRegistry, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
+import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, mergeComponentRegistry, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
 import { migrateRepository } from '../repository.js'
 import { renderMigrationFiles } from '../render.js'
 import type { MigrationWarning } from '../types.js'
@@ -461,6 +461,23 @@ describe('hasAnyFunctionValuedProp', () => {
   it('is false when no prop carries a function value', () => {
     const body = '<Widget title="hi" count={1} />'
     expect(hasAnyFunctionValuedProp(body, new Set())).toBe(false)
+  })
+})
+
+describe('declarationsReferenceBrowserGlobal', () => {
+  it('is true for a page-local inline declaration that uses document', () => {
+    const body = "export function Demo() {\n  return createPortal(children, document.body)\n}\n\n<Demo />"
+    expect(declarationsReferenceBrowserGlobal(body)).toBe(true)
+  })
+
+  it('is false for a declaration that never references document or window', () => {
+    const body = 'export const Demo = () => <div>hi</div>\n\n<Demo />'
+    expect(declarationsReferenceBrowserGlobal(body)).toBe(false)
+  })
+
+  it('is false once the declaration is extracted into a client module (no inline mdxjsEsm left)', () => {
+    const body = '<Inline0 />'
+    expect(declarationsReferenceBrowserGlobal(body)).toBe(false)
   })
 })
 

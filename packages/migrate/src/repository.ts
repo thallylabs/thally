@@ -17,7 +17,7 @@ import { basename, dirname, extname, relative, resolve as resolvePath } from 'no
 
 import { parse as parseYaml } from 'yaml'
 
-import { createComponentMigrator, hasAnyFunctionValuedProp, propsTargetExtractedClientComponent } from './components.js'
+import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, propsTargetExtractedClientComponent } from './components.js'
 
 import {
   projectDocusaurusNavigation,
@@ -1262,6 +1262,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         code: 'unsupported-config',
         message: "This page might pass a function to an interactive component, which can't be rendered on the "
           + 'server; review it manually if the built page fails to render.',
+        source: file.relativePath,
+      })
+    }
+    if (declarationsReferenceBrowserGlobal(page.body)) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: "This page defines a component that uses `document`/`window`, which isn't available when pages "
+          + 'are rendered on the server. Move that code into a client component or edit the page manually.',
         source: file.relativePath,
       })
     }
