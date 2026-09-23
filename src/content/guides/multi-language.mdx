@@ -169,11 +169,11 @@ When a source page exists but its translation is missing, Thally shows the sourc
 
 > ⚠️ This page hasn't been translated to **Español** yet. Showing the original **English** version.
 
-**Stale translation** — a generated translation's recorded source hash differs from the current source, or an unmarked translation's file timestamp predates the source:
+**Stale translation** — a managed AI translation's recorded source hash differs from the current source:
 
 > This translation may be outdated. [View original →]
 
-Both banners appear only on secondary-locale routes. The primary route is never affected.
+Both banners appear only on secondary-locale routes. The primary route is never affected. Human-authored or unmarked translations are not labeled stale from deployment timestamps; review their freshness manually.
 
 To fix a stale or missing translation, run the translate command for that page:
 
