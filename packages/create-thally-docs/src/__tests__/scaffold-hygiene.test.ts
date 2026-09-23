@@ -29,6 +29,7 @@ import {
 import {
   personalizeStarter,
   updateEnvExample,
+  updateSiteConfig,
 } from '../customize.js'
 import { resetTrackingConfig, writeTrackingConfig } from '../docs-json.js'
 import {
@@ -393,6 +394,53 @@ describe('starter owner personalization', () => {
         enableAiChat: true,
       }),
     ).toThrow('missing owner field site.description')
+  })
+
+  it('maps migrated Mintlify theme colors onto the chosen brand preset only', () => {
+    const directory = temporaryDirectory('thally-starter-colors-')
+    mkdirSync(join(directory, 'src', 'data'), { recursive: true })
+    writeFileSync(
+      join(directory, 'src', 'data', 'site.ts'),
+      `const brandPresets = {
+  primary: {
+    light: {
+      accent: '#007852',
+    },
+    dark: {
+      accent: '#BAE43E',
+    },
+  },
+  secondary: {
+    light: {
+      accent: '#8B5CF6',
+    },
+    dark: {
+      accent: '#C084FC',
+    },
+  },
+}
+const brandPreset: BrandPresetKey = 'primary'
+export const siteConfig = {
+  name: 'Your product',
+  description:
+    'Documentation for your product.',
+  repoUrl: '',
+}
+`,
+    )
+
+    updateSiteConfig(directory, 'Acme Docs', 'Acme documentation.', 'primary', '', {
+      primary: '#16A34A',
+      light: '#07C983',
+      dark: '#15803D',
+    })
+
+    const site = readFileSync(join(directory, 'src', 'data', 'site.ts'), 'utf8')
+    expect(site).toContain("accent: '#07C983'")
+    expect(site).toContain("accent: '#15803D'")
+    // The unselected preset keeps its own accents untouched.
+    expect(site).toContain("accent: '#8B5CF6'")
+    expect(site).toContain("accent: '#C084FC'")
   })
 })
 

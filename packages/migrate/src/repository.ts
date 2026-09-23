@@ -4,6 +4,7 @@
  * so source-controlled branch names can never become shell commands.
  */
 
+import { compileSync } from '@mdx-js/mdx'
 import { spawn } from 'node:child_process'
 import {
   existsSync,
@@ -11,6 +12,7 @@ import {
   readFileSync,
   readdirSync,
 } from 'node:fs'
+import { createRequire } from 'node:module'
 import { basename, dirname, extname, relative, resolve as resolvePath } from 'node:path'
 
 import { createComponentMigrator } from './components.js'
@@ -23,13 +25,15 @@ import {
   type DocusaurusPageDescriptor,
   type DocusaurusSidebars,
 } from './docusaurus.js'
-import { parseMarkdownPage } from './mdx.js'
+import { projectFernNavigation, readFernConfig } from './fern.js'
+import { detectUnsupportedFernComponents, escapeFernLiteralBraces, hasClientBoundaryFunctionProp, parseMarkdownPage } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
   buildNavigationFromPages,
   isDocumentationExtension,
   projectMintlifyNavigation,
+  pruneMissingNavigationPages,
   readMintlifyConfig,
 } from './navigation.js'
 import {
@@ -44,6 +48,7 @@ import type {
   MigrationAsset,
   MigrationBundle,
   MigrationDocsConfig,
+  MigrationNavigationGroup,
   MigrationPage,
   MigrationPlatform,
   MigrationWarning,
@@ -67,6 +72,25 @@ const REPOSITORY_ONLY_DOCUMENTS = new Set([
   'license.md', 'readme.md', 'security.md',
 ])
 const SNIPPET_DIRECTORIES = new Set(['snippets', '_snippets', 'partials', '_partials'])
+// Matches a default import (`import Name from '...'`), a default-as-named
+// import (`import { default as Name } from '...'`), and a plain named import
+// (`import { Name } from '...'`) — Mintlify snippets can export either way.
+const SNIPPET_IMPORT_PATTERN = /^import\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm
+const MINTIGNORE_FILENAME = '.mintignore'
+interface IgnoreMatcher {
+  add(patterns: string): IgnoreMatcher
+  ignores(pathname: string): boolean
+}
+// `ignore`'s CJS default export is mistyped under NodeNext module resolution
+// (the default import resolves to the whole module namespace); load it
+// through `require` and type it locally instead of fighting the interop.
+const createIgnoreMatcher = createRequire(import.meta.url)('ignore') as () => IgnoreMatcher
+
+/** Dotfile directories (`.tooling`, `.vale`, tool/editor config, ...) never hold docs pages. */
+function isIgnoredDirectory(name: string): boolean {
+  return name.startsWith('.') || IGNORED_DIRECTORIES.has(name)
+}
+
 const OPENAPI_FILENAMES = new Set([
   'openapi.json', 'openapi.yaml', 'openapi.yml',
   'swagger.json', 'swagger.yaml', 'swagger.yml',
@@ -146,7 +170,40 @@ function findMintlifyProjectRoot(repositoryDir: string, docsDir?: string): strin
     if (hasMintlifyConfig(current.directory)) return current.directory
     if (current.depth >= 4) continue
     for (const entry of readdirSync(current.directory, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || IGNORED_DIRECTORIES.has(entry.name)) continue
+      if (!entry.isDirectory() || entry.isSymbolicLink() || isIgnoredDirectory(entry.name)) continue
+      queue.push({ directory: resolveWithin(current.directory, entry.name), depth: current.depth + 1 })
+    }
+  }
+  return null
+}
+
+function hasFernConfig(directory: string): boolean {
+  return ['docs.yml', 'fern.config.json'].every((filename) => {
+    const path = resolveWithin(directory, filename)
+    return existsSync(path) && lstatSync(path).isFile()
+  })
+}
+
+function findFernProjectRoot(repositoryDir: string, docsDir?: string): string | null {
+  if (docsDir !== undefined) {
+    let candidate = trimTrailingSlashes(docsDir)
+    while (true) {
+      const path = resolveWithin(repositoryDir, candidate || '.')
+      if (hasFernConfig(path)) return path
+      if (!candidate) break
+      const parent = dirname(candidate)
+      candidate = parent === '.' ? '' : parent
+    }
+  }
+  const queue: Array<{ directory: string; depth: number }> = [{ directory: repositoryDir, depth: 0 }]
+  let visited = 0
+  while (queue.length > 0 && visited < 500) {
+    const current = queue.shift()!
+    visited++
+    if (hasFernConfig(current.directory)) return current.directory
+    if (current.depth >= 4) continue
+    for (const entry of readdirSync(current.directory, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || isIgnoredDirectory(entry.name)) continue
       queue.push({ directory: resolveWithin(current.directory, entry.name), depth: current.depth + 1 })
     }
   }
@@ -173,7 +230,7 @@ function findDocusaurusProjectRoot(repositoryDir: string, docsDir?: string): str
     if (hasDocusaurusConfig(current.directory)) return current.directory
     if (current.depth >= 4) continue
     for (const entry of readdirSync(current.directory, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || IGNORED_DIRECTORIES.has(entry.name)) continue
+      if (!entry.isDirectory() || entry.isSymbolicLink() || isIgnoredDirectory(entry.name)) continue
       queue.push({
         directory: resolveWithin(current.directory, entry.name),
         depth: current.depth + 1,
@@ -279,6 +336,7 @@ export async function cloneGitHubRepository(
 /** Detect a supported repository docs platform from unambiguous config files. */
 export function detectRepositoryPlatform(repositoryDir: string, docsDir?: string): MigrationPlatform {
   if (findMintlifyProjectRoot(repositoryDir, docsDir)) return 'mintlify'
+  if (findFernProjectRoot(repositoryDir, docsDir)) return 'fern'
   const selectedRoot = docsDir === undefined ? repositoryDir : resolveWithin(repositoryDir, docsDir || '.')
   const docsJson = resolveWithin(selectedRoot, 'docs.json')
   if (existsSync(docsJson)) {
@@ -304,7 +362,7 @@ export function detectRepositoryPlatform(repositoryDir: string, docsDir?: string
 function containsMarkdown(directory: string, depth = 0): boolean {
   if (depth > 4) return false
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (IGNORED_DIRECTORIES.has(entry.name) || entry.isSymbolicLink()) continue
+    if (isIgnoredDirectory(entry.name) || entry.isSymbolicLink()) continue
     const path = resolveWithin(directory, entry.name)
     if (entry.isFile() && ['.md', '.mdx'].includes(extname(entry.name).toLowerCase())) return true
     if (entry.isDirectory() && containsMarkdown(path, depth + 1)) return true
@@ -332,7 +390,7 @@ function scanFiles(root: string): Array<ScannedFile> {
     if (files.length >= MAX_SOURCE_FILES) return
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       if (files.length >= MAX_SOURCE_FILES) return
-      if (IGNORED_DIRECTORIES.has(entry.name) || entry.isSymbolicLink()) continue
+      if (isIgnoredDirectory(entry.name) || entry.isSymbolicLink()) continue
       const path = resolveWithin(directory, entry.name)
       if (entry.isDirectory()) visit(path)
       else if (entry.isFile()) files.push({ absolutePath: path, relativePath: relative(root, path).replace(/\\/g, '/') })
@@ -340,6 +398,60 @@ function scanFiles(root: string): Array<ScannedFile> {
   }
   visit(root)
   return files
+}
+
+/**
+ * Mintlify excludes paths from the docs site with a gitignore-style
+ * `.mintignore` at the project root (see Mintlify's docs). Honoring it keeps
+ * internal tooling directories like `agent-context/` out of the migration
+ * even though they aren't dotfile directories.
+ */
+function readMintignoreMatcher(mintlifyRoot: string): IgnoreMatcher | null {
+  const path = resolveWithin(mintlifyRoot, MINTIGNORE_FILENAME)
+  if (!existsSync(path) || !lstatSync(path).isFile()) return null
+  return createIgnoreMatcher().add(readFileSync(path, 'utf8'))
+}
+
+/**
+ * Compile-check a page body with the same MDX compiler the scaffold's
+ * runtime build uses (`@mdx-js/mdx`). A single malformed page must never
+ * abort `scripts/build-runtime-sources.mts` for the whole project, so
+ * migration excludes it up front instead and reports why.
+ */
+function invalidMdxReason(body: string): string | null {
+  try {
+    compileSync(body, { outputFormat: 'program' })
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
+const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i
+
+/** Extract Mintlify's `colors.{primary,light,dark}` theme hexes, if valid. */
+function mintlifyThemeColors(value: unknown): { primary?: string; light?: string; dark?: string } | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const source = value as Record<string, unknown>
+  const colors: { primary?: string; light?: string; dark?: string } = {}
+  for (const key of ['primary', 'light', 'dark'] as const) {
+    if (typeof source[key] === 'string' && HEX_COLOR.test(source[key])) colors[key] = source[key]
+  }
+  return Object.keys(colors).length > 0 ? colors : undefined
+}
+
+/** Extract Fern's `colors.accent-primary` (a hex string, or `{light, dark}`), if valid. */
+function fernThemeColors(value: unknown): { primary?: string; light?: string; dark?: string } | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const accent = (value as Record<string, unknown>)['accent-primary']
+  if (typeof accent === 'string') return HEX_COLOR.test(accent) ? { primary: accent } : undefined
+  if (!accent || typeof accent !== 'object') return undefined
+  const colors: { light?: string; dark?: string } = {}
+  for (const key of ['light', 'dark'] as const) {
+    const entry = (accent as Record<string, unknown>)[key]
+    if (typeof entry === 'string' && HEX_COLOR.test(entry)) colors[key] = entry
+  }
+  return Object.keys(colors).length > 0 ? colors : undefined
 }
 
 function normalizedReferenceKey(value: string): string {
@@ -434,7 +546,6 @@ function globalSnippetAliases(
   siteRoot: string,
 ): Map<string, string> {
   const aliases = new Map<string, string>()
-  const matcher = /^import\s+(?:\{\s*default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}?\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm
   for (const file of files) {
     const segments = file.relativePath.split('/')
     if (!segments.some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))) continue
@@ -449,11 +560,12 @@ function globalSnippetAliases(
   for (const file of files) {
     if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())) continue
     const raw = readFileSync(file.absolutePath, 'utf8')
-    for (const match of raw.matchAll(matcher)) {
+    for (const match of raw.matchAll(SNIPPET_IMPORT_PATTERN)) {
       try {
-        const candidate = resolveSnippetPath(match[2], file.absolutePath, repositoryRoot, siteRoot)
+        const componentName = match[1] ?? match[2]
+        const candidate = resolveSnippetPath(match[3], file.absolutePath, repositoryRoot, siteRoot)
         if (existsSync(candidate) && lstatSync(candidate).isFile()) {
-          aliases.set(match[1], candidate)
+          aliases.set(componentName, candidate)
         }
       } catch {
         // The page-local inliner emits the actionable warning when it reaches
@@ -502,6 +614,34 @@ function repositoryAssetHref(
   }
 }
 
+/**
+ * Rewrite links to a page whose Fern frontmatter `slug` replaced its docs.yml
+ * hierarchy. Other pages still spell the link the "natural" nested way, so
+ * this runs across every page's body, not just the renamed page's own.
+ */
+function rewriteFernIdRenameLinks(body: string, renames: Map<string, string>): string {
+  let codeFence: string | null = null
+  return body.split('\n').map((line) => {
+    const fence = line.match(/^\s*(`{3,}|~{3,})/)
+    if (fence) {
+      if (!codeFence) codeFence = fence[1][0]
+      else if (fence[1][0] === codeFence) codeFence = null
+      return line
+    }
+    if (codeFence) return line
+    const rewriteTarget = (target: string): string => {
+      const suffixIndex = target.search(/[?#]/)
+      const path = (suffixIndex >= 0 ? target.slice(0, suffixIndex) : target).replace(/^\/+/, '')
+      const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
+      const renamed = renames.get(path)
+      return renamed ? `/${renamed}${suffix}` : target
+    }
+    return line
+      .replace(/(\]\()\/([^\s)]+)(?=[\s)]|$)/g, (_match, prefix: string, target: string) => `${prefix}${rewriteTarget(`/${target}`)}`)
+      .replace(/(\bhref=")\/([^"]+)(")/g, (_match, prefix: string, target: string, suffix: string) => `${prefix}${rewriteTarget(`/${target}`)}${suffix}`)
+  }).join('\n')
+}
+
 function rewriteRepositoryAssetLinks(body: string, currentFile: string, siteRoot: string): string {
   return body
     .replace(/(!?\[[^\]]*\]\()(<[^>]+>|[^)\s]+)([^)]*\))/g, (
@@ -524,6 +664,34 @@ function rewriteRepositoryAssetLinks(body: string, currentFile: string, siteRoot
     })
 }
 
+const LOCAL_EXPORT_DECLARATION = /^\s*export\s+(?:const|let|var|function|class|async\s+function)\s+([A-Za-z_$][\w$]*)/
+
+/**
+ * Names a page declares itself with a top-level `export const/function/class`.
+ * Mintlify treats every file under `/snippets/` as an implicitly available
+ * global component keyed by its filename, so a page that happens to declare
+ * an inline component with the same name (e.g. both `snippets/counter.mdx`
+ * and a page's own `export const Counter = ...`) must keep its local
+ * declaration: forcing the unrelated global snippet's source in over a
+ * `<Counter />` usage duplicates the export and breaks the compiled module.
+ */
+function locallyDeclaredNames(raw: string): Set<string> {
+  const names = new Set<string>()
+  let codeFence: string | null = null
+  for (const line of raw.split('\n')) {
+    const codeMatch = line.match(/^\s*(`{3,}|~{3,})/)
+    if (codeMatch) {
+      if (!codeFence) codeFence = codeMatch[1][0]
+      else if (codeMatch[1][0] === codeFence) codeFence = null
+      continue
+    }
+    if (codeFence) continue
+    const declared = line.match(LOCAL_EXPORT_DECLARATION)?.[1]
+    if (declared) names.add(declared)
+  }
+  return names
+}
+
 function inlineMdxSnippets(
   raw: string,
   currentFile: string,
@@ -536,8 +704,9 @@ function inlineMdxSnippets(
   if (depth >= 8) return raw
   const snippets = new Map<string, string>()
   const withoutImports = raw.replace(
-    /^import\s+(?:\{\s*default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}?\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm,
-    (_statement, componentName: string, sourcePath: string) => {
+    SNIPPET_IMPORT_PATTERN,
+    (_statement, namedComponent: string | undefined, defaultComponent: string | undefined, sourcePath: string) => {
+      const componentName = (namedComponent ?? defaultComponent) as string
       try {
         const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
         if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
@@ -567,8 +736,10 @@ function inlineMdxSnippets(
   // real sites consequently reuse an alias on a page that does not repeat the
   // import declaration. Recover those aliases deterministically from imports
   // elsewhere in the same docs project.
+  const localNames = locallyDeclaredNames(withoutImports)
   for (const [componentName, candidate] of globalAliases) {
-    if (snippets.has(componentName) || !new RegExp(`<${componentName}(?:\\s|/?>)`).test(withoutImports)) continue
+    if (snippets.has(componentName) || localNames.has(componentName)
+      || !new RegExp(`<${componentName}(?:\\s|/?>)`).test(withoutImports)) continue
     const nested = inlineMdxSnippets(
       withoutFrontmatter(readFileSync(candidate, 'utf8')),
       candidate,
@@ -625,6 +796,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const docusaurusProjectRoot = platform === 'docusaurus'
     ? findDocusaurusProjectRoot(repositoryDir, options.docsDir)
     : null
+  const fernProjectRoot = platform === 'fern'
+    ? findFernProjectRoot(repositoryDir, options.docsDir)
+    : null
   const configuredDocsDir = (() => {
     if (options.docsDir !== undefined) {
       const selected = resolveWithin(repositoryDir, options.docsDir || '.')
@@ -641,11 +815,46 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (platform === 'mintlify' && mintlifyProjectRoot) {
       return relative(repositoryDir, mintlifyProjectRoot).replace(/\\/g, '/')
     }
+    if (platform === 'fern' && fernProjectRoot) {
+      return relative(repositoryDir, fernProjectRoot).replace(/\\/g, '/')
+    }
     return platform === 'mintlify' ? '' : detectRepositoryDocsDir(repositoryDir)
   })()
   const warnings: Array<MigrationWarning> = []
-  const componentRoot = mintlifyProjectRoot ?? repositoryDir
-  const componentMigrator = platform === 'mintlify'
+  // Only the current, default-locale docs are imported (`configuredDocsDir`,
+  // below, never points inside these). Thally has no versions concept and
+  // Docusaurus' own i18n content lives in a separate tree this adapter does
+  // not project, so both are reported rather than silently dropped.
+  if (platform === 'docusaurus' && docusaurusProjectRoot) {
+    for (const [directory, label] of [
+      ['versioned_docs', 'versioned docs'],
+      ['versioned_sidebars', 'versioned sidebars'],
+    ] as const) {
+      const path = resolveWithin(docusaurusProjectRoot, directory)
+      if (!existsSync(path) || !lstatSync(path).isDirectory()) continue
+      const versions = readdirSync(path, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+      if (versions.length) warnings.push({
+        code: 'unsupported-config',
+        message: `Docusaurus ${label} were skipped; only current docs were imported. Skipped: ${versions.join(', ')}.`,
+        source: directory,
+      })
+    }
+    const i18nPath = resolveWithin(docusaurusProjectRoot, 'i18n')
+    if (existsSync(i18nPath) && lstatSync(i18nPath).isDirectory()) {
+      const locales = readdirSync(i18nPath, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+      if (locales.length) warnings.push({
+        code: 'unsupported-config',
+        message: `Docusaurus localized content was skipped; only the default locale was imported. Skipped locales: ${locales.join(', ')}.`,
+        source: 'i18n',
+      })
+    }
+  }
+  // A Docusaurus MDX page can import its own local components (relative or
+  // `@site/...`) and bare npm packages the same way a Mintlify page can; the
+  // same bounded component graph and import-stripping logic applies to
+  // either source, rooted at whichever project actually owns the pages.
+  const componentRoot = mintlifyProjectRoot ?? docusaurusProjectRoot ?? repositoryDir
+  const componentMigrator = platform === 'mintlify' || platform === 'docusaurus'
     ? createComponentMigrator(componentRoot, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
     : undefined
   let docsConfig: MigrationDocsConfig = { tabs: [] }
@@ -654,6 +863,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const referenceOrder = new Map<string, number>()
   let docusaurusSidebars: DocusaurusSidebars | null = null
   let mintlifyConfig: Record<string, unknown> | null = null
+  let fernRawConfig: Record<string, unknown> | null = null
 
   if (platform === 'mintlify') {
     try {
@@ -682,6 +892,30 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
 
+  if (platform === 'fern' && fernProjectRoot) {
+    try {
+      const fernConfig = readFernConfig(fernProjectRoot)
+      if (fernConfig) {
+        fernRawConfig = fernConfig.config
+        const projected = projectFernNavigation({ config: fernConfig.config, fernRoot: fernProjectRoot })
+        docsConfig = projected.docsConfig
+        warnings.push(...projected.warnings)
+        for (const [index, descriptor] of projected.descriptors.entries()) {
+          const key = normalizedReferenceKey(descriptor.sourcePath)
+          if (!referenceMap.has(key)) referenceMap.set(key, { navigationId: descriptor.navigationId })
+          const exactKey = exactReferenceKey(descriptor.sourcePath)
+          if (!exactReferenceMap.has(exactKey)) exactReferenceMap.set(exactKey, { navigationId: descriptor.navigationId })
+          if (!referenceOrder.has(key)) referenceOrder.set(key, index)
+        }
+      }
+    } catch (error) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `Fern config could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  }
+
   if (platform === 'docusaurus') {
     try {
       docusaurusSidebars = options.docusaurusSkipSidebar || !docusaurusProjectRoot
@@ -699,11 +933,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   if (!existsSync(contentRoot) || !lstatSync(contentRoot).isDirectory()) {
     throw new Error(`Documentation directory does not exist: ${configuredDocsDir || '.'}`)
   }
-  const files = scanFiles(contentRoot)
+  const mintignoreMatcher = platform === 'mintlify' && mintlifyProjectRoot
+    ? readMintignoreMatcher(mintlifyProjectRoot)
+    : null
+  const files = mintignoreMatcher
+    ? scanFiles(contentRoot).filter((file) => !mintignoreMatcher.ignores(file.relativePath))
+    : scanFiles(contentRoot)
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
   const docusaurusDescriptors: Array<DocusaurusPageDescriptor> = []
   const seenPageIds = new Set<string>()
+  const warnedFernComponents = new Set<string>()
+  /** docs.yml-derived navigationId -> final id, when a page's frontmatter `slug` overrides it. */
+  const fernIdRenames = new Map<string, string>()
   let skipped = 0
   let discovered = files.length
 
@@ -722,6 +964,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     : new Map<string, string>()
   for (const file of pageFiles) {
     if (!isDocumentationExtension(file.relativePath)) continue
+    // Unlike Mintlify/Docusaurus, Fern only ever serves pages reachable from
+    // docs.yml (or a versions file); everything else is invisible on the
+    // live site, so importing it as an "orphan" page would fabricate content
+    // (and can crash a build on stray files that were never meant to render).
+    if (platform === 'fern'
+      && !exactReferenceMap.has(exactReferenceKey(file.relativePath))
+      && !referenceMap.has(normalizedReferenceKey(file.relativePath))) {
+      skipped++
+      continue
+    }
     const sourceSegments = file.relativePath.split('/')
     if (sourceSegments.some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
       || (platform === 'docusaurus' && basename(file.relativePath).startsWith('_'))) {
@@ -770,16 +1022,30 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       repositoryDir,
       warnings,
       0,
-      mintlifyProjectRoot ?? docusaurusProjectRoot ?? repositoryDir,
+      mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir,
       snippetAliases,
     )
     if (componentMigrator) raw = componentMigrator.transform(raw, file.absolutePath)
+    if (platform === 'fern') {
+      raw = escapeFernLiteralBraces(raw)
+      for (const name of detectUnsupportedFernComponents(raw)) {
+        const key = `fern-component:${name}`
+        if (warnedFernComponents.has(key)) continue
+        warnedFernComponents.add(key)
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Fern component <${name}> is not supported by Thally and was left as-is.`,
+          source: file.relativePath,
+        })
+      }
+    }
     let docusaurusDescriptor: Omit<DocusaurusPageDescriptor, 'title'> | undefined
     const page = parseMarkdownPage({
       id,
       navigationId,
       ...(locale ? { locale } : {}),
       raw,
+      platform,
       source: `${options.sourceUrl}#${relative(repositoryDir, file.absolutePath).replace(/\\/g, '/')}`,
       ...(platform === 'docusaurus' ? {
         resolveIdentity: (frontmatter, fallback) => {
@@ -808,6 +1074,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           }
         },
       } : {}),
+      // A Fern page's own frontmatter `slug` replaces its whole section/folder
+      // hierarchy (never just its own segment) and wins over a docs.yml slug.
+      ...(platform === 'fern' ? {
+        resolveIdentity: (frontmatter, fallback) => {
+          const slug = typeof frontmatter.slug === 'string' ? frontmatter.slug.trim() : ''
+          if (!slug) return fallback
+          const overridden = pageIdFromReference(slug, true)
+          if (!overridden) return fallback
+          fernIdRenames.set(fallback.navigationId, overridden)
+          return { ...fallback, id: overridden, navigationId: overridden }
+        },
+      } : {}),
     })
     if (!page) {
       skipped++
@@ -815,6 +1093,30 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (platform === 'mintlify' && mintlifyProjectRoot) {
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot)
+    }
+    if (platform === 'fern' && fernProjectRoot) {
+      page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, fernProjectRoot)
+    }
+    const mdxError = invalidMdxReason(page.body)
+    if (mdxError) {
+      skipped++
+      warnings.push({
+        code: 'skipped-file',
+        message: `Page was excluded because it does not compile as MDX: ${mdxError}`,
+        source: file.relativePath,
+      })
+      continue
+    }
+    if (hasClientBoundaryFunctionProp(page.body)) {
+      skipped++
+      warnings.push({
+        code: 'skipped-file',
+        message: 'Page was excluded because it passes a page-authored function as a prop into an interactive '
+          + 'client component; Next throws "Functions cannot be passed directly to Client Components" for this '
+          + 'shape even though the MDX itself compiles. Renders fine on Mintlify, which has no server/client split.',
+        source: file.relativePath,
+      })
+      continue
     }
     if (seenPageIds.has(page.id)) {
       skipped++
@@ -901,6 +1203,34 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (descriptor) page.body = rewriteDocusaurusLinks(page.body, descriptor, docusaurusDescriptors)
     }
   }
+  if (platform === 'fern' && fernIdRenames.size > 0) {
+    const renamedRoute = (route: string): string => {
+      const renamed = fernIdRenames.get(route.replace(/^\//, ''))
+      return renamed ? `/${renamed}` : route
+    }
+    const renamePages = (nodes: Array<string | MigrationNavigationGroup>): Array<string | MigrationNavigationGroup> =>
+      nodes.map((node) => typeof node === 'string'
+        ? fernIdRenames.get(node) ?? node
+        : { ...node, pages: renamePages(node.pages) })
+    for (const page of pages) {
+      page.body = rewriteFernIdRenameLinks(page.body, fernIdRenames)
+    }
+    docsConfig = {
+      ...docsConfig,
+      tabs: docsConfig.tabs.map((tab) => ({
+        ...tab,
+        ...(tab.pages ? { pages: renamePages(tab.pages) } : {}),
+        ...(tab.groups ? { groups: renamePages(tab.groups) as Array<MigrationNavigationGroup> } : {}),
+      })),
+      ...(docsConfig.redirects ? {
+        redirects: docsConfig.redirects.map((redirect) => ({
+          ...redirect,
+          source: renamedRoute(redirect.source),
+          destination: renamedRoute(redirect.destination),
+        })),
+      } : {}),
+    }
+  }
   if (docsConfig.tabs.length === 0) docsConfig = buildNavigationFromPages(pages)
   const openApi = findConfiguredMintlifyOpenApi(mintlifyConfig, files) ?? findOpenApi(files)
   if (openApi) {
@@ -955,7 +1285,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
 
+  // Pages skipped above (invalid MDX, a client-boundary function prop, an id
+  // collision) never entered `pages`, but the nav was projected from the raw
+  // source config and may still reference their ids. Drop those dangling
+  // references so `thally check` never reports a nav entry with no MDX file.
+  docsConfig = pruneMissingNavigationPages(docsConfig, new Set(pages.map((page) => page.navigationId)))
+
   if (pages.length === 0) throw new Error('No importable Markdown or MDX pages were found in the repository.')
+  const themeColors = mintlifyConfig
+    ? mintlifyThemeColors(mintlifyConfig.colors)
+    : fernRawConfig ? fernThemeColors(fernRawConfig.colors) : undefined
   return {
     sourceUrl: options.sourceUrl,
     sourceKind: 'repository',
@@ -968,6 +1307,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       site: {
         ...(typeof mintlifyConfig.name === 'string' ? { name: mintlifyConfig.name } : {}),
         ...(typeof mintlifyConfig.description === 'string' ? { description: mintlifyConfig.description } : {}),
+        ...(themeColors ? { colors: themeColors } : {}),
+      },
+    } : fernRawConfig && (typeof fernRawConfig.title === 'string' || themeColors) ? {
+      site: {
+        ...(typeof fernRawConfig.title === 'string' ? { name: fernRawConfig.title } : {}),
+        ...(themeColors ? { colors: themeColors } : {}),
       },
     } : {}),
     warnings,

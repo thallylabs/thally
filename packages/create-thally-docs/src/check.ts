@@ -148,21 +148,38 @@ function addOrphanToNav(projectDir: string, pageId: string): void {
   }
 }
 
-/** Match Thally's heading-anchor slugs closely enough for link validation. */
+/**
+ * Thally's renderer (`src/components/mdx/mdx-components.tsx`) derives every
+ * heading's `id` with `slugify` from `src/lib/utils.ts`. That package lives
+ * outside this CLI's publishable tree, so the algorithm is duplicated here —
+ * keep the two in sync if either changes.
+ */
 function slugify(text: string): string {
   return text
     .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
 }
 
+const EXPLICIT_ID_ATTRIBUTE = /\bid=(?:"([^"]*)"|'([^']*)'|\{["']([^"'}]*)["']\})/g
+
+/**
+ * Headings and explicit anchor targets a rendered page actually exposes.
+ * CommonMark still parses a heading marker indented up to 3 spaces (only 4+
+ * turns it into a code block), including inside JSX children, so markdown
+ * headings authored with light indentation must count too. Any JSX/HTML
+ * element carrying a literal `id` attribute is also a valid link target,
+ * independent of headings.
+ */
 function extractHeadingAnchors(content: string): Set<string> {
   const anchors = new Set<string>()
   for (const line of content.split('\n')) {
-    const m = /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
-    if (m) anchors.add(slugify(m[1]))
+    const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
+    if (heading) anchors.add(slugify(heading[1]))
+    for (const idMatch of line.matchAll(EXPLICIT_ID_ATTRIBUTE)) {
+      const id = idMatch[1] ?? idMatch[2] ?? idMatch[3]
+      if (id) anchors.add(id)
+    }
   }
   return anchors
 }

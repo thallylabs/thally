@@ -112,6 +112,17 @@ describe('standalone rich-content primitives', () => {
     expect(fromString).toContain('lg:grid-cols-4')
   })
 
+  it('renders a card image as a plain <img> so any remote host works without a next.config allowlist', () => {
+    const markup = renderToStaticMarkup(createElement(Card, {
+      title: 'Deploy at a subpath',
+      img: 'https://mintlify-assets.b-cdn.net/deploy/vercel.png',
+    }))
+    expect(markup).toContain('<img')
+    expect(markup).not.toContain('srcset')
+    expect(markup).toContain('src="https://mintlify-assets.b-cdn.net/deploy/vercel.png"')
+    expect(markup).toContain('loading="lazy"')
+  })
+
   it('renders Mintlify cards with authored JSX icons', () => {
     const markup = renderToStaticMarkup(createElement(Card, {
       title: 'Follow us',

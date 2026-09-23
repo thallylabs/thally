@@ -46,6 +46,22 @@ describe('thally check reader routes', () => {
     expect(result.output).not.toContain('Broken')
   })
 
+  it('recognizes indented headings and explicit id attributes as real anchors', async () => {
+    const result = await checkLinks([
+      '<Tab title="Setup">',
+      '  ## Install the CLI',
+      '',
+      '  Follow these steps.',
+      '</Tab>',
+      '',
+      '<div id="explicit-target">Custom anchor</div>',
+      '',
+      '[Indented heading](#install-the-cli) [Explicit id](#explicit-target)',
+    ].join('\n'))
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken anchor')
+  })
+
   it('uses actual translated anchors when a translation exists', async () => {
     const result = await checkLinks('[Reference](/zh-Hans/api-reference/token#response)', [], '## Localized heading\n\nThe translated document has a different heading.')
     expect(result.exit).toBe(0)

@@ -132,6 +132,7 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
       // live at new paths, so source URLs cannot power edit/issue actions.
       repoUrl: '',
       doInstall: false,
+      colors: bundle.site?.colors,
     })
     resetFreshMigrationContent(projectDir)
   } else if (!existsSync(projectDir)) {

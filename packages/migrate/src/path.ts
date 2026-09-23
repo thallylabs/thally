@@ -49,8 +49,15 @@ export function pageIdFromReference(value: string, preserveCase = false): string
   const rawSegments = withoutQuery.split('/').filter(Boolean)
   if (rawSegments.some((segment) => segment === '..' || segment === '.')) return null
   const last = rawSegments.at(-1)?.replace(/\.(?:mdx?|rst|txt)$/i, '') ?? ''
-  const baseSegments = /^(?:index|readme)$/i.test(last) ? rawSegments.slice(0, -1) : rawSegments
-  if (!/^(?:index|readme)$/i.test(last)) {
+  // `index` collapses to its parent directory at any depth, matching how
+  // Mintlify and Next.js both treat directory indexes. `readme` only does the
+  // same at the content root (`readme.md` -> `/`); a nested `readme` is a
+  // real, addressable page (`migration/readme.md` -> `/migration/readme`)
+  // and must not collide with a sibling `migration/index.md`.
+  const isRootLevelReadme = rawSegments.length === 1 && /^readme$/i.test(last)
+  const collapsesToParent = /^index$/i.test(last) || isRootLevelReadme
+  const baseSegments = collapsesToParent ? rawSegments.slice(0, -1) : rawSegments
+  if (!collapsesToParent) {
     baseSegments[baseSegments.length - 1] = last
   }
   const segments = baseSegments.map((segment) => slugifySegment(segment, preserveCase)).filter(Boolean)

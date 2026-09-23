@@ -22,6 +22,8 @@ export interface StarterPersonalizationOptions {
   repoUrl: string
   enableAiChat: boolean
   i18nLocales?: Array<StarterLocale>
+  /** Source theme accent color(s) to apply over the chosen brand preset. */
+  colors?: { primary?: string; light?: string; dark?: string }
 }
 
 function readJsonObject(filePath: string, label: string): Record<string, unknown> {
@@ -127,6 +129,24 @@ function replaceRequired(
   return source.replace(pattern, replacement)
 }
 
+/**
+ * Replace the `accent` hex within one brand preset's `light`/`dark` palette.
+ * Both presets share identical indentation, so the preset's own block is
+ * isolated first (up to its `  },` close) and the mode sub-block second (up
+ * to its `    },` close) before touching the single `accent:` line inside it.
+ */
+function replacePresetAccent(source: string, preset: string, mode: 'light' | 'dark', hex: string): string {
+  const presetPattern = new RegExp(`  ${preset}: \\{[\\s\\S]*?\\n  \\},`)
+  const presetBlock = source.match(presetPattern)?.[0]
+  if (!presetBlock) return source
+  const modePattern = new RegExp(`    ${mode}: \\{[\\s\\S]*?\\n    \\},`)
+  const modeBlock = presetBlock.match(modePattern)?.[0]
+  if (!modeBlock) return source
+  const updatedModeBlock = modeBlock.replace(/accent:[ \t]*'#[0-9a-fA-F]{3,6}'/, `accent: '${hex}'`)
+  if (updatedModeBlock === modeBlock) return source
+  return source.replace(presetBlock, presetBlock.replace(modeBlock, updatedModeBlock))
+}
+
 /** Personalize the documented identity and repository fields in `site.ts`. */
 export function updateSiteConfig(
   targetDir: string,
@@ -134,6 +154,7 @@ export function updateSiteConfig(
   description: string,
   brandPreset: string,
   repoUrl: string,
+  colors?: { primary?: string; light?: string; dark?: string },
 ): void {
   if (!projectName.trim() || /[\0\r\n]/.test(projectName)) {
     throw new Error('The documentation project name is invalid.')
@@ -193,6 +214,11 @@ export function updateSiteConfig(
       '',
     )
   }
+
+  const lightAccent = colors?.light ?? colors?.primary
+  const darkAccent = colors?.dark ?? colors?.primary
+  if (lightAccent) source = replacePresetAccent(source, brandPreset, 'light', lightAccent)
+  if (darkAccent) source = replacePresetAccent(source, brandPreset, 'dark', darkAccent)
 
   writeFileSync(siteFile, source, 'utf8')
 }
@@ -259,6 +285,7 @@ export function personalizeStarter(
     options.description,
     options.brandPreset,
     options.repoUrl,
+    options.colors,
   )
   updatePackageIdentity(targetDir, options.packageName)
   updateCloudflareRuntimeName(targetDir, options.packageName)

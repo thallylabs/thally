@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { migrateRepository, readMintlifyConfig, renderMigrationFiles } from '../index.js'
+import { migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
 
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repository-'))
@@ -249,6 +249,179 @@ describe('Mintlify repository migration', () => {
     expect(introduction?.content).toContain('mode: "center"')
     expect(introduction?.content).toContain('noindex: true')
   })
+
+  it('skips dotfile directories and .mintignore paths, and excludes pages that fail to compile as MDX', () => {
+    const root = fixture()
+    // Dotfile directory: never a docs page, even without a .mintignore entry.
+    mkdirSync(join(root, 'en', '.tooling', 'skills'), { recursive: true })
+    writeFileSync(join(root, 'en', '.tooling', 'skills', 'skill.mdx'), '# Not a page')
+    // Non-dotfile directory excluded only via .mintignore, like Mintlify's own
+    // agent-context/ convention.
+    mkdirSync(join(root, 'agent-context'), { recursive: true })
+    writeFileSync(join(root, 'agent-context', 'notes.mdx'), '# Internal notes')
+    writeFileSync(join(root, '.mintignore'), 'agent-context/\n')
+    // Invalid MDX (an unmatched closing tag) must not abort the whole import.
+    writeFileSync(join(root, 'en', 'broken.mdx'), '---\ntitle: Broken\n---\n\n</NoOpenTag>')
+
+    const bundle = migrateRepository({
+      repositoryDir: root,
+      sourceUrl: 'https://github.com/acme/docs',
+    })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('en/.tooling/skills/skill')
+    expect(bundle.pages.map((page) => page.id)).not.toContain('agent-context/notes')
+    expect(bundle.pages.map((page) => page.id)).not.toContain('broken')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'skipped-file',
+      source: 'en/broken.mdx',
+      message: expect.stringContaining('does not compile as MDX'),
+    }))
+  })
+
+  it('keeps a page-local component declaration instead of forcing in a same-named global snippet', () => {
+    const root = fixture()
+    // Mintlify treats every /snippets/ file as an implicitly available global
+    // component keyed by its filename ("Counter" here), regardless of whether
+    // any page imports it.
+    writeFileSync(join(root, 'snippets', 'counter.mdx'), 'export const Counter = () => <div>Global counter</div>\n')
+    writeFileSync(join(root, 'en', 'widgets.mdx'), [
+      '---',
+      'title: Widgets',
+      '---',
+      '',
+      'export const Counter = () => <div>Local counter</div>',
+      '',
+      '<Counter />',
+    ].join('\n'))
+
+    const bundle = migrateRepository({
+      repositoryDir: root,
+      sourceUrl: 'https://github.com/acme/docs',
+    })
+
+    const page = bundle.pages.find((candidate) => candidate.id === 'widgets')
+    expect(page?.body.match(/export const Counter/g)).toHaveLength(1)
+    expect(page?.body).toContain('Local counter')
+    expect(page?.body).not.toContain('Global counter')
+  })
+
+  it('strips a named-import snippet declaration so its inlined component is not duplicated', () => {
+    const root = fixture()
+    // Mintlify snippets can export a named binding (not just a default),
+    // e.g. `import { Generator } from "/snippets/generator.mdx"`. The import
+    // line itself must be removed once the snippet body is inlined, or the
+    // inlined `export const Generator` collides with the surviving import.
+    writeFileSync(join(root, 'snippets', 'generator.mdx'), 'export const Generator = () => <div>Generated</div>\n')
+    writeFileSync(join(root, 'en', 'generator.mdx'), [
+      '---',
+      'title: Generator',
+      '---',
+      '',
+      'import { Generator } from "/snippets/generator.mdx";',
+      '',
+      '<Generator />',
+    ].join('\n'))
+
+    const bundle = migrateRepository({
+      repositoryDir: root,
+      sourceUrl: 'https://github.com/acme/docs',
+    })
+
+    const page = bundle.pages.find((candidate) => candidate.id === 'generator')
+    expect(page?.body).not.toContain('import { Generator }')
+    expect(page?.body.match(/export const Generator/g)).toHaveLength(1)
+  })
+
+  it('excludes a page that passes a page-authored function as a prop into an interactive client component', () => {
+    const root = fixture()
+    // Next renders an MDX page as a Server Component by default. An extracted
+    // interactive snippet it imports is `'use client'`; passing a plain
+    // function into it as a prop throws "Functions cannot be passed directly
+    // to Client Components" at render, even though the MDX compiles fine —
+    // Mintlify's own renderer has no such server/client split.
+    writeFileSync(join(root, 'en', 'widget.mdx'), [
+      '---',
+      'title: Widget',
+      '---',
+      '',
+      'export const CustomBlock = ({ children }) => <div>{children}</div>;',
+      '',
+      '<Accordion title="x" RenderComponent={CustomBlock}>Body</Accordion>',
+    ].join('\n'))
+
+    const bundle = migrateRepository({
+      repositoryDir: root,
+      sourceUrl: 'https://github.com/acme/docs',
+    })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('widget')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'skipped-file',
+      source: 'en/widget.mdx',
+      message: expect.stringContaining('Functions cannot be passed directly to Client Components'),
+    }))
+  })
+
+  it('drops an excluded page from navigation instead of leaving a dangling reference', () => {
+    const root = fixture()
+    // The source `docs.json`/`navigation.json` still lists this page even
+    // though it gets excluded above (same shape, different platform) — the
+    // nav is projected from the raw config independently of which files
+    // actually made it into `bundle.pages`.
+    writeFileSync(join(root, 'navigation.json'), JSON.stringify({
+      languages: [
+        {
+          language: 'en',
+          tabs: [{
+            tab: 'Guides',
+            groups: [
+              { group: 'Start', pages: ['en/introduction', 'en/guides/install'] },
+              { group: 'Assistant', pages: ['en/widget'] },
+            ],
+          }],
+        },
+        {
+          language: 'es',
+          tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['es/introduction', 'es/guides/install'] }] }],
+        },
+      ],
+    }))
+    writeFileSync(join(root, 'en', 'widget.mdx'), [
+      '---',
+      'title: Widget',
+      '---',
+      '',
+      'export const CustomBlock = ({ children }) => <div>{children}</div>;',
+      '',
+      '<Accordion title="x" RenderComponent={CustomBlock}>Body</Accordion>',
+    ].join('\n'))
+
+    const bundle = migrateRepository({
+      repositoryDir: root,
+      sourceUrl: 'https://github.com/acme/docs',
+    })
+
+    const guidesTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Guides')
+    const groupNames = guidesTab?.groups?.map((group) => group.group)
+    expect(groupNames).not.toContain('Assistant')
+    expect(JSON.stringify(bundle.docsConfig)).not.toContain('en/widget')
+  })
+
+  it('carries Mintlify theme colors into the migrated site branding', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { $ref: './navigation.json' },
+      colors: { primary: '#16A34A', light: '#07C983', dark: '#15803D', invalid: 'not-a-color' },
+    }))
+
+    const bundle = migrateRepository({
+      repositoryDir: root,
+      sourceUrl: 'https://github.com/acme/docs',
+    })
+
+    expect(bundle.site?.colors).toEqual({ primary: '#16A34A', light: '#07C983', dark: '#15803D' })
+  })
 })
 
 function docusaurusFixture(sidebarSource?: string): string {
@@ -311,6 +484,39 @@ describe('Docusaurus repository migration', () => {
       ],
     })
     expect(bundle.assets.map((asset) => asset.path)).toContain('img/logo.svg')
+  })
+
+  it('strips an unsupported npm-package MDX import from a Docusaurus page instead of shipping a broken build', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docs', 'api', '01-auth.md'),
+      "---\ntitle: Authentication\nsidebar_position: 1\n---\n\nimport LiteYouTubeEmbed from 'react-lite-youtube-embed';\n\n<LiteYouTubeEmbed id=\"abc123\" />")
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    const page = bundle.pages.find((page) => page.id === 'api/auth')
+    expect(page?.body).not.toContain('react-lite-youtube-embed')
+    expect(page?.body).toContain('<iframe')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      message: expect.stringContaining("'react-lite-youtube-embed'"),
+    }))
+  })
+
+  it('warns and lists skipped versioned docs and i18n locales instead of silently dropping them', () => {
+    const root = docusaurusFixture()
+    mkdirSync(join(root, 'versioned_docs', 'version-1.0'), { recursive: true })
+    writeFileSync(join(root, 'versioned_docs', 'version-1.0', 'intro.md'), 'Old intro.')
+    mkdirSync(join(root, 'versioned_sidebars'), { recursive: true })
+    writeFileSync(join(root, 'versioned_sidebars', 'version-1.0-sidebars.json'), '{}')
+    mkdirSync(join(root, 'i18n', 'fr', 'docusaurus-plugin-content-docs', 'current'), { recursive: true })
+    writeFileSync(join(root, 'i18n', 'fr', 'docusaurus-plugin-content-docs', 'current', 'intro.md'), 'Bonjour.')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      source: 'versioned_docs',
+      message: expect.stringContaining('version-1.0'),
+    }))
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      source: 'i18n',
+      message: expect.stringContaining('fr'),
+    }))
+    expect(bundle.pages.some((page) => page.body.includes('Bonjour'))).toBe(false)
   })
 
   it('never executes sidebar modules and falls back when their export is executable', () => {
@@ -389,5 +595,160 @@ describe('Docusaurus repository migration', () => {
       { group: 'API Reference', pages: ['API/Type', 'filters/index'] },
     ])
     expect(bundle.assets.map((asset) => asset.path)).toContain('img/logo.svg')
+  })
+})
+
+function fernFixture(): string {
+  const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-'))
+  const fernRoot = join(root, 'fern')
+  mkdirSync(join(fernRoot, 'pages', 'advanced'), { recursive: true })
+  mkdirSync(join(fernRoot, 'images'), { recursive: true })
+  mkdirSync(join(fernRoot, 'openapi'), { recursive: true })
+  writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+  writeFileSync(join(fernRoot, 'docs.yml'), `
+title: Acme Docs
+colors:
+  accent-primary:
+    light: "#008700"
+    dark: "#70E155"
+navbar-links:
+  - type: github
+    value: https://github.com/acme/acme
+tabs:
+  home:
+    display-name: Home
+    skip-slug: true
+  guides:
+    display-name: Guides
+  api:
+    display-name: API Reference
+navigation:
+  - tab: home
+    layout:
+      - page: Welcome
+        path: pages/introduction.mdx
+  - tab: guides
+    layout:
+      - section: Getting Started
+        skip-slug: true
+        contents:
+          - page: Install
+            path: pages/install.mdx
+          - page: OpenAI
+            path: pages/openai.mdx
+          - page: Pinned
+            path: pages/pinned.mdx
+          - section: Reference
+            slug: reference
+            path: pages/reference-overview.mdx
+            contents:
+              - page: Detail
+                path: pages/reference-detail.mdx
+          - section: Advanced
+            slug: advanced
+            contents:
+              - page: Config
+                path: pages/advanced/config.mdx
+  - tab: api
+    layout:
+      - api: API Reference
+redirects:
+  - source: /old-install
+    destination: /guides/install
+`)
+  writeFileSync(join(fernRoot, 'openapi', 'openapi.yml'), 'openapi: 3.0.0\ninfo:\n  title: Acme API\n  version: "1.0"\npaths: {}\n')
+  writeFileSync(join(fernRoot, 'pages', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\n<Callout intent="warning">Read this first.</Callout>\n\n![Logo](../images/logo.svg)')
+  writeFileSync(join(fernRoot, 'pages', 'install.mdx'), '---\ntitle: Install\n---\n\n<CodeBlocks>\n```bash\nnpm install acme\n```\n</CodeBlocks>\n\n<Success>Done.</Success>\n\nIf setup fails: "connection to {vendor} failed".')
+  // Not referenced from docs.yml. Unlike Mintlify, Fern only serves pages
+  // reachable from navigation, so this must be excluded, not imported as an orphan.
+  writeFileSync(join(fernRoot, 'pages', 'orphan.mdx'), '---\ntitle: Orphan\n---\n\nNot in any navigation.')
+  writeFileSync(join(fernRoot, 'pages', 'openai.mdx'), '---\ntitle: OpenAI\n---\n\nUse an OpenAI-compatible key.')
+  writeFileSync(join(fernRoot, 'pages', 'pinned.mdx'), '---\ntitle: Pinned\nslug: pinned-page\n---\n\nA page pinned to a short URL.')
+  writeFileSync(join(fernRoot, 'pages', 'reference-overview.mdx'), '---\ntitle: Reference overview\n---\n\nReference landing page.')
+  writeFileSync(join(fernRoot, 'pages', 'reference-detail.mdx'), '---\ntitle: Reference detail\n---\n\nReference detail page.')
+  writeFileSync(join(fernRoot, 'pages', 'advanced', 'config.mdx'), '---\ntitle: Config\n---\n\n<ParameterField name="apiKey" type="string" required>\n  Your API key.\n</ParameterField>\n\n<EndpointRequestSnippet />')
+  writeFileSync(join(fernRoot, 'images', 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+  return root
+}
+
+describe('Fern repository migration', () => {
+  it('skips a symlinked versions file instead of reading through it', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-versions-'))
+    const outside = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-outside-'))
+    writeFileSync(join(outside, 'v1.yml'), 'navigation:\n  - page: Secret\n    path: secret.mdx\n')
+    symlinkSync(join(outside, 'v1.yml'), join(root, 'v1.yml'))
+    const config = {
+      versions: [{ version: 'v1', path: 'v1.yml', default: true }],
+    }
+    const projected = projectFernNavigation({ config, fernRoot: root })
+    expect(projected.docsConfig.tabs).toEqual([])
+    expect(projected.descriptors).toEqual([])
+    expect(projected.warnings.some((warning) => warning.message.includes('not a regular file'))).toBe(true)
+  })
+
+  it('projects tabs, nested sections with skip-slug, navbar links, redirects, OpenAPI, assets, and component renames', () => {
+    const bundle = migrateRepository({
+      repositoryDir: fernFixture(),
+      sourceUrl: 'https://github.com/acme/fern-docs',
+    })
+
+    expect(bundle.platform).toBe('fern')
+    // Tabs/sections default to their slugified label (confirmed against a live
+    // Fern site's sitemap); only `skip-slug: true` (on a tab, section, or page)
+    // omits that segment, and `slug` overrides the label.
+    expect(bundle.pages.map((page) => page.id).sort()).toEqual([
+      'guides/advanced/config',
+      'guides/install',
+      'guides/open-ai',
+      'guides/reference',
+      'guides/reference/detail',
+      'pinned-page',
+      'welcome',
+    ])
+    // "OpenAI" -> "open-ai": Fern splits camelCase/acronym boundaries when it
+    // slugifies a label, unlike the shared Mintlify/Docusaurus slugifier.
+    expect(bundle.pages.map((page) => page.id)).toContain('guides/open-ai')
+    // A section's own `path` makes it a clickable landing page hosted at the
+    // section's own segment, not a further-nested page segment.
+    expect(bundle.pages.find((page) => page.id === 'guides/reference')?.title).toBe('Reference overview')
+    // A page's frontmatter `slug` replaces its entire section hierarchy.
+    expect(bundle.pages.find((page) => page.id === 'pinned-page')?.title).toBe('Pinned')
+    expect(bundle.docsConfig.tabs.find((tab) => tab.tab === 'Guides')?.groups).toEqual([
+      {
+        group: 'Getting Started',
+        pages: [
+          'guides/install',
+          'guides/open-ai',
+          'pinned-page',
+          { group: 'Reference', pages: ['guides/reference', 'guides/reference/detail'] },
+          { group: 'Advanced', pages: ['guides/advanced/config'] },
+        ],
+      },
+    ])
+    expect(bundle.docsConfig.navbar?.links).toEqual([
+      { label: 'GitHub', href: 'https://github.com/acme/acme', type: 'github' },
+    ])
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old-install', destination: '/guides/install' })
+    const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
+    expect(apiTab?.api?.source).toBe('/openapi.yml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('images/logo.svg')
+    expect(bundle.pages.find((page) => page.id === 'welcome')?.body).toContain('<Warning>Read this first.</Warning>')
+    expect(bundle.pages.find((page) => page.id === 'welcome')?.body).toContain('/images/logo.svg')
+    expect(bundle.pages.find((page) => page.id === 'guides/install')?.body).toContain('<CodeGroup>')
+    expect(bundle.pages.find((page) => page.id === 'guides/install')?.body).toContain('<Tip>Done.</Tip>')
+    // Fern renders a bare `{word}` in prose as literal text; Thally's MDX
+    // pipeline would otherwise throw evaluating it as an undefined JS ref.
+    expect(bundle.pages.find((page) => page.id === 'guides/install')?.body).toContain('connection to \\{vendor\\} failed')
+    expect(bundle.pages.find((page) => page.id === 'guides/advanced/config')?.body).toContain('<ParamField name="apiKey" type="string" required>')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('EndpointRequestSnippet'),
+    }))
+    // Fern only serves pages reachable from docs.yml navigation; an
+    // unreferenced file must not be imported as an orphan (unlike Mintlify).
+    expect(bundle.pages.map((page) => page.id)).not.toContain('orphan')
+    // `title`/`colors.accent-primary` map into the same `site` field Mintlify
+    // branding already populates.
+    expect(bundle.site).toEqual({ name: 'Acme Docs', colors: { light: '#008700', dark: '#70E155' } })
   })
 })

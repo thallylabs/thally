@@ -1,7 +1,12 @@
 /** Mintlify navigation projection invariants shared by every migration entrypoint. */
 
 import { describe, expect, it } from 'vitest'
-import { addMintlifyDirectoryRedirects, parseMarkdownPage, projectMintlifyNavigation } from '../index.js'
+import {
+  addMintlifyDirectoryRedirects,
+  parseMarkdownPage,
+  projectMintlifyNavigation,
+  pruneMissingNavigationPages,
+} from '../index.js'
 import type { MigrationDocsConfig, MigrationPage } from '../types.js'
 
 function page(id: string, navigationId = id, locale?: string): MigrationPage {
@@ -193,5 +198,89 @@ describe('Mintlify navigation projection', () => {
     expect(result.docsConfig.tabs[1]?.href).toBeUndefined()
     expect(result.docsConfig.tabs[2]?.href).toBe('/v1')
     expect(result.docsConfig.tabs[3]?.href).toBeUndefined()
+  })
+
+  it('translates a trailing Mintlify wildcard redirect into a Next.js named catch-all', () => {
+    const result = projectMintlifyNavigation({
+      navigation: { pages: ['introduction'] },
+      redirects: [
+        { source: '/api-reference/*', destination: '/api/*' },
+        { source: '/settings/auth/*', destination: '/deploy/auth-setup' },
+        { source: '/api-playground/mdx/:slug*', destination: '/api-playground/mdx-setup' },
+      ],
+    })
+
+    expect(result.docsConfig.redirects).toEqual([
+      { source: '/api-reference/:path*', destination: '/api/:path*' },
+      { source: '/settings/auth/:path*', destination: '/deploy/auth-setup' },
+      { source: '/api-playground/mdx/:slug*', destination: '/api-playground/mdx-setup' },
+    ])
+  })
+
+  it('drops a redirect whose wildcard Next.js cannot express and warns instead of crashing', () => {
+    const result = projectMintlifyNavigation({
+      navigation: { pages: ['introduction'] },
+      redirects: [
+        { source: '/foo/*/bar', destination: '/baz' },
+        { source: '/only-dest-wildcard', destination: '/dest/*' },
+        { source: '/kept', destination: '/still-kept' },
+      ],
+    })
+
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+    expect(result.warnings.filter((warning) => warning.code === 'unsupported-config'
+      && warning.message.includes('wildcard'))).toHaveLength(2)
+  })
+})
+
+describe('pruning navigation pages excluded after projection', () => {
+  it('drops a page id that was excluded from import, and the group left empty by it', () => {
+    const config: MigrationDocsConfig = {
+      tabs: [{
+        tab: 'Documentation',
+        groups: [
+          { group: 'Guides', pages: ['guides/intro', 'guides/excluded'] },
+          { group: 'Assistant', pages: ['assistant/widget'] },
+        ],
+      }],
+    }
+
+    const pruned = pruneMissingNavigationPages(config, new Set(['guides/intro']))
+
+    expect(pruned).toEqual({
+      tabs: [{
+        tab: 'Documentation',
+        groups: [{ group: 'Guides', pages: ['guides/intro'] }],
+      }],
+    })
+  })
+
+  it('leaves an href-only or api-only tab untouched even though it has no pages', () => {
+    const config: MigrationDocsConfig = {
+      tabs: [
+        { tab: 'Home', href: '/' },
+        { tab: 'API Reference', api: { source: '/openapi.json' } },
+      ],
+    }
+
+    const pruned = pruneMissingNavigationPages(config, new Set())
+
+    expect(pruned.tabs).toEqual(config.tabs)
+  })
+
+  it('prunes nested groups and top-level tab pages, across every tab', () => {
+    const config: MigrationDocsConfig = {
+      tabs: [
+        {
+          tab: 'Docs',
+          pages: ['kept', 'excluded', { group: 'Nested', pages: ['excluded/child', { group: 'Empty', pages: ['also-excluded'] }] }],
+        },
+        { tab: 'Empty tab', pages: ['excluded'] },
+      ],
+    }
+
+    const pruned = pruneMissingNavigationPages(config, new Set(['kept']))
+
+    expect(pruned.tabs).toEqual([{ tab: 'Docs', pages: ['kept'] }])
   })
 })

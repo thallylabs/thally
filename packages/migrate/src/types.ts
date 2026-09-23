@@ -7,6 +7,7 @@
 export type MigrationPlatform =
   | 'mintlify'
   | 'docusaurus'
+  | 'fern'
   | 'gitbook'
   | 'nextra'
   | 'vitepress'
@@ -136,6 +137,12 @@ export interface MigrationBundle {
   site?: {
     name?: string
     description?: string
+    /** Source theme accent color(s), each a `#rrggbb`/`#rgb` hex string. */
+    colors?: {
+      primary?: string
+      light?: string
+      dark?: string
+    }
   }
   warnings: Array<MigrationWarning>
   stats: {

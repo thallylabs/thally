@@ -162,9 +162,32 @@ describe('repository component migration', () => {
     expect(body).not.toContain('onClick')
     expect(body).not.toContain('export function')
     const inline = migrator.files().find((file) => file.path.includes('/inline-'))!
-    expect(inline.content).toContain("'use client'")
+    // Exactly one directive, and it must lead the file, or Next rejects the
+    // module ("use client" must be the first statement).
+    expect(String(inline.content).match(/'use client'/g)).toHaveLength(1)
+    expect(inline.content).toMatch(/^'use client';/)
     expect(inline.content).toContain('onClick={openSearch}')
     expect(inline.content).toContain("new KeyboardEvent('keydown'")
+    expect(warnings).toEqual([])
+  })
+
+  it('extracts a page-local stateful declaration invoked via a bare tag, so its hooks resolve in the client module', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    // Mintlify makes `useState` available without import inside inline
+    // MDX-declared components. The invocation tag `<Counter />` itself has no
+    // `onClick`, so nothing about its own JSX marks it interactive — only the
+    // declaration body does. Left inline, this compiles into the page's own
+    // server-rendered module, where `useState` is never in scope.
+    const source = `export const Counter = () => {\n  const [count, setCount] = useState(0)\n  return <button onClick={() => setCount(count + 1)}>{count}</button>\n}\n\n<Counter />`
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+    expect(body).not.toContain('export const Counter')
+    expect(body).toMatch(/<Migrated[a-f0-9]+ \/>/)
+    const inline = migrator.files().find((file) => file.path.includes('/inline-'))!
+    expect(inline.content).toContain("import { useState } from 'react'")
+    expect(String(inline.content).match(/'use client'/g)).toHaveLength(1)
+    expect(inline.content).toMatch(/^'use client';/)
     expect(warnings).toEqual([])
   })
 
@@ -235,6 +258,42 @@ describe('repository component migration', () => {
     expect(migrator.files()).toEqual([])
     expect(warnings).toHaveLength(1)
     expect(warnings[0].message).toContain('manual migration')
+  })
+
+  it('removes an unsupported npm-package MDX import and replaces its usage instead of shipping a broken build', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const source = "import LiteYouTubeEmbed from 'react-lite-youtube-embed';\n\n<LiteYouTubeEmbed id=\"3YDiloj8_d0\" />"
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).not.toContain('react-lite-youtube-embed')
+    expect(result).not.toContain('LiteYouTubeEmbed')
+    expect(result).toContain('<iframe')
+    expect(result).toContain('3YDiloj8_d0')
+    expect(warnings).toEqual([expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining("'react-lite-youtube-embed'"),
+      source: 'index.mdx',
+    })])
+  })
+
+  it('replaces a non-video unsupported import usage with a comment naming the removed component and package', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const source = "import Confetti from 'react-confetti';\n\n<Confetti pieces={200} />"
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).toBe("\n\n{/* Removed <Confetti>: unsupported import 'react-confetti' */}")
+  })
+
+  it('resolves a @site/... component import to its copied file, same as a relative import', () => {
+    const root = fixture({ 'src/components/Widget.jsx': 'export default () => <p>Widget</p>' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const result = migrator.transform("import Widget from '@site/src/components/Widget.jsx'\n\n<Widget />", join(root, 'docs', 'index.mdx'))
+    expect(result.trim()).toMatch(/^<Migrated[a-f0-9]+ \/>$/)
+    expect(migrator.files().some((file) => file.path.endsWith('/Widget.jsx'))).toBe(true)
+    expect(warnings).toEqual([])
   })
 
   it('rejects symlinked directories even when their leaf looks ordinary', () => {

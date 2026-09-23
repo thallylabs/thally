@@ -14,13 +14,13 @@ import {
   type MigrationPlatform,
 } from '@thallylabs/migrate'
 
-export type SelectableMigrationPlatform = Extract<MigrationPlatform, 'mintlify' | 'docusaurus'>
+export type SelectableMigrationPlatform = Extract<MigrationPlatform, 'mintlify' | 'docusaurus' | 'fern'>
 
 /** Validate the scriptable platform flag while preserving auto-detection. */
 export function parseMigrationPlatform(value: string | undefined): SelectableMigrationPlatform | undefined {
   if (!value || value === 'auto') return undefined
-  if (value === 'mintlify' || value === 'docusaurus') return value
-  throw new Error('--platform must be mintlify, docusaurus, or auto.')
+  if (value === 'mintlify' || value === 'docusaurus' || value === 'fern') return value
+  throw new Error('--platform must be mintlify, docusaurus, fern, or auto.')
 }
 
 /** Ask interactive migrations which source adapter should own the import. */
@@ -35,6 +35,7 @@ export async function gatherMigrationPlatform(
     choices: [
       { name: 'Mintlify', value: 'mintlify' as const },
       { name: 'Docusaurus', value: 'docusaurus' as const },
+      { name: 'Fern', value: 'fern' as const },
       { name: 'Other / detect automatically', value: undefined },
     ],
     default: 'mintlify',

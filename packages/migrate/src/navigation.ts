@@ -629,6 +629,50 @@ function projectedCompatibleConfig(config: Record<string, unknown>): Omit<Migrat
   }
 }
 
+const NEXT_REDIRECT_PARAM_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/**
+ * Next.js redirects compile through path-to-regexp and reject a bare `*`
+ * segment (Mintlify's wildcard syntax) with "Invalid redirects found",
+ * crashing the whole build. Mintlify only documents `*` as a trailing
+ * catch-all segment, so it is translated to Next's named catch-all
+ * (`/:path*`) there; a `*` anywhere else, or a syntax Next can't express, is
+ * dropped rather than guessed at.
+ */
+function translateMintlifyRedirectPaths(
+  source: string,
+  destination: string,
+): { source: string; destination: string } | null {
+  const sourceSegments = source.split('/')
+  const destinationSegments = destination.split('/')
+  const sourceWildcardIndex = sourceSegments.indexOf('*')
+  if (sourceWildcardIndex !== -1 && sourceWildcardIndex !== sourceSegments.length - 1) return null
+  if (sourceSegments.slice(0, -1).includes('*') || destinationSegments.slice(0, -1).includes('*')) return null
+
+  const translatedSource = [...sourceSegments]
+  if (sourceWildcardIndex !== -1) translatedSource[sourceWildcardIndex] = ':path*'
+
+  const destinationHasWildcard = destinationSegments.at(-1) === '*'
+  if (destinationHasWildcard && sourceWildcardIndex === -1) return null
+  const translatedDestination = [...destinationSegments]
+  if (destinationHasWildcard) translatedDestination[translatedDestination.length - 1] = ':path*'
+
+  const finalSource = translatedSource.join('/')
+  const finalDestination = translatedDestination.join('/')
+  if (!isValidNextRedirectPath(finalSource) || !isValidNextRedirectPath(finalDestination)) return null
+  return { source: finalSource, destination: finalDestination }
+}
+
+/** Conservative structural check for the path-to-regexp syntax Next.js redirects accept. */
+function isValidNextRedirectPath(path: string): boolean {
+  return path.split('/').every((segment) => {
+    if (segment === '' || segment === '*') return segment === ''
+    if (!segment.startsWith(':')) return !segment.includes('*') && !segment.includes(':')
+    const name = segment.endsWith('*') ? segment.slice(1, -1) : segment.slice(1)
+    return NEXT_REDIRECT_PARAM_NAME.test(name)
+  })
+}
+
 /** Convert current and legacy Mintlify navigation into Thally's schema. */
 export function projectMintlifyNavigation(
   config: Record<string, unknown>,
@@ -722,13 +766,21 @@ export function projectMintlifyNavigation(
     ? config.redirects.flatMap((value) => {
         const redirect = objectValue(value)
         if (!redirect || typeof redirect.source !== 'string' || typeof redirect.destination !== 'string') return []
-        const source = redirect.source.trim()
-        const destination = redirect.destination.trim()
-        if (!source.startsWith('/') || !destination.startsWith('/')
-          || source.startsWith('//') || destination.startsWith('//')) return []
+        const rawSource = redirect.source.trim()
+        const rawDestination = redirect.destination.trim()
+        if (!rawSource.startsWith('/') || !rawDestination.startsWith('/')
+          || rawSource.startsWith('//') || rawDestination.startsWith('//')) return []
+        const translated = translateMintlifyRedirectPaths(rawSource, rawDestination)
+        if (!translated) {
+          warnings.push({
+            code: 'unsupported-config',
+            message: `Redirect from ${rawSource} uses a wildcard Next.js cannot express and was dropped.`,
+          })
+          return []
+        }
         return [{
-          source,
-          destination,
+          source: translated.source,
+          destination: translated.destination,
           ...(typeof redirect.permanent === 'boolean' ? { permanent: redirect.permanent } : {}),
         }]
       })
@@ -901,4 +953,40 @@ export function buildNavigationFromPages(
 /** Exposed for repository discovery and focused unit tests. */
 export function isDocumentationExtension(filename: string): boolean {
   return ['.md', '.mdx', '.rst', '.txt'].includes(extname(filename).toLowerCase())
+}
+
+/**
+ * A source page can be excluded after navigation is projected (invalid MDX,
+ * a client-boundary function prop, a duplicate id). Its reference still sits
+ * in the projected tabs/groups at that point, across every tab, group, and
+ * locale, since the nav tree and the page list are built from the same
+ * source config independently. Drop those dangling references here so
+ * `thally check` never reports a nav entry with no backing MDX file, and
+ * drop any group left with no pages as a result. Shared by every platform's
+ * navigation projection (Mintlify, Fern, Docusaurus).
+ */
+export function pruneMissingNavigationPages(
+  config: MigrationDocsConfig,
+  availableIds: ReadonlySet<string>,
+): MigrationDocsConfig {
+  const pruneNodes = (nodes: Array<string | MigrationNavigationGroup>): Array<string | MigrationNavigationGroup> =>
+    nodes.flatMap((node): Array<string | MigrationNavigationGroup> => {
+      if (typeof node === 'string') return availableIds.has(node) ? [node] : []
+      const pages = pruneNodes(node.pages)
+      return pages.length > 0 ? [{ ...node, pages }] : []
+    })
+  const tabs = config.tabs.flatMap((tab) => {
+    const hadPages = (tab.pages?.length ?? 0) > 0 || (tab.groups?.length ?? 0) > 0
+    const pages = tab.pages ? pruneNodes(tab.pages) : undefined
+    const groups = tab.groups ? (pruneNodes(tab.groups) as Array<MigrationNavigationGroup>) : undefined
+    const hasPages = (pages?.length ?? 0) > 0 || (groups?.length ?? 0) > 0
+    // A tab that never referenced pages/groups (href-only, api-only) is untouched.
+    if (hadPages && !hasPages) return []
+    return [{
+      ...tab,
+      ...(tab.pages ? { pages } : {}),
+      ...(tab.groups ? { groups } : {}),
+    }]
+  })
+  return { ...config, tabs }
 }

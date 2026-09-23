@@ -245,6 +245,7 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       return raw
     }
     const aliases = new Map<string, string>()
+    const unsupportedImports = new Map<string, string>()
     const edits: Array<Replacement> = []
     const declarations: Array<{ start: number; end: number; source: string }> = []
     const moduleImports: Array<string> = []
@@ -307,14 +308,32 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
           continue
         }
         const bindings = imports(statement)
-        const specifier = ts.isStringLiteral(statement.moduleSpecifier) ? statement.moduleSpecifier.text : ''
+        const rawSpecifier = ts.isStringLiteral(statement.moduleSpecifier) ? statement.moduleSpecifier.text : ''
+        // `@site/...` is Docusaurus' and Mintlify's shared alias for the
+        // project root; treat it exactly like the root-relative `/...` form
+        // `resolveDependency` already understands, so a locally-owned
+        // component copies the same way a relative import would.
+        const specifier = rawSpecifier.startsWith('@site/') ? `/${rawSpecifier.slice('@site/'.length)}` : rawSpecifier
         if (!specifier.startsWith('.') && !specifier.startsWith('/')) {
           if (SHARED_IMPORTS.has(specifier)) {
             moduleImports.push(statement.getText(ast))
             sharedImportEdits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+          } else if (specifier.startsWith('@theme/') || specifier.startsWith('@docusaurus/')) {
+            // Docusaurus' own theme/runtime components (Tabs, TabItem, Link,
+            // useBaseUrl, ...) are converted to Thally's equivalents by
+            // normalizeMdx right after this pass; just drop the now-redundant
+            // import and leave JSX usage untouched for that pass to rewrite.
+            edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
           } else {
-            hasUnsupportedImports = true
-            warn(`MDX import ${specifier} requires manual package installation or registration; the import was preserved.`, currentFile)
+            // An npm package Thally's runtime does not ship is not installed
+            // in the migrated project; leaving the import in place breaks
+            // `next build` with "Module not found". Drop the import and
+            // replace its JSX usage with a safe fallback instead (see the
+            // `unsupportedImports` walk below) rather than shipping a page
+            // that cannot compile.
+            warn(`MDX import '${rawSpecifier}' is an npm package Thally does not provide; the import was removed and its usage replaced.`, currentFile)
+            edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+            for (const binding of bindings) unsupportedImports.set(binding.local, rawSpecifier)
           }
           continue
         }
@@ -349,6 +368,18 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       }
     }
 
+    // A page-local declaration (not imported) that uses a hook or an event
+    // handler must move to the client module along with its invocation: left
+    // inline, it compiles into the page's own server-rendered module, where
+    // `useState` and friends are never in scope (see `implicitReactImports`,
+    // only applied to extracted client files).
+    const statefulDeclarationNames = new Set(
+      declarations
+        .filter(({ source }) => /\bon[A-Z]\w*\s*=|\buse[A-Z]\w*\s*\(/.test(source))
+        .map(({ source }) => source.match(/^export const (\w+)/)?.[1])
+        .filter((name): name is string => !!name),
+    )
+
     // Extract whole HTML JSX roots with event handlers. Markdown and global
     // built-ins remain server-rendered; React functions stay inside the client
     // module, so no function is serialized across a server/client boundary.
@@ -356,11 +387,11 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
     for (const candidate of tree.children ?? []) {
       const node = candidate.type === 'paragraph' && candidate.children?.length === 1 ? candidate.children[0] : candidate
       if (!['mdxJsxFlowElement', 'mdxJsxTextElement'].includes(node.type) || node.position?.start.offset === undefined || node.position.end.offset === undefined) continue
-      let interactive = false
+      let interactive = statefulDeclarationNames.has(node.name ?? '')
       let supported = true
       walk(node, (child) => {
         if (child.attributes?.some((attribute) => /^on[A-Z]/.test(attribute.name ?? ''))) interactive = true
-        if (child.name && /^[A-Z]/.test(child.name) && !aliases.has(child.name)) supported = false
+        if (child.name && /^[A-Z]/.test(child.name) && !aliases.has(child.name) && !statefulDeclarationNames.has(child.name)) supported = false
         if (!['mdxJsxFlowElement', 'mdxJsxTextElement', 'mdxFlowExpression', 'mdxTextExpression', 'text', 'paragraph'].includes(child.type)) supported = false
       })
       if (!interactive) continue
@@ -416,9 +447,11 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       declarationSource = declarationSource.replace(/document\.getElementById\(\s*(['"])search-bar-entry\1\s*\)\.click\(\s*\)/g,
         `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))`)
       const inlineSource = [
-        "'use client';", '', ...moduleImports, '', declarationSource, '',
+        ...moduleImports, '', declarationSource, '',
         ...extracted.map(({ name, jsx }) => `export function ${name}() {\n  return (${jsx});\n}`), '',
       ].join('\n')
+      // A single leading directive: `inlineSource` no longer carries its own,
+      // or Next rejects the file ("use client" must be the first statement).
       copied.set(path, { path, content: `'use client';\n${implicitReactImports(sourceFile(inlineSource, 'inline.jsx'))}\n${inlineSource}` })
       copiedBytes += Buffer.byteLength(inlineSource)
       for (const { node, name } of extracted) {
@@ -437,6 +470,23 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       if (opening >= 0) edits.push({ start: start + opening + 1, end: start + opening + 1 + node.name!.length, value: replacement })
       const closing = text.lastIndexOf(`</${node.name}`)
       if (closing >= 0) edits.push({ start: start + closing + 2, end: start + closing + 2 + node.name!.length, value: replacement })
+    })
+    // Every usage of a removed npm-package import is replaced whole (tag,
+    // props, and children) rather than just its name: nothing in the
+    // migrated project can render it. A video-embed-shaped usage (an `id`
+    // prop, a name suggesting an embedded player) gets a trivial working
+    // `<iframe>`; anything else becomes a visible, greppable MDX comment.
+    walk(tree, (node) => {
+      const specifier = node.name ? unsupportedImports.get(node.name) : undefined
+      if (!specifier || node.position?.start.offset === undefined || node.position.end.offset === undefined) return
+      const start = node.position.start.offset
+      const end = node.position.end.offset
+      const id = node.attributes?.find((attribute) => attribute.name === 'id')?.value
+      const idValue = typeof id === 'string' ? id : typeof id === 'object' ? id?.value : undefined
+      const value = idValue && /video|embed|player/i.test(`${node.name} ${specifier}`)
+        ? `<iframe width="560" height="315" src="https://www.youtube.com/embed/${idValue}" title="Embedded video" allowFullScreen />`
+        : `{/* Removed <${node.name}>: unsupported import '${specifier}' */}`
+      edits.push({ start, end, value })
     })
     return frontmatter + applyReplacements(content, edits)
   }
