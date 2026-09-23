@@ -225,8 +225,18 @@ async function main(): Promise<void> {
   if (!baseUrl) {
     const port = await availablePort()
     baseUrl = `http://127.0.0.1:${port}`
-    const binary = path.join(process.cwd(), 'node_modules/.bin/opennextjs-cloudflare')
-    child = spawn(binary, ['preview', '--port', String(port)], {
+    // A managed assets build embeds no authored files. Local workerd must get
+    // the same runtime binding Cloud injects; inheriting the shell variable
+    // alone does not create a Worker binding in OpenNext's preview command.
+    const isManagedAssets = process.env.THALLY_CONTENT_SOURCE?.trim().toLowerCase() === 'assets'
+    const binary = path.join(
+      process.cwd(),
+      isManagedAssets ? 'node_modules/.bin/wrangler' : 'node_modules/.bin/opennextjs-cloudflare',
+    )
+    const args = isManagedAssets
+      ? ['dev', '--port', String(port), '--var', 'THALLY_CONTENT_SOURCE:assets']
+      : ['preview', '--port', String(port)]
+    child = spawn(binary, args, {
       cwd: process.cwd(),
       detached: process.platform !== 'win32',
       env: process.env,
