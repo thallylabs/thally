@@ -39,11 +39,12 @@ function cloudUrl(pathname: string): URL {
   return new URL(pathname, configured.endsWith('/') ? configured : `${configured}/`)
 }
 
-function latestQuestion(messages: ReadonlyArray<AiChatMessage>): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.role === 'user') return messages[index].content
-  }
-  return ''
+// Retrieval bounds for one managed answer. The per-page cap keeps a single long
+// page from filling every slot when a second page holds the rest of the answer.
+const RETRIEVAL_OPTIONS = { k: 8, tokenBudget: 4_000, maxPerPage: 3 } as const
+
+function userQuestions(messages: ReadonlyArray<AiChatMessage>): Array<string> {
+  return messages.filter((message) => message.role === 'user').map((message) => message.content)
 }
 
 async function readBoundedJson(request: Request): Promise<unknown> {
@@ -104,10 +105,17 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
       status: 400,
     })
   }
-  const question = latestQuestion(messages)
+  const questions = userQuestions(messages)
+  const question = questions.at(-1) ?? ''
   if (!question) return new Response('No user question was provided.', { status: 400 })
+  // A follow-up such as "how do I do that on Vercel?" names only half of its
+  // topic; the previous question supplies the rest at reduced weight.
+  const previousQuestion = questions.at(-2)
 
-  const results = await getRelevantChunks(question, { k: 8, tokenBudget: 4_000 })
+  const results = await getRelevantChunks(question, {
+    ...RETRIEVAL_OPTIONS,
+    ...(previousQuestion ? { context: previousQuestion } : {}),
+  })
   const context = results.map(({ chunk }) => ({
     title: chunk.title,
     heading: chunk.headingPath.join(' > ') || chunk.title,
