@@ -9,13 +9,20 @@
 import { spawnSync } from 'node:child_process'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 function entryTargets(value) {
   if (typeof value === 'string') return [value]
   if (!value || typeof value !== 'object') return []
   return Object.values(value).flatMap(entryTargets)
+}
+
+/** npm resolves local install arguments from the temporary project, not this checkout. */
+export function releaseTarballSpecs(manifestPath, artifacts) {
+  return artifacts.map((artifact) =>
+    pathToFileURL(resolve(dirname(manifestPath), artifact.filename)).href,
+  )
 }
 
 /** Prove the tarballs install without workspace links and expose real entrypoints. */
@@ -35,7 +42,7 @@ export async function verifyReleaseInstall(manifestPath) {
   const directory = await mkdtemp(join(tmpdir(), 'thally-package-install-'))
   try {
     await writeFile(join(directory, 'package.json'), '{"name":"thally-release-install","version":"1.0.0","private":true}\n')
-    const tarballs = manifest.packages.map((artifact) => join(dirname(manifestPath), artifact.filename))
+    const tarballs = releaseTarballSpecs(manifestPath, manifest.packages)
     const installed = spawnSync('npm', [
       'install', '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs,
     ], { cwd: directory, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 })
