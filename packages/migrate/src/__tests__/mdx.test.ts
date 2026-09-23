@@ -234,6 +234,27 @@ describe('escapeFernLiteralBraces', () => {
     const body = '<Unclosed'
     expect(escapeFernLiteralBraces(body)).toBe(body)
   })
+
+  it('escapes a bare identifier inside a callout', () => {
+    expect(escapeFernLiteralBraces('<Note>connection to {vendor} failed</Note>'))
+      .toBe('<Note>connection to \\{vendor\\} failed</Note>')
+  })
+
+  it('escapes a bare identifier inside nested Tabs/Tab', () => {
+    const body = '<Tabs>\n  <Tab title="x">See {vendor} below.</Tab>\n</Tabs>'
+    const expected = '<Tabs>\n  <Tab title="x">See \\{vendor\\} below.</Tab>\n</Tabs>'
+    expect(escapeFernLiteralBraces(body)).toBe(expected)
+  })
+
+  it('leaves props.title inside JSX unchanged', () => {
+    const body = '<Note>{props.title}</Note>'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
+
+  it('leaves a map() callback referencing its own parameter unchanged', () => {
+    const body = '{items.map((item) => <li>{item}</li>)}'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
 })
 
 describe('hasClientBoundaryFunctionProp', () => {

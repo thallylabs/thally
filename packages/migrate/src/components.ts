@@ -154,19 +154,74 @@ function imports(statement: ts.ImportDeclaration): Array<Binding> {
 const EXTRACTED_CLIENT_COMPONENT_TAG = /^(?:Migrated[0-9a-f]+|Inline\d+)$/
 
 /**
+ * Thally's own runtime `src/components/mdx/mdx-components.tsx` registry names
+ * whose backing module is a 'use client' file under `src/components/mdx/`.
+ * Passing a page-authored function as a prop into any of these also throws
+ * "Functions cannot be passed directly to Client Components" at render, the
+ * same as an extracted component — so they are confirmed exclusion targets
+ * too, not just unconfirmed-and-warned.
+ *
+ * This list is a snapshot, not a live read of the app (a published migrate
+ * package cannot import from the app's `src/`). It is drift-guarded by
+ * `src/components/mdx/__tests__/mdx-components-client-registry.test.ts`,
+ * which recomputes the same set from `src/components/mdx/*.tsx` and
+ * `mdx-components.tsx` and fails CI if this snapshot goes stale.
+ *
+ * Source file per name (all under `src/components/mdx/`):
+ *   Accordion, AccordionGroup      -> accordion.tsx
+ *   AgentPrompt                    -> agent-prompt.tsx
+ *   ResponseField, ParamField,
+ *   Expandable                     -> api-fields.tsx
+ *   CodeGroup                      -> code-blocks.tsx
+ *   Badge, Tooltip                 -> content-inline.tsx
+ *   Tabs, Tab                      -> content-tabs.tsx
+ *   RequestExample, ResponseExample,
+ *   InlineRequestExample,
+ *   InlineResponseExample          -> examples.tsx
+ *   Tree, Folder, File             -> file-tree.tsx
+ *   Mermaid                        -> mermaid.tsx
+ *   Panel, ContentPanel,
+ *   InlinePanel                    -> panel.tsx
+ *   Prompt, PromptUser,
+ *   PromptAssistant, Terminal,
+ *   TerminalInput, TerminalOutput  -> prompt.tsx
+ *   View, Embed, LegacyView        -> view.tsx
+ */
+export const CLIENT_BUILTIN_COMPONENT_TAGS: ReadonlySet<string> = new Set([
+  'Accordion', 'AccordionGroup',
+  'AgentPrompt',
+  'ResponseField', 'ParamField', 'Expandable',
+  'CodeGroup',
+  'Badge', 'Tooltip',
+  'Tabs', 'Tab',
+  'RequestExample', 'ResponseExample', 'InlineRequestExample', 'InlineResponseExample',
+  'Tree', 'Folder', 'File',
+  'Mermaid',
+  'Panel', 'ContentPanel', 'InlinePanel',
+  'Prompt', 'PromptUser', 'PromptAssistant', 'Terminal', 'TerminalInput', 'TerminalOutput',
+  'View', 'Embed', 'LegacyView',
+])
+
+function isConfirmedClientBoundaryTag(name: string): boolean {
+  return EXTRACTED_CLIENT_COMPONENT_TAG.test(name) || CLIENT_BUILTIN_COMPONENT_TAGS.has(name)
+}
+
+/**
  * True when a name in `declaredNames` (typically a page's `export const`
  * identifiers) is passed as a bare JSX prop (`prop={Name}`) into a component
- * this migrator actually extracted as a 'use client' module. This is the
- * only shape that really throws "Functions cannot be passed directly to
- * Client Components" at render — the same check against an ordinary,
- * non-extracted tag would over-fire and drop pages that render just fine.
+ * confirmed to cross the server/client boundary: one this migrator extracted
+ * as a 'use client' module, or a Thally runtime built-in already backed by
+ * one (`CLIENT_BUILTIN_COMPONENT_TAGS`). This is the only shape that really
+ * throws "Functions cannot be passed directly to Client Components" at
+ * render — the same check against an unconfirmed tag would over-fire and
+ * drop pages that render just fine.
  */
 export function propsTargetExtractedClientComponent(body: string, declaredNames: ReadonlySet<string>): boolean {
   if (declaredNames.size === 0) return false
   const tree = parser.parse(body) as MdxNode
   let found = false
   walk(tree, (node) => {
-    if (found || !node.name || !EXTRACTED_CLIENT_COMPONENT_TAG.test(node.name)) return
+    if (found || !node.name || !isConfirmedClientBoundaryTag(node.name)) return
     for (const attribute of node.attributes ?? []) {
       const raw = attribute.value
       const value = raw && typeof raw === 'object' ? raw.value : undefined
@@ -391,13 +446,19 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
             edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
           } else if (hasExpressionReference(new Set(bindings.map((binding) => binding.local)))) {
             // Only JSX usage (`<Widget />`) is rewritten below; a reference
-            // in `{pkg.fn()}`, a prop, or an inline `export const` would
-            // become an undefined identifier once the import is dropped and
-            // crash at render. Preserving the import here matches how every
-            // other un-migratable case in this function is handled: the page
-            // still needs manual attention, but it is never left compiling
-            // against a name nothing defines.
-            warn(`MDX import '${rawSpecifier}' is used outside JSX (in an expression, prop, or inline declaration) and requires manual migration; the import was preserved.`, currentFile)
+            // in `{pkg.fn()}`, a prop, or an inline `export const` cannot be
+            // rewritten the same way. Dropping the import would leave an
+            // undefined identifier; keeping it imports a package that is not
+            // installed in the migrated project, which fails `next build`
+            // for the *whole* site with "Module not found" — not just this
+            // page. Excluding the page is the only option that keeps the
+            // rest of the site building; `pruneMissingNavigationPages` (see
+            // repository.ts) then drops it from navigation too.
+            warnings.push({
+              code: 'skipped-file',
+              message: `This page was excluded because it uses '${bindings.map((binding) => binding.local).join(', ')}' from the npm package '${rawSpecifier}' outside JSX (in an expression, prop, or inline declaration), and that package isn't available in the migrated project. Install '${rawSpecifier}' and add the import back manually, or rewrite the page to avoid it.`,
+              source: relative(root, currentFile).replace(/\\/g, '/'),
+            })
             hasUnsupportedImports = true
           } else {
             // An npm package Thally's runtime does not ship is not installed

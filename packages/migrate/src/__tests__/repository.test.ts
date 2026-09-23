@@ -366,13 +366,14 @@ describe('Mintlify repository migration', () => {
     }))
   })
 
-  it('keeps (but warns on) a page that passes a function to a component this migration never extracted', () => {
+  it('excludes a page that passes a function to a Thally built-in already backed by a use-client module', () => {
     const root = fixture()
-    // `Accordion` is a Thally runtime built-in, not something this migration
-    // copied or extracted — `propsTargetExtractedClientComponent` cannot
-    // confirm it crosses the server/client boundary, so exclusion (a last
-    // resort) does not apply; the page is kept and flagged for manual review
-    // instead of being dropped on an unconfirmed heuristic.
+    // `Accordion` is a Thally runtime built-in, but its implementation
+    // (`src/components/mdx/accordion.tsx`) starts with 'use client' — so a
+    // function prop reaching it throws at render exactly like a prop landing
+    // on an extracted component. `CLIENT_BUILTIN_COMPONENT_TAGS` in
+    // components.ts confirms this and exclusion fires, same as a page whose
+    // function targets a copied client component.
     writeFileSync(join(root, 'en', 'builtin-target.mdx'), [
       '---',
       'title: Builtin Target',
@@ -388,10 +389,42 @@ describe('Mintlify repository migration', () => {
       sourceUrl: 'https://github.com/acme/docs',
     })
 
-    expect(bundle.pages.map((page) => page.id)).toContain('builtin-target')
+    expect(bundle.pages.map((page) => page.id)).not.toContain('builtin-target')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'skipped-file',
+      source: 'en/builtin-target.mdx',
+      message: expect.stringContaining("passes a function to an interactive component, which can't be rendered on the server"),
+    }))
+  })
+
+  it('keeps (but warns on) a page that passes a function to a built-in this migration cannot confirm is a client component', () => {
+    const root = fixture()
+    // `Steps` is a Thally runtime built-in that renders entirely on the
+    // server (`src/components/mdx/steps.tsx` has no 'use client'), and it is
+    // not something this migration copied or extracted either — neither
+    // `EXTRACTED_CLIENT_COMPONENT_TAG` nor `CLIENT_BUILTIN_COMPONENT_TAGS`
+    // matches it, so exclusion (a last resort) does not apply; the page is
+    // kept and flagged for manual review instead of being dropped on an
+    // unconfirmed heuristic.
+    writeFileSync(join(root, 'en', 'server-builtin-target.mdx'), [
+      '---',
+      'title: Server Builtin Target',
+      '---',
+      '',
+      'export const CustomBlock = ({ children }) => <div>{children}</div>;',
+      '',
+      '<Steps title="x" RenderComponent={CustomBlock}>Body</Steps>',
+    ].join('\n'))
+
+    const bundle = migrateRepository({
+      repositoryDir: root,
+      sourceUrl: 'https://github.com/acme/docs',
+    })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('server-builtin-target')
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
       code: 'unsupported-config',
-      source: 'en/builtin-target.mdx',
+      source: 'en/server-builtin-target.mdx',
       message: expect.stringContaining('might pass a function'),
     }))
   })
@@ -479,6 +512,58 @@ describe('Mintlify repository migration', () => {
     const groupNames = guidesTab?.groups?.map((group) => group.group)
     expect(groupNames).not.toContain('Assistant')
     expect(JSON.stringify(bundle.docsConfig)).not.toContain('en/widget')
+  })
+
+  it('excludes a page whose unsupported npm import is referenced outside JSX, prunes it from navigation, and keeps other pages', () => {
+    const root = fixture()
+    // `date-fns` is not installed in the migrated project; `format` is used
+    // inside a prop expression (not bare JSX), so the import can't be
+    // rewritten or safely dropped. Keeping it would fail `next build` for
+    // the whole site, so the page itself is excluded instead.
+    writeFileSync(join(root, 'en', 'broken-import.mdx'), [
+      '---',
+      'title: Broken Import',
+      '---',
+      '',
+      "import { format } from 'date-fns'",
+      '',
+      '<Note label={format(new Date(), \'PP\')} />',
+    ].join('\n'))
+    writeFileSync(join(root, 'navigation.json'), JSON.stringify({
+      languages: [
+        {
+          language: 'en',
+          tabs: [{
+            tab: 'Guides',
+            groups: [
+              { group: 'Start', pages: ['en/introduction', 'en/guides/install'] },
+              { group: 'Broken', pages: ['en/broken-import'] },
+            ],
+          }],
+        },
+        {
+          language: 'es',
+          tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['es/introduction', 'es/guides/install'] }] }],
+        },
+      ],
+    }))
+
+    const bundle = migrateRepository({
+      repositoryDir: root,
+      sourceUrl: 'https://github.com/acme/docs',
+    })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('broken-import')
+    expect(bundle.pages.map((page) => page.id)).toEqual(expect.arrayContaining(['introduction', 'guides/install']))
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'skipped-file',
+      source: 'en/broken-import.mdx',
+      message: expect.stringContaining("'date-fns'"),
+    }))
+    const guidesTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Guides')
+    const groupNames = guidesTab?.groups?.map((group) => group.group)
+    expect(groupNames).not.toContain('Broken')
+    expect(JSON.stringify(bundle.docsConfig)).not.toContain('en/broken-import')
   })
 
   it('carries Mintlify theme colors into the migrated site branding', () => {
@@ -932,5 +1017,63 @@ navigation:
       message: expect.stringContaining('Fern Definition'),
     }))
     expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
+  })
+
+  it("resolves a multi-API repo's spec by `api-name` (the fern/apis/<name> folder), not the `api:` display title", () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-name-'))
+    const fernRoot = join(root, 'fern')
+    // `api: Plant API` is only a display title; the folder Fern actually
+    // looks up is named by the sibling `api-name: plants`. A layout with
+    // two APIs (`apis/plants`, `apis/animals`) reproduces the case where
+    // looking up `apis/Plant API` finds nothing and the tab silently drops.
+    mkdirSync(join(fernRoot, 'apis', 'plants', 'openapi'), { recursive: true })
+    mkdirSync(join(fernRoot, 'apis', 'animals'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - api: Plant API
+    api-name: plants
+`)
+    writeFileSync(join(fernRoot, 'apis', 'plants', 'generators.yml'), `
+api:
+  specs:
+    - openapi: openapi/plants.yml
+`)
+    writeFileSync(join(fernRoot, 'apis', 'plants', 'openapi', 'plants.yml'), 'openapi: 3.0.0\ninfo:\n  title: Plant API\n  version: "1.0"\npaths: {}\n')
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
+    expect(apiTab?.api?.source).toBe('/plants.yml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('plants.yml')
+    expect(bundle.warnings.some((warning) => warning.message.includes('No OpenAPI'))).toBe(false)
+  })
+
+  it('warns naming the API node when no spec can be resolved for it, instead of silently dropping the tab', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-unresolved-'))
+    const fernRoot = join(root, 'fern')
+    // `apis/plants` has no generators.yml/spec at all, so nothing resolves
+    // and there is no Fern Definition either.
+    mkdirSync(join(fernRoot, 'apis', 'plants'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - api: Plant API
+    api-name: plants
+`)
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('plants'),
+    }))
   })
 })

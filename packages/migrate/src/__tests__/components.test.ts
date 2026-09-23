@@ -352,6 +352,25 @@ describe('repository component migration', () => {
     expect(migrator.files()).toEqual([])
     expect(warnings[0].message).toContain('symbolic links')
   })
+  it('marks the page skipped-file when an unsupported npm import binding is referenced outside JSX', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    // `date-fns` is not local (doesn't start with '.' or '/') and is not an
+    // installed shared/theme import; `format` is referenced inside a prop
+    // expression (not bare JSX usage), so it can't be rewritten. Preserving
+    // this import would fail `next build` site-wide with "Module not found".
+    migrator.transform(
+      "import { format } from 'date-fns'\n\n<Note label={format(new Date(), 'PP')} />",
+      join(root, 'page.mdx'),
+    )
+    expect(warnings).toContainEqual(expect.objectContaining({
+      code: 'skipped-file',
+      source: 'page.mdx',
+      message: expect.stringContaining("'date-fns'"),
+    }))
+    expect(warnings.find((warning) => warning.code === 'skipped-file')?.message).toContain('format')
+  })
 })
 
 describe('propsTargetExtractedClientComponent', () => {
@@ -365,8 +384,13 @@ describe('propsTargetExtractedClientComponent', () => {
     expect(propsTargetExtractedClientComponent(body, new Set(['handleClick']))).toBe(true)
   })
 
-  it('is false when the tag is not one this migration extracted, even with a matching prop', () => {
+  it('is true for a Thally built-in already backed by a use-client module (CLIENT_BUILTIN_COMPONENT_TAGS)', () => {
     const body = '<Accordion RenderComponent={CustomBlock} />'
+    expect(propsTargetExtractedClientComponent(body, new Set(['CustomBlock']))).toBe(true)
+  })
+
+  it('is false when the tag is neither extracted nor a confirmed client built-in, even with a matching prop', () => {
+    const body = '<Steps RenderComponent={CustomBlock} />'
     expect(propsTargetExtractedClientComponent(body, new Set(['CustomBlock']))).toBe(false)
   })
 

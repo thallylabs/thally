@@ -26,10 +26,13 @@ nested sections (including `slug`/`skip-slug`), navbar links, redirects, the
 default Fern version's navigation, and theme accent colors. Only pages
 referenced from `docs.yml` are imported, matching Fern's own publishing model.
 The first `api:` section's OpenAPI document is resolved from `generators.yml`
-(`api.specs[].openapi`, or the legacy `api:` string; per-API `fern/apis/<name>/`
-layouts are checked before the project root) and attached to that tab. A Fern
-Definition (a non-OpenAPI API with no document to attach) is reported as a
-warning instead of being silently dropped, as are `changelog`/`products`
+(`api.specs[].openapi`, or the legacy `api:` string). In a multi-API repo the
+per-API `fern/apis/<name>/` layout is checked before the project root, keyed
+by the node's `api-name` (the folder name) rather than `api` (its display
+title in the nav) — the two are commonly different. A Fern Definition (a
+non-OpenAPI API with no document to attach), and an `api:` section for which
+no spec could be resolved at all, are each reported as a warning naming the
+API instead of the tab being silently dropped, as are `changelog`/`products`
 sections and logo/favicon branding, which have no equivalent Thally field yet.
 
 ## Mintlify compatibility
@@ -50,9 +53,19 @@ sections are normalized without discarding original URL redirects.
 
 Simple interactive HTML blocks in MDX are extracted into client components.
 The Mintlify `search-bar-entry` click trigger is mapped to Thally's search
-shortcut. Markdown mixed inside interactive JSX, computed imports, namespace
-imports, and external packages that require installation are reported for
-manual review. Unsupported source is preserved, not replaced with empty stubs.
+shortcut. Markdown mixed inside interactive JSX, computed imports, and
+namespace imports are reported for manual review; unsupported source is
+preserved, not replaced with empty stubs. An external package's JSX usage is
+dropped and replaced with a safe fallback (with a warning); if that package's
+binding is instead referenced outside JSX (an expression, a prop, or an
+inline declaration) the import can't be rewritten the same way, so the whole
+page is excluded — instead of shipping with an import `next build` can't
+resolve — and pruned from navigation, with a warning naming the page, the
+package, and the binding. A page that passes a page-authored function as a
+prop into a component confirmed to cross the server/client boundary (one this
+importer extracted as a client module, or a Thally runtime built-in already
+backed by one, such as `Accordion`/`Panel`/`Tabs`) is excluded the same way;
+an unconfirmed target is warned instead of dropped.
 File paths cannot escape the documentation root; symlinks and oversized graphs
 are rejected. This is compatibility analysis, **not a code sandbox**: imported
 JavaScript executes when the developer builds or runs the resulting site.

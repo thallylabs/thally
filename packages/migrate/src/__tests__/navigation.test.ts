@@ -245,6 +245,21 @@ describe('Mintlify navigation projection', () => {
 
     expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
   })
+
+  it('drops a redirect whose destination hides a browser-cross-origin `//` behind a stripped whitespace/control character', () => {
+    const result = projectMintlifyNavigation({
+      navigation: { pages: ['introduction'] },
+      redirects: [
+        { source: '/legit-tab', destination: '/\t/evil.example' },
+        { source: '/legit-newline', destination: '/\n/evil.example' },
+        { source: '/legit-cr', destination: '/\r/evil.example' },
+        { source: '/legit-nul', destination: '/\x00/evil.example' },
+        { source: '/kept', destination: '/still-kept' },
+      ],
+    })
+
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+  })
 })
 
 describe('Fern redirect safety shares the Mintlify guard', () => {

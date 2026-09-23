@@ -683,11 +683,25 @@ function isValidNextRedirectPath(path: string): boolean {
  * destination), so a protocol-relative or absolute value (`//evil.example`
  * reads as same-scheme cross-origin to a browser and to Next.js) is rejected.
  */
+// Matches every ASCII control character (incl. DEL, \x7f) and every Unicode
+// whitespace character (`\s` already covers the line/paragraph separators
+// U+2028/U+2029, along with tab, CR, LF, NBSP, etc).
+const UNSAFE_REDIRECT_CHARS = /[\s\x00-\x1f\x7f]/
+
 export function isRedirectPathSafe(rawSource: string, rawDestination: string): boolean {
   for (const value of [rawSource, rawDestination]) {
     if (!value.startsWith('/')) return false
     if (value.startsWith('//') || value.startsWith('/\\')) return false
     if (value.includes('\\')) return false
+    // A browser strips whitespace/control characters (tab, CR, LF, ...) from
+    // a URL before navigating, so a literal tab in `/\t/evil.example` passes
+    // every check above yet reaches the browser as `//evil.example`. Reject
+    // any such character anywhere in the raw value, then re-check the
+    // `//`/`/\` prefix against what's left once they're gone, as defense in
+    // depth against a character this scan doesn't already reject outright.
+    if (UNSAFE_REDIRECT_CHARS.test(value)) return false
+    const stripped = value.replace(new RegExp(UNSAFE_REDIRECT_CHARS, 'g'), '')
+    if (stripped.startsWith('//') || stripped.startsWith('/\\')) return false
     // Browsers unescape a leading `%2f%2f`/`%5c` before treating it as `//`/`\`.
     const lower = value.toLowerCase()
     if (lower.startsWith('/%2f%2f') || lower.startsWith('/%5c')) return false

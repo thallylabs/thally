@@ -228,7 +228,11 @@ function convertNode(
     if (context.sawApi) {
       warnOnce(context, 'fern-multiple-api', 'Multiple Fern API sections were found; only the first was imported.')
     } else {
-      context.apiName = object.api
+      // `api` is the display title shown in the nav; `api-name` (when
+      // present) is the actual `fern/apis/<name>/` folder name. A repo with
+      // `api: Plant API` / `api-name: plants` has no `apis/Plant API`
+      // folder, so preferring `api-name` is required to find the spec.
+      context.apiName = typeof object['api-name'] === 'string' ? object['api-name'] : object.api
     }
     context.sawApi = true
     return null

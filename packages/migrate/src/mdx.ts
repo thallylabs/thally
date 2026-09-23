@@ -195,16 +195,25 @@ function collectEsmBindings(source: string, declared: Set<string>): void {
 
 /**
  * Fern's own MDX renderer tolerates a bare `{word}` in prose as literal text
- * (e.g. `"connection to {vendor} failed"`); Thally's MDX pipeline evaluates
- * `{...}` as a JS expression and throws `ReferenceError` when the identifier
- * isn't defined. `{vendor}` is syntactically valid MDX either way — a text
- * expression — so the fix isn't a character scan but telling real code from
- * prose: parse the page, then escape only a bare identifier/dotted-path text
- * expression (`mdxTextExpression`/`mdxFlowExpression`) that sits in ordinary
- * prose — never one inside a JSX element (a real component expression, e.g.
- * `{children}` or `{props.x}`) and never one the page's own ESM already
- * imports or declares. A page whose source doesn't parse is left untouched;
- * the migration's MDX-compile check reports the real problem instead.
+ * (e.g. `"connection to {vendor} failed"`, `<Note>connection to {vendor}
+ * failed</Note>`); Thally's MDX pipeline evaluates `{...}` as a JS expression
+ * and throws `ReferenceError` when the identifier isn't defined. `{vendor}`
+ * is syntactically valid MDX either way — a text expression — so the fix
+ * isn't a character scan but telling real code from prose: parse the page,
+ * then escape a bare identifier/dotted-path text expression
+ * (`mdxTextExpression`/`mdxFlowExpression`) anywhere in the body tree,
+ * including inside a JSX element's children (a `<Note>`/`<Tabs>` callout is
+ * the common Fern case) — but never a JSX *attribute* expression
+ * (`prop={x}`, which lives on the node's `attributes`, not its `children`,
+ * and this walk never visits it), never ESM, never code. Real component
+ * code — `{items.map((item) => <li>{item}</li>)}` — parses as a single
+ * expression node whose JSX lives only in its `estree`, not as further mdast
+ * children, so this walk cannot (and must not) descend into it and escape
+ * the inner `{item}`; only a leaf expression node with every mdast ancestor
+ * being JSX/markdown is ever a candidate. `props` (MDX's implicit prop) and
+ * anything the page's own ESM imports or declares are exempt. A page whose
+ * source doesn't parse is left untouched; the migration's MDX-compile check
+ * reports the real problem instead.
  */
 export function escapeFernLiteralBraces(body: string): string {
   let root: MdxOffsetNode
@@ -214,7 +223,7 @@ export function escapeFernLiteralBraces(body: string): string {
     return body
   }
 
-  const declared = new Set<string>()
+  const declared = new Set<string>(['props'])
   const collectEsm = (node: MdxOffsetNode) => {
     if (node.type === 'mdxjsEsm' && node.value) collectEsmBindings(node.value, declared)
     for (const child of node.children ?? []) collectEsm(child)
@@ -222,9 +231,8 @@ export function escapeFernLiteralBraces(body: string): string {
   collectEsm(root)
 
   const edits: Array<{ start: number; end: number; value: string }> = []
-  const visit = (node: MdxOffsetNode, insideJsx: boolean) => {
-    const isJsx = node.type === 'mdxJsxTextElement' || node.type === 'mdxJsxFlowElement'
-    if ((node.type === 'mdxTextExpression' || node.type === 'mdxFlowExpression') && !insideJsx) {
+  const visit = (node: MdxOffsetNode) => {
+    if (node.type === 'mdxTextExpression' || node.type === 'mdxFlowExpression') {
       const value = (node.value ?? '').trim()
       const start = node.position?.start.offset
       const end = node.position?.end.offset
@@ -232,10 +240,13 @@ export function escapeFernLiteralBraces(body: string): string {
         && !declared.has(value.split('.')[0]) && start !== undefined && end !== undefined) {
         edits.push({ start, end, value: `\\{${value}\\}` })
       }
+      // A leaf node: mdast never gives it further `children` (its JSX, if
+      // any, lives only inside `data.estree`), so there is nothing to recurse into.
+      return
     }
-    for (const child of node.children ?? []) visit(child, insideJsx || isJsx)
+    for (const child of node.children ?? []) visit(child)
   }
-  visit(root, false)
+  visit(root)
   if (edits.length === 0) return body
 
   return edits

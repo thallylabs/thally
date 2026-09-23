@@ -1123,7 +1123,23 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir,
       snippetAliases,
     )
-    if (componentMigrator) raw = componentMigrator.transform(raw, file.absolutePath)
+    if (componentMigrator) {
+      const warningsBeforeTransform = warnings.length
+      raw = componentMigrator.transform(raw, file.absolutePath)
+      // `transform` excludes a page itself (pushing a 'skipped-file' warning
+      // for it) when it references an unsupported npm import outside JSX —
+      // keeping that import would fail `next build` for the whole site. Skip
+      // building this page too; `pruneMissingNavigationPages` below drops it
+      // from navigation since it never joins `pages`.
+      // `warning.source` is relative to `componentRoot`, which can differ
+      // from `repositoryDir` (a nested Mintlify/Docusaurus project root);
+      // compare absolute paths rather than the two relative forms directly.
+      if (warnings.slice(warningsBeforeTransform).some((warning) => warning.code === 'skipped-file' && warning.source !== undefined
+        && resolvePath(componentRoot, warning.source) === file.absolutePath)) {
+        skipped++
+        continue
+      }
+    }
     if (platform === 'fern') {
       raw = escapeFernLiteralBraces(raw)
       for (const name of detectUnsupportedFernComponents(raw)) {
@@ -1207,13 +1223,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     // `hasClientBoundaryFunctionProp` only proves a page-authored function is
     // passed as *some* bare JSX prop; it does not know which tag receives it.
-    // Only a prop landing on a component this migration actually extracted
-    // as 'use client' (`Migrated<hash>`/`Inline<n>`, see components.ts)
-    // is confirmed to cross the server/client boundary and throw at render —
-    // a prop on an ordinary tag (a Thally built-in, an unregistered/removed
-    // component) is not confirmed either way, so exclusion (a last resort)
-    // is reserved for the confirmed case; the unconfirmed case is warned
-    // instead, so it is never silently dropped or silently shipped broken.
+    // A prop landing on a component this migration actually extracted as
+    // 'use client' (`Migrated<hash>`/`Inline<n>`) or on a Thally runtime
+    // built-in already backed by a 'use client' module (`Accordion`, `Panel`,
+    // `Tabs`, ... — see `CLIENT_BUILTIN_COMPONENT_TAGS` in components.ts) is
+    // confirmed to cross the server/client boundary and throw at render — a
+    // prop on any other tag (an unregistered/removed component) is not
+    // confirmed either way, so exclusion (a last resort) is reserved for the
+    // confirmed case; the unconfirmed case is warned instead, so it is never
+    // silently dropped or silently shipped broken.
     if (hasClientBoundaryFunctionProp(page.body)) {
       const declaredNames = new Set([...page.body.matchAll(/export const (\w+)\s*=/g)].map((match) => match[1]))
       if (propsTargetExtractedClientComponent(page.body, declaredNames)) {
@@ -1360,6 +1378,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     warnings.push({
       code: 'unsupported-config',
       message: 'This API is defined with a Fern Definition, not an OpenAPI/AsyncAPI document; generating a spec from a Fern Definition is not supported. Export an OpenAPI document and reference it from generators.yml, or add it manually.',
+    })
+  } else if (platform === 'fern' && fernProjectRoot && fernApiName !== undefined) {
+    // Neither an OpenAPI/AsyncAPI spec nor a Fern Definition could be found
+    // for this `api:` node — the API tab was silently dropped from the nav.
+    // Name the node so the user knows which one to fix.
+    warnings.push({
+      code: 'unsupported-config',
+      message: `No OpenAPI/AsyncAPI spec could be found for the "${fernApiName}" API; check that generators.yml points to a spec under fern/apis/${fernApiName}/ (or the Fern project root) and that the file exists.`,
     })
   }
   if (platform === 'mintlify') {

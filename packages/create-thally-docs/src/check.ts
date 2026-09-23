@@ -11,6 +11,7 @@ import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
+import { slugify } from '@thallylabs/core/slugify'
 
 export interface LintIssue {
   severity: 'error' | 'warning'
@@ -131,19 +132,6 @@ function addOrphanToNav(projectDir: string, pageId: string): void {
     lastGroup.pages.push(pageId)
     writeDocsJson(projectDir, config)
   }
-}
-
-/**
- * Thally's renderer (`src/components/mdx/mdx-components.tsx`) derives every
- * heading's `id` with `slugify` from `src/lib/utils.ts`. That package lives
- * outside this CLI's publishable tree, so the algorithm is duplicated here —
- * keep the two in sync if either changes.
- */
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '')
 }
 
 const EXPLICIT_ID_ATTRIBUTE = /\bid=(?:"([^"]*)"|'([^']*)'|\{["']([^"'}]*)["']\})/g
