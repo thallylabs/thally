@@ -39,9 +39,13 @@ vi.mock('@/lib/site-config', () => ({
 import { GET as getDocument } from '@/app/api/docs/[...slug]/route'
 import { GET as getLlmsTxt } from '@/app/llms.txt/route'
 import { loadDocEntries } from '@/data/docs'
+import { getDocsJsonConfig } from '@/lib/docs-json-config'
 import { middleware } from '@/middleware'
-import { navigationPagePath, projectNavigationContract } from '@thallylabs/core/navigation'
-import repositoryDocsConfig from '../../../docs.json'
+import {
+  navigationPagePath,
+  projectNavigationContract,
+  type NavigationContractConfig,
+} from '@thallylabs/core/navigation'
 
 const BASE_URL = 'http://localhost:3040'
 const EVENT = { waitUntil: vi.fn() } as never
@@ -82,7 +86,7 @@ describe('llms.txt canonical page matrix', () => {
       (match) => match[1],
     )
     const entriesByHref = new Map((await loadDocEntries()).map((entry) => [entry.href, entry]))
-    const expectedPagePaths = projectNavigationContract(repositoryDocsConfig).visiblePageIds
+    const expectedPagePaths = projectNavigationContract(getDocsJsonConfig<NavigationContractConfig>()).visiblePageIds
       .map(navigationPagePath)
 
     expect(pageUrls.length).toBeGreaterThan(0)
