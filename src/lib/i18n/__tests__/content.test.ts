@@ -3,11 +3,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  hasDocTranslation: vi.fn(),
+  getIndexableDocTranslation: vi.fn(),
 }))
 
 vi.mock('@/data/get-doc', () => ({
-  hasDocTranslation: mocks.hasDocTranslation,
+  getIndexableDocTranslation: mocks.getIndexableDocTranslation,
 }))
 
 import { getContentI18nConfig } from '../content'
@@ -23,10 +23,12 @@ const selectedLocales = {
 
 describe('getContentI18nConfig', () => {
   beforeEach(() => {
-    mocks.hasDocTranslation.mockReset()
-    mocks.hasDocTranslation.mockImplementation(
+    mocks.getIndexableDocTranslation.mockReset()
+    mocks.getIndexableDocTranslation.mockImplementation(
       async (slug: Array<string> | undefined, locale: string) =>
-        slug?.join('/') === 'introduction' && locale === 'es',
+        slug?.join('/') === 'introduction' && locale === 'es'
+          ? { modifiedAtMs: 1 }
+          : null,
     )
   })
 
@@ -48,7 +50,7 @@ describe('getContentI18nConfig', () => {
       locales: [{ code: 'en', label: 'English' }],
     })
 
-    expect(mocks.hasDocTranslation.mock.calls).toEqual([
+    expect(mocks.getIndexableDocTranslation.mock.calls).toEqual([
       [['introduction'], 'es'],
       [['introduction'], 'fr'],
       [['guides', 'multi-language'], 'es'],

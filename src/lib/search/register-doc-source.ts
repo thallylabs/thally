@@ -20,8 +20,29 @@ import {
 } from '@thallylabs/core/registry'
 import { getDocEntries, loadDocEntries } from '@/data/docs'
 import { getContentDocument, loadContentDocument } from '@/lib/content/document'
+import { getIndexableDocTranslation } from '@/data/get-doc'
+import { localizedPath } from '@/lib/i18n/config'
+import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 
-registerDocEntriesSource(() => getDocEntries())
+registerDocEntriesSource(() => getDocEntries().filter((entry) => !entry.noindex && !entry.hidden))
 registerContentDocumentSource((pageId, locale) => getContentDocument(pageId, locale))
-registerAsyncDocEntriesSource(() => loadDocEntries())
+registerAsyncDocEntriesSource(async (locale) => {
+  const entries = await loadDocEntries()
+  const i18n = await getEffectiveI18nConfig()
+  if (!locale || locale === i18n.defaultLocale) return entries.filter((entry) => !entry.noindex && !entry.hidden)
+  if (!i18n.locales.some((item) => item.code === locale)) return []
+  const translated = await Promise.all(entries.map(async (entry) => {
+    if (entry.noindex || entry.hidden) return null
+    const metadata = await getIndexableDocTranslation(entry.slug, locale)
+    if (!metadata) return null
+    return {
+      id: entry.id,
+      title: metadata.title ?? entry.title,
+      description: metadata.description ?? entry.description,
+      keywords: metadata.keywords ?? entry.keywords,
+      href: localizedPath(entry.href, locale, i18n.defaultLocale),
+    }
+  }))
+  return translated.filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+})
 registerAsyncContentDocumentSource((pageId, locale) => loadContentDocument(pageId, locale))

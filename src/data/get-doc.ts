@@ -15,6 +15,7 @@ import { runtimeDocs } from '@/generated/runtime-docs'
 import { readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 import { getContentSource, type ContentSource } from '@/lib/content-source'
 import { docPathFromSlug } from '@/lib/i18n/doc-route'
+import { parseFrontmatter } from '@/lib/frontmatter'
 
 interface DocFrontmatter {
   title?: string
@@ -41,6 +42,7 @@ function projectJoin(...segments: Array<string>): string {
 
 export interface DocSourceResult {
   filePath: string
+  sourcePath?: string
   isFallback: boolean
   isStale: boolean
 }
@@ -84,6 +86,61 @@ export async function hasDocTranslation(
   return Boolean(candidate && !candidate.isFallback)
 }
 
+/** Read crawler eligibility from the translated file, not just its existence. */
+export async function getIndexableDocTranslation(
+  slugSegments: Array<string> | undefined,
+  locale: string,
+): Promise<{
+  lastUpdated?: string
+  title?: string
+  description?: string
+  keywords?: Array<string>
+} | null> {
+  const source = getContentSource()
+  const slugPath = (slugSegments ?? []).filter(Boolean).join('/')
+  const candidate = await findDocSource(source, slugPath, locale)
+  if (!candidate || candidate.isFallback) return null
+  const file = await source.read(candidate.filePath)
+  if (!file) return null
+  const data = parseFrontmatter(file.content).data
+  const sourceFile = candidate.sourcePath ? await source.read(candidate.sourcePath) : null
+  const sourceData = sourceFile ? parseFrontmatter(sourceFile.content).data : {}
+  if (data.noindex === true || data.hidden === true || sourceData.noindex === true || sourceData.hidden === true) return null
+  return {
+    ...(typeof data.lastUpdated === 'string' ? { lastUpdated: data.lastUpdated } : {}),
+    ...(typeof data.title === 'string' ? { title: data.title } : {}),
+    ...(typeof data.description === 'string' ? { description: data.description } : {}),
+    ...(Array.isArray(data.keywords) && data.keywords.every((word) => typeof word === 'string')
+      ? { keywords: data.keywords as Array<string> }
+      : {}),
+  }
+}
+
+const generatedTranslationMarker = /thally:ai-translation\s+locale=[A-Za-z0-9-]+\s+source-sha=([a-f0-9]{64})/
+
+async function isTranslationStale(
+  source: ContentSource,
+  primaryPath: string,
+  localePath: string,
+): Promise<boolean> {
+  const [primary, translated] = await Promise.all([
+    source.read(primaryPath),
+    source.read(localePath),
+  ])
+  if (!primary || !translated) return false
+  const marker = generatedTranslationMarker.exec(translated.content)
+  if (marker) {
+    // Cloud's provenance hash measures the source bytes. Git checkout times do
+    // not measure content revisions, so use the same digest on reader routes.
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(primary.content))
+    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+    return marker[1] !== hash
+  }
+  // Human-authored files have no source revision marker. Deployment mtimes
+  // can be reset together, so their freshness is unknown rather than stale.
+  return false
+}
+
 async function loadDocFromSource(
   slugSegments: Array<string>,
   locale?: string,
@@ -94,7 +151,16 @@ async function loadDocFromSource(
   if (!candidate) {
     return null
   }
-  return compileDocEntry(source, candidate.filePath, slugSegments, candidate.isFallback, candidate.isStale)
+  const document = await compileDocEntry(source, candidate.filePath, slugSegments, candidate.isFallback, candidate.isStale)
+  if (!document || !candidate.sourcePath || candidate.isFallback) return document
+  const sourceFile = await source.read(candidate.sourcePath)
+  if (!sourceFile) return null
+  const sourcePolicy = parseFrontmatter(sourceFile.content).data
+  return {
+    ...document,
+    noindex: document.noindex || sourcePolicy.noindex === true,
+    hidden: document.hidden || sourcePolicy.hidden === true,
+  }
 }
 
 async function findDocSource(
@@ -102,6 +168,13 @@ async function findDocSource(
   slugPath: string,
   locale?: string,
 ): Promise<DocSourceResult | null> {
+  // Route segments are untrusted. Keep content reads inside src/content even
+  // under the development filesystem source, which accepts project paths.
+  if (
+    /[\\\0]/.test(slugPath) ||
+    slugPath.split('/').some((segment) => segment === '.' || segment === '..') ||
+    (locale !== undefined && !/^[A-Za-z0-9-]+$/.test(locale))
+  ) return null
   const normalized = slugPath || 'introduction'
   const i18n = getI18nConfig()
   const defaultLocale = i18n?.defaultLocale ?? 'en'
@@ -136,30 +209,26 @@ async function findDocSource(
         projectJoin(localDocsRoot, `${normalized}/index.mdx`),
       ]
 
+  // A translated file alone must not keep a deleted or renamed source page
+  // indexable. The source path is the current document identity.
+  let primaryPath: string | null = null
+  for (const candidate of primaryCandidates) {
+    if (await source.exists(candidate)) {
+      primaryPath = candidate
+      break
+    }
+  }
+  if (!primaryPath) return null
+
   for (const localeFilePath of localeCandidates) {
     if (await source.exists(localeFilePath)) {
-      // Translation file exists — check staleness against primary
-      let isStale = false
-      for (const primaryPath of primaryCandidates) {
-        if (await source.exists(primaryPath)) {
-          if ((await source.modifiedAt(primaryPath)) > (await source.modifiedAt(localeFilePath))) {
-            isStale = true
-          }
-          break
-        }
-      }
-      return { filePath: localeFilePath, isFallback: false, isStale }
+      const isStale = await isTranslationStale(source, primaryPath, localeFilePath)
+      return { filePath: localeFilePath, sourcePath: primaryPath, isFallback: false, isStale }
     }
   }
 
   // Fall back to primary
-  for (const primaryPath of primaryCandidates) {
-    if (await source.exists(primaryPath)) {
-      return { filePath: primaryPath, isFallback: true, isStale: false }
-    }
-  }
-
-  return null
+  return { filePath: primaryPath, isFallback: true, isStale: false }
 }
 
 /**

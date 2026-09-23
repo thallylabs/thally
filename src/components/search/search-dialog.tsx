@@ -29,6 +29,7 @@ interface SearchResponse {
 interface SearchDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  locale?: string
 }
 
 function trackSearch(payload: { query: string; resultCount?: number; clickedSlug?: string }) {
@@ -58,7 +59,7 @@ function toLocalHref(value: string) {
   }
 }
 
-export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
+export function SearchDialog({ open, onOpenChange, locale }: SearchDialogProps) {
   const router = useRouter()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Array<SearchResult>>([])
@@ -74,7 +75,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
       setLoading(true)
       try {
         const response = await fetch(
-          `/api/search?q=${encodeURIComponent(normalized)}&limit=8&mode=fulltext`,
+          `/api/search?q=${encodeURIComponent(normalized)}&limit=8&mode=fulltext${locale ? `&locale=${encodeURIComponent(locale)}` : ''}`,
           { signal: controller.signal },
         )
         if (!response.ok) throw new Error(`Search failed with ${response.status}`)
@@ -91,7 +92,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
       window.clearTimeout(timeout)
       controller.abort()
     }
-  }, [query])
+  }, [query, locale])
 
   const visibleResults = query.trim().length >= 2 ? results : []
 

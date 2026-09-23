@@ -13,6 +13,7 @@ import { DocLayout } from '@/components/docs/doc-layout'
 import { LocaleFallbackBanner } from '@/components/docs/locale-fallback-banner'
 import { LocaleStaleBanner } from '@/components/docs/locale-stale-banner'
 import { LocalizedSidebarHydrator } from '@/components/layout/localized-sidebar-hydrator'
+import { LocaleAvailabilityHydrator } from '@/components/layout/locale-availability'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { getApiOperationByKey } from '@/data/api-reference'
 import { getDocEntries, loadNavContext } from '@/data/docs'
@@ -25,7 +26,7 @@ import { localizeDocNavigation } from '@/lib/i18n/navigation'
 import { localizedPath } from '@/lib/i18n/config'
 import { buildLocaleAlternates } from '@/lib/i18n/metadata'
 import {
-  getBuildI18nConfig,
+  getEffectiveI18nConfig,
   getRepositoryI18nConfig,
 } from '@/lib/i18n/request'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
@@ -70,7 +71,7 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const routeParams = await params
-  const buildI18n = getBuildI18nConfig()
+  const buildI18n = await getEffectiveI18nConfig()
   const route = resolveDocRoute(routeParams.slug, buildI18n)
   const doc = await getDocFromParams(
     route.docSlug,
@@ -103,8 +104,10 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       : {}),
     alternates: {
       canonical: `${siteUrl}${canonicalHref}`,
-      languages: buildLocaleAlternates(siteUrl, primaryHref, availableI18n),
-      types: buildAgentAlternateLinks(primaryHref, siteUrl),
+      // A fallback or noindex page cannot participate in an indexable
+      // hreflang cluster, even when other translations of the slug exist.
+      ...(!isNoindex ? { languages: buildLocaleAlternates(siteUrl, primaryHref, availableI18n) } : {}),
+      types: buildAgentAlternateLinks(canonicalHref, siteUrl),
     },
     openGraph: {
       title: doc.title,
@@ -122,7 +125,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function DocsPage({ params }: PageProps) {
   const routeParams = await params
-  const i18n = getBuildI18nConfig()
+  const i18n = await getEffectiveI18nConfig()
   const route = resolveDocRoute(routeParams.slug, i18n)
   const doc = await getDocFromParams(
     route.docSlug,
@@ -133,6 +136,13 @@ export default async function DocsPage({ params }: PageProps) {
   const siteUrl = getSiteUrl()
   const effectiveSite = resolveBuildSiteConfig()
   const primaryHref = docPathFromSlug(doc.slug)
+  const availableI18n = await getContentI18nConfig(route.docSlug, i18n)
+  const localeAvailability = (
+    <LocaleAvailabilityHydrator
+      path={primaryHref}
+      locales={availableI18n.locales.map((locale) => locale.code)}
+    />
+  )
   const contentLocale =
     route.isLocaleRoute && !doc.isFallback
       ? route.locale
@@ -181,6 +191,7 @@ export default async function DocsPage({ params }: PageProps) {
 
     return (
       <>
+        {localeAvailability}
         {localizedNavigation}
         <div className="space-y-10" lang={contentLocale}>
           <JsonLdScript data={jsonLd} />
@@ -200,6 +211,7 @@ export default async function DocsPage({ params }: PageProps) {
 
   return (
     <>
+      {localeAvailability}
       {localizedNavigation}
       <JsonLdScript data={jsonLd} />
       <DocLayout doc={doc} locale={contentLocale} navigation={nav}>

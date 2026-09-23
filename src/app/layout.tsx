@@ -24,7 +24,7 @@ import { SiteBanner } from '@/components/layout/site-banner'
 import { WebMcpTools } from '@/components/agent/web-mcp-tools'
 import { CloudHandshake } from '@/components/cloud/cloud-handshake'
 import { localeDirection } from '@/lib/i18n/config'
-import { getBuildI18nConfig } from '@/lib/i18n/request'
+import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { getBuildSiteAppearance } from '@/lib/cloud-link/appearance'
 import { lockedAppearanceScript } from '@/lib/site-appearance'
@@ -227,6 +227,17 @@ const brandCss = Object.entries(brandStyle)
 const runtimeNameShim =
   "globalThis.__name ??= (target, value) => Object.defineProperty(target, 'name', { value, configurable: true });"
 
+function documentLocaleScript(locales: ReadonlyArray<{ code: string }>, defaultLocale: string): string {
+  // The root layout is shared with admin and unprefixed routes, so Next cannot
+  // receive the child catch-all's locale as a root param. Set the document
+  // language before the body renders while the article itself stays SSR-tagged.
+  const directions = Object.fromEntries(locales
+    .filter((locale) => locale.code !== defaultLocale)
+    .map((locale) => [locale.code, localeDirection(locale.code)]))
+  const serialized = JSON.stringify(directions).replace(/</g, '\\u003c')
+  return `(() => { const locales = ${serialized}; const code = location.pathname.split('/')[1]; if (Object.hasOwn(locales, code)) { document.documentElement.lang = code; document.documentElement.dir = locales[code]; } })();`
+}
+
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   // These values belong to the immutable release binding, not the compiled
   // module. Resolve them during rendering so content-only publishes can reuse
@@ -240,7 +251,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const themeVars = THEME_VARS[structuralTheme] ?? ''
   const bannerConfig = getBannerConfig()
   const customScripts = getCustomScriptsConfig()
-  const i18n = getBuildI18nConfig()
+  const i18n = await getEffectiveI18nConfig()
   const effectiveSite = resolveBuildSiteConfig()
   const siteUrl = getSiteUrl()
   const defaultLang = i18n.defaultLocale
@@ -269,6 +280,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     >
       <head>
         <script id="thally-runtime-name-shim" dangerouslySetInnerHTML={{ __html: runtimeNameShim }} />
+        <script id="thally-document-locale" dangerouslySetInnerHTML={{ __html: documentLocaleScript(i18n.locales, defaultLang) }} />
         {!appearance.showToggle && (
           <script id="thally-locked-appearance" dangerouslySetInnerHTML={{ __html: lockedAppearanceScript(appearance.default) }} />
         )}

@@ -1,7 +1,7 @@
 /** Full-text and hybrid search over local or asynchronously resolved content. */
 
 import { create, insertMultiple, search } from '@orama/orama'
-import type { AnyOrama } from '@orama/orama'
+import type { AnyOrama, Tokenizer } from '@orama/orama'
 import { buildSearchCorpusAsync } from './corpus.js'
 import type { SearchRecord } from './corpus.js'
 import { getEmbeddingIndex } from '../embeddings/index-store.js'
@@ -43,21 +43,25 @@ function meanPool(vectors: Array<EmbeddingVector>, dimensions: number): Embeddin
   return acc.map((value) => value / norm)
 }
 
-async function pageEmbeddings(records: Array<SearchRecord>, dimensions: number): Promise<Map<string, EmbeddingVector>> {
+async function pageEmbeddings(records: Array<SearchRecord>, dimensions: number, locale?: string): Promise<Map<string, EmbeddingVector>> {
   const map = new Map<string, EmbeddingVector>()
-  try {
-    const index = await getEmbeddingIndex()
-    const byPage = new Map<string, Array<EmbeddingVector>>()
-    for (const chunk of index.chunks) {
-      const list = byPage.get(chunk.pageId) ?? []
-      list.push(chunk.embedding)
-      byPage.set(chunk.pageId, list)
+  if (!locale) {
+    try {
+      // The persisted index describes the source language only. Translated
+      // prose needs its own vectors when hybrid search is requested.
+      const index = await getEmbeddingIndex()
+      const byPage = new Map<string, Array<EmbeddingVector>>()
+      for (const chunk of index.chunks) {
+        const list = byPage.get(chunk.pageId) ?? []
+        list.push(chunk.embedding)
+        byPage.set(chunk.pageId, list)
+      }
+      for (const [pageId, vectors] of byPage) {
+        if (vectors.length) map.set(pageId, meanPool(vectors, dimensions))
+      }
+    } catch {
+      // Fall through to on-the-fly embedding below.
     }
-    for (const [pageId, vectors] of byPage) {
-      if (vectors.length) map.set(pageId, meanPool(vectors, dimensions))
-    }
-  } catch {
-    // fall through to on-the-fly embedding below
   }
 
   const missing = records.filter((record) => !map.has(record.pageId))
@@ -71,15 +75,33 @@ async function pageEmbeddings(records: Array<SearchRecord>, dimensions: number):
   return map
 }
 
-let enginePromise: Promise<SearchEngine> | null = null
+const enginePromises = new Map<string, Promise<SearchEngine>>()
 
-async function buildEngine(): Promise<SearchEngine> {
+/** ICU word boundaries cover scripts that Orama's English splitter drops. */
+function createLocaleTokenizer(locale?: string): Tokenizer {
+  const language = locale ?? 'en'
+  const segmenter = new Intl.Segmenter(language, { granularity: 'word' })
+  return {
+    language,
+    normalizationCache: new Map(),
+    tokenize: (raw) => Array.from(new Set(
+      Array.from(segmenter.segment(raw))
+        .filter((part) => part.isWordLike)
+        .map((part) => part.segment.normalize('NFKC').toLocaleLowerCase(language)),
+    )),
+  }
+}
+
+async function buildEngine(locale?: string, includeEmbeddings = true): Promise<SearchEngine> {
   const provider = getEmbeddingProvider()
   const dimensions = provider.dimensions
-  const records = await buildSearchCorpusAsync()
-  const embeddings = await pageEmbeddings(records, dimensions)
+  const records = await buildSearchCorpusAsync(locale)
+  const embeddings = includeEmbeddings
+    ? await pageEmbeddings(records, dimensions, locale)
+    : new Map<string, EmbeddingVector>()
 
   const db = create({
+    components: { tokenizer: createLocaleTokenizer(locale) },
     schema: {
       pageId: 'string',
       title: 'string',
@@ -101,13 +123,17 @@ async function buildEngine(): Promise<SearchEngine> {
   return { db, dimensions }
 }
 
-export function getSearchEngine(): Promise<SearchEngine> {
-  if (!enginePromise) enginePromise = buildEngine()
-  return enginePromise
+export function getSearchEngine(locale?: string, includeEmbeddings = true): Promise<SearchEngine> {
+  const key = `${locale ?? ''}:${includeEmbeddings ? 'hybrid' : 'fulltext'}`
+  const cached = enginePromises.get(key)
+  if (cached) return cached
+  const pending = buildEngine(locale, includeEmbeddings)
+  enginePromises.set(key, pending)
+  return pending
 }
 
 export function resetSearchEngine() {
-  enginePromise = null
+  enginePromises.clear()
 }
 
 function buildSnippet(body: string, query: string): string {
@@ -130,14 +156,14 @@ function buildSnippet(body: string, query: string): string {
 
 export async function searchDocs(
   query: string,
-  options: { limit?: number; mode?: SearchMode } = {},
+  options: { limit?: number; mode?: SearchMode; locale?: string } = {},
 ): Promise<Array<SearchHit>> {
   const trimmed = query.trim()
   if (!trimmed) return []
 
   const limit = options.limit ?? 8
   const mode = options.mode ?? 'hybrid'
-  const engine = await getSearchEngine()
+  const engine = await getSearchEngine(options.locale, mode === 'hybrid')
 
   const searchParams: Record<string, unknown> = {
     term: trimmed,

@@ -40,7 +40,15 @@ export function getBuildI18nConfig(): I18nConfig {
  */
 export const getEffectiveI18nConfig = cache(async (): Promise<I18nConfig> => {
   const repository = getRepositoryI18nConfig()
-  const cloud = await getRequestCloudSiteConfig()
+  // An unlinked self-host must remain statically renderable. Resolving its
+  // origin would touch request headers even though no Cloud grant can exist.
+  const hasCloudConnection = Boolean(
+    process.env.THALLY_CLOUD_SITE_TOKEN?.trim() ||
+    process.env.DOX_CLOUD_SITE_TOKEN?.trim() ||
+    process.env.THALLY_CLOUD_SITE_CONFIG?.trim() ||
+    process.env.DOX_CLOUD_SITE_CONFIG?.trim(),
+  )
+  const cloud = hasCloudConnection ? await getRequestCloudSiteConfig() : null
   if (cloud?.siteConfig.portable.localization) {
     return resolveI18nSelection(
       cloud.siteConfig.portable.localization,

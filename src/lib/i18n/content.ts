@@ -6,7 +6,7 @@
 
 import 'server-only'
 
-import { hasDocTranslation } from '@/data/get-doc'
+import { getIndexableDocTranslation } from '@/data/get-doc'
 import type { I18nConfig } from './config'
 
 /**
@@ -20,7 +20,7 @@ export async function getContentI18nConfig(
   const availability = await Promise.all(
     config.locales.map(async (locale) => {
       if (locale.code === config.defaultLocale) return true
-      return hasDocTranslation(slug, locale.code)
+      return Boolean(await getIndexableDocTranslation(slug, locale.code))
     }),
   )
 
