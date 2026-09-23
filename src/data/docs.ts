@@ -5,6 +5,7 @@ import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/li
 import { getDocsJsonConfig, getDocsJsonConfigRevision } from '@/lib/docs-json-config'
 import { resolveIconLibrary, type IconLibrary } from '@/lib/icon-library'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
+import { SUPPORTED_LOCALE_OPTIONS } from '@/lib/i18n/config'
 
 // ---------------------------------------------------------------------------
 // Public interfaces (consumed by components, pages, and stores)
@@ -492,6 +493,8 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
     lastUpdated: fm.lastUpdated ?? '',
     lastVerified: fm.lastVerified,
     verifiedVersion: fm.verifiedVersion,
+    noindex: fm.noindex,
+    hidden: fm.hidden,
   }
 }
 
@@ -501,13 +504,21 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
 
 let _allEntries: Array<DocEntry> | null = null
 
+/** Locale directories are reserved even when Cloud selects them after build. */
+function localeDirectoryCodes(): Set<string> {
+  return new Set([
+    ...SUPPORTED_LOCALE_OPTIONS.map((locale) => locale.code.toLowerCase()),
+    ...(getI18nConfig()?.locales ?? []).map((locale) => locale.code.toLowerCase()),
+  ])
+}
+
 /** Every page that has an .mdx file under src/content (default locale only). */
 function getAllContentPageIds(): Array<string> {
-  const localeCodes = new Set((getI18nConfig()?.locales ?? []).map((l) => l.code))
+  const localeCodes = localeDirectoryCodes()
   return listRuntimeSources(CONTENT_ROOT)
     .filter((filePath) => filePath.endsWith('.mdx'))
     .map((filePath) => filePath.slice(`${CONTENT_ROOT}/`.length, -'.mdx'.length))
-    .filter((relativePath) => !localeCodes.has(relativePath.split('/')[0] ?? ''))
+    .filter((relativePath) => !localeCodes.has((relativePath.split('/')[0] ?? '').toLowerCase()))
     .map((relativePath) => (relativePath.endsWith('/index') ? relativePath.slice(0, -'/index'.length) : relativePath))
     .filter(Boolean)
 }
@@ -563,11 +574,11 @@ function hydrateContentIndex(index: ContentIndex): void {
 }
 
 function defaultLocalePageIds(index: ContentIndex): Array<string> {
-  const localeCodes = new Set((getI18nConfig()?.locales ?? []).map((locale) => locale.code))
+  const localeCodes = localeDirectoryCodes()
   return Object.keys(index.pages)
     .filter((filePath) => filePath.startsWith(`${CONTENT_ROOT}/`) && filePath.endsWith('.mdx'))
     .map((filePath) => filePath.slice(`${CONTENT_ROOT}/`.length, -'.mdx'.length))
-    .filter((relativePath) => !localeCodes.has(relativePath.split('/')[0] ?? ''))
+    .filter((relativePath) => !localeCodes.has((relativePath.split('/')[0] ?? '').toLowerCase()))
     .map((relativePath) => (relativePath.endsWith('/index') ? relativePath.slice(0, -'/index'.length) : relativePath))
     .filter(Boolean)
 }

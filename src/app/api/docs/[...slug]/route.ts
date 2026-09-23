@@ -1,10 +1,15 @@
 import { type NextRequest } from 'next/server'
-import { getDocEntries, getI18nConfig, loadDocEntries, loadNavContext } from '@/data/docs'
+import { getDocEntries, loadDocEntries, loadNavContext } from '@/data/docs'
+import { hasDocTranslation } from '@/lib/i18n/translation-source'
 import { mdxToMarkdown } from '@thallylabs/core/markdown'
 import { loadContentDocument } from '@/lib/content'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
 import { resolveSiteConfig } from '@/lib/site-config'
 import { problemResponse } from '@/lib/http/problem'
+import { resolveDocRoute } from '@/lib/i18n/doc-route'
+import { getEffectiveI18nConfig } from '@/lib/i18n/request'
+import { localizeDocNavigation } from '@/lib/i18n/navigation'
+import { localizedPath } from '@/lib/i18n/config'
 
 /** Nearest valid pages for a missing slug, so a 404'd agent can self-correct. */
 function suggestSlugs(
@@ -56,7 +61,9 @@ export async function GET(
 ) {
   const baseUrl = request.nextUrl.origin
   const { slug } = await params
-  const slugPath = slug.join('/')
+  const i18n = await getEffectiveI18nConfig()
+  const route = resolveDocRoute(slug, i18n)
+  const slugPath = (route.docSlug ?? []).join('/')
   const format = resolveRequestedFormat(request)
   const wantsJson = format === 'json'
   const wantsLdJson = format === 'ldjson'
@@ -95,7 +102,10 @@ export async function GET(
   // Single source of truth — parse the content graph once via the content
   // engine, reading through the active ContentSource so managed content
   // publishes are reflected without a rebuild.
-  const document = await loadContentDocument(entry.id)
+  const hasRequestedTranslation = !route.isLocaleRoute || await hasDocTranslation(route.docSlug, route.locale)
+  const document = hasRequestedTranslation
+    ? await loadContentDocument(entry.id, route.isLocaleRoute ? route.locale : undefined)
+    : null
   if (!document) {
     if (wantsJson || wantsLdJson) {
       return problemResponse({
@@ -118,18 +128,25 @@ export async function GET(
 
   const { content, frontmatter } = document
   const effectiveSite = await resolveSiteConfig(request.nextUrl.origin)
-  const canonicalUrl = `${baseUrl}${entry.href}`
-  const locale = getI18nConfig()?.defaultLocale ?? 'en'
-  const nav = await loadNavContext(entry.id)
+  const canonicalHref = localizedPath(entry.href, route.locale, i18n.defaultLocale)
+  const canonicalUrl = `${baseUrl}${canonicalHref}`
+  const locale = route.locale
+  const nav = await localizeDocNavigation(await loadNavContext(entry.id), locale, i18n.defaultLocale)
+  const title = typeof frontmatter.title === 'string' ? frontmatter.title : entry.title
+  const description = typeof frontmatter.description === 'string' ? frontmatter.description : entry.description
+  const keywords = Array.isArray(frontmatter.keywords) && frontmatter.keywords.every((item) => typeof item === 'string')
+    ? frontmatter.keywords as Array<string>
+    : entry.keywords
+  const lastUpdated = typeof frontmatter.lastUpdated === 'string' ? frontmatter.lastUpdated : entry.lastUpdated
   const jsonLd = buildDocPageJsonLd({
     siteUrl: baseUrl,
     siteName: effectiveSite.name,
     pageUrl: canonicalUrl,
     id: entry.id,
-    title: entry.title,
-    description: entry.description,
-    keywords: entry.keywords,
-    lastUpdated: entry.lastUpdated,
+    title,
+    description,
+    keywords,
+    lastUpdated,
     locale,
     breadcrumb: nav.breadcrumb,
   })
@@ -137,7 +154,7 @@ export async function GET(
   const commonHeaders: Record<string, string> = {
     'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
     Vary: 'Accept, X-Thally-Format',
-    Link: `<${entry.href}>; rel="canonical", <${entry.href}?format=json>; rel="alternate"; type="application/json", <${entry.href}?format=ldjson>; rel="alternate"; type="application/ld+json"`,
+    Link: `<${canonicalHref}>; rel="canonical", <${canonicalHref}?format=json>; rel="alternate"; type="application/json", <${canonicalHref}?format=ldjson>; rel="alternate"; type="application/ld+json"`,
   }
 
   // -------------------------------------------------------------------------
@@ -165,8 +182,8 @@ export async function GET(
       canonical_url: canonicalUrl,
 
       // Content
-      title: entry.title,
-      description: entry.description,
+      title,
+      description,
       content: {
         mdx: content.markdown,
         text: content.text,
@@ -190,11 +207,11 @@ export async function GET(
       // Metadata
       meta: {
         locale,
-        keywords: entry.keywords,
+        keywords,
         badge: entry.badge ?? undefined,
         mode: entry.mode ?? undefined,
-        noindex: entry.noindex ?? undefined,
-        lastUpdated: entry.lastUpdated || undefined,
+        noindex: frontmatter.noindex === true || entry.noindex || undefined,
+        lastUpdated: lastUpdated || undefined,
         lastVerified: entry.lastVerified || undefined,
         verifiedVersion: entry.verifiedVersion || undefined,
         timeEstimate: entry.timeEstimate || undefined,
@@ -231,18 +248,18 @@ export async function GET(
   const lines: Array<string> = []
 
   lines.push('---')
-  lines.push(`title: ${entry.title}`)
-  if (entry.description) lines.push(`description: ${entry.description}`)
+  lines.push(`title: ${title}`)
+  if (description) lines.push(`description: ${description}`)
   lines.push(`url: ${canonicalUrl}`)
-  if (entry.lastUpdated) lines.push(`lastUpdated: ${entry.lastUpdated}`)
+  if (lastUpdated) lines.push(`lastUpdated: ${lastUpdated}`)
   if (entry.lastVerified) lines.push(`lastVerified: ${entry.lastVerified}`)
   if (entry.verifiedVersion) lines.push(`verifiedVersion: ${entry.verifiedVersion}`)
   lines.push('---')
   lines.push('')
-  lines.push(`# ${entry.title}`)
+  lines.push(`# ${title}`)
   lines.push('')
-  if (entry.description) {
-    lines.push(entry.description)
+  if (description) {
+    lines.push(description)
     lines.push('')
   }
   // Clean MDX → Markdown so agents asking for text/markdown get real Markdown,

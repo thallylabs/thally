@@ -13,6 +13,7 @@ import { CommandSearch } from '@/components/search/command-search'
 import { ThemeSwitch } from '@/components/theme/theme-switch'
 import { VersionSwitcher } from '@/components/docs/version-switcher'
 import { LocaleSwitcher } from '@/components/layout/locale-switcher'
+import { useLocaleAvailability } from '@/components/layout/locale-availability'
 import type { I18nConfig } from '@/components/layout/site-shell'
 import { shell } from '@/config/layout'
 import { cn } from '@/lib/utils'
@@ -50,6 +51,7 @@ export function TopBar({
   showSidebarGroupIcons = true,
 }: TopBarProps) {
   const headerRef = useRef<HTMLElement>(null)
+  const availableLocales = useLocaleAvailability((state) => state.availableByPath[currentPath ?? '/'])
   useEffect(() => {
     if (headerRef.current) return observeHeaderHeight(headerRef.current)
   }, [])
@@ -113,11 +115,11 @@ export function TopBar({
           <span className="-ml-1 shrink-0 font-heading text-[1rem] font-medium text-foreground/55">Docs</span>
         </IntentPrefetchLink>
         {i18nConfig && i18nConfig.locales.length >= 2 ? (
-          <LocaleSwitcher locales={i18nConfig.locales} currentLocale={currentLocale ?? i18nConfig.defaultLocale} currentPath={currentPath ?? '/'} defaultLocale={i18nConfig.defaultLocale} />
+          <LocaleSwitcher locales={i18nConfig.locales} availableLocales={availableLocales ?? [i18nConfig.defaultLocale]} currentLocale={currentLocale ?? i18nConfig.defaultLocale} currentPath={currentPath ?? '/'} defaultLocale={i18nConfig.defaultLocale} />
         ) : null}
         <div className="thally-docs-actions ml-auto flex shrink-0 items-center gap-2">
           <div className="thally-docs-search shrink-0">
-            <CommandSearch />
+            <CommandSearch locale={currentLocale} />
           </div>
           {hasAssistantEntryPoint ? (
             <button

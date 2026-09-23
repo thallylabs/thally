@@ -6,7 +6,7 @@ import { createElement, type ComponentType, type ReactNode } from 'react'
 import { compileMDX } from 'next-mdx-remote/rsc'
 import { interpretMDX } from '@/lib/mdx-interpret'
 import type { DocEntry, DocPageMode, OpenApiReference } from '@/data/docs'
-import { deriveTitleFromSlug, getI18nConfig } from '@/data/docs'
+import { deriveTitleFromSlug } from '@/data/docs'
 import { remarkPlugins } from '@/mdx/remark'
 import { rehypePlugins } from '@/mdx/rehype'
 import { useMDXComponents as getMDXComponents } from '@/components/mdx/mdx-components'
@@ -15,6 +15,8 @@ import { runtimeDocs } from '@/generated/runtime-docs'
 import { readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 import { getContentSource, type ContentSource } from '@/lib/content-source'
 import { docPathFromSlug } from '@/lib/i18n/doc-route'
+import { parseFrontmatter } from '@/lib/frontmatter'
+import { findDocSource } from '@/lib/i18n/translation-source'
 
 interface DocFrontmatter {
   title?: string
@@ -30,19 +32,11 @@ interface DocFrontmatter {
   mode?: DocPageMode
 }
 
-const localDocsRoot = 'src/content'
-
 function projectJoin(...segments: Array<string>): string {
   return segments
     .flatMap((segment) => segment.split('/'))
     .filter(Boolean)
     .join('/')
-}
-
-export interface DocSourceResult {
-  filePath: string
-  isFallback: boolean
-  isStale: boolean
 }
 
 const dynamicDocCache = new Map<string, Promise<(DocEntry & { isFallback: boolean; isStale: boolean }) | null>>()
@@ -66,24 +60,6 @@ export async function getDocFromParams(slugSegments?: Array<string>, locale?: st
   return pending
 }
 
-/**
- * Check whether a locale has an authored MDX source without compiling it.
- * Crawler surfaces call this across many pages and locales, so keeping the
- * operation at the content-source `exists` layer avoids turning sitemap reads
- * into a burst of MDX compilation work.
- */
-export async function hasDocTranslation(
-  slugSegments: Array<string> | undefined,
-  locale: string,
-): Promise<boolean> {
-  const source = getContentSource()
-  const normalized = Array.isArray(slugSegments)
-    ? slugSegments.filter(Boolean)
-    : []
-  const candidate = await findDocSource(source, normalized.join('/'), locale)
-  return Boolean(candidate && !candidate.isFallback)
-}
-
 async function loadDocFromSource(
   slugSegments: Array<string>,
   locale?: string,
@@ -94,72 +70,16 @@ async function loadDocFromSource(
   if (!candidate) {
     return null
   }
-  return compileDocEntry(source, candidate.filePath, slugSegments, candidate.isFallback, candidate.isStale)
-}
-
-async function findDocSource(
-  source: ContentSource,
-  slugPath: string,
-  locale?: string,
-): Promise<DocSourceResult | null> {
-  const normalized = slugPath || 'introduction'
-  const i18n = getI18nConfig()
-  const defaultLocale = i18n?.defaultLocale ?? 'en'
-  const isDefault = !locale || locale === defaultLocale
-
-  if (isDefault) {
-    const candidates = normalized.endsWith('.mdx')
-      ? [normalized]
-      : [`${normalized}.mdx`, `${normalized}/index.mdx`]
-
-    for (const candidate of candidates) {
-      const filePath = projectJoin(localDocsRoot, candidate)
-      if (await source.exists(filePath)) {
-        return { filePath, isFallback: false, isStale: false }
-      }
-    }
-    return null
+  const document = await compileDocEntry(source, candidate.filePath, slugSegments, candidate.isFallback, candidate.isStale)
+  if (!document || !candidate.sourcePath || candidate.isFallback) return document
+  const sourceFile = await source.read(candidate.sourcePath)
+  if (!sourceFile) return null
+  const sourcePolicy = parseFrontmatter(sourceFile.content).data
+  return {
+    ...document,
+    noindex: document.noindex || sourcePolicy.noindex === true,
+    hidden: document.hidden || sourcePolicy.hidden === true,
   }
-
-  // Secondary locale: try translated file first, then fall back to primary
-  const localeCandidates = normalized.endsWith('.mdx')
-    ? [projectJoin(localDocsRoot, locale, normalized)]
-    : [
-        projectJoin(localDocsRoot, locale, `${normalized}.mdx`),
-        projectJoin(localDocsRoot, locale, `${normalized}/index.mdx`),
-      ]
-
-  const primaryCandidates = normalized.endsWith('.mdx')
-    ? [projectJoin(localDocsRoot, normalized)]
-    : [
-        projectJoin(localDocsRoot, `${normalized}.mdx`),
-        projectJoin(localDocsRoot, `${normalized}/index.mdx`),
-      ]
-
-  for (const localeFilePath of localeCandidates) {
-    if (await source.exists(localeFilePath)) {
-      // Translation file exists — check staleness against primary
-      let isStale = false
-      for (const primaryPath of primaryCandidates) {
-        if (await source.exists(primaryPath)) {
-          if ((await source.modifiedAt(primaryPath)) > (await source.modifiedAt(localeFilePath))) {
-            isStale = true
-          }
-          break
-        }
-      }
-      return { filePath: localeFilePath, isFallback: false, isStale }
-    }
-  }
-
-  // Fall back to primary
-  for (const primaryPath of primaryCandidates) {
-    if (await source.exists(primaryPath)) {
-      return { filePath: primaryPath, isFallback: true, isStale: false }
-    }
-  }
-
-  return null
 }
 
 /**
