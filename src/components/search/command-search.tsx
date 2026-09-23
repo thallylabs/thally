@@ -10,7 +10,7 @@ const SearchDialog = dynamic(
   () => import('@/components/search/search-dialog').then((module) => module.SearchDialog),
 )
 
-export function CommandSearch() {
+export function CommandSearch({ locale }: { locale?: string }) {
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -50,7 +50,7 @@ export function CommandSearch() {
         <Search className="h-4 w-4" />
       </button>
 
-      {open ? <SearchDialog open={open} onOpenChange={setOpen} /> : null}
+      {open ? <SearchDialog open={open} onOpenChange={setOpen} locale={locale} /> : null}
     </>
   )
 }

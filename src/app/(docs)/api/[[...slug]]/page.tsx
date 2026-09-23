@@ -2,18 +2,17 @@ import type { Metadata } from 'next'
 import { notFound, redirect } from 'next/navigation'
 import { ApiLayout } from '@/components/api/api-layout'
 import { OperationPanel } from '@/components/api/operation-panel'
-import { DocLayout } from '@/components/docs/doc-layout'
 import { getSiteUrl } from '@/lib/site-url'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { apiReferenceConfig, getOpenApiSpecUrl } from '@/config/api-reference'
 import { getAllApiOperationNodes, getApiOperationBySlug, getApiOperationNodes } from '@/data/api-reference'
 import { getBreadcrumbs, getDocEntries, loadDocEntries } from '@/data/docs'
-import { getDocFromParams } from '@/data/get-doc'
 import { isRemoteContentSource } from '@/lib/content-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
-import { buildApiOperationJsonLd, buildDocPageJsonLd } from '@/lib/json-ld'
+import { buildApiOperationJsonLd } from '@/lib/json-ld'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
+import DocsPage, { generateMetadata as generateDocsMetadata } from '@/app/(docs)/[[...slug]]/page'
 
 interface PageProps {
   params: Promise<{ slug?: Array<string> }>
@@ -74,38 +73,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     }
   }
 
-  const doc = await getDocFromParams(['api', ...(resolved.slug ?? [])])
-  if (doc) {
-    const primaryHref = doc.href
-    const ogImageUrl = buildOgImageUrl({
-      title: doc.title,
-      description: doc.description,
-      crumb: formatOgBreadcrumb(getBreadcrumbs(primaryHref), doc.title, doc.group),
-      url: formatOgDisplayUrl(primaryHref, siteUrl),
-    })
-
-    return {
-      title: doc.title,
-      description: doc.description,
-      alternates: {
-        canonical: `${siteUrl}${primaryHref}`,
-        types: buildAgentAlternateLinks(primaryHref, siteUrl),
-      },
-      openGraph: {
-        title: doc.title,
-        description: doc.description,
-        images: [{ url: ogImageUrl, width: 1200, height: 630 }],
-      },
-      twitter: {
-        card: 'summary_large_image',
-        title: doc.title,
-        description: doc.description,
-        images: [ogImageUrl],
-      },
-    }
-  }
-
-  return {}
+  return generateDocsMetadata({ params: Promise.resolve({ slug: ['api', ...(resolved.slug ?? [])] }) })
 }
 
 export default async function ApiReferencePage({ params }: PageProps) {
@@ -162,32 +130,7 @@ export default async function ApiReferencePage({ params }: PageProps) {
     )
   }
 
-  // MDX page fallback (e.g. /api/overview → src/content/api/overview.mdx)
-  const doc = await getDocFromParams(['api', ...resolved.slug])
-  if (!doc) {
-    notFound()
-  }
-
-  const pageUrl = `${siteUrl}${doc.href}`
-  const jsonLd = buildDocPageJsonLd({
-    siteUrl,
-    siteName: effectiveSite.name,
-    pageUrl,
-    id: doc.id,
-    title: doc.title,
-    description: doc.description,
-    keywords: doc.keywords,
-    lastUpdated: doc.lastUpdated,
-    breadcrumb: getBreadcrumbs(doc.href),
-  })
-
-  const Content = doc.component
-  return (
-    <>
-      <JsonLdScript data={jsonLd} />
-      <DocLayout doc={doc}>
-        <Content />
-      </DocLayout>
-    </>
-  )
+  // MDX under /api is still an authored document, so share its locale,
+  // robots, and hreflang behavior with the primary document route.
+  return DocsPage({ params: Promise.resolve({ slug: ['api', ...resolved.slug] }) })
 }

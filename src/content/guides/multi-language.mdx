@@ -12,7 +12,7 @@ Translated MDX files still live alongside the source content so a localized page
 <CardGroup cols="2">
 
 <Card title="Real locale URLs" icon="link-simple">
-  `/es/introduction`, `/fr/guides/writing-content` — every locale gets its own indexable URL, never a client-side redirect.
+  `/es/introduction`, `/fr/guides/writing-content` — each published translation has its own crawlable URL.
 </Card>
 
 <Card title="AI-powered translation" icon="wrench">
@@ -20,7 +20,7 @@ Translated MDX files still live alongside the source content so a localized page
 </Card>
 
 <Card title="Automatic fallbacks" icon="book-open">
-  Untranslated or stale pages fall back to the primary language gracefully, with informative banners instead of 404s.
+  Missing translations show the original with a notice. Stale translations stay visible with an update notice.
 </Card>
 
 <Card title="Built-in language switcher" icon="grid-round">
@@ -163,13 +163,13 @@ npx create-thally-docs translate --locale es --pages guides/writing-content --fo
 
 ## Fallback behavior
 
-Thally never returns a 404 for a missing translation. Instead, it serves the source-language content with an informative banner:
+When a source page exists but its translation is missing, Thally shows the source-language content with an informative banner. A translation left behind after its source page is deleted returns 404.
 
 **Missing translation** — the page hasn't been translated for that locale yet:
 
 > ⚠️ This page hasn't been translated to **Español** yet. Showing the original **English** version.
 
-**Stale translation** — the primary-language file was updated after the translation was last generated:
+**Stale translation** — a generated translation's recorded source hash differs from the current source, or an unmarked translation's file timestamp predates the source:
 
 > This translation may be outdated. [View original →]
 
@@ -205,7 +205,7 @@ To change the language of API Reference descriptions and summaries, update them 
 
 ## SEO
 
-Thally generates crawler metadata from the same language selection used by the site. A locale is added to `hreflang` and the sitemap only after that page has a real translated MDX file:
+Thally generates crawler metadata from the same language selection used by the site. A locale is added to `hreflang` and the sitemap only when that page has a translated MDX file and neither the source nor the translation is hidden or marked `noindex`:
 
 ```html
 <link rel="canonical" href="https://docs.example.com/introduction" />
@@ -216,6 +216,8 @@ Thally generates crawler metadata from the same language selection used by the s
 ```
 
 Real translations use their own locale URL as canonical. A missing-translation fallback is marked `noindex` and canonicalized to the source URL, so crawlers never index English prose as if it were Spanish or French. The translated content also carries its own `lang` and text direction on the server-rendered content container.
+
+The docs search dialog searches the current language and returns translated page URLs. Agents can request `/api/docs-index?locale=fr`, `/api/search?q=installation&locale=fr`, or `/api/docs/fr/guides/writing-content` for translated content. These APIs omit pages without a published translation in the requested language.
 
 Set `THALLY_SITE_URL` so the correct domain appears in these tags:
 
