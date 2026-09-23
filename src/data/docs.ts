@@ -4,6 +4,7 @@ import { parseFrontmatter } from '@/lib/frontmatter'
 import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 import { getDocsJsonConfig, getDocsJsonConfigRevision } from '@/lib/docs-json-config'
 import { resolveIconLibrary, type IconLibrary } from '@/lib/icon-library'
+import { projectNavigationContract } from '@thallylabs/core/navigation'
 
 // ---------------------------------------------------------------------------
 // Public interfaces (consumed by components, pages, and stores)
@@ -430,28 +431,6 @@ function slugifyId(value: string) {
     .replace(/\//g, '-')
 }
 
-// ---------------------------------------------------------------------------
-// Collect all page IDs from docs.json (for static params & search index)
-// ---------------------------------------------------------------------------
-
-function collectPageIds(groups: Array<DocsJsonNavigationGroup>): Array<string> {
-  return groups.flatMap((group) => collectPageIdsFromPages(group.pages))
-}
-
-function collectPageIdsFromPages(
-  pages: Array<string | DocsJsonNavigationGroup>,
-): Array<string> {
-  const ids: Array<string> = []
-  for (const page of pages) {
-    if (typeof page === 'string') {
-      ids.push(page)
-    } else {
-      ids.push(...collectPageIdsFromPages(page.pages))
-    }
-  }
-  return ids
-}
-
 const KEYWORD_STOPWORDS = new Set([
   'the',
   'a',
@@ -545,18 +524,8 @@ function getAllDocEntries(): Array<DocEntry> {
     entries.push(buildDocEntryFromPageId(id))
   }
 
-  // 1. Nav-group pages first (preserves nav order), plus standalone href tabs
-  //    (e.g. Changelog) which reference a real page outside any group.
-  for (const tab of config.tabs) {
-    if (tab.pages) {
-      for (const id of collectPageIdsFromPages(tab.pages)) add(id)
-    }
-    if (tab.groups) {
-      for (const id of collectPageIds(tab.groups)) add(id)
-    } else if (tab.href && tab.href.startsWith('/')) {
-      add(tab.href.slice(1) || 'introduction')
-    }
-  }
+  // 1. Explicit navigation references and standalone local href tabs.
+  for (const id of projectNavigationContract(config).authoredPageIds) add(id)
 
   // 2. Every remaining content page — so search, embeddings, and the agent
   //    endpoints cover the whole site, not just pages listed in a nav group.
@@ -568,18 +537,7 @@ function getAllDocEntries(): Array<DocEntry> {
 
 /** Page IDs reachable from navigation: nav-group pages + standalone href tabs. */
 export function getNavigablePageIds(): Set<string> {
-  const ids = new Set<string>()
-  for (const tab of docsConfig().tabs) {
-    if (tab.pages) {
-      for (const id of collectPageIdsFromPages(tab.pages)) ids.add(id)
-    }
-    if (tab.groups) {
-      for (const id of collectPageIds(tab.groups)) ids.add(id)
-    } else if (tab.href && tab.href.startsWith('/')) {
-      ids.add(tab.href.slice(1) || 'introduction')
-    }
-  }
-  return ids
+  return new Set(projectNavigationContract(docsConfig()).authoredPageIds)
 }
 
 // ---------------------------------------------------------------------------
@@ -641,16 +599,7 @@ export function loadDocEntries(): Promise<Array<DocEntry>> {
       seen.add(id)
       ids.push(id)
     }
-    for (const tab of docsConfig().tabs) {
-      if (tab.pages) {
-        for (const id of collectPageIdsFromPages(tab.pages)) add(id)
-      }
-      if (tab.groups) {
-        for (const id of collectPageIds(tab.groups)) add(id)
-      } else if (tab.href?.startsWith('/')) {
-        add(tab.href.slice(1) || 'introduction')
-      }
-    }
+    for (const id of projectNavigationContract(docsConfig()).authoredPageIds) add(id)
     for (const id of defaultLocalePageIds(index)) add(id)
     return ids.map((id) => buildDocEntryFromPageId(id, indexedFrontmatter(index, id)))
   })()

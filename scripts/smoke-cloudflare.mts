@@ -7,8 +7,10 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
+import { missingNavigationRoutes, navigationPagePath, projectNavigationContract } from '@thallylabs/core/navigation'
 
 interface SmokeCheck {
   name: string
@@ -24,6 +26,11 @@ interface PageRepresentation {
   bodyFormat: 'html' | 'markdown' | 'json'
 }
 
+const navigationConfig = JSON.parse(readFileSync(path.join(process.cwd(), 'docs.json'), 'utf8'))
+const navigation = projectNavigationContract(navigationConfig)
+const expectedNavigationPaths = navigation.visiblePageIds.map(navigationPagePath)
+const firstContentPath = expectedNavigationPaths.find((pagePath) => pagePath !== '/')
+
 const checks: ReadonlyArray<SmokeCheck> = [
   {
     name: 'home',
@@ -31,7 +38,7 @@ const checks: ReadonlyArray<SmokeCheck> = [
     contentType: 'text/html',
     validateHydrationBootstrap: true,
   },
-  { name: 'guide', path: '/guides/deploying', contentType: 'text/html' },
+  ...(firstContentPath ? [{ name: 'navigable page', path: firstContentPath, contentType: 'text/html' }] : []),
   { name: 'docs index', path: '/api/docs-index', contentType: 'application/json' },
   {
     name: 'structured document',
@@ -103,6 +110,11 @@ async function verifyLlmsPageMatrix(baseUrl: string): Promise<void> {
   )
 
   if (pagePaths.length === 0) throw new Error('llms.txt did not emit any canonical page links.')
+
+  const missingRoutes = missingNavigationRoutes(navigation, pagePaths)
+  if (missingRoutes.length > 0) {
+    throw new Error(`Visible navigation routes absent from llms.txt: ${missingRoutes.join(', ')}.`)
+  }
 
   for (const firstPartyPath of firstPartyPaths) {
     const targetUrl = smokeUrl(baseUrl, firstPartyPath)
@@ -213,8 +225,18 @@ async function main(): Promise<void> {
   if (!baseUrl) {
     const port = await availablePort()
     baseUrl = `http://127.0.0.1:${port}`
-    const binary = path.join(process.cwd(), 'node_modules/.bin/opennextjs-cloudflare')
-    child = spawn(binary, ['preview', '--port', String(port)], {
+    // A managed assets build embeds no authored files. Local workerd must get
+    // the same runtime binding Cloud injects; inheriting the shell variable
+    // alone does not create a Worker binding in OpenNext's preview command.
+    const isManagedAssets = process.env.THALLY_CONTENT_SOURCE?.trim().toLowerCase() === 'assets'
+    const binary = path.join(
+      process.cwd(),
+      isManagedAssets ? 'node_modules/.bin/wrangler' : 'node_modules/.bin/opennextjs-cloudflare',
+    )
+    const args = isManagedAssets
+      ? ['dev', '--port', String(port), '--var', 'THALLY_CONTENT_SOURCE:assets']
+      : ['preview', '--port', String(port)]
+    child = spawn(binary, args, {
       cwd: process.cwd(),
       detached: process.platform !== 'win32',
       env: process.env,

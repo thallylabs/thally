@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process'
 import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
-import type { DocsJsonNavigationGroup } from './docs-json.js'
+import { projectNavigationContract } from '@thallylabs/core/navigation'
 
 export interface LintIssue {
   severity: 'error' | 'warning'
@@ -89,21 +89,6 @@ function checkDrift(projectDir: string, file: string, data: Record<string, unkno
         message: `Drift: source "${src}" changed in ${n} commit(s) since it was verified — this page may be stale.`,
         file,
       })
-    }
-  }
-}
-
-function collectNavPageIds(
-  groups: Array<string | DocsJsonNavigationGroup>,
-  seen: Set<string>,
-  duplicates: Set<string>,
-): void {
-  for (const page of groups) {
-    if (typeof page === 'string') {
-      if (seen.has(page)) duplicates.add(page)
-      else seen.add(page)
-    } else if (page.pages) {
-      collectNavPageIds(page.pages, seen, duplicates)
     }
   }
 }
@@ -325,29 +310,13 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     ]),
   )
 
-  const navPageIds = new Set<string>()
-  const duplicates = new Set<string>()
-
-  for (const tab of config.tabs) {
-    const hasNavigationNodes = Boolean(tab.pages?.length || tab.groups?.length)
-    if (tab.href && !hasNavigationNodes) {
-      // A standalone href tab (e.g. Changelog) references a real page — not an orphan.
-      if (tab.href.startsWith('/')) navPageIds.add(tab.href.slice(1) || 'introduction')
-      continue
-    }
-    // API tabs without authored nodes derive navigation from their
-    // specification. When pages or groups are present, the runtime merges
-    // those MDX sections with generated operations, so they remain reachable.
-    if (tab.api && tab.api.navigation !== false && !hasNavigationNodes) continue
-    if (!hasNavigationNodes) {
-      issues.push({ severity: 'error', message: `Tab "${tab.tab}" has no groups and no href — it will render empty` })
-      continue
-    }
-    collectNavPageIds(tab.pages ?? [], navPageIds, duplicates)
-    collectNavPageIds(tab.groups ?? [], navPageIds, duplicates)
+  const navigation = projectNavigationContract(config)
+  const navPageIds = new Set(navigation.authoredPageIds)
+  for (const tab of navigation.emptyTabs) {
+    issues.push({ severity: 'error', message: `Tab "${tab}" has no groups and no href — it will render empty` })
   }
 
-  for (const dup of duplicates) {
+  for (const dup of navigation.duplicatePageIds) {
     // Reusing one page in multiple sections is supported by both Mintlify and
     // Thally. Surface the editorial ambiguity without failing an otherwise
     // valid migration or CI run.

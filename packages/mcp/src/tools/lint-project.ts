@@ -3,8 +3,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseFrontmatter } from '../lib/frontmatter.js'
 import { readDocsJson, writeDocsJson } from '../lib/docs-json.js'
-import type { DocsJsonNavigationGroup } from '../lib/docs-json.js'
 import { scanMdxFiles } from './search-docs.js'
+import { projectNavigationContract } from '@thallylabs/core/navigation'
 
 export const lintProjectSchema = z.object({
   projectDir: z.string().describe('Path to the Thally project root'),
@@ -17,20 +17,6 @@ interface LintIssue {
   severity: 'error' | 'warning'
   message: string
   file?: string
-}
-
-function collectNavPageIds(groups: Array<string | DocsJsonNavigationGroup>, seen: Set<string>, duplicates: Set<string>): void {
-  for (const page of groups) {
-    if (typeof page === 'string') {
-      if (seen.has(page)) {
-        duplicates.add(page)
-      } else {
-        seen.add(page)
-      }
-    } else if (page.pages) {
-      collectNavPageIds(page.pages, seen, duplicates)
-    }
-  }
 }
 
 function addOrphanToNav(projectDir: string, pageId: string): void {
@@ -65,23 +51,14 @@ export async function handleLintProject(input: LintProjectInput): Promise<string
 
   const config = readDocsJson(projectDir)
 
-  // Collect all nav page IDs + detect duplicates
-  const navPageIds = new Set<string>()
-  const duplicates = new Set<string>()
-
-  for (const tab of config.tabs) {
-    const hasNavigationNodes = Boolean(tab.pages?.length || tab.groups?.length)
-    if ((tab.href || tab.api) && !hasNavigationNodes) continue
-    if (!hasNavigationNodes) {
-      issues.push({ severity: 'error', message: `Tab "${tab.tab}" has no groups and no href — it will render empty` })
-      continue
-    }
-    collectNavPageIds(tab.pages ?? [], navPageIds, duplicates)
-    collectNavPageIds(tab.groups ?? [], navPageIds, duplicates)
+  const navigation = projectNavigationContract(config)
+  const navPageIds = new Set(navigation.authoredPageIds)
+  for (const tab of navigation.emptyTabs) {
+    issues.push({ severity: 'error', message: `Tab "${tab}" has no groups and no href — it will render empty` })
   }
 
-  for (const dup of duplicates) {
-    issues.push({ severity: 'error', message: `[duplicate] "${dup}" appears more than once in docs.json` })
+  for (const dup of navigation.duplicatePageIds) {
+    issues.push({ severity: 'warning', message: `[duplicate] "${dup}" appears more than once in docs.json` })
   }
 
   // Check: page in nav but no MDX file
