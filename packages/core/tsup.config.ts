@@ -8,6 +8,8 @@ import { defineConfig } from 'tsup'
  *                drag the search/embeddings graph into their bundles.
  *  - `markdown` — pure parsing/projection with no filesystem document reader,
  *                 for request-time serverless bundles.
+ *  - `navigation` — pure route expectations shared by runtime and tools.
+ *  - `slugify` — dependency-free IDs for server routes that do not need the barrel.
  *  - `theme`   — pure brand-token helpers, client-safe (no Node/MDX/search deps).
  *
  * Entries share code via tsup's ESM chunk splitting, so `content` and the
@@ -22,8 +24,10 @@ export default defineConfig({
     content: 'src/content/index.ts',
     embeddings: 'src/embeddings/index.ts',
     markdown: 'src/markdown.ts',
+    navigation: 'src/navigation.ts',
     registry: 'src/registry.ts',
     search: 'src/search/index.ts',
+    slugify: 'src/slugify.ts',
     theme: 'src/theme/index.ts',
   },
   format: ['esm'],
