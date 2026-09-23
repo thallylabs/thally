@@ -82,6 +82,8 @@ describe('llms.txt canonical page matrix', () => {
     const entriesByHref = new Map((await loadDocEntries()).map((entry) => [entry.href, entry]))
 
     expect(pageUrls.length).toBeGreaterThan(0)
+    expect(pageUrls).toContain(`${BASE_URL}/changelog`)
+    expect(pageUrls).toContain(`${BASE_URL}/api/overview`)
 
     for (const pageUrl of pageUrls) {
       const url = new URL(pageUrl)
