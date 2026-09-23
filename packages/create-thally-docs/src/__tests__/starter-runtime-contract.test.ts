@@ -76,6 +76,11 @@ function createRuntime(): {
     "src/lib/__tests__/frontmatter-parity.test.ts",
     "import '../../../packages/core'\n",
   );
+  write(
+    directory,
+    "src/components/mdx/client-registry.test.ts",
+    "import '../../../packages/migrate/src/components.js'\n",
+  );
   execFileSync("git", ["init", "-q"], { cwd: directory });
   execFileSync("git", ["add", "."], { cwd: directory });
   execFileSync(
@@ -115,6 +120,11 @@ function createStarter(
     directory,
     "src/lib/__tests__/frontmatter-parity.test.ts",
     "import '../../../packages/core'\n",
+  );
+  write(
+    directory,
+    "src/components/mdx/client-registry.test.ts",
+    "import '../../../packages/migrate/src/components.js'\n",
   );
   write(
     directory,
@@ -174,6 +184,7 @@ describe("starter runtime contract", () => {
         "src/lib/runtime.ts is missing from starter",
         "BUILD-WARNINGS.md is missing from starter",
         "src/lib/__tests__/frontmatter-parity.test.ts is source-only but exists in starter",
+        "src/components/mdx/client-registry.test.ts is source-only but exists in starter",
       ]),
     );
   });
@@ -206,6 +217,12 @@ describe("starter runtime contract", () => {
     expect(() =>
       readFileSync(
         join(starterDirectory, "src/lib/__tests__/frontmatter-parity.test.ts"),
+        "utf8",
+      ),
+    ).toThrow();
+    expect(() =>
+      readFileSync(
+        join(starterDirectory, "src/components/mdx/client-registry.test.ts"),
         "utf8",
       ),
     ).toThrow();

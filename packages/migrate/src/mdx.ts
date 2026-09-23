@@ -1,5 +1,6 @@
 /** Markdown/MDX normalization that preserves every component Thally supports. */
 
+import * as acorn from 'acorn'
 import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
@@ -141,7 +142,26 @@ export function detectUnsupportedFernComponents(body: string): Array<string> {
 }
 
 const JS_LITERAL_KEYWORDS = new Set(['true', 'false', 'null', 'undefined'])
-const BARE_IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/
+// A leading identifier segment (`x` in `x.y.z`) may be any valid JS/Unicode
+// identifier, not just ASCII — `{café}`, `{$var}` are both real bare
+// references a page's own ESM could bind, and Fern's literal-brace prose
+// (the thing this whole pass is trying to leave alone) never happens to
+// look like one, so escaping stays conservative either way.
+const BARE_IDENTIFIER_PATH = /^[\p{ID_Start}$_][\p{ID_Continue}$‌‍]*(?:\.[\p{ID_Start}$_][\p{ID_Continue}$‌‍]*)*$/u
+/**
+ * Well-known JS/browser globals a page's prose might reference (`{Math.PI}`,
+ * `{window.location}`) without ever declaring or importing them. Not
+ * exhaustive — just the ones likely to show up in docs prose; anything else
+ * still needs an explicit import/declaration to avoid being escaped.
+ */
+const KNOWN_GLOBAL_IDENTIFIERS = new Set([
+  'Math', 'JSON', 'Array', 'Object', 'Number', 'String', 'Boolean', 'Symbol',
+  'Promise', 'RegExp', 'Date', 'Error', 'TypeError', 'RangeError', 'Map', 'Set',
+  'WeakMap', 'WeakSet', 'console', 'globalThis', 'window', 'document', 'navigator',
+  'localStorage', 'sessionStorage', 'fetch', 'Infinity', 'NaN', 'isNaN', 'isFinite',
+  'parseInt', 'parseFloat', 'encodeURIComponent', 'decodeURIComponent',
+  'encodeURI', 'decodeURI', 'structuredClone', 'process',
+])
 
 interface MdxOffsetNode {
   type: string
@@ -150,47 +170,75 @@ interface MdxOffsetNode {
   position?: { start: { offset?: number }; end: { offset?: number } }
 }
 
+/** Recursively collects every name a binding pattern introduces (`{a, b: {c}}`, `[p, ...rest]`, `x = 1`). */
+function collectPatternNames(pattern: acorn.AnyNode, names: Set<string>): void {
+  switch (pattern.type) {
+    case 'Identifier':
+      names.add((pattern as acorn.Identifier).name)
+      break
+    case 'ObjectPattern':
+      for (const property of (pattern as acorn.ObjectPattern).properties) {
+        collectPatternNames(property.type === 'RestElement' ? property.argument : property.value, names)
+      }
+      break
+    case 'ArrayPattern':
+      for (const element of (pattern as acorn.ArrayPattern).elements) {
+        if (element) collectPatternNames(element, names)
+      }
+      break
+    case 'AssignmentPattern':
+      collectPatternNames((pattern as acorn.AssignmentPattern).left, names)
+      break
+    case 'RestElement':
+      collectPatternNames((pattern as acorn.RestElement).argument, names)
+      break
+    default:
+      break
+  }
+}
+
+/** Adds the name(s) a single top-level declaration statement introduces (`const`/`let`/`var`, `function`, `class`). */
+function collectDeclarationNames(node: acorn.AnyNode | null | undefined, names: Set<string>): void {
+  if (!node) return
+  if (node.type === 'VariableDeclaration') {
+    for (const declarator of (node as acorn.VariableDeclaration).declarations) collectPatternNames(declarator.id, names)
+  } else if ((node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration') && (node as acorn.FunctionDeclaration | acorn.ClassDeclaration).id) {
+    names.add(((node as acorn.FunctionDeclaration | acorn.ClassDeclaration).id as acorn.Identifier).name)
+  }
+}
+
 /**
  * Bind every name a page's own ESM statement introduces — an import
- * (default, namespace, or named/destructured) or a top-level `const`/`let`/
- * `var`/`function`/`class` — so a prose brace referencing one of them is
- * treated as real, already-bound code rather than ambiguous Fern prose. This
- * is a tolerant textual scan of the statement's own source, not a full JS
- * parse: good enough to recognize a binding, never used to execute anything.
+ * (default, namespace, or named/destructured, however deeply nested its
+ * destructuring goes), or a top-level `const`/`let`/`var`/`function`/`class`
+ * — so a prose brace referencing one of them is treated as real,
+ * already-bound code rather than ambiguous Fern prose. Parsed with `acorn`
+ * (real ESM syntax, not a regex approximation), so `export const a = 1, b =
+ * 2`, nested destructuring, and multi-declarator statements all resolve
+ * correctly. `export { x } from './y'` (a re-export) and a local `export {
+ * x }` (which only re-exposes an already-declared local) never introduce a
+ * new binding, so neither is added here — matching real JS module
+ * semantics, since referencing `x` in prose is exactly as undefined as it
+ * would be in the compiled component.
  */
 function collectEsmBindings(source: string, declared: Set<string>): void {
-  for (const match of source.matchAll(/\bimport\s+([^'";]+?)\s+from\s+['"][^'"]*['"]/g)) {
-    const clause = match[1].trim()
-    const namespace = clause.match(/^\*\s+as\s+(\w+)$/)
-    if (namespace) {
-      declared.add(namespace[1])
-      continue
-    }
-    for (const part of clause.split(/,(?![^{]*\})/).map((piece) => piece.trim()).filter(Boolean)) {
-      const named = part.match(/^\{([^}]*)\}$/)
-      if (named) {
-        for (const entry of named[1].split(',')) {
-          const name = entry.split(/\s+as\s+/).pop()?.trim()
-          if (name) declared.add(name)
-        }
-      } else if (/^\w+$/.test(part)) {
-        declared.add(part)
-      }
-    }
+  let program: acorn.Program
+  try {
+    program = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'module' })
+  } catch {
+    return
   }
-  for (const match of source.matchAll(/\b(?:export\s+)?(?:const|let|var)\s+(\{[^}]*\}|\[[^\]]*\]|\w+)\s*=/g)) {
-    const target = match[1]
-    if (target.startsWith('{') || target.startsWith('[')) {
-      for (const name of target.replace(/[{}[\]]/g, '').split(',')) {
-        const clean = name.split(':').pop()?.split('=')[0]?.trim()
-        if (clean && /^\w+$/.test(clean)) declared.add(clean)
-      }
+  for (const node of program.body) {
+    if (node.type === 'ImportDeclaration') {
+      for (const specifier of node.specifiers) declared.add(specifier.local.name)
+    } else if (node.type === 'ExportNamedDeclaration') {
+      collectDeclarationNames(node.declaration, declared)
+    } else if (node.type === 'ExportDefaultDeclaration') {
+      collectDeclarationNames(node.declaration, declared)
     } else {
-      declared.add(target)
+      collectDeclarationNames(node, declared)
     }
   }
-  for (const match of source.matchAll(/\b(?:export\s+)?function\s+(\w+)/g)) declared.add(match[1])
-  for (const match of source.matchAll(/\b(?:export\s+)?class\s+(\w+)/g)) declared.add(match[1])
 }
 
 /**
@@ -236,8 +284,9 @@ export function escapeFernLiteralBraces(body: string): string {
       const value = (node.value ?? '').trim()
       const start = node.position?.start.offset
       const end = node.position?.end.offset
+      const root = value.split('.')[0]
       if (BARE_IDENTIFIER_PATH.test(value) && !JS_LITERAL_KEYWORDS.has(value)
-        && !declared.has(value.split('.')[0]) && start !== undefined && end !== undefined) {
+        && !declared.has(root) && !KNOWN_GLOBAL_IDENTIFIERS.has(root) && start !== undefined && end !== undefined) {
         edits.push({ start, end, value: `\\{${value}\\}` })
       }
       // A leaf node: mdast never gives it further `children` (its JSX, if
@@ -411,7 +460,7 @@ function exportDeclarationBodies(body: string): Array<string> {
  * `list.map((x) => x)` does. Only a genuine function reference crosses the
  * server/client boundary as a prop; a value like `items` above does not.
  */
-function isFunctionInitializer(source: string, sourceIndex: number): boolean {
+export function isFunctionInitializer(source: string, sourceIndex: number): boolean {
   let index = sourceIndex
   const skipSpace = () => { while (/\s/.test(source[index] ?? '')) index++ }
   skipSpace()
@@ -462,10 +511,32 @@ function isFunctionInitializer(source: string, sourceIndex: number): boolean {
  */
 export function hasClientBoundaryFunctionProp(body: string): boolean {
   const { masked } = maskCode(body)
-  const declared = [...masked.matchAll(/export const (\w+)\s*=\s*/g)]
-    .filter((match) => isFunctionInitializer(masked, (match.index ?? 0) + match[0].length))
-    .map((match) => match[1])
+  const declared = [...functionDeclaredNames(body)]
   return declared.some((name) => new RegExp(`\\w+=\\{${name}\\}`).test(masked))
+}
+
+/**
+ * A page's top-level `export` identifiers that are actually functions — a
+ * `function`/`async function` declaration, or an `export const NAME = `
+ * whose initializer is a real function expression (see
+ * `isFunctionInitializer`). Excludes plain values (`export const diagram =
+ * 'graph TD'`), even when their initializer text happens to contain `=>`
+ * further in (`export const items = list.map((x) => x)`). Callers that need
+ * to know whether a prop value crosses the server/client boundary as a
+ * function must check against this set, not every `export const` name —
+ * confusing the two would exclude pages that merely pass a string or object
+ * to a client component.
+ */
+export function functionDeclaredNames(body: string): Set<string> {
+  const { masked } = maskCode(body)
+  const names = new Set<string>()
+  for (const match of masked.matchAll(/export const (\w+)\s*=\s*/g)) {
+    if (isFunctionInitializer(masked, (match.index ?? 0) + match[0].length)) names.add(match[1])
+  }
+  for (const match of masked.matchAll(/export (?:async\s+)?function\s+(\w+)/g)) {
+    names.add(match[1])
+  }
+  return names
 }
 
 /**

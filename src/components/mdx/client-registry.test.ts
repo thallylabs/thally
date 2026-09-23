@@ -6,11 +6,19 @@
  * recomputes the same set straight from the registry and this directory's
  * files, so a renderer change that adds/removes/re-homes a client component
  * fails CI here instead of silently going stale in the migrator.
+ *
+ * The registry and each candidate file are parsed with the TypeScript
+ * compiler API rather than line regexes, so a multi-line arrow wrapper
+ * (`(props) => (\n  <Accordion ... />\n)`), an aliased import, or a `'use
+ * client'` directive that isn't the very first line of the file are all
+ * resolved correctly instead of silently falling through a regex's blind
+ * spots.
  */
 
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 import { CLIENT_BUILTIN_COMPONENT_TAGS } from '../../../packages/migrate/src/components.js'
@@ -18,54 +26,133 @@ import { CLIENT_BUILTIN_COMPONENT_TAGS } from '../../../packages/migrate/src/com
 const mdxDir = dirname(fileURLToPath(import.meta.url))
 const registrySource = readFileSync(join(mdxDir, 'mdx-components.tsx'), 'utf8')
 
-/** name imported into mdx-components.tsx -> module it came from (e.g. '@/components/mdx/panel') */
-function importedBindings(source: string): Map<string, string> {
+function parse(source: string, fileName: string): ts.SourceFile {
+  return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+}
+
+/** local identifier (as bound in this file) -> the module specifier it was imported from. */
+function importedBindings(sourceFile: ts.SourceFile): Map<string, string> {
   const bindings = new Map<string, string>()
-  const importRe = /import\s+(?:type\s+)?(?:\{([^}]+)\}|(\w+))\s+from\s+['"]([^'"]+)['"]/g
-  for (const match of source.matchAll(importRe)) {
-    const [, named, def, mod] = match
-    if (def) bindings.set(def, mod)
-    if (named) {
-      for (const raw of named.split(',')) {
-        const part = raw.trim().replace(/^type\s+/, '')
-        if (!part) continue
-        const asMatch = part.match(/^(\w+)\s+as\s+(\w+)$/)
-        bindings.set(asMatch ? asMatch[2] : part, mod)
-      }
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue
+    const mod = statement.moduleSpecifier.text
+    const clause = statement.importClause
+    if (!clause) continue
+    if (clause.name) bindings.set(clause.name.text, mod)
+    const named = clause.namedBindings
+    if (named && ts.isNamedImports(named)) {
+      for (const element of named.elements) bindings.set(element.name.text, mod)
     }
   }
   return bindings
 }
 
+/** The root identifier a JSX tag name expression is rooted at (`Color.Item` -> `Color`). */
+function rootTagIdentifier(tagName: ts.JsxTagNameExpression): string | undefined {
+  if (ts.isIdentifier(tagName)) return tagName.text
+  if (ts.isPropertyAccessExpression(tagName)) return rootTagIdentifier(tagName.expression as ts.JsxTagNameExpression)
+  return undefined
+}
+
+/** Unwraps parenthesized expressions and `as`/`satisfies` assertions down to the real expression. */
+function unwrap(expression: ts.Expression): ts.Expression {
+  let current = expression
+  while (true) {
+    if (ts.isParenthesizedExpression(current)) { current = current.expression; continue }
+    if (ts.isAsExpression(current) || ts.isSatisfiesExpression(current)) { current = current.expression; continue }
+    return current
+  }
+}
+
+/** The local identifier a registry entry's value actually renders: a JSX tag's root name, or a bare identifier reference. */
+function renderedLocalIdentifier(initializer: ts.Expression): string | undefined {
+  const value = unwrap(initializer)
+  if (ts.isIdentifier(value)) return value.text
+  if (!ts.isArrowFunction(value) && !ts.isFunctionExpression(value)) return undefined
+  const body = value.body
+  const jsxRoot = (node: ts.Node): ts.JsxTagNameExpression | undefined => {
+    const inner = ts.isExpression(node) ? unwrap(node) : node
+    if (ts.isJsxElement(inner)) return inner.openingElement.tagName
+    if (ts.isJsxSelfClosingElement(inner)) return inner.tagName
+    if (ts.isJsxFragment(inner)) return undefined
+    return undefined
+  }
+  if (ts.isBlock(body)) {
+    let tagName: ts.JsxTagNameExpression | undefined
+    for (const statement of body.statements) {
+      if (ts.isReturnStatement(statement) && statement.expression) {
+        const found = jsxRoot(statement.expression)
+        if (found) tagName = found
+      }
+    }
+    return tagName ? rootTagIdentifier(tagName) : undefined
+  }
+  const tagName = jsxRoot(body)
+  return tagName ? rootTagIdentifier(tagName) : undefined
+}
+
 /** Registry object key -> local identifier its JSX/value actually renders (e.g. Accordion -> Accordion, 'Color.Item' -> Color). */
-function registryEntries(source: string): Map<string, string> {
-  const start = source.indexOf('const components: MDXComponents = {')
-  const body = source.slice(start).split('\n')
+function registryEntries(sourceFile: ts.SourceFile): Map<string, string> {
   const entries = new Map<string, string>()
-  for (const line of body) {
-    const kv = line.match(/^\s*(['"]?[\w.]+['"]?):\s*(.+?),?\s*$/)
-    if (!kv) continue
-    const key = kv[1].replace(/['"]/g, '')
-    const rhs = kv[2]
-    const jsxMatch = rhs.match(/<([\w.]+)[\s/>]/)
-    const identMatch = !jsxMatch ? rhs.match(/^([\w.]+)$/) : null
-    const local = (jsxMatch?.[1] ?? identMatch?.[1])?.split('.')[0]
+  let objectLiteral: ts.ObjectLiteralExpression | undefined
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(sourceFile) === 'components' && node.initializer) {
+      const initializer = unwrap(node.initializer)
+      if (ts.isObjectLiteralExpression(initializer)) objectLiteral = initializer
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+  if (!objectLiteral) return entries
+  for (const property of objectLiteral.properties) {
+    if (ts.isShorthandPropertyAssignment(property)) {
+      entries.set(property.name.text, property.name.text)
+      continue
+    }
+    if (!ts.isPropertyAssignment(property)) continue
+    const key = ts.isStringLiteral(property.name) || ts.isIdentifier(property.name)
+      ? property.name.text
+      : undefined
+    if (!key) continue
+    const local = renderedLocalIdentifier(property.initializer)
     if (local) entries.set(key, local)
   }
   return entries
 }
 
+/** True when the file's first statement is a `'use client'` directive prologue entry, per the TS AST (not just line 1 of the text). */
 function isClientDirectiveFile(fileName: string): boolean {
   const content = readFileSync(join(mdxDir, fileName), 'utf8')
-  return /^['"]use client['"]/m.test(content)
+  const sourceFile = parse(content, fileName)
+  const first = sourceFile.statements[0]
+  return !!first
+    && ts.isExpressionStatement(first)
+    && ts.isStringLiteral(first.expression)
+    && first.expression.text === 'use client'
+}
+
+/**
+ * Registry entries where the server wrapper renders a client component by
+ * spreading props into it one level down, not by directly importing the
+ * client module itself (`color.tsx`, a server file, spreads into
+ * `color-item.tsx`'s `'use client'` `ColorItemClient`). The mechanical check
+ * above only follows one hop (registry entry -> its own imported module), so
+ * it cannot see this; documented here by hand instead of teaching it to
+ * follow re-exports, since these are also the only registry names shaped
+ * this way today.
+ */
+const KNOWN_INDIRECT_CLIENT_TAGS: Record<string, string> = {
+  Color: "color.tsx's ColorRoot renders <ColorItemClient> (color-item.tsx, 'use client') when called without children",
+  'Color.Item': "color.tsx's ColorItem renders <ColorItemClient> (color-item.tsx, 'use client')",
 }
 
 it('every mdx-components.tsx registry name backed by a use-client file in this directory is captured', () => {
-  const bindings = importedBindings(registrySource)
-  const entries = registryEntries(registrySource)
+  const sourceFile = parse(registrySource, 'mdx-components.tsx')
+  const bindings = importedBindings(sourceFile)
+  const entries = registryEntries(sourceFile)
   const clientFiles = new Set(readdirSync(mdxDir).filter((f) => f.endsWith('.tsx') && isClientDirectiveFile(f)))
 
-  const expectedClientTags = new Set<string>()
+  const expectedClientTags = new Set<string>(Object.keys(KNOWN_INDIRECT_CLIENT_TAGS))
   for (const [key, local] of entries) {
     const mod = bindings.get(local)
     if (!mod?.startsWith('@/components/mdx/')) continue
@@ -80,5 +167,26 @@ describe('sanity', () => {
   it('found at least one use-client mdx file to compare against', () => {
     const clientFiles = readdirSync(mdxDir).filter((f) => f.endsWith('.tsx') && isClientDirectiveFile(f))
     expect(clientFiles.length).toBeGreaterThan(0)
+  })
+
+  it('resolves a multi-line arrow wrapper the same as a single-line one', () => {
+    const source = "const components = {\n  Accordion: (props) => (\n    <Accordion {...props} />\n  ),\n}\n"
+    const sourceFile = parse(source, 'inline.tsx')
+    const entries = registryEntries(sourceFile)
+    expect(entries.get('Accordion')).toBe('Accordion')
+  })
+
+  it('resolves an aliased import to its real module specifier', () => {
+    const source = "import { Accordion as Foo } from '@/components/mdx/accordion'\n"
+    const sourceFile = parse(source, 'inline.tsx')
+    const bindings = importedBindings(sourceFile)
+    expect(bindings.get('Foo')).toBe('@/components/mdx/accordion')
+  })
+
+  it('detects a `\'use client\'` directive prologue even when it is not the literal first source line', () => {
+    const content = "// a leading comment\n'use client'\n\nexport const X = 1\n"
+    const sourceFile = parse(content, 'inline.tsx')
+    const first = sourceFile.statements[0]
+    expect(ts.isExpressionStatement(first) && ts.isStringLiteral(first.expression) && first.expression.text === 'use client').toBe(true)
   })
 })

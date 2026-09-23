@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createComponentMigrator, mergeComponentRegistry, propsTargetExtractedClientComponent } from '../components.js'
+import { createComponentMigrator, hasAnyFunctionValuedProp, mergeComponentRegistry, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
 import { migrateRepository } from '../repository.js'
 import { renderMigrationFiles } from '../render.js'
 import type { MigrationWarning } from '../types.js'
@@ -402,5 +402,85 @@ describe('propsTargetExtractedClientComponent', () => {
   it('is false when declaredNames is empty', () => {
     const body = '<Migrated0123456789ab RenderComponent={CustomBlock} />'
     expect(propsTargetExtractedClientComponent(body, new Set())).toBe(false)
+  })
+
+  it('is true for an inline arrow function passed as a prop to a confirmed client built-in', () => {
+    const body = '<Accordion title="t" onToggle={() => console.log(1)}>x</Accordion>'
+    expect(propsTargetExtractedClientComponent(body, new Set())).toBe(true)
+  })
+
+  it('is true for an inline `function` expression passed as a prop to a confirmed client built-in', () => {
+    const body = '<Accordion title="t" onToggle={function () { console.log(1) }}>x</Accordion>'
+    expect(propsTargetExtractedClientComponent(body, new Set())).toBe(true)
+  })
+
+  it('is false for an inline arrow function on a tag that is neither extracted nor a confirmed client built-in', () => {
+    const body = '<Steps onToggle={() => console.log(1)}>x</Steps>'
+    expect(propsTargetExtractedClientComponent(body, new Set())).toBe(false)
+  })
+
+  it('ignores an inline arrow function shown inside a fenced code sample', () => {
+    const body = '```jsx\n<Accordion onToggle={() => console.log(1)} />\n```'
+    expect(propsTargetExtractedClientComponent(body, new Set())).toBe(false)
+  })
+
+  it('ignores JSX written inside a page-local export const, since remark-mdx parses it as ESM text, not JSX element nodes', () => {
+    const body = 'export const Widget = () => <Accordion onToggle={() => console.log(1)} />;\n\n<Widget />'
+    expect(propsTargetExtractedClientComponent(body, new Set())).toBe(false)
+  })
+
+  it('is false for a value prop that merely looks like an object, not a function', () => {
+    const body = '<Accordion data={{ a: 1 }} />'
+    expect(propsTargetExtractedClientComponent(body, new Set())).toBe(false)
+  })
+})
+
+describe('hasAnyFunctionValuedProp', () => {
+  it('is true for an inline function prop even on an unconfirmed tag (the broader, unconfirmed signal)', () => {
+    const body = '<Steps onToggle={() => console.log(1)}>x</Steps>'
+    expect(hasAnyFunctionValuedProp(body, new Set())).toBe(true)
+  })
+
+  it('is true for a declared-name function prop on any tag', () => {
+    const body = '<Widget render={CustomBlock} />'
+    expect(hasAnyFunctionValuedProp(body, new Set(['CustomBlock']))).toBe(true)
+  })
+
+  it('is false when no prop carries a function value', () => {
+    const body = '<Widget title="hi" count={1} />'
+    expect(hasAnyFunctionValuedProp(body, new Set())).toBe(false)
+  })
+})
+
+describe('scaffold-provided imports are kept untouched', () => {
+  it.each([
+    ['next/link used only as JSX', "import Link from 'next/link'\n\n<Link href=\"/a\">A</Link>", "import Link from 'next/link'"],
+    ['next/link used both as JSX and referenced from a declaration', "import Link from 'next/link'\n\nexport const Nav = () => <Link href=\"/a\">A</Link>\n\n<Nav />", "import Link from 'next/link'"],
+    ['clsx used only in an expression', "import clsx from 'clsx'\n\n<div className={clsx('a', 'b')}>hi</div>", "import clsx from 'clsx'"],
+    ['lucide-react icon passed as a prop', "import { Rocket } from 'lucide-react'\n\n<Card icon={Rocket}>x</Card>", "import { Rocket } from 'lucide-react'"],
+    ['react-dom used in a declaration', "import { createPortal } from 'react-dom'\n\nexport const P = ({children}) => createPortal(children, document.body)\n\n<P>x</P>", "import { createPortal } from 'react-dom'"],
+    ['@/ path-alias import', "import { cn } from '@/lib/utils'\n\n<div className={cn('a')}>x</div>", "import { cn } from '@/lib/utils'"],
+  ])('%s', (_label, source, expectedImport) => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const body = migrator.transform(source, join(root, 'page.mdx'))
+    expect(body).toBe(source)
+    expect(body).toContain(expectedImport)
+    expect(migrator.files()).toEqual([])
+    expect(warnings).toEqual([])
+  })
+})
+
+describe('SCAFFOLD_PROVIDED_IMPORTS drift guard', () => {
+  it('every listed package is a real runtime dependency shipped to the starter', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const rootPackageJsonPath = fileURLToPath(new URL('../../../../package.json', import.meta.url))
+    const rootPackageJson = JSON.parse(readFileSync(rootPackageJsonPath, 'utf8'))
+    const dependencies = new Set(Object.keys(rootPackageJson.dependencies ?? {}))
+    for (const name of SCAFFOLD_PROVIDED_IMPORTS) {
+      expect(dependencies.has(name), `${name} is not in root package.json dependencies`).toBe(true)
+    }
   })
 })

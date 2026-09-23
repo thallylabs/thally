@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { escapeFernLiteralBraces, hasClientBoundaryFunctionProp, normalizeMdx, parseMarkdownPage } from '../mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeMdx, parseMarkdownPage } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -255,6 +255,51 @@ describe('escapeFernLiteralBraces', () => {
     const body = '{items.map((item) => <li>{item}</li>)}'
     expect(escapeFernLiteralBraces(body)).toBe(body)
   })
+
+  it('leaves prose referencing a multi-declarator export const unchanged (export const a = 1, b = 2)', () => {
+    const body = 'export const a = 1, b = 2\n\nx {a} {b}'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
+
+  it('leaves prose referencing a nested destructured export const unchanged', () => {
+    const body = 'export const {\n  a,\n  b: { c }\n} = obj\n\n{c}'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
+
+  it('leaves prose referencing a multi-line named import unchanged', () => {
+    const body = 'import {\n  vendor,\n} from "./v"\n\n{vendor}'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
+
+  it('leaves prose referencing both a default and named import unchanged', () => {
+    const body = 'import X, { Y } from "./v"\n\n{X} {Y}'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
+
+  it('leaves prose referencing an `export async function` unchanged', () => {
+    const body = 'export async function load() {}\n\n{load}'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
+
+  it('leaves prose referencing well-known JS/browser globals unchanged (Math, window; undefined is already a literal)', () => {
+    const body = 'x {Math.PI} {window} {undefined}'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
+
+  it('leaves a non-exported local const inside a client component body unchanged', () => {
+    const body = 'export const x = 1\nconst inner = 2\n\n{inner}'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
+
+  it('escapes a Unicode identifier and a $-prefixed identifier the same as an ASCII one', () => {
+    expect(escapeFernLiteralBraces('x {café} y')).toBe('x \\{café\\} y')
+    expect(escapeFernLiteralBraces('x {$var} y {_x} z')).toBe('x \\{$var\\} y \\{_x\\} z')
+  })
+
+  it('does not bind a name from a re-export (`export { x } from "./y"`), since that never declares a local variable', () => {
+    const body = 'export { vendor } from "./x"\n\nx {vendor}'
+    expect(escapeFernLiteralBraces(body)).toBe('export { vendor } from "./x"\n\nx \\{vendor\\}')
+  })
 })
 
 describe('hasClientBoundaryFunctionProp', () => {
@@ -277,5 +322,24 @@ describe('hasClientBoundaryFunctionProp', () => {
   it('ignores an unrelated export not passed anywhere as a prop', () => {
     const body = 'export const helper = () => 1;\n\nJust prose.'
     expect(hasClientBoundaryFunctionProp(body)).toBe(false)
+  })
+})
+
+describe('functionDeclaredNames', () => {
+  it('excludes a plain-value export const even when a function export exists on the same page', () => {
+    // Reviewer's exact input: a string const feeds a client built-in
+    // (`Mermaid chart={diagram}`) while a function feeds a different one
+    // (`Steps render={Demo}`). Only `Demo` is a function.
+    const body = "export const Demo = ({ children }) => <div>{children}</div>;\n"
+      + "export const diagram = 'graph TD; A-->B';\n\n"
+      + '<Steps render={Demo}>x</Steps>\n\n<Mermaid chart={diagram} />'
+    expect(functionDeclaredNames(body)).toEqual(new Set(['Demo']))
+  })
+
+  it('includes export function and export async function declarations', () => {
+    const body = 'export function Demo() { return null }\n'
+      + 'export async function Load() { return 1 }\n'
+      + "export const label = 'hi'\n"
+    expect(functionDeclaredNames(body)).toEqual(new Set(['Demo', 'Load']))
   })
 })

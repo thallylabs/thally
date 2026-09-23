@@ -17,7 +17,7 @@ import { basename, dirname, extname, relative, resolve as resolvePath } from 'no
 
 import { parse as parseYaml } from 'yaml'
 
-import { createComponentMigrator, propsTargetExtractedClientComponent } from './components.js'
+import { createComponentMigrator, hasAnyFunctionValuedProp, propsTargetExtractedClientComponent } from './components.js'
 
 import {
   projectDocusaurusNavigation,
@@ -28,7 +28,7 @@ import {
   type DocusaurusSidebars,
 } from './docusaurus.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
-import { detectUnsupportedFernComponents, escapeFernLiteralBraces, hasClientBoundaryFunctionProp, parseMarkdownPage } from './mdx.js'
+import { detectUnsupportedFernComponents, escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -528,14 +528,23 @@ function readFernGeneratorsConfig(path: string): Record<string, unknown> | null 
  * Resolve the OpenAPI spec Fern's `generators.yml` configures for an API:
  * modern `api.specs[].openapi`, or the legacy top-level `api:` string.
  * Multi-API repos keep a `generators.yml` per API under `fern/apis/<name>/`;
- * single-API repos keep one at the Fern project root. Checked in that order
- * so a resolvable `apiName` (a `fern/apis/<name>` folder, not just a display
- * label) wins over the root config.
+ * single-API repos keep one at the Fern project root.
+ *
+ * When `apiNameExplicit` is true (the `api:` node carries a real `api-name`
+ * field), only `fern/apis/<apiName>/generators.yml` is trusted. The Fern
+ * project root's own `generators.yml` is never consulted as a fallback in
+ * that case: an explicit `api-name` means this is a multi-API repo, where
+ * the root config configures a *different* API's spec, and attaching it
+ * here would silently bind the wrong spec to this tab. The root config is
+ * only used when there is no explicit `api-name` — the single-API repo
+ * shape, where `apiName` (if set at all) is just the `api:` display title
+ * and the root config unambiguously belongs to the one API on the site.
  */
 function findFernConfiguredOpenApi(
   fernRoot: string,
   repositoryDir: string,
   apiName: string | undefined,
+  apiNameExplicit: boolean,
 ): ScannedFile | null {
   const candidateDirs: Array<string> = []
   if (apiName) {
@@ -545,7 +554,7 @@ function findFernConfiguredOpenApi(
       // Not a safe relative path (e.g. a display label, not a folder name).
     }
   }
-  candidateDirs.push(fernRoot)
+  if (!apiNameExplicit) candidateDirs.push(fernRoot)
   for (const dir of candidateDirs) {
     let config: Record<string, unknown> | null = null
     try {
@@ -959,6 +968,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let mintlifyConfig: Record<string, unknown> | null = null
   let fernRawConfig: Record<string, unknown> | null = null
   let fernApiName: string | undefined
+  let fernApiNameExplicit = false
   let fernApiTabLabel: string | undefined
 
   if (platform === 'mintlify') {
@@ -997,6 +1007,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
         fernApiName = projected.apiName
+        fernApiNameExplicit = projected.apiNameExplicit ?? false
         fernApiTabLabel = projected.apiTabLabel
         for (const [index, descriptor] of projected.descriptors.entries()) {
           const key = normalizedReferenceKey(descriptor.sourcePath)
@@ -1221,9 +1232,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       })
       continue
     }
-    // `hasClientBoundaryFunctionProp` only proves a page-authored function is
-    // passed as *some* bare JSX prop; it does not know which tag receives it.
-    // A prop landing on a component this migration actually extracted as
+    // `hasAnyFunctionValuedProp` only proves a function value (a reference to
+    // a page-declared function, or a function written inline) is passed as
+    // *some* JSX prop; it does not know which tag receives it. A prop
+    // landing on a component this migration actually extracted as
     // 'use client' (`Migrated<hash>`/`Inline<n>`) or on a Thally runtime
     // built-in already backed by a 'use client' module (`Accordion`, `Panel`,
     // `Tabs`, ... — see `CLIENT_BUILTIN_COMPONENT_TAGS` in components.ts) is
@@ -1232,8 +1244,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // confirmed either way, so exclusion (a last resort) is reserved for the
     // confirmed case; the unconfirmed case is warned instead, so it is never
     // silently dropped or silently shipped broken.
-    if (hasClientBoundaryFunctionProp(page.body)) {
-      const declaredNames = new Set([...page.body.matchAll(/export const (\w+)\s*=/g)].map((match) => match[1]))
+    const declaredNames = functionDeclaredNames(page.body)
+    if (hasAnyFunctionValuedProp(page.body, declaredNames)) {
       if (propsTargetExtractedClientComponent(page.body, declaredNames)) {
         skipped++
         warnings.push({
@@ -1365,8 +1377,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
   if (docsConfig.tabs.length === 0) docsConfig = buildNavigationFromPages(pages)
+  // A repo-wide scan for *any* `openapi.yml`/`.json` file cannot tell one
+  // API's spec from another's, so once an explicit `api-name` names a
+  // specific multi-API folder, that naive scan (and a root `generators.yml`
+  // meant for a different API) must never be consulted as a fallback — see
+  // `findFernConfiguredOpenApi`. Without an explicit `api-name` there is
+  // only ever one API on the site, so the naive scan remains safe.
   const openApi = platform === 'fern' && fernProjectRoot
-    ? findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, fernApiName) ?? findOpenApi(files)
+    ? findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, fernApiName, fernApiNameExplicit)
+      ?? (fernApiNameExplicit ? null : findOpenApi(files))
     : findConfiguredMintlifyOpenApi(mintlifyConfig, files) ?? findOpenApi(files)
   if (openApi) {
     const filename = basename(openApi.relativePath)

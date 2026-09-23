@@ -13,6 +13,7 @@ import ts from 'typescript'
 import { unified } from 'unified'
 
 import { parseFrontmatter } from './frontmatter.js'
+import { isFunctionInitializer } from './mdx.js'
 import { resolveWithin } from './path.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
 
@@ -62,6 +63,24 @@ const parser = unified().use(remarkParse).use(remarkMdx)
 const CODE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs'])
 const DATA_EXTENSIONS = new Set(['.json', '.css', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.woff', '.woff2'])
 const SHARED_IMPORTS = new Set(['react', 'react/jsx-runtime', 'react/jsx-dev-runtime'])
+/**
+ * Packages the standalone starter already installs as its own runtime
+ * dependencies (root `package.json` `dependencies`, synced there by
+ * `.github/scripts/starter-runtime-contract.mjs`). An MDX page's import of
+ * one of these — even outside JSX, in an expression, a prop, or an inline
+ * declaration — is not "unavailable": the package is really there. Treat it
+ * exactly like `SHARED_IMPORTS` and leave it untouched, instead of excluding
+ * the page or replacing its JSX-only usage with a comment stub.
+ *
+ * Drift-guarded by `packages/migrate/src/__tests__/scaffold-provided-imports.test.ts`,
+ * which checks every bare name here against root `package.json`.
+ */
+export const SCAFFOLD_PROVIDED_IMPORTS: ReadonlySet<string> = new Set(['next', 'react-dom', 'clsx', 'lucide-react', 'tailwind-merge'])
+function isScaffoldProvidedImport(specifier: string): boolean {
+  if (specifier === '@' || specifier.startsWith('@/')) return true
+  if (specifier === 'next' || specifier.startsWith('next/')) return true
+  return SCAFFOLD_PROVIDED_IMPORTS.has(specifier)
+}
 const REACT_GLOBALS = new Set([
   'useState', 'useEffect', 'useLayoutEffect', 'useMemo', 'useCallback', 'useRef',
   'useReducer', 'useContext', 'useId', 'useTransition', 'useDeferredValue',
@@ -163,9 +182,9 @@ const EXTRACTED_CLIENT_COMPONENT_TAG = /^(?:Migrated[0-9a-f]+|Inline\d+)$/
  *
  * This list is a snapshot, not a live read of the app (a published migrate
  * package cannot import from the app's `src/`). It is drift-guarded by
- * `src/components/mdx/__tests__/mdx-components-client-registry.test.ts`,
- * which recomputes the same set from `src/components/mdx/*.tsx` and
- * `mdx-components.tsx` and fails CI if this snapshot goes stale.
+ * `src/components/mdx/client-registry.test.ts`, which recomputes the same
+ * set from `src/components/mdx/*.tsx` and `mdx-components.tsx` and fails CI
+ * if this snapshot goes stale.
  *
  * Source file per name (all under `src/components/mdx/`):
  *   Accordion, AccordionGroup      -> accordion.tsx
@@ -186,6 +205,12 @@ const EXTRACTED_CLIENT_COMPONENT_TAG = /^(?:Migrated[0-9a-f]+|Inline\d+)$/
  *   PromptAssistant, Terminal,
  *   TerminalInput, TerminalOutput  -> prompt.tsx
  *   View, Embed, LegacyView        -> view.tsx
+ *   Color, Color.Item              -> color.tsx (server) spreads props into
+ *                                      color-item.tsx's 'use client'
+ *                                      ColorItemClient — a re-export, not a
+ *                                      direct 'use client' file, so it is
+ *                                      listed by hand (see the override map
+ *                                      in client-registry.test.ts)
  */
 export const CLIENT_BUILTIN_COMPONENT_TAGS: ReadonlySet<string> = new Set([
   'Accordion', 'AccordionGroup',
@@ -200,6 +225,7 @@ export const CLIENT_BUILTIN_COMPONENT_TAGS: ReadonlySet<string> = new Set([
   'Panel', 'ContentPanel', 'InlinePanel',
   'Prompt', 'PromptUser', 'PromptAssistant', 'Terminal', 'TerminalInput', 'TerminalOutput',
   'View', 'Embed', 'LegacyView',
+  'Color', 'Color.Item',
 ])
 
 function isConfirmedClientBoundaryTag(name: string): boolean {
@@ -207,29 +233,67 @@ function isConfirmedClientBoundaryTag(name: string): boolean {
 }
 
 /**
- * True when a name in `declaredNames` (typically a page's `export const`
- * identifiers) is passed as a bare JSX prop (`prop={Name}`) into a component
+ * A JSX attribute's raw expression source (`prop={<this>}`), for the two
+ * shapes that end up passing a function value: a bare reference to a
+ * page-declared function (`declaredNames`), or a function written inline
+ * right there (`() => ...`, `function () { ... }`). Only `mdxJsxAttribute`
+ * nodes with an expression value carry a source string here; a string
+ * literal attribute (`title="x"`) or a spread (`mdxJsxExpressionAttribute`)
+ * never does, so this returns `undefined` for those.
+ */
+function functionValuedAttribute(node: MdxNode, declaredNames: ReadonlySet<string>): string | undefined {
+  for (const attribute of node.attributes ?? []) {
+    const raw = attribute.value
+    const value = raw && typeof raw === 'object' ? raw.value : undefined
+    if (typeof value !== 'string') continue
+    if (declaredNames.has(value.trim()) || isFunctionInitializer(value.trim(), 0)) return value
+  }
+  return undefined
+}
+
+/**
+ * True when a name in `declaredNames` (typically a page's `export const`/
+ * `export function` identifiers) is passed as a bare JSX prop
+ * (`prop={Name}`), or a function is written inline as a prop value
+ * (`prop={() => ...}`, `prop={function () { ... }}`), into a component
  * confirmed to cross the server/client boundary: one this migrator extracted
  * as a 'use client' module, or a Thally runtime built-in already backed by
  * one (`CLIENT_BUILTIN_COMPONENT_TAGS`). This is the only shape that really
  * throws "Functions cannot be passed directly to Client Components" at
  * render — the same check against an unconfirmed tag would over-fire and
  * drop pages that render just fine.
+ *
+ * JSX written inside a page's own `export const Name = () => <...>` (bound
+ * for client extraction itself) is never visited here: `remark-mdx` parses
+ * that whole declaration as a single `mdxjsEsm` text node, not as MDX JSX
+ * element nodes, so `walk`'s `.children` traversal never reaches it — the
+ * same reason fenced/inline code samples (parsed as `code`/`inlineCode` text
+ * nodes) never reach it either.
  */
 export function propsTargetExtractedClientComponent(body: string, declaredNames: ReadonlySet<string>): boolean {
-  if (declaredNames.size === 0) return false
   const tree = parser.parse(body) as MdxNode
   let found = false
   walk(tree, (node) => {
     if (found || !node.name || !isConfirmedClientBoundaryTag(node.name)) return
-    for (const attribute of node.attributes ?? []) {
-      const raw = attribute.value
-      const value = raw && typeof raw === 'object' ? raw.value : undefined
-      if (typeof value === 'string' && declaredNames.has(value.trim())) {
-        found = true
-        return
-      }
-    }
+    if (functionValuedAttribute(node, declaredNames) !== undefined) found = true
+  })
+  return found
+}
+
+/**
+ * Broader, unconfirmed signal: true when *any* JSX tag on the page (not
+ * just a confirmed client boundary) receives a function-valued prop, the
+ * same shapes `propsTargetExtractedClientComponent` looks for. Callers use
+ * this to decide whether the page is worth a "might throw at render, review
+ * manually" warning even when the receiving tag's own client/server status
+ * cannot be confirmed.
+ */
+export function hasAnyFunctionValuedProp(body: string, declaredNames: ReadonlySet<string>): boolean {
+  const tree = parser.parse(body) as MdxNode
+  let found = false
+  walk(tree, (node) => {
+    if (found || !node.name) return
+    if (functionValuedAttribute(node, declaredNames) !== undefined) found = true
   })
   return found
 }
@@ -318,7 +382,7 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       const edits: Array<Replacement> = []
       function dependency(literal: ts.StringLiteralLike): void {
         const specifier = literal.text
-        if (SHARED_IMPORTS.has(specifier)) return
+        if (SHARED_IMPORTS.has(specifier) || isScaffoldProvidedImport(specifier)) return
         if (!specifier.startsWith('.') && !specifier.startsWith('/')) {
           throw new Error(`external package ${specifier} requires manual installation and review`)
         }
@@ -434,6 +498,7 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
         // `resolveDependency` already understands, so a locally-owned
         // component copies the same way a relative import would.
         const specifier = rawSpecifier.startsWith('@site/') ? `/${rawSpecifier.slice('@site/'.length)}` : rawSpecifier
+        if (isScaffoldProvidedImport(specifier)) continue
         if (!specifier.startsWith('.') && !specifier.startsWith('/')) {
           if (SHARED_IMPORTS.has(specifier)) {
             moduleImports.push(statement.getText(ast))

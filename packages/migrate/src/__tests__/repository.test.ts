@@ -466,6 +466,121 @@ describe('Mintlify repository migration', () => {
     expect(bundle.warnings.some((warning) => warning.message.includes('function'))).toBe(false)
   })
 
+  it('keeps a page where a string const feeds a client built-in while a function feeds an unconfirmed one, on the same page', () => {
+    // Reviewer's exact input: `diagram` (a plain string) is not a function at
+    // all, so `Mermaid chart={diagram}` never enters the check; `Demo` (a
+    // real function) targets `Steps`, which is not a confirmed client
+    // boundary, so the page is kept with a warning, not excluded.
+    const root = fixture()
+    writeFileSync(join(root, 'en', 'value-and-function.mdx'), [
+      '---',
+      'title: Value And Function',
+      '---',
+      '',
+      'export const Demo = ({ children }) => <div>{children}</div>;',
+      "export const diagram = 'graph TD; A-->B';",
+      '',
+      '<Steps render={Demo}>x</Steps>',
+      '',
+      '<Mermaid chart={diagram} />',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('value-and-function')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      source: 'en/value-and-function.mdx',
+      code: 'unsupported-config',
+      message: expect.stringContaining('might pass a function'),
+    }))
+  })
+
+  it('excludes a page that passes an `export function` declaration as a prop into a confirmed client component', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'en', 'export-function.mdx'), [
+      '---',
+      'title: Export Function',
+      '---',
+      '',
+      'export function Demo({ children }) { return <div>{children}</div> }',
+      '',
+      '<Accordion title="t" RenderComponent={Demo}>x</Accordion>',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('export-function')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      source: 'en/export-function.mdx',
+      code: 'skipped-file',
+      message: expect.stringContaining("passes a function to an interactive component, which can't be rendered on the server"),
+    }))
+  })
+
+  it('excludes a page that passes an inline arrow function directly as a prop into a confirmed client component', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'en', 'inline-arrow.mdx'), [
+      '---',
+      'title: Inline Arrow',
+      '---',
+      '',
+      '<Accordion title="t" onToggle={() => console.log(1)}>x</Accordion>',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('inline-arrow')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      source: 'en/inline-arrow.mdx',
+      code: 'skipped-file',
+      message: expect.stringContaining("passes a function to an interactive component, which can't be rendered on the server"),
+    }))
+  })
+
+  it('excludes a page that passes a function prop into Color.Item, a server wrapper around a client component', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'en', 'color-item.mdx'), [
+      '---',
+      'title: Color Item',
+      '---',
+      '',
+      'export const fmt = (v) => v.toUpperCase();',
+      '',
+      '<Color.Item name="a" value="#fff" format={fmt} />',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('color-item')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      source: 'en/color-item.mdx',
+      code: 'skipped-file',
+      message: expect.stringContaining("passes a function to an interactive component, which can't be rendered on the server"),
+    }))
+  })
+
+  it('excludes a page that passes a function prop into the Color root component', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'en', 'color-root.mdx'), [
+      '---',
+      'title: Color Root',
+      '---',
+      '',
+      'export const fmt = (v) => v.toUpperCase();',
+      '',
+      '<Color name="a" value="#fff" format={fmt} />',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('color-root')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      source: 'en/color-root.mdx',
+      code: 'skipped-file',
+      message: expect.stringContaining("passes a function to an interactive component, which can't be rendered on the server"),
+    }))
+  })
+
   it('drops an excluded page from navigation instead of leaving a dangling reference', () => {
     const root = fixture()
     // The source `docs.json`/`navigation.json` still lists this page even
@@ -1071,6 +1186,74 @@ navigation:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('plants'),
+    }))
+  })
+
+  it('never attaches a sibling API\'s spec found by a repo-wide scan when the requested api-name has none of its own', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-sibling-scan-'))
+    const fernRoot = join(root, 'fern')
+    // `apis/plants` exists but has no generators.yml of its own; a sibling
+    // `apis/animals` does, with a real openapi.yml. A repo-wide scan for
+    // "any openapi.yml" would find and silently attach the Animal spec to
+    // the Plant tab.
+    mkdirSync(join(fernRoot, 'apis', 'plants'), { recursive: true })
+    mkdirSync(join(fernRoot, 'apis', 'animals', 'openapi'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - api: Plant API
+    api-name: plants
+`)
+    writeFileSync(join(fernRoot, 'apis', 'animals', 'generators.yml'), `
+api:
+  specs:
+    - openapi: openapi/openapi.yml
+`)
+    writeFileSync(join(fernRoot, 'apis', 'animals', 'openapi', 'openapi.yml'), 'openapi: 3.0.0\ninfo:\n  title: Animal API\n  version: "1.0"\npaths: {}\n')
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi.yml')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('plants'),
+    }))
+  })
+
+  it('never attaches another API\'s spec via a root generators.yml when this api node has an api-name', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-root-mismatch-'))
+    const fernRoot = join(root, 'fern')
+    // No `apis/plants` folder at all. The Fern project root's own
+    // generators.yml exists, but it configures a spec meant for a different
+    // API — trusting it here would silently bind the wrong spec.
+    mkdirSync(fernRoot, { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - api: Plant API
+    api-name: plants
+`)
+    writeFileSync(join(fernRoot, 'generators.yml'), `
+api:
+  specs:
+    - openapi: animals.yml
+`)
+    writeFileSync(join(fernRoot, 'animals.yml'), 'openapi: 3.0.0\ninfo:\n  title: Animal API\n  version: "1.0"\npaths: {}\n')
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('animals.yml')
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
       code: 'unsupported-config',
       message: expect.stringContaining('plants'),

@@ -31,6 +31,8 @@ export interface FernNavigationResult {
   warnings: Array<MigrationWarning>
   /** The first `api:` node's own value (a display name or, in multi-API repos, a `fern/apis/<name>` identifier), if any. */
   apiName?: string
+  /** True when `apiName` came from an explicit `api-name` field rather than falling back to the `api:` display title. */
+  apiNameExplicit?: boolean
   /** Label of the tab that owns the first `api:` node, if that tab also has other content and survived projection. */
   apiTabLabel?: string
 }
@@ -74,6 +76,8 @@ interface WalkContext {
   sawApi: boolean
   /** The first `api:` node's own value, used to locate its OpenAPI spec via generators.yml/fern/apis/<name>. */
   apiName?: string
+  /** True when `apiName` came from an explicit `api-name` field rather than falling back to the `api:` display title. */
+  apiNameExplicit?: boolean
   /** Label of the tab that owns the first `api:` node, so the OpenAPI spec attaches to that exact tab. */
   apiTabLabel?: string
   warnings: Array<MigrationWarning>
@@ -233,6 +237,7 @@ function convertNode(
       // `api: Plant API` / `api-name: plants` has no `apis/Plant API`
       // folder, so preferring `api-name` is required to find the spec.
       context.apiName = typeof object['api-name'] === 'string' ? object['api-name'] : object.api
+      context.apiNameExplicit = typeof object['api-name'] === 'string'
     }
     context.sawApi = true
     return null
@@ -428,6 +433,7 @@ export function projectFernNavigation(input: {
     descriptors: context.descriptors,
     warnings: context.warnings,
     ...(context.apiName ? { apiName: context.apiName } : {}),
+    ...(context.apiNameExplicit ? { apiNameExplicit: true } : {}),
     ...(context.apiTabLabel ? { apiTabLabel: context.apiTabLabel } : {}),
   }
 }

@@ -696,12 +696,8 @@ export function isRedirectPathSafe(rawSource: string, rawDestination: string): b
     // A browser strips whitespace/control characters (tab, CR, LF, ...) from
     // a URL before navigating, so a literal tab in `/\t/evil.example` passes
     // every check above yet reaches the browser as `//evil.example`. Reject
-    // any such character anywhere in the raw value, then re-check the
-    // `//`/`/\` prefix against what's left once they're gone, as defense in
-    // depth against a character this scan doesn't already reject outright.
+    // any such character anywhere in the raw value.
     if (UNSAFE_REDIRECT_CHARS.test(value)) return false
-    const stripped = value.replace(new RegExp(UNSAFE_REDIRECT_CHARS, 'g'), '')
-    if (stripped.startsWith('//') || stripped.startsWith('/\\')) return false
     // Browsers unescape a leading `%2f%2f`/`%5c` before treating it as `//`/`\`.
     const lower = value.toLowerCase()
     if (lower.startsWith('/%2f%2f') || lower.startsWith('/%5c')) return false
