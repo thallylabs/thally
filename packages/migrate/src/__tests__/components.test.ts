@@ -433,6 +433,18 @@ describe('propsTargetExtractedClientComponent', () => {
     const body = '<Accordion data={{ a: 1 }} />'
     expect(propsTargetExtractedClientComponent(body, new Set())).toBe(false)
   })
+
+  it('is true for a function passed as children to a confirmed client built-in', () => {
+    expect(propsTargetExtractedClientComponent("<Accordion title=\"t\">{() => 'x'}</Accordion>", new Set())).toBe(true)
+    expect(propsTargetExtractedClientComponent('<Accordion title="t">\n{render}\n</Accordion>', new Set(['render']))).toBe(true)
+  })
+
+  it('is false for ordinary expression children and identifiers that merely start with a keyword', () => {
+    expect(propsTargetExtractedClientComponent('<Accordion title="t">{items.map((item) => item)}</Accordion>', new Set())).toBe(false)
+    expect(propsTargetExtractedClientComponent('<Tabs items={functionList}>x</Tabs>', new Set())).toBe(false)
+    expect(propsTargetExtractedClientComponent('<Accordion title={asyncMode}>x</Accordion>', new Set())).toBe(false)
+    expect(propsTargetExtractedClientComponent('<Accordion title={classNames}>x</Accordion>', new Set())).toBe(false)
+  })
 })
 
 describe('hasAnyFunctionValuedProp', () => {
@@ -459,7 +471,8 @@ describe('scaffold-provided imports are kept untouched', () => {
     ['clsx used only in an expression', "import clsx from 'clsx'\n\n<div className={clsx('a', 'b')}>hi</div>", "import clsx from 'clsx'"],
     ['lucide-react icon passed as a prop', "import { Rocket } from 'lucide-react'\n\n<Card icon={Rocket}>x</Card>", "import { Rocket } from 'lucide-react'"],
     ['react-dom used in a declaration', "import { createPortal } from 'react-dom'\n\nexport const P = ({children}) => createPortal(children, document.body)\n\n<P>x</P>", "import { createPortal } from 'react-dom'"],
-    ['@/ path-alias import', "import { cn } from '@/lib/utils'\n\n<div className={cn('a')}>x</div>", "import { cn } from '@/lib/utils'"],
+    ['lucide-react subpath', "import { DynamicIcon } from 'lucide-react/dynamic'\n\n<DynamicIcon name=\"x\" />", "import { DynamicIcon } from 'lucide-react/dynamic'"],
+    ['clsx subpath used in an expression', "import clsx from 'clsx/lite'\n\n<div className={clsx('a')}>x</div>", "import clsx from 'clsx/lite'"],
   ])('%s', (_label, source, expectedImport) => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
@@ -472,15 +485,85 @@ describe('scaffold-provided imports are kept untouched', () => {
   })
 })
 
+it('treats react-dom/server as unavailable, since Next makes its string renderers throw', () => {
+  const root = fixture({})
+  const warnings: Array<MigrationWarning> = []
+  const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+  migrator.transform("import { renderToString } from 'react-dom/server'\n\n{renderToString(<b/>)}", join(root, 'page.mdx'))
+  expect(warnings).toContainEqual(expect.objectContaining({ code: 'skipped-file', message: expect.stringContaining("'react-dom/server'") }))
+})
+
+describe('scaffold-provided imports in extracted client modules', () => {
+  function extract(source: string): { page: string; clientModule: string; warnings: Array<MigrationWarning> } {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const page = migrator.transform(source, join(root, 'page.mdx'))
+    const clientModule = String(migrator.files().find((file) => file.path.includes('/inline-'))?.content ?? '')
+    return { page, clientModule, warnings }
+  }
+
+  it('copies a clsx import into the client module alongside a stateful inline component', () => {
+    const source = "import clsx from 'clsx'\nimport { useState } from 'react'\n\n"
+      + "export const T = () => { const [on, set] = useState(false); return <button className={clsx(on && 'on')} onClick={() => set(!on)}>t</button> }\n\n<T />"
+    const { page, clientModule, warnings } = extract(source)
+    expect(clientModule).toContain("import clsx from 'clsx'")
+    expect(clientModule).toContain('export const T')
+    expect(page).toContain("import clsx from 'clsx'")
+    expect(warnings).toEqual([])
+  })
+
+  it('copies a next/navigation hook import into the client module', () => {
+    const source = "import { usePathname } from 'next/navigation'\n\nexport const P = () => <b>{usePathname()}</b>\n\n<P />"
+    const { clientModule } = extract(source)
+    expect(clientModule).toContain("import { usePathname } from 'next/navigation'")
+  })
+})
+
+describe('source-site @/ path aliases', () => {
+  function run(source: string): { body: string; warnings: Array<MigrationWarning> } {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    return { body: migrator.transform(source, join(root, 'page.mdx')), warnings }
+  }
+
+  it('drops an unresolvable @/ component import used only as JSX and replaces its usage', () => {
+    const { body, warnings } = run("import Hero from '@/components/HomepageHero'\n\n<Hero />")
+    expect(body).not.toContain('import Hero')
+    expect(body).toContain("{/* Removed <Hero>: unsupported import '@/components/HomepageHero' */}")
+    expect(warnings).toContainEqual(expect.objectContaining({ code: 'unsupported-config', message: expect.stringContaining('path alias') }))
+  })
+
+  it('excludes a page that uses an @/ import outside JSX', () => {
+    const { warnings } = run("import { features } from '@/data/features'\n\n{features.length} features")
+    expect(warnings).toContainEqual(expect.objectContaining({ code: 'skipped-file', message: expect.stringContaining("the path alias '@/data/features'") }))
+  })
+})
+
 describe('SCAFFOLD_PROVIDED_IMPORTS drift guard', () => {
-  it('every listed package is a real runtime dependency shipped to the starter', async () => {
-    const { readFileSync } = await import('node:fs')
+  // The starter's package.json is starter-owned: `starter-runtime-contract.mjs`
+  // only syncs the `@thallylabs/core` pin into it, not this repo's root
+  // dependencies. What the contract does sync byte-for-byte is the runtime
+  // (FRAMEWORK_SYNC_ELIGIBLE: src/app, src/components, src/lib, ...), so a
+  // package that synced runtime code imports must be installed by the starter
+  // or the starter itself would not build. Both checks below are local proxies
+  // for the starter's real package.json, which lives in another repository.
+  it('every listed package is a root runtime dependency imported by synced runtime code', async () => {
+    const { readFileSync, readdirSync } = await import('node:fs')
     const { fileURLToPath } = await import('node:url')
-    const rootPackageJsonPath = fileURLToPath(new URL('../../../../package.json', import.meta.url))
-    const rootPackageJson = JSON.parse(readFileSync(rootPackageJsonPath, 'utf8'))
+    const { FRAMEWORK_SYNC_ELIGIBLE } = await import('../../../../.github/scripts/starter-runtime-contract.mjs')
+    const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url))
+    const rootPackageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
     const dependencies = new Set(Object.keys(rootPackageJson.dependencies ?? {}))
+    const runtimeDirs = ['src/app', 'src/components', 'src/lib']
+    for (const dir of runtimeDirs) expect(FRAMEWORK_SYNC_ELIGIBLE).toContain(`${dir}/**`)
+    const runtimeSource = runtimeDirs.flatMap((dir) => readdirSync(join(repoRoot, dir), { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name))
+      .map((entry) => readFileSync(join(entry.parentPath, entry.name), 'utf8'))).join('\n')
     for (const name of SCAFFOLD_PROVIDED_IMPORTS) {
       expect(dependencies.has(name), `${name} is not in root package.json dependencies`).toBe(true)
+      expect(new RegExp(`from ['"]${name}(?:/[^'"]*)?['"]`).test(runtimeSource), `${name} is not imported by synced runtime code`).toBe(true)
     }
   })
 })

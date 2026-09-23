@@ -397,6 +397,31 @@ describe('Mintlify repository migration', () => {
     }))
   })
 
+  it('excludes class, alias, and function-as-children shapes, but keeps values whose names start with a keyword', () => {
+    const root = fixture()
+    const pages: Record<string, string> = {
+      'class-comp': 'export class Box extends React.Component { render() { return <div/> } }\n\n<Accordion RenderComponent={Box}>x</Accordion>',
+      'alias-const': 'export const Demo = () => <div/>;\nexport const Alias = Demo;\n\n<Accordion RenderComponent={Alias}>x</Accordion>',
+      'children-fn': "<Accordion title=\"t\">{() => 'x'}</Accordion>",
+      'function-list': "export const functionList = ['map', 'filter'];\n\n<Tabs items={functionList}>\n<Tab title=\"a\">x</Tab>\n</Tabs>",
+      'async-mode': "export const asyncMode = 'on';\n\n<Accordion title={asyncMode}>x</Accordion>",
+    }
+    for (const [name, body] of Object.entries(pages)) writeFileSync(join(root, 'en', `${name}.mdx`), `---\ntitle: ${name}\n---\n\n${body}\n`)
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const ids = bundle.pages.map((page) => page.id)
+    const excluded = (name: string) => bundle.warnings.some((warning) => warning.code === 'skipped-file' && warning.source === `en/${name}.mdx`)
+
+    for (const name of ['class-comp', 'alias-const', 'children-fn']) {
+      expect(ids).not.toContain(name)
+      expect(excluded(name)).toBe(true)
+    }
+    for (const name of ['function-list', 'async-mode']) {
+      expect(ids).toContain(name)
+      expect(excluded(name)).toBe(false)
+    }
+  })
+
   it('keeps (but warns on) a page that passes a function to a built-in this migration cannot confirm is a client component', () => {
     const root = fixture()
     // `Steps` is a Thally runtime built-in that renders entirely on the
@@ -1227,13 +1252,13 @@ api:
     }))
   })
 
-  it('never attaches another API\'s spec via a root generators.yml when this api node has an api-name', () => {
+  it('never attaches another API\'s spec via a root generators.yml in a multi-API repo when this api node has an api-name', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-root-mismatch-'))
     const fernRoot = join(root, 'fern')
-    // No `apis/plants` folder at all. The Fern project root's own
-    // generators.yml exists, but it configures a spec meant for a different
-    // API — trusting it here would silently bind the wrong spec.
-    mkdirSync(fernRoot, { recursive: true })
+    // A multi-API layout (`fern/apis/` exists) with no `apis/plants` folder.
+    // The Fern project root's own generators.yml configures a spec meant for
+    // a different API; trusting it here would silently bind the wrong spec.
+    mkdirSync(join(fernRoot, 'apis', 'animals'), { recursive: true })
     writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
     writeFileSync(join(fernRoot, 'docs.yml'), `
 navigation:
@@ -1254,9 +1279,32 @@ api:
 
     expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
     expect(bundle.assets.map((asset) => asset.path)).not.toContain('animals.yml')
-    expect(bundle.warnings).toContainEqual(expect.objectContaining({
-      code: 'unsupported-config',
-      message: expect.stringContaining('plants'),
-    }))
+    const warning = bundle.warnings.find((entry) => entry.message.startsWith('No OpenAPI'))
+    // Names only what was actually checked: the api-name folder, not the root.
+    expect(warning?.message).toContain('fern/apis/plants/generators.yml')
+    expect(warning?.message).not.toContain('fern/generators.yml')
+    expect(warning?.message).not.toContain('any openapi')
+  })
+
+  it('keeps the tab of a single-API repo (no fern/apis/) whose api node sets api-name, via the root generators.yml', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-name-single-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'openapi'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - api: Plant API
+    api-name: plants
+`)
+    writeFileSync(join(fernRoot, 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi/plants.yml\n')
+    writeFileSync(join(fernRoot, 'openapi', 'plants.yml'), 'openapi: 3.0.0\ninfo:\n  title: Plant API\n  version: "1.0"\npaths: {}\n')
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.docsConfig.tabs.find((tab) => tab.api)?.api?.source).toBe('/plants.yml')
+    expect(bundle.warnings.some((warning) => warning.message.startsWith('No OpenAPI'))).toBe(false)
   })
 })

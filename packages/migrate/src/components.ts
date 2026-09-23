@@ -65,21 +65,29 @@ const DATA_EXTENSIONS = new Set(['.json', '.css', '.svg', '.png', '.jpg', '.jpeg
 const SHARED_IMPORTS = new Set(['react', 'react/jsx-runtime', 'react/jsx-dev-runtime'])
 /**
  * Packages the standalone starter already installs as its own runtime
- * dependencies (root `package.json` `dependencies`, synced there by
- * `.github/scripts/starter-runtime-contract.mjs`). An MDX page's import of
- * one of these — even outside JSX, in an expression, a prop, or an inline
- * declaration — is not "unavailable": the package is really there. Treat it
- * exactly like `SHARED_IMPORTS` and leave it untouched, instead of excluding
- * the page or replacing its JSX-only usage with a comment stub.
+ * dependencies. An MDX page's import of one of these (or of a subpath such
+ * as `next/navigation` or `lucide-react/dynamic`), even outside JSX, is not
+ * "unavailable": the package is really there, so the page keeps the import
+ * and any extracted client module gets a copy of it.
  *
- * Drift-guarded by `packages/migrate/src/__tests__/scaffold-provided-imports.test.ts`,
- * which checks every bare name here against root `package.json`.
+ * `@/…` path aliases are deliberately absent: in a source repository they
+ * point at that site's own code, not at Thally's.
+ *
+ * Drift-guarded by the "SCAFFOLD_PROVIDED_IMPORTS drift guard" test in
+ * `packages/migrate/src/__tests__/components.test.ts`.
  */
 export const SCAFFOLD_PROVIDED_IMPORTS: ReadonlySet<string> = new Set(['next', 'react-dom', 'clsx', 'lucide-react', 'tailwind-merge'])
 function isScaffoldProvidedImport(specifier: string): boolean {
-  if (specifier === '@' || specifier.startsWith('@/')) return true
-  if (specifier === 'next' || specifier.startsWith('next/')) return true
-  return SCAFFOLD_PROVIDED_IMPORTS.has(specifier)
+  // Next aliases react-dom/server so renderToString/renderToStaticMarkup throw
+  // at render; treat it like an unavailable package rather than keep the page.
+  if (/^react-dom\/server(?:[./]|$)/.test(specifier)) return false
+  return [...SCAFFOLD_PROVIDED_IMPORTS].some((name) => specifier === name || specifier.startsWith(`${name}/`))
+}
+/** How a warning names an import that is not available in the migrated project. */
+function unavailableImportLabel(specifier: string): string {
+  return specifier.startsWith('@/')
+    ? `the path alias '${specifier}' (the source site's own code, which the migration does not copy)`
+    : `the npm package '${specifier}'`
 }
 const REACT_GLOBALS = new Set([
   'useState', 'useEffect', 'useLayoutEffect', 'useMemo', 'useCallback', 'useRef',
@@ -242,11 +250,19 @@ function isConfirmedClientBoundaryTag(name: string): boolean {
  * never does, so this returns `undefined` for those.
  */
 function functionValuedAttribute(node: MdxNode, declaredNames: ReadonlySet<string>): string | undefined {
+  const isFunctionValue = (value: string) => declaredNames.has(value.trim()) || isFunctionInitializer(value.trim(), 0)
   for (const attribute of node.attributes ?? []) {
     const raw = attribute.value
     const value = raw && typeof raw === 'object' ? raw.value : undefined
     if (typeof value !== 'string') continue
-    if (declaredNames.has(value.trim()) || isFunctionInitializer(value.trim(), 0)) return value
+    if (isFunctionValue(value)) return value
+  }
+  // Function-as-children (`<Accordion>{() => 'x'}</Accordion>`) is passed as
+  // the `children` prop, so it crosses the same boundary. Inline children sit
+  // inside a paragraph node; look one level into it.
+  const children = (node.children ?? []).flatMap((child) => child.type === 'paragraph' ? child.children ?? [] : [child])
+  for (const child of children) {
+    if (['mdxFlowExpression', 'mdxTextExpression'].includes(child.type) && child.value && isFunctionValue(child.value)) return child.value
   }
   return undefined
 }
@@ -384,7 +400,9 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
         const specifier = literal.text
         if (SHARED_IMPORTS.has(specifier) || isScaffoldProvidedImport(specifier)) return
         if (!specifier.startsWith('.') && !specifier.startsWith('/')) {
-          throw new Error(`external package ${specifier} requires manual installation and review`)
+          throw new Error(specifier.startsWith('@/')
+            ? `path alias ${specifier} points to source-site code the migration does not copy`
+            : `external package ${specifier} requires manual installation and review`)
         }
         const target = resolveDependency(specifier, path)
         visit(target)
@@ -498,7 +516,13 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
         // `resolveDependency` already understands, so a locally-owned
         // component copies the same way a relative import would.
         const specifier = rawSpecifier.startsWith('@site/') ? `/${rawSpecifier.slice('@site/'.length)}` : rawSpecifier
-        if (isScaffoldProvidedImport(specifier)) continue
+        if (isScaffoldProvidedImport(specifier)) {
+          // Installed in the migrated project: keep it on the page (content
+          // outside an extracted block may use it) and copy it into any
+          // extracted client module, whose moved declarations may use it too.
+          moduleImports.push(statement.getText(ast))
+          continue
+        }
         if (!specifier.startsWith('.') && !specifier.startsWith('/')) {
           if (SHARED_IMPORTS.has(specifier)) {
             moduleImports.push(statement.getText(ast))
@@ -521,7 +545,7 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
             // repository.ts) then drops it from navigation too.
             warnings.push({
               code: 'skipped-file',
-              message: `This page was excluded because it uses '${bindings.map((binding) => binding.local).join(', ')}' from the npm package '${rawSpecifier}' outside JSX (in an expression, prop, or inline declaration), and that package isn't available in the migrated project. Install '${rawSpecifier}' and add the import back manually, or rewrite the page to avoid it.`,
+              message: `This page was excluded because it uses '${bindings.map((binding) => binding.local).join(', ')}' from ${unavailableImportLabel(rawSpecifier)} outside JSX (in an expression, prop, or inline declaration), and that import isn't available in the migrated project. Make '${rawSpecifier}' available and add the import back manually, or rewrite the page to avoid it.`,
               source: relative(root, currentFile).replace(/\\/g, '/'),
             })
             hasUnsupportedImports = true
@@ -532,7 +556,7 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
             // replace its JSX usage with a safe fallback instead (see the
             // `unsupportedImports` walk below) rather than shipping a page
             // that cannot compile.
-            warn(`MDX import '${rawSpecifier}' is an npm package Thally does not provide; the import was removed and its usage replaced.`, currentFile)
+            warn(`MDX import of ${unavailableImportLabel(rawSpecifier)} is not available in the migrated project; the import was removed and its usage replaced.`, currentFile)
             edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
             for (const binding of bindings) unsupportedImports.set(binding.local, rawSpecifier)
           }

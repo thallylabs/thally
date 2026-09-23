@@ -281,8 +281,20 @@ describe('escapeFernLiteralBraces', () => {
     expect(escapeFernLiteralBraces(body)).toBe(body)
   })
 
-  it('leaves prose referencing well-known JS/browser globals unchanged (Math, window; undefined is already a literal)', () => {
-    const body = 'x {Math.PI} {window} {undefined}'
+  it('leaves a dotted path on a pure JS built-in (and the undefined literal) unchanged', () => {
+    const body = 'x {Math.PI} {Number.MAX_SAFE_INTEGER} {undefined}'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
+
+  it('escapes bare globals and host-only global paths, which crash or vanish at render', () => {
+    for (const name of ['window', 'document', 'navigator', 'process', 'console', 'Date', 'Error', 'fetch', 'Math', 'window.location', 'document.title', 'process.env']) {
+      expect(escapeFernLiteralBraces(`x {${name}} y`)).toBe(`x \\{${name}\\} y`)
+    }
+    expect(escapeFernLiteralBraces('<Note>\n{window}\n</Note>')).toBe('<Note>\n\\{window\\}\n</Note>')
+  })
+
+  it('reads bindings from ESM that contains JSX', () => {
+    const body = 'export const Badge = () => <b>new</b>\nexport const version = "1.2.3"\n\nCurrent version: {version}'
     expect(escapeFernLiteralBraces(body)).toBe(body)
   })
 
@@ -334,6 +346,19 @@ describe('functionDeclaredNames', () => {
       + "export const diagram = 'graph TD; A-->B';\n\n"
       + '<Steps render={Demo}>x</Steps>\n\n<Mermaid chart={diagram} />'
     expect(functionDeclaredNames(body)).toEqual(new Set(['Demo']))
+  })
+
+  it('includes classes, default and generator functions, and one-level aliases of a function', () => {
+    const body = 'export class Box extends React.Component { render() { return null } }\n'
+      + 'export default function Layout({ children }) { return children }\n'
+      + 'export function* gen() {}\n'
+      + 'export const Demo = () => null;\n'
+      + 'export const Alias = Demo;\n'
+      + 'export const load = async() => 1\n'
+      + "export const functionList = ['map']\n"
+      + "export const asyncMode = 'on'\n"
+      + 'export const Label = functionList\n'
+    expect(functionDeclaredNames(body)).toEqual(new Set(['Box', 'Layout', 'gen', 'Demo', 'Alias', 'load']))
   })
 
   it('includes export function and export async function declarations', () => {

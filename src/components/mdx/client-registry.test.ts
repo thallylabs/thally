@@ -70,11 +70,21 @@ function renderedLocalIdentifier(initializer: ts.Expression): string | undefined
   if (ts.isIdentifier(value)) return value.text
   if (!ts.isArrowFunction(value) && !ts.isFunctionExpression(value)) return undefined
   const body = value.body
+  // The first component (capitalized) tag rendered, looking through
+  // intrinsic wrappers (`<div>`, `<span>`) and fragments (`<>...</>`).
   const jsxRoot = (node: ts.Node): ts.JsxTagNameExpression | undefined => {
     const inner = ts.isExpression(node) ? unwrap(node) : node
-    if (ts.isJsxElement(inner)) return inner.openingElement.tagName
-    if (ts.isJsxSelfClosingElement(inner)) return inner.tagName
-    if (ts.isJsxFragment(inner)) return undefined
+    let tagName: ts.JsxTagNameExpression | undefined
+    let children: ts.NodeArray<ts.JsxChild> | undefined
+    if (ts.isJsxElement(inner)) { tagName = inner.openingElement.tagName; children = inner.children }
+    else if (ts.isJsxSelfClosingElement(inner)) tagName = inner.tagName
+    else if (ts.isJsxFragment(inner)) children = inner.children
+    else return undefined
+    if (tagName && !(ts.isIdentifier(tagName) && /^[a-z]/.test(tagName.text))) return tagName
+    for (const child of children ?? []) {
+      const found = ts.isJsxExpression(child) ? (child.expression ? jsxRoot(child.expression) : undefined) : jsxRoot(child)
+      if (found) return found
+    }
     return undefined
   }
   if (ts.isBlock(body)) {
@@ -132,19 +142,29 @@ function isClientDirectiveFile(fileName: string): boolean {
 }
 
 /**
- * Registry entries where the server wrapper renders a client component by
- * spreading props into it one level down, not by directly importing the
- * client module itself (`color.tsx`, a server file, spreads into
- * `color-item.tsx`'s `'use client'` `ColorItemClient`). The mechanical check
- * above only follows one hop (registry entry -> its own imported module), so
- * it cannot see this; documented here by hand instead of teaching it to
- * follow re-exports, since these are also the only registry names shaped
- * this way today.
+ * Registry entries where a server wrapper renders a client component one
+ * level down instead of being a 'use client' file itself (`color.tsx`, a
+ * server file, spreads props into `color-item.tsx`'s 'use client'
+ * `ColorItemClient`). The check below only follows one hop (registry entry ->
+ * its own imported module), so these are listed by hand; the drift test after
+ * it verifies that each listed server file still imports its client file and
+ * that the client file still starts with 'use client'.
  */
-const KNOWN_INDIRECT_CLIENT_TAGS: Record<string, string> = {
-  Color: "color.tsx's ColorRoot renders <ColorItemClient> (color-item.tsx, 'use client') when called without children",
-  'Color.Item': "color.tsx's ColorItem renders <ColorItemClient> (color-item.tsx, 'use client')",
+const KNOWN_INDIRECT_CLIENT_TAGS: Record<string, { server: string; client: string }> = {
+  Color: { server: 'color.tsx', client: 'color-item.tsx' },
+  'Color.Item': { server: 'color.tsx', client: 'color-item.tsx' },
 }
+
+it('every hand-listed indirect client tag still renders through a use-client file', () => {
+  for (const [tag, { server, client }] of Object.entries(KNOWN_INDIRECT_CLIENT_TAGS)) {
+    expect(isClientDirectiveFile(client), `${tag}: ${client} must start with 'use client'`).toBe(true)
+    expect(isClientDirectiveFile(server), `${tag}: ${server} is itself 'use client'; list it normally`).toBe(false)
+    const serverImports = new Set(importedBindings(parse(readFileSync(join(mdxDir, server), 'utf8'), server)).values())
+    const clientModule = `@/components/mdx/${client.replace(/\.tsx$/, '')}`
+    expect(serverImports.has(clientModule) || serverImports.has(`./${client.replace(/\.tsx$/, '')}`),
+      `${tag}: ${server} no longer imports ${client}`).toBe(true)
+  }
+})
 
 it('every mdx-components.tsx registry name backed by a use-client file in this directory is captured', () => {
   const sourceFile = parse(registrySource, 'mdx-components.tsx')
@@ -174,6 +194,13 @@ describe('sanity', () => {
     const sourceFile = parse(source, 'inline.tsx')
     const entries = registryEntries(sourceFile)
     expect(entries.get('Accordion')).toBe('Accordion')
+  })
+
+  it('resolves a component wrapped in a div or fragment in a multi-line arrow entry', () => {
+    const source = "const components = {\n  Tabs: (props) => (\n    <div className=\"x\">\n      <Tabs {...props} />\n    </div>\n  ),\n  Tab: (props) => (\n    <>\n      {<Tab {...props} />}\n    </>\n  ),\n}\n"
+    const entries = registryEntries(parse(source, 'inline.tsx'))
+    expect(entries.get('Tabs')).toBe('Tabs')
+    expect(entries.get('Tab')).toBe('Tab')
   })
 
   it('resolves an aliased import to its real module specifier', () => {

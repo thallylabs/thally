@@ -1,6 +1,6 @@
 /** Markdown/MDX normalization that preserves every component Thally supports. */
 
-import * as acorn from 'acorn'
+import type * as acorn from 'acorn'
 import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
@@ -149,23 +149,21 @@ const JS_LITERAL_KEYWORDS = new Set(['true', 'false', 'null', 'undefined'])
 // look like one, so escaping stays conservative either way.
 const BARE_IDENTIFIER_PATH = /^[\p{ID_Start}$_][\p{ID_Continue}$‌‍]*(?:\.[\p{ID_Start}$_][\p{ID_Continue}$‌‍]*)*$/u
 /**
- * Well-known JS/browser globals a page's prose might reference (`{Math.PI}`,
- * `{window.location}`) without ever declaring or importing them. Not
- * exhaustive — just the ones likely to show up in docs prose; anything else
- * still needs an explicit import/declaration to avoid being escaped.
+ * Pure JS built-ins that exist identically in the server and browser render.
+ * Only a dotted path rooted at one (`{Math.PI}`, `{Number.MAX_SAFE_INTEGER}`)
+ * is left as a live expression. A bare name (`{window}`, `{Date}`,
+ * `{console}`) is always escaped: it would render an object/function (a
+ * React crash or silently empty text), and host globals such as `window`,
+ * `document`, `navigator`, or `process` do not exist on both sides at all.
  */
-const KNOWN_GLOBAL_IDENTIFIERS = new Set([
-  'Math', 'JSON', 'Array', 'Object', 'Number', 'String', 'Boolean', 'Symbol',
-  'Promise', 'RegExp', 'Date', 'Error', 'TypeError', 'RangeError', 'Map', 'Set',
-  'WeakMap', 'WeakSet', 'console', 'globalThis', 'window', 'document', 'navigator',
-  'localStorage', 'sessionStorage', 'fetch', 'Infinity', 'NaN', 'isNaN', 'isFinite',
-  'parseInt', 'parseFloat', 'encodeURIComponent', 'decodeURIComponent',
-  'encodeURI', 'decodeURI', 'structuredClone', 'process',
+const SAFE_BUILTIN_ROOTS = new Set([
+  'Math', 'JSON', 'Number', 'String', 'Object', 'Array', 'Intl', 'Boolean', 'Symbol', 'BigInt', 'Reflect',
 ])
 
 interface MdxOffsetNode {
   type: string
   value?: string
+  data?: { estree?: acorn.Program | null }
   children?: Array<MdxOffsetNode>
   position?: { start: { offset?: number }; end: { offset?: number } }
 }
@@ -212,31 +210,51 @@ function collectDeclarationNames(node: acorn.AnyNode | null | undefined, names: 
  * (default, namespace, or named/destructured, however deeply nested its
  * destructuring goes), or a top-level `const`/`let`/`var`/`function`/`class`
  * — so a prose brace referencing one of them is treated as real,
- * already-bound code rather than ambiguous Fern prose. Parsed with `acorn`
- * (real ESM syntax, not a regex approximation), so `export const a = 1, b =
- * 2`, nested destructuring, and multi-declarator statements all resolve
+ * already-bound code rather than ambiguous Fern prose. Read from the ESTree
+ * remark-mdx attaches to the `mdxjsEsm` node (real ESM syntax including JSX,
+ * not a regex approximation), so `export const a = 1, b = 2`, nested
+ * destructuring, and multi-declarator statements all resolve
  * correctly. `export { x } from './y'` (a re-export) and a local `export {
  * x }` (which only re-exposes an already-declared local) never introduce a
  * new binding, so neither is added here — matching real JS module
  * semantics, since referencing `x` in prose is exactly as undefined as it
  * would be in the compiled component.
  */
-function collectEsmBindings(source: string, declared: Set<string>): void {
-  let program: acorn.Program
-  try {
-    program = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'module' })
-  } catch {
+function collectEsmBindings(node: MdxOffsetNode, declared: Set<string>): void {
+  // remark-mdx already parsed this ESM (with JSX support) and keeps the
+  // result on the node; re-parsing it with plain acorn fails on any JSX.
+  const program = node.data?.estree
+  if (!program) {
+    collectEsmBindingsByPattern(node.value ?? '', declared)
     return
   }
-  for (const node of program.body) {
-    if (node.type === 'ImportDeclaration') {
-      for (const specifier of node.specifiers) declared.add(specifier.local.name)
-    } else if (node.type === 'ExportNamedDeclaration') {
-      collectDeclarationNames(node.declaration, declared)
-    } else if (node.type === 'ExportDefaultDeclaration') {
-      collectDeclarationNames(node.declaration, declared)
+  for (const statement of program.body) {
+    if (statement.type === 'ImportDeclaration') {
+      for (const specifier of statement.specifiers) declared.add(specifier.local.name)
+    } else if (statement.type === 'ExportNamedDeclaration') {
+      collectDeclarationNames(statement.declaration, declared)
+    } else if (statement.type === 'ExportDefaultDeclaration') {
+      collectDeclarationNames(statement.declaration, declared)
     } else {
-      collectDeclarationNames(node, declared)
+      collectDeclarationNames(statement, declared)
+    }
+  }
+}
+
+/**
+ * Fallback when no parsed ESM tree is available: collect simple declared and
+ * imported names by pattern, so the page's own bindings are still recognized.
+ * Approximate (destructuring is not followed, nested declarations are
+ * included), but never records nothing for a page that does bind names.
+ */
+function collectEsmBindingsByPattern(source: string, declared: Set<string>): void {
+  for (const match of source.matchAll(/\b(?:const|let|var|class|function\s*\*?)\s+([\p{ID_Start}$_][\p{ID_Continue}$]*)/gu)) declared.add(match[1])
+  for (const match of source.matchAll(/\bimport\s+([^'";]*?)\s+from\b/g)) {
+    const clause = match[1]
+    for (const name of clause.replace(/\{[^}]*\}/, '').matchAll(/(?:\*\s+as\s+)?([\p{ID_Start}$_][\p{ID_Continue}$]*)/gu)) declared.add(name[1])
+    for (const entry of clause.match(/\{([^}]*)\}/)?.[1].split(',') ?? []) {
+      const local = entry.trim().split(/\s+as\s+/).at(-1)?.trim()
+      if (local) declared.add(local)
     }
   }
 }
@@ -273,7 +291,7 @@ export function escapeFernLiteralBraces(body: string): string {
 
   const declared = new Set<string>(['props'])
   const collectEsm = (node: MdxOffsetNode) => {
-    if (node.type === 'mdxjsEsm' && node.value) collectEsmBindings(node.value, declared)
+    if (node.type === 'mdxjsEsm') collectEsmBindings(node, declared)
     for (const child of node.children ?? []) collectEsm(child)
   }
   collectEsm(root)
@@ -285,8 +303,9 @@ export function escapeFernLiteralBraces(body: string): string {
       const start = node.position?.start.offset
       const end = node.position?.end.offset
       const root = value.split('.')[0]
+      const safeBuiltinPath = value.includes('.') && SAFE_BUILTIN_ROOTS.has(root)
       if (BARE_IDENTIFIER_PATH.test(value) && !JS_LITERAL_KEYWORDS.has(value)
-        && !declared.has(root) && !KNOWN_GLOBAL_IDENTIFIERS.has(root) && start !== undefined && end !== undefined) {
+        && !declared.has(root) && !safeBuiltinPath && start !== undefined && end !== undefined) {
         edits.push({ start, end, value: `\\{${value}\\}` })
       }
       // A leaf node: mdast never gives it further `children` (its JSX, if
@@ -463,12 +482,17 @@ function exportDeclarationBodies(body: string): Array<string> {
 export function isFunctionInitializer(source: string, sourceIndex: number): boolean {
   let index = sourceIndex
   const skipSpace = () => { while (/\s/.test(source[index] ?? '')) index++ }
+  // Keywords must end at a word boundary: `functionList`, `asyncMode`, and
+  // `classNames` are ordinary identifiers, not function expressions.
+  const keyword = (word: string) => new RegExp(`^${word}(?![\\w$])`).test(source.slice(index))
   skipSpace()
-  if (source.startsWith('async', index) && /\s/.test(source[index + 5] ?? '')) {
-    index += 5
+  if (keyword('async')) {
+    index += 'async'.length
     skipSpace()
+    // `async => x` is an arrow whose parameter is named `async`.
+    if (source.startsWith('=>', index)) return true
   }
-  if (source.startsWith('function', index)) return true
+  if (keyword('function') || keyword('class')) return true
   if (source[index] === '(') {
     let depth = 0
     for (; index < source.length; index++) {
@@ -533,8 +557,14 @@ export function functionDeclaredNames(body: string): Set<string> {
   for (const match of masked.matchAll(/export const (\w+)\s*=\s*/g)) {
     if (isFunctionInitializer(masked, (match.index ?? 0) + match[0].length)) names.add(match[1])
   }
-  for (const match of masked.matchAll(/export (?:async\s+)?function\s+(\w+)/g)) {
+  // Function declarations (incl. `default`, `async`, generators) and classes:
+  // a class is a constructor function and is just as unserializable.
+  for (const match of masked.matchAll(/export\s+(?:default\s+)?(?:async\s+)?(?:function\s*\*?\s*|class\s+)(\w+)/g)) {
     names.add(match[1])
+  }
+  // One level of aliasing: `export const Alias = Demo` where `Demo` is one.
+  for (const match of masked.matchAll(/^export const (\w+)\s*=\s*(\w+)\s*;?\s*$/gm)) {
+    if (names.has(match[2])) names.add(match[1])
   }
   return names
 }

@@ -26,10 +26,11 @@ nested sections (including `slug`/`skip-slug`), navbar links, redirects, the
 default Fern version's navigation, and theme accent colors. Only pages
 referenced from `docs.yml` are imported, matching Fern's own publishing model.
 The first `api:` section's OpenAPI document is resolved from `generators.yml`
-(`api.specs[].openapi`, or the legacy `api:` string). In a multi-API repo the
-per-API `fern/apis/<name>/` layout is checked before the project root, keyed
-by the node's `api-name` (the folder name) rather than `api` (its display
-title in the nav) — the two are commonly different. A Fern Definition (a
+(`api.specs[].openapi`, or the legacy `api:` string). The per-API
+`fern/apis/<name>/` layout is checked first, keyed by the node's `api-name`
+(the folder name) rather than `api` (its display title in the nav) — the two
+are commonly different. The project-root `generators.yml` is used only when
+the node has no `api-name` or the repo has no `fern/apis/` folder. A Fern Definition (a
 non-OpenAPI API with no document to attach), and an `api:` section for which
 no spec could be resolved at all, are each reported as a warning naming the
 API instead of the tab being silently dropped, as are `changelog`/`products`
@@ -61,8 +62,13 @@ binding is instead referenced outside JSX (an expression, a prop, or an
 inline declaration) the import can't be rewritten the same way, so the whole
 page is excluded — instead of shipping with an import `next build` can't
 resolve — and pruned from navigation, with a warning naming the page, the
-package, and the binding. A page that passes a page-authored function as a
-prop into a component confirmed to cross the server/client boundary (one this
+package, and the binding. Packages the starter already installs (`next`,
+`react-dom`, `clsx`, `lucide-react`, `tailwind-merge`, and their subpaths) are
+kept as-is (except `react-dom/server`, whose string renderers throw under
+Next) and copied into any extracted client module. A source site's own
+`@/…` path aliases are treated like an unavailable package. A page that
+passes a page-authored function (including a class, or a function written as
+children) as a prop into a component confirmed to cross the server/client boundary (one this
 importer extracted as a client module, or a Thally runtime built-in already
 backed by one, such as `Accordion`/`Panel`/`Tabs`) is excluded the same way;
 an unconfirmed target is warned instead of dropped.

@@ -530,22 +530,12 @@ function readFernGeneratorsConfig(path: string): Record<string, unknown> | null 
  * Multi-API repos keep a `generators.yml` per API under `fern/apis/<name>/`;
  * single-API repos keep one at the Fern project root.
  *
- * When `apiNameExplicit` is true (the `api:` node carries a real `api-name`
- * field), only `fern/apis/<apiName>/generators.yml` is trusted. The Fern
- * project root's own `generators.yml` is never consulted as a fallback in
- * that case: an explicit `api-name` means this is a multi-API repo, where
- * the root config configures a *different* API's spec, and attaching it
- * here would silently bind the wrong spec to this tab. The root config is
- * only used when there is no explicit `api-name` — the single-API repo
- * shape, where `apiName` (if set at all) is just the `api:` display title
- * and the root config unambiguously belongs to the one API on the site.
+ * The root `generators.yml` belongs to a *different* API only in a multi-API
+ * repo, which Fern lays out under `fern/apis/`. So the root config is skipped
+ * only when an explicit `api-name` is set AND a `fern/apis/` directory
+ * exists; a single-API repo whose docs.yml still names its API keeps its tab.
  */
-function findFernConfiguredOpenApi(
-  fernRoot: string,
-  repositoryDir: string,
-  apiName: string | undefined,
-  apiNameExplicit: boolean,
-): ScannedFile | null {
+function fernOpenApiCandidateDirs(fernRoot: string, apiName: string | undefined, apiNameExplicit: boolean): Array<string> {
   const candidateDirs: Array<string> = []
   if (apiName) {
     try {
@@ -554,7 +544,19 @@ function findFernConfiguredOpenApi(
       // Not a safe relative path (e.g. a display label, not a folder name).
     }
   }
-  if (!apiNameExplicit) candidateDirs.push(fernRoot)
+  const apisDir = resolvePath(fernRoot, 'apis')
+  const multiApi = existsSync(apisDir) && lstatSync(apisDir).isDirectory()
+  if (!apiNameExplicit || !multiApi) candidateDirs.push(fernRoot)
+  return candidateDirs
+}
+
+function findFernConfiguredOpenApi(
+  fernRoot: string,
+  repositoryDir: string,
+  apiName: string | undefined,
+  apiNameExplicit: boolean,
+): ScannedFile | null {
+  const candidateDirs = fernOpenApiCandidateDirs(fernRoot, apiName, apiNameExplicit)
   for (const dir of candidateDirs) {
     let config: Record<string, unknown> | null = null
     try {
@@ -1379,10 +1381,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   if (docsConfig.tabs.length === 0) docsConfig = buildNavigationFromPages(pages)
   // A repo-wide scan for *any* `openapi.yml`/`.json` file cannot tell one
   // API's spec from another's, so once an explicit `api-name` names a
-  // specific multi-API folder, that naive scan (and a root `generators.yml`
-  // meant for a different API) must never be consulted as a fallback — see
-  // `findFernConfiguredOpenApi`. Without an explicit `api-name` there is
-  // only ever one API on the site, so the naive scan remains safe.
+  // specific API, that naive scan is never consulted as a fallback (the root
+  // `generators.yml` rule is in `fernOpenApiCandidateDirs`). Without an
+  // explicit `api-name` there is only ever one API on the site, so the naive
+  // scan remains safe.
   const openApi = platform === 'fern' && fernProjectRoot
     ? findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, fernApiName, fernApiNameExplicit)
       ?? (fernApiNameExplicit ? null : findOpenApi(files))
@@ -1402,9 +1404,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // Neither an OpenAPI/AsyncAPI spec nor a Fern Definition could be found
     // for this `api:` node — the API tab was silently dropped from the nav.
     // Name the node so the user knows which one to fix.
+    const checked = fernOpenApiCandidateDirs(fernProjectRoot, fernApiName, fernApiNameExplicit)
+      .map((dir) => relative(repositoryDir, resolvePath(dir, 'generators.yml')).replace(/\\/g, '/'))
+    if (!fernApiNameExplicit) checked.push('any openapi or swagger file in the repository')
     warnings.push({
       code: 'unsupported-config',
-      message: `No OpenAPI/AsyncAPI spec could be found for the "${fernApiName}" API; check that generators.yml points to a spec under fern/apis/${fernApiName}/ (or the Fern project root) and that the file exists.`,
+      message: checked.length
+        ? `No OpenAPI/AsyncAPI spec could be found for the "${fernApiName}" API. Checked: ${checked.join(', ')}. Point generators.yml at a spec file that exists.`
+        : `No OpenAPI/AsyncAPI spec could be found for the "${fernApiName}" API, because its api-name is not a valid folder name. Add the spec manually.`,
     })
   }
   if (platform === 'mintlify') {
