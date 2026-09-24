@@ -1019,6 +1019,61 @@ describe('Fern repository migration', () => {
     expect(projected.warnings.some((warning) => warning.message.includes('could not be read'))).toBe(true)
   })
 
+  it('imports every product from a `products:` docs.yml as its own top-level, route-prefixed tab', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-products-'))
+    mkdirSync(join(root, 'products', 'sdks'), { recursive: true })
+    mkdirSync(join(root, 'products', 'dashboard', 'pages'), { recursive: true })
+    writeFileSync(join(root, 'products', 'sdks', 'sdks.yml'), `
+navigation:
+  - section: Overview
+    contents:
+      - page: Introduction
+        path: ./introduction.mdx
+`)
+    writeFileSync(join(root, 'products', 'sdks', 'introduction.mdx'), '---\ntitle: Introduction\n---\n\nSDK intro.')
+    writeFileSync(join(root, 'products', 'dashboard', 'dashboard.yml'), `
+navigation:
+  - section: Getting started
+    contents:
+      - page: Overview
+        path: ./pages/overview.mdx
+`)
+    writeFileSync(join(root, 'products', 'dashboard', 'pages', 'overview.mdx'), '---\ntitle: Overview\n---\n\nDashboard overview.')
+    const config = {
+      products: [
+        { 'display-name': 'SDKs', path: './products/sdks/sdks.yml', slug: 'sdks' },
+        { 'display-name': 'Dashboard', path: './products/dashboard/dashboard.yml' },
+      ],
+    }
+    const projected = projectFernNavigation({ config, fernRoot: root })
+    expect(projected.warnings.some((warning) => warning.message.includes('not supported'))).toBe(false)
+    expect(projected.docsConfig.tabs.map((tab) => tab.tab)).toEqual(['SDKs', 'Dashboard'])
+    const sourcePaths = projected.descriptors.map((descriptor) => descriptor.sourcePath).sort()
+    expect(sourcePaths).toEqual(['products/dashboard/pages/overview.mdx', 'products/sdks/introduction.mdx'])
+    // The SDKs product's own `slug: sdks` becomes its route prefix; the
+    // Dashboard product falls back to its slugified display-name.
+    const sdksTab = projected.docsConfig.tabs.find((tab) => tab.tab === 'SDKs')!
+    const dashboardTab = projected.docsConfig.tabs.find((tab) => tab.tab === 'Dashboard')!
+    expect(JSON.stringify(sdksTab)).toContain('sdks/overview/introduction')
+    expect(JSON.stringify(dashboardTab)).toContain('dashboard/getting-started/overview')
+  })
+
+  it('skips an unreadable product but keeps importing the rest, with a warning naming it', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-products-missing-'))
+    mkdirSync(join(root, 'products', 'ok'), { recursive: true })
+    writeFileSync(join(root, 'products', 'ok', 'ok.yml'), 'navigation:\n  - page: Hello\n    path: ./hello.mdx\n')
+    writeFileSync(join(root, 'products', 'ok', 'hello.mdx'), '---\ntitle: Hello\n---\n\nHi.')
+    const config = {
+      products: [
+        { 'display-name': 'Missing', path: './products/missing/missing.yml' },
+        { 'display-name': 'Ok', path: './products/ok/ok.yml' },
+      ],
+    }
+    const projected = projectFernNavigation({ config, fernRoot: root })
+    expect(projected.docsConfig.tabs.map((tab) => tab.tab)).toEqual(['Ok'])
+    expect(projected.warnings.some((warning) => warning.message.includes('Missing') && warning.message.includes('does not exist'))).toBe(true)
+  })
+
   it('rejects a protocol-relative redirect destination and translates a trailing wildcard', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-redirects-'))
     const config = {
@@ -1134,6 +1189,63 @@ api:
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
     expect(apiTab?.api?.source).toBe('/configured.yml')
     expect(bundle.assets.map((asset) => asset.path)).toContain('configured.yml')
+  })
+
+  it("resolves a multi-API repo's generators.yml spec path outside its own API folder but inside the repository (Cohere layout)", () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-spec-outside-api-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'v2'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - api: API Reference
+    api-name: v2
+`)
+    // Written relative to fern/apis/v2/, three levels up lands at the
+    // repository root — outside the API folder and outside fern/ itself,
+    // but still inside the repository checkout.
+    writeFileSync(join(fernRoot, 'apis', 'v2', 'generators.yml'), `
+api:
+  specs:
+    - openapi: ../../../acme-openapi.yaml
+`)
+    writeFileSync(join(root, 'acme-openapi.yaml'), 'openapi: 3.0.0\ninfo:\n  title: Acme API\n  version: "1.0"\npaths: {}\n')
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
+    expect(apiTab?.api?.source).toBe('/acme-openapi.yaml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('acme-openapi.yaml')
+    expect(bundle.warnings.some((warning) => /outside the repository/i.test(warning.message))).toBe(false)
+  })
+
+  it('warns instead of silently dropping the API when a generators.yml spec path escapes the repository', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-spec-escapes-repo-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'v2'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - api: API Reference
+    api-name: v2
+`)
+    // fern/apis/v2/ -> four levels up escapes the repository checkout entirely.
+    writeFileSync(join(fernRoot, 'apis', 'v2', 'generators.yml'), `
+api:
+  specs:
+    - openapi: ../../../../outside-the-repo.yaml
+`)
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
+    expect(bundle.warnings.some((warning) => /outside-the-repo\.yaml.*outside the repository/i.test(warning.message))).toBe(true)
   })
 
   it('warns that a Fern Definition API was not migrated when no OpenAPI document is configured', () => {

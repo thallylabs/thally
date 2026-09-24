@@ -43,6 +43,7 @@ import {
   mintlifyLocalizedReference,
   pageIdFromReference,
   resolveWithin,
+  resolveWithinRoot,
   trimEdgeSlashes,
   trimTrailingSlashes,
 } from './path.js'
@@ -555,24 +556,35 @@ function findFernConfiguredOpenApi(
   repositoryDir: string,
   apiName: string | undefined,
   apiNameExplicit: boolean,
+  warnings: Array<MigrationWarning>,
 ): ScannedFile | null {
   const candidateDirs = fernOpenApiCandidateDirs(fernRoot, apiName, apiNameExplicit)
   for (const dir of candidateDirs) {
     let config: Record<string, unknown> | null = null
+    let generatorsPath: string
     try {
-      config = readFernGeneratorsConfig(resolveWithin(dir, 'generators.yml'))
+      generatorsPath = resolveWithin(dir, 'generators.yml')
+      config = readFernGeneratorsConfig(generatorsPath)
     } catch {
       continue
     }
     if (!config) continue
     for (const specPath of fernGeneratorsOpenApiPaths(config)) {
       if (/^(?:https?:)?\/\//i.test(specPath)) continue
+      // `openapi:` in generators.yml is conventionally relative to that
+      // file's own directory (a multi-API repo's `fern/apis/<name>/`), not
+      // to the Fern root, so it commonly points outside `dir` (e.g. Cohere's
+      // `../../../cohere-openapi.yaml`). The security boundary is still the
+      // whole repository checkout, never anything above it.
       try {
-        const absolute = resolveWithin(dir, specPath)
+        const absolute = resolveWithinRoot(dir, specPath, repositoryDir)
         if (!existsSync(absolute) || !lstatSync(absolute).isFile()) continue
         return { absolutePath: absolute, relativePath: relative(repositoryDir, absolute).replace(/\\/g, '/') }
       } catch {
-        // Outside the Fern root or otherwise unsafe; skip.
+        warnings.push({
+          code: 'unsupported-config',
+          message: `The OpenAPI spec path "${specPath}" in ${relative(repositoryDir, generatorsPath).replace(/\\/g, '/')} is outside the repository and was skipped.`,
+        })
       }
     }
   }
@@ -954,12 +966,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       })
     }
   }
-  // A Docusaurus MDX page can import its own local components (relative or
-  // `@site/...`) and bare npm packages the same way a Mintlify page can; the
-  // same bounded component graph and import-stripping logic applies to
-  // either source, rooted at whichever project actually owns the pages.
-  const componentRoot = mintlifyProjectRoot ?? docusaurusProjectRoot ?? repositoryDir
-  const componentMigrator = platform === 'mintlify' || platform === 'docusaurus'
+  // A Docusaurus or Fern MDX page can import its own local components
+  // (relative, or `@site/...` for Docusaurus) and bare npm packages the same
+  // way a Mintlify page can; the same bounded component graph and
+  // import-stripping logic applies to any source, rooted at whichever
+  // project actually owns the pages.
+  const componentRoot = mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir
+  const componentMigrator = platform === 'mintlify' || platform === 'docusaurus' || platform === 'fern'
     ? createComponentMigrator(componentRoot, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
     : undefined
   let docsConfig: MigrationDocsConfig = { tabs: [] }
@@ -1394,7 +1407,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // explicit `api-name` there is only ever one API on the site, so the naive
   // scan remains safe.
   const openApi = platform === 'fern' && fernProjectRoot
-    ? findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, fernApiName, fernApiNameExplicit)
+    ? findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, fernApiName, fernApiNameExplicit, warnings)
       ?? (fernApiNameExplicit ? null : findOpenApi(files))
     : findConfiguredMintlifyOpenApi(mintlifyConfig, files) ?? findOpenApi(files)
   if (openApi) {
@@ -1473,7 +1486,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // references so `thally check` never reports a nav entry with no MDX file.
   docsConfig = pruneMissingNavigationPages(docsConfig, new Set(pages.map((page) => page.navigationId)))
 
-  if (pages.length === 0) throw new Error('No importable Markdown or MDX pages were found in the repository.')
+  if (pages.length === 0) {
+    const reasons = warnings.map((warning) => warning.message)
+    throw new Error(reasons.length
+      ? `No importable Markdown or MDX pages were found in the repository. Warnings encountered during migration:\n${reasons.map((reason) => `- ${reason}`).join('\n')}`
+      : 'No importable Markdown or MDX pages were found in the repository.')
+  }
   const themeColors = mintlifyConfig
     ? mintlifyThemeColors(mintlifyConfig.colors)
     : fernRawConfig ? fernThemeColors(fernRawConfig.colors) : undefined
