@@ -349,11 +349,27 @@ export function declarationsReferenceBrowserGlobal(body: string): boolean {
 }
 
 /** Create one bounded component graph and registry for a repository migration. */
-export function createComponentMigrator(siteRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
+/**
+ * `siteRoot` (a Mintlify/Docusaurus project root, when one was detected —
+ * `repositoryDir` otherwise) is what `@site/...`/root-relative (`/...`)
+ * specifiers resolve against, matching Docusaurus' own alias semantics; a
+ * warning's reported `source` and the generated destination paths stay
+ * relative to it too, unchanged from before this parameter split. A plain
+ * relative import (`../../components/X`), though, is written relative to
+ * the importing *page*, which — in a monorepo where docs/ is a sibling of
+ * website/ rather than nested under it (Redux) — can resolve outside
+ * `siteRoot` even for a component the repository legitimately owns.
+ * `confinementRoot` (always `repositoryDir`) is the actual security
+ * boundary for that resolution and for `checkedFile`'s symlink safety walk,
+ * so such an import still copies instead of throwing "path escapes its
+ * root" for a component this migration should have imported.
+ */
+export function createComponentMigrator(siteRoot: string, confinementRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
   transform: (raw: string, currentFile: string) => string
   files: () => Array<RenderedMigrationFile>
 } {
   const root = resolve(siteRoot)
+  const confined = resolve(confinementRoot)
   // A destination can contain imports from several repositories with identical
   // snippet names. Stable source identity isolates their graphs without tying
   // registry names to a temporary checkout path or changing repeat imports.
@@ -367,9 +383,9 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
   }
 
   function checkedFile(path: string): string {
-    const local = relative(root, path)
-    resolveWithin(root, local)
-    let current = root
+    const local = relative(confined, path)
+    resolveWithin(confined, local)
+    let current = confined
     if (lstatSync(current).isSymbolicLink()) throw new Error('symbolic links are not imported')
     for (const segment of local.split(/[\\/]/)) {
       current = resolveWithin(current, segment)
@@ -383,7 +399,7 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
     if (specifier.includes('\\') || specifier.includes('\0') || /[?#]/.test(specifier)) throw new Error('unsupported component dependency path')
     const candidate = specifier.startsWith('/')
       ? resolveWithin(root, specifier.slice(1))
-      : resolveWithin(root, relative(root, resolve(dirname(importer), specifier)))
+      : resolveWithin(confined, relative(confined, resolve(dirname(importer), specifier)))
     const candidates = [candidate]
     if (!extname(candidate)) {
       candidates.push(...['.tsx', '.jsx', '.ts', '.js', '.mjs', '.json'].map((extension) => candidate + extension))
@@ -398,7 +414,11 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
   }
 
   function outputPath(path: string): string {
-    return `${destinationRoot}/source/${relative(root, path).replace(/\\/g, '/')}`
+    // Must be `confined`, not `root`: a component reached via a relative
+    // import from outside `root` (see `resolveDependency`) is still inside
+    // `confined`, and a `../`-containing destination path would risk
+    // writing outside `destinationRoot`.
+    return `${destinationRoot}/source/${relative(confined, path).replace(/\\/g, '/')}`
   }
 
   function copyGraph(entry: string): string {
@@ -477,7 +497,7 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
     if (size > MAX_FILE_BYTES || copiedBytes + size > MAX_COMPONENT_BYTES || copied.size >= MAX_COMPONENT_FILES) {
       throw new Error('component migration budget exceeded')
     }
-    const publicName = `migrated-${hash(relative(root, path))}${extname(path).toLowerCase()}`
+    const publicName = `migrated-${hash(relative(confined, path))}${extname(path).toLowerCase()}`
     const destination = `public/${publicName}`
     if (!copied.has(destination)) {
       copied.set(destination, { path: destination, content: readFileSync(path) })

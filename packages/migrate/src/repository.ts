@@ -992,9 +992,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // `@site/...`) and bare npm packages the same way a Mintlify page can; the
   // same bounded component graph and import-stripping logic applies to
   // either source, rooted at whichever project actually owns the pages.
+  // `@site/...` is Docusaurus' own alias for its project root specifically
+  // (not the whole repository) and must keep resolving there. A plain
+  // relative import (`../../components/X`), though, is written relative to
+  // the *page*, which can live outside that root in a monorepo where docs/
+  // is a sibling of website/ (e.g. Redux) rather than nested under it — the
+  // repository, not the narrower platform root, is the real confinement
+  // boundary for those.
   const componentRoot = mintlifyProjectRoot ?? docusaurusProjectRoot ?? repositoryDir
   const componentMigrator = platform === 'mintlify' || platform === 'docusaurus'
-    ? createComponentMigrator(componentRoot, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
+    ? createComponentMigrator(componentRoot, repositoryDir, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
     : undefined
   let docsConfig: MigrationDocsConfig = { tabs: [] }
   const referenceMap = new Map<string, { navigationId: string; locale?: string }>()

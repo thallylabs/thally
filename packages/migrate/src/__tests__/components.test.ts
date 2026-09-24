@@ -2,7 +2,7 @@
 
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, mergeComponentRegistry, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
@@ -62,7 +62,10 @@ describe('repository component migration', () => {
     expect(first.componentFiles).toEqual(repeated.componentFiles)
     expect(first.pages[0].body).toBe(repeated.pages[0].body)
     const inline = String(first.componentFiles!.find((file) => file.path.includes('/inline-'))!.content)
-    expect(inline).toContain('"./source/widget.jsx"')
+    // Destination paths are relative to the repository (the confinement
+    // root fix's `confined`), not the narrower Mintlify project root
+    // (`site/`) — so `site/widget.jsx` lands at `./source/site/widget.jsx`.
+    expect(inline).toContain('"./source/site/widget.jsx"')
   })
 
   it('separates sibling documentation roots within the same repository', () => {
@@ -99,13 +102,46 @@ describe('repository component migration', () => {
     expect(files.at(-1)?.content).toMatch(/^'use client';\nimport /)
   })
 
+  it('resolves a relative component import that escapes the platform root but stays inside the repository (Redux: docs/ is a sibling of website/)', () => {
+    const root = fixture({
+      'website/docusaurus.config.js': 'module.exports = {}',
+      'components/DetailedExplanation.jsx': 'export default () => <p>Explanation</p>',
+    })
+    const warnings: Array<MigrationWarning> = []
+    // siteRoot (the Docusaurus project root) is narrower than the
+    // repository; confinementRoot is the whole repository, per fix 4.
+    const migrator = createComponentMigrator(join(root, 'website'), root, warnings, 'https://github.com/example/docs')
+    const source = "import DetailedExplanation from '../components/DetailedExplanation.jsx'\n\n<DetailedExplanation />"
+    const result = migrator.transform(source, join(root, 'docs', 'guide.mdx'))
+    expect(result.trim()).toMatch(/^<Migrated[a-f0-9]+ \/>$/)
+    expect(migrator.files().some((file) => file.path.endsWith('/DetailedExplanation.jsx'))).toBe(true)
+    expect(warnings).toEqual([])
+  })
+
+  it('still refuses (and removes) a relative component import that escapes the repository itself, not just the platform root', () => {
+    const outside = fixture({ 'secret.jsx': 'export default () => <p>Secret</p>' })
+    const root = fixture({ 'website/docusaurus.config.js': 'module.exports = {}' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(join(root, 'website'), root, warnings, 'https://github.com/example/docs')
+    const source = `import Secret from ${JSON.stringify(`${relative(join(root, 'docs'), outside)}/secret.jsx`.replace(/\\/g, '/'))}\n\n<Secret />`
+    const result = migrator.transform(source, join(root, 'docs', 'guide.mdx'))
+    // The import is still refused (repositoryDir remains the outer
+    // boundary) and, per the dead-import fix, removed rather than left
+    // dangling; `<Secret />` is untouched here for the page-level
+    // unknown-component fallback to neutralize.
+    expect(result).toBe('\n\n<Secret />')
+    expect(migrator.files()).toEqual([])
+    expect(warnings[0].message).toContain('could not be copied and was removed')
+    expect(warnings[0].message).toContain('escapes its root')
+  })
+
   it('imports implicit React globals without replacing explicit imports or local bindings', () => {
     const root = fixture({
       'implicit.jsx': `export default function Widget() { const [n] = useState(1); useEffect(() => {}, []); return React.createElement('p', null, n) }`,
       'explicit.jsx': `import { useState as useCounter, useEffect } from 'react'; const useState = () => [7]; export default function Widget() { const [n] = useState(); useEffect(() => {}, []); return <p>{n}</p> }`,
     })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     migrator.transform("import Implicit from './implicit.jsx'\nimport Explicit from './explicit.jsx'\n\n<Implicit />\n\n<Explicit />", join(root, 'index.mdx'))
     const implicit = migrator.files().find((file) => file.path.endsWith('/implicit.jsx'))!
     expect(implicit.content).toContain("import * as React from 'react'")
@@ -143,7 +179,7 @@ describe('repository component migration', () => {
   it('keeps identically named imports page-local and leaves fenced examples untouched', () => {
     const root = fixture({ 'one.jsx': 'export default () => <p>One</p>', 'two.jsx': 'export default () => <p>Two</p>' })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const first = migrator.transform("import Widget from './one.jsx'\n\n<Widget />\n\n```jsx\nimport Widget from './missing.jsx'\n<Widget />\n```", join(root, 'one.mdx'))
     const second = migrator.transform("import Widget from './two.jsx'\n\n<Widget />", join(root, 'two.mdx'))
     expect(first.match(/<Migrated[^ ]+/)?.[0]).not.toBe(second.match(/<Migrated[^ ]+/)?.[0])
@@ -154,7 +190,7 @@ describe('repository component migration', () => {
   it('extracts HTML event handlers into client JSX while preserving passive MDX', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const body = migrator.transform(`---\ntitle: Welcome\nmode: custom\n---\nexport function openSearch() { document.getElementById('search-bar-entry').click(); }\n\n<div><button onClick={openSearch}>Search docs</button></div>\n\n<CardGroup cols={2}>\n  <Card title="Start" href="/start">Read the guide</Card>\n</CardGroup>`, join(root, 'home.mdx'))
     expect(body).toContain('title: Welcome')
     expect(body).toContain('<CardGroup cols={2}>')
@@ -174,7 +210,7 @@ describe('repository component migration', () => {
   it('extracts a page-local stateful declaration invoked via a bare tag, so its hooks resolve in the client module', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     // Mintlify makes `useState` available without import inside inline
     // MDX-declared components. The invocation tag `<Counter />` itself has no
     // `onClick`, so nothing about its own JSX marks it interactive — only the
@@ -194,7 +230,7 @@ describe('repository component migration', () => {
   it('preserves shared declarations when passive page expressions still reference them', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = `export const label = 'Visible';\n\n<div onClick={() => {}}>{label}</div>\n\n{label}`
     expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
     expect(migrator.files()).toEqual([])
@@ -208,7 +244,7 @@ describe('repository component migration', () => {
   ])('preserves shared declarations referenced through JSX spreads or component tags: %s', (declaration, usage) => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = `${declaration}\n\n<div onClick={() => {}}>Click</div>\n\n${usage}`
     expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
     expect(migrator.files()).toEqual([])
@@ -224,7 +260,7 @@ describe('repository component migration', () => {
   ])('preserves an imported binding used outside a direct JSX tag: %s', (usage) => {
     const root = fixture({ 'widget.jsx': 'export default () => <p>Widget</p>' })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = `import Widget from './widget.jsx'\n\n${usage}`
     expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
     expect(migrator.files()).toEqual([])
@@ -237,7 +273,7 @@ describe('repository component migration', () => {
       'helper.js': "import './widget.jsx';\nexport const value = 1;",
     })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     expect(() => migrator.transform("import Widget from './widget.jsx'\n\n<Widget />", join(root, 'index.mdx'))).not.toThrow()
     expect(migrator.files()).toHaveLength(3)
     expect(warnings).toEqual([])
@@ -252,7 +288,7 @@ describe('repository component migration', () => {
   ])('warns and removes the dead import for unsupported %s source, leaving its JSX usage for the page-level fallback', (_name, dependency) => {
     const root = fixture({ 'widget.jsx': `${dependency};\nexport default () => <div />` })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = "import Widget from './widget.jsx'\n\n<Widget />"
     // The import itself is removed (leaving it would reference a module the
     // migrated project never has, breaking `next build` for the whole
@@ -268,7 +304,7 @@ describe('repository component migration', () => {
   it('removes an unsupported npm-package MDX import and replaces its usage instead of shipping a broken build', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = "import LiteYouTubeEmbed from 'react-lite-youtube-embed';\n\n<LiteYouTubeEmbed id=\"3YDiloj8_d0\" />"
     const result = migrator.transform(source, join(root, 'index.mdx'))
     expect(result).not.toContain('react-lite-youtube-embed')
@@ -285,7 +321,7 @@ describe('repository component migration', () => {
   it('does not embed a YouTube iframe for an unrelated player package, even when its usage looks video-shaped', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     // "VimeoEmbed"/"react-vimeo-embed" match the old, too-broad
     // `video|embed|player` heuristic, but Vimeo ids don't resolve on
     // youtube.com, so this must fall back to the comment stub, not a
@@ -299,7 +335,7 @@ describe('repository component migration', () => {
   it('rejects an id that is not a bare YouTube video id instead of interpolating it unescaped', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = 'import LiteYouTubeEmbed from \'react-lite-youtube-embed\';\n\n<LiteYouTubeEmbed id="x onerror=alert(1)" />'
     const result = migrator.transform(source, join(root, 'index.mdx'))
     expect(result).not.toContain('<iframe')
@@ -310,7 +346,7 @@ describe('repository component migration', () => {
   it('does not embed a JSX-expression id, since its literal source text is not the runtime value', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = "import LiteYouTubeEmbed from 'react-lite-youtube-embed';\n\nconst videoId = '3YDiloj8_d0';\n\n<LiteYouTubeEmbed id={videoId} />"
     const result = migrator.transform(source, join(root, 'index.mdx'))
     expect(result).not.toContain('<iframe')
@@ -320,7 +356,7 @@ describe('repository component migration', () => {
   it('embeds a YouTube URL passed to react-player, extracting the video id', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = "import ReactPlayer from 'react-player';\n\n<ReactPlayer url=\"https://www.youtube.com/watch?v=3YDiloj8_d0\" />"
     const result = migrator.transform(source, join(root, 'index.mdx'))
     expect(result).toContain('<iframe')
@@ -330,7 +366,7 @@ describe('repository component migration', () => {
   it('replaces a non-video unsupported import usage with a comment naming the removed component and package', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = "import Confetti from 'react-confetti';\n\n<Confetti pieces={200} />"
     const result = migrator.transform(source, join(root, 'index.mdx'))
     expect(result).toBe("\n\n{/* Removed <Confetti>: unsupported import 'react-confetti' */}")
@@ -339,7 +375,7 @@ describe('repository component migration', () => {
   it('resolves a @site/... component import to its copied file, same as a relative import', () => {
     const root = fixture({ 'src/components/Widget.jsx': 'export default () => <p>Widget</p>' })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const result = migrator.transform("import Widget from '@site/src/components/Widget.jsx'\n\n<Widget />", join(root, 'docs', 'index.mdx'))
     expect(result.trim()).toMatch(/^<Migrated[a-f0-9]+ \/>$/)
     expect(migrator.files().some((file) => file.path.endsWith('/Widget.jsx'))).toBe(true)
@@ -351,7 +387,7 @@ describe('repository component migration', () => {
     const outside = fixture({ 'widget.jsx': 'export default () => <div />' })
     symlinkSync(outside, join(root, 'linked'), 'dir')
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = "import Widget from './linked/widget.jsx'\n\n<Widget />"
     expect(migrator.transform(source, join(root, 'index.mdx'))).toBe('\n\n<Widget />')
     expect(migrator.files()).toEqual([])
@@ -361,7 +397,7 @@ describe('repository component migration', () => {
   it('rescues an asset import that copyGraph cannot handle (.docx) as a public URL when it is never used as a JSX tag', () => {
     const root = fixture({ 'assets/guide.docx': 'binary-ish content' })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = "import Doc from './assets/guide.docx'\n\n<a href={Doc}>Download</a>"
     const result = migrator.transform(source, join(root, 'index.mdx'))
     expect(result).not.toContain("import Doc from './assets/guide.docx'")
@@ -374,7 +410,7 @@ describe('repository component migration', () => {
   it('rescues an asset import bound to a lowercase local name used in an expression (Docusaurus\' own convention, e.g. a logo)', () => {
     const root = fixture({ 'static/img/docusaurus.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>' })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     // A lowercase local name and an expression-attribute usage would each,
     // on their own, bail out of component migration before ever trying to
     // copy anything (see the checks right after this block) — an asset
@@ -389,7 +425,7 @@ describe('repository component migration', () => {
   it('does not rescue an asset import as a URL string when it is used as a JSX tag, since a string cannot render as a component', () => {
     const root = fixture({ 'logo.svg': '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L999999999999999 0" /></svg>'.repeat(1) })
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     // `./logo.svg` actually copies fine via copyGraph (it's a DATA_EXTENSIONS
     // type) unless something else fails it; force a failure with a missing
     // file instead, so the only variable under test is JSX-tag usage.
@@ -402,7 +438,7 @@ describe('repository component migration', () => {
   it('marks the page skipped-file when an unsupported npm import binding is referenced outside JSX', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     // `date-fns` is not local (doesn't start with '.' or '/') and is not an
     // installed shared/theme import; `format` is referenced inside a prop
     // expression (not bare JSX usage), so it can't be rewritten. Preserving
@@ -540,7 +576,7 @@ describe('scaffold-provided imports are kept untouched', () => {
   ])('%s', (_label, source, expectedImport) => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const body = migrator.transform(source, join(root, 'page.mdx'))
     expect(body).toBe(source)
     expect(body).toContain(expectedImport)
@@ -552,7 +588,7 @@ describe('scaffold-provided imports are kept untouched', () => {
 it('treats react-dom/server as unavailable, since Next makes its string renderers throw', () => {
   const root = fixture({})
   const warnings: Array<MigrationWarning> = []
-  const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+  const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
   migrator.transform("import { renderToString } from 'react-dom/server'\n\n{renderToString(<b/>)}", join(root, 'page.mdx'))
   expect(warnings).toContainEqual(expect.objectContaining({ code: 'skipped-file', message: expect.stringContaining("'react-dom/server'") }))
 })
@@ -561,7 +597,7 @@ describe('scaffold-provided imports in extracted client modules', () => {
   function extract(source: string): { page: string; clientModule: string; warnings: Array<MigrationWarning> } {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const page = migrator.transform(source, join(root, 'page.mdx'))
     const clientModule = String(migrator.files().find((file) => file.path.includes('/inline-'))?.content ?? '')
     return { page, clientModule, warnings }
@@ -588,7 +624,7 @@ describe('source-site @/ path aliases', () => {
   function run(source: string): { body: string; warnings: Array<MigrationWarning> } {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
-    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     return { body: migrator.transform(source, join(root, 'page.mdx')), warnings }
   }
 
