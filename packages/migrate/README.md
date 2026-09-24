@@ -76,13 +76,14 @@ binding is instead referenced outside JSX (an expression, a prop, or an
 inline declaration) the import can't be rewritten the same way, so the whole
 page is excluded — instead of shipping with an import `next build` can't
 resolve — and pruned from navigation, with a warning naming the page, the
-package, and the binding. A local/relative component import is migrated the
-same way when every one of its bindings is used as a bare, unwrapped JSX tag;
-if any binding (including a companion value such as an enum passed to a
-sibling component's prop) is referenced anywhere outside that direct-tag
-position, the page is excluded with the same kind of warning rather than
-left with an import pointing at a source-tree path that doesn't exist in the
-migrated project. Packages the starter already installs (`next`,
+package, and the binding. A local/relative component import is fully owned by
+the migration instead: the whole file (and its own local dependency graph) is
+copied, keeping every binding's original name, so it makes no difference
+whether a binding is used as a bare JSX tag or only referenced elsewhere (an
+enum passed into a sibling component's prop, a member tag, a wrapping
+declaration, ...) — the page is excluded only when the copy itself genuinely
+fails (a missing file, a computed/dynamic dependency, a cycle, or a budget
+overrun), with a warning naming the page and the component. Packages the starter already installs (`next`,
 `react-dom`, `clsx`, `lucide-react`, `tailwind-merge`, and their subpaths) are
 kept as-is (except `react-dom/server`, whose string renderers throw under
 Next) and copied into any extracted client module. A source site's own
