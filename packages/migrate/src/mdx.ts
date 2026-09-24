@@ -683,6 +683,81 @@ function normalizeDocusaurusTabBlocks(body: string): string {
   return output.join('\n')
 }
 
+/**
+ * Split a CSS declaration list on top-level `;` only — a `;` inside
+ * `url(...)` (a data URI commonly contains one) must not end the
+ * declaration early.
+ */
+function splitCssDeclarations(value: string): Array<string> {
+  const parts: Array<string> = []
+  let depth = 0
+  let current = ''
+  for (const char of value) {
+    if (char === '(') depth++
+    else if (char === ')') depth = Math.max(0, depth - 1)
+    if (char === ';' && depth === 0) {
+      parts.push(current)
+      current = ''
+    } else {
+      current += char
+    }
+  }
+  if (current.trim()) parts.push(current)
+  return parts
+}
+
+/**
+ * Convert a CSS property name to the key a JSX style object expects:
+ * camelCase, vendor prefixes capitalized (`-webkit-transform` ->
+ * `WebkitTransform`) except React's own `-ms-` quirk (`msTransform`, not
+ * `MsTransform`), and a custom property (`--x`) left as a literal string key.
+ */
+function cssPropertyToJsKey(property: string): string {
+  if (property.startsWith('--')) return JSON.stringify(property)
+  const camel = property.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase())
+  return camel.startsWith('Ms') ? camel.slice(0, 1).toLowerCase() + camel.slice(1) : camel
+}
+
+/**
+ * Convert an HTML `style="..."` attribute's raw CSS text into the object
+ * literal a JSX `style={{...}}` prop requires.
+ *
+ * ponytail: `!important` cannot be expressed in a React style object at all
+ * (there is no per-declaration escape hatch), so it is dropped rather than
+ * left in a value string where it would do nothing; upgrade to a `!` layer
+ * of inline `<style>` injection if a real page ever needs it.
+ */
+function cssTextToStyleObjectLiteral(cssText: string): string {
+  const entries = splitCssDeclarations(cssText).flatMap((declaration) => {
+    const colon = declaration.indexOf(':')
+    if (colon === -1) return []
+    const property = declaration.slice(0, colon).trim()
+    const value = declaration.slice(colon + 1).replace(/\s*!\s*important\s*$/i, '').trim()
+    if (!property || !value || !/^-{0,2}[a-zA-Z][a-zA-Z0-9-]*$/.test(property)) return []
+    return [`${cssPropertyToJsKey(property)}: ${JSON.stringify(value)}`]
+  })
+  return `{${entries.join(', ')}}`
+}
+
+/**
+ * Rewrite a string `style="..."`/`style='...'` attribute on a lowercase
+ * (intrinsic HTML) JSX element into `style={{...}}`. JSX (unlike HTML)
+ * requires `style` to be a mapping from property to value; a raw string —
+ * common in Markdown/MDX pasted from HTML, e.g. a copied DataFrame table —
+ * throws at render instead of just being ignored, so this must run
+ * unconditionally, not only for a known source platform. An already-correct
+ * `style={...}` expression is untouched (the match requires a quote right
+ * after `=`), as is any component tag (uppercase-first is never matched).
+ */
+function convertHtmlStyleAttributes(body: string): string {
+  return body.replace(
+    /<([a-z][a-zA-Z0-9]*)((?:\s+[^\s"'=<>/]+(?:=(?:"[^"]*"|'[^']*'))?)*)\sstyle=(["'])([\s\S]*?)\3((?:\s+[^\s"'=<>/]+(?:=(?:"[^"]*"|'[^']*'))?)*)\s*(\/?)>/g,
+    (_match, tag: string, before: string, _quote: string, styleText: string, after: string, selfClose: string) => (
+      `<${tag}${before} style={${cssTextToStyleObjectLiteral(styleText)}}${after}${selfClose ? ' /' : ''}>`
+    ),
+  )
+}
+
 /** Normalize only syntax Thally cannot render; supported source JSX stays intact. */
 export function normalizeMdx(body: string, platform?: MigrationPlatform): string {
   // A caller that doesn't know the source platform (the URL crawler, when it
@@ -707,7 +782,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform): string
     rewritten = normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(withoutGlobalImports))
   }
   rewritten = replaceOutsideCode(rewritten, (segment) => {
-    let result = segment
+    let result = convertHtmlStyleAttributes(segment)
       .replace(/<!--([\s\S]*?)-->/g, (_match, content: string) => `{/*${content}*/}`)
       .replace(/<Danger(\s[^>]*)?>/g, '<Error$1>')
       .replace(/<\/Danger>/g, '</Error>')
