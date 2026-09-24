@@ -482,6 +482,53 @@ describe('repository component migration', () => {
     expect(css).toBe('[data-theme="light"] { color: red; }\n')
   })
 
+  it('finds and copies an import nested inside a JSX wrapper, not just one at the top of the file (Docusaurus\' own live-code-example idiom)', () => {
+    const root = fixture({ 'widget.jsx': 'export default () => <p>Widget</p>' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = "<BrowserWindow>\nimport Widget from './widget.jsx'\n\n<Widget />\n</BrowserWindow>"
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).not.toContain("import Widget from './widget.jsx'")
+    expect(result).toMatch(/<Migrated[a-f0-9]+ \/>/)
+    expect(migrator.files().some((file) => file.path.endsWith('/widget.jsx'))).toBe(true)
+    expect(warnings).toEqual([])
+  })
+
+  it('rescues a require(\'./asset.ext\').default call inside a JSX attribute expression as a public URL', () => {
+    const root = fixture({ 'assets/handout.docx': 'binary-ish content' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = '<a target="_blank" href={require(\'./assets/handout.docx\').default}>Download</a>'
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).not.toContain('require(')
+    expect(result).toMatch(/^<a target="_blank" href=\{"\/migrated-[a-f0-9]+\.docx"\}>Download<\/a>$/)
+    const publicFile = migrator.files().find((file) => file.path.startsWith('public/'))
+    expect(publicFile?.content.toString()).toBe('binary-ish content')
+  })
+
+  it('never rewrites a require(...) call that only appears inside a fenced code example, even when it names the same asset', () => {
+    const root = fixture({ 'assets/handout.docx': 'binary-ish content' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const fenced = [
+      '```jsx',
+      '<a href={require(\'./assets/handout.docx\').default}>Download</a>',
+      '```',
+    ].join('\n')
+    const result = migrator.transform(fenced, join(root, 'index.mdx'))
+    expect(result).toBe(fenced)
+    expect(migrator.files()).toEqual([])
+  })
+
+  it('leaves an unresolvable require(...) asset call untouched rather than crashing', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = '<a href={require(\'./missing.docx\').default}>Download</a>'
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).toBe(source)
+  })
+
   it('rejects symlinked directories even when their leaf looks ordinary', () => {
     const root = fixture({})
     const outside = fixture({ 'widget.jsx': 'export default () => <div />' })

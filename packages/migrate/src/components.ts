@@ -23,7 +23,12 @@ interface MdxNode {
   type: string
   name?: string | null
   value?: string
-  attributes?: Array<{ name?: string; type: string; value?: string | { value?: string } | null }>
+  attributes?: Array<{
+    name?: string
+    type: string
+    value?: string | { value?: string } | null
+    position?: { start: { offset?: number }; end: { offset?: number } }
+  }>
   children?: Array<MdxNode>
   position?: { start: { offset?: number }; end: { offset?: number } }
 }
@@ -697,8 +702,21 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       walk(tree, (node) => { if (node.name === name) found = true })
       return found
     }
-    for (const node of tree.children ?? []) {
-      if (node.type !== 'mdxjsEsm' || node.value === undefined || node.position?.start.offset === undefined) continue
+    // Docusaurus allows a real `import`/`export` ESM block anywhere in the
+    // body, not just at the top of the file — a documentation page
+    // demonstrating a live code example commonly nests one inside a JSX
+    // wrapper (`<BrowserWindow>\nimport Foo from './foo.svg'\n\n<Foo
+    // /></BrowserWindow>`, straight from Docusaurus' own docs). remark-mdx
+    // still parses each as its own `mdxjsEsm` node, just nested under that
+    // wrapper's `children` instead of `tree.children` directly, so this
+    // must walk the whole tree to find every one of them; a scan of only
+    // `tree.children` silently skips a nested import, leaving the page
+    // referencing a path the migrated project never has ("Module not
+    // found") without any warning at all.
+    const esmNodes: Array<MdxNode> = []
+    walk(tree, (node) => { if (node.type === 'mdxjsEsm') esmNodes.push(node) })
+    for (const node of esmNodes) {
+      if (node.value === undefined || node.position?.start.offset === undefined) continue
       const ast = sourceFile(node.value, 'inline.tsx')
       for (const statement of ast.statements) {
         if (!ts.isImportDeclaration(statement)) {
@@ -870,6 +888,41 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         }
       }
     }
+
+    // Docusaurus' own docs teach `require('./relative/asset.ext').default`
+    // as the idiom for linking a JSX attribute (`href={...}`) straight to a
+    // static asset — real, working MDX on the source site, but a dangling
+    // `require()` of a path the migrated project never has once copied
+    // verbatim ("Module not found" at build time). Only a JSX *attribute*
+    // expression is handled here (`mdxFlowExpression`/`mdxTextExpression`
+    // bodies never hit this shape in practice and the ESM-import loop above
+    // already covers a bare top-level `require()`); each attribute's own
+    // `position` bounds the replacement to just that attribute's text, so
+    // this can never match the identical-looking call inside a *fenced code
+    // example* documenting the very same idiom (a real risk here, since
+    // Docusaurus' own assets.mdx page shows both side by side).
+    walk(tree, (node) => {
+      for (const attribute of node.attributes ?? []) {
+        if (attribute.type !== 'mdxJsxAttribute' || !attribute.value || typeof attribute.value !== 'object') continue
+        const start = attribute.position?.start.offset
+        const end = attribute.position?.end.offset
+        if (start === undefined || end === undefined) continue
+        const attributeText = content.slice(start, end)
+        const match = attributeText.match(/require\(\s*(['"])((?:\.\.?\/|\/|@site\/)[^'"]+?\.(?:svg|png|jpe?g|webp|gif|avif|ico|docx|pdf))\1\s*\)(?:\.default|\.src)?/)
+        if (!match || match.index === undefined) continue
+        try {
+          const specifier = match[2]
+          const normalized = specifier.startsWith('@site/') ? `/${specifier.slice('@site/'.length)}` : specifier
+          const resolvedPath = normalized.startsWith('/') ? resolveWithin(root, normalized.slice(1)) : resolveDependency(normalized, currentFile)
+          const href = copyPublicAsset(resolvedPath)
+          const replaced = attributeText.slice(0, match.index) + JSON.stringify(href) + attributeText.slice(match.index + match[0].length)
+          edits.push({ start, end, value: replaced })
+        } catch {
+          // Not actually resolvable/copyable — leave the attribute as-is;
+          // the MDX-compile/build check reports the real problem.
+        }
+      }
+    })
 
     // A page-local declaration (not imported) that uses a hook or an event
     // handler must move to the client module along with its invocation: left
