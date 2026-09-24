@@ -30,7 +30,7 @@ import {
   type DocusaurusSidebars,
 } from './docusaurus.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
-import { detectUnsupportedFernComponents, escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from './mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -45,6 +45,7 @@ import {
   mintlifyLocalizedReference,
   pageIdFromReference,
   resolveWithin,
+  resolveWithinRoot,
   trimEdgeSlashes,
   trimTrailingSlashes,
 } from './path.js'
@@ -674,24 +675,35 @@ function findFernConfiguredOpenApi(
   repositoryDir: string,
   apiName: string | undefined,
   apiNameExplicit: boolean,
+  warnings: Array<MigrationWarning>,
 ): ScannedFile | null {
   const candidateDirs = fernOpenApiCandidateDirs(fernRoot, apiName, apiNameExplicit)
   for (const dir of candidateDirs) {
     let config: Record<string, unknown> | null = null
+    let generatorsPath: string
     try {
-      config = readFernGeneratorsConfig(resolveWithin(dir, 'generators.yml'))
+      generatorsPath = resolveWithin(dir, 'generators.yml')
+      config = readFernGeneratorsConfig(generatorsPath)
     } catch {
       continue
     }
     if (!config) continue
     for (const specPath of fernGeneratorsOpenApiPaths(config)) {
       if (/^(?:https?:)?\/\//i.test(specPath)) continue
+      // `openapi:` in generators.yml is conventionally relative to that
+      // file's own directory (a multi-API repo's `fern/apis/<name>/`), not
+      // to the Fern root, so it commonly points outside `dir` (e.g. Cohere's
+      // `../../../cohere-openapi.yaml`). The security boundary is still the
+      // whole repository checkout, never anything above it.
       try {
-        const absolute = resolveWithin(dir, specPath)
+        const absolute = resolveWithinRoot(dir, specPath, repositoryDir)
         if (!existsSync(absolute) || !lstatSync(absolute).isFile()) continue
         return { absolutePath: absolute, relativePath: relative(repositoryDir, absolute).replace(/\\/g, '/') }
       } catch {
-        // Outside the Fern root or otherwise unsafe; skip.
+        warnings.push({
+          code: 'unsupported-config',
+          message: `The OpenAPI spec path "${specPath}" in ${relative(repositoryDir, generatorsPath).replace(/\\/g, '/')} is outside the repository and was skipped.`,
+        })
       }
     }
   }
@@ -1096,19 +1108,20 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       })
     }
   }
-  // A Docusaurus MDX page can import its own local components (relative or
-  // `@site/...`) and bare npm packages the same way a Mintlify page can; the
-  // same bounded component graph and import-stripping logic applies to
-  // either source, rooted at whichever project actually owns the pages.
-  // `@site/...` is Docusaurus' own alias for its project root specifically
-  // (not the whole repository) and must keep resolving there. A plain
-  // relative import (`../../components/X`), though, is written relative to
-  // the *page*, which can live outside that root in a monorepo where docs/
-  // is a sibling of website/ (e.g. Redux) rather than nested under it — the
+  // A Docusaurus or Fern MDX page can import its own local components
+  // (relative, or `@site/...` for Docusaurus) and bare npm packages the same
+  // way a Mintlify page can; the same bounded component graph and
+  // import-stripping logic applies to any source, rooted at whichever
+  // project actually owns the pages. `@site/...` is Docusaurus' own alias
+  // for its project root specifically (not the whole repository) and must
+  // keep resolving there. A plain relative import (`../../components/X`),
+  // though, is written relative to the *page*, which can live outside that
+  // root in a monorepo where docs/ is a sibling of website/ (e.g. Redux) or
+  // of a Fern project directory rather than nested under it — the
   // repository, not the narrower platform root, is the real confinement
   // boundary for those.
-  const componentRoot = mintlifyProjectRoot ?? docusaurusProjectRoot ?? repositoryDir
-  const componentMigrator = platform === 'mintlify' || platform === 'docusaurus'
+  const componentRoot = mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir
+  const componentMigrator = platform === 'mintlify' || platform === 'docusaurus' || platform === 'fern'
     ? createComponentMigrator(componentRoot, repositoryDir, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
     : undefined
   let docsConfig: MigrationDocsConfig = { tabs: [] }
@@ -1203,7 +1216,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const assets: Array<MigrationAsset> = []
   const docusaurusDescriptors: Array<DocusaurusPageDescriptor> = []
   const seenPageIds = new Set<string>()
-  const warnedFernComponents = new Set<string>()
   /** docs.yml-derived navigationId -> final id, when a page's frontmatter `slug` overrides it. */
   const fernIdRenames = new Map<string, string>()
   let skipped = 0
@@ -1311,18 +1323,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
       raw = escapeFernLiteralBraces(raw)
     }
-    if (platform === 'fern') {
-      for (const name of detectUnsupportedFernComponents(raw)) {
-        const key = `fern-component:${name}`
-        if (warnedFernComponents.has(key)) continue
-        warnedFernComponents.add(key)
-        warnings.push({
-          code: 'unsupported-config',
-          message: `Fern component <${name}> is not supported by Thally; the page compiles but will likely fail to render. Edit or remove the tag.`,
-          source: file.relativePath,
-        })
-      }
-    }
     let docusaurusDescriptor: Omit<DocusaurusPageDescriptor, 'title'> | undefined
     const page = parseMarkdownPage({
       id,
@@ -1381,7 +1381,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (platform === 'fern' && fernProjectRoot) {
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, fernProjectRoot)
     }
-    if (platform === 'mintlify' || platform === 'docusaurus') {
+    if (platform === 'mintlify' || platform === 'docusaurus' || platform === 'fern') {
       // `<Link href="...">` (common Mintlify/Docusaurus prose, e.g. mem0's
       // docs) has no Thally builtin; map it to a plain anchor before the
       // generic unknown-component fallback runs, so a real navigable link
@@ -1389,7 +1389,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // body (after `parseMarkdownPage`'s `normalizeMdx`), so a tag that a
       // platform-specific rename still resolves (Docusaurus `TabItem` ->
       // `Tab`, Mintlify `Warn` -> `Warning`, ...) is never mistaken for
-      // unknown.
+      // unknown. Fern-native components with no Thally equivalent
+      // (`Markdown`, `Button`, `Download`, ...) fall into the same generic
+      // path below — there is no separate Fern-specific detector, so each
+      // unknown tag gets exactly one warning.
       page.body = replaceLinkWithAnchor(page.body)
       // Anything still capitalized and unresolved at this point (not a
       // Thally builtin, not declared/imported by the page, not already
@@ -1575,7 +1578,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // explicit `api-name` there is only ever one API on the site, so the naive
   // scan remains safe.
   const openApi = platform === 'fern' && fernProjectRoot
-    ? findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, fernApiName, fernApiNameExplicit)
+    ? findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, fernApiName, fernApiNameExplicit, warnings)
       ?? (fernApiNameExplicit ? null : findOpenApi(files))
     : findConfiguredMintlifyOpenApi(mintlifyConfig, files) ?? findOpenApi(files)
   if (openApi) {
@@ -1654,7 +1657,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // references so `thally check` never reports a nav entry with no MDX file.
   docsConfig = pruneMissingNavigationPages(docsConfig, new Set(pages.map((page) => page.navigationId)))
 
-  if (pages.length === 0) throw new Error('No importable Markdown or MDX pages were found in the repository.')
+  if (pages.length === 0) {
+    const reasons = warnings.map((warning) => warning.message)
+    throw new Error(reasons.length
+      ? `No importable Markdown or MDX pages were found in the repository. Warnings encountered during migration:\n${reasons.map((reason) => `- ${reason}`).join('\n')}`
+      : 'No importable Markdown or MDX pages were found in the repository.')
+  }
   const themeColors = mintlifyConfig
     ? mintlifyThemeColors(mintlifyConfig.colors)
     : fernRawConfig ? fernThemeColors(fernRawConfig.colors) : undefined

@@ -871,11 +871,18 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           hasUnsupportedImports = true
           continue
         }
-        if (hasExpressionReference(new Set(bindings.map((binding) => binding.local)))) {
-          warn('Imported components used in MDX expressions, component props, or member tags require manual migration; the import was preserved.', currentFile)
-          hasUnsupportedImports = true
-          continue
-        }
+        // Unlike the unavailable-npm-package case above, a local/relative
+        // import is fully owned by the migration: `copyGraph` below moves
+        // the whole file (and its own local dependency graph) into the
+        // project, and the statement it emits keeps every binding's original
+        // local name (`as ${binding.local}`) — only the module specifier
+        // changes. Nothing in the page body needs renaming, so it makes no
+        // difference whether a binding is used as a bare JSX tag or only
+        // referenced elsewhere (an enum member on a sibling prop, a member
+        // tag, a wrapping declaration, ...): the copy is attempted either
+        // way, and the page is excluded only if that copy genuinely fails
+        // (an unsupported dependency inside the local graph — see the catch
+        // below), not merely because of how the binding is used.
         try {
           const path = copyGraph(resolveDependency(specifier, currentFile))
           const isSvgUsedAsTag = extname(path).toLowerCase() === '.svg' && bindings.some((binding) => usedAsJsxTagName(binding.local))
@@ -1105,8 +1112,16 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         "import type { MDXComponents } from 'mdx/types'", ...entries.map(([name, binding]) => {
           const path = portableSpecifier(`./${relative('src/mdx', binding.path).replace(/\\/g, '/')}`)
           return `import { ${binding.imported} as ${name} } from ${JSON.stringify(path)}`
-        }), '', 'export const customComponents: MDXComponents = {',
-        ...entries.map(([name]) => `  ${name},`), '}', '',
+        }), '',
+        // Not every registered local binding is JSX-taggable — a companion
+        // value from the same import (an enum used only as `Foo.Bar` inside
+        // another component's prop, e.g.) is registered too, so the whole
+        // MDX scope resolves it. `MDXComponents`' index signature expects a
+        // component at every key, which such a value structurally is not;
+        // cast rather than exclude it, since excluding it would leave a
+        // dangling reference in the page that DOES need it.
+        'export const customComponents = {',
+        ...entries.map(([name]) => `  ${name},`), '} as unknown as MDXComponents', '',
       ].join('\n'),
     }]
   }

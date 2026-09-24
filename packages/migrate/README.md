@@ -30,11 +30,25 @@ The first `api:` section's OpenAPI document is resolved from `generators.yml`
 `fern/apis/<name>/` layout is checked first, keyed by the node's `api-name`
 (the folder name) rather than `api` (its display title in the nav) — the two
 are commonly different. The project-root `generators.yml` is used only when
-the node has no `api-name` or the repo has no `fern/apis/` folder. A Fern Definition (a
-non-OpenAPI API with no document to attach), and an `api:` section for which
-no spec could be resolved at all, are each reported as a warning naming the
-API instead of the tab being silently dropped, as are `changelog`/`products`
-sections and logo/favicon branding, which have no equivalent Thally field yet.
+the node has no `api-name` or the repo has no `fern/apis/` folder. `openapi:`
+is conventionally relative to `generators.yml`'s own directory rather than the
+Fern root, so it commonly resolves outside the API folder (or outside `fern/`
+entirely, e.g. `../../../openapi.yaml`); the spec is still found as long as it
+stays inside the repository checkout, and a path that escapes the checkout is
+reported with a warning naming it, instead of the API being silently dropped.
+A Fern Definition (a non-OpenAPI API with no document to attach), and an
+`api:` section for which no spec could be resolved at all, are each reported
+as a warning naming the API instead of the tab being silently dropped, as is
+`changelog`, which has no equivalent Thally field yet.
+
+A `products:` docs.yml (Fern's multi-product/product-switcher layout, as on
+buildwithfern.com/learn) imports every product: each product's own
+`navigation:`/`tabs:` becomes a top-level Thally tab named by its
+`display-name`, routed under its `slug` (or a slugified display-name), with
+its pages read from that product's own directory. Local component imports
+from Fern MDX pages (`../../components/...`, resolved against the Fern
+project root) are migrated the same way Mintlify and Docusaurus components
+are — see "Mintlify compatibility" below.
 
 ## Mintlify compatibility
 
@@ -62,7 +76,14 @@ binding is instead referenced outside JSX (an expression, a prop, or an
 inline declaration) the import can't be rewritten the same way, so the whole
 page is excluded — instead of shipping with an import `next build` can't
 resolve — and pruned from navigation, with a warning naming the page, the
-package, and the binding. Packages the starter already installs (`next`,
+package, and the binding. A local/relative component import is fully owned by
+the migration instead: the whole file (and its own local dependency graph) is
+copied, keeping every binding's original name, so it makes no difference
+whether a binding is used as a bare JSX tag or only referenced elsewhere (an
+enum passed into a sibling component's prop, a member tag, a wrapping
+declaration, ...) — the page is excluded only when the copy itself genuinely
+fails (a missing file, a computed/dynamic dependency, a cycle, or a budget
+overrun), with a warning naming the page and the component. Packages the starter already installs (`next`,
 `react-dom`, `clsx`, `lucide-react`, `tailwind-merge`, and their subpaths) are
 kept as-is (except `react-dom/server`, whose string renderers throw under
 Next) and copied into any extracted client module. A source site's own

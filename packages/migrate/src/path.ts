@@ -88,11 +88,22 @@ export function mintlifyLocalizedReference(
 
 /** Resolve an untrusted relative path and prove it remains below `root`. */
 export function resolveWithin(root: string, candidate: string): string {
+  return resolveWithinRoot(root, candidate, root)
+}
+
+/**
+ * Resolve an untrusted relative path against `baseDir`, but only require the
+ * result to stay below `confineRoot` (which may be an ancestor of `baseDir`).
+ * Used where a config file's relative paths are conventionally resolved
+ * against the file's own directory, yet the security boundary is a wider
+ * root (e.g. the whole repository checkout).
+ */
+export function resolveWithinRoot(baseDir: string, candidate: string, confineRoot: string): string {
   if (isAbsolute(candidate) || candidate.includes('\0')) {
     throw new Error(`Unsafe migration path: ${candidate}`)
   }
-  const target = resolve(root, candidate)
-  const fromRoot = relative(resolve(root), target)
+  const target = resolve(baseDir, candidate)
+  const fromRoot = relative(resolve(confineRoot), target)
   if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
     throw new Error(`Migration path escapes its root: ${candidate}`)
   }

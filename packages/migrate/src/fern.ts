@@ -5,11 +5,12 @@
  */
 
 import { existsSync, lstatSync, readFileSync } from 'node:fs'
+import { dirname, relative } from 'node:path'
 
 import { parse as parseYaml } from 'yaml'
 
 import { isRedirectPathSafe, translateRedirectWildcards } from './navigation.js'
-import { resolveWithin } from './path.js'
+import { resolveWithin, resolveWithinRoot } from './path.js'
 import type {
   MigrationDocsConfig,
   MigrationNavigationGroup,
@@ -84,6 +85,14 @@ interface WalkContext {
   warningKeys: Set<string>
   /** Bare tab/section routes with no page of their own, soft-redirected to their first descendant. */
   bareRouteRedirects: Array<{ source: string; destination: string }>
+  /**
+   * Directory, relative to `fernRoot` (posix, no trailing slash, '' at the
+   * root), that a page's `path` is actually relative to. A product's own
+   * config lives under `fern/products/<name>/`, so its pages resolve there
+   * rather than at the Fern root, even though the product's *route* segment
+   * is unrelated and handled separately via `parentSegments`.
+   */
+  pathPrefix: string
 }
 
 function warnOnce(context: WalkContext, key: string, message: string): void {
@@ -160,7 +169,8 @@ function uniqueNavigationId(base: string, context: WalkContext): string {
 }
 
 function registerPageAt(rawPath: string, base: string, context: WalkContext): string {
-  const sourcePath = rawPath.trim().replace(/^\.\//, '')
+  const relativePath = rawPath.trim().replace(/^\.\//, '')
+  const sourcePath = context.pathPrefix ? `${context.pathPrefix}/${relativePath}` : relativePath
   const navigationId = uniqueNavigationId(base || 'introduction', context)
   context.seenNavigationIds.add(navigationId)
   context.descriptors.push({ sourcePath, navigationId })
@@ -270,15 +280,21 @@ function groupsFromConverted(
   return loosePages.length > 0 ? [{ group: 'Overview', pages: loosePages }, ...groups] : groups
 }
 
-/** Resolve the default Fern version's navigation when no top-level nav exists. */
+/**
+ * Resolve the default Fern version's navigation when no top-level nav
+ * exists. `configDir` is the directory `chosen.path` is conventionally
+ * relative to (the Fern root for a top-level docs.yml, or a product's own
+ * directory for a product config); `fernRoot` remains the security boundary.
+ */
 function resolveVersionedNavigation(
   config: Record<string, unknown>,
+  configDir: string,
   fernRoot: string,
   context: WalkContext,
 ): Record<string, unknown> {
   if (Array.isArray(config.navigation)) return config
   if (Array.isArray(config.products)) {
-    warnOnce(context, 'fern-products', 'Fern multi-product docs are not supported; only this docs.yml was imported.')
+    warnOnce(context, 'fern-products', 'Nested Fern multi-product docs are not supported; only this docs.yml was imported.')
     return config
   }
   if (!Array.isArray(config.versions)) return config
@@ -299,7 +315,7 @@ function resolveVersionedNavigation(
   }
   if (!chosen || typeof chosen.path !== 'string') return config
   try {
-    const versionPath = resolveWithin(fernRoot, chosen.path)
+    const versionPath = resolveWithinRoot(configDir, chosen.path, fernRoot)
     if (!existsSync(versionPath) || !lstatSync(versionPath).isFile()) {
       warnOnce(context, 'fern-version-not-file', `Fern version file "${chosen.path}" is not a regular file and was skipped.`)
       return config
@@ -317,6 +333,119 @@ function resolveVersionedNavigation(
   }
 }
 
+/**
+ * Build tabs for one docs config (the top-level docs.yml, or one product's
+ * own config), rooted at `routePrefix`. Shared by the plain top-level path
+ * and by `projectFernProducts` so both get identical tabbed/flat-navigation
+ * and version-resolution handling.
+ */
+function buildTabsFromConfig(
+  rawConfig: Record<string, unknown>,
+  configDir: string,
+  fernRoot: string,
+  routePrefix: Array<string>,
+  fallbackTabLabel: string,
+  context: WalkContext,
+): Array<MigrationNavigationTab> {
+  const config = resolveVersionedNavigation(rawConfig, configDir, fernRoot, context)
+  const tabsMeta = objectValue(config.tabs) ?? {}
+  const navigation = config.navigation
+
+  const isTabbedNavigation = Array.isArray(navigation)
+    && navigation.length > 0
+    && navigation.every((entry) => typeof objectValue(entry)?.tab === 'string')
+
+  if (isTabbedNavigation) {
+    return (navigation as Array<Record<string, unknown>>).flatMap((entry) => {
+      const id = String(entry.tab)
+      const meta = objectValue(tabsMeta[id]) ?? {}
+      const label = typeof meta['display-name'] === 'string' ? meta['display-name'] : titleCase(id)
+      const tabSegment = segmentFor(meta, label)
+      const segments = [...routePrefix, ...(tabSegment ? [tabSegment] : [])]
+      const layout = Array.isArray(entry.layout) ? entry.layout : []
+      const sawApiBefore = context.sawApi
+      const groups = groupsFromConverted(convertNodes(layout, segments, context))
+      if (!sawApiBefore && context.sawApi) context.apiTabLabel = label
+      if (groups.length === 0) return []
+      if (segments.length > 0) addBareRouteRedirect(segments, groups, context)
+      return [{
+        tab: label,
+        ...(typeof meta.icon === 'string' ? { icon: meta.icon } : {}),
+        groups,
+      }]
+    })
+  }
+  if (Array.isArray(navigation)) {
+    const groups = groupsFromConverted(convertNodes(navigation, routePrefix, context))
+    if (groups.length > 0) {
+      if (routePrefix.length > 0) addBareRouteRedirect(routePrefix, groups, context)
+      return [{ tab: fallbackTabLabel, groups }]
+    }
+  }
+  return []
+}
+
+/**
+ * Project Fern's `products:` (a docs.yml that fans out into several
+ * independently-navigable products, e.g. buildwithfern.com/learn) into one
+ * top-level tab per product, each routed under its own `slug`/display-name
+ * segment and reading its pages from its own `fern/products/<name>/`
+ * directory.
+ */
+function projectFernProducts(
+  rawProducts: Array<unknown>,
+  fernRoot: string,
+  context: WalkContext,
+): Array<MigrationNavigationTab> {
+  return rawProducts.flatMap((entry) => {
+    const product = objectValue(entry)
+    const rawPath = typeof product?.path === 'string' ? product.path.trim() : ''
+    if (!product || !rawPath) return []
+    const label = typeof product['display-name'] === 'string' && product['display-name'].trim()
+      ? product['display-name'].trim()
+      : 'Product'
+    let productPath: string
+    try {
+      productPath = resolveWithin(fernRoot, rawPath)
+    } catch {
+      warnOnce(context, `fern-product-unsafe-${rawPath}`, `Fern product "${label}" path "${rawPath}" is unsafe and was skipped.`)
+      return []
+    }
+    if (!existsSync(productPath) || !lstatSync(productPath).isFile()) {
+      warnOnce(context, `fern-product-missing-${rawPath}`, `Fern product "${label}" path "${rawPath}" does not exist and was skipped.`)
+      return []
+    }
+    let productConfig: Record<string, unknown> | null
+    try {
+      productConfig = objectValue(readBoundedYaml(productPath))
+    } catch (error) {
+      warnOnce(
+        context,
+        `fern-product-read-failed-${rawPath}`,
+        `Fern product "${label}" could not be read (${error instanceof Error ? error.message : String(error)}) and was skipped.`,
+      )
+      return []
+    }
+    if (!productConfig) return []
+    const productDir = dirname(productPath)
+    const routeSegment = segmentFor(product, label)
+    const priorPrefix = context.pathPrefix
+    context.pathPrefix = relative(fernRoot, productDir).replace(/\\/g, '/')
+    try {
+      return buildTabsFromConfig(
+        productConfig,
+        productDir,
+        fernRoot,
+        routeSegment ? [routeSegment] : [],
+        label,
+        context,
+      )
+    } finally {
+      context.pathPrefix = priorPrefix
+    }
+  })
+}
+
 /** Project a Fern `docs.yml` navigation tree into Thally tabs/groups. */
 export function projectFernNavigation(input: {
   config: Record<string, unknown>
@@ -329,38 +458,13 @@ export function projectFernNavigation(input: {
     warnings: [],
     warningKeys: new Set(),
     bareRouteRedirects: [],
+    pathPrefix: '',
   }
-  const config = resolveVersionedNavigation(input.config, input.fernRoot, context)
-  const tabsMeta = objectValue(config.tabs) ?? {}
-  const navigation = config.navigation
-  let tabs: Array<MigrationNavigationTab> = []
-
-  const isTabbedNavigation = Array.isArray(navigation)
-    && navigation.length > 0
-    && navigation.every((entry) => typeof objectValue(entry)?.tab === 'string')
-
-  if (isTabbedNavigation) {
-    tabs = (navigation as Array<Record<string, unknown>>).flatMap((entry) => {
-      const id = String(entry.tab)
-      const meta = objectValue(tabsMeta[id]) ?? {}
-      const label = typeof meta['display-name'] === 'string' ? meta['display-name'] : titleCase(id)
-      const tabSegment = segmentFor(meta, label)
-      const layout = Array.isArray(entry.layout) ? entry.layout : []
-      const sawApiBefore = context.sawApi
-      const groups = groupsFromConverted(convertNodes(layout, tabSegment ? [tabSegment] : [], context))
-      if (!sawApiBefore && context.sawApi) context.apiTabLabel = label
-      if (groups.length === 0) return []
-      if (tabSegment) addBareRouteRedirect([tabSegment], groups, context)
-      return [{
-        tab: label,
-        ...(typeof meta.icon === 'string' ? { icon: meta.icon } : {}),
-        groups,
-      }]
-    })
-  } else if (Array.isArray(navigation)) {
-    const groups = groupsFromConverted(convertNodes(navigation, [], context))
-    if (groups.length > 0) tabs = [{ tab: 'Documentation', groups }]
-  }
+  const config = input.config
+  const hasProducts = Array.isArray(config.products) && config.products.length > 0 && !Array.isArray(config.navigation)
+  const tabs = hasProducts
+    ? projectFernProducts(config.products as Array<unknown>, input.fernRoot, context)
+    : buildTabsFromConfig(config, input.fernRoot, input.fernRoot, [], 'Documentation', context)
 
   if (tabs.length === 0) {
     context.warnings.push({

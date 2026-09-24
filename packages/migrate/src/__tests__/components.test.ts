@@ -3,6 +3,7 @@
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
+import ts from 'typescript'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, mergeComponentRegistry, propsTargetExtractedClientComponent, SCAFFOLD_PROVIDED_IMPORTS } from '../components.js'
@@ -66,6 +67,95 @@ describe('repository component migration', () => {
     // root fix's `confined`), not the narrower Mintlify project root
     // (`site/`) — so `site/widget.jsx` lands at `./source/site/widget.jsx`.
     expect(inline).toContain('"./source/site/widget.jsx"')
+  })
+
+  it('migrates local components imported by a Fern page (../../components from fern/pages/...)', () => {
+    const root = fixture({
+      'fern/fern.config.json': JSON.stringify({ organization: 'acme' }),
+      'fern/docs.yml': [
+        'navigation:',
+        '  - section: Guides',
+        '    contents:',
+        '      - page: Cookbook',
+        '        path: ./pages/guides/cookbook.mdx',
+      ].join('\n'),
+      'fern/pages/guides/cookbook.mdx': [
+        '---',
+        'title: Cookbook',
+        '---',
+        "import { CookbookHeader } from '../../components/cookbook-header'",
+        '',
+        '<CookbookHeader href="https://github.com/example/docs" />',
+      ].join('\n'),
+      'fern/components/cookbook-header.tsx': [
+        "export const CookbookHeader = ({ href }: { href: string }) => <a href={href}>Open in GitHub</a>",
+      ].join('\n'),
+    })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs', platform: 'fern' })
+    expect(bundle.warnings.filter((warning) => /Module not found|module not found/i.test(warning.message))).toEqual([])
+    const files = renderMigrationFiles(bundle)
+    const graph = files.filter((file) => file.path.startsWith('src/mdx/migrated/'))
+    expect(graph.length).toBeGreaterThan(0)
+    expect(graph.some((file) => String(file.content).includes('Open in GitHub'))).toBe(true)
+  })
+
+  it('migrates a Fern page whose companion import binding (an enum) is used inside a JSX prop expression', () => {
+    // Mirrors cohere-developer-experience's `model-showcase.tsx`: one import
+    // statement brings in both the rendered component (`ModelShowcase`, used
+    // as a bare tag) and a value-only companion (`Capability`, used only via
+    // `Capability.SafetyModes` inside a prop expression). The whole file is
+    // local and copyable, so both bindings are migrated together and the
+    // page is kept — excluding a page the migration can satisfy would be
+    // the wrong tradeoff.
+    const root = fixture({
+      'fern/fern.config.json': JSON.stringify({ organization: 'acme' }),
+      'fern/docs.yml': [
+        'navigation:',
+        '  - page: Welcome',
+        '    path: ./pages/welcome.mdx',
+        '  - page: Model',
+        '    path: ./pages/model.mdx',
+      ].join('\n'),
+      'fern/pages/welcome.mdx': '---\ntitle: Welcome\n---\n\nHello.',
+      'fern/pages/model.mdx': [
+        '---',
+        'title: Model',
+        '---',
+        "import { ModelShowcase, Capability } from '../components/model-showcase'",
+        '',
+        '<ModelShowcase model={{ capabilities: [Capability.Reasoning] }} />',
+      ].join('\n'),
+      'fern/components/model-showcase.tsx': [
+        'export enum Capability { Reasoning }',
+        'export const ModelShowcase = ({ model }: { model: { capabilities: Capability[] } }) => <p>{model.capabilities.length}</p>',
+      ].join('\n'),
+    })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs', platform: 'fern' })
+    expect(bundle.pages.map((page) => page.id).sort()).toEqual(['model', 'welcome'])
+    expect(bundle.warnings.filter((warning) => warning.code === 'skipped-file')).toEqual([])
+    const modelPage = bundle.pages.find((page) => page.id === 'model')!
+    expect(modelPage.body).not.toContain('../components/model-showcase')
+    const graph = bundle.componentFiles ?? []
+    expect(graph.some((file) => String(file.content).includes('enum Capability'))).toBe(true)
+    expect(graph.some((file) => String(file.content).includes('ModelShowcase'))).toBe(true)
+    // `Capability` (a TS enum, not a component) is registered into the same
+    // MDX scope as `ModelShowcase` so `Capability.Reasoning` resolves inside
+    // the page. `MDXComponents`' index signature expects every entry to be
+    // component-shaped, which an enum structurally is not — asserting the
+    // object literal (rather than typing each entry) keeps `tsc` clean
+    // without excluding content the migration can otherwise satisfy.
+    const registry = String(graph.find((file) => file.path === 'src/mdx/custom-components.tsx')!.content)
+    expect(registry).toContain('Capability')
+    expect(registry).toContain('ModelShowcase')
+    expect(registry).toMatch(/}\s*as unknown as MDXComponents/)
+    const check = ts.transpileModule(registry, {
+      compilerOptions: { jsx: ts.JsxEmit.Preserve, module: ts.ModuleKind.ESNext, noEmit: true },
+      reportDiagnostics: true,
+    })
+    // transpileModule only checks syntax (no cross-file type info), so this
+    // proves the cast parses as valid TS; the real type-check is exercised
+    // by a live `next build` (see the E2E verification, not run in unit tests).
+    expect(check.diagnostics?.some((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)).toBe(false)
   })
 
   it('separates sibling documentation roots within the same repository', () => {
@@ -257,14 +347,39 @@ describe('repository component migration', () => {
     '<Other {...{ component: Widget }} />',
     '<Widget.Item />',
     'export const Wrapped = () => <Widget />;\n\n<Wrapped />',
-  ])('preserves an imported binding used outside a direct JSX tag: %s', (usage) => {
+  ])('copies and rewrites a local import even when a binding is used outside a direct JSX tag: %s', (usage) => {
+    // A local/relative import is fully owned by the migration: the file is
+    // copied and the import specifier rewritten, keeping every binding's
+    // original local name — nothing in the page body needs renaming, so how
+    // a binding is used (a bare tag, a prop value, a member tag, a wrapping
+    // declaration, ...) makes no difference. Excluding the page here would
+    // drop content the migration can actually satisfy.
     const root = fixture({ 'widget.jsx': 'export default () => <p>Widget</p>' })
     const warnings: Array<MigrationWarning> = []
     const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = `import Widget from './widget.jsx'\n\n${usage}`
-    expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+    expect(body).not.toContain("from './widget.jsx'")
+    expect(body).toContain(usage)
+    // The copied component plus the always-generated component registry.
+    expect(migrator.files()).toHaveLength(2)
+    expect(warnings).toEqual([])
+  })
+
+  it('removes the dead import (without excluding the page) when the local component copy genuinely fails', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    // './missing.jsx' does not exist on disk, so `resolveDependency` throws;
+    // that is a genuine copy failure, distinct from any usage pattern. The
+    // dead import is dropped and `<Widget />` is left for the page-level
+    // unknown-component fallback to neutralize, rather than excluding the
+    // whole page.
+    const source = "import Widget from './missing.jsx'\n\n<Widget />"
+    expect(migrator.transform(source, join(root, 'index.mdx'))).toBe('\n\n<Widget />')
     expect(migrator.files()).toEqual([])
-    expect(warnings[0].message).toContain('MDX expressions')
+    expect(warnings).toContainEqual(expect.objectContaining({ message: expect.stringContaining('could not be copied and was removed') }))
+    expect(warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
   })
 
   it('handles cycles without evaluating any source', () => {

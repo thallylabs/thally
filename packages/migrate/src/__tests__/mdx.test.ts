@@ -142,6 +142,62 @@ describe('normalizeMdx', () => {
   })
 })
 
+describe('HTML style="..." attribute normalization (all platforms, including unspecified)', () => {
+  it('converts a simple string style attribute into a JSX style object', () => {
+    // A raw HTML `style="..."` string (common in Markdown pasted from a
+    // rendered table, e.g. a pandas DataFrame) is invalid JSX — React's
+    // `style` prop must be a mapping, and this throws at render rather than
+    // silently doing nothing. This has no platform-specific semantics, so it
+    // must run even when `platform` is omitted (unlike platform-gated renames).
+    expect(normalizeMdx('<tr style="text-align: right;">')).toBe('<tr style={{textAlign: "right"}}>')
+  })
+
+  it('camelCases a kebab-case property and capitalizes vendor prefixes, with -ms- lowercase', () => {
+    const body = '<div style="-webkit-transform: rotate(3deg); -ms-transform: scale(1); font-size: 12px;">x</div>'
+    expect(normalizeMdx(body, 'fern')).toBe(
+      '<div style={{WebkitTransform: "rotate(3deg)", msTransform: "scale(1)", fontSize: "12px"}}>x</div>',
+    )
+  })
+
+  it('keeps a CSS custom property as a literal string key', () => {
+    expect(normalizeMdx('<div style="--brand-color: #ff0000;">x</div>', 'fern'))
+      .toBe('<div style={{"--brand-color": "#ff0000"}}>x</div>')
+  })
+
+  it('does not split a url() value containing a semicolon (a data URI)', () => {
+    const body = '<div style="background: url(data:image/png;base64,AAAA==);">x</div>'
+    expect(normalizeMdx(body, 'fern')).toBe('<div style={{background: "url(data:image/png;base64,AAAA==)"}}>x</div>')
+  })
+
+  it('drops !important, which a React style object cannot express', () => {
+    expect(normalizeMdx('<p style="color: red !important;">x</p>', 'fern')).toBe('<p style={{color: "red"}}>x</p>')
+  })
+
+  it('converts an empty style attribute to an empty object', () => {
+    expect(normalizeMdx('<span style="">x</span>', 'fern')).toBe('<span style={{}}>x</span>')
+  })
+
+  it('preserves other attributes and self-closing tags', () => {
+    expect(normalizeMdx('<div className="x" style="color:red" id="y">x</div>', 'fern'))
+      .toBe('<div className="x" style={{color: "red"}} id="y">x</div>')
+    expect(normalizeMdx('<br style="color:red"/>', 'fern')).toBe('<br style={{color: "red"}} />')
+  })
+
+  it('leaves an already-correct style expression and a component tag alone', () => {
+    expect(normalizeMdx('<div style={{color: "red"}}>x</div>', 'fern')).toBe('<div style={{color: "red"}}>x</div>')
+    // Uppercase-first is a component, never an intrinsic HTML element — its
+    // own `style` prop (if it has one) may have entirely different semantics.
+    expect(normalizeMdx('<Custom style="color:red" />', 'fern')).toBe('<Custom style="color:red" />')
+  })
+
+  it('never touches a style="..." string inside fenced or inline code', () => {
+    const fenced = '```html\n<div style="color:red">code</div>\n```'
+    expect(normalizeMdx(fenced, 'fern')).toBe(fenced)
+    const inline = 'Use `<div style="color:red">` in HTML.'
+    expect(normalizeMdx(inline, 'fern')).toBe(inline)
+  })
+})
+
 describe('Docusaurus import normalization', () => {
   it('removes injected global component imports', () => {
     expect(normalizeMdx("import Tabs from '@theme/Tabs';\n\n<Tabs />", 'docusaurus'))
