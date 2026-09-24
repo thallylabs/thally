@@ -65,6 +65,76 @@ describe('repository component migration', () => {
     expect(inline).toContain('"./source/widget.jsx"')
   })
 
+  it('migrates local components imported by a Fern page (../../components from fern/pages/...)', () => {
+    const root = fixture({
+      'fern/fern.config.json': JSON.stringify({ organization: 'acme' }),
+      'fern/docs.yml': [
+        'navigation:',
+        '  - section: Guides',
+        '    contents:',
+        '      - page: Cookbook',
+        '        path: ./pages/guides/cookbook.mdx',
+      ].join('\n'),
+      'fern/pages/guides/cookbook.mdx': [
+        '---',
+        'title: Cookbook',
+        '---',
+        "import { CookbookHeader } from '../../components/cookbook-header'",
+        '',
+        '<CookbookHeader href="https://github.com/example/docs" />',
+      ].join('\n'),
+      'fern/components/cookbook-header.tsx': [
+        "export const CookbookHeader = ({ href }: { href: string }) => <a href={href}>Open in GitHub</a>",
+      ].join('\n'),
+    })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs', platform: 'fern' })
+    expect(bundle.warnings.filter((warning) => /Module not found|module not found/i.test(warning.message))).toEqual([])
+    const files = renderMigrationFiles(bundle)
+    const graph = files.filter((file) => file.path.startsWith('src/mdx/migrated/'))
+    expect(graph.length).toBeGreaterThan(0)
+    expect(graph.some((file) => String(file.content).includes('Open in GitHub'))).toBe(true)
+  })
+
+  it('excludes (not breaks) a Fern page whose companion import binding (an enum) is used inside a JSX prop expression', () => {
+    // Mirrors cohere-developer-experience's `model-showcase.tsx`: one import
+    // statement brings in both the rendered component (`ModelShowcase`, used
+    // as a bare tag) and a value-only companion (`Capability`, used only via
+    // `Capability.SafetyModes` inside a prop expression). The whole import
+    // can't be safely rewritten (see the "outside a direct JSX tag" tests
+    // above), so the page must be excluded with a warning rather than left
+    // with a dangling `../../components/model-showcase` import that fails
+    // `next build` site-wide with "Module not found".
+    const root = fixture({
+      'fern/fern.config.json': JSON.stringify({ organization: 'acme' }),
+      'fern/docs.yml': [
+        'navigation:',
+        '  - page: Welcome',
+        '    path: ./pages/welcome.mdx',
+        '  - page: Model',
+        '    path: ./pages/model.mdx',
+      ].join('\n'),
+      'fern/pages/welcome.mdx': '---\ntitle: Welcome\n---\n\nHello.',
+      'fern/pages/model.mdx': [
+        '---',
+        'title: Model',
+        '---',
+        "import { ModelShowcase, Capability } from '../../components/model-showcase'",
+        '',
+        '<ModelShowcase model={{ capabilities: [Capability.Reasoning] }} />',
+      ].join('\n'),
+      'fern/components/model-showcase.tsx': [
+        'export enum Capability { Reasoning }',
+        'export const ModelShowcase = ({ model }: { model: { capabilities: Capability[] } }) => <p>{model.capabilities.length}</p>',
+      ].join('\n'),
+    })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs', platform: 'fern' })
+    expect(bundle.pages.map((page) => page.id)).toEqual(['welcome'])
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({ code: 'skipped-file', message: expect.stringContaining('outside a direct JSX tag') }))
+    // The excluded page's nav entry must not dangle (see `pruneMissingNavigationPages`).
+    const navigationIds = JSON.stringify(bundle.docsConfig.tabs)
+    expect(navigationIds).not.toContain('model')
+  })
+
   it('separates sibling documentation roots within the same repository', () => {
     const files = Object.fromEntries(['first', 'second'].flatMap((directory) => [
       [`${directory}/docs.json`, JSON.stringify({ navigation: { pages: ['introduction'] } })],
@@ -221,14 +291,17 @@ describe('repository component migration', () => {
     '<Other {...{ component: Widget }} />',
     '<Widget.Item />',
     'export const Wrapped = () => <Widget />;\n\n<Wrapped />',
-  ])('preserves an imported binding used outside a direct JSX tag: %s', (usage) => {
+  ])('excludes the page for an imported binding used outside a direct JSX tag: %s', (usage) => {
     const root = fixture({ 'widget.jsx': 'export default () => <p>Widget</p>' })
     const warnings: Array<MigrationWarning> = []
     const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
     const source = `import Widget from './widget.jsx'\n\n${usage}`
+    // Leaving the untouched `./widget.jsx` import in place (rather than
+    // excluding the page) would fail `next build` for the whole site with
+    // "Module not found", since the component was never actually copied.
     expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
     expect(migrator.files()).toEqual([])
-    expect(warnings[0].message).toContain('MDX expressions')
+    expect(warnings).toContainEqual(expect.objectContaining({ code: 'skipped-file', message: expect.stringContaining('outside a direct JSX tag') }))
   })
 
   it('handles cycles without evaluating any source', () => {

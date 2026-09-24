@@ -599,7 +599,21 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
           continue
         }
         if (hasExpressionReference(new Set(bindings.map((binding) => binding.local)))) {
-          warn('Imported components used in MDX expressions, component props, or member tags require manual migration; the import was preserved.', currentFile)
+          // Only a bare, unwrapped `<Widget />` tag is rewritten below.
+          // Unlike the unavailable-npm-package case above, the file itself
+          // is fully available here, so simply leaving the import in place
+          // would be tempting — but it still points at a source-tree path
+          // that does not exist in the migrated project (the component was
+          // never copied there), which fails `next build` with "Module not
+          // found" for the *whole* site, not just this page. Exclude the
+          // page instead, the same way the unavailable-npm-package case
+          // does; `pruneMissingNavigationPages` (see repository.ts) then
+          // drops it from navigation too.
+          warnings.push({
+            code: 'skipped-file',
+            message: `This page was excluded because it uses '${bindings.map((binding) => binding.local).join(', ')}' from the local component '${rawSpecifier}' outside a direct JSX tag (in an expression, prop, member tag, or wrapping declaration), which the migration cannot rewrite safely. Move the usage into a direct <Component /> tag, or migrate it manually.`,
+            source: relative(root, currentFile).replace(/\\/g, '/'),
+          })
           hasUnsupportedImports = true
           continue
         }
