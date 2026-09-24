@@ -2,6 +2,14 @@ import { siteConfig } from '@/data/site'
 import { getSiteUrl } from '@/lib/site-url'
 
 /**
+ * Version of the social-preview image URL. X caches link-preview images per
+ * image URL, including failed fetches, and re-crawling the page does not
+ * refresh them. Bump this to give every page a new image URL when previews
+ * need to be fetched again. The OG route ignores the value.
+ */
+const OG_IMAGE_URL_VERSION = '2'
+
+/**
  * Build a URL string for the dynamic OG image endpoint.
  * All parameters are optional. The route handler fills in defaults from siteConfig.
  */
@@ -18,6 +26,7 @@ export function buildOgImageUrl(params: {
   if (params.crumb) searchParams.set('crumb', params.crumb)
   if (params.url) searchParams.set('url', params.url)
   if (params.theme) searchParams.set('theme', params.theme)
+  searchParams.set('v', OG_IMAGE_URL_VERSION)
 
   const query = searchParams.toString()
   return `/api/og${query ? `?${query}` : ''}`
