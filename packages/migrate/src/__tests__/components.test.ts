@@ -249,15 +249,20 @@ describe('repository component migration', () => {
     ['computed import', 'const data = import(window.location.hash)'],
     ['missing dependency', "import data from './missing.js'"],
     ['server directive', "'use server'"],
-  ])('warns and preserves unsupported %s source without a partial registry', (_name, dependency) => {
+  ])('warns and removes the dead import for unsupported %s source, leaving its JSX usage for the page-level fallback', (_name, dependency) => {
     const root = fixture({ 'widget.jsx': `${dependency};\nexport default () => <div />` })
     const warnings: Array<MigrationWarning> = []
     const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
     const source = "import Widget from './widget.jsx'\n\n<Widget />"
-    expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
+    // The import itself is removed (leaving it would reference a module the
+    // migrated project never has, breaking `next build` for the whole
+    // site); `<Widget />` is untouched here — repository.ts's page-level
+    // `replaceUnknownComponents` pass (mdx.ts) neutralizes it afterward,
+    // since `Widget` is no longer declared anywhere on the page.
+    expect(migrator.transform(source, join(root, 'index.mdx'))).toBe('\n\n<Widget />')
     expect(migrator.files()).toEqual([])
     expect(warnings).toHaveLength(1)
-    expect(warnings[0].message).toContain('manual migration')
+    expect(warnings[0].message).toContain('could not be copied and was removed')
   })
 
   it('removes an unsupported npm-package MDX import and replaces its usage instead of shipping a broken build', () => {
@@ -348,9 +353,51 @@ describe('repository component migration', () => {
     const warnings: Array<MigrationWarning> = []
     const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
     const source = "import Widget from './linked/widget.jsx'\n\n<Widget />"
-    expect(migrator.transform(source, join(root, 'index.mdx'))).toBe(source)
+    expect(migrator.transform(source, join(root, 'index.mdx'))).toBe('\n\n<Widget />')
     expect(migrator.files()).toEqual([])
     expect(warnings[0].message).toContain('symbolic links')
+  })
+
+  it('rescues an asset import that copyGraph cannot handle (.docx) as a public URL when it is never used as a JSX tag', () => {
+    const root = fixture({ 'assets/guide.docx': 'binary-ish content' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const source = "import Doc from './assets/guide.docx'\n\n<a href={Doc}>Download</a>"
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).not.toContain("import Doc from './assets/guide.docx'")
+    expect(result).toMatch(/^const Doc = "\/migrated-[a-f0-9]+\.docx";\n\n<a href=\{Doc\}>Download<\/a>$/)
+    const publicFile = migrator.files().find((file) => file.path.startsWith('public/'))
+    expect(publicFile?.content.toString()).toBe('binary-ish content')
+    expect(warnings[0].message).toContain('bound to that URL')
+  })
+
+  it('rescues an asset import bound to a lowercase local name used in an expression (Docusaurus\' own convention, e.g. a logo)', () => {
+    const root = fixture({ 'static/img/docusaurus.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    // A lowercase local name and an expression-attribute usage would each,
+    // on their own, bail out of component migration before ever trying to
+    // copy anything (see the checks right after this block) — an asset
+    // must not hit either bail.
+    const source = "import docusaurusLogo from '@site/static/img/docusaurus.svg'\n\n<img src={docusaurusLogo} alt=\"logo\" />"
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).not.toContain('import docusaurusLogo')
+    expect(result).toMatch(/^const docusaurusLogo = "\/migrated-[a-f0-9]+\.svg";\n\n<img src=\{docusaurusLogo\} alt="logo" \/>$/)
+    expect(migrator.files().some((file) => file.path.startsWith('public/'))).toBe(true)
+  })
+
+  it('does not rescue an asset import as a URL string when it is used as a JSX tag, since a string cannot render as a component', () => {
+    const root = fixture({ 'logo.svg': '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L999999999999999 0" /></svg>'.repeat(1) })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    // `./logo.svg` actually copies fine via copyGraph (it's a DATA_EXTENSIONS
+    // type) unless something else fails it; force a failure with a missing
+    // file instead, so the only variable under test is JSX-tag usage.
+    const source = "import Logo from './missing-logo.svg'\n\n<Logo />"
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).toBe('\n\n<Logo />')
+    expect(migrator.files()).toEqual([])
+    expect(warnings[0].message).toContain('could not be copied and was removed')
   })
   it('marks the page skipped-file when an unsupported npm import binding is referenced outside JSX', () => {
     const root = fixture({})

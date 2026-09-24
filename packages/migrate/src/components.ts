@@ -62,6 +62,15 @@ function youtubeEmbedVideoId(node: MdxNode, specifier: string): string | undefin
 const parser = unified().use(remarkParse).use(remarkMdx)
 const CODE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs'])
 const DATA_EXTENSIONS = new Set(['.json', '.css', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.woff', '.woff2'])
+/**
+ * Binary asset types a failed component/module import can still be rescued
+ * as: copied verbatim to `public/` and bound to its URL string, rather than
+ * losing the reference outright. Includes types `DATA_EXTENSIONS` already
+ * lets `copyGraph` copy as a JS-module asset (an image can still fail that
+ * path for other reasons — budget, a symlink) and types it never would
+ * (`.docx`, `.pdf`: not importable as a JS module, but a real static file).
+ */
+const RESCUABLE_ASSET_EXTENSIONS = new Set(['.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.ico', '.docx', '.pdf'])
 const SHARED_IMPORTS = new Set(['react', 'react/jsx-runtime', 'react/jsx-dev-runtime'])
 /**
  * Packages the standalone starter already installs as its own runtime
@@ -455,6 +464,28 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
     return outputPath(entry)
   }
 
+  /**
+   * Copy a binary asset verbatim to a stable `public/` path (bypassing
+   * `copyGraph`'s JS-module handling entirely — the asset is bound to its
+   * URL string, never imported as a module) and return that URL. Used when
+   * an import couldn't be copied as a component but names a real file the
+   * page only ever references by URL (`src={Logo}`), never as a JSX tag.
+   */
+  function copyPublicAsset(path: string): string {
+    checkedFile(path)
+    const size = lstatSync(path).size
+    if (size > MAX_FILE_BYTES || copiedBytes + size > MAX_COMPONENT_BYTES || copied.size >= MAX_COMPONENT_FILES) {
+      throw new Error('component migration budget exceeded')
+    }
+    const publicName = `migrated-${hash(relative(root, path))}${extname(path).toLowerCase()}`
+    const destination = `public/${publicName}`
+    if (!copied.has(destination)) {
+      copied.set(destination, { path: destination, content: readFileSync(path) })
+      copiedBytes += size
+    }
+    return `/${publicName}`
+  }
+
   function register(path: string, imported: string): string {
     const name = `Migrated${hash(`${path}:${imported}`)}`
     registrations.set(name, { path, imported })
@@ -509,6 +540,12 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
         ]
         for (const expression of expressions) inspect(sourceFile(expression, 'expression.tsx'))
       })
+      return found
+    }
+    /** True when `name` is ever a JSX tag's own root name (`<name ...>`), regardless of any other usage — narrower than `hasExpressionReference`'s combined signal, needed where a string binding (an asset's URL) is fine for any *other* usage but not this one. */
+    function usedAsJsxTagName(name: string): boolean {
+      let found = false
+      walk(tree, (node) => { if (node.name === name) found = true })
       return found
     }
     for (const node of tree.children ?? []) {
@@ -588,6 +625,33 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
           continue
         }
         if (/\.mdx?$/.test(specifier)) continue
+        // A binary asset (`docusaurusLogo.svg`, a `.docx` handout, ...) is
+        // never really "a component" — it's fine bound to any identifier
+        // shape and referenced from an expression (`src={docusaurusLogo}`),
+        // unlike the component-alias mechanism below, which can only
+        // rewrite a literal JSX tag name, not an arbitrary expression
+        // reference. Handle it before the component-shaped checks reject it
+        // for the wrong reason (a lowercase local name, expression usage)
+        // and leave a dead import behind. Only bail out of this path (to
+        // the ordinary handling below, which removes the import either way)
+        // when the same local name is *also* used as a JSX tag — a string
+        // URL bound there would throw just as hard as the missing import.
+        if (bindings.length && RESCUABLE_ASSET_EXTENSIONS.has(extname(specifier).toLowerCase())
+          && !bindings.some((binding) => usedAsJsxTagName(binding.local))) {
+          try {
+            const href = copyPublicAsset(resolveDependency(specifier, currentFile))
+            edits.push({
+              start: node.position.start.offset + statement.getStart(ast),
+              end: node.position.start.offset + statement.end,
+              value: bindings.map((binding) => `const ${binding.local} = ${JSON.stringify(href)};`).join('\n'),
+            })
+            warn(`Asset import ${JSON.stringify(rawSpecifier)} was copied to ${href} and bound to that URL instead of importing it as a component.`, currentFile)
+            continue
+          } catch {
+            // Not actually resolvable/copyable (missing file, budget) —
+            // fall through to the ordinary handling below.
+          }
+        }
         if (!bindings.length || (statement.importClause?.namedBindings && ts.isNamespaceImport(statement.importClause.namedBindings))) {
           warn('Namespace or side-effect MDX imports require manual registration; the import was preserved.', currentFile)
           hasUnsupportedImports = true
@@ -613,7 +677,47 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
           edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
         } catch (error) {
           hasUnsupportedImports = true
-          warn(`Custom component was preserved for manual migration: ${error instanceof Error ? error.message : 'unsupported dependency'}.`, currentFile)
+          const importStart = node.position.start.offset + statement.getStart(ast)
+          const importEnd = node.position.start.offset + statement.end
+          // The component itself couldn't be copied (unsupported syntax, a
+          // budget limit, a missing file, ...). Leaving the import in place
+          // referenced a module that will never exist in the migrated
+          // project, which fails `next build` for the *whole* site with
+          // "Module not found" — not just this page (the same reasoning as
+          // the unsupported-npm-import case above). Remove it. Its bindings
+          // are known to be used only as JSX tags here (any expression/prop
+          // usage already excluded this import from reaching this try, via
+          // the `hasExpressionReference` check above), so a plain-page
+          // rescan (`replaceUnknownComponents`, mdx.ts, run by repository.ts
+          // after this transform) will find each now-undeclared tag and
+          // neutralize it (a paired tag keeps its children in a `<div>`; a
+          // self-closing one is removed) rather than leave a dangling
+          // reference.
+          let rescuedAssetHref: string | undefined
+          if (RESCUABLE_ASSET_EXTENSIONS.has(extname(specifier).toLowerCase())) {
+            // Only worth rescuing as a URL string when nothing ever renders
+            // it as a JSX tag (`<Logo />`) — a string bound to a component
+            // reference would throw just as hard as the missing import did.
+            const usedAsJsxTag = bindings.some((binding) => hasExpressionReference(new Set([binding.local]), { includeDirectTags: true }))
+            if (!usedAsJsxTag) {
+              try {
+                rescuedAssetHref = copyPublicAsset(resolveDependency(specifier, currentFile))
+              } catch {
+                rescuedAssetHref = undefined
+              }
+            }
+          }
+          if (rescuedAssetHref !== undefined) {
+            edits.push({
+              start: importStart,
+              end: importEnd,
+              value: bindings.map((binding) => `const ${binding.local} = ${JSON.stringify(rescuedAssetHref)};`).join('\n'),
+            })
+            warn(`Asset import ${JSON.stringify(rawSpecifier)} could not be copied as a component; it was copied to ${rescuedAssetHref} and bound to that URL instead.`, currentFile)
+          } else {
+            edits.push({ start: importStart, end: importEnd, value: '' })
+            warn(`Component import ${JSON.stringify(rawSpecifier)} could not be copied and was removed: ${error instanceof Error ? error.message : 'unsupported dependency'}. Its usage on this page was neutralized.`, currentFile)
+          }
         }
       }
     }
@@ -741,7 +845,11 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
   }
 
   function files(): Array<RenderedMigrationFile> {
-    if (!registrations.size) return []
+    // A rescued asset (`copyPublicAsset`) lands in `copied` without ever
+    // registering a component; it still needs emitting even when nothing
+    // was registered.
+    if (!copied.size) return []
+    if (!registrations.size) return [...copied.values()]
     const entries = [...registrations.entries()].sort(([a], [b]) => a.localeCompare(b))
     return [...copied.values(), {
       path: 'src/mdx/custom-components.tsx',
