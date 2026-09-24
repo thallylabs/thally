@@ -6,7 +6,7 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, readFileSync } from 'node:fs'
-import { dirname, extname, relative, resolve } from 'node:path'
+import { basename, dirname, extname, relative, resolve } from 'node:path'
 import postcss from 'postcss'
 import selectorParser from 'postcss-selector-parser'
 import remarkMdx from 'remark-mdx'
@@ -640,6 +640,40 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     return `/${publicName}`
   }
 
+  /**
+   * Docusaurus ships SVGR out of the box, so `import Foo from './foo.svg';
+   * <Foo />` renders the SVG as a real component there. The migrated
+   * project has no SVGR loader, so importing an `.svg` file the ordinary
+   * way (`copyGraph`'s ordinary path, used below) yields whatever the
+   * bundler's default asset handling returns for it — a URL string or a
+   * `{ src }` object, either way not a valid React element type — and
+   * `<Foo />` throws "Element type is invalid" at render. Used only when
+   * the import is actually rendered as a JSX tag (an attribute-only usage,
+   * `src={Foo}`, needs no wrapper and is left as the plain import): stage a
+   * tiny companion module next to the copied SVG that imports it as a URL
+   * either way and renders a plain `<img>`, and register that instead of
+   * the raw file.
+   */
+  function wrapSvgAsComponent(svgOutputPath: string): string {
+    const wrapperPath = `${svgOutputPath}.component.tsx`
+    if (!copied.has(wrapperPath)) {
+      const content = [
+        "'use client'",
+        '',
+        `import svgSource from ${JSON.stringify(`./${basename(svgOutputPath)}`)}`,
+        '',
+        'export default function SvgImage(props: Record<string, unknown>) {',
+        '  const src = typeof svgSource === "string" ? svgSource : (svgSource as { src: string }).src',
+        '  // eslint-disable-next-line @next/next/no-img-element -- no SVGR loader is configured; this renders the raw file.',
+        '  return <img src={src} alt="" {...props} />',
+        '}',
+        '',
+      ].join('\n')
+      copied.set(wrapperPath, { path: wrapperPath, content })
+    }
+    return wrapperPath
+  }
+
   function register(path: string, imported: string): string {
     const name = `Migrated${hash(`${path}:${imported}`)}`
     registrations.set(name, { path, imported })
@@ -836,10 +870,13 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         }
         try {
           const path = copyGraph(resolveDependency(specifier, currentFile))
+          const isSvgUsedAsTag = extname(path).toLowerCase() === '.svg' && bindings.some((binding) => usedAsJsxTagName(binding.local))
           for (const binding of bindings) {
-            const name = register(path, binding.imported)
+            const registerPath = isSvgUsedAsTag ? wrapSvgAsComponent(path) : path
+            const registerImported = isSvgUsedAsTag ? 'default' : binding.imported
+            const name = register(registerPath, registerImported)
             aliases.set(binding.local, name)
-            moduleImports.push(`import { ${binding.imported} as ${binding.local} } from ${JSON.stringify(portableSpecifier(`./${relative(destinationRoot, path).replace(/\\/g, '/')}`))};`)
+            moduleImports.push(`import { ${registerImported} as ${binding.local} } from ${JSON.stringify(portableSpecifier(`./${relative(destinationRoot, registerPath).replace(/\\/g, '/')}`))};`)
           }
           edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
         } catch (error) {

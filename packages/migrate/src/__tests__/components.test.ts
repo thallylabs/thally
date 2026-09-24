@@ -529,6 +529,29 @@ describe('repository component migration', () => {
     expect(result).toBe(source)
   })
 
+  it('wraps a copied SVG used as a JSX tag in an <img> component instead of importing it raw (no SVGR loader is configured)', () => {
+    const root = fixture({ 'docusaurus.svg': '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0" /></svg>' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = "import DocusaurusSvg from './docusaurus.svg'\n\n<DocusaurusSvg />"
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result.trim()).toMatch(/^<Migrated[a-f0-9]+ \/>$/)
+    const wrapper = migrator.files().find((file) => file.path.endsWith('.svg.component.tsx'))
+    expect(wrapper?.content).toContain('<img src={src}')
+    expect(wrapper?.content).toContain("from \"./docusaurus.svg\"")
+    expect(migrator.files().some((file) => file.path.endsWith('/docusaurus.svg'))).toBe(true)
+    expect(warnings).toEqual([])
+  })
+
+  it('does not wrap a copied SVG that is only referenced in an expression (src={Logo}), not rendered as a JSX tag', () => {
+    const root = fixture({ 'docusaurus.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = "import DocusaurusSvg from './docusaurus.svg'\n\n<img src={DocusaurusSvg} alt=\"\" />"
+    migrator.transform(source, join(root, 'index.mdx'))
+    expect(migrator.files().some((file) => file.path.endsWith('.component.tsx'))).toBe(false)
+  })
+
   it('rejects symlinked directories even when their leaf looks ordinary', () => {
     const root = fixture({})
     const outside = fixture({ 'widget.jsx': 'export default () => <div />' })
