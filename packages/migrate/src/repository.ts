@@ -12,6 +12,7 @@ import {
   readFileSync,
   readdirSync,
 } from 'node:fs'
+import type { Dirent } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, extname, relative, resolve as resolvePath } from 'node:path'
 
@@ -164,7 +165,76 @@ function hasMintlifyConfig(directory: string): boolean {
   })
 }
 
-function findMintlifyProjectRoot(repositoryDir: string, docsDir?: string): string | null {
+/**
+ * Recursively counts `.md`/`.mdx` files under `directory` (skipping
+ * ignored/symlinked directories, same as the root-finding BFS above), for
+ * ranking two candidate project roots against each other. Bounded so a huge
+ * false-positive candidate (e.g. `node_modules` slipping past
+ * `isIgnoredDirectory`) can't make root detection itself slow.
+ */
+function countMarkdownPages(directory: string, limit = 20_000): number {
+  let count = 0
+  const stack: Array<string> = [directory]
+  while (stack.length > 0 && count < limit) {
+    const current = stack.pop()!
+    let entries: Array<Dirent>
+    try {
+      entries = readdirSync(current, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
+        if (!isIgnoredDirectory(entry.name)) stack.push(resolveWithin(current, entry.name))
+      } else if (/\.mdx?$/i.test(entry.name)) {
+        count++
+      }
+    }
+  }
+  return count
+}
+
+/**
+ * Multiple config files can each look like a valid project root in the same
+ * repository (Infisical ships both a top-level `company/mint.json` handbook
+ * and `docs/docs.json`, the real docs). Picking the first one a breadth-
+ * first walk happens to reach silently imports the wrong, usually much
+ * smaller, site. Rank every candidate instead: `docs.json` before
+ * `mint.json` (Mintlify's own current format), then a directory literally
+ * named `docs`, then whichever has the most actual content — and warn
+ * whenever there was more than one candidate, so a wrong guess is visible
+ * and `--docs-dir` is offered as the fix, even when the ranking picked the
+ * one the caller actually wanted.
+ */
+function pickPreferredDocsRoot(
+  candidates: Array<string>,
+  repositoryDir: string,
+  platformLabel: string,
+  warnings: Array<MigrationWarning> | undefined,
+  rank?: (directory: string) => number,
+): string {
+  const ranked = [...candidates].sort((left, right) => {
+    const byRank = (rank?.(right) ?? 0) - (rank?.(left) ?? 0)
+    if (byRank !== 0) return byRank
+    const byName = (basename(right) === 'docs' ? 1 : 0) - (basename(left) === 'docs' ? 1 : 0)
+    if (byName !== 0) return byName
+    return countMarkdownPages(right) - countMarkdownPages(left)
+  })
+  const winner = ranked[0]
+  if (candidates.length > 1 && warnings) {
+    const relativePaths = candidates.map((candidate) => relative(repositoryDir, candidate) || '.')
+    warnings.push({
+      code: 'unsupported-config',
+      message: `Multiple possible ${platformLabel} project roots were found (${relativePaths.join(', ')}); `
+        + `${relative(repositoryDir, winner) || '.'} was picked. Pass --docs-dir to choose a different one if this is wrong.`,
+      source: '.',
+    })
+  }
+  return winner
+}
+
+function findMintlifyProjectRoot(repositoryDir: string, docsDir?: string, warnings?: Array<MigrationWarning>): string | null {
   if (docsDir !== undefined) {
     let candidate = trimTrailingSlashes(docsDir)
     while (true) {
@@ -175,19 +245,23 @@ function findMintlifyProjectRoot(repositoryDir: string, docsDir?: string): strin
       candidate = parent === '.' ? '' : parent
     }
   }
+  const candidates: Array<string> = []
   const queue: Array<{ directory: string; depth: number }> = [{ directory: repositoryDir, depth: 0 }]
   let visited = 0
   while (queue.length > 0 && visited < 500) {
     const current = queue.shift()!
     visited++
-    if (hasMintlifyConfig(current.directory)) return current.directory
+    if (hasMintlifyConfig(current.directory)) candidates.push(current.directory)
     if (current.depth >= 4) continue
     for (const entry of readdirSync(current.directory, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.isSymbolicLink() || isIgnoredDirectory(entry.name)) continue
       queue.push({ directory: resolveWithin(current.directory, entry.name), depth: current.depth + 1 })
     }
   }
-  return null
+  if (candidates.length === 0) return null
+  return pickPreferredDocsRoot(candidates, repositoryDir, 'Mintlify', warnings, (directory) => (
+    existsSync(resolveWithin(directory, 'docs.json')) ? 1 : 0
+  ))
 }
 
 function hasFernConfig(directory: string): boolean {
@@ -223,7 +297,7 @@ function findFernProjectRoot(repositoryDir: string, docsDir?: string): string | 
   return null
 }
 
-function findDocusaurusProjectRoot(repositoryDir: string, docsDir?: string): string | null {
+function findDocusaurusProjectRoot(repositoryDir: string, docsDir?: string, warnings?: Array<MigrationWarning>): string | null {
   if (docsDir !== undefined) {
     let candidate = trimTrailingSlashes(docsDir)
     while (true) {
@@ -235,12 +309,13 @@ function findDocusaurusProjectRoot(repositoryDir: string, docsDir?: string): str
     }
   }
 
+  const candidates: Array<string> = []
   const queue: Array<{ directory: string; depth: number }> = [{ directory: repositoryDir, depth: 0 }]
   let visited = 0
   while (queue.length > 0 && visited < 500) {
     const current = queue.shift()!
     visited++
-    if (hasDocusaurusConfig(current.directory)) return current.directory
+    if (hasDocusaurusConfig(current.directory)) candidates.push(current.directory)
     if (current.depth >= 4) continue
     for (const entry of readdirSync(current.directory, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.isSymbolicLink() || isIgnoredDirectory(entry.name)) continue
@@ -250,7 +325,8 @@ function findDocusaurusProjectRoot(repositoryDir: string, docsDir?: string): str
       })
     }
   }
-  return null
+  if (candidates.length === 0) return null
+  return pickPreferredDocsRoot(candidates, repositoryDir, 'Docusaurus', warnings)
 }
 
 function readDocusaurusConfigSource(projectRoot: string): string {
@@ -929,11 +1005,12 @@ function componentSourceIdentity(sourceUrl: string, repositoryDir: string, siteR
 export function migrateRepository(options: RepositoryMigrationOptions): MigrationBundle {
   const repositoryDir = options.repositoryDir
   const platform = options.platform ?? detectRepositoryPlatform(repositoryDir, options.docsDir)
+  const warnings: Array<MigrationWarning> = []
   const mintlifyProjectRoot = platform === 'mintlify'
-    ? findMintlifyProjectRoot(repositoryDir, options.docsDir)
+    ? findMintlifyProjectRoot(repositoryDir, options.docsDir, warnings)
     : null
   const docusaurusProjectRoot = platform === 'docusaurus'
-    ? findDocusaurusProjectRoot(repositoryDir, options.docsDir)
+    ? findDocusaurusProjectRoot(repositoryDir, options.docsDir, warnings)
     : null
   const fernProjectRoot = platform === 'fern'
     ? findFernProjectRoot(repositoryDir, options.docsDir)
@@ -959,7 +1036,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     return platform === 'mintlify' ? '' : detectRepositoryDocsDir(repositoryDir)
   })()
-  const warnings: Array<MigrationWarning> = []
   // Only the current, default-locale docs are imported (`configuredDocsDir`,
   // below, never points inside these). Thally has no versions concept and
   // Docusaurus' own i18n content lives in a separate tree this adapter does

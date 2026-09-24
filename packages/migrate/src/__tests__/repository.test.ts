@@ -171,6 +171,43 @@ describe('Mintlify repository migration', () => {
     }))
   })
 
+  it('prefers a docs.json project root over a smaller mint.json one found first, and warns about the ambiguity (Infisical: company/mint.json vs docs/docs.json)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-multiroot-'))
+    // `company` sorts before `docs` in a directory listing on most
+    // filesystems, so a first-match breadth-first walk reaches it first.
+    mkdirSync(join(root, 'company'), { recursive: true })
+    writeFileSync(join(root, 'company', 'mint.json'), JSON.stringify({ navigation: { pages: ['handbook'] } }))
+    writeFileSync(join(root, 'company', 'handbook.mdx'), '# Handbook')
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction', 'guide'] },
+    }))
+    writeFileSync(join(root, 'docs', 'introduction.mdx'), '# Introduction')
+    writeFileSync(join(root, 'docs', 'guide.mdx'), '# Guide')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.id).sort()).toEqual(['guide', 'introduction'])
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringMatching(/Multiple possible Mintlify project roots.*company.*docs.*docs was picked/s),
+    }))
+  })
+
+  it('does not warn about multiple roots when only one Mintlify project exists', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-singleroot-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction'] },
+    }))
+    writeFileSync(join(root, 'introduction.mdx'), '# Introduction')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.warnings.some((warning) => warning.message.includes('Multiple possible'))).toBe(false)
+  })
+
   it('uses a nested Mintlify project as the config, content, snippet, and asset root', () => {
     const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-monorepo-'))
     const docsRoot = join(repositoryDir, 'apps', 'docs')
@@ -830,6 +867,26 @@ function docusaurusFixture(sidebarSource?: string): string {
 }
 
 describe('Docusaurus repository migration', () => {
+  it('prefers the project root with the most pages when more than one docusaurus.config.* exists, and warns about the ambiguity', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-multiroot-'))
+    mkdirSync(join(root, 'archive', 'docs'), { recursive: true })
+    writeFileSync(join(root, 'archive', 'docusaurus.config.js'), 'module.exports = {}')
+    writeFileSync(join(root, 'archive', 'docs', 'old.md'), '# Old')
+    mkdirSync(join(root, 'website', 'docs'), { recursive: true })
+    writeFileSync(join(root, 'website', 'docusaurus.config.js'), 'module.exports = {}')
+    writeFileSync(join(root, 'website', 'docs', 'intro.md'), '# Intro')
+    writeFileSync(join(root, 'website', 'docs', 'guide.md'), '# Guide')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+
+    expect(bundle.pages.map((page) => page.id).sort()).toEqual(['guide', 'intro'])
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringMatching(/Multiple possible Docusaurus project roots.*archive.*website.*website was picked/s),
+    }))
+  })
+
+
   it('projects static sidebars, routes, generated indexes, syntax, and static assets', () => {
     const bundle = migrateRepository({
       repositoryDir: docusaurusFixture(),
