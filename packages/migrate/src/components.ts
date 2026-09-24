@@ -598,25 +598,18 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
           hasUnsupportedImports = true
           continue
         }
-        if (hasExpressionReference(new Set(bindings.map((binding) => binding.local)))) {
-          // Only a bare, unwrapped `<Widget />` tag is rewritten below.
-          // Unlike the unavailable-npm-package case above, the file itself
-          // is fully available here, so simply leaving the import in place
-          // would be tempting — but it still points at a source-tree path
-          // that does not exist in the migrated project (the component was
-          // never copied there), which fails `next build` with "Module not
-          // found" for the *whole* site, not just this page. Exclude the
-          // page instead, the same way the unavailable-npm-package case
-          // does; `pruneMissingNavigationPages` (see repository.ts) then
-          // drops it from navigation too.
-          warnings.push({
-            code: 'skipped-file',
-            message: `This page was excluded because it uses '${bindings.map((binding) => binding.local).join(', ')}' from the local component '${rawSpecifier}' outside a direct JSX tag (in an expression, prop, member tag, or wrapping declaration), which the migration cannot rewrite safely. Move the usage into a direct <Component /> tag, or migrate it manually.`,
-            source: relative(root, currentFile).replace(/\\/g, '/'),
-          })
-          hasUnsupportedImports = true
-          continue
-        }
+        // Unlike the unavailable-npm-package case above, a local/relative
+        // import is fully owned by the migration: `copyGraph` below moves
+        // the whole file (and its own local dependency graph) into the
+        // project, and the statement it emits keeps every binding's original
+        // local name (`as ${binding.local}`) — only the module specifier
+        // changes. Nothing in the page body needs renaming, so it makes no
+        // difference whether a binding is used as a bare JSX tag or only
+        // referenced elsewhere (an enum member on a sibling prop, a member
+        // tag, a wrapping declaration, ...): the copy is attempted either
+        // way, and the page is excluded only if that copy genuinely fails
+        // (an unsupported dependency inside the local graph — see the catch
+        // below), not merely because of how the binding is used.
         try {
           const path = copyGraph(resolveDependency(specifier, currentFile))
           for (const binding of bindings) {
@@ -626,8 +619,19 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
           }
           edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
         } catch (error) {
+          // The component genuinely cannot be copied (a missing file, a
+          // computed/dynamic dependency, a cycle, or a budget overrun).
+          // Leaving the original import in place would fail `next build`
+          // with "Module not found" for the whole site, not just this page,
+          // so exclude the page instead — the only case this import branch
+          // does, since every other local import is copied above regardless
+          // of how its bindings are used.
+          warnings.push({
+            code: 'skipped-file',
+            message: `This page was excluded because the local component '${rawSpecifier}' could not be copied (${error instanceof Error ? error.message : 'unsupported dependency'}). Fix the component or migrate this page manually.`,
+            source: relative(root, currentFile).replace(/\\/g, '/'),
+          })
           hasUnsupportedImports = true
-          warn(`Custom component was preserved for manual migration: ${error instanceof Error ? error.message : 'unsupported dependency'}.`, currentFile)
         }
       }
     }
@@ -764,8 +768,16 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
         "import type { MDXComponents } from 'mdx/types'", ...entries.map(([name, binding]) => {
           const path = portableSpecifier(`./${relative('src/mdx', binding.path).replace(/\\/g, '/')}`)
           return `import { ${binding.imported} as ${name} } from ${JSON.stringify(path)}`
-        }), '', 'export const customComponents: MDXComponents = {',
-        ...entries.map(([name]) => `  ${name},`), '}', '',
+        }), '',
+        // Not every registered local binding is JSX-taggable — a companion
+        // value from the same import (an enum used only as `Foo.Bar` inside
+        // another component's prop, e.g.) is registered too, so the whole
+        // MDX scope resolves it. `MDXComponents`' index signature expects a
+        // component at every key, which such a value structurally is not;
+        // cast rather than exclude it, since excluding it would leave a
+        // dangling reference in the page that DOES need it.
+        'export const customComponents = {',
+        ...entries.map(([name]) => `  ${name},`), '} as unknown as MDXComponents', '',
       ].join('\n'),
     }]
   }
