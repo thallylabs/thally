@@ -281,12 +281,20 @@ function collectEsmBindingsByPattern(source: string, declared: Set<string>): voi
  * source doesn't parse is left untouched; the migration's MDX-compile check
  * reports the real problem instead.
  */
-export function escapeFernLiteralBraces(body: string): string {
+export function escapeFernLiteralBraces(raw: string): string {
+  // Never touch the YAML frontmatter block: its `{...}` values (e.g. a
+  // description containing a literal brace) are YAML scalars, not MDX
+  // expressions, and running the MDX parser over them corrupts the block.
+  // Split it off first — mirroring `parseFrontmatter`'s own delimiter
+  // handling, including a leading BOM and CRLF line endings, which a naive
+  // `/^---\n/` guard misses and lets the frontmatter get parsed as MDX.
+  const { front, body } = splitFrontmatterBlock(raw)
+
   let root: MdxOffsetNode
   try {
     root = descriptionParser.parse(body) as MdxOffsetNode
   } catch {
-    return body
+    return raw
   }
 
   const declared = new Set<string>(['props'])
@@ -315,11 +323,33 @@ export function escapeFernLiteralBraces(body: string): string {
     for (const child of node.children ?? []) visit(child)
   }
   visit(root)
-  if (edits.length === 0) return body
+  if (edits.length === 0) return raw
 
-  return edits
+  const escapedBody = edits
     .sort((left, right) => right.start - left.start)
     .reduce((result, edit) => `${result.slice(0, edit.start)}${edit.value}${result.slice(edit.end)}`, body)
+  return front + escapedBody
+}
+
+/**
+ * Split `raw` into its untouched YAML frontmatter block (including a leading
+ * BOM, if present) and the remaining MDX body, using the same delimiter
+ * rules as `parseFrontmatter` (BOM-aware, CRLF-safe) so the two always agree
+ * on where the frontmatter ends. Unlike `parseFrontmatter`, this returns the
+ * frontmatter block verbatim (not parsed) because callers here only need to
+ * avoid rewriting it, not read its values.
+ */
+function splitFrontmatterBlock(raw: string): { front: string; body: string } {
+  const hasBom = raw.charCodeAt(0) === 0xfeff
+  const bom = hasBom ? raw[0] : ''
+  const source = hasBom ? raw.slice(1) : raw
+  const opening = /^---([^\r\n]*)\r?\n/.exec(source)
+  if (!opening || opening[1].startsWith('-')) return { front: bom, body: source }
+  const remainder = source.slice(opening[0].length)
+  const closing = /^---[ \t]*\r?$/m.exec(remainder)
+  if (!closing) return { front: bom, body: source }
+  const end = opening[0].length + closing.index + closing[0].length
+  return { front: bom + source.slice(0, end), body: source.slice(end) }
 }
 
 /**

@@ -97,6 +97,21 @@ describe('Mintlify repository migration', () => {
     expect(files.map((file) => file.path)).not.toContain('src/content/readme.mdx')
   })
 
+  it('escapes a bare literal brace in Mintlify page prose instead of crashing the build (frontmatter untouched)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-braces-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['style-guide'] },
+    }))
+    writeFileSync(join(root, 'style-guide.mdx'), '---\ntitle: Style guide\ndescription: "Use {x} as a placeholder"\n---\n\nWrap a variable like {x} in braces.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages[0].body).toContain('Wrap a variable like \\{x\\} in braces.')
+    // The frontmatter value must survive unescaped: it is YAML, not MDX.
+    expect(bundle.pages[0].title).toBe('Style guide')
+  })
+
   it('uses a nested Mintlify project as the config, content, snippet, and asset root', () => {
     const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-monorepo-'))
     const docsRoot = join(repositoryDir, 'apps', 'docs')

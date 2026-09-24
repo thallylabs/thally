@@ -312,6 +312,28 @@ describe('escapeFernLiteralBraces', () => {
     const body = 'export { vendor } from "./x"\n\nx {vendor}'
     expect(escapeFernLiteralBraces(body)).toBe('export { vendor } from "./x"\n\nx \\{vendor\\}')
   })
+
+  it('never rewrites a YAML frontmatter block, even when its value contains a brace', () => {
+    const body = '---\ntitle: "Style guide"\ndescription: "Use {x} for a placeholder"\n---\n\nConnection to {vendor} failed.'
+    expect(escapeFernLiteralBraces(body)).toBe(
+      '---\ntitle: "Style guide"\ndescription: "Use {x} for a placeholder"\n---\n\nConnection to \\{vendor\\} failed.',
+    )
+  })
+
+  it('skips a leading UTF-8 BOM when locating the frontmatter block, matching parseFrontmatter', () => {
+    const body = '﻿---\ndescription: "{x}"\n---\n\n{vendor}'
+    expect(escapeFernLiteralBraces(body)).toBe('﻿---\ndescription: "{x}"\n---\n\n\\{vendor\\}')
+  })
+
+  it('leaves frontmatter alone with CRLF line endings', () => {
+    const body = '---\r\ndescription: "{x}"\r\n---\r\n\r\n{vendor}'
+    expect(escapeFernLiteralBraces(body)).toBe('---\r\ndescription: "{x}"\r\n---\r\n\r\n\\{vendor\\}')
+  })
+
+  it('round-trips a body with no frontmatter and no escapable braces unchanged', () => {
+    const body = 'Just prose, no braces here.'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
 })
 
 describe('hasClientBoundaryFunctionProp', () => {

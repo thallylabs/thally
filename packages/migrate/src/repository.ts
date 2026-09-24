@@ -1153,8 +1153,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         continue
       }
     }
-    if (platform === 'fern') {
+    // A bare `{word}` in prose (e.g. Infisical's STYLE_GUIDE.md `{x}`) is
+    // literal text on Mintlify and Docusaurus too, not just Fern — MDX
+    // always evaluates `{...}` as a JS expression, so any platform's source
+    // can hit the same `ReferenceError` at render. `escapeFernLiteralBraces`
+    // is platform-agnostic (it only reads the page's own AST/ESM scope), so
+    // run it for every platform Thally migrates from.
+    if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
       raw = escapeFernLiteralBraces(raw)
+    }
+    if (platform === 'fern') {
       for (const name of detectUnsupportedFernComponents(raw)) {
         const key = `fern-component:${name}`
         if (warnedFernComponents.has(key)) continue
