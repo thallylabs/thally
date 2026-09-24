@@ -722,7 +722,7 @@ function cssPropertyToJsKey(property: string): string {
  * Convert an HTML `style="..."` attribute's raw CSS text into the object
  * literal a JSX `style={{...}}` prop requires.
  *
- * ponytail: `!important` cannot be expressed in a React style object at all
+ * TODO: `!important` cannot be expressed in a React style object at all
  * (there is no per-declaration escape hatch), so it is dropped rather than
  * left in a value string where it would do nothing; upgrade to a `!` layer
  * of inline `<style>` injection if a real page ever needs it.
