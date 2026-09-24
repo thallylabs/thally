@@ -382,6 +382,65 @@ describe('repository component migration', () => {
     expect(warnings).toEqual([])
   })
 
+  it('copies a component that imports @docusaurus/Link, mapping it to next/link and to= to href=', () => {
+    const root = fixture({
+      'components/Callout.jsx': "import Link from '@docusaurus/Link'\n\nexport default ({ children }) => <div><Link to=\"/docs/intro\">{children}</Link></div>",
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const result = migrator.transform("import Callout from './components/Callout.jsx'\n\n<Callout>Read more</Callout>", join(root, 'index.mdx'))
+    expect(result.trim()).toMatch(/^<Migrated[a-f0-9]+>Read more<\/Migrated[a-f0-9]+>$/)
+    const copied = migrator.files().find((file) => file.path.endsWith('/Callout.jsx'))!
+    expect(copied.content).toContain("from \"next/link\"")
+    expect(copied.content).not.toContain('@docusaurus/Link')
+    expect(copied.content).toContain('<Link href="/docs/intro">')
+    expect(copied.content).not.toContain('to="/docs/intro"')
+    expect(warnings).toEqual([])
+  })
+
+  it('copies a component that imports @theme/CodeBlock and @docusaurus/BrowserOnly, using small shims', () => {
+    const root = fixture({
+      'components/Demo.jsx': "import CodeBlock from '@theme/CodeBlock'\nimport BrowserOnly from '@docusaurus/BrowserOnly'\n\nexport default () => (\n  <div>\n    <CodeBlock>const x = 1</CodeBlock>\n    <BrowserOnly>{() => <span>client-only</span>}</BrowserOnly>\n  </div>\n)",
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const result = migrator.transform("import Demo from './components/Demo.jsx'\n\n<Demo />", join(root, 'index.mdx'))
+    expect(result.trim()).toMatch(/^<Migrated[a-f0-9]+ \/>$/)
+    const copied = migrator.files().find((file) => file.path.endsWith('/Demo.jsx'))!
+    expect(copied.content).not.toContain('@theme/CodeBlock')
+    expect(copied.content).not.toContain('@docusaurus/BrowserOnly')
+    const codeBlockShim = migrator.files().find((file) => file.path.endsWith('/docusaurus-code-block.tsx'))
+    const browserOnlyShim = migrator.files().find((file) => file.path.endsWith('/docusaurus-browser-only.tsx'))
+    expect(codeBlockShim?.content).toContain('<pre')
+    expect(browserOnlyShim?.content).toContain("'use client'")
+    expect(warnings).toEqual([])
+  })
+
+  it('reuses the same staged shim across two components that both import @theme/CodeBlock', () => {
+    const root = fixture({
+      'a.jsx': "import CodeBlock from '@theme/CodeBlock'\nexport default () => <CodeBlock>a</CodeBlock>",
+      'b.jsx': "import CodeBlock from '@theme/CodeBlock'\nexport default () => <CodeBlock>b</CodeBlock>",
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    migrator.transform("import A from './a.jsx'\nimport B from './b.jsx'\n\n<A />\n<B />", join(root, 'index.mdx'))
+    const shims = migrator.files().filter((file) => file.path.endsWith('/docusaurus-code-block.tsx'))
+    expect(shims).toHaveLength(1)
+  })
+
+  it('still refuses (and removes) an unrecognized Docusaurus theme import, since only a small named set is shimmed', () => {
+    const root = fixture({
+      'components/Translated.jsx': "import Translate from '@docusaurus/Translate'\nexport default () => <Translate>Hi</Translate>",
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = "import Translated from './components/Translated.jsx'\n\n<Translated />"
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).toBe('\n\n<Translated />')
+    expect(migrator.files()).toEqual([])
+    expect(warnings[0].message).toContain('could not be copied and was removed')
+  })
+
   it('rejects symlinked directories even when their leaf looks ordinary', () => {
     const root = fixture({})
     const outside = fixture({ 'widget.jsx': 'export default () => <div />' })

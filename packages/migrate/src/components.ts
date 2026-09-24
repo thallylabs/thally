@@ -71,6 +71,50 @@ const DATA_EXTENSIONS = new Set(['.json', '.css', '.svg', '.png', '.jpg', '.jpeg
  * (`.docx`, `.pdf`: not importable as a JS module, but a real static file).
  */
 const RESCUABLE_ASSET_EXTENSIONS = new Set(['.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.ico', '.docx', '.pdf'])
+
+/**
+ * Tiny equivalents for the handful of Docusaurus theme/runtime imports a
+ * copied component commonly uses, so the component still copies instead of
+ * failing outright with "external package requires manual installation" —
+ * the same reasoning as `SCAFFOLD_PROVIDED_IMPORTS`, just for names that
+ * only exist inside a Docusaurus build. Deliberately small: anything else
+ * Docusaurus-specific (`@docusaurus/Translate`, a theme-common hook, ...)
+ * still fails copyGraph and is handled by the dead-import-removal fallback
+ * (the catch block below) instead of growing this into a Docusaurus shim
+ * layer.
+ */
+const DOCUSAURUS_THEME_SHIMS: Record<string, { filename: string; content: string }> = {
+  '@theme/CodeBlock': {
+    filename: 'docusaurus-code-block.tsx',
+    content: [
+      "import type { ReactNode } from 'react'",
+      '',
+      'export default function CodeBlock({ children, className }: { children?: ReactNode; className?: string }) {',
+      '  return (',
+      '    <pre className={className}>',
+      '      <code>{children}</code>',
+      '    </pre>',
+      '  )',
+      '}',
+      '',
+    ].join('\n'),
+  },
+  '@docusaurus/BrowserOnly': {
+    filename: 'docusaurus-browser-only.tsx',
+    content: [
+      "'use client'",
+      '',
+      "import { useEffect, useState, type ReactNode } from 'react'",
+      '',
+      'export default function BrowserOnly({ children, fallback = null }: { children: () => ReactNode; fallback?: ReactNode }) {',
+      '  const [mounted, setMounted] = useState(false)',
+      '  useEffect(() => { setMounted(true) }, [])',
+      '  return mounted ? <>{children()}</> : <>{fallback}</>',
+      '}',
+      '',
+    ].join('\n'),
+  },
+}
 const SHARED_IMPORTS = new Set(['react', 'react/jsx-runtime', 'react/jsx-dev-runtime'])
 /**
  * Packages the standalone starter already installs as its own runtime
@@ -426,6 +470,12 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // registered component or consume the successful-copy budget.
     const staged = new Map<string, RenderedMigrationFile>()
     let stagedBytes = 0
+    /** Stage a small fixed-content shim module (see `DOCUSAURUS_THEME_SHIMS`) once, reused across every component that imports it. */
+    function stageShim(filename: string, content: string): string {
+      const shimDestination = `${destinationRoot}/shims/${filename}`
+      if (!copied.has(shimDestination) && !staged.has(shimDestination)) staged.set(shimDestination, { path: shimDestination, content })
+      return shimDestination
+    }
     function visit(path: string): void {
       const destination = outputPath(path)
       if (copied.has(destination) || staged.has(destination)) return
@@ -450,9 +500,35 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       if (ast.statements.some((statement) => ts.isExpressionStatement(statement)
         && ts.isStringLiteral(statement.expression) && statement.expression.text === 'use server')) throw new Error('server-only component modules require manual migration')
       const edits: Array<Replacement> = []
-      function dependency(literal: ts.StringLiteralLike): void {
+      function dependency(literal: ts.StringLiteralLike, importDeclaration?: ts.ImportDeclaration): void {
         const specifier = literal.text
         if (SHARED_IMPORTS.has(specifier) || isScaffoldProvidedImport(specifier)) return
+        // `@docusaurus/Link` maps onto `next/link` (already scaffold-provided)
+        // rather than a shim module: same default export, only its `to` prop
+        // is renamed to `href` wherever the copied file itself uses the tag.
+        if (specifier === '@docusaurus/Link') {
+          edits.push({ start: literal.getStart(ast), end: literal.end, value: '"next/link"' })
+          const localName = importDeclaration?.importClause?.name?.text
+          if (localName) {
+            function renameToProp(node: ts.Node): void {
+              if (ts.isJsxAttribute(node) && node.name.getText(ast) === 'to'
+                && ts.isJsxOpeningLikeElement(node.parent.parent)
+                && node.parent.parent.tagName.getText(ast) === localName) {
+                edits.push({ start: node.name.getStart(ast), end: node.name.end, value: 'href' })
+              }
+              ts.forEachChild(node, renameToProp)
+            }
+            renameToProp(ast)
+          }
+          return
+        }
+        const shim = DOCUSAURUS_THEME_SHIMS[specifier]
+        if (shim) {
+          const shimPath = stageShim(shim.filename, shim.content)
+          const nextPath = relative(dirname(destination), shimPath).replace(/\\/g, '/')
+          edits.push({ start: literal.getStart(ast), end: literal.end, value: JSON.stringify(portableSpecifier(nextPath.startsWith('.') ? nextPath : `./${nextPath}`)) })
+          return
+        }
         if (!specifier.startsWith('.') && !specifier.startsWith('/')) {
           throw new Error(specifier.startsWith('@/')
             ? `path alias ${specifier} points to source-site code the migration does not copy`
@@ -464,7 +540,9 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         edits.push({ start: literal.getStart(ast), end: literal.end, value: JSON.stringify(portableSpecifier(nextPath.startsWith('.') ? nextPath : `./${nextPath}`)) })
       }
       function inspect(node: ts.Node): void {
-        if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) dependency(node.moduleSpecifier)
+        if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+          dependency(node.moduleSpecifier, ts.isImportDeclaration(node) ? node : undefined)
+        }
         if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword
           || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))) {
           const argument = node.arguments[0]
