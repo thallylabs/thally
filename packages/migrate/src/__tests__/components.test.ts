@@ -441,6 +441,47 @@ describe('repository component migration', () => {
     expect(warnings[0].message).toContain('could not be copied and was removed')
   })
 
+  it('wraps an impure top-level selector in a copied CSS module with :global(...), leaving a pure one untouched', () => {
+    const root = fixture({
+      'components/BrowserWindow.jsx': "import styles from './styles.module.css'\n\nexport default ({ children }) => <div className={styles.window}><div className={styles.content}>{children}</div></div>",
+      'components/styles.module.css': '[data-theme="light"] { background: white; }\n.content { padding: 1rem; }\n:root, .window { border: 1px solid; }\n',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    migrator.transform("import BrowserWindow from './components/BrowserWindow.jsx'\n\n<BrowserWindow>x</BrowserWindow>", join(root, 'index.mdx'))
+    const css = String(migrator.files().find((file) => file.path.endsWith('styles.module.css'))!.content)
+    expect(css).toContain(':global([data-theme="light"])')
+    expect(css).toContain('.content {')
+    expect(css).not.toContain(':global(.content)')
+    expect(css).toContain(':global(:root)')
+    expect(css).toContain('.window {')
+    expect(warnings).toEqual([])
+  })
+
+  it('leaves a CSS module with only pure (class-containing) selectors byte-identical', () => {
+    const root = fixture({
+      'components/Card.jsx': "import styles from './styles.module.css'\n\nexport default ({ children }) => <div className={styles.card}>{children}</div>",
+      'components/styles.module.css': '.card { padding: 1rem; }\n.card:hover { opacity: 0.9; }\n',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    migrator.transform("import Card from './components/Card.jsx'\n\n<Card>x</Card>", join(root, 'index.mdx'))
+    const css = String(migrator.files().find((file) => file.path.endsWith('styles.module.css'))!.content)
+    expect(css).not.toContain(':global')
+  })
+
+  it('does not touch a plain (non-module) .css file copied as a component dependency', () => {
+    const root = fixture({
+      'components/Widget.jsx': "import './styles.css'\n\nexport default () => <div />",
+      'components/styles.css': '[data-theme="light"] { color: red; }\n',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    migrator.transform("import Widget from './components/Widget.jsx'\n\n<Widget />", join(root, 'index.mdx'))
+    const css = String(migrator.files().find((file) => file.path.endsWith('/styles.css'))!.content)
+    expect(css).toBe('[data-theme="light"] { color: red; }\n')
+  })
+
   it('rejects symlinked directories even when their leaf looks ordinary', () => {
     const root = fixture({})
     const outside = fixture({ 'widget.jsx': 'export default () => <div />' })

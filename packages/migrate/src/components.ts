@@ -7,6 +7,8 @@
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import { dirname, extname, relative, resolve } from 'node:path'
+import postcss from 'postcss'
+import selectorParser from 'postcss-selector-parser'
 import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import ts from 'typescript'
@@ -166,6 +168,41 @@ function portableSpecifier(path: string): string {
   // Customer tsconfigs do not opt into allowImportingTsExtensions. Next's
   // bundler resolves these extensionless source imports without that flag.
   return path.replace(/\.tsx?$/, '')
+}
+
+/**
+ * Turbopack's CSS Modules loader requires every selector to contain at
+ * least one class or id ("pure"): a copied `.module.css` file that targets
+ * `:root`, an element, or an attribute at the top level (a common way to
+ * key off a `data-theme` attribute, e.g. Docusaurus' `BrowserWindow`) fails
+ * the whole build with `Selector "..." is not pure`, even though the
+ * selector compiled and worked fine in its own Docusaurus build. Wrap only
+ * the impure branches of each rule's selector list in `:global(...)`
+ * (CSS Modules' own escape hatch) using a real selector parser — a
+ * character-scanning approach can't tell a selector's structure (nesting,
+ * combinators, pseudo-classes) from its text reliably enough to know where
+ * a `:global(...)` wrapper legally starts and ends.
+ */
+function wrapImpureCssModuleSelectors(css: string): string {
+  const root = postcss.parse(css)
+  root.walkRules((rule) => {
+    rule.selector = selectorParser((selectors) => {
+      selectors.each((selector) => {
+        let hasClassOrId = false
+        selector.walk((node) => {
+          if (node.type === 'class' || node.type === 'id') hasClassOrId = true
+        })
+        if (hasClassOrId) return
+        const nodes = selector.nodes.splice(0, selector.nodes.length)
+        const container = selectorParser.selector({ value: '' })
+        for (const node of nodes) container.append(node)
+        const globalPseudo = selectorParser.pseudo({ value: ':global' })
+        globalPseudo.append(container)
+        selector.append(globalPseudo)
+      })
+    }).processSync(rule.selector)
+  })
+  return root.toString()
 }
 
 function sourceFile(source: string, filename: string): ts.SourceFile {
@@ -490,6 +527,20 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       staged.set(destination, { path: destination, content })
       if (!CODE_EXTENSIONS.has(extension)) {
         if (extension === '.css' && /@import\b|url\s*\(/i.test(content.toString('utf8'))) throw new Error('CSS resource dependencies require manual migration')
+        if (extension === '.css' && path.toLowerCase().endsWith('.module.css')) {
+          // A parse failure here (malformed CSS, an SCSS-only construct that
+          // isn't valid CSS, ...) is treated the same as any other copy
+          // failure: throw, so the dead-import-removal fallback in the
+          // caller can neutralize its usage instead of shipping CSS
+          // Turbopack would reject anyway.
+          let wrapped: string
+          try {
+            wrapped = wrapImpureCssModuleSelectors(content.toString('utf8'))
+          } catch {
+            throw new Error('CSS module could not be parsed to check for Turbopack-safe selectors')
+          }
+          staged.set(destination, { path: destination, content: wrapped })
+        }
         return
       }
       const text = content.toString('utf8')
