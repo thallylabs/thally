@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeMdx, parseMarkdownPage } from '../mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -312,6 +312,28 @@ describe('escapeFernLiteralBraces', () => {
     const body = 'export { vendor } from "./x"\n\nx {vendor}'
     expect(escapeFernLiteralBraces(body)).toBe('export { vendor } from "./x"\n\nx \\{vendor\\}')
   })
+
+  it('never rewrites a YAML frontmatter block, even when its value contains a brace', () => {
+    const body = '---\ntitle: "Style guide"\ndescription: "Use {x} for a placeholder"\n---\n\nConnection to {vendor} failed.'
+    expect(escapeFernLiteralBraces(body)).toBe(
+      '---\ntitle: "Style guide"\ndescription: "Use {x} for a placeholder"\n---\n\nConnection to \\{vendor\\} failed.',
+    )
+  })
+
+  it('skips a leading UTF-8 BOM when locating the frontmatter block, matching parseFrontmatter', () => {
+    const body = '﻿---\ndescription: "{x}"\n---\n\n{vendor}'
+    expect(escapeFernLiteralBraces(body)).toBe('﻿---\ndescription: "{x}"\n---\n\n\\{vendor\\}')
+  })
+
+  it('leaves frontmatter alone with CRLF line endings', () => {
+    const body = '---\r\ndescription: "{x}"\r\n---\r\n\r\n{vendor}'
+    expect(escapeFernLiteralBraces(body)).toBe('---\r\ndescription: "{x}"\r\n---\r\n\r\n\\{vendor\\}')
+  })
+
+  it('round-trips a body with no frontmatter and no escapable braces unchanged', () => {
+    const body = 'Just prose, no braces here.'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
 })
 
 describe('hasClientBoundaryFunctionProp', () => {
@@ -366,5 +388,99 @@ describe('functionDeclaredNames', () => {
       + 'export async function Load() { return 1 }\n'
       + "export const label = 'hi'\n"
     expect(functionDeclaredNames(body)).toEqual(new Set(['Demo', 'Load']))
+  })
+})
+
+describe('replaceLinkWithAnchor', () => {
+  it('renames a self-closing <Link> to <a>, keeping every attribute', () => {
+    expect(replaceLinkWithAnchor('<Link href="/docs" target="_blank" />')).toBe('<a href="/docs" target="_blank" />')
+  })
+
+  it('renames a paired <Link> to <a>, keeping attributes and children exactly', () => {
+    expect(replaceLinkWithAnchor('<Link href="/docs">Read the **docs**</Link>')).toBe('<a href="/docs">Read the **docs**</a>')
+  })
+
+  it('leaves a page-declared or imported Link untouched', () => {
+    const body = "import Link from './link.jsx'\n\n<Link href=\"/x\">go</Link>"
+    expect(replaceLinkWithAnchor(body)).toBe(body)
+  })
+
+  it('never touches frontmatter', () => {
+    const body = '---\ntitle: "<Link>"\n---\n\n<Link href="/x">go</Link>'
+    expect(replaceLinkWithAnchor(body)).toBe('---\ntitle: "<Link>"\n---\n\n<a href="/x">go</a>')
+  })
+})
+
+describe('replaceUnknownComponents', () => {
+  it('drops a self-closing unknown component and warns once', () => {
+    const warned: Array<string> = []
+    expect(replaceUnknownComponents('before <Snippet file="x.mdx" /> after', (name) => warned.push(name)))
+      .toBe('before  after')
+    expect(warned).toEqual(['Snippet'])
+  })
+
+  it('replaces a paired unknown component with a div, keeping its children', () => {
+    const warned: Array<string> = []
+    expect(replaceUnknownComponents('<Widget title="x">Hello <b>world</b></Widget>', (name) => warned.push(name)))
+      .toBe('<div>Hello <b>world</b></div>')
+    expect(warned).toEqual(['Widget'])
+  })
+
+  it('warns only once per distinct component name', () => {
+    const warned: Array<string> = []
+    replaceUnknownComponents('<Foo /> and <Foo /> and <Foo>x</Foo>', (name) => warned.push(name))
+    expect(warned).toEqual(['Foo'])
+  })
+
+  it('does not touch a Thally builtin component', () => {
+    const body = '<Card title="x">content</Card>'
+    expect(replaceUnknownComponents(body, () => { throw new Error('should not warn') })).toBe(body)
+  })
+
+  it('does not touch a page-declared or imported component', () => {
+    const body = "import Foo from './foo.jsx'\n\n<Foo>content</Foo>"
+    expect(replaceUnknownComponents(body, () => { throw new Error('should not warn') })).toBe(body)
+  })
+
+  it('does not touch a componentMigrator-registered Migrated<hash> tag', () => {
+    const body = '<Migrated0123456789ab title="x">content</Migrated0123456789ab>'
+    expect(replaceUnknownComponents(body, () => { throw new Error('should not warn') })).toBe(body)
+  })
+
+  it('does not touch a lowercase HTML/JSX tag', () => {
+    const body = '<iframe src="https://example.com" /> and <div>x</div>'
+    expect(replaceUnknownComponents(body, () => { throw new Error('should not warn') })).toBe(body)
+  })
+
+  it('fixes a nested unknown component inside a known one', () => {
+    const warned: Array<string> = []
+    expect(replaceUnknownComponents('<Card><Gizmo>inner</Gizmo></Card>', (name) => warned.push(name)))
+      .toBe('<Card><div>inner</div></Card>')
+    expect(warned).toEqual(['Gizmo'])
+  })
+
+  it('never touches frontmatter, even when its value looks like an unknown tag', () => {
+    const body = '---\ndescription: "<Widget />"\n---\n\n<Widget>x</Widget>'
+    expect(replaceUnknownComponents(body, () => {})).toBe('---\ndescription: "<Widget />"\n---\n\n<div>x</div>')
+  })
+})
+
+describe('normalizeHtmlComments', () => {
+  it('converts a single-line HTML comment to MDX comment syntax', () => {
+    expect(normalizeHtmlComments('<!-- prettier-ignore -->')).toBe('{/* prettier-ignore */}')
+  })
+
+  it('converts a multi-line HTML comment', () => {
+    expect(normalizeHtmlComments('<!--\nline one\nline two\n-->')).toBe('{/*\nline one\nline two\n*/}')
+  })
+
+  it('leaves an HTML comment inside a fenced code block untouched', () => {
+    const body = '```html\n<!-- keep me -->\n```'
+    expect(normalizeHtmlComments(body)).toBe(body)
+  })
+
+  it('leaves plain text with no comment unchanged', () => {
+    const body = 'Just prose, no comments here.'
+    expect(normalizeHtmlComments(body)).toBe(body)
   })
 })

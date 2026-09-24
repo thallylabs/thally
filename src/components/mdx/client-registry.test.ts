@@ -22,6 +22,7 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 import { CLIENT_BUILTIN_COMPONENT_TAGS } from '../../../packages/migrate/src/components.js'
+import { THALLY_BUILTIN_COMPONENTS } from '../../../packages/migrate/src/builtin-components.js'
 
 const mdxDir = dirname(fileURLToPath(import.meta.url))
 const registrySource = readFileSync(join(mdxDir, 'mdx-components.tsx'), 'utf8')
@@ -99,6 +100,30 @@ function renderedLocalIdentifier(initializer: ts.Expression): string | undefined
   }
   const tagName = jsxRoot(body)
   return tagName ? rootTagIdentifier(tagName) : undefined
+}
+
+/** Every key the registry's `components` object literal declares, capitalized (component) keys only — lowercase intrinsic overrides (`pre`, `img`, ...) are not migration-relevant tag names. */
+function registryComponentKeys(sourceFile: ts.SourceFile): Set<string> {
+  const keys = new Set<string>()
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(sourceFile) === 'components' && node.initializer) {
+      const initializer = unwrap(node.initializer)
+      if (ts.isObjectLiteralExpression(initializer)) {
+        for (const property of initializer.properties) {
+          const name = ts.isShorthandPropertyAssignment(property) || ts.isPropertyAssignment(property)
+            ? property.name
+            : undefined
+          const key = name && (ts.isStringLiteral(name) || ts.isIdentifier(name)) ? name.text : undefined
+          // A dotted key ('Color.Item') names the same tag family as its root
+          // ('Color'); the migrator only ever checks the root identifier.
+          if (key && /^[A-Z]/.test(key)) keys.add(key.split('.')[0])
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+  return keys
 }
 
 /** Registry object key -> local identifier its JSX/value actually renders (e.g. Accordion -> Accordion, 'Color.Item' -> Color). */
@@ -181,6 +206,11 @@ it('every mdx-components.tsx registry name backed by a use-client file in this d
   }
 
   expect([...CLIENT_BUILTIN_COMPONENT_TAGS].sort()).toEqual([...expectedClientTags].sort())
+})
+
+it('THALLY_BUILTIN_COMPONENTS (the unknown-component fallback\'s allowlist) matches every registry key', () => {
+  const sourceFile = parse(registrySource, 'mdx-components.tsx')
+  expect([...THALLY_BUILTIN_COMPONENTS].sort()).toEqual([...registryComponentKeys(sourceFile)].sort())
 })
 
 describe('sanity', () => {

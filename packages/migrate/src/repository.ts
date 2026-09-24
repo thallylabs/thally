@@ -11,7 +11,9 @@ import {
   lstatSync,
   readFileSync,
   readdirSync,
+  rmSync,
 } from 'node:fs'
+import type { Dirent } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, extname, relative, resolve as resolvePath } from 'node:path'
 
@@ -28,7 +30,7 @@ import {
   type DocusaurusSidebars,
 } from './docusaurus.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
-import { detectUnsupportedFernComponents, escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage } from './mdx.js'
+import { detectUnsupportedFernComponents, escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -78,6 +80,17 @@ const SNIPPET_DIRECTORIES = new Set(['snippets', '_snippets', 'partials', '_part
 // import (`import { default as Name } from '...'`), and a plain named import
 // (`import { Name } from '...'`) — Mintlify snippets can export either way.
 const SNIPPET_IMPORT_PATTERN = /^import\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm
+
+/**
+ * Mintlify's `<Snippet file="path.mdx" />` tag form: unlike the import form
+ * above, this never needs a matching `import` statement — `file` is a path
+ * relative to the project's `snippets/` directory (Mintlify's own
+ * convention; see `resolveSnippetPath`'s sibling below for the actual
+ * lookup). Both self-closing and paired spellings are matched; a paired
+ * tag's own children (if any) are always discarded in favor of the
+ * resolved snippet's real content, matching Mintlify's own renderer.
+ */
+const SNIPPET_TAG_PATTERN = /<Snippet\s+file=(?:"([^"]+)"|'([^']+)')\s*(?:\/>|>[\s\S]*?<\/Snippet>)/g
 const MINTIGNORE_FILENAME = '.mintignore'
 interface IgnoreMatcher {
   add(patterns: string): IgnoreMatcher
@@ -153,7 +166,76 @@ function hasMintlifyConfig(directory: string): boolean {
   })
 }
 
-function findMintlifyProjectRoot(repositoryDir: string, docsDir?: string): string | null {
+/**
+ * Recursively counts `.md`/`.mdx` files under `directory` (skipping
+ * ignored/symlinked directories, same as the root-finding BFS above), for
+ * ranking two candidate project roots against each other. Bounded so a huge
+ * false-positive candidate (e.g. `node_modules` slipping past
+ * `isIgnoredDirectory`) can't make root detection itself slow.
+ */
+function countMarkdownPages(directory: string, limit = 20_000): number {
+  let count = 0
+  const stack: Array<string> = [directory]
+  while (stack.length > 0 && count < limit) {
+    const current = stack.pop()!
+    let entries: Array<Dirent>
+    try {
+      entries = readdirSync(current, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
+        if (!isIgnoredDirectory(entry.name)) stack.push(resolveWithin(current, entry.name))
+      } else if (/\.mdx?$/i.test(entry.name)) {
+        count++
+      }
+    }
+  }
+  return count
+}
+
+/**
+ * Multiple config files can each look like a valid project root in the same
+ * repository (Infisical ships both a top-level `company/mint.json` handbook
+ * and `docs/docs.json`, the real docs). Picking the first one a breadth-
+ * first walk happens to reach silently imports the wrong, usually much
+ * smaller, site. Rank every candidate instead: `docs.json` before
+ * `mint.json` (Mintlify's own current format), then a directory literally
+ * named `docs`, then whichever has the most actual content — and warn
+ * whenever there was more than one candidate, so a wrong guess is visible
+ * and `--docs-dir` is offered as the fix, even when the ranking picked the
+ * one the caller actually wanted.
+ */
+function pickPreferredDocsRoot(
+  candidates: Array<string>,
+  repositoryDir: string,
+  platformLabel: string,
+  warnings: Array<MigrationWarning> | undefined,
+  rank?: (directory: string) => number,
+): string {
+  const ranked = [...candidates].sort((left, right) => {
+    const byRank = (rank?.(right) ?? 0) - (rank?.(left) ?? 0)
+    if (byRank !== 0) return byRank
+    const byName = (basename(right) === 'docs' ? 1 : 0) - (basename(left) === 'docs' ? 1 : 0)
+    if (byName !== 0) return byName
+    return countMarkdownPages(right) - countMarkdownPages(left)
+  })
+  const winner = ranked[0]
+  if (candidates.length > 1 && warnings) {
+    const relativePaths = candidates.map((candidate) => relative(repositoryDir, candidate) || '.')
+    warnings.push({
+      code: 'unsupported-config',
+      message: `Multiple possible ${platformLabel} project roots were found (${relativePaths.join(', ')}); `
+        + `${relative(repositoryDir, winner) || '.'} was picked. Pass --docs-dir to choose a different one if this is wrong.`,
+      source: '.',
+    })
+  }
+  return winner
+}
+
+function findMintlifyProjectRoot(repositoryDir: string, docsDir?: string, warnings?: Array<MigrationWarning>): string | null {
   if (docsDir !== undefined) {
     let candidate = trimTrailingSlashes(docsDir)
     while (true) {
@@ -164,19 +246,23 @@ function findMintlifyProjectRoot(repositoryDir: string, docsDir?: string): strin
       candidate = parent === '.' ? '' : parent
     }
   }
+  const candidates: Array<string> = []
   const queue: Array<{ directory: string; depth: number }> = [{ directory: repositoryDir, depth: 0 }]
   let visited = 0
   while (queue.length > 0 && visited < 500) {
     const current = queue.shift()!
     visited++
-    if (hasMintlifyConfig(current.directory)) return current.directory
+    if (hasMintlifyConfig(current.directory)) candidates.push(current.directory)
     if (current.depth >= 4) continue
     for (const entry of readdirSync(current.directory, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.isSymbolicLink() || isIgnoredDirectory(entry.name)) continue
       queue.push({ directory: resolveWithin(current.directory, entry.name), depth: current.depth + 1 })
     }
   }
-  return null
+  if (candidates.length === 0) return null
+  return pickPreferredDocsRoot(candidates, repositoryDir, 'Mintlify', warnings, (directory) => (
+    existsSync(resolveWithin(directory, 'docs.json')) ? 1 : 0
+  ))
 }
 
 function hasFernConfig(directory: string): boolean {
@@ -212,7 +298,7 @@ function findFernProjectRoot(repositoryDir: string, docsDir?: string): string | 
   return null
 }
 
-function findDocusaurusProjectRoot(repositoryDir: string, docsDir?: string): string | null {
+function findDocusaurusProjectRoot(repositoryDir: string, docsDir?: string, warnings?: Array<MigrationWarning>): string | null {
   if (docsDir !== undefined) {
     let candidate = trimTrailingSlashes(docsDir)
     while (true) {
@@ -224,12 +310,13 @@ function findDocusaurusProjectRoot(repositoryDir: string, docsDir?: string): str
     }
   }
 
+  const candidates: Array<string> = []
   const queue: Array<{ directory: string; depth: number }> = [{ directory: repositoryDir, depth: 0 }]
   let visited = 0
   while (queue.length > 0 && visited < 500) {
     const current = queue.shift()!
     visited++
-    if (hasDocusaurusConfig(current.directory)) return current.directory
+    if (hasDocusaurusConfig(current.directory)) candidates.push(current.directory)
     if (current.depth >= 4) continue
     for (const entry of readdirSync(current.directory, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.isSymbolicLink() || isIgnoredDirectory(entry.name)) continue
@@ -239,7 +326,8 @@ function findDocusaurusProjectRoot(repositoryDir: string, docsDir?: string): str
       })
     }
   }
-  return null
+  if (candidates.length === 0) return null
+  return pickPreferredDocsRoot(candidates, repositoryDir, 'Docusaurus', warnings)
 }
 
 function readDocusaurusConfigSource(projectRoot: string): string {
@@ -312,15 +400,21 @@ export function parseGitHubRepositoryUrl(rawUrl: string): GitHubRepositorySource
   }
 }
 
-/** Clone a repository without a shell; callers own and remove `targetDir`. */
-export async function cloneGitHubRepository(
-  source: GitHubRepositorySource,
-  targetDir: string,
-): Promise<void> {
+const CLONE_RETRY_ATTEMPTS = 3
+const CLONE_RETRY_DELAY_MS = 1_000
+
+/** Transient network-class git failures a retry can plausibly recover from. */
+const RETRYABLE_CLONE_ERROR = /RPC failed|Recv failure|early EOF|curl \d+|Could not resolve host|Connection (?:reset|refused|timed out)|The remote end hung up|SSL[_ ]?(?:read|connect|write) error|timed out|network is unreachable/i
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, ms) })
+}
+
+function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<void> {
   const args = ['clone', '--depth', '1', '--single-branch']
   if (source.branch !== 'HEAD') args.push('--branch', source.branch)
   args.push('--', source.cloneUrl, targetDir)
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const child = spawn('git', args, { stdio: ['ignore', 'ignore', 'pipe'] })
     let stderr = ''
     child.stderr.setEncoding('utf8')
@@ -333,6 +427,31 @@ export async function cloneGitHubRepository(
       else reject(new Error(`Failed to clone ${source.owner}/${source.repo}: ${stderr.trim() || `git exited ${code}`}`))
     })
   })
+}
+
+/**
+ * Clone a repository without a shell; callers own and remove `targetDir`. A
+ * large repository on a flaky connection can drop mid-clone (`RPC failed`,
+ * `Recv failure`, a `curl 56`, …) — retry a network-class failure a couple
+ * of times with backoff instead of surfacing a hard failure on the first
+ * blip. A partial checkout from the failed attempt is removed first, or
+ * `git clone` refuses to reuse the (now non-empty) target directory.
+ */
+export async function cloneGitHubRepository(
+  source: GitHubRepositorySource,
+  targetDir: string,
+): Promise<void> {
+  for (let attempt = 1; attempt <= CLONE_RETRY_ATTEMPTS; attempt++) {
+    try {
+      await cloneOnce(source, targetDir)
+      return
+    } catch (error) {
+      const retryable = error instanceof Error && RETRYABLE_CLONE_ERROR.test(error.message)
+      if (!retryable || attempt === CLONE_RETRY_ATTEMPTS) throw error
+      rmSync(targetDir, { recursive: true, force: true })
+      await delay(CLONE_RETRY_DELAY_MS * attempt)
+    }
+  }
 }
 
 /** Detect a supported repository docs platform from unambiguous config files. */
@@ -865,6 +984,29 @@ function inlineMdxSnippets(
         return interpolateSnippet(snippet, attributes)
       })
   }
+  result = result.replace(SNIPPET_TAG_PATTERN, (_tag, doubleQuoted: string | undefined, singleQuoted: string | undefined) => {
+    const filePath = (doubleQuoted ?? singleQuoted)!
+    try {
+      const candidate = resolveWithin(siteRoot, `snippets/${filePath}`)
+      if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
+      return inlineMdxSnippets(
+        withoutFrontmatter(readFileSync(candidate, 'utf8')),
+        candidate,
+        repositoryRoot,
+        warnings,
+        depth + 1,
+        siteRoot,
+        globalAliases,
+      )
+    } catch {
+      warnings.push({
+        code: 'missing-page',
+        message: `Snippet file="${filePath}" could not be resolved and was left as a comment.`,
+        source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+      })
+      return `{/* Missing snippet: ${filePath} */}`
+    }
+  })
   return result
 }
 
@@ -895,11 +1037,12 @@ function componentSourceIdentity(sourceUrl: string, repositoryDir: string, siteR
 export function migrateRepository(options: RepositoryMigrationOptions): MigrationBundle {
   const repositoryDir = options.repositoryDir
   const platform = options.platform ?? detectRepositoryPlatform(repositoryDir, options.docsDir)
+  const warnings: Array<MigrationWarning> = []
   const mintlifyProjectRoot = platform === 'mintlify'
-    ? findMintlifyProjectRoot(repositoryDir, options.docsDir)
+    ? findMintlifyProjectRoot(repositoryDir, options.docsDir, warnings)
     : null
   const docusaurusProjectRoot = platform === 'docusaurus'
-    ? findDocusaurusProjectRoot(repositoryDir, options.docsDir)
+    ? findDocusaurusProjectRoot(repositoryDir, options.docsDir, warnings)
     : null
   const fernProjectRoot = platform === 'fern'
     ? findFernProjectRoot(repositoryDir, options.docsDir)
@@ -925,7 +1068,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     return platform === 'mintlify' ? '' : detectRepositoryDocsDir(repositoryDir)
   })()
-  const warnings: Array<MigrationWarning> = []
   // Only the current, default-locale docs are imported (`configuredDocsDir`,
   // below, never points inside these). Thally has no versions concept and
   // Docusaurus' own i18n content lives in a separate tree this adapter does
@@ -958,9 +1100,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // `@site/...`) and bare npm packages the same way a Mintlify page can; the
   // same bounded component graph and import-stripping logic applies to
   // either source, rooted at whichever project actually owns the pages.
+  // `@site/...` is Docusaurus' own alias for its project root specifically
+  // (not the whole repository) and must keep resolving there. A plain
+  // relative import (`../../components/X`), though, is written relative to
+  // the *page*, which can live outside that root in a monorepo where docs/
+  // is a sibling of website/ (e.g. Redux) rather than nested under it — the
+  // repository, not the narrower platform root, is the real confinement
+  // boundary for those.
   const componentRoot = mintlifyProjectRoot ?? docusaurusProjectRoot ?? repositoryDir
   const componentMigrator = platform === 'mintlify' || platform === 'docusaurus'
-    ? createComponentMigrator(componentRoot, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
+    ? createComponentMigrator(componentRoot, repositoryDir, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
     : undefined
   let docsConfig: MigrationDocsConfig = { tabs: [] }
   const referenceMap = new Map<string, { navigationId: string; locale?: string }>()
@@ -1153,8 +1302,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         continue
       }
     }
-    if (platform === 'fern') {
+    // A bare `{word}` in prose (e.g. Infisical's STYLE_GUIDE.md `{x}`) is
+    // literal text on Mintlify and Docusaurus too, not just Fern — MDX
+    // always evaluates `{...}` as a JS expression, so any platform's source
+    // can hit the same `ReferenceError` at render. `escapeFernLiteralBraces`
+    // is platform-agnostic (it only reads the page's own AST/ESM scope), so
+    // run it for every platform Thally migrates from.
+    if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
       raw = escapeFernLiteralBraces(raw)
+    }
+    if (platform === 'fern') {
       for (const name of detectUnsupportedFernComponents(raw)) {
         const key = `fern-component:${name}`
         if (warnedFernComponents.has(key)) continue
@@ -1223,6 +1380,30 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (platform === 'fern' && fernProjectRoot) {
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, fernProjectRoot)
+    }
+    if (platform === 'mintlify' || platform === 'docusaurus') {
+      // `<Link href="...">` (common Mintlify/Docusaurus prose, e.g. mem0's
+      // docs) has no Thally builtin; map it to a plain anchor before the
+      // generic unknown-component fallback runs, so a real navigable link
+      // survives instead of becoming a `<div>`. Runs on the fully normalized
+      // body (after `parseMarkdownPage`'s `normalizeMdx`), so a tag that a
+      // platform-specific rename still resolves (Docusaurus `TabItem` ->
+      // `Tab`, Mintlify `Warn` -> `Warning`, ...) is never mistaken for
+      // unknown.
+      page.body = replaceLinkWithAnchor(page.body)
+      // Anything still capitalized and unresolved at this point (not a
+      // Thally builtin, not declared/imported by the page, not already
+      // handled by componentMigrator's copy/removal above) would otherwise
+      // throw "Expected component X to be defined" at render. Warn once per
+      // component name and neutralize it: keep a paired tag's children,
+      // drop a self-closing one outright.
+      page.body = replaceUnknownComponents(page.body, (name) => {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Component <${name}> has no equivalent in Thally and wasn't found on this page; it was replaced with a plain <div> (or removed, if self-closing) so the page still builds. Add a matching component or edit the page.`,
+          source: file.relativePath,
+        })
+      })
     }
     const mdxError = invalidMdxReason(page.body)
     if (mdxError) {

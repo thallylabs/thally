@@ -6,14 +6,16 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, readFileSync } from 'node:fs'
-import { dirname, extname, relative, resolve } from 'node:path'
+import { basename, dirname, extname, relative, resolve } from 'node:path'
+import postcss from 'postcss'
+import selectorParser from 'postcss-selector-parser'
 import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import ts from 'typescript'
 import { unified } from 'unified'
 
 import { parseFrontmatter } from './frontmatter.js'
-import { isFunctionInitializer } from './mdx.js'
+import { isFunctionInitializer, normalizeHtmlComments } from './mdx.js'
 import { resolveWithin } from './path.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
 
@@ -21,7 +23,12 @@ interface MdxNode {
   type: string
   name?: string | null
   value?: string
-  attributes?: Array<{ name?: string; type: string; value?: string | { value?: string } | null }>
+  attributes?: Array<{
+    name?: string
+    type: string
+    value?: string | { value?: string } | null
+    position?: { start: { offset?: number }; end: { offset?: number } }
+  }>
   children?: Array<MdxNode>
   position?: { start: { offset?: number }; end: { offset?: number } }
 }
@@ -62,6 +69,59 @@ function youtubeEmbedVideoId(node: MdxNode, specifier: string): string | undefin
 const parser = unified().use(remarkParse).use(remarkMdx)
 const CODE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs'])
 const DATA_EXTENSIONS = new Set(['.json', '.css', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.woff', '.woff2'])
+/**
+ * Binary asset types a failed component/module import can still be rescued
+ * as: copied verbatim to `public/` and bound to its URL string, rather than
+ * losing the reference outright. Includes types `DATA_EXTENSIONS` already
+ * lets `copyGraph` copy as a JS-module asset (an image can still fail that
+ * path for other reasons — budget, a symlink) and types it never would
+ * (`.docx`, `.pdf`: not importable as a JS module, but a real static file).
+ */
+const RESCUABLE_ASSET_EXTENSIONS = new Set(['.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.ico', '.docx', '.pdf'])
+
+/**
+ * Tiny equivalents for the handful of Docusaurus theme/runtime imports a
+ * copied component commonly uses, so the component still copies instead of
+ * failing outright with "external package requires manual installation" —
+ * the same reasoning as `SCAFFOLD_PROVIDED_IMPORTS`, just for names that
+ * only exist inside a Docusaurus build. Deliberately small: anything else
+ * Docusaurus-specific (`@docusaurus/Translate`, a theme-common hook, ...)
+ * still fails copyGraph and is handled by the dead-import-removal fallback
+ * (the catch block below) instead of growing this into a Docusaurus shim
+ * layer.
+ */
+const DOCUSAURUS_THEME_SHIMS: Record<string, { filename: string; content: string }> = {
+  '@theme/CodeBlock': {
+    filename: 'docusaurus-code-block.tsx',
+    content: [
+      "import type { ReactNode } from 'react'",
+      '',
+      'export default function CodeBlock({ children, className }: { children?: ReactNode; className?: string }) {',
+      '  return (',
+      '    <pre className={className}>',
+      '      <code>{children}</code>',
+      '    </pre>',
+      '  )',
+      '}',
+      '',
+    ].join('\n'),
+  },
+  '@docusaurus/BrowserOnly': {
+    filename: 'docusaurus-browser-only.tsx',
+    content: [
+      "'use client'",
+      '',
+      "import { useEffect, useState, type ReactNode } from 'react'",
+      '',
+      'export default function BrowserOnly({ children, fallback = null }: { children: () => ReactNode; fallback?: ReactNode }) {',
+      '  const [mounted, setMounted] = useState(false)',
+      '  useEffect(() => { setMounted(true) }, [])',
+      '  return mounted ? <>{children()}</> : <>{fallback}</>',
+      '}',
+      '',
+    ].join('\n'),
+  },
+}
 const SHARED_IMPORTS = new Set(['react', 'react/jsx-runtime', 'react/jsx-dev-runtime'])
 /**
  * Packages the standalone starter already installs as its own runtime
@@ -113,6 +173,41 @@ function portableSpecifier(path: string): string {
   // Customer tsconfigs do not opt into allowImportingTsExtensions. Next's
   // bundler resolves these extensionless source imports without that flag.
   return path.replace(/\.tsx?$/, '')
+}
+
+/**
+ * Turbopack's CSS Modules loader requires every selector to contain at
+ * least one class or id ("pure"): a copied `.module.css` file that targets
+ * `:root`, an element, or an attribute at the top level (a common way to
+ * key off a `data-theme` attribute, e.g. Docusaurus' `BrowserWindow`) fails
+ * the whole build with `Selector "..." is not pure`, even though the
+ * selector compiled and worked fine in its own Docusaurus build. Wrap only
+ * the impure branches of each rule's selector list in `:global(...)`
+ * (CSS Modules' own escape hatch) using a real selector parser — a
+ * character-scanning approach can't tell a selector's structure (nesting,
+ * combinators, pseudo-classes) from its text reliably enough to know where
+ * a `:global(...)` wrapper legally starts and ends.
+ */
+function wrapImpureCssModuleSelectors(css: string): string {
+  const root = postcss.parse(css)
+  root.walkRules((rule) => {
+    rule.selector = selectorParser((selectors) => {
+      selectors.each((selector) => {
+        let hasClassOrId = false
+        selector.walk((node) => {
+          if (node.type === 'class' || node.type === 'id') hasClassOrId = true
+        })
+        if (hasClassOrId) return
+        const nodes = selector.nodes.splice(0, selector.nodes.length)
+        const container = selectorParser.selector({ value: '' })
+        for (const node of nodes) container.append(node)
+        const globalPseudo = selectorParser.pseudo({ value: ':global' })
+        globalPseudo.append(container)
+        selector.append(globalPseudo)
+      })
+    }).processSync(rule.selector)
+  })
+  return root.toString()
 }
 
 function sourceFile(source: string, filename: string): ts.SourceFile {
@@ -340,11 +435,27 @@ export function declarationsReferenceBrowserGlobal(body: string): boolean {
 }
 
 /** Create one bounded component graph and registry for a repository migration. */
-export function createComponentMigrator(siteRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
+/**
+ * `siteRoot` (a Mintlify/Docusaurus project root, when one was detected —
+ * `repositoryDir` otherwise) is what `@site/...`/root-relative (`/...`)
+ * specifiers resolve against, matching Docusaurus' own alias semantics; a
+ * warning's reported `source` and the generated destination paths stay
+ * relative to it too, unchanged from before this parameter split. A plain
+ * relative import (`../../components/X`), though, is written relative to
+ * the importing *page*, which — in a monorepo where docs/ is a sibling of
+ * website/ rather than nested under it (Redux) — can resolve outside
+ * `siteRoot` even for a component the repository legitimately owns.
+ * `confinementRoot` (always `repositoryDir`) is the actual security
+ * boundary for that resolution and for `checkedFile`'s symlink safety walk,
+ * so such an import still copies instead of throwing "path escapes its
+ * root" for a component this migration should have imported.
+ */
+export function createComponentMigrator(siteRoot: string, confinementRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
   transform: (raw: string, currentFile: string) => string
   files: () => Array<RenderedMigrationFile>
 } {
   const root = resolve(siteRoot)
+  const confined = resolve(confinementRoot)
   // A destination can contain imports from several repositories with identical
   // snippet names. Stable source identity isolates their graphs without tying
   // registry names to a temporary checkout path or changing repeat imports.
@@ -358,9 +469,9 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
   }
 
   function checkedFile(path: string): string {
-    const local = relative(root, path)
-    resolveWithin(root, local)
-    let current = root
+    const local = relative(confined, path)
+    resolveWithin(confined, local)
+    let current = confined
     if (lstatSync(current).isSymbolicLink()) throw new Error('symbolic links are not imported')
     for (const segment of local.split(/[\\/]/)) {
       current = resolveWithin(current, segment)
@@ -374,7 +485,7 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
     if (specifier.includes('\\') || specifier.includes('\0') || /[?#]/.test(specifier)) throw new Error('unsupported component dependency path')
     const candidate = specifier.startsWith('/')
       ? resolveWithin(root, specifier.slice(1))
-      : resolveWithin(root, relative(root, resolve(dirname(importer), specifier)))
+      : resolveWithin(confined, relative(confined, resolve(dirname(importer), specifier)))
     const candidates = [candidate]
     if (!extname(candidate)) {
       candidates.push(...['.tsx', '.jsx', '.ts', '.js', '.mjs', '.json'].map((extension) => candidate + extension))
@@ -389,7 +500,11 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
   }
 
   function outputPath(path: string): string {
-    return `${destinationRoot}/source/${relative(root, path).replace(/\\/g, '/')}`
+    // Must be `confined`, not `root`: a component reached via a relative
+    // import from outside `root` (see `resolveDependency`) is still inside
+    // `confined`, and a `../`-containing destination path would risk
+    // writing outside `destinationRoot`.
+    return `${destinationRoot}/source/${relative(confined, path).replace(/\\/g, '/')}`
   }
 
   function copyGraph(entry: string): string {
@@ -397,6 +512,12 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
     // registered component or consume the successful-copy budget.
     const staged = new Map<string, RenderedMigrationFile>()
     let stagedBytes = 0
+    /** Stage a small fixed-content shim module (see `DOCUSAURUS_THEME_SHIMS`) once, reused across every component that imports it. */
+    function stageShim(filename: string, content: string): string {
+      const shimDestination = `${destinationRoot}/shims/${filename}`
+      if (!copied.has(shimDestination) && !staged.has(shimDestination)) staged.set(shimDestination, { path: shimDestination, content })
+      return shimDestination
+    }
     function visit(path: string): void {
       const destination = outputPath(path)
       if (copied.has(destination) || staged.has(destination)) return
@@ -411,6 +532,20 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       staged.set(destination, { path: destination, content })
       if (!CODE_EXTENSIONS.has(extension)) {
         if (extension === '.css' && /@import\b|url\s*\(/i.test(content.toString('utf8'))) throw new Error('CSS resource dependencies require manual migration')
+        if (extension === '.css' && path.toLowerCase().endsWith('.module.css')) {
+          // A parse failure here (malformed CSS, an SCSS-only construct that
+          // isn't valid CSS, ...) is treated the same as any other copy
+          // failure: throw, so the dead-import-removal fallback in the
+          // caller can neutralize its usage instead of shipping CSS
+          // Turbopack would reject anyway.
+          let wrapped: string
+          try {
+            wrapped = wrapImpureCssModuleSelectors(content.toString('utf8'))
+          } catch {
+            throw new Error('CSS module could not be parsed to check for Turbopack-safe selectors')
+          }
+          staged.set(destination, { path: destination, content: wrapped })
+        }
         return
       }
       const text = content.toString('utf8')
@@ -421,9 +556,35 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       if (ast.statements.some((statement) => ts.isExpressionStatement(statement)
         && ts.isStringLiteral(statement.expression) && statement.expression.text === 'use server')) throw new Error('server-only component modules require manual migration')
       const edits: Array<Replacement> = []
-      function dependency(literal: ts.StringLiteralLike): void {
+      function dependency(literal: ts.StringLiteralLike, importDeclaration?: ts.ImportDeclaration): void {
         const specifier = literal.text
         if (SHARED_IMPORTS.has(specifier) || isScaffoldProvidedImport(specifier)) return
+        // `@docusaurus/Link` maps onto `next/link` (already scaffold-provided)
+        // rather than a shim module: same default export, only its `to` prop
+        // is renamed to `href` wherever the copied file itself uses the tag.
+        if (specifier === '@docusaurus/Link') {
+          edits.push({ start: literal.getStart(ast), end: literal.end, value: '"next/link"' })
+          const localName = importDeclaration?.importClause?.name?.text
+          if (localName) {
+            function renameToProp(node: ts.Node): void {
+              if (ts.isJsxAttribute(node) && node.name.getText(ast) === 'to'
+                && ts.isJsxOpeningLikeElement(node.parent.parent)
+                && node.parent.parent.tagName.getText(ast) === localName) {
+                edits.push({ start: node.name.getStart(ast), end: node.name.end, value: 'href' })
+              }
+              ts.forEachChild(node, renameToProp)
+            }
+            renameToProp(ast)
+          }
+          return
+        }
+        const shim = DOCUSAURUS_THEME_SHIMS[specifier]
+        if (shim) {
+          const shimPath = stageShim(shim.filename, shim.content)
+          const nextPath = relative(dirname(destination), shimPath).replace(/\\/g, '/')
+          edits.push({ start: literal.getStart(ast), end: literal.end, value: JSON.stringify(portableSpecifier(nextPath.startsWith('.') ? nextPath : `./${nextPath}`)) })
+          return
+        }
         if (!specifier.startsWith('.') && !specifier.startsWith('/')) {
           throw new Error(specifier.startsWith('@/')
             ? `path alias ${specifier} points to source-site code the migration does not copy`
@@ -435,7 +596,9 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
         edits.push({ start: literal.getStart(ast), end: literal.end, value: JSON.stringify(portableSpecifier(nextPath.startsWith('.') ? nextPath : `./${nextPath}`)) })
       }
       function inspect(node: ts.Node): void {
-        if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) dependency(node.moduleSpecifier)
+        if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+          dependency(node.moduleSpecifier, ts.isImportDeclaration(node) ? node : undefined)
+        }
         if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword
           || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))) {
           const argument = node.arguments[0]
@@ -455,6 +618,62 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
     return outputPath(entry)
   }
 
+  /**
+   * Copy a binary asset verbatim to a stable `public/` path (bypassing
+   * `copyGraph`'s JS-module handling entirely — the asset is bound to its
+   * URL string, never imported as a module) and return that URL. Used when
+   * an import couldn't be copied as a component but names a real file the
+   * page only ever references by URL (`src={Logo}`), never as a JSX tag.
+   */
+  function copyPublicAsset(path: string): string {
+    checkedFile(path)
+    const size = lstatSync(path).size
+    if (size > MAX_FILE_BYTES || copiedBytes + size > MAX_COMPONENT_BYTES || copied.size >= MAX_COMPONENT_FILES) {
+      throw new Error('component migration budget exceeded')
+    }
+    const publicName = `migrated-${hash(relative(confined, path))}${extname(path).toLowerCase()}`
+    const destination = `public/${publicName}`
+    if (!copied.has(destination)) {
+      copied.set(destination, { path: destination, content: readFileSync(path) })
+      copiedBytes += size
+    }
+    return `/${publicName}`
+  }
+
+  /**
+   * Docusaurus ships SVGR out of the box, so `import Foo from './foo.svg';
+   * <Foo />` renders the SVG as a real component there. The migrated
+   * project has no SVGR loader, so importing an `.svg` file the ordinary
+   * way (`copyGraph`'s ordinary path, used below) yields whatever the
+   * bundler's default asset handling returns for it — a URL string or a
+   * `{ src }` object, either way not a valid React element type — and
+   * `<Foo />` throws "Element type is invalid" at render. Used only when
+   * the import is actually rendered as a JSX tag (an attribute-only usage,
+   * `src={Foo}`, needs no wrapper and is left as the plain import): stage a
+   * tiny companion module next to the copied SVG that imports it as a URL
+   * either way and renders a plain `<img>`, and register that instead of
+   * the raw file.
+   */
+  function wrapSvgAsComponent(svgOutputPath: string): string {
+    const wrapperPath = `${svgOutputPath}.component.tsx`
+    if (!copied.has(wrapperPath)) {
+      const content = [
+        "'use client'",
+        '',
+        `import svgSource from ${JSON.stringify(`./${basename(svgOutputPath)}`)}`,
+        '',
+        'export default function SvgImage(props: Record<string, unknown>) {',
+        '  const src = typeof svgSource === "string" ? svgSource : (svgSource as { src: string }).src',
+        '  // eslint-disable-next-line @next/next/no-img-element -- no SVGR loader is configured; this renders the raw file.',
+        '  return <img src={src} alt="" {...props} />',
+        '}',
+        '',
+      ].join('\n')
+      copied.set(wrapperPath, { path: wrapperPath, content })
+    }
+    return wrapperPath
+  }
+
   function register(path: string, imported: string): string {
     const name = `Migrated${hash(`${path}:${imported}`)}`
     registrations.set(name, { path, imported })
@@ -462,8 +681,16 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
   }
 
   function transform(raw: string, currentFile: string): string {
-    const content = parseFrontmatter(raw).content
-    const frontmatter = raw.slice(0, raw.length - content.length)
+    const parsedFrontmatter = parseFrontmatter(raw).content
+    const frontmatter = raw.slice(0, raw.length - parsedFrontmatter.length)
+    // remark-mdx does not parse a raw HTML comment (`<!-- ... -->`) at all —
+    // a real source page commonly has one (Docusaurus' own
+    // `<!-- prettier-ignore -->` ahead of a snippet import) and it
+    // otherwise throws here before this pass ever runs, leaving whatever
+    // import that comment sits near completely untouched. `normalizeMdx`
+    // converts the same syntax later in the pipeline anyway, so doing it
+    // here too (on this function's own working copy) is never wasted work.
+    const content = normalizeHtmlComments(parsedFrontmatter)
     let tree: MdxNode
     try {
       tree = parser.parse(content) as MdxNode
@@ -511,8 +738,27 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       })
       return found
     }
-    for (const node of tree.children ?? []) {
-      if (node.type !== 'mdxjsEsm' || node.value === undefined || node.position?.start.offset === undefined) continue
+    /** True when `name` is ever a JSX tag's own root name (`<name ...>`), regardless of any other usage — narrower than `hasExpressionReference`'s combined signal, needed where a string binding (an asset's URL) is fine for any *other* usage but not this one. */
+    function usedAsJsxTagName(name: string): boolean {
+      let found = false
+      walk(tree, (node) => { if (node.name === name) found = true })
+      return found
+    }
+    // Docusaurus allows a real `import`/`export` ESM block anywhere in the
+    // body, not just at the top of the file — a documentation page
+    // demonstrating a live code example commonly nests one inside a JSX
+    // wrapper (`<BrowserWindow>\nimport Foo from './foo.svg'\n\n<Foo
+    // /></BrowserWindow>`, straight from Docusaurus' own docs). remark-mdx
+    // still parses each as its own `mdxjsEsm` node, just nested under that
+    // wrapper's `children` instead of `tree.children` directly, so this
+    // must walk the whole tree to find every one of them; a scan of only
+    // `tree.children` silently skips a nested import, leaving the page
+    // referencing a path the migrated project never has ("Module not
+    // found") without any warning at all.
+    const esmNodes: Array<MdxNode> = []
+    walk(tree, (node) => { if (node.type === 'mdxjsEsm') esmNodes.push(node) })
+    for (const node of esmNodes) {
+      if (node.value === undefined || node.position?.start.offset === undefined) continue
       const ast = sourceFile(node.value, 'inline.tsx')
       for (const statement of ast.statements) {
         if (!ts.isImportDeclaration(statement)) {
@@ -588,6 +834,33 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
           continue
         }
         if (/\.mdx?$/.test(specifier)) continue
+        // A binary asset (`docusaurusLogo.svg`, a `.docx` handout, ...) is
+        // never really "a component" — it's fine bound to any identifier
+        // shape and referenced from an expression (`src={docusaurusLogo}`),
+        // unlike the component-alias mechanism below, which can only
+        // rewrite a literal JSX tag name, not an arbitrary expression
+        // reference. Handle it before the component-shaped checks reject it
+        // for the wrong reason (a lowercase local name, expression usage)
+        // and leave a dead import behind. Only bail out of this path (to
+        // the ordinary handling below, which removes the import either way)
+        // when the same local name is *also* used as a JSX tag — a string
+        // URL bound there would throw just as hard as the missing import.
+        if (bindings.length && RESCUABLE_ASSET_EXTENSIONS.has(extname(specifier).toLowerCase())
+          && !bindings.some((binding) => usedAsJsxTagName(binding.local))) {
+          try {
+            const href = copyPublicAsset(resolveDependency(specifier, currentFile))
+            edits.push({
+              start: node.position.start.offset + statement.getStart(ast),
+              end: node.position.start.offset + statement.end,
+              value: bindings.map((binding) => `const ${binding.local} = ${JSON.stringify(href)};`).join('\n'),
+            })
+            warn(`Asset import ${JSON.stringify(rawSpecifier)} was copied to ${href} and bound to that URL instead of importing it as a component.`, currentFile)
+            continue
+          } catch {
+            // Not actually resolvable/copyable (missing file, budget) —
+            // fall through to the ordinary handling below.
+          }
+        }
         if (!bindings.length || (statement.importClause?.namedBindings && ts.isNamespaceImport(statement.importClause.namedBindings))) {
           warn('Namespace or side-effect MDX imports require manual registration; the import was preserved.', currentFile)
           hasUnsupportedImports = true
@@ -605,18 +878,96 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
         }
         try {
           const path = copyGraph(resolveDependency(specifier, currentFile))
+          const isSvgUsedAsTag = extname(path).toLowerCase() === '.svg' && bindings.some((binding) => usedAsJsxTagName(binding.local))
           for (const binding of bindings) {
-            const name = register(path, binding.imported)
+            const registerPath = isSvgUsedAsTag ? wrapSvgAsComponent(path) : path
+            const registerImported = isSvgUsedAsTag ? 'default' : binding.imported
+            const name = register(registerPath, registerImported)
             aliases.set(binding.local, name)
-            moduleImports.push(`import { ${binding.imported} as ${binding.local} } from ${JSON.stringify(portableSpecifier(`./${relative(destinationRoot, path).replace(/\\/g, '/')}`))};`)
+            moduleImports.push(`import { ${registerImported} as ${binding.local} } from ${JSON.stringify(portableSpecifier(`./${relative(destinationRoot, registerPath).replace(/\\/g, '/')}`))};`)
           }
           edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
         } catch (error) {
           hasUnsupportedImports = true
-          warn(`Custom component was preserved for manual migration: ${error instanceof Error ? error.message : 'unsupported dependency'}.`, currentFile)
+          const importStart = node.position.start.offset + statement.getStart(ast)
+          const importEnd = node.position.start.offset + statement.end
+          // The component itself couldn't be copied (unsupported syntax, a
+          // budget limit, a missing file, ...). Leaving the import in place
+          // referenced a module that will never exist in the migrated
+          // project, which fails `next build` for the *whole* site with
+          // "Module not found" — not just this page (the same reasoning as
+          // the unsupported-npm-import case above). Remove it. Its bindings
+          // are known to be used only as JSX tags here (any expression/prop
+          // usage already excluded this import from reaching this try, via
+          // the `hasExpressionReference` check above), so a plain-page
+          // rescan (`replaceUnknownComponents`, mdx.ts, run by repository.ts
+          // after this transform) will find each now-undeclared tag and
+          // neutralize it (a paired tag keeps its children in a `<div>`; a
+          // self-closing one is removed) rather than leave a dangling
+          // reference.
+          let rescuedAssetHref: string | undefined
+          if (RESCUABLE_ASSET_EXTENSIONS.has(extname(specifier).toLowerCase())) {
+            // Only worth rescuing as a URL string when nothing ever renders
+            // it as a JSX tag (`<Logo />`) — a string bound to a component
+            // reference would throw just as hard as the missing import did.
+            const usedAsJsxTag = bindings.some((binding) => hasExpressionReference(new Set([binding.local]), { includeDirectTags: true }))
+            if (!usedAsJsxTag) {
+              try {
+                rescuedAssetHref = copyPublicAsset(resolveDependency(specifier, currentFile))
+              } catch {
+                rescuedAssetHref = undefined
+              }
+            }
+          }
+          if (rescuedAssetHref !== undefined) {
+            edits.push({
+              start: importStart,
+              end: importEnd,
+              value: bindings.map((binding) => `const ${binding.local} = ${JSON.stringify(rescuedAssetHref)};`).join('\n'),
+            })
+            warn(`Asset import ${JSON.stringify(rawSpecifier)} could not be copied as a component; it was copied to ${rescuedAssetHref} and bound to that URL instead.`, currentFile)
+          } else {
+            edits.push({ start: importStart, end: importEnd, value: '' })
+            warn(`Component import ${JSON.stringify(rawSpecifier)} could not be copied and was removed: ${error instanceof Error ? error.message : 'unsupported dependency'}. Its usage on this page was neutralized.`, currentFile)
+          }
         }
       }
     }
+
+    // Docusaurus' own docs teach `require('./relative/asset.ext').default`
+    // as the idiom for linking a JSX attribute (`href={...}`) straight to a
+    // static asset — real, working MDX on the source site, but a dangling
+    // `require()` of a path the migrated project never has once copied
+    // verbatim ("Module not found" at build time). Only a JSX *attribute*
+    // expression is handled here (`mdxFlowExpression`/`mdxTextExpression`
+    // bodies never hit this shape in practice and the ESM-import loop above
+    // already covers a bare top-level `require()`); each attribute's own
+    // `position` bounds the replacement to just that attribute's text, so
+    // this can never match the identical-looking call inside a *fenced code
+    // example* documenting the very same idiom (a real risk here, since
+    // Docusaurus' own assets.mdx page shows both side by side).
+    walk(tree, (node) => {
+      for (const attribute of node.attributes ?? []) {
+        if (attribute.type !== 'mdxJsxAttribute' || !attribute.value || typeof attribute.value !== 'object') continue
+        const start = attribute.position?.start.offset
+        const end = attribute.position?.end.offset
+        if (start === undefined || end === undefined) continue
+        const attributeText = content.slice(start, end)
+        const match = attributeText.match(/require\(\s*(['"])((?:\.\.?\/|\/|@site\/)[^'"]+?\.(?:svg|png|jpe?g|webp|gif|avif|ico|docx|pdf))\1\s*\)(?:\.default|\.src)?/)
+        if (!match || match.index === undefined) continue
+        try {
+          const specifier = match[2]
+          const normalized = specifier.startsWith('@site/') ? `/${specifier.slice('@site/'.length)}` : specifier
+          const resolvedPath = normalized.startsWith('/') ? resolveWithin(root, normalized.slice(1)) : resolveDependency(normalized, currentFile)
+          const href = copyPublicAsset(resolvedPath)
+          const replaced = attributeText.slice(0, match.index) + JSON.stringify(href) + attributeText.slice(match.index + match[0].length)
+          edits.push({ start, end, value: replaced })
+        } catch {
+          // Not actually resolvable/copyable — leave the attribute as-is;
+          // the MDX-compile/build check reports the real problem.
+        }
+      }
+    })
 
     // A page-local declaration (not imported) that uses a hook or an event
     // handler must move to the client module along with its invocation: left
@@ -741,7 +1092,11 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
   }
 
   function files(): Array<RenderedMigrationFile> {
-    if (!registrations.size) return []
+    // A rescued asset (`copyPublicAsset`) lands in `copied` without ever
+    // registering a component; it still needs emitting even when nothing
+    // was registered.
+    if (!copied.size) return []
+    if (!registrations.size) return [...copied.values()]
     const entries = [...registrations.entries()].sort(([a], [b]) => a.localeCompare(b))
     return [...copied.values(), {
       path: 'src/mdx/custom-components.tsx',

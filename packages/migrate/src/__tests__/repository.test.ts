@@ -1,12 +1,30 @@
 /** End-to-end repository fixtures for platform-specific navigation and assets. */
 
+import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
+import { cloneGitHubRepository, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
+
+// Queue of scripted `git clone` outcomes consumed in order by the mocked
+// `spawn` below, so `cloneGitHubRepository`'s retry-on-network-failure logic
+// (repository.ts) can be tested without a real clone.
+const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; stderr?: string }> }))
+vi.mock('node:child_process', () => ({
+  spawn: () => {
+    const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void } }
+    child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} })
+    const outcome = cloneOutcomes.queue.shift() ?? { code: 0 }
+    queueMicrotask(() => {
+      if (outcome.stderr) child.stderr.emit('data', outcome.stderr)
+      child.emit('close', outcome.code)
+    })
+    return child
+  },
+}))
 
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repository-'))
@@ -95,6 +113,117 @@ describe('Mintlify repository migration', () => {
     const files = renderMigrationFiles(bundle)
     expect(files.map((file) => file.path)).toContain('public/images/logo.svg')
     expect(files.map((file) => file.path)).not.toContain('src/content/readme.mdx')
+  })
+
+  it('escapes a bare literal brace in Mintlify page prose instead of crashing the build (frontmatter untouched)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-braces-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['style-guide'] },
+    }))
+    writeFileSync(join(root, 'style-guide.mdx'), '---\ntitle: Style guide\ndescription: "Use {x} as a placeholder"\n---\n\nWrap a variable like {x} in braces.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages[0].body).toContain('Wrap a variable like \\{x\\} in braces.')
+    // The frontmatter value must survive unescaped: it is YAML, not MDX.
+    expect(bundle.pages[0].title).toBe('Style guide')
+  })
+
+  it('inlines a Mintlify <Snippet file="..."> tag form (no matching import needed)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-snippet-tag-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['setup'] },
+    }))
+    writeFileSync(join(root, 'setup.mdx'), '---\ntitle: Setup\n---\n\nFirst, <Snippet file="shared/warning.mdx" />\n\ndone.')
+    mkdirSync(join(root, 'snippets', 'shared'), { recursive: true })
+    writeFileSync(join(root, 'snippets', 'shared', 'warning.mdx'), 'back up your data')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages[0].body).toContain('First, back up your data\n\ndone.')
+  })
+
+  it('leaves a comment and warns when a <Snippet file="..."> tag cannot be resolved', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-snippet-tag-missing-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['setup'] },
+    }))
+    writeFileSync(join(root, 'setup.mdx'), '---\ntitle: Setup\n---\n\n<Snippet file="missing.mdx" />')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages[0].body).toContain('Missing snippet: missing.mdx')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'missing-page',
+      message: expect.stringContaining('Snippet file="missing.mdx"'),
+    }))
+  })
+
+  it('maps a bare <Link href> to <a> and neutralizes any other unresolved component, with a warning', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-unknown-components-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['page'] },
+    }))
+    writeFileSync(join(root, 'page.mdx'), [
+      '---', 'title: Page', '---', '',
+      'See <Link href="/other">the other page</Link> for details.', '',
+      '<Emoji name="tada" />',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const body = bundle.pages[0].body
+    expect(body).toContain('<a href="/other">the other page</a>')
+    // `<Emoji>` has no Thally builtin, import, or local declaration: the
+    // generic unknown-component fallback drops the self-closing tag.
+    expect(body).not.toContain('<Emoji')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('<Emoji>'),
+    }))
+  })
+
+  it('prefers a docs.json project root over a smaller mint.json one found first, and warns about the ambiguity (Infisical: company/mint.json vs docs/docs.json)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-multiroot-'))
+    // `company` sorts before `docs` in a directory listing on most
+    // filesystems, so a first-match breadth-first walk reaches it first.
+    mkdirSync(join(root, 'company'), { recursive: true })
+    writeFileSync(join(root, 'company', 'mint.json'), JSON.stringify({ navigation: { pages: ['handbook'] } }))
+    writeFileSync(join(root, 'company', 'handbook.mdx'), '# Handbook')
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction', 'guide'] },
+    }))
+    writeFileSync(join(root, 'docs', 'introduction.mdx'), '# Introduction')
+    writeFileSync(join(root, 'docs', 'guide.mdx'), '# Guide')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.id).sort()).toEqual(['guide', 'introduction'])
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringMatching(/Multiple possible Mintlify project roots.*company.*docs.*docs was picked/s),
+    }))
+  })
+
+  it('does not warn about multiple roots when only one Mintlify project exists', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-singleroot-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction'] },
+    }))
+    writeFileSync(join(root, 'introduction.mdx'), '# Introduction')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.warnings.some((warning) => warning.message.includes('Multiple possible'))).toBe(false)
   })
 
   it('uses a nested Mintlify project as the config, content, snippet, and asset root', () => {
@@ -756,6 +885,26 @@ function docusaurusFixture(sidebarSource?: string): string {
 }
 
 describe('Docusaurus repository migration', () => {
+  it('prefers the project root with the most pages when more than one docusaurus.config.* exists, and warns about the ambiguity', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-multiroot-'))
+    mkdirSync(join(root, 'archive', 'docs'), { recursive: true })
+    writeFileSync(join(root, 'archive', 'docusaurus.config.js'), 'module.exports = {}')
+    writeFileSync(join(root, 'archive', 'docs', 'old.md'), '# Old')
+    mkdirSync(join(root, 'website', 'docs'), { recursive: true })
+    writeFileSync(join(root, 'website', 'docusaurus.config.js'), 'module.exports = {}')
+    writeFileSync(join(root, 'website', 'docs', 'intro.md'), '# Intro')
+    writeFileSync(join(root, 'website', 'docs', 'guide.md'), '# Guide')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+
+    expect(bundle.pages.map((page) => page.id).sort()).toEqual(['guide', 'intro'])
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringMatching(/Multiple possible Docusaurus project roots.*archive.*website.*website was picked/s),
+    }))
+  })
+
+
   it('projects static sidebars, routes, generated indexes, syntax, and static assets', () => {
     const bundle = migrateRepository({
       repositoryDir: docusaurusFixture(),
@@ -1306,5 +1455,48 @@ navigation:
 
     expect(bundle.docsConfig.tabs.find((tab) => tab.api)?.api?.source).toBe('/plants.yml')
     expect(bundle.warnings.some((warning) => warning.message.startsWith('No OpenAPI'))).toBe(false)
+  })
+})
+
+describe('cloneGitHubRepository retry', () => {
+  afterEach(() => { cloneOutcomes.queue.length = 0 })
+
+  it('retries a transient network-class clone failure and succeeds', async () => {
+    const targetDir = mkdtempSync(join(tmpdir(), 'thally-clone-retry-'))
+    cloneOutcomes.queue.push(
+      { code: 128, stderr: 'error: RPC failed; curl 56 Recv failure: Connection reset by peer' },
+      { code: 0 },
+    )
+    await expect(cloneGitHubRepository(
+      { owner: 'acme', repo: 'docs', branch: 'main', docsDir: '', cloneUrl: 'https://github.com/acme/docs.git' },
+      targetDir,
+    )).resolves.toBeUndefined()
+    expect(cloneOutcomes.queue).toHaveLength(0)
+  })
+
+  it('does not retry a non-network clone failure', async () => {
+    const targetDir = mkdtempSync(join(tmpdir(), 'thally-clone-retry-'))
+    cloneOutcomes.queue.push({ code: 128, stderr: "fatal: repository 'https://github.com/acme/missing.git/' not found" })
+    await expect(cloneGitHubRepository(
+      { owner: 'acme', repo: 'missing', branch: 'main', docsDir: '', cloneUrl: 'https://github.com/acme/missing.git' },
+      targetDir,
+    )).rejects.toThrow(/not found/)
+    // Only the one scripted attempt was consumed; a second would have been
+    // queued only if the (non-retryable) failure had triggered a retry.
+    expect(cloneOutcomes.queue).toHaveLength(0)
+  })
+
+  it('gives up after exhausting all retry attempts on a repeated network-class failure', async () => {
+    const targetDir = mkdtempSync(join(tmpdir(), 'thally-clone-retry-'))
+    cloneOutcomes.queue.push(
+      { code: 128, stderr: 'error: RPC failed; curl 56 Recv failure: Connection reset by peer' },
+      { code: 128, stderr: 'error: RPC failed; curl 56 Recv failure: Connection reset by peer' },
+      { code: 128, stderr: 'error: RPC failed; curl 56 Recv failure: Connection reset by peer' },
+    )
+    await expect(cloneGitHubRepository(
+      { owner: 'acme', repo: 'docs', branch: 'main', docsDir: '', cloneUrl: 'https://github.com/acme/docs.git' },
+      targetDir,
+    )).rejects.toThrow(/RPC failed/)
+    expect(cloneOutcomes.queue).toHaveLength(0)
   })
 })
