@@ -5,6 +5,7 @@ import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 
+import { isThallyBuiltinComponent } from './builtin-components.js'
 import { parseFrontmatter } from './frontmatter.js'
 import type { MigrationPage, MigrationPlatform } from './types.js'
 
@@ -163,6 +164,7 @@ const SAFE_BUILTIN_ROOTS = new Set([
 interface MdxOffsetNode {
   type: string
   value?: string
+  name?: string | null
   data?: { estree?: acorn.Program | null }
   children?: Array<MdxOffsetNode>
   position?: { start: { offset?: number }; end: { offset?: number } }
@@ -350,6 +352,148 @@ function splitFrontmatterBlock(raw: string): { front: string; body: string } {
   if (!closing) return { front: bom, body: source }
   const end = opening[0].length + closing.index + closing[0].length
   return { front: bom + source.slice(0, end), body: source.slice(end) }
+}
+
+/**
+ * `components.ts`'s `createComponentMigrator` renames a successfully copied
+ * or extracted component's JSX tag to `Migrated<12-hex-char-hash>` and
+ * registers it in the project-wide `src/mdx/custom-components.tsx` (merged
+ * into every page by `mdx-components.tsx`, not imported per-page) — so a
+ * page's own ESM never mentions it, even though it does resolve. Recognize
+ * the naming convention rather than re-deriving it from `components.ts`,
+ * which would need this module to depend on that one's private `hash()`.
+ */
+const MIGRATED_COMPONENT_TAG = /^Migrated[0-9a-f]{12}$/
+
+/** True when the JSX span itself (not merely its opening tag) is self-closing, e.g. `<Foo />`. */
+function isSelfClosingJsx(text: string): boolean {
+  return /\/>\s*$/.test(text)
+}
+
+/** Replace the leading `<name` / trailing `</name` occurrences of a tag with `newName`, for a tag with no children to preserve (self-closing, or an empty pair). */
+function renameTagOccurrences(text: string, name: string, newName: string): string {
+  let result = text
+  const openIndex = result.indexOf(`<${name}`)
+  if (openIndex >= 0) result = `${result.slice(0, openIndex + 1)}${newName}${result.slice(openIndex + 1 + name.length)}`
+  const closeIndex = result.lastIndexOf(`</${name}`)
+  if (closeIndex >= 0) result = `${result.slice(0, closeIndex + 2)}${newName}${result.slice(closeIndex + 2 + name.length)}`
+  return result
+}
+
+/**
+ * Reconstructs `body.slice(loStart, hiEnd)` verbatim except through
+ * `renderNode` at each of `children`'s own spans — the gaps between/around
+ * them (markdown or JSX syntax the children's own positions don't cover,
+ * such as a parent JSX element's attributes) are copied through unchanged.
+ */
+function renderChildrenSpan(
+  children: Array<MdxOffsetNode>,
+  loStart: number,
+  hiEnd: number,
+  body: string,
+  renderNode: (node: MdxOffsetNode) => string,
+): string {
+  let cursor = loStart
+  let out = ''
+  for (const child of children) {
+    const start = child.position?.start.offset
+    const end = child.position?.end.offset
+    if (start === undefined || end === undefined) continue
+    out += body.slice(cursor, start)
+    out += renderNode(child)
+    cursor = end
+  }
+  out += body.slice(cursor, hiEnd)
+  return out
+}
+
+/**
+ * Replaces a page-authored (or Docusaurus/Fern-only) `<Link href="...">`
+ * with a plain `<a href="...">`, keeping every attribute and all children
+ * exactly as authored — only the tag name changes, so nested content
+ * (including any unknown component the fallback below also rewrites) is
+ * preserved. A page that declares or imports its own `Link` keeps it
+ * untouched; that binding, not this generic one, is what actually renders.
+ */
+export function replaceLinkWithAnchor(raw: string): string {
+  return replaceUnknownComponents(raw, () => {}, { onlyRenameLinkTag: true })
+}
+
+/**
+ * Fallback for any capitalized JSX tag Thally cannot render: not a builtin
+ * (`isThallyBuiltinComponent`) and not declared or imported by the page
+ * itself. Mintlify/Docusaurus content commonly references a project-local or
+ * npm component that `components.ts`'s copy step already handles when it can
+ * be resolved — this only ever fires for what's left: a name with nothing
+ * backing it at all, which would otherwise throw "Expected component X to be
+ * defined" at render. A paired tag becomes a plain `<div>`, keeping its
+ * children (so nested prose/markup survives); a self-closing tag is removed
+ * outright, since it has no content to keep. `warn` is called once per
+ * distinct component name found. `<Link>` is renamed to `<a>` instead of
+ * falling into that generic path, since it's common enough to warrant a
+ * real mapping (Mintlify/Docusaurus content routinely writes `<Link
+ * href="...">`) rather than losing the link.
+ *
+ * Frontmatter is split off first (see `escapeFernLiteralBraces`) so a YAML
+ * value can never be mistaken for JSX.
+ */
+export function replaceUnknownComponents(
+  raw: string,
+  warn: (name: string) => void,
+  options: { onlyRenameLinkTag?: boolean } = {},
+): string {
+  const { front, body } = splitFrontmatterBlock(raw)
+
+  let root: MdxOffsetNode
+  try {
+    root = descriptionParser.parse(body) as MdxOffsetNode
+  } catch {
+    return raw
+  }
+
+  const declared = new Set<string>(['props'])
+  const collectEsm = (node: MdxOffsetNode) => {
+    if (node.type === 'mdxjsEsm') collectEsmBindings(node, declared)
+    for (const child of node.children ?? []) collectEsm(child)
+  }
+  collectEsm(root)
+
+  const warned = new Set<string>()
+  const renderNode = (node: MdxOffsetNode): string => {
+    const start = node.position?.start.offset
+    const end = node.position?.end.offset
+    if (start === undefined || end === undefined) return ''
+    const isJsx = node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement'
+    const tagRoot = node.name ? node.name.split('.')[0] : undefined
+    const text = body.slice(start, end)
+
+    if (isJsx && tagRoot === 'Link' && !declared.has('Link')) {
+      if (isSelfClosingJsx(text) || !node.children?.length) return renameTagOccurrences(text, node.name!, 'a')
+      const openEnd = node.children[0].position?.start.offset ?? start
+      const closeStart = node.children.at(-1)!.position?.end.offset ?? end
+      return renameTagOccurrences(body.slice(start, openEnd), node.name!, 'a')
+        + renderChildrenSpan(node.children, openEnd, closeStart, body, renderNode)
+        + renameTagOccurrences(body.slice(closeStart, end), node.name!, 'a')
+    }
+
+    if (!options.onlyRenameLinkTag && isJsx && tagRoot && /^[A-Z]/.test(tagRoot)
+      && !isThallyBuiltinComponent(node.name!) && !declared.has(tagRoot) && !MIGRATED_COMPONENT_TAG.test(tagRoot)) {
+      if (!warned.has(node.name!)) {
+        warned.add(node.name!)
+        warn(node.name!)
+      }
+      if (isSelfClosingJsx(text)) return ''
+      if (!node.children?.length) return '<div></div>'
+      const openEnd = node.children[0].position?.start.offset ?? start
+      const closeStart = node.children.at(-1)!.position?.end.offset ?? end
+      return `<div>${renderChildrenSpan(node.children, openEnd, closeStart, body, renderNode)}</div>`
+    }
+
+    if (!node.children?.length) return text
+    return renderChildrenSpan(node.children, start, end, body, renderNode)
+  }
+
+  return front + renderNode(root)
 }
 
 /**

@@ -112,6 +112,65 @@ describe('Mintlify repository migration', () => {
     expect(bundle.pages[0].title).toBe('Style guide')
   })
 
+  it('inlines a Mintlify <Snippet file="..."> tag form (no matching import needed)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-snippet-tag-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['setup'] },
+    }))
+    writeFileSync(join(root, 'setup.mdx'), '---\ntitle: Setup\n---\n\nFirst, <Snippet file="shared/warning.mdx" />\n\ndone.')
+    mkdirSync(join(root, 'snippets', 'shared'), { recursive: true })
+    writeFileSync(join(root, 'snippets', 'shared', 'warning.mdx'), 'back up your data')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages[0].body).toContain('First, back up your data\n\ndone.')
+  })
+
+  it('leaves a comment and warns when a <Snippet file="..."> tag cannot be resolved', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-snippet-tag-missing-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['setup'] },
+    }))
+    writeFileSync(join(root, 'setup.mdx'), '---\ntitle: Setup\n---\n\n<Snippet file="missing.mdx" />')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages[0].body).toContain('Missing snippet: missing.mdx')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'missing-page',
+      message: expect.stringContaining('Snippet file="missing.mdx"'),
+    }))
+  })
+
+  it('maps a bare <Link href> to <a> and neutralizes any other unresolved component, with a warning', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-unknown-components-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['page'] },
+    }))
+    writeFileSync(join(root, 'page.mdx'), [
+      '---', 'title: Page', '---', '',
+      'See <Link href="/other">the other page</Link> for details.', '',
+      '<Emoji name="tada" />',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const body = bundle.pages[0].body
+    expect(body).toContain('<a href="/other">the other page</a>')
+    // `<Emoji>` has no Thally builtin, import, or local declaration: the
+    // generic unknown-component fallback drops the self-closing tag.
+    expect(body).not.toContain('<Emoji')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('<Emoji>'),
+    }))
+  })
+
   it('uses a nested Mintlify project as the config, content, snippet, and asset root', () => {
     const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-monorepo-'))
     const docsRoot = join(repositoryDir, 'apps', 'docs')

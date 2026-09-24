@@ -28,7 +28,7 @@ import {
   type DocusaurusSidebars,
 } from './docusaurus.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
-import { detectUnsupportedFernComponents, escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage } from './mdx.js'
+import { detectUnsupportedFernComponents, escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -78,6 +78,17 @@ const SNIPPET_DIRECTORIES = new Set(['snippets', '_snippets', 'partials', '_part
 // import (`import { default as Name } from '...'`), and a plain named import
 // (`import { Name } from '...'`) — Mintlify snippets can export either way.
 const SNIPPET_IMPORT_PATTERN = /^import\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm
+
+/**
+ * Mintlify's `<Snippet file="path.mdx" />` tag form: unlike the import form
+ * above, this never needs a matching `import` statement — `file` is a path
+ * relative to the project's `snippets/` directory (Mintlify's own
+ * convention; see `resolveSnippetPath`'s sibling below for the actual
+ * lookup). Both self-closing and paired spellings are matched; a paired
+ * tag's own children (if any) are always discarded in favor of the
+ * resolved snippet's real content, matching Mintlify's own renderer.
+ */
+const SNIPPET_TAG_PATTERN = /<Snippet\s+file=(?:"([^"]+)"|'([^']+)')\s*(?:\/>|>[\s\S]*?<\/Snippet>)/g
 const MINTIGNORE_FILENAME = '.mintignore'
 interface IgnoreMatcher {
   add(patterns: string): IgnoreMatcher
@@ -865,6 +876,29 @@ function inlineMdxSnippets(
         return interpolateSnippet(snippet, attributes)
       })
   }
+  result = result.replace(SNIPPET_TAG_PATTERN, (_tag, doubleQuoted: string | undefined, singleQuoted: string | undefined) => {
+    const filePath = (doubleQuoted ?? singleQuoted)!
+    try {
+      const candidate = resolveWithin(siteRoot, `snippets/${filePath}`)
+      if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
+      return inlineMdxSnippets(
+        withoutFrontmatter(readFileSync(candidate, 'utf8')),
+        candidate,
+        repositoryRoot,
+        warnings,
+        depth + 1,
+        siteRoot,
+        globalAliases,
+      )
+    } catch {
+      warnings.push({
+        code: 'missing-page',
+        message: `Snippet file="${filePath}" could not be resolved and was left as a comment.`,
+        source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+      })
+      return `{/* Missing snippet: ${filePath} */}`
+    }
+  })
   return result
 }
 
@@ -1231,6 +1265,30 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (platform === 'fern' && fernProjectRoot) {
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, fernProjectRoot)
+    }
+    if (platform === 'mintlify' || platform === 'docusaurus') {
+      // `<Link href="...">` (common Mintlify/Docusaurus prose, e.g. mem0's
+      // docs) has no Thally builtin; map it to a plain anchor before the
+      // generic unknown-component fallback runs, so a real navigable link
+      // survives instead of becoming a `<div>`. Runs on the fully normalized
+      // body (after `parseMarkdownPage`'s `normalizeMdx`), so a tag that a
+      // platform-specific rename still resolves (Docusaurus `TabItem` ->
+      // `Tab`, Mintlify `Warn` -> `Warning`, ...) is never mistaken for
+      // unknown.
+      page.body = replaceLinkWithAnchor(page.body)
+      // Anything still capitalized and unresolved at this point (not a
+      // Thally builtin, not declared/imported by the page, not already
+      // handled by componentMigrator's copy/removal above) would otherwise
+      // throw "Expected component X to be defined" at render. Warn once per
+      // component name and neutralize it: keep a paired tag's children,
+      // drop a self-closing one outright.
+      page.body = replaceUnknownComponents(page.body, (name) => {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Component <${name}> has no equivalent in Thally and wasn't found on this page; it was replaced with a plain <div> (or removed, if self-closing) so the page still builds. Add a matching component or edit the page.`,
+          source: file.relativePath,
+        })
+      })
     }
     const mdxError = invalidMdxReason(page.body)
     if (mdxError) {
