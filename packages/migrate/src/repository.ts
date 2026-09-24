@@ -11,6 +11,7 @@ import {
   lstatSync,
   readFileSync,
   readdirSync,
+  rmSync,
 } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -399,15 +400,21 @@ export function parseGitHubRepositoryUrl(rawUrl: string): GitHubRepositorySource
   }
 }
 
-/** Clone a repository without a shell; callers own and remove `targetDir`. */
-export async function cloneGitHubRepository(
-  source: GitHubRepositorySource,
-  targetDir: string,
-): Promise<void> {
+const CLONE_RETRY_ATTEMPTS = 3
+const CLONE_RETRY_DELAY_MS = 1_000
+
+/** Transient network-class git failures a retry can plausibly recover from. */
+const RETRYABLE_CLONE_ERROR = /RPC failed|Recv failure|early EOF|curl \d+|Could not resolve host|Connection (?:reset|refused|timed out)|The remote end hung up|SSL[_ ]?(?:read|connect|write) error|timed out|network is unreachable/i
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, ms) })
+}
+
+function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<void> {
   const args = ['clone', '--depth', '1', '--single-branch']
   if (source.branch !== 'HEAD') args.push('--branch', source.branch)
   args.push('--', source.cloneUrl, targetDir)
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const child = spawn('git', args, { stdio: ['ignore', 'ignore', 'pipe'] })
     let stderr = ''
     child.stderr.setEncoding('utf8')
@@ -420,6 +427,31 @@ export async function cloneGitHubRepository(
       else reject(new Error(`Failed to clone ${source.owner}/${source.repo}: ${stderr.trim() || `git exited ${code}`}`))
     })
   })
+}
+
+/**
+ * Clone a repository without a shell; callers own and remove `targetDir`. A
+ * large repository on a flaky connection can drop mid-clone (`RPC failed`,
+ * `Recv failure`, a `curl 56`, …) — retry a network-class failure a couple
+ * of times with backoff instead of surfacing a hard failure on the first
+ * blip. A partial checkout from the failed attempt is removed first, or
+ * `git clone` refuses to reuse the (now non-empty) target directory.
+ */
+export async function cloneGitHubRepository(
+  source: GitHubRepositorySource,
+  targetDir: string,
+): Promise<void> {
+  for (let attempt = 1; attempt <= CLONE_RETRY_ATTEMPTS; attempt++) {
+    try {
+      await cloneOnce(source, targetDir)
+      return
+    } catch (error) {
+      const retryable = error instanceof Error && RETRYABLE_CLONE_ERROR.test(error.message)
+      if (!retryable || attempt === CLONE_RETRY_ATTEMPTS) throw error
+      rmSync(targetDir, { recursive: true, force: true })
+      await delay(CLONE_RETRY_DELAY_MS * attempt)
+    }
+  }
 }
 
 /** Detect a supported repository docs platform from unambiguous config files. */

@@ -1,12 +1,30 @@
 /** End-to-end repository fixtures for platform-specific navigation and assets. */
 
+import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
+import { cloneGitHubRepository, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
+
+// Queue of scripted `git clone` outcomes consumed in order by the mocked
+// `spawn` below, so `cloneGitHubRepository`'s retry-on-network-failure logic
+// (repository.ts) can be tested without a real clone.
+const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; stderr?: string }> }))
+vi.mock('node:child_process', () => ({
+  spawn: () => {
+    const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void } }
+    child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} })
+    const outcome = cloneOutcomes.queue.shift() ?? { code: 0 }
+    queueMicrotask(() => {
+      if (outcome.stderr) child.stderr.emit('data', outcome.stderr)
+      child.emit('close', outcome.code)
+    })
+    return child
+  },
+}))
 
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repository-'))
@@ -1437,5 +1455,48 @@ navigation:
 
     expect(bundle.docsConfig.tabs.find((tab) => tab.api)?.api?.source).toBe('/plants.yml')
     expect(bundle.warnings.some((warning) => warning.message.startsWith('No OpenAPI'))).toBe(false)
+  })
+})
+
+describe('cloneGitHubRepository retry', () => {
+  afterEach(() => { cloneOutcomes.queue.length = 0 })
+
+  it('retries a transient network-class clone failure and succeeds', async () => {
+    const targetDir = mkdtempSync(join(tmpdir(), 'thally-clone-retry-'))
+    cloneOutcomes.queue.push(
+      { code: 128, stderr: 'error: RPC failed; curl 56 Recv failure: Connection reset by peer' },
+      { code: 0 },
+    )
+    await expect(cloneGitHubRepository(
+      { owner: 'acme', repo: 'docs', branch: 'main', docsDir: '', cloneUrl: 'https://github.com/acme/docs.git' },
+      targetDir,
+    )).resolves.toBeUndefined()
+    expect(cloneOutcomes.queue).toHaveLength(0)
+  })
+
+  it('does not retry a non-network clone failure', async () => {
+    const targetDir = mkdtempSync(join(tmpdir(), 'thally-clone-retry-'))
+    cloneOutcomes.queue.push({ code: 128, stderr: "fatal: repository 'https://github.com/acme/missing.git/' not found" })
+    await expect(cloneGitHubRepository(
+      { owner: 'acme', repo: 'missing', branch: 'main', docsDir: '', cloneUrl: 'https://github.com/acme/missing.git' },
+      targetDir,
+    )).rejects.toThrow(/not found/)
+    // Only the one scripted attempt was consumed; a second would have been
+    // queued only if the (non-retryable) failure had triggered a retry.
+    expect(cloneOutcomes.queue).toHaveLength(0)
+  })
+
+  it('gives up after exhausting all retry attempts on a repeated network-class failure', async () => {
+    const targetDir = mkdtempSync(join(tmpdir(), 'thally-clone-retry-'))
+    cloneOutcomes.queue.push(
+      { code: 128, stderr: 'error: RPC failed; curl 56 Recv failure: Connection reset by peer' },
+      { code: 128, stderr: 'error: RPC failed; curl 56 Recv failure: Connection reset by peer' },
+      { code: 128, stderr: 'error: RPC failed; curl 56 Recv failure: Connection reset by peer' },
+    )
+    await expect(cloneGitHubRepository(
+      { owner: 'acme', repo: 'docs', branch: 'main', docsDir: '', cloneUrl: 'https://github.com/acme/docs.git' },
+      targetDir,
+    )).rejects.toThrow(/RPC failed/)
+    expect(cloneOutcomes.queue).toHaveLength(0)
   })
 })
