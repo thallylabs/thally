@@ -703,6 +703,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     const edits: Array<Replacement> = []
     const declarations: Array<{ start: number; end: number; source: string }> = []
     const moduleImports: Array<string> = []
+    const realPageImports: Array<string> = []
     const sharedImportEdits: Array<Replacement> = []
     let hasUnsupportedImports = false
     function hasExpressionReference(names: Set<string>, options: {
@@ -889,6 +890,30 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           for (const binding of bindings) {
             const registerPath = isSvgUsedAsTag ? wrapSvgAsComponent(path) : path
             const registerImported = isSvgUsedAsTag ? 'default' : binding.imported
+            // MDX's own component-injection pass (recma-jsx-rewrite) only
+            // rewrites a JSX tag it finds as a genuine, direct mdast JSX
+            // node (`<Foo>` as its own markdown/JSX child) to pull from the
+            // shared `_components` scope (the customComponents registry
+            // below) — the alias-rename walk further down can likewise only
+            // text-replace that same direct form. Any other shape —
+            // `Capability.ToolUse` in a sibling prop's object literal,
+            // `<Widget />` nested inside a `{...}` expression or an
+            // `export const` declaration, a member tag `<Widget.Item />`,
+            // a plain value passed as a prop (`as={Widget}`) — is invisible
+            // to both, and registering it under an aliased key would leave
+            // the literal reference an unresolved free variable
+            // (`ReferenceError` at render; reproduced against a real
+            // Cohere build for both an enum-in-a-prop and a component
+            // nested in a `.map()` callback). Give any such binding a real
+            // import instead, keeping its original local name and using the
+            // project's `@/` alias so the specifier resolves regardless of
+            // where the generated runtime module that embeds this page
+            // ends up on disk.
+            if (!isSvgUsedAsTag && hasExpressionReference(new Set([binding.local]))) {
+              const aliasSpecifier = portableSpecifier(`@/${registerPath.replace(/^src\//, '').replace(/\\/g, '/')}`)
+              realPageImports.push(`import { ${registerImported} as ${binding.local} } from ${JSON.stringify(aliasSpecifier)};`)
+              continue
+            }
             const name = register(registerPath, registerImported)
             aliases.set(binding.local, name)
             moduleImports.push(`import { ${registerImported} as ${binding.local} } from ${JSON.stringify(portableSpecifier(`./${relative(destinationRoot, registerPath).replace(/\\/g, '/')}`))};`)
@@ -1095,7 +1120,11 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         : `{/* Removed <${node.name}>: unsupported import '${specifier}' */}`
       edits.push({ start, end, value })
     })
-    return frontmatter + applyReplacements(content, edits)
+    const rendered = applyReplacements(content, edits)
+    // Inserted after all offset-based edits (it has no position in the
+    // original source) so it lands once, at the very top of the body.
+    const realImportsBlock = realPageImports.length ? `${[...new Set(realPageImports)].join('\n')}\n\n` : ''
+    return frontmatter + realImportsBlock + rendered
   }
 
   function files(): Array<RenderedMigrationFile> {

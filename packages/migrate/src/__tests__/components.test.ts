@@ -138,14 +138,21 @@ describe('repository component migration', () => {
     const graph = bundle.componentFiles ?? []
     expect(graph.some((file) => String(file.content).includes('enum Capability'))).toBe(true)
     expect(graph.some((file) => String(file.content).includes('ModelShowcase'))).toBe(true)
-    // `Capability` (a TS enum, not a component) is registered into the same
-    // MDX scope as `ModelShowcase` so `Capability.Reasoning` resolves inside
-    // the page. `MDXComponents`' index signature expects every entry to be
-    // component-shaped, which an enum structurally is not — asserting the
-    // object literal (rather than typing each entry) keeps `tsc` clean
-    // without excluding content the migration can otherwise satisfy.
+    // MDX only resolves a JSX *tag* name (`<ModelShowcase>`) through the
+    // shared `_components` scope (the customComponents registry below);
+    // `Capability.Reasoning` is a bare identifier inside a prop expression,
+    // which that mechanism can never reach (MDX's own component-injection
+    // pass only rewrites JSX tag names) and throws `ReferenceError` at
+    // render if registered there instead. So `Capability` gets a real
+    // page-level import pointing at the copied module directly, keeping its
+    // original name, while `ModelShowcase` (JSX-tag-only) still goes through
+    // the registry.
+    expect(modelPage.body).toMatch(/^import \{ Capability as Capability \} from ['"]@\//m)
+    const graphFile = graph.find((file) => String(file.content).includes('enum Capability'))!
+    const expectedSpecifier = `@/${graphFile.path.replace(/^src\//, '').replace(/\.tsx?$/, '')}`
+    expect(modelPage.body).toContain(`from ${JSON.stringify(expectedSpecifier)}`)
     const registry = String(graph.find((file) => file.path === 'src/mdx/custom-components.tsx')!.content)
-    expect(registry).toContain('Capability')
+    expect(registry).not.toContain('Capability')
     expect(registry).toContain('ModelShowcase')
     expect(registry).toMatch(/}\s*as unknown as MDXComponents/)
     const check = ts.transpileModule(registry, {
@@ -343,26 +350,32 @@ describe('repository component migration', () => {
 
   it.each([
     '{true && <Widget />}',
-    '<Other as={Widget} />',
-    '<Other {...{ component: Widget }} />',
     '<Widget.Item />',
     'export const Wrapped = () => <Widget />;\n\n<Wrapped />',
-  ])('copies and rewrites a local import even when a binding is used outside a direct JSX tag: %s', (usage) => {
-    // A local/relative import is fully owned by the migration: the file is
-    // copied and the import specifier rewritten, keeping every binding's
-    // original local name — nothing in the page body needs renaming, so how
-    // a binding is used (a bare tag, a prop value, a member tag, a wrapping
-    // declaration, ...) makes no difference. Excluding the page here would
-    // drop content the migration can actually satisfy.
+    '<Other as={Widget} />',
+    '<Other {...{ component: Widget }} />',
+  ])('gives a binding a real import, not the aliased components registry, whenever it is used anywhere but a direct top-level JSX tag: %s', (usage) => {
+    // MDX's own component-injection pass (recma-jsx-rewrite) — and the
+    // alias-rename walk that mirrors it further down this file — only
+    // reach a JSX tag that is a genuine, direct mdast JSX node (`<Widget
+    // />` as its own markdown/JSX child). Nested inside a `{...}`
+    // expression, inside an `export const` declaration's function body, as
+    // a member tag (`<Widget.Item />`), or passed as a plain prop value —
+    // none of these are visible to either mechanism, so registering the
+    // binding under an aliased key (`Migratedxxx`) would leave the page's
+    // still-literal reference to `Widget` unresolved (`ReferenceError` at
+    // render — reproduced against a real Cohere build). A real import,
+    // keeping the original name, resolves every one of these directly.
     const root = fixture({ 'widget.jsx': 'export default () => <p>Widget</p>' })
     const warnings: Array<MigrationWarning> = []
     const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = `import Widget from './widget.jsx'\n\n${usage}`
     const body = migrator.transform(source, join(root, 'index.mdx'))
     expect(body).not.toContain("from './widget.jsx'")
+    expect(body).toMatch(/^import \{ default as Widget \} from ['"]@\//m)
     expect(body).toContain(usage)
-    // The copied component plus the always-generated component registry.
-    expect(migrator.files()).toHaveLength(2)
+    // Only the copied component — nothing was registered, so no registry file is emitted.
+    expect(migrator.files()).toHaveLength(1)
     expect(warnings).toEqual([])
   })
 
