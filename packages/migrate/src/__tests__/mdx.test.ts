@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeMdx, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from '../mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -462,5 +462,25 @@ describe('replaceUnknownComponents', () => {
   it('never touches frontmatter, even when its value looks like an unknown tag', () => {
     const body = '---\ndescription: "<Widget />"\n---\n\n<Widget>x</Widget>'
     expect(replaceUnknownComponents(body, () => {})).toBe('---\ndescription: "<Widget />"\n---\n\n<div>x</div>')
+  })
+})
+
+describe('normalizeHtmlComments', () => {
+  it('converts a single-line HTML comment to MDX comment syntax', () => {
+    expect(normalizeHtmlComments('<!-- prettier-ignore -->')).toBe('{/* prettier-ignore */}')
+  })
+
+  it('converts a multi-line HTML comment', () => {
+    expect(normalizeHtmlComments('<!--\nline one\nline two\n-->')).toBe('{/*\nline one\nline two\n*/}')
+  })
+
+  it('leaves an HTML comment inside a fenced code block untouched', () => {
+    const body = '```html\n<!-- keep me -->\n```'
+    expect(normalizeHtmlComments(body)).toBe(body)
+  })
+
+  it('leaves plain text with no comment unchanged', () => {
+    const body = 'Just prose, no comments here.'
+    expect(normalizeHtmlComments(body)).toBe(body)
   })
 })

@@ -15,7 +15,7 @@ import ts from 'typescript'
 import { unified } from 'unified'
 
 import { parseFrontmatter } from './frontmatter.js'
-import { isFunctionInitializer } from './mdx.js'
+import { isFunctionInitializer, normalizeHtmlComments } from './mdx.js'
 import { resolveWithin } from './path.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
 
@@ -681,8 +681,16 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
   }
 
   function transform(raw: string, currentFile: string): string {
-    const content = parseFrontmatter(raw).content
-    const frontmatter = raw.slice(0, raw.length - content.length)
+    const parsedFrontmatter = parseFrontmatter(raw).content
+    const frontmatter = raw.slice(0, raw.length - parsedFrontmatter.length)
+    // remark-mdx does not parse a raw HTML comment (`<!-- ... -->`) at all —
+    // a real source page commonly has one (Docusaurus' own
+    // `<!-- prettier-ignore -->` ahead of a snippet import) and it
+    // otherwise throws here before this pass ever runs, leaving whatever
+    // import that comment sits near completely untouched. `normalizeMdx`
+    // converts the same syntax later in the pipeline anyway, so doing it
+    // here too (on this function's own working copy) is never wasted work.
+    const content = normalizeHtmlComments(parsedFrontmatter)
     let tree: MdxNode
     try {
       tree = parser.parse(content) as MdxNode

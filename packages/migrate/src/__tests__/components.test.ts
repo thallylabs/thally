@@ -552,6 +552,19 @@ describe('repository component migration', () => {
     expect(migrator.files().some((file) => file.path.endsWith('.component.tsx'))).toBe(false)
   })
 
+  it('parses and processes an import even when the page has an HTML comment remark-mdx cannot parse on its own (Redux\'s <!-- prettier-ignore --> before a snippet import)', () => {
+    const root = fixture({ 'widget.jsx': 'export default () => <p>Widget</p>' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = "import Widget from './widget.jsx'\n\n<!-- prettier-ignore -->\n\n<Widget />"
+    const result = migrator.transform(source, join(root, 'index.mdx'))
+    expect(result).not.toContain("import Widget from './widget.jsx'")
+    expect(result).toContain('{/* prettier-ignore */}')
+    expect(result).toMatch(/<Migrated[a-f0-9]+ \/>/)
+    expect(migrator.files().some((file) => file.path.endsWith('/widget.jsx'))).toBe(true)
+    expect(warnings).toEqual([])
+  })
+
   it('rejects symlinked directories even when their leaf looks ordinary', () => {
     const root = fixture({})
     const outside = fixture({ 'widget.jsx': 'export default () => <div />' })

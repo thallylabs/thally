@@ -564,6 +564,20 @@ function replaceOutsideCode(body: string, transform: (whole: string) => string):
 }
 
 /**
+ * Converts an HTML comment (`<!-- text -->`) to MDX's own comment syntax
+ * (`{/* text *\/}`), skipping fenced/inline code. remark-mdx does not parse
+ * `<!-- -->` at all — a real Markdown/Docusaurus source commonly has one
+ * (`<!-- prettier-ignore -->` ahead of a snippet import is a common
+ * Docusaurus pattern) and it otherwise throws "Unexpected character `!`"
+ * wherever something needs a real MDX parse of the page — not just this
+ * module's `normalizeMdx`, but `components.ts`'s independent component
+ * analysis too, before that pass ever gets a chance to run.
+ */
+export function normalizeHtmlComments(body: string): string {
+  return replaceOutsideCode(body, (whole) => whole.replace(/<!--([\s\S]*?)-->/g, (_match, comment: string) => `{/*${comment}*/}`))
+}
+
+/**
  * Rewrite Fern's callout intents to Thally's fixed callout tags without
  * touching fenced code. Delimiters are tracked with a stack so nested and
  * sibling callouts each close with the tag their own opening intent chose;
