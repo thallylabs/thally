@@ -481,17 +481,41 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     return path
   }
 
-  function resolveDependency(specifier: string, importer: string): string {
-    if (specifier.includes('\\') || specifier.includes('\0') || /[?#]/.test(specifier)) throw new Error('unsupported component dependency path')
-    const candidate = specifier.startsWith('/')
-      ? resolveWithin(root, specifier.slice(1))
-      : resolveWithin(confined, relative(confined, resolve(dirname(importer), specifier)))
+  function expandCandidates(candidate: string): Array<string> {
     const candidates = [candidate]
     if (!extname(candidate)) {
       candidates.push(...['.tsx', '.jsx', '.ts', '.js', '.mjs', '.json'].map((extension) => candidate + extension))
       candidates.push(...['index.tsx', 'index.jsx', 'index.ts', 'index.js'].map((name) => resolve(candidate, name)))
     } else if (extname(candidate) === '.js') {
       candidates.push(candidate.slice(0, -3) + '.ts', candidate.slice(0, -3) + '.tsx')
+    }
+    return candidates
+  }
+
+  function resolveDependency(specifier: string, importer: string): string {
+    if (specifier.includes('\\') || specifier.includes('\0') || /[?#]/.test(specifier)) throw new Error('unsupported component dependency path')
+    const candidates = specifier.startsWith('/')
+      ? expandCandidates(resolveWithin(root, specifier.slice(1)))
+      : expandCandidates(resolveWithin(confined, relative(confined, resolve(dirname(importer), specifier))))
+    // Some monorepo docs sites build by copying the detected project root's
+    // contents up into the repository root (Playwright's own `cp -r
+    // nodejs/* .` step is a real example, and its shared `src/components`
+    // tree lives at the repository root the same way) before running the
+    // site generator, so a root-relative `@site/...` specifier, or a
+    // relative import written against that flattened layout, can only be
+    // found by retrying under the repository root — tried only after the
+    // direct path fails.
+    if (root !== confined) {
+      if (specifier.startsWith('/')) {
+        candidates.push(...expandCandidates(resolveWithin(confined, specifier.slice(1))))
+      } else {
+        try {
+          const rebasedImporter = resolveWithin(confined, relative(root, importer))
+          candidates.push(...expandCandidates(resolveWithin(confined, relative(confined, resolve(dirname(rebasedImporter), specifier)))))
+        } catch {
+          // Importer itself is outside the project root; nothing to rebase.
+        }
+      }
     }
     for (const path of candidates) {
       if (existsSync(path) && lstatSync(path).isFile()) return checkedFile(path)
@@ -610,7 +634,14 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       inspect(ast)
       // Mark copied code as client-owned even when the source platform inferred
       // its client boundary. Browser hooks must never run in MDX's server scope.
-      staged.set(destination, { path: destination, content: `'use client';\n\n${implicitReactImports(ast)}\n${applyReplacements(text, edits)}` })
+      // The source site never ran `next build`'s full `tsc --noEmit` type
+      // check (Docusaurus/Mintlify/Fern don't gate their own build on it),
+      // so loose types, `window.ethereum`-style ambient globals, and
+      // implicit `any` parameters that were fine there fail it here.
+      // `@ts-nocheck` is valid in both `.ts(x)` and `.js(x)` files (a no-op
+      // unless `checkJs` is on) and is the least invasive fix: it preserves
+      // the component's real behavior instead of stripping or rewriting it.
+      staged.set(destination, { path: destination, content: `// @ts-nocheck\n'use client';\n\n${implicitReactImports(ast)}\n${applyReplacements(text, edits)}` })
     }
     visit(entry)
     for (const [path, file] of staged) copied.set(path, file)
@@ -920,6 +951,21 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           }
           edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
         } catch (error) {
+          const failedPackage = error instanceof Error
+            ? error.message.match(/^external package (\S+) requires manual installation and review$/)?.[1]
+            : undefined
+          if (failedPackage && YOUTUBE_ID_PACKAGES.has(failedPackage)) {
+            // The local wrapper's own body just re-exports a known
+            // YouTube-embed package one level down (Playwright's
+            // `LiteYouTube` wraps `react-lite-youtube-embed` this way); the
+            // wrapper itself can't be copied, but its usage is id-prop-shaped
+            // exactly like a direct import of that package, so the same
+            // working `<iframe>` fallback below applies instead of losing
+            // the embed to the generic unknown-component neutralization.
+            for (const binding of bindings) unsupportedImports.set(binding.local, failedPackage)
+            edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+            continue
+          }
           hasUnsupportedImports = true
           const importStart = node.position.start.offset + statement.getStart(ast)
           const importEnd = node.position.start.offset + statement.end
@@ -995,8 +1041,14 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           const replaced = attributeText.slice(0, match.index) + JSON.stringify(href) + attributeText.slice(match.index + match[0].length)
           edits.push({ start, end, value: replaced })
         } catch {
-          // Not actually resolvable/copyable — leave the attribute as-is;
-          // the MDX-compile/build check reports the real problem.
+          // Not actually resolvable/copyable, even after the repository-root
+          // fallback above. Leaving the dangling `require()` in place would
+          // break the whole site's build ("Module not found"), so replace it
+          // with an empty string (a broken image is degraded, not fatal) and
+          // warn instead.
+          const replaced = attributeText.slice(0, match.index) + JSON.stringify('') + attributeText.slice(match.index + match[0].length)
+          edits.push({ start, end, value: replaced })
+          warn(`Asset require(${JSON.stringify(match[2])}) could not be resolved and was removed; the reference was replaced with an empty string.`, currentFile)
         }
       }
     })
