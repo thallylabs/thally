@@ -138,12 +138,16 @@ backoff, and each underlying git process (the clone, and any submodule
 fetch) is killed and treated as a retryable failure if it stalls — a
 generous 10-minute default, configurable via
 `THALLY_MIGRATE_CLONE_TIMEOUT_MS` (milliseconds) for an unusually large
-repository on a slow link. The clone sets `GIT_LFS_SKIP_SMUDGE=1` for that
-one process only (never the user's global git config), so a repository that
-uses Git LFS still clones even when the host has no `git-lfs` binary
-installed; an asset that's still a Git LFS pointer file afterward (not its
-real content) is skipped with a warning instead of being copied as if it
-were the real file. Submodules are initialized one at a time, best-effort,
+repository on a slow link. The clone neutralizes the `filter.lfs.*`
+smudge/clean/process filter driver for that one process only (via
+`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`, never the user's
+global git config), so a repository that uses Git LFS still clones even when
+the host has no `git-lfs` binary installed — including a host where
+`filter.lfs.*` is still registered globally from a previous install,
+pointing at a command that no longer exists; an asset that's still a Git
+LFS pointer file afterward (not its real content) is skipped with a warning
+instead of being copied as if it were the real file. Submodules are
+initialized one at a time, best-effort,
 after a successful clone — a submodule that can't be fetched (private,
 deleted, network trouble) is named in a warning instead of failing the
 whole migration.

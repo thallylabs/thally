@@ -473,6 +473,38 @@ function runGit(args: Array<string>, options: { cwd?: string; env?: Record<strin
   })
 }
 
+/**
+ * Neutralize the `filter.lfs.*` smudge/clean/process filter driver for one
+ * git process only — never the user's global git config — so a repository
+ * tracked with Git LFS still clones when the host has no `git-lfs` binary.
+ * `GIT_LFS_SKIP_SMUDGE=1` alone isn't enough: if this host ever had
+ * `git lfs install` run and then had the `git-lfs` binary removed (as here),
+ * `filter.lfs.smudge`/`.process` are still registered in the *global* git
+ * config pointing at a command that no longer exists, and
+ * `GIT_LFS_SKIP_SMUDGE` is only ever read by that (missing) binary — git
+ * itself still fails outright trying to invoke it. `GIT_CONFIG_COUNT`/
+ * `GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` env pairs are the one config
+ * source with higher precedence than the user's global config, so they can
+ * override it per-process: `smudge`/`clean` become `cat` (pass the LFS
+ * pointer text straight through — real content was never fetched anyway)
+ * and `process` is cleared so git falls back to them; `filter.lfs.required
+ * = false` keeps a filter hiccup on one path (an oversized fixture, say)
+ * from failing the whole checkout. The result is the repository's own
+ * files, with an LFS-tracked asset left as its pointer text — the
+ * asset-copying step below warns when a copied file turns out to be one.
+ */
+const LFS_FILTER_OVERRIDE_ENV: Record<string, string> = {
+  GIT_CONFIG_COUNT: '4',
+  GIT_CONFIG_KEY_0: 'filter.lfs.smudge',
+  GIT_CONFIG_VALUE_0: 'cat',
+  GIT_CONFIG_KEY_1: 'filter.lfs.clean',
+  GIT_CONFIG_VALUE_1: 'cat',
+  GIT_CONFIG_KEY_2: 'filter.lfs.process',
+  GIT_CONFIG_VALUE_2: '',
+  GIT_CONFIG_KEY_3: 'filter.lfs.required',
+  GIT_CONFIG_VALUE_3: 'false',
+}
+
 function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<void> {
   // Submodules are deliberately not recursed here: `--recurse-submodules`
   // fails the *entire* clone if any one submodule can't be fetched (a
@@ -485,14 +517,7 @@ function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<v
   args.push('--', source.cloneUrl, targetDir)
   return runGit(args, {
     label: `Failed to clone ${source.owner}/${source.repo}`,
-    // Per-process only — never touches the user's global git config. A repo
-    // whose assets are tracked with Git LFS otherwise hard-fails the whole
-    // clone when the host has no `git-lfs` binary installed; skipping the
-    // smudge filter clones the repository's own files (including LFS
-    // pointer text files in place of the real binaries) instead of failing
-    // outright. The asset-copying step below warns when a copied file
-    // turns out to be an LFS pointer rather than real content.
-    env: { GIT_LFS_SKIP_SMUDGE: '1' },
+    env: LFS_FILTER_OVERRIDE_ENV,
   })
 }
 
@@ -525,7 +550,7 @@ async function initSubmodules(targetDir: string, warnings: Array<MigrationWarnin
     try {
       await runGit(['submodule', 'update', '--init', '--depth', '1', '--', path], {
         cwd: targetDir,
-        env: { GIT_LFS_SKIP_SMUDGE: '1' },
+        env: LFS_FILTER_OVERRIDE_ENV,
         label: `Failed to initialize submodule ${path}`,
       })
     } catch {

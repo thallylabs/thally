@@ -16,10 +16,17 @@ const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; std
 // Scripted `curl` outcomes for `downloadRemoteApiSpec` (repository.ts), so a
 // remote-spec download can be tested without a real network call.
 const remoteSpecOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ content?: string; fail?: boolean }> }))
+// Records each `spawn('git', args, options)` call's env, so a test can
+// assert the LFS-filter-neutralizing env actually reaches the git process
+// without a real clone (that's covered manually against BoundaryML/baml, a
+// real Git LFS repo, since a mocked child process can't exercise git's own
+// filter-driver resolution).
+const gitSpawnCalls = vi.hoisted(() => ({ envs: [] as Array<Record<string, string | undefined>> }))
 vi.mock('node:child_process', async () => {
   const fs = await import('node:fs')
   return {
-    spawn: () => {
+    spawn: (_command: string, _args: Array<string>, options: { env?: Record<string, string | undefined> }) => {
+      gitSpawnCalls.envs.push(options.env ?? {})
       const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void } }
       child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} })
       const outcome = cloneOutcomes.queue.shift() ?? { code: 0 }
@@ -1963,7 +1970,32 @@ describe('gitmodulePaths', () => {
 })
 
 describe('cloneGitHubRepository retry', () => {
-  afterEach(() => { cloneOutcomes.queue.length = 0 })
+  afterEach(() => {
+    cloneOutcomes.queue.length = 0
+    gitSpawnCalls.envs.length = 0
+  })
+
+  it("neutralizes the Git LFS filter driver per-process (never the global git config) on the clone", async () => {
+    const targetDir = mkdtempSync(join(tmpdir(), 'thally-clone-lfs-env-'))
+    cloneOutcomes.queue.push({ code: 0 })
+    await cloneGitHubRepository(
+      { owner: 'acme', repo: 'docs', branch: 'main', docsDir: '', cloneUrl: 'https://github.com/acme/docs.git' },
+      targetDir,
+    )
+    expect(gitSpawnCalls.envs).toHaveLength(1)
+    const env = gitSpawnCalls.envs[0]
+    // GIT_CONFIG_* env pairs take precedence over the user's own global git
+    // config for this one process, overriding filter.lfs.smudge/clean
+    // (real content was never fetched anyway) and filter.lfs.process
+    // (which would otherwise still win over smudge/clean), so a repo whose
+    // LFS binary is missing on this host clones instead of hard-failing.
+    expect(env.GIT_CONFIG_COUNT).toBe('4')
+    const pairs = Object.entries(env).filter(([key]) => /^GIT_CONFIG_KEY_\d+$/.test(key))
+      .map(([key, value]) => [value, env[key.replace('KEY', 'VALUE')]])
+    expect(pairs).toContainEqual(['filter.lfs.smudge', 'cat'])
+    expect(pairs).toContainEqual(['filter.lfs.clean', 'cat'])
+    expect(pairs).toContainEqual(['filter.lfs.required', 'false'])
+  })
 
   it('retries a transient network-class clone failure and succeeds', async () => {
     const targetDir = mkdtempSync(join(tmpdir(), 'thally-clone-retry-'))
