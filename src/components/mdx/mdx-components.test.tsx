@@ -16,6 +16,15 @@ describe('Banner', () => {
   })
 })
 
+describe('Column', () => {
+  it('renders its children as a single grid cell inside <Columns>', () => {
+    const { Column } = useMDXComponents({})
+    const Component = Column as ComponentType<{ children?: ReactNode }>
+    const html = renderToStaticMarkup(<Component><p>cell content</p></Component>)
+    expect(html).toContain('cell content')
+  })
+})
+
 describe('MDX', () => {
   it('renders children through as-is', () => {
     const { MDX } = useMDXComponents({})

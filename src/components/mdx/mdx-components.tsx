@@ -4,7 +4,7 @@ import { Note, type NoteProps } from '@/components/mdx/note'
 import { AgentPrompt } from '@/components/mdx/agent-prompt'
 import { Code, CodeBlock, CodeGroup, Pre } from '@/components/mdx/code-blocks'
 import {
-  Columns, Frame, Hero,
+  Column, Columns, Frame, Hero,
 } from '@/components/mdx/rich-content'
 import { Video, YouTube, LiteYouTubeEmbed } from '@/components/mdx/video'
 import { Latex } from '@/components/mdx/latex'
@@ -111,6 +111,7 @@ const components: MDXComponents = {
   Card: (props) => <Card {...props} />,
   CardGroup: (props) => <CardGroup {...props} />,
   Columns: (props) => <Columns {...props} />,
+  Column: (props) => <Column {...props} />,
   Frame: (props) => <Frame {...props} />,
   Video: (props) => <Video {...(props as ComponentPropsWithoutRef<typeof Video>)} />,
   YouTube: (props) => <YouTube {...(props as ComponentPropsWithoutRef<typeof YouTube>)} />,

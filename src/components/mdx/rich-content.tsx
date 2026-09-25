@@ -103,6 +103,11 @@ export function Columns({ cols = 2, children }: ColumnsProps) {
   return <div className={cn('grid grid-cols-1 gap-3', columnClassnames[count] ?? columnClassnames[2])}>{children}</div>
 }
 
+/** A single cell inside {@link Columns}; the grid parent handles layout. */
+export function Column({ children }: { children: ReactNode }) {
+  return <div>{children}</div>
+}
+
 interface FrameProps {
   caption?: string
   zoom?: boolean
