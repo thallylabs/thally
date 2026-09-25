@@ -941,7 +941,10 @@ function cssTextToStyleObjectLiteral(cssText: string): string {
  */
 function convertHtmlStyleAttributes(body: string): string {
   return body.replace(
-    /<([a-z][a-zA-Z0-9]*)((?:\s+[^\s"'=<>/]+(?:=(?:"[^"]*"|'[^']*'))?)*)\sstyle=(["'])([\s\S]*?)\3((?:\s+[^\s"'=<>/]+(?:=(?:"[^"]*"|'[^']*'))?)*)\s*(\/?)>/g,
+    // The separator before `style=` must be `\s+`, not a single `\s`: a
+    // multi-line tag indents its attributes, so more than one whitespace
+    // character (a newline plus spaces) commonly precedes it.
+    /<([a-z][a-zA-Z0-9]*)((?:\s+[^\s"'=<>/]+(?:=(?:"[^"]*"|'[^']*'))?)*)\s+style=(["'])([\s\S]*?)\3((?:\s+[^\s"'=<>/]+(?:=(?:"[^"]*"|'[^']*'))?)*)\s*(\/?)>/g,
     (_match, tag: string, before: string, _quote: string, styleText: string, after: string, selfClose: string) => (
       `<${tag}${before} style={${cssTextToStyleObjectLiteral(styleText)}}${after}${selfClose ? ' /' : ''}>`
     ),
