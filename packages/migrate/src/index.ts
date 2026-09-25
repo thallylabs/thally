@@ -4,10 +4,13 @@ export {
   cloneGitHubRepository,
   detectRepositoryDocsDir,
   detectRepositoryPlatform,
+  gitmodulePaths,
+  isPrivateOrLoopbackHost,
   migrateRepository,
   parseGitHubRepositoryUrl,
 } from './repository.js'
-export { addMintlifyDirectoryRedirects, buildNavigationFromPages, projectMintlifyNavigation, readMintlifyConfig } from './navigation.js'
+export { addMintlifyDirectoryRedirects, buildNavigationFromPages, projectMintlifyNavigation, pruneMissingNavigationPages, readMintlifyConfig } from './navigation.js'
+export { projectFernNavigation, readFernConfig } from './fern.js'
 export { normalizeMdx, parseMarkdownPage } from './mdx.js'
 export { mergeMigrationConfig, renderMigrationFiles } from './render.js'
 export { defaultMigrationFetcher, migrateUrl, validateMigrationUrl } from './url.js'

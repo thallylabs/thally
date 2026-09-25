@@ -49,8 +49,15 @@ export function pageIdFromReference(value: string, preserveCase = false): string
   const rawSegments = withoutQuery.split('/').filter(Boolean)
   if (rawSegments.some((segment) => segment === '..' || segment === '.')) return null
   const last = rawSegments.at(-1)?.replace(/\.(?:mdx?|rst|txt)$/i, '') ?? ''
-  const baseSegments = /^(?:index|readme)$/i.test(last) ? rawSegments.slice(0, -1) : rawSegments
-  if (!/^(?:index|readme)$/i.test(last)) {
+  // `index` collapses to its parent directory at any depth, matching how
+  // Mintlify and Next.js both treat directory indexes. `readme` only does the
+  // same at the content root (`readme.md` -> `/`); a nested `readme` is a
+  // real, addressable page (`migration/readme.md` -> `/migration/readme`)
+  // and must not collide with a sibling `migration/index.md`.
+  const isRootLevelReadme = rawSegments.length === 1 && /^readme$/i.test(last)
+  const collapsesToParent = /^index$/i.test(last) || isRootLevelReadme
+  const baseSegments = collapsesToParent ? rawSegments.slice(0, -1) : rawSegments
+  if (!collapsesToParent) {
     baseSegments[baseSegments.length - 1] = last
   }
   const segments = baseSegments.map((segment) => slugifySegment(segment, preserveCase)).filter(Boolean)
@@ -81,11 +88,22 @@ export function mintlifyLocalizedReference(
 
 /** Resolve an untrusted relative path and prove it remains below `root`. */
 export function resolveWithin(root: string, candidate: string): string {
+  return resolveWithinRoot(root, candidate, root)
+}
+
+/**
+ * Resolve an untrusted relative path against `baseDir`, but only require the
+ * result to stay below `confineRoot` (which may be an ancestor of `baseDir`).
+ * Used where a config file's relative paths are conventionally resolved
+ * against the file's own directory, yet the security boundary is a wider
+ * root (e.g. the whole repository checkout).
+ */
+export function resolveWithinRoot(baseDir: string, candidate: string, confineRoot: string): string {
   if (isAbsolute(candidate) || candidate.includes('\0')) {
     throw new Error(`Unsafe migration path: ${candidate}`)
   }
-  const target = resolve(root, candidate)
-  const fromRoot = relative(resolve(root), target)
+  const target = resolve(baseDir, candidate)
+  const fromRoot = relative(resolve(confineRoot), target)
   if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
     throw new Error(`Migration path escapes its root: ${candidate}`)
   }

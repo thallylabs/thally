@@ -148,3 +148,41 @@ describe('thally check OpenAPI migrations', () => {
     expect(output.join('\n')).toContain('"api/unreferenced" is not in docs.json nav (orphan)')
   })
 })
+
+describe('thally check image references', () => {
+  it('warns about a local image with no file under public/, and accepts one that exists', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-images-'))
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    mkdirSync(join(projectDir, 'public/images'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({
+      tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['introduction'] }] }],
+    }))
+    writeFileSync(join(projectDir, 'public/images/present.png'), 'image')
+    writeFileSync(join(projectDir, 'src/content/introduction.mdx'), [
+      '---',
+      'title: Introduction',
+      'description: Overview page.',
+      '---',
+      '',
+      '![Present](/images/present.png)',
+      '',
+      '![Missing](/images/missing.png)',
+      '',
+      '<img src="/images/also-missing.png" />',
+    ].join('\n'))
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+
+    try {
+      // A missing local image is a warning, not an error: next build still
+      // succeeds with a broken <img>, unlike a broken internal link (404).
+      await expect(runCheck(projectDir, { fix: false, ci: true })).resolves.toBe(0)
+    } finally {
+      log.mockRestore()
+    }
+    const text = output.join('\n')
+    expect(text).not.toContain('/images/present.png')
+    expect(text).toContain('Image not found: "/images/missing.png"')
+    expect(text).toContain('Image not found: "/images/also-missing.png"')
+  })
+})

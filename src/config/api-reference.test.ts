@@ -30,3 +30,24 @@ describe('public OpenAPI specification URL', () => {
     await expect(loadSpecUrl()).resolves.toBeNull()
   })
 })
+
+describe('multiple API-bound tabs', () => {
+  afterEach(() => {
+    vi.doUnmock('@/data/docs')
+    vi.resetModules()
+  })
+
+  it('builds one spec per api-bound tab, keyed by the tab id after the first', async () => {
+    vi.doMock('@/data/docs', () => ({
+      getSidebarCollections: () => [
+        { id: 'rest-api', label: 'REST API', api: { source: 'openapi.json' } },
+        { id: 'ws-api', label: 'WebSocket API', api: { source: 'asyncapi.yaml' } },
+        { id: 'guides', label: 'Guides' },
+      ],
+    }))
+    const { apiReferenceConfig } = await import('@/config/api-reference')
+    expect(apiReferenceConfig.specs.map((spec) => spec.id)).toEqual(['default', 'ws-api'])
+    expect(apiReferenceConfig.specs[1].label).toBe('WebSocket API')
+    expect(apiReferenceConfig.defaultSpecId).toBe('default')
+  })
+})

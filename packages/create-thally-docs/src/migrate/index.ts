@@ -104,13 +104,15 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
   const cloneDir = join(temporaryRoot, 'repository')
   console.log(`  📦 Cloning ${source.owner}/${source.repo}...`)
   try {
-    await cloneGitHubRepository(source, cloneDir)
-    return migrateRepository({
+    const cloneWarnings: Array<MigrationWarning> = []
+    await cloneGitHubRepository(source, cloneDir, cloneWarnings)
+    const bundle = migrateRepository({
       repositoryDir: cloneDir,
       sourceUrl: options.sourceUrl,
       docsDir: options.docsDir ?? (source.docsDir || undefined),
       platform: options.platform,
     })
+    return cloneWarnings.length > 0 ? { ...bundle, warnings: [...cloneWarnings, ...bundle.warnings] } : bundle
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true })
   }
@@ -132,6 +134,7 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
       // live at new paths, so source URLs cannot power edit/issue actions.
       repoUrl: '',
       doInstall: false,
+      colors: bundle.site?.colors,
     })
     resetFreshMigrationContent(projectDir)
   } else if (!existsSync(projectDir)) {

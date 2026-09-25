@@ -95,7 +95,7 @@ Options:
   --branch <name>      Override the detected Git branch
   --docs-dir <path>    Override the detected documentation directory
   --max-pages <count>  Limit a public URL crawl to 1-1000 pages
-  --platform <name>    Use mintlify, docusaurus, or auto
+  --platform <name>    Use mintlify, docusaurus, fern, or auto
   --skip-validation   Import only; explicitly skip content and build verification
   --api-key <key>      Anthropic API key for non-Markdown conversion
   -y, --yes            Skip interactive prompts

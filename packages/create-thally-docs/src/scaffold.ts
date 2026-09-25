@@ -27,6 +27,8 @@ export interface ScaffoldOptions {
   i18nLocales?: Array<{ code: string; label: string }>
   /** Repos to pre-register for Thally Track (opt-in). Empty/undefined = Track off. */
   trackRepos?: Array<{ owner: string; repo: string }>
+  /** Source theme accent color(s) to apply over the chosen brand preset. */
+  colors?: { primary?: string; light?: string; dark?: string }
 }
 
 export interface ScaffoldResult {
@@ -44,6 +46,7 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
     enableAiChat = true,
     i18nLocales,
     trackRepos,
+    colors,
   } = options
 
   const targetDir = resolve(projectDir)
@@ -72,6 +75,7 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
     repoUrl,
     enableAiChat,
     i18nLocales,
+    colors,
   })
 
   // 2a. Thally Track is opt-in — first drop the starter's tracking block so a
