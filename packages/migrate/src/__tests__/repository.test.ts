@@ -31,6 +31,8 @@ function fixture(): string {
     navigation: { $ref: './navigation.json' },
   }))
   writeFileSync(join(root, 'README.md'), '# Repository readme\n\nThis must not become a docs page.')
+  mkdirSync(join(root, '.claude', 'skills', 'doc-author'), { recursive: true })
+  writeFileSync(join(root, '.claude', 'skills', 'doc-author', 'SKILL.mdx'), '# Not a docs page\n\n</Broken>')
   writeFileSync(join(root, 'en', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\n# Welcome\n\nEnglish docs.')
   writeFileSync(join(root, 'en', 'guides', 'install.mdx'), '---\ntitle: Install\n---\n\nimport Prerequisite from \'/snippets/prerequisite.mdx\'\n\n<Prerequisite />\n\n<Danger>Back up first.</Danger>\n\n<Warn>Review the result.</Warn>')
   writeFileSync(join(root, 'es', 'introduction.mdx'), '---\ntitle: Bienvenido\n---\n\nDocumentación española.')
@@ -81,6 +83,7 @@ describe('Mintlify repository migration', () => {
     expect(bundle.pages[1].body).toContain('<Warning>Review the result.</Warning>')
     expect(bundle.pages[1].body).toContain('Install Node.js before continuing.')
     expect(bundle.pages.map((page) => page.id)).not.toContain('snippets/prerequisite')
+    expect(bundle.pages.map((page) => page.id)).not.toContain('.claude/skills/doc-author/SKILL')
     expect(bundle.docsConfig.i18n).toEqual({
       defaultLocale: 'en',
       locales: [

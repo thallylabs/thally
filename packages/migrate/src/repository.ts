@@ -54,7 +54,7 @@ const MAX_PAGE_BYTES = 2_000_000
 const MAX_ASSET_BYTES = 25_000_000
 const MAX_TOTAL_ASSET_BYTES = 500_000_000
 const IGNORED_DIRECTORIES = new Set([
-  '.git', '.github', '.next', '.turbo', '.vercel', '.vscode',
+  '.git', '.github', '.claude', '.cursor', '.next', '.turbo', '.vercel', '.vscode',
   'node_modules', 'dist', 'build', 'coverage',
 ])
 const ASSET_DIRECTORIES = new Set(['assets', 'images', 'img', 'media', 'public', 'static'])
