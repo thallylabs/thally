@@ -446,6 +446,22 @@ describe('repository component migration', () => {
     })])
   })
 
+  it('embeds a YouTube iframe for a locally-owned @site/... wrapper whose own body imports a known YouTube-embed package, instead of losing the embed to the generic unknown-component fallback (Playwright: LiteYouTube wraps react-lite-youtube-embed)', () => {
+    const root = fixture({
+      'src/components/LiteYouTube/index.tsx': "import LiteYouTubeEmbed from 'react-lite-youtube-embed';\nexport default function LiteYouTube({ id, title }) { return <LiteYouTubeEmbed id={id} title={title} />; }",
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = "import LiteYouTube from '@site/src/components/LiteYouTube'\n\n<LiteYouTube id=\"3YDiloj8_d0\" title=\"Demo\" />"
+    const result = migrator.transform(source, join(root, 'docs', 'index.mdx'))
+    expect(result).not.toContain('LiteYouTube')
+    expect(result).toContain('<iframe')
+    expect(result).toContain('3YDiloj8_d0')
+    // The wrapper file itself is never copied (its own dependency is
+    // unsupported), only the working iframe fallback is emitted.
+    expect(migrator.files()).toEqual([])
+  })
+
   it('does not embed a YouTube iframe for an unrelated player package, even when its usage looks video-shaped', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
@@ -508,6 +524,27 @@ describe('repository component migration', () => {
     expect(result.trim()).toMatch(/^<Migrated[a-f0-9]+ \/>$/)
     expect(migrator.files().some((file) => file.path.endsWith('/Widget.jsx'))).toBe(true)
     expect(warnings).toEqual([])
+  })
+
+  it('resolves a @site/... component import against the repository root when it is not nested under the narrower project root (Playwright: shared src/components/HTMLCard lives at the repository root, a sibling of the nodejs/ project)', () => {
+    const root = fixture({ 'src/components/HTMLCard.jsx': 'export default () => <p>HTMLCard</p>' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(join(root, 'nodejs'), root, warnings, 'https://github.com/example/docs')
+    const result = migrator.transform("import HTMLCard from '@site/src/components/HTMLCard'\n\n<HTMLCard />", join(root, 'nodejs', 'docs', 'index.mdx'))
+    expect(result.trim()).toMatch(/^<Migrated[a-f0-9]+ \/>$/)
+    expect(migrator.files().some((file) => file.path.endsWith('/HTMLCard.jsx'))).toBe(true)
+    expect(warnings).toEqual([])
+  })
+
+  it('prepends // @ts-nocheck to a copied component, since it was never type-checked by the source platform\'s own build (Oasis: window.ethereum and an implicit-any parameter fail next build\'s tsc gate)', () => {
+    const root = fixture({
+      'src/AddToMetaMask.tsx': 'export default function AddToMetaMask(props) { window.ethereum.request({ method: "wallet_watchAsset" }); return null; }',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    migrator.transform("import AddToMetaMask from './src/AddToMetaMask.tsx'\n\n<AddToMetaMask />", join(root, 'index.mdx'))
+    const copied = migrator.files().find((file) => file.path.endsWith('/AddToMetaMask.tsx'))!
+    expect(String(copied.content)).toMatch(/^\/\/ @ts-nocheck\n'use client';/)
   })
 
   it('copies a component that imports @docusaurus/Link, mapping it to next/link and to= to href=', () => {
@@ -648,13 +685,33 @@ describe('repository component migration', () => {
     expect(migrator.files()).toEqual([])
   })
 
-  it('leaves an unresolvable require(...) asset call untouched rather than crashing', () => {
+  it('neutralizes an unresolvable require(...) asset call with a warning instead of leaving a dangling reference', () => {
     const root = fixture({})
     const warnings: Array<MigrationWarning> = []
     const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     const source = '<a href={require(\'./missing.docx\').default}>Download</a>'
     const result = migrator.transform(source, join(root, 'index.mdx'))
-    expect(result).toBe(source)
+    // A dangling require() would fail `next build` with "Module not found"
+    // for the whole site; it is replaced with an empty string instead.
+    expect(result).not.toContain('require(')
+    expect(result).toBe('<a href={""}>Download</a>')
+    expect(warnings[0].message).toContain('could not be resolved and was removed')
+  })
+
+  it('resolves a require(...) asset call that escapes the platform root into the repository root, mirroring a monorepo build that copies the project root up before building (Playwright: docs reference ../images at the repository root)', () => {
+    const root = fixture({
+      'nodejs/docusaurus.config.ts': 'export default {}',
+      'images/test-agents/planner-prompt.png': 'binary-ish content',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(join(root, 'nodejs'), root, warnings, 'https://github.com/example/docs')
+    const source = '<img src={require(\'../images/test-agents/planner-prompt.png\').src} alt="planner prompt"/>'
+    const result = migrator.transform(source, join(root, 'nodejs', 'docs', 'test-agents.mdx'))
+    expect(result).not.toContain('require(')
+    expect(result).toMatch(/^<img src=\{"\/migrated-[a-f0-9]+\.png"\} alt="planner prompt"\/>$/)
+    const publicFile = migrator.files().find((file) => file.path.startsWith('public/'))
+    expect(publicFile?.content.toString()).toBe('binary-ish content')
+    expect(warnings).toEqual([])
   })
 
   it('wraps a copied SVG used as a JSX tag in an <img> component instead of importing it raw (no SVGR loader is configured)', () => {

@@ -23,7 +23,10 @@ import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunc
 
 import {
   projectDocusaurusNavigation,
+  readDocusaurusBrandAssetPaths,
+  readDocusaurusRedirects,
   readDocusaurusSidebars,
+  readDocusaurusThemeColor,
   rewriteDocusaurusLinks,
   resolveDocusaurusPageIdentity,
   type DocusaurusPageDescriptor,
@@ -133,6 +136,8 @@ export interface RepositoryMigrationOptions {
   docusaurusSkipSidebar?: boolean
   /** @internal Static assets are shared across docs-plugin instances. */
   docusaurusSkipAssets?: boolean
+  /** @internal Redirects are global config, read once, not per plugin instance. */
+  docusaurusSkipRedirects?: boolean
 }
 
 interface DocusaurusPluginRoot {
@@ -348,19 +353,44 @@ function primaryDocusaurusDocsDirectory(projectRoot: string): string {
 function additionalDocusaurusPluginRoots(
   repositoryDir: string,
   projectRoot: string,
+  warnings: Array<MigrationWarning>,
 ): Array<DocusaurusPluginRoot> {
   const source = readDocusaurusConfigSource(projectRoot)
-  const projectRelative = relative(repositoryDir, projectRoot).replace(/\\/g, '/')
   const plugins: Array<DocusaurusPluginRoot> = []
   const matcher = /['"]@docusaurus\/plugin-content-docs['"][\s\S]{0,3000}?\bpath\s*:\s*(['"])([^'"]+)\1[\s\S]{0,1000}?\brouteBasePath\s*:\s*(['"])([^'"]+)\3/g
   for (const match of source.matchAll(matcher)) {
     const localPath = trimTrailingSlashes(match[2].replace(/^\.\//, ''))
     const routePrefix = trimEdgeSlashes(match[4])
     if (!localPath || !routePrefix) continue
-    const docsDir = [projectRelative, localPath].filter(Boolean).join('/')
-    const absolute = resolveWithin(repositoryDir, docsDir)
-    if (!existsSync(absolute) || !lstatSync(absolute).isDirectory()) continue
-    plugins.push({ docsDir, routePrefix })
+    // Docusaurus resolves a content-docs instance's `path` relative to the
+    // site directory (where `docusaurus.config` lives, `projectRoot` here).
+    // Some monorepo sites build by copying that project root's contents up
+    // into the repository root before running the generator (Playwright's
+    // own `cp -r nodejs/* .` step is a real example — see the identical
+    // fallback in components.ts's `resolveDependency`), so a `path` that
+    // isn't found under `projectRoot` is retried directly under
+    // `repositoryDir`, still confined to the repository.
+    let docsDir: string | undefined
+    for (const base of [projectRoot, repositoryDir]) {
+      let absolute: string
+      try {
+        absolute = resolveWithin(base, localPath)
+      } catch {
+        continue
+      }
+      if (existsSync(absolute) && lstatSync(absolute).isDirectory()) {
+        docsDir = relative(repositoryDir, absolute).replace(/\\/g, '/')
+        break
+      }
+    }
+    if (docsDir) {
+      plugins.push({ docsDir, routePrefix })
+    } else {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `The "${routePrefix}" docs plugin instance's path (${JSON.stringify(match[2])}) could not be found in the repository and was skipped.`,
+      })
+    }
   }
   return plugins
 }
@@ -581,6 +611,25 @@ function fernThemeColors(value: unknown): { primary?: string; light?: string; da
   if (darkMode) colors.light = darkMode
   if (lightMode) colors.dark = lightMode
   return Object.keys(colors).length > 0 ? colors : undefined
+}
+
+/**
+ * Mintlify's `logo`/`favicon` config value is a plain path, or an object
+ * with `light`/`dark` (and sometimes `href`, which is a link, not an asset)
+ * variants. The referenced files are already copied to `public/` by the
+ * ordinary asset scan (they live under the docs tree); only wiring them into
+ * the rendered site's actual branding is unsupported (see the warning this
+ * feeds — `SiteConfig` has no static logo/favicon field at all, unlike
+ * `brand`/`brandPreset`, which the color pipeline above already wires), so
+ * this only names them for that warning.
+ */
+function mintlifyBrandAssetPaths(value: unknown): Array<string> {
+  if (typeof value === 'string') return [value]
+  if (!value || typeof value !== 'object') return []
+  const source = value as Record<string, unknown>
+  return (['light', 'dark'] as const)
+    .map((key) => source[key])
+    .filter((entry): entry is string => typeof entry === 'string')
 }
 
 function normalizedReferenceKey(value: string): string {
@@ -1581,6 +1630,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const descriptor = descriptorByNavigationId.get(page.navigationId)
       if (descriptor) page.body = rewriteDocusaurusLinks(page.body, descriptor, docusaurusDescriptors)
     }
+    if (docusaurusProjectRoot && !options.docusaurusSkipRedirects) {
+      const redirects = readDocusaurusRedirects(docusaurusProjectRoot, warnings)
+      if (redirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...redirects] }
+    }
   }
   if (platform === 'fern' && fernIdRenames.size > 0) {
     const renamedRoute = (route: string): string => {
@@ -1654,7 +1707,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
 
   if (platform === 'docusaurus' && docusaurusProjectRoot && !options.docusaurusSkipPlugins) {
-    for (const plugin of additionalDocusaurusPluginRoots(repositoryDir, docusaurusProjectRoot)) {
+    for (const plugin of additionalDocusaurusPluginRoots(repositoryDir, docusaurusProjectRoot, warnings)) {
       if (plugin.docsDir === configuredDocsDir) continue
       const pluginBundle = migrateRepository({
         ...options,
@@ -1664,6 +1717,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         docusaurusSkipPlugins: true,
         docusaurusSkipSidebar: true,
         docusaurusSkipAssets: true,
+        docusaurusSkipRedirects: true,
       })
       for (const page of pluginBundle.pages) {
         if (seenPageIds.has(page.id)) continue
@@ -1703,9 +1757,31 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       ? `No importable Markdown or MDX pages were found in the repository. Warnings encountered during migration:\n${reasons.map((reason) => `- ${reason}`).join('\n')}`
       : 'No importable Markdown or MDX pages were found in the repository.')
   }
+  // Redirects and branding are global site config, extracted once at the
+  // top-level Docusaurus call — `docusaurusSkipRedirects` already marks the
+  // recursive per-plugin-instance sub-calls (community/mcp/agent-cli), which
+  // would otherwise redundantly re-read (and re-warn about) the same config.
+  const isTopLevelDocusaurus = platform === 'docusaurus' && docusaurusProjectRoot && !options.docusaurusSkipRedirects
   const themeColors = mintlifyConfig
     ? mintlifyThemeColors(mintlifyConfig.colors)
-    : fernRawConfig ? fernThemeColors(fernRawConfig.colors) : undefined
+    : fernRawConfig
+      ? fernThemeColors(fernRawConfig.colors)
+      : isTopLevelDocusaurus ? readDocusaurusThemeColor(docusaurusProjectRoot!) : undefined
+  // Thally's `SiteConfig` has no static logo/favicon field (unlike
+  // `brand`/`brandPreset`, which the color pipeline above already wires):
+  // branding is admin-managed at runtime. The referenced files are still
+  // copied to `public/` by the ordinary asset scan, so name them and point
+  // at where to wire them up manually instead of leaving the loss silent.
+  // Fern already emits its own version of this warning (`fern.ts`).
+  const brandAssetPaths = mintlifyConfig
+    ? [...mintlifyBrandAssetPaths(mintlifyConfig.logo), ...mintlifyBrandAssetPaths(mintlifyConfig.favicon)]
+    : isTopLevelDocusaurus ? readDocusaurusBrandAssetPaths(docusaurusProjectRoot!) : []
+  if (brandAssetPaths.length > 0) {
+    warnings.push({
+      code: 'unsupported-config',
+      message: `The site's logo/favicon (${brandAssetPaths.join(', ')}) were copied into public/ but are not wired into the migrated site's branding, which Thally manages from the admin dashboard rather than a static config field; set them there after the site is deployed.`,
+    })
+  }
   return {
     sourceUrl: options.sourceUrl,
     sourceKind: 'repository',
@@ -1725,6 +1801,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         ...(typeof fernRawConfig.title === 'string' ? { name: fernRawConfig.title } : {}),
         ...(themeColors ? { colors: themeColors } : {}),
       },
+    } : themeColors ? {
+      site: { colors: themeColors },
     } : {}),
     warnings,
     stats: { discovered, imported: pages.length, skipped },

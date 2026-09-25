@@ -11,6 +11,7 @@ import JSON5 from 'json5'
 import { parse as parseYaml } from 'yaml'
 
 import type { MarkdownPageIdentity } from './mdx.js'
+import { isRedirectPathSafe } from './navigation.js'
 import { pageIdFromReference, resolveWithin, slugifySegment } from './path.js'
 import type {
   MigrationDocsConfig,
@@ -434,6 +435,101 @@ export function readDocusaurusSidebars(repositoryRoot: string): DocusaurusSideba
   return { config: parsed, sourcePath }
 }
 
+function namedExportObjectLiteralText(source: string, name: string): string | null {
+  const normalizedSource = replaceExternalFbContent(source)
+  const match = new RegExp(`\\bexport\\s+(?:const|let|var)\\s+${name}\\b(?:\\s*:\\s*[^=;]+)?\\s*=\\s*`).exec(normalizedSource)
+  if (!match) return null
+  return matchingObjectLiteral(normalizedSource, match.index + match[0].length)
+}
+
+/**
+ * Pluck just the `redirects: [...]` array out of a plugin options object's
+ * literal text, rather than `JSON5.parse`-ing the whole object — the Oasis
+ * shape (a real, reproduced example) has a sibling `createRedirects(...) {
+ * ... }` method in the same object literal, which is not valid JSON5 and
+ * would otherwise fail the whole object and lose the `redirects` array too.
+ */
+function redirectEntriesFromObjectLiteralText(objectLiteral: string): Array<{ source: string; destination: string }> {
+  const match = /\bredirects\s*:\s*/.exec(objectLiteral)
+  if (!match) return []
+  const arrayStart = objectLiteral.indexOf('[', match.index + match[0].length)
+  if (arrayStart < 0) return []
+  const arrayLiteral = matchingArrayLiteral(objectLiteral, arrayStart)
+  if (!arrayLiteral) return []
+  let parsed: unknown
+  try {
+    parsed = JSON5.parse(arrayLiteral)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  const entries: Array<{ source: string; destination: string }> = []
+  for (const raw of parsed) {
+    const entry = objectValue(raw)
+    if (!entry || typeof entry.to !== 'string') continue
+    const froms = Array.isArray(entry.from) ? entry.from : [entry.from]
+    for (const from of froms) {
+      if (typeof from !== 'string') continue
+      if (!isRedirectPathSafe(from, entry.to)) continue
+      entries.push({ source: from, destination: entry.to })
+    }
+  }
+  return entries
+}
+
+/**
+ * Parse a `@docusaurus/plugin-client-redirects` `Options` object: either an
+ * object literal written inline in the plugin's config entry, or (Oasis's
+ * shape) a named export in a separate module the config imports, e.g.
+ * `redirects.ts` exporting `redirectsOptions`. Only a literal `redirects:
+ * [{ from, to }]` array is understood — `from` may be a single path or an
+ * array of paths, both valid per the plugin's own docs. Its `createRedirects`
+ * function computes redirects dynamically and can't be evaluated statically,
+ * so its presence is warned about rather than silently ignored.
+ */
+export function readDocusaurusRedirects(
+  repositoryRoot: string,
+  warnings: Array<MigrationWarning>,
+): Array<{ source: string; destination: string }> {
+  const configPath = findDocusaurusConfigPath(repositoryRoot)
+  if (!configPath) return []
+  const configSource = readBoundedText(configPath)
+  const pluginMatch = /['"]@docusaurus\/plugin-client-redirects['"]\s*,\s*/.exec(configSource)
+  if (!pluginMatch) return []
+  const afterPlugin = configSource.slice(pluginMatch.index + pluginMatch[0].length)
+  const warnAboutCreateRedirects = (source: string): void => {
+    if (!/\bcreateRedirects\s*[:(]/.test(source)) return
+    warnings.push({
+      code: 'unsupported-config',
+      message: "The redirects plugin's createRedirects function computes redirects dynamically and cannot be evaluated during migration; add its redirects manually.",
+    })
+  }
+  warnAboutCreateRedirects(configSource)
+  // Case 1: the plugin's options object is written inline.
+  const inlineLiteral = matchingObjectLiteral(configSource, pluginMatch.index + pluginMatch[0].length)
+  if (inlineLiteral) return redirectEntriesFromObjectLiteralText(inlineLiteral)
+  // Case 2: the options are an identifier imported from another module.
+  const identifier = afterPlugin.match(/^([A-Za-z_$][\w$]*)/)?.[1]
+  if (!identifier) return []
+  const importMatch = new RegExp(`import\\s*\\{[^}]*\\b${identifier}\\b[^}]*\\}\\s*from\\s*(['"])([^'"]+)\\1`).exec(configSource)
+    ?? new RegExp(`import\\s+${identifier}\\s+from\\s*(['"])([^'"]+)\\1`).exec(configSource)
+  const modulePath = importMatch?.[2]
+  if (!modulePath || !modulePath.startsWith('.')) return []
+  let resolvedPath: string | undefined
+  try {
+    resolvedPath = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs']
+      .map((extension) => resolveWithin(repositoryRoot, `${modulePath.replace(/^\.\//, '')}${extension}`))
+      .find((candidate) => existsSync(candidate) && lstatSync(candidate).isFile())
+  } catch {
+    return []
+  }
+  if (!resolvedPath) return []
+  const moduleSource = readBoundedText(resolvedPath)
+  warnAboutCreateRedirects(moduleSource)
+  const literal = namedExportObjectLiteralText(moduleSource, identifier)
+  return literal ? redirectEntriesFromObjectLiteralText(literal) : []
+}
+
 function readCategoryMetadata(contentRoot: string, directory: string): CategoryMetadata {
   for (const filename of CATEGORY_FILENAMES) {
     const path = resolveWithin(contentRoot, posix.join(directory, filename))
@@ -516,6 +612,68 @@ function generatedIndexPage(
   }
   context.referencedNavigationIds.add(navigationId)
   return navigationId
+}
+
+const DOCUSAURUS_HEX_COLOR = /^#[0-9a-fA-F]{3,8}$/
+
+function findDocusaurusConfigPath(repositoryRoot: string): string | null {
+  return ['docusaurus.config.js', 'docusaurus.config.ts', 'docusaurus.config.mjs']
+    .map((filename) => resolveWithin(repositoryRoot, filename))
+    .find((candidate) => existsSync(candidate) && lstatSync(candidate).isFile()) ?? null
+}
+
+/**
+ * Extract a static `--ifm-color-primary` accent from the classic theme's
+ * `customCss` file (Infima's own theming convention: a `:root` block for
+ * light mode, an `html[data-theme='dark']` block for dark mode). Its
+ * `light`/`dark` blocks are normal, like Fern's (unlike Mintlify's inverted
+ * schema `site.colors` otherwise follows), so they're swapped the same way
+ * `fernThemeColors` does to give downstream consumers one consistent
+ * contract.
+ */
+export function readDocusaurusThemeColor(repositoryRoot: string): { light?: string; dark?: string } | undefined {
+  const configPath = findDocusaurusConfigPath(repositoryRoot)
+  if (!configPath) return undefined
+  const configSource = readBoundedText(configPath)
+  const cssRelativePath = configSource.match(/\bcustomCss\s*:\s*(?:\[\s*)?(?:require\.resolve\(\s*)?(['"])([^'"]+)\1/)?.[2]
+  if (!cssRelativePath) return undefined
+  let cssPath: string
+  try {
+    cssPath = resolveWithin(repositoryRoot, cssRelativePath.replace(/^\.\//, ''))
+  } catch {
+    return undefined
+  }
+  if (!existsSync(cssPath) || !lstatSync(cssPath).isFile()) return undefined
+  const css = readBoundedText(cssPath)
+  const pick = (block: string | undefined): string | undefined => {
+    const value = block?.match(/--ifm-color-primary\s*:\s*([^;]+);/)?.[1]?.trim()
+    return value && DOCUSAURUS_HEX_COLOR.test(value) ? value : undefined
+  }
+  const lightMode = pick(css.match(/:root\s*\{([^}]*)\}/)?.[1])
+  const darkMode = pick(css.match(/\[data-theme=(['"])dark\1\]\s*\{([^}]*)\}/)?.[2])
+  const colors: { light?: string; dark?: string } = {}
+  if (darkMode) colors.light = darkMode
+  if (lightMode) colors.dark = lightMode
+  return Object.keys(colors).length > 0 ? colors : undefined
+}
+
+/**
+ * Name the source config's top-level `favicon` and `themeConfig.navbar.logo`
+ * (`src`/`srcDark`) paths, so migration can warn about them by name. The
+ * files themselves are already copied to `public/` by the ordinary
+ * `static/`/`public/` asset scan (`repository.ts`) — Thally's `SiteConfig`
+ * just has no static field to point at them (branding is admin-managed at
+ * runtime, unlike the `brand`/`brandPreset` color pipeline above).
+ */
+export function readDocusaurusBrandAssetPaths(repositoryRoot: string): Array<string> {
+  const configPath = findDocusaurusConfigPath(repositoryRoot)
+  if (!configPath) return []
+  const configSource = readBoundedText(configPath)
+  const favicon = configSource.match(/\bfavicon\s*:\s*(['"])([^'"]+)\1/)?.[2]
+  const logoBlock = configSource.match(/\blogo\s*:\s*\{([^}]*)\}/)?.[1]
+  const logo = logoBlock?.match(/\bsrc\s*:\s*(['"])([^'"]+)\1/)?.[2]
+  const logoDark = logoBlock?.match(/\bsrcDark\s*:\s*(['"])([^'"]+)\1/)?.[2]
+  return [favicon, logo, logoDark].filter((path): path is string => typeof path === 'string')
 }
 
 function autogeneratedItems(dirName: string, context: ProjectionContext): Array<string | MigrationNavigationGroup> {

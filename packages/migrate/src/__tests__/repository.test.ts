@@ -886,6 +886,24 @@ describe('Mintlify repository migration', () => {
       message: expect.stringContaining('en/with-huge-image.mdx'),
     }))
   })
+
+  it('warns by name about a Mintlify logo/favicon that were copied but are not wired into the migrated site\'s branding', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-brand-warning-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction'] },
+      logo: { light: 'logo/light.svg', dark: 'logo/dark.svg' },
+      favicon: 'favicon.svg',
+    }))
+    writeFileSync(join(root, 'introduction.mdx'), '---\ntitle: Welcome\n---\n\nWelcome.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringMatching(/logo\/light\.svg.*logo\/dark\.svg.*favicon\.svg/s),
+    }))
+  })
 })
 
 function docusaurusFixture(sidebarSource?: string): string {
@@ -1079,6 +1097,189 @@ describe('Docusaurus repository migration', () => {
       { group: 'API Reference', pages: ['API/Type', 'filters/index'] },
     ])
     expect(bundle.assets.map((asset) => asset.path)).toContain('img/logo.svg')
+  })
+
+  it('imports a content-docs plugin instance whose path lives at the repository root, not nested under the project root (Playwright: community/mcp/agent-cli are siblings of the nodejs/ project)', () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-sibling-plugin-'))
+    const siteRoot = join(repositoryDir, 'nodejs')
+    mkdirSync(join(siteRoot, 'docs'), { recursive: true })
+    mkdirSync(join(repositoryDir, 'community'), { recursive: true })
+    writeFileSync(join(siteRoot, 'docusaurus.config.ts'), `
+      export default {
+        presets: [['classic', { docs: { path: 'docs', sidebarPath: './sidebars.js' } }]],
+        plugins: [[
+          '@docusaurus/plugin-content-docs',
+          { id: 'community', path: 'community', routeBasePath: 'community' },
+        ]],
+      }
+    `)
+    writeFileSync(join(siteRoot, 'docs', 'index.mdx'), '---\ntitle: Introduction\n---\n\nMain docs.')
+    writeFileSync(join(repositoryDir, 'community', 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nCommunity welcome page.')
+
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/monorepo' })
+
+    expect(bundle.pages.some((page) => page.body.includes('Community welcome page.'))).toBe(true)
+    expect(bundle.docsConfig.tabs.map((tab) => tab.tab)).toContain('Community')
+    expect(bundle.warnings).not.toContainEqual(expect.objectContaining({ code: 'unsupported-config', message: expect.stringContaining('community') }))
+  })
+
+  it('warns (instead of silently dropping) a content-docs plugin instance whose path cannot be found anywhere in the repository', () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-missing-plugin-'))
+    const siteRoot = join(repositoryDir, 'nodejs')
+    mkdirSync(join(siteRoot, 'docs'), { recursive: true })
+    writeFileSync(join(siteRoot, 'docusaurus.config.ts'), `
+      export default {
+        presets: [['classic', { docs: { path: 'docs', sidebarPath: './sidebars.js' } }]],
+        plugins: [[
+          '@docusaurus/plugin-content-docs',
+          { id: 'wiki', path: 'wiki', routeBasePath: 'wiki' },
+        ]],
+      }
+    `)
+    writeFileSync(join(siteRoot, 'docs', 'index.mdx'), '---\ntitle: Introduction\n---\n\nMain docs.')
+
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/monorepo' })
+
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('wiki'),
+    }))
+  })
+
+  it('imports @docusaurus/plugin-client-redirects rules declared inline in docusaurus.config, including a from: [] array', () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-inline-redirects-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'docusaurus.config.ts'), `
+      export default {
+        presets: [['classic', { docs: { path: 'docs', sidebarPath: './sidebars.js' } }]],
+        plugins: [
+          ['@docusaurus/plugin-client-redirects', {
+            redirects: [
+              { to: '/guide', from: ['/old-guide', '/legacy/guide'] },
+              { to: '/guide#section', from: '/guide/old-section' },
+            ],
+          }],
+        ],
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([
+      { source: '/old-guide', destination: '/guide' },
+      { source: '/legacy/guide', destination: '/guide' },
+      { source: '/guide/old-section', destination: '/guide#section' },
+    ]))
+  })
+
+  it('imports @docusaurus/plugin-client-redirects rules from a separate module the config imports (Oasis: redirects.ts exports redirectsOptions), and warns about an unevaluable createRedirects function', () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-imported-redirects-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'redirects.ts'), `
+      import { Options } from '@docusaurus/plugin-client-redirects';
+
+      export const redirectsOptions: Options = {
+          redirects: [
+              { to: '/build/tools/cli', from: ['/general/manage-tokens/advanced', '/general/manage-tokens/cli'] },
+          ],
+          createRedirects(existingPath) {
+            return [];
+          },
+      };
+    `)
+    writeFileSync(join(repositoryDir, 'docusaurus.config.ts'), `
+      import {redirectsOptions} from './redirects';
+      export default {
+        presets: [['classic', { docs: { path: 'docs', sidebarPath: './sidebars.js' } }]],
+        plugins: [
+          ['@docusaurus/plugin-client-redirects', redirectsOptions],
+        ],
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'cli.mdx'), '---\ntitle: CLI\n---\n\nCLI docs.')
+
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/oasisprotocol/docs' })
+
+    expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([
+      { source: '/general/manage-tokens/advanced', destination: '/build/tools/cli' },
+      { source: '/general/manage-tokens/cli', destination: '/build/tools/cli' },
+    ]))
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('createRedirects'),
+    }))
+  })
+
+  it('rejects an unsafe redirect (protocol-relative //) from a Docusaurus redirects config instead of shipping an open redirect', () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-unsafe-redirect-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'docusaurus.config.ts'), `
+      export default {
+        presets: [['classic', { docs: { path: 'docs', sidebarPath: './sidebars.js' } }]],
+        plugins: [
+          ['@docusaurus/plugin-client-redirects', {
+            redirects: [{ to: '/guide', from: '//evil.example' }],
+          }],
+        ],
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.docsConfig.redirects ?? []).not.toContainEqual(expect.objectContaining({ source: '//evil.example' }))
+  })
+
+  it('wires a static --ifm-color-primary accent from the classic theme\'s customCss into bundle.site.colors (Oasis: :root for light mode, [data-theme=dark] for dark mode)', () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-theme-color-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    mkdirSync(join(repositoryDir, 'src', 'css'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'src', 'css', 'custom.css'), `
+      :root {
+        --ifm-color-primary: #0500e1;
+      }
+      html[data-theme='dark'] {
+        --ifm-color-primary: #00ffff;
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docusaurus.config.ts'), `
+      export default {
+        presets: [['classic', { docs: { path: 'docs', sidebarPath: './sidebars.js' }, theme: { customCss: require.resolve('./src/css/custom.css') } }]],
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docs' })
+
+    // Infima's light/dark blocks are normal (unlike Mintlify's inverted
+    // schema `site.colors` otherwise follows), so they're swapped the same
+    // way Fern's colors are.
+    expect(bundle.site?.colors).toEqual({ dark: '#0500e1', light: '#00ffff' })
+  })
+
+  it('warns by name about a Docusaurus favicon/logo that were copied but are not wired into the migrated site\'s branding', () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-brand-warning-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'docusaurus.config.ts'), `
+      export default {
+        favicon: 'img/favicon/favicon.ico',
+        presets: [['classic', { docs: { path: 'docs', sidebarPath: './sidebars.js' } }]],
+        themeConfig: {
+          navbar: {
+            logo: { src: 'img/logo.svg', srcDark: 'img/logo_dark.svg' },
+          },
+        },
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringMatching(/favicon\/favicon\.ico.*logo\.svg.*logo_dark\.svg/s),
+    }))
   })
 })
 
