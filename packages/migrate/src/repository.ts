@@ -2009,11 +2009,24 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       ? fernApiSections
       : [{ nameExplicit: false }]
     const resolvedSpecs: Array<{ filename: string; tabLabel?: string }> = []
+    // Two different multi-API specs commonly share a basename (Paradex's
+    // prod_rest and testnet_rest both resolve to their own
+    // apis/<name>/openapi/openapi.json) — track which absolute file a
+    // filename already names so a second, genuinely different spec gets a
+    // distinguishing prefix instead of silently reusing the first spec's
+    // copied asset for both tabs.
+    const specFilenameSources = new Map<string, string>()
     for (const section of sections) {
       const resolution = findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, section.name, section.nameExplicit, warnings)
       const spec = resolution.spec ?? (!section.nameExplicit ? findOpenApi(files) : null)
       if (spec) {
-        const filename = basename(spec.relativePath)
+        let filename = basename(spec.relativePath)
+        const existingSource = specFilenameSources.get(filename)
+        if (existingSource && existingSource !== spec.absolutePath) {
+          const prefix = section.name ? `${section.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}-` : `${specFilenameSources.size + 1}-`
+          filename = `${prefix}${filename}`
+        }
+        specFilenameSources.set(filename, spec.absolutePath)
         if (!assets.some((asset) => asset.path === filename)) {
           assets.push({ path: filename, content: readFileSync(spec.absolutePath) })
         }

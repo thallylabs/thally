@@ -34,6 +34,15 @@ export interface FernApiSection {
   nameExplicit: boolean
   /** Label of the tab that owns this node, if that tab also has other content and survived projection. */
   tabLabel?: string
+  /**
+   * Route segments (section slugs) leading to this node, used only to
+   * disambiguate two `api:` nodes that land on the same `tabLabel` — a
+   * "Production API Reference" and "Testnet API Reference" section both
+   * nested under one tab both want that tab's label; without this, the
+   * second one silently overwrites the first tab's binding instead of
+   * getting its own tab.
+   */
+  routeSegments: Array<string>
 }
 
 export interface FernNavigationResult {
@@ -269,6 +278,7 @@ function convertNode(
     context.apiSections.push({
       name: typeof object['api-name'] === 'string' ? object['api-name'] : object.api,
       nameExplicit: typeof object['api-name'] === 'string',
+      routeSegments: parentSegments,
     })
     return null
   }
@@ -581,6 +591,26 @@ export function projectFernNavigation(input: {
     ...segmentAliasRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
   ]
 
+  // Two `api:` nodes both nested under the same top-level tab (e.g.
+  // Paradex's "Production API Reference" and "Testnet API Reference"
+  // sections, both inside a `portal` tab) get the same `tabLabel` from the
+  // loop above — Thally's schema allows only one `.api` per tab, so the
+  // second would otherwise silently overwrite the first tab's binding.
+  // Disambiguate every collision after the fact (the first claimant keeps
+  // the plain tab label) using the node's own section route, which is
+  // exactly what differs between them.
+  const claimedTabLabels = new Set<string>()
+  const disambiguatedApiSections = context.apiSections.map((section) => {
+    if (!section.tabLabel || !claimedTabLabels.has(section.tabLabel)) {
+      if (section.tabLabel) claimedTabLabels.add(section.tabLabel)
+      return section
+    }
+    const distinguishingSegment = section.routeSegments.at(-1)
+    const tabLabel = distinguishingSegment ? `${section.tabLabel}: ${titleCase(distinguishingSegment)}` : section.tabLabel
+    claimedTabLabels.add(tabLabel)
+    return { ...section, tabLabel }
+  })
+
   return {
     docsConfig: {
       tabs,
@@ -589,6 +619,6 @@ export function projectFernNavigation(input: {
     },
     descriptors: context.descriptors,
     warnings: context.warnings,
-    apiSections: context.apiSections,
+    apiSections: disambiguatedApiSections,
   }
 }

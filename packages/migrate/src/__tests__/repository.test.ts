@@ -1493,6 +1493,48 @@ navigation:
     expect(bundle.warnings.some((warning) => /only the first was imported/i.test(warning.message))).toBe(false)
   })
 
+  it('gives two api: sections nested under the SAME tab their own tabs instead of one overwriting the other (Paradex shape)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-same-tab-multi-api-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'prod_rest'), { recursive: true })
+    mkdirSync(join(fernRoot, 'apis', 'testnet_rest'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    // Both api: nodes share the same display title AND live inside the same
+    // top-level "portal" tab, in separate sections distinguished only by
+    // their own `slug` — exactly Paradex's real docs.yml shape.
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - tab: portal
+    layout:
+      - page: Welcome
+        path: welcome.mdx
+      - section: Production API Reference
+        slug: prod
+        contents:
+          - api: REST Endpoints
+            api-name: prod_rest
+      - section: Testnet API Reference
+        slug: testnet
+        contents:
+          - api: REST Endpoints
+            api-name: testnet_rest
+`)
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(fernRoot, 'apis', 'prod_rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.json\n')
+    writeFileSync(join(fernRoot, 'apis', 'prod_rest', 'openapi.json'), '{"openapi":"3.0.0","info":{"title":"Prod","version":"1.0"},"paths":{}}')
+    writeFileSync(join(fernRoot, 'apis', 'testnet_rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.json\n')
+    writeFileSync(join(fernRoot, 'apis', 'testnet_rest', 'openapi.json'), '{"openapi":"3.0.0","info":{"title":"Testnet","version":"1.0"},"paths":{}}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const apiTabs = bundle.docsConfig.tabs.filter((tab) => tab.api)
+    // Both specs are bound, on two distinct tabs, each to its own file —
+    // not one tab overwritten by the other.
+    expect(apiTabs).toHaveLength(2)
+    expect(new Set(apiTabs.map((tab) => tab.api?.source)).size).toBe(2)
+    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['openapi.json', 'testnet-rest-openapi.json'])
+  })
+
   it('warns by name instead of silently dropping an AsyncAPI/OpenRPC-only Fern api: section', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-asyncapi-'))
     const fernRoot = join(root, 'fern')
