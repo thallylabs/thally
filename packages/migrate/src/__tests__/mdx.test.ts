@@ -3,7 +3,7 @@
 import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
-import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from '../mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -270,6 +270,101 @@ describe('multi-line renames (fenced/inline code masked, whole body rewritten)',
     // A comment-like fragment inside a fenced block must not be converted either.
     const fencedComment = '```html\n<!--\n  example comment\n-->\n```'
     expect(normalizeMdx(fencedComment)).toBe(fencedComment)
+  })
+})
+
+describe('protectMathBlocks', () => {
+  it('converts a block $$...$$ (KaTeX align, backslashes and braces) into a fenced ```math block', () => {
+    const body = [
+      'Some prose before.',
+      '',
+      '$$',
+      '\\begin{align*}',
+      '\\small\\text{Account USDC Settlement Balance} = \\\\',
+      '\\text{Account USDC Balance}',
+      '\\end{align*}',
+      '$$',
+      '',
+      'Some prose after.',
+    ].join('\n')
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(true)
+    expect(result.body).toContain('```math')
+    expect(result.body).toContain('\\begin{align*}')
+    expect(result.body).not.toMatch(/\n\$\$\n/)
+    // The content actually compiles as MDX now (this exact construct is
+    // what crashed the parser before math was protected).
+    expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('converts an inline $$...$$ span mid-paragraph into an inline code span, preserving surrounding prose', () => {
+    const body = "Therefore the Total Exchange USDC Balance is $$4'000$$ today."
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(true)
+    expect(result.body).toBe("Therefore the Total Exchange USDC Balance is `$$4'000$$` today.")
+    expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('leaves a real fenced code block containing $$ untouched', () => {
+    const body = ['```js', 'const x = $$(selector)', '```'].join('\n')
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
+
+  it('leaves prose with no $$ at all unchanged', () => {
+    const body = 'Nothing special here.'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
+
+  it('never touches the frontmatter block', () => {
+    const body = '---\ntitle: "$$weird$$"\n---\n\nBody with $$x=1$$ math.'
+    const result = protectMathBlocks(body)
+    expect(result.body).toContain('title: "$$weird$$"')
+    expect(result.body).toContain('`$$x=1$$`')
+  })
+
+  it('converts single-$...$ inline math (the paradex-docs greeks.mdx repro)', () => {
+    const body = 'Under Black-76, the forward is $F = S \\times e^{\\,f\\,T}$, so a move in $S$ matters.'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(true)
+    expect(result.body).toBe(
+      'Under Black-76, the forward is `$F = S \\times e^{\\,f\\,T}$`, so a move in `$S$` matters.',
+    )
+    expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('does not mistake two dollar amounts in prose for inline math', () => {
+    const body = 'It costs $50 and $100 depending on the plan.'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
+
+  it('converts a block delimited by a bare $ alone on its own line (the paradex-docs maintenance-mode.mdx repro)', () => {
+    const body = [
+      'BTC with an External Fair Price of $100,000:',
+      '',
+      '$',
+      '\\text{External Fair Price} = \\text{Spot Oracle Price} \\times (1 + \\text{External Basis Rate})',
+      '$',
+    ].join('\n')
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(true)
+    // A bare dollar amount elsewhere in the prose is left alone.
+    expect(result.body).toContain('$100,000:')
+    expect(result.body).toContain('```math')
+    expect(result.body).toContain('\\text{External Fair Price}')
+    expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('does not treat an author-escaped \\$ as a math delimiter', () => {
+    const body = 'A 1% move corresponds to \\$600 in this example.'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
   })
 })
 

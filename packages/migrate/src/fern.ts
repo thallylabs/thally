@@ -26,16 +26,31 @@ export interface FernPageDescriptor {
   navigationId: string
 }
 
+/** One `api:` navigation node, resolved to the name/tab Thally needs to bind its spec. */
+export interface FernApiSection {
+  /** The node's own value (a display name or, in multi-API repos, a `fern/apis/<name>` identifier). */
+  name: string
+  /** True when `name` came from an explicit `api-name` field rather than falling back to the `api:` display title. */
+  nameExplicit: boolean
+  /** Label of the tab that owns this node, if that tab also has other content and survived projection. */
+  tabLabel?: string
+  /**
+   * Route segments (section slugs) leading to this node, used only to
+   * disambiguate two `api:` nodes that land on the same `tabLabel` — a
+   * "Production API Reference" and "Testnet API Reference" section both
+   * nested under one tab both want that tab's label; without this, the
+   * second one silently overwrites the first tab's binding instead of
+   * getting its own tab.
+   */
+  routeSegments: Array<string>
+}
+
 export interface FernNavigationResult {
   docsConfig: MigrationDocsConfig
   descriptors: Array<FernPageDescriptor>
   warnings: Array<MigrationWarning>
-  /** The first `api:` node's own value (a display name or, in multi-API repos, a `fern/apis/<name>` identifier), if any. */
-  apiName?: string
-  /** True when `apiName` came from an explicit `api-name` field rather than falling back to the `api:` display title. */
-  apiNameExplicit?: boolean
-  /** Label of the tab that owns the first `api:` node, if that tab also has other content and survived projection. */
-  apiTabLabel?: string
+  /** Every `api:` node found in navigation, in document order. A repo can declare several (e.g. a REST and a WebSocket API in separate tabs). */
+  apiSections: Array<FernApiSection>
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -74,17 +89,14 @@ export function readFernConfig(fernRoot: string): { config: Record<string, unkno
 interface WalkContext {
   descriptors: Array<FernPageDescriptor>
   seenNavigationIds: Set<string>
-  sawApi: boolean
-  /** The first `api:` node's own value, used to locate its OpenAPI spec via generators.yml/fern/apis/<name>. */
-  apiName?: string
-  /** True when `apiName` came from an explicit `api-name` field rather than falling back to the `api:` display title. */
-  apiNameExplicit?: boolean
-  /** Label of the tab that owns the first `api:` node, so the OpenAPI spec attaches to that exact tab. */
-  apiTabLabel?: string
+  /** Every `api:` node seen so far, in document order; `tabLabel` is filled in once its owning tab finishes walking. */
+  apiSections: Array<FernApiSection>
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
   /** Bare tab/section routes with no page of their own, soft-redirected to their first descendant. */
   bareRouteRedirects: Array<{ source: string; destination: string }>
+  /** Slugified segment -> the literal explicit `slug` it was derived from, when the two differ (e.g. `baml-client` -> `baml_client`). */
+  segmentAliases: Map<string, string>
   /**
    * Directory, relative to `fernRoot` (posix, no trailing slash, '' at the
    * root), that a page's `path` is actually relative to. A product's own
@@ -124,6 +136,9 @@ function addBareRouteRedirect(
   }
 }
 
+/** A literal explicit `slug` value is only trusted as a redirect segment when it's already plain URL-safe text. */
+const FERN_SEGMENT_ALIAS = /^[\w.-]+$/
+
 /**
  * Fern's own slugifier treats any non-alphanumeric run (including `.`, which
  * Thally's shared `slugifySegment` deliberately preserves for other
@@ -154,11 +169,25 @@ function fernLabelSlug(label: string): string {
  * segment by default (confirmed against a live Fern site's sitemap: nested
  * sections with no `slug` field still nest their descendants by title).
  * `slug` overrides the label; `skip-slug: true` omits the segment entirely.
+ *
+ * An author-written `slug` is intentional URL text (e.g. BAML's `slug:
+ * baml_client`, matching its own `baml_client/` folder name) — Fern serves
+ * it literally, underscore and all. `fernBasicSlug` still squashes it into
+ * Thally's usual hyphenated route (kept as the canonical route: changing it
+ * would be a wider behavior change than this warrants), but when the two
+ * differ, the literal form is recorded as a segment alias so
+ * `fernUnderscoreAliasRedirects` can add a redirect from the original
+ * folder-name-shaped link to the route Thally actually uses.
  */
-function segmentFor(value: Record<string, unknown>, label: string): string | null {
+function segmentFor(value: Record<string, unknown>, label: string, context?: WalkContext): string | null {
   if (value['skip-slug'] === true) return null
   const explicit = typeof value.slug === 'string' ? value.slug.trim() : ''
-  return (explicit ? fernBasicSlug(explicit) : fernLabelSlug(label)) || null
+  if (!explicit) return fernLabelSlug(label) || null
+  const slugified = fernBasicSlug(explicit)
+  if (context && explicit !== slugified && FERN_SEGMENT_ALIAS.test(explicit)) {
+    context.segmentAliases.set(slugified, explicit)
+  }
+  return slugified || null
 }
 
 function uniqueNavigationId(base: string, context: WalkContext): string {
@@ -184,7 +213,7 @@ function registerPage(
 ): string | null {
   if (typeof object.path !== 'string' || !object.path.trim()) return null
   const label = typeof object.page === 'string' && object.page.trim() ? object.page.trim() : 'Untitled'
-  const segment = segmentFor(object, label)
+  const segment = segmentFor(object, label, context)
   const base = [...parentSegments, segment].filter(Boolean).join('/')
   return registerPageAt(object.path, base, context)
 }
@@ -202,7 +231,7 @@ function convertNode(
 
   if (typeof object.section === 'string') {
     const label = object.section
-    const segment = segmentFor(object, label)
+    const segment = segmentFor(object, label, context)
     const segments = segment ? [...parentSegments, segment] : parentSegments
     const contents = Array.isArray(object.contents) ? object.contents : []
     const pages: Array<string | MigrationNavigationGroup> = []
@@ -239,17 +268,18 @@ function convertNode(
   }
 
   if (typeof object.api === 'string') {
-    if (context.sawApi) {
-      warnOnce(context, 'fern-multiple-api', 'Multiple Fern API sections were found; only the first was imported.')
-    } else {
-      // `api` is the display title shown in the nav; `api-name` (when
-      // present) is the actual `fern/apis/<name>/` folder name. A repo with
-      // `api: Plant API` / `api-name: plants` has no `apis/Plant API`
-      // folder, so preferring `api-name` is required to find the spec.
-      context.apiName = typeof object['api-name'] === 'string' ? object['api-name'] : object.api
-      context.apiNameExplicit = typeof object['api-name'] === 'string'
-    }
-    context.sawApi = true
+    // `api` is the display title shown in the nav; `api-name` (when
+    // present) is the actual `fern/apis/<name>/` folder name. A repo with
+    // `api: Plant API` / `api-name: plants` has no `apis/Plant API`
+    // folder, so preferring `api-name` is required to find the spec. A repo
+    // can declare several `api:` nodes (e.g. a REST API and a WebSocket API
+    // in separate tabs) — each is tracked and resolved independently rather
+    // than only ever importing the first one found.
+    context.apiSections.push({
+      name: typeof object['api-name'] === 'string' ? object['api-name'] : object.api,
+      nameExplicit: typeof object['api-name'] === 'string',
+      routeSegments: parentSegments,
+    })
     return null
   }
 
@@ -360,12 +390,14 @@ function buildTabsFromConfig(
       const id = String(entry.tab)
       const meta = objectValue(tabsMeta[id]) ?? {}
       const label = typeof meta['display-name'] === 'string' ? meta['display-name'] : titleCase(id)
-      const tabSegment = segmentFor(meta, label)
+      const tabSegment = segmentFor(meta, label, context)
       const segments = [...routePrefix, ...(tabSegment ? [tabSegment] : [])]
       const layout = Array.isArray(entry.layout) ? entry.layout : []
-      const sawApiBefore = context.sawApi
+      const sectionsBefore = context.apiSections.length
       const groups = groupsFromConverted(convertNodes(layout, segments, context))
-      if (!sawApiBefore && context.sawApi) context.apiTabLabel = label
+      for (let index = sectionsBefore; index < context.apiSections.length; index += 1) {
+        context.apiSections[index].tabLabel ??= label
+      }
       if (groups.length === 0) return []
       if (segments.length > 0) addBareRouteRedirect(segments, groups, context)
       return [{
@@ -376,7 +408,11 @@ function buildTabsFromConfig(
     })
   }
   if (Array.isArray(navigation)) {
+    const sectionsBefore = context.apiSections.length
     const groups = groupsFromConverted(convertNodes(navigation, routePrefix, context))
+    for (let index = sectionsBefore; index < context.apiSections.length; index += 1) {
+      context.apiSections[index].tabLabel ??= fallbackTabLabel
+    }
     if (groups.length > 0) {
       if (routePrefix.length > 0) addBareRouteRedirect(routePrefix, groups, context)
       return [{ tab: fallbackTabLabel, groups }]
@@ -428,7 +464,7 @@ function projectFernProducts(
     }
     if (!productConfig) return []
     const productDir = dirname(productPath)
-    const routeSegment = segmentFor(product, label)
+    const routeSegment = segmentFor(product, label, context)
     const priorPrefix = context.pathPrefix
     context.pathPrefix = relative(fernRoot, productDir).replace(/\\/g, '/')
     try {
@@ -454,10 +490,11 @@ export function projectFernNavigation(input: {
   const context: WalkContext = {
     descriptors: [],
     seenNavigationIds: new Set(),
-    sawApi: false,
+    apiSections: [],
     warnings: [],
     warningKeys: new Set(),
     bareRouteRedirects: [],
+    segmentAliases: new Map(),
     pathPrefix: '',
   }
   const config = input.config
@@ -523,10 +560,56 @@ export function projectFernNavigation(input: {
   }
 
   const authoredSources = new Set(redirects.map((redirect) => redirect.source))
+  const knownIds = new Set(context.descriptors.map((descriptor) => descriptor.navigationId))
+  // A page whose route includes a segment Fern derived from an explicit
+  // `slug` that got hyphenated (see `segmentFor`) is also reachable on the
+  // live Fern site at its literal, unslugified form (Fern's own routing is
+  // file/slug-based and tolerates it) — e.g. BAML's `slug: baml_client`
+  // means both `/ref/baml-client/...` (Thally's route) and
+  // `/ref/baml_client/...` (in-body links, matching the folder name) are
+  // live. Add one redirect per affected page so those in-body links keep
+  // resolving instead of 404ing after migration.
+  const segmentAliasRedirects = context.segmentAliases.size > 0
+    ? context.descriptors.flatMap((descriptor) => {
+        const segments = descriptor.navigationId.split('/')
+        let changed = false
+        const aliased = segments.map((segment) => {
+          const literal = context.segmentAliases.get(segment)
+          if (!literal) return segment
+          changed = true
+          return literal
+        })
+        if (!changed) return []
+        const source = `/${aliased.join('/')}`
+        if (source === `/${descriptor.navigationId}` || knownIds.has(aliased.join('/'))) return []
+        return [{ source, destination: `/${descriptor.navigationId}` }]
+      })
+    : []
   const allRedirects = [
     ...redirects,
     ...context.bareRouteRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
+    ...segmentAliasRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
   ]
+
+  // Two `api:` nodes both nested under the same top-level tab (e.g.
+  // Paradex's "Production API Reference" and "Testnet API Reference"
+  // sections, both inside a `portal` tab) get the same `tabLabel` from the
+  // loop above — Thally's schema allows only one `.api` per tab, so the
+  // second would otherwise silently overwrite the first tab's binding.
+  // Disambiguate every collision after the fact (the first claimant keeps
+  // the plain tab label) using the node's own section route, which is
+  // exactly what differs between them.
+  const claimedTabLabels = new Set<string>()
+  const disambiguatedApiSections = context.apiSections.map((section) => {
+    if (!section.tabLabel || !claimedTabLabels.has(section.tabLabel)) {
+      if (section.tabLabel) claimedTabLabels.add(section.tabLabel)
+      return section
+    }
+    const distinguishingSegment = section.routeSegments.at(-1)
+    const tabLabel = distinguishingSegment ? `${section.tabLabel}: ${titleCase(distinguishingSegment)}` : section.tabLabel
+    claimedTabLabels.add(tabLabel)
+    return { ...section, tabLabel }
+  })
 
   return {
     docsConfig: {
@@ -536,8 +619,6 @@ export function projectFernNavigation(input: {
     },
     descriptors: context.descriptors,
     warnings: context.warnings,
-    ...(context.apiName ? { apiName: context.apiName } : {}),
-    ...(context.apiNameExplicit ? { apiNameExplicit: true } : {}),
-    ...(context.apiTabLabel ? { apiTabLabel: context.apiTabLabel } : {}),
+    apiSections: disambiguatedApiSections,
   }
 }

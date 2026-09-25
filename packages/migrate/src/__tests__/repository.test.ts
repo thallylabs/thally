@@ -7,24 +7,47 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { cloneGitHubRepository, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
+import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
 
 // Queue of scripted `git clone` outcomes consumed in order by the mocked
 // `spawn` below, so `cloneGitHubRepository`'s retry-on-network-failure logic
 // (repository.ts) can be tested without a real clone.
 const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; stderr?: string }> }))
-vi.mock('node:child_process', () => ({
-  spawn: () => {
-    const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void } }
-    child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} })
-    const outcome = cloneOutcomes.queue.shift() ?? { code: 0 }
-    queueMicrotask(() => {
-      if (outcome.stderr) child.stderr.emit('data', outcome.stderr)
-      child.emit('close', outcome.code)
-    })
-    return child
-  },
-}))
+// Scripted `curl` outcomes for `downloadRemoteApiSpec` (repository.ts), so a
+// remote-spec download can be tested without a real network call.
+const remoteSpecOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ content?: string; fail?: boolean }> }))
+// Records each `spawn('git', args, options)` call's env, so a test can
+// assert the LFS-filter-neutralizing env actually reaches the git process
+// without a real clone (that's covered manually against BoundaryML/baml, a
+// real Git LFS repo, since a mocked child process can't exercise git's own
+// filter-driver resolution).
+const gitSpawnCalls = vi.hoisted(() => ({ envs: [] as Array<Record<string, string | undefined>> }))
+vi.mock('node:child_process', async () => {
+  const fs = await import('node:fs')
+  return {
+    spawn: (_command: string, _args: Array<string>, options: { env?: Record<string, string | undefined> }) => {
+      gitSpawnCalls.envs.push(options.env ?? {})
+      const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void } }
+      child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} })
+      const outcome = cloneOutcomes.queue.shift() ?? { code: 0 }
+      queueMicrotask(() => {
+        if (outcome.stderr) child.stderr.emit('data', outcome.stderr)
+        child.emit('close', outcome.code)
+      })
+      return child
+    },
+    execFileSync: (command: string, args: Array<string>) => {
+      if (command !== 'curl') throw new Error(`unexpected execFileSync command: ${command}`)
+      const outcome = remoteSpecOutcomes.queue.shift()
+      if (!outcome || outcome.fail) throw new Error('curl: simulated failure')
+      const outFile = args[args.indexOf('-o') + 1]
+      fs.writeFileSync(outFile, outcome.content ?? '{}')
+      return Buffer.alloc(0)
+    },
+  }
+})
+
+afterEach(() => { remoteSpecOutcomes.queue.length = 0 })
 
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repository-'))
@@ -377,6 +400,81 @@ describe('Mintlify repository migration', () => {
     expect(introduction?.content).toContain('badge: "NEW"')
     expect(introduction?.content).toContain('mode: "center"')
     expect(introduction?.content).toContain('noindex: true')
+  })
+
+  it('binds a per-tab docs.json `openapi` (navigation.tabs[].openapi) to that exact tab, not just the top-level api.openapi', () => {
+    const root = fixture()
+    // `fixture()` already writes docs.json/pages elsewhere; write a minimal,
+    // self-contained one here so the per-tab binding is unambiguous.
+    const docsRoot = root
+    writeFileSync(join(docsRoot, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [
+          { tab: 'Guides', pages: ['guide'] },
+          { tab: 'API Reference', openapi: 'openapi/service.yml', pages: ['api-landing'] },
+        ],
+      },
+    }))
+    mkdirSync(join(docsRoot, 'openapi'), { recursive: true })
+    writeFileSync(join(docsRoot, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    writeFileSync(join(docsRoot, 'api-landing.mdx'), '---\ntitle: API\n---\n\nLanding.')
+    writeFileSync(join(docsRoot, 'openapi', 'service.yml'), 'openapi: 3.1.0\ninfo: { title: Service, version: "1.0" }\npaths: {}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'API Reference')
+    expect(apiTab?.api).toEqual({ source: '/service.yml', navigation: false })
+    expect(bundle.docsConfig.tabs.find((tab) => tab.tab === 'Guides')?.api).toBeUndefined()
+    expect(bundle.assets.map((asset) => asset.path)).toContain('service.yml')
+  })
+
+  it("downloads a remote https `openapi` spec referenced from a tab into public/, and warns instead when the download fails", () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [
+          { tab: 'Guides', pages: ['guide'] },
+          { tab: 'REST API', openapi: 'https://api.example.com/openapi.json', pages: ['rest-landing'] },
+          { tab: 'WS API', openapi: 'https://api.example.com/ws-spec.json', pages: ['ws-landing'] },
+        ],
+      },
+    }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    writeFileSync(join(root, 'rest-landing.mdx'), '---\ntitle: REST\n---\n\nLanding.')
+    writeFileSync(join(root, 'ws-landing.mdx'), '---\ntitle: WS\n---\n\nLanding.')
+    remoteSpecOutcomes.queue.push(
+      { content: 'openapi: 3.1.0\ninfo: { title: Remote, version: "1.0" }\npaths: {}' },
+      { fail: true },
+    )
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const restTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'REST API')
+    expect(restTab?.api?.source).toBe('/openapi.json')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi.json')
+    expect(bundle.docsConfig.tabs.find((tab) => tab.tab === 'WS API')?.api).toBeUndefined()
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('could not be downloaded'),
+    }))
+  })
+
+  it("warns by name instead of silently dropping docs.json's api.asyncapi", () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'Guides', pages: ['guide'] }] },
+      api: { asyncapi: 'api-reference/voice.asyncapi.yaml' },
+    }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('AsyncAPI is not supported'),
+    }))
+    expect(bundle.warnings.find((warning) => warning.message.includes('AsyncAPI'))?.message).toContain('voice.asyncapi.yaml')
   })
 
   it('skips dotfile directories and .mintignore paths, and excludes pages that fail to compile as MDX', () => {
@@ -902,6 +1000,28 @@ describe('Mintlify repository migration', () => {
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
       code: 'unsupported-config',
       message: expect.stringMatching(/logo\/light\.svg.*logo\/dark\.svg.*favicon\.svg/s),
+    }))
+  })
+
+  it('warns instead of copying a Git LFS pointer file as if it were the real asset', () => {
+    const root = fixture()
+    // Clone with GIT_LFS_SKIP_SMUDGE=1 leaves this exact pointer text in
+    // place of the real binary when the host has no git-lfs binary.
+    writeFileSync(join(root, 'images', 'diagram.png'), [
+      'version https://git-lfs.github.com/spec/v1',
+      'oid sha256:0000000000000000000000000000000000000000000000000000000000000',
+      'size 123456',
+      '',
+    ].join('\n'))
+    writeFileSync(join(root, 'en', 'with-lfs-image.mdx'), '---\ntitle: LFS image\n---\n\n![Diagram](/images/diagram.png)')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('images/diagram.png')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      source: 'images/diagram.png',
+      message: expect.stringContaining('Git LFS pointer'),
     }))
   })
 })
@@ -1547,6 +1667,171 @@ navigation:
     expect(bundle.site).toEqual({ name: 'Acme Docs', colors: { light: '#70E155', dark: '#008700' } })
   })
 
+  it('imports every Fern api: section, each bound to its own tab and spec, instead of only the first', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-multi-api-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'rest'), { recursive: true })
+    mkdirSync(join(fernRoot, 'apis', 'ws'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - tab: rest-tab
+    layout:
+      - page: Welcome
+        path: welcome.mdx
+      - api: REST API
+        api-name: rest
+  - tab: ws-tab
+    layout:
+      - api: WebSocket API
+        api-name: ws
+`)
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: rest-openapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'rest-openapi.yml'), 'openapi: 3.0.0\ninfo:\n  title: REST\n  version: "1.0"\npaths: {}\n')
+    writeFileSync(join(fernRoot, 'apis', 'ws', 'generators.yml'), 'api:\n  specs:\n    - openapi: ws-openapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'ws', 'ws-openapi.yml'), 'openapi: 3.0.0\ninfo:\n  title: WS\n  version: "1.0"\npaths: {}\n')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const apiTabs = bundle.docsConfig.tabs.filter((tab) => tab.api)
+    expect(apiTabs.map((tab) => tab.tab).sort()).toEqual(['Rest Tab', 'Ws Tab'])
+    expect(apiTabs.map((tab) => tab.api?.source).sort()).toEqual(['/rest-openapi.yml', '/ws-openapi.yml'])
+    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['rest-openapi.yml', 'ws-openapi.yml'])
+    expect(bundle.warnings.some((warning) => /only the first was imported/i.test(warning.message))).toBe(false)
+  })
+
+  it('gives two api: sections nested under the SAME tab their own tabs instead of one overwriting the other (Paradex shape)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-same-tab-multi-api-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'prod_rest'), { recursive: true })
+    mkdirSync(join(fernRoot, 'apis', 'testnet_rest'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    // Both api: nodes share the same display title AND live inside the same
+    // top-level "portal" tab, in separate sections distinguished only by
+    // their own `slug` — exactly Paradex's real docs.yml shape.
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - tab: portal
+    layout:
+      - page: Welcome
+        path: welcome.mdx
+      - section: Production API Reference
+        slug: prod
+        contents:
+          - api: REST Endpoints
+            api-name: prod_rest
+      - section: Testnet API Reference
+        slug: testnet
+        contents:
+          - api: REST Endpoints
+            api-name: testnet_rest
+`)
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(fernRoot, 'apis', 'prod_rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.json\n')
+    writeFileSync(join(fernRoot, 'apis', 'prod_rest', 'openapi.json'), '{"openapi":"3.0.0","info":{"title":"Prod","version":"1.0"},"paths":{}}')
+    writeFileSync(join(fernRoot, 'apis', 'testnet_rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.json\n')
+    writeFileSync(join(fernRoot, 'apis', 'testnet_rest', 'openapi.json'), '{"openapi":"3.0.0","info":{"title":"Testnet","version":"1.0"},"paths":{}}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const apiTabs = bundle.docsConfig.tabs.filter((tab) => tab.api)
+    // Both specs are bound, on two distinct tabs, each to its own file —
+    // not one tab overwritten by the other.
+    expect(apiTabs).toHaveLength(2)
+    expect(new Set(apiTabs.map((tab) => tab.api?.source)).size).toBe(2)
+    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['openapi.json', 'testnet-rest-openapi.json'])
+  })
+
+  it('warns by name instead of silently dropping an AsyncAPI/OpenRPC-only Fern api: section', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-asyncapi-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'ws'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - api: WebSocket API
+    api-name: ws
+`)
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(fernRoot, 'apis', 'ws', 'generators.yml'), 'api:\n  specs:\n    - asyncapi: asyncapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'ws', 'asyncapi.yml'), 'asyncapi: 2.6.0\ninfo:\n  title: WS\n  version: "1.0"\n')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('AsyncAPI is not supported'),
+    }))
+    expect(bundle.warnings.find((warning) => warning.message.includes('AsyncAPI'))?.message).toContain('asyncapi.yml')
+  })
+
+  it('keeps a page with a $$\\begin{align*}...\\end{align*}$$ KaTeX block instead of excluding it, and warns', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-math-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(fernRoot, { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), 'navigation:\n  - page: Math\n    path: math.mdx\n')
+    writeFileSync(join(fernRoot, 'math.mdx'), [
+      '---',
+      'title: Math',
+      '---',
+      '',
+      'Some prose before.',
+      '',
+      '$$',
+      '\\begin{align*}',
+      '\\text{Bankruptcy Amount} = \\\\',
+      '\\max(0, x)',
+      '\\end{align*}',
+      '$$',
+      '',
+      "Total is $$4'000$$ today.",
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('math')
+    const page = bundle.pages.find((entry) => entry.id === 'math')
+    expect(page?.body).toContain('```math')
+    expect(page?.body).toContain('\\begin{align*}')
+    expect(page?.body).toContain("`$$4'000$$`")
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('kept as a fenced code block'),
+    }))
+  })
+
+  it('redirects an underscore-slug link (matching the on-disk folder name) to the hyphenated route Thally actually uses', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-slug-alias-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'baml_client'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - section: Generated baml_client
+    slug: baml_client
+    contents:
+      - page: With options
+        path: baml_client/with-options.mdx
+`)
+    // The in-body link matches the literal, underscore folder name — the
+    // form the live Fern site tolerates but Thally's hyphenated route
+    // doesn't resolve without an alias redirect.
+    writeFileSync(join(fernRoot, 'baml_client', 'with-options.mdx'), '---\ntitle: With options\n---\n\nSee [type builder](/ref/baml_client/with-options).')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('baml-client/with-options')
+    expect(bundle.docsConfig.redirects).toContainEqual({
+      source: '/baml_client/with-options',
+      destination: '/baml-client/with-options',
+    })
+  })
+
   it("resolves the first api: node's spec from generators.yml instead of the first OpenAPI file on disk", () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-generators-'))
     const fernRoot = join(root, 'fern')
@@ -1807,8 +2092,111 @@ navigation:
   })
 })
 
+describe('scanFiles follows a submodule symlink inside the repository checkout', () => {
+  it('imports pages from a symlinked directory that resolves inside repositoryDir (submodule content)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-submodule-symlink-'))
+    // Mirrors Oasis's layout: docs/core is a symlink into a sibling
+    // external/ submodule checkout, outside the docs root but still inside
+    // the repository.
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'external', 'oasis-core', 'docs'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction', 'core/overview'] },
+    }))
+    writeFileSync(join(root, 'docs', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(root, 'external', 'oasis-core', 'docs', 'overview.mdx'), '---\ntitle: Core overview\n---\n\nSubmodule content.')
+    symlinkSync(join(root, 'external', 'oasis-core', 'docs'), join(root, 'docs', 'core'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', docsDir: 'docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('core/overview')
+    expect(bundle.pages.find((page) => page.id === 'core/overview')?.body).toContain('Submodule content.')
+  })
+
+  it('never follows a symlink that resolves outside the repository checkout', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-symlink-escape-'))
+    const outside = mkdtempSync(join(tmpdir(), 'thally-migrate-symlink-escape-outside-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    writeFileSync(join(outside, 'secret.mdx'), '---\ntitle: Secret\n---\n\nShould never be imported.')
+    writeFileSync(join(root, 'docs', 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction'] },
+    }))
+    writeFileSync(join(root, 'docs', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    symlinkSync(outside, join(root, 'docs', 'escaped'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', docsDir: 'docs' })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('escaped/secret')
+    expect(bundle.pages.map((page) => page.title)).not.toContain('Secret')
+  })
+
+  it('does not hang on a symlink cycle', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-symlink-cycle-'))
+    mkdirSync(join(root, 'docs', 'a'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction'] },
+    }))
+    writeFileSync(join(root, 'docs', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    // docs/a/loop -> docs/a (a self-referencing cycle one level down).
+    symlinkSync(join(root, 'docs', 'a'), join(root, 'docs', 'a', 'loop'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', docsDir: 'docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('introduction')
+  })
+})
+
+describe('gitmodulePaths', () => {
+  it('reads every submodule path from .gitmodules, in file order', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-gitmodules-'))
+    writeFileSync(join(root, '.gitmodules'), [
+      '[submodule "docs/core"]',
+      '\tpath = docs/core',
+      '\turl = https://github.com/acme/core.git',
+      '[submodule "docs/adrs"]',
+      '\tpath = docs/adrs',
+      '\turl = https://github.com/acme/adrs.git',
+    ].join('\n'))
+
+    expect(gitmodulePaths(root)).toEqual(['docs/core', 'docs/adrs'])
+  })
+
+  it('returns an empty list when there is no .gitmodules', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-gitmodules-none-'))
+    expect(gitmodulePaths(root)).toEqual([])
+  })
+})
+
 describe('cloneGitHubRepository retry', () => {
-  afterEach(() => { cloneOutcomes.queue.length = 0 })
+  afterEach(() => {
+    cloneOutcomes.queue.length = 0
+    gitSpawnCalls.envs.length = 0
+  })
+
+  it("neutralizes the Git LFS filter driver per-process (never the global git config) on the clone", async () => {
+    const targetDir = mkdtempSync(join(tmpdir(), 'thally-clone-lfs-env-'))
+    cloneOutcomes.queue.push({ code: 0 })
+    await cloneGitHubRepository(
+      { owner: 'acme', repo: 'docs', branch: 'main', docsDir: '', cloneUrl: 'https://github.com/acme/docs.git' },
+      targetDir,
+    )
+    expect(gitSpawnCalls.envs).toHaveLength(1)
+    const env = gitSpawnCalls.envs[0]
+    // GIT_CONFIG_* env pairs take precedence over the user's own global git
+    // config for this one process, overriding filter.lfs.smudge/clean
+    // (real content was never fetched anyway) and filter.lfs.process
+    // (which would otherwise still win over smudge/clean), so a repo whose
+    // LFS binary is missing on this host clones instead of hard-failing.
+    expect(env.GIT_CONFIG_COUNT).toBe('4')
+    const pairs = Object.entries(env).filter(([key]) => /^GIT_CONFIG_KEY_\d+$/.test(key))
+      .map(([key, value]) => [value, env[key.replace('KEY', 'VALUE')]])
+    expect(pairs).toContainEqual(['filter.lfs.smudge', 'cat'])
+    expect(pairs).toContainEqual(['filter.lfs.clean', 'cat'])
+    expect(pairs).toContainEqual(['filter.lfs.required', 'false'])
+  })
 
   it('retries a transient network-class clone failure and succeeds', async () => {
     const targetDir = mkdtempSync(join(tmpdir(), 'thally-clone-retry-'))

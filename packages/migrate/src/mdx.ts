@@ -273,6 +273,95 @@ function collectEsmBindingsByPattern(source: string, declared: Set<string>): voi
  * source doesn't parse is left untouched; the migration's MDX-compile check
  * reports the real problem instead.
  */
+/** Trimmed line begins a fenced code block (```` ``` ```` or `~~~`, 3+ characters). */
+const FENCE_OPEN = /^(`{3,}|~{3,})/
+
+/**
+ * KaTeX-style `$$...$$` math (block, on its own lines, or inline mid-
+ * paragraph) is common in Fern docs (and any other Markdown source) but has
+ * no Thally renderer (no `remark-math`/`rehype-katex`) — worse, the raw
+ * LaTeX inside (`\begin{align*}`, bare `{...}`) crashes the MDX parser
+ * before `escapeFernLiteralBraces` below even gets a chance to run, so the
+ * whole page fails to compile and is silently excluded. Content is
+ * preserved, never dropped: a block becomes a fenced ` ```math ` code
+ * block, an inline span becomes an inline code span — both opaque to MDX's
+ * `{...}` expression parsing. This is a plain line scan (not an MDX parse,
+ * which is exactly what the source can't survive yet) that tracks fenced
+ * code blocks so a real code sample's own `$$` is never touched, and must
+ * run before any MDX-aware pass.
+ */
+export function protectMathBlocks(raw: string): { body: string; converted: boolean } {
+  const { front, body } = splitFrontmatterBlock(raw)
+  const lines = body.split(/\r\n|\r|\n/)
+  const output: Array<string> = []
+  let inFence = false
+  let fenceToken = ''
+  // Fern also allows a block delimited by a bare `$` alone on its own line
+  // (not just `$$`), e.g. `$\n\text{...}\n$`; a block must close on the
+  // same delimiter that opened it.
+  let mathBlockDelimiter: '$$' | '$' | null = null
+  let mathLines: Array<string> = []
+  let converted = false
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (mathBlockDelimiter) {
+      if (trimmed === mathBlockDelimiter) {
+        output.push('```math', ...mathLines, '```')
+        mathBlockDelimiter = null
+        mathLines = []
+        converted = true
+      } else {
+        mathLines.push(line)
+      }
+      continue
+    }
+    if (inFence) {
+      if (trimmed.startsWith(fenceToken)) inFence = false
+      output.push(line)
+      continue
+    }
+    const fenceOpen = FENCE_OPEN.exec(trimmed)
+    if (fenceOpen) {
+      inFence = true
+      fenceToken = fenceOpen[1].slice(0, 3)
+      output.push(line)
+      continue
+    }
+    if (trimmed === '$$' || trimmed === '$') {
+      mathBlockDelimiter = trimmed
+      continue
+    }
+    if (line.includes('$')) {
+      // One combined pass, `$$...$$` tried before single-`$...$` at each
+      // position: doing these as two sequential passes let the second
+      // (single-`$`) regex re-match dollar signs the first pass had just
+      // wrapped in backticks, corrupting its own output. Single-`$` inline
+      // math (the other half of the KaTeX convention, e.g. `$F = S \times
+      // e^{\,f\,T}$`) only counts when its content doesn't start/end with
+      // whitespace and holds no further `$` — the same rule KaTeX/Pandoc
+      // use to tell real inline math from an ordinary sentence mentioning
+      // two dollar amounts (`$50 and $100`, whose span content ends in a
+      // space and so never matches). An author-escaped `\$` (a literal
+      // dollar sign) is never treated as a delimiter.
+      const updated = line.replace(
+        /\$\$([^\n]+?)\$\$|(?<!\\)\$([^\s$](?:[^$\n]*[^\s$])?)\$/g,
+        (_whole, block: string | undefined, inline: string | undefined) => {
+          converted = true
+          return block !== undefined ? `\`$$${block}$$\`` : `\`$${inline}$\``
+        },
+      )
+      output.push(updated)
+      continue
+    }
+    output.push(line)
+  }
+  // An unterminated `$$` block means the source was malformed to begin
+  // with; leave it untouched rather than eating the rest of the page into
+  // one giant fenced block.
+  if (mathBlockDelimiter) return { body: raw, converted: false }
+  return { body: front + output.join('\n'), converted }
+}
+
 export function escapeFernLiteralBraces(raw: string): string {
   // Never touch the YAML frontmatter block: its `{...}` values (e.g. a
   // description containing a literal brace) are YAML scalars, not MDX

@@ -279,6 +279,65 @@ export function readMintlifyConfig(repositoryRoot: string): Record<string, unkno
   return resolveJsonReferences(raw, configPath, repositoryRoot, new Set()) as Record<string, unknown>
 }
 
+/** One `openapi`/`asyncapi` value found anywhere in Mintlify's navigation tree. */
+export interface MintlifyApiSpecReference {
+  /** The field's raw value: a repository-relative path, or an `http(s)://` URL. */
+  value: string
+  kind: 'openapi' | 'asyncapi'
+  /** Label of the nearest enclosing tab/anchor/dropdown/product/version/menu, so the resolved spec binds to that tab specifically. Undefined at the navigation root. */
+  tabLabel?: string
+}
+
+/**
+ * Mintlify lets `openapi`/`asyncapi` appear not just at the top-level `api`
+ * key but on any navigation container (most commonly a tab:
+ * `navigation.tabs[].openapi`, but the same field is honored on an anchor,
+ * dropdown, product, version or group too) — Mintlify binds the resulting
+ * API reference to whichever tab that container renders under. This walks
+ * the whole raw navigation tree (the same shape `convertContainerToTabs`
+ * projects) collecting every occurrence, so the caller can resolve and bind
+ * each one instead of only ever seeing the single top-level `api` field.
+ */
+export function mintlifyNavigationApiReferences(config: Record<string, unknown>): Array<MintlifyApiSpecReference> {
+  const navigation = objectValue(config.navigation) ?? config
+  const references: Array<MintlifyApiSpecReference> = []
+  const containerKeys = ['tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus', 'languages'] as const
+  const nestedKeys = ['groups', 'pages'] as const
+
+  function visit(node: Record<string, unknown>, tabLabel: string | undefined): void {
+    if (typeof node.openapi === 'string' && node.openapi.trim()) {
+      references.push({ value: node.openapi.trim(), kind: 'openapi', tabLabel })
+    }
+    if (typeof node.asyncapi === 'string' && node.asyncapi.trim()) {
+      references.push({ value: node.asyncapi.trim(), kind: 'asyncapi', tabLabel })
+    }
+    for (const key of containerKeys) {
+      const entries = node[key]
+      if (!Array.isArray(entries)) continue
+      for (const entry of entries) {
+        const object = objectValue(entry)
+        if (!object) continue
+        // A nested container becomes the new binding tab only at the outer
+        // level (Mintlify tabs aren't themselves nested inside other tabs in
+        // practice, but anchors/dropdowns can sit inside a tab) — reuse the
+        // enclosing tab's label unless this container names its own.
+        visit(object, labelFor(object, tabLabel ?? 'Documentation'))
+      }
+    }
+    for (const key of nestedKeys) {
+      const entries = node[key]
+      if (!Array.isArray(entries)) continue
+      for (const entry of entries) {
+        if (typeof entry === 'string') continue
+        const object = objectValue(entry)
+        if (object) visit(object, tabLabel)
+      }
+    }
+  }
+  visit(navigation, undefined)
+  return references
+}
+
 function normalizePageRef(value: string, pathPrefix = ''): string | null {
   if (/^(?:https?:)?\/\//i.test(value) || value.startsWith('#')) return null
   let ref = localReference(value).split('?', 1)[0].replace(/^\/+/, '')

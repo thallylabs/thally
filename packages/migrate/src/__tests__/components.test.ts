@@ -248,6 +248,32 @@ describe('repository component migration', () => {
     expect(warnings).toEqual([])
   })
 
+  it('provides the implicit MintlifyComponents global copied .jsx snippets rely on', () => {
+    const root = fixture({
+      // Mirrors Mintlify's own snippet convention: no import, a global
+      // `MintlifyComponents` object destructured for its built-ins.
+      'calculator.jsx': `const { Card, Columns } = MintlifyComponents;\nexport const Calculator = () => <Columns><Card title="x" /></Columns>`,
+      'plain.jsx': `export const Plain = () => <div>no globals here</div>`,
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    migrator.transform("import Calculator from './calculator.jsx'\nimport Plain from './plain.jsx'\n\n<Calculator />\n\n<Plain />", join(root, 'index.mdx'))
+    const calculator = migrator.files().find((file) => file.path.endsWith('/calculator.jsx'))!
+    // Every leaf module is imported directly (never the app's
+    // mdx-components.tsx registry, which re-exports this very file via
+    // custom-components.tsx and would be circular) and aliased so none of
+    // the ~50 bare component names land in the snippet's own scope.
+    expect(calculator.content).toContain("import { Card as __mintlify_Card")
+    expect(calculator.content).toContain("@/components/mdx/content-cards")
+    expect(calculator.content).not.toContain('mdx-components')
+    expect(calculator.content).toContain('const MintlifyComponents = {')
+    expect(calculator.content).toContain('Card: __mintlify_Card')
+    expect(calculator.content).toContain('Columns: __mintlify_Columns')
+    const plain = migrator.files().find((file) => file.path.endsWith('/plain.jsx'))!
+    expect(plain.content).not.toContain('MintlifyComponents')
+    expect(warnings).toEqual([])
+  })
+
   it('registers multiline named/default imports and copies their dependency graph once', () => {
     const root = fixture({
       'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),

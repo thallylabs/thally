@@ -23,13 +23,32 @@ export function parseMigrationPlatform(value: string | undefined): SelectableMig
   throw new Error('--platform must be mintlify, docusaurus, fern, or auto.')
 }
 
-/** Ask interactive migrations which source adapter should own the import. */
+/** True when stdin is a real interactive terminal an `@inquirer/prompts` select can read from. */
+function isInteractiveStdin(): boolean {
+  return Boolean(process.stdin.isTTY)
+}
+
+/**
+ * Ask interactive migrations which source adapter should own the import.
+ * On a non-TTY stdin (a script, CI job, or piped input) `select()` has
+ * nothing to read and blocks forever, hanging `migrate` even without `-y`
+ * if `--platform` was also left out. Fall back to auto-detection instead —
+ * the same outcome as picking "detect automatically" from this menu — with
+ * a warning naming the flag that avoids it.
+ */
 export async function gatherMigrationPlatform(
   value: string | undefined,
   useDefaults: boolean,
 ): Promise<SelectableMigrationPlatform | undefined> {
   const configured = parseMigrationPlatform(value)
   if (configured || value === 'auto' || useDefaults) return configured
+  if (!isInteractiveStdin()) {
+    console.warn(
+      '\n  ⚠ No platform was specified and this shell is not interactive; auto-detecting the source platform instead. '
+      + 'Pass --platform mintlify|docusaurus|fern (or -y) to skip detection and avoid this warning.',
+    )
+    return undefined
+  }
   return select({
     message: '  Which platform currently hosts these docs?',
     choices: [

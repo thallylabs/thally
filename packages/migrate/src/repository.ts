@@ -1,21 +1,29 @@
 /**
- * Repository adapter for the shared migration engine. Traversal is bounded,
- * symbolic links are ignored, and Git is always invoked with an argument array
- * so source-controlled branch names can never become shell commands.
+ * Repository adapter for the shared migration engine. Traversal is bounded;
+ * `scanFiles` follows a symbolic link only when its resolved real path stays
+ * inside the repository checkout (this covers a submodule mounted as a
+ * symlink, e.g. Oasis's `docs/core -> ../external/oasis-core/docs`) and
+ * guards against a cycle, but every other directory walk in this file still
+ * skips symlinks outright. Git is always invoked with an argument array so
+ * source-controlled branch names can never become shell commands.
  */
 
 import { compileSync } from '@mdx-js/mdx'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import {
   existsSync,
   lstatSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
+  statSync,
 } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { createRequire } from 'node:module'
-import { basename, dirname, extname, relative, resolve as resolvePath } from 'node:path'
+import { tmpdir } from 'node:os'
+import { basename, dirname, extname, join, relative, resolve as resolvePath, sep } from 'node:path'
 
 import { parse as parseYaml } from 'yaml'
 
@@ -32,16 +40,19 @@ import {
   type DocusaurusPageDescriptor,
   type DocusaurusSidebars,
 } from './docusaurus.js'
+import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
-import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from './mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
   buildNavigationFromPages,
   isDocumentationExtension,
+  mintlifyNavigationApiReferences,
   projectMintlifyNavigation,
   pruneMissingNavigationPages,
   readMintlifyConfig,
+  type MintlifyApiSpecReference,
 } from './navigation.js'
 import {
   normalizeAssetPath,
@@ -66,6 +77,13 @@ const MAX_SOURCE_FILES = 5_000
 const MAX_PAGE_BYTES = 2_000_000
 const MAX_ASSET_BYTES = 25_000_000
 const MAX_TOTAL_ASSET_BYTES = 500_000_000
+/** A Git LFS pointer file's fixed opening line (the smudge filter replaces this with the real binary; skipping it during clone leaves this text in place). */
+const GIT_LFS_POINTER_PREFIX = 'version https://git-lfs.github.com/spec/v1'
+
+/** A small text file starting with the fixed Git LFS pointer line, not real asset content. */
+function isGitLfsPointer(content: Buffer): boolean {
+  return content.length < 1024 && content.toString('utf8', 0, GIT_LFS_POINTER_PREFIX.length) === GIT_LFS_POINTER_PREFIX
+}
 const IGNORED_DIRECTORIES = new Set([
   '.git', '.github', '.next', '.turbo', '.vercel', '.vscode',
   'node_modules', 'dist', 'build', 'coverage',
@@ -433,31 +451,148 @@ export function parseGitHubRepositoryUrl(rawUrl: string): GitHubRepositorySource
 
 const CLONE_RETRY_ATTEMPTS = 3
 const CLONE_RETRY_DELAY_MS = 1_000
+const DEFAULT_CLONE_TIMEOUT_MS = 10 * 60_000
 
-/** Transient network-class git failures a retry can plausibly recover from. */
+/** Transient network-class git failures a retry can plausibly recover from. Also covers this module's own timeout error below. */
 const RETRYABLE_CLONE_ERROR = /RPC failed|Recv failure|early EOF|curl \d+|Could not resolve host|Connection (?:reset|refused|timed out)|The remote end hung up|SSL[_ ]?(?:read|connect|write) error|timed out|network is unreachable/i
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => { setTimeout(resolve, ms) })
 }
 
-function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<void> {
-  const args = ['clone', '--depth', '1', '--single-branch']
-  if (source.branch !== 'HEAD') args.push('--branch', source.branch)
-  args.push('--', source.cloneUrl, targetDir)
+/** How long a single git subprocess may run before it's killed and treated as a (retryable) timeout. Configurable since a very large repository on a slow link may need longer than the generous 10-minute default. */
+function gitProcessTimeoutMs(): number {
+  const raw = process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS
+  const parsed = raw ? Number(raw) : NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLONE_TIMEOUT_MS
+}
+
+/**
+ * Run one git subprocess without a shell, with an overall timeout (a
+ * stalled clone/fetch otherwise hangs forever — there is no `timeout`
+ * binary to rely on) and per-process env overrides (never touching global
+ * git/npm config, per this package's own rule).
+ */
+function runGit(args: Array<string>, options: { cwd?: string; env?: Record<string, string>; label: string }): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn('git', args, { stdio: ['ignore', 'ignore', 'pipe'] })
+    const child = spawn('git', args, {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      env: { ...process.env, ...options.env },
+    })
     let stderr = ''
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill('SIGKILL')
+    }, gitProcessTimeoutMs())
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk: string) => {
       if (stderr.length < 16_000) stderr += chunk
     })
-    child.on('error', reject)
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
     child.on('close', (code) => {
+      clearTimeout(timer)
       if (code === 0) resolve()
-      else reject(new Error(`Failed to clone ${source.owner}/${source.repo}: ${stderr.trim() || `git exited ${code}`}`))
+      else if (timedOut) reject(new Error(`${options.label} timed out after ${gitProcessTimeoutMs()}ms and was killed.`))
+      else reject(new Error(`${options.label}: ${stderr.trim() || `git exited ${code}`}`))
     })
   })
+}
+
+/**
+ * Neutralize the `filter.lfs.*` smudge/clean/process filter driver for one
+ * git process only — never the user's global git config — so a repository
+ * tracked with Git LFS still clones when the host has no `git-lfs` binary.
+ * `GIT_LFS_SKIP_SMUDGE=1` alone isn't enough: if this host ever had
+ * `git lfs install` run and then had the `git-lfs` binary removed (as here),
+ * `filter.lfs.smudge`/`.process` are still registered in the *global* git
+ * config pointing at a command that no longer exists, and
+ * `GIT_LFS_SKIP_SMUDGE` is only ever read by that (missing) binary — git
+ * itself still fails outright trying to invoke it. `GIT_CONFIG_COUNT`/
+ * `GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` env pairs are the one config
+ * source with higher precedence than the user's global config, so they can
+ * override it per-process: `smudge`/`clean` become `cat` (pass the LFS
+ * pointer text straight through — real content was never fetched anyway)
+ * and `process` is cleared so git falls back to them; `filter.lfs.required
+ * = false` keeps a filter hiccup on one path (an oversized fixture, say)
+ * from failing the whole checkout. The result is the repository's own
+ * files, with an LFS-tracked asset left as its pointer text — the
+ * asset-copying step below warns when a copied file turns out to be one.
+ */
+const LFS_FILTER_OVERRIDE_ENV: Record<string, string> = {
+  GIT_CONFIG_COUNT: '4',
+  GIT_CONFIG_KEY_0: 'filter.lfs.smudge',
+  GIT_CONFIG_VALUE_0: 'cat',
+  GIT_CONFIG_KEY_1: 'filter.lfs.clean',
+  GIT_CONFIG_VALUE_1: 'cat',
+  GIT_CONFIG_KEY_2: 'filter.lfs.process',
+  GIT_CONFIG_VALUE_2: '',
+  GIT_CONFIG_KEY_3: 'filter.lfs.required',
+  GIT_CONFIG_VALUE_3: 'false',
+}
+
+function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<void> {
+  // Submodules are deliberately not recursed here: `--recurse-submodules`
+  // fails the *entire* clone if any one submodule can't be fetched (a
+  // private or since-deleted submodule shouldn't take the whole migration
+  // down). `initSubmodules`, run after a successful plain clone, is the
+  // equivalent of `--recurse-submodules --shallow-submodules` (`--depth 1`
+  // per submodule) but fault-tolerant per submodule.
+  const args = ['clone', '--depth', '1', '--single-branch']
+  if (source.branch !== 'HEAD') args.push('--branch', source.branch)
+  args.push('--', source.cloneUrl, targetDir)
+  return runGit(args, {
+    label: `Failed to clone ${source.owner}/${source.repo}`,
+    env: LFS_FILTER_OVERRIDE_ENV,
+  })
+}
+
+/** Every submodule path declared in a cloned repository's `.gitmodules`, in file order. */
+export function gitmodulePaths(targetDir: string): Array<string> {
+  const gitmodulesPath = resolvePath(targetDir, '.gitmodules')
+  if (!existsSync(gitmodulesPath) || !lstatSync(gitmodulesPath).isFile()) return []
+  let content: string
+  try {
+    content = readFileSync(gitmodulesPath, 'utf8')
+  } catch {
+    return []
+  }
+  return [...content.matchAll(/^\s*path\s*=\s*(.+?)\s*$/gm)].map((match) => match[1]).filter(Boolean)
+}
+
+/**
+ * `--recurse-submodules` on the main clone (above) fails the *entire* clone
+ * if any one submodule can't be fetched, which is worse than not having
+ * that submodule's content at all. So the main clone omits it and this
+ * best-effort pass follows, per submodule path, so one broken/private
+ * submodule doesn't take down the whole migration — it's just missing,
+ * and named in a warning instead of silently absent.
+ */
+async function initSubmodules(targetDir: string, warnings: Array<MigrationWarning>): Promise<void> {
+  const paths = gitmodulePaths(targetDir)
+  if (paths.length === 0) return
+  const failed: Array<string> = []
+  for (const path of paths) {
+    try {
+      await runGit(['submodule', 'update', '--init', '--depth', '1', '--', path], {
+        cwd: targetDir,
+        env: LFS_FILTER_OVERRIDE_ENV,
+        label: `Failed to initialize submodule ${path}`,
+      })
+    } catch {
+      failed.push(path)
+    }
+  }
+  if (failed.length > 0) {
+    warnings.push({
+      code: 'fetch-failed',
+      message: `${failed.length} git submodule${failed.length === 1 ? '' : 's'} could not be fetched and ${failed.length === 1 ? 'is' : 'are'} missing from the migrated content: ${failed.join(', ')}.`,
+    })
+  }
 }
 
 /**
@@ -466,15 +601,21 @@ function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<v
  * `Recv failure`, a `curl 56`, …) — retry a network-class failure a couple
  * of times with backoff instead of surfacing a hard failure on the first
  * blip. A partial checkout from the failed attempt is removed first, or
- * `git clone` refuses to reuse the (now non-empty) target directory.
+ * `git clone` refuses to reuse the (now non-empty) target directory. A
+ * stalled clone/submodule-init is killed by `runGit`'s own timeout, which
+ * surfaces as a retryable error. `warnings`, if given, collects a
+ * submodule-fetch-failure warning (this function otherwise returns exactly
+ * as before, so existing callers are unaffected).
  */
 export async function cloneGitHubRepository(
   source: GitHubRepositorySource,
   targetDir: string,
+  warnings?: Array<MigrationWarning>,
 ): Promise<void> {
   for (let attempt = 1; attempt <= CLONE_RETRY_ATTEMPTS; attempt++) {
     try {
       await cloneOnce(source, targetDir)
+      await initSubmodules(targetDir, warnings ?? [])
       return
     } catch (error) {
       const retryable = error instanceof Error && RETRYABLE_CLONE_ERROR.test(error.message)
@@ -536,16 +677,79 @@ interface ScannedFile {
   relativePath: string
 }
 
-function scanFiles(root: string): Array<ScannedFile> {
+/**
+ * Scan `root` for its files, following a symbolic link only when its
+ * resolved real path stays inside `confinementRoot` (default `root`) — this
+ * is how a submodule mounted as a symlink (Oasis's `docs/core ->
+ * ../external/oasis-core/docs`, `docs/adrs -> ../external/adrs`) actually
+ * gets its content walked, since a plain `git clone` (even with submodules
+ * initialized) leaves those as real symlinks on disk that a naive walk
+ * would otherwise always skip. `confinementRoot` is normally the whole
+ * repository checkout, not just the docs root, because a submodule commonly
+ * links out to a sibling directory outside it. `visitedRealPaths` guards
+ * against a cycle (a symlink pointing at an ancestor, or two symlinks
+ * pointing at each other).
+ */
+function scanFiles(root: string, confinementRoot: string = root): Array<ScannedFile> {
   const files: Array<ScannedFile> = []
-  function visit(directory: string): void {
+  let confinementReal: string
+  try {
+    confinementReal = realpathSync(confinementRoot)
+  } catch {
+    confinementReal = confinementRoot
+  }
+  // Tracks every directory's real path, symlinked or not: a symlink into an
+  // ancestor (or two symlinks pointing at each other) must not recurse
+  // forever, and this also cheaply dedupes reaching the same real directory
+  // through two different symlinks.
+  const visitedRealPaths = new Set<string>()
+  // `directory` is the real, physical path a symlink was already resolved
+  // to (used for readdirSync/realpathSync); `logicalDirectory` is the path
+  // as seen through the symlink from `root` (used only for `relativePath`,
+  // so a page inside a symlinked submodule gets a sensible id like
+  // `core/overview` instead of a `../../..`-laden physical path).
+  function visit(directory: string, logicalDirectory: string = directory): void {
     if (files.length >= MAX_SOURCE_FILES) return
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    let directoryReal: string
+    try {
+      directoryReal = realpathSync(directory)
+    } catch {
+      return
+    }
+    if (visitedRealPaths.has(directoryReal)) return
+    visitedRealPaths.add(directoryReal)
+    let entries: Array<Dirent>
+    try {
+      entries = readdirSync(directory, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
       if (files.length >= MAX_SOURCE_FILES) return
-      if (isIgnoredDirectory(entry.name) || entry.isSymbolicLink()) continue
+      if (isIgnoredDirectory(entry.name)) continue
       const path = resolveWithin(directory, entry.name)
-      if (entry.isDirectory()) visit(path)
-      else if (entry.isFile()) files.push({ absolutePath: path, relativePath: relative(root, path).replace(/\\/g, '/') })
+      const logicalPath = resolveWithin(logicalDirectory, entry.name)
+      if (entry.isSymbolicLink()) {
+        let real: string
+        try {
+          real = realpathSync(path)
+        } catch {
+          continue // A broken symlink (e.g. an uninitialized submodule) has nothing to walk.
+        }
+        const withinConfinement = real === confinementReal || real.startsWith(`${confinementReal}${sep}`)
+        if (!withinConfinement) continue
+        let target: ReturnType<typeof statSync>
+        try {
+          target = statSync(real)
+        } catch {
+          continue
+        }
+        if (target.isDirectory()) visit(real, logicalPath)
+        else if (target.isFile()) files.push({ absolutePath: real, relativePath: relative(root, logicalPath).replace(/\\/g, '/') })
+        continue
+      }
+      if (entry.isDirectory()) visit(path, logicalPath)
+      else if (entry.isFile()) files.push({ absolutePath: path, relativePath: relative(root, logicalPath).replace(/\\/g, '/') })
     }
   }
   visit(root)
@@ -652,23 +856,172 @@ function findOpenApi(files: Array<ScannedFile>): ScannedFile | null {
   return files.find((file) => OPENAPI_FILENAMES.has(basename(file.relativePath).toLowerCase())) ?? null
 }
 
-function findConfiguredMintlifyOpenApi(
-  config: Record<string, unknown> | null,
-  files: Array<ScannedFile>,
-): ScannedFile | null {
+/** An OpenAPI/AsyncAPI spec resolved and ready to copy into `public/`, optionally bound to one tab. */
+interface ResolvedApiSpec {
+  filename: string
+  content: Buffer
+  tabLabel?: string
+}
+
+const MAX_REMOTE_SPEC_BYTES = 10_000_000
+const REMOTE_SPEC_TIMEOUT_SECONDS = 20
+
+/**
+ * Download a remote OpenAPI spec referenced from docs.json at migration
+ * time — Thally's runtime only ever serves a bundled file, never a live
+ * URL. https-only, bounded size and time (`curl`'s own limits; the whole
+ * migration pipeline is synchronous, so this shells out rather than using
+ * an async fetch), and the body must parse as JSON or YAML before it's
+ * trusted as a spec. Returns null on any failure so the caller warns
+ * instead of silently dropping the API reference.
+ */
+function downloadRemoteApiSpec(url: string): Buffer | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'https:') return null
+  const outFile = join(tmpdir(), `thally-migrate-spec-${randomUUID()}`)
+  try {
+    execFileSync('curl', [
+      '-fsSL',
+      '--max-time', String(REMOTE_SPEC_TIMEOUT_SECONDS),
+      '--max-filesize', String(MAX_REMOTE_SPEC_BYTES),
+      '-o', outFile,
+      '--', parsed.toString(),
+    ], { stdio: 'ignore', timeout: (REMOTE_SPEC_TIMEOUT_SECONDS + 10) * 1000 })
+    if (!existsSync(outFile) || !lstatSync(outFile).isFile()) return null
+    const size = lstatSync(outFile).size
+    if (size === 0 || size > MAX_REMOTE_SPEC_BYTES) return null
+    const content = readFileSync(outFile)
+    const text = content.toString('utf8')
+    try {
+      JSON.parse(text)
+    } catch {
+      try {
+        parseYaml(text)
+      } catch {
+        return null
+      }
+    }
+    return content
+  } catch {
+    return null
+  } finally {
+    try {
+      rmSync(outFile, { force: true })
+    } catch {
+      // Best-effort cleanup; a leaked temp file never reaches the migrated project.
+    }
+  }
+}
+
+/** A stable, collision-free `public/` filename for a downloaded remote spec. */
+function remoteSpecFilename(url: string, index: number, taken: Set<string>): string {
+  let base = 'remote-openapi-spec.json'
+  try {
+    const last = new URL(url).pathname.split('/').filter(Boolean).at(-1)
+    if (last) base = last.replace(/[^a-zA-Z0-9_.-]/g, '-')
+  } catch {
+    // Keep the default name.
+  }
+  if (!/\.(?:ya?ml|json)$/i.test(base)) base += '.json'
+  let candidate = base
+  let suffix = index
+  while (taken.has(candidate.toLowerCase())) {
+    candidate = `${suffix}-${base}`
+    suffix += 1
+  }
+  taken.add(candidate.toLowerCase())
+  return candidate
+}
+
+function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): Array<MintlifyApiSpecReference> {
   const api = config?.api && typeof config.api === 'object' && !Array.isArray(config.api)
     ? config.api as Record<string, unknown>
     : null
-  const configured = typeof api?.openapi === 'string'
-    ? [api.openapi]
-    : Array.isArray(api?.openapi) ? api.openapi.filter((value): value is string => typeof value === 'string') : []
-  for (const reference of configured) {
-    if (/^(?:https?:)?\/\//i.test(reference)) continue
-    const key = reference.split(/[?#]/, 1)[0].replace(/^\/+/, '').replace(/\\/g, '/')
-    const match = files.find((file) => file.relativePath === key)
-    if (match) return match
+  if (!api) return []
+  const references: Array<MintlifyApiSpecReference> = []
+  for (const kind of ['openapi', 'asyncapi'] as const) {
+    const value = api[kind]
+    const values = typeof value === 'string'
+      ? [value]
+      : Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+    for (const entry of values) references.push({ value: entry, kind })
   }
-  return null
+  return references
+}
+
+/**
+ * Resolve every OpenAPI/AsyncAPI reference in a Mintlify config — the
+ * top-level `api.openapi`/`api.asyncapi` plus every per-tab/group/anchor
+ * `openapi`/`asyncapi` field in `navigation` — into copyable spec bytes
+ * bound to the tab that referenced them. AsyncAPI has no Thally renderer,
+ * so it only ever produces a warning naming the spec. A remote `https://`
+ * reference is downloaded; anything that can't be resolved (a missing
+ * local file, a failed download, a non-https URL) produces a specific
+ * warning rather than silently disappearing.
+ */
+function resolveMintlifyApiSpecs(
+  mintlifyConfig: Record<string, unknown> | null,
+  files: Array<ScannedFile>,
+  warnings: Array<MigrationWarning>,
+): Array<ResolvedApiSpec> {
+  if (!mintlifyConfig) return []
+  const references = [
+    ...mintlifyTopLevelApiReferences(mintlifyConfig),
+    ...mintlifyNavigationApiReferences(mintlifyConfig),
+  ]
+  const seen = new Set<string>()
+  const taken = new Set(files.map((file) => basename(file.relativePath).toLowerCase()))
+  const specs: Array<ResolvedApiSpec> = []
+  let remoteIndex = 0
+  for (const reference of references) {
+    const dedupeKey = `${reference.kind}:${reference.value}`
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+    const tabSuffix = reference.tabLabel ? ` (tab "${reference.tabLabel}")` : ''
+    if (reference.kind === 'asyncapi') {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `AsyncAPI is not supported by Thally's API reference; the spec "${reference.value}"${tabSuffix} was not migrated.`,
+      })
+      continue
+    }
+    if (/^https?:\/\//i.test(reference.value)) {
+      if (!/^https:\/\//i.test(reference.value)) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `The OpenAPI spec URL "${reference.value}"${tabSuffix} is not https and was not downloaded.`,
+        })
+        continue
+      }
+      const content = downloadRemoteApiSpec(reference.value)
+      if (!content) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `The remote OpenAPI spec "${reference.value}"${tabSuffix} could not be downloaded and was not migrated. Download it manually and add it to public/.`,
+        })
+        continue
+      }
+      remoteIndex += 1
+      specs.push({ filename: remoteSpecFilename(reference.value, remoteIndex, taken), content, tabLabel: reference.tabLabel })
+      continue
+    }
+    const key = reference.value.split(/[?#]/, 1)[0].replace(/^\/+/, '').replace(/\\/g, '/')
+    const match = files.find((file) => file.relativePath === key)
+    if (!match) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `The OpenAPI spec "${reference.value}"${tabSuffix} could not be found in the repository and was not migrated.`,
+      })
+      continue
+    }
+    specs.push({ filename: basename(match.relativePath), content: readFileSync(match.absolutePath), tabLabel: reference.tabLabel })
+  }
+  return specs
 }
 
 const MAX_FERN_GENERATORS_BYTES = 2_000_000
@@ -684,6 +1037,27 @@ function fernGeneratorsOpenApiPaths(config: Record<string, unknown>): Array<stri
     if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return []
     const openapi = (spec as Record<string, unknown>).openapi
     return typeof openapi === 'string' ? [openapi] : []
+  })
+}
+
+/**
+ * Fern's `generators.yml` can also point an `api.specs[]` entry at an
+ * AsyncAPI or OpenRPC document instead of OpenAPI. Thally's API reference
+ * only renders OpenAPI, so these are named here purely to produce a
+ * specific warning (`fernGeneratorsOpenApiPaths` above never returns them,
+ * so without this they'd otherwise look like a missing spec).
+ */
+function fernGeneratorsUnsupportedSpecPaths(config: Record<string, unknown>): Array<{ kind: 'asyncapi' | 'openrpc'; path: string }> {
+  const api = config.api
+  if (!api || typeof api !== 'object' || Array.isArray(api)) return []
+  const specs = (api as Record<string, unknown>).specs
+  if (!Array.isArray(specs)) return []
+  return specs.flatMap((spec): Array<{ kind: 'asyncapi' | 'openrpc'; path: string }> => {
+    if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return []
+    const record = spec as Record<string, unknown>
+    if (typeof record.asyncapi === 'string') return [{ kind: 'asyncapi', path: record.asyncapi }]
+    if (typeof record.openrpc === 'string') return [{ kind: 'openrpc', path: record.openrpc }]
+    return []
   })
 }
 
@@ -719,14 +1093,21 @@ function fernOpenApiCandidateDirs(fernRoot: string, apiName: string | undefined,
   return candidateDirs
 }
 
+/** `findFernConfiguredOpenApi`'s result, plus any AsyncAPI/OpenRPC specs seen along the way (Thally has no renderer for either). */
+interface FernOpenApiResolution {
+  spec: ScannedFile | null
+  unsupported: Array<{ kind: 'asyncapi' | 'openrpc'; path: string }>
+}
+
 function findFernConfiguredOpenApi(
   fernRoot: string,
   repositoryDir: string,
   apiName: string | undefined,
   apiNameExplicit: boolean,
   warnings: Array<MigrationWarning>,
-): ScannedFile | null {
+): FernOpenApiResolution {
   const candidateDirs = fernOpenApiCandidateDirs(fernRoot, apiName, apiNameExplicit)
+  const unsupported: Array<{ kind: 'asyncapi' | 'openrpc'; path: string }> = []
   for (const dir of candidateDirs) {
     let config: Record<string, unknown> | null = null
     let generatorsPath: string
@@ -747,7 +1128,7 @@ function findFernConfiguredOpenApi(
       try {
         const absolute = resolveWithinRoot(dir, specPath, repositoryDir)
         if (!existsSync(absolute) || !lstatSync(absolute).isFile()) continue
-        return { absolutePath: absolute, relativePath: relative(repositoryDir, absolute).replace(/\\/g, '/') }
+        return { spec: { absolutePath: absolute, relativePath: relative(repositoryDir, absolute).replace(/\\/g, '/') }, unsupported }
       } catch {
         warnings.push({
           code: 'unsupported-config',
@@ -755,8 +1136,9 @@ function findFernConfiguredOpenApi(
         })
       }
     }
+    unsupported.push(...fernGeneratorsUnsupportedSpecPaths(config))
   }
-  return null
+  return { spec: null, unsupported }
 }
 
 /** Whether a Fern Definition (as opposed to a plain OpenAPI/AsyncAPI spec) backs this API. */
@@ -1078,12 +1460,25 @@ function inlineMdxSnippets(
   return result
 }
 
-function injectOpenApi(config: MigrationDocsConfig, filename: string, preferredTabLabel?: string): MigrationDocsConfig {
-  const tabs = config.tabs.map((tab) => ({ ...tab }))
-  const apiTab = (preferredTabLabel ? tabs.find((tab) => tab.tab === preferredTabLabel) : undefined)
-    ?? tabs.find((tab) => tab.tab.toLowerCase().includes('api'))
-  if (apiTab) apiTab.api = { source: `/${filename}`, navigation: false }
-  else tabs.push({ tab: preferredTabLabel ?? 'API Reference', api: { source: `/${filename}` } })
+/**
+ * Bind one or more resolved specs into their tabs. A spec with no
+ * `tabLabel` (the common single-spec case) falls back to an existing
+ * "*api*"-labelled tab, or gets a new "API Reference" tab of its own — the
+ * original single-spec behavior. A spec with a `tabLabel` only ever binds
+ * to that exact tab (creating it if the source tab had no other content
+ * and so was dropped from `config.tabs` earlier), never the loose
+ * substring fallback, so two specs from two different tabs can never both
+ * land on the same tab by accident.
+ */
+function injectOpenApiSpecs(config: MigrationDocsConfig, specs: Array<{ filename: string; tabLabel?: string }>): MigrationDocsConfig {
+  let tabs = config.tabs.map((tab) => ({ ...tab }))
+  for (const spec of specs) {
+    const apiTab = spec.tabLabel
+      ? tabs.find((tab) => tab.tab === spec.tabLabel)
+      : tabs.find((tab) => tab.tab.toLowerCase().includes('api'))
+    if (apiTab) apiTab.api = { source: `/${spec.filename}`, navigation: false }
+    else tabs = [...tabs, { tab: spec.tabLabel ?? 'API Reference', api: { source: `/${spec.filename}` } }]
+  }
   return { ...config, tabs }
 }
 
@@ -1187,9 +1582,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let docusaurusSidebars: DocusaurusSidebars | null = null
   let mintlifyConfig: Record<string, unknown> | null = null
   let fernRawConfig: Record<string, unknown> | null = null
-  let fernApiName: string | undefined
-  let fernApiNameExplicit = false
-  let fernApiTabLabel: string | undefined
+  let fernApiSections: Array<FernApiSection> = []
 
   if (platform === 'mintlify') {
     try {
@@ -1226,9 +1619,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         const projected = projectFernNavigation({ config: fernConfig.config, fernRoot: fernProjectRoot })
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
-        fernApiName = projected.apiName
-        fernApiNameExplicit = projected.apiNameExplicit ?? false
-        fernApiTabLabel = projected.apiTabLabel
+        fernApiSections = projected.apiSections
         for (const [index, descriptor] of projected.descriptors.entries()) {
           const key = normalizedReferenceKey(descriptor.sourcePath)
           if (!referenceMap.has(key)) referenceMap.set(key, { navigationId: descriptor.navigationId })
@@ -1266,8 +1657,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ? readMintignoreMatcher(mintlifyProjectRoot)
     : null
   const files = mintignoreMatcher
-    ? scanFiles(contentRoot).filter((file) => !mintignoreMatcher.ignores(file.relativePath))
-    : scanFiles(contentRoot)
+    ? scanFiles(contentRoot, repositoryDir).filter((file) => !mintignoreMatcher.ignores(file.relativePath))
+    : scanFiles(contentRoot, repositoryDir)
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
   // Which pages reference which asset (by its normalized copy-destination
@@ -1387,7 +1778,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // is platform-agnostic (it only reads the page's own AST/ESM scope), so
     // run it for every platform Thally migrates from.
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
-      raw = escapeFernLiteralBraces(raw)
+      // Math must be protected before the AST-based brace escaper runs:
+      // raw `$$\begin{align*}...\end{align*}$$` crashes that parser outright
+      // (see `protectMathBlocks`), which is what excluded these pages
+      // before this ran.
+      const protectedMath = protectMathBlocks(raw)
+      if (protectedMath.converted) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: "Math (KaTeX '$$...$$') has no renderer in Thally yet; it was kept as a fenced code block instead of being dropped.",
+          source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
+        })
+      }
+      raw = escapeFernLiteralBraces(protectedMath.body)
     }
     let docusaurusDescriptor: Omit<DocusaurusPageDescriptor, 'title'> | undefined
     const page = parseMarkdownPage({
@@ -1559,7 +1962,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ? ['static', 'public'].flatMap((directory) => {
         const root = resolveWithin(docusaurusAssetRoot, directory)
         if (!existsSync(root) || !lstatSync(root).isDirectory()) return []
-        return scanFiles(root).map((file) => ({
+        return scanFiles(root, repositoryDir).map((file) => ({
           ...file,
           relativePath: `${directory}/${file.relativePath}`,
         }))
@@ -1601,7 +2004,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       })
       continue
     }
-    assets.push({ path: assetPath, content: readFileSync(file.absolutePath) })
+    const content = readFileSync(file.absolutePath)
+    if (isGitLfsPointer(content)) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: 'This asset is a Git LFS pointer, not its real content (Git LFS was skipped during clone because the host has no git-lfs binary). Install git-lfs and re-run the migration, or add the real file to public/ manually.',
+        source: file.relativePath,
+      })
+      continue
+    }
+    assets.push({ path: assetPath, content })
     totalAssetBytes += size
   }
 
@@ -1664,40 +2076,94 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
   if (docsConfig.tabs.length === 0) docsConfig = buildNavigationFromPages(pages)
-  // A repo-wide scan for *any* `openapi.yml`/`.json` file cannot tell one
-  // API's spec from another's, so once an explicit `api-name` names a
-  // specific API, that naive scan is never consulted as a fallback (the root
-  // `generators.yml` rule is in `fernOpenApiCandidateDirs`). Without an
-  // explicit `api-name` there is only ever one API on the site, so the naive
-  // scan remains safe.
-  const openApi = platform === 'fern' && fernProjectRoot
-    ? findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, fernApiName, fernApiNameExplicit, warnings)
-      ?? (fernApiNameExplicit ? null : findOpenApi(files))
-    : findConfiguredMintlifyOpenApi(mintlifyConfig, files) ?? findOpenApi(files)
-  if (openApi) {
-    const filename = basename(openApi.relativePath)
-    if (!assets.some((asset) => asset.path === filename)) {
-      assets.push({ path: filename, content: readFileSync(openApi.absolutePath) })
+  if (platform === 'fern' && fernProjectRoot) {
+    // A repo-wide scan for *any* `openapi.yml`/`.json` file cannot tell one
+    // API's spec from another's, so once an explicit `api-name` names a
+    // specific API, that naive scan is never consulted as a fallback (the
+    // root `generators.yml` rule is in `fernOpenApiCandidateDirs`). A docs.yml
+    // with no `api:` node at all falls back to the naive scan, bound to
+    // whatever tab `injectOpenApiSpecs` picks for an unbound spec.
+    const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string }> = fernApiSections.length > 0
+      ? fernApiSections
+      : [{ nameExplicit: false }]
+    const resolvedSpecs: Array<{ filename: string; tabLabel?: string }> = []
+    // Two different multi-API specs commonly share a basename (Paradex's
+    // prod_rest and testnet_rest both resolve to their own
+    // apis/<name>/openapi/openapi.json) — track which absolute file a
+    // filename already names so a second, genuinely different spec gets a
+    // distinguishing prefix instead of silently reusing the first spec's
+    // copied asset for both tabs.
+    const specFilenameSources = new Map<string, string>()
+    for (const section of sections) {
+      const resolution = findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, section.name, section.nameExplicit, warnings)
+      const spec = resolution.spec ?? (!section.nameExplicit ? findOpenApi(files) : null)
+      if (spec) {
+        let filename = basename(spec.relativePath)
+        const existingSource = specFilenameSources.get(filename)
+        if (existingSource && existingSource !== spec.absolutePath) {
+          const prefix = section.name ? `${section.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}-` : `${specFilenameSources.size + 1}-`
+          filename = `${prefix}${filename}`
+        }
+        specFilenameSources.set(filename, spec.absolutePath)
+        if (!assets.some((asset) => asset.path === filename)) {
+          assets.push({ path: filename, content: readFileSync(spec.absolutePath) })
+        }
+        resolvedSpecs.push({ filename, tabLabel: section.tabLabel })
+        continue
+      }
+      if (resolution.unsupported.length > 0) {
+        const sectionLabel = section.name ? ` for the "${section.name}" API` : ''
+        for (const entry of resolution.unsupported) {
+          warnings.push({
+            code: 'unsupported-config',
+            message: `${entry.kind === 'asyncapi' ? 'AsyncAPI' : 'OpenRPC'} is not supported by Thally's API reference; the spec "${entry.path}"${sectionLabel} was not migrated.`,
+          })
+        }
+        continue
+      }
+      if (section.name === undefined) continue
+      if (fernDefinitionExists(fernProjectRoot, section.name)) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `This API${section.name ? ` ("${section.name}")` : ''} is defined with a Fern Definition, not an OpenAPI/AsyncAPI document; generating a spec from a Fern Definition is not supported. Export an OpenAPI document and reference it from generators.yml, or add it manually.`,
+        })
+        continue
+      }
+      // Neither an OpenAPI/AsyncAPI spec nor a Fern Definition could be found
+      // for this `api:` node — the API tab was silently dropped from the nav.
+      // Name the node so the user knows which one to fix.
+      const checked = fernOpenApiCandidateDirs(fernProjectRoot, section.name, section.nameExplicit)
+        .map((dir) => relative(repositoryDir, resolvePath(dir, 'generators.yml')).replace(/\\/g, '/'))
+      if (!section.nameExplicit) checked.push('any openapi or swagger file in the repository')
+      warnings.push({
+        code: 'unsupported-config',
+        message: checked.length
+          ? `No OpenAPI/AsyncAPI spec could be found for the "${section.name}" API. Checked: ${checked.join(', ')}. Point generators.yml at a spec file that exists.`
+          : `No OpenAPI/AsyncAPI spec could be found for the "${section.name}" API, because its api-name is not a valid folder name. Add the spec manually.`,
+      })
     }
-    docsConfig = injectOpenApi(docsConfig, filename, platform === 'fern' ? fernApiTabLabel : undefined)
-  } else if (platform === 'fern' && fernProjectRoot && fernApiName !== undefined && fernDefinitionExists(fernProjectRoot, fernApiName)) {
-    warnings.push({
-      code: 'unsupported-config',
-      message: 'This API is defined with a Fern Definition, not an OpenAPI/AsyncAPI document; generating a spec from a Fern Definition is not supported. Export an OpenAPI document and reference it from generators.yml, or add it manually.',
-    })
-  } else if (platform === 'fern' && fernProjectRoot && fernApiName !== undefined) {
-    // Neither an OpenAPI/AsyncAPI spec nor a Fern Definition could be found
-    // for this `api:` node — the API tab was silently dropped from the nav.
-    // Name the node so the user knows which one to fix.
-    const checked = fernOpenApiCandidateDirs(fernProjectRoot, fernApiName, fernApiNameExplicit)
-      .map((dir) => relative(repositoryDir, resolvePath(dir, 'generators.yml')).replace(/\\/g, '/'))
-    if (!fernApiNameExplicit) checked.push('any openapi or swagger file in the repository')
-    warnings.push({
-      code: 'unsupported-config',
-      message: checked.length
-        ? `No OpenAPI/AsyncAPI spec could be found for the "${fernApiName}" API. Checked: ${checked.join(', ')}. Point generators.yml at a spec file that exists.`
-        : `No OpenAPI/AsyncAPI spec could be found for the "${fernApiName}" API, because its api-name is not a valid folder name. Add the spec manually.`,
-    })
+    if (resolvedSpecs.length > 0) docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs)
+  } else if (platform === 'mintlify') {
+    const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings)
+    for (const spec of resolvedSpecs) {
+      if (!assets.some((asset) => asset.path === spec.filename)) {
+        assets.push({ path: spec.filename, content: spec.content })
+      }
+    }
+    if (resolvedSpecs.length > 0) {
+      docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs)
+    } else {
+      // No docs.json-configured spec at all: fall back to a naive repo scan,
+      // matching every other platform's baseline behavior.
+      const fallback = findOpenApi(files)
+      if (fallback) {
+        const filename = basename(fallback.relativePath)
+        if (!assets.some((asset) => asset.path === filename)) {
+          assets.push({ path: filename, content: readFileSync(fallback.absolutePath) })
+        }
+        docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
+      }
+    }
   }
   if (platform === 'mintlify') {
     const sources = new Set((docsConfig.redirects ?? []).map((redirect) => redirect.source))
