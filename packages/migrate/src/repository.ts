@@ -1877,6 +1877,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           message: "Math (KaTeX '$$...$$') has no renderer in Thally yet; it was kept as a fenced code block instead of being dropped.",
           source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
         })
+      } else if (protectedMath.guardTriggered) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: 'A suspected math span looked like it needed converting, but doing so broke the page; the page was kept as originally authored instead.',
+          source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
+        })
       }
       raw = escapeFernLiteralBraces(protectedMath.body)
     }

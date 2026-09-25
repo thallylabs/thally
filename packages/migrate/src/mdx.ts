@@ -1,6 +1,7 @@
 /** Markdown/MDX normalization that preserves every component Thally supports. */
 
 import type * as acorn from 'acorn'
+import { compileSync } from '@mdx-js/mdx'
 import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
@@ -309,14 +310,60 @@ function maskInlineSpansForMath(line: string): { masked: string; unmask: (text: 
   const codeMasked = line.split(/(`[^`]*`)/).map((segment, index) => (
     index % 2 === 1 ? stash(segment) : segment
   )).join('')
-  const masked = codeMasked.replace(/<\/?[a-zA-Z][^<>]*>/g, stash)
+  const tagMasked = codeMasked.replace(/<\/?[a-zA-Z][^<>]*>/g, stash)
+  // Also mask a JSX expression container (`{...}`), one level of nesting
+  // deep, so `$` inside one (e.g. a prop value built from a template
+  // literal that isn't itself backtick-quoted) is never read as a math
+  // delimiter. Two passes handle one level of `{...{...}...}` nesting; a
+  // line-local regex can't balance further than that, which is fine here —
+  // anything left over simply isn't masked, the conservative default. A
+  // `{` immediately after `$` is deliberately left unmasked: that is a
+  // template-literal interpolation (`${...}`), not a JSX container, and the
+  // caller's own `$(?!{)` guard needs to see the literal `{` to reject it.
+  const masked = [tagMasked, tagMasked].reduce((text) => text.replace(/(?<!\$)\{[^{}]*\}/g, stash), tagMasked)
   return {
     masked,
     unmask: (text) => text.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => blocks[Number(index)]),
   }
 }
 
-export function protectMathBlocks(raw: string): { body: string; converted: boolean } {
+/**
+ * Whether `content` (the real, unmasked text between a matched pair of
+ * inline `$...$`) looks like actual TeX rather than two unrelated dollar
+ * amounts or a stray currency symbol: a backslash command (`\times`,
+ * `\text{...}`), `^`/`_` (super/subscript), or a brace group. A bare
+ * variable-style token with no space and no digit (`$S$`, `$x$`) is also
+ * accepted without any of those — KaTeX/Pandoc's own convention for a
+ * single-symbol inline reference, and the shape of the paradex-docs repro.
+ */
+const TEX_SIGNAL = /\\[a-zA-Z]|[\^_{]/
+function hasTexSignal(content: string): boolean {
+  return TEX_SIGNAL.test(content) || (!/\s/.test(content) && !/\d/.test(content))
+}
+
+/**
+ * Net count of `{`, `(`, `[` minus their closers on `line` — a lazy,
+ * string/comment-unaware bracket count (not a real JS parse) used only to
+ * tell when a multi-line `import`/`export` ESM statement has closed. Real
+ * component source rarely has an unbalanced bracket inside a string on the
+ * same line as an ESM statement's own delimiters, and this is a heuristic
+ * for skipping a scan, not a correctness-critical parse.
+ * ponytail: raw character count, ignores strings/comments; a real AST pass
+ * would be exact, add one if this heuristic misfires on real content.
+ */
+function bracketDelta(line: string): number {
+  let delta = 0
+  for (const ch of line) {
+    if (ch === '{' || ch === '(' || ch === '[') delta += 1
+    else if (ch === '}' || ch === ')' || ch === ']') delta -= 1
+  }
+  return delta
+}
+
+/** Trimmed line opens a top-level `import`/`export` ESM statement (Docusaurus/MDX allow one anywhere a block can start, not just at the top of the file). */
+const ESM_OPEN = /^(?:import|export)\b/
+
+export function protectMathBlocks(raw: string): { body: string; converted: boolean; guardTriggered?: boolean } {
   const { front, body } = splitFrontmatterBlock(raw)
   const lines = body.split(/\r\n|\r|\n/)
   const output: Array<string> = []
@@ -328,6 +375,13 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
   let mathBlockDelimiter: '$$' | '$' | null = null
   let mathLines: Array<string> = []
   let converted = false
+  // Depth of an open `import`/`export` ESM statement (counted in
+  // `bracketDelta`): while positive, every line belongs to page-authored
+  // JS/JSX source (e.g. an inlined snippet's `export const X = () => {...}`
+  // component body), not markdown/math prose, and is copied through
+  // untouched — never scanned for `$`, so a template literal's `${expr}`
+  // inside it can never be misread as a math delimiter.
+  let esmDepth = 0
   for (const line of lines) {
     const trimmed = line.trim()
     if (mathBlockDelimiter) {
@@ -346,6 +400,11 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
       output.push(line)
       continue
     }
+    if (esmDepth > 0) {
+      output.push(line)
+      esmDepth = Math.max(0, esmDepth + bracketDelta(line))
+      continue
+    }
     const fenceOpen = FENCE_OPEN.exec(trimmed)
     if (fenceOpen) {
       inFence = true
@@ -357,14 +416,20 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
       mathBlockDelimiter = trimmed
       continue
     }
+    if (ESM_OPEN.test(trimmed)) {
+      output.push(line)
+      esmDepth = Math.max(0, bracketDelta(line))
+      continue
+    }
     if (line.includes('$')) {
-      // Mask inline code spans (`` `$FOO` ``) and JSX/HTML tags (including
-      // their attribute values, e.g. `<Badge color="$primary">`) before
-      // scanning for math, so neither can be mistaken for a math delimiter
-      // and a math span can never cross into one — a masked placeholder
-      // has no `$` in it, so the scan below simply can't see inside one or
-      // pair a `$` outside a tag with one that was inside it. What's left
-      // unmasked is ordinary prose/JSX text content.
+      // Mask inline code spans (`` `$FOO` ``), JSX/HTML tags (including
+      // their attribute values, e.g. `<Badge color="$primary">`), and a
+      // JSX expression container (`{...}`) before scanning for math, so
+      // none of them can be mistaken for a math delimiter and a math span
+      // can never cross into one — a masked placeholder has no `$` in it,
+      // so the scan below simply can't see inside one or pair a `$`
+      // outside it with one that was inside it. What's left unmasked is
+      // ordinary prose/JSX text content.
       const { masked, unmask } = maskInlineSpansForMath(line)
       // One combined pass, `$$...$$` tried before single-`$...$` at each
       // position: doing these as two sequential passes let the second
@@ -372,17 +437,26 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
       // wrapped in backticks, corrupting its own output. Single-`$` inline
       // math (the other half of the KaTeX convention, e.g. `$F = S \times
       // e^{\,f\,T}$`, or a bare `$S$`) only counts when its content
-      // doesn't start/end with whitespace and holds no further `$` — the
-      // same rule KaTeX/Pandoc use to tell real inline math from an
-      // ordinary sentence mentioning two dollar amounts (`$50 and $100`,
-      // whose span content ends in a space and so never matches). An
+      // doesn't start/end with whitespace, holds no further `$`, and looks
+      // like real TeX (`hasTexSignal`) — the same rule KaTeX/Pandoc use to
+      // tell real inline math from an ordinary sentence mentioning two
+      // dollar amounts (`$50 and $100`, whose span content ends in a space
+      // and so never matches). Neither alternative ever opens on `${`
+      // (a template-literal interpolation, not a math delimiter). An
       // author-escaped `\$` (a literal dollar sign) is never treated as a
       // delimiter.
       const updatedMasked = masked.replace(
-        /\$\$([^\n]+?)\$\$|(?<!\\)\$([^\s$](?:[^$\n]*[^\s$])?)\$/g,
-        (_whole, block: string | undefined, inline: string | undefined) => {
-          converted = true
-          return block !== undefined ? `\`$$${block}$$\`` : `\`$${inline}$\``
+        /\$\$(?!\{)([^\n]+?)\$\$|(?<!\\)\$(?!\{)([^\s$](?:[^$\n]*[^\s$])?)\$/g,
+        (whole: string, block: string | undefined, inline: string | undefined) => {
+          if (block !== undefined) {
+            converted = true
+            return `\`$$${block}$$\``
+          }
+          if (inline !== undefined && hasTexSignal(unmask(inline))) {
+            converted = true
+            return `\`$${inline}$\``
+          }
+          return whole
         },
       )
       output.push(unmask(updatedMasked))
@@ -394,7 +468,26 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
   // with; leave it untouched rather than eating the rest of the page into
   // one giant fenced block.
   if (mathBlockDelimiter) return { body: raw, converted: false }
-  return { body: front + output.join('\n'), converted }
+  const protectedBody = front + output.join('\n')
+  if (!converted) return { body: protectedBody, converted }
+  // Math conversion must never turn a page that used to compile into one
+  // that doesn't (e.g. a false-positive match that corrupts real code).
+  // If the protected body fails to compile as MDX but the untouched
+  // original did, the conversion made things worse — keep the original and
+  // let the caller warn, rather than silently excluding the page later.
+  try {
+    compileSync(protectedBody, { outputFormat: 'program' })
+    return { body: protectedBody, converted }
+  } catch {
+    try {
+      compileSync(raw, { outputFormat: 'program' })
+      return { body: raw, converted: false, guardTriggered: true }
+    } catch {
+      // The original didn't compile either (the usual case math protection
+      // exists for) — the protected attempt is still the better bet.
+      return { body: protectedBody, converted }
+    }
+  }
 }
 
 export function escapeFernLiteralBraces(raw: string): string {

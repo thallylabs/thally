@@ -380,6 +380,84 @@ describe('protectMathBlocks', () => {
     expect(result.converted).toBe(false)
     expect(result.body).toBe(body)
   })
+
+  it('leaves an inlined ESM component with template-literal interpolations untouched (mintlify/docs vercel-json-generator.mdx repro)', () => {
+    const body = [
+      'Some prose before.',
+      '',
+      'export const VercelJsonGenerator = () => {',
+      "  const [subdomain, setSubdomain] = useState('[SUBDOMAIN]')",
+      '  const vercelConfig = {',
+      '    rewrites: [',
+      '      {',
+      '        source: `/${cleanSubpath}`,',
+      '        destination: `https://${subdomain}.mintlify.site/${cleanSubpath}`',
+      '      }',
+      '    ]',
+      '  }',
+      '  return <div>{JSON.stringify(vercelConfig)}</div>',
+      '}',
+      '',
+      '<VercelJsonGenerator />',
+    ].join('\n')
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+    expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('leaves an inline code span with GitHub Actions matrix interpolation untouched (playwright.dev test-sharding repro)', () => {
+    const body = 'Then run tests with the `--shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}` option.'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
+
+  it('never matches a template-literal interpolation (`${...}`) as a math delimiter, even unquoted', () => {
+    const body = 'weird unquoted ${foo}+${bar} text'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
+
+  it('leaves a bare JSX expression container untouched, not mistaking its braces for math content', () => {
+    const body = 'Price is {price} and the total is {total} today.'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
+
+  it('requires a TeX signal for single-$ inline math, so a bare non-digit token like $Pro$ is still left alone unless it also looks like TeX', () => {
+    // No backslash/^/_/{, but also no digits/whitespace: still accepted,
+    // matching the existing `$S$` convention (see the paradex repro test).
+    const bareToken = protectMathBlocks('Upgrade to $Pro$ today.')
+    expect(bareToken.converted).toBe(true)
+    // A stronger prose case that could otherwise look like a pair of dollar
+    // amounts (digits, no TeX signal) never converts.
+    const dollarAmounts = protectMathBlocks('It costs $5 or $10, your choice.')
+    expect(dollarAmounts.converted).toBe(false)
+  })
+
+  it('never returns a body that fails to compile when the original page compiled fine (compile guard invariant)', () => {
+    for (const body of [
+      'A stray $<Foo>$ that a converter could wrap wrong.',
+      'See `code` and $x$ and an unterminated ` backtick here.',
+      'Mixed content: $$4\'000$$ and a `$FOO` shell var and {jsxExpr} together.',
+    ]) {
+      const originalCompiles = (() => {
+        try {
+          compileSync(body, { format: 'mdx' })
+          return true
+        } catch {
+          return false
+        }
+      })()
+      const result = protectMathBlocks(body)
+      if (originalCompiles) {
+        expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
+      }
+    }
+  })
 })
 
 describe('escapeFernLiteralBraces', () => {
