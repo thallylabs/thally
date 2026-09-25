@@ -248,6 +248,24 @@ describe('repository component migration', () => {
     expect(warnings).toEqual([])
   })
 
+  it('provides the implicit MintlifyComponents global copied .jsx snippets rely on', () => {
+    const root = fixture({
+      // Mirrors Mintlify's own snippet convention: no import, a global
+      // `MintlifyComponents` object destructured for its built-ins.
+      'calculator.jsx': `const { Card, Columns } = MintlifyComponents;\nexport const Calculator = () => <Columns><Card title="x" /></Columns>`,
+      'plain.jsx': `export const Plain = () => <div>no globals here</div>`,
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    migrator.transform("import Calculator from './calculator.jsx'\nimport Plain from './plain.jsx'\n\n<Calculator />\n\n<Plain />", join(root, 'index.mdx'))
+    const calculator = migrator.files().find((file) => file.path.endsWith('/calculator.jsx'))!
+    expect(calculator.content).toContain("import { useMDXComponents as __thallyMdxComponents } from '@/components/mdx/mdx-components'")
+    expect(calculator.content).toContain('const MintlifyComponents = __thallyMdxComponents({})')
+    const plain = migrator.files().find((file) => file.path.endsWith('/plain.jsx'))!
+    expect(plain.content).not.toContain('MintlifyComponents')
+    expect(warnings).toEqual([])
+  })
+
   it('registers multiline named/default imports and copies their dependency graph once', () => {
     const root = fixture({
       'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),

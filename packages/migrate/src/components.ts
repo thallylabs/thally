@@ -246,9 +246,18 @@ function implicitReactImports(source: ts.SourceFile): string {
   }
   visit(source)
   const hooks = [...REACT_GLOBALS].filter((name) => references.has(name) && !bindings.has(name)).sort()
+  // Mintlify's own snippet convention exposes its built-in MDX components as
+  // an implicit global too (`const { Card } = MintlifyComponents;`, no
+  // import). Thally's registry mirrors those same built-ins one for one
+  // (`useMDXComponents`, `mdx-components.tsx`), so reuse it verbatim instead
+  // of hand-maintaining a second component list.
+  const usesMintlifyComponents = references.has('MintlifyComponents') && !bindings.has('MintlifyComponents')
   return [
     references.has('React') && !bindings.has('React') ? "import * as React from 'react';" : '',
     hooks.length ? `import { ${hooks.join(', ')} } from 'react';` : '',
+    usesMintlifyComponents
+      ? "import { useMDXComponents as __thallyMdxComponents } from '@/components/mdx/mdx-components';\nconst MintlifyComponents = __thallyMdxComponents({});"
+      : '',
   ].filter(Boolean).join('\n')
 }
 
