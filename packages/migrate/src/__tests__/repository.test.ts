@@ -112,6 +112,24 @@ describe('Mintlify repository migration', () => {
     expect(page?.body).not.toContain('<Snippet')
   })
 
+  it('does not let a page-local component be shadowed by a same-named global snippet alias', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-alias-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['imports-snippet', 'declares-locally'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'counter.mdx'), 'export const Counter = () => {\n  return <div>from snippet</div>\n}')
+    writeFileSync(join(root, 'imports-snippet.mdx'), "---\ntitle: Imports\n---\n\nimport { Counter } from '/snippets/counter.mdx'\n\n<Counter />")
+    writeFileSync(join(root, 'declares-locally.mdx'), '---\ntitle: Local\n---\n\nexport const Counter = () => {\n  return <div>local component</div>\n}\n\n<Counter />')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const local = bundle.pages.find((candidate) => candidate.id === 'declares-locally')
+    expect(local?.body).toContain('local component')
+    expect(local?.body).not.toContain('from snippet')
+    expect(local?.body.match(/export const Counter/g)).toHaveLength(1)
+  })
+
   it('uses a nested Mintlify project as the config, content, snippet, and asset root', () => {
     const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-monorepo-'))
     const docsRoot = join(repositoryDir, 'apps', 'docs')

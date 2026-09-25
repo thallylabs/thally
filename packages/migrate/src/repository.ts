@@ -569,6 +569,10 @@ function inlineMdxSnippets(
   // elsewhere in the same docs project.
   for (const [componentName, candidate] of globalAliases) {
     if (snippets.has(componentName) || !new RegExp(`<${componentName}(?:\\s|/?>)`).test(withoutImports)) continue
+    // A page that declares this identifier itself (its own inline component,
+    // unrelated to the snippet elsewhere in the project) must keep that local
+    // definition; matching by name alone would duplicate and shadow it.
+    if (new RegExp(`^\\s*export\\s+(?:const|function|default\\s+function)\\s+${componentName}\\b`, 'm').test(withoutImports)) continue
     const nested = inlineMdxSnippets(
       withoutFrontmatter(readFileSync(candidate, 'utf8')),
       candidate,
