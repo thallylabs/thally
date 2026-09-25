@@ -7,6 +7,7 @@ import {
   Columns, Frame, Hero,
 } from '@/components/mdx/rich-content'
 import { Video, YouTube, LiteYouTubeEmbed } from '@/components/mdx/video'
+import { Latex } from '@/components/mdx/latex'
 import { Accordion, AccordionGroup } from '@/components/mdx/accordion'
 import { Card, CardGroup, Tile, TileGroup } from '@/components/mdx/content-cards'
 import { Icon } from '@/components/mdx/content-icon'
@@ -103,8 +104,7 @@ const components: MDXComponents = {
     return <Note type={typeof type === 'string' ? type : undefined} {...props}>{children}</Note>
   },
   AccordionGroup: (props) => <AccordionGroup {...props} />,
-  // Latex: Mintlify LaTeX component — render as inline code (no renderer available)
-  Latex: ({ children }: { children?: ReactNode }) => <code className="font-mono text-sm">{children}</code>,
+  Latex: (props) => <Latex {...(props as ComponentPropsWithoutRef<typeof Latex>)} />,
   Hero: (props) => <Hero {...props} />,
   Card: (props) => <Card {...props} />,
   CardGroup: (props) => <CardGroup {...props} />,
