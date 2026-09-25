@@ -599,14 +599,10 @@ interface CodeBlockProps extends Omit<PreProps, 'title'> {
  * be a plain string or an already-rendered `<pre>`/`<code>` element (e.g.
  * from migrated content).
  */
-export function CodeBlock({
-  children,
-  filename,
-  highlight: _highlight,
-  lines: _lines,
-  icon: _icon,
-  ...props
-}: CodeBlockProps) {
+export function CodeBlock({ children, filename, ...rest }: CodeBlockProps) {
+  // Strip the Mintlify-only props so they never reach the DOM.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { highlight, lines, icon, ...props } = rest
   return (
     <Pre {...props} title={filename}>
       {children}
