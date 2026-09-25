@@ -105,6 +105,8 @@ const components: MDXComponents = {
   },
   AccordionGroup: (props) => <AccordionGroup {...props} />,
   Latex: (props) => <Latex {...(props as ComponentPropsWithoutRef<typeof Latex>)} />,
+  // MDX: Mintlify pass-through wrapper — children are already compiled MDX.
+  MDX: ({ children }: { children?: ReactNode }) => <>{children}</>,
   Hero: (props) => <Hero {...props} />,
   Card: (props) => <Card {...props} />,
   CardGroup: (props) => <CardGroup {...props} />,

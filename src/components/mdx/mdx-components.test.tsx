@@ -1,6 +1,6 @@
-/** Regression test for the Mintlify-parity `Banner` alias. */
+/** Regression tests for Mintlify-parity aliases in the MDX components map. */
 
-import type { ComponentType } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
@@ -13,5 +13,14 @@ describe('Banner', () => {
     const html = renderToStaticMarkup(<Component content="Scheduled maintenance tonight." type="warning" />)
     expect(html).toContain('Scheduled maintenance tonight.')
     expect(html).toContain('data-variant="warning"')
+  })
+})
+
+describe('MDX', () => {
+  it('renders children through as-is', () => {
+    const { MDX } = useMDXComponents({})
+    const Component = MDX as ComponentType<{ children?: ReactNode }>
+    const html = renderToStaticMarkup(<Component><p>hello</p></Component>)
+    expect(html).toBe('<p>hello</p>')
   })
 })

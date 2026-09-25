@@ -34,7 +34,7 @@ const PORTABLE_MDX_COMPONENTS = new Set([
   'Check', 'CodeBlock', 'CodeGroup', 'Color', 'Column', 'Columns', 'ContentPanel', 'Danger', 'Error', 'Expandable',
   'Agent', 'AgentPrompt', 'Banner', 'BannerPreview', 'Embed', 'File', 'Folder', 'Frame', 'GitHub', 'Github', 'Hero', 'Human',
   'Icon', 'Info', 'InlinePanel', 'InlineRequestExample', 'InlineResponseExample',
-  'Latex', 'LegacyView', 'LiteYouTubeEmbed', 'Mermaid', 'Note', 'Panel', 'ParamField', 'Prompt',
+  'Latex', 'LegacyView', 'LiteYouTubeEmbed', 'MDX', 'Mermaid', 'Note', 'Panel', 'ParamField', 'Prompt',
   'PromptAssistant', 'PromptUser',
   'RequestExample', 'ResponseExample', 'ResponseField', 'Step', 'Steps',
   'Tab', 'Tabs', 'Terminal', 'TerminalInput', 'TerminalOutput', 'Tile', 'TileGroup',
