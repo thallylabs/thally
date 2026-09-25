@@ -229,6 +229,25 @@ export function normalizeMdx(body: string): string {
     .replace(/<\/Tree\.File>/g, '</File>')
 }
 
+const REACT_HOOK_NAMES = ['useState', 'useEffect', 'useRef', 'useCallback', 'useMemo', 'useContext', 'useReducer']
+
+/**
+ * Mintlify documents these seven hooks as pre-injected globals for a page's
+ * inline `export const Widget = () => {...}` components. Thally's MDX
+ * pipeline only resolves registered components inside the page body itself,
+ * not inside such hand-authored functions, so a bare hook call there is an
+ * undefined reference at render time. Importing whichever hooks the page
+ * actually calls restores the same authoring experience with no custom
+ * compiler step.
+ */
+function injectReactHookImports(body: string): string {
+  const used = REACT_HOOK_NAMES.filter((hook) => (
+    new RegExp(`\\b${hook}\\s*\\(`).test(body)
+    && !new RegExp(`import\\s*\\{[^}]*\\b${hook}\\b[^}]*\\}\\s*from\\s*['"]react['"]`).test(body)
+  ))
+  return used.length > 0 ? `import { ${used.join(', ')} } from 'react'\n\n${body}` : body
+}
+
 /** Parse source Markdown or MDX into the canonical page representation. */
 export function parseMarkdownPage(input: {
   id: string
@@ -249,7 +268,7 @@ export function parseMarkdownPage(input: {
     ...(input.locale ? { locale: input.locale } : {}),
   }
   const identity = input.resolveIdentity?.(parsed.data, fallbackIdentity) ?? fallbackIdentity
-  const body = normalizeMdx(parsed.content).trim()
+  const body = injectReactHookImports(normalizeMdx(parsed.content)).trim()
   const keywords = Array.isArray(parsed.data.keywords)
     ? parsed.data.keywords.filter((value): value is string => typeof value === 'string')
     : []

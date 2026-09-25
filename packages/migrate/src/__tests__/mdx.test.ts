@@ -44,6 +44,32 @@ describe('Docusaurus import normalization', () => {
   })
 })
 
+describe('inline component hook imports', () => {
+  function body(raw: string): string | undefined {
+    return parseMarkdownPage({ id: 'page', raw, source: 'https://example.com/page' })?.body
+  }
+
+  it('imports hooks a page-local inline component calls without an import', () => {
+    const page = body('export const Counter = () => {\n  const [n, setN] = useState(0)\n  return <button onClick={() => setN(n + 1)}>{n}</button>\n}\n\n<Counter />')
+    expect(page).toMatch(/^import \{ useState \} from 'react'/)
+  })
+
+  it('imports only the hooks actually called, in the documented order', () => {
+    const page = body('export const X = () => {\n  useEffect(() => {}, [])\n  const [n] = useState(0)\n  return <div>{n}</div>\n}')
+    expect(page).toMatch(/^import \{ useState, useEffect \} from 'react'/)
+  })
+
+  it('does not add an import when no hook is called', () => {
+    const source = '# Title\n\nJust prose.'
+    expect(body(source)).toBe(source)
+  })
+
+  it('does not duplicate an import the page already has', () => {
+    const source = "import { useState } from 'react'\n\nexport const Counter = () => {\n  const [n] = useState(0)\n  return <div>{n}</div>\n}"
+    expect(body(source)).toBe(source)
+  })
+})
+
 describe('nested code fence widening', () => {
   it('widens an outer fence so a same-length nested fence does not close it early', () => {
     const source = '```mdx\n<Tabs>\n  <Tab title="npm">\n    ```bash\n    npm install x\n    ```\n  </Tab>\n</Tabs>\n```'
