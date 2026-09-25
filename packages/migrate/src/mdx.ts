@@ -296,15 +296,18 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
   const output: Array<string> = []
   let inFence = false
   let fenceToken = ''
-  let inMathBlock = false
+  // Fern also allows a block delimited by a bare `$` alone on its own line
+  // (not just `$$`), e.g. `$\n\text{...}\n$`; a block must close on the
+  // same delimiter that opened it.
+  let mathBlockDelimiter: '$$' | '$' | null = null
   let mathLines: Array<string> = []
   let converted = false
   for (const line of lines) {
     const trimmed = line.trim()
-    if (inMathBlock) {
-      if (trimmed === '$$') {
+    if (mathBlockDelimiter) {
+      if (trimmed === mathBlockDelimiter) {
         output.push('```math', ...mathLines, '```')
-        inMathBlock = false
+        mathBlockDelimiter = null
         mathLines = []
         converted = true
       } else {
@@ -324,8 +327,8 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
       output.push(line)
       continue
     }
-    if (trimmed === '$$') {
-      inMathBlock = true
+    if (trimmed === '$$' || trimmed === '$') {
+      mathBlockDelimiter = trimmed
       continue
     }
     if (line.includes('$')) {
@@ -355,7 +358,7 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
   // An unterminated `$$` block means the source was malformed to begin
   // with; leave it untouched rather than eating the rest of the page into
   // one giant fenced block.
-  if (inMathBlock) return { body: raw, converted: false }
+  if (mathBlockDelimiter) return { body: raw, converted: false }
   return { body: front + output.join('\n'), converted }
 }
 

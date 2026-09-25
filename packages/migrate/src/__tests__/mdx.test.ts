@@ -343,6 +343,23 @@ describe('protectMathBlocks', () => {
     expect(result.body).toBe(body)
   })
 
+  it('converts a block delimited by a bare $ alone on its own line (the paradex-docs maintenance-mode.mdx repro)', () => {
+    const body = [
+      'BTC with an External Fair Price of $100,000:',
+      '',
+      '$',
+      '\\text{External Fair Price} = \\text{Spot Oracle Price} \\times (1 + \\text{External Basis Rate})',
+      '$',
+    ].join('\n')
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(true)
+    // A bare dollar amount elsewhere in the prose is left alone.
+    expect(result.body).toContain('$100,000:')
+    expect(result.body).toContain('```math')
+    expect(result.body).toContain('\\text{External Fair Price}')
+    expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
+  })
+
   it('does not treat an author-escaped \\$ as a math delimiter', () => {
     const body = 'A 1% move corresponds to \\$600 in this example.'
     const result = protectMathBlocks(body)
