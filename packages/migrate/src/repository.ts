@@ -1,7 +1,11 @@
 /**
- * Repository adapter for the shared migration engine. Traversal is bounded,
- * symbolic links are ignored, and Git is always invoked with an argument array
- * so source-controlled branch names can never become shell commands.
+ * Repository adapter for the shared migration engine. Traversal is bounded;
+ * `scanFiles` follows a symbolic link only when its resolved real path stays
+ * inside the repository checkout (this covers a submodule mounted as a
+ * symlink, e.g. Oasis's `docs/core -> ../external/oasis-core/docs`) and
+ * guards against a cycle, but every other directory walk in this file still
+ * skips symlinks outright. Git is always invoked with an argument array so
+ * source-controlled branch names can never become shell commands.
  */
 
 import { compileSync } from '@mdx-js/mdx'
@@ -12,12 +16,14 @@ import {
   lstatSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
+  statSync,
 } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { basename, dirname, extname, join, relative, resolve as resolvePath } from 'node:path'
+import { basename, dirname, extname, join, relative, resolve as resolvePath, sep } from 'node:path'
 
 import { parse as parseYaml } from 'yaml'
 
@@ -616,16 +622,79 @@ interface ScannedFile {
   relativePath: string
 }
 
-function scanFiles(root: string): Array<ScannedFile> {
+/**
+ * Scan `root` for its files, following a symbolic link only when its
+ * resolved real path stays inside `confinementRoot` (default `root`) — this
+ * is how a submodule mounted as a symlink (Oasis's `docs/core ->
+ * ../external/oasis-core/docs`, `docs/adrs -> ../external/adrs`) actually
+ * gets its content walked, since a plain `git clone` (even with submodules
+ * initialized) leaves those as real symlinks on disk that a naive walk
+ * would otherwise always skip. `confinementRoot` is normally the whole
+ * repository checkout, not just the docs root, because a submodule commonly
+ * links out to a sibling directory outside it. `visitedRealPaths` guards
+ * against a cycle (a symlink pointing at an ancestor, or two symlinks
+ * pointing at each other).
+ */
+function scanFiles(root: string, confinementRoot: string = root): Array<ScannedFile> {
   const files: Array<ScannedFile> = []
-  function visit(directory: string): void {
+  let confinementReal: string
+  try {
+    confinementReal = realpathSync(confinementRoot)
+  } catch {
+    confinementReal = confinementRoot
+  }
+  // Tracks every directory's real path, symlinked or not: a symlink into an
+  // ancestor (or two symlinks pointing at each other) must not recurse
+  // forever, and this also cheaply dedupes reaching the same real directory
+  // through two different symlinks.
+  const visitedRealPaths = new Set<string>()
+  // `directory` is the real, physical path a symlink was already resolved
+  // to (used for readdirSync/realpathSync); `logicalDirectory` is the path
+  // as seen through the symlink from `root` (used only for `relativePath`,
+  // so a page inside a symlinked submodule gets a sensible id like
+  // `core/overview` instead of a `../../..`-laden physical path).
+  function visit(directory: string, logicalDirectory: string = directory): void {
     if (files.length >= MAX_SOURCE_FILES) return
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    let directoryReal: string
+    try {
+      directoryReal = realpathSync(directory)
+    } catch {
+      return
+    }
+    if (visitedRealPaths.has(directoryReal)) return
+    visitedRealPaths.add(directoryReal)
+    let entries: Array<Dirent>
+    try {
+      entries = readdirSync(directory, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
       if (files.length >= MAX_SOURCE_FILES) return
-      if (isIgnoredDirectory(entry.name) || entry.isSymbolicLink()) continue
+      if (isIgnoredDirectory(entry.name)) continue
       const path = resolveWithin(directory, entry.name)
-      if (entry.isDirectory()) visit(path)
-      else if (entry.isFile()) files.push({ absolutePath: path, relativePath: relative(root, path).replace(/\\/g, '/') })
+      const logicalPath = resolveWithin(logicalDirectory, entry.name)
+      if (entry.isSymbolicLink()) {
+        let real: string
+        try {
+          real = realpathSync(path)
+        } catch {
+          continue // A broken symlink (e.g. an uninitialized submodule) has nothing to walk.
+        }
+        const withinConfinement = real === confinementReal || real.startsWith(`${confinementReal}${sep}`)
+        if (!withinConfinement) continue
+        let target: ReturnType<typeof statSync>
+        try {
+          target = statSync(real)
+        } catch {
+          continue
+        }
+        if (target.isDirectory()) visit(real, logicalPath)
+        else if (target.isFile()) files.push({ absolutePath: real, relativePath: relative(root, logicalPath).replace(/\\/g, '/') })
+        continue
+      }
+      if (entry.isDirectory()) visit(path, logicalPath)
+      else if (entry.isFile()) files.push({ absolutePath: path, relativePath: relative(root, logicalPath).replace(/\\/g, '/') })
     }
   }
   visit(root)
@@ -1514,8 +1583,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ? readMintignoreMatcher(mintlifyProjectRoot)
     : null
   const files = mintignoreMatcher
-    ? scanFiles(contentRoot).filter((file) => !mintignoreMatcher.ignores(file.relativePath))
-    : scanFiles(contentRoot)
+    ? scanFiles(contentRoot, repositoryDir).filter((file) => !mintignoreMatcher.ignores(file.relativePath))
+    : scanFiles(contentRoot, repositoryDir)
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
   // Which pages reference which asset (by its normalized copy-destination
@@ -1819,7 +1888,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ? ['static', 'public'].flatMap((directory) => {
         const root = resolveWithin(docusaurusAssetRoot, directory)
         if (!existsSync(root) || !lstatSync(root).isDirectory()) return []
-        return scanFiles(root).map((file) => ({
+        return scanFiles(root, repositoryDir).map((file) => ({
           ...file,
           relativePath: `${directory}/${file.relativePath}`,
         }))

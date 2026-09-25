@@ -1842,6 +1842,63 @@ navigation:
   })
 })
 
+describe('scanFiles follows a submodule symlink inside the repository checkout', () => {
+  it('imports pages from a symlinked directory that resolves inside repositoryDir (submodule content)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-submodule-symlink-'))
+    // Mirrors Oasis's layout: docs/core is a symlink into a sibling
+    // external/ submodule checkout, outside the docs root but still inside
+    // the repository.
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'external', 'oasis-core', 'docs'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction', 'core/overview'] },
+    }))
+    writeFileSync(join(root, 'docs', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(root, 'external', 'oasis-core', 'docs', 'overview.mdx'), '---\ntitle: Core overview\n---\n\nSubmodule content.')
+    symlinkSync(join(root, 'external', 'oasis-core', 'docs'), join(root, 'docs', 'core'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', docsDir: 'docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('core/overview')
+    expect(bundle.pages.find((page) => page.id === 'core/overview')?.body).toContain('Submodule content.')
+  })
+
+  it('never follows a symlink that resolves outside the repository checkout', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-symlink-escape-'))
+    const outside = mkdtempSync(join(tmpdir(), 'thally-migrate-symlink-escape-outside-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    writeFileSync(join(outside, 'secret.mdx'), '---\ntitle: Secret\n---\n\nShould never be imported.')
+    writeFileSync(join(root, 'docs', 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction'] },
+    }))
+    writeFileSync(join(root, 'docs', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    symlinkSync(outside, join(root, 'docs', 'escaped'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', docsDir: 'docs' })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('escaped/secret')
+    expect(bundle.pages.map((page) => page.title)).not.toContain('Secret')
+  })
+
+  it('does not hang on a symlink cycle', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-symlink-cycle-'))
+    mkdirSync(join(root, 'docs', 'a'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction'] },
+    }))
+    writeFileSync(join(root, 'docs', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    // docs/a/loop -> docs/a (a self-referencing cycle one level down).
+    symlinkSync(join(root, 'docs', 'a'), join(root, 'docs', 'a', 'loop'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', docsDir: 'docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('introduction')
+  })
+})
+
 describe('gitmodulePaths', () => {
   it('reads every submodule path from .gitmodules, in file order', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-gitmodules-'))
