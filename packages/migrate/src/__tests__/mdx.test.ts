@@ -43,3 +43,27 @@ describe('Docusaurus import normalization', () => {
     expect(performance.now() - startedAt).toBeLessThan(1_000)
   })
 })
+
+describe('nested code fence widening', () => {
+  it('widens an outer fence so a same-length nested fence does not close it early', () => {
+    const source = '```mdx\n<Tabs>\n  <Tab title="npm">\n    ```bash\n    npm install x\n    ```\n  </Tab>\n</Tabs>\n```'
+    expect(normalizeMdx(source)).toBe(
+      '````mdx\n<Tabs>\n  <Tab title="npm">\n    ```bash\n    npm install x\n    ```\n  </Tab>\n</Tabs>\n````',
+    )
+  })
+
+  it('widens each ancestor enough for doubly nested fences of the same length', () => {
+    const source = '```mdx\n```bash\n```diff\ncode\n```\n```\n```'
+    expect(normalizeMdx(source)).toBe('`````mdx\n````bash\n```diff\ncode\n```\n````\n`````')
+  })
+
+  it('leaves ordinary, unnested code fences untouched', () => {
+    const source = '```js\nconst x = 1\n```\n\nMore prose.\n\n```py\nx = 1\n```'
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('leaves unbalanced fences untouched rather than guessing', () => {
+    const source = '```mdx\n```bash\nnpm install x'
+    expect(normalizeMdx(source)).toBe(source)
+  })
+})

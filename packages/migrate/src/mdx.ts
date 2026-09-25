@@ -130,6 +130,71 @@ function isGlobalDocusaurusImport(line: string): boolean {
   return moduleName.startsWith('@theme/') || moduleName.startsWith('@docusaurus/')
 }
 
+interface FenceLine { index: number; indent: string; char: string; length: number; info: string; rest: string }
+
+function matchFenceLine(line: string): FenceLine | null {
+  const match = line.match(/^(\s*)(`{3,}|~{3,})(.*)$/)
+  if (!match) return null
+  return { index: -1, indent: match[1], char: match[2][0], length: match[2].length, info: match[3].trim(), rest: match[3] }
+}
+
+/**
+ * Widen an outer fence (for example a ```mdx block demonstrating authored
+ * Markdown) whose content contains a same-or-greater-length nested fence.
+ * CommonMark has no concept of fence nesting, so an inner fence of matching
+ * length closes the outer one early and strands the rest as raw JSX/markdown.
+ * A nested fence is identified by carrying an info string; a bare fence line
+ * always closes the innermost open block, matching authoring convention.
+ */
+function normalizeNestedCodeFences(body: string): string {
+  const lines = body.split('\n')
+  const fences = lines
+    .map((line, index) => {
+      const fence = matchFenceLine(line)
+      return fence ? { ...fence, index } : null
+    })
+    .filter((fence): fence is FenceLine => fence !== null)
+  if (fences.length === 0) return body
+
+  interface Block { open: FenceLine; close: FenceLine; children: Array<Block> }
+  const stack: Array<{ open: FenceLine; children: Array<Block> }> = []
+  const roots: Array<Block> = []
+  for (const fence of fences) {
+    const top = stack.at(-1)
+    if (top && fence.info === '' && fence.char === top.open.char && fence.length >= top.open.length) {
+      stack.pop()
+      const block: Block = { open: top.open, close: fence, children: top.children }
+      const parent = stack.at(-1)
+      if (parent) parent.children.push(block)
+      else roots.push(block)
+    } else {
+      stack.push({ open: fence, children: [] })
+    }
+  }
+  // An unresolved stack means the fences do not actually nest; leave the
+  // source untouched rather than guess at intent.
+  if (stack.length > 0) return body
+
+  const widenedLengths = new Map<number, number>()
+  function requiredLength(block: Block): number {
+    const deepestChild = Math.max(0, ...block.children.map(requiredLength))
+    const length = Math.max(block.open.length, deepestChild > 0 ? deepestChild + 1 : 0)
+    widenedLengths.set(block.open.index, length)
+    widenedLengths.set(block.close.index, length)
+    return length
+  }
+  roots.forEach(requiredLength)
+
+  return lines
+    .map((line, index) => {
+      const targetLength = widenedLengths.get(index)
+      const fence = targetLength ? matchFenceLine(line) : null
+      if (!targetLength || !fence || targetLength <= fence.length) return line
+      return `${fence.indent}${fence.char.repeat(targetLength)}${fence.rest}`
+    })
+    .join('\n')
+}
+
 /** Normalize only syntax Thally cannot render; supported source JSX stays intact. */
 export function normalizeMdx(body: string): string {
   // Docusaurus injects these theme components globally. Thally also exposes
@@ -138,7 +203,7 @@ export function normalizeMdx(body: string): string {
     .split('\n')
     .filter((line) => !isGlobalDocusaurusImport(line))
     .join('\n')
-  return normalizeDocusaurusAdmonitions(withoutGlobalImports)
+  return normalizeDocusaurusAdmonitions(normalizeNestedCodeFences(withoutGlobalImports))
     .replace(/<TabItem\b([^>]*)>/g, (_match, attributes: string) => {
       const title = attributes.match(/\blabel=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
         ?? attributes.match(/\bvalue=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
