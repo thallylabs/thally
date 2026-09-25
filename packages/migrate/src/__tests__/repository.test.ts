@@ -7,7 +7,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
+import { cloneGitHubRepository, gitmodulePaths, isPrivateOrLoopbackHost, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
 
 // Queue of scripted `git clone` outcomes consumed in order by the mocked
 // `spawn` below, so `cloneGitHubRepository`'s retry-on-network-failure logic
@@ -16,6 +16,9 @@ const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; std
 // Scripted `curl` outcomes for `downloadRemoteApiSpec` (repository.ts), so a
 // remote-spec download can be tested without a real network call.
 const remoteSpecOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ content?: string; fail?: boolean }> }))
+// Every `curl` argv the mocked execFileSync above was called with, so a test
+// can assert the https-lock/redirect-cap flags are always present.
+const curlArgCalls = vi.hoisted(() => ({ calls: [] as Array<Array<string>> }))
 // Records each `spawn('git', args, options)` call's env, so a test can
 // assert the LFS-filter-neutralizing env actually reaches the git process
 // without a real clone (that's covered manually against BoundaryML/baml, a
@@ -38,6 +41,7 @@ vi.mock('node:child_process', async () => {
     },
     execFileSync: (command: string, args: Array<string>) => {
       if (command !== 'curl') throw new Error(`unexpected execFileSync command: ${command}`)
+      curlArgCalls.calls.push(args)
       const outcome = remoteSpecOutcomes.queue.shift()
       if (!outcome || outcome.fail) throw new Error('curl: simulated failure')
       const outFile = args[args.indexOf('-o') + 1]
@@ -47,7 +51,27 @@ vi.mock('node:child_process', async () => {
   }
 })
 
-afterEach(() => { remoteSpecOutcomes.queue.length = 0 })
+afterEach(() => { remoteSpecOutcomes.queue.length = 0; curlArgCalls.calls.length = 0 })
+
+describe('isPrivateOrLoopbackHost', () => {
+  it.each([
+    'localhost', 'foo.localhost',
+    '127.0.0.1', '127.55.0.9',
+    '10.0.0.1', '172.16.0.1', '172.31.255.255', '192.168.1.1',
+    '169.254.169.254', '0.0.0.0',
+    '::1', 'fe80::1', 'fc00::1', 'fd12::34',
+  ])('flags %s as local/private', (host) => {
+    expect(isPrivateOrLoopbackHost(host)).toBe(true)
+  })
+
+  it.each([
+    'api.example.com', 'httpbin.org',
+    '8.8.8.8', '172.15.255.255', '172.32.0.1', '1.1.1.1',
+    '2001:4860:4860::8888',
+  ])('does not flag %s', (host) => {
+    expect(isPrivateOrLoopbackHost(host)).toBe(false)
+  })
+})
 
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repository-'))
@@ -456,6 +480,31 @@ describe('Mintlify repository migration', () => {
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
       code: 'unsupported-config',
       message: expect.stringContaining('could not be downloaded'),
+    }))
+    // Every curl invocation locks the protocol to https on redirects too,
+    // and caps the redirect chain, so an https URL can't 30x to http or
+    // loop forever.
+    expect(curlArgCalls.calls.length).toBeGreaterThan(0)
+    for (const args of curlArgCalls.calls) {
+      expect(args).toEqual(expect.arrayContaining(['--proto', '=https', '--proto-redir', '=https', '--max-redirs', '5']))
+    }
+  })
+
+  it('rejects docs.json `openapi` URLs that point at a local/private address before shelling out to curl', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'Guides', pages: ['guide'] }] },
+      api: { openapi: 'https://169.254.169.254/latest/meta-data/' },
+    }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    // No outcome queued: if downloadRemoteApiSpec called curl anyway, the
+    // mock throws "simulated failure" instead of the SSRF warning below.
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('meta-data')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('local or private address'),
     }))
   })
 

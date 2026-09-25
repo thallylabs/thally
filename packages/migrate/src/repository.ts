@@ -565,6 +565,23 @@ export function gitmodulePaths(targetDir: string): Array<string> {
 }
 
 /**
+ * Every submodule `url` in a cloned repository's `.gitmodules`, in the same
+ * file order as `gitmodulePaths` (each `[submodule "..."]` block declares
+ * `path` and `url` once, so index `i` here corresponds to index `i` there).
+ */
+function gitmoduleUrls(targetDir: string): Array<string> {
+  const gitmodulesPath = resolvePath(targetDir, '.gitmodules')
+  if (!existsSync(gitmodulesPath) || !lstatSync(gitmodulesPath).isFile()) return []
+  let content: string
+  try {
+    content = readFileSync(gitmodulesPath, 'utf8')
+  } catch {
+    return []
+  }
+  return [...content.matchAll(/^\s*url\s*=\s*(.+?)\s*$/gm)].map((match) => match[1]).filter(Boolean)
+}
+
+/**
  * `--recurse-submodules` on the main clone (above) fails the *entire* clone
  * if any one submodule can't be fetched, which is worse than not having
  * that submodule's content at all. So the main clone omits it and this
@@ -575,10 +592,23 @@ export function gitmodulePaths(targetDir: string): Array<string> {
 async function initSubmodules(targetDir: string, warnings: Array<MigrationWarning>): Promise<void> {
   const paths = gitmodulePaths(targetDir)
   if (paths.length === 0) return
+  const urls = gitmoduleUrls(targetDir)
   const failed: Array<string> = []
-  for (const path of paths) {
+  for (const [index, path] of paths.entries()) {
+    // A path or url beginning with `-` would be read as a git option
+    // rather than a pathspec/URL once it reaches argv (even after `--`,
+    // git's own pathspec parser treats a leading `-` as a flag), and
+    // `.gitmodules` is attacker-controlled content from the cloned repo.
+    if (path.startsWith('-') || (urls[index]?.startsWith('-') ?? false)) {
+      failed.push(path)
+      continue
+    }
     try {
-      await runGit(['submodule', 'update', '--init', '--depth', '1', '--', path], {
+      await runGit([
+        '-c', 'protocol.file.allow=never',
+        '-c', 'protocol.ext.allow=never',
+        'submodule', 'update', '--init', '--depth', '1', '--', path,
+      ], {
         cwd: targetDir,
         env: LFS_FILTER_OVERRIDE_ENV,
         label: `Failed to initialize submodule ${path}`,
@@ -867,13 +897,54 @@ const MAX_REMOTE_SPEC_BYTES = 10_000_000
 const REMOTE_SPEC_TIMEOUT_SECONDS = 20
 
 /**
+ * True when `hostname` is `localhost` or an IP literal in a loopback,
+ * link-local, or private range (RFC 1918 / RFC 4193 / IPv6 loopback and
+ * link-local). Used to block SSRF against internal infrastructure before
+ * `downloadRemoteApiSpec` shells out to `curl`. Only literal IPs and the
+ * `localhost` name are checked — this is not a DNS-rebinding defense, it
+ * just stops the obvious "docs.json points at 127.0.0.1" case.
+ */
+export function isPrivateOrLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (host === 'localhost' || host.endsWith('.localhost')) return true
+  // IPv4 literal
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (v4) {
+    const octets = v4.slice(1).map(Number)
+    if (octets.some((n) => n > 255)) return false
+    const [a, b] = octets
+    if (a === 127) return true // 127.0.0.0/8 loopback
+    if (a === 10) return true // 10.0.0.0/8 private
+    if (a === 172 && b >= 16 && b <= 31) return true // 172.16.0.0/12 private
+    if (a === 192 && b === 168) return true // 192.168.0.0/16 private
+    if (a === 169 && b === 254) return true // 169.254.0.0/16 link-local
+    if (a === 0) return true // 0.0.0.0/8
+    return false
+  }
+  // IPv6 literal
+  if (host.includes(':')) {
+    if (host === '::1') return true // loopback
+    if (host === '::') return true
+    if (/^fe[89ab][0-9a-f]:/i.test(host)) return true // fe80::/10 link-local
+    if (/^f[cd][0-9a-f]{2}:/i.test(host)) return true // fc00::/7 unique local
+    // IPv4-mapped IPv6, e.g. ::ffff:127.0.0.1
+    const mapped = host.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)
+    if (mapped) return isPrivateOrLoopbackHost(mapped[1])
+    return false
+  }
+  return false
+}
+
+/**
  * Download a remote OpenAPI spec referenced from docs.json at migration
  * time — Thally's runtime only ever serves a bundled file, never a live
  * URL. https-only, bounded size and time (`curl`'s own limits; the whole
  * migration pipeline is synchronous, so this shells out rather than using
  * an async fetch), and the body must parse as JSON or YAML before it's
- * trusted as a spec. Returns null on any failure so the caller warns
- * instead of silently dropping the API reference.
+ * trusted as a spec. `curl` is also locked to https on every redirect hop
+ * and capped at 5 redirects, so a spec host can't 30x the request down to
+ * plain http or onto an internal address. Returns null on any failure so
+ * the caller warns instead of silently dropping the API reference.
  */
 function downloadRemoteApiSpec(url: string): Buffer | null {
   let parsed: URL
@@ -883,10 +954,14 @@ function downloadRemoteApiSpec(url: string): Buffer | null {
     return null
   }
   if (parsed.protocol !== 'https:') return null
+  if (isPrivateOrLoopbackHost(parsed.hostname)) return null
   const outFile = join(tmpdir(), `thally-migrate-spec-${randomUUID()}`)
   try {
     execFileSync('curl', [
       '-fsSL',
+      '--proto', '=https',
+      '--proto-redir', '=https',
+      '--max-redirs', '5',
       '--max-time', String(REMOTE_SPEC_TIMEOUT_SECONDS),
       '--max-filesize', String(MAX_REMOTE_SPEC_BYTES),
       '-o', outFile,
@@ -995,6 +1070,19 @@ function resolveMintlifyApiSpecs(
         warnings.push({
           code: 'unsupported-config',
           message: `The OpenAPI spec URL "${reference.value}"${tabSuffix} is not https and was not downloaded.`,
+        })
+        continue
+      }
+      let blockedHost = false
+      try {
+        blockedHost = isPrivateOrLoopbackHost(new URL(reference.value).hostname)
+      } catch {
+        blockedHost = false
+      }
+      if (blockedHost) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `The OpenAPI spec URL "${reference.value}"${tabSuffix} points at a local or private address and was not downloaded.`,
         })
         continue
       }
