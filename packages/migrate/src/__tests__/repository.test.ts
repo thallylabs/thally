@@ -1533,6 +1533,33 @@ navigation:
     }))
   })
 
+  it('redirects an underscore-slug link (matching the on-disk folder name) to the hyphenated route Thally actually uses', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-slug-alias-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'baml_client'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - section: Generated baml_client
+    slug: baml_client
+    contents:
+      - page: With options
+        path: baml_client/with-options.mdx
+`)
+    // The in-body link matches the literal, underscore folder name — the
+    // form the live Fern site tolerates but Thally's hyphenated route
+    // doesn't resolve without an alias redirect.
+    writeFileSync(join(fernRoot, 'baml_client', 'with-options.mdx'), '---\ntitle: With options\n---\n\nSee [type builder](/ref/baml_client/with-options).')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('baml-client/with-options')
+    expect(bundle.docsConfig.redirects).toContainEqual({
+      source: '/baml_client/with-options',
+      destination: '/baml-client/with-options',
+    })
+  })
+
   it("resolves the first api: node's spec from generators.yml instead of the first OpenAPI file on disk", () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-generators-'))
     const fernRoot = join(root, 'fern')

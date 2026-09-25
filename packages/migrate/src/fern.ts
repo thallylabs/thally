@@ -86,6 +86,8 @@ interface WalkContext {
   warningKeys: Set<string>
   /** Bare tab/section routes with no page of their own, soft-redirected to their first descendant. */
   bareRouteRedirects: Array<{ source: string; destination: string }>
+  /** Slugified segment -> the literal explicit `slug` it was derived from, when the two differ (e.g. `baml-client` -> `baml_client`). */
+  segmentAliases: Map<string, string>
   /**
    * Directory, relative to `fernRoot` (posix, no trailing slash, '' at the
    * root), that a page's `path` is actually relative to. A product's own
@@ -125,6 +127,9 @@ function addBareRouteRedirect(
   }
 }
 
+/** A literal explicit `slug` value is only trusted as a redirect segment when it's already plain URL-safe text. */
+const FERN_SEGMENT_ALIAS = /^[\w.-]+$/
+
 /**
  * Fern's own slugifier treats any non-alphanumeric run (including `.`, which
  * Thally's shared `slugifySegment` deliberately preserves for other
@@ -155,11 +160,25 @@ function fernLabelSlug(label: string): string {
  * segment by default (confirmed against a live Fern site's sitemap: nested
  * sections with no `slug` field still nest their descendants by title).
  * `slug` overrides the label; `skip-slug: true` omits the segment entirely.
+ *
+ * An author-written `slug` is intentional URL text (e.g. BAML's `slug:
+ * baml_client`, matching its own `baml_client/` folder name) — Fern serves
+ * it literally, underscore and all. `fernBasicSlug` still squashes it into
+ * Thally's usual hyphenated route (kept as the canonical route: changing it
+ * would be a wider behavior change than this warrants), but when the two
+ * differ, the literal form is recorded as a segment alias so
+ * `fernUnderscoreAliasRedirects` can add a redirect from the original
+ * folder-name-shaped link to the route Thally actually uses.
  */
-function segmentFor(value: Record<string, unknown>, label: string): string | null {
+function segmentFor(value: Record<string, unknown>, label: string, context?: WalkContext): string | null {
   if (value['skip-slug'] === true) return null
   const explicit = typeof value.slug === 'string' ? value.slug.trim() : ''
-  return (explicit ? fernBasicSlug(explicit) : fernLabelSlug(label)) || null
+  if (!explicit) return fernLabelSlug(label) || null
+  const slugified = fernBasicSlug(explicit)
+  if (context && explicit !== slugified && FERN_SEGMENT_ALIAS.test(explicit)) {
+    context.segmentAliases.set(slugified, explicit)
+  }
+  return slugified || null
 }
 
 function uniqueNavigationId(base: string, context: WalkContext): string {
@@ -185,7 +204,7 @@ function registerPage(
 ): string | null {
   if (typeof object.path !== 'string' || !object.path.trim()) return null
   const label = typeof object.page === 'string' && object.page.trim() ? object.page.trim() : 'Untitled'
-  const segment = segmentFor(object, label)
+  const segment = segmentFor(object, label, context)
   const base = [...parentSegments, segment].filter(Boolean).join('/')
   return registerPageAt(object.path, base, context)
 }
@@ -203,7 +222,7 @@ function convertNode(
 
   if (typeof object.section === 'string') {
     const label = object.section
-    const segment = segmentFor(object, label)
+    const segment = segmentFor(object, label, context)
     const segments = segment ? [...parentSegments, segment] : parentSegments
     const contents = Array.isArray(object.contents) ? object.contents : []
     const pages: Array<string | MigrationNavigationGroup> = []
@@ -361,7 +380,7 @@ function buildTabsFromConfig(
       const id = String(entry.tab)
       const meta = objectValue(tabsMeta[id]) ?? {}
       const label = typeof meta['display-name'] === 'string' ? meta['display-name'] : titleCase(id)
-      const tabSegment = segmentFor(meta, label)
+      const tabSegment = segmentFor(meta, label, context)
       const segments = [...routePrefix, ...(tabSegment ? [tabSegment] : [])]
       const layout = Array.isArray(entry.layout) ? entry.layout : []
       const sectionsBefore = context.apiSections.length
@@ -435,7 +454,7 @@ function projectFernProducts(
     }
     if (!productConfig) return []
     const productDir = dirname(productPath)
-    const routeSegment = segmentFor(product, label)
+    const routeSegment = segmentFor(product, label, context)
     const priorPrefix = context.pathPrefix
     context.pathPrefix = relative(fernRoot, productDir).replace(/\\/g, '/')
     try {
@@ -465,6 +484,7 @@ export function projectFernNavigation(input: {
     warnings: [],
     warningKeys: new Set(),
     bareRouteRedirects: [],
+    segmentAliases: new Map(),
     pathPrefix: '',
   }
   const config = input.config
@@ -530,9 +550,35 @@ export function projectFernNavigation(input: {
   }
 
   const authoredSources = new Set(redirects.map((redirect) => redirect.source))
+  const knownIds = new Set(context.descriptors.map((descriptor) => descriptor.navigationId))
+  // A page whose route includes a segment Fern derived from an explicit
+  // `slug` that got hyphenated (see `segmentFor`) is also reachable on the
+  // live Fern site at its literal, unslugified form (Fern's own routing is
+  // file/slug-based and tolerates it) — e.g. BAML's `slug: baml_client`
+  // means both `/ref/baml-client/...` (Thally's route) and
+  // `/ref/baml_client/...` (in-body links, matching the folder name) are
+  // live. Add one redirect per affected page so those in-body links keep
+  // resolving instead of 404ing after migration.
+  const segmentAliasRedirects = context.segmentAliases.size > 0
+    ? context.descriptors.flatMap((descriptor) => {
+        const segments = descriptor.navigationId.split('/')
+        let changed = false
+        const aliased = segments.map((segment) => {
+          const literal = context.segmentAliases.get(segment)
+          if (!literal) return segment
+          changed = true
+          return literal
+        })
+        if (!changed) return []
+        const source = `/${aliased.join('/')}`
+        if (source === `/${descriptor.navigationId}` || knownIds.has(aliased.join('/'))) return []
+        return [{ source, destination: `/${descriptor.navigationId}` }]
+      })
+    : []
   const allRedirects = [
     ...redirects,
     ...context.bareRouteRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
+    ...segmentAliasRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
   ]
 
   return {
