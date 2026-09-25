@@ -325,6 +325,30 @@ describe('protectMathBlocks', () => {
     expect(result.body).toContain('title: "$$weird$$"')
     expect(result.body).toContain('`$$x=1$$`')
   })
+
+  it('converts single-$...$ inline math (the paradex-docs greeks.mdx repro)', () => {
+    const body = 'Under Black-76, the forward is $F = S \\times e^{\\,f\\,T}$, so a move in $S$ matters.'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(true)
+    expect(result.body).toBe(
+      'Under Black-76, the forward is `$F = S \\times e^{\\,f\\,T}$`, so a move in `$S$` matters.',
+    )
+    expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('does not mistake two dollar amounts in prose for inline math', () => {
+    const body = 'It costs $50 and $100 depending on the plan.'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
+
+  it('does not treat an author-escaped \\$ as a math delimiter', () => {
+    const body = 'A 1% move corresponds to \\$600 in this example.'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
 })
 
 describe('escapeFernLiteralBraces', () => {

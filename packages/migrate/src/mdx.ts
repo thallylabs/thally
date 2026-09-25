@@ -328,11 +328,26 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
       inMathBlock = true
       continue
     }
-    if (line.includes('$$')) {
-      output.push(line.replace(/\$\$([^\n]+?)\$\$/g, (_whole, inner: string) => {
-        converted = true
-        return `\`$$${inner}$$\``
-      }))
+    if (line.includes('$')) {
+      // One combined pass, `$$...$$` tried before single-`$...$` at each
+      // position: doing these as two sequential passes let the second
+      // (single-`$`) regex re-match dollar signs the first pass had just
+      // wrapped in backticks, corrupting its own output. Single-`$` inline
+      // math (the other half of the KaTeX convention, e.g. `$F = S \times
+      // e^{\,f\,T}$`) only counts when its content doesn't start/end with
+      // whitespace and holds no further `$` — the same rule KaTeX/Pandoc
+      // use to tell real inline math from an ordinary sentence mentioning
+      // two dollar amounts (`$50 and $100`, whose span content ends in a
+      // space and so never matches). An author-escaped `\$` (a literal
+      // dollar sign) is never treated as a delimiter.
+      const updated = line.replace(
+        /\$\$([^\n]+?)\$\$|(?<!\\)\$([^\s$](?:[^$\n]*[^\s$])?)\$/g,
+        (_whole, block: string | undefined, inline: string | undefined) => {
+          converted = true
+          return block !== undefined ? `\`$$${block}$$\`` : `\`$${inline}$\``
+        },
+      )
+      output.push(updated)
       continue
     }
     output.push(line)
