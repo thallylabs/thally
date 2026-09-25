@@ -33,7 +33,7 @@ import {
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
-import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from './mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -1530,7 +1530,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // is platform-agnostic (it only reads the page's own AST/ESM scope), so
     // run it for every platform Thally migrates from.
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
-      raw = escapeFernLiteralBraces(raw)
+      // Math must be protected before the AST-based brace escaper runs:
+      // raw `$$\begin{align*}...\end{align*}$$` crashes that parser outright
+      // (see `protectMathBlocks`), which is what excluded these pages
+      // before this ran.
+      const protectedMath = protectMathBlocks(raw)
+      if (protectedMath.converted) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: "Math (KaTeX '$$...$$') has no renderer in Thally yet; it was kept as a fenced code block instead of being dropped.",
+          source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
+        })
+      }
+      raw = escapeFernLiteralBraces(protectedMath.body)
     }
     let docusaurusDescriptor: Omit<DocusaurusPageDescriptor, 'title'> | undefined
     const page = parseMarkdownPage({

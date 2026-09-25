@@ -273,6 +273,77 @@ function collectEsmBindingsByPattern(source: string, declared: Set<string>): voi
  * source doesn't parse is left untouched; the migration's MDX-compile check
  * reports the real problem instead.
  */
+/** Trimmed line begins a fenced code block (```` ``` ```` or `~~~`, 3+ characters). */
+const FENCE_OPEN = /^(`{3,}|~{3,})/
+
+/**
+ * KaTeX-style `$$...$$` math (block, on its own lines, or inline mid-
+ * paragraph) is common in Fern docs (and any other Markdown source) but has
+ * no Thally renderer (no `remark-math`/`rehype-katex`) — worse, the raw
+ * LaTeX inside (`\begin{align*}`, bare `{...}`) crashes the MDX parser
+ * before `escapeFernLiteralBraces` below even gets a chance to run, so the
+ * whole page fails to compile and is silently excluded. Content is
+ * preserved, never dropped: a block becomes a fenced ` ```math ` code
+ * block, an inline span becomes an inline code span — both opaque to MDX's
+ * `{...}` expression parsing. This is a plain line scan (not an MDX parse,
+ * which is exactly what the source can't survive yet) that tracks fenced
+ * code blocks so a real code sample's own `$$` is never touched, and must
+ * run before any MDX-aware pass.
+ */
+export function protectMathBlocks(raw: string): { body: string; converted: boolean } {
+  const { front, body } = splitFrontmatterBlock(raw)
+  const lines = body.split(/\r\n|\r|\n/)
+  const output: Array<string> = []
+  let inFence = false
+  let fenceToken = ''
+  let inMathBlock = false
+  let mathLines: Array<string> = []
+  let converted = false
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (inMathBlock) {
+      if (trimmed === '$$') {
+        output.push('```math', ...mathLines, '```')
+        inMathBlock = false
+        mathLines = []
+        converted = true
+      } else {
+        mathLines.push(line)
+      }
+      continue
+    }
+    if (inFence) {
+      if (trimmed.startsWith(fenceToken)) inFence = false
+      output.push(line)
+      continue
+    }
+    const fenceOpen = FENCE_OPEN.exec(trimmed)
+    if (fenceOpen) {
+      inFence = true
+      fenceToken = fenceOpen[1].slice(0, 3)
+      output.push(line)
+      continue
+    }
+    if (trimmed === '$$') {
+      inMathBlock = true
+      continue
+    }
+    if (line.includes('$$')) {
+      output.push(line.replace(/\$\$([^\n]+?)\$\$/g, (_whole, inner: string) => {
+        converted = true
+        return `\`$$${inner}$$\``
+      }))
+      continue
+    }
+    output.push(line)
+  }
+  // An unterminated `$$` block means the source was malformed to begin
+  // with; leave it untouched rather than eating the rest of the page into
+  // one giant fenced block.
+  if (inMathBlock) return { body: raw, converted: false }
+  return { body: front + output.join('\n'), converted }
+}
+
 export function escapeFernLiteralBraces(raw: string): string {
   // Never touch the YAML frontmatter block: its `{...}` values (e.g. a
   // description containing a literal brace) are YAML scalars, not MDX

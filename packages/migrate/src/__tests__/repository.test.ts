@@ -1497,6 +1497,42 @@ navigation:
     expect(bundle.warnings.find((warning) => warning.message.includes('AsyncAPI'))?.message).toContain('asyncapi.yml')
   })
 
+  it('keeps a page with a $$\\begin{align*}...\\end{align*}$$ KaTeX block instead of excluding it, and warns', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-math-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(fernRoot, { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), 'navigation:\n  - page: Math\n    path: math.mdx\n')
+    writeFileSync(join(fernRoot, 'math.mdx'), [
+      '---',
+      'title: Math',
+      '---',
+      '',
+      'Some prose before.',
+      '',
+      '$$',
+      '\\begin{align*}',
+      '\\text{Bankruptcy Amount} = \\\\',
+      '\\max(0, x)',
+      '\\end{align*}',
+      '$$',
+      '',
+      "Total is $$4'000$$ today.",
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('math')
+    const page = bundle.pages.find((entry) => entry.id === 'math')
+    expect(page?.body).toContain('```math')
+    expect(page?.body).toContain('\\begin{align*}')
+    expect(page?.body).toContain("`$$4'000$$`")
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('kept as a fenced code block'),
+    }))
+  })
+
   it("resolves the first api: node's spec from generators.yml instead of the first OpenAPI file on disk", () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-generators-'))
     const fernRoot = join(root, 'fern')

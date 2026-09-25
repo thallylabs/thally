@@ -3,7 +3,7 @@
 import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
-import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from '../mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -270,6 +270,60 @@ describe('multi-line renames (fenced/inline code masked, whole body rewritten)',
     // A comment-like fragment inside a fenced block must not be converted either.
     const fencedComment = '```html\n<!--\n  example comment\n-->\n```'
     expect(normalizeMdx(fencedComment)).toBe(fencedComment)
+  })
+})
+
+describe('protectMathBlocks', () => {
+  it('converts a block $$...$$ (KaTeX align, backslashes and braces) into a fenced ```math block', () => {
+    const body = [
+      'Some prose before.',
+      '',
+      '$$',
+      '\\begin{align*}',
+      '\\small\\text{Account USDC Settlement Balance} = \\\\',
+      '\\text{Account USDC Balance}',
+      '\\end{align*}',
+      '$$',
+      '',
+      'Some prose after.',
+    ].join('\n')
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(true)
+    expect(result.body).toContain('```math')
+    expect(result.body).toContain('\\begin{align*}')
+    expect(result.body).not.toMatch(/\n\$\$\n/)
+    // The content actually compiles as MDX now (this exact construct is
+    // what crashed the parser before math was protected).
+    expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('converts an inline $$...$$ span mid-paragraph into an inline code span, preserving surrounding prose', () => {
+    const body = "Therefore the Total Exchange USDC Balance is $$4'000$$ today."
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(true)
+    expect(result.body).toBe("Therefore the Total Exchange USDC Balance is `$$4'000$$` today.")
+    expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('leaves a real fenced code block containing $$ untouched', () => {
+    const body = ['```js', 'const x = $$(selector)', '```'].join('\n')
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
+
+  it('leaves prose with no $$ at all unchanged', () => {
+    const body = 'Nothing special here.'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
+
+  it('never touches the frontmatter block', () => {
+    const body = '---\ntitle: "$$weird$$"\n---\n\nBody with $$x=1$$ math.'
+    const result = protectMathBlocks(body)
+    expect(result.body).toContain('title: "$$weird$$"')
+    expect(result.body).toContain('`$$x=1$$`')
   })
 })
 
