@@ -259,8 +259,16 @@ describe('repository component migration', () => {
     const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     migrator.transform("import Calculator from './calculator.jsx'\nimport Plain from './plain.jsx'\n\n<Calculator />\n\n<Plain />", join(root, 'index.mdx'))
     const calculator = migrator.files().find((file) => file.path.endsWith('/calculator.jsx'))!
-    expect(calculator.content).toContain("import { useMDXComponents as __thallyMdxComponents } from '@/components/mdx/mdx-components'")
-    expect(calculator.content).toContain('const MintlifyComponents = __thallyMdxComponents({})')
+    // Every leaf module is imported directly (never the app's
+    // mdx-components.tsx registry, which re-exports this very file via
+    // custom-components.tsx and would be circular) and aliased so none of
+    // the ~50 bare component names land in the snippet's own scope.
+    expect(calculator.content).toContain("import { Card as __mintlify_Card")
+    expect(calculator.content).toContain("@/components/mdx/content-cards")
+    expect(calculator.content).not.toContain('mdx-components')
+    expect(calculator.content).toContain('const MintlifyComponents = {')
+    expect(calculator.content).toContain('Card: __mintlify_Card')
+    expect(calculator.content).toContain('Columns: __mintlify_Columns')
     const plain = migrator.files().find((file) => file.path.endsWith('/plain.jsx'))!
     expect(plain.content).not.toContain('MintlifyComponents')
     expect(warnings).toEqual([])

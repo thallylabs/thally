@@ -159,6 +159,84 @@ const MAX_COMPONENT_FILES = 300
 const MAX_COMPONENT_BYTES = 20_000_000
 const MAX_FILE_BYTES = 2_000_000
 
+/**
+ * Where each Thally built-in MDX component actually lives, for building the
+ * `MintlifyComponents` shim (below). This must import each leaf module
+ * directly rather than the app's `mdx-components.tsx` registry: that
+ * registry pulls in `src/mdx/custom-components.tsx`, which re-exports every
+ * migrated component — including this very generated file — so importing
+ * it here would be circular (`ReferenceError: Cannot access 'X' before
+ * initialization` at build time). Kept in sync with
+ * `src/components/mdx/mdx-components.tsx`'s own imports by hand; a drift
+ * here only means `MintlifyComponents.<Name>` is `undefined` for a name
+ * added there, not a crash.
+ */
+const MINTLIFY_COMPONENT_MODULES: ReadonlyArray<{ module: string; names: ReadonlyArray<string> }> = [
+  { module: '@/components/mdx/note', names: ['Note'] },
+  { module: '@/components/mdx/agent-prompt', names: ['AgentPrompt'] },
+  { module: '@/components/mdx/code-blocks', names: ['CodeGroup'] },
+  { module: '@/components/mdx/rich-content', names: ['Columns', 'Frame', 'Hero'] },
+  { module: '@/components/mdx/accordion', names: ['Accordion', 'AccordionGroup'] },
+  { module: '@/components/mdx/content-cards', names: ['Card', 'CardGroup', 'Tile', 'TileGroup'] },
+  { module: '@/components/mdx/content-icon', names: ['Icon'] },
+  { module: '@/components/mdx/content-inline', names: ['Badge', 'Tooltip'] },
+  { module: '@/components/mdx/color', names: ['Color'] },
+  { module: '@/components/mdx/content-metadata', names: ['Update'] },
+  { module: '@/components/mdx/panel', names: ['Panel', 'ContentPanel', 'InlinePanel'] },
+  { module: '@/components/mdx/examples', names: ['RequestExample', 'ResponseExample', 'InlineRequestExample', 'InlineResponseExample'] },
+  { module: '@/components/mdx/prompt', names: ['Prompt', 'PromptAssistant', 'PromptUser', 'Terminal', 'TerminalInput', 'TerminalOutput'] },
+  { module: '@/components/mdx/file-tree', names: ['Tree', 'Folder', 'File'] },
+  { module: '@/components/mdx/api-fields', names: ['ResponseField', 'ParamField', 'Expandable'] },
+  { module: '@/components/mdx/mermaid', names: ['Mermaid'] },
+  { module: '@/components/mdx/view', names: ['Embed', 'LegacyView', 'View'] },
+  { module: '@/components/mdx/github-card', names: ['GitHub'] },
+  { module: '@/components/mdx/visibility', names: ['Agent', 'Human', 'Visibility'] },
+  { module: '@/components/mdx/steps', names: ['Steps', 'Step'] },
+  { module: '@/components/mdx/content-tabs', names: ['Tabs', 'Tab'] },
+]
+
+/** Builtins mapped straight through to their same-named import (aliased, see below). */
+const MINTLIFY_DIRECT_COMPONENTS = [
+  'AccordionGroup', 'Hero', 'Card', 'CardGroup', 'Columns', 'Frame', 'Accordion', 'Tooltip',
+  'Icon', 'Steps', 'Step', 'Tabs', 'Tab', 'Badge', 'Update', 'RequestExample', 'ResponseExample',
+  'Panel', 'ContentPanel', 'InlinePanel', 'InlineRequestExample', 'InlineResponseExample',
+  'Tile', 'TileGroup', 'Prompt', 'PromptUser', 'PromptAssistant', 'Terminal', 'TerminalInput',
+  'TerminalOutput', 'AgentPrompt', 'Color', 'Tree', 'Folder', 'File', 'ResponseField',
+  'ParamField', 'Expandable', 'Mermaid', 'View', 'Embed', 'LegacyView', 'GitHub', 'Visibility',
+  'Human', 'Agent', 'CodeGroup',
+]
+
+/**
+ * Mintlify's implicit `MintlifyComponents` global for a copied `.jsx`
+ * snippet (`const { Card } = MintlifyComponents;`, no import) — an object
+ * of Thally's built-in equivalents. Every import is aliased (`Card as
+ * __mintlify_Card`) so none of ~50 bare names land in the snippet's own top
+ * level scope and risk colliding with something it already declares; only
+ * the single `MintlifyComponents` identifier is introduced unaliased.
+ */
+function mintlifyComponentsShim(): string {
+  const alias = (name: string) => `__mintlify_${name}`
+  const imports = MINTLIFY_COMPONENT_MODULES
+    .map(({ module, names }) => `import { ${names.map((name) => `${name} as ${alias(name)}`).join(', ')} } from '${module}';`)
+    .join('\n')
+  const entries = [
+    // The callout family all render through Note, whose `type` mdx-components.tsx
+    // sets for each name; Callout and Latex mirror that file's own handling.
+    `Info: (props) => <${alias('Note')} type="info" {...props} />`,
+    `Warning: (props) => <${alias('Note')} type="warning" {...props} />`,
+    `Check: (props) => <${alias('Note')} type="check" {...props} />`,
+    `Danger: (props) => <${alias('Note')} type="danger" {...props} />`,
+    `Error: (props) => <${alias('Note')} type="danger" {...props} />`,
+    `Note: (props) => <${alias('Note')} type="note" {...props} />`,
+    `Tip: (props) => <${alias('Note')} type="tip" {...props} />`,
+    `Callout: (props) => <${alias('Note')} {...props} />`,
+    `Latex: ({ children }) => <code>{children}</code>`,
+    ...MINTLIFY_DIRECT_COMPONENTS.map((name) => `${name}: ${alias(name)}`),
+    `Github: ${alias('GitHub')}`,
+  ]
+  return `${imports}\nconst MintlifyComponents = {\n  ${entries.join(',\n  ')},\n};`
+}
+
 function applyReplacements(source: string, replacements: Array<Replacement>): string {
   return replacements.sort((a, b) => b.start - a.start).reduce(
     (text, edit) => text.slice(0, edit.start) + edit.value + text.slice(edit.end), source,
@@ -248,16 +326,12 @@ function implicitReactImports(source: ts.SourceFile): string {
   const hooks = [...REACT_GLOBALS].filter((name) => references.has(name) && !bindings.has(name)).sort()
   // Mintlify's own snippet convention exposes its built-in MDX components as
   // an implicit global too (`const { Card } = MintlifyComponents;`, no
-  // import). Thally's registry mirrors those same built-ins one for one
-  // (`useMDXComponents`, `mdx-components.tsx`), so reuse it verbatim instead
-  // of hand-maintaining a second component list.
+  // import).
   const usesMintlifyComponents = references.has('MintlifyComponents') && !bindings.has('MintlifyComponents')
   return [
     references.has('React') && !bindings.has('React') ? "import * as React from 'react';" : '',
     hooks.length ? `import { ${hooks.join(', ')} } from 'react';` : '',
-    usesMintlifyComponents
-      ? "import { useMDXComponents as __thallyMdxComponents } from '@/components/mdx/mdx-components';\nconst MintlifyComponents = __thallyMdxComponents({});"
-      : '',
+    usesMintlifyComponents ? mintlifyComponentsShim() : '',
   ].filter(Boolean).join('\n')
 }
 
