@@ -68,6 +68,13 @@ const MAX_SOURCE_FILES = 5_000
 const MAX_PAGE_BYTES = 2_000_000
 const MAX_ASSET_BYTES = 25_000_000
 const MAX_TOTAL_ASSET_BYTES = 500_000_000
+/** A Git LFS pointer file's fixed opening line (the smudge filter replaces this with the real binary; skipping it during clone leaves this text in place). */
+const GIT_LFS_POINTER_PREFIX = 'version https://git-lfs.github.com/spec/v1'
+
+/** A small text file starting with the fixed Git LFS pointer line, not real asset content. */
+function isGitLfsPointer(content: Buffer): boolean {
+  return content.length < 1024 && content.toString('utf8', 0, GIT_LFS_POINTER_PREFIX.length) === GIT_LFS_POINTER_PREFIX
+}
 const IGNORED_DIRECTORIES = new Set([
   '.git', '.github', '.next', '.turbo', '.vercel', '.vscode',
   'node_modules', 'dist', 'build', 'coverage',
@@ -408,31 +415,123 @@ export function parseGitHubRepositoryUrl(rawUrl: string): GitHubRepositorySource
 
 const CLONE_RETRY_ATTEMPTS = 3
 const CLONE_RETRY_DELAY_MS = 1_000
+const DEFAULT_CLONE_TIMEOUT_MS = 10 * 60_000
 
-/** Transient network-class git failures a retry can plausibly recover from. */
+/** Transient network-class git failures a retry can plausibly recover from. Also covers this module's own timeout error below. */
 const RETRYABLE_CLONE_ERROR = /RPC failed|Recv failure|early EOF|curl \d+|Could not resolve host|Connection (?:reset|refused|timed out)|The remote end hung up|SSL[_ ]?(?:read|connect|write) error|timed out|network is unreachable/i
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => { setTimeout(resolve, ms) })
 }
 
-function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<void> {
-  const args = ['clone', '--depth', '1', '--single-branch']
-  if (source.branch !== 'HEAD') args.push('--branch', source.branch)
-  args.push('--', source.cloneUrl, targetDir)
+/** How long a single git subprocess may run before it's killed and treated as a (retryable) timeout. Configurable since a very large repository on a slow link may need longer than the generous 10-minute default. */
+function gitProcessTimeoutMs(): number {
+  const raw = process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS
+  const parsed = raw ? Number(raw) : NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLONE_TIMEOUT_MS
+}
+
+/**
+ * Run one git subprocess without a shell, with an overall timeout (a
+ * stalled clone/fetch otherwise hangs forever — there is no `timeout`
+ * binary to rely on) and per-process env overrides (never touching global
+ * git/npm config, per this package's own rule).
+ */
+function runGit(args: Array<string>, options: { cwd?: string; env?: Record<string, string>; label: string }): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn('git', args, { stdio: ['ignore', 'ignore', 'pipe'] })
+    const child = spawn('git', args, {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      env: { ...process.env, ...options.env },
+    })
     let stderr = ''
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill('SIGKILL')
+    }, gitProcessTimeoutMs())
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk: string) => {
       if (stderr.length < 16_000) stderr += chunk
     })
-    child.on('error', reject)
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
     child.on('close', (code) => {
+      clearTimeout(timer)
       if (code === 0) resolve()
-      else reject(new Error(`Failed to clone ${source.owner}/${source.repo}: ${stderr.trim() || `git exited ${code}`}`))
+      else if (timedOut) reject(new Error(`${options.label} timed out after ${gitProcessTimeoutMs()}ms and was killed.`))
+      else reject(new Error(`${options.label}: ${stderr.trim() || `git exited ${code}`}`))
     })
   })
+}
+
+function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<void> {
+  // Submodules are deliberately not recursed here: `--recurse-submodules`
+  // fails the *entire* clone if any one submodule can't be fetched (a
+  // private or since-deleted submodule shouldn't take the whole migration
+  // down). `initSubmodules`, run after a successful plain clone, is the
+  // equivalent of `--recurse-submodules --shallow-submodules` (`--depth 1`
+  // per submodule) but fault-tolerant per submodule.
+  const args = ['clone', '--depth', '1', '--single-branch']
+  if (source.branch !== 'HEAD') args.push('--branch', source.branch)
+  args.push('--', source.cloneUrl, targetDir)
+  return runGit(args, {
+    label: `Failed to clone ${source.owner}/${source.repo}`,
+    // Per-process only — never touches the user's global git config. A repo
+    // whose assets are tracked with Git LFS otherwise hard-fails the whole
+    // clone when the host has no `git-lfs` binary installed; skipping the
+    // smudge filter clones the repository's own files (including LFS
+    // pointer text files in place of the real binaries) instead of failing
+    // outright. The asset-copying step below warns when a copied file
+    // turns out to be an LFS pointer rather than real content.
+    env: { GIT_LFS_SKIP_SMUDGE: '1' },
+  })
+}
+
+/** Every submodule path declared in a cloned repository's `.gitmodules`, in file order. */
+export function gitmodulePaths(targetDir: string): Array<string> {
+  const gitmodulesPath = resolvePath(targetDir, '.gitmodules')
+  if (!existsSync(gitmodulesPath) || !lstatSync(gitmodulesPath).isFile()) return []
+  let content: string
+  try {
+    content = readFileSync(gitmodulesPath, 'utf8')
+  } catch {
+    return []
+  }
+  return [...content.matchAll(/^\s*path\s*=\s*(.+?)\s*$/gm)].map((match) => match[1]).filter(Boolean)
+}
+
+/**
+ * `--recurse-submodules` on the main clone (above) fails the *entire* clone
+ * if any one submodule can't be fetched, which is worse than not having
+ * that submodule's content at all. So the main clone omits it and this
+ * best-effort pass follows, per submodule path, so one broken/private
+ * submodule doesn't take down the whole migration — it's just missing,
+ * and named in a warning instead of silently absent.
+ */
+async function initSubmodules(targetDir: string, warnings: Array<MigrationWarning>): Promise<void> {
+  const paths = gitmodulePaths(targetDir)
+  if (paths.length === 0) return
+  const failed: Array<string> = []
+  for (const path of paths) {
+    try {
+      await runGit(['submodule', 'update', '--init', '--depth', '1', '--', path], {
+        cwd: targetDir,
+        env: { GIT_LFS_SKIP_SMUDGE: '1' },
+        label: `Failed to initialize submodule ${path}`,
+      })
+    } catch {
+      failed.push(path)
+    }
+  }
+  if (failed.length > 0) {
+    warnings.push({
+      code: 'fetch-failed',
+      message: `${failed.length} git submodule${failed.length === 1 ? '' : 's'} could not be fetched and ${failed.length === 1 ? 'is' : 'are'} missing from the migrated content: ${failed.join(', ')}.`,
+    })
+  }
 }
 
 /**
@@ -441,15 +540,21 @@ function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<v
  * `Recv failure`, a `curl 56`, …) — retry a network-class failure a couple
  * of times with backoff instead of surfacing a hard failure on the first
  * blip. A partial checkout from the failed attempt is removed first, or
- * `git clone` refuses to reuse the (now non-empty) target directory.
+ * `git clone` refuses to reuse the (now non-empty) target directory. A
+ * stalled clone/submodule-init is killed by `runGit`'s own timeout, which
+ * surfaces as a retryable error. `warnings`, if given, collects a
+ * submodule-fetch-failure warning (this function otherwise returns exactly
+ * as before, so existing callers are unaffected).
  */
 export async function cloneGitHubRepository(
   source: GitHubRepositorySource,
   targetDir: string,
+  warnings?: Array<MigrationWarning>,
 ): Promise<void> {
   for (let attempt = 1; attempt <= CLONE_RETRY_ATTEMPTS; attempt++) {
     try {
       await cloneOnce(source, targetDir)
+      await initSubmodules(targetDir, warnings ?? [])
       return
     } catch (error) {
       const retryable = error instanceof Error && RETRYABLE_CLONE_ERROR.test(error.message)
@@ -1756,7 +1861,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       })
       continue
     }
-    assets.push({ path: assetPath, content: readFileSync(file.absolutePath) })
+    const content = readFileSync(file.absolutePath)
+    if (isGitLfsPointer(content)) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: 'This asset is a Git LFS pointer, not its real content (Git LFS was skipped during clone because the host has no git-lfs binary). Install git-lfs and re-run the migration, or add the real file to public/ manually.',
+        source: file.relativePath,
+      })
+      continue
+    }
+    assets.push({ path: assetPath, content })
     totalAssetBytes += size
   }
 

@@ -4,6 +4,7 @@ export {
   cloneGitHubRepository,
   detectRepositoryDocsDir,
   detectRepositoryPlatform,
+  gitmodulePaths,
   migrateRepository,
   parseGitHubRepositoryUrl,
 } from './repository.js'

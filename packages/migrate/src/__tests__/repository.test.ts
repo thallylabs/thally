@@ -7,7 +7,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { cloneGitHubRepository, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
+import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
 
 // Queue of scripted `git clone` outcomes consumed in order by the mocked
 // `spawn` below, so `cloneGitHubRepository`'s retry-on-network-failure logic
@@ -977,6 +977,28 @@ describe('Mintlify repository migration', () => {
       message: expect.stringContaining('en/with-huge-image.mdx'),
     }))
   })
+
+  it('warns instead of copying a Git LFS pointer file as if it were the real asset', () => {
+    const root = fixture()
+    // Clone with GIT_LFS_SKIP_SMUDGE=1 leaves this exact pointer text in
+    // place of the real binary when the host has no git-lfs binary.
+    writeFileSync(join(root, 'images', 'diagram.png'), [
+      'version https://git-lfs.github.com/spec/v1',
+      'oid sha256:0000000000000000000000000000000000000000000000000000000000000',
+      'size 123456',
+      '',
+    ].join('\n'))
+    writeFileSync(join(root, 'en', 'with-lfs-image.mdx'), '---\ntitle: LFS image\n---\n\n![Diagram](/images/diagram.png)')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('images/diagram.png')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      source: 'images/diagram.png',
+      message: expect.stringContaining('Git LFS pointer'),
+    }))
+  })
 })
 
 function docusaurusFixture(sidebarSource?: string): string {
@@ -1817,6 +1839,27 @@ navigation:
 
     expect(bundle.docsConfig.tabs.find((tab) => tab.api)?.api?.source).toBe('/plants.yml')
     expect(bundle.warnings.some((warning) => warning.message.startsWith('No OpenAPI'))).toBe(false)
+  })
+})
+
+describe('gitmodulePaths', () => {
+  it('reads every submodule path from .gitmodules, in file order', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-gitmodules-'))
+    writeFileSync(join(root, '.gitmodules'), [
+      '[submodule "docs/core"]',
+      '\tpath = docs/core',
+      '\turl = https://github.com/acme/core.git',
+      '[submodule "docs/adrs"]',
+      '\tpath = docs/adrs',
+      '\turl = https://github.com/acme/adrs.git',
+    ].join('\n'))
+
+    expect(gitmodulePaths(root)).toEqual(['docs/core', 'docs/adrs'])
+  })
+
+  it('returns an empty list when there is no .gitmodules', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-gitmodules-none-'))
+    expect(gitmodulePaths(root)).toEqual([])
   })
 })
 
