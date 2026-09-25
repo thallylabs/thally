@@ -88,6 +88,16 @@ const IGNORED_DIRECTORIES = new Set([
   '.git', '.github', '.next', '.turbo', '.vercel', '.vscode',
   'node_modules', 'dist', 'build', 'coverage',
 ])
+// `dist`/`build`/`coverage` are build output when found while *looking for*
+// a docs root (root-detection BFS below, which walks the whole repository
+// checkout) — but once a docs content root is actually confirmed, a
+// same-named subdirectory inside it is real content, not output (e.g.
+// oasisprotocol/docs's `docs/build/`, a live section of the site).
+// `scanFiles`'s own walk is always already confined to a confirmed content
+// root, so it uses this narrower set instead of `IGNORED_DIRECTORIES`.
+function isIgnoredContentDirectory(name: string): boolean {
+  return name.startsWith('.') || name === 'node_modules'
+}
 const ASSET_DIRECTORIES = new Set(['assets', 'images', 'img', 'media', 'public', 'static'])
 const ASSET_EXTENSIONS = new Set([
   '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.mp3', '.mp4',
@@ -720,7 +730,7 @@ interface ScannedFile {
  * against a cycle (a symlink pointing at an ancestor, or two symlinks
  * pointing at each other).
  */
-function scanFiles(root: string, confinementRoot: string = root): Array<ScannedFile> {
+function scanFiles(root: string, confinementRoot: string = root, warnings?: Array<MigrationWarning>): Array<ScannedFile> {
   const files: Array<ScannedFile> = []
   let confinementReal: string
   try {
@@ -756,7 +766,20 @@ function scanFiles(root: string, confinementRoot: string = root): Array<ScannedF
     }
     for (const entry of entries) {
       if (files.length >= MAX_SOURCE_FILES) return
-      if (isIgnoredDirectory(entry.name)) continue
+      if (isIgnoredContentDirectory(entry.name)) {
+        // Still skipped (`.git`, `node_modules`, ...) — but never silently:
+        // warn if it turns out to hold real pages, since that's exactly the
+        // shape of bug this content root is supposed to be free of.
+        if (warnings && entry.isDirectory() && !entry.isSymbolicLink()
+          && containsMarkdown(resolveWithin(directory, entry.name))) {
+          warnings.push({
+            code: 'unsupported-config',
+            message: `The "${entry.name}" directory was skipped during migration but contains Markdown/MDX files; if any are real pages, move them out or pass --docs-dir to include them.`,
+            source: relative(root, resolveWithin(directory, entry.name)).replace(/\\/g, '/'),
+          })
+        }
+        continue
+      }
       const path = resolveWithin(directory, entry.name)
       const logicalPath = resolveWithin(logicalDirectory, entry.name)
       if (entry.isSymbolicLink()) {
@@ -1745,8 +1768,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ? readMintignoreMatcher(mintlifyProjectRoot)
     : null
   const files = mintignoreMatcher
-    ? scanFiles(contentRoot, repositoryDir).filter((file) => !mintignoreMatcher.ignores(file.relativePath))
-    : scanFiles(contentRoot, repositoryDir)
+    ? scanFiles(contentRoot, repositoryDir, warnings).filter((file) => !mintignoreMatcher.ignores(file.relativePath))
+    : scanFiles(contentRoot, repositoryDir, warnings)
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
   // Which pages reference which asset (by its normalized copy-destination

@@ -2198,6 +2198,43 @@ describe('scanFiles follows a submodule symlink inside the repository checkout',
   })
 })
 
+describe('scanFiles walks a build/dist/coverage-named directory inside the docs content root', () => {
+  it('imports pages from a real "build" subdirectory of the docs root (oasisprotocol/docs repro)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-content-build-dir-'))
+    mkdirSync(join(root, 'docs', 'build', 'tools'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction', 'build/tools/llms'] },
+    }))
+    writeFileSync(join(root, 'docs', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(root, 'docs', 'build', 'tools', 'llms.mdx'), '---\ntitle: LLM tools\n---\n\nReal content that used to be silently dropped.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/oasisprotocol/docs', docsDir: 'docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toContain('build/tools/llms')
+    expect(bundle.pages.find((page) => page.id === 'build/tools/llms')?.body).toContain('used to be silently dropped')
+    expect(bundle.warnings.some((warning) => warning.message.includes('was skipped during migration'))).toBe(false)
+  })
+
+  it('still skips node_modules inside the docs root, but warns if it holds Markdown', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-content-node-modules-'))
+    mkdirSync(join(root, 'docs', 'node_modules', 'some-pkg'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction'] },
+    }))
+    writeFileSync(join(root, 'docs', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(root, 'docs', 'node_modules', 'some-pkg', 'readme.md'), '# Not a real page')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', docsDir: 'docs' })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('node_modules/some-pkg/readme')
+    expect(bundle.warnings.some((warning) => warning.code === 'unsupported-config'
+      && warning.message.includes('node_modules')
+      && warning.message.includes('was skipped during migration'))).toBe(true)
+  })
+})
+
 describe('gitmodulePaths', () => {
   it('reads every submodule path from .gitmodules, in file order', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-gitmodules-'))
