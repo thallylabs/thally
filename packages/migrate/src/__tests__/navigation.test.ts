@@ -114,6 +114,21 @@ describe('Mintlify navigation projection', () => {
     ])
   })
 
+  it('rewrites bare wildcard redirects into Next.js catch-all syntax', () => {
+    const result = projectMintlifyNavigation({
+      navigation: { pages: ['introduction'] },
+      redirects: [
+        { source: '/api-reference/*', destination: '/api/*' },
+        { source: '/old/*', destination: '/new', permanent: true },
+      ],
+    })
+
+    expect(result.docsConfig.redirects).toEqual([
+      { source: '/api-reference/:path*', destination: '/api/:path*' },
+      { source: '/old/:path*', destination: '/new', permanent: true },
+    ])
+  })
+
   it('derives dropdown presentation only from the selected default container', () => {
     const result = projectMintlifyNavigation({
       navigation: {

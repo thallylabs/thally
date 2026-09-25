@@ -629,6 +629,19 @@ function projectedCompatibleConfig(config: Record<string, unknown>): Omit<Migrat
   }
 }
 
+/**
+ * Rewrite a Mintlify wildcard redirect (bare trailing `/*`) into Next.js's
+ * named catch-all syntax. Next's route matcher rejects a bare `*`, so an
+ * untranslated wildcard fails the whole redirects list and blocks the build.
+ */
+function mintlifyRedirectWildcard(source: string, destination: string): { source: string; destination: string } {
+  if (!source.endsWith('/*')) return { source, destination }
+  return {
+    source: `${source.slice(0, -2)}/:path*`,
+    destination: destination.endsWith('/*') ? `${destination.slice(0, -2)}/:path*` : destination,
+  }
+}
+
 /** Convert current and legacy Mintlify navigation into Thally's schema. */
 export function projectMintlifyNavigation(
   config: Record<string, unknown>,
@@ -726,9 +739,10 @@ export function projectMintlifyNavigation(
         const destination = redirect.destination.trim()
         if (!source.startsWith('/') || !destination.startsWith('/')
           || source.startsWith('//') || destination.startsWith('//')) return []
+        const wildcard = mintlifyRedirectWildcard(source, destination)
         return [{
-          source,
-          destination,
+          source: wildcard.source,
+          destination: wildcard.destination,
           ...(typeof redirect.permanent === 'boolean' ? { permanent: redirect.permanent } : {}),
         }]
       })
