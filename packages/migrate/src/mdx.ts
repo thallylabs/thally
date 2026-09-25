@@ -348,7 +348,7 @@ function hasTexSignal(content: string): boolean {
  * component source rarely has an unbalanced bracket inside a string on the
  * same line as an ESM statement's own delimiters, and this is a heuristic
  * for skipping a scan, not a correctness-critical parse.
- * ponytail: raw character count, ignores strings/comments; a real AST pass
+ * TODO: raw character count, ignores strings/comments; a real AST pass
  * would be exact, add one if this heuristic misfires on real content.
  */
 function bracketDelta(line: string): number {
