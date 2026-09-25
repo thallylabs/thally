@@ -34,11 +34,11 @@ const PORTABLE_MDX_COMPONENTS = new Set([
   'Check', 'CodeBlock', 'CodeGroup', 'Color', 'Column', 'Columns', 'ContentPanel', 'Danger', 'Error', 'Expandable',
   'Agent', 'AgentPrompt', 'BannerPreview', 'Embed', 'File', 'Folder', 'Frame', 'GitHub', 'Github', 'Hero', 'Human',
   'Icon', 'Info', 'InlinePanel', 'InlineRequestExample', 'InlineResponseExample',
-  'Latex', 'LegacyView', 'Mermaid', 'Note', 'Panel', 'ParamField', 'Prompt',
+  'Latex', 'LegacyView', 'LiteYouTubeEmbed', 'Mermaid', 'Note', 'Panel', 'ParamField', 'Prompt',
   'PromptAssistant', 'PromptUser',
   'RequestExample', 'ResponseExample', 'ResponseField', 'Step', 'Steps',
   'Tab', 'Tabs', 'Terminal', 'TerminalInput', 'TerminalOutput', 'Tile', 'TileGroup',
-  'Tip', 'Tooltip', 'Tree', 'Update', 'View', 'Visibility', 'Warning',
+  'Tip', 'Tooltip', 'Tree', 'Update', 'Video', 'View', 'Visibility', 'Warning', 'YouTube',
 ])
 const LOCALE_CODES = new Set([
   'ar', 'cs', 'da', 'de', 'el', 'es', 'fi', 'fr', 'he', 'hi', 'hu', 'id',

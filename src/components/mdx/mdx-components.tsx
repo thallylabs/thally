@@ -6,6 +6,7 @@ import { Code, CodeBlock, CodeGroup, Pre } from '@/components/mdx/code-blocks'
 import {
   Columns, Frame, Hero,
 } from '@/components/mdx/rich-content'
+import { Video, YouTube, LiteYouTubeEmbed } from '@/components/mdx/video'
 import { Accordion, AccordionGroup } from '@/components/mdx/accordion'
 import { Card, CardGroup, Tile, TileGroup } from '@/components/mdx/content-cards'
 import { Icon } from '@/components/mdx/content-icon'
@@ -109,6 +110,9 @@ const components: MDXComponents = {
   CardGroup: (props) => <CardGroup {...props} />,
   Columns: (props) => <Columns {...props} />,
   Frame: (props) => <Frame {...props} />,
+  Video: (props) => <Video {...(props as ComponentPropsWithoutRef<typeof Video>)} />,
+  YouTube: (props) => <YouTube {...(props as ComponentPropsWithoutRef<typeof YouTube>)} />,
+  LiteYouTubeEmbed: (props) => <LiteYouTubeEmbed {...(props as ComponentPropsWithoutRef<typeof LiteYouTubeEmbed>)} />,
   Accordion: (props) => <Accordion {...props} />,
   Tooltip: (props) => <Tooltip {...props} />,
   Icon: (props) => <Icon {...props} />,
