@@ -26,16 +26,22 @@ export interface FernPageDescriptor {
   navigationId: string
 }
 
+/** One `api:` navigation node, resolved to the name/tab Thally needs to bind its spec. */
+export interface FernApiSection {
+  /** The node's own value (a display name or, in multi-API repos, a `fern/apis/<name>` identifier). */
+  name: string
+  /** True when `name` came from an explicit `api-name` field rather than falling back to the `api:` display title. */
+  nameExplicit: boolean
+  /** Label of the tab that owns this node, if that tab also has other content and survived projection. */
+  tabLabel?: string
+}
+
 export interface FernNavigationResult {
   docsConfig: MigrationDocsConfig
   descriptors: Array<FernPageDescriptor>
   warnings: Array<MigrationWarning>
-  /** The first `api:` node's own value (a display name or, in multi-API repos, a `fern/apis/<name>` identifier), if any. */
-  apiName?: string
-  /** True when `apiName` came from an explicit `api-name` field rather than falling back to the `api:` display title. */
-  apiNameExplicit?: boolean
-  /** Label of the tab that owns the first `api:` node, if that tab also has other content and survived projection. */
-  apiTabLabel?: string
+  /** Every `api:` node found in navigation, in document order. A repo can declare several (e.g. a REST and a WebSocket API in separate tabs). */
+  apiSections: Array<FernApiSection>
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -74,13 +80,8 @@ export function readFernConfig(fernRoot: string): { config: Record<string, unkno
 interface WalkContext {
   descriptors: Array<FernPageDescriptor>
   seenNavigationIds: Set<string>
-  sawApi: boolean
-  /** The first `api:` node's own value, used to locate its OpenAPI spec via generators.yml/fern/apis/<name>. */
-  apiName?: string
-  /** True when `apiName` came from an explicit `api-name` field rather than falling back to the `api:` display title. */
-  apiNameExplicit?: boolean
-  /** Label of the tab that owns the first `api:` node, so the OpenAPI spec attaches to that exact tab. */
-  apiTabLabel?: string
+  /** Every `api:` node seen so far, in document order; `tabLabel` is filled in once its owning tab finishes walking. */
+  apiSections: Array<FernApiSection>
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
   /** Bare tab/section routes with no page of their own, soft-redirected to their first descendant. */
@@ -239,17 +240,17 @@ function convertNode(
   }
 
   if (typeof object.api === 'string') {
-    if (context.sawApi) {
-      warnOnce(context, 'fern-multiple-api', 'Multiple Fern API sections were found; only the first was imported.')
-    } else {
-      // `api` is the display title shown in the nav; `api-name` (when
-      // present) is the actual `fern/apis/<name>/` folder name. A repo with
-      // `api: Plant API` / `api-name: plants` has no `apis/Plant API`
-      // folder, so preferring `api-name` is required to find the spec.
-      context.apiName = typeof object['api-name'] === 'string' ? object['api-name'] : object.api
-      context.apiNameExplicit = typeof object['api-name'] === 'string'
-    }
-    context.sawApi = true
+    // `api` is the display title shown in the nav; `api-name` (when
+    // present) is the actual `fern/apis/<name>/` folder name. A repo with
+    // `api: Plant API` / `api-name: plants` has no `apis/Plant API`
+    // folder, so preferring `api-name` is required to find the spec. A repo
+    // can declare several `api:` nodes (e.g. a REST API and a WebSocket API
+    // in separate tabs) — each is tracked and resolved independently rather
+    // than only ever importing the first one found.
+    context.apiSections.push({
+      name: typeof object['api-name'] === 'string' ? object['api-name'] : object.api,
+      nameExplicit: typeof object['api-name'] === 'string',
+    })
     return null
   }
 
@@ -363,9 +364,11 @@ function buildTabsFromConfig(
       const tabSegment = segmentFor(meta, label)
       const segments = [...routePrefix, ...(tabSegment ? [tabSegment] : [])]
       const layout = Array.isArray(entry.layout) ? entry.layout : []
-      const sawApiBefore = context.sawApi
+      const sectionsBefore = context.apiSections.length
       const groups = groupsFromConverted(convertNodes(layout, segments, context))
-      if (!sawApiBefore && context.sawApi) context.apiTabLabel = label
+      for (let index = sectionsBefore; index < context.apiSections.length; index += 1) {
+        context.apiSections[index].tabLabel ??= label
+      }
       if (groups.length === 0) return []
       if (segments.length > 0) addBareRouteRedirect(segments, groups, context)
       return [{
@@ -376,7 +379,11 @@ function buildTabsFromConfig(
     })
   }
   if (Array.isArray(navigation)) {
+    const sectionsBefore = context.apiSections.length
     const groups = groupsFromConverted(convertNodes(navigation, routePrefix, context))
+    for (let index = sectionsBefore; index < context.apiSections.length; index += 1) {
+      context.apiSections[index].tabLabel ??= fallbackTabLabel
+    }
     if (groups.length > 0) {
       if (routePrefix.length > 0) addBareRouteRedirect(routePrefix, groups, context)
       return [{ tab: fallbackTabLabel, groups }]
@@ -454,7 +461,7 @@ export function projectFernNavigation(input: {
   const context: WalkContext = {
     descriptors: [],
     seenNavigationIds: new Set(),
-    sawApi: false,
+    apiSections: [],
     warnings: [],
     warningKeys: new Set(),
     bareRouteRedirects: [],
@@ -536,8 +543,6 @@ export function projectFernNavigation(input: {
     },
     descriptors: context.descriptors,
     warnings: context.warnings,
-    ...(context.apiName ? { apiName: context.apiName } : {}),
-    ...(context.apiNameExplicit ? { apiNameExplicit: true } : {}),
-    ...(context.apiTabLabel ? { apiTabLabel: context.apiTabLabel } : {}),
+    apiSections: context.apiSections,
   }
 }

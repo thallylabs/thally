@@ -5,7 +5,8 @@
  */
 
 import { compileSync } from '@mdx-js/mdx'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import {
   existsSync,
   lstatSync,
@@ -15,7 +16,8 @@ import {
 } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { createRequire } from 'node:module'
-import { basename, dirname, extname, relative, resolve as resolvePath } from 'node:path'
+import { tmpdir } from 'node:os'
+import { basename, dirname, extname, join, relative, resolve as resolvePath } from 'node:path'
 
 import { parse as parseYaml } from 'yaml'
 
@@ -29,6 +31,7 @@ import {
   type DocusaurusPageDescriptor,
   type DocusaurusSidebars,
 } from './docusaurus.js'
+import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
 import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from './mdx.js'
 import {
@@ -36,9 +39,11 @@ import {
   addMintlifyHomepageRedirects,
   buildNavigationFromPages,
   isDocumentationExtension,
+  mintlifyNavigationApiReferences,
   projectMintlifyNavigation,
   pruneMissingNavigationPages,
   readMintlifyConfig,
+  type MintlifyApiSpecReference,
 } from './navigation.js'
 import {
   normalizeAssetPath,
@@ -603,23 +608,172 @@ function findOpenApi(files: Array<ScannedFile>): ScannedFile | null {
   return files.find((file) => OPENAPI_FILENAMES.has(basename(file.relativePath).toLowerCase())) ?? null
 }
 
-function findConfiguredMintlifyOpenApi(
-  config: Record<string, unknown> | null,
-  files: Array<ScannedFile>,
-): ScannedFile | null {
+/** An OpenAPI/AsyncAPI spec resolved and ready to copy into `public/`, optionally bound to one tab. */
+interface ResolvedApiSpec {
+  filename: string
+  content: Buffer
+  tabLabel?: string
+}
+
+const MAX_REMOTE_SPEC_BYTES = 10_000_000
+const REMOTE_SPEC_TIMEOUT_SECONDS = 20
+
+/**
+ * Download a remote OpenAPI spec referenced from docs.json at migration
+ * time — Thally's runtime only ever serves a bundled file, never a live
+ * URL. https-only, bounded size and time (`curl`'s own limits; the whole
+ * migration pipeline is synchronous, so this shells out rather than using
+ * an async fetch), and the body must parse as JSON or YAML before it's
+ * trusted as a spec. Returns null on any failure so the caller warns
+ * instead of silently dropping the API reference.
+ */
+function downloadRemoteApiSpec(url: string): Buffer | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'https:') return null
+  const outFile = join(tmpdir(), `thally-migrate-spec-${randomUUID()}`)
+  try {
+    execFileSync('curl', [
+      '-fsSL',
+      '--max-time', String(REMOTE_SPEC_TIMEOUT_SECONDS),
+      '--max-filesize', String(MAX_REMOTE_SPEC_BYTES),
+      '-o', outFile,
+      '--', parsed.toString(),
+    ], { stdio: 'ignore', timeout: (REMOTE_SPEC_TIMEOUT_SECONDS + 10) * 1000 })
+    if (!existsSync(outFile) || !lstatSync(outFile).isFile()) return null
+    const size = lstatSync(outFile).size
+    if (size === 0 || size > MAX_REMOTE_SPEC_BYTES) return null
+    const content = readFileSync(outFile)
+    const text = content.toString('utf8')
+    try {
+      JSON.parse(text)
+    } catch {
+      try {
+        parseYaml(text)
+      } catch {
+        return null
+      }
+    }
+    return content
+  } catch {
+    return null
+  } finally {
+    try {
+      rmSync(outFile, { force: true })
+    } catch {
+      // Best-effort cleanup; a leaked temp file never reaches the migrated project.
+    }
+  }
+}
+
+/** A stable, collision-free `public/` filename for a downloaded remote spec. */
+function remoteSpecFilename(url: string, index: number, taken: Set<string>): string {
+  let base = 'remote-openapi-spec.json'
+  try {
+    const last = new URL(url).pathname.split('/').filter(Boolean).at(-1)
+    if (last) base = last.replace(/[^a-zA-Z0-9_.-]/g, '-')
+  } catch {
+    // Keep the default name.
+  }
+  if (!/\.(?:ya?ml|json)$/i.test(base)) base += '.json'
+  let candidate = base
+  let suffix = index
+  while (taken.has(candidate.toLowerCase())) {
+    candidate = `${suffix}-${base}`
+    suffix += 1
+  }
+  taken.add(candidate.toLowerCase())
+  return candidate
+}
+
+function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): Array<MintlifyApiSpecReference> {
   const api = config?.api && typeof config.api === 'object' && !Array.isArray(config.api)
     ? config.api as Record<string, unknown>
     : null
-  const configured = typeof api?.openapi === 'string'
-    ? [api.openapi]
-    : Array.isArray(api?.openapi) ? api.openapi.filter((value): value is string => typeof value === 'string') : []
-  for (const reference of configured) {
-    if (/^(?:https?:)?\/\//i.test(reference)) continue
-    const key = reference.split(/[?#]/, 1)[0].replace(/^\/+/, '').replace(/\\/g, '/')
-    const match = files.find((file) => file.relativePath === key)
-    if (match) return match
+  if (!api) return []
+  const references: Array<MintlifyApiSpecReference> = []
+  for (const kind of ['openapi', 'asyncapi'] as const) {
+    const value = api[kind]
+    const values = typeof value === 'string'
+      ? [value]
+      : Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+    for (const entry of values) references.push({ value: entry, kind })
   }
-  return null
+  return references
+}
+
+/**
+ * Resolve every OpenAPI/AsyncAPI reference in a Mintlify config — the
+ * top-level `api.openapi`/`api.asyncapi` plus every per-tab/group/anchor
+ * `openapi`/`asyncapi` field in `navigation` — into copyable spec bytes
+ * bound to the tab that referenced them. AsyncAPI has no Thally renderer,
+ * so it only ever produces a warning naming the spec. A remote `https://`
+ * reference is downloaded; anything that can't be resolved (a missing
+ * local file, a failed download, a non-https URL) produces a specific
+ * warning rather than silently disappearing.
+ */
+function resolveMintlifyApiSpecs(
+  mintlifyConfig: Record<string, unknown> | null,
+  files: Array<ScannedFile>,
+  warnings: Array<MigrationWarning>,
+): Array<ResolvedApiSpec> {
+  if (!mintlifyConfig) return []
+  const references = [
+    ...mintlifyTopLevelApiReferences(mintlifyConfig),
+    ...mintlifyNavigationApiReferences(mintlifyConfig),
+  ]
+  const seen = new Set<string>()
+  const taken = new Set(files.map((file) => basename(file.relativePath).toLowerCase()))
+  const specs: Array<ResolvedApiSpec> = []
+  let remoteIndex = 0
+  for (const reference of references) {
+    const dedupeKey = `${reference.kind}:${reference.value}`
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+    const tabSuffix = reference.tabLabel ? ` (tab "${reference.tabLabel}")` : ''
+    if (reference.kind === 'asyncapi') {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `AsyncAPI is not supported by Thally's API reference; the spec "${reference.value}"${tabSuffix} was not migrated.`,
+      })
+      continue
+    }
+    if (/^https?:\/\//i.test(reference.value)) {
+      if (!/^https:\/\//i.test(reference.value)) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `The OpenAPI spec URL "${reference.value}"${tabSuffix} is not https and was not downloaded.`,
+        })
+        continue
+      }
+      const content = downloadRemoteApiSpec(reference.value)
+      if (!content) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `The remote OpenAPI spec "${reference.value}"${tabSuffix} could not be downloaded and was not migrated. Download it manually and add it to public/.`,
+        })
+        continue
+      }
+      remoteIndex += 1
+      specs.push({ filename: remoteSpecFilename(reference.value, remoteIndex, taken), content, tabLabel: reference.tabLabel })
+      continue
+    }
+    const key = reference.value.split(/[?#]/, 1)[0].replace(/^\/+/, '').replace(/\\/g, '/')
+    const match = files.find((file) => file.relativePath === key)
+    if (!match) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `The OpenAPI spec "${reference.value}"${tabSuffix} could not be found in the repository and was not migrated.`,
+      })
+      continue
+    }
+    specs.push({ filename: basename(match.relativePath), content: readFileSync(match.absolutePath), tabLabel: reference.tabLabel })
+  }
+  return specs
 }
 
 const MAX_FERN_GENERATORS_BYTES = 2_000_000
@@ -635,6 +789,27 @@ function fernGeneratorsOpenApiPaths(config: Record<string, unknown>): Array<stri
     if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return []
     const openapi = (spec as Record<string, unknown>).openapi
     return typeof openapi === 'string' ? [openapi] : []
+  })
+}
+
+/**
+ * Fern's `generators.yml` can also point an `api.specs[]` entry at an
+ * AsyncAPI or OpenRPC document instead of OpenAPI. Thally's API reference
+ * only renders OpenAPI, so these are named here purely to produce a
+ * specific warning (`fernGeneratorsOpenApiPaths` above never returns them,
+ * so without this they'd otherwise look like a missing spec).
+ */
+function fernGeneratorsUnsupportedSpecPaths(config: Record<string, unknown>): Array<{ kind: 'asyncapi' | 'openrpc'; path: string }> {
+  const api = config.api
+  if (!api || typeof api !== 'object' || Array.isArray(api)) return []
+  const specs = (api as Record<string, unknown>).specs
+  if (!Array.isArray(specs)) return []
+  return specs.flatMap((spec): Array<{ kind: 'asyncapi' | 'openrpc'; path: string }> => {
+    if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return []
+    const record = spec as Record<string, unknown>
+    if (typeof record.asyncapi === 'string') return [{ kind: 'asyncapi', path: record.asyncapi }]
+    if (typeof record.openrpc === 'string') return [{ kind: 'openrpc', path: record.openrpc }]
+    return []
   })
 }
 
@@ -670,14 +845,21 @@ function fernOpenApiCandidateDirs(fernRoot: string, apiName: string | undefined,
   return candidateDirs
 }
 
+/** `findFernConfiguredOpenApi`'s result, plus any AsyncAPI/OpenRPC specs seen along the way (Thally has no renderer for either). */
+interface FernOpenApiResolution {
+  spec: ScannedFile | null
+  unsupported: Array<{ kind: 'asyncapi' | 'openrpc'; path: string }>
+}
+
 function findFernConfiguredOpenApi(
   fernRoot: string,
   repositoryDir: string,
   apiName: string | undefined,
   apiNameExplicit: boolean,
   warnings: Array<MigrationWarning>,
-): ScannedFile | null {
+): FernOpenApiResolution {
   const candidateDirs = fernOpenApiCandidateDirs(fernRoot, apiName, apiNameExplicit)
+  const unsupported: Array<{ kind: 'asyncapi' | 'openrpc'; path: string }> = []
   for (const dir of candidateDirs) {
     let config: Record<string, unknown> | null = null
     let generatorsPath: string
@@ -698,7 +880,7 @@ function findFernConfiguredOpenApi(
       try {
         const absolute = resolveWithinRoot(dir, specPath, repositoryDir)
         if (!existsSync(absolute) || !lstatSync(absolute).isFile()) continue
-        return { absolutePath: absolute, relativePath: relative(repositoryDir, absolute).replace(/\\/g, '/') }
+        return { spec: { absolutePath: absolute, relativePath: relative(repositoryDir, absolute).replace(/\\/g, '/') }, unsupported }
       } catch {
         warnings.push({
           code: 'unsupported-config',
@@ -706,8 +888,9 @@ function findFernConfiguredOpenApi(
         })
       }
     }
+    unsupported.push(...fernGeneratorsUnsupportedSpecPaths(config))
   }
-  return null
+  return { spec: null, unsupported }
 }
 
 /** Whether a Fern Definition (as opposed to a plain OpenAPI/AsyncAPI spec) backs this API. */
@@ -1029,12 +1212,25 @@ function inlineMdxSnippets(
   return result
 }
 
-function injectOpenApi(config: MigrationDocsConfig, filename: string, preferredTabLabel?: string): MigrationDocsConfig {
-  const tabs = config.tabs.map((tab) => ({ ...tab }))
-  const apiTab = (preferredTabLabel ? tabs.find((tab) => tab.tab === preferredTabLabel) : undefined)
-    ?? tabs.find((tab) => tab.tab.toLowerCase().includes('api'))
-  if (apiTab) apiTab.api = { source: `/${filename}`, navigation: false }
-  else tabs.push({ tab: preferredTabLabel ?? 'API Reference', api: { source: `/${filename}` } })
+/**
+ * Bind one or more resolved specs into their tabs. A spec with no
+ * `tabLabel` (the common single-spec case) falls back to an existing
+ * "*api*"-labelled tab, or gets a new "API Reference" tab of its own — the
+ * original single-spec behavior. A spec with a `tabLabel` only ever binds
+ * to that exact tab (creating it if the source tab had no other content
+ * and so was dropped from `config.tabs` earlier), never the loose
+ * substring fallback, so two specs from two different tabs can never both
+ * land on the same tab by accident.
+ */
+function injectOpenApiSpecs(config: MigrationDocsConfig, specs: Array<{ filename: string; tabLabel?: string }>): MigrationDocsConfig {
+  let tabs = config.tabs.map((tab) => ({ ...tab }))
+  for (const spec of specs) {
+    const apiTab = spec.tabLabel
+      ? tabs.find((tab) => tab.tab === spec.tabLabel)
+      : tabs.find((tab) => tab.tab.toLowerCase().includes('api'))
+    if (apiTab) apiTab.api = { source: `/${spec.filename}`, navigation: false }
+    else tabs = [...tabs, { tab: spec.tabLabel ?? 'API Reference', api: { source: `/${spec.filename}` } }]
+  }
   return { ...config, tabs }
 }
 
@@ -1138,9 +1334,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let docusaurusSidebars: DocusaurusSidebars | null = null
   let mintlifyConfig: Record<string, unknown> | null = null
   let fernRawConfig: Record<string, unknown> | null = null
-  let fernApiName: string | undefined
-  let fernApiNameExplicit = false
-  let fernApiTabLabel: string | undefined
+  let fernApiSections: Array<FernApiSection> = []
 
   if (platform === 'mintlify') {
     try {
@@ -1177,9 +1371,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         const projected = projectFernNavigation({ config: fernConfig.config, fernRoot: fernProjectRoot })
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
-        fernApiName = projected.apiName
-        fernApiNameExplicit = projected.apiNameExplicit ?? false
-        fernApiTabLabel = projected.apiTabLabel
+        fernApiSections = projected.apiSections
         for (const [index, descriptor] of projected.descriptors.entries()) {
           const key = normalizedReferenceKey(descriptor.sourcePath)
           if (!referenceMap.has(key)) referenceMap.set(key, { navigationId: descriptor.navigationId })
@@ -1611,40 +1803,81 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
   if (docsConfig.tabs.length === 0) docsConfig = buildNavigationFromPages(pages)
-  // A repo-wide scan for *any* `openapi.yml`/`.json` file cannot tell one
-  // API's spec from another's, so once an explicit `api-name` names a
-  // specific API, that naive scan is never consulted as a fallback (the root
-  // `generators.yml` rule is in `fernOpenApiCandidateDirs`). Without an
-  // explicit `api-name` there is only ever one API on the site, so the naive
-  // scan remains safe.
-  const openApi = platform === 'fern' && fernProjectRoot
-    ? findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, fernApiName, fernApiNameExplicit, warnings)
-      ?? (fernApiNameExplicit ? null : findOpenApi(files))
-    : findConfiguredMintlifyOpenApi(mintlifyConfig, files) ?? findOpenApi(files)
-  if (openApi) {
-    const filename = basename(openApi.relativePath)
-    if (!assets.some((asset) => asset.path === filename)) {
-      assets.push({ path: filename, content: readFileSync(openApi.absolutePath) })
+  if (platform === 'fern' && fernProjectRoot) {
+    // A repo-wide scan for *any* `openapi.yml`/`.json` file cannot tell one
+    // API's spec from another's, so once an explicit `api-name` names a
+    // specific API, that naive scan is never consulted as a fallback (the
+    // root `generators.yml` rule is in `fernOpenApiCandidateDirs`). A docs.yml
+    // with no `api:` node at all falls back to the naive scan, bound to
+    // whatever tab `injectOpenApiSpecs` picks for an unbound spec.
+    const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string }> = fernApiSections.length > 0
+      ? fernApiSections
+      : [{ nameExplicit: false }]
+    const resolvedSpecs: Array<{ filename: string; tabLabel?: string }> = []
+    for (const section of sections) {
+      const resolution = findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, section.name, section.nameExplicit, warnings)
+      const spec = resolution.spec ?? (!section.nameExplicit ? findOpenApi(files) : null)
+      if (spec) {
+        const filename = basename(spec.relativePath)
+        if (!assets.some((asset) => asset.path === filename)) {
+          assets.push({ path: filename, content: readFileSync(spec.absolutePath) })
+        }
+        resolvedSpecs.push({ filename, tabLabel: section.tabLabel })
+        continue
+      }
+      if (resolution.unsupported.length > 0) {
+        const sectionLabel = section.name ? ` for the "${section.name}" API` : ''
+        for (const entry of resolution.unsupported) {
+          warnings.push({
+            code: 'unsupported-config',
+            message: `${entry.kind === 'asyncapi' ? 'AsyncAPI' : 'OpenRPC'} is not supported by Thally's API reference; the spec "${entry.path}"${sectionLabel} was not migrated.`,
+          })
+        }
+        continue
+      }
+      if (section.name === undefined) continue
+      if (fernDefinitionExists(fernProjectRoot, section.name)) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `This API${section.name ? ` ("${section.name}")` : ''} is defined with a Fern Definition, not an OpenAPI/AsyncAPI document; generating a spec from a Fern Definition is not supported. Export an OpenAPI document and reference it from generators.yml, or add it manually.`,
+        })
+        continue
+      }
+      // Neither an OpenAPI/AsyncAPI spec nor a Fern Definition could be found
+      // for this `api:` node — the API tab was silently dropped from the nav.
+      // Name the node so the user knows which one to fix.
+      const checked = fernOpenApiCandidateDirs(fernProjectRoot, section.name, section.nameExplicit)
+        .map((dir) => relative(repositoryDir, resolvePath(dir, 'generators.yml')).replace(/\\/g, '/'))
+      if (!section.nameExplicit) checked.push('any openapi or swagger file in the repository')
+      warnings.push({
+        code: 'unsupported-config',
+        message: checked.length
+          ? `No OpenAPI/AsyncAPI spec could be found for the "${section.name}" API. Checked: ${checked.join(', ')}. Point generators.yml at a spec file that exists.`
+          : `No OpenAPI/AsyncAPI spec could be found for the "${section.name}" API, because its api-name is not a valid folder name. Add the spec manually.`,
+      })
     }
-    docsConfig = injectOpenApi(docsConfig, filename, platform === 'fern' ? fernApiTabLabel : undefined)
-  } else if (platform === 'fern' && fernProjectRoot && fernApiName !== undefined && fernDefinitionExists(fernProjectRoot, fernApiName)) {
-    warnings.push({
-      code: 'unsupported-config',
-      message: 'This API is defined with a Fern Definition, not an OpenAPI/AsyncAPI document; generating a spec from a Fern Definition is not supported. Export an OpenAPI document and reference it from generators.yml, or add it manually.',
-    })
-  } else if (platform === 'fern' && fernProjectRoot && fernApiName !== undefined) {
-    // Neither an OpenAPI/AsyncAPI spec nor a Fern Definition could be found
-    // for this `api:` node — the API tab was silently dropped from the nav.
-    // Name the node so the user knows which one to fix.
-    const checked = fernOpenApiCandidateDirs(fernProjectRoot, fernApiName, fernApiNameExplicit)
-      .map((dir) => relative(repositoryDir, resolvePath(dir, 'generators.yml')).replace(/\\/g, '/'))
-    if (!fernApiNameExplicit) checked.push('any openapi or swagger file in the repository')
-    warnings.push({
-      code: 'unsupported-config',
-      message: checked.length
-        ? `No OpenAPI/AsyncAPI spec could be found for the "${fernApiName}" API. Checked: ${checked.join(', ')}. Point generators.yml at a spec file that exists.`
-        : `No OpenAPI/AsyncAPI spec could be found for the "${fernApiName}" API, because its api-name is not a valid folder name. Add the spec manually.`,
-    })
+    if (resolvedSpecs.length > 0) docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs)
+  } else if (platform === 'mintlify') {
+    const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings)
+    for (const spec of resolvedSpecs) {
+      if (!assets.some((asset) => asset.path === spec.filename)) {
+        assets.push({ path: spec.filename, content: spec.content })
+      }
+    }
+    if (resolvedSpecs.length > 0) {
+      docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs)
+    } else {
+      // No docs.json-configured spec at all: fall back to a naive repo scan,
+      // matching every other platform's baseline behavior.
+      const fallback = findOpenApi(files)
+      if (fallback) {
+        const filename = basename(fallback.relativePath)
+        if (!assets.some((asset) => asset.path === filename)) {
+          assets.push({ path: filename, content: readFileSync(fallback.absolutePath) })
+        }
+        docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
+      }
+    }
   }
   if (platform === 'mintlify') {
     const sources = new Set((docsConfig.redirects ?? []).map((redirect) => redirect.source))

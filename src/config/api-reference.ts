@@ -10,24 +10,29 @@ import { getSiteUrl } from '@/lib/site-url'
 
 function buildApiReferenceConfig(): ApiReferenceConfig {
   const collections = getSidebarCollections()
-  const apiCollection = collections.find((c) => c.api)
-  const apiConfig = apiCollection?.api
+  const apiCollections = collections.filter((c) => c.api)
 
-  if (!apiConfig) {
+  if (apiCollections.length === 0) {
     return { defaultSpecId: 'default', specs: [] }
   }
 
+  // A docs.json with several tabs each binding their own spec (e.g. a
+  // migrated Fern site with a REST and a WebSocket API) gets one spec per
+  // tab, routed at `/api/<specId>/...`. The first keeps the stable
+  // `'default'` id existing single-spec sites already rely on; the rest are
+  // keyed by their own tab's id, which is already unique per tab.
   return {
     defaultSpecId: 'default',
-    specs: [buildSpecFromDocsJson(apiConfig)],
+    specs: apiCollections.map((collection, index) =>
+      buildSpecFromDocsJson(collection.api!, index === 0 ? 'default' : collection.id, index === 0 ? 'API Reference' : collection.label)),
   }
 }
 
-function buildSpecFromDocsJson(api: DocsJsonApiConfig): ApiSpecConfig {
+function buildSpecFromDocsJson(api: DocsJsonApiConfig, id: string, label: string): ApiSpecConfig {
   const isUrl = api.source.startsWith('http://') || api.source.startsWith('https://')
   return {
-    id: 'default',
-    label: 'API Reference',
+    id,
+    label,
     source: isUrl
       ? { type: 'url', url: api.source }
       : { type: 'file', path: api.source },

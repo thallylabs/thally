@@ -13,18 +13,34 @@ import { cloneGitHubRepository, migrateRepository, projectFernNavigation, readMi
 // `spawn` below, so `cloneGitHubRepository`'s retry-on-network-failure logic
 // (repository.ts) can be tested without a real clone.
 const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; stderr?: string }> }))
-vi.mock('node:child_process', () => ({
-  spawn: () => {
-    const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void } }
-    child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} })
-    const outcome = cloneOutcomes.queue.shift() ?? { code: 0 }
-    queueMicrotask(() => {
-      if (outcome.stderr) child.stderr.emit('data', outcome.stderr)
-      child.emit('close', outcome.code)
-    })
-    return child
-  },
-}))
+// Scripted `curl` outcomes for `downloadRemoteApiSpec` (repository.ts), so a
+// remote-spec download can be tested without a real network call.
+const remoteSpecOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ content?: string; fail?: boolean }> }))
+vi.mock('node:child_process', async () => {
+  const fs = await import('node:fs')
+  return {
+    spawn: () => {
+      const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void } }
+      child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} })
+      const outcome = cloneOutcomes.queue.shift() ?? { code: 0 }
+      queueMicrotask(() => {
+        if (outcome.stderr) child.stderr.emit('data', outcome.stderr)
+        child.emit('close', outcome.code)
+      })
+      return child
+    },
+    execFileSync: (command: string, args: Array<string>) => {
+      if (command !== 'curl') throw new Error(`unexpected execFileSync command: ${command}`)
+      const outcome = remoteSpecOutcomes.queue.shift()
+      if (!outcome || outcome.fail) throw new Error('curl: simulated failure')
+      const outFile = args[args.indexOf('-o') + 1]
+      fs.writeFileSync(outFile, outcome.content ?? '{}')
+      return Buffer.alloc(0)
+    },
+  }
+})
+
+afterEach(() => { remoteSpecOutcomes.queue.length = 0 })
 
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repository-'))
@@ -377,6 +393,81 @@ describe('Mintlify repository migration', () => {
     expect(introduction?.content).toContain('badge: "NEW"')
     expect(introduction?.content).toContain('mode: "center"')
     expect(introduction?.content).toContain('noindex: true')
+  })
+
+  it('binds a per-tab docs.json `openapi` (navigation.tabs[].openapi) to that exact tab, not just the top-level api.openapi', () => {
+    const root = fixture()
+    // `fixture()` already writes docs.json/pages elsewhere; write a minimal,
+    // self-contained one here so the per-tab binding is unambiguous.
+    const docsRoot = root
+    writeFileSync(join(docsRoot, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [
+          { tab: 'Guides', pages: ['guide'] },
+          { tab: 'API Reference', openapi: 'openapi/service.yml', pages: ['api-landing'] },
+        ],
+      },
+    }))
+    mkdirSync(join(docsRoot, 'openapi'), { recursive: true })
+    writeFileSync(join(docsRoot, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    writeFileSync(join(docsRoot, 'api-landing.mdx'), '---\ntitle: API\n---\n\nLanding.')
+    writeFileSync(join(docsRoot, 'openapi', 'service.yml'), 'openapi: 3.1.0\ninfo: { title: Service, version: "1.0" }\npaths: {}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'API Reference')
+    expect(apiTab?.api).toEqual({ source: '/service.yml', navigation: false })
+    expect(bundle.docsConfig.tabs.find((tab) => tab.tab === 'Guides')?.api).toBeUndefined()
+    expect(bundle.assets.map((asset) => asset.path)).toContain('service.yml')
+  })
+
+  it("downloads a remote https `openapi` spec referenced from a tab into public/, and warns instead when the download fails", () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [
+          { tab: 'Guides', pages: ['guide'] },
+          { tab: 'REST API', openapi: 'https://api.example.com/openapi.json', pages: ['rest-landing'] },
+          { tab: 'WS API', openapi: 'https://api.example.com/ws-spec.json', pages: ['ws-landing'] },
+        ],
+      },
+    }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    writeFileSync(join(root, 'rest-landing.mdx'), '---\ntitle: REST\n---\n\nLanding.')
+    writeFileSync(join(root, 'ws-landing.mdx'), '---\ntitle: WS\n---\n\nLanding.')
+    remoteSpecOutcomes.queue.push(
+      { content: 'openapi: 3.1.0\ninfo: { title: Remote, version: "1.0" }\npaths: {}' },
+      { fail: true },
+    )
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const restTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'REST API')
+    expect(restTab?.api?.source).toBe('/openapi.json')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi.json')
+    expect(bundle.docsConfig.tabs.find((tab) => tab.tab === 'WS API')?.api).toBeUndefined()
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('could not be downloaded'),
+    }))
+  })
+
+  it("warns by name instead of silently dropping docs.json's api.asyncapi", () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'Guides', pages: ['guide'] }] },
+      api: { asyncapi: 'api-reference/voice.asyncapi.yaml' },
+    }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('AsyncAPI is not supported'),
+    }))
+    expect(bundle.warnings.find((warning) => warning.message.includes('AsyncAPI'))?.message).toContain('voice.asyncapi.yaml')
   })
 
   it('skips dotfile directories and .mintignore paths, and excludes pages that fail to compile as MDX', () => {
@@ -1344,6 +1435,66 @@ navigation:
     // the mode it paints); they're swapped here onto Mintlify's inverted
     // `{light, dark}` keys so `updateSiteConfig` has one consistent contract.
     expect(bundle.site).toEqual({ name: 'Acme Docs', colors: { light: '#70E155', dark: '#008700' } })
+  })
+
+  it('imports every Fern api: section, each bound to its own tab and spec, instead of only the first', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-multi-api-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'rest'), { recursive: true })
+    mkdirSync(join(fernRoot, 'apis', 'ws'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - tab: rest-tab
+    layout:
+      - page: Welcome
+        path: welcome.mdx
+      - api: REST API
+        api-name: rest
+  - tab: ws-tab
+    layout:
+      - api: WebSocket API
+        api-name: ws
+`)
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: rest-openapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'rest-openapi.yml'), 'openapi: 3.0.0\ninfo:\n  title: REST\n  version: "1.0"\npaths: {}\n')
+    writeFileSync(join(fernRoot, 'apis', 'ws', 'generators.yml'), 'api:\n  specs:\n    - openapi: ws-openapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'ws', 'ws-openapi.yml'), 'openapi: 3.0.0\ninfo:\n  title: WS\n  version: "1.0"\npaths: {}\n')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const apiTabs = bundle.docsConfig.tabs.filter((tab) => tab.api)
+    expect(apiTabs.map((tab) => tab.tab).sort()).toEqual(['Rest Tab', 'Ws Tab'])
+    expect(apiTabs.map((tab) => tab.api?.source).sort()).toEqual(['/rest-openapi.yml', '/ws-openapi.yml'])
+    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['rest-openapi.yml', 'ws-openapi.yml'])
+    expect(bundle.warnings.some((warning) => /only the first was imported/i.test(warning.message))).toBe(false)
+  })
+
+  it('warns by name instead of silently dropping an AsyncAPI/OpenRPC-only Fern api: section', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-asyncapi-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'ws'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - api: WebSocket API
+    api-name: ws
+`)
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(fernRoot, 'apis', 'ws', 'generators.yml'), 'api:\n  specs:\n    - asyncapi: asyncapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'ws', 'asyncapi.yml'), 'asyncapi: 2.6.0\ninfo:\n  title: WS\n  version: "1.0"\n')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'unsupported-config',
+      message: expect.stringContaining('AsyncAPI is not supported'),
+    }))
+    expect(bundle.warnings.find((warning) => warning.message.includes('AsyncAPI'))?.message).toContain('asyncapi.yml')
   })
 
   it("resolves the first api: node's spec from generators.yml instead of the first OpenAPI file on disk", () => {
