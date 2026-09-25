@@ -476,7 +476,19 @@ export function replaceUnknownComponents(
       if (!node.children?.length) return '<div></div>'
       const openEnd = node.children[0].position?.start.offset ?? start
       const closeStart = node.children.at(-1)!.position?.end.offset ?? end
-      return `<div>${renderChildrenSpan(node.children, openEnd, closeStart, body, renderNode)}</div>`
+      const children = renderChildrenSpan(node.children, openEnd, closeStart, body, renderNode)
+      // A flow (block-level) unknown component can wrap block content —
+      // a fenced code block, a heading, another flow element — and MDX
+      // only recognizes that as block content when it's set off from the
+      // surrounding tag by a blank line; gluing it straight onto `<div>`
+      // (the previous behavior) reads as inline text, which derails the
+      // parser and can surface as an unrelated "unclosed `<div>`" error
+      // once it hits the real closing tag. The source component's own
+      // markup may have had no blank line there at all (a permissive
+      // renderer doesn't require one), so always add it rather than
+      // trying to detect when it's needed. An inline (text-level) unknown
+      // component never contains block content, so it stays glued.
+      return node.type === 'mdxJsxFlowElement' ? `<div>\n\n${children}\n\n</div>` : `<div>${children}</div>`
     }
 
     if (!node.children?.length) return text

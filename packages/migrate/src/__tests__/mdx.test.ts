@@ -1,5 +1,6 @@
 /** Generated page descriptions contain readable prose, never component syntax. */
 
+import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
 import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, replaceLinkWithAnchor, replaceUnknownComponents } from '../mdx.js'
@@ -181,6 +182,33 @@ describe('HTML style="..." attribute normalization (all platforms, including uns
     expect(normalizeMdx('<div className="x" style="color:red" id="y">x</div>', 'fern'))
       .toBe('<div className="x" style={{color: "red"}} id="y">x</div>')
     expect(normalizeMdx('<br style="color:red"/>', 'fern')).toBe('<br style={{color: "red"}} />')
+  })
+
+  it('converts a style attribute on its own line inside a multi-line tag', () => {
+    // A copied HTML snippet often spreads each attribute onto its own
+    // indented line (e.g. an <iframe>). The separator right before `style=`
+    // is then a newline plus indentation — more than one whitespace
+    // character — not the single space a same-line tag has. The original
+    // layout is not preserved (attributes are reflowed onto one line, same
+    // as the single-line case), but the string style attribute — which
+    // would otherwise throw at render — is still converted to a valid JSX
+    // style object.
+    const body = [
+      '<iframe',
+      '    src="https://example.com/embed"',
+      '    style="width: 100%; height: 500px; border: none; border-radius: 8px;"',
+      '  ></iframe>',
+    ].join('\n')
+    const result = normalizeMdx(body, 'fern')
+    expect(result).toBe(
+      '<iframe\n    src="https://example.com/embed" style={{width: "100%", height: "500px", border: "none", borderRadius: "8px"}}></iframe>',
+    )
+    expect(result).not.toContain('style="')
+  })
+
+  it('converts a multi-line tag whose style attribute comes first, with no attribute before it', () => {
+    const body = '<div\n  style="color: red;"\n  id="y"\n>x</div>'
+    expect(normalizeMdx(body, 'fern')).toBe('<div style={{color: "red"}}\n  id="y">x</div>')
   })
 
   it('leaves an already-correct style expression and a component tag alone', () => {
@@ -518,6 +546,68 @@ describe('replaceUnknownComponents', () => {
   it('never touches frontmatter, even when its value looks like an unknown tag', () => {
     const body = '---\ndescription: "<Widget />"\n---\n\n<Widget>x</Widget>'
     expect(replaceUnknownComponents(body, () => {})).toBe('---\ndescription: "<Widget />"\n---\n\n<div>x</div>')
+  })
+
+  // Regression: on fern-api/docs, a block-level unknown component (e.g.
+  // Fern's <Template>) commonly wraps a fenced code block directly, with no
+  // blank line before it — a real page's own author never needed one,
+  // because the source component isn't rendered through MDX's block rules.
+  // The fallback used to glue that content straight onto `<div>`, which
+  // reads as inline text and desyncs the parser badly enough that the
+  // reported error pointed at an unrelated `<div>` elsewhere on the page.
+  it('separates a flow unknown component\'s block-level children (a fenced code block) with blank lines so the result still compiles', () => {
+    const warned: Array<string> = []
+    const body = [
+      '<Template data={{ NAME: "x" }}>',
+      '```bash',
+      'echo hi',
+      '```',
+      '</Template>',
+    ].join('\n')
+    const out = replaceUnknownComponents(body, (name) => warned.push(name))
+    expect(warned).toEqual(['Template'])
+    expect(out).toContain('<div>\n\n```bash')
+    expect(out).toContain('```\n\n</div>')
+    expect(() => compileSync(out, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('keeps an inline unknown component glued to its text-level children', () => {
+    // A component used inline, mid-paragraph, never carries block content —
+    // adding blank lines there would break the surrounding sentence instead
+    // of fixing anything, so this case is untouched (matches the existing
+    // "replaces a paired unknown component with a div" test above).
+    const warned: Array<string> = []
+    const body = 'See <Gizmo>new</Gizmo> for details.'
+    const out = replaceUnknownComponents(body, (name) => warned.push(name))
+    expect(warned).toEqual(['Gizmo'])
+    expect(out).toBe('See <div>new</div> for details.')
+  })
+
+  it('compiles a flow unknown component nested inside another flow unknown component, each wrapping block content', () => {
+    const body = [
+      '<Steps>',
+      '',
+      '<Step title="One">',
+      '',
+      'Do the first thing.',
+      '',
+      '```bash',
+      'echo one',
+      '```',
+      '',
+      '</Step>',
+      '',
+      '</Steps>',
+    ].join('\n')
+    const out = replaceUnknownComponents(body, () => {})
+    expect(() => compileSync(out, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('compiles a self-closing unknown component nested directly inside a flow unknown component with no blank line', () => {
+    // Mirrors the real fern-api/docs shape: <Steps><Markdown src="..."/> ...
+    const body = '<Steps>\n<Markdown src="/x.mdx"/>\n<Step title="A">Body.</Step>\n</Steps>'
+    const out = replaceUnknownComponents(body, () => {})
+    expect(() => compileSync(out, { format: 'mdx' })).not.toThrow()
   })
 })
 
