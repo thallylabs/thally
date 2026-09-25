@@ -575,29 +575,47 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     return candidates
   }
 
-  function resolveDependency(specifier: string, importer: string): string {
+  /**
+   * `allowFlattenedMirror` gates the repository-root retry for a *plain
+   * relative* specifier (`./x`, `../x`) below. It must stay narrow: a
+   * relative import resolves relative to the importing file by standard
+   * Node semantics, full stop — rebasing that resolution onto the
+   * repository root for every project with a nested docs directory (the
+   * ordinary case, not a monorepo) let a missing/broken import like
+   * `./bogus` silently resolve to an unrelated same-named file that
+   * happens to live at the mirrored repository-root path, instead of
+   * being reported as unresolvable. The one real need for a mirror is
+   * Playwright's own build (`cp -r nodejs/* .` flattens the `nodejs/`
+   * project root's contents, including its shared `images/`, up into the
+   * repository root before the site is generated), reached only through
+   * the `require('../asset.ext')` idiom below — so only that call site
+   * passes `true`. Every ordinary component/`import` resolution passes
+   * `false` (the default) and never rebases.
+   */
+  function resolveDependency(specifier: string, importer: string, allowFlattenedMirror = false): string {
     if (specifier.includes('\\') || specifier.includes('\0') || /[?#]/.test(specifier)) throw new Error('unsupported component dependency path')
     const candidates = specifier.startsWith('/')
       ? expandCandidates(resolveWithin(root, specifier.slice(1)))
       : expandCandidates(resolveWithin(confined, relative(confined, resolve(dirname(importer), specifier))))
-    // Some monorepo docs sites build by copying the detected project root's
-    // contents up into the repository root (Playwright's own `cp -r
-    // nodejs/* .` step is a real example, and its shared `src/components`
-    // tree lives at the repository root the same way) before running the
-    // site generator, so a root-relative `@site/...` specifier, or a
-    // relative import written against that flattened layout, can only be
-    // found by retrying under the repository root — tried only after the
-    // direct path fails.
-    if (root !== confined) {
-      if (specifier.startsWith('/')) {
-        candidates.push(...expandCandidates(resolveWithin(confined, specifier.slice(1))))
-      } else {
-        try {
-          const rebasedImporter = resolveWithin(confined, relative(root, importer))
-          candidates.push(...expandCandidates(resolveWithin(confined, relative(confined, resolve(dirname(rebasedImporter), specifier)))))
-        } catch {
-          // Importer itself is outside the project root; nothing to rebase.
-        }
+    // A root-relative `@site/...`/`/...` specifier is Docusaurus' own alias
+    // for its *project* root; when the shared component it names isn't
+    // nested under the narrower detected project root, it can still be a
+    // real, unambiguous repository-root path (Playwright's shared
+    // `src/components` tree is a sibling of the `nodejs/` project, not
+    // nested under it) — tried only after the direct, project-rooted path
+    // fails. This is safe even outside a flattened-build layout: the
+    // specifier itself names an absolute-from-some-root path, so the retry
+    // can't be fooled into matching an unrelated file the way a *relative*
+    // import's rebase (below) can.
+    if (root !== confined && specifier.startsWith('/')) {
+      candidates.push(...expandCandidates(resolveWithin(confined, specifier.slice(1))))
+    }
+    if (root !== confined && !specifier.startsWith('/') && allowFlattenedMirror) {
+      try {
+        const rebasedImporter = resolveWithin(confined, relative(root, importer))
+        candidates.push(...expandCandidates(resolveWithin(confined, relative(confined, resolve(dirname(rebasedImporter), specifier)))))
+      } catch {
+        // Importer itself is outside the project root; nothing to rebase.
       }
     }
     for (const path of candidates) {
@@ -724,7 +742,21 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       // `@ts-nocheck` is valid in both `.ts(x)` and `.js(x)` files (a no-op
       // unless `checkJs` is on) and is the least invasive fix: it preserves
       // the component's real behavior instead of stripping or rewriting it.
-      staged.set(destination, { path: destination, content: `// @ts-nocheck\n'use client';\n\n${implicitReactImports(ast)}\n${applyReplacements(text, edits)}` })
+      const replaced = applyReplacements(text, edits)
+      // A `#!/...` shebang is only special on line 1 of the file (Node
+      // strips it before parsing only there); inserting the `@ts-nocheck`
+      // prologue above it would both break that and, since `// @ts-nocheck`
+      // isn't itself a shebang, leave a dead shebang-looking comment mid
+      // file. If the copied source starts with one, keep it first and
+      // insert the prologue right after instead.
+      const shebangMatch = /^#!.*\r?\n/.exec(replaced)
+      const prologue = "// @ts-nocheck\n'use client';\n\n"
+      staged.set(destination, {
+        path: destination,
+        content: shebangMatch
+          ? shebangMatch[0] + prologue + implicitReactImports(ast) + '\n' + replaced.slice(shebangMatch[0].length)
+          : prologue + implicitReactImports(ast) + '\n' + replaced,
+      })
     }
     visit(entry)
     for (const [path, file] of staged) copied.set(path, file)
@@ -1119,7 +1151,11 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         try {
           const specifier = match[2]
           const normalized = specifier.startsWith('@site/') ? `/${specifier.slice('@site/'.length)}` : specifier
-          const resolvedPath = normalized.startsWith('/') ? resolveWithin(root, normalized.slice(1)) : resolveDependency(normalized, currentFile)
+          // `true`: this is exactly the Playwright `require('../images/...')`
+          // idiom (a page under a flattened project root reaching a shared
+          // asset that only exists at the mirrored repository-root path) —
+          // see `resolveDependency`'s `allowFlattenedMirror` doc.
+          const resolvedPath = normalized.startsWith('/') ? resolveWithin(root, normalized.slice(1)) : resolveDependency(normalized, currentFile, true)
           const href = copyPublicAsset(resolvedPath)
           const replaced = attributeText.slice(0, match.index) + JSON.stringify(href) + attributeText.slice(match.index + match[0].length)
           edits.push({ start, end, value: replaced })

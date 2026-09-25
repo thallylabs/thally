@@ -215,6 +215,27 @@ describe('repository component migration', () => {
     expect(warnings).toEqual([])
   })
 
+  it('reports a dangling relative import as unresolved instead of silently shadowing it with an unrelated same-named file at the repository root (a plain nested docs/ layout, not a flattened monorepo)', () => {
+    const root = fixture({
+      // docs/ is the detected component (site) root, one level under the
+      // repository root — the ordinary case, not a Playwright-style
+      // monorepo that flattens a project root's contents up into it.
+      'docs/snippets/foo.jsx': "import Bogus from './bogus'\nexport default function Foo() { return <Bogus /> }",
+      // An unrelated top-level directory that happens to collide with the
+      // broken import's path once mirrored onto the repository root.
+      'snippets/bogus.jsx': 'export default function Bogus() { return <div>UNRELATED-TOP-LEVEL-CODE</div> }',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(join(root, 'docs'), root, warnings, 'https://github.com/example/docs')
+    const source = "import Foo from './snippets/foo.jsx'\n\n<Foo />"
+    const result = migrator.transform(source, join(root, 'docs', 'index.mdx'))
+    expect(result).toBe('\n\n<Foo />')
+    expect(migrator.files().some((file) => file.content.toString().includes('UNRELATED-TOP-LEVEL-CODE'))).toBe(false)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toContain('./bogus')
+    expect(warnings[0].message).toContain('could not be copied and was removed')
+  })
+
   it('still refuses (and removes) a relative component import that escapes the repository itself, not just the platform root', () => {
     const outside = fixture({ 'secret.jsx': 'export default () => <p>Secret</p>' })
     const root = fixture({ 'website/docusaurus.config.js': 'module.exports = {}' })
@@ -571,6 +592,19 @@ describe('repository component migration', () => {
     migrator.transform("import AddToMetaMask from './src/AddToMetaMask.tsx'\n\n<AddToMetaMask />", join(root, 'index.mdx'))
     const copied = migrator.files().find((file) => file.path.endsWith('/AddToMetaMask.tsx'))!
     expect(String(copied.content)).toMatch(/^\/\/ @ts-nocheck\n'use client';/)
+  })
+
+  it('keeps a leading shebang on line 1 instead of burying it under the @ts-nocheck prologue', () => {
+    const root = fixture({
+      'src/Script.tsx': '#!/usr/bin/env node\nexport default function Script() { return null; }',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    migrator.transform("import Script from './src/Script.tsx'\n\n<Script />", join(root, 'index.mdx'))
+    const copied = migrator.files().find((file) => file.path.endsWith('/Script.tsx'))!
+    const content = String(copied.content)
+    expect(content.split('\n')[0]).toBe('#!/usr/bin/env node')
+    expect(content).toMatch(/^#!\/usr\/bin\/env node\n\/\/ @ts-nocheck\n'use client';/)
   })
 
   it('copies a component that imports @docusaurus/Link, mapping it to next/link and to= to href=', () => {
