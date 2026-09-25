@@ -105,6 +105,17 @@ interface WalkContext {
    * is unrelated and handled separately via `parentSegments`.
    */
   pathPrefix: string
+  /**
+   * The navigation id that actually owns a page's content, keyed by
+   * `sourcePath` — the first nav location a file is registered at. A file
+   * registered again at a second nav location (e.g. a Fern page listed
+   * under both a guide section and a `slug: baml_client` reference section)
+   * gets its own position-derived id recorded in `descriptors` (so a
+   * redirect from it can still be built), but the navigation tree itself
+   * points that second location at this id, since `repository.ts` creates
+   * exactly one page per physical file and the second id never becomes one.
+   */
+  sourcePathToNavigationId: Map<string, string>
 }
 
 function warnOnce(context: WalkContext, key: string, message: string): void {
@@ -203,6 +214,17 @@ function registerPageAt(rawPath: string, base: string, context: WalkContext): st
   const navigationId = uniqueNavigationId(base || 'introduction', context)
   context.seenNavigationIds.add(navigationId)
   context.descriptors.push({ sourcePath, navigationId })
+  // `repository.ts` creates exactly one page per physical file, keyed off
+  // the first nav location that registers it — a file listed at a second
+  // nav location (Fern allows the same page under several sections) must
+  // not point the tree at this position's own id, which will never become
+  // a page. Point it at the id that actually owns the content instead;
+  // `fernUnderscoreAliasRedirects` still adds a redirect from this
+  // position's own derived route to that kept id, for any old/external
+  // link built from it.
+  const kept = context.sourcePathToNavigationId.get(sourcePath)
+  if (kept) return kept
+  context.sourcePathToNavigationId.set(sourcePath, navigationId)
   return navigationId
 }
 
@@ -496,6 +518,7 @@ export function projectFernNavigation(input: {
     bareRouteRedirects: [],
     segmentAliases: new Map(),
     pathPrefix: '',
+    sourcePathToNavigationId: new Map(),
   }
   const config = input.config
   const hasProducts = Array.isArray(config.products) && config.products.length > 0 && !Array.isArray(config.navigation)
@@ -561,6 +584,15 @@ export function projectFernNavigation(input: {
 
   const authoredSources = new Set(redirects.map((redirect) => redirect.source))
   const knownIds = new Set(context.descriptors.map((descriptor) => descriptor.navigationId))
+  // The id that actually owns a descriptor's page content — itself, unless
+  // the same source file was registered at an earlier nav location too, in
+  // which case `registerPageAt` already pointed the tree at that earlier
+  // id and this descriptor's own id never becomes a real page. Every
+  // redirect destination must resolve through this, never a descriptor's
+  // raw `navigationId`, or it targets a route that doesn't exist.
+  const keptNavigationId = (descriptor: FernPageDescriptor): string => (
+    context.sourcePathToNavigationId.get(descriptor.sourcePath) ?? descriptor.navigationId
+  )
   // A page whose route includes a segment Fern derived from an explicit
   // `slug` that got hyphenated (see `segmentFor`) is also reachable on the
   // live Fern site at its literal, unslugified form (Fern's own routing is
@@ -581,14 +613,27 @@ export function projectFernNavigation(input: {
         })
         if (!changed) return []
         const source = `/${aliased.join('/')}`
-        if (source === `/${descriptor.navigationId}` || knownIds.has(aliased.join('/'))) return []
-        return [{ source, destination: `/${descriptor.navigationId}` }]
+        const destination = `/${keptNavigationId(descriptor)}`
+        if (source === destination || knownIds.has(aliased.join('/'))) return []
+        return [{ source, destination }]
       })
     : []
+  // A source file registered at more than one nav location (a Fern page
+  // listed under both a guide section and a `slug: baml_client` reference
+  // section, say) keeps exactly one page, at the first location's route —
+  // Fern itself serves the content at every route it's registered under, so
+  // every other location's own derived route redirects to the kept one
+  // instead of 404ing.
+  const duplicateNavRedirects = context.descriptors.flatMap((descriptor) => {
+    const kept = keptNavigationId(descriptor)
+    if (kept === descriptor.navigationId) return []
+    return [{ source: `/${descriptor.navigationId}`, destination: `/${kept}` }]
+  })
   const allRedirects = [
     ...redirects,
     ...context.bareRouteRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
     ...segmentAliasRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
+    ...duplicateNavRedirects.filter((redirect) => !authoredSources.has(redirect.source)),
   ]
 
   // Two `api:` nodes both nested under the same top-level tab (e.g.

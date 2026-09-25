@@ -1881,6 +1881,65 @@ navigation:
     })
   })
 
+  it('redirects every other nav location of a page registered twice to the one that actually gets built, and keeps the sidebar pointing at real content in both places (BoundaryML/baml client-registry repro)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-dup-nav-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'baml_client'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    // The same source file, `baml_client/client-registry.mdx`, is listed
+    // once under an ordinary guide section and again under a `slug:
+    // baml_client` reference section — Fern serves the identical content at
+    // both `/guide/client-registry` and `/ref/baml-client/client-registry`.
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - section: Guide
+    contents:
+      - page: Client registry
+        path: baml_client/client-registry.mdx
+  - section: Generated baml_client
+    slug: baml_client
+    contents:
+      - page: Client registry
+        path: baml_client/client-registry.mdx
+`)
+    writeFileSync(join(fernRoot, 'baml_client', 'client-registry.mdx'), '---\ntitle: Client registry\n---\n\nHow to register a client.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/baml' })
+
+    // Exactly one page was built, for the first (guide) location.
+    expect(bundle.pages.filter((page) => page.title === 'Client registry')).toHaveLength(1)
+    expect(bundle.pages.map((page) => page.id)).toContain('guide/client-registry')
+    expect(bundle.pages.map((page) => page.id)).not.toContain('baml-client/client-registry')
+    // The second location's own derived route redirects to the kept one,
+    // instead of dangling as a 404.
+    expect(bundle.docsConfig.redirects).toContainEqual({
+      source: '/baml-client/client-registry',
+      destination: '/guide/client-registry',
+    })
+    // The `slug: baml_client` alias (a separate class of redirect) also
+    // resolves straight to the kept route, not the dropped intermediate id.
+    expect(bundle.docsConfig.redirects).toContainEqual({
+      source: '/baml_client/client-registry',
+      destination: '/guide/client-registry',
+    })
+    // No redirect (segment-alias or otherwise) ever targets the dropped,
+    // non-existent second route.
+    expect(bundle.docsConfig.redirects ?? []).not.toContainEqual(
+      expect.objectContaining({ destination: '/baml-client/client-registry' }),
+    )
+    // The sidebar still lists the page at both nav locations — both point
+    // at the one id that actually has content.
+    const flattenIds = (nodes: Array<string | { pages: Array<unknown> }>): Array<string> => nodes.flatMap((node) => (
+      typeof node === 'string' ? [node] : flattenIds(node.pages as Array<string | { pages: Array<unknown> }>)
+    ))
+    const allNavIds = bundle.docsConfig.tabs.flatMap((tab) => [
+      ...flattenIds((tab.pages ?? []) as Array<string | { pages: Array<unknown> }>),
+      ...(tab.groups ?? []).flatMap((group) => flattenIds(group.pages as Array<string | { pages: Array<unknown> }>)),
+    ])
+    expect(allNavIds.filter((id) => id === 'guide/client-registry')).toHaveLength(2)
+    expect(allNavIds).not.toContain('baml-client/client-registry')
+  })
+
   it("resolves the first api: node's spec from generators.yml instead of the first OpenAPI file on disk", () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-generators-'))
     const fernRoot = join(root, 'fern')
