@@ -590,6 +590,38 @@ function inlineMdxSnippets(
         return interpolateSnippet(snippet, attributes)
       })
   }
+  // Mintlify also references snippets directly by path, with no import
+  // statement: `<Snippet file="snippets/x.mdx" />`. Resolve and inline these
+  // the same way so the content is never dropped.
+  const resolveSnippetFile = (sourcePath: string): string => {
+    try {
+      const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
+      if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
+      return inlineMdxSnippets(
+        withoutFrontmatter(readFileSync(candidate, 'utf8')),
+        candidate,
+        repositoryRoot,
+        warnings,
+        depth + 1,
+        siteRoot,
+        globalAliases,
+      )
+    } catch {
+      warnings.push({
+        code: 'missing-page',
+        message: `Snippet file ${sourcePath} could not be resolved and was left as a comment.`,
+        source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+      })
+      return `{/* Missing snippet file: ${sourcePath} */}`
+    }
+  }
+  result = result
+    .replace(/<Snippet\s+file=(?:"([^"]+)"|'([^']+)')\s*\/>/g, (_tag, doubleQuoted?: string, singleQuoted?: string) => {
+      return resolveSnippetFile(doubleQuoted ?? singleQuoted ?? '')
+    })
+    .replace(/<Snippet\s+file=(?:"([^"]+)"|'([^']+)')\s*>[\s\S]*?<\/Snippet>/g, (_tag, doubleQuoted?: string, singleQuoted?: string) => {
+      return resolveSnippetFile(doubleQuoted ?? singleQuoted ?? '')
+    })
   return result
 }
 

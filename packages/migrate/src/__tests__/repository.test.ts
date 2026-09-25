@@ -97,6 +97,18 @@ describe('Mintlify repository migration', () => {
     expect(files.map((file) => file.path)).not.toContain('src/content/readme.mdx')
   })
 
+  it('inlines <Snippet file="..."> references with no import statement', () => {
+    const root = fixture()
+    writeFileSync(
+      join(root, 'en', 'guides', 'install.mdx'),
+      '---\ntitle: Install\n---\n\n<Snippet file="/snippets/prerequisite.mdx" />',
+    )
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'guides/install')
+    expect(page?.body).toContain('Install Node.js before continuing.')
+    expect(page?.body).not.toContain('<Snippet')
+  })
+
   it('uses a nested Mintlify project as the config, content, snippet, and asset root', () => {
     const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-monorepo-'))
     const docsRoot = join(repositoryDir, 'apps', 'docs')
