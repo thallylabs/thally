@@ -366,6 +366,20 @@ describe('protectMathBlocks', () => {
     expect(result.converted).toBe(false)
     expect(result.body).toBe(body)
   })
+
+  it('leaves shell-variable-looking inline code spans untouched, even in pairs on one line', () => {
+    const body = 'Compare `$FOO` and `$BAR` values.'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
+
+  it('leaves a JSX attribute value and adjacent text content untouched (not real math)', () => {
+    const body = '<Badge color="$primary">$5</Badge>'
+    const result = protectMathBlocks(body)
+    expect(result.converted).toBe(false)
+    expect(result.body).toBe(body)
+  })
 })
 
 describe('escapeFernLiteralBraces', () => {

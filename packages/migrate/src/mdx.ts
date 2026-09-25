@@ -290,6 +290,32 @@ const FENCE_OPEN = /^(`{3,}|~{3,})/
  * code blocks so a real code sample's own `$$` is never touched, and must
  * run before any MDX-aware pass.
  */
+/**
+ * Mask, within a single line, every backtick code span and every JSX/HTML
+ * tag (open, close, or self-closing — including its attribute values) so
+ * `protectMathBlocks`'s inline `$...$` scan below can never mistake a `$`
+ * inside either for a math delimiter, and a matched math span can never
+ * straddle a masked region (the placeholder has no `$` in it, so the regex
+ * simply can't span across one). A JSX tag never spans a `$...$` scan's own
+ * line here because `protectMathBlocks` processes text line by line; a tag
+ * split across lines is already opaque to it for other reasons.
+ */
+function maskInlineSpansForMath(line: string): { masked: string; unmask: (text: string) => string } {
+  const blocks: Array<string> = []
+  const stash = (text: string): string => {
+    blocks.push(text)
+    return `\u0000${blocks.length - 1}\u0000`
+  }
+  const codeMasked = line.split(/(`[^`]*`)/).map((segment, index) => (
+    index % 2 === 1 ? stash(segment) : segment
+  )).join('')
+  const masked = codeMasked.replace(/<\/?[a-zA-Z][^<>]*>/g, stash)
+  return {
+    masked,
+    unmask: (text) => text.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => blocks[Number(index)]),
+  }
+}
+
 export function protectMathBlocks(raw: string): { body: string; converted: boolean } {
   const { front, body } = splitFrontmatterBlock(raw)
   const lines = body.split(/\r\n|\r|\n/)
@@ -332,25 +358,34 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
       continue
     }
     if (line.includes('$')) {
+      // Mask inline code spans (`` `$FOO` ``) and JSX/HTML tags (including
+      // their attribute values, e.g. `<Badge color="$primary">`) before
+      // scanning for math, so neither can be mistaken for a math delimiter
+      // and a math span can never cross into one — a masked placeholder
+      // has no `$` in it, so the scan below simply can't see inside one or
+      // pair a `$` outside a tag with one that was inside it. What's left
+      // unmasked is ordinary prose/JSX text content.
+      const { masked, unmask } = maskInlineSpansForMath(line)
       // One combined pass, `$$...$$` tried before single-`$...$` at each
       // position: doing these as two sequential passes let the second
       // (single-`$`) regex re-match dollar signs the first pass had just
       // wrapped in backticks, corrupting its own output. Single-`$` inline
       // math (the other half of the KaTeX convention, e.g. `$F = S \times
-      // e^{\,f\,T}$`) only counts when its content doesn't start/end with
-      // whitespace and holds no further `$` — the same rule KaTeX/Pandoc
-      // use to tell real inline math from an ordinary sentence mentioning
-      // two dollar amounts (`$50 and $100`, whose span content ends in a
-      // space and so never matches). An author-escaped `\$` (a literal
-      // dollar sign) is never treated as a delimiter.
-      const updated = line.replace(
+      // e^{\,f\,T}$`, or a bare `$S$`) only counts when its content
+      // doesn't start/end with whitespace and holds no further `$` — the
+      // same rule KaTeX/Pandoc use to tell real inline math from an
+      // ordinary sentence mentioning two dollar amounts (`$50 and $100`,
+      // whose span content ends in a space and so never matches). An
+      // author-escaped `\$` (a literal dollar sign) is never treated as a
+      // delimiter.
+      const updatedMasked = masked.replace(
         /\$\$([^\n]+?)\$\$|(?<!\\)\$([^\s$](?:[^$\n]*[^\s$])?)\$/g,
         (_whole, block: string | undefined, inline: string | undefined) => {
           converted = true
           return block !== undefined ? `\`$$${block}$$\`` : `\`$${inline}$\``
         },
       )
-      output.push(updated)
+      output.push(unmask(updatedMasked))
       continue
     }
     output.push(line)
