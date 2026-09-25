@@ -14,7 +14,7 @@ vi.mock('@/components/docs/code-actions-provider', () => ({
   }),
 }))
 
-import { Code, Pre } from './code-blocks'
+import { Code, CodeBlock, Pre } from './code-blocks'
 
 function renderPanel({
   language,
@@ -70,5 +70,17 @@ describe('code-panel labels', () => {
 
   it('labels explicitly plain fences without claiming a syntax grammar', () => {
     expect(renderPanel({ language: 'txt' })).toContain('Plain text')
+  })
+})
+
+describe('standalone CodeBlock', () => {
+  it('renders code and the filename header like a fenced block', () => {
+    const html = renderToStaticMarkup(
+      <CodeBlock language="ts" filename="x.ts">
+        {'const answer = 42'}
+      </CodeBlock>,
+    )
+    expect(html).toContain('const answer = 42')
+    expect(html).toContain('x.ts')
   })
 })

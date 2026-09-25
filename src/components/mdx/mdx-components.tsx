@@ -2,7 +2,7 @@ import type { MDXComponents } from 'mdx/types'
 import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 import { Note, type NoteProps } from '@/components/mdx/note'
 import { AgentPrompt } from '@/components/mdx/agent-prompt'
-import { Code, CodeGroup, Pre } from '@/components/mdx/code-blocks'
+import { Code, CodeBlock, CodeGroup, Pre } from '@/components/mdx/code-blocks'
 import {
   Columns, Frame, Hero,
 } from '@/components/mdx/rich-content'
@@ -85,6 +85,7 @@ const components: MDXComponents = {
   pre: (props) => <Pre {...(props as CodeGroupProps)} />,
   code: (props) => <Code {...props} />,
   CodeGroup: (props) => <CodeGroup {...(props as CodeGroupProps)} />,
+  CodeBlock: (props) => <CodeBlock {...(props as ComponentPropsWithoutRef<typeof CodeBlock>)} />,
   Info: (props) => <Note type="info" {...props} />,
   Warning: (props) => <Note type="warning" {...props} />,
   Check: (props) => <Note type="check" {...props} />,

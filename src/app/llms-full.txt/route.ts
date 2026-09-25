@@ -19,7 +19,7 @@ async function readRawContent(pageId: string): Promise<string | null> {
       const { content } = parseFrontmatter(file.content)
       // Strip JSX component tags but keep their text content
       return content
-        .replace(/<\/?(?:Steps|Step|Tabs|Tab|Note|Callout|CodeGroup|CardGroup|Card|Frame|Accordion|Columns|Tooltip|AgentPrompt)[^>]*>/g, '')
+        .replace(/<\/?(?:Steps|Step|Tabs|Tab|Note|Callout|CodeGroup|CodeBlock|CardGroup|Card|Frame|Accordion|Columns|Tooltip|AgentPrompt)[^>]*>/g, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim()
     }
