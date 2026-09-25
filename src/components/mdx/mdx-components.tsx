@@ -160,6 +160,8 @@ const components: MDXComponents = {
   Human: (props) => <Human {...props} />,
   Agent: (props) => <Agent {...props} />,
   BannerPreview: (props) => <BannerPreview {...props} />,
+  // Mintlify-parity alias: an inline banner announcement in MDX.
+  Banner: (props) => <BannerPreview {...props} />,
   // Documentation screenshots are commonly below the fold. Native lazy
   // loading keeps them out of the critical request queue while preserving
   // standard Markdown image authoring and Frame zoom behavior.

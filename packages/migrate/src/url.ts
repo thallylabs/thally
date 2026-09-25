@@ -32,7 +32,7 @@ const MAX_SITEMAP_DOCUMENTS = 25
 const PORTABLE_MDX_COMPONENTS = new Set([
   'Accordion', 'AccordionGroup', 'Badge', 'Callout', 'Card', 'CardGroup',
   'Check', 'CodeBlock', 'CodeGroup', 'Color', 'Column', 'Columns', 'ContentPanel', 'Danger', 'Error', 'Expandable',
-  'Agent', 'AgentPrompt', 'BannerPreview', 'Embed', 'File', 'Folder', 'Frame', 'GitHub', 'Github', 'Hero', 'Human',
+  'Agent', 'AgentPrompt', 'Banner', 'BannerPreview', 'Embed', 'File', 'Folder', 'Frame', 'GitHub', 'Github', 'Hero', 'Human',
   'Icon', 'Info', 'InlinePanel', 'InlineRequestExample', 'InlineResponseExample',
   'Latex', 'LegacyView', 'LiteYouTubeEmbed', 'Mermaid', 'Note', 'Panel', 'ParamField', 'Prompt',
   'PromptAssistant', 'PromptUser',
