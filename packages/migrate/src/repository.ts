@@ -815,6 +815,7 @@ function repositoryAssetHref(
   value: string,
   currentFile: string,
   siteRoot: string,
+  onReferenced?: (normalizedPath: string) => void,
 ): string | null {
   const isBracketed = value.startsWith('<') && value.endsWith('>')
   const raw = isBracketed ? value.slice(1, -1) : value
@@ -840,6 +841,7 @@ function repositoryAssetHref(
     if (!existsSync(candidate) || !lstatSync(candidate).isFile()) return null
     const normalized = normalizeAssetPath(siteRelative)
     if (!normalized) return null
+    onReferenced?.(normalized)
     const rewritten = `/${normalized}${suffix}`
     // Markdown destinations containing parentheses must stay angle-bracketed;
     // removing the wrapper makes CommonMark terminate the URL too early.
@@ -877,7 +879,12 @@ function rewriteFernIdRenameLinks(body: string, renames: Map<string, string>): s
   }).join('\n')
 }
 
-function rewriteRepositoryAssetLinks(body: string, currentFile: string, siteRoot: string): string {
+function rewriteRepositoryAssetLinks(
+  body: string,
+  currentFile: string,
+  siteRoot: string,
+  onReferenced?: (normalizedPath: string) => void,
+): string {
   return body
     .replace(/(!?\[[^\]]*\]\()(<[^>]+>|[^)\s]+)([^)]*\))/g, (
       original,
@@ -885,7 +892,7 @@ function rewriteRepositoryAssetLinks(body: string, currentFile: string, siteRoot
       destination: string,
       closing: string,
     ) => {
-      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot)
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced)
       return rewritten ? `${opening}${rewritten}${closing}` : original
     })
     .replace(/\b(src|img|image|href)=(['"])([^'"]+)\2/g, (
@@ -894,7 +901,7 @@ function rewriteRepositoryAssetLinks(body: string, currentFile: string, siteRoot
       quote: string,
       destination: string,
     ) => {
-      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot)
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced)
       return rewritten ? `${property}=${quote}${rewritten}${quote}` : original
     })
 }
@@ -1214,6 +1221,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     : scanFiles(contentRoot)
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
+  // Which pages reference which asset (by its normalized copy-destination
+  // path), so the final asset-copy pass can prioritize referenced assets
+  // over unreferenced ones when the budget is tight, and name the
+  // referencing pages in the warning if one still gets dropped.
+  const referencedAssetPaths = new Map<string, Set<string>>()
+  const addAssetReference = (assetPath: string, referencingPage: string): void => {
+    const referrers = referencedAssetPaths.get(assetPath)
+    if (referrers) referrers.add(referencingPage)
+    else referencedAssetPaths.set(assetPath, new Set([referencingPage]))
+  }
   const docusaurusDescriptors: Array<DocusaurusPageDescriptor> = []
   const seenPageIds = new Set<string>()
   /** docs.yml-derived navigationId -> final id, when a page's frontmatter `slug` overrides it. */
@@ -1376,10 +1393,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       continue
     }
     if (platform === 'mintlify' && mintlifyProjectRoot) {
-      page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot)
+      page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath) => {
+        addAssetReference(assetPath, file.relativePath)
+      })
     }
     if (platform === 'fern' && fernProjectRoot) {
-      page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, fernProjectRoot)
+      page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, fernProjectRoot, (assetPath) => {
+        addAssetReference(assetPath, file.relativePath)
+      })
     }
     if (platform === 'mintlify' || platform === 'docusaurus' || platform === 'fern') {
       // `<Link href="...">` (common Mintlify/Docusaurus prose, e.g. mem0's
@@ -1495,16 +1516,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         }))
       })
     : []
-  let totalAssetBytes = 0
+  interface AssetCandidate { file: ScannedFile; assetPath: string; size: number }
+  const assetCandidates: Array<AssetCandidate> = []
   for (const file of [...files, ...repositoryAssets]) {
     const firstSegment = file.relativePath.split('/', 1)[0].toLowerCase()
     if (!ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
     if (platform !== 'mintlify' && !ASSET_DIRECTORIES.has(firstSegment)) continue
-    const size = lstatSync(file.absolutePath).size
-    if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
-      warnings.push({ code: 'limit-reached', message: 'An asset was skipped because the migration asset budget was exhausted.', source: file.relativePath })
-      continue
-    }
     const isDocusaurusStatic = platform === 'docusaurus' && firstSegment === 'static'
     const assetPath = normalizeAssetPath(firstSegment === 'public'
       ? file.relativePath.slice('public/'.length)
@@ -1512,6 +1529,29 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         ? file.relativePath.slice('static/'.length)
         : file.relativePath)
     if (!assetPath) continue
+    assetCandidates.push({ file, assetPath, size: lstatSync(file.absolutePath).size })
+  }
+  // Copy assets that pages actually reference before unreferenced ones, so a
+  // tight budget drops decorative/unused files first instead of screenshots
+  // a page links to (each group keeps its original scan order).
+  const isReferenced = (candidate: AssetCandidate): boolean => referencedAssetPaths.has(candidate.assetPath)
+  const orderedAssetCandidates = [
+    ...assetCandidates.filter((candidate) => isReferenced(candidate)),
+    ...assetCandidates.filter((candidate) => !isReferenced(candidate)),
+  ]
+  let totalAssetBytes = 0
+  for (const { file, assetPath, size } of orderedAssetCandidates) {
+    if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
+      const referencingPages = referencedAssetPaths.get(assetPath)
+      warnings.push({
+        code: 'limit-reached',
+        message: referencingPages
+          ? `Asset was skipped because the migration asset budget was exhausted, but it is referenced by: ${[...referencingPages].join(', ')}.`
+          : 'An asset was skipped because the migration asset budget was exhausted.',
+        source: file.relativePath,
+      })
+      continue
+    }
     assets.push({ path: assetPath, content: readFileSync(file.absolutePath) })
     totalAssetBytes += size
   }

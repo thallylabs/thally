@@ -850,6 +850,42 @@ describe('Mintlify repository migration', () => {
 
     expect(bundle.site?.colors).toEqual({ primary: '#16A34A', light: '#07C983', dark: '#15803D' })
   })
+
+  it('copies page-referenced assets before unreferenced ones so the budget favors what pages actually link to', () => {
+    const root = fixture()
+    // Alphabetically "referenced.png" sorts after "logo.svg" and
+    // "unreferenced.png" sorts before "unreferenced" would, but directory
+    // scan order is not what matters here: the page-referenced asset must
+    // come first in the copy order regardless of its position on disk.
+    writeFileSync(join(root, 'images', 'unreferenced.png'), 'unreferenced-bytes')
+    writeFileSync(join(root, 'images', 'referenced.png'), 'referenced-bytes')
+    writeFileSync(join(root, 'en', 'with-image.mdx'), '---\ntitle: With image\n---\n\n![Screenshot](/images/referenced.png)')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const paths = bundle.assets.map((asset) => asset.path)
+    expect(paths).toContain('images/referenced.png')
+    expect(paths).toContain('images/unreferenced.png')
+    expect(paths.indexOf('images/referenced.png')).toBeLessThan(paths.indexOf('images/unreferenced.png'))
+  })
+
+  it('warns which page(s) reference an asset that is still dropped for being too large', () => {
+    const root = fixture()
+    // Over MAX_ASSET_BYTES (25MB) on its own, so it is dropped regardless of
+    // being referenced — the fix only reorders the queue, it does not raise
+    // the budget. The warning must still name the referencing page.
+    writeFileSync(join(root, 'images', 'huge.png'), Buffer.alloc(26_000_000))
+    writeFileSync(join(root, 'en', 'with-huge-image.mdx'), '---\ntitle: Huge image\n---\n\n![Huge](/images/huge.png)')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('images/huge.png')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'limit-reached',
+      source: 'images/huge.png',
+      message: expect.stringContaining('en/with-huge-image.mdx'),
+    }))
+  })
 })
 
 function docusaurusFixture(sidebarSource?: string): string {

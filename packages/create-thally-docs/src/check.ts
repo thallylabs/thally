@@ -184,6 +184,28 @@ function extractLinks(content: string): FoundLink[] {
   return links
 }
 
+/** Local image references: markdown `![]()` images and `src="..."` attributes. */
+function extractImageRefs(content: string): FoundLink[] {
+  const refs: FoundLink[] = []
+  const lines = content.split('\n')
+  let inFence = false
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i])) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence) continue
+    const line = lines[i].replace(/`[^`]*`/g, '')
+    for (const m of line.matchAll(/!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
+      refs.push({ target: m[1], line: i + 1 })
+    }
+    for (const m of line.matchAll(/\bsrc=["']([^"']+)["']/g)) {
+      refs.push({ target: m[1], line: i + 1 })
+    }
+  }
+  return refs
+}
+
 function localizedPage(
   pageId: string,
   secondaryLocales: Set<string>,
@@ -324,7 +346,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   const fixedOrphans: string[] = []
   const validPaths = new Set<string>(['/'])
   const anchorsByPath = new Map<string, Set<string>>()
-  const linksByFile: Array<{ file: string; path: string; anchors: Set<string>; links: FoundLink[]; offset: number }> = []
+  const linksByFile: Array<{ file: string; path: string; anchors: Set<string>; links: FoundLink[]; images: FoundLink[]; offset: number }> = []
 
   for (const filePath of allFiles) {
     const rel = filePath.slice(contentDir.length + 1).replace(/\.mdx$/, '').replace(/\\/g, '/')
@@ -372,7 +394,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     validPaths.add(`/${pageId}`)
     anchorsByPath.set(path, anchors)
     anchorsByPath.set(`/${pageId}`, anchors)
-    linksByFile.push({ file: rel2, path, anchors, links: extractLinks(content), offset: lineOffset })
+    linksByFile.push({ file: rel2, path, anchors, links: extractLinks(content), images: extractImageRefs(content), offset: lineOffset })
   }
 
   // Reader routes fall back to the primary document when no translated file
@@ -411,6 +433,30 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
         issues.push({ severity: 'error', message: `Broken link: "${target}" — no page at "${path}"`, file, line })
       } else if (anchor && !anchorsByPath.get(path)?.has(anchor)) {
         issues.push({ severity: 'warning', message: `Broken anchor: "${target}" — no heading "#${anchor}" on that page`, file, line })
+      }
+    }
+  }
+
+  // Local image existence: a broken `<img>`/`![]()` src doesn't fail `next
+  // build` (Next.js just renders a broken image), so this is a warning, not
+  // an error — unlike a broken internal link, which 404s. Only root-relative
+  // paths are checked (asset copy always writes under `public/`); external
+  // URLs, data URIs, and template-interpolated values are skipped.
+  const publicDir = join(projectDir, 'public')
+  for (const { file, images, offset } of linksByFile) {
+    for (const { target, line: contentLine } of images) {
+      const line = contentLine + offset
+      if (/^(https?:|data:|\{)/i.test(target)) continue
+      if (!target.startsWith('/')) continue
+      const pathOnly = target.split(/[?#]/, 1)[0]
+      let decoded: string
+      try {
+        decoded = decodeURIComponent(pathOnly)
+      } catch {
+        continue
+      }
+      if (!existsSync(join(publicDir, decoded))) {
+        issues.push({ severity: 'warning', message: `Image not found: "${target}" has no file under public/`, file, line })
       }
     }
   }
