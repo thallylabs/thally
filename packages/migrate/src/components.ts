@@ -44,6 +44,9 @@ const REACT_GLOBALS = new Set([
   'useOptimistic', 'useActionState', 'use', 'createContext', 'forwardRef', 'memo',
 ])
 const MAX_COMPONENT_FILES = 300
+// scripts/build-runtime-sources.mts compiles every page into this same flat
+// directory, regardless of the source page's own path under src/content/.
+const COMPILED_DOCS_DIR = 'src/generated/runtime-docs'
 const MAX_COMPONENT_BYTES = 20_000_000
 const MAX_FILE_BYTES = 2_000_000
 
@@ -121,7 +124,7 @@ function imports(statement: ts.ImportDeclaration): Array<Binding> {
 
 /** Create one bounded component graph and registry for a repository migration. */
 export function createComponentMigrator(siteRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
-  transform: (raw: string, currentFile: string, pageId?: string) => string
+  transform: (raw: string, currentFile: string) => string
   files: () => Array<RenderedMigrationFile>
 } {
   const root = resolve(siteRoot)
@@ -239,14 +242,9 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
     return name
   }
 
-  function transform(raw: string, currentFile: string, pageId?: string): string {
+  function transform(raw: string, currentFile: string): string {
     const content = parseFrontmatter(raw).content
     const frontmatter = raw.slice(0, raw.length - content.length)
-    // The rendered page always lands at `src/content/<id>.mdx` (render.ts).
-    // Falling back to the source's own relative path keeps this correct for
-    // direct unit-test callers that never pass a real page id.
-    const resolvedPageId = pageId ?? relative(root, currentFile).replace(/\\/g, '/').replace(/\.mdx?$/, '')
-    const pagePath = `src/content/${resolvedPageId}.mdx`
     let tree: MdxNode
     try {
       tree = parser.parse(content) as MdxNode
@@ -436,7 +434,12 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
         // A prop-value reference is a bare JS identifier, not a JSX tag: MDX
         // only resolves tag names through the shared `_components` registry,
         // so this one needs a real import bound in the page's own module.
-        const relativePath = relative(dirname(pagePath), path).replace(/\\/g, '/')
+        // Every page compiles into the same flat directory (scripts/
+        // build-runtime-sources.mts writes `src/generated/runtime-docs/
+        // doc-N.tsx`), which an import statement carried through verbatim
+        // from the source MDX ends up living in — not the source page's own
+        // nested path under `src/content/`.
+        const relativePath = relative(COMPILED_DOCS_DIR, path).replace(/\\/g, '/')
         const specifier = portableSpecifier(relativePath.startsWith('.') ? relativePath : `./${relativePath}`)
         edits.push({ start: 0, end: 0, value: `import { ${name} as ${registeredName} } from ${JSON.stringify(specifier)};\n` })
       }
