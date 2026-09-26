@@ -112,6 +112,26 @@ describe('Mintlify repository migration', () => {
     expect(page?.body).not.toContain('<Snippet')
   })
 
+  it('hoists a component snippet as a real declaration instead of splicing its source into the usage tag', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-component-snippet-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'counter.mdx'), "export const Counter = () => {\n  const [n, setN] = useState(0)\n  return <button onClick={() => setN(n + 1)}>{n}</button>\n}")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { Counter } from '/snippets/counter.mdx'\n\n<Counter />")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    // The usage stays a live self-closing tag (here rewritten to the
+    // registered client component by the component migrator); it must not
+    // be replaced by the declaration's own source text.
+    expect(page?.body).not.toMatch(/<Counter\s*>[\s\S]*<\/Counter>/)
+    expect(page?.body).not.toContain('return <button')
+    expect(page?.body.match(/\/>/g)).toHaveLength(1)
+  })
+
   it('does not let a page-local component be shadowed by a same-named global snippet alias', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-alias-'))
     mkdirSync(join(root, 'snippets'), { recursive: true })

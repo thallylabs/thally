@@ -591,7 +591,17 @@ function inlineMdxSnippets(
     snippets.set(componentName, nested)
   }
   let result = withoutImports
+  const hoistedDeclarations: Array<string> = []
   for (const [componentName, snippet] of snippets) {
+    const trimmed = snippet.trim()
+    // A snippet that itself declares the imported name as a component is
+    // real JSX, not reusable prose: keep its usage tag(s) as a live
+    // component invocation and hoist the declaration instead of splicing
+    // the definition's source text in verbatim wherever it is used.
+    if (new RegExp(`^export\\s+(?:const|function)\\s+${componentName}\\b`).test(trimmed)) {
+      if (new RegExp(`<${componentName}(?:\\s|/?>)`).test(result)) hoistedDeclarations.push(trimmed)
+      continue
+    }
     result = result
       .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)\\s*/>`, 'g'), (_tag, attributes: string) => {
         return interpolateSnippet(snippet, attributes)
@@ -600,6 +610,7 @@ function inlineMdxSnippets(
         return interpolateSnippet(snippet, attributes)
       })
   }
+  if (hoistedDeclarations.length > 0) result = `${hoistedDeclarations.join('\n\n')}\n\n${result}`
   // Mintlify also references snippets directly by path, with no import
   // statement: `<Snippet file="snippets/x.mdx" />`. Resolve and inline these
   // the same way so the content is never dropped.
