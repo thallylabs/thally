@@ -108,6 +108,60 @@ function implicitReactImports(source: ts.SourceFile): string {
   ].filter(Boolean).join('\n')
 }
 
+/**
+ * A component extracted into its own client module (see `createComponentMigrator`'s
+ * inline-hook extraction below) loses the page's implicit access to Thally's
+ * built-in MDX components: unlike a component that stays inline in the page,
+ * this module never receives a `components` prop to read a name such as
+ * `CodeBlock` from. Any JSX tag it uses that isn't locally declared or
+ * imported is resolved instead by calling the same registry function every
+ * MDX page already uses, `useMDXComponents`, at render time (not at module
+ * scope, since that registry file in turn imports every extracted module and
+ * a module-scope call would deadlock on that import cycle).
+ */
+function resolveInlineBuiltinReferences(source: string, ownName: string): string {
+  const file = sourceFile(source, 'declaration.tsx')
+  const statement = file.statements[0]
+  if (!statement) return source
+  let fn: ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression | undefined
+  if (ts.isFunctionDeclaration(statement)) fn = statement
+  else if (ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1) {
+    const initializer = statement.declarationList.declarations[0].initializer
+    if (initializer && (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer))) fn = initializer
+  }
+  if (!fn?.body) return source
+  const localNames = new Set<string>([ownName])
+  function bindLocal(name: ts.BindingName): void {
+    if (ts.isIdentifier(name)) localNames.add(name.text)
+    else for (const element of name.elements) if (ts.isBindingElement(element)) bindLocal(element.name)
+  }
+  function collectLocals(node: ts.Node): void {
+    if ((ts.isParameter(node) || ts.isVariableDeclaration(node) || ts.isBindingElement(node)) && node.name) bindLocal(node.name)
+    ts.forEachChild(node, collectLocals)
+  }
+  collectLocals(statement)
+  const unresolved = new Set<string>()
+  function collectJsxTags(node: ts.Node): void {
+    const tagName = ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node) ? node.tagName : undefined
+    if (tagName && ts.isIdentifier(tagName) && /^[A-Z]/.test(tagName.text) && !localNames.has(tagName.text)) {
+      unresolved.add(tagName.text)
+    }
+    ts.forEachChild(node, collectJsxTags)
+  }
+  collectJsxTags(statement)
+  if (unresolved.size === 0) return source
+  const destructure = `const { ${[...unresolved].sort().join(', ')} } = _getMdxComponents({});`
+  const body = fn.body
+  const replacements: Array<Replacement> = ts.isBlock(body)
+    ? [{ start: body.getStart() + 1, end: body.getStart() + 1, value: `\n  ${destructure}` }]
+    : [
+      { start: body.getStart(), end: body.getStart(), value: `{ ${destructure} return (` },
+      { start: body.getEnd(), end: body.getEnd(), value: ') }' },
+    ]
+  const rewritten = applyReplacements(source, replacements)
+  return `import { useMDXComponents as _getMdxComponents } from '@/components/mdx/mdx-components';\n${rewritten}`
+}
+
 function imports(statement: ts.ImportDeclaration): Array<Binding> {
   if (!ts.isStringLiteral(statement.moduleSpecifier) || !statement.importClause) return []
   const clause = statement.importClause
@@ -413,7 +467,7 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
         warn(`Inline component "${name}" calls a React hook but is not used in a way that can be safely extracted; source was preserved for manual extraction.`, currentFile)
         continue
       }
-      const inlineSource = `${declaration.source}\n`
+      const inlineSource = `${resolveInlineBuiltinReferences(declaration.source, name)}\n`
       if (copied.size >= MAX_COMPONENT_FILES || Buffer.byteLength(inlineSource) > MAX_FILE_BYTES
         || copiedBytes + Buffer.byteLength(inlineSource) > MAX_COMPONENT_BYTES) {
         warn(`Inline component "${name}" exceeded the component migration budget; source was preserved.`, currentFile)
