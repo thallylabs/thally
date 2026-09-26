@@ -67,6 +67,12 @@ const REPOSITORY_ONLY_DOCUMENTS = new Set([
   'license.md', 'readme.md', 'security.md',
 ])
 const SNIPPET_DIRECTORIES = new Set(['snippets', '_snippets', 'partials', '_partials'])
+// Matches a default import (`import Name from '...'`), a renamed default
+// import (`import { default as Name } from '...'`), and — the form Mintlify's
+// own docs use for snippets — a plain named import (`import { Name } from
+// '...'`). Group 1 is the braced name, group 2 the bare default name, group 3
+// the source path.
+const MDX_SNIPPET_IMPORT_PATTERN = /^import\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm
 const OPENAPI_FILENAMES = new Set([
   'openapi.json', 'openapi.yaml', 'openapi.yml',
   'swagger.json', 'swagger.yaml', 'swagger.yml',
@@ -434,7 +440,6 @@ function globalSnippetAliases(
   siteRoot: string,
 ): Map<string, string> {
   const aliases = new Map<string, string>()
-  const matcher = /^import\s+(?:\{\s*default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}?\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm
   for (const file of files) {
     const segments = file.relativePath.split('/')
     if (!segments.some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))) continue
@@ -449,11 +454,11 @@ function globalSnippetAliases(
   for (const file of files) {
     if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())) continue
     const raw = readFileSync(file.absolutePath, 'utf8')
-    for (const match of raw.matchAll(matcher)) {
+    for (const match of raw.matchAll(MDX_SNIPPET_IMPORT_PATTERN)) {
       try {
-        const candidate = resolveSnippetPath(match[2], file.absolutePath, repositoryRoot, siteRoot)
+        const candidate = resolveSnippetPath(match[3], file.absolutePath, repositoryRoot, siteRoot)
         if (existsSync(candidate) && lstatSync(candidate).isFile()) {
-          aliases.set(match[1], candidate)
+          aliases.set(match[1] ?? match[2], candidate)
         }
       } catch {
         // The page-local inliner emits the actionable warning when it reaches
@@ -536,8 +541,9 @@ function inlineMdxSnippets(
   if (depth >= 8) return raw
   const snippets = new Map<string, string>()
   const withoutImports = raw.replace(
-    /^import\s+(?:\{\s*default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}?\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm,
-    (_statement, componentName: string, sourcePath: string) => {
+    MDX_SNIPPET_IMPORT_PATTERN,
+    (_statement, braced: string | undefined, bare: string | undefined, sourcePath: string) => {
+      const componentName = (braced ?? bare)!
       try {
         const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
         if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')

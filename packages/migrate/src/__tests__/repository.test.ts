@@ -128,6 +128,13 @@ describe('Mintlify repository migration', () => {
     expect(local?.body).toContain('local component')
     expect(local?.body).not.toContain('from snippet')
     expect(local?.body.match(/export const Counter/g)).toHaveLength(1)
+
+    // The named-import form (`import { Name } from '...'`) is what Mintlify's
+    // own docs use for snippets; it must be fully consumed, not left behind
+    // as a dead import alongside the inlined content.
+    const imported = bundle.pages.find((candidate) => candidate.id === 'imports-snippet')
+    expect(imported?.body).toContain('from snippet')
+    expect(imported?.body).not.toContain('import')
   })
 
   it('uses a nested Mintlify project as the config, content, snippet, and asset root', () => {
