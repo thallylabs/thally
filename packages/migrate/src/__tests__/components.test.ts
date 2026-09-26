@@ -143,7 +143,25 @@ describe('repository component migration', () => {
     const body = migrator.transform(source, join(root, 'index.mdx'))
 
     expect(body).toBe(source)
-    expect(warnings.at(-1)?.message).toContain('not used as a simple self-closing tag')
+    expect(warnings.at(-1)?.message).toContain('not used in a way that can be safely extracted')
+  })
+
+  it('extracts a page-local inline component that is passed as a prop value, even without a hook', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const source = 'export const WidgetCodeBlock = ({ children, ...props }) => {\n  return <pre {...props}>{children}</pre>\n}\n\n<Playground CodeBlockComponent={WidgetCodeBlock}>content</Playground>'
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+
+    expect(body).not.toContain('export const WidgetCodeBlock')
+    expect(body).toMatch(/CodeBlockComponent=\{Migrated[a-f0-9]+\}/)
+    expect(warnings).toEqual([])
+
+    const client = migrator.files().find((file) => file.path.includes('inline-'))!
+    expect(client.content).toMatch(/^'use client';/)
+    expect(client.content).toContain('export const WidgetCodeBlock')
+    const registry = migrator.files().find((file) => file.path === 'src/mdx/custom-components.tsx')!
+    expect(registry.content).toContain('WidgetCodeBlock as Migrated')
   })
 
   it('registers multiline named/default imports and copies their dependency graph once', () => {

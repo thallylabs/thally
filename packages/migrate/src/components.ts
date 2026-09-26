@@ -20,7 +20,12 @@ interface MdxNode {
   type: string
   name?: string | null
   value?: string
-  attributes?: Array<{ name?: string; type: string; value?: string | { value?: string } | null }>
+  attributes?: Array<{
+    name?: string
+    type: string
+    value?: string | { type?: string; value?: string } | null
+    position?: { start: { offset?: number }; end: { offset?: number } }
+  }>
   children?: Array<MdxNode>
   position?: { start: { offset?: number }; end: { offset?: number } }
 }
@@ -350,11 +355,15 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
     }
 
     // Extract a page's own inline `export const Widget = () => {...}` component
-    // into its own client module when it calls a React hook: Mintlify treats
+    // into its own client module when it calls a React hook (Mintlify treats
     // hooks as pre-injected globals for such components, but Thally's page
-    // module is a Server Component and cannot import a hook itself. Only a
-    // self-closing usage is rewritten; anything else is left for manual review
-    // rather than guessing at how to carry children across the boundary.
+    // module is a Server Component and cannot import a hook itself) or when
+    // it is passed as a prop value to another component (a bare function
+    // reference cannot cross a Server/Client Component boundary; moving it
+    // into a real module makes passing it legal either way). A self-closing
+    // tag usage is rewritten to the registered import; a prop-value usage has
+    // just its identifier swapped. Anything else (a paired tag usage with
+    // children) is left for manual review rather than guessed at.
     for (const declaration of [...declarations]) {
       const statement = sourceFile(declaration.source, 'declaration.tsx').statements[0]
       if (!statement) continue
@@ -372,19 +381,33 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
         ts.forEachChild(node, detectReactGlobal)
       }
       detectReactGlobal(statement)
-      if (!usesReactGlobal) continue
+
       const usageNodes: Array<MdxNode> = []
+      const propUsages: Array<{ start: number; end: number }> = []
       let unsupportedUsage = false
       walk(tree, (node) => {
-        if (node.name !== name || !['mdxJsxFlowElement', 'mdxJsxTextElement'].includes(node.type)) return
-        if ((node.children?.length ?? 0) > 0 || node.position?.start.offset === undefined || node.position.end.offset === undefined) {
-          unsupportedUsage = true
-          return
+        if (node.name === name && ['mdxJsxFlowElement', 'mdxJsxTextElement'].includes(node.type)) {
+          if ((node.children?.length ?? 0) > 0 || node.position?.start.offset === undefined || node.position.end.offset === undefined) {
+            unsupportedUsage = true
+          } else {
+            usageNodes.push(node)
+          }
         }
-        usageNodes.push(node)
+        for (const attribute of node.attributes ?? []) {
+          const value = attribute.value
+          if (typeof value !== 'object' || !value || value.type !== 'mdxJsxAttributeValueExpression'
+            || value.value !== name || attribute.position?.start.offset === undefined
+            || attribute.position.end.offset === undefined) continue
+          const raw = content.slice(attribute.position.start.offset, attribute.position.end.offset)
+          const match = raw.match(new RegExp(`\\b${name}\\b`))
+          if (!match || match.index === undefined) continue
+          const start = attribute.position.start.offset + match.index
+          propUsages.push({ start, end: start + name.length })
+        }
       })
-      if (unsupportedUsage || usageNodes.length === 0) {
-        warn(`Inline component "${name}" calls a React hook but is not used as a simple self-closing tag; source was preserved for manual extraction.`, currentFile)
+      if (!usesReactGlobal && propUsages.length === 0) continue
+      if (unsupportedUsage || (usageNodes.length === 0 && propUsages.length === 0)) {
+        warn(`Inline component "${name}" calls a React hook but is not used in a way that can be safely extracted; source was preserved for manual extraction.`, currentFile)
         continue
       }
       const inlineSource = `${declaration.source}\n`
@@ -400,6 +423,9 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       edits.push({ start: declaration.start, end: declaration.end, value: '' })
       for (const node of usageNodes) {
         edits.push({ start: node.position!.start.offset!, end: node.position!.end.offset!, value: `<${registeredName} />` })
+      }
+      for (const usage of propUsages) {
+        edits.push({ start: usage.start, end: usage.end, value: registeredName })
       }
       declarations.splice(declarations.indexOf(declaration), 1)
     }
