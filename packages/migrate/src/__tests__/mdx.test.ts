@@ -68,6 +68,14 @@ describe('inline component hook imports', () => {
     const source = "import { useState } from 'react'\n\nexport const Counter = () => {\n  const [n] = useState(0)\n  return <div>{n}</div>\n}"
     expect(body(source)).toBe(source)
   })
+
+  it('does not import a hook shown only in a documentation code sample', () => {
+    // The import alone (unused or not) marks the compiled page a Client
+    // Component and breaks the Server Component build — showing readers what
+    // a hook call looks like must not trigger it.
+    const source = '```mdx\nexport const Counter = () => {\n  const [n] = useState(0)\n}\n```'
+    expect(body(source)).toBe(source)
+  })
 })
 
 describe('nested code fence widening', () => {

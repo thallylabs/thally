@@ -312,16 +312,18 @@ const REACT_HOOK_NAMES = ['useState', 'useEffect', 'useRef', 'useCallback', 'use
 
 /**
  * Mintlify documents these seven hooks as pre-injected globals for a page's
- * inline `export const Widget = () => {...}` components. Thally's MDX
- * pipeline only resolves registered components inside the page body itself,
- * not inside such hand-authored functions, so a bare hook call there is an
- * undefined reference at render time. Importing whichever hooks the page
- * actually calls restores the same authoring experience with no custom
- * compiler step.
+ * inline `export const Widget = () => {...}` components. The migrator's
+ * component extraction (components.ts) moves a component that really calls
+ * one of these hooks into its own client module, so this is only a fallback
+ * for a hook call the extractor doesn't own (for example directly in the
+ * page body). Detection is fence-aware: merely showing `useState(...)` in a
+ * documentation code sample must not import it — that import alone, unused
+ * or not, marks the compiled page a Client Component and breaks the build.
  */
 function injectReactHookImports(body: string): string {
+  const masked = maskCodeRegions(body)
   const used = REACT_HOOK_NAMES.filter((hook) => (
-    new RegExp(`\\b${hook}\\s*\\(`).test(body)
+    new RegExp(`\\b${hook}\\s*\\(`).test(masked)
     && !new RegExp(`import\\s*\\{[^}]*\\b${hook}\\b[^}]*\\}\\s*from\\s*['"]react['"]`).test(body)
   ))
   return used.length > 0 ? `import { ${used.join(', ')} } from 'react'\n\n${body}` : body
