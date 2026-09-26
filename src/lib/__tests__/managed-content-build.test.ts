@@ -78,6 +78,15 @@ function runManagedGenerator(root: string): GeneratedSnapshot {
   }
 }
 
+function runSelfHostedGenerator(root: string): void {
+  const repositoryRoot = process.cwd()
+  execFileSync(
+    path.join(repositoryRoot, 'node_modules/.bin/tsx'),
+    [path.join(repositoryRoot, 'scripts/build-runtime-sources.mts')],
+    { cwd: root, env: { ...process.env, THALLY_CONTENT_SOURCE: '' }, stdio: 'pipe' },
+  )
+}
+
 describe('managed content build', () => {
   it(
     'keeps generated Worker modules constant while the asset corpus grows',
@@ -114,5 +123,26 @@ describe('managed content build', () => {
     expect(readdirSync(path.join(root, 'public/_thally/content/public'))).toEqual([
       'openapi.json',
     ])
+  })
+
+  it('lets a page-local inline component resolve a registered built-in it references', () => {
+    const root = createProject(1)
+    writeFileSync(
+      path.join(root, 'src/content/pdf.mdx'),
+      '---\ntitle: PDF\n---\n\n'
+        + 'export const DownloadButton = () => {\n'
+        + '  return <a><Icon icon="download" /> Download</a>\n'
+        + '}\n\n<DownloadButton />\n',
+      'utf8',
+    )
+    runSelfHostedGenerator(root)
+
+    const docsDirectory = path.join(root, 'src/generated/runtime-docs')
+    const doc = readdirSync(docsDirectory)
+      .map((file) => readFileSync(path.join(docsDirectory, file), 'utf8'))
+      .find((content) => content.includes('DownloadButton'))
+
+    expect(doc).toContain('let _mdxRuntimeRefs = {};')
+    expect(doc).toMatch(/const \{ Icon \} = _mdxRuntimeRefs;/)
   })
 })

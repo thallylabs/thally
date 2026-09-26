@@ -27,10 +27,14 @@ import remarkModule from '../src/mdx/remark'
 // @ts-expect-error -- runtime interop intentionally provides the default object
 import runtimeContentFilesModule from './lib/runtime-content-files'
 import type { RuntimeSourceMap } from './lib/runtime-content-files'
+// @ts-expect-error -- runtime interop intentionally provides the default object
+import scopedComponentReferencesModule from './lib/scoped-component-references'
 
 const { parseFrontmatter } = frontmatterModule as unknown as typeof import('../src/lib/frontmatter')
 const { rehypePlugins } = rehypeModule as unknown as typeof import('../src/mdx/rehype')
 const { remarkPlugins } = remarkModule as unknown as typeof import('../src/mdx/remark')
+const { injectScopedComponentReferences } = scopedComponentReferencesModule as unknown as
+  typeof import('./lib/scoped-component-references')
 const {
   collectRuntimeContentFiles,
   removeManagedContentAssets,
@@ -106,7 +110,7 @@ async function writeCompiledDocs(): Promise<number> {
 
     writeFileSync(
       modulePath,
-      `// @ts-nocheck -- generated MDX program\n${String(program)}\n` +
+      `// @ts-nocheck -- generated MDX program\n${injectScopedComponentReferences(String(program))}\n` +
         `export const frontmatter = ${JSON.stringify(parsed.data)} as const\n`,
       'utf8',
     )
