@@ -64,11 +64,6 @@ function writeRuntimeSourceMap(sources: Readonly<RuntimeSourceMap>): void {
 }
 
 const snippetImportPattern = /^\s*import\s+\{([^}]+)\}\s+from\s+['"]\/snippets\/[^'"]+['"];?\s*$/gm
-// A page's inline `export const Widget = () => {...}` component may call a
-// React hook (Mintlify documents these as pre-injected globals). That makes
-// the compiled module a Client Component; Next.js rejects a hook import in a
-// Server Component with no directive to mark the boundary.
-const reactHookCallPattern = /\buse(?:State|Effect|Ref|Callback|Memo|Context|Reducer)\s*\(/
 
 /**
  * Compile MDX while the build still has Node privileges.
@@ -109,10 +104,9 @@ async function writeCompiledDocs(): Promise<number> {
       )
     }
 
-    const directive = reactHookCallPattern.test(mdxSource) ? "'use client'\n" : ''
     writeFileSync(
       modulePath,
-      `${directive}// @ts-nocheck -- generated MDX program\n${String(program)}\n` +
+      `// @ts-nocheck -- generated MDX program\n${String(program)}\n` +
         `export const frontmatter = ${JSON.stringify(parsed.data)} as const\n`,
       'utf8',
     )

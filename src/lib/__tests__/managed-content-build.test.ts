@@ -78,15 +78,6 @@ function runManagedGenerator(root: string): GeneratedSnapshot {
   }
 }
 
-function runSelfHostedGenerator(root: string): void {
-  const repositoryRoot = process.cwd()
-  execFileSync(
-    path.join(repositoryRoot, 'node_modules/.bin/tsx'),
-    [path.join(repositoryRoot, 'scripts/build-runtime-sources.mts')],
-    { cwd: root, env: { ...process.env, THALLY_CONTENT_SOURCE: '' }, stdio: 'pipe' },
-  )
-}
-
 describe('managed content build', () => {
   it(
     'keeps generated Worker modules constant while the asset corpus grows',
@@ -123,27 +114,5 @@ describe('managed content build', () => {
     expect(readdirSync(path.join(root, 'public/_thally/content/public'))).toEqual([
       'openapi.json',
     ])
-  })
-
-  it("marks a compiled doc 'use client' when its inline component calls a React hook", () => {
-    const root = createProject(1)
-    writeFileSync(
-      path.join(root, 'src/content/hooked.mdx'),
-      '---\ntitle: Hooked\n---\n\n'
-        + "import { useState } from 'react'\n\n"
-        + 'export const Counter = () => {\n'
-        + '  const [count, setCount] = useState(0)\n'
-        + '  return <button onClick={() => setCount(count + 1)}>{count}</button>\n'
-        + '}\n\n<Counter />\n',
-      'utf8',
-    )
-    runSelfHostedGenerator(root)
-
-    const docsDirectory = path.join(root, 'src/generated/runtime-docs')
-    const hookedDoc = readdirSync(docsDirectory)
-      .map((file) => readFileSync(path.join(docsDirectory, file), 'utf8'))
-      .find((content) => content.includes('Counter'))
-
-    expect(hookedDoc).toMatch(/^'use client'\n/)
   })
 })
