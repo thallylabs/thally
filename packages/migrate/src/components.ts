@@ -114,22 +114,15 @@ function implicitReactImports(source: ts.SourceFile): string {
  * built-in MDX components: unlike a component that stays inline in the page,
  * this module never receives a `components` prop to read a name such as
  * `CodeBlock` from. Any JSX tag it uses that isn't locally declared or
- * imported is resolved instead by calling the same registry function every
- * MDX page already uses, `useMDXComponents`, at render time (not at module
- * scope, since that registry file in turn imports every extracted module and
- * a module-scope call would deadlock on that import cycle).
+ * imported is resolved instead from `builtinMdxComponents`, the same
+ * built-in registry every MDX page reads from — imported directly rather
+ * than through `useMDXComponents`, which in turn imports the customer
+ * registry that imports every extracted module, closing an import cycle
+ * that throws at runtime once bundled.
  */
 function resolveInlineBuiltinReferences(source: string, ownName: string): string {
-  const file = sourceFile(source, 'declaration.tsx')
-  const statement = file.statements[0]
+  const statement = sourceFile(source, 'declaration.tsx').statements[0]
   if (!statement) return source
-  let fn: ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression | undefined
-  if (ts.isFunctionDeclaration(statement)) fn = statement
-  else if (ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1) {
-    const initializer = statement.declarationList.declarations[0].initializer
-    if (initializer && (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer))) fn = initializer
-  }
-  if (!fn?.body) return source
   const localNames = new Set<string>([ownName])
   function bindLocal(name: ts.BindingName): void {
     if (ts.isIdentifier(name)) localNames.add(name.text)
@@ -150,16 +143,11 @@ function resolveInlineBuiltinReferences(source: string, ownName: string): string
   }
   collectJsxTags(statement)
   if (unresolved.size === 0) return source
-  const destructure = `const { ${[...unresolved].sort().join(', ')} } = _getMdxComponents({});`
-  const body = fn.body
-  const replacements: Array<Replacement> = ts.isBlock(body)
-    ? [{ start: body.getStart() + 1, end: body.getStart() + 1, value: `\n  ${destructure}` }]
-    : [
-      { start: body.getStart(), end: body.getStart(), value: `{ ${destructure} return (` },
-      { start: body.getEnd(), end: body.getEnd(), value: ') }' },
-    ]
-  const rewritten = applyReplacements(source, replacements)
-  return `import { useMDXComponents as _getMdxComponents } from '@/components/mdx/mdx-components';\n${rewritten}`
+  return [
+    "import { builtinMdxComponents } from '@/components/mdx/builtin-components';",
+    `const { ${[...unresolved].sort().join(', ')} } = builtinMdxComponents;`,
+    source,
+  ].join('\n')
 }
 
 function imports(statement: ts.ImportDeclaration): Array<Binding> {

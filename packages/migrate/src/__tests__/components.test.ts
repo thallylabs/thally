@@ -165,10 +165,10 @@ describe('repository component migration', () => {
     expect(client.content).toMatch(/^'use client';/)
     expect(client.content).toContain('export const WidgetCodeBlock')
     // `CodeBlock` is a Thally built-in, not declared or imported inside this
-    // extracted module: it must be resolved through the shared MDX registry
-    // at render time instead of being left as a bare, unbound identifier.
-    expect(client.content).toContain("import { useMDXComponents as _getMdxComponents } from '@/components/mdx/mdx-components';")
-    expect(client.content).toMatch(/const \{ CodeBlock \} = _getMdxComponents\(\{\}\);/)
+    // extracted module: it must be resolved from the built-in registry
+    // directly instead of being left as a bare, unbound identifier.
+    expect(client.content).toContain("import { builtinMdxComponents } from '@/components/mdx/builtin-components';")
+    expect(client.content).toMatch(/const \{ CodeBlock \} = builtinMdxComponents;/)
     const registry = migrator.files().find((file) => file.path === 'src/mdx/custom-components.tsx')!
     expect(registry.content).toContain('WidgetCodeBlock as Migrated')
   })
