@@ -826,7 +826,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       mintlifyProjectRoot ?? docusaurusProjectRoot ?? repositoryDir,
       snippetAliases,
     )
-    if (componentMigrator) raw = componentMigrator.transform(raw, file.absolutePath)
+    if (componentMigrator) raw = componentMigrator.transform(raw, file.absolutePath, id)
     let docusaurusDescriptor: Omit<DocusaurusPageDescriptor, 'title'> | undefined
     const page = parseMarkdownPage({
       id,

@@ -121,7 +121,7 @@ function imports(statement: ts.ImportDeclaration): Array<Binding> {
 
 /** Create one bounded component graph and registry for a repository migration. */
 export function createComponentMigrator(siteRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
-  transform: (raw: string, currentFile: string) => string
+  transform: (raw: string, currentFile: string, pageId?: string) => string
   files: () => Array<RenderedMigrationFile>
 } {
   const root = resolve(siteRoot)
@@ -239,9 +239,14 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
     return name
   }
 
-  function transform(raw: string, currentFile: string): string {
+  function transform(raw: string, currentFile: string, pageId?: string): string {
     const content = parseFrontmatter(raw).content
     const frontmatter = raw.slice(0, raw.length - content.length)
+    // The rendered page always lands at `src/content/<id>.mdx` (render.ts).
+    // Falling back to the source's own relative path keeps this correct for
+    // direct unit-test callers that never pass a real page id.
+    const resolvedPageId = pageId ?? relative(root, currentFile).replace(/\\/g, '/').replace(/\.mdx?$/, '')
+    const pagePath = `src/content/${resolvedPageId}.mdx`
     let tree: MdxNode
     try {
       tree = parser.parse(content) as MdxNode
@@ -426,6 +431,14 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       }
       for (const usage of propUsages) {
         edits.push({ start: usage.start, end: usage.end, value: registeredName })
+      }
+      if (propUsages.length > 0) {
+        // A prop-value reference is a bare JS identifier, not a JSX tag: MDX
+        // only resolves tag names through the shared `_components` registry,
+        // so this one needs a real import bound in the page's own module.
+        const relativePath = relative(dirname(pagePath), path).replace(/\\/g, '/')
+        const specifier = portableSpecifier(relativePath.startsWith('.') ? relativePath : `./${relativePath}`)
+        edits.push({ start: 0, end: 0, value: `import { ${name} as ${registeredName} } from ${JSON.stringify(specifier)};\n` })
       }
       declarations.splice(declarations.indexOf(declaration), 1)
     }

@@ -156,6 +156,10 @@ describe('repository component migration', () => {
     expect(body).not.toContain('export const WidgetCodeBlock')
     expect(body).toMatch(/CodeBlockComponent=\{Migrated[a-f0-9]+\}/)
     expect(warnings).toEqual([])
+    // A prop-value reference is a bare JS identifier: MDX never routes it
+    // through the shared components registry the way a JSX tag is, so the
+    // page itself needs a real import binding the same registered name.
+    expect(body).toMatch(/^import \{ WidgetCodeBlock as Migrated[a-f0-9]+ \} from ['"]\.\.\/mdx\/migrated\/[a-f0-9]+\/inline-[a-f0-9]+\.jsx['"];/)
 
     const client = migrator.files().find((file) => file.path.includes('inline-'))!
     expect(client.content).toMatch(/^'use client';/)
