@@ -349,6 +349,61 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
       }
     }
 
+    // Extract a page's own inline `export const Widget = () => {...}` component
+    // into its own client module when it calls a React hook: Mintlify treats
+    // hooks as pre-injected globals for such components, but Thally's page
+    // module is a Server Component and cannot import a hook itself. Only a
+    // self-closing usage is rewritten; anything else is left for manual review
+    // rather than guessing at how to carry children across the boundary.
+    for (const declaration of [...declarations]) {
+      const statement = sourceFile(declaration.source, 'declaration.tsx').statements[0]
+      if (!statement) continue
+      let name: string | undefined
+      if (ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1) {
+        const binding = statement.declarationList.declarations[0].name
+        if (ts.isIdentifier(binding)) name = binding.text
+      } else if (ts.isFunctionDeclaration(statement) && statement.name) {
+        name = statement.name.text
+      }
+      if (!name || !/^[A-Z]/.test(name)) continue
+      let usesReactGlobal = false
+      function detectReactGlobal(node: ts.Node): void {
+        if (ts.isIdentifier(node) && REACT_GLOBALS.has(node.text)) usesReactGlobal = true
+        ts.forEachChild(node, detectReactGlobal)
+      }
+      detectReactGlobal(statement)
+      if (!usesReactGlobal) continue
+      const usageNodes: Array<MdxNode> = []
+      let unsupportedUsage = false
+      walk(tree, (node) => {
+        if (node.name !== name || !['mdxJsxFlowElement', 'mdxJsxTextElement'].includes(node.type)) return
+        if ((node.children?.length ?? 0) > 0 || node.position?.start.offset === undefined || node.position.end.offset === undefined) {
+          unsupportedUsage = true
+          return
+        }
+        usageNodes.push(node)
+      })
+      if (unsupportedUsage || usageNodes.length === 0) {
+        warn(`Inline component "${name}" calls a React hook but is not used as a simple self-closing tag; source was preserved for manual extraction.`, currentFile)
+        continue
+      }
+      const inlineSource = `${declaration.source}\n`
+      if (copied.size >= MAX_COMPONENT_FILES || Buffer.byteLength(inlineSource) > MAX_FILE_BYTES
+        || copiedBytes + Buffer.byteLength(inlineSource) > MAX_COMPONENT_BYTES) {
+        warn(`Inline component "${name}" exceeded the component migration budget; source was preserved.`, currentFile)
+        continue
+      }
+      const path = `${destinationRoot}/inline-${hash(`${relative(root, currentFile)}:${name}`)}.jsx`
+      copied.set(path, { path, content: `'use client';\n${implicitReactImports(sourceFile(inlineSource, 'inline.jsx'))}\n${inlineSource}` })
+      copiedBytes += Buffer.byteLength(inlineSource)
+      const registeredName = register(path, name)
+      edits.push({ start: declaration.start, end: declaration.end, value: '' })
+      for (const node of usageNodes) {
+        edits.push({ start: node.position!.start.offset!, end: node.position!.end.offset!, value: `<${registeredName} />` })
+      }
+      declarations.splice(declarations.indexOf(declaration), 1)
+    }
+
     // Extract whole HTML JSX roots with event handlers. Markdown and global
     // built-ins remain server-rendered; React functions stay inside the client
     // module, so no function is serialized across a server/client boundary.

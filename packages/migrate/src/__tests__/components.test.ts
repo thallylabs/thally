@@ -115,6 +115,37 @@ describe('repository component migration', () => {
     expect(warnings).toEqual([])
   })
 
+  it('extracts a page-local inline component that calls a hook into its own client module', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const source = 'export const Counter = () => {\n  const [n, setN] = useState(0)\n  return <button onClick={() => setN(n + 1)}>{n}</button>\n}\n\n<Counter />'
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+
+    expect(body).not.toContain('export const Counter')
+    expect(body).not.toContain('useState')
+    expect(body.trim()).toMatch(/^<Migrated[a-f0-9]+ \/>$/)
+    expect(warnings).toEqual([])
+
+    const client = migrator.files().find((file) => file.path.includes('inline-'))!
+    expect(client.content).toMatch(/^'use client';/)
+    expect(client.content).toContain("import { useState } from 'react'")
+    expect(client.content).toContain('export const Counter')
+    const registry = migrator.files().find((file) => file.path === 'src/mdx/custom-components.tsx')!
+    expect(registry.content).toContain('Counter as Migrated')
+  })
+
+  it('preserves an inline hook-using component used with children instead of guessing', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const source = 'export const Counter = () => {\n  const [n] = useState(0)\n  return <span>{n}</span>\n}\n\n<Counter>child</Counter>'
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+
+    expect(body).toBe(source)
+    expect(warnings.at(-1)?.message).toContain('not used as a simple self-closing tag')
+  })
+
   it('registers multiline named/default imports and copies their dependency graph once', () => {
     const root = fixture({
       'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),
