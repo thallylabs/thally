@@ -109,10 +109,13 @@ async function writeCompiledDocs(): Promise<number> {
       )
     }
 
+    // `@ts-nocheck` only suppresses the file when it leads; the client
+    // directive must also lead its file, so the comment goes first — a
+    // leading comment does not stop Next.js from recognizing the directive.
     const directive = reactHookCallPattern.test(mdxSource) ? "'use client'\n" : ''
     writeFileSync(
       modulePath,
-      `${directive}// @ts-nocheck -- generated MDX program\n${String(program)}\n` +
+      `// @ts-nocheck -- generated MDX program\n${directive}${String(program)}\n` +
         `export const frontmatter = ${JSON.stringify(parsed.data)} as const\n`,
       'utf8',
     )
