@@ -148,6 +148,8 @@ const components: MDXComponents = {
   'Color.Item': (props) => <Color.Item {...props} />,
   'Color.Row': (props) => <Color.Row {...props} />,
   Tree: (props) => <Tree {...props} />,
+  // Mintlify treats `<FileTree>` as an alias of `<Tree>`.
+  FileTree: (props) => <Tree {...props} />,
   Folder: (props) => <Folder {...props} />,
   File: (props) => <File {...props} />,
   ResponseField: (props) => <ResponseField {...props} />,

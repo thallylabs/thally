@@ -200,7 +200,7 @@ function normalizeNestedCodeFences(body: string): string {
 const BUILTIN_COMPONENT_NAMES = new Set([
   'Accordion', 'AccordionGroup', 'Agent', 'AgentPrompt', 'Badge', 'Banner', 'BannerPreview',
   'Callout', 'Card', 'CardGroup', 'Check', 'CodeBlock', 'CodeGroup', 'Column', 'Columns',
-  'ContentPanel', 'Danger', 'Embed', 'Error', 'Expandable', 'File', 'Folder', 'Frame', 'GitHub',
+  'ContentPanel', 'Danger', 'Embed', 'Error', 'Expandable', 'File', 'FileTree', 'Folder', 'Frame', 'GitHub',
   'Github', 'Hero', 'Human', 'Icon', 'Info', 'InlinePanel', 'InlineRequestExample',
   'InlineResponseExample', 'Latex', 'LegacyView', 'LiteYouTubeEmbed', 'MDX', 'Mermaid', 'Note',
   'Panel', 'ParamField', 'Prompt', 'PromptAssistant', 'PromptUser', 'RequestExample',

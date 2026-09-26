@@ -25,6 +25,23 @@ describe('Column', () => {
   })
 })
 
+describe('FileTree', () => {
+  it('aliases to Tree', () => {
+    const { FileTree } = useMDXComponents({})
+    const Component = FileTree as ComponentType<{ children?: ReactNode }>
+    const html = renderToStaticMarkup(<Component><p>src/</p></Component>)
+    expect(html).toContain('src/')
+  })
+})
+
+describe('GitHub', () => {
+  it('keeps the Repo static so the compound tag <GitHub.Repo> resolves', () => {
+    const { GitHub } = useMDXComponents({}) as { GitHub: ComponentType<{ repo: string }> & { Repo: ComponentType<{ repo: string }> } }
+    const html = renderToStaticMarkup(<GitHub.Repo repo="thallylabs/thally" />)
+    expect(html).toContain('href="https://github.com/thallylabs/thally"')
+  })
+})
+
 describe('MDX', () => {
   it('renders children through as-is', () => {
     const { MDX } = useMDXComponents({})
