@@ -144,6 +144,6 @@ describe('managed content build', () => {
       .map((file) => readFileSync(path.join(docsDirectory, file), 'utf8'))
       .find((content) => content.includes('Counter'))
 
-    expect(hookedDoc).toMatch(/^\/\/ @ts-nocheck.*\n'use client'\n/)
+    expect(hookedDoc).toMatch(/^'use client'\n/)
   })
 })
