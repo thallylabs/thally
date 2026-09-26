@@ -195,6 +195,85 @@ function normalizeNestedCodeFences(body: string): string {
     .join('\n')
 }
 
+// Thally's built-in MDX component registry (src/components/mdx/mdx-components.tsx),
+// plus a few names normalizeMdx itself renames away before this check runs.
+const BUILTIN_COMPONENT_NAMES = new Set([
+  'Accordion', 'AccordionGroup', 'Agent', 'AgentPrompt', 'Badge', 'Banner', 'BannerPreview',
+  'Callout', 'Card', 'CardGroup', 'Check', 'CodeBlock', 'CodeGroup', 'Column', 'Columns',
+  'ContentPanel', 'Danger', 'Embed', 'Error', 'Expandable', 'File', 'Folder', 'Frame', 'GitHub',
+  'Github', 'Hero', 'Human', 'Icon', 'Info', 'InlinePanel', 'InlineRequestExample',
+  'InlineResponseExample', 'Latex', 'LegacyView', 'LiteYouTubeEmbed', 'MDX', 'Mermaid', 'Note',
+  'Panel', 'ParamField', 'Prompt', 'PromptAssistant', 'PromptUser', 'RequestExample',
+  'ResponseExample', 'ResponseField', 'Step', 'Steps', 'Tab', 'Tabs', 'Terminal', 'TerminalInput',
+  'TerminalOutput', 'Tile', 'TileGroup', 'Tip', 'Tooltip', 'Tree', 'Update', 'Video', 'View',
+  'Visibility', 'Warning', 'YouTube', 'Snippet', 'Warn', 'Link', 'TabItem', 'DocCardList', 'TOCInline',
+])
+
+/** Replace fenced code blocks and inline code spans with same-length filler. */
+function maskCodeRegions(body: string): string {
+  let inFence = false
+  return body.split('\n').map((line) => {
+    if (/^\s*(`{3,}|~{3,})/.test(line)) {
+      inFence = !inFence
+      return ' '.repeat(line.length)
+    }
+    if (inFence) return ' '.repeat(line.length)
+    return line.replace(/`[^`]*`/g, (span) => ' '.repeat(span.length))
+  }).join('\n')
+}
+
+function isKnownComponentName(name: string, body: string): boolean {
+  if (BUILTIN_COMPONENT_NAMES.has(name)) return true
+  if (new RegExp(`^\\s*export\\s+(?:const|function|default\\s+function)\\s+${name}\\b`, 'm').test(body)) return true
+  if (new RegExp(`^\\s*import\\s+(?:\\{[^}]*\\b${name}\\b[^}]*\\}|${name})\\s+from\\s+['"][^'"]+['"]`, 'm').test(body)) return true
+  return false
+}
+
+/**
+ * Mintlify content occasionally uses a bare capitalized word in angle
+ * brackets as a prose placeholder — for example "<Feature> requires a Pro
+ * plan" — which is invalid JSX: a tag must self-close or have a matching
+ * close. Left alone, this crashes MDX compilation for the whole page. A tag
+ * name that never closes or self-closes anywhere in the document, and isn't
+ * a known built-in, imported, or locally declared component, is almost
+ * certainly such a placeholder — escape it to literal text rather than
+ * losing the page.
+ */
+function escapeOrphanCapitalizedTags(body: string): string {
+  const masked = maskCodeRegions(body)
+  // The attribute group is lazy so a trailing self-close slash is captured by
+  // its own group instead of being swallowed as the last attribute character.
+  const tagPattern = /<(\/?)([A-Z][A-Za-z0-9]*)(?:\s+[^<>]*?)?(\/?)>/g
+  const opens = new Map<string, Array<{ start: number; end: number }>>()
+  const closedOrSelfClosed = new Set<string>()
+  for (const match of masked.matchAll(tagPattern)) {
+    const [full, closing, name, selfClosing] = match
+    if (closing || selfClosing) {
+      closedOrSelfClosed.add(name)
+      continue
+    }
+    const start = match.index!
+    const list = opens.get(name) ?? []
+    list.push({ start, end: start + full.length })
+    opens.set(name, list)
+  }
+  const edits: Array<{ start: number; end: number }> = []
+  for (const [name, ranges] of opens) {
+    if (closedOrSelfClosed.has(name) || isKnownComponentName(name, body)) continue
+    edits.push(...ranges)
+  }
+  if (edits.length === 0) return body
+  edits.sort((a, b) => a.start - b.start)
+  let result = ''
+  let cursor = 0
+  for (const edit of edits) {
+    result += body.slice(cursor, edit.start)
+    result += body.slice(edit.start, edit.end).replace(/^</, '&lt;').replace(/>$/, '&gt;')
+    cursor = edit.end
+  }
+  return result + body.slice(cursor)
+}
+
 /** Normalize only syntax Thally cannot render; supported source JSX stays intact. */
 export function normalizeMdx(body: string): string {
   // Docusaurus injects these theme components globally. Thally also exposes
@@ -203,7 +282,7 @@ export function normalizeMdx(body: string): string {
     .split('\n')
     .filter((line) => !isGlobalDocusaurusImport(line))
     .join('\n')
-  return normalizeDocusaurusAdmonitions(normalizeNestedCodeFences(withoutGlobalImports))
+  return escapeOrphanCapitalizedTags(normalizeDocusaurusAdmonitions(normalizeNestedCodeFences(withoutGlobalImports))
     .replace(/<TabItem\b([^>]*)>/g, (_match, attributes: string) => {
       const title = attributes.match(/\blabel=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
         ?? attributes.match(/\bvalue=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
@@ -226,7 +305,7 @@ export function normalizeMdx(body: string): string {
     .replace(/<Tree\.Folder/g, '<Folder')
     .replace(/<\/Tree\.Folder>/g, '</Folder>')
     .replace(/<Tree\.File/g, '<File')
-    .replace(/<\/Tree\.File>/g, '</File>')
+    .replace(/<\/Tree\.File>/g, '</File>'))
 }
 
 const REACT_HOOK_NAMES = ['useState', 'useEffect', 'useRef', 'useCallback', 'useMemo', 'useContext', 'useReducer']

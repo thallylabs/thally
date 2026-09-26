@@ -93,3 +93,41 @@ describe('nested code fence widening', () => {
     expect(normalizeMdx(source)).toBe(source)
   })
 })
+
+describe('orphan capitalized tag escaping', () => {
+  it('escapes a bare placeholder tag that never closes or self-closes', () => {
+    expect(normalizeMdx('Add a callout: "<Feature> requires a plan."'))
+      .toBe('Add a callout: "&lt;Feature&gt; requires a plan."')
+  })
+
+  it('leaves a properly paired tag alone', () => {
+    const source = '<Note>hello</Note>'
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('leaves a self-closing tag alone', () => {
+    const source = '<Icon icon="download" />'
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('recognizes a self-closing tag whose last attribute value ends in a brace', () => {
+    const source = '<Visits initial={4} />'
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('leaves a locally declared inline component alone', () => {
+    const source = 'export const Counter = () => <div/>\n\n<Counter />'
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('leaves an imported component alone', () => {
+    const source = "import { Widget } from '/snippets/widget.mdx'\n\n<Widget>"
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('does not touch tag-like text inside inline code or a fenced code block', () => {
+    expect(normalizeMdx('Use `<Info>` for callouts.')).toBe('Use `<Info>` for callouts.')
+    const fenced = '```mdx\n<Foo>\n```'
+    expect(normalizeMdx(fenced)).toBe(fenced)
+  })
+})
