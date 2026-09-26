@@ -157,8 +157,11 @@ const components: MDXComponents = {
   View: (props) => <View {...props} />,
   Embed: (props) => <Embed {...props} />,
   LegacyView: (props) => <LegacyView {...props} />,
-  GitHub: (props) => <GitHub {...props} />,
-  Github: (props) => <GitHub {...props} />,
+  // Preserve the compound member used by generated MDX (`GitHub.Repo`). A
+  // wrapper component would discard that static property.
+  GitHub,
+  Github: GitHub,
+  'GitHub.Repo': (props) => <GitHub.Repo {...props} />,
   Visibility: (props) => <Visibility {...props} />,
   Human: (props) => <Human {...props} />,
   Agent: (props) => <Agent {...props} />,
