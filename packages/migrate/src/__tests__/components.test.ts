@@ -115,6 +115,64 @@ describe('repository component migration', () => {
     expect(warnings).toEqual([])
   })
 
+  it('extracts a page-local inline component that calls a hook into its own client module', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const source = 'export const Counter = () => {\n  const [n, setN] = useState(0)\n  return <button onClick={() => setN(n + 1)}>{n}</button>\n}\n\n<Counter />'
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+
+    expect(body).not.toContain('export const Counter')
+    expect(body).not.toContain('useState')
+    expect(body.trim()).toMatch(/^<Migrated[a-f0-9]+ \/>$/)
+    expect(warnings).toEqual([])
+
+    const client = migrator.files().find((file) => file.path.includes('inline-'))!
+    expect(client.content).toMatch(/^'use client';/)
+    expect(client.content).toContain("import { useState } from 'react'")
+    expect(client.content).toContain('export const Counter')
+    const registry = migrator.files().find((file) => file.path === 'src/mdx/custom-components.tsx')!
+    expect(registry.content).toContain('Counter as Migrated')
+  })
+
+  it('preserves an inline hook-using component used with children instead of guessing', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const source = 'export const Counter = () => {\n  const [n] = useState(0)\n  return <span>{n}</span>\n}\n\n<Counter>child</Counter>'
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+
+    expect(body).toBe(source)
+    expect(warnings.at(-1)?.message).toContain('not used in a way that can be safely extracted')
+  })
+
+  it('extracts a page-local inline component that is passed as a prop value, even without a hook', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, warnings, 'https://github.com/example/docs')
+    const source = 'export const WidgetCodeBlock = ({ children, ...props }) => {\n  return <CodeBlock {...props}>{children}</CodeBlock>\n}\n\n<Playground CodeBlockComponent={WidgetCodeBlock}>content</Playground>'
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+
+    expect(body).not.toContain('export const WidgetCodeBlock')
+    expect(body).toMatch(/CodeBlockComponent=\{Migrated[a-f0-9]+\}/)
+    expect(warnings).toEqual([])
+    // A prop-value reference is a bare JS identifier: MDX never routes it
+    // through the shared components registry the way a JSX tag is, so the
+    // page itself needs a real import binding the same registered name.
+    expect(body).toMatch(/^import \{ WidgetCodeBlock as Migrated[a-f0-9]+ \} from ['"]\.\.\/\.\.\/mdx\/migrated\/[a-f0-9]+\/inline-[a-f0-9]+\.jsx['"];/)
+
+    const client = migrator.files().find((file) => file.path.includes('inline-'))!
+    expect(client.content).toMatch(/^'use client';/)
+    expect(client.content).toContain('export const WidgetCodeBlock')
+    // `CodeBlock` is a Thally built-in, not declared or imported inside this
+    // extracted module: it must be resolved from the built-in registry
+    // directly instead of being left as a bare, unbound identifier.
+    expect(client.content).toContain("import { builtinMdxComponents } from '@/components/mdx/builtin-components';")
+    expect(client.content).toMatch(/const \{ CodeBlock \} = builtinMdxComponents;/)
+    const registry = migrator.files().find((file) => file.path === 'src/mdx/custom-components.tsx')!
+    expect(registry.content).toContain('WidgetCodeBlock as Migrated')
+  })
+
   it('registers multiline named/default imports and copies their dependency graph once', () => {
     const root = fixture({
       'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),

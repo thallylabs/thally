@@ -31,6 +31,8 @@ function fixture(): string {
     navigation: { $ref: './navigation.json' },
   }))
   writeFileSync(join(root, 'README.md'), '# Repository readme\n\nThis must not become a docs page.')
+  mkdirSync(join(root, '.claude', 'skills', 'doc-author'), { recursive: true })
+  writeFileSync(join(root, '.claude', 'skills', 'doc-author', 'SKILL.mdx'), '# Not a docs page\n\n</Broken>')
   writeFileSync(join(root, 'en', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\n# Welcome\n\nEnglish docs.')
   writeFileSync(join(root, 'en', 'guides', 'install.mdx'), '---\ntitle: Install\n---\n\nimport Prerequisite from \'/snippets/prerequisite.mdx\'\n\n<Prerequisite />\n\n<Danger>Back up first.</Danger>\n\n<Warn>Review the result.</Warn>')
   writeFileSync(join(root, 'es', 'introduction.mdx'), '---\ntitle: Bienvenido\n---\n\nDocumentación española.')
@@ -81,6 +83,7 @@ describe('Mintlify repository migration', () => {
     expect(bundle.pages[1].body).toContain('<Warning>Review the result.</Warning>')
     expect(bundle.pages[1].body).toContain('Install Node.js before continuing.')
     expect(bundle.pages.map((page) => page.id)).not.toContain('snippets/prerequisite')
+    expect(bundle.pages.map((page) => page.id)).not.toContain('.claude/skills/doc-author/SKILL')
     expect(bundle.docsConfig.i18n).toEqual({
       defaultLocale: 'en',
       locales: [
@@ -95,6 +98,63 @@ describe('Mintlify repository migration', () => {
     const files = renderMigrationFiles(bundle)
     expect(files.map((file) => file.path)).toContain('public/images/logo.svg')
     expect(files.map((file) => file.path)).not.toContain('src/content/readme.mdx')
+  })
+
+  it('inlines <Snippet file="..."> references with no import statement', () => {
+    const root = fixture()
+    writeFileSync(
+      join(root, 'en', 'guides', 'install.mdx'),
+      '---\ntitle: Install\n---\n\n<Snippet file="/snippets/prerequisite.mdx" />',
+    )
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'guides/install')
+    expect(page?.body).toContain('Install Node.js before continuing.')
+    expect(page?.body).not.toContain('<Snippet')
+  })
+
+  it('hoists a component snippet as a real declaration instead of splicing its source into the usage tag', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-component-snippet-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'counter.mdx'), "export const Counter = () => {\n  const [n, setN] = useState(0)\n  return <button onClick={() => setN(n + 1)}>{n}</button>\n}")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { Counter } from '/snippets/counter.mdx'\n\n<Counter />")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    // The usage stays a live self-closing tag (here rewritten to the
+    // registered client component by the component migrator); it must not
+    // be replaced by the declaration's own source text.
+    expect(page?.body).not.toMatch(/<Counter\s*>[\s\S]*<\/Counter>/)
+    expect(page?.body).not.toContain('return <button')
+    expect(page?.body.match(/\/>/g)).toHaveLength(1)
+  })
+
+  it('does not let a page-local component be shadowed by a same-named global snippet alias', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-alias-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['imports-snippet', 'declares-locally'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'counter.mdx'), 'export const Counter = () => {\n  return <div>from snippet</div>\n}')
+    writeFileSync(join(root, 'imports-snippet.mdx'), "---\ntitle: Imports\n---\n\nimport { Counter } from '/snippets/counter.mdx'\n\n<Counter />")
+    writeFileSync(join(root, 'declares-locally.mdx'), '---\ntitle: Local\n---\n\nexport const Counter = () => {\n  return <div>local component</div>\n}\n\n<Counter />')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const local = bundle.pages.find((candidate) => candidate.id === 'declares-locally')
+    expect(local?.body).toContain('local component')
+    expect(local?.body).not.toContain('from snippet')
+    expect(local?.body.match(/export const Counter/g)).toHaveLength(1)
+
+    // The named-import form (`import { Name } from '...'`) is what Mintlify's
+    // own docs use for snippets; it must be fully consumed, not left behind
+    // as a dead import alongside the inlined content.
+    const imported = bundle.pages.find((candidate) => candidate.id === 'imports-snippet')
+    expect(imported?.body).toContain('from snippet')
+    expect(imported?.body).not.toContain('import')
   })
 
   it('uses a nested Mintlify project as the config, content, snippet, and asset root', () => {

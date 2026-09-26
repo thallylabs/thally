@@ -579,3 +579,33 @@ export function Pre({
 
   return <CodeGroup {...props} label={title}>{children}</CodeGroup>
 }
+
+interface CodeBlockProps extends Omit<PreProps, 'title'> {
+  filename?: string
+  /** Mintlify prop. Shiki line-highlighting only runs at MDX build time on
+   *  real fences, so a standalone block has no runtime equivalent; ignored. */
+  highlight?: string
+  /** Mintlify prop; no line-number gutter exists. Ignored. */
+  lines?: boolean | string
+  /** Mintlify prop; no icon slot exists in the panel header. Ignored. */
+  icon?: string
+}
+
+/**
+ * Mintlify-parity standalone code block:
+ * `<CodeBlock language="ts" filename="x.ts">{`const x = 1`}</CodeBlock>`.
+ * A thin wrapper around `Pre` so standalone blocks share highlighting, the
+ * copy button, filename header, and styling with fenced code. `children` may
+ * be a plain string or an already-rendered `<pre>`/`<code>` element (e.g.
+ * from migrated content).
+ */
+export function CodeBlock({ children, filename, ...rest }: CodeBlockProps) {
+  // Strip the Mintlify-only props so they never reach the DOM.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { highlight, lines, icon, ...props } = rest
+  return (
+    <Pre {...props} title={filename}>
+      {children}
+    </Pre>
+  )
+}

@@ -54,7 +54,7 @@ const MAX_PAGE_BYTES = 2_000_000
 const MAX_ASSET_BYTES = 25_000_000
 const MAX_TOTAL_ASSET_BYTES = 500_000_000
 const IGNORED_DIRECTORIES = new Set([
-  '.git', '.github', '.next', '.turbo', '.vercel', '.vscode',
+  '.git', '.github', '.claude', '.cursor', '.next', '.turbo', '.vercel', '.vscode',
   'node_modules', 'dist', 'build', 'coverage',
 ])
 const ASSET_DIRECTORIES = new Set(['assets', 'images', 'img', 'media', 'public', 'static'])
@@ -67,6 +67,12 @@ const REPOSITORY_ONLY_DOCUMENTS = new Set([
   'license.md', 'readme.md', 'security.md',
 ])
 const SNIPPET_DIRECTORIES = new Set(['snippets', '_snippets', 'partials', '_partials'])
+// Matches a default import (`import Name from '...'`), a renamed default
+// import (`import { default as Name } from '...'`), and — the form Mintlify's
+// own docs use for snippets — a plain named import (`import { Name } from
+// '...'`). Group 1 is the braced name, group 2 the bare default name, group 3
+// the source path.
+const MDX_SNIPPET_IMPORT_PATTERN = /^import\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm
 const OPENAPI_FILENAMES = new Set([
   'openapi.json', 'openapi.yaml', 'openapi.yml',
   'swagger.json', 'swagger.yaml', 'swagger.yml',
@@ -434,7 +440,6 @@ function globalSnippetAliases(
   siteRoot: string,
 ): Map<string, string> {
   const aliases = new Map<string, string>()
-  const matcher = /^import\s+(?:\{\s*default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}?\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm
   for (const file of files) {
     const segments = file.relativePath.split('/')
     if (!segments.some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))) continue
@@ -449,11 +454,11 @@ function globalSnippetAliases(
   for (const file of files) {
     if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())) continue
     const raw = readFileSync(file.absolutePath, 'utf8')
-    for (const match of raw.matchAll(matcher)) {
+    for (const match of raw.matchAll(MDX_SNIPPET_IMPORT_PATTERN)) {
       try {
-        const candidate = resolveSnippetPath(match[2], file.absolutePath, repositoryRoot, siteRoot)
+        const candidate = resolveSnippetPath(match[3], file.absolutePath, repositoryRoot, siteRoot)
         if (existsSync(candidate) && lstatSync(candidate).isFile()) {
-          aliases.set(match[1], candidate)
+          aliases.set(match[1] ?? match[2], candidate)
         }
       } catch {
         // The page-local inliner emits the actionable warning when it reaches
@@ -536,8 +541,9 @@ function inlineMdxSnippets(
   if (depth >= 8) return raw
   const snippets = new Map<string, string>()
   const withoutImports = raw.replace(
-    /^import\s+(?:\{\s*default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}?\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?(?:\s*\/\/.*)?$/gm,
-    (_statement, componentName: string, sourcePath: string) => {
+    MDX_SNIPPET_IMPORT_PATTERN,
+    (_statement, braced: string | undefined, bare: string | undefined, sourcePath: string) => {
+      const componentName = (braced ?? bare)!
       try {
         const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
         if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
@@ -569,6 +575,10 @@ function inlineMdxSnippets(
   // elsewhere in the same docs project.
   for (const [componentName, candidate] of globalAliases) {
     if (snippets.has(componentName) || !new RegExp(`<${componentName}(?:\\s|/?>)`).test(withoutImports)) continue
+    // A page that declares this identifier itself (its own inline component,
+    // unrelated to the snippet elsewhere in the project) must keep that local
+    // definition; matching by name alone would duplicate and shadow it.
+    if (new RegExp(`^\\s*export\\s+(?:const|function|default\\s+function)\\s+${componentName}\\b`, 'm').test(withoutImports)) continue
     const nested = inlineMdxSnippets(
       withoutFrontmatter(readFileSync(candidate, 'utf8')),
       candidate,
@@ -581,7 +591,17 @@ function inlineMdxSnippets(
     snippets.set(componentName, nested)
   }
   let result = withoutImports
+  const hoistedDeclarations: Array<string> = []
   for (const [componentName, snippet] of snippets) {
+    const trimmed = snippet.trim()
+    // A snippet that itself declares the imported name as a component is
+    // real JSX, not reusable prose: keep its usage tag(s) as a live
+    // component invocation and hoist the declaration instead of splicing
+    // the definition's source text in verbatim wherever it is used.
+    if (new RegExp(`^export\\s+(?:const|function)\\s+${componentName}\\b`).test(trimmed)) {
+      if (new RegExp(`<${componentName}(?:\\s|/?>)`).test(result)) hoistedDeclarations.push(trimmed)
+      continue
+    }
     result = result
       .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)\\s*/>`, 'g'), (_tag, attributes: string) => {
         return interpolateSnippet(snippet, attributes)
@@ -590,6 +610,39 @@ function inlineMdxSnippets(
         return interpolateSnippet(snippet, attributes)
       })
   }
+  if (hoistedDeclarations.length > 0) result = `${hoistedDeclarations.join('\n\n')}\n\n${result}`
+  // Mintlify also references snippets directly by path, with no import
+  // statement: `<Snippet file="snippets/x.mdx" />`. Resolve and inline these
+  // the same way so the content is never dropped.
+  const resolveSnippetFile = (sourcePath: string): string => {
+    try {
+      const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
+      if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
+      return inlineMdxSnippets(
+        withoutFrontmatter(readFileSync(candidate, 'utf8')),
+        candidate,
+        repositoryRoot,
+        warnings,
+        depth + 1,
+        siteRoot,
+        globalAliases,
+      )
+    } catch {
+      warnings.push({
+        code: 'missing-page',
+        message: `Snippet file ${sourcePath} could not be resolved and was left as a comment.`,
+        source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+      })
+      return `{/* Missing snippet file: ${sourcePath} */}`
+    }
+  }
+  result = result
+    .replace(/<Snippet\s+file=(?:"([^"]+)"|'([^']+)')\s*\/>/g, (_tag, doubleQuoted?: string, singleQuoted?: string) => {
+      return resolveSnippetFile(doubleQuoted ?? singleQuoted ?? '')
+    })
+    .replace(/<Snippet\s+file=(?:"([^"]+)"|'([^']+)')\s*>[\s\S]*?<\/Snippet>/g, (_tag, doubleQuoted?: string, singleQuoted?: string) => {
+      return resolveSnippetFile(doubleQuoted ?? singleQuoted ?? '')
+    })
   return result
 }
 

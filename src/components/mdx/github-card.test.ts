@@ -3,13 +3,19 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { GitHubCard, githubRepositoryHref } from '@/components/mdx/github-card'
+import { GitHub, GitHubCard, githubRepositoryHref } from '@/components/mdx/github-card'
 
 describe('GitHubCard', () => {
   it('renders a validated repository without remote metadata', () => {
     const html = renderToStaticMarkup(createElement(GitHubCard, { repo: 'thallylabs/thally' }))
     expect(html).toContain('href="https://github.com/thallylabs/thally"')
     expect(html).toContain('rel="noreferrer"')
+  })
+
+  it('exposes Repo as a static property so the Mintlify <GitHub.Repo> tag resolves', () => {
+    expect(GitHub.Repo).toBe(GitHubCard)
+    const html = renderToStaticMarkup(createElement(GitHub.Repo, { repo: 'thallylabs/thally' }))
+    expect(html).toContain('href="https://github.com/thallylabs/thally"')
   })
 
   it.each([

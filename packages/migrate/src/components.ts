@@ -20,7 +20,12 @@ interface MdxNode {
   type: string
   name?: string | null
   value?: string
-  attributes?: Array<{ name?: string; type: string; value?: string | { value?: string } | null }>
+  attributes?: Array<{
+    name?: string
+    type: string
+    value?: string | { type?: string; value?: string } | null
+    position?: { start: { offset?: number }; end: { offset?: number } }
+  }>
   children?: Array<MdxNode>
   position?: { start: { offset?: number }; end: { offset?: number } }
 }
@@ -39,6 +44,9 @@ const REACT_GLOBALS = new Set([
   'useOptimistic', 'useActionState', 'use', 'createContext', 'forwardRef', 'memo',
 ])
 const MAX_COMPONENT_FILES = 300
+// scripts/build-runtime-sources.mts compiles every page into this same flat
+// directory, regardless of the source page's own path under src/content/.
+const COMPILED_DOCS_DIR = 'src/generated/runtime-docs'
 const MAX_COMPONENT_BYTES = 20_000_000
 const MAX_FILE_BYTES = 2_000_000
 
@@ -98,6 +106,48 @@ function implicitReactImports(source: ts.SourceFile): string {
     references.has('React') && !bindings.has('React') ? "import * as React from 'react';" : '',
     hooks.length ? `import { ${hooks.join(', ')} } from 'react';` : '',
   ].filter(Boolean).join('\n')
+}
+
+/**
+ * A component extracted into its own client module (see `createComponentMigrator`'s
+ * inline-hook extraction below) loses the page's implicit access to Thally's
+ * built-in MDX components: unlike a component that stays inline in the page,
+ * this module never receives a `components` prop to read a name such as
+ * `CodeBlock` from. Any JSX tag it uses that isn't locally declared or
+ * imported is resolved instead from `builtinMdxComponents`, the same
+ * built-in registry every MDX page reads from — imported directly rather
+ * than through `useMDXComponents`, which in turn imports the customer
+ * registry that imports every extracted module, closing an import cycle
+ * that throws at runtime once bundled.
+ */
+function resolveInlineBuiltinReferences(source: string, ownName: string): string {
+  const statement = sourceFile(source, 'declaration.tsx').statements[0]
+  if (!statement) return source
+  const localNames = new Set<string>([ownName])
+  function bindLocal(name: ts.BindingName): void {
+    if (ts.isIdentifier(name)) localNames.add(name.text)
+    else for (const element of name.elements) if (ts.isBindingElement(element)) bindLocal(element.name)
+  }
+  function collectLocals(node: ts.Node): void {
+    if ((ts.isParameter(node) || ts.isVariableDeclaration(node) || ts.isBindingElement(node)) && node.name) bindLocal(node.name)
+    ts.forEachChild(node, collectLocals)
+  }
+  collectLocals(statement)
+  const unresolved = new Set<string>()
+  function collectJsxTags(node: ts.Node): void {
+    const tagName = ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node) ? node.tagName : undefined
+    if (tagName && ts.isIdentifier(tagName) && /^[A-Z]/.test(tagName.text) && !localNames.has(tagName.text)) {
+      unresolved.add(tagName.text)
+    }
+    ts.forEachChild(node, collectJsxTags)
+  }
+  collectJsxTags(statement)
+  if (unresolved.size === 0) return source
+  return [
+    "import { builtinMdxComponents } from '@/components/mdx/builtin-components';",
+    `const { ${[...unresolved].sort().join(', ')} } = builtinMdxComponents;`,
+    source,
+  ].join('\n')
 }
 
 function imports(statement: ts.ImportDeclaration): Array<Binding> {
@@ -347,6 +397,95 @@ export function createComponentMigrator(siteRoot: string, warnings: Array<Migrat
           warn(`Custom component was preserved for manual migration: ${error instanceof Error ? error.message : 'unsupported dependency'}.`, currentFile)
         }
       }
+    }
+
+    // Extract a page's own inline `export const Widget = () => {...}` component
+    // into its own client module when it calls a React hook (Mintlify treats
+    // hooks as pre-injected globals for such components, but Thally's page
+    // module is a Server Component and cannot import a hook itself) or when
+    // it is passed as a prop value to another component (a bare function
+    // reference cannot cross a Server/Client Component boundary; moving it
+    // into a real module makes passing it legal either way). A self-closing
+    // tag usage is rewritten to the registered import; a prop-value usage has
+    // just its identifier swapped. Anything else (a paired tag usage with
+    // children) is left for manual review rather than guessed at.
+    for (const declaration of [...declarations]) {
+      const statement = sourceFile(declaration.source, 'declaration.tsx').statements[0]
+      if (!statement) continue
+      let name: string | undefined
+      if (ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1) {
+        const binding = statement.declarationList.declarations[0].name
+        if (ts.isIdentifier(binding)) name = binding.text
+      } else if (ts.isFunctionDeclaration(statement) && statement.name) {
+        name = statement.name.text
+      }
+      if (!name || !/^[A-Z]/.test(name)) continue
+      let usesReactGlobal = false
+      function detectReactGlobal(node: ts.Node): void {
+        if (ts.isIdentifier(node) && REACT_GLOBALS.has(node.text)) usesReactGlobal = true
+        ts.forEachChild(node, detectReactGlobal)
+      }
+      detectReactGlobal(statement)
+
+      const usageNodes: Array<MdxNode> = []
+      const propUsages: Array<{ start: number; end: number }> = []
+      let unsupportedUsage = false
+      walk(tree, (node) => {
+        if (node.name === name && ['mdxJsxFlowElement', 'mdxJsxTextElement'].includes(node.type)) {
+          if ((node.children?.length ?? 0) > 0 || node.position?.start.offset === undefined || node.position.end.offset === undefined) {
+            unsupportedUsage = true
+          } else {
+            usageNodes.push(node)
+          }
+        }
+        for (const attribute of node.attributes ?? []) {
+          const value = attribute.value
+          if (typeof value !== 'object' || !value || value.type !== 'mdxJsxAttributeValueExpression'
+            || value.value !== name || attribute.position?.start.offset === undefined
+            || attribute.position.end.offset === undefined) continue
+          const raw = content.slice(attribute.position.start.offset, attribute.position.end.offset)
+          const match = raw.match(new RegExp(`\\b${name}\\b`))
+          if (!match || match.index === undefined) continue
+          const start = attribute.position.start.offset + match.index
+          propUsages.push({ start, end: start + name.length })
+        }
+      })
+      if (!usesReactGlobal && propUsages.length === 0) continue
+      if (unsupportedUsage || (usageNodes.length === 0 && propUsages.length === 0)) {
+        warn(`Inline component "${name}" calls a React hook but is not used in a way that can be safely extracted; source was preserved for manual extraction.`, currentFile)
+        continue
+      }
+      const inlineSource = `${resolveInlineBuiltinReferences(declaration.source, name)}\n`
+      if (copied.size >= MAX_COMPONENT_FILES || Buffer.byteLength(inlineSource) > MAX_FILE_BYTES
+        || copiedBytes + Buffer.byteLength(inlineSource) > MAX_COMPONENT_BYTES) {
+        warn(`Inline component "${name}" exceeded the component migration budget; source was preserved.`, currentFile)
+        continue
+      }
+      const path = `${destinationRoot}/inline-${hash(`${relative(root, currentFile)}:${name}`)}.jsx`
+      copied.set(path, { path, content: `'use client';\n${implicitReactImports(sourceFile(inlineSource, 'inline.jsx'))}\n${inlineSource}` })
+      copiedBytes += Buffer.byteLength(inlineSource)
+      const registeredName = register(path, name)
+      edits.push({ start: declaration.start, end: declaration.end, value: '' })
+      for (const node of usageNodes) {
+        edits.push({ start: node.position!.start.offset!, end: node.position!.end.offset!, value: `<${registeredName} />` })
+      }
+      for (const usage of propUsages) {
+        edits.push({ start: usage.start, end: usage.end, value: registeredName })
+      }
+      if (propUsages.length > 0) {
+        // A prop-value reference is a bare JS identifier, not a JSX tag: MDX
+        // only resolves tag names through the shared `_components` registry,
+        // so this one needs a real import bound in the page's own module.
+        // Every page compiles into the same flat directory (scripts/
+        // build-runtime-sources.mts writes `src/generated/runtime-docs/
+        // doc-N.tsx`), which an import statement carried through verbatim
+        // from the source MDX ends up living in — not the source page's own
+        // nested path under `src/content/`.
+        const relativePath = relative(COMPILED_DOCS_DIR, path).replace(/\\/g, '/')
+        const specifier = portableSpecifier(relativePath.startsWith('.') ? relativePath : `./${relativePath}`)
+        edits.push({ start: 0, end: 0, value: `import { ${name} as ${registeredName} } from ${JSON.stringify(specifier)};\n` })
+      }
+      declarations.splice(declarations.indexOf(declaration), 1)
     }
 
     // Extract whole HTML JSX roots with event handlers. Markdown and global
