@@ -17,6 +17,7 @@ export interface DocEntry {
   id: string
   title: string
   description: string
+  descriptionPlacement?: 'body'
   slug: Array<string>
   href: string
   group: string
@@ -166,7 +167,9 @@ export interface DocsJsonNavLink {
 
 export interface DocsJsonNavbar {
   links?: Array<DocsJsonNavLink>
-  primary?: { label: string; href: string }
+  primary?: { label: string; href: string } | null
+  /** Public assets for a portable, source-owned logo fallback. */
+  logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string }
 }
 
 export interface DocsJsonFooterColumn {
@@ -176,6 +179,8 @@ export interface DocsJsonFooterColumn {
 
 export interface DocsJsonFooter {
   socials?: Record<string, string>
+  /** Optional imported attribution; `{year}` follows the current year. */
+  copyright?: string
   links?: Array<DocsJsonFooterColumn>
 }
 
@@ -221,6 +226,8 @@ interface DocsJsonConfig {
   redirects?: Array<DocsJsonRedirect>
   banner?: DocsJsonBanner
   navbar?: DocsJsonNavbar
+  /** Public favicon fallback when no managed or admin asset is configured. */
+  favicon?: { light: string; dark?: string }
   footer?: DocsJsonFooter
   seo?: DocsJsonSeo
   customScripts?: Array<DocsJsonScript>
@@ -281,6 +288,8 @@ interface DocsJsonConfig {
   i18n?: {
     defaultLocale: string
     locales: Array<{ code: string; label: string }>
+    /** Optional locale-specific tabs, groups, and labels from a migrated source. */
+    navigation?: Record<string, Array<DocsJsonTab>>
   }
   /**
    * Admin-dashboard team — the git-committed roster. Version-controlled and
@@ -334,6 +343,7 @@ interface FrontmatterData {
   /** Optional compact label used only in sidebar and previous/next navigation. */
   navTitle?: string
   description?: string
+  descriptionPlacement?: 'body'
   badge?: string
   keywords?: Array<string>
   timeEstimate?: string
@@ -483,6 +493,7 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
     id: pageId,
     title,
     description: fm.description ?? '',
+    descriptionPlacement: fm.descriptionPlacement === 'body' ? 'body' : undefined,
     slug,
     href,
     group: '',
@@ -674,6 +685,7 @@ function buildNavigationGroup(
 
   const groupPath = [...ancestors, group.group].filter(Boolean)
   const nodes = buildNavigationNodes(group.pages, indexPath, groupPath, locale)
+  if (nodes.length === 0) return null
 
   return {
     id: `nav-group-${indexPath.join('-')}-${slugifyId(group.group) || 'group'}`,
@@ -691,6 +703,9 @@ function buildNavigationNodes(
 ): Array<NavigationNode> {
   return pages.flatMap<NavigationNode>((page, index) => {
     if (typeof page === 'string') {
+      // Fern and some legacy docs configs list pages that are reachable by
+      // direct link but explicitly hidden from the rendered sidebar.
+      if (readFrontmatter(page, locale).hidden) return []
       return [{ type: 'page', item: resolveNavItem(page, locale, ancestors) }]
     }
     const child = buildNavigationGroup(page, [...indexPath, index], ancestors, locale)
@@ -713,7 +728,7 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
     return sidebarCollectionsCache.get(cacheKey)!
   }
 
-  const collections = config.tabs
+  const collections = ((locale ? config.i18n?.navigation?.[locale] : undefined) ?? config.tabs)
     .filter((tab) => !tab.hidden)
     .map((tab) => {
       const id = slugifyId(tab.tab) || tab.tab.toLowerCase()
@@ -776,11 +791,21 @@ export interface PrevNextLink {
   href: string
 }
 
+/** Select a translated navigation tree only for a configured locale prefix. */
+function navigationLocaleForHref(href: string): string | undefined {
+  const firstSegment = href.split('/')[1]
+  const i18n = docsConfig().i18n
+  return firstSegment && firstSegment !== i18n?.defaultLocale
+    && i18n?.locales.some((locale) => locale.code === firstSegment)
+    ? firstSegment
+    : undefined
+}
+
 export function getPrevNextLinks(currentHref: string): {
   prev: PrevNextLink | null
   next: PrevNextLink | null
 } {
-  const collections = getSidebarCollections()
+  const collections = getSidebarCollections(navigationLocaleForHref(currentHref))
   const flatPages: Array<{ title: string; href: string }> = []
 
   for (const collection of collections) {
@@ -819,7 +844,7 @@ function navigationGroupParts(section: NavigationSection, item: NavigationItem):
 }
 
 export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
-  const collections = getSidebarCollections()
+  const collections = getSidebarCollections(navigationLocaleForHref(currentHref))
 
   for (const collection of collections) {
     for (const section of collection.sections) {
@@ -856,7 +881,7 @@ export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
  * that sit outside any navigation group (e.g. direct-link tabs).
  */
 export function getNavCategory(currentHref: string): string | null {
-  for (const collection of getSidebarCollections()) {
+  for (const collection of getSidebarCollections(navigationLocaleForHref(currentHref))) {
     for (const section of collection.sections) {
       const item = section.items.find((candidate) => candidate.href === currentHref)
       if (item) {
@@ -880,15 +905,17 @@ export interface NavContext {
   breadcrumb: Array<BreadcrumbItem>
 }
 
-export function getNavContext(pageId: string): NavContext {
+export function getNavContext(pageId: string, locale?: string): NavContext {
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
-  const href = slug.length ? `/${slug.join('/')}` : '/'
+  const baseHref = slug.length ? `/${slug.join('/')}` : '/'
+  const href = locale && locale !== docsConfig().i18n?.defaultLocale
+    ? `/${locale}${baseHref === '/' ? '' : baseHref}` : baseHref
 
   const { prev, next } = getPrevNextLinks(href)
   const breadcrumb = getBreadcrumbs(href)
 
   // Find which tab and group this page belongs to
-  const collections = getSidebarCollections()
+  const collections = getSidebarCollections(locale)
   let tabName = ''
   let groupName = ''
 
@@ -908,10 +935,10 @@ export function getNavContext(pageId: string): NavContext {
 }
 
 /** Async managed-release twin of {@link getNavContext}. */
-export async function loadNavContext(pageId: string): Promise<NavContext> {
+export async function loadNavContext(pageId: string, locale?: string): Promise<NavContext> {
   const index = await loadContentIndex()
   if (index) hydrateContentIndex(index)
-  return getNavContext(pageId)
+  return getNavContext(pageId, locale)
 }
 
 export function getAiConfig(): {

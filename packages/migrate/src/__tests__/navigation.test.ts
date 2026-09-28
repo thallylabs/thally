@@ -140,6 +140,10 @@ describe('Mintlify navigation projection', () => {
     expect(result.docsConfig.i18n?.defaultLocale).toBe('pt')
     expect(result.docsConfig.navigation).toBeUndefined()
     expect(result.docsConfig.tabs.map((tab) => tab.tab)).toEqual(['Docs'])
+    expect(result.docsConfig.i18n?.navigation?.fr?.[0]).toMatchObject({
+      tab: 'Documentation',
+      groups: [{ group: 'Start', pages: ['introduction'] }],
+    })
   })
 
   it('does not let an empty legacy dropdown array override active tabs', () => {
@@ -281,6 +285,16 @@ describe('Fern redirect safety shares the Mintlify guard', () => {
 })
 
 describe('pruning navigation pages excluded after projection', () => {
+  it('keeps a route once per sibling group after two files resolve to the same slug', () => {
+    const config: MigrationDocsConfig = { tabs: [{ tab: 'Release Notes', groups: [
+      { group: 'Latest', pages: ['changelog', 'changelog/release', 'changelog/release'] },
+      { group: 'Archive', pages: ['changelog/release'] },
+    ] }] }
+    expect(pruneMissingNavigationPages(config, new Set(['changelog', 'changelog/release'])).tabs[0].groups).toEqual([
+      { group: 'Latest', pages: ['changelog', 'changelog/release'] },
+      { group: 'Archive', pages: ['changelog/release'] },
+    ])
+  })
   it('drops a page id that was excluded from import, and the group left empty by it', () => {
     const config: MigrationDocsConfig = {
       tabs: [{

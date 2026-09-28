@@ -21,6 +21,7 @@ import { findDocSource } from '@/lib/i18n/translation-source'
 interface DocFrontmatter {
   title?: string
   description?: string
+  descriptionPlacement?: 'body'
   group?: string
   badge?: string
   keywords?: Array<string>
@@ -164,6 +165,7 @@ async function compileDocEntry(
     id: slugPath || 'introduction',
     title: frontmatter?.title ?? deriveTitleFromSlug(slugPath),
     description: frontmatter?.description ?? '',
+    descriptionPlacement: frontmatter?.descriptionPlacement === 'body' ? 'body' : undefined,
     slug: slugSegments,
     href,
     group: frontmatter?.group ?? 'Docs',

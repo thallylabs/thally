@@ -46,6 +46,7 @@ import langTypescript from 'shiki/langs/typescript.mjs'
 import langVue from 'shiki/langs/vue.mjs'
 import langYaml from 'shiki/langs/yaml.mjs'
 import { visit } from 'unist-util-visit'
+import { slugify } from '../lib/utils'
 
 /**
  * A theme whose colors are CSS variables, so code blocks stay theme-aware via
@@ -448,4 +449,31 @@ function rehypeShiki() {
   }
 }
 
-export const rehypePlugins = [rehypeParseCodeBlocks, rehypeShiki]
+/** Give repeated headings distinct, stable fragments in document order. */
+function rehypeUniqueHeadingIds() {
+  return (tree: Root) => {
+    const occurrences = new Map<string, number>()
+    const usedIds = new Set<string>()
+    const text = (node: Element): string => node.children.map((child) =>
+      child.type === 'text' ? child.value
+        : child.type === 'element' ? text(child)
+          : '').join('')
+    visit(tree, 'element', (node: Element) => {
+      if (!/^h[2-6]$/.test(node.tagName)) return
+      const base = typeof node.properties?.id === 'string' && node.properties.id
+        ? node.properties.id : slugify(text(node))
+      if (!base) return
+      let occurrence = (occurrences.get(base) ?? 0) + 1
+      let id = occurrence === 1 ? base : `${base}-${occurrence}`
+      while (usedIds.has(id)) {
+        occurrence++
+        id = `${base}-${occurrence}`
+      }
+      occurrences.set(base, occurrence)
+      usedIds.add(id)
+      node.properties = { ...node.properties, id }
+    })
+  }
+}
+
+export const rehypePlugins = [rehypeParseCodeBlocks, rehypeShiki, rehypeUniqueHeadingIds]
