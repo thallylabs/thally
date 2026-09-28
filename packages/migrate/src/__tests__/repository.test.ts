@@ -1969,6 +1969,63 @@ navigation:
     expect(guide?.body).not.toContain('/api-reference/webhooks/server-message')
   })
 
+  it('rewrites a bare API-tab landing link to the spec landing route, and an unmatched operation link to the same route with one aggregated warning', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-landing-link-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'rest'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - tab: documentation
+    layout:
+      - page: Guide
+        path: guide.mdx
+  - tab: api-reference
+    layout:
+      - api: API reference
+        api-name: rest
+        skip-slug: true
+`)
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'openapi.yml'), [
+      'openapi: 3.1.0',
+      'info: { title: REST, version: "1.0" }',
+      'paths:',
+      '  /tool:',
+      '    post:',
+      '      summary: Create Tool',
+      '      operationId: ToolController_create',
+      '      tags: [Tools]',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    writeFileSync(join(fernRoot, 'guide.mdx'), [
+      '---',
+      'title: Guide',
+      '---',
+      '',
+      'See the [API reference](/api-reference) for everything, the',
+      '[create tool endpoint](/api-reference/tools/create), and the',
+      '[deleted endpoint](/api-reference/tools/delete) (removed since).',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const guide = bundle.pages.find((page) => page.id === 'documentation/guide')
+    // Bare tab-landing link -> the spec's Thally landing route.
+    expect(guide?.body).toContain('[API reference](/api)')
+    // Matched operation link -> its real operation route, as before.
+    expect(guide?.body).toContain('[create tool endpoint](/api/default/tool/post)')
+    // Unmatched operation link -> falls back to the landing route rather
+    // than staying broken.
+    expect(guide?.body).toContain('[deleted endpoint](/api)')
+    expect(guide?.body).not.toContain('/api-reference')
+    // Exactly one aggregated warning names the unmatched link.
+    const unmatchedWarnings = bundle.warnings.filter((warning) =>
+      warning.message.includes('did not match a known operation'))
+    expect(unmatchedWarnings).toHaveLength(1)
+    expect(unmatchedWarnings[0]!.message).toContain('/api-reference/tools/delete')
+  })
+
   it('disambiguates two api: sections with the same tab label and a self-repeating route segment instead of a redundant "X: X" name', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-dup-tab-label-'))
     const fernRoot = join(root, 'fern')

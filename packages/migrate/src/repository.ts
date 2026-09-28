@@ -1120,16 +1120,32 @@ interface ApiOperationLinkSource {
   prefix?: string
 }
 
+interface ApiOperationLinkMaps {
+  /** Exact source-platform operation-page path (lowercased) -> Thally operation route. */
+  operationLinks: Map<string, string>
+  /**
+   * Source-platform API-section route prefix (lowercased, no leading/trailing
+   * slash) -> that spec's Thally landing route (`/api` for the first spec,
+   * `/api/<specId>` for the rest). Used both for a bare tab-landing link
+   * (the prefix on its own) and as the fallback for an operation link under
+   * this prefix that didn't match any known operation.
+   */
+  prefixLandings: Map<string, string>
+}
+
 function apiOperationLinkMap(
   sources: Array<ApiOperationLinkSource>,
   docsConfig: MigrationDocsConfig,
-): Map<string, string> {
+): ApiOperationLinkMaps {
   const map = new Map<string, string>()
+  const prefixLandings = new Map<string, string>()
   const apiTabs = docsConfig.tabs.filter((tab) => !tab.hidden && tab.api)
   apiTabs.forEach((tab, index) => {
     const source = sources.find((entry) => tab.api?.source === `/${entry.filename}`)
     if (!source || !source.prefix) return
     const specId = index === 0 ? 'default' : slugifyApiSpecId(tab.tab)
+    const prefix = source.prefix.replace(/^\/+|\/+$/g, '').toLowerCase()
+    if (prefix) prefixLandings.set(prefix, specId === 'default' ? '/api' : `/api/${specId}`)
     for (const operation of parseOpenApiOperationsForLinking(source.content)) {
       const thallyHref = `/api/${specId}/${thallyOperationSlugSegments(operation.path, operation.method).join('/')}`
       // Leaf candidates, tried in order of how likely a source generator is
@@ -1171,12 +1187,33 @@ function apiOperationLinkMap(
       }
     }
   })
-  return map
+  return { operationLinks: map, prefixLandings }
 }
 
-/** Rewrite in-content links matching a source platform's auto-generated OpenAPI operation pages to Thally's actual `/api/...` routes. Non-matching links are left untouched — still broken, but no worse than before this rewrite existed. */
-function rewriteApiOperationLinks(body: string, linkMap: Map<string, string>): string {
-  if (linkMap.size === 0) return body
+/**
+ * Rewrite in-content links matching a source platform's auto-generated
+ * OpenAPI operation pages to Thally's actual `/api/...` routes. A link
+ * that is exactly a known API-section prefix (a bare tab-landing link, e.g.
+ * "/api-reference") is rewritten to that spec's Thally landing route. A
+ * link under a known prefix that doesn't match any specific operation
+ * (renamed/removed operation, or a match this rewrite's heuristics missed)
+ * falls back to the same landing route rather than staying broken, and its
+ * original target is recorded into `unmatched` so the caller can emit one
+ * aggregated warning instead of one per link. Links outside every known
+ * prefix are left untouched — still broken, but no worse than before this
+ * rewrite existed.
+ */
+function rewriteApiOperationLinks(
+  body: string,
+  linkMap: Map<string, string>,
+  prefixLandings: Map<string, string>,
+  unmatched: Set<string>,
+): string {
+  if (linkMap.size === 0 && prefixLandings.size === 0) return body
+  // Longest prefix first, so a more specific API section (e.g.
+  // "api-reference/webhooks") is preferred over a shorter one that happens
+  // to also match ("api-reference").
+  const orderedPrefixes = [...prefixLandings.entries()].sort((a, b) => b[0].length - a[0].length)
   let codeFence: string | null = null
   return body.split('\n').map((line) => {
     const fence = line.match(/^\s*(`{3,}|~{3,})/)
@@ -1191,7 +1228,15 @@ function rewriteApiOperationLinks(body: string, linkMap: Map<string, string>): s
       const path = (suffixIndex >= 0 ? target.slice(0, suffixIndex) : target).replace(/^\/+/, '').toLowerCase()
       const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
       const mapped = linkMap.get(path)
-      return mapped ? `${mapped}${suffix}` : target
+      if (mapped) return `${mapped}${suffix}`
+      for (const [prefix, landing] of orderedPrefixes) {
+        if (path === prefix) return `${landing}${suffix}`
+        if (path.startsWith(`${prefix}/`)) {
+          unmatched.add(target)
+          return `${landing}${suffix}`
+        }
+      }
+      return target
     }
     return line
       .replace(/(\]\()\/([^\s)]+)(?=[\s)]|$)/g, (_match, prefix: string, target: string) => `${prefix}${rewriteTarget(`/${target}`)}`)
@@ -2382,13 +2427,20 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // under that section's own route (e.g. "api-reference/messages/...")
       // — the same shape Mintlify's `directory` scoping produces, so the
       // same rewrite applies, keyed by the section's route instead.
-      const operationLinkMap = apiOperationLinkMap(
+      const { operationLinks, prefixLandings } = apiOperationLinkMap(
         resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.routeSegments.join('/') })),
         docsConfig,
       )
-      if (operationLinkMap.size > 0) {
+      if (operationLinks.size > 0 || prefixLandings.size > 0) {
+        const unmatched = new Set<string>()
         for (const page of pages) {
-          page.body = rewriteApiOperationLinks(page.body, operationLinkMap)
+          page.body = rewriteApiOperationLinks(page.body, operationLinks, prefixLandings, unmatched)
+        }
+        if (unmatched.size > 0) {
+          warnings.push({
+            code: 'unsupported-config',
+            message: `${unmatched.size} API operation link(s) did not match a known operation and were pointed at their API section's landing page instead: ${[...unmatched].sort().join(', ')}`,
+          })
         }
       }
     }
@@ -2401,13 +2453,20 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (resolvedSpecs.length > 0) {
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
-      const operationLinkMap = apiOperationLinkMap(
+      const { operationLinks, prefixLandings } = apiOperationLinkMap(
         resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.directory })),
         docsConfig,
       )
-      if (operationLinkMap.size > 0) {
+      if (operationLinks.size > 0 || prefixLandings.size > 0) {
+        const unmatched = new Set<string>()
         for (const page of pages) {
-          page.body = rewriteApiOperationLinks(page.body, operationLinkMap)
+          page.body = rewriteApiOperationLinks(page.body, operationLinks, prefixLandings, unmatched)
+        }
+        if (unmatched.size > 0) {
+          warnings.push({
+            code: 'unsupported-config',
+            message: `${unmatched.size} API operation link(s) did not match a known operation and were pointed at their API section's landing page instead: ${[...unmatched].sort().join(', ')}`,
+          })
         }
       }
     } else {
