@@ -1,5 +1,6 @@
 /** Component migration preserves executable source without running source code. */
 
+import { compileSync } from '@mdx-js/mdx'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
@@ -873,10 +874,19 @@ describe('repository component migration', () => {
     const source = "import Doc from './assets/guide.docx'\n\n<a href={Doc}>Download</a>"
     const result = migrator.transform(source, join(root, 'index.mdx'))
     expect(result).not.toContain("import Doc from './assets/guide.docx'")
-    expect(result).toMatch(/^const Doc = "\/migrated-[a-f0-9]+\.docx";\n\n<a href=\{Doc\}>Download<\/a>$/)
+    expect(result).toMatch(/^export const Doc = "\/migrated-[a-f0-9]+\.docx";\n\n<a href=\{Doc\}>Download<\/a>$/)
     const publicFile = migrator.files().find((file) => file.path.startsWith('public/'))
     expect(publicFile?.content.toString()).toBe('binary-ish content')
     expect(warnings[0].message).toContain('bound to that URL')
+    // A bare `const` (no `export`) in this position is prose to a fresh MDX
+    // parse, not an executable declaration — `Doc` would then be an
+    // undefined free variable at render ("ReferenceError: Doc is not
+    // defined"), reproduced against hasura/graphql-engine's
+    // databases/overview.mdx. Compile the actual output the same way the
+    // real build does and check the binding survived as real ESM, not text.
+    const compiled = String(compileSync(result, { outputFormat: 'program' }))
+    expect(compiled).toContain('const Doc =')
+    expect(compiled).not.toContain('"const Doc =')
   })
 
   it('rescues an asset import bound to a lowercase local name used in an expression (Docusaurus\' own convention, e.g. a logo)', () => {
@@ -890,7 +900,7 @@ describe('repository component migration', () => {
     const source = "import docusaurusLogo from '@site/static/img/docusaurus.svg'\n\n<img src={docusaurusLogo} alt=\"logo\" />"
     const result = migrator.transform(source, join(root, 'index.mdx'))
     expect(result).not.toContain('import docusaurusLogo')
-    expect(result).toMatch(/^const docusaurusLogo = "\/migrated-[a-f0-9]+\.svg";\n\n<img src=\{docusaurusLogo\} alt="logo" \/>$/)
+    expect(result).toMatch(/^export const docusaurusLogo = "\/migrated-[a-f0-9]+\.svg";\n\n<img src=\{docusaurusLogo\} alt="logo" \/>$/)
     expect(migrator.files().some((file) => file.path.startsWith('public/'))).toBe(true)
   })
 

@@ -1071,7 +1071,17 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             edits.push({
               start: node.position.start.offset + statement.getStart(ast),
               end: node.position.start.offset + statement.end,
-              value: bindings.map((binding) => `const ${binding.local} = ${JSON.stringify(href)};`).join('\n'),
+              // `export`, not a bare `const`: this replaces an `import`
+              // statement in place, and the final MDX compile (a fresh
+              // parse of this text, not a reuse of this pass's own AST)
+              // only recognizes a top-level JS block as ESM — evaluated and
+              // its bindings put in scope — when it starts with `import` or
+              // `export`. A bare `const` there is just prose to that parser
+              // and renders as literal paragraph text instead, leaving
+              // every reference to this binding a `ReferenceError` at
+              // render (reproduced against hasura/graphql-engine's
+              // databases/overview.mdx, which binds asset URLs this way).
+              value: bindings.map((binding) => `export const ${binding.local} = ${JSON.stringify(href)};`).join('\n'),
             })
             warn(`Asset import ${JSON.stringify(rawSpecifier)} was copied to ${href} and bound to that URL instead of importing it as a component.`, currentFile)
             continue
@@ -1188,7 +1198,9 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             edits.push({
               start: importStart,
               end: importEnd,
-              value: bindings.map((binding) => `const ${binding.local} = ${JSON.stringify(rescuedAssetHref)};`).join('\n'),
+              // See the identical `export const` note on the other asset
+              // rescue above — same reason.
+              value: bindings.map((binding) => `export const ${binding.local} = ${JSON.stringify(rescuedAssetHref)};`).join('\n'),
             })
             warn(`Asset import ${JSON.stringify(rawSpecifier)} could not be copied as a component; it was copied to ${rescuedAssetHref} and bound to that URL instead.`, currentFile)
           } else {
