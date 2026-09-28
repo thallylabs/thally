@@ -40,7 +40,7 @@ import {
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
-import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents } from './mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, stripMdxHeadingCustomIds } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -2156,11 +2156,20 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // is platform-agnostic (it only reads the page's own AST/ESM scope), so
     // run it for every platform Thally migrates from.
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
-      // Math must be protected before the AST-based brace escaper runs:
-      // raw `$$\begin{align*}...\end{align*}$$` crashes that parser outright
-      // (see `protectMathBlocks`), which is what excluded these pages
-      // before this ran.
-      const protectedMath = protectMathBlocks(raw)
+      // Heading custom-ids and math must both be protected before the
+      // AST-based brace escaper runs: either raw `## Title {#custom-id}` or
+      // `$$\begin{align*}...\end{align*}$$` crashes that parser outright
+      // (see `stripMdxHeadingCustomIds`/`protectMathBlocks`), which is what
+      // excluded these pages before this ran.
+      const strippedHeadingIds = stripMdxHeadingCustomIds(raw)
+      if (strippedHeadingIds.converted) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: "A heading's custom `{#id}` anchor has no equivalent in Thally yet; it was dropped and the heading text was kept.",
+          source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
+        })
+      }
+      const protectedMath = protectMathBlocks(strippedHeadingIds.body)
       if (protectedMath.converted) {
         warnings.push({
           code: 'unsupported-config',

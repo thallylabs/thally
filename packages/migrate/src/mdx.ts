@@ -490,6 +490,55 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
   }
 }
 
+/** A heading line ending in Docusaurus/Mintlify-style custom-id syntax (`## Title {#custom-id}`). */
+const HEADING_CUSTOM_ID = /^(#{1,6}\s+.*?)\s*\{#[A-Za-z0-9_-]+\}\s*$/
+
+/**
+ * Strip a heading's trailing `{#custom-id}` anchor-id syntax (a convention
+ * several Markdown/MDX platforms support, including live crewAI docs, e.g.
+ * `### Memory & embedder config {#memory-embedder-config}`). MDX always
+ * evaluates `{...}` as a JS expression, and `#custom-id` isn't valid
+ * JavaScript, so this crashes `@mdx-js/mdx`'s parser outright — before
+ * `escapeFernLiteralBraces` below even gets a chance to run (that function
+ * needs a successful parse to find the expression node in the first place)
+ * — silently excluding the whole page. Thally has no custom-heading-id
+ * feature to preserve the id for, so the id is dropped and the heading text
+ * kept; this is a plain line scan (not an MDX parse, which is exactly what
+ * the source can't survive yet) that tracks fenced code blocks so a real
+ * code sample's own `{#...}`-shaped text is never touched.
+ */
+export function stripMdxHeadingCustomIds(raw: string): { body: string; converted: boolean } {
+  const { front, body } = splitFrontmatterBlock(raw)
+  const lines = body.split(/\r\n|\r|\n/)
+  const output: Array<string> = []
+  let inFence = false
+  let fenceToken = ''
+  let converted = false
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (inFence) {
+      if (trimmed.startsWith(fenceToken)) inFence = false
+      output.push(line)
+      continue
+    }
+    const fenceOpen = FENCE_OPEN.exec(trimmed)
+    if (fenceOpen) {
+      inFence = true
+      fenceToken = fenceOpen[1].slice(0, 3)
+      output.push(line)
+      continue
+    }
+    const match = HEADING_CUSTOM_ID.exec(line)
+    if (match) {
+      output.push(match[1])
+      converted = true
+    } else {
+      output.push(line)
+    }
+  }
+  return { body: front + output.join('\n'), converted }
+}
+
 export function escapeFernLiteralBraces(raw: string): string {
   // Never touch the YAML frontmatter block: its `{...}` values (e.g. a
   // description containing a literal brace) are YAML scalars, not MDX
