@@ -831,21 +831,17 @@ function scanFiles(root: string, confinementRoot: string = root, warnings?: Arra
 }
 
 /**
- * When a `scanFiles` walk (run with a `rank` function) found more than
- * `MAX_SOURCE_FILES` files, keep the highest-priority `MAX_SOURCE_FILES` of
- * them and drop the rest, emitting one warning naming how many files were
- * dropped and — for Mintlify — which versions they belonged to. `rank`
- * comes from `referenceOrder` (navigation traversal order: default version
- * before non-default, newest non-default before older, per
- * `projectMintlifyNavigation`'s version sort), so referenced pages always
- * win over unreferenced ones, and within referenced pages the default
- * version's own pages always win over other versions'.
+ * Applies the `MAX_SOURCE_FILES` budget to one homogeneous group (either
+ * documentation pages or assets — see `selectFilesWithinBudget`), keeping
+ * the highest-priority files and emitting one warning naming how many were
+ * dropped and — for Mintlify — which versions they belonged to.
  */
-function selectFilesWithinBudget(
+function selectGroupWithinBudget(
   scanned: Array<ScannedFile>,
   rank: (relativePath: string) => number,
   warnings: Array<MigrationWarning> | undefined,
   allVersionPrefixes: ReadonlySet<string>,
+  label: string,
 ): Array<ScannedFile> {
   if (scanned.length <= MAX_SOURCE_FILES) return scanned
   const ranked = scanned
@@ -860,11 +856,44 @@ function selectFilesWithinBudget(
     }
     warnings.push({
       code: 'limit-reached',
-      message: `Repository discovery stopped at ${MAX_SOURCE_FILES} files; ${dropped.length} lower-priority file(s) were dropped`
+      message: `Repository discovery stopped at ${MAX_SOURCE_FILES} ${label}(s); ${dropped.length} lower-priority ${label}(s) were dropped`
         + (droppedVersions.size > 0 ? ` (versions: ${[...droppedVersions].join(', ')})` : '') + '.',
     })
   }
   return ranked.slice(0, MAX_SOURCE_FILES).map(({ file }) => file)
+}
+
+/**
+ * When a `scanFiles` walk (run with a `rank` function) found more than
+ * `MAX_SOURCE_FILES` files, keep the highest-priority files and drop the
+ * rest. `rank` comes from `referenceOrder` (navigation traversal order:
+ * default version before non-default, newest non-default before older, per
+ * `projectMintlifyNavigation`'s version sort), so referenced pages always
+ * win over unreferenced ones, and within referenced pages the default
+ * version's own pages always win over other versions'.
+ *
+ * Assets get their own `MAX_SOURCE_FILES` budget, separate from pages: a
+ * repository with more than `MAX_SOURCE_FILES` navigation-referenced pages
+ * (e.g. crewAI's ~40 Mintlify versions) would otherwise fill the entire
+ * shared budget with pages before a single image is ever considered,
+ * since `rank` only orders *pages* (assets always sort last, at
+ * `Number.MAX_SAFE_INTEGER` — see `discoveryRank` in `migrateRepository`)
+ * — starving every asset even though the asset budget
+ * (`MAX_ASSET_BYTES`/`MAX_TOTAL_ASSET_BYTES`) was never reached.
+ */
+function selectFilesWithinBudget(
+  scanned: Array<ScannedFile>,
+  rank: (relativePath: string) => number,
+  warnings: Array<MigrationWarning> | undefined,
+  allVersionPrefixes: ReadonlySet<string>,
+): Array<ScannedFile> {
+  const isAsset = (file: ScannedFile): boolean => ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())
+  const assetFiles = scanned.filter(isAsset)
+  const otherFiles = scanned.filter((file) => !isAsset(file))
+  return [
+    ...selectGroupWithinBudget(otherFiles, rank, warnings, allVersionPrefixes, 'file'),
+    ...selectGroupWithinBudget(assetFiles, rank, warnings, allVersionPrefixes, 'asset'),
+  ]
 }
 
 /**

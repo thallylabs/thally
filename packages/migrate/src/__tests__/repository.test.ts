@@ -1214,6 +1214,34 @@ describe('Mintlify repository migration', () => {
       message: expect.stringMatching(/dropped.*v1/s),
     }))
   }, 30_000)
+
+  // Regression test for the bug fixed alongside the file-cap prioritization
+  // above: pages and assets used to share one MAX_SOURCE_FILES budget, so a
+  // Mintlify project with more navigation-referenced *pages* than the
+  // budget filled the whole budget with pages before a single asset was
+  // ever considered — even though the asset was well within its own
+  // MAX_ASSET_BYTES/MAX_TOTAL_ASSET_BYTES limits.
+  it('still copies a referenced asset when navigation-referenced pages alone exceed the file budget', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-asset-budget-'))
+    mkdirSync(join(root, 'en'), { recursive: true })
+    mkdirSync(join(root, 'images'), { recursive: true })
+    const pageIds = Array.from({ length: 5001 }, (_, index) => `en/page-${index}`)
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: pageIds }] }] },
+    }))
+    for (const id of pageIds) {
+      const isFirst = id === pageIds[0]
+      writeFileSync(join(root, `${id}.mdx`), `---\ntitle: ${id}\n---\n\n${
+        isFirst ? '![Diagram](/images/diagram.png)' : 'Filler page.'
+      }`)
+    }
+    writeFileSync(join(root, 'images', 'diagram.png'), 'fake-png-bytes')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.assets.map((asset) => asset.path)).toContain('images/diagram.png')
+  }, 30_000)
 })
 
 function docusaurusFixture(sidebarSource?: string): string {
