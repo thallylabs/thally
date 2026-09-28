@@ -2007,39 +2007,43 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // An *unreferenced* page (a real file Mintlify still serves by its own
   // file-based routing even though no sidebar entry points at it, e.g.
   // crewAI's `tools/web-scraping/firecrawlsearchtool.mdx`) used to get the
-  // exact same flat priority regardless of which version it belonged to, so
-  // when a repository's total unreferenced-page count alone exceeds the
-  // budget, orphan pages from the *default* version could be dropped in
-  // favor of ones from long-superseded versions purely by scan order. Rank
-  // orphans by their own version's priority too — the same order their
-  // *referenced* siblings already got, derived from the lowest referenced
-  // index found under each version prefix — so a version's orphan pages
-  // never lose to another, lower-priority version's, while every orphan
-  // still loses to every referenced page (all referenced indices stay below
-  // `orphanRankFloor`).
-  const orphanVersionRank = new Map<string, number>()
-  if (referenceOrder.size > 0 && allVersionPrefixes.size > 0) {
-    const earliestReferencedIndexByVersion = new Map<string, number>()
-    for (const [key, index] of referenceOrder) {
-      const versionPrefix = key.split('/', 1)[0]
-      if (!allVersionPrefixes.has(versionPrefix)) continue
-      const current = earliestReferencedIndexByVersion.get(versionPrefix)
-      if (current === undefined || index < current) earliestReferencedIndexByVersion.set(versionPrefix, index)
-    }
-    const orderedVersions = [...allVersionPrefixes].sort((left, right) => {
-      const leftIndex = earliestReferencedIndexByVersion.get(left) ?? Number.MAX_SAFE_INTEGER
-      const rightIndex = earliestReferencedIndexByVersion.get(right) ?? Number.MAX_SAFE_INTEGER
-      return leftIndex - rightIndex
-    })
-    orderedVersions.forEach((versionPrefix, rank) => orphanVersionRank.set(versionPrefix, rank))
+  // exact same flat lowest priority regardless of which version it belonged
+  // to. Ranking it just after a single *global* floor (every referenced
+  // page, from every version) isn't enough to fix that: a repository whose
+  // total *referenced*-page count alone already exceeds the budget (e.g.
+  // crewAI's ~40 versions x ~180 pages each) would still starve every
+  // orphan, including the default version's own, since literally every
+  // referenced page from every version would still outrank it. Instead,
+  // each orphan is ranked right after the *last* referenced page found
+  // under its own version+locale block — traversal is contiguous per
+  // (language, version) pair (a whole version's pages, referenced and its
+  // own orphans together, are visited before the next version starts, and
+  // a whole language's versions before the next language's) — so grouping
+  // by version alone (dropping the locale segment) would still pool an
+  // English orphan's ceiling together with, say, Arabic's or Korean's much
+  // later-traversed pages under the same version identifier. Keying by the
+  // first two path segments (version, then locale) — rather than requiring
+  // an exact match against `allVersionPrefixes` (the `version:` label
+  // declared in config) — also keeps this working even when a version's
+  // declared label and its actual directory prefix disagree in spelling or
+  // case (e.g. crewAI's own `"version": "Edge"` label for its lowercase
+  // `edge/` directory): what matters for contiguity is purely the directory
+  // structure real pages were discovered under, not the label text. A
+  // version's orphans land immediately behind that same version+locale's
+  // own referenced pages, never behind another locale's or version's.
+  const lastReferencedIndexByVersionLocale = new Map<string, number>()
+  for (const [key, index] of referenceOrder) {
+    const blockKey = key.split('/').slice(0, 2).join('/')
+    const current = lastReferencedIndexByVersionLocale.get(blockKey)
+    if (current === undefined || index > current) lastReferencedIndexByVersionLocale.set(blockKey, index)
   }
-  const orphanRankFloor = referenceOrder.size + 1
   const discoveryRank = referenceOrder.size > 0
     ? (relativePath: string): number => {
         const referencedIndex = referenceOrder.get(normalizedReferenceKey(relativePath))
         if (referencedIndex !== undefined) return referencedIndex
-        const versionRank = orphanVersionRank.get(relativePath.split('/', 1)[0])
-        return versionRank !== undefined ? orphanRankFloor + versionRank : Number.MAX_SAFE_INTEGER
+        const blockKey = relativePath.split('/').slice(0, 2).join('/')
+        const versionCeiling = lastReferencedIndexByVersionLocale.get(blockKey)
+        return versionCeiling !== undefined ? versionCeiling + 1 : Number.MAX_SAFE_INTEGER
       }
     : undefined
   const scannedFiles = scanFiles(contentRoot, repositoryDir, warnings, discoveryRank)
