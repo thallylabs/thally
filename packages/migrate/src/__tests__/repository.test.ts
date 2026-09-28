@@ -1468,6 +1468,27 @@ describe('Docusaurus repository migration', () => {
     expect(page.body).toContain('<a id="custom-guide-id"></a>')
   })
 
+  it("rewrites a link's #fragment to Thally's lowercase heading slug when the source used a case-preserved id (live Docusaurus renders a heading's id with case intact; Thally always lowercases it)", () => {
+    const repositoryDir = docusaurusFixture()
+    writeFileSync(join(repositoryDir, 'docs', 'api', '01-auth.md'), '---\ntitle: Authentication\nsidebar_position: 1\n---\n\n## Using AI Agents With Cypress\n\nDetails.')
+    writeFileSync(join(repositoryDir, 'docs', 'guide', '02-faq.md'), [
+      '---',
+      'title: FAQ',
+      '---',
+      '',
+      '[See the section](../api/01-auth.md#Using-AI-Agents-With-Cypress)',
+      '',
+      'Self link too: [here](#Self-Section)',
+      '',
+      '## Self Section',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    const faq = bundle.pages.find((page) => page.body.includes('See the section'))!
+    expect(faq).toBeDefined()
+    expect(faq.body).toContain('(/api/auth#using-ai-agents-with-cypress)')
+    expect(faq.body).toContain('(#self-section)')
+  })
+
   it('discovers monorepo projects, static external wrappers, aliases, plugins, and literal index slugs', () => {
     const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-monorepo-'))
     const siteRoot = join(repositoryDir, 'packages', 'website')

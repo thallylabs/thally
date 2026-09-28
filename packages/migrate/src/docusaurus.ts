@@ -188,6 +188,36 @@ function sourceReferenceKey(value: string): string {
 }
 
 /**
+ * Mirrors `slugify` in packages/core/src/slugify.ts — the same function
+ * Thally's MDX renderer uses to derive a heading's `id`. Kept duplicated
+ * here (rather than an inter-package dependency) since it's a single pure
+ * one-liner.
+ */
+function headingAnchorSlug(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+}
+
+const EXPLICIT_ANCHOR_ID = /\bid=(?:"([^"]*)"|'([^']*)')/g
+
+/**
+ * Headings (and any literal `id` attribute, e.g. an `<a id="...">` inserted
+ * by heading-custom-id preservation) a migrated page actually exposes as an
+ * anchor target — used to repair a link's `#fragment` below.
+ */
+export function pageHeadingAnchors(body: string): Set<string> {
+  const anchors = new Set<string>()
+  for (const line of body.split('\n')) {
+    const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
+    if (heading) anchors.add(headingAnchorSlug(heading[1]))
+    for (const match of line.matchAll(EXPLICIT_ANCHOR_ID)) {
+      const id = match[1] ?? match[2]
+      if (id) anchors.add(id)
+    }
+  }
+  return anchors
+}
+
+/**
  * Rewrite Docusaurus file/doc-id links after every final slug is known. This is
  * deliberately line based so examples inside fenced code remain byte-for-byte
  * source content.
@@ -196,6 +226,7 @@ export function rewriteDocusaurusLinks(
   body: string,
   current: DocusaurusPageDescriptor,
   descriptors: Array<DocusaurusPageDescriptor>,
+  pageAnchors: Map<string, Set<string>>,
 ): string {
   const routes = new Map<string, string>()
   for (const descriptor of descriptors) {
@@ -208,8 +239,24 @@ export function rewriteDocusaurusLinks(
   }
   const currentDirectory = posix.dirname(sourceReferenceKey(current.sourcePath))
 
+  // The live site (and the source repo) can render a heading's id with its
+  // original case preserved even though Thally always lowercases it (e.g.
+  // cypress-documentation's own `#Using-AI-agents-with-Cypress-UI-Coverage`
+  // for a heading with no explicit `{#id}`, live-rendered case-preserved,
+  // for a heading Thally slugs to `using-ai-agents-with-cypress-ui-coverage`).
+  // Only repair a fragment that doesn't already match a real anchor on the
+  // target page — an explicit id (case-sensitive on Thally too) must never
+  // be touched.
+  function rewriteFragment(routeId: string, fragment: string): string {
+    const anchors = pageAnchors.get(routeId)
+    if (!fragment || !anchors || anchors.has(fragment)) return fragment
+    const slug = headingAnchorSlug(fragment)
+    return anchors.has(slug) ? slug : fragment
+  }
+
   function rewriteTarget(target: string): string {
-    if (!target || target.startsWith('#') || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(target)) return target
+    if (!target || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(target)) return target
+    if (target.startsWith('#')) return `#${rewriteFragment(current.navigationId, target.slice(1))}`
     const suffixIndex = target.search(/[?#]/)
     const path = suffixIndex >= 0 ? target.slice(0, suffixIndex) : target
     const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
@@ -221,7 +268,11 @@ export function rewriteDocusaurusLinks(
         ]
     const route = candidates.map((candidate) => routes.get(candidate)).find(Boolean)
     if (!route) return target
-    return `${route === 'introduction' ? '/' : `/${route}`}${suffix}`
+    const hashIndex = suffix.indexOf('#')
+    const rewrittenSuffix = hashIndex >= 0
+      ? `${suffix.slice(0, hashIndex)}#${rewriteFragment(route, suffix.slice(hashIndex + 1))}`
+      : suffix
+    return `${route === 'introduction' ? '/' : `/${route}`}${rewrittenSuffix}`
   }
 
   let codeFence: string | null = null

@@ -28,6 +28,7 @@ import { parse as parseYaml } from 'yaml'
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, propsTargetExtractedClientComponent } from './components.js'
 
 import {
+  pageHeadingAnchors,
   projectDocusaurusNavigation,
   readDocusaurusBrandAssetPaths,
   readDocusaurusRedirects,
@@ -2598,9 +2599,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const descriptorByNavigationId = new Map(
       docusaurusDescriptors.map((descriptor) => [descriptor.navigationId, descriptor]),
     )
+    // Anchors every page actually exposes, keyed by navigationId — computed
+    // once up front (before any link rewriting) so `rewriteDocusaurusLinks`
+    // can repair a `#fragment` that only matches a target heading's slug
+    // case-insensitively or after Thally's own slugify.
+    const pageAnchors = new Map(pages.map((page) => [page.navigationId, pageHeadingAnchors(page.body)]))
     for (const page of pages) {
       const descriptor = descriptorByNavigationId.get(page.navigationId)
-      if (descriptor) page.body = rewriteDocusaurusLinks(page.body, descriptor, docusaurusDescriptors)
+      if (descriptor) page.body = rewriteDocusaurusLinks(page.body, descriptor, docusaurusDescriptors, pageAnchors)
     }
     if (docusaurusProjectRoot && !options.docusaurusSkipRedirects) {
       const redirects = readDocusaurusRedirects(docusaurusProjectRoot, warnings)
