@@ -357,3 +357,48 @@ describe('normalizeSpec circular $ref resolution', () => {
   })
 })
 
+
+describe('normalizeSpec dense $ref cycles', () => {
+  // A clique of mutually-referencing schemas (like the large cycle in a real
+  // API's object graph): every schema refs every other. Re-walking each
+  // simple path through it is factorial; memoizing per truncation context
+  // must keep it fast and produce the same path-specific placeholders.
+  const SIZE = 9
+  const schemas: Record<string, unknown> = {}
+  const paths: Record<string, unknown> = {}
+  for (let i = 0; i < SIZE; i++) {
+    const properties: Record<string, unknown> = {}
+    for (let j = 0; j < SIZE; j++) {
+      if (j !== i) properties[`to${j}`] = { $ref: `#/components/schemas/S${j}` }
+    }
+    schemas[`S${i}`] = { type: 'object', properties }
+    paths[`/s${i}`] = {
+      get: {
+        summary: `Get S${i}`,
+        responses: {
+          '200': {
+            description: 'ok',
+            content: { 'application/json': { schema: { $ref: `#/components/schemas/S${i}` } } },
+          },
+        },
+      },
+    }
+  }
+  const denseSpec = { openapi: '3.1.0', info: { title: 'Dense', version: '1.0.0' }, paths, components: { schemas } }
+
+  it('resolves every entry path with its own placeholders, and quickly', () => {
+    const started = Date.now()
+    const normalized = normalizeSpec({
+      config: { ...baseConfig, source: { type: 'inline', document: denseSpec } },
+      document: denseSpec,
+    } as unknown as ResolvedSpec)
+    expect(Date.now() - started).toBeLessThan(2000)
+
+    for (let i = 0; i < SIZE; i++) {
+      const schema = findResponseSchema(normalized, `/s${i}`)
+      const next = (i + 1) % SIZE
+      // Entered via S<i>: following to<next> then back to<i> closes the cycle on S<i>.
+      expect(schema.properties[`to${next}`].properties[`to${i}`].description).toBe(`[Circular: S${i}]`)
+    }
+  })
+})
