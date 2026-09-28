@@ -1105,29 +1105,45 @@ function parseOpenApiOperationsForLinking(content: Buffer): Array<OpenApiOperati
  * itself falls back through — an operation whose tag Mintlify computed
  * differently still won't resolve, and stays a broken link as before.
  */
-function mintlifyApiOperationLinkMap(
-  resolvedSpecs: Array<ResolvedApiSpec>,
+/** A spec bound to a tab, plus the source-platform's own route prefix its auto-generated operation pages live under (Mintlify's `directory`, Fern's section route). */
+interface ApiOperationLinkSource {
+  filename: string
+  content: Buffer
+  /** Prefix path segment(s) the source platform served its auto-generated operation pages under (no leading/trailing slash); absent or empty means "no known auto-generated prefix for this spec" and it's skipped. */
+  prefix?: string
+}
+
+function apiOperationLinkMap(
+  sources: Array<ApiOperationLinkSource>,
   docsConfig: MigrationDocsConfig,
 ): Map<string, string> {
   const map = new Map<string, string>()
   const apiTabs = docsConfig.tabs.filter((tab) => !tab.hidden && tab.api)
   apiTabs.forEach((tab, index) => {
-    const spec = resolvedSpecs.find((entry) => tab.api?.source === `/${entry.filename}`)
-    if (!spec || !spec.directory) return
+    const source = sources.find((entry) => tab.api?.source === `/${entry.filename}`)
+    if (!source || !source.prefix) return
     const specId = index === 0 ? 'default' : slugifyApiSpecId(tab.tab)
-    for (const operation of parseOpenApiOperationsForLinking(spec.content)) {
-      const tagSegment = mintlifyOperationSlugSegment(operation.tag ?? 'default')
+    for (const operation of parseOpenApiOperationsForLinking(source.content)) {
       const leaf = mintlifyOperationSlugSegment(operation.summary ?? operation.operationId ?? `${operation.method} ${operation.path}`)
-      const mintlifyPath = `${spec.directory}/${tagSegment}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
       const thallyHref = `/api/${specId}/${thallyOperationSlugSegments(operation.path, operation.method).join('/')}`
-      if (!map.has(mintlifyPath)) map.set(mintlifyPath, thallyHref)
+      // Two conventions get registered for the same operation: Mintlify
+      // nests auto-generated pages under a tag folder
+      // ("<prefix>/<tag>/<leaf>"); Fern's default layout serves them flat
+      // under the section route ("<prefix>/<leaf>") instead. Registering
+      // both costs nothing (an operation matches at most one of them in
+      // practice) and avoids guessing which convention a given source used.
+      const tagSegment = mintlifyOperationSlugSegment(operation.tag ?? 'default')
+      const tagged = `${source.prefix}/${tagSegment}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
+      const flat = `${source.prefix}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
+      if (!map.has(tagged)) map.set(tagged, thallyHref)
+      if (!map.has(flat)) map.set(flat, thallyHref)
     }
   })
   return map
 }
 
-/** Rewrite in-content links matching Mintlify's auto-generated OpenAPI operation pages to Thally's actual `/api/...` routes. Non-matching links are left untouched — still broken, but no worse than before this rewrite existed. */
-function rewriteMintlifyApiOperationLinks(body: string, linkMap: Map<string, string>): string {
+/** Rewrite in-content links matching a source platform's auto-generated OpenAPI operation pages to Thally's actual `/api/...` routes. Non-matching links are left untouched — still broken, but no worse than before this rewrite existed. */
+function rewriteApiOperationLinks(body: string, linkMap: Map<string, string>): string {
   if (linkMap.size === 0) return body
   let codeFence: string | null = null
   return body.split('\n').map((line) => {
@@ -2240,10 +2256,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // root `generators.yml` rule is in `fernOpenApiCandidateDirs`). A docs.yml
     // with no `api:` node at all falls back to the naive scan, bound to
     // whatever tab `injectOpenApiSpecs` picks for an unbound spec.
-    const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string }> = fernApiSections.length > 0
+    const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string; routeSegments?: Array<string> }> = fernApiSections.length > 0
       ? fernApiSections
       : [{ nameExplicit: false }]
-    const resolvedSpecs: Array<{ filename: string; tabLabel?: string }> = []
+    const resolvedSpecs: Array<{ filename: string; tabLabel?: string; content: Buffer; routeSegments: Array<string> }> = []
     // Two different multi-API specs commonly share a basename (Paradex's
     // prod_rest and testnet_rest both resolve to their own
     // apis/<name>/openapi/openapi.json) — track which absolute file a
@@ -2262,10 +2278,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           filename = `${prefix}${filename}`
         }
         specFilenameSources.set(filename, spec.absolutePath)
+        const specContent = readFileSync(spec.absolutePath)
         if (!assets.some((asset) => asset.path === filename)) {
-          assets.push({ path: filename, content: readFileSync(spec.absolutePath) })
+          assets.push({ path: filename, content: specContent })
         }
-        resolvedSpecs.push({ filename, tabLabel: section.tabLabel })
+        resolvedSpecs.push({ filename, tabLabel: section.tabLabel, content: specContent, routeSegments: section.routeSegments ?? [] })
         continue
       }
       if (resolution.unsupported.length > 0) {
@@ -2299,7 +2316,22 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           : `No OpenAPI/AsyncAPI spec could be found for the "${section.name}" API, because its api-name is not a valid folder name. Add the spec manually.`,
       })
     }
-    if (resolvedSpecs.length > 0) docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs)
+    if (resolvedSpecs.length > 0) {
+      docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs)
+      // Fern serves each api: section's auto-generated operation pages
+      // under that section's own route (e.g. "api-reference/messages/...")
+      // — the same shape Mintlify's `directory` scoping produces, so the
+      // same rewrite applies, keyed by the section's route instead.
+      const operationLinkMap = apiOperationLinkMap(
+        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.routeSegments.join('/') })),
+        docsConfig,
+      )
+      if (operationLinkMap.size > 0) {
+        for (const page of pages) {
+          page.body = rewriteApiOperationLinks(page.body, operationLinkMap)
+        }
+      }
+    }
   } else if (platform === 'mintlify') {
     const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings)
     for (const spec of resolvedSpecs) {
@@ -2309,10 +2341,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (resolvedSpecs.length > 0) {
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
-      const operationLinkMap = mintlifyApiOperationLinkMap(resolvedSpecs, docsConfig)
+      const operationLinkMap = apiOperationLinkMap(
+        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.directory })),
+        docsConfig,
+      )
       if (operationLinkMap.size > 0) {
         for (const page of pages) {
-          page.body = rewriteMintlifyApiOperationLinks(page.body, operationLinkMap)
+          page.body = rewriteApiOperationLinks(page.body, operationLinkMap)
         }
       }
     } else {

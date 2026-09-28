@@ -1807,6 +1807,83 @@ navigation:
     expect(bundle.site).toEqual({ name: 'Acme Docs', colors: { light: '#70E155', dark: '#008700' } })
   })
 
+  it('rewrites in-content links to Fern auto-generated operation pages to the matching Thally /api/ route', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-link-rewrite-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'rest'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Guide
+    path: guide.mdx
+  - section: API Reference
+    contents:
+      - api: REST API
+        api-name: rest
+`)
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'openapi.yml'), [
+      'openapi: 3.1.0',
+      'info: { title: REST, version: "1.0" }',
+      'paths:',
+      '  /v2/publish/{destination}:',
+      '    post:',
+      '      summary: Publish a Message',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    writeFileSync(join(fernRoot, 'guide.mdx'), [
+      '---',
+      'title: Guide',
+      '---',
+      '',
+      'See [publish](/api-reference/publish-a-message) for details.',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const guide = bundle.pages.find((page) => page.id === 'guide')
+    expect(guide?.body).toContain('[publish](/api/default/v2/publish/destination/post)')
+    expect(guide?.body).not.toContain('/api-reference/publish-a-message')
+  })
+
+  it('disambiguates two api: sections with the same tab label and a self-repeating route segment instead of a redundant "X: X" name', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-dup-tab-label-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'rest'), { recursive: true })
+    mkdirSync(join(fernRoot, 'apis', 'webhooks'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    // Both `api:` nodes are direct children of "API Reference" sections that
+    // share that exact title, so the plain distinguishing-segment fallback
+    // would title-case straight back to "API Reference" for the second one.
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - section: API Reference
+    contents:
+      - api: REST API
+        api-name: rest
+  - section: API Reference
+    contents:
+      - api: Webhooks
+        api-name: webhooks
+`)
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.json\n')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'openapi.json'), '{"openapi":"3.0.0","info":{"title":"REST","version":"1.0"},"paths":{}}')
+    writeFileSync(join(fernRoot, 'apis', 'webhooks', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.json\n')
+    writeFileSync(join(fernRoot, 'apis', 'webhooks', 'openapi.json'), '{"openapi":"3.0.0","info":{"title":"Webhooks","version":"1.0"},"paths":{}}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const apiTabs = bundle.docsConfig.tabs.filter((tab) => tab.api)
+    expect(apiTabs).toHaveLength(2)
+    const labels = apiTabs.map((tab) => tab.tab)
+    expect(new Set(labels).size).toBe(2)
+    // No tab name is the earlier redundant "API Reference: API Reference".
+    expect(labels.every((label) => !/^(.+): \1$/.test(label))).toBe(true)
+  })
+
   it('imports every Fern api: section, each bound to its own tab and spec, instead of only the first', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-multi-api-'))
     const fernRoot = join(root, 'fern')

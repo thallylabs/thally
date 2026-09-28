@@ -651,7 +651,22 @@ export function projectFernNavigation(input: {
       return section
     }
     const distinguishingSegment = section.routeSegments.at(-1)
-    const tabLabel = distinguishingSegment ? `${section.tabLabel}: ${titleCase(distinguishingSegment)}` : section.tabLabel
+    let tabLabel = distinguishingSegment ? `${section.tabLabel}: ${titleCase(distinguishingSegment)}` : section.tabLabel
+    // The route segment can itself title-case back to the tab's own label
+    // (e.g. a section nested under a route segment also called
+    // "api-reference"), producing a redundant "API Reference: API
+    // Reference" name, or the segment-based label can still collide with
+    // another section's. Either way, fall back to a plain ordinal suffix
+    // instead of shipping a confusing or still-colliding tab name.
+    if (!tabLabel || tabLabel === `${section.tabLabel}: ${section.tabLabel}` || claimedTabLabels.has(tabLabel)) {
+      let ordinal = 2
+      let candidate = `${section.tabLabel} (${ordinal})`
+      while (claimedTabLabels.has(candidate)) {
+        ordinal += 1
+        candidate = `${section.tabLabel} (${ordinal})`
+      }
+      tabLabel = candidate
+    }
     claimedTabLabels.add(tabLabel)
     return { ...section, tabLabel }
   })
