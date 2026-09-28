@@ -2,7 +2,6 @@
  * Shared linked surfaces for Card, Tile, and their responsive groups.
  * Card and Tile intentionally share semantics while retaining distinct media scale.
  */
-import Image from 'next/image'
 import type { CSSProperties, ReactNode } from 'react'
 import { ArrowRight } from 'lucide-react'
 import { Icon, type ContentIconTone } from '@/components/mdx/content-icon'
@@ -110,7 +109,8 @@ function ContentCardSurface({ kind, title, href, icon, iconType, iconColor, colo
     >
       {showImage ? (
         <div className={cn('relative shrink-0 overflow-hidden bg-muted', horizontal ? 'h-20 w-28 rounded-lg border border-border/40' : cn('w-full', kind === 'tile' ? 'h-44' : 'aspect-[16/9]'))}>
-          <Image src={img as string} alt={title ?? ''} width={1280} height={720} sizes="(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw" className={cn('h-full w-full object-cover', kind === 'tile' && 'transition-transform duration-300 group-hover/card:scale-[1.03]')} />
+          {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary MDX card images cannot use a fixed Next loader. */}
+          <img src={img as string} alt={title ?? ''} loading="lazy" decoding="async" className={cn('h-full w-full object-cover', kind === 'tile' && 'transition-transform duration-300 group-hover/card:scale-[1.03]')} />
         </div>
       ) : null}
       <div className={cn('flex min-w-0 flex-1 flex-col', !horizontal && 'px-6 py-5', arrow && (horizontal ? 'pr-4' : 'pr-10'))}>

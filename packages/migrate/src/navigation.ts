@@ -279,6 +279,65 @@ export function readMintlifyConfig(repositoryRoot: string): Record<string, unkno
   return resolveJsonReferences(raw, configPath, repositoryRoot, new Set()) as Record<string, unknown>
 }
 
+/** One `openapi`/`asyncapi` value found anywhere in Mintlify's navigation tree. */
+export interface MintlifyApiSpecReference {
+  /** The field's raw value: a repository-relative path, or an `http(s)://` URL. */
+  value: string
+  kind: 'openapi' | 'asyncapi'
+  /** Label of the nearest enclosing tab/anchor/dropdown/product/version/menu, so the resolved spec binds to that tab specifically. Undefined at the navigation root. */
+  tabLabel?: string
+}
+
+/**
+ * Mintlify lets `openapi`/`asyncapi` appear not just at the top-level `api`
+ * key but on any navigation container (most commonly a tab:
+ * `navigation.tabs[].openapi`, but the same field is honored on an anchor,
+ * dropdown, product, version or group too) — Mintlify binds the resulting
+ * API reference to whichever tab that container renders under. This walks
+ * the whole raw navigation tree (the same shape `convertContainerToTabs`
+ * projects) collecting every occurrence, so the caller can resolve and bind
+ * each one instead of only ever seeing the single top-level `api` field.
+ */
+export function mintlifyNavigationApiReferences(config: Record<string, unknown>): Array<MintlifyApiSpecReference> {
+  const navigation = objectValue(config.navigation) ?? config
+  const references: Array<MintlifyApiSpecReference> = []
+  const containerKeys = ['tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus', 'languages'] as const
+  const nestedKeys = ['groups', 'pages'] as const
+
+  function visit(node: Record<string, unknown>, tabLabel: string | undefined): void {
+    if (typeof node.openapi === 'string' && node.openapi.trim()) {
+      references.push({ value: node.openapi.trim(), kind: 'openapi', tabLabel })
+    }
+    if (typeof node.asyncapi === 'string' && node.asyncapi.trim()) {
+      references.push({ value: node.asyncapi.trim(), kind: 'asyncapi', tabLabel })
+    }
+    for (const key of containerKeys) {
+      const entries = node[key]
+      if (!Array.isArray(entries)) continue
+      for (const entry of entries) {
+        const object = objectValue(entry)
+        if (!object) continue
+        // A nested container becomes the new binding tab only at the outer
+        // level (Mintlify tabs aren't themselves nested inside other tabs in
+        // practice, but anchors/dropdowns can sit inside a tab) — reuse the
+        // enclosing tab's label unless this container names its own.
+        visit(object, labelFor(object, tabLabel ?? 'Documentation'))
+      }
+    }
+    for (const key of nestedKeys) {
+      const entries = node[key]
+      if (!Array.isArray(entries)) continue
+      for (const entry of entries) {
+        if (typeof entry === 'string') continue
+        const object = objectValue(entry)
+        if (object) visit(object, tabLabel)
+      }
+    }
+  }
+  visit(navigation, undefined)
+  return references
+}
+
 function normalizePageRef(value: string, pathPrefix = ''): string | null {
   if (/^(?:https?:)?\/\//i.test(value) || value.startsWith('#')) return null
   let ref = localReference(value).split('?', 1)[0].replace(/^\/+/, '')
@@ -629,6 +688,88 @@ function projectedCompatibleConfig(config: Record<string, unknown>): Omit<Migrat
   }
 }
 
+const NEXT_REDIRECT_PARAM_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/**
+ * Next.js redirects compile through path-to-regexp and reject a bare `*`
+ * segment (Mintlify and Fern's trailing wildcard syntax) with "Invalid
+ * redirects found", crashing the whole build. Both platforms only document
+ * `*` as a trailing catch-all segment, so it is translated to Next's named
+ * catch-all (`/:path*`) here; a `*` anywhere else, or a syntax Next can't
+ * express, is dropped rather than guessed at. Source text already written as
+ * path-to-regexp (e.g. `:path*`) passes through unchanged: only a literal
+ * `*` segment is rewritten, and the final `isValidNextRedirectPath` check
+ * still accepts it.
+ */
+function translateRedirectWildcards(
+  source: string,
+  destination: string,
+): { source: string; destination: string } | null {
+  const sourceSegments = source.split('/')
+  const destinationSegments = destination.split('/')
+  const sourceWildcardIndex = sourceSegments.indexOf('*')
+  if (sourceWildcardIndex !== -1 && sourceWildcardIndex !== sourceSegments.length - 1) return null
+  if (sourceSegments.slice(0, -1).includes('*') || destinationSegments.slice(0, -1).includes('*')) return null
+
+  const translatedSource = [...sourceSegments]
+  if (sourceWildcardIndex !== -1) translatedSource[sourceWildcardIndex] = ':path*'
+
+  const destinationHasWildcard = destinationSegments.at(-1) === '*'
+  if (destinationHasWildcard && sourceWildcardIndex === -1) return null
+  const translatedDestination = [...destinationSegments]
+  if (destinationHasWildcard) translatedDestination[translatedDestination.length - 1] = ':path*'
+
+  const finalSource = translatedSource.join('/')
+  const finalDestination = translatedDestination.join('/')
+  if (!isValidNextRedirectPath(finalSource) || !isValidNextRedirectPath(finalDestination)) return null
+  return { source: finalSource, destination: finalDestination }
+}
+
+/** Conservative structural check for the path-to-regexp syntax Next.js redirects accept. */
+function isValidNextRedirectPath(path: string): boolean {
+  return path.split('/').every((segment) => {
+    if (segment === '' || segment === '*') return segment === ''
+    if (!segment.startsWith(':')) return !segment.includes('*') && !segment.includes(':')
+    const name = segment.endsWith('*') ? segment.slice(1, -1) : segment.slice(1)
+    return NEXT_REDIRECT_PARAM_NAME.test(name)
+  })
+}
+
+/**
+ * Shared redirect-safety check for Mintlify and Fern: both require a
+ * site-relative, `/`-rooted source and destination (Mintlify's own redirect
+ * docs give only rooted examples; neither documents an absolute-URL
+ * destination), so a protocol-relative or absolute value (`//evil.example`
+ * reads as same-scheme cross-origin to a browser and to Next.js) is rejected.
+ */
+// Matches every ASCII control character (incl. DEL, \x7f) and every Unicode
+// whitespace character (`\s` already covers the line/paragraph separators
+// U+2028/U+2029, along with tab, CR, LF, NBSP, etc).
+const UNSAFE_REDIRECT_CHARS = /[\s\x00-\x1f\x7f]/
+
+export function isRedirectPathSafe(rawSource: string, rawDestination: string): boolean {
+  for (const value of [rawSource, rawDestination]) {
+    if (!value.startsWith('/')) return false
+    if (value.startsWith('//') || value.startsWith('/\\')) return false
+    if (value.includes('\\')) return false
+    // A browser strips whitespace/control characters (tab, CR, LF, ...) from
+    // a URL before navigating, so a literal tab in `/\t/evil.example` passes
+    // every check above yet reaches the browser as `//evil.example`. Reject
+    // any such character anywhere in the raw value.
+    if (UNSAFE_REDIRECT_CHARS.test(value)) return false
+    // Browsers unescape a leading `%2f%2f`/`%5c` before treating it as `//`/`\`.
+    const lower = value.toLowerCase()
+    if (lower.startsWith('/%2f%2f') || lower.startsWith('/%5c')) return false
+  }
+  return true
+}
+
+/**
+ * Translate a redirect's trailing wildcard for Next.js, once its source and
+ * destination have already passed {@link isRedirectPathSafe}.
+ */
+export { translateRedirectWildcards }
+
 /** Convert current and legacy Mintlify navigation into Thally's schema. */
 export function projectMintlifyNavigation(
   config: Record<string, unknown>,
@@ -722,13 +863,20 @@ export function projectMintlifyNavigation(
     ? config.redirects.flatMap((value) => {
         const redirect = objectValue(value)
         if (!redirect || typeof redirect.source !== 'string' || typeof redirect.destination !== 'string') return []
-        const source = redirect.source.trim()
-        const destination = redirect.destination.trim()
-        if (!source.startsWith('/') || !destination.startsWith('/')
-          || source.startsWith('//') || destination.startsWith('//')) return []
+        const rawSource = redirect.source.trim()
+        const rawDestination = redirect.destination.trim()
+        if (!isRedirectPathSafe(rawSource, rawDestination)) return []
+        const translated = translateRedirectWildcards(rawSource, rawDestination)
+        if (!translated) {
+          warnings.push({
+            code: 'unsupported-config',
+            message: `Redirect from ${rawSource} uses a wildcard Next.js cannot express and was dropped.`,
+          })
+          return []
+        }
         return [{
-          source,
-          destination,
+          source: translated.source,
+          destination: translated.destination,
           ...(typeof redirect.permanent === 'boolean' ? { permanent: redirect.permanent } : {}),
         }]
       })
@@ -901,4 +1049,40 @@ export function buildNavigationFromPages(
 /** Exposed for repository discovery and focused unit tests. */
 export function isDocumentationExtension(filename: string): boolean {
   return ['.md', '.mdx', '.rst', '.txt'].includes(extname(filename).toLowerCase())
+}
+
+/**
+ * A source page can be excluded after navigation is projected (invalid MDX,
+ * a client-boundary function prop, a duplicate id). Its reference still sits
+ * in the projected tabs/groups at that point, across every tab, group, and
+ * locale, since the nav tree and the page list are built from the same
+ * source config independently. Drop those dangling references here so
+ * `thally check` never reports a nav entry with no backing MDX file, and
+ * drop any group left with no pages as a result. Shared by every platform's
+ * navigation projection (Mintlify, Fern, Docusaurus).
+ */
+export function pruneMissingNavigationPages(
+  config: MigrationDocsConfig,
+  availableIds: ReadonlySet<string>,
+): MigrationDocsConfig {
+  const pruneNodes = (nodes: Array<string | MigrationNavigationGroup>): Array<string | MigrationNavigationGroup> =>
+    nodes.flatMap((node): Array<string | MigrationNavigationGroup> => {
+      if (typeof node === 'string') return availableIds.has(node) ? [node] : []
+      const pages = pruneNodes(node.pages)
+      return pages.length > 0 ? [{ ...node, pages }] : []
+    })
+  const tabs = config.tabs.flatMap((tab) => {
+    const hadPages = (tab.pages?.length ?? 0) > 0 || (tab.groups?.length ?? 0) > 0
+    const pages = tab.pages ? pruneNodes(tab.pages) : undefined
+    const groups = tab.groups ? (pruneNodes(tab.groups) as Array<MigrationNavigationGroup>) : undefined
+    const hasPages = (pages?.length ?? 0) > 0 || (groups?.length ?? 0) > 0
+    // A tab that never referenced pages/groups (href-only, api-only) is untouched.
+    if (hadPages && !hasPages) return []
+    return [{
+      ...tab,
+      ...(tab.pages ? { pages } : {}),
+      ...(tab.groups ? { groups } : {}),
+    }]
+  })
+  return { ...config, tabs }
 }
