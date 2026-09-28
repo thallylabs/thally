@@ -84,6 +84,36 @@ describe('Mintlify repository route identity', () => {
     expect(bundle.docsConfig.redirects).toContainEqual({ source: '/en/guides/start', destination: '/guides/start', permanent: false })
   })
 
+  it('does not double the locale segment when a versioned layout nests it mid-path (CrewAI shape)', () => {
+    // CrewAI's real docs.json: navigation.languages[].versions[].tabs, where
+    // every version's own page references already embed the locale one
+    // level in ("edge/ar/introduction", not "ar/edge/introduction" nor
+    // plain "introduction"). Locale prefixing the raw navigationId on top
+    // of that produced "ar/edge/ar/introduction" — the locale twice.
+    const root = repository({
+      navigation: { languages: [
+        { language: 'en', default: true, versions: [
+          { version: 'edge', groups: [{ group: 'Guide', pages: ['edge/en/introduction'] }] },
+        ] },
+        { language: 'ar', versions: [
+          { version: 'edge', groups: [{ group: 'Guide', pages: ['edge/ar/introduction'] }] },
+        ] },
+      ] },
+    }, {
+      'edge/en/introduction': '# Introduction\n\nDefault overview.',
+      'edge/ar/introduction': '---\ntitle: مقدمة\n---\n\nترجمة.',
+    })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    // Shared nav is locale-independent: no "en" or "ar" baked into the ref.
+    expect(bundle.docsConfig.tabs[0].groups?.[0].pages).toEqual(['edge/introduction'])
+    // Default-locale content lives at the plain id, matching the shared nav.
+    expect(bundle.pages.some((page) => page.id === 'edge/introduction')).toBe(true)
+    // Non-default locale gets exactly one locale segment, not two.
+    const arabic = bundle.pages.find((page) => page.locale === 'ar')
+    expect(arabic).toMatchObject({ id: 'ar/edge/introduction', navigationId: 'edge/introduction' })
+    expect(bundle.pages.some((page) => page.id?.startsWith('ar/edge/ar/'))).toBe(false)
+  })
+
   it('skips invalid locale directories without discarding valid navigation', () => {
     const projected = projectMintlifyNavigation({ navigation: { languages: [
       { language: '../../escape', pages: ['unsafe'] },
