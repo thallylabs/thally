@@ -18,12 +18,12 @@ rendered application before falling back to DOM link inference.
 An `openapi` (or `asyncapi`) reference is resolved wherever Mintlify allows
 it — the top-level `api.openapi`, or on any individual
 tab/anchor/dropdown/product/version, e.g. `navigation.tabs[].openapi` — and
-binds to that exact tab, not only the first one found. A remote `https://`
-spec reference is downloaded (bounded size and time, `https://` only, and
-validated as parseable JSON/YAML before it's trusted) into `public/`; a
-non-`https` URL or a failed download produces a warning naming it instead of
-silently dropping that API tab's reference. AsyncAPI has no Thally renderer,
-so it always produces a clear warning naming the spec instead of
+binds to that exact tab, not only the first one found. Remote `http://` and
+`https://` specs are not downloaded during migration. The report names each
+remote URL and tells you to add its spec to `public/`, then set the API source
+in `docs.json` to that local path. Missing local specs also produce warnings
+instead of silently dropping that API tab's reference. AsyncAPI has no Thally
+renderer, so it always produces a clear warning naming the spec instead of
 disappearing.
 
 Docusaurus sidebars are parsed as bounded, data-only JSON5—never executed—and

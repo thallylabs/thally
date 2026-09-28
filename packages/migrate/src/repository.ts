@@ -9,8 +9,7 @@
  */
 
 import { compileSync } from '@mdx-js/mdx'
-import { execFileSync, spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import {
   existsSync,
   lstatSync,
@@ -22,8 +21,7 @@ import {
 } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { createRequire } from 'node:module'
-import { tmpdir } from 'node:os'
-import { basename, dirname, extname, join, relative, resolve as resolvePath, sep } from 'node:path'
+import { basename, dirname, extname, relative, resolve as resolvePath, sep } from 'node:path'
 
 import { parse as parseYaml } from 'yaml'
 
@@ -916,126 +914,6 @@ interface ResolvedApiSpec {
   tabLabel?: string
 }
 
-const MAX_REMOTE_SPEC_BYTES = 10_000_000
-const REMOTE_SPEC_TIMEOUT_SECONDS = 20
-
-/**
- * True when `hostname` is `localhost` or an IP literal in a loopback,
- * link-local, or private range (RFC 1918 / RFC 4193 / IPv6 loopback and
- * link-local). Used to block SSRF against internal infrastructure before
- * `downloadRemoteApiSpec` shells out to `curl`. Only literal IPs and the
- * `localhost` name are checked — this is not a DNS-rebinding defense, it
- * just stops the obvious "docs.json points at 127.0.0.1" case.
- */
-export function isPrivateOrLoopbackHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  if (host === 'localhost' || host.endsWith('.localhost')) return true
-  // IPv4 literal
-  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
-  if (v4) {
-    const octets = v4.slice(1).map(Number)
-    if (octets.some((n) => n > 255)) return false
-    const [a, b] = octets
-    if (a === 127) return true // 127.0.0.0/8 loopback
-    if (a === 10) return true // 10.0.0.0/8 private
-    if (a === 172 && b >= 16 && b <= 31) return true // 172.16.0.0/12 private
-    if (a === 192 && b === 168) return true // 192.168.0.0/16 private
-    if (a === 169 && b === 254) return true // 169.254.0.0/16 link-local
-    if (a === 0) return true // 0.0.0.0/8
-    return false
-  }
-  // IPv6 literal
-  if (host.includes(':')) {
-    if (host === '::1') return true // loopback
-    if (host === '::') return true
-    if (/^fe[89ab][0-9a-f]:/i.test(host)) return true // fe80::/10 link-local
-    if (/^f[cd][0-9a-f]{2}:/i.test(host)) return true // fc00::/7 unique local
-    // IPv4-mapped IPv6, e.g. ::ffff:127.0.0.1
-    const mapped = host.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)
-    if (mapped) return isPrivateOrLoopbackHost(mapped[1])
-    return false
-  }
-  return false
-}
-
-/**
- * Download a remote OpenAPI spec referenced from docs.json at migration
- * time — Thally's runtime only ever serves a bundled file, never a live
- * URL. https-only, bounded size and time (`curl`'s own limits; the whole
- * migration pipeline is synchronous, so this shells out rather than using
- * an async fetch), and the body must parse as JSON or YAML before it's
- * trusted as a spec. `curl` is also locked to https on every redirect hop
- * and capped at 5 redirects, so a spec host can't 30x the request down to
- * plain http or onto an internal address. Returns null on any failure so
- * the caller warns instead of silently dropping the API reference.
- */
-function downloadRemoteApiSpec(url: string): Buffer | null {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    return null
-  }
-  if (parsed.protocol !== 'https:') return null
-  if (isPrivateOrLoopbackHost(parsed.hostname)) return null
-  const outFile = join(tmpdir(), `thally-migrate-spec-${randomUUID()}`)
-  try {
-    execFileSync('curl', [
-      '-fsSL',
-      '--proto', '=https',
-      '--proto-redir', '=https',
-      '--max-redirs', '5',
-      '--max-time', String(REMOTE_SPEC_TIMEOUT_SECONDS),
-      '--max-filesize', String(MAX_REMOTE_SPEC_BYTES),
-      '-o', outFile,
-      '--', parsed.toString(),
-    ], { stdio: 'ignore', timeout: (REMOTE_SPEC_TIMEOUT_SECONDS + 10) * 1000 })
-    if (!existsSync(outFile) || !lstatSync(outFile).isFile()) return null
-    const size = lstatSync(outFile).size
-    if (size === 0 || size > MAX_REMOTE_SPEC_BYTES) return null
-    const content = readFileSync(outFile)
-    const text = content.toString('utf8')
-    try {
-      JSON.parse(text)
-    } catch {
-      try {
-        parseYaml(text)
-      } catch {
-        return null
-      }
-    }
-    return content
-  } catch {
-    return null
-  } finally {
-    try {
-      rmSync(outFile, { force: true })
-    } catch {
-      // Best-effort cleanup; a leaked temp file never reaches the migrated project.
-    }
-  }
-}
-
-/** A stable, collision-free `public/` filename for a downloaded remote spec. */
-function remoteSpecFilename(url: string, index: number, taken: Set<string>): string {
-  let base = 'remote-openapi-spec.json'
-  try {
-    const last = new URL(url).pathname.split('/').filter(Boolean).at(-1)
-    if (last) base = last.replace(/[^a-zA-Z0-9_.-]/g, '-')
-  } catch {
-    // Keep the default name.
-  }
-  if (!/\.(?:ya?ml|json)$/i.test(base)) base += '.json'
-  let candidate = base
-  let suffix = index
-  while (taken.has(candidate.toLowerCase())) {
-    candidate = `${suffix}-${base}`
-    suffix += 1
-  }
-  taken.add(candidate.toLowerCase())
-  return candidate
-}
-
 function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): Array<MintlifyApiSpecReference> {
   const api = config?.api && typeof config.api === 'object' && !Array.isArray(config.api)
     ? config.api as Record<string, unknown>
@@ -1058,9 +936,9 @@ function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): 
  * `openapi`/`asyncapi` field in `navigation` — into copyable spec bytes
  * bound to the tab that referenced them. AsyncAPI has no Thally renderer,
  * so it only ever produces a warning naming the spec. A remote `https://`
- * reference is downloaded; anything that can't be resolved (a missing
- * local file, a failed download, a non-https URL) produces a specific
- * warning rather than silently disappearing.
+ * reference is skipped with an actionable warning until the downloader can
+ * validate the connected address on every request, including redirects.
+ * Missing local files also produce warnings rather than disappearing.
  */
 function resolveMintlifyApiSpecs(
   mintlifyConfig: Record<string, unknown> | null,
@@ -1073,9 +951,7 @@ function resolveMintlifyApiSpecs(
     ...mintlifyNavigationApiReferences(mintlifyConfig),
   ]
   const seen = new Set<string>()
-  const taken = new Set(files.map((file) => basename(file.relativePath).toLowerCase()))
   const specs: Array<ResolvedApiSpec> = []
-  let remoteIndex = 0
   for (const reference of references) {
     const dedupeKey = `${reference.kind}:${reference.value}`
     if (seen.has(dedupeKey)) continue
@@ -1089,36 +965,10 @@ function resolveMintlifyApiSpecs(
       continue
     }
     if (/^https?:\/\//i.test(reference.value)) {
-      if (!/^https:\/\//i.test(reference.value)) {
-        warnings.push({
-          code: 'unsupported-config',
-          message: `The OpenAPI spec URL "${reference.value}"${tabSuffix} is not https and was not downloaded.`,
-        })
-        continue
-      }
-      let blockedHost = false
-      try {
-        blockedHost = isPrivateOrLoopbackHost(new URL(reference.value).hostname)
-      } catch {
-        blockedHost = false
-      }
-      if (blockedHost) {
-        warnings.push({
-          code: 'unsupported-config',
-          message: `The OpenAPI spec URL "${reference.value}"${tabSuffix} points at a local or private address and was not downloaded.`,
-        })
-        continue
-      }
-      const content = downloadRemoteApiSpec(reference.value)
-      if (!content) {
-        warnings.push({
-          code: 'unsupported-config',
-          message: `The remote OpenAPI spec "${reference.value}"${tabSuffix} could not be downloaded and was not migrated. Download it manually and add it to public/.`,
-        })
-        continue
-      }
-      remoteIndex += 1
-      specs.push({ filename: remoteSpecFilename(reference.value, remoteIndex, taken), content, tabLabel: reference.tabLabel })
+      warnings.push({
+        code: 'unsupported-config',
+        message: `The remote OpenAPI spec "${reference.value}"${tabSuffix} was not downloaded. Download it manually, add it to public/, and set its API source in docs.json to the local path.`,
+      })
       continue
     }
     const key = reference.value.split(/[?#]/, 1)[0].replace(/^\/+/, '').replace(/\\/g, '/')

@@ -5,7 +5,6 @@ export {
   detectRepositoryDocsDir,
   detectRepositoryPlatform,
   gitmodulePaths,
-  isPrivateOrLoopbackHost,
   migrateRepository,
   parseGitHubRepositoryUrl,
 } from './repository.js'
