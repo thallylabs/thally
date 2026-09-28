@@ -46,6 +46,7 @@ import {
   addMintlifyHomepageRedirects,
   buildNavigationFromPages,
   isDocumentationExtension,
+  mintlifyDefaultVersionPrefixes,
   mintlifyNavigationApiReferences,
   projectMintlifyNavigation,
   pruneMissingNavigationPages,
@@ -1813,6 +1814,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ? createComponentMigrator(componentRoot, repositoryDir, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
     : undefined
   let docsConfig: MigrationDocsConfig = { tabs: [] }
+  // Literal leading path segments (e.g. "v1.15.22") that identify a
+  // Mintlify `versions` container's default version — see
+  // `mintlifyDefaultVersionPrefixes`.
+  let defaultVersionPrefixes: ReadonlySet<string> = new Set()
   const referenceMap = new Map<string, { navigationId: string; locale?: string }>()
   const exactReferenceMap = new Map<string, { navigationId: string; locale?: string }>()
   const referenceOrder = new Map<string, number>()
@@ -1830,6 +1835,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const config = readMintlifyConfig(mintlifyProjectRoot ?? repositoryDir)
       if (config) {
         mintlifyConfig = config
+        defaultVersionPrefixes = mintlifyDefaultVersionPrefixes(config)
         const projected = projectMintlifyNavigation(config)
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
@@ -2221,6 +2227,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // must never introduce route patterns such as `:param` or wildcards.
       if (sourcePath !== page.id && /^[A-Za-z0-9_./-]+$/.test(sourcePath)) {
         routeAliases.push({ source: `/${sourcePath}`, destination: `/${page.id}`, permanent: false })
+      }
+      // The default version's own pages are also linked without the
+      // version segment (the live Mintlify site 307s such a link to the
+      // versioned page) — add the matching alias so those in-repo links
+      // resolve instead of dead-ending. See `mintlifyDefaultVersionPrefixes`.
+      const versionPrefix = [...defaultVersionPrefixes].find((prefix) => sourcePath === prefix || sourcePath.startsWith(`${prefix}/`))
+      if (versionPrefix) {
+        const unversioned = sourcePath.slice(versionPrefix.length).replace(/^\/+/, '')
+        if (unversioned && unversioned !== sourcePath && unversioned !== page.id
+          && /^[A-Za-z0-9_./-]+$/.test(unversioned)
+          && !routeAliases.some((redirect) => redirect.source === `/${unversioned}`)) {
+          routeAliases.push({ source: `/${unversioned}`, destination: `/${page.id}`, permanent: false })
+        }
       }
     }
     if (docusaurusDescriptor) {

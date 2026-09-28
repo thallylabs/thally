@@ -837,6 +837,42 @@ export function isRedirectPathSafe(rawSource: string, rawDestination: string): b
  */
 export { translateRedirectWildcards }
 
+/**
+ * Mintlify's `versions` container authors every version's own page paths
+ * with the version identifier as a literal leading segment (`v1.15.22/en/
+ * introduction`), including the default version's — the live site still
+ * serves that path, but also serves the same page with the segment
+ * dropped (`/en/introduction` 307s to the versioned URL). Thally has no
+ * multi-version content model of its own (each version becomes its own
+ * tab, per existing behavior), so an in-repo link authored the second way
+ * has nothing to resolve to. Collecting each `versions` container's
+ * default identifier lets the repository scanner add a matching redirect
+ * alongside the one it already adds for a page's literal source path.
+ */
+export function mintlifyDefaultVersionPrefixes(config: Record<string, unknown>): Set<string> {
+  const navigation = objectValue(config.navigation) ?? config
+  const prefixes = new Set<string>()
+  function collect(container: Record<string, unknown>): void {
+    if (Array.isArray(container.versions)) {
+      const entries = container.versions
+        .map((value) => objectValue(value))
+        .filter((value): value is Record<string, unknown> => value !== null)
+      const defaultEntry = entries.find((entry) => entry.default === true) ?? entries[0]
+      if (defaultEntry && typeof defaultEntry.version === 'string' && defaultEntry.version.trim()) {
+        prefixes.add(defaultEntry.version.trim())
+      }
+    }
+    if (Array.isArray(container.languages)) {
+      for (const value of container.languages) {
+        const language = objectValue(value)
+        if (language) collect(language)
+      }
+    }
+  }
+  collect(navigation)
+  return prefixes
+}
+
 /** Convert current and legacy Mintlify navigation into Thally's schema. */
 export function projectMintlifyNavigation(
   config: Record<string, unknown>,
