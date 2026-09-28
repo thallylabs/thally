@@ -15,7 +15,7 @@ import ts from 'typescript'
 import { unified } from 'unified'
 
 import { parseFrontmatter } from './frontmatter.js'
-import { isFunctionInitializer, normalizeHtmlComments } from './mdx.js'
+import { isFunctionInitializer, normalizeHtmlComments, preserveDocusaurusHeadingIds } from './mdx.js'
 import { resolveWithin } from './path.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
 
@@ -533,6 +533,34 @@ export function declarationsReferenceBrowserGlobal(body: string): boolean {
  * so such an import still copies instead of throwing "path escapes its
  * root" for a component this migration should have imported.
  */
+
+/**
+ * Text-only safety net for a page whose MDX can't be parsed at all (see the
+ * catch below `transform`'s own `parser.parse` call): with no AST to drive a
+ * real copy/removal, this only guarantees the page still builds by dropping
+ * a `@site/...`/relative component import and blanking its JSX usage,
+ * narrowly matching the single-binding default/named-as-default shape
+ * `SNIPPET_IMPORT_PATTERN` (repository.ts) already uses for the same reason.
+ * A bare npm-package import is left alone — that failure mode ("module not
+ * installed") is unrelated to why this page's MDX didn't parse, and this
+ * pass has no way to tell whether it is actually used anywhere.
+ */
+function neutralizeUnresolvableImportsWithoutAst(content: string, currentFile: string, warn: (message: string, source: string) => void): string {
+  const importPattern = /^import\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+(['"])((?:@site\/|\.\.?\/|\/)[^'"]+)\3\s*;?[ \t]*$/gm
+  const dropped: Array<{ name: string; specifier: string }> = []
+  let result = content.replace(importPattern, (_match, namedComponent: string | undefined, defaultComponent: string | undefined, _quote: string, specifier: string) => {
+    dropped.push({ name: (namedComponent ?? defaultComponent) as string, specifier })
+    return ''
+  })
+  for (const { name, specifier } of dropped) {
+    warn(`Component import ${JSON.stringify(specifier)} could not be resolved because this page's source doesn't compile as MDX (see the preceding warning); the import and its usage were removed rather than risking a broken build.`, currentFile)
+    result = result
+      .replace(new RegExp(`<${name}(?:\\s[^>]*)?/>`, 'g'), `{/* Removed <${name}>: unresolved during fallback migration */}`)
+      .replace(new RegExp(`<${name}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${name}>`, 'g'), `{/* Removed <${name}>: unresolved during fallback migration */}`)
+  }
+  return result
+}
+
 export function createComponentMigrator(siteRoot: string, confinementRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
   transform: (raw: string, currentFile: string) => string
   files: () => Array<RenderedMigrationFile>
@@ -836,13 +864,29 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // import that comment sits near completely untouched. `normalizeMdx`
     // converts the same syntax later in the pipeline anyway, so doing it
     // here too (on this function's own working copy) is never wasted work.
-    const content = normalizeHtmlComments(parsedFrontmatter)
+    // Likewise a Docusaurus heading's explicit `{#custom-id}` suffix is
+    // never valid MDX (a bare `{...}` in prose is always parsed as a JS
+    // expression, and no JS expression starts with `#`) regardless of
+    // platform, so converting it up front is always safe, not just for
+    // Docusaurus sources — and it must happen before this function's own
+    // parse below, or that parse throws first and this whole page's import
+    // analysis is skipped instead of just this one page's expression.
+    const content = preserveDocusaurusHeadingIds(normalizeHtmlComments(parsedFrontmatter))
     let tree: MdxNode
     try {
       tree = parser.parse(content) as MdxNode
     } catch {
       warn('Custom component analysis could not parse this MDX; its source was preserved for manual migration.', currentFile)
-      return raw
+      // The AST walk below is how every `@site/...`/relative component
+      // import normally gets copied or removed; none of that runs on a page
+      // that can't even be parsed. Left alone, an import like that survives
+      // verbatim and breaks `next build` with "Module not found" for the
+      // whole site, not just this page — the same failure mode the AST path
+      // already guards against everywhere else. This is a text-only,
+      // best-effort safety net (no AST here to drive a real copy), narrow by
+      // design: only the single-binding default/named-as-default import
+      // shape actually seen in practice, mirroring `SNIPPET_IMPORT_PATTERN`.
+      return frontmatter + neutralizeUnresolvableImportsWithoutAst(content, currentFile, warn)
     }
     const aliases = new Map<string, string>()
     const unsupportedImports = new Map<string, string>()

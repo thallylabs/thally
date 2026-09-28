@@ -1332,6 +1332,24 @@ describe('Docusaurus repository migration', () => {
     expect(bundle.pages.some((page) => page.body.includes('Wiki introduction.'))).toBe(true)
   })
 
+  it("removes an unresolvable @site component import on a page whose heading has an explicit {#id} anchor (components.ts's own MDX parse used to choke on the {#id} before it ever reached the import, leaving it in the emitted page and breaking next build)", () => {
+    const repositoryDir = docusaurusFixture()
+    writeFileSync(join(repositoryDir, 'docs', 'custom-heading-id-guide.mdx'), [
+      "import Thumbnail from '@site/src/components/Thumbnail';",
+      '',
+      '# Guide {#custom-guide-id}',
+      '',
+      '<Thumbnail src="/img/x.png" />',
+      '',
+      'Body text.',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    const page = bundle.pages.find((p) => p.body.includes('Body text.'))!
+    expect(page).toBeDefined()
+    expect(page.body).not.toContain("from '@site/src/components/Thumbnail'")
+    expect(page.body).toContain('<a id="custom-guide-id"></a>')
+  })
+
   it('discovers monorepo projects, static external wrappers, aliases, plugins, and literal index slugs', () => {
     const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-monorepo-'))
     const siteRoot = join(repositoryDir, 'packages', 'website')

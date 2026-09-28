@@ -242,6 +242,23 @@ describe('repository component migration', () => {
     expect(warnings[0].message).toContain('removed')
   })
 
+  it("neutralizes a @site component import even when the page's MDX can't be parsed at all, instead of leaving the raw import in place to break next build (safety net for the 'could not parse this MDX' fallback)", () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(join(root, 'docs'), root, warnings, 'https://github.com/example/docs')
+    // An unclosed JSX tag (a real, independent MDX parse failure Docusaurus
+    // itself tolerates less strictly) breaks remark-mdx's parse before this
+    // migration's own AST walk — the walk that would normally copy or drop
+    // the import below — ever gets a chance to run.
+    const source = "import Thumbnail from '@site/src/components/Thumbnail'\n\n<Note>\n\n<Thumbnail src=\"/img/x.png\" />\n\nUnclosed admonition."
+    const result = migrator.transform(source, join(root, 'docs', 'broken.mdx'))
+    expect(result).not.toContain("from '@site/src/components/Thumbnail'")
+    expect(result).not.toContain('<Thumbnail ')
+    expect(result).toContain('{/* Removed <Thumbnail>')
+    expect(warnings.some((w) => w.message.includes('could not parse this MDX'))).toBe(true)
+    expect(warnings.some((w) => w.message.includes('Thumbnail') && w.message.includes('removed'))).toBe(true)
+  })
+
   it('reports a dangling relative import as unresolved instead of silently shadowing it with an unrelated same-named file at the repository root (a plain nested docs/ layout, not a flattened monorepo)', () => {
     const root = fixture({
       // docs/ is the detected component (site) root, one level under the
