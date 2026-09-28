@@ -1811,6 +1811,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       skipped++
       continue
     }
+    if (page.frontmatterError) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `Frontmatter was invalid YAML (${page.frontmatterError}); the page was kept with a best-effort salvage of its metadata.`,
+        source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
+      })
+    }
     if (platform === 'mintlify' && mintlifyProjectRoot) {
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath) => {
         addAssetReference(assetPath, file.relativePath)

@@ -1328,5 +1328,6 @@ export function parseMarkdownPage(input: {
     openapi: typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined,
     body,
     source: input.source,
+    ...(parsed.error ? { frontmatterError: parsed.error } : {}),
   }
 }
