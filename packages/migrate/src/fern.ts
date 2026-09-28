@@ -345,12 +345,20 @@ function groupsFromConverted(
  * Resolve the default Fern version's navigation when no top-level nav
  * exists. `configDir` is the directory `chosen.path` is conventionally
  * relative to (the Fern root for a top-level docs.yml, or a product's own
- * directory for a product config); `fernRoot` remains the security boundary.
+ * directory for a product config); `repoRoot` (the whole repository
+ * checkout) is the security boundary. A version file is a legitimate Fern
+ * layout even when it lives outside `fern/` (e.g. a sibling `docs/`
+ * directory referenced as `../docs/index.yml`), so it may resolve anywhere
+ * inside the repository, not just under the Fern root — escapes from the
+ * repository itself are still rejected. Once a version file loads, its own
+ * `path:` entries are relative to *its* directory, not the Fern root, so
+ * `pathPrefix` is shifted there for the rest of this config's walk.
  */
 function resolveVersionedNavigation(
   config: Record<string, unknown>,
   configDir: string,
   fernRoot: string,
+  repoRoot: string,
   context: WalkContext,
 ): Record<string, unknown> {
   if (Array.isArray(config.navigation)) return config
@@ -376,13 +384,14 @@ function resolveVersionedNavigation(
   }
   if (!chosen || typeof chosen.path !== 'string') return config
   try {
-    const versionPath = resolveWithinRoot(configDir, chosen.path, fernRoot)
+    const versionPath = resolveWithinRoot(configDir, chosen.path, repoRoot)
     if (!existsSync(versionPath) || !lstatSync(versionPath).isFile()) {
       warnOnce(context, 'fern-version-not-file', `Fern version file "${chosen.path}" is not a regular file and was skipped.`)
       return config
     }
     const versionConfig = objectValue(readBoundedYaml(versionPath))
     if (!versionConfig) return config
+    context.pathPrefix = relative(fernRoot, dirname(versionPath)).replace(/\\/g, '/')
     return { ...config, navigation: versionConfig.navigation, tabs: versionConfig.tabs ?? config.tabs }
   } catch (error) {
     warnOnce(
@@ -404,11 +413,12 @@ function buildTabsFromConfig(
   rawConfig: Record<string, unknown>,
   configDir: string,
   fernRoot: string,
+  repoRoot: string,
   routePrefix: Array<string>,
   fallbackTabLabel: string,
   context: WalkContext,
 ): Array<MigrationNavigationTab> {
-  const config = resolveVersionedNavigation(rawConfig, configDir, fernRoot, context)
+  const config = resolveVersionedNavigation(rawConfig, configDir, fernRoot, repoRoot, context)
   const tabsMeta = objectValue(config.tabs) ?? {}
   const navigation = config.navigation
 
@@ -462,6 +472,7 @@ function buildTabsFromConfig(
 function projectFernProducts(
   rawProducts: Array<unknown>,
   fernRoot: string,
+  repoRoot: string,
   context: WalkContext,
 ): Array<MigrationNavigationTab> {
   return rawProducts.flatMap((entry) => {
@@ -503,6 +514,7 @@ function projectFernProducts(
         productConfig,
         productDir,
         fernRoot,
+        repoRoot,
         routeSegment ? [routeSegment] : [],
         label,
         context,
@@ -517,7 +529,16 @@ function projectFernProducts(
 export function projectFernNavigation(input: {
   config: Record<string, unknown>
   fernRoot: string
+  /**
+   * The whole repository checkout — the security boundary for anything a
+   * config file references (e.g. a `versions:` file living outside
+   * `fern/`). Defaults to `fernRoot` for callers with no wider repository
+   * context (e.g. unit tests), which reproduces the previous fernRoot-only
+   * confinement.
+   */
+  repoRoot?: string
 }): FernNavigationResult {
+  const repoRoot = input.repoRoot ?? input.fernRoot
   const context: WalkContext = {
     descriptors: [],
     seenNavigationIds: new Set(),
@@ -532,8 +553,8 @@ export function projectFernNavigation(input: {
   const config = input.config
   const hasProducts = Array.isArray(config.products) && config.products.length > 0 && !Array.isArray(config.navigation)
   const tabs = hasProducts
-    ? projectFernProducts(config.products as Array<unknown>, input.fernRoot, context)
-    : buildTabsFromConfig(config, input.fernRoot, input.fernRoot, [], 'Documentation', context)
+    ? projectFernProducts(config.products as Array<unknown>, input.fernRoot, repoRoot, context)
+    : buildTabsFromConfig(config, input.fernRoot, input.fernRoot, repoRoot, [], 'Documentation', context)
 
   if (tabs.length === 0) {
     context.warnings.push({

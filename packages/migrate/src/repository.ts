@@ -1775,6 +1775,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let mintlifyConfig: Record<string, unknown> | null = null
   let fernRawConfig: Record<string, unknown> | null = null
   let fernApiSections: Array<FernApiSection> = []
+  // sourcePaths of Fern descriptors that resolve outside fern/ (from a
+  // `versions:` file living in a sibling directory) — resolved directly,
+  // below, since the ordinary fern/-rooted scan can't reach them.
+  const fernExternalSourcePaths = new Set<string>()
 
   if (platform === 'mintlify') {
     try {
@@ -1808,7 +1812,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const fernConfig = readFernConfig(fernProjectRoot)
       if (fernConfig) {
         fernRawConfig = fernConfig.config
-        const projected = projectFernNavigation({ config: fernConfig.config, fernRoot: fernProjectRoot })
+        const projected = projectFernNavigation({ config: fernConfig.config, fernRoot: fernProjectRoot, repoRoot: repositoryDir })
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
         fernApiSections = projected.apiSections
@@ -1818,6 +1822,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           const exactKey = exactReferenceKey(descriptor.sourcePath)
           if (!exactReferenceMap.has(exactKey)) exactReferenceMap.set(exactKey, { navigationId: descriptor.navigationId })
           if (!referenceOrder.has(key)) referenceOrder.set(key, index)
+          if (descriptor.sourcePath.startsWith('../')) fernExternalSourcePaths.add(descriptor.sourcePath)
         }
       }
     } catch (error) {
@@ -1851,6 +1856,29 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const files = mintignoreMatcher
     ? scanFiles(contentRoot, repositoryDir, warnings).filter((file) => !mintignoreMatcher.ignores(file.relativePath))
     : scanFiles(contentRoot, repositoryDir, warnings)
+  // A Fern `versions:` file may live outside fern/ (a sibling `docs/`
+  // directory) and its own pages resolve relative to it, so their
+  // sourcePath (e.g. `../docs/pages/x.mdx`) falls outside the fern/-rooted
+  // scan above. Resolve exactly those referenced files directly, rather
+  // than rescanning the whole repository (which would also shift every
+  // asset's firstSegment and break the fern/-relative asset-bucket
+  // detection below).
+  if (platform === 'fern' && fernProjectRoot) {
+    const discovered = new Set(files.map((file) => file.relativePath))
+    for (const sourcePath of fernExternalSourcePaths) {
+      if (discovered.has(sourcePath)) continue
+      try {
+        const absolutePath = resolveWithinRoot(fernProjectRoot, sourcePath, repositoryDir)
+        if (existsSync(absolutePath) && lstatSync(absolutePath).isFile()) {
+          files.push({ absolutePath, relativePath: sourcePath })
+          discovered.add(sourcePath)
+        }
+      } catch {
+        // Traversal escaping the repository itself; leave unresolved so the
+        // existing "did not resolve to a source page" warning fires below.
+      }
+    }
+  }
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
   // Which pages reference which asset (by its normalized copy-destination

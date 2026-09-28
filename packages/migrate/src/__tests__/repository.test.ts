@@ -1665,6 +1665,39 @@ describe('Fern repository migration', () => {
     expect(projected.warnings.some((warning) => warning.message.includes('could not be read'))).toBe(true)
   })
 
+  it('resolves a Fern version file living outside fern/ (a legitimate sibling docs/ layout) and imports its pages', () => {
+    // NVIDIA-NeMo/Guardrails' real layout: fern/docs.yml declares
+    // `versions: [{ path: ../docs/index.yml }]`, a sibling of fern/ rather
+    // than a file under it. Previously this failed outright ("Migration
+    // path escapes its root") because the version file was confined to
+    // fern/ instead of the whole repository checkout.
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-versions-sibling-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(fernRoot, { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), 'versions:\n  - version: v1\n    path: ../docs/index.yml\n    default: true\n')
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'index.yml'), 'navigation:\n  - page: Welcome\n    path: welcome.mdx\n')
+    writeFileSync(join(root, 'docs', 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello from outside fern/.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.warnings.some((warning) => warning.message.includes('escapes its root'))).toBe(false)
+    expect(bundle.warnings.some((warning) => warning.message.includes('could not be read'))).toBe(false)
+    const welcome = bundle.pages.find((page) => page.id === 'welcome')
+    expect(welcome?.body).toContain('Hello from outside fern/.')
+  })
+
+  it('still rejects a Fern version file that escapes the repository checkout itself', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-versions-escape-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(fernRoot, { recursive: true })
+    const config = { versions: [{ version: 'v1', path: '../../outside.yml', default: true }] }
+    const projected = projectFernNavigation({ config, fernRoot, repoRoot: root })
+    expect(projected.warnings.some((warning) =>
+      warning.message.includes('could not be read') && warning.message.includes('escapes its root'))).toBe(true)
+  })
+
   it('imports every product from a `products:` docs.yml as its own top-level, route-prefixed tab', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-products-'))
     mkdirSync(join(root, 'products', 'sdks'), { recursive: true })
