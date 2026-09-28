@@ -1178,6 +1178,42 @@ describe('Mintlify repository migration', () => {
       message: expect.stringContaining('Git LFS pointer'),
     }))
   })
+
+  // Creating 5,000+ fixture files and migrating them is inherently slower
+  // than the suite's default 5s per-test timeout.
+  it('keeps the default version\'s referenced pages over unreferenced ones when discovery exceeds the file budget', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-discovery-budget-'))
+    mkdirSync(join(root, 'v2', 'en'), { recursive: true })
+    mkdirSync(join(root, 'v1', 'en'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: {
+        versions: [
+          { version: 'v1', tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['v1/en/introduction'] }] }] },
+          { version: 'v2', default: true, tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['v2/en/introduction'] }] }] },
+        ],
+      },
+    }))
+    writeFileSync(join(root, 'v2', 'en', 'introduction.mdx'), '---\ntitle: Welcome v2\n---\n\nDefault version docs.')
+    writeFileSync(join(root, 'v1', 'en', 'introduction.mdx'), '---\ntitle: Welcome v1\n---\n\nOlder version docs.')
+    // Unreferenced filler pages under the non-default version, enough to
+    // push total discovery past the 5,000-file budget: the two referenced
+    // pages above must survive regardless of scan order, and the dropped
+    // filler files (all under v1/) must be named in the warning.
+    for (let index = 0; index < 5000; index++) {
+      writeFileSync(join(root, 'v1', 'en', `filler-${index}.mdx`), `---\ntitle: Filler ${index}\n---\n\nUnreferenced filler page.`)
+    }
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const pageIds = bundle.pages.map((page) => page.id)
+    expect(pageIds).toContain('v2/en/introduction')
+    expect(pageIds).toContain('v1/en/introduction')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'limit-reached',
+      message: expect.stringMatching(/dropped.*v1/s),
+    }))
+  }, 30_000)
 })
 
 function docusaurusFixture(sidebarSource?: string): string {

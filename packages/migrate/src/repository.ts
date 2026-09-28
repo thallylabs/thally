@@ -46,6 +46,7 @@ import {
   addMintlifyHomepageRedirects,
   buildNavigationFromPages,
   isDocumentationExtension,
+  mintlifyAllVersionPrefixes,
   mintlifyDefaultVersionPrefixes,
   mintlifyNavigationApiReferences,
   projectMintlifyNavigation,
@@ -729,8 +730,29 @@ interface ScannedFile {
  * against a cycle (a symlink pointing at an ancestor, or two symlinks
  * pointing at each other).
  */
-function scanFiles(root: string, confinementRoot: string = root, warnings?: Array<MigrationWarning>): Array<ScannedFile> {
+/**
+ * A generous ceiling on how many *directory entries* `scanFiles` will walk
+ * when a `rank` function is supplied (see below) — far above
+ * `MAX_SOURCE_FILES` so a repository the size of crewAI's (~28k files) is
+ * walked in full, but still bounded so a pathologically huge tree can't
+ * make discovery itself slow. Walking is cheap (no file content is read
+ * here); only the final `MAX_SOURCE_FILES` selection is expensive to get
+ * wrong.
+ */
+const MAX_RANKED_WALK_FILES = MAX_SOURCE_FILES * 20
+
+/**
+ * Scan `root` for its files. When `rank` is given, the walk isn't cut off at
+ * `MAX_SOURCE_FILES` — it continues (bounded by `MAX_RANKED_WALK_FILES`) so
+ * every file's priority can be considered before any are dropped; the
+ * caller is responsible for sorting by `rank` and trimming to
+ * `MAX_SOURCE_FILES` afterward (see `selectFilesWithinBudget`). Without
+ * `rank`, the walk stops as soon as `MAX_SOURCE_FILES` files are found, same
+ * as before.
+ */
+function scanFiles(root: string, confinementRoot: string = root, warnings?: Array<MigrationWarning>, rank?: (relativePath: string) => number): Array<ScannedFile> {
   const files: Array<ScannedFile> = []
+  const walkCap = rank ? MAX_RANKED_WALK_FILES : MAX_SOURCE_FILES
   let confinementReal: string
   try {
     confinementReal = realpathSync(confinementRoot)
@@ -748,7 +770,7 @@ function scanFiles(root: string, confinementRoot: string = root, warnings?: Arra
   // so a page inside a symlinked submodule gets a sensible id like
   // `core/overview` instead of a `../../..`-laden physical path).
   function visit(directory: string, logicalDirectory: string = directory): void {
-    if (files.length >= MAX_SOURCE_FILES) return
+    if (files.length >= walkCap) return
     let directoryReal: string
     try {
       directoryReal = realpathSync(directory)
@@ -764,7 +786,7 @@ function scanFiles(root: string, confinementRoot: string = root, warnings?: Arra
       return
     }
     for (const entry of entries) {
-      if (files.length >= MAX_SOURCE_FILES) return
+      if (files.length >= walkCap) return
       if (isIgnoredContentDirectory(entry.name)) {
         // Still skipped (`.git`, `node_modules`, ...) — but never silently:
         // warn if it turns out to hold real pages, since that's exactly the
@@ -806,6 +828,43 @@ function scanFiles(root: string, confinementRoot: string = root, warnings?: Arra
   }
   visit(root)
   return files
+}
+
+/**
+ * When a `scanFiles` walk (run with a `rank` function) found more than
+ * `MAX_SOURCE_FILES` files, keep the highest-priority `MAX_SOURCE_FILES` of
+ * them and drop the rest, emitting one warning naming how many files were
+ * dropped and — for Mintlify — which versions they belonged to. `rank`
+ * comes from `referenceOrder` (navigation traversal order: default version
+ * before non-default, newest non-default before older, per
+ * `projectMintlifyNavigation`'s version sort), so referenced pages always
+ * win over unreferenced ones, and within referenced pages the default
+ * version's own pages always win over other versions'.
+ */
+function selectFilesWithinBudget(
+  scanned: Array<ScannedFile>,
+  rank: (relativePath: string) => number,
+  warnings: Array<MigrationWarning> | undefined,
+  allVersionPrefixes: ReadonlySet<string>,
+): Array<ScannedFile> {
+  if (scanned.length <= MAX_SOURCE_FILES) return scanned
+  const ranked = scanned
+    .map((file, index) => ({ file, index, priority: rank(file.relativePath) }))
+    .sort((left, right) => left.priority - right.priority || left.index - right.index)
+  const dropped = ranked.slice(MAX_SOURCE_FILES)
+  if (warnings) {
+    const droppedVersions = new Set<string>()
+    for (const { file } of dropped) {
+      const firstSegment = file.relativePath.split('/', 1)[0]
+      if (allVersionPrefixes.has(firstSegment)) droppedVersions.add(firstSegment)
+    }
+    warnings.push({
+      code: 'limit-reached',
+      message: `Repository discovery stopped at ${MAX_SOURCE_FILES} files; ${dropped.length} lower-priority file(s) were dropped`
+        + (droppedVersions.size > 0 ? ` (versions: ${[...droppedVersions].join(', ')})` : '') + '.',
+    })
+  }
+  return ranked.slice(0, MAX_SOURCE_FILES).map(({ file }) => file)
 }
 
 /**
@@ -1818,6 +1877,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // Mintlify `versions` container's default version — see
   // `mintlifyDefaultVersionPrefixes`.
   let defaultVersionPrefixes: ReadonlySet<string> = new Set()
+  // Every version identifier declared in the config (default and
+  // non-default) — used only to name which versions' pages were dropped if
+  // discovery exceeds MAX_SOURCE_FILES; see `selectFilesWithinBudget`.
+  let allVersionPrefixes: ReadonlySet<string> = new Set()
   const referenceMap = new Map<string, { navigationId: string; locale?: string }>()
   const exactReferenceMap = new Map<string, { navigationId: string; locale?: string }>()
   const referenceOrder = new Map<string, number>()
@@ -1836,6 +1899,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (config) {
         mintlifyConfig = config
         defaultVersionPrefixes = mintlifyDefaultVersionPrefixes(config)
+        allVersionPrefixes = mintlifyAllVersionPrefixes(config)
         const projected = projectMintlifyNavigation(config)
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
@@ -1904,9 +1968,23 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const mintignoreMatcher = platform === 'mintlify' && mintlifyProjectRoot
     ? readMintignoreMatcher(mintlifyProjectRoot)
     : null
-  const files = mintignoreMatcher
-    ? scanFiles(contentRoot, repositoryDir, warnings).filter((file) => !mintignoreMatcher.ignores(file.relativePath))
-    : scanFiles(contentRoot, repositoryDir, warnings)
+  // Referenced files (found in the navigation config) are ranked ahead of
+  // unreferenced ones, in navigation traversal order — which already puts a
+  // Mintlify default version's pages before non-default versions' (and
+  // newer non-default versions before older ones); see
+  // `selectFilesWithinBudget`. Only meaningful when a nav was actually
+  // parsed (Mintlify/Fern); Docusaurus has no pre-scan reference set.
+  const discoveryRank = referenceOrder.size > 0
+    ? (relativePath: string): number => referenceOrder.get(normalizedReferenceKey(relativePath)) ?? Number.MAX_SAFE_INTEGER
+    : undefined
+  const scannedFiles = scanFiles(contentRoot, repositoryDir, warnings, discoveryRank)
+  const mintignoreFilteredFiles = mintignoreMatcher
+    ? scannedFiles.filter((file) => !mintignoreMatcher.ignores(file.relativePath))
+    : scannedFiles
+  const discoveryBudgetApplied = discoveryRank !== undefined && mintignoreFilteredFiles.length > MAX_SOURCE_FILES
+  const files = discoveryRank
+    ? selectFilesWithinBudget(mintignoreFilteredFiles, discoveryRank, warnings, allVersionPrefixes)
+    : mintignoreFilteredFiles
   // A Fern `versions:` file may live outside fern/ (a sibling `docs/`
   // directory) and its own pages resolve relative to it, so their
   // sourcePath (e.g. `../docs/pages/x.mdx`) falls outside the fern/-rooted
@@ -2314,7 +2392,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     totalAssetBytes += size
   }
 
-  if (files.length >= MAX_SOURCE_FILES) {
+  // `selectFilesWithinBudget` already emitted a detailed warning (dropped
+  // count + versions) when it ran; this generic fallback only covers the
+  // case it couldn't run (no `discoveryRank`, e.g. Docusaurus) or the rare
+  // case where later additions (Fern's external sourcePaths, above) pushed
+  // the count back over budget after the event.
+  if (!discoveryBudgetApplied && files.length >= MAX_SOURCE_FILES) {
     warnings.push({ code: 'limit-reached', message: `Repository discovery stopped at ${MAX_SOURCE_FILES} files.` })
   }
   if (platform === 'docusaurus') {

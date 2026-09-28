@@ -873,6 +873,32 @@ export function mintlifyDefaultVersionPrefixes(config: Record<string, unknown>):
   return prefixes
 }
 
+/**
+ * Every version identifier declared across all `versions` containers (not
+ * just the default one) — used to label which versions' pages were dropped
+ * when a repository exceeds the source-file discovery budget.
+ */
+export function mintlifyAllVersionPrefixes(config: Record<string, unknown>): Set<string> {
+  const navigation = objectValue(config.navigation) ?? config
+  const prefixes = new Set<string>()
+  function collect(container: Record<string, unknown>): void {
+    if (Array.isArray(container.versions)) {
+      for (const value of container.versions) {
+        const entry = objectValue(value)
+        if (entry && typeof entry.version === 'string' && entry.version.trim()) prefixes.add(entry.version.trim())
+      }
+    }
+    if (Array.isArray(container.languages)) {
+      for (const value of container.languages) {
+        const language = objectValue(value)
+        if (language) collect(language)
+      }
+    }
+  }
+  collect(navigation)
+  return prefixes
+}
+
 /** Convert current and legacy Mintlify navigation into Thally's schema. */
 export function projectMintlifyNavigation(
   config: Record<string, unknown>,
