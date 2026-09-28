@@ -2003,8 +2003,44 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // newer non-default versions before older ones); see
   // `selectFilesWithinBudget`. Only meaningful when a nav was actually
   // parsed (Mintlify/Fern); Docusaurus has no pre-scan reference set.
+  //
+  // An *unreferenced* page (a real file Mintlify still serves by its own
+  // file-based routing even though no sidebar entry points at it, e.g.
+  // crewAI's `tools/web-scraping/firecrawlsearchtool.mdx`) used to get the
+  // exact same flat priority regardless of which version it belonged to, so
+  // when a repository's total unreferenced-page count alone exceeds the
+  // budget, orphan pages from the *default* version could be dropped in
+  // favor of ones from long-superseded versions purely by scan order. Rank
+  // orphans by their own version's priority too — the same order their
+  // *referenced* siblings already got, derived from the lowest referenced
+  // index found under each version prefix — so a version's orphan pages
+  // never lose to another, lower-priority version's, while every orphan
+  // still loses to every referenced page (all referenced indices stay below
+  // `orphanRankFloor`).
+  const orphanVersionRank = new Map<string, number>()
+  if (referenceOrder.size > 0 && allVersionPrefixes.size > 0) {
+    const earliestReferencedIndexByVersion = new Map<string, number>()
+    for (const [key, index] of referenceOrder) {
+      const versionPrefix = key.split('/', 1)[0]
+      if (!allVersionPrefixes.has(versionPrefix)) continue
+      const current = earliestReferencedIndexByVersion.get(versionPrefix)
+      if (current === undefined || index < current) earliestReferencedIndexByVersion.set(versionPrefix, index)
+    }
+    const orderedVersions = [...allVersionPrefixes].sort((left, right) => {
+      const leftIndex = earliestReferencedIndexByVersion.get(left) ?? Number.MAX_SAFE_INTEGER
+      const rightIndex = earliestReferencedIndexByVersion.get(right) ?? Number.MAX_SAFE_INTEGER
+      return leftIndex - rightIndex
+    })
+    orderedVersions.forEach((versionPrefix, rank) => orphanVersionRank.set(versionPrefix, rank))
+  }
+  const orphanRankFloor = referenceOrder.size + 1
   const discoveryRank = referenceOrder.size > 0
-    ? (relativePath: string): number => referenceOrder.get(normalizedReferenceKey(relativePath)) ?? Number.MAX_SAFE_INTEGER
+    ? (relativePath: string): number => {
+        const referencedIndex = referenceOrder.get(normalizedReferenceKey(relativePath))
+        if (referencedIndex !== undefined) return referencedIndex
+        const versionRank = orphanVersionRank.get(relativePath.split('/', 1)[0])
+        return versionRank !== undefined ? orphanRankFloor + versionRank : Number.MAX_SAFE_INTEGER
+      }
     : undefined
   const scannedFiles = scanFiles(contentRoot, repositoryDir, warnings, discoveryRank)
   const mintignoreFilteredFiles = mintignoreMatcher

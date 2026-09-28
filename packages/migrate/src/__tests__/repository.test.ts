@@ -1243,6 +1243,45 @@ describe('Mintlify repository migration', () => {
 
     expect(bundle.assets.map((asset) => asset.path)).toContain('images/diagram.png')
   }, 30_000)
+
+  // Regression test for a second bug found alongside the two above: a real
+  // file Mintlify still serves by file-based routing even though nothing in
+  // the sidebar links to it (an "orphan" page, e.g. crewAI's
+  // tools/web-scraping/firecrawlsearchtool.mdx) used to get the exact same
+  // flat lowest priority regardless of which version it belonged to. When a
+  // repository's total *unreferenced* page count alone exceeds the budget,
+  // that let an older, non-default version's orphan pages crowd out the
+  // default version's own orphan pages purely by scan order.
+  it('keeps the default version\'s own unreferenced pages over an older version\'s when discovery exceeds the file budget', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-orphan-budget-'))
+    mkdirSync(join(root, 'v2', 'en'), { recursive: true })
+    mkdirSync(join(root, 'v1', 'en'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: {
+        versions: [
+          { version: 'v1', tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['v1/en/introduction'] }] }] },
+          { version: 'v2', default: true, tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['v2/en/introduction'] }] }] },
+        ],
+      },
+    }))
+    writeFileSync(join(root, 'v2', 'en', 'introduction.mdx'), '---\ntitle: Welcome v2\n---\n\nDefault version docs.')
+    writeFileSync(join(root, 'v1', 'en', 'introduction.mdx'), '---\ntitle: Welcome v1\n---\n\nOlder version docs.')
+    // A real file that exists but is never linked from the nav — Mintlify
+    // still serves it, so it must survive the budget ahead of an older
+    // version's unreferenced filler pages.
+    writeFileSync(join(root, 'v2', 'en', 'orphan.mdx'), '---\ntitle: Orphan v2\n---\n\nNot in the sidebar, but live on the site.')
+    // Enough unreferenced filler under the older, non-default version to
+    // push total discovery past the 5,000-file budget on its own.
+    for (let index = 0; index < 5000; index++) {
+      writeFileSync(join(root, 'v1', 'en', `filler-${index}.mdx`), `---\ntitle: Filler ${index}\n---\n\nUnreferenced filler page.`)
+    }
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const pageIds = bundle.pages.map((page) => page.id)
+    expect(pageIds).toContain('v2/en/orphan')
+  }, 30_000)
 })
 
 function docusaurusFixture(sidebarSource?: string): string {
