@@ -196,6 +196,7 @@ export function rewriteDocusaurusLinks(
   body: string,
   current: DocusaurusPageDescriptor,
   descriptors: Array<DocusaurusPageDescriptor>,
+  options: { sourceOrigin?: string; onExternalLink?: (target: string) => void } = {},
 ): string {
   const routes = new Map<string, string>()
   for (const descriptor of descriptors) {
@@ -214,22 +215,33 @@ export function rewriteDocusaurusLinks(
     const path = suffixIndex >= 0 ? target.slice(0, suffixIndex) : target
     const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
     const candidates = path.startsWith('/')
-      ? [sourceReferenceKey(path), sourceReferenceKey(path).replace(/^docs\//, '')]
+      ? [
+          sourceReferenceKey(path),
+          sourceReferenceKey(path).replace(/^docs\//, ''),
+          sourceReferenceKey(path).replace(/^docs\/(?:next|current|latest)\//, ''),
+        ]
       : [
           sourceReferenceKey(posix.normalize(posix.join(currentDirectory, path))),
           sourceReferenceKey(path),
         ]
     const route = candidates.map((candidate) => routes.get(candidate)).find(Boolean)
-    if (!route) return target
+    if (!route) {
+      if (path.startsWith('/') && path !== '/' && options.sourceOrigin) {
+        options.onExternalLink?.(target)
+        return new URL(target, options.sourceOrigin).toString()
+      }
+      return target
+    }
     return `${route === 'introduction' ? '/' : `/${route}`}${suffix}`
   }
 
   let codeFence: string | null = null
   return body.split('\n').map((line) => {
-    const fence = line.match(/^\s*(`{3,}|~{3,})/)
+    const fence = line.match(/^\s{0,3}(`{3,}|~{3,})/)
     if (fence) {
-      if (!codeFence) codeFence = fence[1][0]
-      else if (fence[1][0] === codeFence) codeFence = null
+      if (!codeFence) codeFence = fence[1]
+      else if (fence[1][0] === codeFence[0] && fence[1].length >= codeFence.length
+        && /^\s*$/.test(line.slice(fence[0].length))) codeFence = null
       return line
     }
     if (codeFence) return line
@@ -237,6 +249,19 @@ export function rewriteDocusaurusLinks(
       .replace(/(\]\()([^\s)]+)(?=[\s)]|$)/g, (_match, prefix: string, target: string) => `${prefix}${rewriteTarget(target)}`)
       .replace(/(\bhref=")([^"]+)(")/g, (_match, prefix: string, target: string, suffix: string) => `${prefix}${rewriteTarget(target)}${suffix}`)
   }).join('\n')
+}
+
+/** Read a static Docusaurus site origin for links outside imported docs. */
+export function readDocusaurusSiteOrigin(repositoryRoot: string): string | undefined {
+  const configPath = findDocusaurusConfigPath(repositoryRoot)
+  if (!configPath) return undefined
+  const address = readBoundedText(configPath).match(/\burl['"]?\s*:\s*(['"])(https?:\/\/[^'"]+)\1/)?.[2]
+  if (!address) return undefined
+  try {
+    return new URL(address).origin
+  } catch {
+    return undefined
+  }
 }
 
 function readBoundedText(path: string): string {
@@ -420,11 +445,16 @@ function configuredSidebarPath(repositoryRoot: string): string | null {
 }
 
 /** Read the configured/default sidebar without running the source module. */
-export function readDocusaurusSidebars(repositoryRoot: string): DocusaurusSidebars | null {
-  const configured = configuredSidebarPath(repositoryRoot)
-  const sourcePath = [configured, ...SIDEBAR_FILENAMES]
+export function readDocusaurusSidebars(repositoryRoot: string, versionedSidebarPath?: string): DocusaurusSidebars | null {
+  // Archived versions carry their own sidebar file. Resolve it within the
+  // project and parse it as data; never load source-controlled code.
+  const configured = versionedSidebarPath ?? configuredSidebarPath(repositoryRoot)
+  const sourcePath = [configured, ...(versionedSidebarPath ? [] : SIDEBAR_FILENAMES)]
     .filter((value): value is string => Boolean(value))
-    .find((candidate) => existsSync(resolveWithin(repositoryRoot, candidate)))
+    .find((candidate) => {
+      const path = resolveWithin(repositoryRoot, candidate)
+      return existsSync(path) && lstatSync(path).isFile()
+    })
   if (!sourcePath) return null
   const absolutePath = resolveWithin(repositoryRoot, sourcePath)
   const source = readBoundedText(absolutePath)
