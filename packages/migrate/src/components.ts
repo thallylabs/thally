@@ -846,6 +846,12 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     }
     const aliases = new Map<string, string>()
     const unsupportedImports = new Map<string, string>()
+    // Local names dropped by the lowercase-named `.mdx?` import case below
+    // (Docusaurus' auto-generated per-file `toc` export, merged into
+    // another page's own `toc` via `...viewsToc`) — collected here so the
+    // spread-removal pass after the main walk can find every one of them,
+    // regardless of which esmNode declared the import vs. used it.
+    const droppedMdxDataBindings = new Set<string>()
     const edits: Array<Replacement> = []
     const declarations: Array<{ start: number; end: number; source: string }> = []
     const moduleImports: Array<string> = []
@@ -980,7 +986,29 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           }
           continue
         }
-        if (/\.mdx?$/.test(specifier)) continue
+        if (/\.mdx?$/.test(specifier)) {
+          // A capitalized default/named import here is a JSX-usable
+          // partial (`import Partial from './x.mdx'`, `<Partial />`) — the
+          // earlier text-level snippet-inlining pass (`inlineMdxSnippets`,
+          // repository.ts) already resolved and removed those before this
+          // AST walk ever runs, so reaching this point with only lowercase
+          // bindings means every one is a plain named value that pass
+          // can't touch: Docusaurus' own convention of auto-generating a
+          // `toc` export per `.mdx` file, commonly re-exported by spreading
+          // it into another page's `toc` (`export const toc = [...viewsToc,
+          // ...]`). The migrated project has no such module to import from
+          // ("Module not found"), and no way to compute the value, so the
+          // import and that one safe, common usage shape are both removed;
+          // anything shaped differently is left for the npm-style
+          // expression-reference check below to exclude the page instead of
+          // guessing at a replacement.
+          if (bindings.length > 0 && bindings.every((binding) => !/^[A-Z]/.test(binding.local))) {
+            warn(`MDX import of ${unavailableImportLabel(rawSpecifier)} is not a component and isn't available in the migrated project; the import was removed, along with any '...${bindings.map((binding) => binding.local).join(", '...")}' spread of it.`, currentFile)
+            edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+            for (const binding of bindings) droppedMdxDataBindings.add(binding.local)
+          }
+          continue
+        }
         // A binary asset (`docusaurusLogo.svg`, a `.docx` handout, ...) is
         // never really "a component" — it's fine bound to any identifier
         // shape and referenced from an expression (`src={docusaurusLogo}`),
@@ -1124,6 +1152,36 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             warn(`Component import ${JSON.stringify(rawSpecifier)} could not be copied and was removed: ${error instanceof Error ? error.message : 'unsupported dependency'}. Its usage on this page was neutralized.`, currentFile)
           }
         }
+      }
+    }
+
+    // Remove every `...name` spread of a dropped MDX data import (see the
+    // lowercase-binding `.mdx?` case above) from any array literal it
+    // appears in, so the export that merges it (`export const toc =
+    // [...viewsToc, ...]`) stays valid instead of throwing on the now-
+    // undefined identifier. Only the spread element itself is touched
+    // (plus one adjacent comma, so the array literal it lived in stays
+    // syntactically valid); a bare reference to the same name elsewhere is
+    // intentionally left alone for `hasExpressionReference`'s excluded-page
+    // path elsewhere in this function to catch instead of guessing at it.
+    if (droppedMdxDataBindings.size > 0) {
+      for (const node of esmNodes) {
+        if (node.value === undefined || node.position?.start.offset === undefined) continue
+        const nodeStart = node.position.start.offset
+        const nodeText = node.value
+        const ast = sourceFile(nodeText, 'inline.tsx')
+        function stripDroppedSpreads(inner: ts.Node): void {
+          if (ts.isSpreadElement(inner) && ts.isIdentifier(inner.expression) && droppedMdxDataBindings.has(inner.expression.text)) {
+            const start = nodeStart + inner.getStart(ast)
+            let end = nodeStart + inner.end
+            const following = nodeText.slice(inner.end).match(/^\s*,/)
+            if (following) end += following[0].length
+            edits.push({ start, end, value: '' })
+            return
+          }
+          ts.forEachChild(inner, stripDroppedSpreads)
+        }
+        for (const statement of ast.statements) stripDroppedSpreads(statement)
       }
     }
 

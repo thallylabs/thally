@@ -215,6 +215,33 @@ describe('repository component migration', () => {
     expect(warnings).toEqual([])
   })
 
+  it("drops a named (non-component) .mdx import and its spread usage instead of leaving an unresolvable module reference (cypress-documentation's views.mdx: `import { toc as viewsToc } from '@site/docs/partials/_views.mdx'`, merged via `export const toc = [...viewsToc, ...]`)", () => {
+    const root = fixture({
+      'website/docusaurus.config.js': 'module.exports = {}',
+      'docs/partials/_views.mdx': '## Why use views?\n\nSome content.',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(join(root, 'website'), root, warnings, 'https://github.com/example/docs')
+    const source = [
+      "import { toc as viewsToc } from '@site/docs/partials/_views.mdx'",
+      '',
+      'export const toc = [',
+      '  ...viewsToc,',
+      "  { value: 'See also', id: 'See-also', level: 2 },",
+      ']',
+      '',
+      '# Views',
+    ].join('\n')
+    const result = migrator.transform(source, join(root, 'docs', 'views.mdx'))
+    expect(result).not.toContain("from '@site/docs/partials/_views.mdx'")
+    expect(result).not.toContain('viewsToc')
+    expect(result).toContain("export const toc = [")
+    expect(result).toContain("{ value: 'See also', id: 'See-also', level: 2 }")
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toContain('_views.mdx')
+    expect(warnings[0].message).toContain('removed')
+  })
+
   it('reports a dangling relative import as unresolved instead of silently shadowing it with an unrelated same-named file at the repository root (a plain nested docs/ layout, not a flattened monorepo)', () => {
     const root = fixture({
       // docs/ is the detected component (site) root, one level under the
