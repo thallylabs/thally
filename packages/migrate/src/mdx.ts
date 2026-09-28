@@ -140,6 +140,16 @@ const JS_LITERAL_KEYWORDS = new Set(['true', 'false', 'null', 'undefined'])
 // (the thing this whole pass is trying to leave alone) never happens to
 // look like one, so escaping stays conservative either way.
 const BARE_IDENTIFIER_PATH = /^[\p{ID_Start}$_][\p{ID_Continue}$‌‍]*(?:\.[\p{ID_Start}$_][\p{ID_Continue}$‌‍]*)*$/u
+// Double-mustache templating syntax (`{{now}}`, `{{customer}}`) is common in
+// prose copied from other platforms (Liquid/Handlebars-style variable
+// interpolation). MDX parses the outer `{...}` as an expression container and
+// the inner `{now}` as a JS object-literal shorthand property, so the node's
+// value looks like `{now}` — a single bare identifier wrapped in its own
+// braces — never a real JSX prop (which appears inside an attribute, not
+// standalone body/flow text). Matching this shape lets the same "leave a
+// $ref alone unless we can hint an undeclared reference" caution apply to
+// double-brace template text as it already does to single-brace text.
+const BARE_OBJECT_SHORTHAND = /^\{\s*([\p{ID_Start}$_][\p{ID_Continue}$‌‍]*)\s*\}$/u
 /**
  * Pure JS built-ins that exist identically in the server and browser render.
  * Only a dotted path rooted at one (`{Math.PI}`, `{Number.MAX_SAFE_INTEGER}`)
@@ -562,9 +572,16 @@ export function escapeFernLiteralBraces(raw: string): string {
       const end = node.position?.end.offset
       const root = value.split('.')[0]
       const safeBuiltinPath = value.includes('.') && SAFE_BUILTIN_ROOTS.has(root)
-      if (BARE_IDENTIFIER_PATH.test(value) && !JS_LITERAL_KEYWORDS.has(value)
-        && !declared.has(root) && !safeBuiltinPath && start !== undefined && end !== undefined) {
-        edits.push({ start, end, value: `\\{${value}\\}` })
+      const isBareIdentifier = BARE_IDENTIFIER_PATH.test(value) && !JS_LITERAL_KEYWORDS.has(value)
+        && !declared.has(root) && !safeBuiltinPath
+      const shorthandMatch = value.match(BARE_OBJECT_SHORTHAND)
+      const isDoubleBraceTemplate = shorthandMatch !== null && !declared.has(shorthandMatch[1])
+      if ((isBareIdentifier || isDoubleBraceTemplate) && start !== undefined && end !== undefined) {
+        // Escape every literal brace in the matched span rather than
+        // rebuilding it from `value`, so this handles both `{name}` and
+        // `{{name}}` (and any other brace nesting) the same way.
+        const rawSpan = body.slice(start, end)
+        edits.push({ start, end, value: rawSpan.replace(/[{}]/g, (brace) => `\\${brace}`) })
       }
       // A leaf node: mdast never gives it further `children` (its JSX, if
       // any, lives only inside `data.estree`), so there is nothing to recurse into.

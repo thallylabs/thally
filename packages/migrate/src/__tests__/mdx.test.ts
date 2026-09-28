@@ -665,6 +665,16 @@ describe('escapeFernLiteralBraces', () => {
     const body = 'Just prose, no braces here.'
     expect(escapeFernLiteralBraces(body)).toBe(body)
   })
+
+  it('escapes double-mustache template text (`{{now}}`) the same as single-brace text', () => {
+    const body = 'Also remember to format {{now}} with your desired timezone.'
+    expect(escapeFernLiteralBraces(body)).toBe('Also remember to format \\{\\{now\\}\\} with your desired timezone.')
+  })
+
+  it('leaves `{{name}}` alone when `name` is declared by the page\'s own ESM', () => {
+    const body = 'import { now } from "./x"\n\nformat {{now}} for the user.'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
 })
 
 describe('hasClientBoundaryFunctionProp', () => {
