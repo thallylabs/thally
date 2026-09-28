@@ -980,6 +980,12 @@ function resolveMintlifyApiSpecs(
       })
       continue
     }
+    if (reference.directory) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `The OpenAPI spec "${reference.value}"${tabSuffix} was scoped to generate its pages under "${reference.directory}", but Thally's API reference can only be bound to a whole tab, not a nested directory; it was migrated as a tab-wide API reference instead, so links to "${reference.directory}/..." pages will need to be updated manually.`,
+      })
+    }
     specs.push({ filename: basename(match.relativePath), content: readFileSync(match.absolutePath), tabLabel: reference.tabLabel })
   }
   return specs
@@ -1431,14 +1437,31 @@ function inlineMdxSnippets(
  * substring fallback, so two specs from two different tabs can never both
  * land on the same tab by accident.
  */
-function injectOpenApiSpecs(config: MigrationDocsConfig, specs: Array<{ filename: string; tabLabel?: string }>): MigrationDocsConfig {
+function injectOpenApiSpecs(
+  config: MigrationDocsConfig,
+  specs: Array<{ filename: string; tabLabel?: string }>,
+  warnings?: Array<MigrationWarning>,
+): MigrationDocsConfig {
   let tabs = config.tabs.map((tab) => ({ ...tab }))
   for (const spec of specs) {
     const apiTab = spec.tabLabel
       ? tabs.find((tab) => tab.tab === spec.tabLabel)
       : tabs.find((tab) => tab.tab.toLowerCase().includes('api'))
-    if (apiTab) apiTab.api = { source: `/${spec.filename}`, navigation: false }
-    else tabs = [...tabs, { tab: spec.tabLabel ?? 'API Reference', api: { source: `/${spec.filename}` } }]
+    if (apiTab) {
+      // Thally binds one API spec per tab; a second spec that resolves to
+      // the same tab would otherwise silently replace the first one's
+      // binding with no trace of it ever having existed.
+      if (apiTab.api && warnings) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Tab "${apiTab.tab}" already has an OpenAPI spec bound to it; "/${spec.filename}" was not also bound (Thally supports one API spec per tab). Move it to its own tab manually.`,
+        })
+        continue
+      }
+      apiTab.api = { source: `/${spec.filename}`, navigation: false }
+    } else {
+      tabs = [...tabs, { tab: spec.tabLabel ?? 'API Reference', api: { source: `/${spec.filename}` } }]
+    }
   }
   return { ...config, tabs }
 }
@@ -2125,7 +2148,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }
     }
     if (resolvedSpecs.length > 0) {
-      docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs)
+      docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
     } else {
       // No docs.json-configured spec at all: fall back to a naive repo scan,
       // matching every other platform's baseline behavior.

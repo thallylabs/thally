@@ -422,6 +422,77 @@ describe('Mintlify repository migration', () => {
     expect(bundle.assets.map((asset) => asset.path)).toContain('service.yml')
   })
 
+  it('resolves an object-form `openapi: { source, directory }` group reference and warns that the directory scoping is lost', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [{
+          tab: 'Documentation',
+          groups: [{
+            group: 'API',
+            openapi: { source: 'qstash/openapi.yaml', directory: 'qstash/api-reference' },
+          }],
+        }],
+      },
+    }))
+    mkdirSync(join(root, 'qstash'), { recursive: true })
+    writeFileSync(join(root, 'qstash', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: { title: QStash, version: "1.0" }\npaths: {}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Documentation')
+    expect(apiTab?.api).toEqual({ source: '/openapi.yaml', navigation: false })
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi.yaml')
+    expect(bundle.warnings.some((warning) =>
+      warning.message.includes('qstash/api-reference') && warning.message.includes('bound to a whole tab'))).toBe(true)
+  })
+
+  it('warns instead of silently dropping a second OpenAPI spec that resolves to an already-bound tab', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [{
+          tab: 'Documentation',
+          groups: [
+            { group: 'A', openapi: 'a/openapi.yaml' },
+            { group: 'B', openapi: 'b/openapi.yaml' },
+          ],
+        }],
+      },
+    }))
+    mkdirSync(join(root, 'a'), { recursive: true })
+    mkdirSync(join(root, 'b'), { recursive: true })
+    writeFileSync(join(root, 'a', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: { title: A, version: "1.0" }\npaths: {}')
+    writeFileSync(join(root, 'b', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: { title: B, version: "1.0" }\npaths: {}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Documentation')
+    expect(apiTab?.api?.source).toBe('/openapi.yaml')
+    expect(bundle.warnings.some((warning) =>
+      warning.message.includes('already has an OpenAPI spec bound to it'))).toBe(true)
+  })
+
+  it('drops a manual OpenAPI operation listing ("GET /path") with one warning instead of one missing-page warning per operation', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [{
+          tab: 'API Reference',
+          openapi: 'service.yml',
+          pages: ['GET /users', 'POST /users', 'landing'],
+        }],
+      },
+    }))
+    writeFileSync(join(root, 'service.yml'), 'openapi: 3.1.0\ninfo: { title: Service, version: "1.0" }\npaths: {}')
+    writeFileSync(join(root, 'landing.mdx'), '---\ntitle: Landing\n---\n\nLanding.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.warnings.filter((warning) => warning.code === 'missing-page')).toHaveLength(0)
+    expect(bundle.warnings.filter((warning) => /hand-pick or reorder individual OpenAPI operations/.test(warning.message))).toHaveLength(1)
+  })
+
   it('skips remote OpenAPI URLs without invoking a downloader and keeps the other content', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

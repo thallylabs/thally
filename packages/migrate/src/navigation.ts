@@ -175,6 +175,27 @@ function objectValue(value: unknown): Record<string, unknown> | null {
     : null
 }
 
+/**
+ * Some Mintlify sites (e.g. Upstash's docs.json) group `products` under an
+ * extra `productGroups: [{ group, products }]` wrapper instead of a bare
+ * `products` array directly on the tab. Flatten it into `products` so the
+ * existing container handling picks the products up unchanged — otherwise
+ * every page and `openapi`/`asyncapi` reference under it is silently
+ * invisible to navigation projection and API-spec resolution alike.
+ */
+function withFlattenedProductGroups(container: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(container.productGroups)) return container
+  const flattened = (container.productGroups as Array<unknown>).flatMap((entry) => {
+    const group = objectValue(entry)
+    return group && Array.isArray(group.products) ? group.products : []
+  })
+  if (flattened.length === 0) return container
+  return {
+    ...container,
+    products: [...(Array.isArray(container.products) ? container.products : []), ...flattened],
+  }
+}
+
 function projectedHref(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const href = value.trim()
@@ -286,6 +307,8 @@ export interface MintlifyApiSpecReference {
   kind: 'openapi' | 'asyncapi'
   /** Label of the nearest enclosing tab/anchor/dropdown/product/version/menu, so the resolved spec binds to that tab specifically. Undefined at the navigation root. */
   tabLabel?: string
+  /** Set when the source used Mintlify's object form to scope generated pages under a nested directory; Thally can only bind the whole tab, so this is lost and must be warned about. */
+  directory?: string
 }
 
 /**
@@ -304,12 +327,32 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
   const containerKeys = ['tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus', 'languages'] as const
   const nestedKeys = ['groups', 'pages'] as const
 
-  function visit(node: Record<string, unknown>, tabLabel: string | undefined): void {
-    if (typeof node.openapi === 'string' && node.openapi.trim()) {
-      references.push({ value: node.openapi.trim(), kind: 'openapi', tabLabel })
-    }
-    if (typeof node.asyncapi === 'string' && node.asyncapi.trim()) {
-      references.push({ value: node.asyncapi.trim(), kind: 'asyncapi', tabLabel })
+  function visit(rawNode: Record<string, unknown>, tabLabel: string | undefined): void {
+    const node = withFlattenedProductGroups(rawNode)
+    for (const kind of ['openapi', 'asyncapi'] as const) {
+      const value = node[kind]
+      if (typeof value === 'string' && value.trim()) {
+        references.push({ value: value.trim(), kind, tabLabel })
+        continue
+      }
+      // Mintlify also accepts an object form (`{ source, directory }`) to
+      // scope a spec's auto-generated operation pages under a nested
+      // directory instead of the whole tab. Thally's API reference can't
+      // be scoped to a nested path (it always renders under the tab it's
+      // bound to), so the spec is still resolved and bound at the tab
+      // level — better than vanishing outright — but the caller is told
+      // via `directory` so it can warn that the manual scoping was lost.
+      const object = objectValue(value)
+      if (object && typeof object.source === 'string' && object.source.trim()) {
+        references.push({
+          value: object.source.trim(),
+          kind,
+          tabLabel,
+          ...(typeof object.directory === 'string' && object.directory.trim()
+            ? { directory: object.directory.trim() }
+            : {}),
+        })
+      }
     }
     for (const key of containerKeys) {
       const entries = node[key]
@@ -400,11 +443,34 @@ function registerReference(value: string, context: ProjectionContext): string | 
   return navigationId
 }
 
+/**
+ * Mintlify lets a `pages` entry name a single OpenAPI operation directly
+ * (`"GET /users"`) to hand-pick or reorder which operations of an
+ * already-`openapi`-scoped ancestor appear, instead of a page file
+ * reference. Thally always renders every operation of a bound spec and
+ * has no manual-selection equivalent, so these are not migratable pages —
+ * treating them as one is what produced a "did not resolve to a source
+ * page" warning per operation instead of one explanation for the group.
+ */
+const OPENAPI_OPERATION_REF = /^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S/
+
 function convertPage(
   value: unknown,
   context: ProjectionContext,
 ): string | MigrationNavigationGroup | null {
-  if (typeof value === 'string') return registerReference(value, context)
+  if (typeof value === 'string') {
+    if (OPENAPI_OPERATION_REF.test(value)) {
+      warnOnce(
+        context,
+        'openapi-operation-list',
+        'One or more navigation groups hand-pick or reorder individual OpenAPI operations (e.g. "GET /users"); '
+          + "Thally always renders every operation of a bound spec and has no manual-selection equivalent, so that "
+          + 'list was dropped. The operations themselves are still available through the bound API reference.',
+      )
+      return null
+    }
+    return registerReference(value, context)
+  }
   const object = objectValue(value)
   if (!object) return null
   if (typeof object.page === 'string') return registerReference(object.page, context)
@@ -462,8 +528,9 @@ function convertContainerToTabs(
   trace?: NavigationProjectionTrace,
   depth = 0,
 ): Array<MigrationNavigationTab> {
-  const container = objectValue(containerValue)
-  if (!container) return []
+  const rawContainer = objectValue(containerValue)
+  if (!rawContainer) return []
+  const container = withFlattenedProductGroups(rawContainer)
   const containerKeys = ['tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus'] as const
   for (const key of containerKeys) {
     if (!Array.isArray(container[key])) continue

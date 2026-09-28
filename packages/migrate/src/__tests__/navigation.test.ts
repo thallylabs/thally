@@ -8,6 +8,7 @@ import {
   pruneMissingNavigationPages,
 } from '../index.js'
 import { projectFernNavigation } from '../fern.js'
+import { mintlifyNavigationApiReferences } from '../navigation.js'
 import type { MigrationDocsConfig, MigrationPage } from '../types.js'
 
 function page(id: string, navigationId = id, locale?: string): MigrationPage {
@@ -329,5 +330,100 @@ describe('pruning navigation pages excluded after projection', () => {
     const pruned = pruneMissingNavigationPages(config, new Set(['kept']))
 
     expect(pruned.tabs).toEqual([{ tab: 'Docs', pages: ['kept'] }])
+  })
+})
+
+describe('Mintlify productGroups wrapper (Upstash-shaped docs.json)', () => {
+  const config = {
+    navigation: {
+      tabs: [{
+        tab: 'Documentation',
+        productGroups: [{
+          group: 'Products',
+          products: [{
+            product: 'Redis',
+            groups: [{ group: 'Overview', pages: ['redis/overview'] }],
+          }],
+        }],
+      }],
+    },
+  }
+
+  it('projects pages nested under tab.productGroups[].products, not just tab.products', () => {
+    const result = projectMintlifyNavigation(config)
+    expect(result.docsConfig.tabs).toEqual([{
+      tab: 'Documentation',
+      groups: [{ group: 'Overview', pages: ['redis/overview'] }],
+    }])
+  })
+
+  it('still resolves an openapi/asyncapi reference nested under productGroups', () => {
+    const nested = {
+      navigation: {
+        tabs: [{
+          tab: 'Documentation',
+          productGroups: [{
+            group: 'Products',
+            products: [{
+              product: 'QStash',
+              groups: [{ group: 'REST', pages: [{ group: 'API', openapi: 'qstash/openapi.yaml' }] }],
+            }],
+          }],
+        }],
+      },
+    }
+    const references = mintlifyNavigationApiReferences(nested)
+    expect(references).toEqual([{ value: 'qstash/openapi.yaml', kind: 'openapi', tabLabel: 'QStash' }])
+  })
+})
+
+describe('Mintlify openapi object-form reference', () => {
+  it('recognizes { source, directory } in addition to a bare string, and reports the directory', () => {
+    const config = {
+      navigation: {
+        tabs: [{
+          tab: 'Documentation',
+          groups: [{
+            group: 'API',
+            openapi: { source: 'qstash/openapi.yaml', directory: 'qstash/api-reference' },
+          }],
+        }],
+      },
+    }
+    const references = mintlifyNavigationApiReferences(config)
+    expect(references).toEqual([{
+      value: 'qstash/openapi.yaml',
+      kind: 'openapi',
+      tabLabel: 'Documentation',
+      directory: 'qstash/api-reference',
+    }])
+  })
+})
+
+describe('Mintlify manual OpenAPI operation listing', () => {
+  it('drops "METHOD /path" navigation entries with one warning instead of a missing-page warning each', () => {
+    const config = {
+      navigation: {
+        tabs: [{
+          tab: 'API Reference',
+          openapi: 'devops/openapi.yaml',
+          groups: [{
+            group: 'Redis',
+            pages: ['GET /redis/databases', 'POST /redis/database', 'devops/introduction'],
+          }],
+        }],
+      },
+    }
+    const result = projectMintlifyNavigation(config)
+    expect(result.docsConfig.tabs).toEqual([{
+      tab: 'API Reference',
+      groups: [{ group: 'Redis', pages: ['devops/introduction'] }],
+    }])
+    const operationWarnings = result.warnings.filter((warning) => /hand-pick or reorder individual OpenAPI operations/.test(warning.message))
+    expect(operationWarnings).toHaveLength(1)
+    // Not registered as page references at all, so repository.ts's later
+    // "did not resolve to a source page" pass never sees them, let alone
+    // once per operation.
+    expect(result.pageReferences.some((reference) => reference.ref.startsWith('GET ') || reference.ref.startsWith('POST '))).toBe(false)
   })
 })
