@@ -166,6 +166,19 @@ describe('repository component migration', () => {
     expect(check.diagnostics?.some((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)).toBe(false)
   })
 
+  it('copies mixed component and lowercase helper exports from a local JSX module', () => {
+    const root = fixture({
+      'docs.json': JSON.stringify({ name: 'Demo', navigation: { tabs: [{ tab: 'Docs', pages: ['index'] }] } }),
+      'index.mdx': '---\ntitle: Index\n---\n\nimport { rows, Table } from "/snippets/table.jsx";\n\n<Table data={rows()} />',
+      'snippets/table.jsx': 'export const rows = () => [{ name: "A" }]; export const Table = ({ data }) => <p>{data[0].name}</p>;',
+    })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs', platform: 'mintlify' })
+    expect(bundle.pages).toHaveLength(1)
+    expect(bundle.pages[0].body).toContain('export const rows = () => ([{ name: "A" }]);')
+    expect(bundle.pages[0].body).not.toContain('from "/snippets/table.jsx"')
+    expect(bundle.componentFiles?.some((file) => String(file.content).includes('export const rows'))).toBe(true)
+  })
+
   it('separates sibling documentation roots within the same repository', () => {
     const files = Object.fromEntries(['first', 'second'].flatMap((directory) => [
       [`${directory}/docs.json`, JSON.stringify({ navigation: { pages: ['introduction'] } })],
@@ -413,6 +426,42 @@ describe('repository component migration', () => {
     expect(inline.content).toContain("import { useState } from 'react'")
     expect(String(inline.content).match(/'use client'/g)).toHaveLength(1)
     expect(inline.content).toMatch(/^'use client';/)
+    expect(warnings).toEqual([])
+  })
+
+  it('keeps a copied client playground with a page-local code callback and MDX children', () => {
+    const root = fixture({ 'playground.jsx': 'export const Playground = ({ children, CodeBlockComponent }) => <section><CodeBlockComponent>sample</CodeBlockComponent>{children}</section>' })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = "import { Playground } from './playground.jsx'\n\nexport const WidgetCodeBlock = ({ children, ...props }) => (<CodeBlock {...props}>{children}</CodeBlock>);\n\n<Playground CodeBlockComponent={WidgetCodeBlock}><Warning>Keep this.</Warning></Playground>"
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+    expect(body).toMatch(/<Migrated[a-f0-9]+ ><Warning>Keep this.<\/Warning><\/Migrated[a-f0-9]+>/)
+    expect(body).not.toContain('CodeBlockComponent={WidgetCodeBlock}')
+    const adapter = migrator.files().find((file) => file.path.includes('/callback-'))!
+    expect(adapter.content).toContain("'use client';")
+    expect(adapter.content).toContain('<pre><code>{children}</code></pre>')
+    expect(adapter.content).toContain('CodeBlockComponent={WidgetCodeBlock}')
+    expect(warnings[0].message).toContain('basic code block')
+  })
+
+  it('removes a React hook import unused outside fenced examples', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = 'import { useState } from "react";\n\n<Step title="Example">\n\n```tsx\nconst [count] = useState(0);\n```\n\n</Step>'
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+    expect(body).not.toContain('import { useState }')
+    expect(body).toContain('const [count] = useState(0)')
+  })
+
+  it('keeps imports inside an indented JSX code fence as part of the example', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = '<Steps>\n  <Step title="Use the hook">\n    ```tsx\n    import { useState } from "react";\n    import { useChat } from "@ai-sdk/react";\n\n    function MyComponent() { const [input] = useState(""); return input }\n    ```\n  </Step>\n</Steps>'
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+    expect(body).toContain('```tsx\nimport { useState } from "react";\nimport { useChat } from "@ai-sdk/react";')
+    expect(body).toMatch(/^<Steps>/)
     expect(warnings).toEqual([])
   })
 

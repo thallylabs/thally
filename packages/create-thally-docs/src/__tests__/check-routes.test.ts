@@ -62,6 +62,25 @@ describe('thally check reader routes', () => {
     expect(result.output).not.toContain('Broken anchor')
   })
 
+  it('ignores links, images, and headings inside nested code fences', async () => {
+    const result = await checkLinks([
+      '````mdx',
+      '```tsx',
+      '<a href="/missing">Example</a>',
+      '<img src="/missing.png" />',
+      '### code-only-heading',
+      '```',
+      '````',
+      '',
+      '[Real link](/api-reference/token#response)',
+      '[Not a real heading](#code-only-heading)',
+    ].join('\n'))
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken link: "/missing"')
+    expect(result.output).not.toContain('Broken image')
+    expect(result.output).toContain('Broken anchor: "#code-only-heading"')
+  })
+
   it('uses actual translated anchors when a translation exists', async () => {
     const result = await checkLinks('[Reference](/zh-Hans/api-reference/token#response)', [], '## Localized heading\n\nThe translated document has a different heading.')
     expect(result.exit).toBe(0)

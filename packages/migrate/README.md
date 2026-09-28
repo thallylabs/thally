@@ -49,12 +49,38 @@ computes redirects dynamically and can't be evaluated statically, so its
 presence is reported with a warning instead of being silently ignored. A
 static `--ifm-color-primary` accent color in the classic theme's `customCss`
 file is imported the same way Mintlify's and Fern's theme colors are.
+Versioned docs under `versioned_docs/` and translated docs under
+`i18n/<locale>/docusaurus-plugin-content-docs/` are imported with their
+navigation, including locale-prefixed routes such as `/fr/...`. Each version
+and locale keeps its own route tree; sidebar entries without source documents
+are reported.
+Docusaurus heading ID comments such as `{/* #custom-id */}` become explicit
+HTML anchors so links to those headings keep working after migration. Links
+using Docusaurus' implicit heading slugs also get explicit aliases when the
+linked heading or option-table field can be matched uniquely. Repeated option
+fields use the nearest preceding row when all local references agree;
+otherwise ambiguous anchors remain warnings.
+Longer fenced code examples keep nested shorter fences inert. An archived
+admonition missing its closing delimiter is closed before the next top-level
+heading (or at the end of the page) so its remaining content stays importable.
+Docusaurus `mdx-code-block` wrappers are opened as live MDX when the resulting
+page compiles and its special fences contain no module declarations. Pages
+whose fragments still need Docusaurus theme imports or remark plugins remain
+fenced and are retained.
 
 Fern repositories are located by their `fern/docs.yml` + `fern/fern.config.json`
 pair. `docs.yml` is parsed as bounded YAML—never executed—and preserves tabs,
 nested sections (including `slug`/`skip-slug`), navbar links, redirects, the
 default Fern version's navigation, and theme accent colors. Only pages
 referenced from `docs.yml` are imported, matching Fern's own publishing model.
+Versioned `folder:` entries expand the Markdown files they contain, even when
+the folder or an individual page is outside `fern/` but still inside the
+checkout. An explicit empty tab `slug` keeps pages at the site root; a folder
+title changes its navigation label without changing its directory-based URL.
+Internal links are adjusted for the site's domain path, selected version, and
+source-file routes. Links to sections not imported into Thally stay on the
+published Fern site and produce a migration warning, so the generated site can
+build while the remaining content is moved separately.
 Every `api:` section's OpenAPI document is resolved from its own
 `generators.yml` (`api.specs[].openapi`, or the legacy `api:` string) and
 imported into its own tab — a docs.yml with several API sections (e.g. a REST
@@ -112,8 +138,16 @@ The importer creates a root redirect to the first available page in source
 navigation when no root introduction exists, while retaining a separate custom
 homepage and explicit redirects. Locale tags and recognized locale-prefixed
 sections are normalized without discarding original URL redirects.
+Mintlify's generated `param-*` links for settings headings and named fields
+become explicit anchors in migrated MDX.
 
 Simple interactive HTML blocks in MDX are extracted into client components.
+For a copied client component that receives a simple page-authored JSX callback,
+the importer moves the callback into a client wrapper and keeps the page. If
+the callback cannot be moved safely, it keeps the page and the control's child
+content as a passive fallback, with a warning identifying the control. A
+stateful local snippet component is kept as a client component instead of
+flattening away its hooks and state.
 The Mintlify `search-bar-entry` click trigger is mapped to Thally's search
 shortcut. Markdown mixed inside interactive JSX, computed imports, and
 namespace imports are reported for manual review; unsupported source is
@@ -135,11 +169,9 @@ overrun), with a warning naming the page and the component. Packages the starter
 kept as-is (except `react-dom/server`, whose string renderers throw under
 Next) and copied into any extracted client module. A source site's own
 `@/…` path aliases are treated like an unavailable package. A page that
-passes a page-authored function (including a class, or a function written as
-children) as a prop into a component confirmed to cross the server/client boundary (one this
-importer extracted as a client module, or a Thally runtime built-in already
-backed by one, such as `Accordion`/`Panel`/`Tabs`) is excluded the same way;
-an unconfirmed target is warned instead of dropped.
+passes a page-authored function into a client component needs the client
+wrapper described above; unsupported callback shapes retain their content
+with a warning. An unconfirmed target is warned for review.
 File paths cannot escape the repository checkout; symlinks and oversized
 graphs are rejected. This is compatibility analysis, **not a code sandbox**:
 imported JavaScript executes when the developer builds or runs the resulting

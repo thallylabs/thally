@@ -4,8 +4,8 @@
  * parses them with `yaml` and never imports or executes JavaScript.
  */
 
-import { existsSync, lstatSync, readFileSync } from 'node:fs'
-import { dirname, relative } from 'node:path'
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
+import { basename, dirname, extname, relative } from 'node:path'
 
 import { parse as parseYaml } from 'yaml'
 
@@ -87,6 +87,8 @@ export function readFernConfig(fernRoot: string): { config: Record<string, unkno
 }
 
 interface WalkContext {
+  fernRoot: string
+  repositoryRoot: string
   descriptors: Array<FernPageDescriptor>
   seenNavigationIds: Set<string>
   /** Every `api:` node seen so far, in document order; `tabLabel` is filled in once its owning tab finishes walking. */
@@ -192,8 +194,10 @@ function fernLabelSlug(label: string): string {
  */
 function segmentFor(value: Record<string, unknown>, label: string, context?: WalkContext): string | null {
   if (value['skip-slug'] === true) return null
-  const explicit = typeof value.slug === 'string' ? value.slug.trim() : ''
-  if (!explicit) return fernLabelSlug(label) || null
+  // Fern uses an authored empty slug to put a tab at the site root.
+  if (typeof value.slug !== 'string') return fernLabelSlug(label) || null
+  const explicit = value.slug.trim()
+  if (!explicit) return null
   const slugified = fernBasicSlug(explicit)
   if (context && explicit !== slugified && FERN_SEGMENT_ALIAS.test(explicit)) {
     context.segmentAliases.set(slugified, explicit)
@@ -209,8 +213,18 @@ function uniqueNavigationId(base: string, context: WalkContext): string {
 }
 
 function registerPageAt(rawPath: string, base: string, context: WalkContext): string {
-  const relativePath = rawPath.trim().replace(/^\.\//, '')
-  const sourcePath = context.pathPrefix ? `${context.pathPrefix}/${relativePath}` : relativePath
+  let sourcePath: string
+  try {
+    const absolute = resolveWithinRoot(
+      context.pathPrefix ? resolveWithinRoot(context.fernRoot, context.pathPrefix, context.repositoryRoot) : context.fernRoot,
+      rawPath.trim(),
+      context.repositoryRoot,
+    )
+    sourcePath = relative(context.fernRoot, absolute).replace(/\\/g, '/')
+  } catch {
+    warnOnce(context, `fern-unsafe-page-${rawPath}`, `Fern page path "${rawPath}" escapes the repository and was skipped.`)
+    return ''
+  }
   const navigationId = uniqueNavigationId(base || 'introduction', context)
   context.seenNavigationIds.add(navigationId)
   context.descriptors.push({ sourcePath, navigationId })
@@ -228,6 +242,63 @@ function registerPageAt(rawPath: string, base: string, context: WalkContext): st
   return navigationId
 }
 
+/** Expand Fern's folder shorthand from actual Markdown files in document order. */
+function registerFolder(
+  object: Record<string, unknown>,
+  parentSegments: Array<string>,
+  context: WalkContext,
+): MigrationNavigationGroup | null {
+  const rawPath = String(object.folder).trim()
+  let folder: string
+  try {
+    folder = resolveWithinRoot(
+      context.pathPrefix ? resolveWithinRoot(context.fernRoot, context.pathPrefix, context.repositoryRoot) : context.fernRoot,
+      rawPath,
+      context.repositoryRoot,
+    )
+  } catch {
+    warnOnce(context, `fern-unsafe-folder-${rawPath}`, `Fern folder "${rawPath}" escapes the repository and was skipped.`)
+    return null
+  }
+  if (!existsSync(folder) || !lstatSync(folder).isDirectory()) {
+    warnOnce(context, `fern-missing-folder-${rawPath}`, `Fern folder "${rawPath}" does not exist and was skipped.`)
+    return null
+  }
+  const label = typeof object.title === 'string' && object.title.trim() ? object.title.trim() : titleCase(basename(folder))
+  // Folder titles are navigation labels. Fern keeps the directory name in
+  // the route unless a slug override is authored.
+  const segment = typeof object.slug === 'string' || object['skip-slug'] === true
+    ? segmentFor(object, label, context)
+    : fernBasicSlug(basename(folder))
+  const segments = segment ? [...parentSegments, segment] : parentSegments
+  const visit = (directory: string, routeSegments: Array<string>, depth: number): Array<string | MigrationNavigationGroup> => {
+    if (depth > 12 || context.descriptors.length >= 5_000) return []
+    const pages: Array<string | MigrationNavigationGroup> = []
+    const entries = readdirSync(directory, { withFileTypes: true })
+      .filter((entry) => !entry.name.startsWith('.') && !entry.isSymbolicLink())
+      .sort((left, right) => Number(left.name !== 'index.mdx' && left.name !== 'index.md')
+        - Number(right.name !== 'index.mdx' && right.name !== 'index.md') || left.name.localeCompare(right.name))
+    for (const entry of entries) {
+      const path = resolveWithin(directory, entry.name)
+      if (entry.isDirectory()) {
+        const nested = visit(path, [...routeSegments, fernBasicSlug(entry.name)], depth + 1)
+        if (nested.length) pages.push({ group: titleCase(entry.name), pages: nested })
+      } else if (entry.isFile() && ['.md', '.mdx'].includes(extname(entry.name).toLowerCase())) {
+        const stem = basename(entry.name, extname(entry.name))
+        const pageSegment = stem.toLowerCase() === 'index' ? null : fernBasicSlug(stem)
+        const route = [...routeSegments, ...(pageSegment ? [pageSegment] : [])].join('/')
+        const registered = registerPageAt(relative(context.fernRoot, path), route, { ...context, pathPrefix: '' })
+        if (registered) pages.push(registered)
+      }
+    }
+    return pages
+  }
+  const pages = visit(folder, segments, 0)
+  if (!pages.length) return null
+  addBareRouteRedirect(segments, pages, context)
+  return { group: label, pages }
+}
+
 function registerPage(
   object: Record<string, unknown>,
   parentSegments: Array<string>,
@@ -237,7 +308,7 @@ function registerPage(
   const label = typeof object.page === 'string' && object.page.trim() ? object.page.trim() : 'Untitled'
   const segment = segmentFor(object, label, context)
   const base = [...parentSegments, segment].filter(Boolean).join('/')
-  return registerPageAt(object.path, base, context)
+  return registerPageAt(object.path, base, context) || null
 }
 
 /** A `section`/`page`/`link`/`api`/`changelog` node from `layout` or `contents`. */
@@ -251,6 +322,8 @@ function convertNode(
 
   if (typeof object.page === 'string') return registerPage(object, parentSegments, context)
 
+  if (typeof object.folder === 'string') return registerFolder(object, parentSegments, context)
+
   if (typeof object.section === 'string') {
     const label = object.section
     const segment = segmentFor(object, label, context)
@@ -262,7 +335,8 @@ function convertNode(
     // further-nested page segment).
     const hasOwnPath = typeof object.path === 'string' && object.path.trim().length > 0
     if (hasOwnPath) {
-      pages.push(registerPageAt(object.path as string, segments.join('/'), context))
+      const registered = registerPageAt(object.path as string, segments.join('/'), context)
+      if (registered) pages.push(registered)
     }
     for (const child of contents) {
       const converted = convertNode(child, segments, context)
@@ -345,20 +419,19 @@ function groupsFromConverted(
  * Resolve the default Fern version's navigation when no top-level nav
  * exists. `configDir` is the directory `chosen.path` is conventionally
  * relative to (the Fern root for a top-level docs.yml, or a product's own
- * directory for a product config); `repoRoot` (the whole repository
- * checkout) is the security boundary. A version file is a legitimate Fern
- * layout even when it lives outside `fern/` (e.g. a sibling `docs/`
- * directory referenced as `../docs/index.yml`), so it may resolve anywhere
- * inside the repository, not just under the Fern root — escapes from the
- * repository itself are still rejected. Once a version file loads, its own
- * `path:` entries are relative to *its* directory, not the Fern root, so
- * `pathPrefix` is shifted there for the rest of this config's walk.
+ * directory for a product config); `context.repositoryRoot` (the whole
+ * repository checkout) is the security boundary. A version file is a
+ * legitimate Fern layout even when it lives outside `fern/` (e.g. a sibling
+ * `docs/` directory referenced as `../docs/index.yml`), so it may resolve
+ * anywhere inside the repository, not just under the Fern root — escapes
+ * from the repository itself are still rejected. Once a version file loads,
+ * its own `path:` entries are relative to *its* directory, not the Fern
+ * root, so `pathPrefix` is shifted there for the rest of this config's walk.
  */
 function resolveVersionedNavigation(
   config: Record<string, unknown>,
   configDir: string,
   fernRoot: string,
-  repoRoot: string,
   context: WalkContext,
 ): Record<string, unknown> {
   if (Array.isArray(config.navigation)) return config
@@ -384,7 +457,7 @@ function resolveVersionedNavigation(
   }
   if (!chosen || typeof chosen.path !== 'string') return config
   try {
-    const versionPath = resolveWithinRoot(configDir, chosen.path, repoRoot)
+    const versionPath = resolveWithinRoot(configDir, chosen.path, context.repositoryRoot)
     if (!existsSync(versionPath) || !lstatSync(versionPath).isFile()) {
       warnOnce(context, 'fern-version-not-file', `Fern version file "${chosen.path}" is not a regular file and was skipped.`)
       return config
@@ -413,12 +486,11 @@ function buildTabsFromConfig(
   rawConfig: Record<string, unknown>,
   configDir: string,
   fernRoot: string,
-  repoRoot: string,
   routePrefix: Array<string>,
   fallbackTabLabel: string,
   context: WalkContext,
 ): Array<MigrationNavigationTab> {
-  const config = resolveVersionedNavigation(rawConfig, configDir, fernRoot, repoRoot, context)
+  const config = resolveVersionedNavigation(rawConfig, configDir, fernRoot, context)
   const tabsMeta = objectValue(config.tabs) ?? {}
   const navigation = config.navigation
 
@@ -472,7 +544,6 @@ function buildTabsFromConfig(
 function projectFernProducts(
   rawProducts: Array<unknown>,
   fernRoot: string,
-  repoRoot: string,
   context: WalkContext,
 ): Array<MigrationNavigationTab> {
   return rawProducts.flatMap((entry) => {
@@ -514,7 +585,6 @@ function projectFernProducts(
         productConfig,
         productDir,
         fernRoot,
-        repoRoot,
         routeSegment ? [routeSegment] : [],
         label,
         context,
@@ -536,10 +606,11 @@ export function projectFernNavigation(input: {
    * context (e.g. unit tests), which reproduces the previous fernRoot-only
    * confinement.
    */
-  repoRoot?: string
+  repositoryRoot?: string
 }): FernNavigationResult {
-  const repoRoot = input.repoRoot ?? input.fernRoot
   const context: WalkContext = {
+    fernRoot: input.fernRoot,
+    repositoryRoot: input.repositoryRoot ?? input.fernRoot,
     descriptors: [],
     seenNavigationIds: new Set(),
     apiSections: [],
@@ -553,8 +624,8 @@ export function projectFernNavigation(input: {
   const config = input.config
   const hasProducts = Array.isArray(config.products) && config.products.length > 0 && !Array.isArray(config.navigation)
   const tabs = hasProducts
-    ? projectFernProducts(config.products as Array<unknown>, input.fernRoot, repoRoot, context)
-    : buildTabsFromConfig(config, input.fernRoot, input.fernRoot, repoRoot, [], 'Documentation', context)
+    ? projectFernProducts(config.products as Array<unknown>, input.fernRoot, context)
+    : buildTabsFromConfig(config, input.fernRoot, input.fernRoot, [], 'Documentation', context)
 
   if (tabs.length === 0) {
     context.warnings.push({

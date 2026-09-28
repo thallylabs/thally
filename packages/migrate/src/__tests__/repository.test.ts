@@ -41,6 +41,33 @@ vi.mock('node:child_process', () => {
   }
 })
 
+describe('repository redirect finalization', () => {
+  it('omits literal self redirects across trailing slashes and keeps distinct destinations', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-self-redirects-'))
+    writeFileSync(join(root, 'introduction.mdx'), '# Introduction\n\n[Models](/docs/models)')
+    writeFileSync(join(root, 'models.mdx'), '# Models')
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction', 'models'] },
+      redirects: [
+        { source: '/docs/models', destination: '/docs/models' },
+        { source: '/docs/models/', destination: '/docs/models' },
+        { source: '/docs/models', destination: '/docs/models?view=all' },
+        { source: '/docs/old-models', destination: '/docs/models' },
+      ],
+    }))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([
+      { source: '/docs/models', destination: '/docs/models?view=all' },
+      { source: '/docs/old-models', destination: '/docs/models' },
+    ]))
+    expect(bundle.docsConfig.redirects).not.toContainEqual({ source: '/docs/models', destination: '/docs/models' })
+    expect(bundle.docsConfig.redirects).not.toContainEqual({ source: '/docs/models/', destination: '/docs/models' })
+    expect(bundle.warnings.filter((warning) => warning.message.startsWith('Self-redirect'))).toHaveLength(2)
+  })
+})
+
 afterEach(() => { execFileCalls.calls.length = 0 })
 
 function fixture(): string {
@@ -677,8 +704,8 @@ describe('Mintlify repository migration', () => {
     const root = fixture()
     // Mintlify snippets can export a named binding (not just a default),
     // e.g. `import { Generator } from "/snippets/generator.mdx"`. The import
-    // line itself must be removed once the snippet body is inlined, or the
-    // inlined `export const Generator` collides with the surviving import.
+    // declaration must be replaced with its JSX body, or its function
+    // declaration would render nothing at the point of use.
     writeFileSync(join(root, 'snippets', 'generator.mdx'), 'export const Generator = () => <div>Generated</div>\n')
     writeFileSync(join(root, 'en', 'generator.mdx'), [
       '---',
@@ -697,10 +724,70 @@ describe('Mintlify repository migration', () => {
 
     const page = bundle.pages.find((candidate) => candidate.id === 'generator')
     expect(page?.body).not.toContain('import { Generator }')
-    expect(page?.body.match(/export const Generator/g)).toHaveLength(1)
+    expect(page?.body).not.toContain('export const Generator')
+    expect(page?.body).toContain('<div>Generated</div>')
   })
 
-  it('excludes a page that passes a page-authored function as a prop into a component this migration extracted as a client module', () => {
+  it('inlines named JSX snippets with quoted attribute values as valid expressions', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'snippets', 'community.mdx'), 'export const Community = ({ url, name }) => (<Note><a href={url}>{name}</a></Note>);')
+    writeFileSync(join(root, 'en', 'community.mdx'), [
+      '---', 'title: Community', '---', '',
+      'import { Community } from "/snippets/community.mdx";',
+      '<Community url="https://example.com/a?b=1" name="A & B" />',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const body = bundle.pages.find((page) => page.id === 'community')?.body
+    expect(body).toContain('href={"https://example.com/a?b=1"}')
+    expect(body).toContain('{"A & B"}')
+    expect(bundle.warnings.some((warning) => warning.source?.includes('community.mdx') && warning.code === 'skipped-file')).toBe(false)
+  })
+
+  it('inlines block-bodied JSX snippets with child text and CRLF source', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'snippets', 'button.mdx'), 'export const Button = ({ href, children }) => {\r\n  return <a href={href}>{children}</a>;\r\n};\r\n')
+    writeFileSync(join(root, 'en', 'button.mdx'), [
+      '---', 'title: Button', '---', '',
+      'import { Button } from "/snippets/button.mdx";',
+      '<Button href="/guide">Read guide</Button>',
+    ].join('\r\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const body = bundle.pages.find((page) => page.id === 'button')?.body
+    expect(body).toContain('<a href={"/guide"}>Read guide</a>')
+    expect(bundle.warnings.some((warning) => warning.source?.includes('button.mdx') && warning.code === 'skipped-file')).toBe(false)
+  })
+
+  it('resolves multiline named primitive imports from MDX snippets without executing them', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'snippets', 'values.mdx'), 'export const product = "Example";\nexport const minimum = 2;\n')
+    writeFileSync(join(root, 'en', 'values.mdx'), [
+      '---', 'title: Values', '---', '',
+      'import {', '  product,', '  minimum as version,', '} from "/snippets/values.mdx";',
+      '', '**{product}** version {version}.',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const body = bundle.pages.find((page) => page.id === 'values')?.body
+    expect(body).toContain('export const product = "Example";')
+    expect(body).toContain('export const version = 2;')
+    expect(body).not.toContain('/snippets/values.mdx')
+  })
+
+  it('resolves a mixed primitive and JSX import from the same MDX snippet', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'snippets', 'note.mdx'), 'export const minimum = "1.2.0";\nexport const VersionNote = () => (<Note>Requires {minimum}</Note>);\n')
+    writeFileSync(join(root, 'en', 'mixed.mdx'), [
+      '---', 'title: Mixed', '---', '',
+      'import {', '  minimum,', '  VersionNote,', '} from "/snippets/note.mdx";',
+      '', '<VersionNote /> Version {minimum}.',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const body = bundle.pages.find((page) => page.id === 'mixed')?.body
+    expect(body).toContain('export const minimum = "1.2.0";')
+    expect(body).toContain('<Note>Requires {minimum}</Note>')
+    expect(body).not.toContain('/snippets/note.mdx')
+  })
+
+  it('retains a page with an unsupported callback shape using a noninteractive fallback', () => {
     const root = fixture()
     // Next renders an MDX page as a Server Component by default. A component
     // this migration copies (see components.ts's `copyGraph`) is always
@@ -726,11 +813,11 @@ describe('Mintlify repository migration', () => {
       sourceUrl: 'https://github.com/acme/docs',
     })
 
-    expect(bundle.pages.map((page) => page.id)).not.toContain('widget')
+    expect(bundle.pages.map((page) => page.id)).toContain('widget')
+    expect(bundle.pages.find((page) => page.id === 'widget')?.body).toContain('data-migration-interactive-fallback')
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
-      code: 'skipped-file',
       source: 'en/widget.mdx',
-      message: expect.stringContaining("passes a function to an interactive component, which can't be rendered on the server"),
+      message: expect.stringContaining('child content was retained without the interactive control'),
     }))
   })
 
@@ -974,12 +1061,10 @@ describe('Mintlify repository migration', () => {
     }))
   })
 
-  it('drops an excluded page from navigation instead of leaving a dangling reference', () => {
+  it('retains a fallback page in navigation', () => {
     const root = fixture()
-    // The source `docs.json`/`navigation.json` still lists this page even
-    // though it gets excluded above (same shape, different platform) — the
-    // nav is projected from the raw config independently of which files
-    // actually made it into `bundle.pages`.
+    // The callback cannot cross the server/client boundary. The importer
+    // retains its page with a fallback, so the navigation remains complete.
     writeFileSync(join(root, 'navigation.json'), JSON.stringify({
       languages: [
         {
@@ -1018,8 +1103,8 @@ describe('Mintlify repository migration', () => {
 
     const guidesTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Guides')
     const groupNames = guidesTab?.groups?.map((group) => group.group)
-    expect(groupNames).not.toContain('Assistant')
-    expect(JSON.stringify(bundle.docsConfig)).not.toContain('en/widget')
+    expect(groupNames).toContain('Assistant')
+    expect(JSON.stringify(bundle.docsConfig)).toContain('widget')
   })
 
   it('excludes a page whose unsupported npm import is referenced outside JSX, prunes it from navigation, and keeps other pages', () => {
@@ -1317,6 +1402,79 @@ function docusaurusFixture(sidebarSource?: string): string {
 }
 
 describe('Docusaurus repository migration', () => {
+  it('anchors the nearest repeated option field for an unambiguous local link', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docs', 'options.md'), [
+      '# Options',
+      '| Field | Value |',
+      '| --- | --- |',
+      '| `tags` | Global tags |',
+      '',
+      '## Per-page options',
+      '| Field | Value |',
+      '| --- | --- |',
+      '| `tags` | Page tags |',
+      '',
+      'Use the [`tags` option](#tags) here.',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    const body = bundle.pages.find((page) => page.id === 'options')?.body ?? ''
+    expect(body).toContain('| <a id="tags"></a>`tags` | Page tags |')
+    expect(body).toContain('| `tags` | Global tags |')
+  })
+
+  it('retains linked source heading IDs when Thally uses a different slug', () => {
+    const root = docusaurusFixture()
+    writeFileSync(join(root, 'docs', 'slug-test.md'), [
+      '---', 'title: Slug test', '---', '',
+      '### nodeLinker',
+      '### --report-summary',
+      '| Option | Type |',
+      '| --- | --- |',
+      '| `disableInDev` | boolean |',
+      '```md', '### codeOnly', '```',
+    ].join('\n'))
+    writeFileSync(join(root, 'docs', 'link-source.md'), [
+      '---', 'title: Link source', '---', '',
+      '[Settings](/slug-test#nodeLinker)',
+      '<a href="/slug-test#--report-summary">Summary</a>',
+      '[Option](/slug-test#disableInDev)',
+      '[Code](/slug-test#codeOnly)',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    const body = bundle.pages.find((page) => page.id === 'slug-test')?.body ?? ''
+    expect(body).toContain('<a id="nodeLinker"></a>\n### nodeLinker')
+    expect(body).toContain('<a id="--report-summary"></a>\n### --report-summary')
+    expect(body).toContain('| <a id="disableInDev"></a>`disableInDev` | boolean |')
+    expect(body).not.toContain('id="codeOnly"')
+  })
+
+  it('inlines escaped Markdown partial imports and hoists their page imports', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-partial-'))
+    mkdirSync(join(root, 'docs'))
+    writeFileSync(join(root, 'docusaurus.config.js'), 'module.exports = { title: "Docs" }')
+    writeFileSync(join(root, 'docs', '_shared.md'), "import Tabs from '@theme/Tabs';\n\n<Tabs><TabItem value=\"a\">Shared guide</TabItem></Tabs>")
+    writeFileSync(join(root, 'docs', 'index.md'), "import Shared from './\\_shared.md';\n\n<Shared />")
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.pages.map((page) => page.id)).toContain('introduction')
+    expect(bundle.pages[0].body).toContain('Shared guide')
+    expect(bundle.pages[0].body).not.toContain('@theme/Tabs')
+    expect(bundle.warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+  })
+
+  it('maps current-version doc links and preserves out-of-scope site links', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-links-'))
+    mkdirSync(join(root, 'docs'))
+    writeFileSync(join(root, 'docusaurus.config.js'), 'module.exports = { "url": "https://docs.example.com", title: "Docs" }')
+    writeFileSync(join(root, 'docs', 'index.md'), '# Home\n\n[Guide](/docs/next/guide) [News](/blog/post)')
+    writeFileSync(join(root, 'docs', 'guide.md'), '# Guide')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const home = bundle.pages.find((page) => page.id === 'introduction')
+    expect(home?.body).toContain('[Guide](/guide)')
+    expect(home?.body).toContain('[News](https://docs.example.com/blog/post)')
+    expect(bundle.warnings.some((warning) => warning.message.includes('outside the imported Docusaurus docs'))).toBe(true)
+  })
   it('prefers the project root with the most pages when more than one docusaurus.config.* exists, and warns about the ambiguity', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-multiroot-'))
     mkdirSync(join(root, 'archive', 'docs'), { recursive: true })
@@ -1379,24 +1537,28 @@ describe('Docusaurus repository migration', () => {
     }))
   })
 
-  it('warns and lists skipped versioned docs and i18n locales instead of silently dropping them', () => {
+  it('retains versioned and localized Docusaurus docs in distinct routes', () => {
     const root = docusaurusFixture()
+    writeFileSync(join(root, 'versions.json'), '["1.0"]')
     mkdirSync(join(root, 'versioned_docs', 'version-1.0'), { recursive: true })
-    writeFileSync(join(root, 'versioned_docs', 'version-1.0', 'intro.md'), 'Old intro.')
+    writeFileSync(join(root, 'versioned_docs', 'version-1.0', 'intro.md'), 'Old intro. [Guide](./guide.md)')
+    writeFileSync(join(root, 'versioned_docs', 'version-1.0', 'guide.md'), 'Old guide.')
     mkdirSync(join(root, 'versioned_sidebars'), { recursive: true })
-    writeFileSync(join(root, 'versioned_sidebars', 'version-1.0-sidebars.json'), '{}')
+    writeFileSync(join(root, 'versioned_sidebars', 'version-1.0-sidebars.json'), '{"docs":["intro","guide"]}')
     mkdirSync(join(root, 'i18n', 'fr', 'docusaurus-plugin-content-docs', 'current'), { recursive: true })
     writeFileSync(join(root, 'i18n', 'fr', 'docusaurus-plugin-content-docs', 'current', 'intro.md'), 'Bonjour.')
+    mkdirSync(join(root, 'i18n', 'fr', 'docusaurus-plugin-content-docs', 'version-2.0'), { recursive: true })
+    writeFileSync(join(root, 'i18n', 'fr', 'docusaurus-plugin-content-docs', 'version-2.0', 'intro.md'), 'Bonjour version deux.')
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
-    expect(bundle.warnings).toContainEqual(expect.objectContaining({
-      source: 'versioned_docs',
-      message: expect.stringContaining('version-1.0'),
-    }))
-    expect(bundle.warnings).toContainEqual(expect.objectContaining({
-      source: 'i18n',
-      message: expect.stringContaining('fr'),
-    }))
-    expect(bundle.pages.some((page) => page.body.includes('Bonjour'))).toBe(false)
+    expect(bundle.pages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ navigationId: '1.0/intro', body: expect.stringContaining('[Guide](/1.0/guide)') }),
+      expect.objectContaining({ navigationId: '1.0/guide', body: expect.stringContaining('Old guide.') }),
+      expect.objectContaining({ navigationId: 'fr/intro', body: expect.stringContaining('Bonjour.') }),
+      expect.objectContaining({ navigationId: 'fr/2.0/intro', body: expect.stringContaining('Bonjour version deux.') }),
+    ]))
+    expect(bundle.docsConfig.tabs.some((tab) => tab.tab === 'Version 1.0')).toBe(true)
+    expect(JSON.stringify(bundle.docsConfig.tabs)).toContain('1.0/guide')
+    expect(bundle.warnings.some((warning) => warning.message.includes('were skipped; only current docs'))).toBe(false)
   })
 
   it('never executes sidebar modules and falls back when their export is executable', () => {
@@ -1468,7 +1630,7 @@ describe('Docusaurus repository migration', () => {
     expect(page.body).toContain('<a id="custom-guide-id"></a>')
   })
 
-  it("rewrites a link's #fragment to Thally's lowercase heading slug when the source used a case-preserved id (live Docusaurus renders a heading's id with case intact; Thally always lowercases it)", () => {
+  it("preserves a case-preserved heading id used in a link's #fragment (live Docusaurus renders a heading's id with case intact; Thally always lowercases its auto-slug) by anchoring the target heading, leaving the link itself untouched", () => {
     const repositoryDir = docusaurusFixture()
     writeFileSync(join(repositoryDir, 'docs', 'api', '01-auth.md'), '---\ntitle: Authentication\nsidebar_position: 1\n---\n\n## Using AI Agents With Cypress\n\nDetails.')
     writeFileSync(join(repositoryDir, 'docs', 'guide', '02-faq.md'), [
@@ -1484,9 +1646,13 @@ describe('Docusaurus repository migration', () => {
     ].join('\n'))
     const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
     const faq = bundle.pages.find((page) => page.body.includes('See the section'))!
+    const auth = bundle.pages.find((page) => page.id === 'api/auth')!
     expect(faq).toBeDefined()
-    expect(faq.body).toContain('(/api/auth#using-ai-agents-with-cypress)')
-    expect(faq.body).toContain('(#self-section)')
+    expect(auth).toBeDefined()
+    expect(faq.body).toContain('(/api/auth#Using-AI-Agents-With-Cypress)')
+    expect(faq.body).toContain('(#Self-Section)')
+    expect(auth.body).toContain('<a id="Using-AI-Agents-With-Cypress"></a>\n## Using AI Agents With Cypress')
+    expect(faq.body).toContain('<a id="Self-Section"></a>\n## Self Section')
   })
 
   it('discovers monorepo projects, static external wrappers, aliases, plugins, and literal index slugs', () => {
@@ -1806,6 +1972,110 @@ redirects:
 }
 
 describe('Fern repository migration', () => {
+  it('resolves sibling pages and expands a versioned folder without leaving the repository', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-folders-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'versions', 'latest', 'pages', 'guide'), { recursive: true })
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), '{}')
+    writeFileSync(join(fernRoot, 'docs.yml'), [
+      'versions:', '  - path: versions/main.yml', '    default: true',
+    ].join('\n'))
+    writeFileSync(join(fernRoot, 'versions', 'main.yml'), [
+      'navigation:', '  - page: Overview', '    path: ../../docs/index.mdx',
+      '  - folder: ./latest/pages/guide', '    title: Guide',
+    ].join('\n'))
+    writeFileSync(join(root, 'docs', 'index.mdx'), '# Overview')
+    writeFileSync(join(fernRoot, 'versions', 'latest', 'pages', 'guide', 'index.mdx'), '# Guide')
+    writeFileSync(join(fernRoot, 'versions', 'latest', 'pages', 'guide', 'install.mdx'), '# Install')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.pages.map((page) => page.id)).toEqual(expect.arrayContaining(['overview', 'guide', 'guide/install']))
+    expect(bundle.warnings.filter((warning) => warning.code === 'missing-page')).toEqual([])
+  })
+
+  it('keeps a root tab and folder directory routes when their display names differ', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-folder-routes-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'versions', 'latest', 'pages', 'model-server'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), '{}')
+    writeFileSync(join(fernRoot, 'docs.yml'), 'versions:\n  - path: versions/main.yml\n    slug: main\n    default: true\n')
+    writeFileSync(join(fernRoot, 'versions', 'main.yml'), [
+      'tabs:', '  docs:', '    display-name: Documentation', '    slug: ""',
+      'navigation:', '  - tab: docs', '    layout:', '      - folder: ./latest/pages/model-server', '        title: Configure Models',
+    ].join('\n'))
+    writeFileSync(join(fernRoot, 'versions', 'latest', 'pages', 'model-server', 'index.mdx'), '# Models\n\n[Setup](/main/model-server/setup)')
+    writeFileSync(join(fernRoot, 'versions', 'latest', 'pages', 'model-server', 'setup.mdx'), '# Setup')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.pages.map((page) => page.id).sort()).toEqual(['model-server', 'model-server/setup'])
+    expect(bundle.pages[0].body).toContain('[Setup](/model-server/setup)')
+  })
+
+  it('does not treat a configured AsyncAPI file as an OpenAPI reference', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-asyncapi-mislabeled-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'calls'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), '{}')
+    writeFileSync(join(fernRoot, 'docs.yml'), 'navigation:\n  - page: Overview\n    path: overview.mdx\n  - api: Calls\n    api-name: calls\n')
+    writeFileSync(join(fernRoot, 'overview.mdx'), '# Overview')
+    writeFileSync(join(fernRoot, 'apis', 'calls', 'generators.yml'), 'api:\n  specs:\n    - openapi: ./call.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'calls', 'call.yml'), 'asyncapi: 3.0.0\ninfo: { title: Calls, version: 1.0.0 }\nchannels: {}\n')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
+    expect(bundle.warnings.some((warning) => warning.message.includes('AsyncAPI is not supported'))).toBe(true)
+  })
+
+  it('strips a Fern instance base path from internal links but preserves examples', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-basepath-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(fernRoot)
+    writeFileSync(join(fernRoot, 'fern.config.json'), '{}')
+    writeFileSync(join(fernRoot, 'docs.yml'), 'instances:\n  - custom-domain: docs.example.com/skills\nnavigation:\n  - page: Overview\n    path: overview.mdx\n  - page: Guide\n    path: guide.mdx\n')
+    writeFileSync(join(fernRoot, 'overview.mdx'), '# Overview\n\n[Guide](/skills/guide) <a href="/skills/guide">Guide</a>\n\n```md\n[Example](/skills/guide)\n```')
+    writeFileSync(join(fernRoot, 'guide.mdx'), '# Guide')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const body = bundle.pages[0].body
+    expect(body).toContain('[Guide](/guide)')
+    expect(body).toContain('href="/guide"')
+    expect(body).toContain('[Example](/skills/guide)')
+  })
+
+  it('retains unresolved Fern references on the published source site', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-external-links-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(fernRoot)
+    writeFileSync(join(fernRoot, 'fern.config.json'), '{}')
+    writeFileSync(join(fernRoot, 'docs.yml'), 'instances:\n  - custom-domain: docs.example.com/product\nversions:\n  - path: main.yml\n    slug: main\n')
+    writeFileSync(join(fernRoot, 'main.yml'), 'navigation:\n  - page: Overview\n    path: overview.mdx\n')
+    writeFileSync(join(fernRoot, 'overview.mdx'), '# Overview\n\n[API](/main/reference/missing) <a href="/main/reference/missing">API</a>\n\n[Unsafe](/javascript:alert)\n\n```md\n[Example](/main/reference/missing)\n```')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const body = bundle.pages[0].body
+    expect(body).toContain('[API](https://docs.example.com/product/main/reference/missing)')
+    expect(body).toContain('href="https://docs.example.com/product/main/reference/missing"')
+    expect(body).toContain('[Unsafe](/javascript:alert)')
+    expect(body).toContain('[Example](/main/reference/missing)')
+    expect(bundle.warnings.some((warning) => warning.message.includes('unresolved Fern link'))).toBe(true)
+  })
+
+  it('rewrites links based on a Fern page source path when a section title changes its route', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-source-links-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'pages', 'features', 'tts-vendors'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), '{}')
+    writeFileSync(join(fernRoot, 'docs.yml'), [
+      'tabs:', '  guides:', '    display-name: Guides', '    slug: guides',
+      'navigation:', '  - tab: guides', '    layout:',
+      '      - section: Features', '        contents:',
+      '          - section: TTS Vendor Settings', '            contents:',
+      '              - page: Overview', '                path: ./pages/features/tts-vendors/overview.mdx',
+      '              - page: Cartesia', '                path: ./pages/features/tts-vendors/cartesia.mdx',
+    ].join('\n'))
+    writeFileSync(join(fernRoot, 'pages', 'features', 'tts-vendors', 'overview.mdx'), '# Overview\n\n[Cartesia](/guides/features/tts-vendors/cartesia)\n\n```md\n[Source](/guides/features/tts-vendors/cartesia)\n```')
+    writeFileSync(join(fernRoot, 'pages', 'features', 'tts-vendors', 'cartesia.mdx'), '# Cartesia')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.pages.find((page) => page.id.endsWith('/overview'))?.body).toContain('[Cartesia](/guides/features/tts-vendor-settings/cartesia)')
+    expect(bundle.pages.find((page) => page.id.endsWith('/overview'))?.body).toContain('[Source](/guides/features/tts-vendors/cartesia)')
+  })
+
   it('skips a symlinked versions file instead of reading through it', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-versions-'))
     const outside = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-outside-'))
@@ -1882,7 +2152,7 @@ describe('Fern repository migration', () => {
     const fernRoot = join(root, 'fern')
     mkdirSync(fernRoot, { recursive: true })
     const config = { versions: [{ version: 'v1', path: '../../outside.yml', default: true }] }
-    const projected = projectFernNavigation({ config, fernRoot, repoRoot: root })
+    const projected = projectFernNavigation({ config, fernRoot, repositoryRoot: root })
     expect(projected.warnings.some((warning) =>
       warning.message.includes('could not be read') && warning.message.includes('escapes its root'))).toBe(true)
   })
@@ -2721,6 +2991,137 @@ navigation:
     expect(bundle.docsConfig.tabs.find((tab) => tab.api)?.api?.source).toBe('/plants.yml')
     expect(bundle.warnings.some((warning) => warning.message.startsWith('No OpenAPI'))).toBe(false)
   })
+})
+
+describe('Mintlify mounted links', () => {
+  it('retains state and handlers from an imported interactive MDX snippet', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-stateful-snippet-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['index'] },
+    }))
+    writeFileSync(join(root, 'index.mdx'), [
+      '---', 'title: Demo', '---', '',
+      'import { Counter } from "/snippets/counter.mdx";', '', '<Counter />',
+    ].join('\n'))
+    writeFileSync(join(root, 'snippets', 'counter.mdx'), [
+      'export const Counter = () => {',
+      '  const [count, setCount] = useState(0)',
+      '  const label = `Count ${count}`',
+      '  return <button onClick={() => setCount(count + 1)}>{label}</button>',
+      '}',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'introduction')
+    expect(page?.body).toMatch(/<Migrated[a-f0-9]+\s*\/>/)
+    expect(page?.body).not.toContain('count + 1')
+    const clientSource = bundle.componentFiles?.map((file) => String(file.content)).find((content) => content.includes('setCount(count + 1)'))
+    expect(clientSource).toContain("'use client';")
+    expect(clientSource).toContain('const [count, setCount] = useState(0)')
+  })
+
+  it('keeps translated JSX code example imports inside their indented fence', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-translated-code-'))
+    mkdirSync(join(root, 'fr'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { languages: [
+        { language: 'en', default: true, pages: ['index'] },
+        { language: 'fr', pages: ['fr/example'] },
+      ] },
+    }))
+    writeFileSync(join(root, 'index.mdx'), '---\ntitle: Home\n---\n\nHome.')
+    writeFileSync(join(root, 'fr', 'example.mdx'), [
+      '---', 'title: Exemple', '---', '',
+      '<Steps>', '  <Step title="Utiliser le hook">',
+      '    ```tsx',
+      '    import { useState } from "react";',
+      '    import { useChat } from "@ai-sdk/react";',
+      '    function Example() { return useState(0) }',
+      '    ```', '  </Step>', '</Steps>',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const body = bundle.pages.find((page) => page.id === 'fr/example')?.body ?? ''
+    expect(body).toContain('```tsx\nimport { useState } from "react";\nimport { useChat } from "@ai-sdk/react";')
+    expect(body.trimStart()).not.toMatch(/^import \{ useState \}/)
+    expect(bundle.warnings.some((warning) => warning.message.includes("npm package '@ai-sdk/react'"))).toBe(false)
+  })
+
+  it('retains translated list examples wrapped in indented JSX', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-translated-list-'))
+    mkdirSync(join(root, 'fr'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { languages: [
+        { language: 'en', default: true, pages: ['index'] },
+        { language: 'fr', pages: ['fr/reusable-snippets'] },
+      ] },
+    }))
+    writeFileSync(join(root, 'index.mdx'), '---\ntitle: Home\n---\n\nHome.')
+    writeFileSync(join(root, 'fr', 'reusable-snippets.mdx'), [
+      '---', 'title: Extraits réutilisables', '---', '',
+      '1. Ajoutez votre extrait.', '',
+      '   <CodeGroup>', '',
+      '     ```mdx Import absolu',
+      '     import MySnippet from "/shared/my-snippet.mdx";',
+      '     <MySnippet />',
+      '     ```', '',
+      '   </CodeGroup>',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'fr/reusable-snippets')
+    expect(page).toBeDefined()
+    expect(page?.body).toContain('```mdx Import absolu')
+    expect(page?.body).toContain('import MySnippet from "/shared/my-snippet.mdx";')
+    expect(bundle.warnings.some((warning) => warning.source === 'fr/reusable-snippets.mdx' && warning.message.includes('Imported snippet'))).toBe(false)
+    expect(bundle.warnings.some((warning) => warning.code === 'skipped-file' && warning.source === 'fr/reusable-snippets.mdx')).toBe(false)
+  })
+
+  it('rewrites only links to imported localized pages', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-mounted-links-'))
+    mkdirSync(join(root, 'fr'), { recursive: true })
+    mkdirSync(join(root, 'fr', 'editor'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { languages: [
+        { language: 'en', default: true, pages: ['introduction', 'quickstart'] },
+        { language: 'fr', pages: ['fr/introduction', 'fr/quickstart', 'fr/editor/index'] },
+      ] },
+    }))
+    writeFileSync(join(root, 'introduction.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(root, 'quickstart.mdx'), '---\ntitle: Quickstart\n---\n\nHello.')
+    writeFileSync(join(root, 'fr', 'quickstart.mdx'), '---\ntitle: Démarrage\n---\n\nHello.')
+    writeFileSync(join(root, 'fr', 'editor', 'index.mdx'), '---\ntitle: Éditeur\n---\n\nEditor.')
+    writeFileSync(join(root, 'fr', 'introduction.mdx'), [
+      '---', 'title: Bienvenue', '---', '',
+      '[Start](/docs/fr/quickstart?view=all#install)',
+      '<Card title="Start" href="/docs/fr/quickstart#install" />',
+      '<Card title="Editor" href="/docs/fr/editor/index" />',
+      '[Already local](/fr/quickstart)',
+      '[Missing](/docs/fr/missing)',
+      '[Asset](/docs/fr/image.png)',
+      '[External](https://example.com/docs/fr/quickstart)',
+      '`/docs/fr/quickstart`',
+      '```md', '[Example](/docs/fr/quickstart)', '```',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const body = bundle.pages.find((page) => page.id === 'fr/introduction')?.body ?? ''
+    expect(body).toContain('[Start](/fr/quickstart?view=all#install)')
+    expect(body).toContain('href="/fr/quickstart#install"')
+    expect(body).toContain('href="/fr/editor/index"')
+    expect(bundle.docsConfig.redirects).toContainEqual(expect.objectContaining({ source: '/fr/editor/index', destination: '/fr/editor' }))
+    expect(body).toContain('[Already local](/fr/quickstart)')
+    expect(body).toContain('[Missing](/docs/fr/missing)')
+    expect(body).toContain('[Asset](/docs/fr/image.png)')
+    expect(body).toContain('https://example.com/docs/fr/quickstart')
+    expect(body).toContain('`/docs/fr/quickstart`')
+    expect(body).toContain('[Example](/docs/fr/quickstart)')
+  })
+
 })
 
 describe('scanFiles follows a submodule symlink inside the repository checkout', () => {

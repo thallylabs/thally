@@ -188,45 +188,20 @@ function sourceReferenceKey(value: string): string {
 }
 
 /**
- * Mirrors `slugify` in packages/core/src/slugify.ts — the same function
- * Thally's MDX renderer uses to derive a heading's `id`. Kept duplicated
- * here (rather than an inter-package dependency) since it's a single pure
- * one-liner.
- */
-function headingAnchorSlug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
-}
-
-const EXPLICIT_ANCHOR_ID = /\bid=(?:"([^"]*)"|'([^']*)')/g
-
-/**
- * Headings (and any literal `id` attribute, e.g. an `<a id="...">` inserted
- * by heading-custom-id preservation) a migrated page actually exposes as an
- * anchor target — used to repair a link's `#fragment` below.
- */
-export function pageHeadingAnchors(body: string): Set<string> {
-  const anchors = new Set<string>()
-  for (const line of body.split('\n')) {
-    const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
-    if (heading) anchors.add(headingAnchorSlug(heading[1]))
-    for (const match of line.matchAll(EXPLICIT_ANCHOR_ID)) {
-      const id = match[1] ?? match[2]
-      if (id) anchors.add(id)
-    }
-  }
-  return anchors
-}
-
-/**
  * Rewrite Docusaurus file/doc-id links after every final slug is known. This is
  * deliberately line based so examples inside fenced code remain byte-for-byte
- * source content.
+ * source content. A link whose `#fragment` uses a case-preserved heading id
+ * (live Docusaurus keeps case intact; Thally always lowercases its auto-slug)
+ * is left as-is here — `preserveDocusaurusLinkedAnchors` (repository.ts)
+ * repairs those afterward by adding an explicit anchor matching the literal
+ * fragment, which also covers repeated table-field ids that this
+ * path-only resolver has no visibility into.
  */
 export function rewriteDocusaurusLinks(
   body: string,
   current: DocusaurusPageDescriptor,
   descriptors: Array<DocusaurusPageDescriptor>,
-  pageAnchors: Map<string, Set<string>>,
+  options: { sourceOrigin?: string; onExternalLink?: (target: string) => void } = {},
 ): string {
   const routes = new Map<string, string>()
   for (const descriptor of descriptors) {
@@ -239,48 +214,40 @@ export function rewriteDocusaurusLinks(
   }
   const currentDirectory = posix.dirname(sourceReferenceKey(current.sourcePath))
 
-  // The live site (and the source repo) can render a heading's id with its
-  // original case preserved even though Thally always lowercases it (e.g.
-  // cypress-documentation's own `#Using-AI-agents-with-Cypress-UI-Coverage`
-  // for a heading with no explicit `{#id}`, live-rendered case-preserved,
-  // for a heading Thally slugs to `using-ai-agents-with-cypress-ui-coverage`).
-  // Only repair a fragment that doesn't already match a real anchor on the
-  // target page — an explicit id (case-sensitive on Thally too) must never
-  // be touched.
-  function rewriteFragment(routeId: string, fragment: string): string {
-    const anchors = pageAnchors.get(routeId)
-    if (!fragment || !anchors || anchors.has(fragment)) return fragment
-    const slug = headingAnchorSlug(fragment)
-    return anchors.has(slug) ? slug : fragment
-  }
-
   function rewriteTarget(target: string): string {
     if (!target || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(target)) return target
-    if (target.startsWith('#')) return `#${rewriteFragment(current.navigationId, target.slice(1))}`
+    if (target.startsWith('#')) return target
     const suffixIndex = target.search(/[?#]/)
     const path = suffixIndex >= 0 ? target.slice(0, suffixIndex) : target
     const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
     const candidates = path.startsWith('/')
-      ? [sourceReferenceKey(path), sourceReferenceKey(path).replace(/^docs\//, '')]
+      ? [
+          sourceReferenceKey(path),
+          sourceReferenceKey(path).replace(/^docs\//, ''),
+          sourceReferenceKey(path).replace(/^docs\/(?:next|current|latest)\//, ''),
+        ]
       : [
           sourceReferenceKey(posix.normalize(posix.join(currentDirectory, path))),
           sourceReferenceKey(path),
         ]
     const route = candidates.map((candidate) => routes.get(candidate)).find(Boolean)
-    if (!route) return target
-    const hashIndex = suffix.indexOf('#')
-    const rewrittenSuffix = hashIndex >= 0
-      ? `${suffix.slice(0, hashIndex)}#${rewriteFragment(route, suffix.slice(hashIndex + 1))}`
-      : suffix
-    return `${route === 'introduction' ? '/' : `/${route}`}${rewrittenSuffix}`
+    if (!route) {
+      if (path.startsWith('/') && path !== '/' && options.sourceOrigin) {
+        options.onExternalLink?.(target)
+        return new URL(target, options.sourceOrigin).toString()
+      }
+      return target
+    }
+    return `${route === 'introduction' ? '/' : `/${route}`}${suffix}`
   }
 
   let codeFence: string | null = null
   return body.split('\n').map((line) => {
-    const fence = line.match(/^\s*(`{3,}|~{3,})/)
+    const fence = line.match(/^\s{0,3}(`{3,}|~{3,})/)
     if (fence) {
-      if (!codeFence) codeFence = fence[1][0]
-      else if (fence[1][0] === codeFence) codeFence = null
+      if (!codeFence) codeFence = fence[1]
+      else if (fence[1][0] === codeFence[0] && fence[1].length >= codeFence.length
+        && /^\s*$/.test(line.slice(fence[0].length))) codeFence = null
       return line
     }
     if (codeFence) return line
@@ -288,6 +255,19 @@ export function rewriteDocusaurusLinks(
       .replace(/(\]\()([^\s)]+)(?=[\s)]|$)/g, (_match, prefix: string, target: string) => `${prefix}${rewriteTarget(target)}`)
       .replace(/(\bhref=")([^"]+)(")/g, (_match, prefix: string, target: string, suffix: string) => `${prefix}${rewriteTarget(target)}${suffix}`)
   }).join('\n')
+}
+
+/** Read a static Docusaurus site origin for links outside imported docs. */
+export function readDocusaurusSiteOrigin(repositoryRoot: string): string | undefined {
+  const configPath = findDocusaurusConfigPath(repositoryRoot)
+  if (!configPath) return undefined
+  const address = readBoundedText(configPath).match(/\burl['"]?\s*:\s*(['"])(https?:\/\/[^'"]+)\1/)?.[2]
+  if (!address) return undefined
+  try {
+    return new URL(address).origin
+  } catch {
+    return undefined
+  }
 }
 
 function readBoundedText(path: string): string {
@@ -471,11 +451,16 @@ function configuredSidebarPath(repositoryRoot: string): string | null {
 }
 
 /** Read the configured/default sidebar without running the source module. */
-export function readDocusaurusSidebars(repositoryRoot: string): DocusaurusSidebars | null {
-  const configured = configuredSidebarPath(repositoryRoot)
-  const sourcePath = [configured, ...SIDEBAR_FILENAMES]
+export function readDocusaurusSidebars(repositoryRoot: string, versionedSidebarPath?: string): DocusaurusSidebars | null {
+  // Archived versions carry their own sidebar file. Resolve it within the
+  // project and parse it as data; never load source-controlled code.
+  const configured = versionedSidebarPath ?? configuredSidebarPath(repositoryRoot)
+  const sourcePath = [configured, ...(versionedSidebarPath ? [] : SIDEBAR_FILENAMES)]
     .filter((value): value is string => Boolean(value))
-    .find((candidate) => existsSync(resolveWithin(repositoryRoot, candidate)))
+    .find((candidate) => {
+      const path = resolveWithin(repositoryRoot, candidate)
+      return existsSync(path) && lstatSync(path).isFile()
+    })
   if (!sourcePath) return null
   const absolutePath = resolveWithin(repositoryRoot, sourcePath)
   const source = readBoundedText(absolutePath)

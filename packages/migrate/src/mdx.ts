@@ -79,22 +79,25 @@ function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'War
  */
 function normalizeDocusaurusAdmonitions(body: string): string {
   const lines = body.split('\n')
-  const openAdmonitions: Array<{ delimiter: string; tag: string }> = []
+  const openAdmonitions: Array<{ delimiter: string; tag: string; openedAt: number }> = []
+  const headingLines: Array<number> = []
   let codeFence: string | null = null
 
-  return lines.map((line) => {
-    const codeMatch = line.match(/^\s*(`{3,}|~{3,})/)
+  const output = lines.map((line, index) => {
+    const codeMatch = line.match(/^\s{0,3}(`{3,}|~{3,})/)
     if (codeMatch) {
-      if (!codeFence) codeFence = codeMatch[1][0]
-      else if (codeMatch[1][0] === codeFence) codeFence = null
+      if (!codeFence) codeFence = codeMatch[1]
+      else if (codeMatch[1][0] === codeFence[0] && codeMatch[1].length >= codeFence.length
+        && /^\s*$/.test(line.slice(codeMatch[0].length))) codeFence = null
       return line
     }
     if (codeFence) return line
+    if (/^#{1,6}\s/.test(line)) headingLines.push(index)
 
     const opening = line.match(/^\s*(:{3,})(note|tip|info|warning|caution|danger)(?:\[([^\]]+)\]|\s+(.+))?\s*$/i)
     if (opening) {
       const tag = docusaurusAdmonitionTag(opening[2].toLowerCase())
-      openAdmonitions.push({ delimiter: opening[1], tag })
+      openAdmonitions.push({ delimiter: opening[1], tag, openedAt: index })
       const title = (opening[3] ?? opening[4])?.trim()
       return title ? `<${tag}>\n**${title}**` : `<${tag}>`
     }
@@ -106,7 +109,94 @@ function normalizeDocusaurusAdmonitions(body: string): string {
       return `</${current.tag}>`
     }
     return line
-  }).join('\n')
+  })
+  // Docusaurus tolerates an unterminated admonition in some archived docs.
+  // Close it before the next top-level heading (or at EOF) so an otherwise
+  // complete page remains importable instead of being discarded by MDX.
+  const closingByLine = new Map<number, Array<string>>()
+  for (const open of openAdmonitions.reverse()) {
+    const at = headingLines.find((line) => line > open.openedAt) ?? output.length
+    closingByLine.set(at, [...(closingByLine.get(at) ?? []), `</${open.tag}>`])
+  }
+  for (const [at, closing] of [...closingByLine].sort(([left], [right]) => right - left)) output.splice(at, 0, ...closing)
+  return output.join('\n')
+}
+
+/**
+ * Docusaurus' `mdx-code-block` fence is an escape hatch for live MDX syntax,
+ * often used to open a JSX element around ordinary Markdown and code blocks.
+ * Remove only the special fence itself; its contents must pass through the
+ * same component and link normalization as the rest of the page.
+ */
+function unwrapDocusaurusMdxCodeBlocks(body: string): string {
+  const output: Array<string> = []
+  let fence: string | undefined
+  let isMdxCodeBlock = false
+  for (const line of body.split('\n')) {
+    const opening = !fence && line.match(/^ {0,3}(`{3,}|~{3,})mdx-code-block\s*$/)
+    if (opening) {
+      fence = opening[1]
+      isMdxCodeBlock = true
+      continue
+    }
+    if (fence) {
+      const closing = line.match(/^ {0,3}(`{3,}|~{3,})\s*$/)
+      if (closing && closing[1][0] === fence[0] && closing[1].length >= fence.length) {
+        if (!isMdxCodeBlock) output.push(line)
+        fence = undefined
+        isMdxCodeBlock = false
+        continue
+      }
+      // These blocks may be Docusaurus' only declaration of a theme or
+      // npm component used later on the page. Opening just the JSX would
+      // promote an unresolved import into Thally's server build, so leave
+      // the entire page's source-specific fences intact.
+      if (isMdxCodeBlock && /^\s*(?:import|export)\b/.test(line)) return body
+      output.push(line)
+      continue
+    }
+    const ordinaryFence = line.match(/^ {0,3}(`{3,}|~{3,})/)
+    if (ordinaryFence) {
+      fence = ordinaryFence[1]
+      isMdxCodeBlock = false
+    }
+    output.push(line)
+  }
+  // An unmatched source fence remains visible to the MDX compiler, which
+  // reports the malformed page rather than silently deleting its contents.
+  return isMdxCodeBlock ? body : output.join('\n')
+}
+
+/** Keep explicit heading anchors without leaving `{#id}` as an MDX expression. */
+function normalizeExplicitHeadingIds(body: string): string {
+  return replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
+    if (!/^[ \t]{0,3}#{1,6}[ \t]+/.test(line)) return line
+    const trimmed = line.trimEnd()
+    // Check suffixes from the end instead of matching unbounded whitespace
+    // against unbounded heading text; that combination backtracks on long
+    // headings with no valid anchor.
+    if (trimmed.endsWith('}')) {
+      const marker = trimmed.lastIndexOf(' {#')
+      if (marker >= 0) {
+        const id = trimmed.slice(marker + 3, -1)
+        if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) {
+          return `<a id="${id}"></a>\n${trimmed.slice(0, marker).trimEnd()}`
+        }
+      }
+    }
+    // Docusaurus' heading plugin also accepts a trailing MDX comment.
+    if (trimmed.endsWith('*/}')) {
+      const marker = trimmed.lastIndexOf(' {/*')
+      if (marker >= 0) {
+        const comment = trimmed.slice(marker + 4, -3).trim()
+        const id = comment.startsWith('#') ? comment.slice(1) : ''
+        if (/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(id)) {
+          return `<a id="${id}"></a>\n${trimmed.slice(0, marker).trimEnd()}`
+        }
+      }
+    }
+    return line
+  }).join('\n'))
 }
 
 const GLOBAL_DOCUSARUS_COMPONENTS = new Set([
@@ -118,19 +208,11 @@ const GLOBAL_DOCUSARUS_COMPONENTS = new Set([
 ])
 
 /** Match the one simple import form Docusaurus injects without backtracking. */
-function isGlobalDocusaurusImport(line: string): boolean {
-  const trimmed = line.trim().replace(/;$/, '').trimEnd()
-  if (!trimmed.startsWith('import ')) return false
-  const separator = trimmed.indexOf(' from ', 'import '.length)
-  if (separator < 0) return false
-  const component = trimmed.slice('import '.length, separator).trim()
-  if (!GLOBAL_DOCUSARUS_COMPONENTS.has(component)) return false
-  const source = trimmed.slice(separator + ' from '.length)
-  if (source.length < 3) return false
-  const quote = source[0]
-  if ((quote !== "'" && quote !== '"') || source.at(-1) !== quote) return false
-  const moduleName = source.slice(1, -1)
-  return moduleName.startsWith('@theme/') || moduleName.startsWith('@docusaurus/')
+function removeGlobalDocusaurusImports(body: string): string {
+  return replaceOutsideCode(body, (segment) => segment.replace(
+    /\bimport\s+([A-Za-z_$][\w$]*)\s+from\s+(['"])(@(?:theme|docusaurus)\/[^'"]+)\2\s*;?/g,
+    (statement: string, component: string) => GLOBAL_DOCUSARUS_COMPONENTS.has(component) ? '' : statement,
+  ))
 }
 
 const JS_LITERAL_KEYWORDS = new Set(['true', 'false', 'null', 'undefined'])
@@ -576,12 +658,13 @@ export function escapeFernLiteralBraces(raw: string): string {
         && !declared.has(root) && !safeBuiltinPath
       const shorthandMatch = value.match(BARE_OBJECT_SHORTHAND)
       const isDoubleBraceTemplate = shorthandMatch !== null && !declared.has(shorthandMatch[1])
-      if ((isBareIdentifier || isDoubleBraceTemplate) && start !== undefined && end !== undefined) {
+      const isIssueList = /^[A-Za-z][A-Za-z0-9]*-\d+(?:\s*,\s*[A-Za-z][A-Za-z0-9]*-\d+)*$/.test(value)
+      if ((isBareIdentifier || isDoubleBraceTemplate || isIssueList) && start !== undefined && end !== undefined) {
         // Escape every literal brace in the matched span rather than
         // rebuilding it from `value`, so this handles both `{name}` and
         // `{{name}}` (and any other brace nesting) the same way.
         const rawSpan = body.slice(start, end)
-        edits.push({ start, end, value: rawSpan.replace(/[{}]/g, (brace) => `\\${brace}`) })
+        edits.push({ start, end, value: rawSpan.replace(/\\/g, '\\\\').replace(/[{}]/g, '\\$&') })
       }
       // A leaf node: mdast never gives it further `children` (its JSX, if
       // any, lives only inside `data.estree`), so there is nothing to recurse into.
@@ -803,10 +886,15 @@ function maskCode(body: string): { masked: string; unmask: (text: string) => str
   // 4-space-indented text is never code here and is intentionally left
   // unmasked, matching @mdx-js/mdx's own parsing.
   for (const line of source.split('\n')) {
-    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/)
+    const fenceMatch = line.match(/^\s{0,3}(`{3,}|~{3,})/)
     if (codeFence) {
       fenceBuffer.push(line)
-      if (fenceMatch && fenceMatch[1][0] === codeFence) {
+      // A closing fence has no info string. ` ```python` inside an open
+      // Markdown fence is content, not a close; treating it as one can mask
+      // every later HTML tag and leave React-invalid attributes untouched.
+      if (fenceMatch && fenceMatch[1][0] === codeFence[0]
+        && fenceMatch[1].length >= codeFence.length
+        && /^\s*$/.test(line.slice(fenceMatch[0].length))) {
         lines.push(stash(fenceBuffer.join('\n')))
         codeFence = null
         fenceBuffer = []
@@ -814,7 +902,7 @@ function maskCode(body: string): { masked: string; unmask: (text: string) => str
       continue
     }
     if (fenceMatch) {
-      codeFence = fenceMatch[1][0]
+      codeFence = fenceMatch[1]
       fenceBuffer = [line]
       continue
     }
@@ -835,7 +923,7 @@ function maskCode(body: string): { masked: string; unmask: (text: string) => str
  * Apply a textual rename to the WHOLE body outside fenced/inline code (via
  * `maskCode`), so a match may span multiple lines.
  */
-function replaceOutsideCode(body: string, transform: (whole: string) => string): string {
+export function replaceOutsideCode(body: string, transform: (whole: string) => string): string {
   const { masked, unmask } = maskCode(body)
   return unmask(transform(masked))
 }
@@ -857,29 +945,116 @@ export function normalizeHtmlComments(body: string): string {
 /**
  * Rewrite Fern's callout intents to Thally's fixed callout tags without
  * touching fenced code. Delimiters are tracked with a stack so nested and
- * sibling callouts each close with the tag their own opening intent chose;
- * the stack order only holds up when both passes run over the whole body in
- * document order, which `replaceOutsideCode` provides.
+ * sibling callouts each close with the tag their own opening intent chose.
+ * A single scan is required: collecting every opener before visiting any
+ * closer incorrectly pairs sibling and nested callouts.
  */
 function normalizeFernCallouts(body: string): string {
   return replaceOutsideCode(body, (whole) => {
-    const openTags: Array<string> = []
-    return whole
-      .replace(/<Callout\s+intent=(?:"([^"]*)"|'([^']*)')([^>]*?)(\/?)>/g, (_match, doubleQuoted: string, singleQuoted: string, rest: string, selfClose: string) => {
-        const intent = (doubleQuoted ?? singleQuoted ?? '').toLowerCase()
-        const tag = intent === 'warning'
-          ? 'Warning'
-          : intent === 'success' || intent === 'tip'
-            ? 'Tip'
-            : intent === 'error' || intent === 'danger' ? 'Error' : 'Note'
-        if (!selfClose) openTags.push(tag)
-        return `<${tag}${rest}${selfClose}>`
-      })
-      // Only rewrite closes paired with a Fern `<Callout intent="...">` we
-      // actually opened; a bare Mintlify `<Callout>...</Callout>` (no
-      // `intent`) never pushed a tag, so its closing tag must stay as-is.
-      .replace(/<\/Callout>/g, (match) => openTags.length ? `</${openTags.pop()}>` : match)
+    const openTags: Array<string | null> = []
+    const output: string[] = []
+    let cursor = 0
+    while (cursor < whole.length) {
+      const opening = whole.indexOf('<Callout', cursor)
+      const closing = whole.indexOf('</Callout>', cursor)
+      const next = opening < 0 ? closing : closing < 0 ? opening : Math.min(opening, closing)
+      if (next < 0) break
+      output.push(whole.slice(cursor, next))
+      if (next === closing) {
+        const tag = openTags.pop()
+        output.push(tag ? `</${tag}>` : '</Callout>')
+        cursor = next + '</Callout>'.length
+        continue
+      }
+      const attributeStart = next + '<Callout'.length
+      if (!/[\s/>]/.test(whole[attributeStart] ?? '')) {
+        output.push('<Callout')
+        cursor = attributeStart
+        continue
+      }
+      // JSX attributes may contain quoted `>` or expression comparisons.
+      // Locate the delimiter in one pass instead of using a backtracking
+      // regex over arbitrary source content.
+      let end = attributeStart
+      let quote: string | null = null
+      let expressionDepth = 0
+      for (; end < whole.length; end++) {
+        const character = whole[end]
+        if (quote) {
+          if (character === quote && whole[end - 1] !== '\\') quote = null
+        } else if (character === '"' || character === "'") {
+          quote = character
+        } else if (character === '{') {
+          expressionDepth++
+        } else if (character === '}' && expressionDepth > 0) {
+          expressionDepth--
+        } else if (character === '>' && expressionDepth === 0) {
+          break
+        }
+      }
+      if (end === whole.length) {
+        output.push(whole.slice(next))
+        cursor = whole.length
+        break
+      }
+      const attributes = whole.slice(attributeStart, end)
+      const intent = findStaticCalloutIntent(attributes)
+      const isSelfClosing = attributes.trimEnd().endsWith('/')
+      if (!intent) {
+        output.push(whole.slice(next, end + 1))
+        if (!isSelfClosing) openTags.push(null)
+      } else {
+        const value = intent.value.toLowerCase()
+        const tag = value === 'warning' ? 'Warning'
+          : value === 'success' || value === 'tip' ? 'Tip'
+            : value === 'error' || value === 'danger' ? 'Error' : 'Note'
+        output.push(`<${tag}${attributes.slice(0, intent.start)}${attributes.slice(intent.end)}>`)
+        if (!isSelfClosing) openTags.push(tag)
+      }
+      cursor = end + 1
+    }
+    output.push(whole.slice(cursor))
+    return output.join('')
   })
+}
+
+/** Find only a static, quoted intent attribute; preserve every other prop. */
+function findStaticCalloutIntent(attributes: string): { start: number; end: number; value: string } | null {
+  let cursor = 0
+  while (cursor < attributes.length) {
+    const start = cursor
+    while (/\s/.test(attributes[cursor] ?? '')) cursor++
+    if (cursor === start) { cursor++; continue }
+    const nameStart = cursor
+    while (/[A-Za-z0-9_-]/.test(attributes[cursor] ?? '')) cursor++
+    const name = attributes.slice(nameStart, cursor)
+    while (/\s/.test(attributes[cursor] ?? '')) cursor++
+    if (attributes[cursor] !== '=') continue
+    cursor++
+    while (/\s/.test(attributes[cursor] ?? '')) cursor++
+    const quote = attributes[cursor]
+    if (quote !== '"' && quote !== "'") {
+      // Other props may be JSX expressions. Skip balanced braces so a
+      // string inside an expression cannot masquerade as an attribute.
+      if (quote === '{') {
+        let depth = 0
+        do {
+          if (attributes[cursor] === '{') depth++
+          if (attributes[cursor] === '}') depth--
+          cursor++
+        } while (cursor < attributes.length && depth > 0)
+      } else {
+        while (cursor < attributes.length && !/\s/.test(attributes[cursor])) cursor++
+      }
+      continue
+    }
+    const valueStart = ++cursor
+    while (cursor < attributes.length && attributes[cursor] !== quote) cursor++
+    const value = attributes.slice(valueStart, cursor)
+    if (cursor < attributes.length) cursor++
+    if (name === 'intent') return { start, end: cursor, value }
+  }
+  return null
 }
 
 /**
@@ -1068,7 +1243,9 @@ function provideScopedGlobalReferences(body: string): string {
  * they don't linger as dead JSX attributes on the migrated component.
  */
 function normalizeDocusaurusTabs(body: string): string {
-  return body.replace(/<Tabs\b([^>]*)>([\s\S]*?)<\/Tabs>/g, (_match, attributes: string, inner: string) => {
+  let result = body
+  for (let depth = 0; depth < 20; depth += 1) {
+    const updated = result.replace(/<Tabs\b([^>]*)>((?:(?!<Tabs\b)[\s\S])*?)<\/Tabs>/g, (_match, attributes: string, inner: string) => {
     const labelByValue = new Map<string, string>()
     const valuesSource = attributes.match(/\bvalues=\{(\[[\s\S]*?\])\s*\}/)?.[1]
     if (valuesSource) {
@@ -1081,6 +1258,7 @@ function normalizeDocusaurusTabs(body: string): string {
     const cleanedAttributes = attributes
       .replace(/\s*defaultValue=(?:\{[^}]*\}|"[^"]*"|'[^']*')/g, '')
       .replace(/\s*values=\{[\s\S]*?\]\s*\}/g, '')
+      .replace(/\s*values=\{[^{}]*\}/g, '')
       .replace(/\s*groupId=(?:"[^"]*"|'[^']*')/g, '')
       .replace(/\s*queryString(?:=(?:\{[^}]*\}|"[^"]*"|'[^']*'))?/g, '')
     const rewrittenInner = inner
@@ -1091,8 +1269,12 @@ function normalizeDocusaurusTabs(body: string): string {
         return `<Tab title="${title.replace(/"/g, '&quot;')}">`
       })
       .replace(/<\/TabItem>/g, '</Tab>')
-    return `<Tabs${cleanedAttributes}>${rewrittenInner}</Tabs>`
-  })
+    return `<ThallyTabs${cleanedAttributes}>${rewrittenInner}</ThallyTabs>`
+    })
+    if (updated === result) break
+    result = updated
+  }
+  return result.replace(/<ThallyTabs\b/g, '<Tabs').replace(/<\/ThallyTabs>/g, '</Tabs>')
 }
 
 const TAB_FENCE_OPEN = /^(`{3,}|~{3,})(\S*)\s+tab\b(.*)$/
@@ -1226,8 +1408,61 @@ function convertHtmlStyleAttributes(body: string): string {
   )
 }
 
+/** Mintlify allows presentational JSX in Update labels; Thally uses the label as an anchor id. */
+function normalizeMintlifyUpdateLabels(body: string): string {
+  return body.replace(/(<Update\b[^>]*\blabel=)\{(<\>[\s\S]*?<\/\>)\}/g, (match, prefix: string, fragment: string) => {
+    let root: DescriptionNode
+    try {
+      root = descriptionParser.parse(fragment) as DescriptionNode
+    } catch {
+      return match
+    }
+    const plainText = (node: DescriptionNode): string | null => {
+      // Preserve only parsed text nodes. Dropping markup with a regex can
+      // leave a partial tag in the output when an attribute contains `>`.
+      if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
+      if (node.type === 'mdxTextExpression' || node.type === 'mdxFlowExpression' || node.type === 'mdxjsEsm') return null
+      const parts = (node.children ?? []).map(plainText)
+      return parts.some((part) => part === null) ? null : parts.join('')
+    }
+    const label = plainText(root)?.replace(/\s+/g, ' ').trim()
+    // Dynamic labels cannot be flattened safely; preserve their source form.
+    return label && !/[{}]/.test(label) ? `${prefix}{${JSON.stringify(label)}}` : match
+  })
+}
+
+/** Preserve Mintlify's generated `param-*` links on authored settings fields. */
+function normalizeMintlifyParameterAnchors(body: string): string {
+  const seen = new Set<string>()
+  const anchorFor = (name: string): string => {
+    const id = `param-${name.toLowerCase().replace(/[._]/g, '-')}`
+    if (seen.has(id)) return ''
+    seen.add(id)
+    return `<a id="${id}"></a>\n`
+  }
+  // `replaceOutsideCode` masks inline backticks as well as fenced code, so
+  // scan heading lines separately to retain the authored setting name.
+  let fence: string | undefined
+  const withHeadings = body.split('\n').map((line) => {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
+    if (marker) {
+      if (!fence) fence = marker[1]
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length
+        && /^\s*$/.test(line.slice(marker[0].length))) fence = undefined
+      return line
+    }
+    if (fence) return line
+    const heading = line.match(/^ {0,3}#{1,6}\s+`([A-Za-z][A-Za-z0-9._-]*)`(?:\s|$)/)
+    return heading ? `${anchorFor(heading[1])}${line}` : line
+  }).join('\n')
+  return replaceOutsideCode(withHeadings, (segment) => segment
+    .replace(/<(ResponseField|ParamField)\b([^>]*?)\bname=(?:"([A-Za-z][A-Za-z0-9._-]*)"|'([A-Za-z][A-Za-z0-9._-]*)')([^>]*)>/g,
+      (match: string, _tag: string, _before: string, doubleQuoted: string, singleQuoted: string) =>
+        `${anchorFor(doubleQuoted ?? singleQuoted)}${match}`))
+}
+
 /** Normalize only syntax Thally cannot render; supported source JSX stays intact. */
-export function normalizeMdx(body: string, platform?: MigrationPlatform): string {
+export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapMdxCodeBlocks = true): string {
   // A caller that doesn't know the source platform (the URL crawler, when it
   // can't identify one) must not guess — applying every platform's textual
   // renames to a page of unknown origin corrupts one that happens to use the
@@ -1242,16 +1477,27 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform): string
   // A heading's explicit `{#custom-id}` anchor (see `preserveMdxHeadingCustomIds`)
   // means the same thing on every platform, so — unlike the platform-specific
   // renames below — this always runs, even when `platform` is omitted.
-  let rewritten = preserveMdxHeadingCustomIds(normalizeDocusaurusAdmonitions(runFern ? normalizeFernCallouts(body) : body)).body
+  // `normalizeExplicitHeadingIds` also covers Docusaurus' `{/* #id */}`
+  // comment form.
+  const sourceBody = runDocusaurus && unwrapMdxCodeBlocks ? unwrapDocusaurusMdxCodeBlocks(body) : body
+  let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(runFern ? normalizeFernCallouts(sourceBody) : sourceBody))
   if (runDocusaurus) {
     // Docusaurus injects these theme components globally. Thally also
     // exposes its equivalents globally, so source-only imports must not survive.
-    const withoutGlobalImports = rewritten
-      .split('\n')
-      .filter((line) => !isGlobalDocusaurusImport(line))
-      .join('\n')
-    rewritten = normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(withoutGlobalImports))
+    rewritten = normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(removeGlobalDocusaurusImports(rewritten)))
+    // Data-only @site imports are often used solely by Docusaurus' tab
+    // metadata. Once those props are projected to <Tab> labels, remove only
+    // imports whose binding has no remaining use on the page.
+    rewritten = replaceOutsideCode(rewritten, (segment) => segment.replace(
+      /\bimport\s+([A-Za-z_$][\w$]*)\s+from\s+(['"])(@site\/[^'"]+)\2\s*;?/g,
+      (statement: string, binding: string, _quote: string, _source: string, offset: number) => {
+        const withoutStatement = segment.slice(0, offset) + segment.slice(offset + statement.length)
+        return new RegExp(`\\b${binding}\\s*(?:\\.|\\[|\\})`).test(withoutStatement) ? statement : ''
+      },
+    ))
+    rewritten = rewritten.replace(/^\n{2,}/, '\n')
   }
+  if (runMintlify) rewritten = normalizeMintlifyParameterAnchors(rewritten)
   rewritten = replaceOutsideCode(rewritten, (segment) => {
     let result = convertHtmlStyleAttributes(segment)
       .replace(/<!--([\s\S]*?)-->/g, (_match, content: string) => `{/*${content}*/}`)
@@ -1284,7 +1530,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform): string
         .replace(/<(?:DocCardList|TOCInline)\b[^>]*\/>/g, '')
     }
     if (runMintlify) {
-      result = result
+      result = normalizeMintlifyUpdateLabels(result)
         // Mintlify documents `<FileTree>` as a plain alias of `<Tree>`; Thally
         // only registers the latter.
         .replace(/<FileTree(\s[^>]*)?>/g, '<Tree$1>')
@@ -1321,7 +1567,18 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform): string
     return result
   })
   if (runFern) rewritten = unwrapFernCodeBlockTabs(rewritten)
-  return provideScopedGlobalReferences(rewritten)
+  const normalized = provideScopedGlobalReferences(rewritten)
+  if (runDocusaurus && sourceBody !== body) {
+    try {
+      compileSync(normalized, { outputFormat: 'program' })
+    } catch {
+      // Some Docusaurus sites use this fence for imports or JSX fragments
+      // whose surrounding source requires their private remark transforms.
+      // Retain the original fenced page instead of dropping it entirely.
+      return normalizeMdx(body, platform, false)
+    }
+  }
+  return normalized
 }
 
 /** Parse source Markdown or MDX into the canonical page representation. */

@@ -15,7 +15,7 @@ import ts from 'typescript'
 import { unified } from 'unified'
 
 import { parseFrontmatter } from './frontmatter.js'
-import { isFunctionInitializer, normalizeHtmlComments, preserveMdxHeadingCustomIds } from './mdx.js'
+import { functionDeclaredNames, isFunctionInitializer, normalizeHtmlComments, preserveMdxHeadingCustomIds } from './mdx.js'
 import { resolveWithin } from './path.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
 
@@ -35,6 +35,85 @@ interface MdxNode {
 
 interface Replacement { start: number; end: number; value: string }
 interface Binding { local: string; imported: string; source: string }
+
+/** Make JSX-indented fences parse as code before MDX import analysis runs. */
+export function normalizeIndentedFences(content: string): string {
+  const lines = content.split('\n')
+  let active: { indent: string; marker: string } | undefined
+  let ordinaryFence: string | undefined
+  let indentedJsx: { tag: string; indent: string } | undefined
+  let listIndent: number | undefined
+  return lines.map((line) => {
+    const trimmed = line.trimStart()
+    // A fenced example inside list-indented JSX must move together with its
+    // container. Unindenting only the fence leaves the tag unclosed; keeping
+    // everything indented lets textual import passes mistake example imports
+    // for live MDX imports.
+    if (indentedJsx) {
+      const normalized = line.startsWith(indentedJsx.indent) ? line.slice(indentedJsx.indent.length) : line
+      if (normalized.trimStart().startsWith(`</${indentedJsx.tag}>`)) indentedJsx = undefined
+      return normalized
+    }
+    if (ordinaryFence) {
+      const closing = trimmed.match(/^(`{3,}|~{3,})\s*$/)?.[1]
+      if (closing && closing[0] === ordinaryFence[0] && closing.length >= ordinaryFence.length) ordinaryFence = undefined
+      return line
+    }
+    if (!active) {
+      const listItem = line.match(/^([ \t]*)(?:[-*+]|\d+[.)])\s/)
+      const indentation = line.length - trimmed.length
+      if (listItem) listIndent = listItem[1].length
+      else if (trimmed && listIndent !== undefined && indentation <= listIndent) listIndent = undefined
+      const jsx = line.match(/^([ \t]{2,})<([A-Z][\w.]*)\b[^>]*>\s*$/)
+      if (jsx && listIndent !== undefined && jsx[1].length > listIndent && !trimmed.endsWith('/>')) {
+        indentedJsx = { tag: jsx[2], indent: jsx[1] }
+        return line.slice(jsx[1].length)
+      }
+      const match = line.match(/^([ \t]{4,})(`{3,}|~{3,})/)
+      if (match) {
+        active = { indent: match[1], marker: match[2] }
+        return line.slice(match[1].length)
+      }
+      const ordinary = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/)
+      if (ordinary) ordinaryFence = ordinary[1]
+      return line
+    }
+    const normalized = line.startsWith(active.indent) ? line.slice(active.indent.length) : line
+    const closing = normalized.trimStart().match(/^(`{3,}|~{3,})\s*$/)?.[1]
+    if (closing && closing[0] === active.marker[0] && closing.length >= active.marker.length) active = undefined
+    return normalized
+  }).join('\n')
+}
+
+/** Lift a self-contained data helper out of a copied client module for server MDX expressions. */
+function staticServerHelper(path: string, imported: string, local: string): string | null {
+  if (imported === 'default') return null
+  const parsed = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const isLiteral = (node: ts.Expression): boolean => {
+    if (ts.isParenthesizedExpression(node)) return isLiteral(node.expression)
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isNumericLiteral(node)) return true
+    if ([ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword, ts.SyntaxKind.NullKeyword].includes(node.kind)) return true
+    if (ts.isPrefixUnaryExpression(node)) return [ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken].includes(node.operator) && ts.isNumericLiteral(node.operand)
+    if (ts.isArrayLiteralExpression(node)) return node.elements.every((element) => ts.isExpression(element) && isLiteral(element))
+    if (ts.isObjectLiteralExpression(node)) return node.properties.every((property) => ts.isPropertyAssignment(property)
+      && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name) || ts.isNumericLiteral(property.name))
+      && isLiteral(property.initializer))
+    return false
+  }
+  for (const statement of parsed.statements) {
+    if (!ts.isVariableStatement(statement) || !statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== imported || !declaration.initializer || !ts.isArrowFunction(declaration.initializer)) continue
+      const arrow = declaration.initializer
+      if (arrow.parameters.length > 0) continue
+      const result = ts.isBlock(arrow.body)
+        ? arrow.body.statements.length === 1 && ts.isReturnStatement(arrow.body.statements[0]) ? arrow.body.statements[0].expression : undefined
+        : arrow.body
+      if (result && isLiteral(result)) return `export const ${local} = () => (${result.getText(parsed)});`
+    }
+  }
+  return null
+}
 
 /** A bare `id`/`videoId`-style attribute value is safe to embed in an `iframe src` only when it looks like a real YouTube video id. */
 const YOUTUBE_VIDEO_ID = /^[\w-]{1,64}$/
@@ -871,7 +950,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // function's own parse below, or that parse throws first and this
     // whole page's import analysis is skipped instead of just this one
     // page's expression.
-    const content = preserveMdxHeadingCustomIds(normalizeHtmlComments(parsedFrontmatter)).body
+    const content = preserveMdxHeadingCustomIds(normalizeIndentedFences(normalizeHtmlComments(parsedFrontmatter))).body
     let tree: MdxNode
     try {
       tree = parser.parse(content) as MdxNode
@@ -900,6 +979,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     const declarations: Array<{ start: number; end: number; source: string }> = []
     const moduleImports: Array<string> = []
     const realPageImports: Array<string> = []
+    const serverPageDeclarations: Array<string> = []
     const sharedImportEdits: Array<Replacement> = []
     let hasUnsupportedImports = false
     function hasExpressionReference(names: Set<string>, options: {
@@ -985,6 +1065,15 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         // component copies the same way a relative import would.
         const specifier = rawSpecifier.startsWith('@site/') ? `/${rawSpecifier.slice('@site/'.length)}` : rawSpecifier
         if (isScaffoldProvidedImport(specifier)) {
+          // Some translated Mintlify pages place a React hook import above a
+          // fenced example. Keeping that unused import turns server MDX into
+          // a module that illegally imports a client-only hook.
+          if (specifier === 'react' && bindings.length > 0
+            && bindings.every((binding) => REACT_GLOBALS.has(binding.imported))
+            && !hasExpressionReference(new Set(bindings.map((binding) => binding.local)))) {
+            edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+            continue
+          }
           // Installed in the migrated project: keep it on the page (content
           // outside an extracted block may use it) and copy it into any
           // extracted client module, whose moved declarations may use it too.
@@ -993,8 +1082,15 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         }
         if (!specifier.startsWith('.') && !specifier.startsWith('/')) {
           if (SHARED_IMPORTS.has(specifier)) {
-            moduleImports.push(statement.getText(ast))
-            sharedImportEdits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+            const isUnusedReactHookImport = specifier === 'react' && bindings.length > 0
+              && bindings.every((binding) => REACT_GLOBALS.has(binding.imported))
+              && !hasExpressionReference(new Set(bindings.map((binding) => binding.local)))
+            if (!isUnusedReactHookImport) moduleImports.push(statement.getText(ast))
+            // A shared React import is normally retained in server MDX. An
+            // unused hook import belongs only to a fenced example and would
+            // cause Next's server-component build to reject the whole page.
+            if (isUnusedReactHookImport) edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+            else sharedImportEdits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
           } else if (specifier.startsWith('@theme/') || specifier.startsWith('@docusaurus/')) {
             // Docusaurus' own theme/runtime components (Tabs, TabItem, Link,
             // useBaseUrl, ...) are converted to Thally's equivalents by
@@ -1095,11 +1191,6 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           hasUnsupportedImports = true
           continue
         }
-        if (bindings.some((binding) => !/^[A-Z]/.test(binding.local))) {
-          warn('MDX imports containing non-component values require manual migration; the import was preserved.', currentFile)
-          hasUnsupportedImports = true
-          continue
-        }
         // Unlike the unavailable-npm-package case above, a local/relative
         // import is fully owned by the migration: `copyGraph` below moves
         // the whole file (and its own local dependency graph) into the
@@ -1113,7 +1204,8 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         // (an unsupported dependency inside the local graph — see the catch
         // below), not merely because of how the binding is used.
         try {
-          const path = copyGraph(resolveDependency(specifier, currentFile))
+          const sourcePath = resolveDependency(specifier, currentFile)
+          const path = copyGraph(sourcePath)
           const isSvgUsedAsTag = extname(path).toLowerCase() === '.svg' && bindings.some((binding) => usedAsJsxTagName(binding.local))
           for (const binding of bindings) {
             const registerPath = isSvgUsedAsTag ? wrapSvgAsComponent(path) : path
@@ -1138,6 +1230,11 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             // where the generated runtime module that embeds this page
             // ends up on disk.
             if (!isSvgUsedAsTag && hasExpressionReference(new Set([binding.local]))) {
+              const helper = staticServerHelper(sourcePath, binding.imported, binding.local)
+              if (helper) {
+                serverPageDeclarations.push(helper)
+                continue
+              }
               const aliasSpecifier = portableSpecifier(`@/${registerPath.replace(/^src\//, '').replace(/\\/g, '/')}`)
               realPageImports.push(`import { ${registerImported} as ${binding.local} } from ${JSON.stringify(aliasSpecifier)};`)
               continue
@@ -1148,6 +1245,15 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           }
           edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
         } catch (error) {
+          if (hasExpressionReference(new Set(bindings.map((binding) => binding.local)))) {
+            warnings.push({
+              code: 'skipped-file',
+              message: `This page was excluded because local import ${JSON.stringify(rawSpecifier)} could not be copied and is used in an expression: ${error instanceof Error ? error.message : 'unsupported dependency'}.`,
+              source: relative(root, currentFile).replace(/\\/g, '/'),
+            })
+            hasUnsupportedImports = true
+            continue
+          }
           const failedPackage = error instanceof Error
             ? error.message.match(/^external package (\S+) requires manual installation and review$/)?.[1]
             : undefined
@@ -1377,9 +1483,72 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       }
       edits.push(...declarations.map(({ start, end }) => ({ start, end, value: '' })), ...sharedImportEdits)
     }
+    // A page-local callback cannot cross into a copied client component. Move
+    // a self-contained JSX callback into a thin client adapter while keeping
+    // the MDX children on the page. More complex callbacks remain passive.
+    const pageFunctions = functionDeclaredNames(content)
+    const passiveRoots: Array<MdxNode> = []
+    const wrappedRoots = new Set<MdxNode>()
+    walk(tree, (node) => {
+      if (!node.name || !aliases.has(node.name) || !functionValuedAttribute(node, pageFunctions)
+        || node.position?.start.offset === undefined || node.position.end.offset === undefined) return
+      if (passiveRoots.some((root) => node.position!.start.offset! >= root.position!.start.offset!
+        && node.position!.end.offset! <= root.position!.end.offset!)) return
+      const functionAttributes = (node.attributes ?? []).filter((attribute) => {
+        const value = attribute.value && typeof attribute.value === 'object' ? attribute.value.value?.trim() : undefined
+        return !!value && pageFunctions.has(value)
+      })
+      if (functionAttributes.length === 1 && functionAttributes[0].name
+        && functionAttributes[0].position?.start.offset !== undefined
+        && functionAttributes[0].position.end.offset !== undefined) {
+        const functionName = (functionAttributes[0].value as { value: string }).value.trim()
+        const declaration = declarations.find((entry) => new RegExp(`^export const ${functionName}\\s*=`).test(entry.source))
+        const safeDeclaration = declaration?.source.match(/^export const \w+\s*=\s*\(\s*\{\s*children(?:\s*,\s*\.\.\.props)?\s*\}\s*\)\s*=>\s*\([\s\S]*\)\s*;?$/)
+          && !/\b(?:window|document|process|fetch|use[A-Z]\w*)\b/.test(declaration.source)
+          && [...declaration.source.matchAll(/<([A-Z]\w*)\b/g)].every((match) => match[1] === 'CodeBlock')
+          && [...declaration.source.matchAll(/\{([^{}]*)\}/g)].every((match) =>
+            ['children', '...props', 'children, ...props'].includes(match[1].trim()))
+        const binding = registrations.get(aliases.get(node.name)!)
+        if (safeDeclaration && binding) {
+          const fallbackDeclaration = declaration!.source.replace(/<CodeBlock\b[^>]*>/g, '<pre><code>').replace(/<\/CodeBlock>/g, '</code></pre>')
+          const wrapperPath = `${destinationRoot}/callback-${hash(`${currentFile}:${node.position.start.offset}`)}.jsx`
+          const imported = binding.imported === 'default' ? 'default' : binding.imported
+          const importClause = imported === 'default' ? 'import Original' : `import { ${imported} as Original }`
+          const specifier = portableSpecifier(`./${relative(destinationRoot, binding.path).replace(/\\/g, '/')}`)
+          const wrapperName = register(wrapperPath, 'CallbackWrapper')
+          copied.set(wrapperPath, { path: wrapperPath, content: [
+            "'use client';", `${importClause} from ${JSON.stringify(specifier)};`,
+            fallbackDeclaration,
+            `export function CallbackWrapper({ children, ...props }) { return <Original {...props} ${functionAttributes[0].name}={${functionName}}>{children}</Original>; }`,
+          ].join('\n') })
+          const start = node.position.start.offset
+          const end = node.position.end.offset
+          const source = content.slice(start, end)
+          const opening = source.indexOf(`<${node.name}`)
+          const closing = source.lastIndexOf(`</${node.name}`)
+          if (opening >= 0) edits.push({ start: start + opening + 1, end: start + opening + 1 + node.name.length, value: wrapperName })
+          if (closing >= 0) edits.push({ start: start + closing + 2, end: start + closing + 2 + node.name.length, value: wrapperName })
+          edits.push({ start: functionAttributes[0].position!.start.offset!, end: functionAttributes[0].position!.end.offset!, value: '' })
+          wrappedRoots.add(node)
+          if (declaration!.source.includes('<CodeBlock')) warn(`Interactive <${node.name}> was retained with a basic code block in place of Mintlify's CodeBlock.`, currentFile)
+          return
+        }
+      }
+      const source = content.slice(node.position.start.offset, node.position.end.offset)
+      const openingEnd = source.indexOf('>')
+      const closingStart = source.lastIndexOf(`</${node.name}`)
+      const children = openingEnd >= 0 && closingStart > openingEnd ? source.slice(openingEnd + 1, closingStart) : ''
+      edits.push({ start: node.position.start.offset, end: node.position.end.offset,
+        value: `<div data-migration-interactive-fallback="${node.name}">${children}</div>` })
+      passiveRoots.push(node)
+      warn(`Interactive <${node.name}> passes a page-local function into a client component; its child content was retained without the interactive control. Move the callback into a client component to restore it.`, currentFile)
+    })
     walk(tree, (node) => {
       const replacement = node.name ? aliases.get(node.name) : undefined
       if (!replacement || node.position?.start.offset === undefined || node.position.end.offset === undefined) return
+      if (wrappedRoots.has(node)) return
+      if (passiveRoots.some((root) => node.position!.start.offset! >= root.position!.start.offset!
+        && node.position!.end.offset! <= root.position!.end.offset!)) return
       const start = node.position.start.offset
       const end = node.position.end.offset
       if (extracted.some((item) => start >= item.node.position!.start.offset! && end <= item.node.position!.end.offset!)) return
@@ -1408,7 +1577,8 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     const rendered = applyReplacements(content, edits)
     // Inserted after all offset-based edits (it has no position in the
     // original source) so it lands once, at the very top of the body.
-    const realImportsBlock = realPageImports.length ? `${[...new Set(realPageImports)].join('\n')}\n\n` : ''
+    const pageStatements = [...new Set([...realPageImports, ...serverPageDeclarations])]
+    const realImportsBlock = pageStatements.length ? `${pageStatements.join('\n')}\n\n` : ''
     return frontmatter + realImportsBlock + rendered
   }
 
