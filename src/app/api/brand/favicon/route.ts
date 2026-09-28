@@ -1,6 +1,8 @@
 import type { NextRequest } from 'next/server'
 import { getBrandAsset } from '@/lib/admin/settings'
 import { getCloudSiteConfig } from '@/lib/cloud-link/client'
+import { getDocsJsonConfig } from '@/lib/docs-json-config'
+import { publicBrandAssetPath } from '@/lib/public-brand-asset'
 
 export const runtime = 'nodejs'
 
@@ -20,7 +22,7 @@ export async function GET(request: NextRequest) {
     const configured = dark
       ? cloud?.siteConfig.portable.branding?.faviconDark ?? cloud?.siteConfig.portable.branding?.favicon
       : cloud?.siteConfig.portable.branding?.favicon
-    const publicPath = normalizePublicAssetPath(configured)
+    const publicPath = publicBrandAssetPath(configured)
     if (publicPath) return Response.redirect(new URL(publicPath, request.nextUrl.origin), 302)
     const uri = (dark ? await getBrandAsset('favicon-dark') : null) ?? (await getBrandAsset('favicon'))
     match = uri ? /^data:(image\/[a-z]+);base64,(.+)$/.exec(uri) : null
@@ -28,6 +30,11 @@ export async function GET(request: NextRequest) {
     match = null
   }
   if (!match) {
+    const docs = getDocsJsonConfig<{ favicon?: { light: string; dark?: string } }>()
+    const favicon = docs.favicon
+    const source = dark ? favicon?.dark ?? favicon?.light : favicon?.light
+    const path = publicBrandAssetPath(source)
+    if (path) return Response.redirect(new URL(path, request.nextUrl.origin), 302)
     return new Response(null, {
       status: 302,
       headers: { Location: `/brand/default-favicon-${dark ? 'dark' : 'light'}.svg` },
@@ -36,10 +43,4 @@ export async function GET(request: NextRequest) {
   return new Response(Buffer.from(match[2], 'base64'), {
     headers: { 'content-type': match[1], 'cache-control': 'public, max-age=300' },
   })
-}
-
-function normalizePublicAssetPath(value?: string): string | null {
-  if (!value || value.includes('..') || /^https?:/i.test(value)) return null
-  const normalized = value.replace(/^\/+/, '').replace(/^public\//, '')
-  return normalized ? `/${normalized}` : null
 }

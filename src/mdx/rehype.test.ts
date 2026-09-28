@@ -132,3 +132,27 @@ describe('code-fence metadata', () => {
     expect(parseCodeFenceMeta('{100001-100002}').highlight).toEqual([])
   })
 })
+
+describe('heading anchors', () => {
+  it('gives repeated headings distinct IDs in document order', () => {
+    const headings: Array<Element> = ['Key Features', 'Key Features', 'Next'].map((value) => ({
+      type: 'element', tagName: 'h3', properties: {}, children: [{ type: 'text', value }],
+    }))
+    const transform = rehypePlugins[2]() as (tree: Root) => void
+    transform({ type: 'root', children: headings })
+    expect(headings.map((heading) => heading.properties?.id)).toEqual([
+      'key-features', 'key-features-2', 'next',
+    ])
+  })
+
+  it('avoids a generated suffix colliding with an authored heading ID', () => {
+    const headings: Array<Element> = [
+      { type: 'element', tagName: 'h2', properties: { id: 'key-features-2' }, children: [{ type: 'text', value: 'Custom' }] },
+      { type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: 'Key Features' }] },
+      { type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: 'Key Features' }] },
+    ]
+    const transform = rehypePlugins[2]() as (tree: Root) => void
+    transform({ type: 'root', children: headings })
+    expect(headings.map((heading) => heading.properties?.id)).toEqual(['key-features-2', 'key-features', 'key-features-3'])
+  })
+})

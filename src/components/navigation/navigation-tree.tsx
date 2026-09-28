@@ -27,8 +27,10 @@ function matchesPath(href: string, pathname: string) {
   if (!href || /^https?:\/\//i.test(href)) return false
   const normalizedHref = normalizePath(href)
   const normalizedPath = normalizePath(pathname)
-  if (normalizedHref === '/') return normalizedPath === '/'
-  return normalizedPath === normalizedHref || normalizedPath.startsWith(`${normalizedHref}/`)
+  // A page only owns its exact route. Prefix matching is useful for opening a
+  // parent group, but marks both `/guide` and `/guide/advanced` as the current
+  // page when a collection contains a landing page alongside its children.
+  return normalizedPath === normalizedHref
 }
 
 function groupContainsPath(group: NavigationGroup, pathname: string): boolean {

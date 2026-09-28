@@ -249,6 +249,14 @@ async function runMigrateCommand(): Promise<void> {
     yes,
     skipValidation: flags.includes('--skip-validation'),
   })
+  // Scaffold Git output can span hundreds of files, so repeat the only path
+  // readers need after all install, validation, and commit logs have ended.
+  console.log('')
+  console.log(`  Migrated docs: ${result.projectDir}`)
+  const quotedDir = process.platform === 'win32'
+    ? `"${result.projectDir.replace(/"/g, '""')}"`
+    : `'${result.projectDir.replace(/'/g, "'\\''")}'`
+  console.log(`  To preview: cd ${quotedDir} && npm run dev`)
   if (result.validation.content === 'failed' || result.validation.build === 'failed') process.exitCode = 1
 }
 

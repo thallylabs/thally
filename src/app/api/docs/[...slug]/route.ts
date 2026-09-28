@@ -131,7 +131,7 @@ export async function GET(
   const canonicalHref = localizedPath(entry.href, route.locale, i18n.defaultLocale)
   const canonicalUrl = `${baseUrl}${canonicalHref}`
   const locale = route.locale
-  const nav = await localizeDocNavigation(await loadNavContext(entry.id), locale, i18n.defaultLocale)
+  const nav = await localizeDocNavigation(await loadNavContext(entry.id, locale), locale, i18n.defaultLocale)
   const title = typeof frontmatter.title === 'string' ? frontmatter.title : entry.title
   const description = typeof frontmatter.description === 'string' ? frontmatter.description : entry.description
   const keywords = Array.isArray(frontmatter.keywords) && frontmatter.keywords.every((item) => typeof item === 'string')

@@ -2,6 +2,8 @@
 
 import type * as acorn from 'acorn'
 import { compileSync } from '@mdx-js/mdx'
+import { nameToEmoji } from 'gemoji'
+import remarkGfm from 'remark-gfm'
 import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
@@ -33,7 +35,7 @@ interface DescriptionNode {
   children?: Array<DescriptionNode>
 }
 
-const descriptionParser = unified().use(remarkParse).use(remarkMdx)
+const descriptionParser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
 
 function firstParagraph(content: string): string {
   function plainText(node: DescriptionNode): string {
@@ -236,11 +238,30 @@ const SAFE_BUILTIN_ROOTS = new Set([
 
 interface MdxOffsetNode {
   type: string
+  depth?: number
   value?: string
   name?: string | null
   data?: { estree?: acorn.Program | null }
   children?: Array<MdxOffsetNode>
   position?: { start: { offset?: number }; end: { offset?: number } }
+}
+
+/** Use a page's leading H1 as its title without rendering it twice. */
+function leadingPageHeading(body: string): { title: string; start: number; end: number } | undefined {
+  try {
+    const root = descriptionParser.parse(body) as MdxOffsetNode
+    const first = root.children?.find((node) => node.type !== 'mdxjsEsm' && node.type !== 'html')
+    if (first?.type !== 'heading' || first.depth !== 1) return undefined
+    const text = (node: MdxOffsetNode): string => node.type === 'mdxTextExpression' || node.type === 'mdxFlowExpression'
+      ? ''
+      : node.value ?? (node.children ?? []).map(text).join('')
+    const title = text(first).replace(/\s+/g, ' ').trim()
+    const start = first.position?.start.offset
+    const end = first.position?.end.offset
+    return title && start !== undefined && end !== undefined ? { title, start, end } : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** Recursively collects every name a binding pattern introduces (`{a, b: {c}}`, `[p, ...rest]`, `x = 1`). */
@@ -1422,6 +1443,13 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   const sourceBody = runDocusaurus && unwrapMdxCodeBlocks ? unwrapDocusaurusMdxCodeBlocks(body) : body
   let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(runFern ? normalizeFernCallouts(sourceBody) : sourceBody))
   if (runDocusaurus) {
+    // Docusaurus resolves GitHub emoji names in Markdown text. Leaving the
+    // shortcodes literal makes comparison tables unreadable after import; the
+    // code masker keeps examples and inline code byte-for-byte intact.
+    rewritten = replaceOutsideCode(rewritten, (segment) => segment.replace(
+      /:([+\w-]+):/g,
+      (shortcode: string, name: string) => nameToEmoji[name] ?? shortcode,
+    ))
     // Docusaurus injects these theme components globally. Thally also
     // exposes its equivalents globally, so source-only imports must not survive.
     rewritten = normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(removeGlobalDocusaurusImports(rewritten)))
@@ -1543,13 +1571,17 @@ export function parseMarkdownPage(input: {
     ...(input.locale ? { locale: input.locale } : {}),
   }
   const identity = input.resolveIdentity?.(parsed.data, fallbackIdentity) ?? fallbackIdentity
-  const body = normalizeMdx(parsed.content, input.platform).trim()
+  let body = normalizeMdx(parsed.content, input.platform).trim()
   const keywords = Array.isArray(parsed.data.keywords)
     ? parsed.data.keywords.filter((value): value is string => typeof value === 'string')
     : []
+  const heading = leadingPageHeading(body)
   const title = typeof parsed.data.title === 'string' && parsed.data.title.trim()
     ? parsed.data.title.trim()
-    : titleFromId(identity.navigationId)
+    : heading?.title ?? titleFromId(identity.navigationId)
+  if (heading && heading.title === title) {
+    body = `${body.slice(0, heading.start)}${body.slice(heading.end)}`.trim()
+  }
   const navTitle = typeof parsed.data.sidebarTitle === 'string' && parsed.data.sidebarTitle.trim()
     ? parsed.data.sidebarTitle.trim()
     : typeof parsed.data.navTitle === 'string' && parsed.data.navTitle.trim()
@@ -1578,6 +1610,9 @@ export function parseMarkdownPage(input: {
     title,
     navTitle,
     description,
+    ...(input.platform === 'docusaurus' || input.platform === 'fern'
+      ? { descriptionPlacement: 'body' as const }
+      : {}),
     badge,
     keywords,
     mode,

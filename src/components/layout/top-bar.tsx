@@ -79,8 +79,10 @@ export function TopBar({
     })
 
   // navbarConfig.primary overrides the siteConfig CTA when present
-  const primaryCta = navbarConfig?.primary
-    ? { label: navbarConfig.primary.label, href: navbarConfig.primary.href }
+  const primaryCta = navbarConfig && Object.hasOwn(navbarConfig, 'primary')
+    ? navbarConfig.primary
+      ? { label: navbarConfig.primary.label, href: navbarConfig.primary.href }
+      : undefined
     : siteConfigCta
   // GitHub is part of the footer's social cluster in the default docs shell.
   // SiteShell carries legacy navbar-only GitHub links into the footer so an
@@ -109,10 +111,17 @@ export function TopBar({
           className="thally-docs-brand mr-5 flex min-w-0 items-center gap-2 text-foreground"
         >
           <Logo showText={false} />
-          <span className="truncate font-heading text-[1rem] font-semibold tracking-[-0.015em]">
-            {displaySiteName(siteName)}
-          </span>
-          <span className="-ml-1 shrink-0 font-heading text-[1rem] font-medium text-foreground/55">Docs</span>
+          {navbarConfig?.logo?.showTitle !== false ? (
+            <span className="truncate font-heading text-[1rem] font-semibold tracking-[-0.015em]">
+              {displaySiteName(siteName)}
+            </span>
+          ) : null}
+          {navbarConfig?.logo?.rightText ? (
+            <span className="-ml-1 shrink-0 font-heading text-[1rem] font-medium text-foreground/55">{navbarConfig.logo.rightText}</span>
+          ) : null}
+          {!navbarConfig?.logo ? (
+            <span className="-ml-1 shrink-0 font-heading text-[1rem] font-medium text-foreground/55">Docs</span>
+          ) : null}
         </IntentPrefetchLink>
         {i18nConfig && i18nConfig.locales.length >= 2 ? (
           <LocaleSwitcher locales={i18nConfig.locales} availableLocales={availableLocales ?? [i18nConfig.defaultLocale]} currentLocale={currentLocale ?? i18nConfig.defaultLocale} currentPath={currentPath ?? '/'} defaultLocale={i18nConfig.defaultLocale} />
