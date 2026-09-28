@@ -352,6 +352,14 @@ function normalizeContent(raw: unknown, deepResolve: (schema: RawObject) => RawO
  */
 function createDeepResolver(resolveRef: (ref: string) => RawObject | null) {
   const cache = new Map<string, RawObject>()
+  // Counts circular placeholders emitted so far. A ref's resolved result is
+  // only safe to memoize if resolving it emitted none: a placeholder means
+  // the result was truncated based on which refs were already "in progress"
+  // on THIS call path (`seen`), so the same ref reached via a different
+  // entry path (different `seen`) can legitimately truncate at a different
+  // point. Caching it unconditionally lets whichever path resolves first
+  // poison every other path with its placeholder.
+  let placeholderCount = 0
 
   function resolve(schema: RawObject, seen: Set<string>): RawObject {
     // If this node IS a $ref, resolve it first (then recurse into the result)
@@ -363,14 +371,18 @@ function createDeepResolver(resolveRef: (ref: string) => RawObject | null) {
       }
       if (seen.has(ref)) {
         // Break circular reference — return a placeholder
+        placeholderCount += 1
         return { type: 'object', description: `[Circular: ${ref.split('/').pop()}]` }
       }
       const resolved = resolveRef(ref)
       if (resolved) {
         const childSeen = new Set(seen)
         childSeen.add(ref)
+        const placeholdersBefore = placeholderCount
         const result = resolve(resolved, childSeen)
-        cache.set(ref, result)
+        if (placeholderCount === placeholdersBefore) {
+          cache.set(ref, result)
+        }
         return result
       }
       return schema

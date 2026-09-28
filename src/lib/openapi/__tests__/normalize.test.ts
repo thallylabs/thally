@@ -179,3 +179,181 @@ describe('normalizeSpec', () => {
   })
 })
 
+const circularSpec = {
+  openapi: '3.1.0',
+  info: { title: 'Circular API', version: '1.0.0' },
+  paths: {
+    '/nodes': {
+      get: {
+        summary: 'Get node',
+        responses: {
+          '200': {
+            description: 'Node response',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Node' } } },
+          },
+        },
+      },
+    },
+    '/a': {
+      get: {
+        summary: 'Get A',
+        responses: {
+          '200': {
+            description: 'A response',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/A' } } },
+          },
+        },
+      },
+    },
+    '/b': {
+      get: {
+        summary: 'Get B',
+        responses: {
+          '200': {
+            description: 'B response',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/B' } } },
+          },
+        },
+      },
+    },
+    '/shared1': {
+      get: {
+        summary: 'Get shared 1',
+        responses: {
+          '200': {
+            description: 'Shared response',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Shared' } } },
+          },
+        },
+      },
+    },
+    '/shared2': {
+      get: {
+        summary: 'Get shared 2',
+        responses: {
+          '200': {
+            description: 'Shared response',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Shared' } } },
+          },
+        },
+      },
+    },
+    '/shared3': {
+      get: {
+        summary: 'Get shared 3',
+        responses: {
+          '200': {
+            description: 'Shared response',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Shared' } } },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      // Self-referencing: Node.children is an array of Node.
+      Node: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          children: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/Node' },
+          },
+        },
+      },
+      // Mutual cycle: A -> B -> A.
+      A: {
+        type: 'object',
+        properties: {
+          label: { type: 'string' },
+          b: { $ref: '#/components/schemas/B' },
+        },
+      },
+      B: {
+        type: 'object',
+        properties: {
+          label: { type: 'string' },
+          a: { $ref: '#/components/schemas/A' },
+        },
+      },
+      // No cycle — referenced by three different operations.
+      Shared: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          value: { type: 'number' },
+        },
+      },
+    },
+  },
+} as const
+
+function createCircularResolvedSpec(): ResolvedSpec {
+  return {
+    config: { ...baseConfig, source: { type: 'inline', document: circularSpec } },
+    document: circularSpec,
+  }
+}
+
+interface LooseSchema {
+  type?: string
+  description?: string
+  properties: Record<string, LooseSchema>
+  items: LooseSchema
+}
+
+function findResponseSchema(normalized: ReturnType<typeof normalizeSpec>, path: string): LooseSchema {
+  const operation = normalized.operations.find((op) => op.path === path)
+  const schema = operation?.responses.find((response) => response.code === '200')?.contents[0]?.schema
+  return schema as unknown as LooseSchema
+}
+
+describe('normalizeSpec circular $ref resolution', () => {
+  it('terminates and places a placeholder for a self-referencing schema', () => {
+    const normalized = normalizeSpec(createCircularResolvedSpec())
+    const nodeSchema = findResponseSchema(normalized, '/nodes')
+    expect(nodeSchema.properties.children.items.description).toBe('[Circular: Node]')
+  })
+
+  it('terminates and places a placeholder for a mutual cycle (A -> B -> A)', () => {
+    const normalized = normalizeSpec(createCircularResolvedSpec())
+    const aSchema = findResponseSchema(normalized, '/a')
+    expect(aSchema.properties.b.properties.a.description).toBe('[Circular: A]')
+  })
+
+  it('resolves a shared schema identically for every operation that references it', () => {
+    const normalized = normalizeSpec(createCircularResolvedSpec())
+    const shared1 = findResponseSchema(normalized, '/shared1')
+    const shared2 = findResponseSchema(normalized, '/shared2')
+    const shared3 = findResponseSchema(normalized, '/shared3')
+    expect(shared1).toEqual({
+      type: 'object',
+      properties: { id: { type: 'string' }, value: { type: 'number' } },
+    })
+    expect(shared2).toEqual(shared1)
+    expect(shared3).toEqual(shared1)
+    // Memoized: every operation gets back the exact same resolved object.
+    expect(shared2).toBe(shared1)
+    expect(shared3).toBe(shared1)
+  })
+
+  it('resolves the same cycle correctly from two different entry paths (A first, then B)', () => {
+    const normalized = normalizeSpec(createCircularResolvedSpec())
+    const aSchema = findResponseSchema(normalized, '/a')
+    const bSchema = findResponseSchema(normalized, '/b')
+
+    // Entering via A: the cycle closes back on A.
+    expect(aSchema.properties.b.properties.a.description).toBe('[Circular: A]')
+    expect(aSchema.properties.b.properties.a.type).toBe('object')
+
+    // Entering via B: the cycle closes back on B, not on whatever A's
+    // resolution happened to produce first. A memo cache keyed only by ref
+    // (with no regard for which `seen` context produced the cached value)
+    // would incorrectly reuse A's truncated result here.
+    expect(bSchema.properties.a.properties.b.description).toBe('[Circular: B]')
+    expect(bSchema.properties.a.properties.b.type).toBe('object')
+  })
+})
+
