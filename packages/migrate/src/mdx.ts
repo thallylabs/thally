@@ -801,19 +801,26 @@ export function normalizeHtmlComments(body: string): string {
  * (`## Heading {#custom-id}`) instead of its default auto-slug. remark-mdx
  * has no idea that syntax exists — a bare `{...}` in prose is always parsed
  * as an embedded JS expression, and `#custom-id` isn't valid JS, so it
- * throws ("Could not parse expression with acorn") and the whole page gets
- * excluded. Thally's own heading renderer (`createHeading` in
- * mdx-components.tsx) always derives the anchor id from the heading's
- * rendered text anyway and has no way to honor an explicit id, so there is
- * nothing useful to preserve here beyond making the page compile again:
- * strip the suffix and let the heading fall back to its auto-generated id.
- * An anchor link elsewhere in the source that specifically relied on the
- * custom id (rather than the plain heading text) may need a manual fix.
+ * throws ("Could not parse expression with acorn") wherever something needs
+ * a real MDX parse of the page (both this migration's own component
+ * analysis and the final compiled output), excluding the whole page. Thally's
+ * heading renderer (`createHeading` in mdx-components.tsx) always derives
+ * the anchor id from the heading's rendered text and has no way to honor an
+ * explicit `id` prop on `h2`/`h3`, so the custom id can't be attached to the
+ * heading element itself — instead, an empty `<a id="custom-id" />` is
+ * inserted immediately before the heading. A browser resolves a `#hash` to
+ * *any* element with a matching `id`, not just headings, so an existing
+ * in-repo or migrated link to `#custom-id` still lands in the right place;
+ * only the exact scroll offset shifts up by one heading's height, same as
+ * Docusaurus' own `hash-in-anchor-vs-on-heading` implementations do for a
+ * heading with children before its own anchor point in some themes. Always
+ * separated from surrounding content by blank lines so it can never be
+ * swallowed into a preceding paragraph as a lazy continuation line.
  */
-function stripDocusaurusHeadingIds(body: string): string {
+export function preserveDocusaurusHeadingIds(body: string): string {
   return replaceOutsideCode(body, (whole) => whole.replace(
-    /^(#{1,6}[ \t]+.+?)[ \t]*\{#[A-Za-z0-9_-]+\}[ \t]*$/gm,
-    (_match, heading: string) => heading,
+    /^(#{1,6}[ \t]+.+?)[ \t]*\{#([A-Za-z0-9_-]+)\}[ \t]*$/gm,
+    (_match, heading: string, id: string) => `\n<a id=${JSON.stringify(id)}></a>\n\n${heading}`,
   ))
 }
 
@@ -1210,7 +1217,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform): string
       .split('\n')
       .filter((line) => !isGlobalDocusaurusImport(line))
       .join('\n')
-    rewritten = stripDocusaurusHeadingIds(normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(withoutGlobalImports)))
+    rewritten = preserveDocusaurusHeadingIds(normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(withoutGlobalImports)))
   }
   rewritten = replaceOutsideCode(rewritten, (segment) => {
     let result = convertHtmlStyleAttributes(segment)

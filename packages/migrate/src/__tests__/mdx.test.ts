@@ -241,14 +241,14 @@ describe('Docusaurus import normalization', () => {
   })
 })
 
-describe('Docusaurus heading id stripping (an explicit `{#id}` anchor is unparsable MDX prose)', () => {
-  it("strips a heading's explicit {#custom-id} suffix", () => {
-    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'docusaurus')).toBe('### Timeouts')
+describe("Docusaurus heading id preservation (an explicit `{#id}` anchor is unparsable MDX prose, and Thally's heading renderer can't take an explicit id prop)", () => {
+  it("replaces a heading's explicit {#custom-id} suffix with a preceding anchor element carrying that id", () => {
+    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'docusaurus')).toBe('\n<a id="Notes-Timeouts"></a>\n\n### Timeouts')
   })
 
-  it('strips the suffix even with inline code and JSX before it on the same heading line', () => {
+  it('does the same with inline code and JSX before it on the same heading line', () => {
     const source = '### <Icon name="angle-right" /> `cypress-tap` sessions {#cypress-tap-sessions}'
-    expect(normalizeMdx(source, 'docusaurus')).toBe('### <Icon name="angle-right" /> `cypress-tap` sessions')
+    expect(normalizeMdx(source, 'docusaurus')).toBe('\n<a id="cypress-tap-sessions"></a>\n\n### <Icon name="angle-right" /> `cypress-tap` sessions')
   })
 
   it('leaves a heading with no explicit id unchanged', () => {
