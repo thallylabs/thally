@@ -241,6 +241,30 @@ describe('Docusaurus import normalization', () => {
   })
 })
 
+describe('Docusaurus heading id stripping (an explicit `{#id}` anchor is unparsable MDX prose)', () => {
+  it("strips a heading's explicit {#custom-id} suffix", () => {
+    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'docusaurus')).toBe('### Timeouts')
+  })
+
+  it('strips the suffix even with inline code and JSX before it on the same heading line', () => {
+    const source = '### <Icon name="angle-right" /> `cypress-tap` sessions {#cypress-tap-sessions}'
+    expect(normalizeMdx(source, 'docusaurus')).toBe('### <Icon name="angle-right" /> `cypress-tap` sessions')
+  })
+
+  it('leaves a heading with no explicit id unchanged', () => {
+    expect(normalizeMdx('## Plain heading', 'docusaurus')).toBe('## Plain heading')
+  })
+
+  it('leaves a `{#...}`-shaped line inside a fenced code block untouched', () => {
+    const body = '```md\n## Heading {#id}\n```'
+    expect(normalizeMdx(body, 'docusaurus')).toBe(body)
+  })
+
+  it('only runs for the docusaurus platform', () => {
+    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'mintlify')).toBe('### Timeouts {#Notes-Timeouts}')
+  })
+})
+
 describe('multi-line renames (fenced/inline code masked, whole body rewritten)', () => {
   it('converts a multi-line HTML comment to an MDX comment', () => {
     const body = 'Before.\n\n<!--\n  a note\n  spanning lines\n-->\n\nAfter.'

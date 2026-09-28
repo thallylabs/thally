@@ -797,6 +797,27 @@ export function normalizeHtmlComments(body: string): string {
 }
 
 /**
+ * Docusaurus lets a heading declare an explicit anchor id
+ * (`## Heading {#custom-id}`) instead of its default auto-slug. remark-mdx
+ * has no idea that syntax exists — a bare `{...}` in prose is always parsed
+ * as an embedded JS expression, and `#custom-id` isn't valid JS, so it
+ * throws ("Could not parse expression with acorn") and the whole page gets
+ * excluded. Thally's own heading renderer (`createHeading` in
+ * mdx-components.tsx) always derives the anchor id from the heading's
+ * rendered text anyway and has no way to honor an explicit id, so there is
+ * nothing useful to preserve here beyond making the page compile again:
+ * strip the suffix and let the heading fall back to its auto-generated id.
+ * An anchor link elsewhere in the source that specifically relied on the
+ * custom id (rather than the plain heading text) may need a manual fix.
+ */
+function stripDocusaurusHeadingIds(body: string): string {
+  return replaceOutsideCode(body, (whole) => whole.replace(
+    /^(#{1,6}[ \t]+.+?)[ \t]*\{#[A-Za-z0-9_-]+\}[ \t]*$/gm,
+    (_match, heading: string) => heading,
+  ))
+}
+
+/**
  * Rewrite Fern's callout intents to Thally's fixed callout tags without
  * touching fenced code. Delimiters are tracked with a stack so nested and
  * sibling callouts each close with the tag their own opening intent chose;
@@ -1189,7 +1210,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform): string
       .split('\n')
       .filter((line) => !isGlobalDocusaurusImport(line))
       .join('\n')
-    rewritten = normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(withoutGlobalImports))
+    rewritten = stripDocusaurusHeadingIds(normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(withoutGlobalImports)))
   }
   rewritten = replaceOutsideCode(rewritten, (segment) => {
     let result = convertHtmlStyleAttributes(segment)
