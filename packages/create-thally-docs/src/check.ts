@@ -136,6 +136,21 @@ function addOrphanToNav(projectDir: string, pageId: string): void {
 
 const EXPLICIT_ID_ATTRIBUTE = /\bid=(?:"([^"]*)"|'([^']*)'|\{["']([^"'}]*)["']\})/g
 
+/** Visit rendered prose lines while respecting the opening fence's marker and length. */
+function forEachNonFencedLine(content: string, visit: (line: string, lineNumber: number) => void): void {
+  let fence: string | undefined
+  for (const [index, line] of content.split('\n').entries()) {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
+    if (marker) {
+      if (!fence) fence = marker[1]
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length
+        && /^\s*$/.test(line.slice(marker[0].length))) fence = undefined
+      continue
+    }
+    if (!fence) visit(line, index + 1)
+  }
+}
+
 /**
  * Headings and explicit anchor targets a rendered page actually exposes.
  * CommonMark still parses a heading marker indented up to 3 spaces (only 4+
@@ -146,14 +161,14 @@ const EXPLICIT_ID_ATTRIBUTE = /\bid=(?:"([^"]*)"|'([^']*)'|\{["']([^"'}]*)["']\}
  */
 function extractHeadingAnchors(content: string): Set<string> {
   const anchors = new Set<string>()
-  for (const line of content.split('\n')) {
+  forEachNonFencedLine(content, (line) => {
     const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
     if (heading) anchors.add(slugify(heading[1]))
     for (const idMatch of line.matchAll(EXPLICIT_ID_ATTRIBUTE)) {
       const id = idMatch[1] ?? idMatch[2] ?? idMatch[3]
       if (id) anchors.add(id)
     }
-  }
+  })
   return anchors
 }
 
@@ -164,45 +179,31 @@ interface FoundLink {
 
 function extractLinks(content: string): FoundLink[] {
   const links: FoundLink[] = []
-  const lines = content.split('\n')
-  let inFence = false
-  for (let i = 0; i < lines.length; i++) {
-    if (/^\s*(```|~~~)/.test(lines[i])) {
-      inFence = !inFence
-      continue
-    }
-    if (inFence) continue // don't link-check example URLs inside code blocks
-    const line = lines[i].replace(/`[^`]*`/g, '') // strip inline code spans
+  forEachNonFencedLine(content, (rawLine, lineNumber) => {
+    const line = rawLine.replace(/`[^`]*`/g, '') // strip inline code spans
     // Markdown links [text](target) and bare href="target"
     for (const m of line.matchAll(/\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
-      links.push({ target: m[1], line: i + 1 })
+      links.push({ target: m[1], line: lineNumber })
     }
     for (const m of line.matchAll(/href=["']([^"']+)["']/g)) {
-      links.push({ target: m[1], line: i + 1 })
+      links.push({ target: m[1], line: lineNumber })
     }
-  }
+  })
   return links
 }
 
 /** Local image references: markdown `![]()` images and `src="..."` attributes. */
 function extractImageRefs(content: string): FoundLink[] {
   const refs: FoundLink[] = []
-  const lines = content.split('\n')
-  let inFence = false
-  for (let i = 0; i < lines.length; i++) {
-    if (/^\s*(```|~~~)/.test(lines[i])) {
-      inFence = !inFence
-      continue
-    }
-    if (inFence) continue
-    const line = lines[i].replace(/`[^`]*`/g, '')
+  forEachNonFencedLine(content, (rawLine, lineNumber) => {
+    const line = rawLine.replace(/`[^`]*`/g, '')
     for (const m of line.matchAll(/!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
-      refs.push({ target: m[1], line: i + 1 })
+      refs.push({ target: m[1], line: lineNumber })
     }
     for (const m of line.matchAll(/\bsrc=["']([^"']+)["']/g)) {
-      refs.push({ target: m[1], line: i + 1 })
+      refs.push({ target: m[1], line: lineNumber })
     }
-  }
+  })
   return refs
 }
 

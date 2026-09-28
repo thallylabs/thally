@@ -45,6 +45,135 @@ describe('migration description fallback', () => {
 })
 
 describe('normalizeMdx', () => {
+  it('reduces a presentational Mintlify Update label to static text', () => {
+    const source = '<Update label={<><Icon icon="rocket" /><span>Quickstart</span></>} tags={["Guide"]}>Text</Update>'
+    const output = normalizeMdx(source, 'mintlify')
+    expect(output).toContain('<Update label={"Quickstart"} tags={["Guide"]}>')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('preserves an explicit heading anchor in a Mintlify page', () => {
+    const output = normalizeMdx('## Install help {#smartscreen}', 'mintlify')
+    expect(output).toContain('<a id="smartscreen"></a>')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('preserves Mintlify parameter anchors for settings headings and fields', () => {
+    const body = [
+      '### `icons`',
+      '<ResponseField name="icons.library" type="string" />',
+      '<ResponseField name="seo.paths" type="array" />',
+      '```mdx',
+      '<ResponseField name="example.only" />',
+      '```',
+    ].join('\n')
+    const output = normalizeMdx(body, 'mintlify')
+    expect(output).toContain('<a id="param-icons"></a>\n### `icons`')
+    expect(output).toContain('<a id="param-icons-library"></a>\n<ResponseField name="icons.library"')
+    expect(output).toContain('<a id="param-seo-paths"></a>\n<ResponseField name="seo.paths"')
+    expect(output).not.toContain('id="param-example-only"')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('removes Docusaurus theme imports and unused tab data across shared import lines', () => {
+    const body = "import Tabs from '@theme/Tabs'; import TabItem from '@theme/TabItem'; import constants from '@site/core/TabsConstants';\n\n<Tabs values={constants.languages} defaultValue={constants.defaultLanguage}><TabItem value=\"en\">Hello</TabItem></Tabs>"
+    const output = normalizeMdx(body, 'docusaurus')
+    expect(output).not.toContain('@theme/')
+    expect(output).not.toContain('@site/')
+    expect(output).not.toContain('constants.')
+    expect(output).toContain('<Tab title="en">')
+  })
+
+  it('preserves explicit Docusaurus heading anchors without invalid MDX expressions', () => {
+    const body = '### Hook name {#hook-name}\n### `getClientModules()` {/* #getClientModules */}\n\n```md\n### Example {#literal}\n### Example {/* #literalComment */}\n```'
+    const output = normalizeMdx(body, 'docusaurus')
+    expect(output).toContain('<a id="hook-name"></a>\n### Hook name')
+    expect(output).toContain('<a id="getClientModules"></a>\n### `getClientModules()`')
+    expect(output).toContain('### Example {#literal}')
+    expect(output).toContain('### Example {/* #literalComment */}')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+  it('renders Docusaurus mdx-code-block wrappers as live MDX around examples', () => {
+    const body = [
+      '[Jump to details](#node-env)',
+      '```mdx-code-block',
+      '<details id="node-env">',
+      '<summary>Environment</summary>',
+      '```',
+      '',
+      '```jsx',
+      'const mode = "production"',
+      '```',
+      '',
+      '```mdx-code-block',
+      '</details>',
+      '```',
+      '',
+      '````md',
+      '```mdx-code-block',
+      '<details id="example-only">',
+      '```',
+      '````',
+    ].join('\n')
+    const output = normalizeMdx(body, 'docusaurus')
+    expect(output).toContain('<details id="node-env">')
+    expect(output).toContain('</details>')
+    expect(output).not.toContain('```mdx-code-block\n<details id="node-env">')
+    expect(output).toContain('````md\n```mdx-code-block\n<details id="example-only">')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+  it('keeps a Docusaurus mdx-code-block fenced when unwrapping would invalidate the page', () => {
+    const body = '```mdx-code-block\nimport Source from "@site/sidebar.ts" with {type: "text"};\n```\n\nPage copy.'
+    const output = normalizeMdx(body, 'docusaurus')
+    expect(output).toContain('```mdx-code-block\nimport Source')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+  it('does not expose theme imports from any mdx-code-block on a page', () => {
+    const body = [
+      '```mdx-code-block',
+      "import Image from '@theme/ThemedImage';",
+      '```',
+      '```mdx-code-block',
+      '<Image sources={{light: "/light.png", dark: "/dark.png"}} />',
+      '```',
+    ].join('\n')
+    const output = normalizeMdx(body, 'docusaurus')
+    expect(output).toBe(body)
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+  it('keeps admonition examples inside a longer outer code fence inert', () => {
+    const body = [
+      '````mdx',
+      ':::note',
+      '```js',
+      'example',
+      '```',
+      ':::',
+      '````',
+      '',
+      ':::tip',
+      'Real tip.',
+      ':::',
+    ].join('\n')
+    const output = normalizeMdx(body, 'docusaurus')
+    expect(output).toContain('````mdx\n:::note\n```js\nexample\n```\n:::\n````')
+    expect(output).toContain('<Note>\nReal tip.\n</Note>')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+  it('closes an archived Docusaurus admonition before the next heading', () => {
+    const body = [
+      ':::warning For pnpm users',
+      'Install configuration:',
+      '```json',
+      '{"onlyBuiltDependencies":["fsevents"]}',
+      '```',
+      '## Configuration',
+      'Available options.',
+    ].join('\n')
+    const output = normalizeMdx(body, 'docusaurus')
+    expect(output).toContain('</Warning>\n## Configuration')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
   it('leaves a bare Mintlify <Callout>...</Callout> closing tag untouched', () => {
     // Fern's `<Callout intent="...">` closing tags are rewritten to the tag
     // its matching opener chose. A generic Mintlify `<Callout>` (no `intent`)
@@ -144,6 +273,10 @@ describe('normalizeMdx', () => {
 })
 
 describe('HTML style="..." attribute normalization (all platforms, including unspecified)', () => {
+  it('does not mistake an info string inside a fence for its closing delimiter', () => {
+    const body = '```markdown\n```python\ncode\n```\n\n<small style="color: #666;">License</small>'
+    expect(normalizeMdx(body, 'mintlify')).toContain('<small style={{color: "#666"}}>')
+  })
   it('converts a simple string style attribute into a JSX style object', () => {
     // A raw HTML `style="..."` string (common in Markdown pasted from a
     // rendered table, e.g. a pandas DataFrame) is invalid JSX — React's
@@ -461,6 +594,13 @@ describe('protectMathBlocks', () => {
 })
 
 describe('escapeFernLiteralBraces', () => {
+  it('keeps issue lists and double-braced templates as literal prose', () => {
+    const body = 'Dependencies: {V2-7, V2-8}. Prompt: {{business_name}}.'
+    const escaped = escapeFernLiteralBraces(body)
+    expect(escaped).toContain('\\{V2-7, V2-8\\}')
+    expect(escaped).toContain('\\{\\{business_name\\}\\}')
+    expect(() => compileSync(escaped, { format: 'mdx' })).not.toThrow()
+  })
   it('leaves an ESM component whose JSX returns a real expression unchanged', () => {
     const body = 'export const Box = ({ children }) => <div>{children}</div>;'
     expect(escapeFernLiteralBraces(body)).toBe(body)
