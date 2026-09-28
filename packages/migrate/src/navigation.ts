@@ -22,7 +22,7 @@ interface MintlifyPageReference {
   locale?: string
 }
 
-const MAX_MINTLIFY_CONFIG_BYTES = 2_000_000
+const MAX_MINTLIFY_CONFIG_BYTES = 20_000_000
 
 export interface MintlifyNavigationResult {
   docsConfig: MigrationDocsConfig

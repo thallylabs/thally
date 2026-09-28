@@ -20,7 +20,7 @@ import type {
   MigrationWarning,
 } from './types.js'
 
-const MAX_CONFIG_BYTES = 1_000_000
+const MAX_CONFIG_BYTES = 20_000_000
 const CATEGORY_FILENAMES = ['_category_.json', '_category_.yml', '_category_.yaml']
 const SIDEBAR_FILENAMES = [
   'sidebars.json',
@@ -241,7 +241,7 @@ export function rewriteDocusaurusLinks(
 
 function readBoundedText(path: string): string {
   if (lstatSync(path).size > MAX_CONFIG_BYTES) {
-    throw new Error('Docusaurus sidebar config exceeded the 1 MB static-parser limit.')
+    throw new Error('Docusaurus sidebar config exceeded the 20 MB static-parser limit.')
   }
   return readFileSync(path, 'utf8')
 }

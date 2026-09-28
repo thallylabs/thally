@@ -18,7 +18,7 @@ import type {
   MigrationWarning,
 } from './types.js'
 
-const MAX_CONFIG_BYTES = 2_000_000
+const MAX_CONFIG_BYTES = 20_000_000
 
 export interface FernPageDescriptor {
   /** Path to the referenced page file, relative to the Fern root. */
@@ -71,7 +71,7 @@ function titleCase(value: string): string {
 
 function readBoundedYaml(path: string): unknown {
   if (lstatSync(path).size > MAX_CONFIG_BYTES) {
-    throw new Error('Fern config exceeded the 2 MB static-parser limit.')
+    throw new Error('Fern config exceeded the 20 MB static-parser limit.')
   }
   return parseYaml(readFileSync(path, 'utf8'))
 }

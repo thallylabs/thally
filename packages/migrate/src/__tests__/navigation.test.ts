@@ -1,5 +1,8 @@
 /** Mintlify navigation projection invariants shared by every migration entrypoint. */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   addMintlifyDirectoryRedirects,
@@ -8,7 +11,7 @@ import {
   pruneMissingNavigationPages,
 } from '../index.js'
 import { projectFernNavigation } from '../fern.js'
-import { mintlifyNavigationApiReferences } from '../navigation.js'
+import { mintlifyNavigationApiReferences, readMintlifyConfig } from '../navigation.js'
 import type { MigrationDocsConfig, MigrationPage } from '../types.js'
 
 function page(id: string, navigationId = id, locale?: string): MigrationPage {
@@ -425,5 +428,41 @@ describe('Mintlify manual OpenAPI operation listing', () => {
     // "did not resolve to a source page" pass never sees them, let alone
     // once per operation.
     expect(result.pageReferences.some((reference) => reference.ref.startsWith('GET ') || reference.ref.startsWith('POST '))).toBe(false)
+  })
+})
+
+describe('Mintlify config size limit', () => {
+  it('reads a docs.json larger than the old 2 MB page limit, up to the 20 MB config limit', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-config-'))
+    try {
+      // A large but realistic docs.json: many groups/pages, past 2 MB (the
+      // page-content limit) but well under the 20 MB config limit.
+      const groups = Array.from({ length: 40_000 }, (_, index) => ({
+        group: `Group ${index}`,
+        pages: [`guides/page-${index}`],
+      }))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { tabs: [{ tab: 'Guides', groups }] } }))
+      const size = Buffer.byteLength(JSON.stringify({ navigation: { tabs: [{ tab: 'Guides', groups }] } }))
+      expect(size).toBeGreaterThan(2_000_000)
+      expect(size).toBeLessThan(20_000_000)
+      const config = readMintlifyConfig(root)
+      expect(config).not.toBeNull()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('still rejects a docs.json past the 20 MB config limit', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-config-'))
+    try {
+      const groups = Array.from({ length: 400_000 }, (_, index) => ({
+        group: `Group ${index}`,
+        pages: [`guides/page-${index}`],
+      }))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { tabs: [{ tab: 'Guides', groups }] } }))
+      expect(() => readMintlifyConfig(root)).toThrow(/exceeded 20 MB/)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

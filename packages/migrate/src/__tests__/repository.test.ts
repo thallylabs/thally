@@ -1585,9 +1585,9 @@ describe('Fern repository migration', () => {
   it('warns instead of silently skipping when a chosen version file cannot be read', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-versions-unreadable-'))
     // Oversized rather than malformed: the `yaml` parser is lenient about
-    // syntax, but `readBoundedYaml` throws once a file exceeds its 2 MB cap,
+    // syntax, but `readBoundedYaml` throws once a file exceeds its 20 MB cap,
     // which previously hit the bare `catch {}` and vanished without a trace.
-    writeFileSync(join(root, 'v1.yml'), `navigation:\n${'  # padding\n'.repeat(180_000)}`)
+    writeFileSync(join(root, 'v1.yml'), `navigation:\n${'  # padding\n'.repeat(1_800_000)}`)
     const config = { versions: [{ version: 'v1', path: 'v1.yml', default: true }] }
     const projected = projectFernNavigation({ config, fernRoot: root })
     expect(projected.warnings.some((warning) => warning.message.includes('could not be read'))).toBe(true)
