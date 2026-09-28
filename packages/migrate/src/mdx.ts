@@ -169,18 +169,34 @@ function unwrapDocusaurusMdxCodeBlocks(body: string): string {
 
 /** Keep explicit heading anchors without leaving `{#id}` as an MDX expression. */
 function normalizeExplicitHeadingIds(body: string): string {
-  return replaceOutsideCode(body, (segment) => segment
-    .replace(
-      /^(\s{0,3}#{1,6}\s+.*?)\s+\{#([A-Za-z][A-Za-z0-9_-]*)\}\s*$/gm,
-      (_match, heading: string, id: string) => `<a id="${id}"></a>\n${heading}`,
-    )
-    // Docusaurus' explicit heading ID comment is interpreted by its own
-    // heading plugin. Thally would otherwise render the heading without that
-    // anchor while preserving inbound links to the old ID.
-    .replace(
-      /^(\s{0,3}#{1,6}\s+.*?)\s+\{\/\*\s*#([A-Za-z][A-Za-z0-9_.:-]*)\s*\*\/\}\s*$/gm,
-      (_match, heading: string, id: string) => `<a id="${id}"></a>\n${heading}`,
-    ))
+  return replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
+    if (!/^[ \t]{0,3}#{1,6}[ \t]+/.test(line)) return line
+    const trimmed = line.trimEnd()
+    // Check suffixes from the end instead of matching unbounded whitespace
+    // against unbounded heading text; that combination backtracks on long
+    // headings with no valid anchor.
+    if (trimmed.endsWith('}')) {
+      const marker = trimmed.lastIndexOf(' {#')
+      if (marker >= 0) {
+        const id = trimmed.slice(marker + 3, -1)
+        if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) {
+          return `<a id="${id}"></a>\n${trimmed.slice(0, marker).trimEnd()}`
+        }
+      }
+    }
+    // Docusaurus' heading plugin also accepts a trailing MDX comment.
+    if (trimmed.endsWith('*/}')) {
+      const marker = trimmed.lastIndexOf(' {/*')
+      if (marker >= 0) {
+        const comment = trimmed.slice(marker + 4, -3).trim()
+        const id = comment.startsWith('#') ? comment.slice(1) : ''
+        if (/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(id)) {
+          return `<a id="${id}"></a>\n${trimmed.slice(0, marker).trimEnd()}`
+        }
+      }
+    }
+    return line
+  }).join('\n'))
 }
 
 const GLOBAL_DOCUSARUS_COMPONENTS = new Set([
@@ -590,7 +606,7 @@ export function escapeFernLiteralBraces(raw: string): string {
       const isTemplatePlaceholder = /^\{\s*[A-Za-z_$][\w$.-]*\s*\}$/.test(value)
       const isIssueList = /^[A-Za-z][A-Za-z0-9]*-\d+(?:\s*,\s*[A-Za-z][A-Za-z0-9]*-\d+)*$/.test(value)
       if ((isTemplatePlaceholder || isIssueList) && start !== undefined && end !== undefined) {
-        edits.push({ start, end, value: body.slice(start, end).replace(/[{}]/g, '\\$&') })
+        edits.push({ start, end, value: body.slice(start, end).replace(/\\/g, '\\\\').replace(/[{}]/g, '\\$&') })
       } else if (BARE_IDENTIFIER_PATH.test(value) && !JS_LITERAL_KEYWORDS.has(value)
         && !declared.has(root) && !safeBuiltinPath && start !== undefined && end !== undefined) {
         edits.push({ start, end, value: `\\{${value}\\}` })
@@ -874,29 +890,116 @@ export function normalizeHtmlComments(body: string): string {
 /**
  * Rewrite Fern's callout intents to Thally's fixed callout tags without
  * touching fenced code. Delimiters are tracked with a stack so nested and
- * sibling callouts each close with the tag their own opening intent chose;
- * the stack order only holds up when both passes run over the whole body in
- * document order, which `replaceOutsideCode` provides.
+ * sibling callouts each close with the tag their own opening intent chose.
+ * A single scan is required: collecting every opener before visiting any
+ * closer incorrectly pairs sibling and nested callouts.
  */
 function normalizeFernCallouts(body: string): string {
   return replaceOutsideCode(body, (whole) => {
-    const openTags: Array<string> = []
-    return whole
-      .replace(/<Callout\s+intent=(?:"([^"]*)"|'([^']*)')([^>]*?)(\/?)>/g, (_match, doubleQuoted: string, singleQuoted: string, rest: string, selfClose: string) => {
-        const intent = (doubleQuoted ?? singleQuoted ?? '').toLowerCase()
-        const tag = intent === 'warning'
-          ? 'Warning'
-          : intent === 'success' || intent === 'tip'
-            ? 'Tip'
-            : intent === 'error' || intent === 'danger' ? 'Error' : 'Note'
-        if (!selfClose) openTags.push(tag)
-        return `<${tag}${rest}${selfClose}>`
-      })
-      // Only rewrite closes paired with a Fern `<Callout intent="...">` we
-      // actually opened; a bare Mintlify `<Callout>...</Callout>` (no
-      // `intent`) never pushed a tag, so its closing tag must stay as-is.
-      .replace(/<\/Callout>/g, (match) => openTags.length ? `</${openTags.pop()}>` : match)
+    const openTags: Array<string | null> = []
+    const output: string[] = []
+    let cursor = 0
+    while (cursor < whole.length) {
+      const opening = whole.indexOf('<Callout', cursor)
+      const closing = whole.indexOf('</Callout>', cursor)
+      const next = opening < 0 ? closing : closing < 0 ? opening : Math.min(opening, closing)
+      if (next < 0) break
+      output.push(whole.slice(cursor, next))
+      if (next === closing) {
+        const tag = openTags.pop()
+        output.push(tag ? `</${tag}>` : '</Callout>')
+        cursor = next + '</Callout>'.length
+        continue
+      }
+      const attributeStart = next + '<Callout'.length
+      if (!/[\s/>]/.test(whole[attributeStart] ?? '')) {
+        output.push('<Callout')
+        cursor = attributeStart
+        continue
+      }
+      // JSX attributes may contain quoted `>` or expression comparisons.
+      // Locate the delimiter in one pass instead of using a backtracking
+      // regex over arbitrary source content.
+      let end = attributeStart
+      let quote: string | null = null
+      let expressionDepth = 0
+      for (; end < whole.length; end++) {
+        const character = whole[end]
+        if (quote) {
+          if (character === quote && whole[end - 1] !== '\\') quote = null
+        } else if (character === '"' || character === "'") {
+          quote = character
+        } else if (character === '{') {
+          expressionDepth++
+        } else if (character === '}' && expressionDepth > 0) {
+          expressionDepth--
+        } else if (character === '>' && expressionDepth === 0) {
+          break
+        }
+      }
+      if (end === whole.length) {
+        output.push(whole.slice(next))
+        cursor = whole.length
+        break
+      }
+      const attributes = whole.slice(attributeStart, end)
+      const intent = findStaticCalloutIntent(attributes)
+      const isSelfClosing = attributes.trimEnd().endsWith('/')
+      if (!intent) {
+        output.push(whole.slice(next, end + 1))
+        if (!isSelfClosing) openTags.push(null)
+      } else {
+        const value = intent.value.toLowerCase()
+        const tag = value === 'warning' ? 'Warning'
+          : value === 'success' || value === 'tip' ? 'Tip'
+            : value === 'error' || value === 'danger' ? 'Error' : 'Note'
+        output.push(`<${tag}${attributes.slice(0, intent.start)}${attributes.slice(intent.end)}>`)
+        if (!isSelfClosing) openTags.push(tag)
+      }
+      cursor = end + 1
+    }
+    output.push(whole.slice(cursor))
+    return output.join('')
   })
+}
+
+/** Find only a static, quoted intent attribute; preserve every other prop. */
+function findStaticCalloutIntent(attributes: string): { start: number; end: number; value: string } | null {
+  let cursor = 0
+  while (cursor < attributes.length) {
+    const start = cursor
+    while (/\s/.test(attributes[cursor] ?? '')) cursor++
+    if (cursor === start) { cursor++; continue }
+    const nameStart = cursor
+    while (/[A-Za-z0-9_-]/.test(attributes[cursor] ?? '')) cursor++
+    const name = attributes.slice(nameStart, cursor)
+    while (/\s/.test(attributes[cursor] ?? '')) cursor++
+    if (attributes[cursor] !== '=') continue
+    cursor++
+    while (/\s/.test(attributes[cursor] ?? '')) cursor++
+    const quote = attributes[cursor]
+    if (quote !== '"' && quote !== "'") {
+      // Other props may be JSX expressions. Skip balanced braces so a
+      // string inside an expression cannot masquerade as an attribute.
+      if (quote === '{') {
+        let depth = 0
+        do {
+          if (attributes[cursor] === '{') depth++
+          if (attributes[cursor] === '}') depth--
+          cursor++
+        } while (cursor < attributes.length && depth > 0)
+      } else {
+        while (cursor < attributes.length && !/\s/.test(attributes[cursor])) cursor++
+      }
+      continue
+    }
+    const valueStart = ++cursor
+    while (cursor < attributes.length && attributes[cursor] !== quote) cursor++
+    const value = attributes.slice(valueStart, cursor)
+    if (cursor < attributes.length) cursor++
+    if (name === 'intent') return { start, end: cursor, value }
+  }
+  return null
 }
 
 /**
@@ -1253,7 +1356,21 @@ function convertHtmlStyleAttributes(body: string): string {
 /** Mintlify allows presentational JSX in Update labels; Thally uses the label as an anchor id. */
 function normalizeMintlifyUpdateLabels(body: string): string {
   return body.replace(/(<Update\b[^>]*\blabel=)\{(<\>[\s\S]*?<\/\>)\}/g, (match, prefix: string, fragment: string) => {
-    const label = fragment.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+    let root: DescriptionNode
+    try {
+      root = descriptionParser.parse(fragment) as DescriptionNode
+    } catch {
+      return match
+    }
+    const plainText = (node: DescriptionNode): string | null => {
+      // Preserve only parsed text nodes. Dropping markup with a regex can
+      // leave a partial tag in the output when an attribute contains `>`.
+      if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
+      if (node.type === 'mdxTextExpression' || node.type === 'mdxFlowExpression' || node.type === 'mdxjsEsm') return null
+      const parts = (node.children ?? []).map(plainText)
+      return parts.some((part) => part === null) ? null : parts.join('')
+    }
+    const label = plainText(root)?.replace(/\s+/g, ' ').trim()
     // Dynamic labels cannot be flattened safely; preserve their source form.
     return label && !/[{}]/.test(label) ? `${prefix}{${JSON.stringify(label)}}` : match
   })

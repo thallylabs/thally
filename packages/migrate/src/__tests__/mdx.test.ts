@@ -52,6 +52,13 @@ describe('normalizeMdx', () => {
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
 
+  it('reads Update label text from parsed JSX without leaking attributes or expressions', () => {
+    const staticLabel = '<Update label={<><Icon title="a > b" /><span>Quickstart</span></>}>Text</Update>'
+    expect(normalizeMdx(staticLabel, 'mintlify')).toContain('<Update label={"Quickstart"}>')
+    const dynamicLabel = '<Update label={<>{version}</>}>Text</Update>'
+    expect(normalizeMdx(dynamicLabel, 'mintlify')).toContain('label={<>{version}</>}')
+  })
+
   it('preserves an explicit heading anchor in a Mintlify page', () => {
     const output = normalizeMdx('## Install help {#smartscreen}', 'mintlify')
     expect(output).toContain('<a id="smartscreen"></a>')
@@ -92,6 +99,13 @@ describe('normalizeMdx', () => {
     expect(output).toContain('### Example {#literal}')
     expect(output).toContain('### Example {/* #literalComment */}')
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('handles a long heading with no valid explicit anchor without backtracking', () => {
+    const body = `### Heading${' '.repeat(30_000)}{#unfinished`
+    const startedAt = performance.now()
+    expect(normalizeMdx(body, 'docusaurus')).toBe(body)
+    expect(performance.now() - startedAt).toBeLessThan(1_000)
   })
   it('renders Docusaurus mdx-code-block wrappers as live MDX around examples', () => {
     const body = [
@@ -393,6 +407,20 @@ describe('multi-line renames (fenced/inline code masked, whole body rewritten)',
   it('rewrites a multi-line Fern <Callout intent="..."> to the paired Thally tag', () => {
     const body = '<Callout\n  intent="warning">\nBack up first.\n</Callout>'
     expect(normalizeMdx(body, 'fern')).toBe('<Warning>\nBack up first.\n</Warning>')
+  })
+
+  it('pairs Fern callouts in source order, including nested and bare callouts', () => {
+    const body = '<Callout intent="warning">A</Callout>\n<Callout intent="success" title="x > y"><Callout icon="key">B</Callout>C</Callout>'
+    const output = normalizeMdx(body, 'fern')
+    expect(output).toBe('<Warning>A</Warning>\n<Tip title="x > y"><Callout icon="key">B</Callout>C</Tip>')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('scans long malformed Fern callout tags without exponential backtracking', () => {
+    const body = `<Callout intent="warning"${' '.repeat(30_000)}unfinished`
+    const startedAt = performance.now()
+    expect(normalizeMdx(body, 'fern')).toBe(body)
+    expect(performance.now() - startedAt).toBeLessThan(1_000)
   })
 
   it('still never rewrites a tag name mentioned inside an inline code span or fenced code block', () => {
