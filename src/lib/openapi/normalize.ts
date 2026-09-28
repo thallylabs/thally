@@ -352,35 +352,44 @@ function normalizeContent(raw: unknown, deepResolve: (schema: RawObject) => RawO
  */
 function createDeepResolver(resolveRef: (ref: string) => RawObject | null) {
   const cache = new Map<string, RawObject>()
-  // Counts circular placeholders emitted so far. A ref's resolved result is
-  // only safe to memoize if resolving it emitted none: a placeholder means
-  // the result was truncated based on which refs were already "in progress"
-  // on THIS call path (`seen`), so the same ref reached via a different
-  // entry path (different `seen`) can legitimately truncate at a different
-  // point. Caching it unconditionally lets whichever path resolves first
-  // poison every other path with its placeholder.
-  let placeholderCount = 0
+  // Refs actually found to sit on a $ref cycle (classic white/grey/black DFS
+  // cycle marking: `stack` holds the "grey" — currently in-progress — refs).
+  // A ref's resolved result is safe to memoize once its whole subtree has
+  // been walked without looping back to anything still on `stack`, because
+  // that walk necessarily reaches every ref reachable from it: if any of
+  // them could cycle back to it (through ANY caller, not just this one),
+  // that back-edge is inside this very subtree and gets caught right here,
+  // regardless of which entry path resolved it first. Only refs on an
+  // actual cycle — where resolving them truly does depend on which of their
+  // own cycle-mates are already in progress on the current path — are
+  // excluded from the cache; every acyclic ref (the overwhelming majority
+  // in a large spec) is memoized normally.
+  const cyclicRefs = new Set<string>()
 
-  function resolve(schema: RawObject, seen: Set<string>): RawObject {
+  function resolve(schema: RawObject, stack: Array<string>): RawObject {
     // If this node IS a $ref, resolve it first (then recurse into the result)
     if (typeof schema.$ref === 'string') {
       const ref = schema.$ref
-      const cached = cache.get(ref)
-      if (cached) {
-        return cached
+      if (!cyclicRefs.has(ref)) {
+        const cached = cache.get(ref)
+        if (cached) {
+          return cached
+        }
       }
-      if (seen.has(ref)) {
-        // Break circular reference — return a placeholder
-        placeholderCount += 1
+      const cycleStart = stack.indexOf(ref)
+      if (cycleStart !== -1) {
+        // Break circular reference — return a placeholder. Everything from
+        // the repeated ref to the top of the stack is genuinely on this
+        // cycle and can never be cached context-free.
+        for (let i = cycleStart; i < stack.length; i++) {
+          cyclicRefs.add(stack[i])
+        }
         return { type: 'object', description: `[Circular: ${ref.split('/').pop()}]` }
       }
       const resolved = resolveRef(ref)
       if (resolved) {
-        const childSeen = new Set(seen)
-        childSeen.add(ref)
-        const placeholdersBefore = placeholderCount
-        const result = resolve(resolved, childSeen)
-        if (placeholderCount === placeholdersBefore) {
+        const result = resolve(resolved, [...stack, ref])
+        if (!cyclicRefs.has(ref)) {
           cache.set(ref, result)
         }
         return result
@@ -394,7 +403,7 @@ function createDeepResolver(resolveRef: (ref: string) => RawObject | null) {
     for (const compositeKey of ['allOf', 'anyOf', 'oneOf'] as const) {
       if (Array.isArray(schema[compositeKey])) {
         result[compositeKey] = (schema[compositeKey] as unknown[]).map((item) =>
-          item && typeof item === 'object' ? resolve(item as RawObject, seen) : item,
+          item && typeof item === 'object' ? resolve(item as RawObject, stack) : item,
         )
       }
     }
@@ -404,20 +413,20 @@ function createDeepResolver(resolveRef: (ref: string) => RawObject | null) {
       const resolvedProps: Record<string, unknown> = {}
       for (const [propKey, propSchema] of Object.entries(schema.properties as Record<string, unknown>)) {
         resolvedProps[propKey] =
-          propSchema && typeof propSchema === 'object' ? resolve(propSchema as RawObject, seen) : propSchema
+          propSchema && typeof propSchema === 'object' ? resolve(propSchema as RawObject, stack) : propSchema
       }
       result.properties = resolvedProps
     }
 
     // Resolve array items
     if (schema.items && typeof schema.items === 'object') {
-      result.items = resolve(schema.items as RawObject, seen)
+      result.items = resolve(schema.items as RawObject, stack)
     }
 
     return result
   }
 
-  return (schema: RawObject) => resolve(schema, new Set<string>())
+  return (schema: RawObject) => resolve(schema, [])
 }
 
 function normalizeExamples(raw: unknown): Array<{ key: string; summary?: string; description?: string; value: unknown }> {
