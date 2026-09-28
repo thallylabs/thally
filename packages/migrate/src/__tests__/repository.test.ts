@@ -1820,6 +1820,7 @@ navigation:
     contents:
       - api: REST API
         api-name: rest
+        skip-slug: true
 `)
     writeFileSync(join(fernRoot, 'apis', 'rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.yml\n')
     writeFileSync(join(fernRoot, 'apis', 'rest', 'openapi.yml'), [
@@ -1844,6 +1845,73 @@ navigation:
     const guide = bundle.pages.find((page) => page.id === 'guide')
     expect(guide?.body).toContain('[publish](/api/default/v2/publish/destination/post)')
     expect(guide?.body).not.toContain('/api-reference/publish-a-message')
+  })
+
+  it('matches Fern operation pages by their route (own node slug included) and by operationId method name, not just the summary', () => {
+    // Confirmed against a live Fern site (VapiAI): an `api:` node without
+    // `skip-slug` adds its own slug to the route ("api-reference/webhooks/
+    // ..."), and when `operationId` is present ("ToolController_create"),
+    // Fern's page slug is that id's last segment ("create"), not
+    // kebab(summary) ("create-tool").
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-link-rewrite-real-shape-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'webhooks'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    // Fern navigation is either all-tabs or no-tabs at the top level; a
+    // bare page alongside a `tab:` entry is not a valid shape, so the guide
+    // page lives in its own "documentation" tab, matching a real docs.yml
+    // (confirmed against VapiAI's).
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - tab: documentation
+    layout:
+      - page: Guide
+        path: guide.mdx
+  - tab: api-reference
+    layout:
+      - api: API reference
+        api-name: api
+        skip-slug: true
+      - api: Webhooks
+        api-name: webhooks
+`)
+    mkdirSync(join(fernRoot, 'apis', 'api'), { recursive: true })
+    writeFileSync(join(fernRoot, 'apis', 'api', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.json\n')
+    writeFileSync(join(fernRoot, 'apis', 'api', 'openapi.json'), JSON.stringify({
+      openapi: '3.0.0',
+      info: { title: 'API', version: '1.0' },
+      paths: {
+        '/tool': {
+          post: { summary: 'Create Tool', operationId: 'ToolController_create', tags: ['Tools'], responses: { 200: { description: 'ok' } } },
+        },
+      },
+    }))
+    writeFileSync(join(fernRoot, 'apis', 'webhooks', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'webhooks', 'openapi.yml'), [
+      'openapi: 3.0.0',
+      'info: { title: Webhooks, version: "1.0" }',
+      'paths:',
+      '  /server:',
+      '    post:',
+      '      summary: Server Message',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    writeFileSync(join(fernRoot, 'guide.mdx'), [
+      '---',
+      'title: Guide',
+      '---',
+      '',
+      'See [create a tool](/api-reference/tools/create) and the',
+      '[server message webhook](/api-reference/webhooks/server-message).',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const guide = bundle.pages.find((page) => page.id === 'documentation/guide')
+    expect(guide?.body).toContain('[create a tool](/api/default/tool/post)')
+    expect(guide?.body).toMatch(/\[server message webhook\]\(\/api\/[a-z-]+\/server\/post\)/)
+    expect(guide?.body).not.toContain('/api-reference/tools/create')
+    expect(guide?.body).not.toContain('/api-reference/webhooks/server-message')
   })
 
   it('disambiguates two api: sections with the same tab label and a self-repeating route segment instead of a redundant "X: X" name', () => {

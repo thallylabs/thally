@@ -1124,19 +1124,36 @@ function apiOperationLinkMap(
     if (!source || !source.prefix) return
     const specId = index === 0 ? 'default' : slugifyApiSpecId(tab.tab)
     for (const operation of parseOpenApiOperationsForLinking(source.content)) {
-      const leaf = mintlifyOperationSlugSegment(operation.summary ?? operation.operationId ?? `${operation.method} ${operation.path}`)
       const thallyHref = `/api/${specId}/${thallyOperationSlugSegments(operation.path, operation.method).join('/')}`
-      // Two conventions get registered for the same operation: Mintlify
-      // nests auto-generated pages under a tag folder
+      // Leaf candidates, tried in order of how likely a source generator is
+      // to have used them: Mintlify slugs from the summary; Fern instead
+      // prefers an SDK-style method name — confirmed against a live Fern
+      // site, where `operationId: "ToolController_create"` (summary
+      // "Create Tool") rendered its page at ".../tools/create", the
+      // operationId's segment after its last "_"/".", not the summary.
+      const leafCandidates = new Set<string>()
+      if (operation.operationId) {
+        const parts = operation.operationId.split(/[_.]/).filter(Boolean)
+        leafCandidates.add(mintlifyOperationSlugSegment(parts.at(-1) ?? operation.operationId))
+      }
+      if (operation.summary) leafCandidates.add(mintlifyOperationSlugSegment(operation.summary))
+      if (operation.operationId) leafCandidates.add(mintlifyOperationSlugSegment(operation.operationId))
+      leafCandidates.add(mintlifyOperationSlugSegment(`${operation.method} ${operation.path}`))
+      // Two prefix conventions get registered for every leaf candidate:
+      // Mintlify nests auto-generated pages under a tag folder
       // ("<prefix>/<tag>/<leaf>"); Fern's default layout serves them flat
       // under the section route ("<prefix>/<leaf>") instead. Registering
-      // both costs nothing (an operation matches at most one of them in
-      // practice) and avoids guessing which convention a given source used.
+      // every combination costs nothing (an operation matches at most one
+      // of them in practice) and avoids guessing which convention and
+      // which leaf a given source actually used.
       const tagSegment = mintlifyOperationSlugSegment(operation.tag ?? 'default')
-      const tagged = `${source.prefix}/${tagSegment}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
-      const flat = `${source.prefix}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
-      if (!map.has(tagged)) map.set(tagged, thallyHref)
-      if (!map.has(flat)) map.set(flat, thallyHref)
+      for (const leaf of leafCandidates) {
+        if (!leaf) continue
+        const tagged = `${source.prefix}/${tagSegment}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
+        const flat = `${source.prefix}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
+        if (!map.has(tagged)) map.set(tagged, thallyHref)
+        if (!map.has(flat)) map.set(flat, thallyHref)
+      }
     }
   })
   return map
@@ -2317,7 +2334,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       })
     }
     if (resolvedSpecs.length > 0) {
-      docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs)
+      docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
       // Fern serves each api: section's auto-generated operation pages
       // under that section's own route (e.g. "api-reference/messages/...")
       // — the same shape Mintlify's `directory` scoping produces, so the

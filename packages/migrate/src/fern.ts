@@ -297,10 +297,19 @@ function convertNode(
     // can declare several `api:` nodes (e.g. a REST API and a WebSocket API
     // in separate tabs) — each is tracked and resolved independently rather
     // than only ever importing the first one found.
+    // Like a section or page, an `api:` node contributes its own slug to the
+    // route unless `skip-slug: true` (confirmed against a live Fern site:
+    // VapiAI's `api-reference` tab has one `api:` node with `skip-slug:
+    // true` served directly at the tab's own route, and a second `Webhooks`
+    // node — no skip-slug — served one level deeper, at
+    // ".../api-reference/webhooks"). This is also this node's own auto-
+    // generated operation page prefix, used to rewrite in-content links to
+    // those pages onto Thally's route.
+    const ownSegment = segmentFor(object, object.api, context)
     context.apiSections.push({
       name: typeof object['api-name'] === 'string' ? object['api-name'] : object.api,
       nameExplicit: typeof object['api-name'] === 'string',
-      routeSegments: parentSegments,
+      routeSegments: ownSegment ? [...parentSegments, ownSegment] : parentSegments,
     })
     return null
   }
