@@ -230,8 +230,50 @@ interface ResolvedLink {
   cycle?: boolean
 }
 
-/** Follow literal site redirects without accepting cycles as reachable pages. */
-function resolveLink(target: string, redirects: ReadonlyMap<string, string>): ResolvedLink {
+interface DynamicRedirect {
+  regex: RegExp
+  paramNames: Array<string>
+  destination: string
+}
+
+/**
+ * Compile a Next.js-style redirect source into a matcher, for a source that
+ * contains a dynamic segment (`:param`, `:param*`, `:param+`, `:param?`) —
+ * the same syntax `next.config.ts` passes straight to Next's own
+ * `redirects()`. A purely literal source (no `:`) doesn't need this; it
+ * stays in the exact-match map below. `*`/`+` consume the rest of the path
+ * including further `/` segments, matching Next's own behavior.
+ */
+function compileDynamicRedirectSource(source: string, destination: string): DynamicRedirect | null {
+  if (!source.includes(':')) return null
+  const paramNames: Array<string> = []
+  const pattern = source
+    .split('/')
+    .map((segment) => {
+      const match = segment.match(/^:([A-Za-z_][A-Za-z0-9_]*)([*+?]?)$/)
+      if (!match) return segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const [, name, quantifier] = match
+      paramNames.push(name)
+      if (quantifier === '*') return '(.*)'
+      if (quantifier === '+') return '(.+)'
+      if (quantifier === '?') return '([^/]*)'
+      return '([^/]+)'
+    })
+    .join('/')
+  return { regex: new RegExp(`^${pattern}$`), paramNames, destination }
+}
+
+/** Substitute a dynamic redirect's matched params into its destination template. */
+function resolveDynamicRedirectDestination(redirect: DynamicRedirect, match: RegExpMatchArray): string {
+  let destination = redirect.destination
+  redirect.paramNames.forEach((name, index) => {
+    destination = destination.replace(new RegExp(`:${name}[*+?]?`, 'g'), match[index + 1] ?? '')
+  })
+  return destination
+}
+
+/** Follow literal and Next.js-style dynamic site redirects without accepting cycles as reachable pages. */
+function resolveLink(target: string, redirects: ReadonlyMap<string, string>, dynamicRedirects: ReadonlyArray<DynamicRedirect> = []): ResolvedLink {
   let current = target
   let anchor: string | undefined
   const seen = new Set<string>()
@@ -243,9 +285,16 @@ function resolveLink(target: string, redirects: ReadonlyMap<string, string>): Re
     const path = beforeHash.split('?', 1)[0].replace(/\/$/, '') || '/'
     if (seen.has(path)) return { path, anchor, cycle: true }
     seen.add(path)
-    const redirected = redirects.get(path)
-    if (!redirected) return { path, anchor }
-    current = redirected
+    const literalRedirect = redirects.get(path)
+    if (literalRedirect) {
+      current = literalRedirect
+      continue
+    }
+    const dynamicMatch = dynamicRedirects
+      .map((redirect) => ({ redirect, match: path.match(redirect.regex) }))
+      .find((candidate): candidate is { redirect: DynamicRedirect; match: RegExpMatchArray } => candidate.match !== null)
+    if (!dynamicMatch) return { path, anchor }
+    current = resolveDynamicRedirectDestination(dynamicMatch.redirect, dynamicMatch.match)
   }
 }
 
@@ -314,11 +363,17 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     ...Array.from(secondaryLocales, (locale) => `/${locale}/api`),
   ])
   const redirectDestinations = new Map(
-    (config.redirects ?? []).map((redirect) => [
-      redirect.source.replace(/\/$/, '') || '/',
-      redirect.destination,
-    ]),
+    (config.redirects ?? [])
+      .filter((redirect) => !redirect.source.includes(':'))
+      .map((redirect) => [
+        redirect.source.replace(/\/$/, '') || '/',
+        redirect.destination,
+      ]),
   )
+  const dynamicRedirects = (config.redirects ?? []).flatMap((redirect) => {
+    const compiled = compileDynamicRedirectSource(redirect.source, redirect.destination)
+    return compiled ? [compiled] : []
+  })
 
   const navigation = projectNavigationContract(config)
   const navPageIds = new Set(navigation.authoredPageIds)
@@ -423,7 +478,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
         continue
       }
       if (!target.startsWith('/')) continue // relative/asset links — not validated
-      const { path, anchor, cycle, external } = resolveLink(target, redirectDestinations)
+      const { path, anchor, cycle, external } = resolveLink(target, redirectDestinations, dynamicRedirects)
       if (external) continue
       const isGeneratedApiPath = Array.from(generatedApiPaths).some(
         (prefix) => path === prefix || path.startsWith(`${prefix}/`),

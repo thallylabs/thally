@@ -77,6 +77,22 @@ describe('thally check reader routes', () => {
     expect(result.output).not.toContain('Broken')
   })
 
+  it('resolves a link through a Next.js-style wildcard/param redirect source the same way the runtime matches it', async () => {
+    const result = await checkLinks('[Old reference](/old/api-reference/token)', [
+      { source: '/old/:slug*', destination: '/:slug*' },
+    ])
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken')
+  })
+
+  it('still reports a broken link when a wildcard/param redirect resolves to a page that does not exist', async () => {
+    const result = await checkLinks('[Missing](/old/nowhere)', [
+      { source: '/old/:slug*', destination: '/:slug*' },
+    ])
+    expect(result.exit).toBe(1)
+    expect(result.output).toContain('Broken link: "/old/nowhere"')
+  })
+
   it('keeps missing locale targets, missing changelog content, and redirect cycles as errors', async () => {
     const result = await checkLinks('[Missing](/zh-Hans/quickstart) [Changes](/changelog) [Cycle](/loop)', [
       { source: '/loop', destination: '/other' },
