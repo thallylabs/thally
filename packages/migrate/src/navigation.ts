@@ -89,20 +89,20 @@ export function addMintlifyDirectoryRedirects(
       }
     }
   }
-  for (const redirect of config.redirects ?? []) {
-    // An authored redirect is evidence that a directory itself was a public
-    // route, even when its landing page has no overview/introduction filename.
-    // Resolve only that destination, using source navigation order rather than
-    // filesystem order. Required parameters and arbitrary patterns stay intact.
-    const destination = redirect.destination.split(/[?#]/, 1)[0]
-      .replace(/\/:[A-Za-z_][A-Za-z0-9_]*\*\/?$/, '')
-    if (!destination.startsWith('/') || destination.startsWith('//') || /[:*()[\]{}]/.test(destination)) continue
-    const directory = trimEdgeSlashes(destination)
-    if (!directory || pageIds.has(directory)) continue
+  // Mintlify 307s *any* nav-shaped directory path with no page of its own to
+  // its first descendant page in navigation order — not only ones an
+  // overview/introduction page or an authored redirect already pointed at
+  // (e.g. a `product`/`tab`/`group` container path like Upstash's `/redis`,
+  // or a plain mid-tree directory like `/vector/sdks/py/example_calls`).
+  // `firstDescendantByDirectory` already holds every such directory (built
+  // from real page ids in navigation order above), so redirect all of them
+  // in one pass; `hasAuthoredRedirect` skips any directory the overview/
+  // introduction pass above, or the project's own `redirects:`, already
+  // covers, and `pageIds.has(directory)` never overrides a real page.
+  for (const [directory, landing] of firstDescendantByDirectory) {
+    if (pageIds.has(directory)) continue
     const source = `/${directory}`
     if (hasAuthoredRedirect(source)) continue
-    const landing = firstDescendantByDirectory.get(directory)
-    if (!landing) continue
     // Match full stored ids, not locale-independent navigation ids: a French
     // directory must never be redirected to an English descendant.
     redirects.push({ source, destination: `/${landing.id}`, permanent: false })

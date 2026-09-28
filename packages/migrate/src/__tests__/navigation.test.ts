@@ -35,11 +35,13 @@ describe('Mintlify referenced directory landings', () => {
     const result = addMintlifyDirectoryRedirects({ tabs, redirects: [authored] }, [
       page('guides/examples/database'), page('guides/examples/hidden'), page('guides/examples/webhook'),
     ])
+    // '/guides' has no page of its own either, so it also redirects to the
+    // same first-descendant landing page as '/guides/examples'.
     expect(result.redirects).toEqual([
       authored,
+      { source: '/guides', destination: '/guides/examples/webhook', permanent: false },
       { source: '/guides/examples', destination: '/guides/examples/webhook', permanent: false },
     ])
-    expect(result.redirects?.some((redirect) => redirect.source === '/guides')).toBe(false)
   })
 
   it('preserves real directory pages and explicit redirect precedence', () => {
@@ -47,11 +49,21 @@ describe('Mintlify referenced directory landings', () => {
     const realPage = addMintlifyDirectoryRedirects({ tabs, redirects: [incoming] }, [
       page('guides/examples'), page('guides/examples/webhook'),
     ])
-    expect(realPage.redirects).toEqual([incoming])
+    // '/guides/examples' is a real page and is never overridden, but its
+    // ancestor '/guides' still has no page of its own and gets the general
+    // first-descendant redirect.
+    expect(realPage.redirects).toEqual([
+      incoming,
+      { source: '/guides', destination: '/guides/examples/webhook', permanent: false },
+    ])
     for (const source of ['/guides/examples', '/guides/examples/:path*']) {
       const explicit = { source, destination: '/chosen' }
       const result = addMintlifyDirectoryRedirects({ tabs, redirects: [incoming, explicit] }, [page('guides/examples/webhook')])
-      expect(result.redirects).toEqual([incoming, explicit])
+      expect(result.redirects).toEqual([
+        incoming,
+        explicit,
+        { source: '/guides', destination: '/guides/examples/webhook', permanent: false },
+      ])
     }
   })
 
@@ -63,6 +75,7 @@ describe('Mintlify referenced directory landings', () => {
     expect(result.redirects).toEqual([
       incoming,
       { source: '/guides/examples', destination: '/guides/examples/overview', permanent: false },
+      { source: '/guides', destination: '/guides/examples/webhook', permanent: false },
     ])
   })
 
@@ -71,6 +84,7 @@ describe('Mintlify referenced directory landings', () => {
     const result = addMintlifyDirectoryRedirects({ tabs, redirects: [incoming] }, [page('guides/examples/webhook')])
     expect(result.redirects).toEqual([
       incoming,
+      { source: '/guides', destination: '/guides/examples/webhook', permanent: false },
       { source: '/guides/examples', destination: '/guides/examples/webhook', permanent: false },
     ])
     expect(addMintlifyDirectoryRedirects(result, [page('guides/examples/webhook')])).toEqual(result)
@@ -90,18 +104,47 @@ describe('Mintlify referenced directory landings', () => {
       page('guides/examples/webhook', 'guides/examples/webhook', 'en'),
       page('fr/guides/examples/database', 'guides/examples/database', 'fr'),
     ])
+    // Every French ancestor directory ('/fr', '/fr/guides', ...) resolves to
+    // the French descendant, never to the English one.
     expect(result.redirects?.slice(3)).toEqual([
+      { source: '/guides', destination: '/guides/examples/webhook', permanent: false },
       { source: '/guides/examples', destination: '/guides/examples/webhook', permanent: false },
+      { source: '/fr', destination: '/fr/guides/examples/database', permanent: false },
+      { source: '/fr/guides', destination: '/fr/guides/examples/database', permanent: false },
       { source: '/fr/guides/examples', destination: '/fr/guides/examples/database', permanent: false },
     ])
   })
 
-  it('does not synthesize arbitrary directories or unresolved navigation entries', () => {
+  it('does not synthesize directories for pages outside the navigation', () => {
     const result = addMintlifyDirectoryRedirects({ tabs, redirects: [
       { source: '/old', destination: '/unlisted' },
       { source: '/required/:slug', destination: '/guides/examples/:slug' },
     ] }, [page('unlisted/child'), page('guides/examples/database')])
-    expect(result.redirects).toHaveLength(2)
+    // 'unlisted/child' is never referenced by the `tabs` fixture's
+    // navigation, so no directory redirect is synthesized for it — only the
+    // navigation-referenced 'guides/examples/database' page's ancestors do.
+    expect(result.redirects).toEqual([
+      { source: '/old', destination: '/unlisted' },
+      { source: '/required/:slug', destination: '/guides/examples/:slug' },
+      { source: '/guides', destination: '/guides/examples/database', permanent: false },
+      { source: '/guides/examples', destination: '/guides/examples/database', permanent: false },
+    ])
+    expect(result.redirects?.some((redirect) => redirect.source === '/unlisted')).toBe(false)
+  })
+
+  it('redirects a nav-group directory with no page of its own even with no authored redirect pointing at it', () => {
+    // Mirrors the live-site behavior this fix targets: a Mintlify container
+    // path (e.g. a `product`/`tab`/`group`, such as Upstash's `/redis`) 307s
+    // to its first descendant page purely from navigation structure — no
+    // `redirects:` entry involved at all, which the previous implementation
+    // required to ever produce this redirect.
+    const result = addMintlifyDirectoryRedirects({ tabs }, [
+      page('guides/examples/webhook'), page('guides/examples/database'),
+    ])
+    expect(result.redirects).toEqual([
+      { source: '/guides', destination: '/guides/examples/webhook', permanent: false },
+      { source: '/guides/examples', destination: '/guides/examples/webhook', permanent: false },
+    ])
   })
 })
 
