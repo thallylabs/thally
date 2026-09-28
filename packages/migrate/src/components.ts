@@ -1003,7 +1003,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           // expression-reference check below to exclude the page instead of
           // guessing at a replacement.
           if (bindings.length > 0 && bindings.every((binding) => !/^[A-Z]/.test(binding.local))) {
-            warn(`MDX import of ${unavailableImportLabel(rawSpecifier)} is not a component and isn't available in the migrated project; the import was removed, along with any '...${bindings.map((binding) => binding.local).join(", '...")}' spread of it.`, currentFile)
+            warn(`MDX named import of ${JSON.stringify(rawSpecifier)} isn't a component and has no equivalent in the migrated project (e.g. Docusaurus' auto-generated per-file 'toc' export); the import was removed, along with any '...${bindings.map((binding) => binding.local).join(", '...")}' spread of it.`, currentFile)
             edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
             for (const binding of bindings) droppedMdxDataBindings.add(binding.local)
           }
