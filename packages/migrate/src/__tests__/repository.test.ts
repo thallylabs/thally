@@ -1300,6 +1300,38 @@ describe('Docusaurus repository migration', () => {
     expect(bundle.docsConfig.tabs[0].tab).toBe('Documentation')
   })
 
+  it("finds the primary docs instance's default 'docs' directory instead of a later plugin's path (hasura/graphql-engine shape: preset docs: {} has no path, a sibling content-docs plugin does)", () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-primary-path-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    mkdirSync(join(repositoryDir, 'wiki'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'docusaurus.config.js'), `
+      module.exports = {
+        presets: [
+          ['classic', {
+            docs: {
+              routeBasePath: '/',
+              sidebarPath: require.resolve('./sidebars.js'),
+              versions: {
+                current: { label: 'v2.x', badge: true, path: '' },
+              },
+            },
+          }],
+        ],
+        plugins: [[
+          'content-docs',
+          { id: 'wiki', path: 'wiki', routeBasePath: 'wiki' },
+        ]],
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'index.mdx'), '---\ntitle: Introduction\n---\n\nMain docs.')
+    writeFileSync(join(repositoryDir, 'wiki', 'index.mdx'), '---\ntitle: Wiki\n---\n\nWiki introduction.')
+
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/hasura/graphql-engine' })
+
+    expect(bundle.pages.some((page) => page.body.includes('Main docs.'))).toBe(true)
+    expect(bundle.pages.some((page) => page.body.includes('Wiki introduction.'))).toBe(true)
+  })
+
   it('discovers monorepo projects, static external wrappers, aliases, plugins, and literal index slugs', () => {
     const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-monorepo-'))
     const siteRoot = join(repositoryDir, 'packages', 'website')
