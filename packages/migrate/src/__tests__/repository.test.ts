@@ -1107,6 +1107,20 @@ describe('Mintlify repository migration', () => {
     expect(paths.indexOf('images/referenced.png')).toBeLessThan(paths.indexOf('images/unreferenced.png'))
   })
 
+  it('migrates .wav, .ogg, and .m4a audio assets', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'images', 'greeting.wav'), 'wav-bytes')
+    writeFileSync(join(root, 'images', 'greeting.ogg'), 'ogg-bytes')
+    writeFileSync(join(root, 'images', 'greeting.m4a'), 'm4a-bytes')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const paths = bundle.assets.map((asset) => asset.path)
+    expect(paths).toContain('images/greeting.wav')
+    expect(paths).toContain('images/greeting.ogg')
+    expect(paths).toContain('images/greeting.m4a')
+  })
+
   it('warns which page(s) reference an asset that is still dropped for being too large', () => {
     const root = fixture()
     // Over MAX_ASSET_BYTES (25MB) on its own, so it is dropped regardless of

@@ -98,8 +98,8 @@ function isIgnoredContentDirectory(name: string): boolean {
 }
 const ASSET_DIRECTORIES = new Set(['assets', 'images', 'img', 'media', 'public', 'static'])
 const ASSET_EXTENSIONS = new Set([
-  '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.mp3', '.mp4',
-  '.pdf', '.png', '.svg', '.webm', '.webp',
+  '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.m4a', '.mp3', '.mp4',
+  '.ogg', '.pdf', '.png', '.svg', '.wav', '.webm', '.webp',
 ])
 const REPOSITORY_ONLY_DOCUMENTS = new Set([
   'agents.md', 'claude.md', 'code_of_conduct.md', 'contributing.md',
