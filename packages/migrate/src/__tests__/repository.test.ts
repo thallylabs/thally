@@ -1884,6 +1884,9 @@ navigation:
         '/tool': {
           post: { summary: 'Create Tool', operationId: 'ToolController_create', tags: ['Tools'], responses: { 200: { description: 'ok' } } },
         },
+        '/call/{id}': {
+          get: { summary: 'Get Call', operationId: 'CallController_findOne', tags: ['Calls'], responses: { 200: { description: 'ok' } } },
+        },
       },
     }))
     writeFileSync(join(fernRoot, 'apis', 'webhooks', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.yml\n')
@@ -1901,7 +1904,8 @@ navigation:
       'title: Guide',
       '---',
       '',
-      'See [create a tool](/api-reference/tools/create) and the',
+      'See [create a tool](/api-reference/tools/create), the',
+      '[get call endpoint](/api-reference/calls/get), and the',
       '[server message webhook](/api-reference/webhooks/server-message).',
     ].join('\n'))
 
@@ -1909,6 +1913,10 @@ navigation:
 
     const guide = bundle.pages.find((page) => page.id === 'documentation/guide')
     expect(guide?.body).toContain('[create a tool](/api/default/tool/post)')
+    // `operationId: "CallController_findOne"` maps through the NestJS ->
+    // Fern REST-conventional table ("findOne" -> "get"), not a literal
+    // kebab of the id's last segment ("find-one").
+    expect(guide?.body).toContain('[get call endpoint](/api/default/call/id/get)')
     expect(guide?.body).toMatch(/\[server message webhook\]\(\/api\/[a-z-]+\/server\/post\)/)
     expect(guide?.body).not.toContain('/api-reference/tools/create')
     expect(guide?.body).not.toContain('/api-reference/webhooks/server-message')

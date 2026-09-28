@@ -1024,6 +1024,13 @@ function resolveMintlifyApiSpecs(
 
 const OPENAPI_HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'trace']
 
+/** NestJS's conventional CRUD controller method names, mapped to the REST-conventional slug Fern renders them under (confirmed against a live site). */
+const FERN_CRUD_METHOD_NAMES: Record<string, string> = {
+  findall: 'list',
+  findone: 'get',
+  remove: 'delete',
+}
+
 /** Kebab-case a label the way Mintlify slugs its auto-generated OpenAPI operation pages (tag folder, operation leaf). */
 function mintlifyOperationSlugSegment(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
@@ -1134,7 +1141,15 @@ function apiOperationLinkMap(
       const leafCandidates = new Set<string>()
       if (operation.operationId) {
         const parts = operation.operationId.split(/[_.]/).filter(Boolean)
-        leafCandidates.add(mintlifyOperationSlugSegment(parts.at(-1) ?? operation.operationId))
+        const lastPart = parts.at(-1) ?? operation.operationId
+        // A NestJS-style controller method name (findOne/findAll/remove) is
+        // common enough in real OpenAPI generators that Fern renders it
+        // under its REST-conventional name instead — also confirmed live:
+        // "CallController_findOne" rendered at ".../calls/get", not
+        // ".../calls/find-one".
+        const conventional = FERN_CRUD_METHOD_NAMES[lastPart.toLowerCase()]
+        if (conventional) leafCandidates.add(conventional)
+        leafCandidates.add(mintlifyOperationSlugSegment(lastPart))
       }
       if (operation.summary) leafCandidates.add(mintlifyOperationSlugSegment(operation.summary))
       if (operation.operationId) leafCandidates.add(mintlifyOperationSlugSegment(operation.operationId))
