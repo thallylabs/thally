@@ -473,6 +473,78 @@ describe('Mintlify repository migration', () => {
       warning.message.includes('already has an OpenAPI spec bound to it'))).toBe(true)
   })
 
+  it('disambiguates two OpenAPI specs bound to different tabs that share a basename, instead of one asset silently overwriting the other', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [
+          { tab: 'QStash', openapi: 'qstash/openapi.yaml' },
+          { tab: 'Workflow', openapi: 'workflow/openapi.yaml' },
+        ],
+      },
+    }))
+    mkdirSync(join(root, 'qstash'), { recursive: true })
+    mkdirSync(join(root, 'workflow'), { recursive: true })
+    writeFileSync(join(root, 'qstash', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: { title: QStash, version: "1.0" }\npaths: {}')
+    writeFileSync(join(root, 'workflow', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: { title: Workflow, version: "1.0" }\npaths: {}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const qstashTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'QStash')
+    const workflowTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Workflow')
+    expect(qstashTab?.api?.source).toBeDefined()
+    expect(workflowTab?.api?.source).toBeDefined()
+    // Distinct assets, each with the right tab's own content — neither
+    // spec silently overwrote the other's bytes.
+    expect(qstashTab?.api?.source).not.toBe(workflowTab?.api?.source)
+    const qstashAsset = bundle.assets.find((asset) => `/${asset.path}` === qstashTab?.api?.source)
+    const workflowAsset = bundle.assets.find((asset) => `/${asset.path}` === workflowTab?.api?.source)
+    expect(qstashAsset?.content.toString()).toContain('title: QStash')
+    expect(workflowAsset?.content.toString()).toContain('title: Workflow')
+    expect(bundle.warnings.some((warning) => warning.message.includes('already has an OpenAPI spec bound to it'))).toBe(false)
+  })
+
+  it('rewrites in-content links to Mintlify auto-generated operation pages to the matching Thally /api/ route', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [{
+          tab: 'Documentation',
+          groups: [{
+            group: 'API',
+            openapi: { source: 'qstash/openapi.yaml', directory: 'qstash/api-reference' },
+          }],
+        }],
+      },
+    }))
+    mkdirSync(join(root, 'qstash'), { recursive: true })
+    writeFileSync(join(root, 'qstash', 'openapi.yaml'), [
+      'openapi: 3.1.0',
+      'info: { title: QStash, version: "1.0" }',
+      'paths:',
+      '  /v2/publish/{destination}:',
+      '    post:',
+      '      summary: Publish a Message',
+      '      tags: [Messages]',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    writeFileSync(join(root, 'guide.mdx'), [
+      '---',
+      'title: Guide',
+      '---',
+      '',
+      'See [publish](/qstash/api-reference/messages/publish-a-message) for details.',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const guide = bundle.pages.find((page) => page.id === 'guide')
+    // The first (only) API-bound tab keeps the stable 'default' spec id;
+    // the operation's route is path+method based, never the summary.
+    expect(guide?.body).toContain('[publish](/api/default/v2/publish/destination/post)')
+    expect(guide?.body).not.toContain('/qstash/api-reference/messages/publish-a-message')
+  })
+
   it('drops a manual OpenAPI operation listing ("GET /path") with one warning instead of one missing-page warning per operation', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

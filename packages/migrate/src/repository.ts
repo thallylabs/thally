@@ -912,6 +912,10 @@ interface ResolvedApiSpec {
   filename: string
   content: Buffer
   tabLabel?: string
+  /** Repository-relative path the spec was read from, used only to disambiguate a basename collision across tabs. */
+  sourcePath: string
+  /** Mintlify's object-form `{ source, directory }` scoping directory, if any — the prefix its auto-generated operation pages live under. */
+  directory?: string
 }
 
 function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): Array<MintlifyApiSpecReference> {
@@ -986,9 +990,165 @@ function resolveMintlifyApiSpecs(
         message: `The OpenAPI spec "${reference.value}"${tabSuffix} was scoped to generate its pages under "${reference.directory}", but Thally's API reference can only be bound to a whole tab, not a nested directory; it was migrated as a tab-wide API reference instead, so links to "${reference.directory}/..." pages will need to be updated manually.`,
       })
     }
-    specs.push({ filename: basename(match.relativePath), content: readFileSync(match.absolutePath), tabLabel: reference.tabLabel })
+    specs.push({
+      filename: basename(match.relativePath),
+      content: readFileSync(match.absolutePath),
+      tabLabel: reference.tabLabel,
+      sourcePath: match.relativePath,
+      directory: reference.directory,
+    })
+  }
+  // Two specs bound to *different* tabs can share a basename (e.g.
+  // "qstash/openapi.yaml" and "workflow/openapi.yaml" both resolve to
+  // "openapi.yaml") — without disambiguation the second spec's asset
+  // write collides with the first's, silently discarding its content
+  // even though both tabs believe they have a working spec bound. Specs
+  // that land on the *same* tab are left alone: only one of them ever
+  // gets bound (see injectOpenApiSpecs's "already has an OpenAPI spec"
+  // warning), so renaming there would produce an asset nothing points to.
+  const filenameOwners = new Map<string, string>()
+  for (const spec of specs) {
+    const groupKey = spec.tabLabel ?? '\0default'
+    const owner = filenameOwners.get(spec.filename)
+    if (owner !== undefined && owner !== groupKey) {
+      let disambiguated = spec.sourcePath.replace(/\//g, '-')
+      while (filenameOwners.has(disambiguated) && filenameOwners.get(disambiguated) !== groupKey) {
+        disambiguated = `${groupKey.replace(/\W+/g, '-')}-${disambiguated}`
+      }
+      spec.filename = disambiguated
+    }
+    filenameOwners.set(spec.filename, groupKey)
   }
   return specs
+}
+
+const OPENAPI_HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'trace']
+
+/** Kebab-case a label the way Mintlify slugs its auto-generated OpenAPI operation pages (tag folder, operation leaf). */
+function mintlifyOperationSlugSegment(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+}
+
+/**
+ * Thally's own API operation route segment: path segments (braces stripped)
+ * plus the HTTP method — never the summary. Mirrors `buildSlugSegments` in
+ * src/lib/openapi/normalize.ts; duplicated rather than imported because
+ * packages/migrate cannot depend on the Next.js app. Ceiling: webhook
+ * operations (`x-webhooks`) aren't covered — normalize.ts prefixes those
+ * with "webhooks", update this alongside it if that ever matters here.
+ */
+function thallyOperationSlugSegments(path: string, method: string): Array<string> {
+  const cleaned = path
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => segment.replace(/[{}]/g, '').replace(/[^a-zA-Z0-9-]/g, '-').replace(/-+/g, '-').toLowerCase())
+  if (!cleaned.length) cleaned.push('root')
+  cleaned.push(method.toLowerCase())
+  return cleaned
+}
+
+/** Mirrors `slugifyId` in src/data/docs.ts, which turns a tab label into its API spec id. */
+function slugifyApiSpecId(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9/]+/g, '-').replace(/(^-|-$)+/g, '').replace(/\//g, '-') || value.toLowerCase()
+}
+
+interface OpenApiOperationForLinking {
+  method: string
+  path: string
+  tag?: string
+  summary?: string
+  operationId?: string
+}
+
+/** Read just enough of an OpenAPI document to match Mintlify's auto-generated operation pages. Malformed input yields no operations rather than throwing. */
+function parseOpenApiOperationsForLinking(content: Buffer): Array<OpenApiOperationForLinking> {
+  let document: unknown
+  try {
+    document = parseYaml(content.toString('utf8'))
+  } catch {
+    return []
+  }
+  const paths = document && typeof document === 'object' ? (document as Record<string, unknown>).paths : null
+  if (!paths || typeof paths !== 'object') return []
+  const operations: Array<OpenApiOperationForLinking> = []
+  for (const [path, pathItem] of Object.entries(paths as Record<string, unknown>)) {
+    if (!pathItem || typeof pathItem !== 'object') continue
+    for (const method of OPENAPI_HTTP_METHODS) {
+      const operation = (pathItem as Record<string, unknown>)[method]
+      if (!operation || typeof operation !== 'object') continue
+      const op = operation as Record<string, unknown>
+      const tags = Array.isArray(op.tags) ? op.tags.filter((tag): tag is string => typeof tag === 'string') : []
+      operations.push({
+        method,
+        path,
+        tag: tags[0],
+        summary: typeof op.summary === 'string' ? op.summary : undefined,
+        operationId: typeof op.operationId === 'string' ? op.operationId : undefined,
+      })
+    }
+  }
+  return operations
+}
+
+/**
+ * Map Mintlify's auto-generated operation page path (e.g.
+ * "qstash/api-reference/messages/publish-a-message", from the `directory`
+ * an object-form `openapi: { source, directory }` reference scoped its
+ * pages under) to Thally's actual operation route
+ * (`/api/<specId>/<method+path slug>`), so in-content links to those
+ * Mintlify-only pages can be rewritten instead of staying broken.
+ *
+ * `specId` mirrors buildApiReferenceConfig in src/config/api-reference.ts:
+ * the first non-hidden tab with a bound spec is `'default'`, every other
+ * one is keyed by its own tab id. Ceiling: matches by tag + (summary,
+ * operationId, or "method path"), the same fields Mintlify's generator
+ * itself falls back through — an operation whose tag Mintlify computed
+ * differently still won't resolve, and stays a broken link as before.
+ */
+function mintlifyApiOperationLinkMap(
+  resolvedSpecs: Array<ResolvedApiSpec>,
+  docsConfig: MigrationDocsConfig,
+): Map<string, string> {
+  const map = new Map<string, string>()
+  const apiTabs = docsConfig.tabs.filter((tab) => !tab.hidden && tab.api)
+  apiTabs.forEach((tab, index) => {
+    const spec = resolvedSpecs.find((entry) => tab.api?.source === `/${entry.filename}`)
+    if (!spec || !spec.directory) return
+    const specId = index === 0 ? 'default' : slugifyApiSpecId(tab.tab)
+    for (const operation of parseOpenApiOperationsForLinking(spec.content)) {
+      const tagSegment = mintlifyOperationSlugSegment(operation.tag ?? 'default')
+      const leaf = mintlifyOperationSlugSegment(operation.summary ?? operation.operationId ?? `${operation.method} ${operation.path}`)
+      const mintlifyPath = `${spec.directory}/${tagSegment}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
+      const thallyHref = `/api/${specId}/${thallyOperationSlugSegments(operation.path, operation.method).join('/')}`
+      if (!map.has(mintlifyPath)) map.set(mintlifyPath, thallyHref)
+    }
+  })
+  return map
+}
+
+/** Rewrite in-content links matching Mintlify's auto-generated OpenAPI operation pages to Thally's actual `/api/...` routes. Non-matching links are left untouched — still broken, but no worse than before this rewrite existed. */
+function rewriteMintlifyApiOperationLinks(body: string, linkMap: Map<string, string>): string {
+  if (linkMap.size === 0) return body
+  let codeFence: string | null = null
+  return body.split('\n').map((line) => {
+    const fence = line.match(/^\s*(`{3,}|~{3,})/)
+    if (fence) {
+      if (!codeFence) codeFence = fence[1][0]
+      else if (fence[1][0] === codeFence) codeFence = null
+      return line
+    }
+    if (codeFence) return line
+    const rewriteTarget = (target: string): string => {
+      const suffixIndex = target.search(/[?#]/)
+      const path = (suffixIndex >= 0 ? target.slice(0, suffixIndex) : target).replace(/^\/+/, '').toLowerCase()
+      const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
+      const mapped = linkMap.get(path)
+      return mapped ? `${mapped}${suffix}` : target
+    }
+    return line
+      .replace(/(\]\()\/([^\s)]+)(?=[\s)]|$)/g, (_match, prefix: string, target: string) => `${prefix}${rewriteTarget(`/${target}`)}`)
+      .replace(/(\bhref=")\/([^"]+)(")/g, (_match, prefix: string, target: string, suffix: string) => `${prefix}${rewriteTarget(`/${target}`)}${suffix}`)
+  }).join('\n')
 }
 
 const MAX_FERN_GENERATORS_BYTES = 2_000_000
@@ -2149,6 +2309,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (resolvedSpecs.length > 0) {
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
+      const operationLinkMap = mintlifyApiOperationLinkMap(resolvedSpecs, docsConfig)
+      if (operationLinkMap.size > 0) {
+        for (const page of pages) {
+          page.body = rewriteMintlifyApiOperationLinks(page.body, operationLinkMap)
+        }
+      }
     } else {
       // No docs.json-configured spec at all: fall back to a naive repo scan,
       // matching every other platform's baseline behavior.
