@@ -490,53 +490,45 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
   }
 }
 
-/** A heading line ending in Docusaurus/Mintlify-style custom-id syntax (`## Title {#custom-id}`). */
-const HEADING_CUSTOM_ID = /^(#{1,6}\s+.*?)\s*\{#[A-Za-z0-9_-]+\}\s*$/
-
 /**
- * Strip a heading's trailing `{#custom-id}` anchor-id syntax (a convention
- * several Markdown/MDX platforms support, including live crewAI docs, e.g.
+ * Preserve a heading's explicit anchor id (`## Heading {#custom-id}` — a
+ * convention several Markdown/MDX platforms support, including live
+ * Docusaurus sources and crewAI's own Mintlify docs, e.g.
  * `### Memory & embedder config {#memory-embedder-config}`). MDX always
  * evaluates `{...}` as a JS expression, and `#custom-id` isn't valid
- * JavaScript, so this crashes `@mdx-js/mdx`'s parser outright — before
- * `escapeFernLiteralBraces` below even gets a chance to run (that function
- * needs a successful parse to find the expression node in the first place)
- * — silently excluding the whole page. Thally has no custom-heading-id
- * feature to preserve the id for, so the id is dropped and the heading text
- * kept; this is a plain line scan (not an MDX parse, which is exactly what
- * the source can't survive yet) that tracks fenced code blocks so a real
- * code sample's own `{#...}`-shaped text is never touched.
+ * JavaScript, so this crashes `@mdx-js/mdx`'s parser outright wherever
+ * something needs a real MDX parse of the page — both `components.ts`'s
+ * own component-import analysis and the final compiled output — silently
+ * excluding the whole page. Thally's heading renderer (`createHeading` in
+ * mdx-components.tsx) always derives the anchor id from the heading's
+ * rendered text and has no way to honor an explicit `id` prop on `h2`/`h3`,
+ * so the custom id can't be attached to the heading element itself —
+ * instead, an empty `<a id="custom-id"></a>` is inserted immediately
+ * before the heading. A browser resolves a `#hash` to *any* element with a
+ * matching `id`, not just headings, so an existing in-repo or migrated
+ * link to `#custom-id` still lands in the right place; only the exact
+ * scroll offset shifts up by one heading's height, same as Docusaurus'
+ * own `hash-in-anchor-vs-on-heading` implementations do for a heading with
+ * children before its own anchor point in some themes. This syntax means
+ * the same thing on every platform Thally migrates from (and no platform
+ * uses `{#...}`-shaped text for anything else), so it applies regardless
+ * of platform; and it never touches the YAML frontmatter block, so it is
+ * safe to call directly on a page's raw source before any parse — MDX or
+ * otherwise — is attempted. Always separated from surrounding content by
+ * blank lines so it can never be swallowed into a preceding paragraph as a
+ * lazy continuation line.
  */
-export function stripMdxHeadingCustomIds(raw: string): { body: string; converted: boolean } {
+export function preserveMdxHeadingCustomIds(raw: string): { body: string; converted: boolean } {
   const { front, body } = splitFrontmatterBlock(raw)
-  const lines = body.split(/\r\n|\r|\n/)
-  const output: Array<string> = []
-  let inFence = false
-  let fenceToken = ''
   let converted = false
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (inFence) {
-      if (trimmed.startsWith(fenceToken)) inFence = false
-      output.push(line)
-      continue
-    }
-    const fenceOpen = FENCE_OPEN.exec(trimmed)
-    if (fenceOpen) {
-      inFence = true
-      fenceToken = fenceOpen[1].slice(0, 3)
-      output.push(line)
-      continue
-    }
-    const match = HEADING_CUSTOM_ID.exec(line)
-    if (match) {
-      output.push(match[1])
+  const rewritten = replaceOutsideCode(body, (whole) => whole.replace(
+    /^(#{1,6}[ \t]+.+?)[ \t]*\{#([A-Za-z0-9_-]+)\}[ \t]*$/gm,
+    (_match, heading: string, id: string) => {
       converted = true
-    } else {
-      output.push(line)
-    }
-  }
-  return { body: front + output.join('\n'), converted }
+      return `\n<a id=${JSON.stringify(id)}></a>\n\n${heading}`
+    },
+  ))
+  return { body: front + rewritten, converted }
 }
 
 export function escapeFernLiteralBraces(raw: string): string {
@@ -1230,7 +1222,10 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform): string
   const runMintlify = platform === 'mintlify'
   const runDocusaurus = platform === 'docusaurus'
 
-  let rewritten = normalizeDocusaurusAdmonitions(runFern ? normalizeFernCallouts(body) : body)
+  // A heading's explicit `{#custom-id}` anchor (see `preserveMdxHeadingCustomIds`)
+  // means the same thing on every platform, so — unlike the platform-specific
+  // renames below — this always runs, even when `platform` is omitted.
+  let rewritten = preserveMdxHeadingCustomIds(normalizeDocusaurusAdmonitions(runFern ? normalizeFernCallouts(body) : body)).body
   if (runDocusaurus) {
     // Docusaurus injects these theme components globally. Thally also
     // exposes its equivalents globally, so source-only imports must not survive.

@@ -40,7 +40,7 @@ import {
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
-import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, stripMdxHeadingCustomIds } from './mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, preserveMdxHeadingCustomIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -372,9 +372,107 @@ function readDocusaurusConfigSource(projectRoot: string): string {
   return readFileSync(path, 'utf8')
 }
 
+/**
+ * Scans forward from a `{` for its matching `}`, skipping over string,
+ * template, and comment contents so braces inside them don't throw off the
+ * depth count. Returns -1 if the object is never closed.
+ */
+function matchingBraceIndex(source: string, openBraceIndex: number): number {
+  let depth = 0
+  for (let i = openBraceIndex; i < source.length; i++) {
+    const ch = source[i]
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch
+      i++
+      while (i < source.length && source[i] !== quote) {
+        if (source[i] === '\\') i++
+        i++
+      }
+      continue
+    }
+    if (ch === '/' && source[i + 1] === '/') {
+      const newline = source.indexOf('\n', i)
+      i = newline === -1 ? source.length : newline
+      continue
+    }
+    if (ch === '/' && source[i + 1] === '*') {
+      const end = source.indexOf('*/', i + 2)
+      i = end === -1 ? source.length : end + 1
+      continue
+    }
+    if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+/** Finds a `key: 'value'` or `key: "value"` pair at the top level of an object body (not nested inside a further `{`, `[`, or `(`). */
+function topLevelStringProperty(objectBody: string, key: string): string | undefined {
+  let depth = 0
+  const keyPattern = new RegExp(`^${key}\\s*:\\s*(['"])`)
+  for (let i = 0; i < objectBody.length; i++) {
+    const ch = objectBody[i]
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch
+      i++
+      while (i < objectBody.length && objectBody[i] !== quote) {
+        if (objectBody[i] === '\\') i++
+        i++
+      }
+      continue
+    }
+    if (ch === '/' && objectBody[i + 1] === '/') {
+      const newline = objectBody.indexOf('\n', i)
+      i = newline === -1 ? objectBody.length : newline
+      continue
+    }
+    if (ch === '/' && objectBody[i + 1] === '*') {
+      const end = objectBody.indexOf('*/', i + 2)
+      i = end === -1 ? objectBody.length : end + 1
+      continue
+    }
+    if (ch === '{' || ch === '[' || ch === '(') {
+      depth++
+      continue
+    }
+    if (ch === '}' || ch === ']' || ch === ')') {
+      depth--
+      continue
+    }
+    if (depth === 0) {
+      const match = keyPattern.exec(objectBody.slice(i))
+      if (match) {
+        const quote = match[1]
+        const valueStart = i + match[0].length
+        const valueEnd = objectBody.indexOf(quote, valueStart)
+        if (valueEnd !== -1) return objectBody.slice(valueStart, valueEnd)
+      }
+    }
+  }
+  return undefined
+}
+
 function primaryDocusaurusDocsDirectory(projectRoot: string): string {
   const source = readDocusaurusConfigSource(projectRoot)
-  const configured = source.match(/\bdocs\s*:\s*\{[\s\S]{0,4000}?\bpath\s*:\s*(['"])([^'"]+)\1/)?.[2]
+  // The classic preset's `docs: { ... }` object configures the primary docs
+  // instance. Its `path` (when present) must come from directly inside that
+  // object, not from a `path` belonging to a nested value (e.g. a versions
+  // entry) or to an unrelated plugin's config further down the file — a
+  // brace-blind regex can walk straight through the docs object's closing
+  // brace into the next plugin's `path` (see the standalone content-docs
+  // plugin case handled by `additionalDocusaurusPluginRoots`).
+  const docsKeyMatch = source.match(/\bdocs\s*:\s*\{/)
+  let configured: string | undefined
+  if (docsKeyMatch?.index !== undefined) {
+    const openBrace = docsKeyMatch.index + docsKeyMatch[0].length - 1
+    const closeBrace = matchingBraceIndex(source, openBrace)
+    if (closeBrace !== -1) {
+      configured = topLevelStringProperty(source.slice(openBrace + 1, closeBrace), 'path')
+    }
+  }
   return trimTrailingSlashes(configured?.replace(/^\.\//, '') ?? '') || 'docs'
 }
 
@@ -385,7 +483,9 @@ function additionalDocusaurusPluginRoots(
 ): Array<DocusaurusPluginRoot> {
   const source = readDocusaurusConfigSource(projectRoot)
   const plugins: Array<DocusaurusPluginRoot> = []
-  const matcher = /['"]@docusaurus\/plugin-content-docs['"][\s\S]{0,3000}?\bpath\s*:\s*(['"])([^'"]+)\1[\s\S]{0,1000}?\brouteBasePath\s*:\s*(['"])([^'"]+)\3/g
+  // Docusaurus resolves the bare shorthand ('content-docs') to the same
+  // official plugin as the full package name, so both forms are matched.
+  const matcher = /['"](?:@docusaurus\/plugin-)?content-docs['"][\s\S]{0,3000}?\bpath\s*:\s*(['"])([^'"]+)\1[\s\S]{0,1000}?\brouteBasePath\s*:\s*(['"])([^'"]+)\3/g
   for (const match of source.matchAll(matcher)) {
     const localPath = trimTrailingSlashes(match[2].replace(/^\.\//, ''))
     const routePrefix = trimEdgeSlashes(match[4])
@@ -2172,6 +2272,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir,
       snippetAliases,
     )
+    if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
+      // A heading's `{#custom-id}` anchor (`## Title {#custom-id}`) crashes
+      // `@mdx-js/mdx`'s parser outright, so it must be converted to a
+      // preceding `<a id="custom-id"></a>` (see `preserveMdxHeadingCustomIds`)
+      // before ANY MDX parse of this page is attempted — including
+      // `componentMigrator.transform` below, whose own early parse would
+      // otherwise choke on it and skip the page's import analysis entirely.
+      raw = preserveMdxHeadingCustomIds(raw).body
+    }
     if (componentMigrator) {
       const warningsBeforeTransform = warnings.length
       raw = componentMigrator.transform(raw, file.absolutePath)
@@ -2196,20 +2305,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // is platform-agnostic (it only reads the page's own AST/ESM scope), so
     // run it for every platform Thally migrates from.
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
-      // Heading custom-ids and math must both be protected before the
-      // AST-based brace escaper runs: either raw `## Title {#custom-id}` or
+      // Math must be protected before the AST-based brace escaper runs:
       // `$$\begin{align*}...\end{align*}$$` crashes that parser outright
-      // (see `stripMdxHeadingCustomIds`/`protectMathBlocks`), which is what
-      // excluded these pages before this ran.
-      const strippedHeadingIds = stripMdxHeadingCustomIds(raw)
-      if (strippedHeadingIds.converted) {
-        warnings.push({
-          code: 'unsupported-config',
-          message: "A heading's custom `{#id}` anchor has no equivalent in Thally yet; it was dropped and the heading text was kept.",
-          source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
-        })
-      }
-      const protectedMath = protectMathBlocks(strippedHeadingIds.body)
+      // (see `protectMathBlocks`), which is what excluded these pages
+      // before this ran. The heading-custom-id case that used to be
+      // handled at this same point is now converted earlier, above, before
+      // `componentMigrator.transform` gets a chance to choke on it too.
+      const protectedMath = protectMathBlocks(raw)
       if (protectedMath.converted) {
         warnings.push({
           code: 'unsupported-config',

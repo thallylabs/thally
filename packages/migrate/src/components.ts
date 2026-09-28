@@ -15,7 +15,7 @@ import ts from 'typescript'
 import { unified } from 'unified'
 
 import { parseFrontmatter } from './frontmatter.js'
-import { isFunctionInitializer, normalizeHtmlComments } from './mdx.js'
+import { isFunctionInitializer, normalizeHtmlComments, preserveMdxHeadingCustomIds } from './mdx.js'
 import { resolveWithin } from './path.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
 
@@ -533,6 +533,34 @@ export function declarationsReferenceBrowserGlobal(body: string): boolean {
  * so such an import still copies instead of throwing "path escapes its
  * root" for a component this migration should have imported.
  */
+
+/**
+ * Text-only safety net for a page whose MDX can't be parsed at all (see the
+ * catch below `transform`'s own `parser.parse` call): with no AST to drive a
+ * real copy/removal, this only guarantees the page still builds by dropping
+ * a `@site/...`/relative component import and blanking its JSX usage,
+ * narrowly matching the single-binding default/named-as-default shape
+ * `SNIPPET_IMPORT_PATTERN` (repository.ts) already uses for the same reason.
+ * A bare npm-package import is left alone — that failure mode ("module not
+ * installed") is unrelated to why this page's MDX didn't parse, and this
+ * pass has no way to tell whether it is actually used anywhere.
+ */
+function neutralizeUnresolvableImportsWithoutAst(content: string, currentFile: string, warn: (message: string, source: string) => void): string {
+  const importPattern = /^import\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+(['"])((?:@site\/|\.\.?\/|\/)[^'"]+)\3\s*;?[ \t]*$/gm
+  const dropped: Array<{ name: string; specifier: string }> = []
+  let result = content.replace(importPattern, (_match, namedComponent: string | undefined, defaultComponent: string | undefined, _quote: string, specifier: string) => {
+    dropped.push({ name: (namedComponent ?? defaultComponent) as string, specifier })
+    return ''
+  })
+  for (const { name, specifier } of dropped) {
+    warn(`Component import ${JSON.stringify(specifier)} could not be resolved because this page's source doesn't compile as MDX (see the preceding warning); the import and its usage were removed rather than risking a broken build.`, currentFile)
+    result = result
+      .replace(new RegExp(`<${name}(?:\\s[^>]*)?/>`, 'g'), `{/* Removed <${name}>: unresolved during fallback migration */}`)
+      .replace(new RegExp(`<${name}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${name}>`, 'g'), `{/* Removed <${name}>: unresolved during fallback migration */}`)
+  }
+  return result
+}
+
 export function createComponentMigrator(siteRoot: string, confinementRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
   transform: (raw: string, currentFile: string) => string
   files: () => Array<RenderedMigrationFile>
@@ -836,16 +864,38 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // import that comment sits near completely untouched. `normalizeMdx`
     // converts the same syntax later in the pipeline anyway, so doing it
     // here too (on this function's own working copy) is never wasted work.
-    const content = normalizeHtmlComments(parsedFrontmatter)
+    // Likewise a heading's explicit `{#custom-id}` suffix is never valid MDX
+    // (a bare `{...}` in prose is always parsed as a JS expression, and no
+    // JS expression starts with `#`) regardless of platform, so converting
+    // it up front is always safe — and it must happen before this
+    // function's own parse below, or that parse throws first and this
+    // whole page's import analysis is skipped instead of just this one
+    // page's expression.
+    const content = preserveMdxHeadingCustomIds(normalizeHtmlComments(parsedFrontmatter)).body
     let tree: MdxNode
     try {
       tree = parser.parse(content) as MdxNode
     } catch {
       warn('Custom component analysis could not parse this MDX; its source was preserved for manual migration.', currentFile)
-      return raw
+      // The AST walk below is how every `@site/...`/relative component
+      // import normally gets copied or removed; none of that runs on a page
+      // that can't even be parsed. Left alone, an import like that survives
+      // verbatim and breaks `next build` with "Module not found" for the
+      // whole site, not just this page — the same failure mode the AST path
+      // already guards against everywhere else. This is a text-only,
+      // best-effort safety net (no AST here to drive a real copy), narrow by
+      // design: only the single-binding default/named-as-default import
+      // shape actually seen in practice, mirroring `SNIPPET_IMPORT_PATTERN`.
+      return frontmatter + neutralizeUnresolvableImportsWithoutAst(content, currentFile, warn)
     }
     const aliases = new Map<string, string>()
     const unsupportedImports = new Map<string, string>()
+    // Local names dropped by the lowercase-named `.mdx?` import case below
+    // (Docusaurus' auto-generated per-file `toc` export, merged into
+    // another page's own `toc` via `...viewsToc`) — collected here so the
+    // spread-removal pass after the main walk can find every one of them,
+    // regardless of which esmNode declared the import vs. used it.
+    const droppedMdxDataBindings = new Set<string>()
     const edits: Array<Replacement> = []
     const declarations: Array<{ start: number; end: number; source: string }> = []
     const moduleImports: Array<string> = []
@@ -980,7 +1030,29 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           }
           continue
         }
-        if (/\.mdx?$/.test(specifier)) continue
+        if (/\.mdx?$/.test(specifier)) {
+          // A capitalized default/named import here is a JSX-usable
+          // partial (`import Partial from './x.mdx'`, `<Partial />`) — the
+          // earlier text-level snippet-inlining pass (`inlineMdxSnippets`,
+          // repository.ts) already resolved and removed those before this
+          // AST walk ever runs, so reaching this point with only lowercase
+          // bindings means every one is a plain named value that pass
+          // can't touch: Docusaurus' own convention of auto-generating a
+          // `toc` export per `.mdx` file, commonly re-exported by spreading
+          // it into another page's `toc` (`export const toc = [...viewsToc,
+          // ...]`). The migrated project has no such module to import from
+          // ("Module not found"), and no way to compute the value, so the
+          // import and that one safe, common usage shape are both removed;
+          // anything shaped differently is left for the npm-style
+          // expression-reference check below to exclude the page instead of
+          // guessing at a replacement.
+          if (bindings.length > 0 && bindings.every((binding) => !/^[A-Z]/.test(binding.local))) {
+            warn(`MDX named import of ${JSON.stringify(rawSpecifier)} isn't a component and has no equivalent in the migrated project (e.g. Docusaurus' auto-generated per-file 'toc' export); the import was removed, along with any '...${bindings.map((binding) => binding.local).join(", '...")}' spread of it.`, currentFile)
+            edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+            for (const binding of bindings) droppedMdxDataBindings.add(binding.local)
+          }
+          continue
+        }
         // A binary asset (`docusaurusLogo.svg`, a `.docx` handout, ...) is
         // never really "a component" — it's fine bound to any identifier
         // shape and referenced from an expression (`src={docusaurusLogo}`),
@@ -999,7 +1071,17 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             edits.push({
               start: node.position.start.offset + statement.getStart(ast),
               end: node.position.start.offset + statement.end,
-              value: bindings.map((binding) => `const ${binding.local} = ${JSON.stringify(href)};`).join('\n'),
+              // `export`, not a bare `const`: this replaces an `import`
+              // statement in place, and the final MDX compile (a fresh
+              // parse of this text, not a reuse of this pass's own AST)
+              // only recognizes a top-level JS block as ESM — evaluated and
+              // its bindings put in scope — when it starts with `import` or
+              // `export`. A bare `const` there is just prose to that parser
+              // and renders as literal paragraph text instead, leaving
+              // every reference to this binding a `ReferenceError` at
+              // render (reproduced against hasura/graphql-engine's
+              // databases/overview.mdx, which binds asset URLs this way).
+              value: bindings.map((binding) => `export const ${binding.local} = ${JSON.stringify(href)};`).join('\n'),
             })
             warn(`Asset import ${JSON.stringify(rawSpecifier)} was copied to ${href} and bound to that URL instead of importing it as a component.`, currentFile)
             continue
@@ -1116,7 +1198,9 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             edits.push({
               start: importStart,
               end: importEnd,
-              value: bindings.map((binding) => `const ${binding.local} = ${JSON.stringify(rescuedAssetHref)};`).join('\n'),
+              // See the identical `export const` note on the other asset
+              // rescue above — same reason.
+              value: bindings.map((binding) => `export const ${binding.local} = ${JSON.stringify(rescuedAssetHref)};`).join('\n'),
             })
             warn(`Asset import ${JSON.stringify(rawSpecifier)} could not be copied as a component; it was copied to ${rescuedAssetHref} and bound to that URL instead.`, currentFile)
           } else {
@@ -1124,6 +1208,36 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             warn(`Component import ${JSON.stringify(rawSpecifier)} could not be copied and was removed: ${error instanceof Error ? error.message : 'unsupported dependency'}. Its usage on this page was neutralized.`, currentFile)
           }
         }
+      }
+    }
+
+    // Remove every `...name` spread of a dropped MDX data import (see the
+    // lowercase-binding `.mdx?` case above) from any array literal it
+    // appears in, so the export that merges it (`export const toc =
+    // [...viewsToc, ...]`) stays valid instead of throwing on the now-
+    // undefined identifier. Only the spread element itself is touched
+    // (plus one adjacent comma, so the array literal it lived in stays
+    // syntactically valid); a bare reference to the same name elsewhere is
+    // intentionally left alone for `hasExpressionReference`'s excluded-page
+    // path elsewhere in this function to catch instead of guessing at it.
+    if (droppedMdxDataBindings.size > 0) {
+      for (const node of esmNodes) {
+        if (node.value === undefined || node.position?.start.offset === undefined) continue
+        const nodeStart = node.position.start.offset
+        const nodeText = node.value
+        const ast = sourceFile(nodeText, 'inline.tsx')
+        function stripDroppedSpreads(inner: ts.Node): void {
+          if (ts.isSpreadElement(inner) && ts.isIdentifier(inner.expression) && droppedMdxDataBindings.has(inner.expression.text)) {
+            const start = nodeStart + inner.getStart(ast)
+            let end = nodeStart + inner.end
+            const following = nodeText.slice(inner.end).match(/^\s*,/)
+            if (following) end += following[0].length
+            edits.push({ start, end, value: '' })
+            return
+          }
+          ts.forEachChild(inner, stripDroppedSpreads)
+        }
+        for (const statement of ast.statements) stripDroppedSpreads(statement)
       }
     }
 
