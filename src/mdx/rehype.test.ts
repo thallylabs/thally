@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type { Element, Root, Text } from 'hast'
 
 import {
+  applyCodeNotation,
   measureHighlightableCode,
   parseCodeFenceMeta,
   rehypePlugins,
@@ -154,5 +155,142 @@ describe('heading anchors', () => {
     const transform = rehypePlugins[2]() as (tree: Root) => void
     transform({ type: 'root', children: headings })
     expect(headings.map((heading) => heading.properties?.id)).toEqual(['key-features-2', 'key-features', 'key-features-3'])
+  })
+})
+
+describe('code-fence metadata tokenizer', () => {
+  it('joins multi-word bare titles', () => {
+    expect(parseCodeFenceMeta('Example title here')).toEqual({ title: 'Example title here' })
+  })
+
+  it('never turns boolean flags into titles, in any position', () => {
+    expect(parseCodeFenceMeta('lines')).toEqual({ lines: true })
+    expect(parseCodeFenceMeta('expandable nocopy twoslash')).toEqual({ expandable: true, nocopy: true })
+    expect(parseCodeFenceMeta('My File lines expandable')).toEqual({ title: 'My File', lines: true, expandable: true })
+    expect(parseCodeFenceMeta('twoslash app.ts')).toEqual({ title: 'app.ts' })
+    expect(parseCodeFenceMeta('wrap Example lines')).toEqual({ title: 'Example', wrap: true, lines: true })
+  })
+
+  it('handles quoted titles containing spaces, equals signs and braces', () => {
+    expect(parseCodeFenceMeta('title="a = {b} c d"')).toEqual({ title: 'a = {b} c d' })
+    expect(parseCodeFenceMeta("title='It is done' wrap")).toEqual({ title: 'It is done', wrap: true })
+    expect(parseCodeFenceMeta('filename="my file.ts"')).toEqual({ title: 'my file.ts' })
+  })
+
+  it('lets an explicit title override bare words', () => {
+    expect(parseCodeFenceMeta('bare words title="Real"')).toEqual({ title: 'Real' })
+    expect(parseCodeFenceMeta('title="Real" bare words')).toEqual({ title: 'Real' })
+  })
+
+  it('combines braces and highlight= with focus and caps', () => {
+    expect(parseCodeFenceMeta('{1,3} highlight={5-6} focus={2,4-5}')).toEqual({
+      highlight: [5, 6],
+      focus: [2, 4, 5],
+    })
+    expect(parseCodeFenceMeta('focus={1-4000000000}').focus).toHaveLength(1_000)
+    expect(parseCodeFenceMeta('focus={5-2}').focus).toEqual([])
+  })
+
+  it('reads icon with and without quotes and braces', () => {
+    expect(parseCodeFenceMeta('icon="python"')).toEqual({ icon: 'python' })
+    expect(parseCodeFenceMeta('icon=square-js Title')).toEqual({ icon: 'square-js', title: 'Title' })
+    expect(parseCodeFenceMeta('icon={"python"}')).toEqual({ icon: 'python' })
+  })
+
+  it('supports nocopy="false" and ignores unknown keys and JSON-ish groups', () => {
+    expect(parseCodeFenceMeta('nocopy="false"')).toEqual({ nocopy: false })
+    expect(parseCodeFenceMeta('nocopy')).toEqual({ nocopy: true })
+    expect(parseCodeFenceMeta('mystery=value other="two words" Title')).toEqual({ title: 'Title' })
+    expect(parseCodeFenceMeta('theme={"system"} lines')).toEqual({ lines: true })
+    expect(parseCodeFenceMeta('')).toEqual({})
+    expect(parseCodeFenceMeta('   ')).toEqual({})
+  })
+
+  it('keeps Windows paths and dotted filenames as titles', () => {
+    expect(parseCodeFenceMeta('C:\\src\\app.config.ts')).toEqual({ title: 'C:\\src\\app.config.ts' })
+    expect(parseCodeFenceMeta('docker-compose.prod.yml lines')).toEqual({ title: 'docker-compose.prod.yml', lines: true })
+  })
+
+  it('tolerates unterminated quotes and groups', () => {
+    expect(parseCodeFenceMeta('title="oops')).toEqual({ title: 'oops' })
+    expect(parseCodeFenceMeta('{1,2')).toEqual({ highlight: [1, 2] })
+  })
+})
+
+describe('code notation markers', () => {
+  it('strips markers for several comment styles and marks lines', () => {
+    const code = [
+      'a // [!code ++]',
+      'b # [!code --]',
+      'c <!-- [!code highlight] -->',
+      'd -- [!code focus]',
+      'e /* [!code ++] */',
+      'plain',
+    ].join('\n')
+    const result = applyCodeNotation(code)!
+    expect(result.code).toBe('a\nb\nc\nd\ne\nplain')
+    expect([...result.marks.add]).toEqual([1, 5])
+    expect([...result.marks.remove]).toEqual([2])
+    expect([...result.marks.highlight]).toEqual([3])
+    expect([...result.marks.focus]).toEqual([4])
+  })
+
+  it('expands :N counts to the current and following lines', () => {
+    const result = applyCodeNotation('a // [!code ++:3]\nb\nc\nd')!
+    expect(result.code).toBe('a\nb\nc\nd')
+    expect([...result.marks.add]).toEqual([1, 2, 3])
+  })
+
+  it('returns null for fences without markers', () => {
+    expect(applyCodeNotation('const a = 1 // not a marker')).toBeNull()
+  })
+
+  it('leaves plain fences unchanged in rendered output and code prop', async () => {
+    const block = codeBlock('const a = 1\nconst b = 2', 'typescript')
+    await transformCodeBlocks([block])
+    expect(block.properties?.code).toBe('const a = 1\nconst b = 2')
+    expect(codeText(block).value).not.toContain('class=')
+  })
+
+  it('strips markers from rendered HTML and copied code, and adds line classes', async () => {
+    const block = codeBlock('const a = 1 // [!code ++]\nconst b = 2 // [!code --]\nconst c = 3', 'typescript')
+    await transformCodeBlocks([block])
+    expect(block.properties?.code).toBe('const a = 1\nconst b = 2\nconst c = 3')
+    const html = codeText(block).value
+    expect(html).not.toContain('[!code')
+    expect(html).toContain('thally-line-add')
+    expect(html).toContain('thally-line-remove')
+  })
+
+  it('dims non-focused lines for focus= and focus markers', async () => {
+    const block = codeBlock('one\ntwo // [!code focus]\nthree', 'txt')
+    block.properties = { ...block.properties, focusLines: '3' }
+    await transformCodeBlocks([block])
+    const spans = codeText(block).value.split('\n')
+    expect(spans[0]).toContain('thally-line-dim')
+    expect(spans[1]).not.toContain('thally-line-dim')
+    expect(spans[2]).not.toContain('thally-line-dim')
+  })
+
+  it('does not touch mermaid fences', async () => {
+    const source = 'graph TD\nA-->B // [!code ++]'
+    const block = codeBlock(source, 'mermaid')
+    await transformCodeBlocks([block])
+    expect(block.properties?.code).toBe(source)
+  })
+
+  it('lifts new meta options onto the pre element', () => {
+    const pre = codeBlock('x', 'txt')
+    ;(pre.children[0] as Element).data = { meta: 'My Title lines expandable nocopy icon="python" focus={2}' } as never
+    const parse = rehypePlugins[0]() as (tree: Root) => void
+    parse({ type: 'root', children: [pre] })
+    expect(pre.properties).toMatchObject({
+      title: 'My Title',
+      lines: '',
+      expandable: '',
+      nocopy: '',
+      icon: 'python',
+      focusLines: '2',
+    })
   })
 })
