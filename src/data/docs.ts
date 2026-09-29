@@ -169,7 +169,8 @@ export interface DocsJsonNavbar {
   links?: Array<DocsJsonNavLink>
   primary?: { label: string; href: string } | null
   /** Public assets for a portable, source-owned logo fallback. */
-  logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string }
+  /** Explicit null keeps a source site's text-only wordmark. */
+  logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string } | null
 }
 
 export interface DocsJsonFooterColumn {

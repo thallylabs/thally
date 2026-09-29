@@ -279,10 +279,10 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       className={cn(fontSans.variable, fontMono.variable)}
     >
       <head>
-        <script id="thally-runtime-name-shim" dangerouslySetInnerHTML={{ __html: runtimeNameShim }} />
-        <script id="thally-document-locale" dangerouslySetInnerHTML={{ __html: documentLocaleScript(i18n.locales, defaultLang) }} />
+        <Script id="thally-runtime-name-shim" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: runtimeNameShim }} />
+        <Script id="thally-document-locale" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: documentLocaleScript(i18n.locales, defaultLang) }} />
         {!appearance.showToggle && (
-          <script id="thally-locked-appearance" dangerouslySetInnerHTML={{ __html: lockedAppearanceScript(appearance.default) }} />
+          <Script id="thally-locked-appearance" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: lockedAppearanceScript(appearance.default) }} />
         )}
         <JsonLdScript data={siteJsonLd} />
         {/* Google Fonts for custom body/heading fonts set in docs.json */}

@@ -110,7 +110,7 @@ export function TopBar({
           href="/"
           className="thally-docs-brand mr-5 flex min-w-0 items-center gap-2 text-foreground"
         >
-          <Logo showText={false} />
+          {navbarConfig?.logo === null ? null : <Logo showText={false} />}
           {navbarConfig?.logo?.showTitle !== false ? (
             <span className="truncate font-heading text-[1rem] font-semibold tracking-[-0.015em]">
               {displaySiteName(siteName)}
@@ -119,7 +119,7 @@ export function TopBar({
           {navbarConfig?.logo?.rightText ? (
             <span className="-ml-1 shrink-0 font-heading text-[1rem] font-medium text-foreground/55">{navbarConfig.logo.rightText}</span>
           ) : null}
-          {!navbarConfig?.logo ? (
+          {navbarConfig?.logo === undefined ? (
             <span className="-ml-1 shrink-0 font-heading text-[1rem] font-medium text-foreground/55">Docs</span>
           ) : null}
         </IntentPrefetchLink>
