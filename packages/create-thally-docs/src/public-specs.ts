@@ -14,6 +14,13 @@ const MAX_SPEC_BYTES = 10_000_000
 const MAX_DEPTH = 8
 const MAX_ENTRIES = 5000
 
+/** Extra sentence for `public/openapi.json|yaml`: the host serves them ahead of the filtered `/openapi.*` routes. */
+export function shadowNote(urlPath: string): string {
+  return urlPath === 'openapi.json' || urlPath === 'openapi.yaml'
+    ? ` It is also served at /${urlPath} in place of the filtered specification, so visitors get this raw file there.`
+    : ''
+}
+
 const isFlagged = (value: unknown) => value === true || value === 'true'
 
 /** True when the spec marks any operation/path entry/path item/webhook hidden or excluded (extensions or docs.json overrides). */

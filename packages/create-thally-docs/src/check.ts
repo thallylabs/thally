@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process'
 import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
-import { findPublicSpecs, specHasHiddenOperations } from './public-specs.js'
+import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { slugify } from '@thallylabs/core/slugify'
 
@@ -310,7 +310,7 @@ function checkPublicSpecs(projectDir: string, tabs: Array<{ api?: { source?: str
     issues.push({
       severity: 'warning',
       file: spec.path,
-      message: `${spec.path} is an OpenAPI file served publicly as /${spec.urlPath}${spec.hasHiddenOperations ? ' and it contains x-excluded/x-hidden operations, which are downloadable from it' : ' but is not the spec this site is configured with (an old copy?)'}. Re-running migration into an existing site does not remove old copies from public/: delete this file manually`,
+      message: `${spec.path} is an OpenAPI file served publicly as /${spec.urlPath}${spec.hasHiddenOperations ? ' and it contains x-excluded/x-hidden operations, which are downloadable from it' : ' but is not the spec this site is configured with (an old copy?)'}.${shadowNote(spec.urlPath)} Re-running migration into an existing site does not remove old copies from public/: delete this file manually`,
     })
   }
   for (const path of skipped) {
@@ -343,7 +343,7 @@ function validateOpenApi(projectDir: string, source: string, issues: LintIssue[]
     specHasHiddenOperations(s, overrides)) {
     issues.push({
       severity: 'warning',
-      message: `OpenAPI spec "${source}" lives under public/ and contains x-excluded/x-hidden operations; public/ is served as-is, so those operations would be downloadable. Move it to a project-root path such as "openapi/${source.split('/').pop()}", update docs.json, and delete the copy in public/ (re-running migration into an existing site does not remove old copies from public/)`,
+      message: `OpenAPI spec "${source}" lives under public/ and contains x-excluded/x-hidden operations; public/ is served as-is, so those operations would be downloadable.${shadowNote(source.replace(/^\.?\/+/, '').replace(/^public\//, ''))} Move it to a project-root path such as "openapi/${source.split('/').pop()}", update docs.json, and delete the copy in public/ (re-running migration into an existing site does not remove old copies from public/)`,
       file: source,
     })
   }

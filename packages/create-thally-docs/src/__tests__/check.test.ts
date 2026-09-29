@@ -222,6 +222,18 @@ describe('thally check stale specs under public/', () => {
     expect(output).toContain('does not remove old copies from public/')
   })
 
+  it('says a leftover public/openapi.json answers /openapi.json instead of the filtered spec; other names do not', async () => {
+    const flagged = doc({ '/a': { get: { 'x-hidden': true, responses: {} } } })
+    const shadowed = await run({ 'openapi/api.json': doc({ '/a': ok }), 'public/openapi.json': flagged })
+    expect(shadowed).toContain('in place of the filtered specification')
+    const other = await run({ 'openapi/api.json': doc({ '/a': ok }), 'public/old.json': flagged })
+    expect(other).toContain('public/old.json')
+    expect(other).not.toContain('in place of the filtered specification')
+    // Configured at /openapi.json itself: the validateOpenApi warning carries the same consequence.
+    const configured = await run({ 'public/openapi.json': flagged }, '/openapi.json')
+    expect(configured).toContain('in place of the filtered specification')
+  })
+
   it('detects flags on a $ref sibling, a path item, a webhook and nested directories', async () => {
     for (const spec of [
       doc({ '/a': { $ref: '#/components/pathItems/X', 'x-hidden': true } }),

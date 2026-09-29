@@ -3,11 +3,12 @@
 import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import {
   MANAGED_CONTENT_ASSET_DIRECTORY,
   collectRuntimeContentFiles,
+  findShadowingPublicSpecs,
   writeManagedContentAssets,
 } from '../../../scripts/lib/runtime-content-files'
 import { sanitizeSpecForPublication } from '@/lib/openapi/sanitize'
@@ -71,6 +72,36 @@ describe('collectRuntimeContentFiles', () => {
     const served = readFileSync(path.join(projectRoot, MANAGED_CONTENT_ASSET_DIRECTORY, 'openapi/api.yaml'), 'utf8')
     expect(served).not.toContain('secret')
     expect(sanitizeSpecForPublication(parseYaml(served))).toEqual(parseYaml(served))
+  })
+
+  it('reports a public/openapi.json that would shadow the filtered /openapi.json route', () => {
+    const projectRoot = createProject('openapi/api.yaml')
+    mkdirSync(path.join(projectRoot, 'public'), { recursive: true })
+    const doc = (flag: Record<string, unknown>) =>
+      JSON.stringify({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths: { '/a': { get: { ...flag, responses: {} } } } })
+    writeFileSync(path.join(projectRoot, 'public/openapi.json'), doc({ 'x-hidden': true }))
+    writeFileSync(path.join(projectRoot, 'public/openapi.yaml'), stringifyYaml(JSON.parse(doc({ 'x-excluded': true }))))
+    expect(findShadowingPublicSpecs(projectRoot)).toEqual(['public/openapi.json', 'public/openapi.yaml'])
+
+    // Nothing to filter: serving the raw file is harmless. Other names do not shadow a route.
+    writeFileSync(path.join(projectRoot, 'public/openapi.json'), doc({}))
+    writeFileSync(path.join(projectRoot, 'public/openapi.yaml'), 'not: [valid')
+    writeFileSync(path.join(projectRoot, 'public/api.json'), doc({ 'x-hidden': true }))
+    expect(findShadowingPublicSpecs(projectRoot)).toEqual([])
+  })
+
+  it('does not fail the build for an unparseable root spec', () => {
+    const projectRoot = createProject('openapi/api.yaml')
+    mkdirSync(path.join(projectRoot, 'openapi'))
+    writeFileSync(path.join(projectRoot, 'openapi/api.yaml'), 'openapi: 3.1.0\n')
+    writeFileSync(path.join(projectRoot, 'openapi.yaml'), 'paths: [unclosed')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(collectRuntimeContentFiles(projectRoot)['openapi.yaml']?.content).toBe('paths: [unclosed')
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('openapi.yaml'))
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('maps URL-style configured paths to public assets', () => {

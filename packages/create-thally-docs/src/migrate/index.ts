@@ -22,7 +22,7 @@ import {
   type MigrationWarning,
 } from '@thallylabs/migrate'
 
-import { findPublicSpecs } from '../public-specs.js'
+import { findPublicSpecs, shadowNote } from '../public-specs.js'
 import { scaffold } from '../scaffold.js'
 import { initGit, installDeps } from '../utils.js'
 import { validateMigration, type MigrationValidation } from './validate.js'
@@ -131,7 +131,7 @@ function publicSpecWarning(projectDir: string, bundle: MigrationBundle): Migrati
   if (specs.length === 0 && skipped.length === 0) return null
   const migrated = new Set(bundle.assets.filter((asset) => asset.projectRelative).map((asset) => basename(asset.path)))
   const lines = [
-    ...specs.map((spec) => `${spec.path}${migrated.has(basename(spec.path)) ? ' (same file name as a migrated spec)' : ''}${spec.hasHiddenOperations ? ' (contains x-excluded/x-hidden operations)' : ''}`),
+    ...specs.map((spec) => `${spec.path}${migrated.has(basename(spec.path)) ? ' (same file name as a migrated spec)' : ''}${spec.hasHiddenOperations ? ' (contains x-excluded/x-hidden operations)' : ''}${shadowNote(spec.urlPath)}`),
     ...skipped.map((path) => `${path} (too large to inspect)`),
   ]
   return {

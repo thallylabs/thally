@@ -106,12 +106,41 @@ function addSpecFile(
   try {
     document = isJson ? JSON.parse(entry.content) : parseYaml(entry.content)
   } catch (error) {
-    throw new Error(`OpenAPI source is not valid ${isJson ? 'JSON' : 'YAML'}: ${projectPath(projectRoot, filePath)} (${(error as Error).message})`)
+    // The runtime cannot load an unparseable spec either, so it publishes no
+    // operations from it; never fail the whole build over a file (possibly an
+    // unused root default) that is broken on its own.
+    console.warn(`[thally] OpenAPI source is not valid ${isJson ? 'JSON' : 'YAML'} and was copied unfiltered: ${projectPath(projectRoot, filePath)} (${(error as Error).message})`)
+    return
   }
   if (!document || typeof document !== 'object') return
   const sanitized = sanitizeSpecForPublication(document as OpenAPIDocument, { overrides })
   if (sanitized === document) return
   entry.content = isJson ? `${JSON.stringify(sanitized, null, 2)}\n` : stringifyYaml(sanitized)
+}
+
+/**
+ * `/openapi.json` and `/openapi.yaml` are route handlers that publish the
+ * filtered spec, but the host serves `public/` first: a same-named file there
+ * answers instead, raw. Returns those files when filtering would change them.
+ */
+export function findShadowingPublicSpecs(projectRoot: string): Array<string> {
+  const configured = configuredOpenApiSources(projectRoot)
+  const shadowing: Array<string> = []
+  for (const name of ['openapi.json', 'openapi.yaml']) {
+    const filePath = path.join(projectRoot, 'public', name)
+    let document: unknown
+    try {
+      if (!lstatSync(filePath).isFile()) continue
+      const raw = readFileSync(filePath, 'utf8')
+      document = name.endsWith('.json') ? JSON.parse(raw) : parseYaml(raw)
+    } catch {
+      continue
+    }
+    if (!document || typeof document !== 'object') continue
+    const overrides = configured.find(({ source }) => source === `/${name}` || source === `public/${name}`)?.overrides
+    if (sanitizeSpecForPublication(document as OpenAPIDocument, { overrides }) !== document) shadowing.push(`public/${name}`)
+  }
+  return shadowing
 }
 
 function addConfiguredOpenApiFile(
