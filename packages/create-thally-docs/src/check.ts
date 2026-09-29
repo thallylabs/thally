@@ -166,7 +166,9 @@ function extractHeadingAnchors(content: string): Set<string> {
   forEachNonFencedLine(content, (line) => {
     const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
     if (heading) {
-      const base = slugify(heading[1])
+      // The runtime hashes rendered heading text. JSX badges and inline
+      // anchors contribute their visible children, never their tag/props.
+      const base = slugify(heading[1].replace(/<[^>]*>/g, ''))
       const occurrence = (occurrences.get(base) ?? 0) + 1
       occurrences.set(base, occurrence)
       anchors.add(occurrence === 1 ? base : `${base}-${occurrence}`)

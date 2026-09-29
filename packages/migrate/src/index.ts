@@ -13,6 +13,7 @@ export { projectFernNavigation, readFernConfig } from './fern.js'
 export { normalizeMdx, parseMarkdownPage } from './mdx.js'
 export { mergeMigrationConfig, renderMigrationFiles } from './render.js'
 export { defaultMigrationFetcher, migrateUrl, validateMigrationUrl } from './url.js'
+export { hydrateRemoteApiSpecs } from './remote-api.js'
 export type {
   GitHubRepositorySource,
   RepositoryMigrationOptions,

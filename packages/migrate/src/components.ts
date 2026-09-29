@@ -407,9 +407,17 @@ function implicitReactImports(source: ts.SourceFile): string {
   // an implicit global too (`const { Card } = MintlifyComponents;`, no
   // import).
   const usesMintlifyComponents = references.has('MintlifyComponents') && !bindings.has('MintlifyComponents')
+  // Mintlify also makes built-ins available as bare JSX names inside snippet
+  // modules. A copied module runs outside Mintlify's MDX scope, so explicitly
+  // import every unbound name it uses before the destination build renders it.
+  const implicitComponents = MINTLIFY_COMPONENT_MODULES.map(({ module, names }) => {
+    const needed = names.filter((name) => references.has(name) && !bindings.has(name))
+    return needed.length ? `import { ${needed.join(', ')} } from '${module}';` : ''
+  }).filter(Boolean)
   return [
     references.has('React') && !bindings.has('React') ? "import * as React from 'react';" : '',
     hooks.length ? `import { ${hooks.join(', ')} } from 'react';` : '',
+    ...implicitComponents,
     usesMintlifyComponents ? mintlifyComponentsShim() : '',
   ].filter(Boolean).join('\n')
 }

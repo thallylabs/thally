@@ -10,6 +10,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import {
   cloneGitHubRepository,
+  hydrateRemoteApiSpecs,
   migrateRepository,
   migrateUrl,
   parseGitHubRepositoryUrl,
@@ -112,7 +113,8 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
       docsDir: options.docsDir ?? (source.docsDir || undefined),
       platform: options.platform,
     })
-    return cloneWarnings.length > 0 ? { ...bundle, warnings: [...cloneWarnings, ...bundle.warnings] } : bundle
+    const hydrated = await hydrateRemoteApiSpecs(bundle, options.fetcher)
+    return cloneWarnings.length > 0 ? { ...hydrated, warnings: [...cloneWarnings, ...hydrated.warnings] } : hydrated
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true })
   }
