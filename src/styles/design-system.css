@@ -951,9 +951,18 @@
     left: 0;
     box-shadow: var(--ds-elev-3);
     transform: translateX(-100%);
-    transition: transform var(--ds-dur-base) var(--ds-ease-standard);
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      transform var(--ds-dur-base) var(--ds-ease-standard),
+      visibility 0s linear var(--ds-dur-base);
   }
-  .thally-dashboard .ds-sidebar[data-open='true'] { transform: translateX(0); }
+  .thally-dashboard .ds-sidebar[data-open='true'] {
+    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
+    transition-delay: 0s;
+  }
   .thally-dashboard .ds-content { height: auto; }
   .thally-dashboard .ds-topbar { padding: 0 var(--ds-space-16); }
 }

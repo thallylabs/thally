@@ -9,16 +9,18 @@ import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { getSiteUrl } from '@/lib/site-url'
 import { apiReferenceConfig, getOpenApiSpecUrl } from '@/config/api-reference'
 import { getAllApiOperationNodes, getApiOperationBySlug, getApiOperationNodes } from '@/data/api-reference'
-import { getBreadcrumbs } from '@/data/docs'
+import { getBreadcrumbs, getDocEntries, loadDocEntries } from '@/data/docs'
+import { getIndexableDocTranslation, hasDocTranslation } from '@/lib/i18n/translation-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { buildApiOperationJsonLd } from '@/lib/json-ld'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
 import { localeDirection, type I18nConfig } from '@/lib/i18n/config'
 import {
-  getBuildI18nConfig,
+  getEffectiveI18nConfig,
   getRepositoryI18nConfig,
 } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
+import DocsPage, { generateMetadata as generateDocsMetadata } from '@/app/(docs)/[[...slug]]/page'
 
 interface PageProps {
   params: Promise<{ locale: string; slug?: Array<string> }>
@@ -37,17 +39,28 @@ export async function generateStaticParams() {
   if (isRemoteContentSource()) return [{ locale: i18n.defaultLocale, slug: [] }]
   const secondaryLocales = i18n.locales.filter((l) => l.code !== i18n.defaultLocale)
   const nodes = await getAllApiOperationNodes()
-  return secondaryLocales.flatMap(({ code }) => nodes.map((node) => ({ locale: code, slug: node.slug })))
+  const docs = getDocEntries().filter((doc) => doc.slug[0] === 'api' && doc.slug.length > 1)
+  const translatedDocs = await Promise.all(secondaryLocales.flatMap(({ code }) =>
+    docs.map(async (doc) => (await hasDocTranslation(doc.slug, code)
+      ? { locale: code, slug: doc.slug.slice(1) }
+      : null)),
+  ))
+  return [
+    ...secondaryLocales.flatMap(({ code }) => nodes.map((node) => ({ locale: code, slug: node.slug }))),
+    ...translatedDocs.filter((entry): entry is NonNullable<typeof entry> => entry !== null),
+  ]
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const resolved = await params
-  const i18n = getBuildI18nConfig()
+  const i18n = await getEffectiveI18nConfig()
   if (!isValidSecondaryLocale(resolved.locale, i18n)) return {}
   const siteUrl = getSiteUrl()
   const specUrl = getOpenApiSpecUrl(siteUrl)
   const node = await getApiOperationBySlug(resolved.slug)
-  if (!node) return {}
+  if (!node) {
+    return generateDocsMetadata({ params: Promise.resolve({ slug: [resolved.locale, 'api', ...(resolved.slug ?? [])] }) })
+  }
   const title = node.operation.title
   const description = node.operation.description ?? `${node.operation.method} ${node.operation.path}`
   const ogImageUrl = buildOgImageUrl({
@@ -88,7 +101,7 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
   const resolved = await params
   const siteUrl = getSiteUrl()
   const specUrl = getOpenApiSpecUrl(siteUrl)
-  const i18n = getBuildI18nConfig()
+  const i18n = await getEffectiveI18nConfig()
   const effectiveSite = resolveBuildSiteConfig()
 
   if (!isValidSecondaryLocale(resolved.locale, i18n)) {
@@ -96,6 +109,14 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
   }
 
   if (!resolved.slug?.length) {
+    const mdxCandidates = (await loadDocEntries()).filter(
+      (doc) => doc.slug[0] === 'api' && doc.slug.length > 1,
+    )
+    const availableMdx = await Promise.all(mdxCandidates.map(async (doc) =>
+      (await getIndexableDocTranslation(doc.slug, resolved.locale)) ? doc : null,
+    ))
+    const firstMdx = availableMdx.find((doc) => doc !== null)
+    if (firstMdx) redirect(`/${resolved.locale}${firstMdx.href}`)
     const defaultNodes = await getApiOperationNodes(apiReferenceConfig.defaultSpecId)
     if (defaultNodes.length > 0) {
       redirect(`/${resolved.locale}${defaultNodes[0].href}`)
@@ -105,7 +126,9 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
 
   const node = await getApiOperationBySlug(resolved.slug)
   if (!node) {
-    notFound()
+    // /{locale}/api/* also belongs to authored MDX; the OpenAPI operation
+    // surface only owns slugs present in the spec.
+    return DocsPage({ params: Promise.resolve({ slug: [resolved.locale, 'api', ...resolved.slug] }) })
   }
 
   const pageUrl = `${siteUrl}${node.href}`

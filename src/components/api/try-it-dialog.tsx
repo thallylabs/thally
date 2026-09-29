@@ -48,7 +48,15 @@ export function TryItDialog({ controller, open, onOpenChange }: TryItDialogProps
                 </div>
                 <button
                   type="button"
-                  onClick={() => void controller.sendRequest()}
+                  onClick={() => {
+                    if (
+                      controller.operation.method === 'DELETE' &&
+                      !window.confirm('Send this DELETE request? This may permanently remove data.')
+                    ) {
+                      return
+                    }
+                    void controller.sendRequest()
+                  }}
                   disabled={!controller.preparedRequest.isServerConfigured || controller.isSending}
                   className="flex items-center gap-2 rounded-[9px] bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition hover:brightness-125 disabled:opacity-50"
                 >

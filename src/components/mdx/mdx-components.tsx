@@ -49,11 +49,11 @@ function flattenText(node: ReactNode): string {
   return ''
 }
 
-function createHeading(level: 2 | 3) {
+function createHeading(level: 2 | 3 | 4 | 5 | 6) {
   const Tag = `h${level}` as const
-  return function Heading({ children }: { children: ReactNode }) {
+  return function Heading({ children, id: authoredId }: { children: ReactNode; id?: string }) {
     const text = flattenText(children)
-    const id = slugify(text)
+    const id = authoredId ?? slugify(text)
     return (
       // Size, weight, color, and rhythm come from the prose config in
       // tailwind.config.ts so MDX and plain-markdown headings share one scale.
@@ -82,6 +82,9 @@ interface CalloutProps extends Omit<NoteProps, 'type' | 'children'> {
 const components: MDXComponents = {
   h2: createHeading(2),
   h3: createHeading(3),
+  h4: createHeading(4),
+  h5: createHeading(5),
+  h6: createHeading(6),
   pre: (props) => <Pre {...(props as CodeGroupProps)} />,
   code: (props) => <Code {...props} />,
   CodeGroup: (props) => <CodeGroup {...(props as CodeGroupProps)} />,

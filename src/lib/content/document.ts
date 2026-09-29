@@ -8,7 +8,8 @@
  * source map on the legacy sync path.
  */
 
-import { parseMdxContent, type ContentDocument } from '@thallylabs/core'
+import { isSafeContentIdentifier, type ContentDocument } from '@thallylabs/core/content'
+import { parseMdxContent } from '@thallylabs/core/markdown'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import {
   readRuntimeSource,
@@ -20,6 +21,7 @@ import { getContentSource } from '@/lib/content-source'
 const CONTENT_ROOT = 'src/content'
 
 function contentFileCandidates(pageId: string, locale?: string): Array<string> {
+  if (!isSafeContentIdentifier(pageId, locale)) return []
   const candidates: Array<string> = []
   if (locale) {
     candidates.push(

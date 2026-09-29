@@ -34,7 +34,7 @@ export interface DocEntrySummary {
 }
 
 type DocEntriesResolver = () => Array<DocEntrySummary>
-type AsyncDocEntriesResolver = () => Promise<Array<DocEntrySummary>>
+type AsyncDocEntriesResolver = (locale?: string) => Promise<Array<DocEntrySummary>>
 
 let resolver: DocEntriesResolver | null = null
 let asyncResolver: AsyncDocEntriesResolver | null = null
@@ -68,7 +68,7 @@ export function resolveDocEntries(): Array<DocEntrySummary> {
 }
 
 /** Resolve remote entries when registered, otherwise preserve the sync host. */
-export function resolveDocEntriesAsync(): Promise<Array<DocEntrySummary>> {
-  if (asyncResolver) return asyncResolver()
+export function resolveDocEntriesAsync(locale?: string): Promise<Array<DocEntrySummary>> {
+  if (asyncResolver) return asyncResolver(locale)
   return Promise.resolve(resolveDocEntries())
 }

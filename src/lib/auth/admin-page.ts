@@ -19,8 +19,8 @@ export async function resolveAdminFromCookies(): Promise<AdminSession | null> {
   // Break-glass password cookie — only honored when a password is configured
   // (matches the API path; otherwise a cookie forged with the public default
   // secret would grant Owner).
-  const password = store.get(ADMIN_SESSION_COOKIE)?.value
-  if (isAdminEnabled() && password && verifyAdminSessionToken(password)) {
+  const sessionToken = store.get(ADMIN_SESSION_COOKIE)?.value
+  if (isAdminEnabled() && sessionToken && verifyAdminSessionToken(sessionToken)) {
     return { email: 'break-glass', role: 'owner' }
   }
   return null

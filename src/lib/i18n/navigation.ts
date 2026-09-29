@@ -3,7 +3,7 @@
 import 'server-only'
 
 import type { NavContext } from '@/data/docs'
-import { hasDocTranslation } from '@/data/get-doc'
+import { hasDocTranslation } from '@/lib/i18n/translation-source'
 import { localizedPath } from './config'
 
 /** Localize breadcrumb and adjacent-page destinations without changing navigation order or source fallbacks. */
@@ -24,8 +24,13 @@ export async function localizeDocNavigation(
       const suffixAt = href.search(/[?#]/)
       const path = suffixAt < 0 ? href : href.slice(0, suffixAt)
       const suffix = suffixAt < 0 ? '' : href.slice(suffixAt)
-      const exists = await hasDocTranslation(path.split('/').filter(Boolean), locale)
-      return exists ? `${localizedPath(path, locale, defaultLocale)}${suffix}` : href
+      // A locale-specific navigation tree already carries prefixed routes.
+      // Check their canonical page IDs so missing translations still fall
+      // back to the primary page instead of pointing at an absent URL.
+      const isLocalized = path === `/${locale}` || path.startsWith(`/${locale}/`)
+      const canonical = isLocalized ? path.slice(locale.length + 1) || '/' : path
+      const exists = await hasDocTranslation(canonical.split('/').filter(Boolean), locale)
+      return exists ? `${localizedPath(canonical, locale, defaultLocale)}${suffix}` : `${canonical}${suffix}`
     })()
     destinations.set(href, pending)
     return pending

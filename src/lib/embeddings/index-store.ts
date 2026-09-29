@@ -8,5 +8,9 @@
  */
 import '@/lib/search/register-doc-source'
 
-export { buildEmbeddingIndex, getEmbeddingIndex, resetEmbeddingIndex } from '@thallylabs/core'
-export type { PageSource, BuildOptions } from '@thallylabs/core'
+export {
+  buildEmbeddingIndex,
+  getEmbeddingIndex,
+  resetEmbeddingIndex,
+} from '@thallylabs/core/embeddings'
+export type { PageSource, BuildOptions } from '@thallylabs/core/embeddings'

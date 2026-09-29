@@ -8,7 +8,7 @@ import { loadSidebarCollections, getAiConfig, getNavbarConfig, getFooterConfig, 
 import type { NavigationSection } from '@/data/docs'
 import { buildApiNavigation } from '@/data/api-reference'
 import { DocsCodeActionsProvider } from '@/components/docs/code-actions-provider'
-import { getBuildI18nConfig } from '@/lib/i18n/request'
+import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig, siteIdentity } from '@/lib/site-config'
 
 interface DocsLayoutProps {
@@ -43,7 +43,7 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
     return collection
   })
   const aiConfig = getAiConfig()
-  const i18nConfig = getBuildI18nConfig()
+  const i18nConfig = await getEffectiveI18nConfig()
   const navbarConfig = getNavbarConfig()
   const footerConfig = getFooterConfig()
   const navigationPresentation = getNavigationPresentation()

@@ -24,6 +24,8 @@ vi.mock('@/lib/traffic-classifier', () => ({
 }))
 
 vi.mock('@/lib/agent-endpoints', () => ({
+  isAgentDiscoveryEndpoint: vi.fn().mockReturnValue(false),
+  isContentBearingAgentEndpoint: vi.fn().mockReturnValue(false),
   isMachineEndpoint: vi.fn().mockReturnValue(false),
   isPublicAgentEndpoint: vi.fn().mockReturnValue(false),
 }))

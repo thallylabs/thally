@@ -9,7 +9,19 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { parseFrontmatter } from './frontmatter.js'
 import { parseMdxContent } from './parse.js'
+import { isSafeContentIdentifier } from './identifiers.js'
+import {
+  resolveRegisteredAsyncContentDocument,
+  resolveRegisteredContentDocument,
+} from './source-registry.js'
 import type { ParsedContent } from './types.js'
+
+// Keep the historical document-module imports working for package-internal
+// consumers while the public `registry` subpath provides the lean host API.
+export {
+  registerAsyncContentDocumentSource,
+  registerContentDocumentSource,
+} from './source-registry.js'
 
 const CONTENT_ROOT = path.join(process.cwd(), 'src/content')
 
@@ -21,53 +33,39 @@ export interface ContentDocument {
   content: ParsedContent
 }
 
-export type ContentDocumentResolver = (
-  pageId: string,
-  locale?: string,
-) => ContentDocument | null
-
-export type AsyncContentDocumentResolver = (
-  pageId: string,
-  locale?: string,
-) => Promise<ContentDocument | null>
-
-let registeredResolver: ContentDocumentResolver | null = null
-let registeredAsyncResolver: AsyncContentDocumentResolver | null = null
-
-/**
- * Register the host's runtime-aware content reader.
- *
- * The default filesystem reader keeps the framework-agnostic package useful
- * for local tools. Deployed hosts register a reader backed by their generated
- * source map so every projection consumes the same customer-authored bytes in
- * runtimes where the project checkout is unavailable.
- */
-export function registerContentDocumentSource(resolver: ContentDocumentResolver): void {
-  registeredResolver = resolver
-}
-
-/** Register a request-time reader for remote/asset-backed content. */
-export function registerAsyncContentDocumentSource(
-  resolver: AsyncContentDocumentResolver,
-): void {
-  registeredAsyncResolver = resolver
-}
-
 function resolveContentFile(pageId: string, locale?: string): string | null {
+  if (!isSafeContentIdentifier(pageId, locale)) return null
+  let root: string
+  try {
+    root = fs.realpathSync(CONTENT_ROOT)
+  } catch {
+    return null
+  }
   const candidates: Array<string> = []
   if (locale) {
     candidates.push(
-      path.join(CONTENT_ROOT, locale, `${pageId}.mdx`),
-      path.join(CONTENT_ROOT, locale, `${pageId}/index.mdx`),
+      path.resolve(root, locale, `${pageId}.mdx`),
+      path.resolve(root, locale, `${pageId}/index.mdx`),
     )
   }
   candidates.push(
-    path.join(CONTENT_ROOT, `${pageId}.mdx`),
-    path.join(CONTENT_ROOT, `${pageId}/index.mdx`),
+    path.resolve(root, `${pageId}.mdx`),
+    path.resolve(root, `${pageId}/index.mdx`),
   )
 
   for (const filePath of candidates) {
-    if (fs.existsSync(filePath)) return filePath
+    // Deployed hosts register an embedded/asset reader before search runs.
+    // This fallback is for local Node tools only; tracing a dynamic absolute
+    // path would otherwise package the entire repository into server output.
+    if (!filePath.startsWith(`${root}${path.sep}`)) continue
+    try {
+      // A repository can contain symlinks. Resolve those before accepting a
+      // file, so a valid-looking page ID cannot escape the content root.
+      const realFile = fs.realpathSync(/*turbopackIgnore: true*/ filePath)
+      if (realFile.startsWith(`${root}${path.sep}`) && fs.statSync(realFile).isFile()) return realFile
+    } catch {
+      // The candidate does not exist; try the next supported MDX path.
+    }
   }
   return null
 }
@@ -81,19 +79,21 @@ const documentCache = new Map<string, { mtimeMs: number; document: ContentDocume
  * embeddings should use — no ad-hoc regex extraction anywhere else.
  */
 export function getContentDocument(pageId: string, locale?: string): ContentDocument | null {
-  if (registeredResolver) return registeredResolver(pageId, locale)
+  if (!isSafeContentIdentifier(pageId, locale)) return null
+  const registered = resolveRegisteredContentDocument(pageId, locale)
+  if (registered !== undefined) return registered
 
   const filePath = resolveContentFile(pageId, locale)
   if (!filePath) return null
 
-  const stat = fs.statSync(filePath)
+  const stat = fs.statSync(/*turbopackIgnore: true*/ filePath)
   const cacheKey = filePath
   const cached = documentCache.get(cacheKey)
   if (cached && cached.mtimeMs === stat.mtimeMs) {
     return cached.document
   }
 
-  const raw = fs.readFileSync(filePath, 'utf8')
+  const raw = fs.readFileSync(/*turbopackIgnore: true*/ filePath, 'utf8')
   const { data, content } = parseFrontmatter(raw)
   const document: ContentDocument = {
     pageId,
@@ -113,6 +113,8 @@ export async function loadContentDocument(
   pageId: string,
   locale?: string,
 ): Promise<ContentDocument | null> {
-  if (registeredAsyncResolver) return registeredAsyncResolver(pageId, locale)
+  if (!isSafeContentIdentifier(pageId, locale)) return null
+  const registered = resolveRegisteredAsyncContentDocument(pageId, locale)
+  if (registered) return registered
   return getContentDocument(pageId, locale)
 }

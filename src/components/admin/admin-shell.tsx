@@ -2,7 +2,7 @@
 
 import '@/styles/design-system.css'
 
-import { useState, useSyncExternalStore, type ComponentType } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ComponentType } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { AdminCommandMenu } from '@/components/admin/admin-command-menu'
 import { BrandMark } from '@/components/admin/brand-mark'
+import { activateMobileDrawer } from '@/components/admin/mobile-drawer'
 
 interface NavItem {
   href: string
@@ -86,11 +87,31 @@ export function AdminShell({ siteName, children }: { siteName: string; children:
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [cmdOpen, setCmdOpen] = useState(false)
+  const drawerRef = useRef<HTMLElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
   // next-themes resolves the real theme only on the client, so gate any
   // theme-dependent render on hydration to keep SSR and first client render
   // identical. useSyncExternalStore returns the server snapshot (false) through
   // hydration, then the client snapshot (true) — no setState-in-effect.
   const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false)
+
+  useEffect(() => {
+    if (
+      !mobileOpen ||
+      !drawerRef.current ||
+      !contentRef.current ||
+      !menuButtonRef.current
+    ) {
+      return
+    }
+    return activateMobileDrawer(
+      drawerRef.current,
+      contentRef.current,
+      menuButtonRef.current,
+      () => setMobileOpen(false),
+    )
+  }, [mobileOpen, pathname])
 
   // The login screen renders bare — no shell chrome.
   if (pathname === '/admin/login') {
@@ -120,7 +141,17 @@ export function AdminShell({ siteName, children }: { siteName: string; children:
         />
       ) : null}
 
-      <aside className="ds-sidebar" data-collapsed={collapsed} data-open={mobileOpen}>
+      <aside
+        id="admin-mobile-navigation"
+        ref={drawerRef}
+        className="ds-sidebar"
+        data-collapsed={collapsed}
+        data-open={mobileOpen}
+        role={mobileOpen ? 'dialog' : undefined}
+        aria-modal={mobileOpen ? true : undefined}
+        aria-label={mobileOpen ? 'Admin navigation' : undefined}
+        tabIndex={-1}
+      >
         <div className="ds-sidebar-head">
           {/* Top-aligned so the mark sits on the same line as the site name
               (the sub-label hangs below); collapsed mode still centers the
@@ -142,6 +173,7 @@ export function AdminShell({ siteName, children }: { siteName: string; children:
             onClick={() => setMobileOpen(false)}
             className="ds-iconbtn ds-focusable ds-mobile-only"
             aria-label="Close menu"
+            data-drawer-entry
           >
             <X className="h-4 w-4" />
           </button>
@@ -151,7 +183,10 @@ export function AdminShell({ siteName, children }: { siteName: string; children:
           <div className="px-3">
             <button
               type="button"
-              onClick={() => setCmdOpen(true)}
+              onClick={() => {
+                setMobileOpen(false)
+                setCmdOpen(true)
+              }}
               className="ds-sidebar-search ds-focusable"
             >
               <Search className="h-3.5 w-3.5" />
@@ -237,13 +272,19 @@ export function AdminShell({ siteName, children }: { siteName: string; children:
         </div>
       </aside>
 
-      <div className="ds-content">
+      <div ref={contentRef} className="ds-content">
+        <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-foreground focus:px-4 focus:py-2 focus:text-background focus:shadow-lg">
+          Skip to content
+        </a>
         <header className="ds-topbar">
           <button
+            ref={menuButtonRef}
             type="button"
             onClick={() => setMobileOpen(true)}
             className="ds-iconbtn ds-focusable ds-mobile-only"
             aria-label="Open menu"
+            aria-expanded={mobileOpen}
+            aria-controls="admin-mobile-navigation"
           >
             <Menu className="h-5 w-5" />
           </button>
@@ -266,7 +307,7 @@ export function AdminShell({ siteName, children }: { siteName: string; children:
             </a>
           </div>
         </header>
-        <main className="mx-auto max-w-6xl px-6 py-8 md:px-8 md:py-10">{children}</main>
+        <main id="main-content" className="mx-auto max-w-6xl px-6 py-8 md:px-8 md:py-10">{children}</main>
       </div>
     </div>
   )

@@ -40,10 +40,88 @@ async function checkLinks(
 }
 
 describe('thally check reader routes', () => {
+  it('does not label a deliberately hidden page as an orphan', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-hidden-'))
+    mkdirSync(join(projectDir, 'src', 'content'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'Docs', pages: ['introduction'] }] }))
+    writeFileSync(join(projectDir, 'src', 'content', 'introduction.mdx'), '---\ntitle: Intro\ndescription: Introduction page.\n---\n\nIntroduction content.')
+    writeFileSync(join(projectDir, 'src', 'content', 'archived.mdx'), '---\ntitle: Archived\ndescription: Archived page.\nhidden: true\n---\n\nArchived content.')
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      expect(await runCheck(projectDir, { fix: false, ci: true })).toBe(0)
+      expect(output.join('\n')).not.toContain('orphan')
+    } finally {
+      log.mockRestore()
+    }
+  })
   it('accepts locale fallback and both introduction URLs', async () => {
     const result = await checkLinks('[Reference](/zh-Hans/api-reference/token#response) [Home](/introduction) [Localized home](/zh-Hans/introduction)')
     expect(result.exit).toBe(0)
     expect(result.output).not.toContain('Broken')
+  })
+
+  it('recognizes indented headings and explicit id attributes as real anchors', async () => {
+    const result = await checkLinks([
+      '<Tab title="Setup">',
+      '  ## Install the CLI',
+      '',
+      '  Follow these steps.',
+      '</Tab>',
+      '',
+      '<div id="explicit-target">Custom anchor</div>',
+      '',
+      '[Indented heading](#install-the-cli) [Explicit id](#explicit-target)',
+    ].join('\n'))
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken anchor')
+  })
+
+  it('matches encoded fragments to explicit IDs', async () => {
+    const result = await checkLinks('<a id="section-$ref"></a>\n\n[Settings](#section-%24ref)')
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken anchor')
+  })
+
+  it('accepts legacy named anchors in imported notebook pages', async () => {
+    const result = await checkLinks('<a name="subscribe"></a>\n\n[Subscribe](#subscribe)')
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken anchor')
+  })
+
+  it('uses visible text for headings containing JSX badges and anchors', async () => {
+    const result = await checkLinks([
+      '## Initialize instance <Badge title="1 > 0">Enterprise</Badge>',
+      '### CLI <a id="-cli" />',
+      '[Enterprise](#initialize-instance-enterprise) [CLI](#cli)',
+    ].join('\n'))
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken anchor')
+  })
+
+  it('accepts the second occurrence of a repeated heading', async () => {
+    const result = await checkLinks('## Key Features\n\nFirst.\n\n## Key Features\n\nSecond.\n\n[Second](#key-features-2)')
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken anchor')
+  })
+
+  it('ignores links, images, and headings inside nested code fences', async () => {
+    const result = await checkLinks([
+      '````mdx',
+      '```tsx',
+      '<a href="/missing">Example</a>',
+      '<img src="/missing.png" />',
+      '### code-only-heading',
+      '```',
+      '````',
+      '',
+      '[Real link](/api-reference/token#response)',
+      '[Not a real heading](#code-only-heading)',
+    ].join('\n'))
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken link: "/missing"')
+    expect(result.output).not.toContain('Broken image')
+    expect(result.output).toContain('Broken anchor: "#code-only-heading"')
   })
 
   it('uses actual translated anchors when a translation exists', async () => {

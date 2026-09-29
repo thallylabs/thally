@@ -104,6 +104,7 @@ export function TableOfContents() {
             <li key={item.id}>
               <a
                 href={`#${item.id}`}
+                aria-current={isActive ? 'location' : undefined}
                 onClick={(event) => handleClick(event, item.id)}
                 className={cn(
                   '-ml-px flex items-center border-l-2 py-1 pr-2 text-left text-sm font-medium leading-6 transition-colors duration-200 hover:text-foreground',

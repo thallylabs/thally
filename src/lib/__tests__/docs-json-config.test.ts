@@ -8,6 +8,7 @@ import {
   getBannerConfig,
   getBreadcrumbs,
   getContentIconTone,
+  getIconLibrary,
   getNavCategory,
   getNavContext,
   getNavigablePageIds,
@@ -33,6 +34,24 @@ describe('release-bound docs.json', () => {
     resetDocsJsonConfigForTests()
 
     expect(getContentIconTone()).toBe('neutral')
+  })
+
+  it('renders icon names through Lucide unless docs.json selects another library', () => {
+    expect(getIconLibrary()).toBe('lucide')
+
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+      icons: { library: 'fontawesome' },
+      tabs: [{ tab: 'Documentation', groups: [] }],
+    }))
+    resetDocsJsonConfigForTests()
+    expect(getIconLibrary()).toBe('fontawesome')
+
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+      icons: { library: 'noto' },
+      tabs: [{ tab: 'Documentation', groups: [] }],
+    }))
+    resetDocsJsonConfigForTests()
+    expect(getIconLibrary()).toBe('lucide')
   })
 
   it('uses a valid managed binding for navigation and appearance', () => {

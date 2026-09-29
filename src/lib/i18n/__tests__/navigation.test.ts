@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NavContext } from '@/data/docs'
 
 const mocks = vi.hoisted(() => ({ hasDocTranslation: vi.fn() }))
-vi.mock('@/data/get-doc', () => ({ hasDocTranslation: mocks.hasDocTranslation }))
+vi.mock('@/lib/i18n/translation-source', () => ({ hasDocTranslation: mocks.hasDocTranslation }))
 
 import { localizeDocNavigation } from '../navigation'
 
@@ -46,5 +46,17 @@ describe('localized reader navigation', () => {
     expect(result.next).toBeNull()
     expect(result.breadcrumb.map((item) => item.href)).toEqual(['/fr?ref=guide#start', 'https://example.com'])
     expect(mocks.hasDocTranslation).toHaveBeenCalledExactlyOnceWith([], 'fr')
+  })
+
+  it('accepts locale-prefixed navigation without adding the locale twice', async () => {
+    const result = await localizeDocNavigation({
+      ...navigation,
+      prev: { title: 'Anterior', href: '/es/guides/slippage' },
+      next: { title: 'Siguiente', href: '/es/guides/routing' },
+      breadcrumb: [{ label: 'Documentación', href: '/es/guides/fees' }],
+    }, 'es', 'en')
+    expect(result.prev?.href).toBe('/es/guides/slippage')
+    expect(result.next?.href).toBe('/guides/routing')
+    expect(result.breadcrumb[0].href).toBe('/es/guides/fees')
   })
 })

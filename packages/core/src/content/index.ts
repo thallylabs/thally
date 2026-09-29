@@ -9,18 +9,23 @@
  */
 export { parseMdxContent } from './parse.js'
 export { projectMdxAudience } from './audience.js'
+export { isSafeContentIdentifier } from './identifiers.js'
 export type { ContentAudience } from './audience.js'
 export {
   getContentDocument,
   loadContentDocument,
+} from './document.js'
+export {
   registerAsyncContentDocumentSource,
   registerContentDocumentSource,
+} from './source-registry.js'
+export type {
+  ContentDocument,
 } from './document.js'
 export type {
   AsyncContentDocumentResolver,
-  ContentDocument,
   ContentDocumentResolver,
-} from './document.js'
+} from './source-registry.js'
 export { mdxToMarkdown } from './to-markdown.js'
 export type {
   ContentHeading,

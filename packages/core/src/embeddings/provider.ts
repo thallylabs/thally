@@ -8,7 +8,7 @@ const LOCAL_DIMENSIONS = 4096
 // English function words carry no retrieval signal but dominate short queries
 // ("How does navigation work?" is 3/4 stopwords). Dropping them from both
 // documents and queries keeps cosine scores about content words.
-const STOPWORDS = new Set([
+export const STOPWORDS: ReadonlySet<string> = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'can', 'do', 'does',
   'for', 'from', 'has', 'have', 'how', 'if', 'in', 'into', 'is', 'it', 'its',
   'my', 'no', 'not', 'of', 'on', 'or', 'our', 'so', 'than', 'that', 'the',

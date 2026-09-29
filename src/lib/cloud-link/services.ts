@@ -10,7 +10,7 @@
 import 'server-only'
 
 import '@/lib/search/register-doc-source'
-import { getRelevantChunks } from '@thallylabs/core'
+import { getRelevantChunks } from '@thallylabs/core/embeddings'
 import { siteConfig } from '@/data/site'
 import {
   MAX_AI_CHAT_REQUEST_BYTES,
@@ -21,6 +21,11 @@ import {
   AI_ANSWER_SOURCES_HEADER,
   serializeAiAnswerSources,
 } from '@/lib/ai-answer-sources'
+import {
+  AI_FOLLOW_UPS_HEADER,
+  parseAiFollowUps,
+  serializeAiFollowUps,
+} from '@/lib/ai-chat-suggestions'
 import type { AnalyticsEvent } from '@/lib/analytics/types'
 import { getCloudServiceGrant, getCloudSiteConfig } from './client'
 
@@ -34,11 +39,12 @@ function cloudUrl(pathname: string): URL {
   return new URL(pathname, configured.endsWith('/') ? configured : `${configured}/`)
 }
 
-function latestQuestion(messages: ReadonlyArray<AiChatMessage>): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.role === 'user') return messages[index].content
-  }
-  return ''
+// Retrieval bounds for one managed answer. The per-page cap keeps a single long
+// page from filling every slot when a second page holds the rest of the answer.
+const RETRIEVAL_OPTIONS = { k: 8, tokenBudget: 4_000, maxPerPage: 3 } as const
+
+function userQuestions(messages: ReadonlyArray<AiChatMessage>): Array<string> {
+  return messages.filter((message) => message.role === 'user').map((message) => message.content)
 }
 
 async function readBoundedJson(request: Request): Promise<unknown> {
@@ -99,10 +105,17 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
       status: 400,
     })
   }
-  const question = latestQuestion(messages)
+  const questions = userQuestions(messages)
+  const question = questions.at(-1) ?? ''
   if (!question) return new Response('No user question was provided.', { status: 400 })
+  // A follow-up such as "how do I do that on Vercel?" names only half of its
+  // topic; the previous question supplies the rest at reduced weight.
+  const previousQuestion = questions.at(-2)
 
-  const results = await getRelevantChunks(question, { k: 8, tokenBudget: 4_000 })
+  const results = await getRelevantChunks(question, {
+    ...RETRIEVAL_OPTIONS,
+    ...(previousQuestion ? { context: previousQuestion } : {}),
+  })
   const context = results.map(({ chunk }) => ({
     title: chunk.title,
     heading: chunk.headingPath.join(' > ') || chunk.title,
@@ -122,6 +135,9 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
         siteName: cloud.siteConfig.portable.details?.name ?? siteConfig.name,
         messages,
         context,
+        // Opt in to model-written follow-up questions. Cloud ignores unknown
+        // fields, so an older service simply answers without them.
+        followUps: true,
       }),
       cache: 'no-store',
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -133,6 +149,11 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
   // The retrieval happened in this trusted runtime, so expose that bounded
   // local evidence rather than accepting link metadata from the remote model.
   const sourcesHeader = serializeAiAnswerSources(context)
+  // Follow-ups are model text from a remote service: re-normalize them here
+  // rather than relaying the raw header to the browser.
+  const followUpsHeader = serializeAiFollowUps(
+    parseAiFollowUps(response.headers.get(AI_FOLLOW_UPS_HEADER)),
+  )
 
   return new Response(response.body, {
     status: response.status,
@@ -144,6 +165,9 @@ export async function handleCloudAiChat(request: Request): Promise<Response> {
         : {}),
       ...(response.ok && sourcesHeader
         ? { [AI_ANSWER_SOURCES_HEADER]: sourcesHeader }
+        : {}),
+      ...(response.ok && followUpsHeader
+        ? { [AI_FOLLOW_UPS_HEADER]: followUpsHeader }
         : {}),
     },
   })

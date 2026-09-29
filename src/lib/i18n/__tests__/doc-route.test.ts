@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { I18nConfig } from '@/lib/i18n/config'
-import { resolveDocRoute } from '@/lib/i18n/doc-route'
+import { docPathFromSlug, resolveDocRoute } from '@/lib/i18n/doc-route'
 
 const config: I18nConfig = {
   defaultLocale: 'en',
@@ -43,5 +43,17 @@ describe('resolveDocRoute', () => {
       locale: 'en',
       isLocaleRoute: false,
     })
+  })
+})
+
+describe('docPathFromSlug', () => {
+  it('builds ordinary documentation paths and the root path', () => {
+    expect(docPathFromSlug(['guides', 'quickstart'])).toBe('/guides/quickstart')
+    expect(docPathFromSlug(undefined)).toBe('/')
+  })
+
+  it('encodes navigation-significant characters in untrusted route segments', () => {
+    expect(docPathFromSlug(['//attacker.example', String.raw`\redirect`, 'a?next=//attacker.example']))
+      .toBe('/%2F%2Fattacker.example/%5Credirect/a%3Fnext%3D%2F%2Fattacker.example')
   })
 })

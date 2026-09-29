@@ -28,6 +28,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
       </div>
       {operation.servers.length > 1 ? (
         <select
+          aria-label="API server"
           value={serverUrl}
           onChange={(event) => setServerUrl(event.target.value)}
           className="rounded-[9px] border border-border bg-background px-3 py-1 text-sm"
@@ -44,6 +45,12 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (
+      operation.method === 'DELETE' &&
+      !window.confirm('Send this DELETE request? This may permanently remove data.')
+    ) {
+      return
+    }
     void sendRequest()
   }
 
@@ -115,6 +122,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
               <span className="text-[10px] text-foreground/50">JSON</span>
             </div>
             <textarea
+              aria-label="JSON request body"
               value={bodyValue}
               onChange={(event) => setBodyValue(event.target.value)}
               className="min-h-[180px] w-full rounded-[9px] border border-border bg-background px-4 py-3 font-mono text-sm text-foreground"
@@ -145,7 +153,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
 export function TryItResponse({ response }: { response: TryItController['response'] }) {
   if (!response) {
     return (
-      <div className="rounded-[11px] border border-dashed border-border p-4 text-sm text-foreground/60">
+      <div aria-live="polite" className="rounded-[11px] border border-dashed border-border p-4 text-sm text-foreground/60">
         Responses will appear here.
       </div>
     )
@@ -153,14 +161,14 @@ export function TryItResponse({ response }: { response: TryItController['respons
 
   if ('error' in response) {
     return (
-      <div className="rounded-2xl border border-rose-500/40 bg-rose-500/5 p-4 text-sm text-rose-500">
+      <div role="alert" className="rounded-2xl border border-rose-500/40 bg-rose-500/5 p-4 text-sm text-rose-500">
         {response.error}
       </div>
     )
   }
 
   return (
-    <div className="space-y-3 rounded-[11px] border border-border bg-background p-4">
+    <div aria-live="polite" className="space-y-3 rounded-[11px] border border-border bg-background p-4">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <StatusPill status={response.status} statusText={response.statusText} />
         <span className="text-xs text-foreground/60">{response.duration} ms</span>

@@ -20,7 +20,7 @@ import { PagePanelSlot, PageSlotsProvider } from '@/components/mdx/page-slots'
 interface DocLayoutProps {
   doc: DocEntry
   locale?: string
-  navigation?: Pick<NavContext, 'prev' | 'next' | 'breadcrumb'>
+  navigation?: Pick<NavContext, 'prev' | 'next' | 'breadcrumb' | 'group'>
   children: React.ReactNode
 }
 
@@ -29,7 +29,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayou
     ...getPrevNextLinks(doc.href),
     breadcrumb: getBreadcrumbs(doc.href),
   }
-  const eyebrow = getNavCategory(doc.href)
+  const eyebrow = navigation ? navigation.group : getNavCategory(doc.href)
   const mode = doc.mode ?? 'default'
   const feedbackConfig = getFeedbackConfig()
   // Managed releases already carry an immutable, release-scoped settings

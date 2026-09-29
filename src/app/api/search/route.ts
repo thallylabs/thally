@@ -3,6 +3,7 @@ import { searchDocs, type SearchMode } from '@/lib/search/engine'
 import { recordAnalyticsEvent } from '@/lib/cloud-bridge'
 import { classifyRequest } from '@/lib/traffic-classifier'
 import { problemResponse } from '@/lib/http/problem'
+import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 
 export const runtime = 'nodejs'
 
@@ -24,7 +25,23 @@ export async function GET(request: NextRequest) {
     })
   }
 
-  const hits = await searchDocs(query, { limit, mode })
+  const requestedLocale = params.get('locale')
+  const i18n = await getEffectiveI18nConfig()
+  if (requestedLocale && !i18n.locales.some((locale) => locale.code === requestedLocale)) {
+    return problemResponse({
+      status: 400,
+      code: 'invalid_locale',
+      title: 'Unsupported language',
+      detail: 'The requested locale is not enabled for this site.',
+      resolution: 'Use a language code enabled in the site configuration.',
+      instance: request.nextUrl.pathname,
+    })
+  }
+  const locale = requestedLocale && requestedLocale !== i18n.defaultLocale
+    ? requestedLocale
+    : undefined
+
+  const hits = await searchDocs(query, { limit, mode, locale })
 
   // Record the search (best-effort) — feeds the admin Search analytics.
   try {
@@ -45,6 +62,7 @@ export async function GET(request: NextRequest) {
     {
       schema_version: '1',
       query,
+      locale: requestedLocale ?? i18n.defaultLocale,
       mode,
       total: hits.length,
       as_of: new Date().toISOString(),
@@ -53,7 +71,7 @@ export async function GET(request: NextRequest) {
         title: hit.title,
         description: hit.description,
         url: `${baseUrl}${hit.href}`,
-        api_url: `${baseUrl}/api/docs/${hit.pageId}`,
+        api_url: `${baseUrl}/api/docs/${locale ? `${locale}/` : ''}${hit.pageId}`,
         score: hit.score,
         snippet: hit.snippet,
       })),

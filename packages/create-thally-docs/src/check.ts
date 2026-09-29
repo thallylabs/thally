@@ -10,7 +10,8 @@ import { execFileSync } from 'node:child_process'
 import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
-import type { DocsJsonNavigationGroup } from './docs-json.js'
+import { projectNavigationContract } from '@thallylabs/core/navigation'
+import { slugify } from '@thallylabs/core/slugify'
 
 export interface LintIssue {
   severity: 'error' | 'warning'
@@ -93,21 +94,6 @@ function checkDrift(projectDir: string, file: string, data: Record<string, unkno
   }
 }
 
-function collectNavPageIds(
-  groups: Array<string | DocsJsonNavigationGroup>,
-  seen: Set<string>,
-  duplicates: Set<string>,
-): void {
-  for (const page of groups) {
-    if (typeof page === 'string') {
-      if (seen.has(page)) duplicates.add(page)
-      else seen.add(page)
-    } else if (page.pages) {
-      collectNavPageIds(page.pages, seen, duplicates)
-    }
-  }
-}
-
 function scanMdx(dir: string, results: string[]): void {
   let entries: string[]
   try {
@@ -148,23 +134,84 @@ function addOrphanToNav(projectDir: string, pageId: string): void {
   }
 }
 
-/** Match Thally's heading-anchor slugs closely enough for link validation. */
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
+const EXPLICIT_ID_ATTRIBUTE = /\bid=(?:"([^"]*)"|'([^']*)'|\{["']([^"'}]*)["']\})/g
+const NAMED_ANCHOR = /<a\b[^>]*\bname=(?:"([^"]*)"|'([^']*)')/g
+
+/** Visit rendered prose lines while respecting the opening fence's marker and length. */
+function forEachNonFencedLine(content: string, visit: (line: string, lineNumber: number) => void): void {
+  let fence: string | undefined
+  for (const [index, line] of content.split('\n').entries()) {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
+    if (marker) {
+      if (!fence) fence = marker[1]
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length
+        && /^\s*$/.test(line.slice(marker[0].length))) fence = undefined
+      continue
+    }
+    if (!fence) visit(line, index + 1)
+  }
+}
+
+/**
+ * Headings and explicit anchor targets a rendered page actually exposes.
+ * CommonMark still parses a heading marker indented up to 3 spaces (only 4+
+ * turns it into a code block), including inside JSX children, so markdown
+ * headings authored with light indentation must count too. Any JSX/HTML
+ * element carrying a literal `id` attribute is also a valid link target,
+ * independent of headings.
+ */
+function renderedHeadingText(source: string): string {
+  let visible = ''
+  let inTag = false
+  let quote: '"' | "'" | null = null
+  for (let index = 0; index < source.length; index++) {
+    const character = source[index]
+    if (!inTag) {
+      if (character === '<') inTag = true
+      else visible += character
+      continue
+    }
+    if (quote) {
+      if (character === quote && source[index - 1] !== '\\') quote = null
+    } else if (character === '"' || character === "'") {
+      quote = character
+    } else if (character === '>') {
+      inTag = false
+    }
+  }
+  return visible
 }
 
 function extractHeadingAnchors(content: string): Set<string> {
   const anchors = new Set<string>()
-  for (const line of content.split('\n')) {
-    const m = /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
-    if (m) anchors.add(slugify(m[1]))
-  }
+  const occurrences = new Map<string, number>()
+  forEachNonFencedLine(content, (line) => {
+    const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
+    if (heading) {
+      // The runtime hashes rendered heading text. JSX badges and inline
+      // anchors contribute their visible children, never their tag/props.
+      const base = slugify(renderedHeadingText(heading[1]))
+      const occurrence = (occurrences.get(base) ?? 0) + 1
+      occurrences.set(base, occurrence)
+      anchors.add(occurrence === 1 ? base : `${base}-${occurrence}`)
+    }
+    for (const idMatch of line.matchAll(EXPLICIT_ID_ATTRIBUTE)) {
+      const id = idMatch[1] ?? idMatch[2] ?? idMatch[3]
+      if (id) anchors.add(id)
+    }
+    // Legacy Markdown exports and notebook conversions commonly use
+    // `<a name="section">`; browsers resolve fragments to those too.
+    for (const nameMatch of line.matchAll(NAMED_ANCHOR)) {
+      const name = nameMatch[1] ?? nameMatch[2]
+      if (name) anchors.add(name)
+    }
+  })
   return anchors
+}
+
+/** Compare URL-encoded fragments with the IDs the browser resolves. */
+function decodedFragment(fragment: string): string {
+  try { return decodeURIComponent(fragment) } catch { return fragment }
 }
 
 interface FoundLink {
@@ -174,24 +221,32 @@ interface FoundLink {
 
 function extractLinks(content: string): FoundLink[] {
   const links: FoundLink[] = []
-  const lines = content.split('\n')
-  let inFence = false
-  for (let i = 0; i < lines.length; i++) {
-    if (/^\s*(```|~~~)/.test(lines[i])) {
-      inFence = !inFence
-      continue
-    }
-    if (inFence) continue // don't link-check example URLs inside code blocks
-    const line = lines[i].replace(/`[^`]*`/g, '') // strip inline code spans
+  forEachNonFencedLine(content, (rawLine, lineNumber) => {
+    const line = rawLine.replace(/`[^`]*`/g, '') // strip inline code spans
     // Markdown links [text](target) and bare href="target"
     for (const m of line.matchAll(/\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
-      links.push({ target: m[1], line: i + 1 })
+      links.push({ target: m[1], line: lineNumber })
     }
     for (const m of line.matchAll(/href=["']([^"']+)["']/g)) {
-      links.push({ target: m[1], line: i + 1 })
+      links.push({ target: m[1], line: lineNumber })
     }
-  }
+  })
   return links
+}
+
+/** Local image references: markdown `![]()` images and `src="..."` attributes. */
+function extractImageRefs(content: string): FoundLink[] {
+  const refs: FoundLink[] = []
+  forEachNonFencedLine(content, (rawLine, lineNumber) => {
+    const line = rawLine.replace(/`[^`]*`/g, '')
+    for (const m of line.matchAll(/!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
+      refs.push({ target: m[1], line: lineNumber })
+    }
+    for (const m of line.matchAll(/\bsrc=["']([^"']+)["']/g)) {
+      refs.push({ target: m[1], line: lineNumber })
+    }
+  })
+  return refs
 }
 
 function localizedPage(
@@ -308,29 +363,13 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     ]),
   )
 
-  const navPageIds = new Set<string>()
-  const duplicates = new Set<string>()
-
-  for (const tab of config.tabs) {
-    const hasNavigationNodes = Boolean(tab.pages?.length || tab.groups?.length)
-    if (tab.href && !hasNavigationNodes) {
-      // A standalone href tab (e.g. Changelog) references a real page — not an orphan.
-      if (tab.href.startsWith('/')) navPageIds.add(tab.href.slice(1) || 'introduction')
-      continue
-    }
-    // API tabs without authored nodes derive navigation from their
-    // specification. When pages or groups are present, the runtime merges
-    // those MDX sections with generated operations, so they remain reachable.
-    if (tab.api && tab.api.navigation !== false && !hasNavigationNodes) continue
-    if (!hasNavigationNodes) {
-      issues.push({ severity: 'error', message: `Tab "${tab.tab}" has no groups and no href — it will render empty` })
-      continue
-    }
-    collectNavPageIds(tab.pages ?? [], navPageIds, duplicates)
-    collectNavPageIds(tab.groups ?? [], navPageIds, duplicates)
+  const navigation = projectNavigationContract(config)
+  const navPageIds = new Set(navigation.authoredPageIds)
+  for (const tab of navigation.emptyTabs) {
+    issues.push({ severity: 'error', message: `Tab "${tab}" has no groups and no href — it will render empty` })
   }
 
-  for (const dup of duplicates) {
+  for (const dup of navigation.duplicatePageIds) {
     // Reusing one page in multiple sections is supported by both Mintlify and
     // Thally. Surface the editorial ambiguity without failing an otherwise
     // valid migration or CI run.
@@ -350,21 +389,11 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   const fixedOrphans: string[] = []
   const validPaths = new Set<string>(['/'])
   const anchorsByPath = new Map<string, Set<string>>()
-  const linksByFile: Array<{ file: string; path: string; anchors: Set<string>; links: FoundLink[]; offset: number }> = []
+  const linksByFile: Array<{ file: string; path: string; anchors: Set<string>; links: FoundLink[]; images: FoundLink[]; offset: number }> = []
 
   for (const filePath of allFiles) {
     const rel = filePath.slice(contentDir.length + 1).replace(/\.mdx$/, '').replace(/\\/g, '/')
     const pageId = rel.endsWith('/index') ? rel.slice(0, -6) : rel
-
-    const { navPageId } = localizedPage(pageId, secondaryLocales)
-    if (!navPageIds.has(navPageId)) {
-      if (fix) {
-        addOrphanToNav(projectDir, pageId)
-        fixedOrphans.push(pageId)
-      } else {
-        issues.push({ severity: 'warning', message: `"${pageId}" is not in docs.json nav (orphan)`, file: relative(projectDir, filePath) })
-      }
-    }
 
     let data: Record<string, unknown> = {}
     let content = ''
@@ -380,6 +409,16 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     } catch {
       issues.push({ severity: 'error', message: `Could not parse frontmatter`, file: relative(projectDir, filePath) })
       continue
+    }
+
+    const { navPageId } = localizedPage(pageId, secondaryLocales)
+    if (!navPageIds.has(navPageId) && data.hidden !== true) {
+      if (fix) {
+        addOrphanToNav(projectDir, pageId)
+        fixedOrphans.push(pageId)
+      } else {
+        issues.push({ severity: 'warning', message: `"${pageId}" is not in docs.json nav (orphan)`, file: relative(projectDir, filePath) })
+      }
     }
 
     const rel2 = relative(projectDir, filePath)
@@ -398,7 +437,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     validPaths.add(`/${pageId}`)
     anchorsByPath.set(path, anchors)
     anchorsByPath.set(`/${pageId}`, anchors)
-    linksByFile.push({ file: rel2, path, anchors, links: extractLinks(content), offset: lineOffset })
+    linksByFile.push({ file: rel2, path, anchors, links: extractLinks(content), images: extractImageRefs(content), offset: lineOffset })
   }
 
   // Reader routes fall back to the primary document when no translated file
@@ -421,7 +460,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       if (/^(https?:|mailto:|tel:)/i.test(target)) continue // external — skipped unless --external
       if (target.startsWith('#')) {
         const anchor = target.slice(1)
-        if (anchor && !anchors.has(anchor)) {
+        if (anchor && !anchors.has(decodedFragment(anchor))) {
           issues.push({ severity: 'warning', message: `Broken anchor: "${target}" not found on this page`, file, line })
         }
         continue
@@ -435,8 +474,32 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       if (!cycle && (isGeneratedApiPath || path.startsWith('/_next') || /\.[a-z0-9]+$/i.test(path))) continue // generated/assets
       if (cycle || !validPaths.has(path)) {
         issues.push({ severity: 'error', message: `Broken link: "${target}" — no page at "${path}"`, file, line })
-      } else if (anchor && !anchorsByPath.get(path)?.has(anchor)) {
+      } else if (anchor && !anchorsByPath.get(path)?.has(decodedFragment(anchor))) {
         issues.push({ severity: 'warning', message: `Broken anchor: "${target}" — no heading "#${anchor}" on that page`, file, line })
+      }
+    }
+  }
+
+  // Local image existence: a broken `<img>`/`![]()` src doesn't fail `next
+  // build` (Next.js just renders a broken image), so this is a warning, not
+  // an error — unlike a broken internal link, which 404s. Only root-relative
+  // paths are checked (asset copy always writes under `public/`); external
+  // URLs, data URIs, and template-interpolated values are skipped.
+  const publicDir = join(projectDir, 'public')
+  for (const { file, images, offset } of linksByFile) {
+    for (const { target, line: contentLine } of images) {
+      const line = contentLine + offset
+      if (/^(https?:|data:|\{)/i.test(target)) continue
+      if (!target.startsWith('/')) continue
+      const pathOnly = target.split(/[?#]/, 1)[0]
+      let decoded: string
+      try {
+        decoded = decodeURIComponent(pathOnly)
+      } catch {
+        continue
+      }
+      if (!existsSync(join(publicDir, decoded))) {
+        issues.push({ severity: 'warning', message: `Image not found: "${target}" has no file under public/`, file, line })
       }
     }
   }

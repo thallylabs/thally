@@ -38,10 +38,10 @@ function buildRecords(bodyLimit: number): Array<SearchRecord> {
   return records
 }
 
-async function buildRecordsAsync(bodyLimit: number): Promise<Array<SearchRecord>> {
+async function buildRecordsAsync(bodyLimit: number, locale?: string): Promise<Array<SearchRecord>> {
   const records = await Promise.all(
-    (await resolveDocEntriesAsync()).map(async (entry): Promise<SearchRecord | null> => {
-      const document = await loadContentDocument(entry.id)
+    (await resolveDocEntriesAsync(locale)).map(async (entry): Promise<SearchRecord | null> => {
+      const document = await loadContentDocument(entry.id, locale)
       if (!document) return null
       return {
         id: entry.id,
@@ -66,12 +66,16 @@ export function buildSearchCorpus(): Array<SearchRecord> {
   return serverCorpus
 }
 
-let asyncServerCorpus: Promise<Array<SearchRecord>> | null = null
+const asyncServerCorpora = new Map<string, Promise<Array<SearchRecord>>>()
 
 /** Full server corpus supporting remote/asset-backed content readers. */
-export function buildSearchCorpusAsync(): Promise<Array<SearchRecord>> {
-  if (!asyncServerCorpus) asyncServerCorpus = buildRecordsAsync(BODY_LIMIT)
-  return asyncServerCorpus
+export function buildSearchCorpusAsync(locale?: string): Promise<Array<SearchRecord>> {
+  const key = locale ?? ''
+  const cached = asyncServerCorpora.get(key)
+  if (cached) return cached
+  const pending = buildRecordsAsync(BODY_LIMIT, locale)
+  asyncServerCorpora.set(key, pending)
+  return pending
 }
 
 let clientCorpus: Array<SearchRecord> | null = null

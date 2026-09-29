@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AlertCircle } from 'lucide-react'
 import { BrandMark } from '@/components/admin/brand-mark'
+import { resolveSafeReturnPath } from '@/lib/safe-return-path'
+import { getAuthErrorMessage } from '@/lib/admin/auth-error'
 
 export function AdminLoginForm({ siteName = 'Thally', oidcEnabled = false }: { siteName?: string; oidcEnabled?: boolean }) {
   const router = useRouter()
@@ -17,20 +19,24 @@ export function AdminLoginForm({ siteName = 'Thally', oidcEnabled = false }: { s
     setLoading(true)
     setError(null)
 
-    const res = await fetch('/api/admin/auth', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ password }),
-    })
+    try {
+      const res = await fetch('/api/admin/auth', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
 
-    if (!res.ok) {
-      setError('Invalid password. Try again.')
+      if (!res.ok) {
+        setError(getAuthErrorMessage('admin', res.status))
+        return
+      }
+
+      router.replace(resolveSafeReturnPath(searchParams.get('next'), '/admin'))
+    } catch {
+      setError('Unable to sign in. Check your connection and try again.')
+    } finally {
       setLoading(false)
-      return
     }
-
-    const next = searchParams.get('next') ?? '/admin'
-    router.replace(next)
   }
 
   return (
@@ -70,6 +76,8 @@ export function AdminLoginForm({ siteName = 'Thally', oidcEnabled = false }: { s
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className="ds-input ds-focusable mt-2"
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? 'admin-login-error' : undefined}
           placeholder="••••••••••••"
           autoComplete="current-password"
           autoFocus
@@ -77,7 +85,7 @@ export function AdminLoginForm({ siteName = 'Thally', oidcEnabled = false }: { s
         />
 
         {error ? (
-          <p className="mt-3 flex items-center gap-1.5" style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-danger)' }}>
+          <p id="admin-login-error" role="alert" className="mt-3 flex items-center gap-1.5" style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-danger)' }}>
             <AlertCircle className="h-4 w-4" />
             {error}
           </p>

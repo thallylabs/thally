@@ -177,7 +177,7 @@ function CopyButton({ code }: { code: string }) {
 }
 
 function CodeActions({ code }: { code: string }) {
-  const { canReportCode, reportCode, askAssistant } = useDocsCodeActions()
+  const { canReportCode, hasAssistantEntryPoint, assistantLabel, reportCode, askAssistant } = useDocsCodeActions()
 
   return (
     <span className="ml-auto flex items-center gap-0.5">
@@ -185,9 +185,9 @@ function CodeActions({ code }: { code: string }) {
         <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true"><path d="M8.2 3h7.6L21 8.2v7.6L15.8 21H8.2L3 15.8V8.2L8.2 3z"/><path d="M12 7.5V13" strokeLinecap="round"/><path d="M12 16.2v.1" strokeLinecap="round" strokeWidth="2.2"/></svg>
       </button>
       <CopyButton code={code} />
-      <button type="button" onClick={() => askAssistant(code)} className="inline-flex h-[30px] w-[30px] items-center justify-center rounded-[7px] text-muted-foreground transition hover:bg-muted hover:text-foreground" aria-label="Ask assistant about this code" title="Ask ThallyAI">
+      {hasAssistantEntryPoint && <button type="button" onClick={() => askAssistant(code)} className="inline-flex h-[30px] w-[30px] items-center justify-center rounded-[7px] text-muted-foreground transition hover:bg-muted hover:text-foreground" aria-label="Ask assistant about this code" title={assistantLabel}>
         <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true"><path d="M12 3.5l1.8 4.9 4.9 1.8-4.9 1.8L12 16.9l-1.8-4.9-4.9-1.8 4.9-1.8L12 3.5z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg>
-      </button>
+      </button>}
     </span>
   )
 }

@@ -17,6 +17,58 @@ Use the **dashboard** for day-to-day changes — theme, brand accent, logo, favi
 
 The dashboard overrides the structural theme, the **brand accent** (and its focus ring), the logo, and the favicon. The rest of the palette (backgrounds, borders, sidebar tokens) is defined in the source files described below.
 
+### Site backgrounds in Thally Cloud
+
+In your site's **Settings → Branding → Site background**, choose a separate
+background for light and dark mode. Use the color picker or enter a hex color.
+The preview updates as you edit; the contrast readouts compare your brand color
+and the default text palette with the selected background.
+
+The override covers the page canvas, header, sidebar, and cards. It keeps text,
+borders, code blocks, and other semantic colors in their existing palette.
+Choose a light background for light mode and a dark background for dark mode,
+then check readability in both previews.
+
+Choose **Use site default** to remove an override. With no override, the
+background comes from `src/data/site.ts`. Managed sites publish these changes
+with the next site version. Sites pinned to an older runtime must first upgrade
+to a runtime that supports background overrides.
+
+### Reader appearance and background imagery
+
+In **Settings → Branding**, choose the default appearance: **System**, **Light**,
+or **Dark**. With the appearance toggle enabled, readers can choose a mode and
+their browser remembers it. Hiding the toggle enforces your selection, including
+following OS changes for System, even when a reader previously saved another mode.
+The default remains System with the toggle visible.
+
+Add one shared background image, or provide separate light and dark images.
+The light/shared image is also used in dark mode unless a dark image is set.
+A dark image without a shared image appears only in dark mode. Choose **None**,
+**Grid**, or **Gradient** for an optional decoration over the background color
+and image. Reading surfaces keep a translucent background for legibility.
+
+Self-hosted sites can configure the same options in `docs.json`:
+
+```json
+{
+  "appearance": { "default": "system", "showToggle": true },
+  "background": {
+    "image": "public/brand/background-light.png",
+    "imageDark": "public/brand/background-dark.png",
+    "decoration": "grid"
+  }
+}
+```
+
+Merge these fields into your existing configuration; keep its navigation and
+other options. Images may use public-relative PNG, JPG, JPEG, or WebP paths,
+or HTTPS image URLs without credentials. Remote images load directly in the
+reader's browser. Paths cannot contain traversal segments, and SVG backgrounds
+are not supported. Existing sites with no background image or decoration keep
+their current appearance. Managed branding overrides matching `docs.json`
+fields and takes effect in the next published version; upgrade older runtimes first.
+
 ## Site configuration
 
 All site-level settings live in `src/data/site.ts`. Edit this file to set your product name, description, and links. (Name, description, and repo URL can also be overridden live from the dashboard.)
@@ -73,6 +125,22 @@ to override the site-wide choice — the border treatment follows the same
 per-card override. Accent icons and card chrome use the same live token as
 links and controls, so changing the owner-selected brand accent updates them
 automatically, in both themes and every locale.
+
+### Icon library
+
+Icon names in cards, accordions, and prompts resolve through one library for
+the whole site. Lucide is the default; sites written for Font Awesome or Tabler
+names keep them by selecting that library:
+
+```json
+"icons": {
+  "library": "fontawesome"
+}
+```
+
+Brand marks such as `python` or `github` render inline under every library.
+See [Icons](/components/icons) for the full behaviour and the list of bundled
+names.
 
 ## Custom colors
 

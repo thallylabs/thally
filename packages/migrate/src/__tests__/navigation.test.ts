@@ -1,7 +1,13 @@
 /** Mintlify navigation projection invariants shared by every migration entrypoint. */
 
 import { describe, expect, it } from 'vitest'
-import { addMintlifyDirectoryRedirects, parseMarkdownPage, projectMintlifyNavigation } from '../index.js'
+import {
+  addMintlifyDirectoryRedirects,
+  parseMarkdownPage,
+  projectMintlifyNavigation,
+  pruneMissingNavigationPages,
+} from '../index.js'
+import { projectFernNavigation } from '../fern.js'
 import type { MigrationDocsConfig, MigrationPage } from '../types.js'
 
 function page(id: string, navigationId = id, locale?: string): MigrationPage {
@@ -134,6 +140,10 @@ describe('Mintlify navigation projection', () => {
     expect(result.docsConfig.i18n?.defaultLocale).toBe('pt')
     expect(result.docsConfig.navigation).toBeUndefined()
     expect(result.docsConfig.tabs.map((tab) => tab.tab)).toEqual(['Docs'])
+    expect(result.docsConfig.i18n?.navigation?.fr?.[0]).toMatchObject({
+      tab: 'Documentation',
+      groups: [{ group: 'Start', pages: ['introduction'] }],
+    })
   })
 
   it('does not let an empty legacy dropdown array override active tabs', () => {
@@ -193,5 +203,182 @@ describe('Mintlify navigation projection', () => {
     expect(result.docsConfig.tabs[1]?.href).toBeUndefined()
     expect(result.docsConfig.tabs[2]?.href).toBe('/v1')
     expect(result.docsConfig.tabs[3]?.href).toBeUndefined()
+  })
+
+  it('translates a trailing Mintlify wildcard redirect into a Next.js named catch-all', () => {
+    const result = projectMintlifyNavigation({
+      navigation: { pages: ['introduction'] },
+      redirects: [
+        { source: '/api-reference/*', destination: '/api/*' },
+        { source: '/settings/auth/*', destination: '/deploy/auth-setup' },
+        { source: '/api-playground/mdx/:slug*', destination: '/api-playground/mdx-setup' },
+      ],
+    })
+
+    expect(result.docsConfig.redirects).toEqual([
+      { source: '/api-reference/:path*', destination: '/api/:path*' },
+      { source: '/settings/auth/:path*', destination: '/deploy/auth-setup' },
+      { source: '/api-playground/mdx/:slug*', destination: '/api-playground/mdx-setup' },
+    ])
+  })
+
+  it('drops a redirect whose wildcard Next.js cannot express and warns instead of crashing', () => {
+    const result = projectMintlifyNavigation({
+      navigation: { pages: ['introduction'] },
+      redirects: [
+        { source: '/foo/*/bar', destination: '/baz' },
+        { source: '/only-dest-wildcard', destination: '/dest/*' },
+        { source: '/kept', destination: '/still-kept' },
+      ],
+    })
+
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+    expect(result.warnings.filter((warning) => warning.code === 'unsupported-config'
+      && warning.message.includes('wildcard'))).toHaveLength(2)
+  })
+
+  it('drops a backslash-prefixed or percent-encoded browser-cross-origin redirect destination', () => {
+    const result = projectMintlifyNavigation({
+      navigation: { pages: ['introduction'] },
+      redirects: [
+        { source: '/legit', destination: '/\\evil.example' },
+        { source: '/legit-2', destination: '/%5Cevil.example' },
+        { source: '/kept', destination: '/still-kept' },
+      ],
+    })
+
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+  })
+
+  it('drops a redirect whose destination hides a browser-cross-origin `//` behind a stripped whitespace/control character', () => {
+    const result = projectMintlifyNavigation({
+      navigation: { pages: ['introduction'] },
+      redirects: [
+        { source: '/legit-tab', destination: '/\t/evil.example' },
+        { source: '/legit-newline', destination: '/\n/evil.example' },
+        { source: '/legit-cr', destination: '/\r/evil.example' },
+        { source: '/legit-nul', destination: '/\x00/evil.example' },
+        { source: '/kept', destination: '/still-kept' },
+      ],
+    })
+
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+  })
+})
+
+describe('Fern redirect safety shares the Mintlify guard', () => {
+  it('drops a backslash-prefixed or percent-encoded browser-cross-origin redirect destination', () => {
+    const result = projectFernNavigation({
+      config: {
+        navigation: [{ page: 'Introduction', path: 'introduction.mdx' }],
+        redirects: [
+          { source: '/legit', destination: '/\\evil.example' },
+          { source: '/legit-2', destination: '/%5Cevil.example' },
+          { source: '/kept', destination: '/still-kept' },
+        ],
+      },
+      fernRoot: '/tmp/fern-root-unused',
+    })
+
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+  })
+})
+
+describe('Fern external navigation links', () => {
+  it('preserves safe nested links in the navbar alongside authored navbar links', () => {
+    const result = projectFernNavigation({
+      config: {
+        'navbar-links': [{ type: 'github', value: 'https://github.com/NVIDIA/SkillEvaluator' }],
+        navigation: [
+          { page: 'Overview', path: '../docs/index.mdx' },
+          { section: 'Reference', contents: [
+            { page: 'CLI', path: '../docs/cli.mdx' },
+            { link: 'NVIDIA Verified Skills', href: 'https://docs.nvidia.com/skills/' },
+          ] },
+        ],
+      },
+      fernRoot: '/tmp/fern-root-unused',
+      repositoryRoot: '/tmp',
+    })
+    expect(result.docsConfig.navbar?.links).toEqual([
+      { label: 'GitHub', href: 'https://github.com/NVIDIA/SkillEvaluator', type: 'github' },
+      { label: 'NVIDIA Verified Skills', href: 'https://docs.nvidia.com/skills/' },
+    ])
+    expect(result.warnings.some((warning) => warning.message.includes('Fern navigation "link"'))).toBe(false)
+  })
+
+  it('drops unsafe external targets and hidden links', () => {
+    const result = projectFernNavigation({
+      config: { navigation: [
+        { link: 'Unsafe', href: 'javascript:alert(1)' },
+        { link: 'Credentials', href: 'https://user:pass@example.com/' },
+        { link: 'Hidden', href: 'https://example.com/', hidden: true },
+      ] },
+      fernRoot: '/tmp/fern-root-unused',
+    })
+    expect(result.docsConfig.navbar).toBeUndefined()
+    expect(result.warnings.filter((warning) => warning.message.includes('unsafe or invalid external URL'))).toHaveLength(2)
+  })
+})
+
+describe('pruning navigation pages excluded after projection', () => {
+  it('keeps a route once per sibling group after two files resolve to the same slug', () => {
+    const config: MigrationDocsConfig = { tabs: [{ tab: 'Release Notes', groups: [
+      { group: 'Latest', pages: ['changelog', 'changelog/release', 'changelog/release'] },
+      { group: 'Archive', pages: ['changelog/release'] },
+    ] }] }
+    expect(pruneMissingNavigationPages(config, new Set(['changelog', 'changelog/release'])).tabs[0].groups).toEqual([
+      { group: 'Latest', pages: ['changelog', 'changelog/release'] },
+      { group: 'Archive', pages: ['changelog/release'] },
+    ])
+  })
+  it('drops a page id that was excluded from import, and the group left empty by it', () => {
+    const config: MigrationDocsConfig = {
+      tabs: [{
+        tab: 'Documentation',
+        groups: [
+          { group: 'Guides', pages: ['guides/intro', 'guides/excluded'] },
+          { group: 'Assistant', pages: ['assistant/widget'] },
+        ],
+      }],
+    }
+
+    const pruned = pruneMissingNavigationPages(config, new Set(['guides/intro']))
+
+    expect(pruned).toEqual({
+      tabs: [{
+        tab: 'Documentation',
+        groups: [{ group: 'Guides', pages: ['guides/intro'] }],
+      }],
+    })
+  })
+
+  it('leaves an href-only or api-only tab untouched even though it has no pages', () => {
+    const config: MigrationDocsConfig = {
+      tabs: [
+        { tab: 'Home', href: '/' },
+        { tab: 'API Reference', api: { source: '/openapi.json' } },
+      ],
+    }
+
+    const pruned = pruneMissingNavigationPages(config, new Set())
+
+    expect(pruned.tabs).toEqual(config.tabs)
+  })
+
+  it('prunes nested groups and top-level tab pages, across every tab', () => {
+    const config: MigrationDocsConfig = {
+      tabs: [
+        {
+          tab: 'Docs',
+          pages: ['kept', 'excluded', { group: 'Nested', pages: ['excluded/child', { group: 'Empty', pages: ['also-excluded'] }] }],
+        },
+        { tab: 'Empty tab', pages: ['excluded'] },
+      ],
+    }
+
+    const pruned = pruneMissingNavigationPages(config, new Set(['kept']))
+
+    expect(pruned.tabs).toEqual([{ tab: 'Docs', pages: ['kept'] }])
   })
 })

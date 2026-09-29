@@ -95,7 +95,7 @@ Options:
   --branch <name>      Override the detected Git branch
   --docs-dir <path>    Override the detected documentation directory
   --max-pages <count>  Limit a public URL crawl to 1-1000 pages
-  --platform <name>    Use mintlify, docusaurus, or auto
+  --platform <name>    Use mintlify, docusaurus, fern, or auto
   --skip-validation   Import only; explicitly skip content and build verification
   --api-key <key>      Anthropic API key for non-Markdown conversion
   -y, --yes            Skip interactive prompts
@@ -249,6 +249,14 @@ async function runMigrateCommand(): Promise<void> {
     yes,
     skipValidation: flags.includes('--skip-validation'),
   })
+  // Scaffold Git output can span hundreds of files, so repeat the only path
+  // readers need after all install, validation, and commit logs have ended.
+  console.log('')
+  console.log(`  Migrated docs: ${result.projectDir}`)
+  const quotedDir = process.platform === 'win32'
+    ? `"${result.projectDir.replace(/"/g, '""')}"`
+    : `'${result.projectDir.replace(/'/g, "'\\''")}'`
+  console.log(`  To preview: cd ${quotedDir} && npm run dev`)
   if (result.validation.content === 'failed' || result.validation.build === 'failed') process.exitCode = 1
 }
 

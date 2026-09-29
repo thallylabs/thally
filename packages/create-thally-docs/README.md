@@ -53,7 +53,10 @@ scripts and CI, pass
 `--platform mintlify`, `--platform docusaurus`, or `--platform auto`; `--yes`
 keeps backward-compatible auto-detection when no platform flag is supplied.
 Explicit `--platform auto` and `--yes` runs print the live-site limitation
-without introducing an interactive prompt.
+without introducing an interactive prompt. Running `migrate` without
+`--platform` or `--yes` from a non-interactive shell (a script, a CI job, a
+piped command) also skips the platform prompt — it can't be answered there —
+and auto-detects instead, with a warning naming the flag that silences it.
 
 Mintlify repository migrations preserve the source information architecture
 instead of rebuilding navigation from folders: nested project roots, `$ref`

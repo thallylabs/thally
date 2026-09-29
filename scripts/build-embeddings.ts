@@ -1,5 +1,3 @@
-import { buildEmbeddingIndex } from '@/lib/embeddings/index-store'
-
 interface BuildStats {
   chunks: Array<unknown>
   provider: string
@@ -8,6 +6,9 @@ interface BuildStats {
 }
 
 async function main() {
+  // Loading the MDX/search dependency graph may fail in a build-only
+  // environment. Keep that failure inside the documented fail-soft boundary.
+  const { buildEmbeddingIndex } = await import('@/lib/embeddings/index-store')
   const start = Date.now()
   const index = (await buildEmbeddingIndex()) as unknown as BuildStats
   const elapsed = Date.now() - start

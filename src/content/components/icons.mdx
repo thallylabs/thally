@@ -19,6 +19,55 @@ Use `<Icon>` directly or pass the same icon name to components such as
 <Icon icon="book-open" size={20} color="#B8EC36" />
 ```
 
+## Icon libraries
+
+Every `icon` name resolves through one icon library for the whole site. Lucide
+is the default. Choose Font Awesome or Tabler in `docs.json` when your content
+was written for those names:
+
+```json
+"icons": {
+  "library": "fontawesome"
+}
+```
+
+| Library | Value | Notes |
+|---|---|---|
+| [Lucide](https://lucide.dev/icons) | `lucide` | Default. Common names ship with the site and render offline. |
+| [Font Awesome Free](https://fontawesome.com/search?o=r&m=free) | `fontawesome` | `iconType="regular"` selects the regular set; anything else uses solid. |
+| [Tabler](https://tabler.io/icons) | `tabler` | `iconType="solid"` selects the filled set; anything else uses outline. |
+
+Names that are not bundled load on demand from the selected library on jsDelivr
+at a pinned version, so a glyph never changes without a runtime release. A name
+the library does not have renders nothing rather than a placeholder. Font
+Awesome class syntax such as `fa-solid fa-book` is accepted as `book`.
+
+## Brand icons
+
+Brand marks render inline under every library, so migrated content keeps its
+logos without a network request:
+
+<Columns cols={4}>
+  <Card title="Python" icon="python" />
+  <Card title="Node" icon="node" />
+  <Card title="Rust" icon="rust" />
+  <Card title="GitHub" icon="github" />
+</Columns>
+
+Available names: `android`, `angular`, `anthropic`, `apple`, `bash`, `bitbucket`,
+`bun`, `cloudflare`, `css`, `curl`, `dart`, `deno`, `discord`, `django`, `docker`,
+`dotnet` (also `csharp`), `elixir`, `figma`, `firebase`, `flutter`, `git`, `github`,
+`gitlab`, `go` (also `golang`), `graphql`, `html`, `java`, `javascript` (also `js`),
+`json`, `jupyter`, `kotlin`, `laravel`, `markdown`, `mongodb`, `netlify`, `nextjs`,
+`node` (also `nodejs`), `notion`, `npm`, `php`, `pnpm`, `postgresql` (also
+`postgres`), `postman`, `python`, `pytorch`, `react`, `redis`, `resend`, `ruby`,
+`rust`, `sass`, `shopify`, `stripe`, `supabase`, `svelte`, `swift`, `tailwind`,
+`tensorflow`, `terraform`, `typescript` (also `ts`), `ubuntu`, `vercel`, `vim`,
+`vue`, `wordpress`, `x` (also `twitter`), `yaml`, `yarn`, `youtube`.
+
+Other Font Awesome brand names such as `slack`, `linkedin`, `aws`, `openai`, or
+`microsoft` load from the Font Awesome brands set under every library.
+
 ## Custom source
 
 Use `src` for a project-owned SVG or image URL. Remote URLs are rendered as

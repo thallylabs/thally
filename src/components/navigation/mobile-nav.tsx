@@ -1,5 +1,7 @@
 'use client'
 
+/** Mobile documentation navigation with contained brand artwork and labels. */
+
 import * as Dialog from '@radix-ui/react-dialog'
 import { Menu, X } from 'lucide-react'
 import { usePathname } from 'next/navigation'
@@ -42,12 +44,12 @@ export function MobileNav({
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" />
         <Dialog.Content className="fixed inset-y-0 left-0 z-50 flex w-full max-w-[min(85vw,320px)] flex-col border-r border-border bg-background shadow-2xl">
           <Dialog.Title className="sr-only">Primary navigation</Dialog.Title>
-          <div className="flex shrink-0 items-center justify-between border-b border-border/50 px-4 py-4">
-            <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/50 px-4 py-4">
+            <div className="flex min-w-0 items-center gap-2">
               <Logo showText={false} />
-              <span className="text-base font-semibold">{displaySiteName(siteName)}</span>
+              <span className="truncate text-base font-semibold">{displaySiteName(siteName)}</span>
             </div>
-            <Dialog.Close className="rounded-full border border-border p-1.5 transition hover:bg-muted/50">
+            <Dialog.Close className="shrink-0 rounded-full border border-border p-1.5 transition hover:bg-muted/50">
               <span className="sr-only">Close</span>
               <X className="h-4 w-4" />
             </Dialog.Close>

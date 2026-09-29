@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { resolveSafeReturnPath } from '@/lib/safe-return-path'
+import { getAuthErrorMessage } from '@/lib/admin/auth-error'
 
 export function DocsAccessForm() {
   const router = useRouter()
@@ -16,20 +18,24 @@ export function DocsAccessForm() {
     setLoading(true)
     setError(null)
 
-    const res = await fetch('/api/access/auth', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ password }),
-    })
+    try {
+      const res = await fetch('/api/access/auth', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
 
-    if (!res.ok) {
-      setError('Invalid password.')
+      if (!res.ok) {
+        setError(getAuthErrorMessage('docs', res.status))
+        return
+      }
+
+      router.replace(resolveSafeReturnPath(searchParams.get('next'), '/'))
+    } catch {
+      setError('Unable to sign in. Check your connection and try again.')
+    } finally {
       setLoading(false)
-      return
     }
-
-    const next = searchParams.get('next') ?? '/'
-    router.replace(next)
   }
 
   return (
@@ -50,10 +56,12 @@ export function DocsAccessForm() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring"
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? 'access-error' : undefined}
           required
         />
 
-        {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+        {error ? <p id="access-error" role="alert" className="mt-3 text-sm text-red-600">{error}</p> : null}
 
         <Button type="submit" className="mt-6 w-full" disabled={loading}>
           {loading ? 'Checking…' : 'Continue'}

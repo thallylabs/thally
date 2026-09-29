@@ -1,6 +1,7 @@
 import { getI18nConfig } from '@/data/docs'
 import { getSiteUrl } from '@/lib/site-url'
 import type { SiteIdentity } from '@/lib/site-config'
+import type { I18nConfig } from '@/lib/i18n/config'
 
 const baseUrl = getSiteUrl()
 
@@ -12,8 +13,11 @@ export function buildAgentAlternateLinks(href: string, siteUrl = baseUrl) {
   }
 }
 
-export function buildAiTxtBody(identity: SiteIdentity, siteUrl = baseUrl): string {
-  const i18n = getI18nConfig()
+export function buildAiTxtBody(
+  identity: SiteIdentity,
+  siteUrl = baseUrl,
+  i18n: I18nConfig | null = getI18nConfig(),
+): string {
   const lines: Array<string> = [
     `# ${identity.name} AI Discovery File`,
     '# This file describes how AI agents and automated tools can interact with this documentation site.',
@@ -37,6 +41,9 @@ export function buildAiTxtBody(identity: SiteIdentity, siteUrl = baseUrl): strin
 
   if (i18n && i18n.locales.length > 1) {
     lines.push(`Docs-Locales: ${i18n.locales.map((l) => l.code).join(', ')}`)
+    lines.push(`Docs-Locale-Index: ${siteUrl}/api/docs-index?locale={locale}`)
+    lines.push(`Docs-Locale-Search: ${siteUrl}/api/search?q={query}&locale={locale}`)
+    lines.push(`Docs-Locale-Page: ${siteUrl}/api/docs/{locale}/{slug}`)
   }
 
   if (identity.repoUrl && !identity.repoUrl.includes('your-org')) {

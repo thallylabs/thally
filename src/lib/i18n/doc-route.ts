@@ -14,6 +14,19 @@ export interface ResolvedDocRoute {
   isLocaleRoute: boolean
 }
 
+/**
+ * Build a same-origin documentation path from decoded catch-all segments.
+ * Encoding each segment prevents route input such as `//host` or backslashes
+ * from becoming a scheme-relative navigation target when rendered in a link.
+ */
+export function docPathFromSlug(routeSlug: ReadonlyArray<string> | undefined): string {
+  const pathname = (routeSlug ?? [])
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+  return pathname ? `/${pathname}` : '/'
+}
+
 /** Split a secondary-locale prefix from the underlying documentation slug. */
 export function resolveDocRoute(
   routeSlug: Array<string> | undefined,

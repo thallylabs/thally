@@ -28,6 +28,30 @@ describe('documentation visual system', () => {
     vi.clearAllMocks()
   })
 
+  it('keeps the default mark square without constraining custom wordmarks', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const css = await readFile('src/styles/docs-handoff.css', 'utf8')
+    expect(css).toContain('.thally-docs-brand img:not([data-custom-logo])')
+    expect(css).not.toMatch(/\.thally-docs-brand (?:img|svg)\s*[,\{]/)
+  })
+
+  it('brands only the active collection underline, not its neutral label', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const css = await readFile('src/styles/docs-handoff.css', 'utf8')
+    const rule = css.match(/\.thally-docs-tabs \.thally-nav-tab-item\[aria-current='page'\] \{([^}]+)\}/)?.[1]
+    expect(rule).toContain('border-bottom-color: var(--docs-accent)')
+    expect(rule).not.toMatch(/(?:^|[;\n])\s*color\s*:/)
+  })
+
+  it('brands the active page-outline label and indicator with the live theme accent', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const css = await readFile('src/styles/docs-handoff.css', 'utf8')
+    const rule = css.match(/\.thally-docs-toc a\[aria-current='location'\][^{]*\{([^}]+)\}/)?.[1]
+    expect(rule).toContain('color: var(--docs-accent)')
+    expect(rule).toContain('border-inline-start-color: var(--docs-accent)')
+    expect(css).toContain('--docs-accent: hsl(var(--thally-accent))')
+  })
+
   it.each([
     ['card', Card],
     ['tile', Tile],
@@ -87,10 +111,21 @@ describe('documentation visual system', () => {
     // (and Cloud branding) apply — a hardcoded color would freeze the default
     // green and break locale/theme consistency guarantees.
     const cardChrome = css.slice(css.indexOf("[data-content-icons='accent'] .thally-docs-card"))
-    const firstBlock = cardChrome.slice(0, cardChrome.indexOf('.thally-docs-card > .prose'))
+    const firstBlock = cardChrome.slice(0, cardChrome.indexOf('.thally-docs-card-body'))
     expect(firstBlock).toContain('hsl(var(--thally-accent)')
     expect(firstBlock).not.toContain('background-color')
     expect(firstBlock).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
+  })
+
+  it('selects the icon library mask from the html attribute the layout stamps', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const css = await readFile('src/styles/docs-handoff.css', 'utf8')
+
+    expect(css).toContain("html[data-icon-library='fontawesome'] .thally-icon {")
+    expect(css).toContain("html[data-icon-library='tabler'] .thally-icon {")
+    expect(css).toContain('--thally-icon-mask: var(--thally-icon-lucide)')
+    // Bundled Lucide glyphs hide only when another library is active.
+    expect(css).toContain("html[data-icon-library='fontawesome'] .thally-icon[data-icon-source='lucide'] > .thally-icon-glyph")
   })
 
   it('renders the category eyebrow above the page title', () => {
@@ -423,6 +458,28 @@ describe('documentation visual system', () => {
     expect(chat).not.toContain('<FabIcon')
     expect(provider).toContain('icon={chatStatus.icon ?? icon}')
     expect(statusRoute).toContain("/^\\/[A-Za-z0-9._/-]+$/")
-    expect(statusRoute).toContain('{ show, label, disclaimer, icon }')
+    expect(statusRoute).toContain('{ show, label, disclaimer, icon, suggestions }')
+  })
+
+  it('never ships a fixed list of assistant suggestions', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const [chat, provider, statusRoute, css] = await Promise.all([
+      readFile('src/components/docs/docs-chat.tsx', 'utf8'),
+      readFile('src/components/docs/code-actions-provider.tsx', 'utf8'),
+      readFile('src/app/api/chat-status/route.ts', 'utf8'),
+      readFile('src/styles/docs-handoff.css', 'utf8'),
+    ])
+
+    // Opening questions come from the site's navigation and follow-ups from
+    // the conversation; product-specific copy must not be compiled in.
+    expect(chat).not.toContain('How does navigation work?')
+    expect(chat).not.toContain('How do I add an API reference?')
+    expect(statusRoute).toContain('deriveStarterSuggestions')
+    expect(provider).toContain('starterSuggestions={chatStatus.suggestions}')
+    expect(chat).toContain('AI_FOLLOW_UPS_HEADER')
+    expect(chat).toContain('deriveFollowUpSuggestions')
+    // Focus is a soft halo on the composer, not a saturated accent outline.
+    const composerFocus = css.slice(css.indexOf('.thally-docs-chat-composer:focus-within'))
+    expect(composerFocus.slice(0, composerFocus.indexOf('}'))).toContain('color-mix')
   })
 })

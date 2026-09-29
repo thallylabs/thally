@@ -37,37 +37,79 @@ export function isMachineEndpoint(pathname: string): boolean {
  * Public agent-discovery and crawler-control documents that must stay
  * anonymously reachable even when docs-access protection is enabled.
  *
- * These are non-sensitive machine endpoints — crawler directives
- * (robots.txt, sitemap.xml), discovery indexes (llms.txt, llms-full.txt,
- * ai.txt), the OpenAPI description, the RSS changelog, the packaged agent
- * guides (skill.md, AGENTS.md, auth.md), and everything under /.well-known/
- * (MCP card, Agent Skills, OAuth Protected Resource metadata,
- * api-catalog). Redirecting any of these to the HTML /access gate would hand an
- * MCP client or crawler a login page instead of the JSON/markdown it expects,
- * preventing it from discovering the site's actual public or password-cookie
- * access contract.
+ * These are non-sensitive machine endpoints: crawler directives, capability
+ * hints, authentication guidance, and RFC 8615 connection metadata. Corpus,
+ * schemas, sitemaps, changelogs, and author-owned agent instructions are
+ * intentionally excluded because they can disclose protected content.
  *
- * This is deliberately NARROWER than isMachineEndpoint: docs *content* machine
- * surfaces (/api/docs/*, /api/markdown/*, and .md page mirrors) are NOT public
- * here, so they stay behind the access gate along with the HTML pages.
+ * This is deliberately narrower than isMachineEndpoint: docs-content machine
+ * surfaces stay behind the access gate along with the HTML pages.
  */
 export function isPublicAgentEndpoint(pathname: string): boolean {
-  // Every /.well-known/ document is a machine-targeted discovery resource
-  // (RFC 8615) — many are extensionless, so enumerate the prefix.
-  if (pathname.startsWith('/.well-known/')) return true
+  // Most /.well-known/ documents describe how to authenticate or connect and
+  // must remain reachable before authentication. The llms projection is the
+  // exception: despite its discovery-shaped URL, it contains the docs corpus.
+  if (pathname.startsWith('/.well-known/') && pathname !== '/.well-known/llms.txt') {
+    return true
+  }
 
   const publicExact = new Set<string>([
     '/robots.txt',
-    '/sitemap.xml',
-    '/llms.txt',
-    '/llms-full.txt',
     '/ai.txt',
-    '/openapi.json',
-    '/openapi.yaml',
-    '/changelog/rss.xml',
     '/skill.md',
-    '/AGENTS.md',
     '/auth.md',
   ])
   return publicExact.has(pathname)
+}
+
+/**
+ * Machine-readable surfaces that disclose authored documentation content.
+ *
+ * These paths remain public on public sites, but follow the same docs-access
+ * policy as HTML pages on password-protected sites. Keep this list explicit:
+ * discovery metadata needed to learn the authentication contract belongs in
+ * {@link isPublicAgentEndpoint}, never here.
+ */
+export function isContentBearingAgentEndpoint(pathname: string): boolean {
+  if (
+    pathname === '/api/docs-index' ||
+    pathname === '/api/agent-readiness' ||
+    pathname === '/api/mcp' ||
+    pathname === '/api/search' ||
+    pathname.startsWith('/api/docs/') ||
+    pathname.startsWith('/api/markdown/')
+  ) {
+    return true
+  }
+
+  if (pathname.endsWith('.md') && !isPublicAgentEndpoint(pathname)) return true
+
+  return new Set<string>([
+    '/llms.txt',
+    '/llms-full.txt',
+    '/.well-known/llms.txt',
+    '/AGENTS.md',
+    '/sitemap.xml',
+    '/openapi.json',
+    '/openapi.yaml',
+    '/changelog/rss.xml',
+  ]).has(pathname)
+}
+
+/** Classify discovery-shaped traffic without granting anonymous access. */
+export function isAgentDiscoveryEndpoint(pathname: string): boolean {
+  return (
+    isPublicAgentEndpoint(pathname) ||
+    new Set<string>([
+      '/llms.txt',
+      '/llms-full.txt',
+      '/.well-known/llms.txt',
+      '/AGENTS.md',
+      '/sitemap.xml',
+      '/openapi.json',
+      '/openapi.yaml',
+      '/changelog/rss.xml',
+      '/api/docs-index',
+    ]).has(pathname)
+  )
 }

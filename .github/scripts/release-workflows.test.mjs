@@ -16,13 +16,25 @@ const promotionWorkflow = parse(
 const fullReleaseWorkflow = parse(
   readFileSync(".github/workflows/full-release.yml", "utf8"),
 );
+const ciWorkflow = parse(
+  readFileSync(".github/workflows/ci.yml", "utf8"),
+);
+
+test("rejects missing package bumps in pull-request CI before a main merge", () => {
+  const checkout = ciWorkflow.jobs.verify.steps.find((step) => step.name === "Checkout");
+  const disposition = ciWorkflow.jobs.verify.steps.find(
+    (step) => step.name === "Require a release disposition for changed packages",
+  );
+  assert.equal(checkout.with["fetch-depth"], 0);
+  assert.match(disposition.run, /release-package-plan\.mjs/);
+  assert.match(disposition.env.BASE_SHA, /pull_request\.base\.sha/);
+  assert.equal(disposition.if, "github.event_name != 'workflow_dispatch'");
+});
 
 test("starts only from a reviewed stable-record merge or an operator recovery", () => {
   assert.deepEqual(workflow.on.push.branches, ["main"]);
   assert.deepEqual(workflow.on.push.paths, [
-    "packages/create-thally-docs/src/stable-scaffold-release.json",
-    "packages/core/package.json",
-    "packages/migrate/package.json",
+    "packages/**",
   ]);
   assert.equal(
     workflow.on.workflow_dispatch.inputs.request_id.required,
@@ -33,6 +45,8 @@ test("starts only from a reviewed stable-record merge or an operator recovery", 
     true,
   );
   assert.equal(workflow.jobs.plan.outputs.release_sha, "${{ steps.source.outputs.sha }}");
+  assert.equal(workflow.jobs.plan.outputs.has_packages, "${{ steps.package-plan.outputs.has_packages }}");
+  assert.equal(workflow.jobs.plan.outputs.plan_sha256, "${{ steps.package-plan.outputs.plan_sha256 }}");
   assert.deepEqual(workflow.jobs.publish.needs, ["plan", "verify", "attest"]);
   assert.match(workflow.jobs.plan.steps[0].run, /refs\/heads\/main/);
   assert.match(
@@ -47,6 +61,11 @@ test("starts only from a reviewed stable-record merge or an operator recovery", 
   assert.match(sourceStep.run, /authoritative_sha/);
   assert.match(sourceStep.run, /log -1 --format=%H origin\/main/);
   assert.match(sourceStep.run, /selected_sha.*authoritative_sha/);
+  const packagePlan = workflow.jobs.plan.steps.find(
+    (step) => step.name === "Derive dependency-aware package plan",
+  );
+  assert.match(packagePlan.run, /release-package-plan\.mjs/);
+  assert.match(packagePlan.run, /sha256sum/);
 });
 
 test("tests and packs before the minimal OIDC publish job", () => {
@@ -61,9 +80,11 @@ test("tests and packs before the minimal OIDC publish job", () => {
   });
   assert.equal(workflow.jobs.publish.environment, "npm-production");
   assert.equal(workflow.jobs.publish.permissions["id-token"], "write");
+  assert.equal(verify.if, "needs.plan.outputs.has_packages == 'true'");
+  assert.equal(publish.if, "needs.plan.outputs.has_packages == 'true'");
   assert.deepEqual(
-    verify.steps.map((step) => step.name).slice(-2),
-    ["Pack immutable release artifacts", "Upload immutable release artifacts"],
+    verify.steps.map((step) => step.name).slice(-3),
+    ["Pack immutable release artifacts", "Clean-install the selected tarballs", "Upload immutable release artifacts"],
   );
   const uploadStep = verify.steps.find(
     (step) => step.name === "Upload immutable release artifacts",
@@ -72,6 +93,7 @@ test("tests and packs before the minimal OIDC publish job", () => {
   const publishScript = publish.steps.map((step) => step.run ?? "").join("\n");
   assert.match(publishScript, /publish-release-artifacts\.mjs/);
   assert.doesNotMatch(publishScript, /npm ci|npm test|npm pack|--workspace/);
+  assert.match(publishScript, /EXPECTED_PLAN_SHA256/);
 });
 
 test("mints a narrowed Cloud workflow token only after publish succeeds", () => {

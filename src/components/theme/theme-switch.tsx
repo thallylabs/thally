@@ -1,12 +1,13 @@
 'use client'
 
 import { Moon, Sun } from 'lucide-react'
-import { useTheme } from 'next-themes'
+import { useReaderTheme } from '@/components/theme/reader-theme'
 import { Button } from '@/components/ui/button'
 
 export function ThemeSwitch() {
-  const { resolvedTheme, setTheme } = useTheme()
+  const { resolvedTheme, setTheme, showToggle } = useReaderTheme()
   const isDark = resolvedTheme === 'dark'
+  if (!showToggle) return null
 
   return (
     <Button

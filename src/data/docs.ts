@@ -3,6 +3,9 @@ import { getContentIndex, loadContentIndex, type ContentIndex } from '@/lib/cont
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 import { getDocsJsonConfig, getDocsJsonConfigRevision } from '@/lib/docs-json-config'
+import { resolveIconLibrary, type IconLibrary } from '@/lib/icon-library'
+import { projectNavigationContract } from '@thallylabs/core/navigation'
+import { SUPPORTED_LOCALE_OPTIONS } from '@/lib/i18n/config'
 
 // ---------------------------------------------------------------------------
 // Public interfaces (consumed by components, pages, and stores)
@@ -14,6 +17,7 @@ export interface DocEntry {
   id: string
   title: string
   description: string
+  descriptionPlacement?: 'body'
   slug: Array<string>
   href: string
   group: string
@@ -163,7 +167,10 @@ export interface DocsJsonNavLink {
 
 export interface DocsJsonNavbar {
   links?: Array<DocsJsonNavLink>
-  primary?: { label: string; href: string }
+  primary?: { label: string; href: string } | null
+  /** Public assets for a portable, source-owned logo fallback. */
+  /** Explicit null keeps a source site's text-only wordmark. */
+  logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string } | null
 }
 
 export interface DocsJsonFooterColumn {
@@ -173,6 +180,8 @@ export interface DocsJsonFooterColumn {
 
 export interface DocsJsonFooter {
   socials?: Record<string, string>
+  /** Optional imported attribution; `{year}` follows the current year. */
+  copyright?: string
   links?: Array<DocsJsonFooterColumn>
 }
 
@@ -218,6 +227,8 @@ interface DocsJsonConfig {
   redirects?: Array<DocsJsonRedirect>
   banner?: DocsJsonBanner
   navbar?: DocsJsonNavbar
+  /** Public favicon fallback when no managed or admin asset is configured. */
+  favicon?: { light: string; dark?: string }
   footer?: DocsJsonFooter
   seo?: DocsJsonSeo
   customScripts?: Array<DocsJsonScript>
@@ -225,8 +236,21 @@ interface DocsJsonConfig {
   feedback?: DocsJsonFeedback
   /** Visual choices that remain independent of the structural theme. */
   appearance?: {
+    /** Initial reader mode; hidden controls enforce this preference. */
+    default?: 'system' | 'light' | 'dark'
+    showToggle?: boolean
     /** Card and tile icons are neutral by default or inherit the live brand accent. */
     contentIcons?: ContentIconTone
+  }
+  background?: {
+    image?: string
+    imageDark?: string
+    decoration?: 'none' | 'grid' | 'gradient'
+  }
+  /** Icon set used for every `icon` name in content. Mirrors Mintlify's `icons.library`. */
+  icons?: {
+    /** "lucide" (default) | "fontawesome" | "tabler" */
+    library?: IconLibrary
   }
   /**
    * Structural theme controlling border radius, sidebar active style, and nav
@@ -265,6 +289,8 @@ interface DocsJsonConfig {
   i18n?: {
     defaultLocale: string
     locales: Array<{ code: string; label: string }>
+    /** Optional locale-specific tabs, groups, and labels from a migrated source. */
+    navigation?: Record<string, Array<DocsJsonTab>>
   }
   /**
    * Admin-dashboard team — the git-committed roster. Version-controlled and
@@ -318,6 +344,7 @@ interface FrontmatterData {
   /** Optional compact label used only in sidebar and previous/next navigation. */
   navTitle?: string
   description?: string
+  descriptionPlacement?: 'body'
   badge?: string
   keywords?: Array<string>
   timeEstimate?: string
@@ -416,28 +443,6 @@ function slugifyId(value: string) {
     .replace(/\//g, '-')
 }
 
-// ---------------------------------------------------------------------------
-// Collect all page IDs from docs.json (for static params & search index)
-// ---------------------------------------------------------------------------
-
-function collectPageIds(groups: Array<DocsJsonNavigationGroup>): Array<string> {
-  return groups.flatMap((group) => collectPageIdsFromPages(group.pages))
-}
-
-function collectPageIdsFromPages(
-  pages: Array<string | DocsJsonNavigationGroup>,
-): Array<string> {
-  const ids: Array<string> = []
-  for (const page of pages) {
-    if (typeof page === 'string') {
-      ids.push(page)
-    } else {
-      ids.push(...collectPageIdsFromPages(page.pages))
-    }
-  }
-  return ids
-}
-
 const KEYWORD_STOPWORDS = new Set([
   'the',
   'a',
@@ -489,6 +494,7 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
     id: pageId,
     title,
     description: fm.description ?? '',
+    descriptionPlacement: fm.descriptionPlacement === 'body' ? 'body' : undefined,
     slug,
     href,
     group: '',
@@ -499,6 +505,8 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
     lastUpdated: fm.lastUpdated ?? '',
     lastVerified: fm.lastVerified,
     verifiedVersion: fm.verifiedVersion,
+    noindex: fm.noindex,
+    hidden: fm.hidden,
   }
 }
 
@@ -508,13 +516,21 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
 
 let _allEntries: Array<DocEntry> | null = null
 
+/** Locale directories are reserved even when Cloud selects them after build. */
+function localeDirectoryCodes(): Set<string> {
+  return new Set([
+    ...SUPPORTED_LOCALE_OPTIONS.map((locale) => locale.code.toLowerCase()),
+    ...(getI18nConfig()?.locales ?? []).map((locale) => locale.code.toLowerCase()),
+  ])
+}
+
 /** Every page that has an .mdx file under src/content (default locale only). */
 function getAllContentPageIds(): Array<string> {
-  const localeCodes = new Set((getI18nConfig()?.locales ?? []).map((l) => l.code))
+  const localeCodes = localeDirectoryCodes()
   return listRuntimeSources(CONTENT_ROOT)
     .filter((filePath) => filePath.endsWith('.mdx'))
     .map((filePath) => filePath.slice(`${CONTENT_ROOT}/`.length, -'.mdx'.length))
-    .filter((relativePath) => !localeCodes.has(relativePath.split('/')[0] ?? ''))
+    .filter((relativePath) => !localeCodes.has((relativePath.split('/')[0] ?? '').toLowerCase()))
     .map((relativePath) => (relativePath.endsWith('/index') ? relativePath.slice(0, -'/index'.length) : relativePath))
     .filter(Boolean)
 }
@@ -531,18 +547,8 @@ function getAllDocEntries(): Array<DocEntry> {
     entries.push(buildDocEntryFromPageId(id))
   }
 
-  // 1. Nav-group pages first (preserves nav order), plus standalone href tabs
-  //    (e.g. Changelog) which reference a real page outside any group.
-  for (const tab of config.tabs) {
-    if (tab.pages) {
-      for (const id of collectPageIdsFromPages(tab.pages)) add(id)
-    }
-    if (tab.groups) {
-      for (const id of collectPageIds(tab.groups)) add(id)
-    } else if (tab.href && tab.href.startsWith('/')) {
-      add(tab.href.slice(1) || 'introduction')
-    }
-  }
+  // 1. Explicit navigation references and standalone local href tabs.
+  for (const id of projectNavigationContract(config).authoredPageIds) add(id)
 
   // 2. Every remaining content page — so search, embeddings, and the agent
   //    endpoints cover the whole site, not just pages listed in a nav group.
@@ -554,18 +560,7 @@ function getAllDocEntries(): Array<DocEntry> {
 
 /** Page IDs reachable from navigation: nav-group pages + standalone href tabs. */
 export function getNavigablePageIds(): Set<string> {
-  const ids = new Set<string>()
-  for (const tab of docsConfig().tabs) {
-    if (tab.pages) {
-      for (const id of collectPageIdsFromPages(tab.pages)) ids.add(id)
-    }
-    if (tab.groups) {
-      for (const id of collectPageIds(tab.groups)) ids.add(id)
-    } else if (tab.href && tab.href.startsWith('/')) {
-      ids.add(tab.href.slice(1) || 'introduction')
-    }
-  }
-  return ids
+  return new Set(projectNavigationContract(docsConfig()).authoredPageIds)
 }
 
 // ---------------------------------------------------------------------------
@@ -591,11 +586,11 @@ function hydrateContentIndex(index: ContentIndex): void {
 }
 
 function defaultLocalePageIds(index: ContentIndex): Array<string> {
-  const localeCodes = new Set((getI18nConfig()?.locales ?? []).map((locale) => locale.code))
+  const localeCodes = localeDirectoryCodes()
   return Object.keys(index.pages)
     .filter((filePath) => filePath.startsWith(`${CONTENT_ROOT}/`) && filePath.endsWith('.mdx'))
     .map((filePath) => filePath.slice(`${CONTENT_ROOT}/`.length, -'.mdx'.length))
-    .filter((relativePath) => !localeCodes.has(relativePath.split('/')[0] ?? ''))
+    .filter((relativePath) => !localeCodes.has((relativePath.split('/')[0] ?? '').toLowerCase()))
     .map((relativePath) => (relativePath.endsWith('/index') ? relativePath.slice(0, -'/index'.length) : relativePath))
     .filter(Boolean)
 }
@@ -627,16 +622,7 @@ export function loadDocEntries(): Promise<Array<DocEntry>> {
       seen.add(id)
       ids.push(id)
     }
-    for (const tab of docsConfig().tabs) {
-      if (tab.pages) {
-        for (const id of collectPageIdsFromPages(tab.pages)) add(id)
-      }
-      if (tab.groups) {
-        for (const id of collectPageIds(tab.groups)) add(id)
-      } else if (tab.href?.startsWith('/')) {
-        add(tab.href.slice(1) || 'introduction')
-      }
-    }
+    for (const id of projectNavigationContract(docsConfig()).authoredPageIds) add(id)
     for (const id of defaultLocalePageIds(index)) add(id)
     return ids.map((id) => buildDocEntryFromPageId(id, indexedFrontmatter(index, id)))
   })()
@@ -700,6 +686,7 @@ function buildNavigationGroup(
 
   const groupPath = [...ancestors, group.group].filter(Boolean)
   const nodes = buildNavigationNodes(group.pages, indexPath, groupPath, locale)
+  if (nodes.length === 0) return null
 
   return {
     id: `nav-group-${indexPath.join('-')}-${slugifyId(group.group) || 'group'}`,
@@ -717,6 +704,9 @@ function buildNavigationNodes(
 ): Array<NavigationNode> {
   return pages.flatMap<NavigationNode>((page, index) => {
     if (typeof page === 'string') {
+      // Fern and some legacy docs configs list pages that are reachable by
+      // direct link but explicitly hidden from the rendered sidebar.
+      if (readFrontmatter(page, locale).hidden) return []
       return [{ type: 'page', item: resolveNavItem(page, locale, ancestors) }]
     }
     const child = buildNavigationGroup(page, [...indexPath, index], ancestors, locale)
@@ -739,7 +729,7 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
     return sidebarCollectionsCache.get(cacheKey)!
   }
 
-  const collections = config.tabs
+  const collections = ((locale ? config.i18n?.navigation?.[locale] : undefined) ?? config.tabs)
     .filter((tab) => !tab.hidden)
     .map((tab) => {
       const id = slugifyId(tab.tab) || tab.tab.toLowerCase()
@@ -802,11 +792,21 @@ export interface PrevNextLink {
   href: string
 }
 
+/** Select a translated navigation tree only for a configured locale prefix. */
+function navigationLocaleForHref(href: string): string | undefined {
+  const firstSegment = href.split('/')[1]
+  const i18n = docsConfig().i18n
+  return firstSegment && firstSegment !== i18n?.defaultLocale
+    && i18n?.locales.some((locale) => locale.code === firstSegment)
+    ? firstSegment
+    : undefined
+}
+
 export function getPrevNextLinks(currentHref: string): {
   prev: PrevNextLink | null
   next: PrevNextLink | null
 } {
-  const collections = getSidebarCollections()
+  const collections = getSidebarCollections(navigationLocaleForHref(currentHref))
   const flatPages: Array<{ title: string; href: string }> = []
 
   for (const collection of collections) {
@@ -845,7 +845,7 @@ function navigationGroupParts(section: NavigationSection, item: NavigationItem):
 }
 
 export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
-  const collections = getSidebarCollections()
+  const collections = getSidebarCollections(navigationLocaleForHref(currentHref))
 
   for (const collection of collections) {
     for (const section of collection.sections) {
@@ -882,7 +882,7 @@ export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
  * that sit outside any navigation group (e.g. direct-link tabs).
  */
 export function getNavCategory(currentHref: string): string | null {
-  for (const collection of getSidebarCollections()) {
+  for (const collection of getSidebarCollections(navigationLocaleForHref(currentHref))) {
     for (const section of collection.sections) {
       const item = section.items.find((candidate) => candidate.href === currentHref)
       if (item) {
@@ -906,15 +906,17 @@ export interface NavContext {
   breadcrumb: Array<BreadcrumbItem>
 }
 
-export function getNavContext(pageId: string): NavContext {
+export function getNavContext(pageId: string, locale?: string): NavContext {
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
-  const href = slug.length ? `/${slug.join('/')}` : '/'
+  const baseHref = slug.length ? `/${slug.join('/')}` : '/'
+  const href = locale && locale !== docsConfig().i18n?.defaultLocale
+    ? `/${locale}${baseHref === '/' ? '' : baseHref}` : baseHref
 
   const { prev, next } = getPrevNextLinks(href)
   const breadcrumb = getBreadcrumbs(href)
 
   // Find which tab and group this page belongs to
-  const collections = getSidebarCollections()
+  const collections = getSidebarCollections(locale)
   let tabName = ''
   let groupName = ''
 
@@ -934,10 +936,10 @@ export function getNavContext(pageId: string): NavContext {
 }
 
 /** Async managed-release twin of {@link getNavContext}. */
-export async function loadNavContext(pageId: string): Promise<NavContext> {
+export async function loadNavContext(pageId: string, locale?: string): Promise<NavContext> {
   const index = await loadContentIndex()
   if (index) hydrateContentIndex(index)
-  return getNavContext(pageId)
+  return getNavContext(pageId, locale)
 }
 
 export function getAiConfig(): {
@@ -1065,4 +1067,13 @@ export function getStructuralTheme(): StructuralTheme {
 /** Resolve the global card/tile icon treatment, defaulting to the site accent. */
 export function getContentIconTone(): ContentIconTone {
   return docsConfig().appearance?.contentIcons === 'neutral' ? 'neutral' : 'accent'
+}
+
+/**
+ * Resolve the repository's icon library, defaulting to Lucide. Managed sites
+ * layer the Thally Cloud branding choice on top in `@/lib/cloud-link/icon-library`;
+ * this reader stays free of server-only imports so Node build scripts can use it.
+ */
+export function getIconLibrary(): IconLibrary {
+  return resolveIconLibrary(docsConfig().icons?.library)
 }

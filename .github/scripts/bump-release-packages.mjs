@@ -7,15 +7,12 @@
  * the lockfile.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const PACKAGE_PATHS = Object.freeze({
-  create: 'packages/create-thally-docs/package.json',
-  mcp: 'packages/mcp/package.json',
-  cli: 'packages/cli/package.json',
-})
+const SCAFFOLD_RECORD_WORKSPACE = 'packages/create-thally-docs'
+const RELEASE_DEPENDENCY_FIELDS = ['dependencies', 'optionalDependencies', 'peerDependencies']
 
 function readPackage(rootDirectory, packagePath) {
   const absolutePath = resolve(rootDirectory, packagePath)
@@ -38,35 +35,57 @@ function writePackage({ absolutePath, manifest }) {
 }
 
 /**
- * Increment every publishable package and repin internal dependencies before
- * any manifest is written.
+ * A new scaffold record changes create-thally-docs. Its publishable dependents
+ * must be versioned too because their exact package ranges are embedded in npm
+ * tarballs. Discover that closure from package manifests rather than a list.
  */
 export function bumpReleasePackages(rootDirectory = process.cwd()) {
-  const create = readPackage(rootDirectory, PACKAGE_PATHS.create)
-  const mcp = readPackage(rootDirectory, PACKAGE_PATHS.mcp)
-  const cli = readPackage(rootDirectory, PACKAGE_PATHS.cli)
-
-  const versions = {
-    create: incrementPatch(create.manifest.version, create.manifest.name),
-    mcp: incrementPatch(mcp.manifest.version, mcp.manifest.name),
-    cli: incrementPatch(cli.manifest.version, cli.manifest.name),
+  const records = readdirSync(resolve(rootDirectory, 'packages'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
+      workspace: `packages/${entry.name}`,
+      ...readPackage(rootDirectory, join('packages', entry.name, 'package.json')),
+    }))
+  const byName = new Map(records.map((record) => [record.manifest.name, record]))
+  const scaffold = records.find((record) => record.workspace === SCAFFOLD_RECORD_WORKSPACE)
+  if (!scaffold || scaffold.manifest.private === true) {
+    throw new Error('The scaffold record workspace must be publishable.')
   }
-
-  create.manifest.version = versions.create
-  mcp.manifest.version = versions.mcp
-  cli.manifest.version = versions.cli
-  mcp.manifest.dependencies['create-thally-docs'] = versions.create
-  cli.manifest.dependencies['create-thally-docs'] = versions.create
-  cli.manifest.dependencies['@thallylabs/mcp'] = versions.mcp
-
-  for (const packageRecord of [create, mcp, cli]) writePackage(packageRecord)
-
+  const selected = new Set([scaffold.manifest.name])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const record of records) {
+      if (record.manifest.private === true || selected.has(record.manifest.name)) continue
+      const dependencies = RELEASE_DEPENDENCY_FIELDS.flatMap((field) =>
+        Object.keys(record.manifest[field] ?? {}),
+      )
+      if (dependencies.some((name) => selected.has(name))) {
+        selected.add(record.manifest.name)
+        changed = true
+      }
+    }
+  }
+  const versions = {}
+  for (const record of records.filter((item) => selected.has(item.manifest.name))) {
+    versions[record.manifest.name] = incrementPatch(record.manifest.version, record.manifest.name)
+  }
+  for (const record of records.filter((item) => selected.has(item.manifest.name))) {
+    record.manifest.version = versions[record.manifest.name]
+    for (const field of RELEASE_DEPENDENCY_FIELDS) {
+      for (const name of Object.keys(record.manifest[field] ?? {})) {
+        if (versions[name]) record.manifest[field][name] = versions[name]
+        else if (byName.get(name)?.manifest.private === true) {
+          throw new Error(`${record.manifest.name} cannot publish a runtime dependency on private ${name}.`)
+        }
+      }
+    }
+  }
+  for (const record of records.filter((item) => selected.has(item.manifest.name))) writePackage(record)
   return versions
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const versions = bumpReleasePackages()
-  console.log(
-    `Prepared create-thally-docs@${versions.create}, @thallylabs/mcp@${versions.mcp}, and @thallylabs/cli@${versions.cli}.`,
-  )
+  console.log(`Prepared ${Object.entries(versions).map(([name, version]) => `${name}@${version}`).join(', ')}.`)
 }

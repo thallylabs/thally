@@ -3,6 +3,8 @@ import { themeVarsFor, toHslValue } from '@thallylabs/core/theme'
 import type { NextRequest } from 'next/server'
 import { getCloudSiteConfig } from '@/lib/cloud-link/client'
 import { brandRuntimeCss } from '@/lib/brand-runtime-css'
+import { getDocsJsonConfig } from '@/lib/docs-json-config'
+import { resolveSiteBackground, type SiteBackground } from '@/lib/site-appearance'
 
 export const runtime = 'nodejs'
 
@@ -41,7 +43,11 @@ export async function GET(request: NextRequest) {
   // precedence — otherwise the globals bundle can re-sort after this link.
   const declarations = parts.filter(Boolean).join(';')
   const legacyCss = declarations ? `:root:root{${declarations}}` : ''
-  const css = [brandRuntimeCss(cloudBranding), legacyCss].filter(Boolean).join('\n')
+  const repository = getDocsJsonConfig<{ background?: SiteBackground }>()
+  const branding = cloudBranding?.background
+    ? { ...cloudBranding, background: resolveSiteBackground(repository.background, cloudBranding.background) }
+    : cloudBranding
+  const css = [brandRuntimeCss(branding), legacyCss].filter(Boolean).join('\n')
   return new Response(css, {
     headers: { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'public, max-age=30' },
   })

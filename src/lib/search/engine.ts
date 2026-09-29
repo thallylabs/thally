@@ -7,5 +7,5 @@
  */
 import './register-doc-source'
 
-export { searchDocs, getSearchEngine, resetSearchEngine } from '@thallylabs/core'
-export type { SearchMode, SearchHit } from '@thallylabs/core'
+export { searchDocs, getSearchEngine, resetSearchEngine } from '@thallylabs/core/search'
+export type { SearchMode, SearchHit } from '@thallylabs/core/search'

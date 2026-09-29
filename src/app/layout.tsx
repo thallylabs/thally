@@ -12,6 +12,7 @@ import {
   getFontsConfig,
   getStructuralTheme,
 } from '@/data/docs'
+import { getBuildIconLibrary } from '@/lib/cloud-link/icon-library'
 import { cn } from '@/lib/utils'
 import { toHslValue, THEME_VARS } from '@thallylabs/core/theme'
 import { buildOgImageUrl } from '@/lib/og'
@@ -23,8 +24,11 @@ import { SiteBanner } from '@/components/layout/site-banner'
 import { WebMcpTools } from '@/components/agent/web-mcp-tools'
 import { CloudHandshake } from '@/components/cloud/cloud-handshake'
 import { localeDirection } from '@/lib/i18n/config'
-import { getBuildI18nConfig } from '@/lib/i18n/request'
+import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
+import { getBuildSiteAppearance } from '@/lib/cloud-link/appearance'
+import { lockedAppearanceScript } from '@/lib/site-appearance'
+import { brandRuntimeCss } from '@/lib/brand-runtime-css'
 
 // Default fonts via next/font (optimal performance — preloaded, no FOUC).
 // Inter covers both reading and display text so the public docs keep one
@@ -120,16 +124,16 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: new URL(siteUrl),
     title: {
       default: `${effectiveSite.name} Documentation`,
-      template: `%s • ${effectiveSite.name}`,
+      template: `%s | ${effectiveSite.name}`,
     },
     description: effectiveSite.description,
     // Derived from the request-bound site config so a fork never inherits
     // the baseline's marketing keywords.
     keywords: [effectiveSite.name, `${effectiveSite.name} documentation`, 'docs'],
     icons: {
-      // The dark link wins on OS dark scheme (link media can't follow the
-      // in-site theme toggle); the route falls back to the light asset when no
-      // dark variant is uploaded, so both links always resolve.
+      // Media supplies the pre-hydration/no-JavaScript fallback. ThemeFavicon
+      // then follows the reader's resolved mode, including manual and locked
+      // modes. The route falls back to the light upload when dark is absent.
       icon: [
         { url: '/api/brand/favicon', media: '(prefers-color-scheme: light)' },
         {
@@ -223,17 +227,31 @@ const brandCss = Object.entries(brandStyle)
 const runtimeNameShim =
   "globalThis.__name ??= (target, value) => Object.defineProperty(target, 'name', { value, configurable: true });"
 
+function documentLocaleScript(locales: ReadonlyArray<{ code: string }>, defaultLocale: string): string {
+  // The root layout is shared with admin and unprefixed routes, so Next cannot
+  // receive the child catch-all's locale as a root param. Set the document
+  // language before the body renders while the article itself stays SSR-tagged.
+  const directions = Object.fromEntries(locales
+    .filter((locale) => locale.code !== defaultLocale)
+    .map((locale) => [locale.code, localeDirection(locale.code)]))
+  const serialized = JSON.stringify(directions).replace(/</g, '\\u003c')
+  return `(() => { const locales = ${serialized}; const code = location.pathname.split('/')[1]; if (Object.hasOwn(locales, code)) { document.documentElement.lang = code; document.documentElement.dir = locales[code]; } })();`
+}
+
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   // These values belong to the immutable release binding, not the compiled
   // module. Resolve them during rendering so content-only publishes can reuse
   // Worker code while presenting the new docs.json immediately.
   const { googleFontUrls, fontOverrides } = resolveFontPresentation()
   const structuralTheme = getStructuralTheme()
+  const { appearance, background } = getBuildSiteAppearance()
+  const hasBackground = Boolean(background.image || background.imageDark || background.decoration !== 'none')
   const contentIconTone = getContentIconTone()
+  const iconLibrary = getBuildIconLibrary()
   const themeVars = THEME_VARS[structuralTheme] ?? ''
   const bannerConfig = getBannerConfig()
   const customScripts = getCustomScriptsConfig()
-  const i18n = getBuildI18nConfig()
+  const i18n = await getEffectiveI18nConfig()
   const effectiveSite = resolveBuildSiteConfig()
   const siteUrl = getSiteUrl()
   const defaultLang = i18n.defaultLocale
@@ -255,10 +273,17 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       suppressHydrationWarning
       data-theme={structuralTheme}
       data-content-icons={contentIconTone}
+      data-icon-library={iconLibrary}
+      data-site-background={hasBackground ? 'enabled' : undefined}
+      data-site-background-image={background.image || background.imageDark ? 'enabled' : undefined}
       className={cn(fontSans.variable, fontMono.variable)}
     >
       <head>
-        <script id="thally-runtime-name-shim" dangerouslySetInnerHTML={{ __html: runtimeNameShim }} />
+        <Script id="thally-runtime-name-shim" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: runtimeNameShim }} />
+        <Script id="thally-document-locale" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: documentLocaleScript(i18n.locales, defaultLang) }} />
+        {!appearance.showToggle && (
+          <Script id="thally-locked-appearance" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: lockedAppearanceScript(appearance.default) }} />
+        )}
         <JsonLdScript data={siteJsonLd} />
         {/* Google Fonts for custom body/heading fonts set in docs.json */}
         {googleFontUrls.length > 0 && (
@@ -272,6 +297,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         )}
         {/* Brand palette (default) — a :root rule so /api/brand.css can override it */}
         <style>{`:root { ${brandCss} }`}</style>
+        {hasBackground && <style>{brandRuntimeCss({ background })}</style>}
         {/* CSS variable overrides for custom fonts */}
         {fontOverrides && <style>{`:root { ${fontOverrides} }`}</style>}
         {/* CSS variable overrides for structural theme (radius, sidebar, nav tabs) */}
@@ -288,7 +314,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
             locales={i18n.locales.map((locale) => locale.code)}
           />
         )}
-        <Providers>{children}</Providers>
+        <Providers appearance={appearance}>{children}</Providers>
         <CloudHandshake />
         {siteConfig.analytics && <AnalyticsProvider />}
         <WebMcpTools />

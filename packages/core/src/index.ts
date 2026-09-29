@@ -81,10 +81,12 @@ export {
   resetEmbeddingIndex,
   getRelevantChunks,
   rankChunks,
+  rankIndexedChunks,
 } from './embeddings/index.js'
 export type {
   PageSource,
   BuildOptions,
+  RankOptions,
   Chunk,
   EmbeddedChunk,
   EmbeddingIndex,

@@ -15,6 +15,14 @@ interface DocsRedirect {
 const docRedirects: Array<DocsRedirect> =
   (docsJson as { redirects?: Array<DocsRedirect> }).redirects ?? []
 
+const securityHeaders = [
+  { key: 'Strict-Transport-Security', value: 'max-age=31536000' },
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  { key: 'Permissions-Policy', value: 'camera=(), geolocation=(self), microphone=(), payment=(), usb=()' },
+]
+
 const nextConfig: NextConfig = {
   pageExtensions: ['ts', 'tsx'],
   // Generated projects are commonly inspected through a loopback URL. Permit
@@ -41,6 +49,9 @@ const nextConfig: NextConfig = {
     // THALLY_DISABLE_BUILD_CACHE=1 opts out without editing this file.
     turbopackFileSystemCacheForBuild:
       process.env.THALLY_DISABLE_BUILD_CACHE !== '1',
+  },
+  async headers() {
+    return [{ source: '/:path*', headers: securityHeaders }]
   },
   async redirects() {
     return [

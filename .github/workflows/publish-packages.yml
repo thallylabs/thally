@@ -14,9 +14,7 @@ on:
   push:
     branches: [main]
     paths:
-      - packages/create-thally-docs/src/stable-scaffold-release.json
-      - packages/core/package.json
-      - packages/migrate/package.json
+      - packages/**
   workflow_dispatch:
     inputs:
       request_id:
@@ -44,6 +42,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_sha: ${{ steps.source.outputs.sha }}
+      base_sha: ${{ steps.package-plan.outputs.base_sha }}
+      plan_sha256: ${{ steps.package-plan.outputs.plan_sha256 }}
+      has_packages: ${{ steps.package-plan.outputs.has_packages }}
       should_handoff: ${{ steps.release.outputs.should_handoff }}
     steps:
       - name: Reject non-main dispatches
@@ -86,21 +87,49 @@ jobs:
             authoritative_sha="$(
               git -C release-source log -1 --format=%H origin/main -- "$record_path"
             )"
-            if [[ "$selected_sha" != "$authoritative_sha" ]]; then
-              echo "::error::release_commit_sha is not the commit that introduced the current stable record."
+            latest_package_sha="$(
+              git -C release-source log -1 --format=%H origin/main -- packages/
+            )"
+            if [[ "$selected_sha" != "$authoritative_sha" && "$selected_sha" != "$latest_package_sha" ]]; then
+              echo "::error::release_commit_sha is not the current stable record or latest package source."
               exit 1
             fi
-            git -C release-source show "$selected_sha:packages/create-thally-docs/src/stable-scaffold-release.json" \
-              > "$RUNNER_TEMP/selected-stable.json"
-            git -C release-source show "origin/main:packages/create-thally-docs/src/stable-scaffold-release.json" \
-              > "$RUNNER_TEMP/current-stable.json"
-            cmp --silent "$RUNNER_TEMP/selected-stable.json" "$RUNNER_TEMP/current-stable.json" || {
-              echo "::error::The selected release is no longer the public stable record."
-              exit 1
-            }
+            if [[ "$selected_sha" == "$authoritative_sha" ]]; then
+              git -C release-source show "$selected_sha:$record_path" > "$RUNNER_TEMP/selected-stable.json"
+              git -C release-source show "origin/main:$record_path" > "$RUNNER_TEMP/current-stable.json"
+              cmp --silent "$RUNNER_TEMP/selected-stable.json" "$RUNNER_TEMP/current-stable.json" || {
+                echo "::error::The selected release is no longer the public stable record."
+                exit 1
+              }
+            else
+              git -C release-source diff --quiet "$selected_sha" origin/main -- packages/ || {
+                echo "::error::Package sources changed after the selected release."
+                exit 1
+              }
+            fi
           fi
           git -C release-source checkout --detach "$selected_sha"
           echo "sha=$selected_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Derive dependency-aware package plan
+        id: package-plan
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          RELEASE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          base="$BEFORE_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" || ! "$base" =~ ^[0-9a-f]{40}$ || "$base" =~ ^0{40}$ ]]; then
+            base="$(git -C release-source rev-parse "$RELEASE_SHA^")"
+          fi
+          cd release-source
+          node ../.github/scripts/release-package-plan.mjs \
+            --base "$base" \
+            --output "$RUNNER_TEMP/package-plan.json" \
+            --github-output "$GITHUB_OUTPUT"
+          echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+          echo "plan_sha256=$(sha256sum "$RUNNER_TEMP/package-plan.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - name: Classify immutable scaffold handoff
         id: release
@@ -109,15 +138,7 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "should_handoff=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          base="$BEFORE_SHA"
-          if [[ ! "$base" =~ ^[0-9a-f]{40}$ ]] || [[ "$base" =~ ^0{40}$ ]]; then
-            base="HEAD^"
-          fi
-          if git -C release-source diff --quiet "$base" HEAD -- \
+          if git -C release-source diff --quiet "${{ steps.package-plan.outputs.base_sha }}" HEAD -- \
             packages/create-thally-docs/src/stable-scaffold-release.json; then
             echo "should_handoff=false" >> "$GITHUB_OUTPUT"
           else
@@ -127,6 +148,7 @@ jobs:
   verify:
     name: Test · Pack once
     needs: plan
+    if: needs.plan.outputs.has_packages == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted release policy
@@ -154,6 +176,17 @@ jobs:
           node-version: 24
           package-manager-cache: false
 
+      - name: Recompute the immutable package plan
+        env:
+          BASE_SHA: ${{ needs.plan.outputs.base_sha }}
+          EXPECTED_PLAN_SHA256: ${{ needs.plan.outputs.plan_sha256 }}
+        run: |
+          cd release-source
+          node ../.github/scripts/release-package-plan.mjs \
+            --base "$BASE_SHA" \
+            --output "$GITHUB_WORKSPACE/.release-plan.json"
+          echo "$EXPECTED_PLAN_SHA256  $GITHUB_WORKSPACE/.release-plan.json" | sha256sum --check
+
       - name: Install dependencies
         working-directory: release-source
         run: npm ci
@@ -163,13 +196,14 @@ jobs:
         run: npm test
 
       - name: Pack immutable release artifacts
-        env:
-          SHOULD_HANDOFF: ${{ needs.plan.outputs.should_handoff }}
         run: |
-          arguments=("$GITHUB_WORKSPACE/.release-artifacts")
-          [[ "$SHOULD_HANDOFF" == "true" ]] && arguments+=(--include-scaffold)
           cd release-source
-          node ../.github/scripts/pack-release-workspaces.mjs "${arguments[@]}"
+          node ../.github/scripts/pack-release-workspaces.mjs \
+            "$GITHUB_WORKSPACE/.release-artifacts" \
+            "$GITHUB_WORKSPACE/.release-plan.json"
+
+      - name: Clean-install the selected tarballs
+        run: node .github/scripts/verify-release-install.mjs .release-artifacts/manifest.json
 
       - name: Upload immutable release artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -185,6 +219,7 @@ jobs:
   attest:
     name: Attest package bytes
     needs: [plan, verify]
+    if: needs.plan.outputs.has_packages == 'true'
     runs-on: ubuntu-latest
     permissions:
       attestations: write
@@ -205,6 +240,7 @@ jobs:
   publish:
     name: Publish exact package bytes
     needs: [plan, verify, attest]
+    if: needs.plan.outputs.has_packages == 'true'
     runs-on: ubuntu-latest
     environment: npm-production
     permissions:
@@ -233,7 +269,9 @@ jobs:
           path: .release-artifacts
 
       - name: Publish and verify exact tarballs
-        run: node .github/scripts/publish-release-artifacts.mjs .release-artifacts/manifest.json
+        env:
+          EXPECTED_PLAN_SHA256: ${{ needs.plan.outputs.plan_sha256 }}
+        run: node .github/scripts/publish-release-artifacts.mjs .release-artifacts/manifest.json "$EXPECTED_PLAN_SHA256"
 
   handoff:
     name: Dispatch immutable record to Thally Cloud

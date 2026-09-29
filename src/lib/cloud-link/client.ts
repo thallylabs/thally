@@ -63,9 +63,13 @@ export interface CloudPortableConfig {
     favicon?: string
     faviconDark?: string
     themePreset?: string
+    appearance?: { default?: 'system' | 'light' | 'dark'; showToggle?: boolean }
+    background?: { image?: string; imageDark?: string; decoration?: 'none' | 'grid' | 'gradient' }
+    /** Icon set chosen in Thally Cloud site settings; overrides docs.json `icons.library`. */
+    iconLibrary?: string
     colors?: {
-      light?: { primary?: string; accent?: string }
-      dark?: { primary?: string; accent?: string }
+      light?: { primary?: string; accent?: string; background?: string }
+      dark?: { primary?: string; accent?: string; background?: string }
     }
     fonts?: {
       body?: {

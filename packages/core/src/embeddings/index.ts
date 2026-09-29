@@ -6,7 +6,8 @@ export {
   resetEmbeddingIndex,
 } from './index-store.js'
 export type { PageSource, BuildOptions } from './index-store.js'
-export { getRelevantChunks, rankChunks } from './retrieve.js'
+export { getRelevantChunks, rankChunks, rankIndexedChunks } from './retrieve.js'
+export type { RankOptions } from './retrieve.js'
 export type {
   Chunk,
   EmbeddedChunk,

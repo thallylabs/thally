@@ -155,6 +155,12 @@ export function SiteShell({
   return (
     <SiteNameProvider initialName={identity.name}>
       <div className="thally-docs-root min-h-screen w-full overflow-x-clip bg-background text-foreground" data-navigation={navigationPresentation.display} data-header-layout={getHeaderNavigationLayout(navigationPresentation.display, collections.length)}>
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-background focus:px-4 focus:py-2 focus:text-foreground focus:shadow-lg"
+        >
+          Skip to content
+        </a>
         <TopBar
           collections={collections}
           activeCollectionId={activeTabId}

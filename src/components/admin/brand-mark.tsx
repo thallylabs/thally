@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { useTheme } from 'next-themes'
+import { useReaderTheme } from '@/components/theme/reader-theme'
 
 // Stable no-op subscribe for the hydration gate below.
 const emptySubscribe = () => () => {}
@@ -14,7 +14,7 @@ const emptySubscribe = () => () => {}
  */
 export function BrandMark({ size = 30 }: { size?: number }) {
   const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false)
-  const { resolvedTheme } = useTheme()
+  const { resolvedTheme } = useReaderTheme()
   const dark = mounted && resolvedTheme === 'dark'
 
   const [customOk, setCustomOk] = useState(true)

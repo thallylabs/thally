@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import {
   getAdminSettings,
   updateAdminSettings,
@@ -194,5 +195,11 @@ export async function PUT(request: NextRequest) {
     )
   }
 
-  return NextResponse.json(await fullResponse(await updateAdminSettings(patch)))
+  const updated = await updateAdminSettings(patch)
+  if (patch.localization !== undefined) {
+    // Locale selection affects the root language, nested shells, and every
+    // statically rendered documentation route, including new locale prefixes.
+    revalidatePath('/', 'layout')
+  }
+  return NextResponse.json(await fullResponse(updated))
 }
