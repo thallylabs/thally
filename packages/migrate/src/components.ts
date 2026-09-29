@@ -640,7 +640,7 @@ function neutralizeUnresolvableImportsWithoutAst(content: string, currentFile: s
     return ''
   })
   for (const { name, specifier } of dropped) {
-    warn(`Component import ${JSON.stringify(specifier)} could not be resolved because this page's source doesn't compile as MDX (see the preceding warning); the import and its usage were removed rather than risking a broken build.`, currentFile)
+    warn(`Component import ${JSON.stringify(specifier)} could not be resolved because this page has invalid MDX (see the previous warning), so the import and its usage were removed to keep the site building.`, currentFile)
     result = result
       .replace(new RegExp(`<${name}(?:\\s[^>]*)?/>`, 'g'), `{/* Removed <${name}>: unresolved during fallback migration */}`)
       .replace(new RegExp(`<${name}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${name}>`, 'g'), `{/* Removed <${name}>: unresolved during fallback migration */}`)
@@ -1151,7 +1151,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           // expression-reference check below to exclude the page instead of
           // guessing at a replacement.
           if (bindings.length > 0 && bindings.every((binding) => !/^[A-Z]/.test(binding.local))) {
-            warn(`MDX named import of ${JSON.stringify(rawSpecifier)} isn't a component and has no equivalent in the migrated project (e.g. Docusaurus' auto-generated per-file 'toc' export); the import was removed, along with any '...${bindings.map((binding) => binding.local).join(", '...")}' spread of it.`, currentFile)
+            warn(`MDX named import of ${JSON.stringify(rawSpecifier)} isn't a component and has no equivalent in the migrated site (for example Docusaurus's generated 'toc' export), so it was removed, along with any '...${bindings.map((binding) => binding.local).join(", '...")}' spread of it.`, currentFile)
             edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
             for (const binding of bindings) droppedMdxDataBindings.add(binding.local)
           }

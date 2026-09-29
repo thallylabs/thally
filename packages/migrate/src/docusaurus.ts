@@ -435,7 +435,7 @@ export function readDocusaurusSiteOrigin(repositoryRoot: string): string | undef
 
 function readBoundedText(path: string): string {
   if (lstatSync(path).size > MAX_CONFIG_BYTES) {
-    throw new Error('Docusaurus sidebar config exceeded the 20 MB static-parser limit.')
+    throw new Error('The Docusaurus sidebar config is larger than 20 MB and could not be imported.')
   }
   return readFileSync(path, 'utf8')
 }

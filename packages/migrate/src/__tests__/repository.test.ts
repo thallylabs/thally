@@ -512,7 +512,7 @@ describe('Mintlify repository migration', () => {
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Documentation')
     expect(apiTab?.api?.source).toBe('/openapi.yaml')
     expect(bundle.warnings.some((warning) =>
-      warning.message.includes('already has an OpenAPI spec bound to it'))).toBe(true)
+      warning.message.includes('already uses another OpenAPI spec'))).toBe(true)
   })
 
   it('disambiguates two OpenAPI specs bound to different tabs that share a basename, instead of one asset silently overwriting the other', () => {
@@ -543,7 +543,7 @@ describe('Mintlify repository migration', () => {
     const workflowAsset = bundle.assets.find((asset) => `/${asset.path}` === workflowTab?.api?.source)
     expect(qstashAsset?.content.toString()).toContain('title: QStash')
     expect(workflowAsset?.content.toString()).toContain('title: Workflow')
-    expect(bundle.warnings.some((warning) => warning.message.includes('already has an OpenAPI spec bound to it'))).toBe(false)
+    expect(bundle.warnings.some((warning) => warning.message.includes('already uses another OpenAPI spec'))).toBe(false)
   })
 
   it('rewrites in-content links to Mintlify auto-generated operation pages to the matching Thally /api/ route', () => {
@@ -2821,7 +2821,7 @@ navigation:
     expect(guide?.body).not.toContain('/api-reference')
     // Exactly one aggregated warning names the unmatched link.
     const unmatchedWarnings = bundle.warnings.filter((warning) =>
-      warning.message.includes('did not match a known operation'))
+      warning.message.includes('matched no endpoint'))
     expect(unmatchedWarnings).toHaveLength(1)
     expect(unmatchedWarnings[0]!.message).toContain('/api-reference/tools/delete')
   })

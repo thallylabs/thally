@@ -105,7 +105,7 @@ function titleCase(value: string): string {
 
 function readBoundedYaml(path: string): unknown {
   if (lstatSync(path).size > MAX_CONFIG_BYTES) {
-    throw new Error('Fern config exceeded the 20 MB static-parser limit.')
+    throw new Error('The Fern config is larger than 20 MB and could not be imported.')
   }
   return parseYaml(readFileSync(path, 'utf8'))
 }

@@ -1274,7 +1274,7 @@ function resolveMintlifyApiSpecs(
     if (reference.directory) {
       warnings.push({
         code: 'unsupported-config',
-        message: `The OpenAPI spec "${reference.value}"${tabSuffix} was scoped to generate its pages under "${reference.directory}", but Thally's API reference can only be bound to a whole tab, not a nested directory; it was migrated as a tab-wide API reference instead, so links to "${reference.directory}/..." pages will need to be updated manually.`,
+        message: `The OpenAPI spec "${reference.value}"${tabSuffix} was limited to pages under "${reference.directory}" in the source, but Thally's API reference always covers a whole tab, so it was migrated as the tab's full API reference. Update any links to "${reference.directory}/..." pages manually.`,
       })
     }
     specs.push({
@@ -1331,7 +1331,7 @@ function mintlifyOperationSlugSegment(value: string): string {
  * operations (`x-webhooks`) aren't covered — normalize.ts prefixes those
  * with "webhooks", update this alongside it if that ever matters here.
  */
-function thallyOperationSlugSegments(path: string, method: string): Array<string> {
+export function thallyOperationSlugSegments(path: string, method: string): Array<string> {
   const cleaned = path
     .split('/')
     .filter(Boolean)
@@ -1475,6 +1475,27 @@ function apiOperationLinkMap(
     }
   })
   return { operationLinks: map, prefixLandings }
+}
+
+/** Rewrite API operation links in every page body, with one capped warning for links that matched no operation. */
+function rewriteApiLinksInPages(
+  pages: Array<MigrationPage>,
+  operationLinks: Map<string, string>,
+  prefixLandings: Map<string, string>,
+  warnings: Array<MigrationWarning>,
+): void {
+  if (operationLinks.size === 0 && prefixLandings.size === 0) return
+  const unmatched = new Set<string>()
+  for (const page of pages) {
+    page.body = rewriteApiOperationLinks(page.body, operationLinks, prefixLandings, unmatched)
+  }
+  if (unmatched.size === 0) return
+  const sorted = [...unmatched].sort()
+  warnings.push({
+    code: 'unsupported-config',
+    message: `${sorted.length} link(s) to API endpoints matched no endpoint in the OpenAPI spec, so they now point to the API section's overview page instead: `
+      + `${sorted.slice(0, 10).join(', ')}${sorted.length > 10 ? `, and ${sorted.length - 10} more` : ''}. Update those links if you want them to reach a specific endpoint.`,
+  })
 }
 
 /**
@@ -2375,7 +2396,7 @@ function injectOpenApiSpecs(
       if (apiTab.api && warnings) {
         warnings.push({
           code: 'unsupported-config',
-          message: `Tab "${apiTab.tab}" already has an OpenAPI spec bound to it; "/${spec.filename}" was not also bound (Thally supports one API spec per tab). Move it to its own tab manually.`,
+          message: `Tab "${apiTab.tab}" already uses another OpenAPI spec, and Thally supports one API spec per tab, so "/${spec.filename}" was not added. Put it in its own tab to include it.`,
         })
         continue
       }
@@ -2875,7 +2896,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (page.frontmatterError) {
       warnings.push({
         code: 'unsupported-config',
-        message: `Frontmatter was invalid YAML (${page.frontmatterError}); the page was kept with a best-effort salvage of its metadata.`,
+        message: `The page's frontmatter is not valid YAML (${page.frontmatterError}); the page was kept and as much of its metadata as could be read was used.`,
         source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
       })
     }
@@ -3286,18 +3307,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.routeSegments.join('/') })),
         docsConfig,
       )
-      if (operationLinks.size > 0 || prefixLandings.size > 0) {
-        const unmatched = new Set<string>()
-        for (const page of pages) {
-          page.body = rewriteApiOperationLinks(page.body, operationLinks, prefixLandings, unmatched)
-        }
-        if (unmatched.size > 0) {
-          warnings.push({
-            code: 'unsupported-config',
-            message: `${unmatched.size} API operation link(s) did not match a known operation and were pointed at their API section's landing page instead: ${[...unmatched].sort().join(', ')}`,
-          })
-        }
-      }
+      rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
     }
   } else if (platform === 'mintlify') {
     const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs)
@@ -3312,18 +3322,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.directory })),
         docsConfig,
       )
-      if (operationLinks.size > 0 || prefixLandings.size > 0) {
-        const unmatched = new Set<string>()
-        for (const page of pages) {
-          page.body = rewriteApiOperationLinks(page.body, operationLinks, prefixLandings, unmatched)
-        }
-        if (unmatched.size > 0) {
-          warnings.push({
-            code: 'unsupported-config',
-            message: `${unmatched.size} API operation link(s) did not match a known operation and were pointed at their API section's landing page instead: ${[...unmatched].sort().join(', ')}`,
-          })
-        }
-      }
+      rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
     } else {
       // No docs.json-configured spec at all: fall back to a naive repo scan,
       // matching every other platform's baseline behavior.
