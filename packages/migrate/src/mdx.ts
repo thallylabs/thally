@@ -170,9 +170,10 @@ function unwrapDocusaurusMdxCodeBlocks(body: string): string {
   return isMdxCodeBlock ? body : output.join('\n')
 }
 
-/** Keep explicit heading anchors without leaving `{#id}` as an MDX expression. */
-function normalizeExplicitHeadingIds(body: string): string {
-  return replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
+/** Keep explicit heading anchors without leaving `{#id}` as an MDX expression. Frontmatter is left untouched. */
+export function normalizeExplicitHeadingIds(raw: string): string {
+  const { front, body } = splitFrontmatterBlock(raw)
+  return front + replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
     if (!/^[ \t]{0,3}#{1,6}[ \t]+/.test(line)) return line
     const trimmed = line.trimEnd()
     // Check suffixes from the end instead of matching unbounded whitespace
@@ -602,52 +603,6 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
       return { body: protectedBody, converted }
     }
   }
-}
-
-/**
- * Preserve a heading's explicit anchor id (`## Heading {#custom-id}` — a
- * convention several Markdown/MDX platforms support, including live
- * Docusaurus sources and crewAI's own Mintlify docs, e.g.
- * `### Memory & embedder config {#memory-embedder-config}`). MDX always
- * evaluates `{...}` as a JS expression, and `#custom-id` isn't valid
- * JavaScript, so this crashes `@mdx-js/mdx`'s parser outright wherever
- * something needs a real MDX parse of the page — both `components.ts`'s
- * own component-import analysis and the final compiled output — silently
- * excluding the whole page. Thally's heading renderer (`createHeading` in
- * mdx-components.tsx) always derives the anchor id from the heading's
- * rendered text and has no way to honor an explicit `id` prop on `h2`/`h3`,
- * so the custom id can't be attached to the heading element itself —
- * instead, an empty `<a id="custom-id"></a>` is inserted immediately
- * before the heading. A browser resolves a `#hash` to *any* element with a
- * matching `id`, not just headings, so an existing in-repo or migrated
- * link to `#custom-id` still lands in the right place; only the exact
- * scroll offset shifts up by one heading's height, same as Docusaurus'
- * own `hash-in-anchor-vs-on-heading` implementations do for a heading with
- * children before its own anchor point in some themes. This syntax means
- * the same thing on every platform Thally migrates from (and no platform
- * uses `{#...}`-shaped text for anything else), so it applies regardless
- * of platform; and it never touches the YAML frontmatter block, so it is
- * safe to call directly on a page's raw source before any parse — MDX or
- * otherwise — is attempted. Always separated from surrounding content by
- * blank lines so it can never be swallowed into a preceding paragraph as a
- * lazy continuation line.
- */
-export function preserveMdxHeadingCustomIds(raw: string): { body: string; converted: boolean } {
-  const { front, body } = splitFrontmatterBlock(raw)
-  let converted = false
-  const rewritten = replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
-    if (!/^#{1,6}[ \t]+/.test(line)) return line
-    // Look for the suffix from the end: a regex with lazy text before optional
-    // whitespace backtracks quadratically on long headings with no id.
-    const trimmed = line.trimEnd()
-    const marker = trimmed.lastIndexOf('{#')
-    const id = marker > 0 && trimmed.endsWith('}') ? trimmed.slice(marker + 2, -1) : ''
-    const heading = trimmed.slice(0, marker).trimEnd()
-    if (!/^[A-Za-z0-9_-]+$/.test(id) || !/^#{1,6}[ \t]+\S/.test(heading)) return line
-    converted = true
-    return `\n<a id=${JSON.stringify(id)}></a>\n\n${heading}`
-  }).join('\n'))
-  return { body: front + rewritten, converted }
 }
 
 export function escapeFernLiteralBraces(raw: string): string {
@@ -1572,7 +1527,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   const runMintlify = platform === 'mintlify'
   const runDocusaurus = platform === 'docusaurus'
 
-  // A heading's explicit `{#custom-id}` anchor (see `preserveMdxHeadingCustomIds`)
+  // A heading's explicit `{#custom-id}` anchor (see `normalizeExplicitHeadingIds`)
   // means the same thing on every platform, so — unlike the platform-specific
   // renames below — this always runs, even when `platform` is omitted.
   // `normalizeExplicitHeadingIds` also covers Docusaurus' `{/* #id */}`

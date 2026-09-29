@@ -3,7 +3,7 @@
 import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
-import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, preserveMdxHeadingCustomIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -509,44 +509,35 @@ describe('multi-line renames (fenced/inline code masked, whole body rewritten)',
   })
 })
 
-describe('preserveMdxHeadingCustomIds', () => {
-  it('replaces a heading\'s trailing {#custom-id} anchor with a preceding <a id> element, keeping the heading text', () => {
-    // This exact construct (real crewAI content) crashes @mdx-js/mdx's
-    // parser outright ("Could not parse expression with acorn") because
-    // `#memory-embedder-config` isn't valid JavaScript, silently excluding
-    // the whole page before this ran.
-    const body = '### Memory & embedder config {#memory-embedder-config}\n\nSome prose.'
-    const result = preserveMdxHeadingCustomIds(body)
-    expect(result.converted).toBe(true)
-    expect(result.body).toBe('\n<a id="memory-embedder-config"></a>\n\n### Memory & embedder config\n\nSome prose.')
-    expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
+describe('normalizeExplicitHeadingIds', () => {
+  it('replaces a heading\'s trailing {#custom-id} with an <a id> element, keeping the heading text, and the result compiles', () => {
+    // Real crewAI content: `{#memory-embedder-config}` makes @mdx-js/mdx fail
+    // with "Could not parse expression with acorn" and excluded the whole page.
+    const result = normalizeExplicitHeadingIds('### Memory & embedder config {#memory-embedder-config}\n\nSome prose.')
+    expect(result).toBe('<a id="memory-embedder-config"></a>\n### Memory & embedder config\n\nSome prose.')
+    expect(() => compileSync(result, { format: 'mdx' })).not.toThrow()
   })
 
   it('leaves a real fenced code block containing heading-shaped text untouched', () => {
     const body = ['```md', '### Not a real heading {#fake-id}', '```'].join('\n')
-    const result = preserveMdxHeadingCustomIds(body)
-    expect(result.converted).toBe(false)
-    expect(result.body).toBe(body)
+    expect(normalizeExplicitHeadingIds(body)).toBe(body)
   })
 
   it('leaves a heading with no custom id unchanged', () => {
     const body = '## Plain heading\n\nSome prose.'
-    const result = preserveMdxHeadingCustomIds(body)
-    expect(result.converted).toBe(false)
-    expect(result.body).toBe(body)
+    expect(normalizeExplicitHeadingIds(body)).toBe(body)
+  })
+
+  it('never touches the YAML frontmatter block', () => {
+    const body = '---\ntitle: "{#not-a-heading}"\n---\n\n## Heading {#real-id}'
+    expect(normalizeExplicitHeadingIds(body)).toBe('---\ntitle: "{#not-a-heading}"\n---\n\n<a id="real-id"></a>\n## Heading')
   })
 
   it('stays fast on a very long heading with no custom id', () => {
     const body = `# a${' '.repeat(60_000)}b`
     const started = Date.now()
-    expect(preserveMdxHeadingCustomIds(body)).toEqual({ body, converted: false })
+    expect(normalizeExplicitHeadingIds(body)).toBe(body)
     expect(Date.now() - started).toBeLessThan(500)
-  })
-
-  it('never touches the YAML frontmatter block', () => {
-    const body = '---\ntitle: "{#not-a-heading}"\n---\n\n## Heading {#real-id}'
-    const result = preserveMdxHeadingCustomIds(body)
-    expect(result.body).toBe('---\ntitle: "{#not-a-heading}"\n---\n\n\n<a id="real-id"></a>\n\n## Heading')
   })
 })
 

@@ -15,7 +15,7 @@ import ts from 'typescript'
 import { unified } from 'unified'
 
 import { parseFrontmatter } from './frontmatter.js'
-import { functionDeclaredNames, isFunctionInitializer, normalizeHtmlComments, preserveMdxHeadingCustomIds } from './mdx.js'
+import { functionDeclaredNames, isFunctionInitializer, normalizeHtmlComments, normalizeExplicitHeadingIds } from './mdx.js'
 import { resolveWithin } from './path.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
 
@@ -958,7 +958,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // function's own parse below, or that parse throws first and this
     // whole page's import analysis is skipped instead of just this one
     // page's expression.
-    const content = preserveMdxHeadingCustomIds(normalizeIndentedFences(normalizeHtmlComments(parsedFrontmatter))).body
+    const content = normalizeExplicitHeadingIds(normalizeIndentedFences(normalizeHtmlComments(parsedFrontmatter)))
     let tree: MdxNode
     try {
       tree = parser.parse(content) as MdxNode

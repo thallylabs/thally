@@ -47,7 +47,7 @@ import {
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
-import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, preserveMdxHeadingCustomIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -2783,11 +2783,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
       // A heading's `{#custom-id}` anchor (`## Title {#custom-id}`) crashes
       // `@mdx-js/mdx`'s parser outright, so it must be converted to a
-      // preceding `<a id="custom-id"></a>` (see `preserveMdxHeadingCustomIds`)
+      // preceding `<a id="custom-id"></a>` (see `normalizeExplicitHeadingIds`)
       // before ANY MDX parse of this page is attempted — including
       // `componentMigrator.transform` below, whose own early parse would
       // otherwise choke on it and skip the page's import analysis entirely.
-      raw = preserveMdxHeadingCustomIds(raw).body
+      raw = normalizeExplicitHeadingIds(raw)
     }
     if (componentMigrator) {
       const warningsBeforeTransform = warnings.length
