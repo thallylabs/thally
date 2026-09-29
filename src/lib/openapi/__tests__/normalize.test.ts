@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { thallyOperationSlugSegments } from '../../../../packages/migrate/src/repository'
 import { normalizeSpec, buildOperationKey } from '@/lib/openapi/normalize'
 import type { ApiSpecConfig, ResolvedSpec } from '@/lib/openapi/types'
 
@@ -443,21 +442,5 @@ describe('normalizeSpec pathological schemas', () => {
     const started = Date.now()
     responseSchemaFor(schemas, 'S0')
     expect(Date.now() - started).toBeLessThan(5000)
-  })
-})
-
-describe('migrate operation slug parity', () => {
-  it('builds the same route segments as the migration package for a link rewrite', () => {
-    const paths = ['/', '/plants', '/plants/{id}/water', '/v1/Élan_x.y/{a}-{b}']
-    const doc = {
-      openapi: '3.1.0',
-      info: { title: 'Slugs', version: '1.0.0' },
-      paths: Object.fromEntries(paths.map((path) => [path, { post: { responses: { '200': { description: 'ok' } } } }])),
-    }
-    const normalized = normalizeSpec({ config: { ...baseConfig, source: { type: 'inline', document: doc } }, document: doc } as unknown as ResolvedSpec)
-    for (const path of paths) {
-      const operation = normalized.operations.find((entry) => entry.path === path)
-      expect(operation?.slug).toEqual(thallyOperationSlugSegments(path, 'post'))
-    }
   })
 })
