@@ -403,6 +403,7 @@ describe('Mintlify repository migration', () => {
       },
       redirects: [
         { source: '/guides', destination: '/guides/introduction', permanent: false },
+        { source: '/management', destination: '/management/runs', permanent: false },
       ],
     })
     expect(bundle.pages.map((page) => page.id)).toEqual([
@@ -461,6 +462,149 @@ describe('Mintlify repository migration', () => {
     expect(apiTab?.api).toEqual({ source: '/service.yml', navigation: false })
     expect(bundle.docsConfig.tabs.find((tab) => tab.tab === 'Guides')?.api).toBeUndefined()
     expect(bundle.assets.map((asset) => asset.path)).toContain('service.yml')
+  })
+
+  it('resolves an object-form `openapi: { source, directory }` group reference and warns that the directory scoping is lost', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [{
+          tab: 'Documentation',
+          groups: [{
+            group: 'API',
+            openapi: { source: 'qstash/openapi.yaml', directory: 'qstash/api-reference' },
+          }],
+        }],
+      },
+    }))
+    mkdirSync(join(root, 'qstash'), { recursive: true })
+    writeFileSync(join(root, 'qstash', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: { title: QStash, version: "1.0" }\npaths: {}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Documentation')
+    expect(apiTab?.api).toEqual({ source: '/openapi.yaml', navigation: false })
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi.yaml')
+    expect(bundle.warnings.some((warning) =>
+      warning.message.includes('qstash/api-reference') && warning.message.includes('covers a whole tab'))).toBe(true)
+  })
+
+  it('warns instead of silently dropping a second OpenAPI spec that resolves to an already-bound tab', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [{
+          tab: 'Documentation',
+          groups: [
+            { group: 'A', openapi: 'a/openapi.yaml' },
+            { group: 'B', openapi: 'b/openapi.yaml' },
+          ],
+        }],
+      },
+    }))
+    mkdirSync(join(root, 'a'), { recursive: true })
+    mkdirSync(join(root, 'b'), { recursive: true })
+    writeFileSync(join(root, 'a', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: { title: A, version: "1.0" }\npaths: {}')
+    writeFileSync(join(root, 'b', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: { title: B, version: "1.0" }\npaths: {}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Documentation')
+    expect(apiTab?.api?.source).toBe('/openapi.yaml')
+    expect(bundle.warnings.some((warning) =>
+      warning.message.includes('already uses another OpenAPI spec'))).toBe(true)
+  })
+
+  it('disambiguates two OpenAPI specs bound to different tabs that share a basename, instead of one asset silently overwriting the other', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [
+          { tab: 'QStash', openapi: 'qstash/openapi.yaml' },
+          { tab: 'Workflow', openapi: 'workflow/openapi.yaml' },
+        ],
+      },
+    }))
+    mkdirSync(join(root, 'qstash'), { recursive: true })
+    mkdirSync(join(root, 'workflow'), { recursive: true })
+    writeFileSync(join(root, 'qstash', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: { title: QStash, version: "1.0" }\npaths: {}')
+    writeFileSync(join(root, 'workflow', 'openapi.yaml'), 'openapi: 3.1.0\ninfo: { title: Workflow, version: "1.0" }\npaths: {}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const qstashTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'QStash')
+    const workflowTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Workflow')
+    expect(qstashTab?.api?.source).toBeDefined()
+    expect(workflowTab?.api?.source).toBeDefined()
+    // Distinct assets, each with the right tab's own content — neither
+    // spec silently overwrote the other's bytes.
+    expect(qstashTab?.api?.source).not.toBe(workflowTab?.api?.source)
+    const qstashAsset = bundle.assets.find((asset) => `/${asset.path}` === qstashTab?.api?.source)
+    const workflowAsset = bundle.assets.find((asset) => `/${asset.path}` === workflowTab?.api?.source)
+    expect(qstashAsset?.content.toString()).toContain('title: QStash')
+    expect(workflowAsset?.content.toString()).toContain('title: Workflow')
+    expect(bundle.warnings.some((warning) => warning.message.includes('already uses another OpenAPI spec'))).toBe(false)
+  })
+
+  it('rewrites in-content links to Mintlify auto-generated operation pages to the matching Thally /api/ route', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [{
+          tab: 'Documentation',
+          groups: [{
+            group: 'API',
+            openapi: { source: 'qstash/openapi.yaml', directory: 'qstash/api-reference' },
+          }],
+        }],
+      },
+    }))
+    mkdirSync(join(root, 'qstash'), { recursive: true })
+    writeFileSync(join(root, 'qstash', 'openapi.yaml'), [
+      'openapi: 3.1.0',
+      'info: { title: QStash, version: "1.0" }',
+      'paths:',
+      '  /v2/publish/{destination}:',
+      '    post:',
+      '      summary: Publish a Message',
+      '      tags: [Messages]',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    writeFileSync(join(root, 'guide.mdx'), [
+      '---',
+      'title: Guide',
+      '---',
+      '',
+      'See [publish](/qstash/api-reference/messages/publish-a-message) for details.',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const guide = bundle.pages.find((page) => page.id === 'guide')
+    // The first (only) API-bound tab keeps the stable 'default' spec id;
+    // the operation's route is path+method based, never the summary.
+    expect(guide?.body).toContain('[publish](/api/default/v2/publish/destination/post)')
+    expect(guide?.body).not.toContain('/qstash/api-reference/messages/publish-a-message')
+  })
+
+  it('drops a manual OpenAPI operation listing ("GET /path") with one warning instead of one missing-page warning per operation', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [{
+          tab: 'API Reference',
+          openapi: 'service.yml',
+          pages: ['GET /users', 'POST /users', 'landing'],
+        }],
+      },
+    }))
+    writeFileSync(join(root, 'service.yml'), 'openapi: 3.1.0\ninfo: { title: Service, version: "1.0" }\npaths: {}')
+    writeFileSync(join(root, 'landing.mdx'), '---\ntitle: Landing\n---\n\nLanding.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.warnings.filter((warning) => warning.code === 'missing-page')).toHaveLength(0)
+    expect(bundle.warnings.filter((warning) => /hand-pick or reorder individual OpenAPI operations/.test(warning.message))).toHaveLength(1)
   })
 
   it('defers remote OpenAPI downloads and keeps other content', () => {
@@ -1064,6 +1208,20 @@ describe('Mintlify repository migration', () => {
     expect(paths.indexOf('images/referenced.png')).toBeLessThan(paths.indexOf('images/unreferenced.png'))
   })
 
+  it('migrates .wav, .ogg, and .m4a audio assets', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'images', 'greeting.wav'), 'wav-bytes')
+    writeFileSync(join(root, 'images', 'greeting.ogg'), 'ogg-bytes')
+    writeFileSync(join(root, 'images', 'greeting.m4a'), 'm4a-bytes')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const paths = bundle.assets.map((asset) => asset.path)
+    expect(paths).toContain('images/greeting.wav')
+    expect(paths).toContain('images/greeting.ogg')
+    expect(paths).toContain('images/greeting.m4a')
+  })
+
   it('warns which page(s) reference an asset that is still dropped for being too large', () => {
     const root = fixture()
     // Over MAX_ASSET_BYTES (25MB) on its own, so it is dropped regardless of
@@ -1121,6 +1279,132 @@ describe('Mintlify repository migration', () => {
       message: expect.stringContaining('Git LFS pointer'),
     }))
   })
+
+  // Creating 5,000+ fixture files and migrating them is inherently slower
+  // than the suite's default 5s per-test timeout.
+  it('keeps the default version\'s referenced pages over unreferenced ones when discovery exceeds the file budget', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-discovery-budget-'))
+    mkdirSync(join(root, 'v2', 'en'), { recursive: true })
+    mkdirSync(join(root, 'v1', 'en'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: {
+        versions: [
+          { version: 'v1', tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['v1/en/introduction'] }] }] },
+          { version: 'v2', default: true, tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['v2/en/introduction'] }] }] },
+        ],
+      },
+    }))
+    writeFileSync(join(root, 'v2', 'en', 'introduction.mdx'), '---\ntitle: Welcome v2\n---\n\nDefault version docs.')
+    writeFileSync(join(root, 'v1', 'en', 'introduction.mdx'), '---\ntitle: Welcome v1\n---\n\nOlder version docs.')
+    // Unreferenced filler pages under the non-default version, enough to
+    // push total discovery past the 5,000-file budget: the two referenced
+    // pages above must survive regardless of scan order, and the dropped
+    // filler files (all under v1/) must be named in the warning.
+    for (let index = 0; index < 5000; index++) {
+      writeFileSync(join(root, 'v1', 'en', `filler-${index}.mdx`), `---\ntitle: Filler ${index}\n---\n\nUnreferenced filler page.`)
+    }
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const pageIds = bundle.pages.map((page) => page.id)
+    expect(pageIds).toContain('v2/en/introduction')
+    expect(pageIds).toContain('v1/en/introduction')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'limit-reached',
+      message: expect.stringMatching(/left out.*v1/s),
+    }))
+  }, 90_000)
+
+  it('keeps the first pages in navigation order and names what was dropped when one version alone exceeds the file budget', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-single-version-budget-'))
+    mkdirSync(join(root, 'en'), { recursive: true })
+    const pageIds = Array.from({ length: 5010 }, (_, index) => `en/page-${String(index).padStart(4, '0')}`)
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: pageIds }] }] },
+    }))
+    for (const id of pageIds) writeFileSync(join(root, `${id}.mdx`), `---\ntitle: ${id}\n---\n\nPage.`)
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const migrated = bundle.pages.map((page) => page.id)
+    expect(migrated).toContain('en/page-4999')
+    expect(migrated).not.toContain('en/page-5000')
+    const warning = bundle.warnings.find((entry) => entry.code === 'limit-reached')
+    expect(warning?.message).toContain('10 page(s) were left out')
+    expect(warning?.message).toContain('en/page-5000.mdx')
+    expect(warning?.message).toContain('--docs-dir')
+    expect(warning?.message).toContain('and 7 more')
+    expect(warning?.message).not.toMatch(/lower-priority|budget/)
+  }, 90_000)
+
+  // Regression test for the bug fixed alongside the file-cap prioritization
+  // above: pages and assets used to share one MAX_SOURCE_FILES budget, so a
+  // Mintlify project with more navigation-referenced *pages* than the
+  // budget filled the whole budget with pages before a single asset was
+  // ever considered — even though the asset was well within its own
+  // MAX_ASSET_BYTES/MAX_TOTAL_ASSET_BYTES limits.
+  it('still copies a referenced asset when navigation-referenced pages alone exceed the file budget', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-asset-budget-'))
+    mkdirSync(join(root, 'en'), { recursive: true })
+    mkdirSync(join(root, 'images'), { recursive: true })
+    const pageIds = Array.from({ length: 5001 }, (_, index) => `en/page-${index}`)
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: pageIds }] }] },
+    }))
+    for (const id of pageIds) {
+      const isFirst = id === pageIds[0]
+      writeFileSync(join(root, `${id}.mdx`), `---\ntitle: ${id}\n---\n\n${
+        isFirst ? '![Diagram](/images/diagram.png)' : 'Filler page.'
+      }`)
+    }
+    writeFileSync(join(root, 'images', 'diagram.png'), 'fake-png-bytes')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.assets.map((asset) => asset.path)).toContain('images/diagram.png')
+  }, 90_000)
+
+  // Regression test for a second bug found alongside the two above: a real
+  // file Mintlify still serves by file-based routing even though nothing in
+  // the sidebar links to it (an "orphan" page, e.g. crewAI's
+  // tools/web-scraping/firecrawlsearchtool.mdx) used to get the exact same
+  // flat lowest priority regardless of which version it belonged to. When a
+  // repository's total *unreferenced* page count alone exceeds the budget,
+  // that let an older, non-default version's orphan pages crowd out the
+  // default version's own orphan pages purely by scan order.
+  it('keeps the default version\'s own unreferenced pages over an older version\'s when discovery exceeds the file budget', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-orphan-budget-'))
+    mkdirSync(join(root, 'v2', 'en'), { recursive: true })
+    mkdirSync(join(root, 'v1', 'en'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: {
+        versions: [
+          { version: 'v1', tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['v1/en/introduction'] }] }] },
+          { version: 'v2', default: true, tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['v2/en/introduction'] }] }] },
+        ],
+      },
+    }))
+    writeFileSync(join(root, 'v2', 'en', 'introduction.mdx'), '---\ntitle: Welcome v2\n---\n\nDefault version docs.')
+    writeFileSync(join(root, 'v1', 'en', 'introduction.mdx'), '---\ntitle: Welcome v1\n---\n\nOlder version docs.')
+    // A real file that exists but is never linked from the nav — Mintlify
+    // still serves it, so it must survive the budget ahead of an older
+    // version's unreferenced filler pages.
+    writeFileSync(join(root, 'v2', 'en', 'orphan.mdx'), '---\ntitle: Orphan v2\n---\n\nNot in the sidebar, but live on the site.')
+    // Enough unreferenced filler under the older, non-default version to
+    // push total discovery past the 5,000-file budget on its own.
+    for (let index = 0; index < 5000; index++) {
+      writeFileSync(join(root, 'v1', 'en', `filler-${index}.mdx`), `---\ntitle: Filler ${index}\n---\n\nUnreferenced filler page.`)
+    }
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const pageIds = bundle.pages.map((page) => page.id)
+    expect(pageIds).toContain('v2/en/orphan')
+  }, 90_000)
 })
 
 function docusaurusFixture(sidebarSource?: string): string {
@@ -1487,6 +1771,81 @@ describe('Docusaurus repository migration', () => {
       message: expect.stringContaining('could not be read safely'),
     }))
     expect(bundle.docsConfig.tabs[0].tab).toBe('Documentation')
+  })
+
+  it("finds the primary docs instance's default 'docs' directory instead of a later plugin's path (hasura/graphql-engine shape: preset docs: {} has no path, a sibling content-docs plugin does)", () => {
+    const repositoryDir = mkdtempSync(join(tmpdir(), 'thally-migrate-docusaurus-primary-path-'))
+    mkdirSync(join(repositoryDir, 'docs'), { recursive: true })
+    mkdirSync(join(repositoryDir, 'wiki'), { recursive: true })
+    writeFileSync(join(repositoryDir, 'docusaurus.config.js'), `
+      module.exports = {
+        presets: [
+          ['classic', {
+            docs: {
+              routeBasePath: '/',
+              sidebarPath: require.resolve('./sidebars.js'),
+              versions: {
+                current: { label: 'v2.x', badge: true, path: '' },
+              },
+            },
+          }],
+        ],
+        plugins: [[
+          'content-docs',
+          { id: 'wiki', path: 'wiki', routeBasePath: 'wiki' },
+        ]],
+      }
+    `)
+    writeFileSync(join(repositoryDir, 'docs', 'index.mdx'), '---\ntitle: Introduction\n---\n\nMain docs.')
+    writeFileSync(join(repositoryDir, 'wiki', 'index.mdx'), '---\ntitle: Wiki\n---\n\nWiki introduction.')
+
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/hasura/graphql-engine' })
+
+    expect(bundle.pages.some((page) => page.body.includes('Main docs.'))).toBe(true)
+    expect(bundle.pages.some((page) => page.body.includes('Wiki introduction.'))).toBe(true)
+  })
+
+  it("removes an unresolvable @site component import on a page whose heading has an explicit {#id} anchor (components.ts's own MDX parse used to choke on the {#id} before it ever reached the import, leaving it in the emitted page and breaking next build)", () => {
+    const repositoryDir = docusaurusFixture()
+    writeFileSync(join(repositoryDir, 'docs', 'custom-heading-id-guide.mdx'), [
+      "import Thumbnail from '@site/src/components/Thumbnail';",
+      '',
+      '# Guide {#custom-guide-id}',
+      '',
+      '<Thumbnail src="/img/x.png" />',
+      '',
+      'Body text.',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    const page = bundle.pages.find((p) => p.body.includes('Body text.'))!
+    expect(page).toBeDefined()
+    expect(page.body).not.toContain("from '@site/src/components/Thumbnail'")
+    expect(page.body).toContain('<a id="custom-guide-id"></a>')
+  })
+
+  it("preserves a case-preserved heading id used in a link's #fragment (live Docusaurus renders a heading's id with case intact; Thally always lowercases its auto-slug) by anchoring the target heading, leaving the link itself untouched", () => {
+    const repositoryDir = docusaurusFixture()
+    writeFileSync(join(repositoryDir, 'docs', 'api', '01-auth.md'), '---\ntitle: Authentication\nsidebar_position: 1\n---\n\n## Using AI Agents With Cypress\n\nDetails.')
+    writeFileSync(join(repositoryDir, 'docs', 'guide', '02-faq.md'), [
+      '---',
+      'title: FAQ',
+      '---',
+      '',
+      '[See the section](../api/01-auth.md#Using-AI-Agents-With-Cypress)',
+      '',
+      'Self link too: [here](#Self-Section)',
+      '',
+      '## Self Section',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir, sourceUrl: 'https://github.com/acme/docusaurus-docs', platform: 'docusaurus' })
+    const faq = bundle.pages.find((page) => page.body.includes('See the section'))!
+    const auth = bundle.pages.find((page) => page.id === 'api/auth')!
+    expect(faq).toBeDefined()
+    expect(auth).toBeDefined()
+    expect(faq.body).toContain('(/api/auth#Using-AI-Agents-With-Cypress)')
+    expect(faq.body).toContain('(#Self-Section)')
+    expect(auth.body).toContain('<a id="Using-AI-Agents-With-Cypress"></a>\n## Using AI Agents With Cypress')
+    expect(faq.body).toContain('<a id="Self-Section"></a>\n## Self Section')
   })
 
   it('discovers monorepo projects, static external wrappers, aliases, plugins, and literal index slugs', () => {
@@ -2112,12 +2471,45 @@ describe('Fern repository migration', () => {
   it('warns instead of silently skipping when a chosen version file cannot be read', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-versions-unreadable-'))
     // Oversized rather than malformed: the `yaml` parser is lenient about
-    // syntax, but `readBoundedYaml` throws once a file exceeds its 2 MB cap,
+    // syntax, but `readBoundedYaml` throws once a file exceeds its 20 MB cap,
     // which previously hit the bare `catch {}` and vanished without a trace.
-    writeFileSync(join(root, 'v1.yml'), `navigation:\n${'  # padding\n'.repeat(180_000)}`)
+    writeFileSync(join(root, 'v1.yml'), `navigation:\n${'  # padding\n'.repeat(1_800_000)}`)
     const config = { versions: [{ version: 'v1', path: 'v1.yml', default: true }] }
     const projected = projectFernNavigation({ config, fernRoot: root })
     expect(projected.warnings.some((warning) => warning.message.includes('could not be read'))).toBe(true)
+  })
+
+  it('resolves a Fern version file living outside fern/ (a legitimate sibling docs/ layout) and imports its pages', () => {
+    // NVIDIA-NeMo/Guardrails' real layout: fern/docs.yml declares
+    // `versions: [{ path: ../docs/index.yml }]`, a sibling of fern/ rather
+    // than a file under it. Previously this failed outright ("Migration
+    // path escapes its root") because the version file was confined to
+    // fern/ instead of the whole repository checkout.
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-versions-sibling-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(fernRoot, { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), 'versions:\n  - version: v1\n    path: ../docs/index.yml\n    default: true\n')
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'index.yml'), 'navigation:\n  - page: Welcome\n    path: welcome.mdx\n')
+    writeFileSync(join(root, 'docs', 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello from outside fern/.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    expect(bundle.warnings.some((warning) => warning.message.includes('escapes its root'))).toBe(false)
+    expect(bundle.warnings.some((warning) => warning.message.includes('could not be read'))).toBe(false)
+    const welcome = bundle.pages.find((page) => page.id === 'welcome')
+    expect(welcome?.body).toContain('Hello from outside fern/.')
+  })
+
+  it('still rejects a Fern version file that escapes the repository checkout itself', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-versions-escape-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(fernRoot, { recursive: true })
+    const config = { versions: [{ version: 'v1', path: '../../outside.yml', default: true }] }
+    const projected = projectFernNavigation({ config, fernRoot, repositoryRoot: root })
+    expect(projected.warnings.some((warning) =>
+      warning.message.includes('could not be read') && warning.message.includes('escapes its root'))).toBe(true)
   })
 
   it('imports every product from a `products:` docs.yml as its own top-level, route-prefixed tab', () => {
@@ -2260,6 +2652,216 @@ navigation:
     // the mode it paints); they're swapped here onto Mintlify's inverted
     // `{light, dark}` keys so `updateSiteConfig` has one consistent contract.
     expect(bundle.site).toEqual({ name: 'Acme Docs', colors: { light: '#70E155', dark: '#008700' } })
+  })
+
+  it('rewrites in-content links to Fern auto-generated operation pages to the matching Thally /api/ route', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-link-rewrite-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'rest'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Guide
+    path: guide.mdx
+  - section: API Reference
+    contents:
+      - api: REST API
+        api-name: rest
+        skip-slug: true
+`)
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'openapi.yml'), [
+      'openapi: 3.1.0',
+      'info: { title: REST, version: "1.0" }',
+      'paths:',
+      '  /v2/publish/{destination}:',
+      '    post:',
+      '      summary: Publish a Message',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    writeFileSync(join(fernRoot, 'guide.mdx'), [
+      '---',
+      'title: Guide',
+      '---',
+      '',
+      'See [publish](/api-reference/publish-a-message) for details.',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const guide = bundle.pages.find((page) => page.id === 'guide')
+    expect(guide?.body).toContain('[publish](/api/default/v2/publish/destination/post)')
+    expect(guide?.body).not.toContain('/api-reference/publish-a-message')
+  })
+
+  it('matches Fern operation pages by their route (own node slug included) and by operationId method name, not just the summary', () => {
+    // Confirmed against a live Fern site (VapiAI): an `api:` node without
+    // `skip-slug` adds its own slug to the route ("api-reference/webhooks/
+    // ..."), and when `operationId` is present ("ToolController_create"),
+    // Fern's page slug is that id's last segment ("create"), not
+    // kebab(summary) ("create-tool").
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-link-rewrite-real-shape-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'webhooks'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    // Fern navigation is either all-tabs or no-tabs at the top level; a
+    // bare page alongside a `tab:` entry is not a valid shape, so the guide
+    // page lives in its own "documentation" tab, matching a real docs.yml
+    // (confirmed against VapiAI's).
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - tab: documentation
+    layout:
+      - page: Guide
+        path: guide.mdx
+  - tab: api-reference
+    layout:
+      - api: API reference
+        api-name: api
+        skip-slug: true
+      - api: Webhooks
+        api-name: webhooks
+`)
+    mkdirSync(join(fernRoot, 'apis', 'api'), { recursive: true })
+    writeFileSync(join(fernRoot, 'apis', 'api', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.json\n')
+    writeFileSync(join(fernRoot, 'apis', 'api', 'openapi.json'), JSON.stringify({
+      openapi: '3.0.0',
+      info: { title: 'API', version: '1.0' },
+      paths: {
+        '/tool': {
+          post: { summary: 'Create Tool', operationId: 'ToolController_create', tags: ['Tools'], responses: { 200: { description: 'ok' } } },
+        },
+        '/call/{id}': {
+          get: { summary: 'Get Call', operationId: 'CallController_findOne', tags: ['Calls'], responses: { 200: { description: 'ok' } } },
+        },
+      },
+    }))
+    writeFileSync(join(fernRoot, 'apis', 'webhooks', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'webhooks', 'openapi.yml'), [
+      'openapi: 3.0.0',
+      'info: { title: Webhooks, version: "1.0" }',
+      'paths:',
+      '  /server:',
+      '    post:',
+      '      summary: Server Message',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    writeFileSync(join(fernRoot, 'guide.mdx'), [
+      '---',
+      'title: Guide',
+      '---',
+      '',
+      'See [create a tool](/api-reference/tools/create), the',
+      '[get call endpoint](/api-reference/calls/get), and the',
+      '[server message webhook](/api-reference/webhooks/server-message).',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const guide = bundle.pages.find((page) => page.id === 'documentation/guide')
+    expect(guide?.body).toContain('[create a tool](/api/default/tool/post)')
+    // `operationId: "CallController_findOne"` maps through the NestJS ->
+    // Fern REST-conventional table ("findOne" -> "get"), not a literal
+    // kebab of the id's last segment ("find-one").
+    expect(guide?.body).toContain('[get call endpoint](/api/default/call/id/get)')
+    expect(guide?.body).toMatch(/\[server message webhook\]\(\/api\/[a-z-]+\/server\/post\)/)
+    expect(guide?.body).not.toContain('/api-reference/tools/create')
+    expect(guide?.body).not.toContain('/api-reference/webhooks/server-message')
+  })
+
+  it('rewrites a bare API-tab landing link to the spec landing route, and an unmatched operation link to the same route with one aggregated warning', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-landing-link-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'rest'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - tab: documentation
+    layout:
+      - page: Guide
+        path: guide.mdx
+  - tab: api-reference
+    layout:
+      - api: API reference
+        api-name: rest
+        skip-slug: true
+`)
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'openapi.yml'), [
+      'openapi: 3.1.0',
+      'info: { title: REST, version: "1.0" }',
+      'paths:',
+      '  /tool:',
+      '    post:',
+      '      summary: Create Tool',
+      '      operationId: ToolController_create',
+      '      tags: [Tools]',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    writeFileSync(join(fernRoot, 'guide.mdx'), [
+      '---',
+      'title: Guide',
+      '---',
+      '',
+      'See the [API reference](/api-reference) for everything, the',
+      '[create tool endpoint](/api-reference/tools/create), and the',
+      '[deleted endpoint](/api-reference/tools/delete) (removed since).',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const guide = bundle.pages.find((page) => page.id === 'documentation/guide')
+    // Bare tab-landing link -> the spec's Thally landing route.
+    expect(guide?.body).toContain('[API reference](/api)')
+    // Matched operation link -> its real operation route, as before.
+    expect(guide?.body).toContain('[create tool endpoint](/api/default/tool/post)')
+    // Unmatched operation link -> falls back to the landing route rather
+    // than staying broken.
+    expect(guide?.body).toContain('[deleted endpoint](/api)')
+    expect(guide?.body).not.toContain('/api-reference')
+    // Exactly one aggregated warning names the unmatched link.
+    const unmatchedWarnings = bundle.warnings.filter((warning) =>
+      warning.message.includes('matched no endpoint'))
+    expect(unmatchedWarnings).toHaveLength(1)
+    expect(unmatchedWarnings[0]!.message).toContain('/api-reference/tools/delete')
+  })
+
+  it('disambiguates two api: sections with the same tab label and a self-repeating route segment instead of a redundant "X: X" name', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-dup-tab-label-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'rest'), { recursive: true })
+    mkdirSync(join(fernRoot, 'apis', 'webhooks'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    // Both `api:` nodes are direct children of "API Reference" sections that
+    // share that exact title, so the plain distinguishing-segment fallback
+    // would title-case straight back to "API Reference" for the second one.
+    writeFileSync(join(fernRoot, 'docs.yml'), `
+navigation:
+  - page: Welcome
+    path: welcome.mdx
+  - section: API Reference
+    contents:
+      - api: REST API
+        api-name: rest
+  - section: API Reference
+    contents:
+      - api: Webhooks
+        api-name: webhooks
+`)
+    writeFileSync(join(fernRoot, 'welcome.mdx'), '---\ntitle: Welcome\n---\n\nHello.')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.json\n')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'openapi.json'), '{"openapi":"3.0.0","info":{"title":"REST","version":"1.0"},"paths":{}}')
+    writeFileSync(join(fernRoot, 'apis', 'webhooks', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.json\n')
+    writeFileSync(join(fernRoot, 'apis', 'webhooks', 'openapi.json'), '{"openapi":"3.0.0","info":{"title":"Webhooks","version":"1.0"},"paths":{}}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+
+    const apiTabs = bundle.docsConfig.tabs.filter((tab) => tab.api)
+    expect(apiTabs).toHaveLength(2)
+    const labels = apiTabs.map((tab) => tab.tab)
+    expect(new Set(labels).size).toBe(2)
+    // No tab name is the earlier redundant "API Reference: API Reference".
+    expect(labels.every((label) => !/^(.+): \1$/.test(label))).toBe(true)
   })
 
   it('imports every Fern api: section, each bound to its own tab and spec, instead of only the first', () => {
