@@ -338,6 +338,15 @@ function normalizeContent(raw: unknown, deepResolve: (schema: RawObject) => RawO
   })
 }
 
+// Real specs stay far below these caps (VapiAI's, the densest known, needs
+// under 2,000 lookups per schema); they only stop pathological ones —
+// thousands of nesting levels, or a dense clique of mutually-referencing
+// schemas — from overflowing the stack or hanging the build. Past a cap the
+// schema is shown as a short placeholder.
+const MAX_DEPTH = 1000
+const MAX_REF_EXPANSIONS = 200_000
+const MAX_CYCLE_ENTRIES = 1000
+
 /**
  * Builds a schema deep-resolver bound to one spec document. Resolves every
  * $ref pointer it finds — including refs inside properties, items, and
@@ -376,6 +385,8 @@ function createDeepResolver(resolveRef: (ref: string) => RawObject | null) {
   const cycleCache = new Map<string, Array<CycleEntry>>()
   const stack: Array<string> = []
   const frames: Array<Frame> = []
+  let depth = 0
+  let budget = 0
 
   // `ref` (at stack[index]) was reached again while in progress: every frame
   // from it to the top is on that cycle, and every frame above it depends on
@@ -388,6 +399,16 @@ function createDeepResolver(resolveRef: (ref: string) => RawObject | null) {
   }
 
   function resolve(schema: RawObject): RawObject {
+    if (depth >= MAX_DEPTH) return { type: 'object', description: '[Too deeply nested to show]' }
+    depth++
+    try {
+      return resolveNode(schema)
+    } finally {
+      depth--
+    }
+  }
+
+  function resolveNode(schema: RawObject): RawObject {
     // If this node IS a $ref, resolve it first (then recurse into the result)
     if (typeof schema.$ref === 'string') {
       const ref = schema.$ref
@@ -401,7 +422,11 @@ function createDeepResolver(resolveRef: (ref: string) => RawObject | null) {
         markCycle(cycleStart, ref)
         return { type: 'object', description: `[Circular: ${ref.split('/').pop()}]` }
       }
-      const entry = cycleCache.get(ref)?.find(
+      const candidates = cycleCache.get(ref)
+      // Each lookup costs one unit plus one per cached entry it may scan.
+      budget -= 1 + (candidates?.length ?? 0)
+      if (budget < 0) return { type: 'object', description: `[Too large to show: ${ref.split('/').pop()}]` }
+      const entry = candidates?.find(
         (e) => e.deps.every((d) => stack.includes(d)) && ![...e.expanded].some((x) => stack.includes(x)),
       )
       if (entry) {
@@ -425,7 +450,7 @@ function createDeepResolver(resolveRef: (ref: string) => RawObject | null) {
           cache.set(ref, result)
         } else {
           const entries = cycleCache.get(ref) ?? []
-          entries.push({ deps: [...frame.deps], expanded: frame.expanded, result })
+          if (entries.length < MAX_CYCLE_ENTRIES) entries.push({ deps: [...frame.deps], expanded: frame.expanded, result })
           cycleCache.set(ref, entries)
           const parent = frames[frames.length - 1]
           if (parent) {
@@ -467,7 +492,10 @@ function createDeepResolver(resolveRef: (ref: string) => RawObject | null) {
     return result
   }
 
-  return (schema: RawObject) => resolve(schema)
+  return (schema: RawObject) => {
+    budget = MAX_REF_EXPANSIONS
+    return resolve(schema)
+  }
 }
 
 function normalizeExamples(raw: unknown): Array<{ key: string; summary?: string; description?: string; value: unknown }> {
@@ -605,6 +633,15 @@ function buildOperationId(specId: string, slug: Array<string>, isWebhook: boolea
   return [prefix, specId, ...slug].join('-').replace(/-+/g, '-')
 }
 
+/** A `$ref` fragment is URI-encoded (`Pet%20Store`); malformed escapes stay as written. */
+function decodeFragmentSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
 function createSchemaResolver(document: RawObject) {
   return function resolveRef(ref: string): RawObject | null {
     if (typeof ref !== 'string' || !ref.startsWith('#/')) {
@@ -613,7 +650,7 @@ function createSchemaResolver(document: RawObject) {
     const pathSegments = ref
       .slice(2)
       .split('/')
-      .map((segment) => segment.replace(/~1/g, '/').replace(/~0/g, '~'))
+      .map((segment) => decodeFragmentSegment(segment).replace(/~1/g, '/').replace(/~0/g, '~'))
 
     let current: unknown = document
     for (const segment of pathSegments) {

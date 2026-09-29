@@ -402,3 +402,45 @@ describe('normalizeSpec dense $ref cycles', () => {
     }
   })
 })
+
+describe('normalizeSpec pathological schemas', () => {
+  function responseSchemaFor(schemas: Record<string, unknown>, root: string) {
+    const doc = {
+      openapi: '3.1.0',
+      info: { title: 'Odd', version: '1.0.0' },
+      paths: { '/x': { get: { responses: { '200': { description: 'ok', content: { 'application/json': { schema: { $ref: `#/components/schemas/${root}` } } } } } } } },
+      components: { schemas },
+    }
+    const normalized = normalizeSpec({ config: { ...baseConfig, source: { type: 'inline', document: doc } }, document: doc } as unknown as ResolvedSpec)
+    return findResponseSchema(normalized, '/x')
+  }
+
+  it('resolves refs whose fragment is percent-encoded or uses ~ escapes', () => {
+    const schema = responseSchemaFor({
+      'Pet Store': { type: 'string' },
+      'a/b': { type: 'integer' },
+      Root: { properties: { a: { $ref: '#/components/schemas/Pet%20Store' }, b: { $ref: '#/components/schemas/a~1b' } } },
+    }, 'Root')
+    expect(schema.properties.a).toEqual({ type: 'string' })
+    expect(schema.properties.b).toEqual({ type: 'integer' })
+  })
+
+  it('does not overflow the stack on extremely deep nesting', () => {
+    let deep: Record<string, unknown> = { type: 'string' }
+    for (let i = 0; i < 8000; i++) deep = { type: 'object', properties: { child: deep } }
+    expect(() => responseSchemaFor({ Root: deep }, 'Root')).not.toThrow()
+  })
+
+  it('gives up on a dense clique of mutually-referencing schemas instead of hanging', () => {
+    const size = 12
+    const schemas: Record<string, unknown> = {}
+    for (let i = 0; i < size; i++) {
+      const properties: Record<string, unknown> = {}
+      for (let j = 0; j < size; j++) if (j !== i) properties[`to${j}`] = { $ref: `#/components/schemas/S${j}` }
+      schemas[`S${i}`] = { type: 'object', properties }
+    }
+    const started = Date.now()
+    responseSchemaFor(schemas, 'S0')
+    expect(Date.now() - started).toBeLessThan(5000)
+  })
+})
