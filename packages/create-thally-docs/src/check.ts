@@ -290,30 +290,33 @@ interface DynamicRedirect {
 function compileDynamicRedirectSource(source: string, destination: string): DynamicRedirect | null {
   if (!source.includes(':')) return null
   const paramNames: Array<string> = []
-  const pattern = source
-    .split('/')
-    .map((segment) => {
-      const match = segment.match(/^:([A-Za-z_][A-Za-z0-9_]*)([*+?]?)$/)
-      if (!match) return segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      const [, name, quantifier] = match
-      paramNames.push(name)
-      if (quantifier === '*') return '(.*)'
-      if (quantifier === '+') return '(.+)'
-      if (quantifier === '?') return '([^/]*)'
-      return '([^/]+)'
-    })
-    .join('/')
+  let pattern = ''
+  source.split('/').forEach((segment, index) => {
+    const match = segment.match(/^:([A-Za-z_][A-Za-z0-9_]*)([*+?]?)$/)
+    const separator = index === 0 ? '' : '/'
+    if (!match) {
+      pattern += separator + segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      return
+    }
+    const [, name, quantifier] = match
+    paramNames.push(name)
+    // `*` and `?` also match with the whole segment (and its `/`) absent.
+    if (quantifier === '*') pattern += `(?:${separator}(.*))?`
+    else if (quantifier === '?') pattern += `(?:${separator}([^/]+))?`
+    else pattern += `${separator}(${quantifier === '+' ? '.+' : '[^/]+'})`
+  })
   return { regex: new RegExp(`^${pattern}$`), paramNames, destination }
 }
 
 /** Substitute a dynamic redirect's matched params into its destination template. */
 function resolveDynamicRedirectDestination(redirect: DynamicRedirect, match: RegExpMatchArray): string {
-  let destination = redirect.destination
-  redirect.paramNames.forEach((name, index) => {
-    destination = destination.replace(new RegExp(`:${name}[*+?]?`, 'g'), match[index + 1] ?? '')
+  return redirect.destination.replace(/:([A-Za-z_][A-Za-z0-9_]*)[*+?]?/g, (whole, name: string) => {
+    const index = redirect.paramNames.indexOf(name)
+    return index === -1 ? whole : (match[index + 1] ?? '')
   })
-  return destination
 }
+
+const MAX_REDIRECT_HOPS = 20
 
 /** Follow literal and Next.js-style dynamic site redirects without accepting cycles as reachable pages. */
 function resolveLink(target: string, redirects: ReadonlyMap<string, string>, dynamicRedirects: ReadonlyArray<DynamicRedirect> = []): ResolvedLink {
@@ -326,7 +329,8 @@ function resolveLink(target: string, redirects: ReadonlyMap<string, string>, dyn
     if (hash >= 0) anchor = current.slice(hash + 1)
     const beforeHash = hash >= 0 ? current.slice(0, hash) : current
     const path = beforeHash.split('?', 1)[0].replace(/\/$/, '') || '/'
-    if (seen.has(path)) return { path, anchor, cycle: true }
+    // A wildcard can keep matching its own destination (`/docs/:p*` -> `/docs/v2/:p*`), producing a new path every hop.
+    if (seen.has(path) || seen.size >= MAX_REDIRECT_HOPS) return { path, anchor, cycle: true }
     seen.add(path)
     const literalRedirect = redirects.get(path)
     if (literalRedirect) {

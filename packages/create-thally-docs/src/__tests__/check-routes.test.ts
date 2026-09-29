@@ -155,6 +155,27 @@ describe('thally check reader routes', () => {
     expect(result.output).toContain('Broken link: "/old/nowhere"')
   })
 
+  it('terminates on a wildcard redirect whose destination keeps matching its own source', async () => {
+    const result = await checkLinks('[Docs](/docs/intro)', [
+      { source: '/docs/:slug*', destination: '/docs/v2/:slug*' },
+    ])
+    expect(result.exit).toBe(1)
+  })
+
+  it('matches a trailing :param* with zero segments, like Next.js', async () => {
+    const result = await checkLinks('[Old](/old)', [
+      { source: '/old/:slug*', destination: '/introduction/:slug*' },
+    ])
+    expect(result.exit).toBe(0)
+  })
+
+  it('substitutes params by exact name when one name prefixes another', async () => {
+    const result = await checkLinks('[Old](/x/1/token)', [
+      { source: '/x/:a/:abc', destination: '/api-reference/:abc' },
+    ])
+    expect(result.exit).toBe(0)
+  })
+
   it('keeps missing locale targets, missing changelog content, and redirect cycles as errors', async () => {
     const result = await checkLinks('[Missing](/zh-Hans/quickstart) [Changes](/changelog) [Cycle](/loop)', [
       { source: '/loop', destination: '/other' },
