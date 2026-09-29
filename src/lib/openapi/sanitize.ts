@@ -25,16 +25,20 @@ const PRUNABLE = new Set([
   'pathItems',
 ])
 
-/** `#/components/<type>/<name>[/...]` -> `<type>/<name>` (name pointer-decoded), else null. */
-function componentKey(ref: string): string | null {
-  const match = /^#\/components\/([^/]+)\/([^/]+)/.exec(ref)
+// Swagger 2.0 keeps its reusable objects at the document root instead of `components`.
+const SWAGGER_MAPS = ['definitions', 'parameters', 'responses'] as const
+const isSwagger = (document: Obj) => typeof document.swagger === 'string'
+
+/** `#/components/<type>/<name>[/...]` -> `<type>/<name>`; Swagger 2.0 `#/definitions/<name>` -> `@definitions/<name>`; else null. */
+function componentKey(ref: string, swagger: boolean): string | null {
+  const match = /^#\/components\/([^/]+)\/([^/]+)/.exec(ref) ?? (swagger ? /^#\/(definitions|parameters|responses)\/([^/]+)/.exec(ref) : null)
   if (!match) return null
-  try {
-    return `${match[1]}/${unescapePointer(match[2])}`
-  } catch {
-    return null
-  }
+  const type = match[0].startsWith('#/components/') ? match[1] : `@${match[1]}`
+  return `${type}/${unescapePointer(match[2])}`
 }
+
+const componentMap = (document: Obj, type: string): unknown =>
+  type.startsWith('@') ? document[type.slice(1)] : isObj(document.components) ? document.components[type] : undefined
 
 function collectRefs(root: unknown, onRef: (ref: string) => void) {
   const seen = new WeakSet<object>()
@@ -59,14 +63,18 @@ function collectRefs(root: unknown, onRef: (ref: string) => void) {
 
 /** Component keys (`type/name`) reachable from everything outside `components`. */
 function reachableComponents(document: Obj): Set<string> {
-  const { components, ...rest } = document
+  const swagger = isSwagger(document)
+  const rest = { ...document }
+  delete rest.components
+  if (swagger) for (const type of SWAGGER_MAPS) delete rest[type]
   const found = new Set<string>()
   const queue: Array<unknown> = [rest]
   const onRef = (ref: string) => {
-    const key = componentKey(ref)
+    const key = componentKey(ref, swagger)
     if (!key || found.has(key)) return
     const [type, name] = [key.slice(0, key.indexOf('/')), key.slice(key.indexOf('/') + 1)]
-    const target = isObj(components) && isObj(components[type]) ? components[type][name] : undefined
+    const map = componentMap(document, type)
+    const target = isObj(map) ? map[name] : undefined
     if (target === undefined) return
     found.add(key)
     queue.push(target)
@@ -196,14 +204,12 @@ export function sanitizeSpecForPublication(
   }
 
   // Components: prune what the removed operations alone kept reachable.
-  if (isObj(doc.components)) {
-    const after = reachableComponents(doc)
-    for (const key of reachableComponents(document)) {
-      if (after.has(key)) continue
-      const [type, name] = [key.slice(0, key.indexOf('/')), key.slice(key.indexOf('/') + 1)]
-      const map = (doc.components as Obj)[type]
-      if (PRUNABLE.has(type) && isObj(map)) delete map[name]
-    }
+  const after = reachableComponents(doc)
+  for (const key of reachableComponents(document)) {
+    if (after.has(key)) continue
+    const [type, name] = [key.slice(0, key.indexOf('/')), key.slice(key.indexOf('/') + 1)]
+    const map = componentMap(doc, type)
+    if ((PRUNABLE.has(type) || type.startsWith('@')) && isObj(map)) delete map[name]
   }
 
   return doc as OpenAPIDocument

@@ -319,3 +319,38 @@ describe('path item $refs (sanitize and normalize agree)', () => {
     expect(out.components.pathItems).toEqual({})
   })
 })
+
+describe('Swagger 2.0 documents', () => {
+  const swagger = (): Record<string, any> => ({
+    swagger: '2.0',
+    info: { title: 'T', version: '1' },
+    paths: {
+      '/pub': { get: { parameters: [{ $ref: '#/parameters/Shared' }], responses: { 200: { schema: { $ref: '#/definitions/Pub' } } } } },
+      '/secret': {
+        get: {
+          'x-excluded': true,
+          parameters: [{ $ref: '#/parameters/SecretParam' }],
+          responses: { 200: { schema: { $ref: '#/definitions/Secret' } }, 404: { $ref: '#/responses/SecretMissing' } },
+        },
+      },
+    },
+    definitions: { Pub: { type: 'object' }, Secret: { type: 'object', properties: { inner: { $ref: '#/definitions/Inner' } } }, Inner: { type: 'string' } },
+    parameters: { Shared: { name: 's', in: 'query', type: 'string' }, SecretParam: { name: 'x', in: 'query', type: 'string' } },
+    responses: { SecretMissing: { description: 'gone' } },
+  })
+
+  it('removes excluded operations and prunes definitions, parameters and responses only they used', () => {
+    const out = sanitizeSpecForPublication(swagger() as OpenAPIDocument) as Record<string, any>
+    expect(Object.keys(out.paths)).toEqual(['/pub'])
+    expect(Object.keys(out.definitions)).toEqual(['Pub'])
+    expect(Object.keys(out.parameters)).toEqual(['Shared'])
+    expect(out.responses).toEqual({})
+    expect(JSON.stringify(out)).not.toMatch(/Secret|Inner/)
+  })
+
+  it('does not treat a custom root `definitions` key of an OpenAPI 3 document as prunable', () => {
+    const spec = { ...swagger(), openapi: '3.1.0' } as Record<string, any>
+    delete spec.swagger
+    expect(Object.keys((sanitizeSpecForPublication(spec as OpenAPIDocument) as Record<string, any>).definitions)).toContain('Secret')
+  })
+})
