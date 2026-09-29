@@ -74,6 +74,25 @@ describe('collectRuntimeContentFiles', () => {
     expect(sanitizeSpecForPublication(parseYaml(served))).toEqual(parseYaml(served))
   })
 
+  it('keeps an operation in a shared managed spec unless every tab that binds it hides it', () => {
+    const projectRoot = createProject('openapi/api.yaml')
+    mkdirSync(path.join(projectRoot, 'openapi'))
+    const op = { get: { responses: {} } }
+    writeFileSync(
+      path.join(projectRoot, 'openapi/api.yaml'),
+      stringifyYaml({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths: { '/a': op, '/b': op, '/c': op } }),
+    )
+    writeFileSync(
+      path.join(projectRoot, 'docs.json'),
+      JSON.stringify({ tabs: [
+        { tab: 'One', api: { source: 'openapi/api.yaml', overrides: { 'GET /a': { hidden: true }, 'GET /b': { hidden: true } } } },
+        { tab: 'Two', api: { source: 'openapi/api.yaml', overrides: { 'GET /b': { hidden: true } } } },
+      ] }),
+    )
+    const paths = Object.keys(parseYaml(collectRuntimeContentFiles(projectRoot)['openapi/api.yaml']!.content).paths)
+    expect(paths).toEqual(['/a', '/c'])
+  })
+
   it('reports a public/openapi.json that would shadow the filtered /openapi.json route', () => {
     const projectRoot = createProject('openapi/api.yaml')
     mkdirSync(path.join(projectRoot, 'public'), { recursive: true })

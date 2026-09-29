@@ -78,13 +78,31 @@ function configuredOpenApiSources(projectRoot: string): Array<ConfiguredOpenApiS
     tabs?: Array<{ api?: { source?: unknown; overrides?: Record<string, OperationOverride> } }>
   }
 
-  return (config.tabs ?? [])
-    .flatMap((tab) =>
-      typeof tab.api?.source === 'string'
-        ? [{ source: tab.api.source, overrides: tab.api.overrides }]
-        : [],
-    )
-    .filter(({ source }) => !source.startsWith('http://') && !source.startsWith('https://'))
+  const bySource = new Map<string, Array<Record<string, OperationOverride> | undefined>>()
+  for (const tab of config.tabs ?? []) {
+    const source = tab.api?.source
+    if (typeof source !== 'string' || source.startsWith('http://') || source.startsWith('https://')) continue
+    bySource.set(source, [...(bySource.get(source) ?? []), tab.api?.overrides])
+  }
+  return [...bySource].map(([source, list]) => ({ source, overrides: mergeOverrides(list) }))
+}
+
+/**
+ * Several tabs may bind one spec file with different overrides, but the managed
+ * copy exists once. Remove an operation from it only when every tab hides it, so
+ * no tab loses an operation it shows; each tab's own overrides still apply at runtime.
+ */
+function mergeOverrides(
+  list: Array<Record<string, OperationOverride> | undefined>,
+): Record<string, OperationOverride> | undefined {
+  if (list.length === 1) return list[0]
+  const merged: Record<string, OperationOverride> = {}
+  for (const key of new Set(list.flatMap((overrides) => Object.keys(overrides ?? {})))) {
+    const hidden = list.map((overrides) => overrides?.[key]?.hidden)
+    if (hidden.every((value) => value === true)) merged[key] = { hidden: true }
+    else if (hidden.some((value) => value === false)) merged[key] = { hidden: false }
+  }
+  return merged
 }
 
 /**
