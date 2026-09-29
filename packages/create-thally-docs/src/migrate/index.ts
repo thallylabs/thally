@@ -6,7 +6,7 @@
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import {
   cloneGitHubRepository,
@@ -22,6 +22,7 @@ import {
   type MigrationWarning,
 } from '@thallylabs/migrate'
 
+import { findPublicSpecs } from '../public-specs.js'
 import { scaffold } from '../scaffold.js'
 import { initGit, installDeps } from '../utils.js'
 import { validateMigration, type MigrationValidation } from './validate.js'
@@ -120,6 +121,25 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
   }
 }
 
+/**
+ * Migrated specs are written outside `public/`, but a spec already there (from
+ * an earlier import or an older release) stays served as-is. Never deleted
+ * here: list it so the owner can remove it.
+ */
+function publicSpecWarning(projectDir: string, bundle: MigrationBundle): MigrationWarning | null {
+  const { specs, skipped } = findPublicSpecs(projectDir)
+  if (specs.length === 0 && skipped.length === 0) return null
+  const migrated = new Set(bundle.assets.filter((asset) => asset.projectRelative).map((asset) => basename(asset.path)))
+  const lines = [
+    ...specs.map((spec) => `${spec.path}${migrated.has(basename(spec.path)) ? ' (same file name as a migrated spec)' : ''}${spec.hasHiddenOperations ? ' (contains x-excluded/x-hidden operations)' : ''}`),
+    ...skipped.map((path) => `${path} (too large to inspect)`),
+  ]
+  return {
+    code: 'unsupported-config',
+    message: `Existing OpenAPI files under public/ are served publicly as-is: ${lines.join(', ')}. Migrated specs are written to openapi/, and re-running migration does not remove old copies from public/. Delete any old copy manually (nothing was deleted), or its hidden operations stay downloadable.`,
+  }
+}
+
 /** Import a GitHub docs repository or public docs URL into a Thally project. */
 export async function migrateDocs(options: MigrateOptions): Promise<MigrateResult> {
   const projectDir = resolve(options.projectDir)
@@ -156,6 +176,11 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     // An absent locale block invokes the runtime's legacy bilingual fallback.
     // A single-language source must not acquire a phantom translation menu.
     bundle.docsConfig.i18n ??= { defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }] }
+  }
+
+  if (options.into) {
+    const stale = publicSpecWarning(projectDir, bundle)
+    if (stale) bundle.warnings.unshift(stale)
   }
 
   const rendered = renderMigrationFiles(bundle, {

@@ -190,6 +190,66 @@ describe('thally check hidden operations under public/', () => {
   })
 })
 
+describe('thally check stale specs under public/', () => {
+  const doc = (paths: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths, ...extra })
+  const ok = { get: { responses: { 200: { description: 'ok' } } } }
+
+  async function run(files: Record<string, string>, source = 'openapi/api.json') {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-stale-'))
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'API', api: { source } }] }))
+    for (const [file, body] of Object.entries(files)) {
+      mkdirSync(join(projectDir, file.slice(0, file.lastIndexOf('/'))), { recursive: true })
+      writeFileSync(join(projectDir, file), body)
+    }
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    return output.join('\n')
+  }
+
+  it('warns about a leftover public/ spec even though docs.json points at the new file', async () => {
+    const output = await run({
+      'openapi/api.json': doc({ '/a': ok }),
+      'public/openapi.json': doc({ '/a': { ...ok, get: { 'x-hidden': true, responses: {} } } }),
+    })
+    expect(output).toContain('public/openapi.json')
+    expect(output).toContain('x-excluded/x-hidden')
+    expect(output).toContain('does not remove old copies from public/')
+  })
+
+  it('detects flags on a $ref sibling, a path item, a webhook and nested directories', async () => {
+    for (const spec of [
+      doc({ '/a': { $ref: '#/components/pathItems/X', 'x-hidden': true } }),
+      doc({ '/a': { 'x-excluded': true, ...ok } }),
+      doc({}, { webhooks: { h: { post: { 'x-excluded': 'true' } } } }),
+    ]) {
+      expect(await run({ 'openapi/api.json': doc({ '/a': ok }), 'public/deep/nested/spec.yaml': spec })).toContain('public/deep/nested/spec.yaml')
+    }
+  })
+
+  it('warns about an unflagged leftover only when the configured spec lives elsewhere; ignores non-specs', async () => {
+    const files = { 'openapi/api.json': doc({ '/a': ok }), 'public/old.json': doc({ '/a': ok }), 'public/manifest.json': '{"name":"x"}', 'public/data.yaml': 'a: 1' }
+    const output = await run(files)
+    expect(output).toContain('public/old.json')
+    expect(output).toContain('an old copy')
+    expect(output).not.toContain('manifest.json')
+    expect(output).not.toContain('data.yaml')
+    // No configured spec elsewhere and nothing hidden: a plain public spec is left alone.
+    expect(await run({ 'public/old.json': doc({ '/a': ok }) }, 'https://example.com/spec.json')).not.toContain('public/old.json')
+  })
+
+  it('does not double-report the configured public/ spec and never errors', async () => {
+    const output = await run({ 'public/openapi.json': doc({ '/a': { 'x-excluded': true, ...ok } }) }, '/openapi.json')
+    expect(output.match(/public\/openapi\.json|lives under public\//g)?.length).toBe(1)
+    expect(output).toContain('0 error(s)')
+  })
+})
+
 describe('thally check image references', () => {
   it('warns about a local image with no file under public/, and accepts one that exists', async () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-images-'))
