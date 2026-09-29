@@ -536,6 +536,13 @@ describe('preserveMdxHeadingCustomIds', () => {
     expect(result.body).toBe(body)
   })
 
+  it('stays fast on a very long heading with no custom id', () => {
+    const body = `# a${' '.repeat(60_000)}b`
+    const started = Date.now()
+    expect(preserveMdxHeadingCustomIds(body)).toEqual({ body, converted: false })
+    expect(Date.now() - started).toBeLessThan(500)
+  })
+
   it('never touches the YAML frontmatter block', () => {
     const body = '---\ntitle: "{#not-a-heading}"\n---\n\n## Heading {#real-id}'
     const result = preserveMdxHeadingCustomIds(body)

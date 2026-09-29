@@ -635,13 +635,18 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
 export function preserveMdxHeadingCustomIds(raw: string): { body: string; converted: boolean } {
   const { front, body } = splitFrontmatterBlock(raw)
   let converted = false
-  const rewritten = replaceOutsideCode(body, (whole) => whole.replace(
-    /^(#{1,6}[ \t]+.+?)[ \t]*\{#([A-Za-z0-9_-]+)\}[ \t]*$/gm,
-    (_match, heading: string, id: string) => {
-      converted = true
-      return `\n<a id=${JSON.stringify(id)}></a>\n\n${heading}`
-    },
-  ))
+  const rewritten = replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
+    if (!/^#{1,6}[ \t]+/.test(line)) return line
+    // Look for the suffix from the end: a regex with lazy text before optional
+    // whitespace backtracks quadratically on long headings with no id.
+    const trimmed = line.trimEnd()
+    const marker = trimmed.lastIndexOf('{#')
+    const id = marker > 0 && trimmed.endsWith('}') ? trimmed.slice(marker + 2, -1) : ''
+    const heading = trimmed.slice(0, marker).trimEnd()
+    if (!/^[A-Za-z0-9_-]+$/.test(id) || !/^#{1,6}[ \t]+\S/.test(heading)) return line
+    converted = true
+    return `\n<a id=${JSON.stringify(id)}></a>\n\n${heading}`
+  }).join('\n'))
   return { body: front + rewritten, converted }
 }
 
