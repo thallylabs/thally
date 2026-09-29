@@ -394,7 +394,7 @@ export function planInlineExtraction(input: {
     .filter((unit) => unit.hooks && unit.names.some((name) => /^[A-Z]/.test(name)))
     .map((unit) => unit.index)
   const blocked: Array<{ name: string; reason: string }> = []
-  let active = new Set(roots)
+  const active = new Set(roots)
 
   const block = (rootIndex: number, reason: string): void => {
     active.delete(rootIndex)
