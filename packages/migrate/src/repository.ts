@@ -995,6 +995,12 @@ function scanFiles(root: string, confinementRoot: string = root, warnings?: Arra
     }
   }
   visit(root)
+  if (rank && files.length >= walkCap) {
+    warnings?.push({
+      code: 'limit-reached',
+      message: `Stopped scanning after ${walkCap} files, so the rest of the repository was not looked at. Run the migration on a smaller part of the repository with --docs-dir.`,
+    })
+  }
   return files
 }
 
@@ -1009,23 +1015,35 @@ function selectGroupWithinBudget(
   rank: (relativePath: string) => number,
   warnings: Array<MigrationWarning> | undefined,
   allVersionPrefixes: ReadonlySet<string>,
-  label: string,
+  label: 'file' | 'asset',
 ): Array<ScannedFile> {
   if (scanned.length <= MAX_SOURCE_FILES) return scanned
+  // Ties (unreferenced files sharing a ceiling) break by path, not by
+  // directory-listing order, so the same repository always keeps the same files.
   const ranked = scanned
-    .map((file, index) => ({ file, index, priority: rank(file.relativePath) }))
-    .sort((left, right) => left.priority - right.priority || left.index - right.index)
-  const dropped = ranked.slice(MAX_SOURCE_FILES)
+    .map((file) => ({ file, priority: rank(file.relativePath) }))
+    .sort((left, right) => left.priority - right.priority
+      || (left.file.relativePath < right.file.relativePath ? -1 : left.file.relativePath > right.file.relativePath ? 1 : 0))
+  const dropped = ranked.slice(MAX_SOURCE_FILES).map(({ file }) => file)
   if (warnings) {
+    const droppedPages = label === 'file' ? dropped.filter((file) => isDocumentationExtension(file.relativePath)) : dropped
+    const noun = label === 'file' ? 'page' : 'image or media file'
     const droppedVersions = new Set<string>()
-    for (const { file } of dropped) {
+    for (const file of dropped) {
       const firstSegment = file.relativePath.split('/', 1)[0]
       if (allVersionPrefixes.has(firstSegment)) droppedVersions.add(firstSegment)
     }
+    const examples = droppedPages.slice(0, 3).map((file) => file.relativePath)
+    const rest = droppedPages.length - examples.length
     warnings.push({
       code: 'limit-reached',
-      message: `Repository discovery stopped at ${MAX_SOURCE_FILES} ${label}(s); ${dropped.length} lower-priority ${label}(s) were dropped`
-        + (droppedVersions.size > 0 ? ` (versions: ${[...droppedVersions].join(', ')})` : '') + '.',
+      message: `This repository has more than ${MAX_SOURCE_FILES} ${label === 'file' ? 'files' : 'assets'}, so only the first ${MAX_SOURCE_FILES} (in navigation order, default version first) were migrated. `
+        + `${droppedPages.length} ${noun}(s) were left out`
+        + (examples.length > 0 ? `: ${examples.join(', ')}${rest > 0 ? `, and ${rest} more` : ''}` : '')
+        + (droppedVersions.size > 0 ? ` (versions: ${[...droppedVersions].join(', ')})` : '')
+        + (label === 'file'
+          ? '. To include them, run the migration on a smaller part of the repository with --docs-dir.'
+          : '. Copy them into public/ manually if your pages use them.'),
     })
   }
   return ranked.slice(0, MAX_SOURCE_FILES).map(({ file }) => file)
@@ -3017,9 +3035,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const referencingPages = referencedAssetPaths.get(assetPath)
       warnings.push({
         code: 'limit-reached',
-        message: referencingPages
-          ? `Asset was skipped because the migration asset budget was exhausted, but it is referenced by: ${[...referencingPages].join(', ')}.`
-          : 'An asset was skipped because the migration asset budget was exhausted.',
+        message: 'This file was not copied because it is larger than 25 MB or the copied files would exceed 500 MB in total. Add it to public/ manually'
+          + (referencingPages
+            ? `; it is used by ${[...referencingPages].slice(0, 3).join(', ')}${referencingPages.size > 3 ? `, and ${referencingPages.size - 3} more` : ''}.`
+            : '.'),
         source: file.relativePath,
       })
       continue
@@ -3043,7 +3062,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // case where later additions (Fern's external sourcePaths, above) pushed
   // the count back over budget after the event.
   if (!discoveryBudgetApplied && files.length >= MAX_SOURCE_FILES) {
-    warnings.push({ code: 'limit-reached', message: `Repository discovery stopped at ${MAX_SOURCE_FILES} files.` })
+    warnings.push({ code: 'limit-reached', message: `Stopped scanning after ${MAX_SOURCE_FILES} files, so the rest of the repository was not looked at. Run the migration on a smaller part of the repository with --docs-dir.` })
   }
   if (platform === 'docusaurus') {
     const projected = projectDocusaurusNavigation({
@@ -3271,7 +3290,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ]
     for (const plugin of additionalRoots) {
       if (discovered >= MAX_SOURCE_FILES) {
-        warnings.push({ code: 'limit-reached', message: `Docusaurus docs import stopped at the ${MAX_SOURCE_FILES}-file discovery budget.` })
+        warnings.push({ code: 'limit-reached', message: `Stopped importing Docusaurus docs plugins after ${MAX_SOURCE_FILES} files; the remaining plugin docs were not migrated.` })
         break
       }
       if (plugin.docsDir === configuredDocsDir) continue

@@ -1311,8 +1311,31 @@ describe('Mintlify repository migration', () => {
     expect(pageIds).toContain('v1/en/introduction')
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
       code: 'limit-reached',
-      message: expect.stringMatching(/dropped.*v1/s),
+      message: expect.stringMatching(/left out.*v1/s),
     }))
+  }, 30_000)
+
+  it('keeps the first pages in navigation order and names what was dropped when one version alone exceeds the file budget', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-single-version-budget-'))
+    mkdirSync(join(root, 'en'), { recursive: true })
+    const pageIds = Array.from({ length: 5010 }, (_, index) => `en/page-${String(index).padStart(4, '0')}`)
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: pageIds }] }] },
+    }))
+    for (const id of pageIds) writeFileSync(join(root, `${id}.mdx`), `---\ntitle: ${id}\n---\n\nPage.`)
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const migrated = bundle.pages.map((page) => page.id)
+    expect(migrated).toContain('en/page-4999')
+    expect(migrated).not.toContain('en/page-5000')
+    const warning = bundle.warnings.find((entry) => entry.code === 'limit-reached')
+    expect(warning?.message).toContain('10 page(s) were left out')
+    expect(warning?.message).toContain('en/page-5000.mdx')
+    expect(warning?.message).toContain('--docs-dir')
+    expect(warning?.message).toContain('and 7 more')
+    expect(warning?.message).not.toMatch(/lower-priority|budget/)
   }, 30_000)
 
   // Regression test for the bug fixed alongside the file-cap prioritization
