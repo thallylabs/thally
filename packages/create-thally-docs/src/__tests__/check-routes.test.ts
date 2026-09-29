@@ -91,7 +91,7 @@ describe('thally check reader routes', () => {
 
   it('uses visible text for headings containing JSX badges and anchors', async () => {
     const result = await checkLinks([
-      '## Initialize instance <Badge>Enterprise</Badge>',
+      '## Initialize instance <Badge title="1 > 0">Enterprise</Badge>',
       '### CLI <a id="-cli" />',
       '[Enterprise](#initialize-instance-enterprise) [CLI](#cli)',
     ].join('\n'))

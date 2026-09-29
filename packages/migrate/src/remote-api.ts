@@ -190,8 +190,17 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   const tabs = bundle.docsConfig.tabs.map((tab) => ({ ...tab }))
   const redirects = [...(bundle.docsConfig.redirects ?? [])]
   const warnings = [...bundle.warnings]
-  const authoredLinks = new Set(bundle.pages.flatMap((page) => [...page.body.matchAll(/\/(?:[a-z0-9_-]*api[a-z0-9_-]*|[a-z0-9_-]*reference[a-z0-9_-]*)(?:\/[a-z0-9_-]+){2,}/gi)]
-    .map((match) => match[0])))
+  const authoredLinks = new Set<string>()
+  for (const page of bundle.pages) {
+    // Scan path-shaped tokens once, then inspect segments without nested
+    // regex quantifiers. Authored pages may be arbitrarily long or hostile.
+    for (const match of page.body.matchAll(/\/[a-z0-9_/-]+/gi)) {
+      const segments = match[0].split('/').filter(Boolean)
+      if (segments.length < 3) continue
+      const section = segments[0].toLowerCase()
+      if (section.includes('api') || section.includes('reference')) authoredLinks.add(match[0])
+    }
+  }
   for (const reference of bundle.remoteApiSpecs) {
     for (let index = warnings.length - 1; index >= 0; index--) {
       if (warnings[index].source === reference.url && warnings[index].message.includes('requires a network download')) warnings.splice(index, 1)
