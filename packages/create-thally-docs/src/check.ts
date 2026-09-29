@@ -135,6 +135,7 @@ function addOrphanToNav(projectDir: string, pageId: string): void {
 }
 
 const EXPLICIT_ID_ATTRIBUTE = /\bid=(?:"([^"]*)"|'([^']*)'|\{["']([^"'}]*)["']\})/g
+const NAMED_ANCHOR = /<a\b[^>]*\bname=(?:"([^"]*)"|'([^']*)')/g
 
 /** Visit rendered prose lines while respecting the opening fence's marker and length. */
 function forEachNonFencedLine(content: string, visit: (line: string, lineNumber: number) => void): void {
@@ -161,15 +162,32 @@ function forEachNonFencedLine(content: string, visit: (line: string, lineNumber:
  */
 function extractHeadingAnchors(content: string): Set<string> {
   const anchors = new Set<string>()
+  const occurrences = new Map<string, number>()
   forEachNonFencedLine(content, (line) => {
     const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
-    if (heading) anchors.add(slugify(heading[1]))
+    if (heading) {
+      const base = slugify(heading[1])
+      const occurrence = (occurrences.get(base) ?? 0) + 1
+      occurrences.set(base, occurrence)
+      anchors.add(occurrence === 1 ? base : `${base}-${occurrence}`)
+    }
     for (const idMatch of line.matchAll(EXPLICIT_ID_ATTRIBUTE)) {
       const id = idMatch[1] ?? idMatch[2] ?? idMatch[3]
       if (id) anchors.add(id)
     }
+    // Legacy Markdown exports and notebook conversions commonly use
+    // `<a name="section">`; browsers resolve fragments to those too.
+    for (const nameMatch of line.matchAll(NAMED_ANCHOR)) {
+      const name = nameMatch[1] ?? nameMatch[2]
+      if (name) anchors.add(name)
+    }
   })
   return anchors
+}
+
+/** Compare URL-encoded fragments with the IDs the browser resolves. */
+function decodedFragment(fragment: string): string {
+  try { return decodeURIComponent(fragment) } catch { return fragment }
 }
 
 interface FoundLink {
@@ -408,16 +426,6 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     const rel = filePath.slice(contentDir.length + 1).replace(/\.mdx$/, '').replace(/\\/g, '/')
     const pageId = rel.endsWith('/index') ? rel.slice(0, -6) : rel
 
-    const { navPageId } = localizedPage(pageId, secondaryLocales)
-    if (!navPageIds.has(navPageId)) {
-      if (fix) {
-        addOrphanToNav(projectDir, pageId)
-        fixedOrphans.push(pageId)
-      } else {
-        issues.push({ severity: 'warning', message: `"${pageId}" is not in docs.json nav (orphan)`, file: relative(projectDir, filePath) })
-      }
-    }
-
     let data: Record<string, unknown> = {}
     let content = ''
     let lineOffset = 0
@@ -432,6 +440,16 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     } catch {
       issues.push({ severity: 'error', message: `Could not parse frontmatter`, file: relative(projectDir, filePath) })
       continue
+    }
+
+    const { navPageId } = localizedPage(pageId, secondaryLocales)
+    if (!navPageIds.has(navPageId) && data.hidden !== true) {
+      if (fix) {
+        addOrphanToNav(projectDir, pageId)
+        fixedOrphans.push(pageId)
+      } else {
+        issues.push({ severity: 'warning', message: `"${pageId}" is not in docs.json nav (orphan)`, file: relative(projectDir, filePath) })
+      }
     }
 
     const rel2 = relative(projectDir, filePath)
@@ -473,7 +491,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       if (/^(https?:|mailto:|tel:)/i.test(target)) continue // external — skipped unless --external
       if (target.startsWith('#')) {
         const anchor = target.slice(1)
-        if (anchor && !anchors.has(anchor)) {
+        if (anchor && !anchors.has(decodedFragment(anchor))) {
           issues.push({ severity: 'warning', message: `Broken anchor: "${target}" not found on this page`, file, line })
         }
         continue
@@ -487,7 +505,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       if (!cycle && (isGeneratedApiPath || path.startsWith('/_next') || /\.[a-z0-9]+$/i.test(path))) continue // generated/assets
       if (cycle || !validPaths.has(path)) {
         issues.push({ severity: 'error', message: `Broken link: "${target}" — no page at "${path}"`, file, line })
-      } else if (anchor && !anchorsByPath.get(path)?.has(anchor)) {
+      } else if (anchor && !anchorsByPath.get(path)?.has(decodedFragment(anchor))) {
         issues.push({ severity: 'warning', message: `Broken anchor: "${target}" — no heading "#${anchor}" on that page`, file, line })
       }
     }

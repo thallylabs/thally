@@ -46,11 +46,16 @@ export interface MigrationBannerConfig {
 
 export interface MigrationNavbarConfig {
   links?: Array<{ label: string; href: string; type?: 'github' }>
-  primary?: { label: string; href: string }
+  /** Explicit null suppresses the starter's sample call to action. */
+  primary?: { label: string; href: string } | null
+  /** Local public assets used until an owner uploads a brand replacement. */
+  logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string }
 }
 
 export interface MigrationFooterConfig {
   socials?: Record<string, string>
+  /** Literal footer attribution; `{year}` is resolved by the site at render time. */
+  copyright?: string
   links?: Array<{
     heading: string
     items: Array<{ label: string; href: string }>
@@ -69,6 +74,7 @@ export interface MigrationDocsConfig {
   icons?: { library?: 'lucide' | 'fontawesome' | 'tabler' }
   banner?: MigrationBannerConfig
   navbar?: MigrationNavbarConfig
+  favicon?: { light: string; dark?: string }
   footer?: MigrationFooterConfig
   seo?: { indexing?: 'navigable' | 'all' }
   fonts?: {
@@ -83,6 +89,8 @@ export interface MigrationDocsConfig {
   i18n?: {
     defaultLocale: string
     locales: Array<{ code: string; label: string }>
+    /** Source-authored navigation labels and ordering for each translation. */
+    navigation?: Record<string, Array<MigrationNavigationTab>>
   }
 }
 
@@ -95,6 +103,8 @@ export interface MigrationPage {
   title: string
   navTitle?: string
   description: string
+  /** Keep SEO/search description without repeating it above Docusaurus body copy. */
+  descriptionPlacement?: 'body'
   badge?: string
   keywords: Array<string>
   mode?: 'default' | 'wide' | 'custom' | 'center' | 'home'

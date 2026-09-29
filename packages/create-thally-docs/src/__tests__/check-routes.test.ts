@@ -40,6 +40,21 @@ async function checkLinks(
 }
 
 describe('thally check reader routes', () => {
+  it('does not label a deliberately hidden page as an orphan', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-hidden-'))
+    mkdirSync(join(projectDir, 'src', 'content'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'Docs', pages: ['introduction'] }] }))
+    writeFileSync(join(projectDir, 'src', 'content', 'introduction.mdx'), '---\ntitle: Intro\ndescription: Introduction page.\n---\n\nIntroduction content.')
+    writeFileSync(join(projectDir, 'src', 'content', 'archived.mdx'), '---\ntitle: Archived\ndescription: Archived page.\nhidden: true\n---\n\nArchived content.')
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      expect(await runCheck(projectDir, { fix: false, ci: true })).toBe(0)
+      expect(output.join('\n')).not.toContain('orphan')
+    } finally {
+      log.mockRestore()
+    }
+  })
   it('accepts locale fallback and both introduction URLs', async () => {
     const result = await checkLinks('[Reference](/zh-Hans/api-reference/token#response) [Home](/introduction) [Localized home](/zh-Hans/introduction)')
     expect(result.exit).toBe(0)
@@ -58,6 +73,24 @@ describe('thally check reader routes', () => {
       '',
       '[Indented heading](#install-the-cli) [Explicit id](#explicit-target)',
     ].join('\n'))
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken anchor')
+  })
+
+  it('matches encoded fragments to explicit IDs', async () => {
+    const result = await checkLinks('<a id="section-$ref"></a>\n\n[Settings](#section-%24ref)')
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken anchor')
+  })
+
+  it('accepts legacy named anchors in imported notebook pages', async () => {
+    const result = await checkLinks('<a name="subscribe"></a>\n\n[Subscribe](#subscribe)')
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken anchor')
+  })
+
+  it('accepts the second occurrence of a repeated heading', async () => {
+    const result = await checkLinks('## Key Features\n\nFirst.\n\n## Key Features\n\nSecond.\n\n[Second](#key-features-2)')
     expect(result.exit).toBe(0)
     expect(result.output).not.toContain('Broken anchor')
   })

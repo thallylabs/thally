@@ -42,9 +42,44 @@ describe('migration description fallback', () => {
   it('does not invent description text for code-only pages', () => {
     expect(description('```jsx\n<Widget />\n```')).toBe('')
   })
+
+  it('does not turn a GFM table into a visible page summary', () => {
+    const raw = '---\ntitle: Comparison\n---\n\n| Feature | Result |\n| --- | --- |\n| Cache | Yes |\n\nThe cache reuses packages.'
+    expect(description(raw)).toBe('The cache reuses packages.')
+  })
+
+  it('keeps Docusaurus descriptions for metadata without adding a second visible paragraph', () => {
+    const page = parseMarkdownPage({
+      id: 'guide',
+      platform: 'docusaurus',
+      raw: '---\ntitle: Guide\ndescription: Introductory prose.\n---\n\nIntroductory prose.',
+      source: 'docs/guide.md',
+    })
+    expect(page).toMatchObject({ description: 'Introductory prose.', descriptionPlacement: 'body' })
+  })
+
+  it('takes a leading Markdown H1 as the page title and removes its duplicate body heading', () => {
+    const page = parseMarkdownPage({
+      id: 'api/docusaurus-config',
+      platform: 'docusaurus',
+      raw: '---\ndescription: Configuration reference.\n---\n\nimport Widget from "./widget"\n\n# `docusaurus.config.js`\n\nConfiguration details.',
+      source: 'docs/api/docusaurus.config.js.mdx',
+    })
+    expect(page?.title).toBe('docusaurus.config.js')
+    expect(page?.body).not.toContain('# `docusaurus.config.js`')
+    expect(page?.body).toContain('Configuration details.')
+  })
 })
 
 describe('normalizeMdx', () => {
+  it('resolves Docusaurus emoji shortcodes in prose and tables without changing code', () => {
+    const source = '| Result |\n| --- |\n| :white_check_mark: |\n\nUse :x: for no. `:x:`\n\n```md\n:x:\n```'
+    const output = normalizeMdx(source, 'docusaurus')
+    expect(output).toContain('| ✅ |')
+    expect(output).toContain('Use ❌ for no. `:x:`')
+    expect(output).toContain('```md\n:x:\n```')
+  })
+
   it('reduces a presentational Mintlify Update label to static text', () => {
     const source = '<Update label={<><Icon icon="rocket" /><span>Quickstart</span></>} tags={["Guide"]}>Text</Update>'
     const output = normalizeMdx(source, 'mintlify')

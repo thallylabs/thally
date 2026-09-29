@@ -36,3 +36,15 @@ describe.each(variants)('$name footer', ({ footerConfig }) => {
     expect(html).toContain('Example. All rights reserved.')
   })
 })
+
+describe('imported footer attribution', () => {
+  it('renders a source copyright with the current year', () => {
+    const html = renderToStaticMarkup(<Footer
+      siteName="Example"
+      siteLinks={[]}
+      footerConfig={{ copyright: 'Copyright © 2015-{year} contributors', links: [{ heading: 'Docs', items: [{ label: 'Install', href: '/installation' }] }] }}
+    />)
+    expect(html).toContain(`Copyright © 2015-${new Date().getFullYear()} contributors`)
+    expect(html).toContain('href="/installation"')
+  })
+})

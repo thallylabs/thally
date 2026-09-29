@@ -19,6 +19,7 @@ function renderPage(bundle: MigrationBundle, page: MigrationBundle['pages'][numb
     `title: ${yamlString(page.title)}`,
     page.navTitle ? `navTitle: ${yamlString(page.navTitle)}` : null,
     `description: ${yamlString(page.description)}`,
+    page.descriptionPlacement === 'body' ? 'descriptionPlacement: body' : null,
     page.badge ? `badge: ${yamlString(page.badge)}` : null,
     page.keywords.length > 0 ? `keywords: [${page.keywords.map(yamlString).join(', ')}]` : null,
     page.mode ? `mode: ${yamlString(page.mode)}` : null,

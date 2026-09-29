@@ -146,6 +146,11 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   if (!options.into) {
     const starterConfig = readExistingConfig(projectDir)
     if (starterConfig?.markdown) bundle.docsConfig.markdown = starterConfig.markdown
+    // The starter's "Get started" link points at its sample quickstart. A
+    // migrated source without its own primary action must not inherit it.
+    if (!bundle.docsConfig.navbar?.primary) {
+      bundle.docsConfig.navbar = { ...bundle.docsConfig.navbar, primary: null }
+    }
     // An absent locale block invokes the runtime's legacy bilingual fallback.
     // A single-language source must not acquire a phantom translation menu.
     bundle.docsConfig.i18n ??= { defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }] }

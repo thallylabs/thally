@@ -7,6 +7,7 @@
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { basename, dirname, extname, relative } from 'node:path'
 
+import { load } from 'cheerio'
 import { parse as parseYaml } from 'yaml'
 
 import { isRedirectPathSafe, translateRedirectWildcards } from './navigation.js'
@@ -20,10 +21,41 @@ import type {
 
 const MAX_CONFIG_BYTES = 20_000_000
 
+/** Retain safe Fern announcement links without emitting source-controlled HTML. */
+function announcementMarkdown(message: string): string {
+  const document = load(message)
+  document('script, style, iframe, object, embed, svg, math').remove()
+  const escapeText = (value: string): string => value
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/([\\`*_\[\]{}()!])/g, '\\$1')
+  const links = new Map<string, string>()
+  document('a').each((index, element) => {
+    const marker = `THALLYANNOUNCEMENTLINK${index}TOKEN`
+    const label = document(element).text().trim()
+    const rawHref = document(element).attr('href')?.trim() ?? ''
+    let href: string | undefined
+    if (/^https?:\/\//i.test(rawHref)) {
+      try { href = new URL(rawHref).toString() } catch { /* invalid source link becomes text */ }
+    } else if (rawHref.startsWith('/') && !rawHref.startsWith('//') && !/[\\<>\s]/.test(rawHref)) {
+      href = rawHref
+    }
+    const destination = href?.replace(/\(/g, '%28').replace(/\)/g, '%29')
+    links.set(marker, destination && label ? `[${escapeText(label)}](${destination})` : escapeText(label))
+    document(element).replaceWith(marker)
+  })
+  let text = escapeText(document('body').text())
+  for (const [marker, link] of links) text = text.replaceAll(marker, link)
+  return text.trim()
+}
+
 export interface FernPageDescriptor {
   /** Path to the referenced page file, relative to the Fern root. */
   sourcePath: string
   navigationId: string
+  /** Fern's sidebar label can intentionally differ from the page title. */
+  navTitle?: string
+  /** Keep routable pages excluded by Fern's `hidden` navigation flag. */
+  hidden?: boolean
 }
 
 /** One `api:` navigation node, resolved to the name/tab Thally needs to bind its spec. */
@@ -51,6 +83,8 @@ export interface FernNavigationResult {
   warnings: Array<MigrationWarning>
   /** Every `api:` node found in navigation, in document order. A repo can declare several (e.g. a REST and a WebSocket API in separate tabs). */
   apiSections: Array<FernApiSection>
+  /** Fern changelog tabs render their entries as a feed at the bare route. */
+  changelogIndexes: Array<{ route: string; entries: Array<string> }>
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -93,6 +127,7 @@ interface WalkContext {
   seenNavigationIds: Set<string>
   /** Every `api:` node seen so far, in document order; `tabLabel` is filled in once its owning tab finishes walking. */
   apiSections: Array<FernApiSection>
+  changelogIndexes: Array<{ route: string; entries: Array<string> }>
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
   /** Bare tab/section routes with no page of their own, soft-redirected to their first descendant. */
@@ -107,6 +142,7 @@ interface WalkContext {
    * is unrelated and handled separately via `parentSegments`.
    */
   pathPrefix: string
+  hiddenInherited?: boolean
   /**
    * The navigation id that actually owns a page's content, keyed by
    * `sourcePath` — the first nav location a file is registered at. A file
@@ -212,7 +248,7 @@ function uniqueNavigationId(base: string, context: WalkContext): string {
   return `${base}-${index}`
 }
 
-function registerPageAt(rawPath: string, base: string, context: WalkContext): string {
+function registerPageAt(rawPath: string, base: string, context: WalkContext, navTitle?: string, hidden = false): string {
   let sourcePath: string
   try {
     const absolute = resolveWithinRoot(
@@ -227,7 +263,8 @@ function registerPageAt(rawPath: string, base: string, context: WalkContext): st
   }
   const navigationId = uniqueNavigationId(base || 'introduction', context)
   context.seenNavigationIds.add(navigationId)
-  context.descriptors.push({ sourcePath, navigationId })
+  const isHidden = hidden || context.hiddenInherited === true
+  context.descriptors.push({ sourcePath, navigationId, ...(navTitle ? { navTitle } : {}), ...(isHidden ? { hidden: true } : {}) })
   // `repository.ts` creates exactly one page per physical file, keyed off
   // the first nav location that registers it — a file listed at a second
   // nav location (Fern allows the same page under several sections) must
@@ -237,7 +274,13 @@ function registerPageAt(rawPath: string, base: string, context: WalkContext): st
   // position's own derived route to that kept id, for any old/external
   // link built from it.
   const kept = context.sourcePathToNavigationId.get(sourcePath)
-  if (kept) return kept
+  if (kept) {
+    if (!isHidden) {
+      const owner = context.descriptors.find((descriptor) => descriptor.navigationId === kept)
+      if (owner) owner.hidden = false
+    }
+    return kept
+  }
   context.sourcePathToNavigationId.set(sourcePath, navigationId)
   return navigationId
 }
@@ -287,8 +330,11 @@ function registerFolder(
         const stem = basename(entry.name, extname(entry.name))
         const pageSegment = stem.toLowerCase() === 'index' ? null : fernBasicSlug(stem)
         const route = [...routeSegments, ...(pageSegment ? [pageSegment] : [])].join('/')
-        const registered = registerPageAt(relative(context.fernRoot, path), route, { ...context, pathPrefix: '' })
-        if (registered) pages.push(registered)
+        const source = lstatSync(path).size <= MAX_CONFIG_BYTES ? readFileSync(path, 'utf8') : ''
+        const frontmatter = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? ''
+        const hidden = /^hidden:\s*true\s*$/m.test(frontmatter)
+        const registered = registerPageAt(relative(context.fernRoot, path), route, { ...context, pathPrefix: '' }, undefined, hidden)
+        if (registered && !hidden && !context.hiddenInherited) pages.push(registered)
       }
     }
     return pages
@@ -308,7 +354,7 @@ function registerPage(
   const label = typeof object.page === 'string' && object.page.trim() ? object.page.trim() : 'Untitled'
   const segment = segmentFor(object, label, context)
   const base = [...parentSegments, segment].filter(Boolean).join('/')
-  return registerPageAt(object.path, base, context) || null
+  return registerPageAt(object.path, base, context, label, object.hidden === true) || null
 }
 
 /** A `section`/`page`/`link`/`api`/`changelog` node from `layout` or `contents`. */
@@ -320,9 +366,15 @@ function convertNode(
   const object = objectValue(node)
   if (!object) return null
 
-  if (typeof object.page === 'string') return registerPage(object, parentSegments, context)
+  if (typeof object.page === 'string') {
+    const page = registerPage(object, parentSegments, context)
+    return object.hidden === true || context.hiddenInherited ? null : page
+  }
 
-  if (typeof object.folder === 'string') return registerFolder(object, parentSegments, context)
+  if (typeof object.folder === 'string') {
+    const folder = registerFolder(object, parentSegments, object.hidden === true ? { ...context, hiddenInherited: true } : context)
+    return object.hidden === true || context.hiddenInherited ? null : folder
+  }
 
   if (typeof object.section === 'string') {
     const label = object.section
@@ -335,17 +387,18 @@ function convertNode(
     // further-nested page segment).
     const hasOwnPath = typeof object.path === 'string' && object.path.trim().length > 0
     if (hasOwnPath) {
-      const registered = registerPageAt(object.path as string, segments.join('/'), context)
+      const registered = registerPageAt(object.path as string, segments.join('/'), context, label, object.hidden === true)
       if (registered) pages.push(registered)
     }
     for (const child of contents) {
-      const converted = convertNode(child, segments, context)
+      const converted = convertNode(child, segments, object.hidden === true ? { ...context, hiddenInherited: true } : context)
       if (converted) pages.push(converted)
     }
     if (pages.length === 0) return null
     // A section without its own `path` still has a public URL at its segment;
     // Fern resolves that bare route to the section's first descendant page.
     if (!hasOwnPath && segment) addBareRouteRedirect(segments, pages, context)
+    if (object.hidden === true || context.hiddenInherited) return null
     return {
       group: label,
       ...(typeof object.icon === 'string' ? { icon: object.icon } : {}),
@@ -389,8 +442,7 @@ function convertNode(
   }
 
   if (typeof object.changelog === 'string') {
-    warnOnce(context, 'fern-changelog', 'Fern changelog sections are not supported and were omitted.')
-    return null
+    return registerFolder({ folder: object.changelog, title: 'Changelog', 'skip-slug': true }, parentSegments, context)
   }
 
   return null
@@ -499,7 +551,7 @@ function buildTabsFromConfig(
     && navigation.every((entry) => typeof objectValue(entry)?.tab === 'string')
 
   if (isTabbedNavigation) {
-    return (navigation as Array<Record<string, unknown>>).flatMap((entry) => {
+    return (navigation as Array<Record<string, unknown>>).flatMap((entry): Array<MigrationNavigationTab> => {
       const id = String(entry.tab)
       const meta = objectValue(tabsMeta[id]) ?? {}
       const label = typeof meta['display-name'] === 'string' ? meta['display-name'] : titleCase(id)
@@ -510,6 +562,53 @@ function buildTabsFromConfig(
       const groups = groupsFromConverted(convertNodes(layout, segments, context))
       for (let index = sectionsBefore; index < context.apiSections.length; index += 1) {
         context.apiSections[index].tabLabel ??= label
+      }
+      if (groups.length === 0 && typeof meta.href === 'string' && /^https?:\/\//i.test(meta.href)) {
+        return [{ tab: label, href: meta.href }]
+      }
+      if (groups.length === 0 && typeof meta.changelog === 'string') {
+        // A Fern changelog tab names a directory rather than explicit page
+        // nodes. Keep every MDX entry, newest dated filename first.
+        const changelog = registerFolder({ folder: meta.changelog, title: label, 'skip-slug': true }, segments, context)
+        if (changelog) {
+          const indexRoute = segments.join('/')
+          const descriptors = new Map(context.descriptors.map((descriptor) => [descriptor.navigationId, descriptor]))
+          const visiblePages = changelog.pages.filter((page): page is string => typeof page === 'string')
+            .filter((page) => !descriptors.get(page)?.hidden)
+          // Fern's feed is ordered by publication date, while a directory
+          // listing is alphabetical. An overview file may publish at the tab
+          // root via frontmatter `slug`, so recognize it before slug remapping.
+          const index = visiblePages.find((page) => {
+            const descriptor = descriptors.get(page)
+            if (!descriptor) return false
+            const stem = basename(descriptor.sourcePath, extname(descriptor.sourcePath))
+            return page === indexRoute || stem === 'overview' || stem === 'index'
+          })
+          const entries = visiblePages.filter((page) => page !== index).sort((left, right) => {
+            const date = (page: string): string => descriptors.get(page)?.sourcePath.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? ''
+            return date(right).localeCompare(date(left)) || left.localeCompare(right)
+          })
+          // Fern renders the entries in the feed, not in its sidebar. Keep
+          // each article routable for its permalink while showing only the
+          // feed itself in the navigation tree.
+          for (const entryId of entries) {
+            const descriptor = descriptors.get(entryId)
+            if (descriptor) descriptor.hidden = true
+          }
+          changelog.pages = [index ?? indexRoute]
+          context.changelogIndexes.push({ route: indexRoute, entries })
+          const latest = index ?? firstLeafId(changelog.pages)
+          const bareRouteIndex = context.bareRouteRedirects.findIndex((redirect) => redirect.source === `/${indexRoute}`)
+          const indexDescriptor = index ? descriptors.get(index) : undefined
+          const indexSource = indexDescriptor && lstatSync(resolveWithinRoot(context.fernRoot, indexDescriptor.sourcePath, context.repositoryRoot)).size <= MAX_CONFIG_BYTES
+            ? readFileSync(resolveWithinRoot(context.fernRoot, indexDescriptor.sourcePath, context.repositoryRoot), 'utf8') : ''
+          const indexFrontmatter = indexSource.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? ''
+          const indexSlug = indexFrontmatter.match(/^slug:\s*["']?([^\s"']+)["']?\s*$/m)?.[1]?.replace(/^\/+|\/+$/g, '')
+          const hasBarePage = index === indexRoute || indexSlug === indexRoute
+          if (bareRouteIndex >= 0 && hasBarePage) context.bareRouteRedirects.splice(bareRouteIndex, 1)
+          else if (latest && bareRouteIndex >= 0) context.bareRouteRedirects[bareRouteIndex].destination = `/${latest}`
+          return [{ tab: label, groups: [changelog] }]
+        }
       }
       if (groups.length === 0) return []
       if (segments.length > 0) addBareRouteRedirect(segments, groups, context)
@@ -614,6 +713,7 @@ export function projectFernNavigation(input: {
     descriptors: [],
     seenNavigationIds: new Set(),
     apiSections: [],
+    changelogIndexes: [],
     warnings: [],
     warningKeys: new Set(),
     bareRouteRedirects: [],
@@ -646,6 +746,13 @@ export function projectFernNavigation(input: {
         return href && label ? [{ label, href, ...(link?.type === 'github' ? { type: 'github' as const } : {}) }] : []
       })
     : []
+  const announcement = objectValue(config.announcement)
+  const announcementMessage = typeof announcement?.message === 'string'
+    ? announcement.message.trim()
+    : ''
+  // Fern permits HTML announcements; reduce them to escaped text and vetted
+  // links before the Markdown-capable Thally banner renders the result.
+  const bannerContent = announcementMarkdown(announcementMessage)
 
   const redirects = Array.isArray(config.redirects)
     ? (config.redirects as Array<unknown>).flatMap((value) => {
@@ -670,18 +777,6 @@ export function projectFernNavigation(input: {
         }]
       })
     : []
-
-  // `title`/`colors.accent-primary` are mapped by the repository adapter into
-  // `MigrationBundle.site`; logo/favicon files live under `public/brand/` by
-  // fixed filename rather than a docs.json-style config field, so they can
-  // only be flagged for manual follow-up here.
-  if (config.logo || config.favicon) {
-    warnOnce(
-      context,
-      'fern-branding',
-      'Fern logo and favicon were not migrated; add them to public/brand/ (default-logo-light.svg, default-logo-dark.svg, default-favicon-light.svg, default-favicon-dark.svg).',
-    )
-  }
 
   const authoredSources = new Set(redirects.map((redirect) => redirect.source))
   const knownIds = new Set(context.descriptors.map((descriptor) => descriptor.navigationId))
@@ -775,11 +870,13 @@ export function projectFernNavigation(input: {
   return {
     docsConfig: {
       tabs,
+      ...(bannerContent ? { banner: { content: bannerContent, dismissible: true } } : {}),
       ...(navbarLinks.length > 0 ? { navbar: { links: navbarLinks } } : {}),
       ...(allRedirects.length > 0 ? { redirects: allRedirects } : {}),
     },
     descriptors: context.descriptors,
     warnings: context.warnings,
     apiSections: disambiguatedApiSections,
+    changelogIndexes: context.changelogIndexes,
   }
 }

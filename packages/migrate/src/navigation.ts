@@ -924,6 +924,7 @@ export function projectMintlifyNavigation(
     : []
   let tabs: Array<MigrationNavigationTab> = []
   let i18n: MigrationDocsConfig['i18n']
+  const localizedNavigation: Record<string, Array<MigrationNavigationTab>> = {}
   const projectionTrace: NavigationProjectionTrace = {}
 
   if (languages.length > 0) {
@@ -963,8 +964,11 @@ export function projectMintlifyNavigation(
       if (language === defaultLanguage) {
         tabs = languageTabs
         for (const reference of references) defaultPageIds.add(reference.navigationId)
+      } else if (languageTabs.length > 0) {
+        localizedNavigation[locale] = languageTabs
       }
     }
+    if (Object.keys(localizedNavigation).length > 0) i18n.navigation = localizedNavigation
   } else {
     const context = { references, seenReferences, warnings, warningKeys, pathPrefix: options.pathPrefix }
     tabs = convertContainerToTabs(navigation, context, 'Documentation', projectionTrace)
@@ -1194,12 +1198,21 @@ export function pruneMissingNavigationPages(
   config: MigrationDocsConfig,
   availableIds: ReadonlySet<string>,
 ): MigrationDocsConfig {
-  const pruneNodes = (nodes: Array<string | MigrationNavigationGroup>): Array<string | MigrationNavigationGroup> =>
-    nodes.flatMap((node): Array<string | MigrationNavigationGroup> => {
-      if (typeof node === 'string') return availableIds.has(node) ? [node] : []
+  const pruneNodes = (nodes: Array<string | MigrationNavigationGroup>): Array<string | MigrationNavigationGroup> => {
+    const seenSiblings = new Set<string>()
+    return nodes.flatMap((node): Array<string | MigrationNavigationGroup> => {
+      if (typeof node === 'string') {
+        // Distinct source files can resolve to one final frontmatter slug.
+        // Showing that route twice in one sidebar group is misleading even
+        // though both references passed the existence check.
+        if (!availableIds.has(node) || seenSiblings.has(node)) return []
+        seenSiblings.add(node)
+        return [node]
+      }
       const pages = pruneNodes(node.pages)
       return pages.length > 0 ? [{ ...node, pages }] : []
     })
+  }
   const tabs = config.tabs.flatMap((tab) => {
     const hadPages = (tab.pages?.length ?? 0) > 0 || (tab.groups?.length ?? 0) > 0
     const pages = tab.pages ? pruneNodes(tab.pages) : undefined

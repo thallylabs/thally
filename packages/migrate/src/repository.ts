@@ -24,7 +24,7 @@ import {
 } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { createRequire } from 'node:module'
-import { basename, dirname, extname, relative, resolve as resolvePath, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path'
 
 import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
@@ -33,9 +33,9 @@ import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunc
 
 import {
   projectDocusaurusNavigation,
-  readDocusaurusBrandAssetPaths,
   readDocusaurusRedirects,
   readDocusaurusSiteOrigin,
+  readDocusaurusSiteSettings,
   readDocusaurusSidebars,
   readDocusaurusThemeColor,
   rewriteDocusaurusLinks,
@@ -1125,25 +1125,6 @@ function fernThemeColors(value: unknown): { primary?: string; light?: string; da
   return Object.keys(colors).length > 0 ? colors : undefined
 }
 
-/**
- * Mintlify's `logo`/`favicon` config value is a plain path, or an object
- * with `light`/`dark` (and sometimes `href`, which is a link, not an asset)
- * variants. The referenced files are already copied to `public/` by the
- * ordinary asset scan (they live under the docs tree); only wiring them into
- * the rendered site's actual branding is unsupported (see the warning this
- * feeds — `SiteConfig` has no static logo/favicon field at all, unlike
- * `brand`/`brandPreset`, which the color pipeline above already wires), so
- * this only names them for that warning.
- */
-function mintlifyBrandAssetPaths(value: unknown): Array<string> {
-  if (typeof value === 'string') return [value]
-  if (!value || typeof value !== 'object') return []
-  const source = value as Record<string, unknown>
-  return (['light', 'dark'] as const)
-    .map((key) => source[key])
-    .filter((entry): entry is string => typeof entry === 'string')
-}
-
 function normalizedReferenceKey(value: string): string {
   return value.split(/[?#]/, 1)[0]
     .replace(/^\/+/, '')
@@ -1822,7 +1803,10 @@ function fernSourceSiteUrl(config: Record<string, unknown>): string | undefined 
 function externalizeMissingFernLinks(body: string, pageIds: ReadonlySet<string>, sourceSiteUrl: string, externalized: Set<string>): string {
   const rewrite = (target: string): string => {
     const path = target.split(/[?#]/, 1)[0].replace(/^\//, '').replace(/\/$/, '')
-    if (!path || pageIds.has(path)) return target
+    // Only unresolved page routes belong on the source site. Fern pages may
+    // reference copied public assets with root-relative Markdown links; an
+    // image or download is not a missing docs page.
+    if (!path || pageIds.has(path) || ASSET_EXTENSIONS.has(extname(path).toLowerCase())) return target
     try {
       const base = new URL(`${sourceSiteUrl}/`)
       const sourceLinkUrl = new URL(target.slice(1), base)
@@ -1876,17 +1860,19 @@ function rewriteMintlifyMountedLinks(body: string, pageIds: ReadonlySet<string>)
     .replace(/(\b(?:href|to)=(['"]))(\/[^'"\n]+)\2/g, (_match, before: string, quote: string, target: string) => `${before}${rewrite(target)}${quote}`))
 }
 
-/** Restore source heading fragments when Thally's slugger differs from Docusaurus'. */
-function preserveDocusaurusLinkedAnchors(pages: Array<MigrationPage>): void {
+/** Preserve source fragments that resolve to a unique heading or table row. */
+function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
   const pageById = new Map(pages.map((page) => [page.id, page]))
   const requested = new Map<string, Set<string>>()
   const crossPageRequests = new Set<string>()
   const addTarget = (target: string, currentId: string): void => {
     const hash = target.indexOf('#')
     if (hash < 0) return
-    const fragment = target.slice(hash + 1)
-    // Only literal, HTML-attribute-safe fragments can become explicit IDs.
-    if (!/^[A-Za-z0-9_.:-]{1,120}$/.test(fragment)) return
+    let fragment: string
+    try { fragment = decodeURIComponent(target.slice(hash + 1)) } catch { return }
+    // Only HTML-attribute-safe fragments can become explicit IDs. Encoded
+    // fragments are common in exported docs, including names with `$`.
+    if (!/^[\p{L}\p{N}_.:$-]{1,120}$/u.test(fragment)) return
     const path = target.slice(0, hash).split('?')[0]
     const id = target.startsWith('#') ? currentId : path.startsWith('/') && !path.startsWith('//')
       ? path.replace(/^\//, '').replace(/\/$/, '') || 'introduction' : ''
@@ -1972,6 +1958,50 @@ function preserveDocusaurusLinkedAnchors(pages: Array<MigrationPage>): void {
   }
 }
 
+/** Prevent an entry's EOF-terminated fence from swallowing the next feed entry. */
+function closeOpenCodeFence(body: string): string {
+  let open: { marker: string; length: number } | null = null
+  for (const line of body.split(/\r?\n/)) {
+    const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+    if (!match) continue
+    const marker = match[1][0]
+    if (!open) {
+      open = { marker, length: match[1].length }
+    } else if (marker === open.marker && match[1].length >= open.length && !match[2].trim()) {
+      open = null
+    }
+  }
+  return open ? `${body}\n\n${open.marker.repeat(open.length)}` : body
+}
+
+/** Fern changelog fragments prefix each article heading with its date. */
+function addDatedHeadingAliases(body: string, date: string): string {
+  let open: { marker: string; length: number } | null = null
+  const existingIds = new Set([...body.matchAll(/<a\s+id=["']([^"']+)["']/g)].map((match) => match[1]))
+  return body.split(/\r?\n/).flatMap((line) => {
+    const fence = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+    if (fence) {
+      const marker = fence[1][0]
+      if (!open) open = { marker, length: fence[1].length }
+      else if (marker === open.marker && fence[1].length >= open.length && !fence[2].trim()) open = null
+      return [line]
+    }
+    if (open) return [line]
+    const heading = line.match(/^#{2,6}\s+(.+?)\s*#*\s*$/)
+    if (!heading) return [line]
+    const slug = heading[1]
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/[`*_]/g, '')
+      .normalize('NFKD').toLowerCase()
+      .replace(/[^\p{L}\p{N}\s-]/gu, '')
+      .trim().replace(/\s+/g, '-')
+    const id = `${date}-${slug}`
+    if (!slug || existingIds.has(id)) return [line]
+    existingIds.add(id)
+    return [`<a id="${id}" />`, '', line]
+  }).join('\n')
+}
+
 function resolveSnippetPath(
   sourcePath: string,
   currentFile: string,
@@ -2049,7 +2079,14 @@ function repositoryAssetHref(
   try {
     const candidate = decodedPath.startsWith('/')
       ? resolveWithin(siteRoot, decodedPath.replace(/^\/+/, ''))
-      : resolveWithin(dirname(currentFile), decodedPath)
+      : resolveWithinRoot(dirname(currentFile), decodedPath, siteRoot)
+    // Resolve every path component before accepting an asset. A repository
+    // could contain a symlinked directory whose lexical path stays under
+    // the docs root while its file contents live elsewhere on the host.
+    const realRoot = realpathSync(siteRoot)
+    const realCandidate = realpathSync(candidate)
+    const realRelative = relative(realRoot, realCandidate)
+    if (realRelative === '..' || realRelative.startsWith(`..${sep}`) || isAbsolute(realRelative)) return null
     // Mintlify's deploy root is the directory containing docs.json. Do not
     // copy or expose a relative reference that escapes that project boundary.
     const siteRelative = relative(siteRoot, candidate).replace(/\\/g, '/')
@@ -2415,8 +2452,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // `versions:` file living in a sibling directory) — resolved directly,
   // below, since the ordinary fern/-rooted scan can't reach them.
   const fernExternalSourcePaths = new Set<string>()
+  let fernChangelogIndexes: Array<{ route: string; entries: Array<string> }> = []
   const fernReferencedPaths = new Set<string>()
   const fernSourceLinkAliases = new Map<string, string>()
+  const fernNavTitles = new Map<string, string>()
+  const fernHiddenIds = new Set<string>()
 
   if (platform === 'mintlify') {
     try {
@@ -2458,8 +2498,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
         fernApiSections = projected.apiSections
+        fernChangelogIndexes = projected.changelogIndexes
         for (const [index, descriptor] of projected.descriptors.entries()) {
           fernReferencedPaths.add(descriptor.sourcePath)
+          if (descriptor.navTitle && !fernNavTitles.has(descriptor.navigationId)) {
+            fernNavTitles.set(descriptor.navigationId, descriptor.navTitle)
+          }
+          if (descriptor.hidden) fernHiddenIds.add(descriptor.navigationId)
           // Fern pages often link by their source directory while a section
           // title changes the published route (for example tts-vendors to
           // tts-vendor-settings). Resolve only unambiguous, tab-prefixed
@@ -2799,6 +2844,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
       })
     }
+    if (platform === 'fern' && !page.navTitle) {
+      const navTitle = fernNavTitles.get(navigationId)
+      if (navTitle && navTitle !== page.title) page.navTitle = navTitle
+    }
+    if (platform === 'fern' && fernHiddenIds.has(navigationId)) page.hidden = true
     if (platform === 'mintlify' && mintlifyProjectRoot) {
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath) => {
         addAssetReference(assetPath, file.relativePath)
@@ -3262,12 +3312,91 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
 
+  if (platform === 'docusaurus') {
+    const importedRoutes = new Set(pages.map((page) => page.navigationId))
+    docsConfig.tabs = docsConfig.tabs.map((tab) => {
+      if (tab.href) return tab
+      const root = tab.tab.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-')
+      if (!root || !importedRoutes.has(root)) return tab
+      // Auto-generated Docusaurus sidebars can sort an `index.mdx` landing
+      // page after alphabetic siblings. Keep the actual tab root as the
+      // collection destination, and put it first when it is a direct child.
+      return {
+        ...tab,
+        href: `/${root}`,
+        ...(tab.pages ? { pages: tab.pages.map((node) => {
+          if (typeof node === 'string') return node
+          const index = node.pages.indexOf(root)
+          return index > 0
+            ? { ...node, pages: [root, ...node.pages.filter((page) => page !== root)] }
+            : node
+        }) } : {}),
+        ...(tab.groups ? { groups: tab.groups.map((group) => {
+          const index = group.pages.indexOf(root)
+          return index > 0
+            ? { ...group, pages: [root, ...group.pages.filter((page) => page !== root)] }
+            : group
+        }) } : {}),
+      }
+    })
+  }
+
   // Pages skipped above (invalid MDX, a client-boundary function prop, an id
   // collision) never entered `pages`, but the nav was projected from the raw
   // source config and may still reference their ids. Drop those dangling
   // references so `thally check` never reports a nav entry with no MDX file.
+  if (platform === 'fern') {
+    const byId = new Map(pages.map((page) => [page.navigationId, page]))
+    for (const changelog of fernChangelogIndexes) {
+      let index = byId.get(changelog.route)
+      const entries = changelog.entries
+        .map((id) => byId.get(fernIdRenames.get(id) ?? id))
+        .filter((page): page is MigrationPage => Boolean(page))
+        .slice(0, 10)
+      if (entries.length === 0) continue
+      if (!index) {
+        // A changelog directory may have no overview file at all. Fern still
+        // publishes a feed at the tab route, so materialize that route before
+        // pruning navigation entries which lack an imported source file.
+        index = {
+          id: changelog.route,
+          navigationId: changelog.route,
+          title: 'Release Notes',
+          description: 'Latest release notes and product updates.',
+          descriptionPlacement: 'body',
+          keywords: [],
+          body: '',
+          source: entries[0].source,
+        }
+        pages.push(index)
+        byId.set(index.navigationId, index)
+        docsConfig.redirects = docsConfig.redirects?.filter((redirect) => redirect.source !== `/${changelog.route}`)
+      }
+      if (index.body.trim()) continue
+      // Fern renders changelog directories as a dated feed at the bare tab
+      // route. Its `overview.mdx` is often intentionally blank: leaving that
+      // page blank strands the release notes even though every entry imports.
+      // The feed contains the full articles, including code examples and
+      // images. Entry bodies have already gone through normal MDX migration
+      // and link/asset rewriting. Pages with module declarations need an
+      // excerpt because imports cannot safely be concatenated into one MDX
+      // document without renaming all their bindings.
+      index.description ||= 'Latest release notes and product updates.'
+      index.body = entries.map((entry) => {
+        const date = entry.source.match(/\d{4}-\d{2}-\d{2}/)?.[0]
+        const escapeText = (value: string): string => value.replace(/([\\{}<>\[\]*_`])/g, '\\$1')
+        // The runtime wraps headings in their own permalink anchor. A link
+        // inside the heading would create nested anchors and break hydration.
+        const body = /^(?:import|export)\s.+(?:from\s|\{)/m.test(entry.body)
+          ? escapeText(entry.description)
+          : closeOpenCodeFence(date ? addDatedHeadingAliases(entry.body.trim(), date) : entry.body.trim()) || escapeText(entry.description)
+        const dateAnchor = date ? `<a id="${date}T00:00:00.000Z" />\n\n` : ''
+        return `${dateAnchor}## ${escapeText(entry.title)}\n\n${date ? `**${date}** · ` : ''}[Read release note](/${entry.id})\n\n${body}`
+      }).join('\n\n---\n\n')
+    }
+  }
   docsConfig = pruneMissingNavigationPages(docsConfig, new Set(pages.map((page) => page.navigationId)))
-  if (platform === 'docusaurus') preserveDocusaurusLinkedAnchors(pages)
+  preserveLinkedAnchors(pages)
   if (platform === 'fern' && fernRawConfig) {
     const sourceSiteUrl = fernSourceSiteUrl(fernRawConfig)
     if (sourceSiteUrl) {
@@ -3323,26 +3452,158 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // recursive per-plugin-instance sub-calls (community/mcp/agent-cli), which
   // would otherwise redundantly re-read (and re-warn about) the same config.
   const isTopLevelDocusaurus = platform === 'docusaurus' && docusaurusProjectRoot && !options.docusaurusSkipRedirects
+  const docusaurusSettings = isTopLevelDocusaurus
+    ? readDocusaurusSiteSettings(docusaurusProjectRoot!)
+    : undefined
+  if (docusaurusSettings) {
+    const importedRoutes = new Set(pages.map((page) => page.navigationId))
+    const sourceOrigin = readDocusaurusSiteOrigin(docusaurusProjectRoot!)
+    const externalized = new Set<string>()
+    const projectLink = (raw: string, sourceLiteral = false): string | undefined => {
+      if (/^https?:\/\//i.test(raw)) return raw
+      if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(raw) || raw.includes('\\')) return undefined
+      const suffixAt = raw.search(/[?#]/)
+      const path = suffixAt < 0 ? raw : raw.slice(0, suffixAt)
+      const suffix = suffixAt < 0 ? '' : raw.slice(suffixAt)
+      const route = path.replace(/^\.?\//, '').replace(/\/+$/, '')
+      if (route === '..' || route.startsWith('../') || route.includes('/../')) return undefined
+      const docsBase = docusaurusSettings.docsRouteBasePath.replace(/^\/+|\/+$/g, '')
+      // Literal site links are routes in Docusaurus' URL space. A docs page
+      // called "blog" must not capture the site's separate /blog section
+      // when docs are mounted below /docs.
+      const isOutsideDocs = sourceLiteral && docsBase
+        && route !== docsBase && !route.startsWith(`${docsBase}/`)
+      if (isOutsideDocs && sourceOrigin) {
+        externalized.add(raw)
+        return new URL(raw, `${sourceOrigin}/`).toString()
+      }
+      const strippedDocsRoute = docsBase && route.startsWith(`${docsBase}/`)
+        ? route.slice(docsBase.length + 1) : route
+      const candidates = [route, strippedDocsRoute, ...(route === docsBase ? ['introduction'] : [])]
+      const imported = candidates.find((candidate) => importedRoutes.has(candidate))
+      if (imported) return `/${imported}${suffix}`
+      if (sourceOrigin) {
+        externalized.add(raw)
+        return new URL(raw, `${sourceOrigin}/`).toString()
+      }
+      return path.startsWith('/') ? `${path}${suffix}` : `/${route}${suffix}`
+    }
+    const firstNavigationPage = (nodes: Array<string | MigrationNavigationGroup>): string | undefined => {
+      for (const node of nodes) {
+        if (typeof node === 'string') return node
+        const nested = firstNavigationPage(node.pages)
+        if (nested) return nested
+      }
+      return undefined
+    }
+    const navbarLinks = docusaurusSettings.navbarLinks.flatMap((link) => {
+      const docRoute = link.docId && !link.docsPluginId && docusaurusDescriptors.find((page) =>
+        page.docId === link.docId)?.navigationId
+      const sidebar = link.sidebarId && docsConfig.tabs.find((tab) =>
+        tab.tab.toLowerCase() === link.sidebarId!.toLowerCase())
+      const sidebarRoute = sidebar && firstNavigationPage(sidebar.pages ?? sidebar.groups ?? [])
+      const pluginRoot = link.docsPluginId && importedRoutes.has(link.docsPluginId)
+        ? link.docsPluginId : undefined
+      const rawHref = link.href ?? (docRoute ? `/${docRoute}` : undefined)
+        ?? (pluginRoot ? `/${pluginRoot}` : undefined)
+        ?? (sidebarRoute ? `/${sidebarRoute}` : undefined)
+        ?? (link.docsPluginId ? `/${link.docsPluginId}` : undefined)
+      const href = rawHref && projectLink(rawHref, Boolean(link.href))
+      return href ? [{ label: link.label, href }] : []
+    })
+    const footerLinks = docusaurusSettings.footerLinks?.flatMap((column) => {
+      const items = column.items.flatMap((item) => {
+        const href = projectLink(item.href, true)
+        return href ? [{ label: item.label, href }] : []
+      })
+      return items.length > 0 ? [{ heading: column.heading, items }] : []
+    })
+    docsConfig = {
+      ...docsConfig,
+      ...(navbarLinks.length > 0 ? { navbar: { ...docsConfig.navbar, links: navbarLinks } } : {}),
+      ...(footerLinks?.length || docusaurusSettings.copyright ? {
+        footer: {
+          ...docsConfig.footer,
+          ...(footerLinks?.length ? { links: footerLinks } : {}),
+          ...(docusaurusSettings.copyright ? { copyright: docusaurusSettings.copyright } : {}),
+        },
+      } : {}),
+    }
+    if (externalized.size > 0) warnings.push({
+      code: 'unsupported-config',
+      message: `${externalized.size} site navigation/footer link(s) point outside the imported docs and were kept on ${sourceOrigin}.`,
+    })
+  }
+  // Dense version menus should fit in one header row. A dozen archived
+  // Docusaurus releases otherwise turn the collection tabs into a tall wall
+  // above every document.
+  if (!docsConfig.navigation?.display && docsConfig.tabs.filter((tab) => !tab.hidden).length > 6) {
+    docsConfig = { ...docsConfig, navigation: { display: 'dropdown' } }
+  }
   const themeColors = mintlifyConfig
     ? mintlifyThemeColors(mintlifyConfig.colors)
     : fernRawConfig
       ? fernThemeColors(fernRawConfig.colors)
       : isTopLevelDocusaurus ? readDocusaurusThemeColor(docusaurusProjectRoot!) : undefined
-  // Thally's `SiteConfig` has no static logo/favicon field (unlike
-  // `brand`/`brandPreset`, which the color pipeline above already wires):
-  // branding is admin-managed at runtime. The referenced files are still
-  // copied to `public/` by the ordinary asset scan, so name them and point
-  // at where to wire them up manually instead of leaving the loss silent.
-  // Fern already emits its own version of this warning (`fern.ts`).
-  const brandAssetPaths = mintlifyConfig
-    ? [...mintlifyBrandAssetPaths(mintlifyConfig.logo), ...mintlifyBrandAssetPaths(mintlifyConfig.favicon)]
-    : isTopLevelDocusaurus ? readDocusaurusBrandAssetPaths(docusaurusProjectRoot!) : []
-  if (brandAssetPaths.length > 0) {
-    warnings.push({
-      code: 'unsupported-config',
-      message: `The site's logo/favicon (${brandAssetPaths.join(', ')}) were copied into public/ but are not wired into the migrated site's branding, which Thally manages from the admin dashboard rather than a static config field; set them there after the site is deployed.`,
-    })
+  // Brand assets are copied as ordinary public files. Wire only assets that
+  // were actually imported; a missing source file must not create a broken
+  // header image or favicon. Admin uploads still override these fallbacks.
+  const assetPaths = new Set(assets.map((asset) => asset.path))
+  const publicBrandPath = (value: unknown): string | undefined => {
+    if (typeof value !== 'string' || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(value)) return undefined
+    const normalized = normalizeAssetPath(value)
+    return normalized && assetPaths.has(normalized) ? `/${normalized}` : undefined
   }
+  const brandVariants = (value: unknown): { light?: string; dark?: string; showTitle?: boolean } => {
+    if (typeof value === 'string') return { light: value }
+    if (!value || typeof value !== 'object') return {}
+    const source = value as Record<string, unknown>
+    const light = source.light ?? source.src
+    const dark = source.dark ?? source.srcDark
+    return {
+      ...(typeof light === 'string' ? { light } : {}),
+      ...(typeof dark === 'string' ? { dark } : {}),
+      ...(typeof source.showTitle === 'boolean' ? { showTitle: source.showTitle } : {}),
+    }
+  }
+  const sourceLogo = mintlifyConfig?.logo ?? fernRawConfig?.logo ?? docusaurusSettings?.logo
+  const sourceFavicon = mintlifyConfig?.favicon ?? fernRawConfig?.favicon ?? docusaurusSettings?.favicon
+  const logo = brandVariants(sourceLogo)
+  const favicon = brandVariants(sourceFavicon)
+  const logoLight = publicBrandPath(logo.light)
+  const logoDark = publicBrandPath(logo.dark)
+  const faviconLight = publicBrandPath(favicon.light)
+  const faviconDark = publicBrandPath(favicon.dark)
+  if (logoLight) docsConfig = {
+    ...docsConfig,
+    navbar: {
+      ...docsConfig.navbar,
+      logo: {
+        light: logoLight,
+        ...(logoDark ? { dark: logoDark } : {}),
+        showTitle: mintlifyConfig || fernRawConfig ? false : logo.showTitle !== false,
+        ...(typeof (fernRawConfig?.logo as Record<string, unknown> | undefined)?.['right-text'] === 'string'
+          ? { rightText: String((fernRawConfig!.logo as Record<string, unknown>)['right-text']).trim().slice(0, 40) }
+          : {}),
+      },
+    },
+  }
+  if (faviconLight) docsConfig = {
+    ...docsConfig,
+    favicon: { light: faviconLight, ...(faviconDark ? { dark: faviconDark } : {}) },
+  }
+  const missingBrand = [
+    ...[logo.light, logo.dark].filter((value): value is string => typeof value === 'string' && !publicBrandPath(value)),
+    ...[favicon.light, favicon.dark].filter((value): value is string => typeof value === 'string' && !publicBrandPath(value)),
+  ]
+  if (missingBrand.length > 0) warnings.push({
+    code: 'unsupported-config',
+    message: `Brand asset(s) were referenced but not imported: ${[...new Set(missingBrand)].join(', ')}. Add these files under public/ or update docs.json.`,
+  })
+  if (fernRawConfig?.logo && !logoLight && !logo.light) warnings.push({
+    code: 'unsupported-config',
+    message: 'Fern supplied a logo through its global theme without a local asset; add a logo path to docs.json after import.',
+  })
   return {
     sourceUrl: options.sourceUrl,
     sourceKind: 'repository',
@@ -3360,6 +3621,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     } : fernRawConfig && (typeof fernRawConfig.title === 'string' || themeColors) ? {
       site: {
         ...(typeof fernRawConfig.title === 'string' ? { name: fernRawConfig.title } : {}),
+        ...(themeColors ? { colors: themeColors } : {}),
+      },
+    } : docusaurusSettings && (docusaurusSettings.name || docusaurusSettings.description || themeColors) ? {
+      site: {
+        ...(docusaurusSettings.name ? { name: docusaurusSettings.name } : {}),
+        ...(docusaurusSettings.description ? { description: docusaurusSettings.description } : {}),
         ...(themeColors ? { colors: themeColors } : {}),
       },
     } : themeColors ? {
