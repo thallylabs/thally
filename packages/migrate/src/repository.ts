@@ -47,6 +47,8 @@ import {
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
+import { parseFrontmatter } from './frontmatter.js'
+import { frontmatterGateReason, isMintlifyServedScriptOrStyle, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
 import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
@@ -76,6 +78,7 @@ import type {
   MigrationPage,
   MigrationPlatform,
   MigrationWarning,
+  RenderedMigrationFile,
 } from './types.js'
 
 const MAX_SOURCE_FILES = 5_000
@@ -103,6 +106,8 @@ const IGNORED_DIRECTORIES = new Set([
 function isIgnoredContentDirectory(name: string): boolean {
   return name.startsWith('.') || name === 'node_modules'
 }
+/** Project-root directory for withheld access-restricted pages; never read by the runtime. */
+const QUARANTINE_DIRECTORY = 'migration-quarantine'
 const ASSET_DIRECTORIES = new Set(['assets', 'images', 'img', 'media', 'public', 'static'])
 const ASSET_EXTENSIONS = new Set([
   '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.mp3', '.mp4',
@@ -1748,6 +1753,8 @@ function inlineMdxSnippets(
   depth = 0,
   siteRoot = repositoryRoot,
   globalAliases: Map<string, string> = new Map(),
+  /** Absolute paths of access-restricted pages, which must never be inlined into another page. */
+  withheld: ReadonlySet<string> = new Set(),
 ): string {
   if (depth >= 8) return raw
   // Hoisting page imports must see indented JSX code examples as fenced code.
@@ -1763,6 +1770,15 @@ function inlineMdxSnippets(
       try {
         const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
         if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
+        if (withheld.has(candidate)) {
+          warnings.push({
+            code: 'gated-page',
+            message: `Imported ${sourcePath} is access-restricted and was NOT inlined; the import was left as a comment.`,
+            source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+          })
+          snippets.set(componentName, `{/* Access-restricted content withheld: ${sourcePath} */}`)
+          return ''
+        }
         const nested = inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
           candidate,
@@ -1771,6 +1787,7 @@ function inlineMdxSnippets(
           depth + 1,
           siteRoot,
           globalAliases,
+          withheld,
         )
         const declaration = statefulSnippetDeclaration(nested, componentName)
         if (declaration) preservedDeclarations.set(componentName, declaration)
@@ -1797,7 +1814,7 @@ function inlineMdxSnippets(
       if (bindings.length === 0 || bindings.some((binding) => !binding)) return statement
       try {
         const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
-        if (!existsSync(candidate) || !lstatSync(candidate).isFile()) return statement
+        if (!existsSync(candidate) || !lstatSync(candidate).isFile() || withheld.has(candidate)) return statement
         const snippetSource = readFileSync(candidate, 'utf8')
         const values = staticNamedSnippetValues(snippetSource)
         const declarations: Array<string> = []
@@ -1826,7 +1843,7 @@ function inlineMdxSnippets(
   // elsewhere in the same docs project.
   const localNames = locallyDeclaredNames(withoutImports)
   for (const [componentName, candidate] of globalAliases) {
-    if (snippets.has(componentName) || localNames.has(componentName)
+    if (snippets.has(componentName) || localNames.has(componentName) || withheld.has(candidate)
       || !new RegExp(`<${componentName}(?:\\s|/?>)`).test(withoutImports)) continue
     const nested = inlineMdxSnippets(
       withoutFrontmatter(readFileSync(candidate, 'utf8')),
@@ -1836,6 +1853,7 @@ function inlineMdxSnippets(
       depth + 1,
       siteRoot,
       globalAliases,
+      withheld,
     )
     const declaration = statefulSnippetDeclaration(nested, componentName)
     if (declaration) preservedDeclarations.set(componentName, declaration)
@@ -1864,6 +1882,7 @@ function inlineMdxSnippets(
         depth + 1,
         siteRoot,
         globalAliases,
+        withheld,
       )
     } catch {
       warnings.push({
@@ -1980,6 +1999,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const referenceOrder = new Map<string, number>()
   let docusaurusSidebars: DocusaurusSidebars | null = null
   let mintlifyConfig: Record<string, unknown> | null = null
+  /** Pages under a restricted Mintlify navigation container, keyed like page references. */
+  const mintlifyGatedRefs = new Map<string, string>()
   let fernRawConfig: Record<string, unknown> | null = null
   let fernBasePath = ''
   let fernVersionPath = ''
@@ -1998,6 +2019,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         const projected = projectMintlifyNavigation(config)
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
+        for (const gated of projected.gatedReferences) {
+          const gatedKey = normalizedReferenceKey(gated.ref)
+          if (!mintlifyGatedRefs.has(gatedKey)) mintlifyGatedRefs.set(gatedKey, gated.reason)
+        }
         for (const [index, reference] of projected.pageReferences.entries()) {
           const key = normalizedReferenceKey(reference.ref)
           // Shared source pages may appear in several language menus. The
@@ -2118,6 +2143,28 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const docusaurusDescriptors: Array<DocusaurusPageDescriptor> = []
   const docusaurusDocCardRoutes = new Set<string>()
   const seenPageIds = new Set<string>()
+  const quarantinedFiles: Array<RenderedMigrationFile> = []
+  let sawPublicTrue = false
+  // Gate verdicts are computed up front so a page that imports an
+  // access-restricted page as a component can never inline its content.
+  const gateByPath = new Map<string, { reason?: string; publicTrue: boolean }>()
+  const withheldPaths = new Set<string>()
+  if (platform === 'mintlify') {
+    for (const file of files) {
+      if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())
+        || file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
+        || lstatSync(file.absolutePath).size > MAX_PAGE_BYTES) continue
+      let frontmatter: Record<string, unknown> = {}
+      try {
+        frontmatter = parseFrontmatter(readFileSync(file.absolutePath, 'utf8')).data
+      } catch {
+        // Invalid YAML is fatal in the page parse below; nothing is published.
+      }
+      const reason = frontmatterGateReason(frontmatter) ?? mintlifyGatedRefs.get(normalizedReferenceKey(file.relativePath))
+      gateByPath.set(file.absolutePath, { reason, publicTrue: isPublicTrue(frontmatter.public) })
+      if (reason) withheldPaths.add(file.absolutePath)
+    }
+  }
   /** docs.yml-derived navigationId -> final id, when a page's frontmatter `slug` overrides it. */
   const fernIdRenames = new Map<string, string>()
   let skipped = 0
@@ -2171,6 +2218,29 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       continue
     }
     const key = normalizedReferenceKey(file.relativePath)
+    if (platform === 'mintlify') {
+      // Access-restricted pages must never migrate as public. Certain signals
+      // only: frontmatter `groups` / `public: false`, or a restricted
+      // navigation container. The original file is kept outside every
+      // published path so nothing is lost.
+      const gate = gateByPath.get(file.absolutePath)
+      if (gate?.publicTrue) sawPublicTrue = true
+      const gateReason = gate?.reason
+      if (gateReason) {
+        skipped++
+        if (file.relativePath.split('/').some((segment) => segment === '..')) {
+          warnings.push({ code: 'gated-page', message: `Access-restricted page (${gateReason}) was withheld from the site, but its path could not be preserved safely; recover it from the source repository.`, source: file.relativePath })
+          continue
+        }
+        quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/${file.relativePath}`, content: readFileSync(file.absolutePath) })
+        warnings.push({
+          code: 'gated-page',
+          message: `Access-restricted on the source site (${gateReason}), so it was NOT published. The original is saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}; links from other pages to it will break.`,
+          source: file.relativePath,
+        })
+        continue
+      }
+    }
     const referenced = exactReferenceMap.get(exactReferenceKey(file.relativePath)) ?? referenceMap.get(key)
     let locale = referenced?.locale
     let navigationId = referenced?.navigationId ?? pageIdFromReference(file.relativePath, platform === 'mintlify')
@@ -2198,6 +2268,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       0,
       mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir,
       snippetAliases,
+      withheldPaths,
     )
     if (componentMigrator) {
       const warningsBeforeTransform = warnings.length
@@ -2487,9 +2558,26 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     : []
   interface AssetCandidate { file: ScannedFile; assetPath: string; size: number }
   const assetCandidates: Array<AssetCandidate> = []
+  // Mintlify serves every `.css`/`.js` file in its content directory
+  // site-wide, plus any font file named by docs.json `fonts.source`.
+  const mintlifyFonts = platform === 'mintlify' ? mintlifyFontSources(mintlifyConfig) : []
+  const fontRelativePaths = new Set(mintlifyFonts.flatMap((font) => font.path ? [font.path] : []))
+  // A `.js` that pages import as a component was copied under src/mdx/migrated;
+  // loading it again as a site-wide script would run a module as a plain script.
+  const importedComponentSources = new Set((componentMigrator?.files() ?? []).flatMap((file) => {
+    const source = /^src\/mdx\/migrated\/[^/]+\/source\/(.+)$/.exec(file.path)?.[1]
+    return source ? [resolvePath(repositoryDir, source)] : []
+  }))
+  const siteAssetPaths = new Map<string, 'style' | 'script' | 'font'>()
+  const fontAssetByRelative = new Map<string, string>()
   for (const file of [...files, ...repositoryAssets, ...fernReferencedAssets]) {
     const firstSegment = file.relativePath.split('/', 1)[0].toLowerCase()
-    if (!ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
+    const siteKind = platform !== 'mintlify' ? undefined
+      : fontRelativePaths.has(file.relativePath) ? 'font' as const
+        : isMintlifyServedScriptOrStyle(file.relativePath) && !importedComponentSources.has(file.absolutePath)
+          ? (extname(file.relativePath).toLowerCase() === '.css' ? 'style' as const : 'script' as const)
+          : undefined
+    if (!siteKind && !ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
     if (platform !== 'mintlify' && !ASSET_DIRECTORIES.has(firstSegment)
       && !(platform === 'fern' && referencedAssetPaths.has(file.relativePath))) continue
     const isDocusaurusStatic = platform === 'docusaurus' && firstSegment === 'static'
@@ -2499,6 +2587,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         ? file.relativePath.slice('static/'.length)
         : file.relativePath)
     if (!assetPath) continue
+    if (siteKind) {
+      siteAssetPaths.set(assetPath, siteKind)
+      if (siteKind === 'font') fontAssetByRelative.set(file.relativePath, assetPath)
+    }
     assetCandidates.push({ file, assetPath, size: lstatSync(file.absolutePath).size })
   }
   // Copy assets that pages actually reference before unreferenced ones, so a
@@ -2533,6 +2625,45 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     assets.push({ path: assetPath, content })
     totalAssetBytes += size
+  }
+  if (platform === 'mintlify') {
+    const copiedSite = assets.flatMap((asset) => siteAssetPaths.has(asset.path) ? [{ path: asset.path, kind: siteAssetPaths.get(asset.path)! }] : [])
+    const scripts = copiedSite.filter((entry) => entry.kind === 'script')
+    if (scripts.length > 0) {
+      docsConfig = {
+        ...docsConfig,
+        customScripts: [...(docsConfig.customScripts ?? []), ...scripts.map((entry) => ({ src: `/${entry.path.split('/').map(encodeURIComponent).join('/')}`, strategy: 'afterInteractive' as const }))],
+      }
+      warnings.push({
+        code: 'unsupported-config',
+        message: `${scripts.length} script(s) from the content directory (${scripts.map((entry) => entry.path).join(', ')}) now load on every page via docs.json customScripts, as they did on Mintlify. They may target Mintlify's page structure; review them.`,
+      })
+    }
+    for (const entry of copiedSite.filter((item) => item.kind === 'style')) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `Stylesheet preserved at public/${entry.path} but NOT applied: Thally cannot load a stylesheet from docs.json, and it likely targets Mintlify's DOM ids and classes. Review it manually.`,
+        source: entry.path,
+      })
+    }
+    for (const font of mintlifyFonts) {
+      const copiedPath = font.path ? fontAssetByRelative.get(font.path) : undefined
+      const copied = copiedPath !== undefined && assets.some((asset) => asset.path === copiedPath)
+      const detail = font.remote
+        ? `its source ${font.source} is a remote URL and was not downloaded`
+        : !font.path
+          ? `its source ${font.source} is not a safe local .woff/.woff2/.ttf/.otf path inside the docs directory and was not imported`
+          : !copiedPath
+            ? `its source file ${font.source} was not found in the docs directory`
+            : copied
+              ? `its file was copied to public/${copiedPath}`
+              : null
+      if (detail === null) continue
+      warnings.push({
+        code: 'unsupported-config',
+        message: `Self-hosted font "${font.family}" is not applied: Thally's fonts setting loads Google Fonts by family only; ${detail}. The family name was still mapped, which loads a Google font of that name if one exists.`,
+      })
+    }
   }
 
   if (files.length >= MAX_SOURCE_FILES) {
@@ -3083,11 +3214,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     docsConfig = { ...docsConfig, navbar: { ...docsConfig.navbar, logo: null } }
   }
   if (mintlifyConfig) {
-    const appearance = mintlifyConfig.appearance && typeof mintlifyConfig.appearance === 'object'
-      ? mintlifyConfig.appearance as Record<string, unknown> : null
-    const defaultMode = appearance?.default
-    if (defaultMode === 'light' || defaultMode === 'dark' || defaultMode === 'system') {
-      docsConfig = { ...docsConfig, appearance: { ...docsConfig.appearance, default: defaultMode } }
+    const appearance = mintlifyAppearance(mintlifyConfig, warnings)
+    if (Object.keys(appearance).length > 0) {
+      docsConfig = { ...docsConfig, appearance: { ...docsConfig.appearance, ...appearance } }
     }
     const background = mintlifyConfig.background && typeof mintlifyConfig.background === 'object'
       ? mintlifyConfig.background as Record<string, unknown> : null
@@ -3121,6 +3250,23 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     code: 'unsupported-config',
     message: `Brand asset(s) were referenced but not imported: ${[...new Set(missingBrand)].join(', ')}. Add these files under public/ or update docs.json.`,
   })
+  if (platform === 'mintlify') {
+    // Mintlify serves a Markdown mirror of every page by default. The mirror
+    // route reads only src/content, the same files the HTML routes serve.
+    docsConfig = { ...docsConfig, markdown: { enabled: true } }
+    if (quarantinedFiles.length > 0) {
+      warnings.push({
+        code: 'gated-page',
+        message: `${quarantinedFiles.length} access-restricted page(s) were withheld from the published site and saved under ${QUARANTINE_DIRECTORY}/ (local only: git-ignored, never served or deployed). Images and other assets those pages used were still copied to public/. Review them before deciding how to publish or protect that content.`,
+      })
+    }
+    if (sawPublicTrue) {
+      warnings.push({
+        code: 'gated-page',
+        message: 'Some pages set `public: true`, which means the source site used Mintlify authentication and every page WITHOUT it was private. Site-wide authentication is configured in the Mintlify dashboard and cannot be read from the repository, so Thally will publish ALL imported pages publicly. Confirm nothing here was meant to stay private before deploying.',
+      })
+    }
+  }
   if (fernRawConfig?.logo && !logoLight && !logo.light) warnings.push({
     code: 'unsupported-config',
     message: 'Fern supplied a logo through its global theme without a local asset; add a logo path to docs.json after import.',
@@ -3133,6 +3279,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     assets,
     ...(remoteApiSpecs.length > 0 ? { remoteApiSpecs } : {}),
     ...(componentMigrator ? { componentFiles: componentMigrator.files() } : {}),
+    ...(quarantinedFiles.length > 0 ? { quarantinedFiles } : {}),
     docsConfig,
     ...(mintlifyConfig ? {
       site: {

@@ -64,6 +64,19 @@ function projectPath(projectDir: string, candidate: string): string {
   return target
 }
 
+/**
+ * Keep withheld access-restricted pages out of git: the new project is
+ * committed by `initGit`, and a public push must not publish them. Appends to
+ * (never replaces) an existing .gitignore, once.
+ */
+function ignoreQuarantineDirectory(projectDir: string): void {
+  const ignorePath = projectPath(projectDir, '.gitignore')
+  const existing = existsSync(ignorePath) ? readFileSync(ignorePath, 'utf8') : ''
+  if (existing.split(/\r?\n/).some((line) => /^\/?migration-quarantine\/?$/.test(line.trim()))) return
+  const separator = existing === '' || existing.endsWith('\n') ? '' : '\n'
+  writeFileSync(ignorePath, `${existing}${separator}\n# Access-restricted pages withheld by migration: local only, never commit or deploy\n/migration-quarantine/\n`)
+}
+
 function readExistingConfig(projectDir: string): MigrationDocsConfig | undefined {
   const configPath = projectPath(projectDir, 'docs.json')
   if (!existsSync(configPath)) return undefined
@@ -144,10 +157,11 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   }
 
   // Preserve portable runtime capabilities, not the starter's sample pages,
-  // navigation or locale setup. Mintlify has no equivalent Markdown toggle.
+  // navigation or locale setup. A source-derived Markdown setting (Mintlify
+  // serves .md mirrors by default) wins over the starter's.
   if (!options.into) {
     const starterConfig = readExistingConfig(projectDir)
-    if (starterConfig?.markdown) bundle.docsConfig.markdown = starterConfig.markdown
+    if (starterConfig?.markdown) bundle.docsConfig.markdown ??= starterConfig.markdown
     // The starter's "Get started" link points at its sample quickstart. A
     // migrated source without its own primary action must not inherit it.
     if (!bundle.docsConfig.navbar?.primary) {
@@ -170,8 +184,16 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     writeFileSync(destination, file.content)
   }
 
-  for (const warning of bundle.warnings) {
-    console.warn(`  ⚠  ${warning.message}${warning.source ? ` (${warning.source})` : ''}`)
+  if (bundle.quarantinedFiles?.length) ignoreQuarantineDirectory(projectDir)
+
+  const format = (warning: MigrationWarning): string => `${warning.message}${warning.source ? ` (${warning.source})` : ''}`
+  for (const warning of bundle.warnings.filter((item) => item.code !== 'gated-page')) console.warn(`  ⚠  ${format(warning)}`)
+  // Access-restricted content is a security matter: keep it together, last,
+  // and unmistakable so it is not lost among compatibility notes.
+  const gatedWarnings = bundle.warnings.filter((item) => item.code === 'gated-page')
+  if (gatedWarnings.length > 0) {
+    console.warn('\n  🔒 ACCESS-RESTRICTED CONTENT — review before publishing')
+    for (const warning of gatedWarnings) console.warn(`  🔒 ${format(warning)}`)
   }
   console.log(`  ✓ Imported ${bundle.pages.length} pages and ${bundle.assets.length} assets from ${bundle.platform}.`)
 
@@ -198,6 +220,7 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     pages: bundle.pages.length,
     assets: bundle.assets.length,
     components: bundle.componentFiles?.length ?? 0,
+    quarantined: bundle.quarantinedFiles?.length ?? 0,
     warnings: bundle.warnings,
     validation,
   }, null, 2)}\n`)
