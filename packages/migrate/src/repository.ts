@@ -1042,7 +1042,7 @@ function selectGroupWithinBudget(
       message: `This repository has more than ${MAX_SOURCE_FILES} ${label === 'file' ? 'files' : 'assets'}, so only the first ${MAX_SOURCE_FILES} (in navigation order, default version first) were migrated. `
         + `${droppedPages.length} ${noun}(s) were left out`
         + (examples.length > 0 ? `: ${examples.join(', ')}${rest > 0 ? `, and ${rest} more` : ''}` : '')
-        + (droppedVersions.size > 0 ? ` (versions: ${[...droppedVersions].join(', ')})` : '')
+        + (droppedVersions.size > 0 ? ` (versions: ${[...droppedVersions].slice(0, 5).join(', ')}${droppedVersions.size > 5 ? `, and ${droppedVersions.size - 5} more` : ''})` : '')
         + (label === 'file'
           ? '. To include them, run the migration on a smaller part of the repository with --docs-dir.'
           : '. Copy them into public/ manually if your pages use them.'),
