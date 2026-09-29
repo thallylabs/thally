@@ -130,6 +130,8 @@ interface WalkContext {
   changelogIndexes: Array<{ route: string; entries: Array<string> }>
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
+  /** External navigation leaves cannot live inside Thally groups; keep them as navbar links. */
+  externalLinks: Array<{ label: string; href: string }>
   /** Bare tab/section routes with no page of their own, soft-redirected to their first descendant. */
   bareRouteRedirects: Array<{ source: string; destination: string }>
   /** Slugified segment -> the literal explicit `slug` it was derived from, when the two differ (e.g. `baml-client` -> `baml_client`). */
@@ -408,11 +410,25 @@ function convertNode(
   }
 
   if (typeof object.link === 'string') {
-    warnOnce(
-      context,
-      'fern-link',
-      'Fern navigation "link" entries are external and cannot be nested inside a Thally group; add them to the navbar manually.',
-    )
+    const label = object.link.trim()
+    const rawHref = typeof object.href === 'string' ? object.href.trim() : ''
+    // Fern links may appear within a section, while Thally's group schema
+    // accepts page ids only. Only absolute web URLs belong in the navbar;
+    // canonicalizing through URL also rejects malformed or deceptive hosts.
+    let href: string | undefined
+    if (/^https?:\/\//i.test(rawHref) && !/[\\\u0000-\u0020\u007f]/.test(rawHref)) {
+      try {
+        const url = new URL(rawHref)
+        if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) href = url.toString()
+      } catch { /* An invalid authored link is reported below. */ }
+    }
+    if (label && href && object.hidden !== true && !context.hiddenInherited) {
+      if (!context.externalLinks.some((link) => link.label === label && link.href === href)) {
+        context.externalLinks.push({ label, href })
+      }
+    } else if (!href && object.hidden !== true && !context.hiddenInherited) {
+      warnOnce(context, `fern-link-${rawHref}`, `Fern navigation link "${label}" has an unsafe or invalid external URL and was skipped.`)
+    }
     return null
   }
 
@@ -716,6 +732,7 @@ export function projectFernNavigation(input: {
     changelogIndexes: [],
     warnings: [],
     warningKeys: new Set(),
+    externalLinks: [],
     bareRouteRedirects: [],
     segmentAliases: new Map(),
     pathPrefix: '',
@@ -746,6 +763,11 @@ export function projectFernNavigation(input: {
         return href && label ? [{ label, href, ...(link?.type === 'github' ? { type: 'github' as const } : {}) }] : []
       })
     : []
+  for (const link of context.externalLinks) {
+    if (!navbarLinks.some((existing) => existing.label === link.label && existing.href === link.href)) {
+      navbarLinks.push(link)
+    }
+  }
   const announcement = objectValue(config.announcement)
   const announcementMessage = typeof announcement?.message === 'string'
     ? announcement.message.trim()

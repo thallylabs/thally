@@ -331,6 +331,43 @@ describe('Fern redirect safety shares the Mintlify guard', () => {
   })
 })
 
+describe('Fern external navigation links', () => {
+  it('preserves safe nested links in the navbar alongside authored navbar links', () => {
+    const result = projectFernNavigation({
+      config: {
+        'navbar-links': [{ type: 'github', value: 'https://github.com/NVIDIA/SkillEvaluator' }],
+        navigation: [
+          { page: 'Overview', path: '../docs/index.mdx' },
+          { section: 'Reference', contents: [
+            { page: 'CLI', path: '../docs/cli.mdx' },
+            { link: 'NVIDIA Verified Skills', href: 'https://docs.nvidia.com/skills/' },
+          ] },
+        ],
+      },
+      fernRoot: '/tmp/fern-root-unused',
+      repositoryRoot: '/tmp',
+    })
+    expect(result.docsConfig.navbar?.links).toEqual([
+      { label: 'GitHub', href: 'https://github.com/NVIDIA/SkillEvaluator', type: 'github' },
+      { label: 'NVIDIA Verified Skills', href: 'https://docs.nvidia.com/skills/' },
+    ])
+    expect(result.warnings.some((warning) => warning.message.includes('Fern navigation "link"'))).toBe(false)
+  })
+
+  it('drops unsafe external targets and hidden links', () => {
+    const result = projectFernNavigation({
+      config: { navigation: [
+        { link: 'Unsafe', href: 'javascript:alert(1)' },
+        { link: 'Credentials', href: 'https://user:pass@example.com/' },
+        { link: 'Hidden', href: 'https://example.com/', hidden: true },
+      ] },
+      fernRoot: '/tmp/fern-root-unused',
+    })
+    expect(result.docsConfig.navbar).toBeUndefined()
+    expect(result.warnings.filter((warning) => warning.message.includes('unsafe or invalid external URL'))).toHaveLength(2)
+  })
+})
+
 describe('pruning navigation pages excluded after projection', () => {
   it('keeps a route once per sibling group after two files resolve to the same slug', () => {
     const config: MigrationDocsConfig = { tabs: [{ tab: 'Release Notes', groups: [

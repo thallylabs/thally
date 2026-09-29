@@ -32,6 +32,8 @@ import * as ts from 'typescript'
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent } from './components.js'
 
 import {
+  addDocusaurusTranslatedHeadingAliases,
+  expandDocusaurusDocCardLists,
   projectDocusaurusNavigation,
   readDocusaurusRedirects,
   readDocusaurusSiteOrigin,
@@ -45,7 +47,7 @@ import {
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
-import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, preserveMdxHeadingCustomIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceUnknownComponents } from './mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, preserveMdxHeadingCustomIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -1226,6 +1228,7 @@ function resolveMintlifyApiSpecs(
   mintlifyConfig: Record<string, unknown> | null,
   files: Array<ScannedFile>,
   warnings: Array<MigrationWarning>,
+  remoteSpecs: Array<{ url: string; tabLabel?: string }>,
 ): Array<ResolvedApiSpec> {
   if (!mintlifyConfig) return []
   const references = [
@@ -1246,11 +1249,17 @@ function resolveMintlifyApiSpecs(
       })
       continue
     }
-    if (/^https?:\/\//i.test(reference.value)) {
+    if (/^https:\/\//i.test(reference.value)) {
+      remoteSpecs.push({ url: reference.value, ...(reference.tabLabel ? { tabLabel: reference.tabLabel } : {}) })
       warnings.push({
         code: 'unsupported-config',
-        message: `The remote OpenAPI spec "${reference.value}"${tabSuffix} was not downloaded. Download it manually, add it to public/, and set its API source in docs.json to the local path.`,
+        message: `The remote OpenAPI spec "${reference.value}"${tabSuffix} requires a network download before this import is complete.`,
+        source: reference.value,
       })
+      continue
+    }
+    if (/^http:\/\//i.test(reference.value)) {
+      warnings.push({ code: 'unsupported-config', message: `The OpenAPI spec "${reference.value}"${tabSuffix} uses insecure HTTP and was not imported.`, source: reference.value })
       continue
     }
     const key = reference.value.split(/[?#]/, 1)[0].replace(/^\/+/, '').replace(/\\/g, '/')
@@ -2655,6 +2664,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
+  const remoteApiSpecs: Array<{ url: string; tabLabel?: string }> = []
   // Which pages reference which asset (by its normalized copy-destination
   // path), so the final asset-copy pass can prioritize referenced assets
   // over unreferenced ones when the budget is tight, and name the
@@ -2666,6 +2676,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     else referencedAssetPaths.set(assetPath, new Set([referencingPage]))
   }
   const docusaurusDescriptors: Array<DocusaurusPageDescriptor> = []
+  const docusaurusDocCardRoutes = new Set<string>()
   const seenPageIds = new Set<string>()
   /** docs.yml-derived navigationId -> final id, when a page's frontmatter `slug` overrides it. */
   const fernIdRenames = new Map<string, string>()
@@ -2803,6 +2814,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }
       raw = escapeFernLiteralBraces(protectedMath.body)
     }
+    const hasDocusaurusDocCardList = platform === 'docusaurus' && /<DocCardList\b[^>]*\/>/.test(raw)
+    if (hasDocusaurusDocCardList) {
+      // A plain HTML placeholder survives the generic MDX normalizer while
+      // retaining the card list's exact position relative to surrounding prose.
+      raw = raw.replace(/<DocCardList\b[^>]*\/>/g, '<div data-thally-doc-card-list="" />')
+    }
     let docusaurusDescriptor: Omit<DocusaurusPageDescriptor, 'title'> | undefined
     const page = parseMarkdownPage({
       id,
@@ -2873,7 +2890,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       })
     }
     if (platform === 'fern' && fernProjectRoot) {
+      // Fern can keep docs in a sibling `docs/` directory beside `fern/`.
+      // The checkout, not the config directory, is the safe asset boundary.
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, fernProjectRoot, (assetPath) => {
+        addAssetReference(assetPath, file.relativePath)
+      })
+      page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, repositoryDir, (assetPath) => {
         addAssetReference(assetPath, file.relativePath)
       })
       page.body = stripFernBasePathFromLinks(page.body, fernBasePath)
@@ -2962,6 +2984,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     seenPageIds.add(page.id)
     pages.push(page)
+    // MDX normalization removes DocCardList because Thally has no matching
+    // component. Remember its authored route so the resolved sidebar can
+    // supply the cards once every page and category has been discovered.
+    if (hasDocusaurusDocCardList) {
+      docusaurusDocCardRoutes.add(page.navigationId)
+    }
     if (platform === 'mintlify') {
       const sourcePath = exactReferenceKey(file.relativePath)
       // Only literal portable paths become Next redirects: source filenames
@@ -2996,6 +3024,48 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
 
   const docusaurusAssetRoot = docusaurusProjectRoot ?? repositoryDir
+  const fernBrandAssetPaths = new Map<string, string>()
+  const fernReferencedAssets: Array<ScannedFile> = []
+  if (platform === 'fern' && fernProjectRoot) {
+    const seen = new Set<string>()
+    const addFernAsset = (candidate: string, source?: string): void => {
+      try {
+        const absolutePath = source
+          ? resolveWithinRoot(fernProjectRoot, source.replace(/^\/+/, ''), repositoryDir)
+          : resolveWithin(repositoryDir, candidate)
+        if (!existsSync(absolutePath) || !lstatSync(absolutePath).isFile()) return
+        const realRoot = realpathSync(repositoryDir)
+        const realPath = realpathSync(absolutePath)
+        const confined = relative(realRoot, realPath)
+        if (confined === '..' || confined.startsWith(`..${sep}`) || isAbsolute(confined)) return
+        const withinFern = relative(fernProjectRoot, absolutePath)
+        const assetRelative = withinFern !== '..' && !withinFern.startsWith(`..${sep}`) && !isAbsolute(withinFern)
+          ? withinFern
+          : relative(repositoryDir, absolutePath)
+        const assetPath = normalizeAssetPath(assetRelative.replace(/\\/g, '/'))
+        if (!assetPath || !ASSET_EXTENSIONS.has(extname(assetPath).toLowerCase())) return
+        if (source) {
+          fernBrandAssetPaths.set(source, assetPath)
+          addAssetReference(assetPath, 'fern/docs.yml')
+        }
+        if (seen.has(absolutePath)) return
+        seen.add(absolutePath)
+        fernReferencedAssets.push({ absolutePath, relativePath: assetPath })
+      } catch {
+        // The existing missing-asset warning names any unresolved brand path.
+      }
+    }
+    for (const path of referencedAssetPaths.keys()) addFernAsset(path)
+    for (const value of [fernRawConfig?.logo, fernRawConfig?.favicon]) {
+      if (typeof value === 'string') addFernAsset('', value)
+      else if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const variants = value as Record<string, unknown>
+        for (const candidate of [variants.light, variants.dark, variants.src, variants.srcDark]) {
+          if (typeof candidate === 'string') addFernAsset('', candidate)
+        }
+      }
+    }
+  }
   const repositoryAssets = platform === 'docusaurus' && configuredDocsDir && !options.docusaurusSkipAssets
     ? ['static', 'public'].flatMap((directory) => {
         const root = resolveWithin(docusaurusAssetRoot, directory)
@@ -3008,10 +3078,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     : []
   interface AssetCandidate { file: ScannedFile; assetPath: string; size: number }
   const assetCandidates: Array<AssetCandidate> = []
-  for (const file of [...files, ...repositoryAssets]) {
+  for (const file of [...files, ...repositoryAssets, ...fernReferencedAssets]) {
     const firstSegment = file.relativePath.split('/', 1)[0].toLowerCase()
     if (!ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
-    if (platform !== 'mintlify' && !ASSET_DIRECTORIES.has(firstSegment)) continue
+    if (platform !== 'mintlify' && !ASSET_DIRECTORIES.has(firstSegment)
+      && !(platform === 'fern' && referencedAssetPaths.has(file.relativePath))) continue
     const isDocusaurusStatic = platform === 'docusaurus' && firstSegment === 'static'
     const assetPath = normalizeAssetPath(firstSegment === 'public'
       ? file.relativePath.slice('public/'.length)
@@ -3073,6 +3144,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       routePrefix: options.docusaurusRoutePrefix,
     })
     docsConfig = projected.docsConfig
+    expandDocusaurusDocCardLists(pages, docsConfig, docusaurusDocCardRoutes)
     warnings.push(...projected.warnings)
     for (const page of projected.generatedPages) {
       if (seenPageIds.has(page.id)) continue
@@ -3089,6 +3161,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (descriptor) page.body = rewriteDocusaurusLinks(page.body, descriptor, docusaurusDescriptors, {
         sourceOrigin,
         onExternalLink: (target) => externalizedLinks.add(target),
+        assetPaths: new Set(assets.map((asset) => asset.path)),
       })
     }
     if (externalizedLinks.size > 0) warnings.push({
@@ -3227,7 +3300,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }
     }
   } else if (platform === 'mintlify') {
-    const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings)
+    const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs)
     for (const spec of resolvedSpecs) {
       if (!assets.some((asset) => asset.path === spec.filename)) {
         assets.push({ path: spec.filename, content: spec.content })
@@ -3332,6 +3405,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
 
   if (platform === 'docusaurus') {
+    // Localized and archived docs are imported as separate roots, often with
+    // asset copying disabled. Once all roots are merged, resolve their mounted
+    // `/docs/...` references against the assets actually copied by the parent.
+    const copiedAssets = new Set(assets.map((asset) => asset.path))
+    for (const page of pages) {
+      page.body = rewriteDocusaurusLinks(page.body, {
+        sourcePath: page.source ?? page.navigationId,
+        docId: page.navigationId,
+        navigationId: page.navigationId,
+        title: page.title,
+      }, [], { assetPaths: copiedAssets })
+    }
     const importedRoutes = new Set(pages.map((page) => page.navigationId))
     docsConfig.tabs = docsConfig.tabs.map((tab) => {
       if (tab.href) return tab
@@ -3415,6 +3500,27 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
   docsConfig = pruneMissingNavigationPages(docsConfig, new Set(pages.map((page) => page.navigationId)))
+  if (platform === 'docusaurus') addDocusaurusTranslatedHeadingAliases(pages)
+  if (platform === 'fern' && fernProjectRoot) {
+    const sourcePath = (page: MigrationPage): string | null => {
+      const fragment = page.source.split('#', 2)[1]
+      if (!fragment) return null
+      try {
+        return relative(fernProjectRoot, resolveWithin(repositoryDir, decodeURIComponent(fragment))).replace(/\\/g, '/')
+      } catch {
+        return null
+      }
+    }
+    const routes = new Map<string, string>()
+    for (const page of pages) {
+      const source = sourcePath(page)
+      if (source) routes.set(source, page.id)
+    }
+    for (const page of pages) {
+      const source = sourcePath(page)
+      if (source) page.body = rewriteFernRelativePageLinks(page.body, source, routes)
+    }
+  }
   preserveLinkedAnchors(pages)
   if (platform === 'fern' && fernRawConfig) {
     const sourceSiteUrl = fernSourceSiteUrl(fernRawConfig)
@@ -3570,7 +3676,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const assetPaths = new Set(assets.map((asset) => asset.path))
   const publicBrandPath = (value: unknown): string | undefined => {
     if (typeof value !== 'string' || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(value)) return undefined
-    const normalized = normalizeAssetPath(value)
+    const normalized = fernBrandAssetPaths.get(value) ?? normalizeAssetPath(value)
     return normalized && assetPaths.has(normalized) ? `/${normalized}` : undefined
   }
   const brandVariants = (value: unknown): { light?: string; dark?: string; showTitle?: boolean } => {
@@ -3607,6 +3713,38 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       },
     },
   }
+  if (platform === 'docusaurus' && docusaurusSettings?.navbarTitle && !logoLight) {
+    // Docusaurus commonly uses a text-only navbar. Its commented-out logo
+    // template must not become Thally's unrelated starter leaf mark.
+    docsConfig = { ...docsConfig, navbar: { ...docsConfig.navbar, logo: null } }
+  }
+  if (mintlifyConfig) {
+    const appearance = mintlifyConfig.appearance && typeof mintlifyConfig.appearance === 'object'
+      ? mintlifyConfig.appearance as Record<string, unknown> : null
+    const defaultMode = appearance?.default
+    if (defaultMode === 'light' || defaultMode === 'dark' || defaultMode === 'system') {
+      docsConfig = { ...docsConfig, appearance: { ...docsConfig.appearance, default: defaultMode } }
+    }
+    const background = mintlifyConfig.background && typeof mintlifyConfig.background === 'object'
+      ? mintlifyConfig.background as Record<string, unknown> : null
+    if (background) {
+      const decoration = background.decoration
+      const image = publicBrandPath(background.image)
+      const imageDark = publicBrandPath(background.imageDark)
+      docsConfig = {
+        ...docsConfig,
+        background: {
+          ...docsConfig.background,
+          ...(decoration === 'none' || decoration === 'grid' || decoration === 'gradient' ? { decoration } : {}),
+          ...(image ? { image } : {}),
+          ...(imageDark ? { imageDark } : {}),
+        },
+      }
+    }
+  }
+  if (platform === 'docusaurus') {
+    docsConfig = { ...docsConfig, appearance: { ...docsConfig.appearance, default: docusaurusSettings?.defaultColorMode ?? 'light' } }
+  }
   if (faviconLight) docsConfig = {
     ...docsConfig,
     favicon: { light: faviconLight, ...(faviconDark ? { dark: faviconDark } : {}) },
@@ -3629,6 +3767,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     platform,
     pages,
     assets,
+    ...(remoteApiSpecs.length > 0 ? { remoteApiSpecs } : {}),
     ...(componentMigrator ? { componentFiles: componentMigrator.files() } : {}),
     docsConfig,
     ...(mintlifyConfig ? {
@@ -3644,7 +3783,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       },
     } : docusaurusSettings && (docusaurusSettings.name || docusaurusSettings.description || themeColors) ? {
       site: {
-        ...(docusaurusSettings.name ? { name: docusaurusSettings.name } : {}),
+        ...(docusaurusSettings.navbarTitle || docusaurusSettings.name ? { name: docusaurusSettings.navbarTitle ?? docusaurusSettings.name } : {}),
         ...(docusaurusSettings.description ? { description: docusaurusSettings.description } : {}),
         ...(themeColors ? { colors: themeColors } : {}),
       },

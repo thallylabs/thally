@@ -3,7 +3,7 @@
 import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
-import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, preserveMdxHeadingCustomIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents } from '../mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, preserveMdxHeadingCustomIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -234,6 +234,20 @@ describe('normalizeMdx', () => {
 
   it('rewrites <FileTree> to Thally\'s <Tree> built-in', () => {
     expect(normalizeMdx('<FileTree>\n- docs/\n</FileTree>', 'mintlify')).toBe('<Tree>\n- docs/\n</Tree>')
+  })
+
+  it('converts Fern FileTree bullets into nested, initially visible Folder and File nodes', () => {
+    const source = '<FileTree>\n- my-skill/\n  - SKILL.md\n  - scripts/\n    - requirements.txt\n  - evals/\n    - evals.json\n    - environment/\n      - Dockerfile\n</FileTree>'
+    const output = normalizeMdx(source, 'fern')
+    expect(output).toBe('<Tree>\n<Folder name={"my-skill/"} defaultOpen>\n<File name={"SKILL.md"} />\n<Folder name={"scripts/"} defaultOpen>\n<File name={"requirements.txt"} />\n</Folder>\n<Folder name={"evals/"} defaultOpen>\n<File name={"evals.json"} />\n<Folder name={"environment/"} defaultOpen>\n<File name={"Dockerfile"} />\n</Folder>\n</Folder>\n</Folder>\n</Tree>')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+    expect(normalizeMdx('```mdx\n<FileTree>\n- example/\n</FileTree>\n```', 'fern'))
+      .toBe('```mdx\n<FileTree>\n- example/\n</FileTree>\n```')
+  })
+
+  it('keeps malformed Fern FileTree indentation for explicit migration validation', () => {
+    const source = '<FileTree>\n- parent/\n    - skipped-level.txt\n</FileTree>'
+    expect(normalizeMdx(source, 'fern')).toBe(source)
   })
 
   it('rewrites <Column> to a plain <div> so Columns lays it out without a registry entry', () => {
@@ -526,6 +540,25 @@ describe('preserveMdxHeadingCustomIds', () => {
     const body = '---\ntitle: "{#not-a-heading}"\n---\n\n## Heading {#real-id}'
     const result = preserveMdxHeadingCustomIds(body)
     expect(result.body).toBe('---\ntitle: "{#not-a-heading}"\n---\n\n\n<a id="real-id"></a>\n\n## Heading')
+  })
+})
+
+describe('Fern relative page links', () => {
+  const routes = new Map([
+    ['../docs/tier1-validation.mdx', 'tier1-validation'],
+    ['../docs/guides/install.mdx', 'get-started/install'],
+  ])
+
+  it('resolves sibling Card hrefs and Markdown links against source files, retaining suffixes', () => {
+    const body = '<Card href="tier1-validation.mdx#checks" />\n<a href={"./guides/install.mdx?tab=uv#linux"}>Install</a>\n[Tier 1](tier1-validation.mdx)\n[Install](<guides/install.mdx#setup> "title")'
+    expect(rewriteFernRelativePageLinks(body, '../docs/index.mdx', routes)).toBe(
+      '<Card href="/tier1-validation#checks" />\n<a href={"/get-started/install?tab=uv#linux"}>Install</a>\n[Tier 1](/tier1-validation)\n[Install](</get-started/install#setup> "title")',
+    )
+  })
+
+  it('leaves unknown files, external URLs, assets, and code examples unchanged', () => {
+    const body = '<Card href="https://example.com/x.mdx" />\n<Card href="missing.mdx" />\n<a href="./assets/chart.svg" />\n`<Card href="tier1-validation.mdx" />`\n```mdx\n<Card href="tier1-validation.mdx" />\n```'
+    expect(rewriteFernRelativePageLinks(body, '../docs/index.mdx', routes)).toBe(body)
   })
 })
 

@@ -89,6 +89,16 @@ describe('thally check reader routes', () => {
     expect(result.output).not.toContain('Broken anchor')
   })
 
+  it('uses visible text for headings containing JSX badges and anchors', async () => {
+    const result = await checkLinks([
+      '## Initialize instance <Badge title="1 > 0">Enterprise</Badge>',
+      '### CLI <a id="-cli" />',
+      '[Enterprise](#initialize-instance-enterprise) [CLI](#cli)',
+    ].join('\n'))
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken anchor')
+  })
+
   it('accepts the second occurrence of a repeated heading', async () => {
     const result = await checkLinks('## Key Features\n\nFirst.\n\n## Key Features\n\nSecond.\n\n[Second](#key-features-2)')
     expect(result.exit).toBe(0)

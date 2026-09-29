@@ -160,13 +160,37 @@ function forEachNonFencedLine(content: string, visit: (line: string, lineNumber:
  * element carrying a literal `id` attribute is also a valid link target,
  * independent of headings.
  */
+function renderedHeadingText(source: string): string {
+  let visible = ''
+  let inTag = false
+  let quote: '"' | "'" | null = null
+  for (let index = 0; index < source.length; index++) {
+    const character = source[index]
+    if (!inTag) {
+      if (character === '<') inTag = true
+      else visible += character
+      continue
+    }
+    if (quote) {
+      if (character === quote && source[index - 1] !== '\\') quote = null
+    } else if (character === '"' || character === "'") {
+      quote = character
+    } else if (character === '>') {
+      inTag = false
+    }
+  }
+  return visible
+}
+
 function extractHeadingAnchors(content: string): Set<string> {
   const anchors = new Set<string>()
   const occurrences = new Map<string, number>()
   forEachNonFencedLine(content, (line) => {
     const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
     if (heading) {
-      const base = slugify(heading[1])
+      // The runtime hashes rendered heading text. JSX badges and inline
+      // anchors contribute their visible children, never their tag/props.
+      const base = slugify(renderedHeadingText(heading[1]))
       const occurrence = (occurrences.get(base) ?? 0) + 1
       occurrences.set(base, occurrence)
       anchors.add(occurrence === 1 ? base : `${base}-${occurrence}`)

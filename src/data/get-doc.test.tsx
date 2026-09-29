@@ -2,10 +2,14 @@
 
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { compileMDX } from 'next-mdx-remote/rsc'
 import { describe, expect, it, vi } from 'vitest'
 import { getDocFromParams } from './get-doc'
+import { interpretMDX } from '@/lib/mdx-interpret'
 import { EditOnGithub } from '@/components/docs/edit-on-github'
 import { ReportAnIssue } from '@/components/docs/report-an-issue'
+
+const contentSourceState = vi.hoisted(() => ({ kind: 'filesystem' as 'filesystem' | 'assets' }))
 
 vi.mock('@/data/docs', () => ({
   deriveTitleFromSlug: (slug: string) => slug,
@@ -23,9 +27,11 @@ vi.mock('@/lib/runtime-sources', () => ({
 }))
 vi.mock('@/lib/content-source', () => ({
   getContentSource: () => ({
-    kind: 'filesystem',
-    exists: async (path: string) => ['src/content/introduction.mdx', 'src/content/events.mdx'].includes(path),
-    read: async () => ({ content: '# Content' }),
+    kind: contentSourceState.kind,
+    exists: async (path: string) => ['src/content/introduction.mdx', 'src/content/events.mdx', 'src/content/inline-component.mdx', 'src/content/remote-inline.mdx'].includes(path),
+    read: async (path: string) => ({ content: path === 'src/content/inline-component.mdx'
+      ? '---\ntitle: Inline component\n---\n\nexport const HeroCard = ({ title }) => <div>{title}</div>\n\n<HeroCard title={`Preview ${1 + 1}`} />'
+      : '# Content' }),
   }),
 }))
 vi.mock('@/generated/runtime-docs', () => ({
@@ -61,5 +67,33 @@ describe('document source identity', () => {
   it('keeps non-root identity separate from the display title', async () => {
     const doc = await getDocFromParams(['events'])
     expect(doc).toMatchObject({ id: 'events', title: 'Event delivery', href: '/events', slug: ['events'] })
+  })
+
+  it('renders authored MDX exports and expressions in development', async () => {
+    const realMdx = await vi.importActual<typeof import('next-mdx-remote/rsc')>('next-mdx-remote/rsc')
+    vi.mocked(compileMDX).mockImplementation(realMdx.compileMDX)
+    vi.stubEnv('NODE_ENV', 'development')
+    try {
+      const doc = await getDocFromParams(['inline-component'])
+      expect(renderToStaticMarkup(createElement(doc!.component))).toContain('<div>Preview 2</div>')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('keeps remote MDX eval-free even in development', async () => {
+    contentSourceState.kind = 'assets'
+    vi.stubEnv('NODE_ENV', 'development')
+    vi.mocked(compileMDX).mockClear()
+    vi.mocked(interpretMDX).mockResolvedValue({ content: null, frontmatter: { title: 'Remote page' } })
+    try {
+      const doc = await getDocFromParams(['remote-inline'])
+      expect(doc?.title).toBe('Remote page')
+      expect(interpretMDX).toHaveBeenCalledOnce()
+      expect(compileMDX).not.toHaveBeenCalled()
+    } finally {
+      contentSourceState.kind = 'filesystem'
+      vi.unstubAllEnvs()
+    }
   })
 })
