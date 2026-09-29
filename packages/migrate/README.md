@@ -39,7 +39,8 @@ version first, then pages not listed in navigation, and one warning counts and
 names (the first three of) the pages left out and suggests `--docs-dir` to
 migrate a smaller part of the repository. Scanning itself stops after 100,000
 files with its own warning. Individual assets over 25 MB, or beyond 500 MB in
-total, are not copied and are warned about one by one.
+total, are not copied; one warning per reason gives the count, the limits, the first five
+paths, and the action (copy them into `public/` manually).
 
 Headings written with an explicit `{#custom-id}` become a preceding
 `<a id="custom-id"></a>` anchor and keep their text, so links to that id still
@@ -228,18 +229,20 @@ dashboard's branding settings instead of leaving the loss silent.
 
 `cloneGitHubRepository` retries a transient network-class failure with
 backoff, and each underlying git process (the clone, and any submodule
-fetch) is killed and treated as a retryable failure if it stalls — a
-generous 10-minute default, configurable via
-`THALLY_MIGRATE_CLONE_TIMEOUT_MS` (milliseconds) for an unusually large
-repository on a slow link. The clone neutralizes the `filter.lfs.*`
+fetch) is killed and treated as a retryable failure if it stalls, meaning
+git prints no progress for 2 minutes (a large repository that is still
+downloading is never cut off; an hour is the absolute ceiling for one git
+process). The allowed silence is configurable via
+`THALLY_MIGRATE_CLONE_TIMEOUT_MS` (milliseconds) for an unusually slow link. The clone neutralizes the `filter.lfs.*`
 smudge/clean/process filter driver for that one process only (via
 `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`, never the user's
 global git config), so a repository that uses Git LFS still clones even when
 the host has no `git-lfs` binary installed — including a host where
 `filter.lfs.*` is still registered globally from a previous install,
 pointing at a command that no longer exists; an asset that's still a Git
-LFS pointer file afterward (not its real content) is skipped with a warning
-instead of being copied as if it were the real file. Submodules are
+LFS pointer file afterward (not its real content) is skipped, and one
+warning lists those files, instead of copying them as if they were the real
+files. Submodules are
 initialized one at a time, best-effort,
 after a successful clone — a submodule that can't be fetched (private,
 deleted, network trouble) is named in a warning instead of failing the

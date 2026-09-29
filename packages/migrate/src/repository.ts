@@ -87,6 +87,12 @@ const MAX_TOTAL_ASSET_BYTES = 500_000_000
 /** A Git LFS pointer file's fixed opening line (the smudge filter replaces this with the real binary; skipping it during clone leaves this text in place). */
 const GIT_LFS_POINTER_PREFIX = 'version https://git-lfs.github.com/spec/v1'
 
+/** The first few paths of a skipped-asset list, with the remainder counted. */
+function listAssetPaths(paths: Array<string>): string {
+  const shown = paths.slice(0, 5).join(', ')
+  return paths.length > 5 ? `${shown}, and ${paths.length - 5} more` : shown
+}
+
 /** A small text file starting with the fixed Git LFS pointer line, not real asset content. */
 function isGitLfsPointer(content: Buffer): boolean {
   return content.length < 1024 && content.toString('utf8', 0, GIT_LFS_POINTER_PREFIX.length) === GIT_LFS_POINTER_PREFIX
@@ -631,7 +637,10 @@ export function parseGitHubRepositoryUrl(rawUrl: string): GitHubRepositorySource
 
 const CLONE_RETRY_ATTEMPTS = 3
 const CLONE_RETRY_DELAY_MS = 1_000
-const DEFAULT_CLONE_TIMEOUT_MS = 10 * 60_000
+/** How long a git process may go without printing any progress before it is treated as stalled. */
+const DEFAULT_CLONE_IDLE_TIMEOUT_MS = 2 * 60_000
+/** Absolute ceiling for one git process, so a connection that trickles progress forever still ends. */
+const MAX_GIT_PROCESS_MS = 60 * 60_000
 
 /** Transient network-class git failures a retry can plausibly recover from. Also covers this module's own timeout error below. */
 const RETRYABLE_CLONE_ERROR = /RPC failed|Recv failure|early EOF|curl \d+|Could not resolve host|Connection (?:reset|refused|timed out)|The remote end hung up|SSL[_ ]?(?:read|connect|write) error|timed out|network is unreachable/i
@@ -640,18 +649,33 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => { setTimeout(resolve, ms) })
 }
 
-/** How long a single git subprocess may run before it's killed and treated as a (retryable) timeout. Configurable since a very large repository on a slow link may need longer than the generous 10-minute default. */
-function gitProcessTimeoutMs(): number {
+/**
+ * How long a git subprocess may stay silent (no progress output) before it's
+ * killed and treated as a (retryable) stall. Configurable for an unusually
+ * slow link. A slow but progressing clone is never killed by this — only a
+ * stalled one.
+ */
+function gitIdleTimeoutMs(): number {
   const raw = process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS
   const parsed = raw ? Number(raw) : NaN
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLONE_TIMEOUT_MS
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLONE_IDLE_TIMEOUT_MS
+}
+
+/** The last few meaningful stderr lines, without git's `Receiving objects:  42%` progress noise. */
+function gitErrorTail(stderr: string): string {
+  return stderr.split(/[\r\n]+/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^(?:remote: )?[A-Za-z][A-Za-z ]*:\s+\d+%/.test(line))
+    .slice(-5)
+    .join('\n')
 }
 
 /**
- * Run one git subprocess without a shell, with an overall timeout (a
- * stalled clone/fetch otherwise hangs forever — there is no `timeout`
- * binary to rely on) and per-process env overrides (never touching global
- * git/npm config, per this package's own rule).
+ * Run one git subprocess without a shell, with a stall timeout (a hung
+ * clone/fetch otherwise waits forever — there is no `timeout` binary to rely
+ * on; callers pass `--progress` so a healthy transfer keeps resetting it) and
+ * per-process env overrides (never touching global git/npm config, per this
+ * package's own rule).
  */
 function runGit(args: Array<string>, options: { cwd?: string; env?: Record<string, string>; label: string }): Promise<void> {
   return new Promise<void>((resolve, reject) => {
@@ -661,24 +685,35 @@ function runGit(args: Array<string>, options: { cwd?: string; env?: Record<strin
       env: { ...process.env, ...options.env },
     })
     let stderr = ''
-    let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
+    let timeoutReason = ''
+    const kill = (reason: string) => {
+      timeoutReason = reason
       child.kill('SIGKILL')
-    }, gitProcessTimeoutMs())
+    }
+    const idleMs = gitIdleTimeoutMs()
+    const idleMessage = `no progress for ${Math.round(idleMs / 1000)}s`
+    let idleTimer = setTimeout(() => { kill(idleMessage) }, idleMs)
+    const hardTimer = setTimeout(() => { kill(`still running after ${MAX_GIT_PROCESS_MS / 60_000} minutes`) }, MAX_GIT_PROCESS_MS)
+    const clearTimers = () => {
+      clearTimeout(idleTimer)
+      clearTimeout(hardTimer)
+    }
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk: string) => {
-      if (stderr.length < 16_000) stderr += chunk
+      clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => { kill(idleMessage) }, idleMs)
+      stderr = (stderr + chunk).slice(-16_000)
     })
     child.on('error', (error) => {
-      clearTimeout(timer)
+      clearTimers()
       reject(error)
     })
     child.on('close', (code) => {
-      clearTimeout(timer)
+      clearTimers()
       if (code === 0) resolve()
-      else if (timedOut) reject(new Error(`${options.label} timed out after ${gitProcessTimeoutMs()}ms and was killed.`))
-      else reject(new Error(`${options.label}: ${stderr.trim() || `git exited ${code}`}`))
+      else if (timeoutReason) {
+        reject(new Error(`${options.label}: timed out (${timeoutReason}) and was killed. Check your network connection and try again; on a very slow link, raise THALLY_MIGRATE_CLONE_TIMEOUT_MS (milliseconds of allowed silence).`))
+      } else reject(new Error(`${options.label}: ${gitErrorTail(stderr) || `git exited ${code}`}`))
     })
   })
 }
@@ -722,7 +757,7 @@ function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<v
   // down). `initSubmodules`, run after a successful plain clone, is the
   // equivalent of `--recurse-submodules --shallow-submodules` (`--depth 1`
   // per submodule) but fault-tolerant per submodule.
-  const args = ['clone', '--depth', '1', '--single-branch']
+  const args = ['clone', '--progress', '--depth', '1', '--single-branch']
   if (source.branch !== 'HEAD') args.push('--branch', source.branch)
   args.push('--', source.cloneUrl, targetDir)
   return runGit(args, {
@@ -787,7 +822,7 @@ async function initSubmodules(targetDir: string, warnings: Array<MigrationWarnin
       await runGit([
         '-c', 'protocol.file.allow=never',
         '-c', 'protocol.ext.allow=never',
-        'submodule', 'update', '--init', '--depth', '1', '--', path,
+        'submodule', 'update', '--init', '--progress', '--depth', '1', '--', path,
       ], {
         cwd: targetDir,
         env: LFS_FILTER_OVERRIDE_ENV,
@@ -3122,30 +3157,39 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ...assetCandidates.filter((candidate) => !isReferenced(candidate)),
   ]
   let totalAssetBytes = 0
+  // One summary warning per skip reason, not one per file: a repository with
+  // hundreds of oversized assets would otherwise bury every other warning.
+  const overBudgetAssets: Array<string> = []
+  let overBudgetReferenced = 0
+  const lfsPointerAssets: Array<string> = []
   for (const { file, assetPath, size } of orderedAssetCandidates) {
     if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
-      const referencingPages = referencedAssetPaths.get(assetPath)
-      warnings.push({
-        code: 'limit-reached',
-        message: 'This file was not copied because it is larger than 25 MB or the copied files would exceed 500 MB in total. Add it to public/ manually'
-          + (referencingPages
-            ? `; it is used by ${[...referencingPages].slice(0, 3).join(', ')}${referencingPages.size > 3 ? `, and ${referencingPages.size - 3} more` : ''}.`
-            : '.'),
-        source: file.relativePath,
-      })
+      overBudgetAssets.push(file.relativePath)
+      if (referencedAssetPaths.has(assetPath)) overBudgetReferenced++
       continue
     }
     const content = readFileSync(file.absolutePath)
     if (isGitLfsPointer(content)) {
-      warnings.push({
-        code: 'unsupported-config',
-        message: 'This asset is a Git LFS pointer, not its real content (Git LFS was skipped during clone because the host has no git-lfs binary). Install git-lfs and re-run the migration, or add the real file to public/ manually.',
-        source: file.relativePath,
-      })
+      lfsPointerAssets.push(file.relativePath)
       continue
     }
     assets.push({ path: assetPath, content })
     totalAssetBytes += size
+  }
+  if (overBudgetAssets.length > 0) {
+    warnings.push({
+      code: 'limit-reached',
+      message: `${overBudgetAssets.length} asset file${overBudgetAssets.length === 1 ? ' was' : 's were'} not copied because a file over ${MAX_ASSET_BYTES / 1_000_000} MB, or files beyond ${MAX_TOTAL_ASSET_BYTES / 1_000_000} MB in total, are skipped: ${listAssetPaths(overBudgetAssets)}. `
+        + (overBudgetReferenced > 0 ? `${overBudgetReferenced} of them ${overBudgetReferenced === 1 ? 'is' : 'are'} used by pages, so those images will be broken until you copy ${overBudgetAssets.length === 1 ? 'it' : 'them'}. ` : '')
+        + `Copy ${overBudgetAssets.length === 1 ? 'it' : 'them'} into public/ manually.`,
+    })
+  }
+  if (lfsPointerAssets.length > 0) {
+    warnings.push({
+      code: 'unsupported-config',
+      message: `${lfsPointerAssets.length} asset file${lfsPointerAssets.length === 1 ? ' is a Git LFS pointer' : 's are Git LFS pointers'}, not real content, and ${lfsPointerAssets.length === 1 ? 'was' : 'were'} not copied (Git LFS was skipped during clone because the host has no git-lfs binary): ${listAssetPaths(lfsPointerAssets)}. `
+        + 'Install git-lfs and re-run the migration, or copy the real files into public/ manually.',
+    })
   }
 
   // `selectFilesWithinBudget` already emitted a detailed warning (dropped
