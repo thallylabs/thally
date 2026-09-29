@@ -308,6 +308,16 @@ describe('repository component migration', () => {
     expect(warnings).toEqual([])
   })
 
+  it('imports bare Mintlify built-ins used by an interactive snippet', () => {
+    const root = fixture({
+      'picker.jsx': `export const Picker = () => <Steps><Step title="Start">Hello</Step></Steps>`,
+    })
+    const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+    migrator.transform("import { Picker } from './picker.jsx'\n\n<Picker />", join(root, 'index.mdx'))
+    const picker = migrator.files().find((file) => file.path.endsWith('/picker.jsx'))!
+    expect(picker.content).toContain("import { Steps, Step } from '@/components/mdx/steps';")
+  })
+
   it('registers multiline named/default imports and copies their dependency graph once', () => {
     const root = fixture({
       'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),

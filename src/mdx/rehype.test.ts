@@ -155,4 +155,15 @@ describe('heading anchors', () => {
     transform({ type: 'root', children: headings })
     expect(headings.map((heading) => heading.properties?.id)).toEqual(['key-features-2', 'key-features', 'key-features-3'])
   })
+
+  it('preserves Unicode heading IDs and suffixes repeated translated headings', () => {
+    const headings: Array<Element> = ['Überblick', 'Überblick', '日本語 API'].map((value) => ({
+      type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value }],
+    }))
+    const transform = rehypePlugins[2]() as (tree: Root) => void
+    transform({ type: 'root', children: headings })
+    expect(headings.map((heading) => heading.properties?.id)).toEqual([
+      'überblick', 'überblick-2', '日本語-api',
+    ])
+  })
 })

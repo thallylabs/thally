@@ -49,7 +49,8 @@ export interface MigrationNavbarConfig {
   /** Explicit null suppresses the starter's sample call to action. */
   primary?: { label: string; href: string } | null
   /** Local public assets used until an owner uploads a brand replacement. */
-  logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string }
+  /** Explicit null requests a text-only brand when the source has no logo. */
+  logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string } | null
 }
 
 export interface MigrationFooterConfig {
@@ -70,6 +71,8 @@ export interface MigrationDocsConfig {
     display?: 'tabs' | 'dropdown'
   }
   theme?: 'default' | 'maple' | 'sharp' | 'minimal'
+  appearance?: { default?: 'system' | 'light' | 'dark'; showToggle?: boolean }
+  background?: { image?: string; imageDark?: string; decoration?: 'none' | 'grid' | 'gradient' }
   /** Icon set for content `icon` names; Mintlify's `icons.library` carries through. */
   icons?: { library?: 'lucide' | 'fontawesome' | 'tabler' }
   banner?: MigrationBannerConfig
@@ -141,6 +144,8 @@ export interface MigrationBundle {
   platform: MigrationPlatform
   pages: Array<MigrationPage>
   assets: Array<MigrationAsset>
+  /** Repository-configured remote specs awaiting a bounded network fetch by the host. */
+  remoteApiSpecs?: Array<{ url: string; tabLabel?: string }>
   /** Customer-owned component source and registry; paths are repository-relative. */
   componentFiles?: Array<RenderedMigrationFile>
   docsConfig: MigrationDocsConfig

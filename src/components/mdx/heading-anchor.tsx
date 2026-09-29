@@ -6,11 +6,20 @@
  * authored content.
  */
 
-import { useCallback, type ReactNode } from 'react'
+import { isValidElement, useCallback, type ReactNode } from 'react'
 
 interface HeadingAnchorProps {
   id: string
   children?: ReactNode
+}
+
+function containsLink(node: ReactNode): boolean {
+  if (Array.isArray(node)) return node.some(containsLink)
+  if (!isValidElement(node)) return false
+  const props = node.props as { children?: ReactNode; href?: unknown }
+  // MDX can supply either a native <a> or a link component with href. Both
+  // eventually render an anchor, so neither may be nested in our permalink.
+  return node.type === 'a' || typeof props.href === 'string' || containsLink(props.children)
 }
 
 /** Wrap a rendered heading in a permalink that copies its canonical URL. */
@@ -25,6 +34,17 @@ export function HeadingAnchor({ id, children }: HeadingAnchorProps) {
     },
     [id],
   )
+
+  if (containsLink(children)) {
+    return (
+      <>
+        <span>{children}</span>
+        <a href={`#${id}`} onClick={handleClick} className="sr-only focus:not-sr-only">
+          Permalink to this section
+        </a>
+      </>
+    )
+  }
 
   return (
     <a
