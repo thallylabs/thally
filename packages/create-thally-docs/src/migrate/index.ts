@@ -131,12 +131,12 @@ function publicSpecWarning(projectDir: string, bundle: MigrationBundle): Migrati
   if (specs.length === 0 && skipped.length === 0) return null
   const migrated = new Set(bundle.assets.filter((asset) => asset.projectRelative).map((asset) => basename(asset.path)))
   const lines = [
-    ...specs.map((spec) => `${spec.path}${migrated.has(basename(spec.path)) ? ' (same file name as a migrated spec)' : ''}${spec.hasHiddenOperations ? ' (contains x-excluded/x-hidden operations)' : ''}${shadowNote(spec.urlPath)}`),
+    ...specs.map((spec) => `${spec.path}${migrated.has(basename(spec.path)) ? ' (same file name as a migrated spec)' : ''}${spec.hasHiddenOperations ? ' (contains x-excluded/x-hidden operations)' : ''}${shadowNote(spec.urlPath) ? ` (answers /${spec.urlPath} in place of the filtered specification)` : ''}`),
     ...skipped.map((path) => `${path} (too large to inspect)`),
   ]
   return {
     code: 'unsupported-config',
-    message: `Existing OpenAPI files under public/ are served publicly as-is: ${lines.join(', ')}. Migrated specs are written to openapi/, and re-running migration does not remove old copies from public/. Delete any old copy manually (nothing was deleted), or its hidden operations stay downloadable.`,
+    message: `Existing OpenAPI files under public/ are served publicly as-is: ${lines.join('; ')}. Migrated specs are written to openapi/, and re-running migration does not remove old copies from public/. Delete any old copy manually (nothing was deleted), or its hidden operations stay downloadable.`,
   }
 }
 
