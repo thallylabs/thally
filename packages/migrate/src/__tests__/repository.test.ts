@@ -469,6 +469,88 @@ describe('Mintlify repository migration', () => {
     expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/service.yml')
   })
 
+  describe('tab menu API items', () => {
+    const spec = 'openapi: 3.1.0\ninfo: { title: Service, version: "1.0" }\npaths: {}'
+    const migrateMenu = (tabs: Array<Record<string, unknown>>, specs: Array<string> = ['openapi.json']) => {
+      const root = fixture()
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { tabs } }))
+      writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+      for (const name of specs) writeFileSync(join(root, name), spec)
+      return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    }
+    const summary = (bundle: ReturnType<typeof migrateRepository>) =>
+      bundle.docsConfig.tabs.map((tab) => ({ tab: tab.tab, api: tab.api?.source, groups: tab.groups?.map((group) => group.group) }))
+
+    it('keeps a Guide + API reference menu: the API item becomes a sibling tab bound to its spec with generated navigation', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [{ item: 'Guide', pages: ['guide'] }, { item: 'API reference', openapi: 'openapi.json' }],
+      }])
+      expect(summary(bundle)).toEqual([
+        { tab: 'Docs', api: undefined, groups: ['Guide'] },
+        { tab: 'Docs: API reference', api: 'openapi/openapi.json', groups: undefined },
+      ])
+      expect(bundle.docsConfig.tabs[1].api).toEqual({ source: 'openapi/openapi.json' })
+      expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/openapi.json')
+    })
+
+    it('supports the { source, directory } object form and openapi + pages in one item', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [
+          { item: 'Guide', pages: ['guide'] },
+          { item: 'Reference', openapi: { source: 'openapi.json', directory: 'api' }, pages: ['guide'] },
+        ],
+      }])
+      expect(summary(bundle)).toEqual([
+        { tab: 'Docs', api: undefined, groups: ['Guide', 'Reference'] },
+        { tab: 'Docs: Reference', api: 'openapi/openapi.json', groups: undefined },
+      ])
+    })
+
+    it('binds a sole API item to the tab itself, and keeps later tabs after the sibling', () => {
+      const bundle = migrateMenu([
+        { tab: 'API', menu: [{ item: 'Reference', openapi: 'openapi.json' }] },
+        { tab: 'Docs', menu: [{ item: 'Guide', pages: ['guide'] }, { item: 'A', openapi: 'a.json' }] },
+        { tab: 'More', pages: ['guide'] },
+      ], ['openapi.json', 'a.json'])
+      expect(summary(bundle).map((tab) => [tab.tab, tab.api])).toEqual([
+        ['Docs', undefined],
+        ['Docs: A', 'openapi/a.json'],
+        ['More', undefined],
+        ['API', 'openapi/openapi.json'],
+      ])
+    })
+
+    it('gives two API items in one tab their own bindings, even for the same spec', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [
+          { item: 'Guide', pages: ['guide'] },
+          { item: 'REST', openapi: 'openapi.json' },
+          { item: 'Admin', openapi: 'admin.json' },
+          { item: 'REST again', openapi: 'openapi.json' },
+        ],
+      }], ['openapi.json', 'admin.json'])
+      expect(summary(bundle).map((tab) => [tab.tab, tab.api])).toEqual([
+        ['Docs', undefined],
+        ['Docs: REST', 'openapi/openapi.json'],
+        ['Docs: Admin', 'openapi/admin.json'],
+        ['Docs: REST again', 'openapi/openapi.json'],
+      ])
+    })
+
+    it('warns about an API menu item it cannot represent instead of dropping it silently', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [{ item: 'Guide', pages: ['guide'] }, { item: 'Broken API', openapi: { directory: 'api' } }, { item: 'Async', asyncapi: 'openapi.json' }],
+      }])
+      const messages = bundle.warnings.map((warning) => warning.message).join('\n')
+      expect(messages).toContain('"Broken API"')
+      expect(messages).toContain('AsyncAPI is not supported')
+    })
+  })
+
   it('defers remote OpenAPI downloads and keeps other content', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

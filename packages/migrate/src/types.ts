@@ -147,7 +147,7 @@ export interface MigrationBundle {
   pages: Array<MigrationPage>
   assets: Array<MigrationAsset>
   /** Repository-configured remote specs awaiting a bounded network fetch by the host. */
-  remoteApiSpecs?: Array<{ url: string; tabLabel?: string }>
+  remoteApiSpecs?: Array<{ url: string; tabLabel?: string; parentTab?: string }>
   /** Customer-owned component source and registry; paths are repository-relative. */
   componentFiles?: Array<RenderedMigrationFile>
   docsConfig: MigrationDocsConfig

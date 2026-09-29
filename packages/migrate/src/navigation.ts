@@ -284,9 +284,20 @@ export interface MintlifyApiSpecReference {
   /** The field's raw value: a repository-relative path, or an `http(s)://` URL. */
   value: string
   kind: 'openapi' | 'asyncapi'
-  /** Label of the nearest enclosing tab/anchor/dropdown/product/version/menu, so the resolved spec binds to that tab specifically. Undefined at the navigation root. */
+  /** Label of the tab the resolved spec binds to (created if the source tab was dropped). Undefined at the navigation root. */
   tabLabel?: string
+  /** Set when `tabLabel` is a per-item sibling tab (`<Tab>: <Item>`): the tab it should be placed after. */
+  parentTab?: string
 }
+
+/** `openapi`/`asyncapi` is a path/URL string, or Mintlify's `{ source, directory }` object. */
+function specSource(value: unknown): string | undefined {
+  const source = typeof value === 'string' ? value : objectValue(value)?.source
+  return typeof source === 'string' && source.trim() ? source.trim() : undefined
+}
+
+const hasNavigationChildren = (node: Record<string, unknown>): boolean =>
+  ['groups', 'pages'].some((key) => Array.isArray(node[key]) && (node[key] as Array<unknown>).length > 0)
 
 /**
  * Mintlify lets `openapi`/`asyncapi` appear not just at the top-level `api`
@@ -297,6 +308,11 @@ export interface MintlifyApiSpecReference {
  * the whole raw navigation tree (the same shape `convertContainerToTabs`
  * projects) collecting every occurrence, so the caller can resolve and bind
  * each one instead of only ever seeing the single top-level `api` field.
+ *
+ * A tab `menu` item with `openapi` cannot become a group (Thally groups hold
+ * pages, and the generated endpoints live in an API-bound tab). It becomes a
+ * sibling tab `<Tab>: <Item>` bound to its own spec, or binds to the tab
+ * itself when it is the tab's only content.
  */
 export function mintlifyNavigationApiReferences(config: Record<string, unknown>): Array<MintlifyApiSpecReference> {
   const navigation = objectValue(config.navigation) ?? config
@@ -304,13 +320,14 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
   const containerKeys = ['tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus', 'languages'] as const
   const nestedKeys = ['groups', 'pages'] as const
 
-  function visit(node: Record<string, unknown>, tabLabel: string | undefined): void {
-    if (typeof node.openapi === 'string' && node.openapi.trim()) {
-      references.push({ value: node.openapi.trim(), kind: 'openapi', tabLabel })
+  function collect(node: Record<string, unknown>, tabLabel: string | undefined, parentTab?: string): void {
+    for (const kind of ['openapi', 'asyncapi'] as const) {
+      const value = specSource(node[kind])
+      if (value) references.push({ value, kind, tabLabel, ...(parentTab ? { parentTab } : {}) })
     }
-    if (typeof node.asyncapi === 'string' && node.asyncapi.trim()) {
-      references.push({ value: node.asyncapi.trim(), kind: 'asyncapi', tabLabel })
-    }
+  }
+
+  function visitChildren(node: Record<string, unknown>, tabLabel: string | undefined): void {
     for (const key of containerKeys) {
       const entries = node[key]
       if (!Array.isArray(entries)) continue
@@ -324,9 +341,7 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
         visit(object, labelFor(object, tabLabel ?? 'Documentation'))
       }
     }
-    // Menu items are projected as groups inside the enclosing tab, so their
-    // `openapi` binds to that tab rather than to a tab named after the item.
-    for (const key of [...nestedKeys, 'menu'] as const) {
+    for (const key of nestedKeys) {
       const entries = node[key]
       if (!Array.isArray(entries)) continue
       for (const entry of entries) {
@@ -335,9 +350,40 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
         if (object) visit(object, tabLabel)
       }
     }
+    if (Array.isArray(node.menu)) {
+      const tab = tabLabel ?? 'Documentation'
+      const items = node.menu.flatMap((entry): Array<Record<string, unknown>> => {
+        const object = objectValue(entry)
+        return object ? [object] : []
+      })
+      const apiItems = items.filter((item) => specSource(item.openapi) || specSource(item.asyncapi))
+      const soleContent = apiItems.length === 1 && !hasNavigationChildren(node) && !items.some(hasNavigationChildren)
+      items.forEach((item, index) => {
+        if (soleContent && apiItems[0] === item) collect(item, tab)
+        else collect(item, `${tab}: ${labelFor(item, `Menu item ${index + 1}`)}`, tab)
+        visitChildren(item, tabLabel)
+      })
+    }
+  }
+
+  function visit(node: Record<string, unknown>, tabLabel: string | undefined): void {
+    collect(node, tabLabel)
+    visitChildren(node, tabLabel)
   }
   visit(navigation, undefined)
   return references
+}
+
+/** Add an API-bound tab, right after `parentTab` (and its earlier per-item siblings) when given, else at the end. */
+export function insertApiTab<T extends { tab: string }>(tabs: Array<T>, tab: T, parentTab?: string): Array<T> {
+  let index = -1
+  if (parentTab) {
+    tabs.forEach((candidate, position) => {
+      if (candidate.tab === parentTab || candidate.tab.startsWith(`${parentTab}: `)) index = position
+    })
+  }
+  tabs.splice(index === -1 ? tabs.length : index + 1, 0, tab)
+  return tabs
 }
 
 function normalizePageRef(value: string, pathPrefix = ''): string | null {
@@ -464,6 +510,14 @@ function convertMenuItems(
         `Mintlify menu item "${label}" has a description, which Thally groups cannot display; it was omitted.`,
       )
     }
+    const hasUnsourcedSpec = Boolean(item.openapi || item.asyncapi) && !specSource(item.openapi) && !specSource(item.asyncapi)
+    if (hasUnsourcedSpec) {
+      warnOnce(
+        context,
+        `menu-item-spec:${label}`,
+        `Mintlify menu item "${label}" has an openapi/asyncapi value without a "source", so its API reference was not migrated.`,
+      )
+    }
     const children = convertNavigationValues([
       ...(Array.isArray(item.groups) ? item.groups : []),
       ...(Array.isArray(item.pages) ? item.pages : []),
@@ -476,7 +530,7 @@ function convertMenuItems(
       )
     }
     if (children.length === 0) {
-      if (typeof item.openapi !== 'string' && typeof item.asyncapi !== 'string') {
+      if (!specSource(item.openapi) && !specSource(item.asyncapi) && !hasUnsourcedSpec) {
         warnOnce(context, `menu-item-empty:${label}`, `Mintlify menu item "${label}" has no projectable pages and was omitted.`)
       }
       return []

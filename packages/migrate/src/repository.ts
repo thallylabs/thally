@@ -53,6 +53,7 @@ import {
   addMintlifyHomepageRedirects,
   buildNavigationFromPages,
   isDocumentationExtension,
+  insertApiTab,
   mintlifyNavigationApiReferences,
   projectMintlifyNavigation,
   pruneMissingNavigationPages,
@@ -1000,6 +1001,8 @@ interface ResolvedApiSpec {
   filename: string
   content: Buffer
   tabLabel?: string
+  /** `tabLabel` is a per-menu-item sibling tab; place it after this tab. */
+  parentTab?: string
 }
 
 function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): Array<MintlifyApiSpecReference> {
@@ -1032,7 +1035,7 @@ function resolveMintlifyApiSpecs(
   mintlifyConfig: Record<string, unknown> | null,
   files: Array<ScannedFile>,
   warnings: Array<MigrationWarning>,
-  remoteSpecs: Array<{ url: string; tabLabel?: string }>,
+  remoteSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string }>,
 ): Array<ResolvedApiSpec> {
   if (!mintlifyConfig) return []
   const references = [
@@ -1042,7 +1045,7 @@ function resolveMintlifyApiSpecs(
   const seen = new Set<string>()
   const specs: Array<ResolvedApiSpec> = []
   for (const reference of references) {
-    const dedupeKey = `${reference.kind}:${reference.value}`
+    const dedupeKey = `${reference.kind}:${reference.value}:${reference.tabLabel ?? ''}`
     if (seen.has(dedupeKey)) continue
     seen.add(dedupeKey)
     const tabSuffix = reference.tabLabel ? ` (tab "${reference.tabLabel}")` : ''
@@ -1054,7 +1057,7 @@ function resolveMintlifyApiSpecs(
       continue
     }
     if (/^https:\/\//i.test(reference.value)) {
-      remoteSpecs.push({ url: reference.value, ...(reference.tabLabel ? { tabLabel: reference.tabLabel } : {}) })
+      remoteSpecs.push({ url: reference.value, ...(reference.tabLabel ? { tabLabel: reference.tabLabel } : {}), ...(reference.parentTab ? { parentTab: reference.parentTab } : {}) })
       warnings.push({
         code: 'unsupported-config',
         message: `The remote OpenAPI spec "${reference.value}"${tabSuffix} requires a network download before this import is complete.`,
@@ -1075,7 +1078,7 @@ function resolveMintlifyApiSpecs(
       })
       continue
     }
-    specs.push({ filename: basename(match.relativePath), content: readFileSync(match.absolutePath), tabLabel: reference.tabLabel })
+    specs.push({ filename: basename(match.relativePath), content: readFileSync(match.absolutePath), tabLabel: reference.tabLabel, parentTab: reference.parentTab })
   }
   return specs
 }
@@ -1907,7 +1910,7 @@ function inlineMdxSnippets(
  * substring fallback, so two specs from two different tabs can never both
  * land on the same tab by accident.
  */
-function injectOpenApiSpecs(config: MigrationDocsConfig, specs: Array<{ filename: string; tabLabel?: string }>): MigrationDocsConfig {
+function injectOpenApiSpecs(config: MigrationDocsConfig, specs: Array<{ filename: string; tabLabel?: string; parentTab?: string }>): MigrationDocsConfig {
   let tabs = config.tabs.map((tab) => ({ ...tab }))
   for (const spec of specs) {
     const apiTab = spec.tabLabel
@@ -1919,7 +1922,7 @@ function injectOpenApiSpecs(config: MigrationDocsConfig, specs: Array<{ filename
       // page tab keeps its own groups alongside the bound spec.
       ...((apiTab.groups?.length || apiTab.pages?.length) ? { navigation: false } : {}),
     }
-    else tabs = [...tabs, { tab: spec.tabLabel ?? 'API Reference', api: { source: specAssetPath(spec.filename) } }]
+    else insertApiTab(tabs, { tab: spec.tabLabel ?? 'API Reference', api: { source: specAssetPath(spec.filename) } }, spec.parentTab)
   }
   return { ...config, tabs }
 }
@@ -2119,7 +2122,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
-  const remoteApiSpecs: Array<{ url: string; tabLabel?: string }> = []
+  const remoteApiSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string }> = []
   // Which pages reference which asset (by its normalized copy-destination
   // path), so the final asset-copy pass can prioritize referenced assets
   // over unreferenced ones when the budget is tight, and name the

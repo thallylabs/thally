@@ -447,6 +447,34 @@ describe('Mintlify tab menus', () => {
     expect(references).toEqual([{ value: 'openapi.yaml', kind: 'openapi', tabLabel: 'Developer Tools' }])
   })
 
+  it('labels menu API references to match the tabs migration creates', () => {
+    const mixed = mintlifyNavigationApiReferences({ navigation: { tabs: [{
+      tab: 'Docs',
+      menu: [
+        { item: 'Guide', pages: ['guide'] },
+        { item: 'REST', openapi: 'rest.yaml' },
+        { item: 'Admin', openapi: { source: 'admin.yaml', directory: 'admin' }, pages: ['admin/x'] },
+      ],
+    }] } })
+    expect(mixed).toEqual([
+      { value: 'rest.yaml', kind: 'openapi', tabLabel: 'Docs: REST', parentTab: 'Docs' },
+      { value: 'admin.yaml', kind: 'openapi', tabLabel: 'Docs: Admin', parentTab: 'Docs' },
+    ])
+    const two = mintlifyNavigationApiReferences({ navigation: { tabs: [{
+      tab: 'API',
+      menu: [{ item: 'A', openapi: 'a.yaml' }, { item: 'B', openapi: 'b.yaml' }],
+    }] } })
+    expect(two.map((reference) => reference.tabLabel)).toEqual(['API: A', 'API: B'])
+  })
+
+  it('warns when a menu API item has no spec source', () => {
+    const result = projectMintlifyNavigation({ navigation: { tabs: [{
+      tab: 'Docs',
+      menu: [{ item: 'Guide', pages: ['g'] }, { item: 'Broken', openapi: { directory: 'api' }, pages: ['b'] }],
+    }] } })
+    expect(result.warnings.map((warning) => warning.message).join('\n')).toContain('"Broken" has an openapi/asyncapi value without a "source"')
+  })
+
   it('still honors the legacy plural menus container', () => {
     const result = projectMintlifyNavigation({ navigation: { menus: [{ menu: 'One', pages: ['one'] }] } })
     expect(result.docsConfig.tabs).toEqual([{ tab: 'One', pages: ['one'] }])
