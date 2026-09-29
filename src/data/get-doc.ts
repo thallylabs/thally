@@ -5,8 +5,10 @@
 import { createElement, type ComponentType, type ReactNode } from 'react'
 import { compileMDX } from 'next-mdx-remote/rsc'
 import { interpretMDX } from '@/lib/mdx-interpret'
-import type { DocEntry, DocPageMode, OpenApiReference } from '@/data/docs'
-import { deriveTitleFromSlug } from '@/data/docs'
+import type { DocEntry, DocPageMode } from '@/data/docs'
+import { deriveTitleFromSlug, getApiMdxConfig } from '@/data/docs'
+import { parseOpenApiFrontmatter } from '@/lib/openapi/page-frontmatter'
+import { buildManualOperation } from '@/lib/openapi/manual-operation'
 import { remarkPlugins } from '@/mdx/remark'
 import { rehypePlugins } from '@/mdx/rehype'
 import { useMDXComponents as getMDXComponents } from '@/components/mdx/mdx-components'
@@ -27,7 +29,9 @@ interface DocFrontmatter {
   keywords?: Array<string>
   timeEstimate?: string
   lastUpdated?: string
-  openapi?: string
+  openapi?: unknown
+  api?: unknown
+  authMethod?: unknown
   noindex?: boolean
   hidden?: boolean
   mode?: DocPageMode
@@ -160,13 +164,32 @@ async function compileDocEntry(
   }
   GeneratedDoc.displayName = `DocContent(${href})`
 
-  const openapi = parseOpenApiReference(frontmatter?.openapi)
+  const openapi = parseOpenApiFrontmatter(frontmatter?.openapi)
+  const title = frontmatter?.title ?? deriveTitleFromSlug(slugPath)
+  // `openapi:` wins when a page declares both: it is the existing behaviour.
+  let manualApi: DocEntry['manualApi']
+  if (frontmatter?.api !== undefined && frontmatter.api !== null) {
+    const warn = (message: string) => console.warn(`[thally] ${filePath}: ${message}`)
+    if (openapi) {
+      warn('both "openapi" and "api" frontmatter are set; using "openapi" and ignoring "api".')
+    } else {
+      manualApi = buildManualOperation({
+        pageId: slugPath || 'introduction',
+        title,
+        api: frontmatter.api,
+        authMethod: frontmatter.authMethod,
+        mdx: parseFrontmatter(sourceFile.content).content,
+        config: getApiMdxConfig(),
+        warn,
+      }) ?? undefined
+    }
+  }
 
   return {
     // The empty route resolves introduction.mdx; titles are display metadata,
     // not source identifiers used by navigation, feedback, and GitHub edit links.
     id: slugPath || 'introduction',
-    title: frontmatter?.title ?? deriveTitleFromSlug(slugPath),
+    title,
     description: frontmatter?.description ?? '',
     descriptionPlacement: frontmatter?.descriptionPlacement === 'body' ? 'body' : undefined,
     slug: slugSegments,
@@ -178,6 +201,7 @@ async function compileDocEntry(
     timeEstimate: frontmatter?.timeEstimate ?? '5 min',
     lastUpdated: frontmatter?.lastUpdated ?? new Date().toISOString().slice(0, 10),
     openapi: openapi ?? undefined,
+    manualApi,
     noindex: frontmatter?.noindex,
     hidden: frontmatter?.hidden,
     mode: frontmatter?.mode,
@@ -281,32 +305,4 @@ async function compileSnippetFromPath(snippetImportPath: string): Promise<Compon
     return content
   }
   return SnippetComponent
-}
-
-function parseOpenApiReference(raw?: string): OpenApiReference | null {
-  if (typeof raw !== 'string') {
-    return null
-  }
-
-  const trimmed = raw.trim()
-  if (!trimmed) {
-    return null
-  }
-
-  const parts = trimmed.split(/\s+/)
-  if (parts.length < 2) {
-    return null
-  }
-
-  const method = parts[0]?.toUpperCase()
-  const path = parts.slice(1).join(' ')
-  if (!method || !path.startsWith('/')) {
-    return null
-  }
-
-  return {
-    specId: 'default',
-    method,
-    path,
-  }
 }

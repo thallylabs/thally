@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from 'react'
 import type { NormalizedOperation } from '@/lib/openapi/types'
 
+export const MANUAL_NO_SERVER = 'No server URL for this page. Set api.mdx.server in docs.json or use a full URL in the api frontmatter.'
+
 export interface TryItController {
   operation: NormalizedOperation
   serverUrl: string
@@ -95,7 +97,7 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
 
   const sendRequest = useCallback(async () => {
     if (!preparedRequest.isServerConfigured) {
-      setResponse({ error: 'No server URL available for this spec. Update your OpenAPI servers array.' })
+      setResponse({ error: operation.manualPage ? MANUAL_NO_SERVER : 'No server URL available for this spec. Update your OpenAPI servers array.' })
       return
     }
     setIsSending(true)
@@ -108,6 +110,7 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
         },
         body: JSON.stringify({
           specId: operation.specId,
+          ...(operation.manualPage ? { page: operation.manualPage } : {}),
           operationPath: operation.path,
           url: preparedRequest.url,
           method: preparedRequest.method,
@@ -122,7 +125,7 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
     } finally {
       setIsSending(false)
     }
-  }, [operation.path, operation.specId, preparedRequest])
+  }, [operation.manualPage, operation.path, operation.specId, preparedRequest])
 
   return {
     operation,

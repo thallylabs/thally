@@ -7,10 +7,15 @@ import { Readable } from 'node:stream'
 import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getApiOperationByKey } from '@/data/api-reference'
+import { getManualApiOperation } from '@/data/manual-api'
 import { POST } from './route'
 
 vi.mock('@/data/api-reference', () => ({
   getApiOperationByKey: vi.fn(),
+}))
+
+vi.mock('@/data/manual-api', () => ({
+  getManualApiOperation: vi.fn(),
 }))
 
 vi.mock('node:dns/promises', () => ({
@@ -223,5 +228,73 @@ describe('POST /api/try-it', () => {
 
     expect(response.status).toBe(400)
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /api/try-it for manual api pages', () => {
+  function manual(overrides: Record<string, unknown> = {}) {
+    return {
+      specId: 'manual',
+      path: '/anything/users/{id}',
+      method: 'POST',
+      isWebhook: false,
+      servers: [{ url: 'https://httpbin.org' }],
+      manualPage: 'guides/users',
+      ...overrides,
+    }
+  }
+  function manualPayload(overrides: Record<string, unknown> = {}) {
+    return {
+      specId: 'manual',
+      page: 'guides/users',
+      operationPath: '/anything/users/{id}',
+      method: 'POST',
+      url: 'https://httpbin.org/anything/users/7?verbose=1',
+      headers: {},
+      body: '{}',
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    vi.mocked(getManualApiOperation).mockResolvedValue(manual() as never)
+  })
+
+  it('relays to the origin declared by the page, never consulting spec operations', async () => {
+    const response = await POST(request(manualPayload()))
+    expect(response.status).toBe(200)
+    expect(getManualApiOperation).toHaveBeenCalledWith('guides/users')
+    expect(getApiOperationByKey).not.toHaveBeenCalled()
+  })
+
+  it('refuses a host the page did not declare', async () => {
+    const response = await POST(request(manualPayload({ url: 'https://evil.example.net/anything/users/7' })))
+    expect(response.status).toBe(403)
+  })
+
+  it('refuses a different path or method than the page declares', async () => {
+    expect((await POST(request(manualPayload({ url: 'https://httpbin.org/other' })))).status).toBe(403)
+    expect((await POST(request(manualPayload({ method: 'DELETE' })))).status).toBe(403)
+    expect((await POST(request(manualPayload({ operationPath: '/other' })))).status).toBe(403)
+  })
+
+  it('refuses unknown pages and never falls back to spec operations', async () => {
+    vi.mocked(getManualApiOperation).mockResolvedValue(null)
+    const response = await POST(request(manualPayload({ page: 'nope' })))
+    expect(response.status).toBe(403)
+    expect(getApiOperationByKey).not.toHaveBeenCalled()
+  })
+
+  it('keeps the private-target guard even when the page declares a private server', async () => {
+    for (const server of ['http://127.0.0.1', 'http://localhost:3000', 'http://169.254.169.254', 'http://10.0.0.5']) {
+      vi.mocked(getManualApiOperation).mockResolvedValue(manual({ servers: [{ url: server }] }) as never)
+      const response = await POST(request(manualPayload({ url: `${server}/anything/users/7` })))
+      expect(response.status).toBe(403)
+    }
+  })
+
+  it('refuses a non-string page id from the client', async () => {
+    const response = await POST(request(manualPayload({ page: { a: 1 } })))
+    expect(response.status).toBe(403)
   })
 })

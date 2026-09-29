@@ -688,6 +688,44 @@ function projectedCompatibleConfig(config: Record<string, unknown>): Omit<Migrat
   }
 }
 
+/**
+ * Mintlify's `api.mdx.server` / `api.mdx.auth` (defaults for manual `api:`
+ * pages). Only well-formed values are kept; each dropped one is reported.
+ */
+function projectedApiMdx(config: Record<string, unknown>, warnings: Array<MigrationWarning>): Pick<MigrationDocsConfig, 'api'> {
+  const mdx = objectValue(objectValue(config.api)?.mdx)
+  if (!mdx) return {}
+  const warn = (message: string) => warnings.push({ code: 'unsupported-config', message })
+  const rawServers = mdx.server === undefined ? [] : Array.isArray(mdx.server) ? mdx.server : [mdx.server]
+  const servers = rawServers.filter((entry): entry is string => {
+    const valid = typeof entry === 'string' && /^https?:\/\/[^\s/@?#]+(?:\/[^\s?#]*)?$/i.test(entry.trim())
+    if (!valid) warn(`api.mdx.server entry ${JSON.stringify(entry)} is not an absolute http(s) URL and was dropped.`)
+    return valid
+  }).map((entry) => entry.trim())
+  const auth = objectValue(mdx.auth)
+  const method = typeof auth?.method === 'string' ? auth.method.toLowerCase() : undefined
+  const name = typeof auth?.name === 'string' && auth.name.trim() ? auth.name.trim() : undefined
+  let projectedAuth: { method: 'bearer' | 'basic' | 'key'; name?: string } | undefined
+  if (mdx.auth !== undefined && auth && method !== undefined) {
+    if (method === 'bearer' || method === 'basic' || (method === 'key' && name)) {
+      projectedAuth = { method, ...(name ? { name } : {}) }
+    } else {
+      warn(`api.mdx.auth method ${JSON.stringify(auth.method)} is not supported (bearer, basic, or key with a name) and was dropped.`)
+    }
+  } else if (mdx.auth !== undefined && !auth) {
+    warn('api.mdx.auth is not an object and was dropped.')
+  }
+  if (servers.length === 0 && !projectedAuth) return {}
+  return {
+    api: {
+      mdx: {
+        ...(servers.length > 0 ? { server: servers.length === 1 && typeof mdx.server === 'string' ? servers[0] : servers } : {}),
+        ...(projectedAuth ? { auth: projectedAuth } : {}),
+      },
+    },
+  }
+}
+
 const NEXT_REDIRECT_PARAM_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 /**
@@ -892,6 +930,7 @@ export function projectMintlifyNavigation(
         ? { navigation: { display: 'dropdown' as const } }
         : {}),
       ...projectedCompatibleConfig(config),
+      ...projectedApiMdx(config, warnings),
       ...(i18n ? { i18n } : {}),
       ...(redirects.length > 0 ? { redirects } : {}),
     },

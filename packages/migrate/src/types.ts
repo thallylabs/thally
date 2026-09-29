@@ -88,6 +88,8 @@ export interface MigrationDocsConfig {
   ai?: { chat?: boolean; label?: string; icon?: string }
   admin?: { enabled?: boolean }
   analytics?: { enabled?: boolean }
+  /** Manual API pages: default server(s) and auth for `api:` frontmatter pages. */
+  api?: { mdx?: { server?: string | Array<string>; auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string } } }
   redirects?: Array<{ source: string; destination: string; permanent?: boolean }>
   i18n?: {
     defaultLocale: string
@@ -115,6 +117,10 @@ export interface MigrationPage {
   noindex?: boolean
   /** OpenAPI operation key rendered by Thally instead of ordinary MDX. */
   openapi?: string
+  /** Manual API page: `METHOD <url-or-path>`; rendered by Thally's playground. */
+  api?: string
+  /** Page-level playground auth override: bearer | basic | key | none. */
+  authMethod?: string
   body: string
   source: string
 }

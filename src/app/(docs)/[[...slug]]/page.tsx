@@ -7,6 +7,7 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { ApiLayout } from '@/components/api/api-layout'
+import { ManualApiEndpoint } from '@/components/api/manual-api-endpoint'
 import { OperationPanel } from '@/components/api/operation-panel'
 import { DocHeader } from '@/components/docs/doc-header'
 import { DocLayout } from '@/components/docs/doc-layout'
@@ -15,7 +16,7 @@ import { LocaleStaleBanner } from '@/components/docs/locale-stale-banner'
 import { LocalizedSidebarHydrator } from '@/components/layout/localized-sidebar-hydrator'
 import { LocaleAvailabilityHydrator } from '@/components/layout/locale-availability'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
-import { getApiOperationByKey } from '@/data/api-reference'
+import { getApiOperationForFrontmatter } from '@/data/api-reference'
 import { getDocEntries, loadNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { hasDocTranslation } from '@/lib/i18n/translation-source'
@@ -183,11 +184,7 @@ export default async function DocsPage({ params }: PageProps) {
   ) : null
 
   if (doc.openapi) {
-    const operationNode = await getApiOperationByKey(
-      doc.openapi.method,
-      doc.openapi.path,
-      doc.openapi.specId,
-    )
+    const operationNode = await getApiOperationForFrontmatter(doc.openapi)
     if (!operationNode) notFound()
 
     return (
@@ -217,6 +214,7 @@ export default async function DocsPage({ params }: PageProps) {
       <JsonLdScript data={jsonLd} />
       <DocLayout doc={doc} locale={contentLocale} navigation={nav}>
         {localeNotice}
+        {doc.manualApi ? <ManualApiEndpoint operation={doc.manualApi} /> : null}
         <Content />
       </DocLayout>
     </>

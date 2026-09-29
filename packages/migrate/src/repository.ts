@@ -47,6 +47,7 @@ import {
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
+import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
@@ -985,6 +986,8 @@ interface ResolvedApiSpec {
   filename: string
   content: Buffer
   tabLabel?: string
+  /** Repository-relative path the spec was read from. */
+  sourceKey?: string
 }
 
 function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): Array<MintlifyApiSpecReference> {
@@ -1060,9 +1063,42 @@ function resolveMintlifyApiSpecs(
       })
       continue
     }
-    specs.push({ filename: basename(match.relativePath), content: readFileSync(match.absolutePath), tabLabel: reference.tabLabel })
+    specs.push({ filename: basename(match.relativePath), content: readFileSync(match.absolutePath), tabLabel: reference.tabLabel, sourceKey: match.relativePath })
   }
   return specs
+}
+
+/**
+ * Point each page's `openapi: "<spec> METHOD /path"` prefix at the location
+ * the migrated spec was written to. A prefix naming a spec that was not
+ * migrated is kept as authored and reported: the page cannot resolve without it.
+ */
+function rewriteMintlifyPageSpecRefs(
+  pages: Array<MigrationPage>,
+  specs: Array<{ filename: string; sourceKey?: string }>,
+  remoteUrls: Set<string>,
+  warnings: Array<MigrationWarning>,
+): void {
+  for (const page of pages) {
+    const ref = page.openapi ? splitOpenApiRef(page.openapi) : null
+    if (!ref?.specRef) continue
+    if (/^https?:\/\//i.test(ref.specRef)) {
+      // A remote spec is rewritten once it has been downloaded (hydrateRemoteApiSpecs).
+      if (!remoteUrls.has(ref.specRef)) {
+        warnings.push({ code: 'unsupported-config', message: `Page "${page.id}" references the remote OpenAPI spec "${ref.specRef}", which is not referenced from docs.json and was not migrated; the page will not render an endpoint.`, source: page.source })
+      }
+      continue
+    }
+    const key = ref.specRef.split(/[?#]/, 1)[0].replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/^\/+/, '')
+    const byPath = specs.find((spec) => spec.sourceKey === key)
+    const byName = specs.filter((spec) => spec.filename.toLowerCase() === specRefBaseName(key))
+    const match = byPath ?? (byName.length === 1 ? byName[0] : undefined)
+    if (match) {
+      page.openapi = withSpecRef(ref, `/${match.filename}`)
+    } else {
+      warnings.push({ code: 'unsupported-config', message: `Page "${page.id}" references the OpenAPI spec "${ref.specRef}", which is not referenced from docs.json and was not migrated; the page will not render an endpoint. Add the spec to a tab's api setting.`, source: page.source })
+    }
+  }
 }
 
 const MAX_FERN_GENERATORS_BYTES = 2_000_000
@@ -2253,6 +2289,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const page = parseMarkdownPage({
       id,
       navigationId,
+      warn: (message) => warnings.push({ code: 'unsupported-config', message, source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/') }),
       ...(locale ? { locale } : {}),
       raw,
       platform,
@@ -2686,6 +2723,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         assets.push({ path: spec.filename, content: spec.content })
       }
     }
+    let pageSpecs: Array<{ filename: string; sourceKey?: string }> = resolvedSpecs
     if (resolvedSpecs.length > 0) {
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs)
     } else {
@@ -2698,8 +2736,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           assets.push({ path: filename, content: readFileSync(fallback.absolutePath) })
         }
         docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
+        pageSpecs = [{ filename, sourceKey: fallback.relativePath }]
       }
     }
+    rewriteMintlifyPageSpecRefs(pages, pageSpecs, new Set(remoteApiSpecs.map((spec) => spec.url)), warnings)
   }
   if (platform === 'mintlify') {
     const sources = new Set((docsConfig.redirects ?? []).map((redirect) => redirect.source))

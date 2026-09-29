@@ -26,6 +26,8 @@ function renderPage(bundle: MigrationBundle, page: MigrationBundle['pages'][numb
     page.hidden ? 'hidden: true' : null,
     page.noindex ? 'noindex: true' : null,
     page.openapi ? `openapi: ${yamlString(page.openapi)}` : null,
+    page.api ? `api: ${yamlString(page.api)}` : null,
+    page.authMethod ? `authMethod: ${yamlString(page.authMethod)}` : null,
     bundle.sourceKind === 'url' ? `source: ${yamlString(page.source)}` : null,
     '---',
     '',

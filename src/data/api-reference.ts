@@ -3,6 +3,7 @@ import { apiReferenceConfig } from '@/config/api-reference'
 import { getSpecConfig, loadSpec } from '@/lib/openapi/fetch'
 import { buildOperationKey, normalizeSpec } from '@/lib/openapi/normalize'
 import type { NormalizedOperation, NormalizedSpec } from '@/lib/openapi/types'
+import { findSpecForRef, type OpenApiFrontmatterRef } from '@/lib/openapi/page-frontmatter'
 
 export interface ApiNavigationItem {
   id: string
@@ -95,6 +96,44 @@ export async function getApiOperationByKey(
 
   const allNodes = await getAllApiOperationNodes()
   return allNodes.find((node) => node.operation.key === key) ?? null
+}
+
+export async function getApiWebhookByName(name: string, specId?: string): Promise<ApiOperationNode | null> {
+  if (!name) return null
+  const nodes = specId ? await getApiOperationNodes(specId) : await getAllApiOperationNodes()
+  return nodes.find((node) => node.operation.isWebhook && node.operation.path === name) ?? null
+}
+
+/**
+ * Resolve a page's `openapi:` frontmatter. A spec prefix selects that spec
+ * (unknown spec: no match). Without one the default spec is tried first, so
+ * existing pages resolve exactly as before, then the remaining specs in
+ * configured order; a repeat match there resolves to the first with a warning.
+ */
+export async function getApiOperationForFrontmatter(ref: OpenApiFrontmatterRef): Promise<ApiOperationNode | null> {
+  const lookup = (specId: string) => ref.webhook
+    ? getApiWebhookByName(ref.path, specId)
+    : getApiOperationByKey(ref.method, ref.path, specId)
+  if (ref.specRef) {
+    const spec = findSpecForRef(apiReferenceConfig.specs, ref.specRef)
+    return spec ? lookup(spec.id) : null
+  }
+  const inDefault = await lookup(ref.specId)
+  if (inDefault) return inDefault
+  const matches: Array<ApiOperationNode> = []
+  for (const spec of apiReferenceConfig.specs) {
+    if (spec.id === ref.specId) continue
+    try {
+      const node = await lookup(spec.id)
+      if (node) matches.push(node)
+    } catch {
+      // A broken secondary spec must not take down a page that never named it.
+    }
+  }
+  if (matches.length > 1) {
+    console.warn(`[thally] openapi frontmatter "${ref.method} ${ref.path}" matches ${matches.length} specs; using the first. Prefix the spec file to disambiguate.`)
+  }
+  return matches[0] ?? null
 }
 
 export async function buildApiNavigation(specId?: string): Promise<Array<ApiNavigationGroup>> {

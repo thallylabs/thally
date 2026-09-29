@@ -110,6 +110,78 @@ Try It is ready when the specification provides at least one server URL. Add
 authentication placeholders only when your API requires them; readers can
 enter their own credentials before sending a request.
 
+## Pointing a page at one operation
+
+A page can render a single operation from your spec with `openapi` frontmatter:
+
+```yaml
+---
+openapi: "POST /things"
+---
+```
+
+When a site has several specs, prefix the spec file (or URL) exactly as it is
+configured in `docs.json`; a leading `/` or `./`, quotes, and a name with spaces
+all work, and the file name alone is enough:
+
+```yaml
+openapi: "openapi-b.yaml GET /widgets/{id}"
+openapi: "/specs/openapi-b.yaml GET /widgets/{id}"
+openapi: "openapi-a.json webhook orderUpdated"
+```
+
+Without a prefix, the default (first) spec is searched first, then the others in
+`docs.json` order. If only later specs match, the first is used and a warning
+names the ambiguity; add the prefix to choose. An unknown spec or operation
+gives a 404. If a page also sets `api`, `openapi` wins.
+
+## Hand-written API pages
+
+A page without a spec can still get an endpoint header and a Try It panel. Set
+`api` to `METHOD` plus a full URL or a path:
+
+```yaml
+---
+title: Create user
+api: "POST https://api.example.com/users/{id}"
+authMethod: bearer   # optional: bearer | basic | key | none
+---
+
+<ParamField path="id" type="string" default="42" required />
+<ParamField query="verbose" type="boolean" />
+<ParamField header="X-Trace" type="string" />
+<ParamField body="user.name" type="string" required />
+```
+
+- A full URL in `api` wins. A path (`api: "GET /status"`) is added to the
+  server from `docs.json`. Without either, the page shows the header and the
+  playground is disabled with a message.
+- The playground fields come from the page's `ParamField` elements
+  (`path`, `query`, `header`, `body`; `default` becomes the prefilled value).
+  Dotted body names (`user.name`) build nested JSON. Each `{name}` in the path
+  is an input even without a `ParamField`. A query string in `api` is prefilled.
+- Invalid `api` values (unknown method, non-string, missing path) are ignored
+  with a build/server log warning and the page renders as normal MDX.
+
+```json
+"api": {
+  "mdx": {
+    "server": "https://api.example.com",
+    "auth": { "method": "bearer" }
+  }
+}
+```
+
+`api.mdx.server` is one URL or a list (readers get a selector). `api.mdx.auth`
+takes `method` `bearer`, `basic` or `key` (`key` needs `name`, the header
+name) and prefills that header. Only absolute `http(s)` URLs without
+credentials are accepted.
+
+The Try It relay only forwards to the server the page itself declares (from its
+`api` frontmatter or `docs.json`); it re-reads the page on the server and never
+trusts a URL from the browser. Private, loopback and metadata addresses stay
+blocked.
+
 ## Replace the example spec
 
 The template ships with a JSONPlaceholder specification so you can test the

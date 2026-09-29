@@ -1,4 +1,6 @@
 import type { ComponentType } from 'react'
+import type { NormalizedOperation } from '@/lib/openapi/types'
+import { sanitizeApiMdxConfig, type ApiMdxConfig } from '@/lib/openapi/manual-operation'
 import { getContentIndex, loadContentIndex, type ContentIndex } from '@/lib/content-index'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
@@ -31,6 +33,8 @@ export interface DocEntry {
   /** Public provenance: product version this page was verified against. */
   verifiedVersion?: string
   openapi?: OpenApiReference
+  /** Synthetic operation for a manual `api:` page (header + Try It); see manual-operation.ts. */
+  manualApi?: NormalizedOperation
   noindex?: boolean
   hidden?: boolean
   mode?: DocPageMode
@@ -38,6 +42,10 @@ export interface DocEntry {
 
 export interface OpenApiReference {
   specId: string
+  /** Spec file/URL prefix as authored (`openapi: "spec.json GET /x"`). */
+  specRef?: string
+  /** `openapi: "webhook name"`: `path` is the webhook name. */
+  webhook?: boolean
   method: string
   path: string
 }
@@ -221,6 +229,13 @@ export type ContentIconTone = 'neutral' | 'accent'
 
 interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
+  /** Manual API pages (`api:` frontmatter): default server(s) and auth for the playground. */
+  api?: {
+    mdx?: {
+      server?: string | Array<string>
+      auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string }
+    }
+  }
   navigation?: {
     display?: 'tabs' | 'dropdown'
   }
@@ -949,6 +964,19 @@ export function getAiConfig(): {
   systemPrompt?: string
 } {
   return docsConfig().ai ?? {}
+}
+
+const apiMdxCache = new WeakMap<object, ApiMdxConfig>()
+
+/** Validated docs.json `api.mdx` settings; invalid parts are dropped with one warning each. */
+export function getApiMdxConfig(): ApiMdxConfig {
+  const config = docsConfig()
+  let cached = apiMdxCache.get(config)
+  if (!cached) {
+    cached = sanitizeApiMdxConfig(config.api?.mdx, (message) => console.warn(`[thally] ${message}`))
+    apiMdxCache.set(config, cached)
+  }
+  return cached
 }
 
 export function getApiPlaygroundCredentials(): Record<string, string> {
