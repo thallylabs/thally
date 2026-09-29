@@ -7,6 +7,7 @@
 export type MigrationPlatform =
   | 'mintlify'
   | 'docusaurus'
+  | 'fern'
   | 'gitbook'
   | 'nextra'
   | 'vitepress'
@@ -45,11 +46,17 @@ export interface MigrationBannerConfig {
 
 export interface MigrationNavbarConfig {
   links?: Array<{ label: string; href: string; type?: 'github' }>
-  primary?: { label: string; href: string }
+  /** Explicit null suppresses the starter's sample call to action. */
+  primary?: { label: string; href: string } | null
+  /** Local public assets used until an owner uploads a brand replacement. */
+  /** Explicit null requests a text-only brand when the source has no logo. */
+  logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string } | null
 }
 
 export interface MigrationFooterConfig {
   socials?: Record<string, string>
+  /** Literal footer attribution; `{year}` is resolved by the site at render time. */
+  copyright?: string
   links?: Array<{
     heading: string
     items: Array<{ label: string; href: string }>
@@ -64,10 +71,13 @@ export interface MigrationDocsConfig {
     display?: 'tabs' | 'dropdown'
   }
   theme?: 'default' | 'maple' | 'sharp' | 'minimal'
+  appearance?: { default?: 'system' | 'light' | 'dark'; showToggle?: boolean }
+  background?: { image?: string; imageDark?: string; decoration?: 'none' | 'grid' | 'gradient' }
   /** Icon set for content `icon` names; Mintlify's `icons.library` carries through. */
   icons?: { library?: 'lucide' | 'fontawesome' | 'tabler' }
   banner?: MigrationBannerConfig
   navbar?: MigrationNavbarConfig
+  favicon?: { light: string; dark?: string }
   footer?: MigrationFooterConfig
   seo?: { indexing?: 'navigable' | 'all' }
   fonts?: {
@@ -82,6 +92,8 @@ export interface MigrationDocsConfig {
   i18n?: {
     defaultLocale: string
     locales: Array<{ code: string; label: string }>
+    /** Source-authored navigation labels and ordering for each translation. */
+    navigation?: Record<string, Array<MigrationNavigationTab>>
   }
 }
 
@@ -94,6 +106,8 @@ export interface MigrationPage {
   title: string
   navTitle?: string
   description: string
+  /** Keep SEO/search description without repeating it above Docusaurus body copy. */
+  descriptionPlacement?: 'body'
   badge?: string
   keywords: Array<string>
   mode?: 'default' | 'wide' | 'custom' | 'center' | 'home'
@@ -130,12 +144,26 @@ export interface MigrationBundle {
   platform: MigrationPlatform
   pages: Array<MigrationPage>
   assets: Array<MigrationAsset>
+  /** Repository-configured remote specs awaiting a bounded network fetch by the host. */
+  remoteApiSpecs?: Array<{ url: string; tabLabel?: string }>
   /** Customer-owned component source and registry; paths are repository-relative. */
   componentFiles?: Array<RenderedMigrationFile>
   docsConfig: MigrationDocsConfig
   site?: {
     name?: string
     description?: string
+    /**
+     * Source theme accent color(s), each a `#rrggbb`/`#rgb` hex string.
+     * Follows Mintlify's own `colors` schema: `light` is the color used in
+     * dark mode and `dark` is the color used in light mode. Fern's colors
+     * are normal (its `light`/`dark` match the mode they paint), so
+     * extraction swaps them onto this shape for a single downstream contract.
+     */
+    colors?: {
+      primary?: string
+      light?: string
+      dark?: string
+    }
   }
   warnings: Array<MigrationWarning>
   stats: {

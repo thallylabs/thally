@@ -71,6 +71,16 @@ describe('interpretMDX', () => {
     expect(html).toContain('data-flag="true"')
   })
 
+  it('keeps string expression attributes used by imported file trees', async () => {
+    const Folder: ComponentType<Record<string, unknown>> = ({ name }) =>
+      createElement('div', { 'data-name': name as string })
+    const { content } = await interpretMDX({
+      source: '<Folder name={"my-skill/"} />',
+      components: { Folder },
+    })
+    expect(render(content)).toContain('data-name="my-skill/"')
+  })
+
   it('evaluates expression-free template literals in component children', async () => {
     const Probe: ComponentType<Record<string, unknown>> = ({ children }) =>
       createElement('div', { 'data-definition': children as string })

@@ -22,6 +22,8 @@ export interface StarterPersonalizationOptions {
   repoUrl: string
   enableAiChat: boolean
   i18nLocales?: Array<StarterLocale>
+  /** Source theme accent color(s) to apply over the chosen brand preset. */
+  colors?: { primary?: string; light?: string; dark?: string }
 }
 
 function readJsonObject(filePath: string, label: string): Record<string, unknown> {
@@ -127,6 +129,58 @@ function replaceRequired(
   return source.replace(pattern, replacement)
 }
 
+const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
+
+/**
+ * Pick black or white text for legibility over `hex`, using WCAG relative
+ * luminance (the same formula used for contrast-ratio checks).
+ */
+function contrastForeground(hex: string): '#000000' | '#ffffff' {
+  const digits = hex.slice(1)
+  // 3/4-digit shorthand: double each RGB nibble, dropping any alpha digit.
+  const value = digits.length <= 4
+    ? digits.slice(0, 3).split('').map((c) => c + c).join('')
+    : digits.slice(0, 6)
+  const channel = (index: number) => {
+    const c = Number.parseInt(value.slice(index, index + 2), 16) / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)
+  const contrastWithWhite = 1.05 / (luminance + 0.05)
+  const contrastWithBlack = (luminance + 0.05) / 0.05
+  return contrastWithWhite >= contrastWithBlack ? '#ffffff' : '#000000'
+}
+
+/** Replace a single `key: '#hex'` line within `block`, if present. */
+function replaceHexKey(block: string, key: string, hex: string): string {
+  const pattern = new RegExp(`(${key}:[ \\t]*)'#[0-9a-fA-F]{3,8}'`)
+  return pattern.test(block) ? block.replace(pattern, `$1'${hex}'`) : block
+}
+
+/**
+ * Replace the accent-driven hexes within one brand preset's `light`/`dark`
+ * palette: `accent` and `ring`/`sidebarActiveText` (which track it) take the
+ * new hex verbatim, and `accentForeground` is recomputed for contrast. Both
+ * presets share identical indentation, so the preset's own block is isolated
+ * first (up to its `  },` close) and the mode sub-block second (up to its
+ * `    },` close) before touching the individual lines inside it.
+ */
+function replacePresetAccent(source: string, preset: string, mode: 'light' | 'dark', hex: string): string {
+  const presetPattern = new RegExp(`  ${preset}: \\{[\\s\\S]*?\\n  \\},`)
+  const presetBlock = source.match(presetPattern)?.[0]
+  if (!presetBlock) return source
+  const modePattern = new RegExp(`    ${mode}: \\{[\\s\\S]*?\\n    \\},`)
+  const modeBlock = presetBlock.match(modePattern)?.[0]
+  if (!modeBlock) return source
+  let updatedModeBlock = modeBlock
+  updatedModeBlock = replaceHexKey(updatedModeBlock, 'accent', hex)
+  updatedModeBlock = replaceHexKey(updatedModeBlock, 'ring', hex)
+  updatedModeBlock = replaceHexKey(updatedModeBlock, 'sidebarActiveText', hex)
+  updatedModeBlock = replaceHexKey(updatedModeBlock, 'accentForeground', contrastForeground(hex))
+  if (updatedModeBlock === modeBlock) return source
+  return source.replace(presetBlock, presetBlock.replace(modeBlock, updatedModeBlock))
+}
+
 /** Personalize the documented identity and repository fields in `site.ts`. */
 export function updateSiteConfig(
   targetDir: string,
@@ -134,6 +188,7 @@ export function updateSiteConfig(
   description: string,
   brandPreset: string,
   repoUrl: string,
+  colors?: { primary?: string; light?: string; dark?: string },
 ): void {
   if (!projectName.trim() || /[\0\r\n]/.test(projectName)) {
     throw new Error('The documentation project name is invalid.')
@@ -192,6 +247,19 @@ export function updateSiteConfig(
       /\r?\n[ \t]*\{[ \t]*label:[ \t]*'(?:GitHub|Support)',[ \t]*href:[ \t]*''[ \t]*\},?/g,
       '',
     )
+  }
+
+  // `colors` follows Mintlify's own schema, where `light` is the color used
+  // in dark mode and `dark` is the color used in light mode (verified
+  // against Mintlify's docs.json schema; callers that extract Fern's normal,
+  // non-inverted light/dark accents must swap them onto this shape first).
+  const lightAccent = colors?.dark ?? colors?.primary
+  const darkAccent = colors?.light ?? colors?.primary
+  if (lightAccent && HEX_COLOR_PATTERN.test(lightAccent)) {
+    source = replacePresetAccent(source, brandPreset, 'light', lightAccent)
+  }
+  if (darkAccent && HEX_COLOR_PATTERN.test(darkAccent)) {
+    source = replacePresetAccent(source, brandPreset, 'dark', darkAccent)
   }
 
   writeFileSync(siteFile, source, 'utf8')
@@ -259,6 +327,7 @@ export function personalizeStarter(
     options.description,
     options.brandPreset,
     options.repoUrl,
+    options.colors,
   )
   updatePackageIdentity(targetDir, options.packageName)
   updateCloudflareRuntimeName(targetDir, options.packageName)

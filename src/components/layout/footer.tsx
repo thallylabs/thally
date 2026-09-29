@@ -73,6 +73,9 @@ function PoweredByThally() {
 
 /** Render configured and default footers with the same server-decided policy. */
 export function Footer({ footerConfig, siteName, siteLinks, showPoweredBy = true, githubHref }: FooterProps) {
+  const copyright = footerConfig?.copyright
+    ? footerConfig.copyright.replace(/\{year\}/g, String(new Date().getFullYear()))
+    : `© ${new Date().getFullYear()} ${siteName}. All rights reserved.`
   const socials: Record<string, string> = {
     ...footerConfig?.socials,
     ...(githubHref && !footerConfig?.socials?.github ? { github: githubHref } : {}),
@@ -122,7 +125,7 @@ export function Footer({ footerConfig, siteName, siteLinks, showPoweredBy = true
             </div>
           )}
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-muted-foreground">
-            <p>© {new Date().getFullYear()} {siteName}. All rights reserved.</p>
+            <p>{copyright}</p>
             {showPoweredBy && <PoweredByThally />}
             {hasSocials && (
               <div className="ml-auto flex items-center gap-4">
@@ -153,7 +156,7 @@ export function Footer({ footerConfig, siteName, siteLinks, showPoweredBy = true
   return (
     <footer className="border-t border-border/60 bg-muted/30">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-6 text-sm text-muted-foreground sm:px-6 lg:px-8">
-        <p>© {new Date().getFullYear()} {siteName}. All rights reserved.</p>
+        <p>{copyright}</p>
         {showPoweredBy && <PoweredByThally />}
         <div className="ml-auto flex flex-wrap items-center gap-4">
           {siteLinks.map((link) => (

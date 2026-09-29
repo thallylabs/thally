@@ -11,6 +11,7 @@ import JSON5 from 'json5'
 import { parse as parseYaml } from 'yaml'
 
 import type { MarkdownPageIdentity } from './mdx.js'
+import { isRedirectPathSafe } from './navigation.js'
 import { pageIdFromReference, resolveWithin, slugifySegment } from './path.js'
 import type {
   MigrationDocsConfig,
@@ -186,6 +187,137 @@ function sourceReferenceKey(value: string): string {
   return value.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\.(?:mdx?)$/i, '').replace(/\/$/, '')
 }
 
+interface SourceHeading {
+  index: number
+  level: number
+  id: string | null
+}
+
+function sourceHeadings(body: string): Array<SourceHeading> {
+  const headings: Array<SourceHeading> = []
+  const lines = body.split('\n')
+  let fence: string | null = null
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
+    if (marker) {
+      if (!fence) fence = marker[1]
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length
+        && /^\s*$/.test(line.slice(marker[0].length))) fence = null
+      continue
+    }
+    if (fence) continue
+    const heading = line.match(/^ {0,3}(#{2,6})\s+(.+?)\s*#*\s*$/)
+    if (!heading) continue
+    const preceding = lines[index - 1]?.match(/^<a id="([\p{L}\p{N}_.:$-]{1,120})"><\/a>$/u)
+    // The runtime extracts rendered heading text from MDX elements. Only
+    // plain text can be mapped reliably without evaluating authored MDX.
+    const plainText = !/[<>{}\[\]`*_]/.test(heading[2])
+    const generatedId = plainText
+      ? heading[2].normalize('NFC').toLowerCase()
+        .replace(/[^\p{L}\p{M}\p{N}]+/gu, '-').replace(/(^-|-$)/g, '')
+      : null
+    headings.push({ index, level: heading[1].length, id: preceding?.[1] ?? generatedId })
+  }
+  return headings
+}
+
+/**
+ * Preserve original-language fragments in translated Docusaurus pages when
+ * their heading outlines are identical. An inserted alias never replaces an
+ * explicit translated ID, and ambiguous or edited outlines are left alone.
+ */
+export function addDocusaurusTranslatedHeadingAliases(pages: Array<MigrationPage>): void {
+  const byRoute = new Map(pages.map((page) => [page.navigationId, page]))
+  for (const page of pages) {
+    const locale = page.source.match(/(?:^|[/#])i18n\/([A-Za-z]{2,8}(?:-[A-Za-z0-9]{2,8})*)\/docusaurus-plugin-content-docs\//)?.[1]
+    if (!locale) continue
+    const originalRoute = page.navigationId === locale ? 'introduction'
+      : page.navigationId.startsWith(`${locale}/`) ? page.navigationId.slice(locale.length + 1) : null
+    if (!originalRoute) continue
+    const original = byRoute.get(originalRoute)
+    if (!original) continue
+    const originalHeadings = sourceHeadings(original.body)
+    const translatedHeadings = sourceHeadings(page.body)
+    if (!originalHeadings.length || originalHeadings.length !== translatedHeadings.length
+      || originalHeadings.some((heading, index) => heading.level !== translatedHeadings[index].level)) continue
+
+    const occupied = new Set(translatedHeadings.map((heading) => heading.id).filter((id): id is string => !!id))
+    for (const match of page.body.matchAll(/<a\s+id="([^"]+)"/g)) occupied.add(match[1])
+    const originalIdCounts = new Map<string, number>()
+    for (const heading of originalHeadings) {
+      if (heading.id) originalIdCounts.set(heading.id, (originalIdCounts.get(heading.id) ?? 0) + 1)
+    }
+    const aliases = new Map<number, string>()
+    for (let index = 0; index < originalHeadings.length; index++) {
+      const id = originalHeadings[index].id
+      if (!id || occupied.has(id) || originalIdCounts.get(id) !== 1) continue
+      aliases.set(translatedHeadings[index].index, id)
+      occupied.add(id)
+    }
+    if (aliases.size) page.body = page.body.split('\n').flatMap((line, index) => {
+      const alias = aliases.get(index)
+      return alias ? [`<a id="${alias}"></a>`, line] : [line]
+    }).join('\n')
+  }
+}
+
+/** Fill Docusaurus category card lists from the sidebar tree they summarize. */
+export function expandDocusaurusDocCardLists(
+  pages: Array<MigrationPage>,
+  config: MigrationDocsConfig,
+  sourceRoutes: ReadonlySet<string>,
+): void {
+  const pageByRoute = new Map(pages.map((page) => [page.navigationId, page]))
+  const containsRoute = (items: Array<string | MigrationNavigationGroup>, route: string): boolean =>
+    items.some((item) => typeof item === 'string'
+      ? item === route
+      : containsRoute(item.pages, route))
+  const findGroup = (items: Array<string | MigrationNavigationGroup>, route: string): MigrationNavigationGroup | undefined => {
+    for (const item of items) {
+      if (typeof item === 'string' || !containsRoute(item.pages, route)) continue
+      return findGroup(item.pages, route) ?? item
+    }
+    return undefined
+  }
+  const firstRoute = (items: Array<string | MigrationNavigationGroup>): string | undefined => {
+    for (const item of items) {
+      if (typeof item === 'string') return item
+      const candidate = firstRoute(item.pages)
+      if (candidate) return candidate
+    }
+    return undefined
+  }
+  for (const page of pages) {
+    if (!sourceRoutes.has(page.navigationId)) continue
+    const group = config.tabs.map((tab) => findGroup([
+      ...(tab.pages ?? []),
+      ...(tab.groups ?? []),
+    ], page.navigationId)).find(Boolean)
+    if (!group) {
+      page.body = page.body.replace(/<div data-thally-doc-card-list=""\s*\/>/g, '')
+      continue
+    }
+    const cards = group.pages.flatMap((item) => {
+      if (typeof item === 'string') {
+        if (item === page.navigationId) return []
+        const target = pageByRoute.get(item)
+        return [{ title: target?.title ?? item.split('/').at(-1) ?? item, route: item }]
+      }
+      const slug = slugifySegment(item.group)
+      const routes = [...item.pages].flatMap((child) => typeof child === 'string' ? [child] : [])
+      const route = routes.find((candidate) => candidate === slug || candidate.endsWith(`/${slug}`))
+        ?? firstRoute(item.pages)
+      return route ? [{ title: item.group, route }] : []
+    })
+    const markup = cards.length
+      ? `<CardGroup>\n${cards.map(({ title, route }) => `  <Card title={${JSON.stringify(title)}} href={${JSON.stringify(`/${route === 'introduction' ? '' : route}`)}} />`).join('\n')}\n</CardGroup>`
+      : ''
+    page.body = page.body.replace(/<div data-thally-doc-card-list=""\s*\/>/g, markup)
+    if (markup && !page.body.includes(markup)) page.body = [page.body.trim(), markup].filter(Boolean).join('\n\n')
+  }
+}
+
 /**
  * Rewrite Docusaurus file/doc-id links after every final slug is known. This is
  * deliberately line based so examples inside fenced code remain byte-for-byte
@@ -195,6 +327,12 @@ export function rewriteDocusaurusLinks(
   body: string,
   current: DocusaurusPageDescriptor,
   descriptors: Array<DocusaurusPageDescriptor>,
+  options: {
+    sourceOrigin?: string
+    onExternalLink?: (target: string) => void
+    /** Copy destinations, without a leading slash, after asset budgeting. */
+    assetPaths?: ReadonlySet<string>
+  } = {},
 ): string {
   const routes = new Map<string, string>()
   for (const descriptor of descriptors) {
@@ -207,35 +345,86 @@ export function rewriteDocusaurusLinks(
   }
   const currentDirectory = posix.dirname(sourceReferenceKey(current.sourcePath))
 
+  function copiedAssetTarget(target: string): string | null {
+    if (!target.startsWith('/') || target.startsWith('//') || target.includes('\\')) return null
+    const suffixIndex = target.search(/[?#]/)
+    const path = suffixIndex >= 0 ? target.slice(0, suffixIndex) : target
+    const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
+    if (path.startsWith('/docs/') && options.assetPaths?.has(path.slice('/docs/'.length))) {
+      return `/${path.slice('/docs/'.length)}${suffix}`
+    }
+    return options.assetPaths?.has(path.slice(1)) ? target : null
+  }
+
   function rewriteTarget(target: string): string {
     if (!target || target.startsWith('#') || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(target)) return target
     const suffixIndex = target.search(/[?#]/)
     const path = suffixIndex >= 0 ? target.slice(0, suffixIndex) : target
     const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
+    // Docusaurus sites often publish `static/img/foo` as `/img/foo` while
+    // authors refer to it as `/docs/img/foo`. Strip the docs mount only after
+    // the copy pass proves the resulting asset exists.
+    const copiedAsset = copiedAssetTarget(target)
+    if (copiedAsset) return copiedAsset
     const candidates = path.startsWith('/')
-      ? [sourceReferenceKey(path), sourceReferenceKey(path).replace(/^docs\//, '')]
+      ? [
+          sourceReferenceKey(path),
+          sourceReferenceKey(path).replace(/^docs\//, ''),
+          sourceReferenceKey(path).replace(/^docs\/(?:next|current|latest)\//, ''),
+        ]
       : [
           sourceReferenceKey(posix.normalize(posix.join(currentDirectory, path))),
           sourceReferenceKey(path),
         ]
     const route = candidates.map((candidate) => routes.get(candidate)).find(Boolean)
-    if (!route) return target
+    if (!route) {
+      if (path.startsWith('/') && path !== '/' && options.sourceOrigin) {
+        options.onExternalLink?.(target)
+        return new URL(target, options.sourceOrigin).toString()
+      }
+      return target
+    }
     return `${route === 'introduction' ? '/' : `/${route}`}${suffix}`
   }
 
   let codeFence: string | null = null
   return body.split('\n').map((line) => {
-    const fence = line.match(/^\s*(`{3,}|~{3,})/)
+    const fence = line.match(/^\s{0,3}(`{3,}|~{3,})/)
     if (fence) {
-      if (!codeFence) codeFence = fence[1][0]
-      else if (fence[1][0] === codeFence) codeFence = null
+      if (!codeFence) codeFence = fence[1]
+      else if (fence[1][0] === codeFence[0] && fence[1].length >= codeFence.length
+        && /^\s*$/.test(line.slice(fence[0].length))) codeFence = null
       return line
     }
     if (codeFence) return line
     return line
       .replace(/(\]\()([^\s)]+)(?=[\s)]|$)/g, (_match, prefix: string, target: string) => `${prefix}${rewriteTarget(target)}`)
       .replace(/(\bhref=")([^"]+)(")/g, (_match, prefix: string, target: string, suffix: string) => `${prefix}${rewriteTarget(target)}${suffix}`)
+      .replace(/(\bsrc=")([^"]+)(")/g, (_match, prefix: string, target: string, suffix: string) => `${prefix}${copiedAssetTarget(target) ?? target}${suffix}`)
+      // Markdown reference links carry their destination in a later
+      // definition line. Docusaurus resolves `[label]` through that line, so
+      // rewriting only inline links leaves an apparently working link in the
+      // content whose click still goes to `/page.md` and 404s on Thally.
+      .replace(/^(\s{0,3}\[[^\]]+\]:\s*)(<[^>]+>|\S+)/, (_match, prefix: string, destination: string) => {
+        const bracketed = destination.startsWith('<') && destination.endsWith('>')
+        const target = bracketed ? destination.slice(1, -1) : destination
+        const rewritten = rewriteTarget(target)
+        return `${prefix}${bracketed ? `<${rewritten}>` : rewritten}`
+      })
   }).join('\n')
+}
+
+/** Read a static Docusaurus site origin for links outside imported docs. */
+export function readDocusaurusSiteOrigin(repositoryRoot: string): string | undefined {
+  const configPath = findDocusaurusConfigPath(repositoryRoot)
+  if (!configPath) return undefined
+  const address = readBoundedText(configPath).match(/\burl['"]?\s*:\s*(['"])(https?:\/\/[^'"]+)\1/)?.[2]
+  if (!address) return undefined
+  try {
+    return new URL(address).origin
+  } catch {
+    return undefined
+  }
 }
 
 function readBoundedText(path: string): string {
@@ -409,6 +598,17 @@ function configuredSidebarPath(repositoryRoot: string): string | null {
     const path = resolveWithin(repositoryRoot, filename)
     if (!existsSync(path)) continue
     const source = readBoundedText(path)
+    // A site can register other docs plugins before the classic preset. Their
+    // sidebarPath belongs to a different content root (Docusaurus registers
+    // its community plugin before the main docs preset, for example).
+    for (const docs of source.matchAll(/\bdocs\s*:\s*/g)) {
+      const object = matchingObjectLiteral(source, (docs.index ?? 0) + docs[0].length)
+      const candidate = object && staticStringField(object, 'sidebarPath')?.replace(/^\.\//, '')
+      if (candidate) {
+        const resolved = resolveWithin(repositoryRoot, candidate)
+        if (existsSync(resolved) && lstatSync(resolved).isFile()) return candidate
+      }
+    }
     const match = source.match(/\bsidebarPath\s*:\s*(?:require\.resolve\(\s*)?(['"])([^'"]+)\1/)
     if (!match) continue
     const candidate = match[2].replace(/^\.\//, '')
@@ -419,11 +619,16 @@ function configuredSidebarPath(repositoryRoot: string): string | null {
 }
 
 /** Read the configured/default sidebar without running the source module. */
-export function readDocusaurusSidebars(repositoryRoot: string): DocusaurusSidebars | null {
-  const configured = configuredSidebarPath(repositoryRoot)
-  const sourcePath = [configured, ...SIDEBAR_FILENAMES]
+export function readDocusaurusSidebars(repositoryRoot: string, versionedSidebarPath?: string): DocusaurusSidebars | null {
+  // Archived versions carry their own sidebar file. Resolve it within the
+  // project and parse it as data; never load source-controlled code.
+  const configured = versionedSidebarPath ?? configuredSidebarPath(repositoryRoot)
+  const sourcePath = [configured, ...(versionedSidebarPath ? [] : SIDEBAR_FILENAMES)]
     .filter((value): value is string => Boolean(value))
-    .find((candidate) => existsSync(resolveWithin(repositoryRoot, candidate)))
+    .find((candidate) => {
+      const path = resolveWithin(repositoryRoot, candidate)
+      return existsSync(path) && lstatSync(path).isFile()
+    })
   if (!sourcePath) return null
   const absolutePath = resolveWithin(repositoryRoot, sourcePath)
   const source = readBoundedText(absolutePath)
@@ -432,6 +637,101 @@ export function readDocusaurusSidebars(repositoryRoot: string): DocusaurusSideba
     : parseStaticSidebarModule(source)
   if (!parsed) throw new Error('Docusaurus sidebar config must export an object.')
   return { config: parsed, sourcePath }
+}
+
+function namedExportObjectLiteralText(source: string, name: string): string | null {
+  const normalizedSource = replaceExternalFbContent(source)
+  const match = new RegExp(`\\bexport\\s+(?:const|let|var)\\s+${name}\\b(?:\\s*:\\s*[^=;]+)?\\s*=\\s*`).exec(normalizedSource)
+  if (!match) return null
+  return matchingObjectLiteral(normalizedSource, match.index + match[0].length)
+}
+
+/**
+ * Pluck just the `redirects: [...]` array out of a plugin options object's
+ * literal text, rather than `JSON5.parse`-ing the whole object — the Oasis
+ * shape (a real, reproduced example) has a sibling `createRedirects(...) {
+ * ... }` method in the same object literal, which is not valid JSON5 and
+ * would otherwise fail the whole object and lose the `redirects` array too.
+ */
+function redirectEntriesFromObjectLiteralText(objectLiteral: string): Array<{ source: string; destination: string }> {
+  const match = /\bredirects\s*:\s*/.exec(objectLiteral)
+  if (!match) return []
+  const arrayStart = objectLiteral.indexOf('[', match.index + match[0].length)
+  if (arrayStart < 0) return []
+  const arrayLiteral = matchingArrayLiteral(objectLiteral, arrayStart)
+  if (!arrayLiteral) return []
+  let parsed: unknown
+  try {
+    parsed = JSON5.parse(arrayLiteral)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  const entries: Array<{ source: string; destination: string }> = []
+  for (const raw of parsed) {
+    const entry = objectValue(raw)
+    if (!entry || typeof entry.to !== 'string') continue
+    const froms = Array.isArray(entry.from) ? entry.from : [entry.from]
+    for (const from of froms) {
+      if (typeof from !== 'string') continue
+      if (!isRedirectPathSafe(from, entry.to)) continue
+      entries.push({ source: from, destination: entry.to })
+    }
+  }
+  return entries
+}
+
+/**
+ * Parse a `@docusaurus/plugin-client-redirects` `Options` object: either an
+ * object literal written inline in the plugin's config entry, or (Oasis's
+ * shape) a named export in a separate module the config imports, e.g.
+ * `redirects.ts` exporting `redirectsOptions`. Only a literal `redirects:
+ * [{ from, to }]` array is understood — `from` may be a single path or an
+ * array of paths, both valid per the plugin's own docs. Its `createRedirects`
+ * function computes redirects dynamically and can't be evaluated statically,
+ * so its presence is warned about rather than silently ignored.
+ */
+export function readDocusaurusRedirects(
+  repositoryRoot: string,
+  warnings: Array<MigrationWarning>,
+): Array<{ source: string; destination: string }> {
+  const configPath = findDocusaurusConfigPath(repositoryRoot)
+  if (!configPath) return []
+  const configSource = readBoundedText(configPath)
+  const pluginMatch = /['"]@docusaurus\/plugin-client-redirects['"]\s*,\s*/.exec(configSource)
+  if (!pluginMatch) return []
+  const afterPlugin = configSource.slice(pluginMatch.index + pluginMatch[0].length)
+  const warnAboutCreateRedirects = (source: string): void => {
+    if (!/\bcreateRedirects\s*[:(]/.test(source)) return
+    warnings.push({
+      code: 'unsupported-config',
+      message: "The redirects plugin's createRedirects function computes redirects dynamically and cannot be evaluated during migration; add its redirects manually.",
+    })
+  }
+  warnAboutCreateRedirects(configSource)
+  // Case 1: the plugin's options object is written inline.
+  const inlineLiteral = matchingObjectLiteral(configSource, pluginMatch.index + pluginMatch[0].length)
+  if (inlineLiteral) return redirectEntriesFromObjectLiteralText(inlineLiteral)
+  // Case 2: the options are an identifier imported from another module.
+  const identifier = afterPlugin.match(/^([A-Za-z_$][\w$]*)/)?.[1]
+  if (!identifier) return []
+  const importMatch = new RegExp(`import\\s*\\{[^}]*\\b${identifier}\\b[^}]*\\}\\s*from\\s*(['"])([^'"]+)\\1`).exec(configSource)
+    ?? new RegExp(`import\\s+${identifier}\\s+from\\s*(['"])([^'"]+)\\1`).exec(configSource)
+  const modulePath = importMatch?.[2]
+  if (!modulePath || !modulePath.startsWith('.')) return []
+  let resolvedPath: string | undefined
+  try {
+    resolvedPath = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs']
+      .map((extension) => resolveWithin(repositoryRoot, `${modulePath.replace(/^\.\//, '')}${extension}`))
+      .find((candidate) => existsSync(candidate) && lstatSync(candidate).isFile())
+  } catch {
+    return []
+  }
+  if (!resolvedPath) return []
+  const moduleSource = readBoundedText(resolvedPath)
+  warnAboutCreateRedirects(moduleSource)
+  const literal = namedExportObjectLiteralText(moduleSource, identifier)
+  return literal ? redirectEntriesFromObjectLiteralText(literal) : []
 }
 
 function readCategoryMetadata(contentRoot: string, directory: string): CategoryMetadata {
@@ -518,6 +818,223 @@ function generatedIndexPage(
   return navigationId
 }
 
+const DOCUSAURUS_HEX_COLOR = /^#[0-9a-fA-F]{3,8}$/
+
+function findDocusaurusConfigPath(repositoryRoot: string): string | null {
+  return ['docusaurus.config.js', 'docusaurus.config.ts', 'docusaurus.config.mjs']
+    .map((filename) => resolveWithin(repositoryRoot, filename))
+    .find((candidate) => existsSync(candidate) && lstatSync(candidate).isFile()) ?? null
+}
+
+/**
+ * Extract a static `--ifm-color-primary` accent from the classic theme's
+ * `customCss` file (Infima's own theming convention: a `:root` block for
+ * light mode, an `html[data-theme='dark']` block for dark mode). Its
+ * `light`/`dark` blocks are normal, like Fern's (unlike Mintlify's inverted
+ * schema `site.colors` otherwise follows), so they're swapped the same way
+ * `fernThemeColors` does to give downstream consumers one consistent
+ * contract.
+ */
+export function readDocusaurusThemeColor(repositoryRoot: string): { light?: string; dark?: string } | undefined {
+  const configPath = findDocusaurusConfigPath(repositoryRoot)
+  if (!configPath) return undefined
+  const configSource = readBoundedText(configPath)
+  const cssRelativePath = configSource.match(/\bcustomCss\s*:\s*(?:\[\s*)?(?:require\.resolve\(\s*)?(['"])([^'"]+)\1/)?.[2]
+  if (!cssRelativePath) return undefined
+  let cssPath: string
+  try {
+    cssPath = resolveWithin(repositoryRoot, cssRelativePath.replace(/^\.\//, ''))
+  } catch {
+    return undefined
+  }
+  if (!existsSync(cssPath) || !lstatSync(cssPath).isFile()) return undefined
+  const css = readBoundedText(cssPath)
+  const pick = (block: string | undefined): string | undefined => {
+    const value = block?.match(/--ifm-color-primary\s*:\s*([^;]+);/)?.[1]?.trim()
+    return value && DOCUSAURUS_HEX_COLOR.test(value) ? value : undefined
+  }
+  const lightMode = pick(css.match(/:root\s*\{([^}]*)\}/)?.[1])
+  const darkMode = pick(css.match(/\[data-theme=(['"])dark\1\]\s*\{([^}]*)\}/)?.[2])
+  const colors: { light?: string; dark?: string } = {}
+  if (darkMode) colors.light = darkMode
+  if (lightMode) colors.dark = lightMode
+  return Object.keys(colors).length > 0 ? colors : undefined
+}
+
+export interface DocusaurusSiteSettings {
+  name?: string
+  description?: string
+  navbarTitle?: string
+  defaultColorMode?: 'light' | 'dark'
+  logo?: { light: string; dark?: string; showTitle?: boolean }
+  favicon?: string
+  /** Docusaurus serves the classic docs plugin below /docs unless configured otherwise. */
+  docsRouteBasePath: string
+  navbarLinks: Array<{ label: string; href?: string; docId?: string; sidebarId?: string; docsPluginId?: string }>
+  footerLinks: NonNullable<MigrationDocsConfig['footer']>['links']
+  copyright?: string
+}
+
+function propertyStart(source: string, name: string): number {
+  // Only property positions count. A bare word in a comment or a value must
+  // never become executable configuration during repository migration.
+  const pattern = new RegExp(`(?:^|[,{\\n])\\s*["']?${name}["']?\\s*:\\s*`, 'm')
+  const match = pattern.exec(source)
+  return match ? match.index + match[0].length : -1
+}
+
+function staticStringBindings(source: string): Map<string, string> {
+  const bindings = new Map<string, string>()
+  for (const match of source.matchAll(/\bconst\s+([A-Z][A-Z0-9_]*)\s*=\s*((?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'))/g)) {
+    try {
+      const value = JSON5.parse(match[2]) as unknown
+      if (typeof value === 'string') bindings.set(match[1], value)
+    } catch {
+      // Executable or malformed declarations cannot become imported links.
+    }
+  }
+  return bindings
+}
+
+function staticArrayField(source: string, name: string): string | null {
+  const start = propertyStart(source, name)
+  return start < 0 ? null : matchingArrayLiteral(source, start)
+}
+
+function staticObjectEntries(array: string | null): Array<string> {
+  if (!array) return []
+  const entries: Array<string> = []
+  let afterDelimiter = 1
+  let quote = ''
+  let lineComment = false
+  let blockComment = false
+  for (let index = 1; index < array.length - 1; index++) {
+    const char = array[index]
+    const next = array[index + 1]
+    if (lineComment) {
+      if (char === '\n') lineComment = false
+      continue
+    }
+    if (blockComment) {
+      if (char === '*' && next === '/') { blockComment = false; index++ }
+      continue
+    }
+    if (quote) {
+      if (char === '\\') { index++; continue }
+      if (char === quote) quote = ''
+      continue
+    }
+    if (char === '/' && next === '/') { lineComment = true; index++; continue }
+    if (char === '/' && next === '*') { blockComment = true; index++; continue }
+    if (char === '"' || char === "'" || char === '`') { quote = char; continue }
+    if (char === ',') { afterDelimiter = index + 1; continue }
+    if (char !== '{') continue
+    const literal = matchingObjectLiteral(array, index)
+    if (!literal) continue
+    const lead = array.slice(afterDelimiter, index)
+      .replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '').trim()
+    // `isDev && { ... }` is a conditional entry; never assume it appears in
+    // production just because its object literal can be read statically.
+    if (!lead) entries.push(literal)
+    index += literal.length - 1
+  }
+  return entries
+}
+
+function staticStringField(source: string, name: string, bindings?: Map<string, string>): string | undefined {
+  const start = propertyStart(source, name)
+  if (start < 0) return undefined
+  const quoted = source.slice(start).match(/^("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/)
+  if (!quoted) {
+    const binding = source.slice(start).match(/^([A-Z][A-Z0-9_]*)\b/)?.[1]
+    return binding ? bindings?.get(binding) : undefined
+  }
+  try {
+    const parsed = JSON5.parse(quoted[1]) as unknown
+    return typeof parsed === 'string' ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Project Docusaurus' static site identity and footer without loading config code. */
+export function readDocusaurusSiteSettings(repositoryRoot: string): DocusaurusSiteSettings {
+  const empty: DocusaurusSiteSettings = { docsRouteBasePath: 'docs', defaultColorMode: 'light', navbarLinks: [], footerLinks: [] }
+  const configPath = findDocusaurusConfigPath(repositoryRoot)
+  if (!configPath) return empty
+  const source = readBoundedText(configPath)
+  const bindings = staticStringBindings(source)
+  const presets = staticArrayField(source, 'presets')
+  const classicDocs = presets && [...presets.matchAll(/["']?docs["']?\s*:\s*/g)]
+    .map((match) => matchingObjectLiteral(presets, (match.index ?? 0) + match[0].length))
+    .find((object): object is string => Boolean(object))
+  const docsRouteBasePath = classicDocs && staticStringField(classicDocs, 'routeBasePath') || 'docs'
+  const themeStart = propertyStart(source, 'themeConfig')
+  const theme = themeStart < 0 ? null : matchingObjectLiteral(source, themeStart)
+  const colorModeStart = theme ? propertyStart(theme, 'colorMode') : -1
+  const colorMode = colorModeStart < 0 ? null : matchingObjectLiteral(theme!, colorModeStart)
+  const configuredColorMode = colorMode ? staticStringField(colorMode, 'defaultMode') : undefined
+  const defaultColorMode = configuredColorMode === 'dark' ? 'dark' : 'light'
+  const navbarStart = theme ? propertyStart(theme, 'navbar') : -1
+  const navbar = navbarStart < 0 ? null : matchingObjectLiteral(theme!, navbarStart)
+  const logoStart = navbar ? propertyStart(navbar, 'logo') : -1
+  const logo = logoStart < 0 ? null : matchingObjectLiteral(navbar!, logoStart)
+  const footerStart = theme ? propertyStart(theme, 'footer') : -1
+  const footer = footerStart < 0 ? null : matchingObjectLiteral(theme!, footerStart)
+  const navbarLinks = navbar ? staticObjectEntries(staticArrayField(navbar, 'items')).flatMap((item) => {
+    // A dropdown owns nested links but no single destination. Taking its
+    // first child as the parent's href creates duplicate, misleading links.
+    if (propertyStart(item, 'items') >= 0 || propertyStart(item, 'dropdownItemsAfter') >= 0) return []
+    const docsPluginId = staticStringField(item, 'docsPluginId', bindings)
+    const href = staticStringField(item, 'to', bindings)
+      ?? staticStringField(item, 'href', bindings)
+    const docId = staticStringField(item, 'docId', bindings)
+    const sidebarId = staticStringField(item, 'sidebarId', bindings)
+    const label = staticStringField(item, 'label', bindings) ?? staticStringField(item, 'aria-label', bindings)
+    return label && (href || docId || sidebarId || docsPluginId)
+      ? [{ label, ...(href ? { href } : {}), ...(docId ? { docId } : {}),
+        ...(sidebarId ? { sidebarId } : {}), ...(docsPluginId ? { docsPluginId } : {}) }]
+      : []
+  }) : []
+  const footerLinks = footer ? staticObjectEntries(staticArrayField(footer, 'links')).flatMap((column) => {
+    const heading = staticStringField(column, 'title', bindings)
+    if (!heading) return []
+    const items = staticObjectEntries(staticArrayField(column, 'items')).flatMap((item) => {
+      const href = staticStringField(item, 'to', bindings) ?? staticStringField(item, 'href', bindings)
+      const label = staticStringField(item, 'label', bindings)
+      return label && href
+        ? [{ label, href }]
+        : []
+    })
+    return items.length > 0 ? [{ heading, items }] : []
+  }) : []
+  // A build-time year expression is the one dynamic Docusaurus copyright
+  // pattern that can be represented without evaluating source JavaScript.
+  const copyright = footer && propertyStart(footer, 'copyright') >= 0
+    ? staticStringField(footer, 'copyright')
+      ?? footer.slice(propertyStart(footer, 'copyright')).match(/^`([^`]+)`/)?.[1]
+        ?.replace(/\$\{new Date\(\)\.getFullYear\(\)\}/g, '{year}')
+    : undefined
+  return {
+    name: staticStringField(source, 'title'),
+    description: staticStringField(source, 'tagline'),
+    ...(navbar && staticStringField(navbar, 'title') ? { navbarTitle: staticStringField(navbar, 'title') } : {}),
+    defaultColorMode,
+    docsRouteBasePath,
+    ...(logo && staticStringField(logo, 'src') ? {
+      logo: {
+        light: staticStringField(logo, 'src')!,
+        ...(staticStringField(logo, 'srcDark') ? { dark: staticStringField(logo, 'srcDark') } : {}),
+        showTitle: Boolean(navbar && staticStringField(navbar, 'title')),
+      },
+    } : {}),
+    ...(staticStringField(source, 'favicon') ? { favicon: staticStringField(source, 'favicon') } : {}),
+    navbarLinks,
+    footerLinks,
+    ...(copyright ? { copyright } : {}),
+  }
+}
+
 function autogeneratedItems(dirName: string, context: ProjectionContext): Array<string | MigrationNavigationGroup> {
   const normalizedDir = dirName === '.' ? '' : normalizeDocId(dirName)
   const inDirectory = context.descriptors.filter((descriptor) => {
@@ -534,30 +1051,53 @@ function autogeneratedItems(dirName: string, context: ProjectionContext): Array<
     else childDirectories.add(segments[0])
   }
 
-  const items: Array<string | MigrationNavigationGroup> = directPages
-    .sort(descriptorSort)
-    .map((descriptor) => {
-      context.referencedNavigationIds.add(descriptor.navigationId)
-      return descriptor.navigationId
-    })
+  const pages = directPages.map((descriptor) => ({
+    // An index document is the category landing page in Docusaurus. Thally
+    // renders it as a child link, so put it before the category's other docs.
+    position: descriptor.sidebarPosition ?? (/(?:^|\/)(?:index|readme)\.mdx?$/i.test(descriptor.sourcePath)
+      ? -1 : Number.MAX_SAFE_INTEGER),
+    sortKey: descriptor.sourcePath,
+    item: descriptor.navigationId as string | MigrationNavigationGroup,
+  }))
   const groups = [...childDirectories].map((segment) => {
     const directory = normalizedDir ? posix.join(normalizedDir, segment) : segment
     const metadata = readCategoryMetadata(context.contentRoot, directory)
     const pages = autogeneratedItems(directory, context)
+    // A folder containing only its index document is a direct sidebar doc in
+    // Docusaurus. Inventing a category here duplicates the link and moves it
+    // after ordered siblings when the folder has no `_category_` metadata.
+    if (pages.length === 1 && typeof pages[0] === 'string'
+      && !metadata.label && metadata.position === undefined && !metadata.link) {
+      const onlyPage = context.descriptors.find((descriptor) => descriptor.navigationId === pages[0])
+      if (onlyPage && /(?:^|\/)(?:index|readme)\.mdx?$/i.test(onlyPage.sourcePath)) {
+        return {
+          position: onlyPage.sidebarPosition ?? Number.MAX_SAFE_INTEGER,
+          sortKey: segment,
+          item: pages[0],
+        }
+      }
+    }
     const landing = generatedIndexPage(metadata.label ?? titleCase(segment), metadata.link, context)
     if (landing && !pages.includes(landing)) pages.unshift(landing)
     return {
       position: metadata.position ?? Number.MAX_SAFE_INTEGER,
-      segment,
-      group: {
+      sortKey: segment,
+      item: {
         group: metadata.label ?? titleCase(segment),
         pages,
       } satisfies MigrationNavigationGroup,
     }
-  }).sort((left, right) => left.position - right.position
-    || left.segment.localeCompare(right.segment, undefined, { numeric: true }))
-  items.push(...groups.map((entry) => entry.group))
-  return items
+  })
+  // Docusaurus sorts direct docs and child categories in one list. Sorting
+  // them separately moves every category below every doc regardless of the
+  // authored sidebar_position / _category_.json position.
+  return [...pages, ...groups]
+    .sort((left, right) => left.position - right.position
+      || left.sortKey.localeCompare(right.sortKey, undefined, { numeric: true }))
+    .map(({ item }) => {
+      if (typeof item === 'string') context.referencedNavigationIds.add(item)
+      return item
+    })
 }
 
 function convertItems(value: unknown, context: ProjectionContext): Array<string | MigrationNavigationGroup> {
@@ -619,13 +1159,13 @@ export function projectDocusaurusNavigation(input: {
   ]]]
   const tabs = sidebarEntries.flatMap(([sidebarId, value]) => {
     const converted = convertItems(value, context)
-    const loosePages = converted.filter((entry): entry is string => typeof entry === 'string')
-    const groups = converted.filter((entry): entry is MigrationNavigationGroup => typeof entry !== 'string')
-    if (loosePages.length > 0) groups.unshift({ group: 'Overview', pages: loosePages })
-    if (groups.length === 0) return []
+    if (converted.length === 0) return []
     return [{
       tab: sidebarEntries.length === 1 ? 'Documentation' : titleCase(sidebarId),
-      groups,
+      // Docusaurus categories are disclosures, including at the sidebar
+      // root. Keeping them as Thally root nodes preserves their collapsed
+      // state and the authored interleaving of documents and categories.
+      pages: converted,
     }]
   })
 
@@ -634,8 +1174,8 @@ export function projectDocusaurusNavigation(input: {
     .sort(descriptorSort)
     .map((page) => page.navigationId)
   if (unreferenced.length > 0) {
-    if (tabs.length === 0) tabs.push({ tab: 'Documentation', groups: [] })
-    tabs[0].groups?.push({ group: 'Additional', pages: unreferenced })
+    if (tabs.length === 0) tabs.push({ tab: 'Documentation', pages: [] })
+    tabs[0].pages?.push({ group: 'Additional', pages: unreferenced })
   }
   return {
     docsConfig: { tabs },

@@ -47,4 +47,16 @@ describe('localized reader navigation', () => {
     expect(result.breadcrumb.map((item) => item.href)).toEqual(['/fr?ref=guide#start', 'https://example.com'])
     expect(mocks.hasDocTranslation).toHaveBeenCalledExactlyOnceWith([], 'fr')
   })
+
+  it('accepts locale-prefixed navigation without adding the locale twice', async () => {
+    const result = await localizeDocNavigation({
+      ...navigation,
+      prev: { title: 'Anterior', href: '/es/guides/slippage' },
+      next: { title: 'Siguiente', href: '/es/guides/routing' },
+      breadcrumb: [{ label: 'Documentación', href: '/es/guides/fees' }],
+    }, 'es', 'en')
+    expect(result.prev?.href).toBe('/es/guides/slippage')
+    expect(result.next?.href).toBe('/guides/routing')
+    expect(result.breadcrumb[0].href).toBe('/es/guides/fees')
+  })
 })

@@ -71,6 +71,7 @@ export const FRAMEWORK_SYNC_ELIGIBLE = Object.freeze([
 const SOURCE_ONLY_PATHS = new Set([
   "src/lib/__tests__/frontmatter.test.ts",
   "src/lib/__tests__/frontmatter-parity.test.ts",
+  "src/components/mdx/client-registry.test.ts",
 ]);
 
 function invariant(condition, message) {

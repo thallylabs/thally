@@ -881,7 +881,7 @@ function extractEmbeddedOpenApi(content: string): {
   }
 }
 
-function markdownPage(document: MigrationFetchResponse, id: string): {
+function markdownPage(document: MigrationFetchResponse, id: string, platform: MigrationPlatform): {
   page: MigrationPage | null
   openApiFragment?: EmbeddedOpenApiFragment
 } {
@@ -917,7 +917,10 @@ function markdownPage(document: MigrationFetchResponse, id: string): {
     embeddedOpenApi.content,
   ].join('\n')
   return {
-    page: parseMarkdownPage({ id, raw, source: document.finalUrl.toString() }),
+    // The crawler knows the source platform (detected or caller-provided)
+    // before it ever parses a page; an omitted platform would otherwise
+    // apply every platform's textual renames to content of unknown origin.
+    page: parseMarkdownPage({ id, raw, source: document.finalUrl.toString(), platform }),
     openApiFragment: embeddedOpenApi.fragment,
   }
 }
@@ -1747,7 +1750,7 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
         ? storageIdForDocusaurusRoute(navigationId)
         : navigationId
       if (/(?:markdown|text\/plain)/i.test(document.contentType) || /\.mdx?$/i.test(document.finalUrl.pathname)) {
-        const markdown = markdownPage(document, id)
+        const markdown = markdownPage(document, id, platform)
         if (markdown.page) markdown.page.navigationId = navigationId
         return {
           candidate,

@@ -10,6 +10,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import {
   cloneGitHubRepository,
+  hydrateRemoteApiSpecs,
   migrateRepository,
   migrateUrl,
   parseGitHubRepositoryUrl,
@@ -104,13 +105,16 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
   const cloneDir = join(temporaryRoot, 'repository')
   console.log(`  📦 Cloning ${source.owner}/${source.repo}...`)
   try {
-    await cloneGitHubRepository(source, cloneDir)
-    return migrateRepository({
+    const cloneWarnings: Array<MigrationWarning> = []
+    await cloneGitHubRepository(source, cloneDir, cloneWarnings)
+    const bundle = migrateRepository({
       repositoryDir: cloneDir,
       sourceUrl: options.sourceUrl,
       docsDir: options.docsDir ?? (source.docsDir || undefined),
       platform: options.platform,
     })
+    const hydrated = await hydrateRemoteApiSpecs(bundle, options.fetcher)
+    return cloneWarnings.length > 0 ? { ...hydrated, warnings: [...cloneWarnings, ...hydrated.warnings] } : hydrated
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true })
   }
@@ -132,6 +136,7 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
       // live at new paths, so source URLs cannot power edit/issue actions.
       repoUrl: '',
       doInstall: false,
+      colors: bundle.site?.colors,
     })
     resetFreshMigrationContent(projectDir)
   } else if (!existsSync(projectDir)) {
@@ -143,6 +148,11 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   if (!options.into) {
     const starterConfig = readExistingConfig(projectDir)
     if (starterConfig?.markdown) bundle.docsConfig.markdown = starterConfig.markdown
+    // The starter's "Get started" link points at its sample quickstart. A
+    // migrated source without its own primary action must not inherit it.
+    if (!bundle.docsConfig.navbar?.primary) {
+      bundle.docsConfig.navbar = { ...bundle.docsConfig.navbar, primary: null }
+    }
     // An absent locale block invokes the runtime's legacy bilingual fallback.
     // A single-language source must not acquire a phantom translation menu.
     bundle.docsConfig.i18n ??= { defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }] }

@@ -88,7 +88,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const hasTranslation = !route.isLocaleRoute || !doc.isFallback
   const canonicalHref = hasTranslation ? requestedHref : primaryHref
   const availableI18n = await getContentI18nConfig(route.docSlug, buildI18n)
-  const nav = await loadNavContext(doc.id)
+  const nav = await loadNavContext(doc.id, route.isLocaleRoute ? route.locale : undefined)
   const ogImageUrl = buildOgImageUrl({
     title: doc.title,
     description: doc.description,
@@ -153,7 +153,7 @@ export default async function DocsPage({ params }: PageProps) {
       ? localizedPath(primaryHref, route.locale, i18n.defaultLocale)
       : primaryHref
   const nav = await localizeDocNavigation(
-    await loadNavContext(doc.id),
+    await loadNavContext(doc.id, route.isLocaleRoute ? route.locale : undefined),
     route.isLocaleRoute ? route.locale : i18n.defaultLocale,
     i18n.defaultLocale,
   )
