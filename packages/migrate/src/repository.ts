@@ -978,6 +978,21 @@ function classifyApiSpec(path: string): 'openapi' | 'asyncapi' | 'unknown' {
   return /asyncapi/i.test(topLevel) ? 'asyncapi' : 'openapi'
 }
 
+/**
+ * Migrated specs live outside `public/`: anything under `public/` is served
+ * verbatim by the host, which would publish `x-excluded` internal operations.
+ * The renderer loads a relative `api.source` from the project root instead.
+ */
+const SPEC_DIRECTORY = 'openapi'
+
+function specAssetPath(filename: string): string {
+  return `${SPEC_DIRECTORY}/${filename}`
+}
+
+function specAsset(filename: string, content: Uint8Array): MigrationAsset {
+  return { path: specAssetPath(filename), content, projectRelative: true }
+}
+
 /** An OpenAPI/AsyncAPI spec resolved and ready to copy into `public/`, optionally bound to one tab. */
 interface ResolvedApiSpec {
   filename: string
@@ -1890,12 +1905,12 @@ function injectOpenApiSpecs(config: MigrationDocsConfig, specs: Array<{ filename
       ? tabs.find((tab) => tab.tab === spec.tabLabel)
       : tabs.find((tab) => tab.tab.toLowerCase().includes('api'))
     if (apiTab) apiTab.api = {
-      source: `/${spec.filename}`,
+      source: specAssetPath(spec.filename),
       // An API-only tab needs generated endpoint navigation; an authored
       // page tab keeps its own groups alongside the bound spec.
       ...((apiTab.groups?.length || apiTab.pages?.length) ? { navigation: false } : {}),
     }
-    else tabs = [...tabs, { tab: spec.tabLabel ?? 'API Reference', api: { source: `/${spec.filename}` } }]
+    else tabs = [...tabs, { tab: spec.tabLabel ?? 'API Reference', api: { source: specAssetPath(spec.filename) } }]
   }
   return { ...config, tabs }
 }
@@ -2568,8 +2583,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           filename = `${prefix}${filename}`
         }
         specFilenameSources.set(filename, spec.absolutePath)
-        if (!assets.some((asset) => asset.path === filename)) {
-          assets.push({ path: filename, content: readFileSync(spec.absolutePath) })
+        if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
+          assets.push(specAsset(filename, readFileSync(spec.absolutePath)))
         }
         resolvedSpecs.push({ filename, tabLabel: section.tabLabel })
         continue
@@ -2609,8 +2624,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   } else if (platform === 'mintlify') {
     const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings)
     for (const spec of resolvedSpecs) {
-      if (!assets.some((asset) => asset.path === spec.filename)) {
-        assets.push({ path: spec.filename, content: spec.content })
+      if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) {
+        assets.push(specAsset(spec.filename, spec.content))
       }
     }
     if (resolvedSpecs.length > 0) {
@@ -2621,8 +2636,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const fallback = findOpenApi(files)
       if (fallback) {
         const filename = basename(fallback.relativePath)
-        if (!assets.some((asset) => asset.path === filename)) {
-          assets.push({ path: filename, content: readFileSync(fallback.absolutePath) })
+        if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
+          assets.push(specAsset(filename, readFileSync(fallback.absolutePath)))
         }
         docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
       }

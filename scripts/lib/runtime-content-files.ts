@@ -18,6 +18,9 @@ import {
   writeFileSync,
 } from 'node:fs'
 import path from 'node:path'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import { sanitizeSpecForPublication } from '../../src/lib/openapi/sanitize'
+import type { OpenAPIDocument, OperationOverride } from '../../src/lib/openapi/types'
 
 export interface RuntimeSourceEntry {
   content: string
@@ -62,24 +65,60 @@ function isContainedProjectPath(projectRoot: string, filePath: string): boolean 
   )
 }
 
-function configuredOpenApiSources(projectRoot: string): Array<string> {
+interface ConfiguredOpenApiSource {
+  source: string
+  overrides?: Record<string, OperationOverride>
+}
+
+function configuredOpenApiSources(projectRoot: string): Array<ConfiguredOpenApiSource> {
   const docsJsonPath = path.join(projectRoot, 'docs.json')
   if (!existsSync(docsJsonPath)) return []
 
   const config = JSON.parse(readFileSync(docsJsonPath, 'utf8')) as {
-    tabs?: Array<{ api?: { source?: unknown } }>
+    tabs?: Array<{ api?: { source?: unknown; overrides?: Record<string, OperationOverride> } }>
   }
 
   return (config.tabs ?? [])
-    .map((tab) => tab.api?.source)
-    .filter((source): source is string => typeof source === 'string')
-    .filter((source) => !source.startsWith('http://') && !source.startsWith('https://'))
+    .flatMap((tab) =>
+      typeof tab.api?.source === 'string'
+        ? [{ source: tab.api.source, overrides: tab.api.overrides }]
+        : [],
+    )
+    .filter(({ source }) => !source.startsWith('http://') && !source.startsWith('https://'))
+}
+
+/**
+ * Managed assets are served verbatim from `/_thally/content/…`, so a spec
+ * copied there must already be publication-safe (excluded operations removed).
+ * The runtime re-sanitizes on load, which is idempotent.
+ */
+function addSpecFile(
+  projectRoot: string,
+  sources: RuntimeSourceMap,
+  filePath: string,
+  overrides?: Record<string, OperationOverride>,
+): void {
+  addTextFile(projectRoot, sources, filePath)
+  const entry = sources[projectPath(projectRoot, filePath)]
+  if (!entry) return
+  const isJson = path.extname(filePath).toLowerCase() === '.json'
+  let document: unknown
+  try {
+    document = isJson ? JSON.parse(entry.content) : parseYaml(entry.content)
+  } catch (error) {
+    throw new Error(`OpenAPI source is not valid ${isJson ? 'JSON' : 'YAML'}: ${projectPath(projectRoot, filePath)} (${(error as Error).message})`)
+  }
+  if (!document || typeof document !== 'object') return
+  const sanitized = sanitizeSpecForPublication(document as OpenAPIDocument, { overrides })
+  if (sanitized === document) return
+  entry.content = isJson ? `${JSON.stringify(sanitized, null, 2)}\n` : stringifyYaml(sanitized)
 }
 
 function addConfiguredOpenApiFile(
   projectRoot: string,
   sources: RuntimeSourceMap,
   configuredPath: string,
+  overrides?: Record<string, OperationOverride>,
 ): void {
   const filePath = configuredPath.startsWith('/')
     ? path.resolve(projectRoot, 'public', configuredPath.slice(1))
@@ -98,7 +137,7 @@ function addConfiguredOpenApiFile(
     throw new Error(`Configured OpenAPI source resolves outside the project: ${configuredPath}`)
   }
 
-  addTextFile(projectRoot, sources, filePath)
+  addSpecFile(projectRoot, sources, filePath, overrides)
 }
 
 function walkTextFiles(
@@ -135,11 +174,11 @@ export function collectRuntimeContentFiles(projectRoot: string): RuntimeSourceMa
     '.yml',
     '.json',
   ])
-  addTextFile(projectRoot, sources, path.join(projectRoot, 'openapi.yaml'))
-  addTextFile(projectRoot, sources, path.join(projectRoot, 'openapi.yml'))
-  addTextFile(projectRoot, sources, path.join(projectRoot, 'openapi.json'))
-  for (const configuredPath of configuredOpenApiSources(projectRoot)) {
-    addConfiguredOpenApiFile(projectRoot, sources, configuredPath)
+  addSpecFile(projectRoot, sources, path.join(projectRoot, 'openapi.yaml'))
+  addSpecFile(projectRoot, sources, path.join(projectRoot, 'openapi.yml'))
+  addSpecFile(projectRoot, sources, path.join(projectRoot, 'openapi.json'))
+  for (const { source, overrides } of configuredOpenApiSources(projectRoot)) {
+    addConfiguredOpenApiFile(projectRoot, sources, source, overrides)
   }
   addTextFile(projectRoot, sources, path.join(projectRoot, 'docs.json'))
   addTextFile(projectRoot, sources, path.join(projectRoot, 'AGENTS.md'))

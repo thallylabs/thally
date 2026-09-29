@@ -268,7 +268,30 @@ function resolveLink(target: string, redirects: ReadonlyMap<string, string>): Re
   }
 }
 
-function validateOpenApi(projectDir: string, source: string, issues: LintIssue[]): void {
+const OPENAPI_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'trace']
+const isFlagged = (value: unknown) => value === true || value === 'true'
+
+/** True when the spec marks any operation/path/webhook hidden or excluded (extensions or docs.json overrides). */
+function specHasHiddenOperations(spec: Record<string, unknown>, overrides: unknown): boolean {
+  if (overrides && typeof overrides === 'object' &&
+    Object.values(overrides).some((o) => (o as { hidden?: unknown } | null)?.hidden === true)) return true
+  const components = spec.components as { pathItems?: unknown } | undefined
+  for (const group of [spec.paths, spec.webhooks, spec['x-webhooks'], components?.pathItems]) {
+    if (!group || typeof group !== 'object') continue
+    for (const item of Object.values(group as Record<string, unknown>)) {
+      if (!item || typeof item !== 'object') continue
+      const record = item as Record<string, unknown>
+      if (isFlagged(record['x-excluded']) || isFlagged(record['x-hidden'])) return true
+      for (const method of OPENAPI_METHODS) {
+        const op = record[method] as Record<string, unknown> | undefined
+        if (op && typeof op === 'object' && (isFlagged(op['x-excluded']) || isFlagged(op['x-hidden']))) return true
+      }
+    }
+  }
+  return false
+}
+
+function validateOpenApi(projectDir: string, source: string, issues: LintIssue[], overrides?: unknown): void {
   // Runtime URL-style sources are author-owned files below `public/`, while
   // relative sources are resolved from the project root.
   const specPath = source.startsWith('/')
@@ -287,6 +310,16 @@ function validateOpenApi(projectDir: string, source: string, issues: LintIssue[]
     return
   }
   const s = spec as Record<string, unknown>
+  // Files under public/ are served verbatim by the host, bypassing the
+  // publication filter that drops hidden/excluded operations.
+  if (s && typeof s === 'object' && (source.startsWith('/') || source.replace(/^\.\//, '').startsWith('public/')) &&
+    specHasHiddenOperations(s, overrides)) {
+    issues.push({
+      severity: 'warning',
+      message: `OpenAPI spec "${source}" lives under public/ and contains x-excluded/x-hidden operations; public/ is served as-is, so those operations would be downloadable. Move it to a project-root path such as "openapi/${source.split('/').pop()}" and update docs.json`,
+      file: source,
+    })
+  }
   if (typeof s?.openapi !== 'string' && typeof s?.swagger !== 'string') {
     issues.push({ severity: 'error', message: 'OpenAPI spec is missing the "openapi" (or "swagger") version field', file: source })
   }
@@ -482,7 +515,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
   // OpenAPI validation for each API tab.
   for (const tab of config.tabs) {
-    if (tab.api?.source) validateOpenApi(projectDir, tab.api.source, issues)
+    if (tab.api?.source) validateOpenApi(projectDir, tab.api.source, issues, (tab.api as { overrides?: unknown }).overrides)
   }
 
   const errors = issues.filter((i) => i.severity === 'error')

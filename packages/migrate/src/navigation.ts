@@ -186,7 +186,7 @@ function projectedHref(value: unknown): string | undefined {
 }
 
 function labelFor(value: Record<string, unknown>, fallback: string): string {
-  for (const key of ['tab', 'group', 'anchor', 'product', 'dropdown', 'version', 'menu', 'label', 'name', 'title']) {
+  for (const key of ['tab', 'group', 'anchor', 'product', 'dropdown', 'version', 'menu', 'item', 'label', 'name', 'title']) {
     if (typeof value[key] === 'string' && value[key]) return String(value[key])
   }
   return fallback
@@ -324,7 +324,9 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
         visit(object, labelFor(object, tabLabel ?? 'Documentation'))
       }
     }
-    for (const key of nestedKeys) {
+    // Menu items are projected as groups inside the enclosing tab, so their
+    // `openapi` binds to that tab rather than to a tab named after the item.
+    for (const key of [...nestedKeys, 'menu'] as const) {
       const entries = node[key]
       if (!Array.isArray(entries)) continue
       for (const entry of entries) {
@@ -441,6 +443,53 @@ function convertPage(
   return null
 }
 
+const KNOWN_NAVIGATION_KEYS = new Set([
+  'tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus', 'languages',
+  'groups', 'pages', 'menu', 'global',
+])
+
+/** A Mintlify tab `menu`: each item becomes a top-level group of the enclosing tab. */
+function convertMenuItems(
+  items: Array<unknown>,
+  context: ProjectionContext,
+): Array<MigrationNavigationGroup> {
+  return items.flatMap((value, index) => {
+    const item = objectValue(value)
+    if (!item) return []
+    const label = labelFor(item, `Menu item ${index + 1}`)
+    if (typeof item.description === 'string' && item.description.trim()) {
+      warnOnce(
+        context,
+        `menu-item-description:${label}`,
+        `Mintlify menu item "${label}" has a description, which Thally groups cannot display; it was omitted.`,
+      )
+    }
+    const children = convertNavigationValues([
+      ...(Array.isArray(item.groups) ? item.groups : []),
+      ...(Array.isArray(item.pages) ? item.pages : []),
+    ], context)
+    if (typeof item.href === 'string' && item.href) {
+      warnOnce(
+        context,
+        `menu-item-href:${label}`,
+        `Mintlify menu item "${label}" links to ${item.href}, which cannot be represented as a Thally group; the link was omitted.`,
+      )
+    }
+    if (children.length === 0) {
+      if (typeof item.openapi !== 'string' && typeof item.asyncapi !== 'string') {
+        warnOnce(context, `menu-item-empty:${label}`, `Mintlify menu item "${label}" has no projectable pages and was omitted.`)
+      }
+      return []
+    }
+    return [{
+      group: label,
+      ...(iconName(item.icon) ? { icon: iconName(item.icon) } : {}),
+      ...(item.hidden === true ? { hidden: true } : {}),
+      pages: children,
+    }]
+  })
+}
+
 function convertNavigationValues(
   values: Array<unknown>,
   context: ProjectionContext,
@@ -465,6 +514,13 @@ function convertContainerToTabs(
   const container = objectValue(containerValue)
   if (!container) return []
   const containerKeys = ['tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus'] as const
+  for (const key of Object.keys(container)) {
+    if (KNOWN_NAVIGATION_KEYS.has(key)) continue
+    const entries = container[key]
+    if (Array.isArray(entries) && entries.some((entry) => objectValue(entry))) {
+      warnOnce(context, `unknown-container:${key}`, `Mintlify navigation key "${key}" is not supported and its contents were not projected.`)
+    }
+  }
   for (const key of containerKeys) {
     if (!Array.isArray(container[key])) continue
     const entries = [...container[key] as Array<unknown>]
@@ -476,7 +532,7 @@ function convertContainerToTabs(
       if (!object) return []
       const tab = labelFor(object, `${fallbackTab} ${index + 1}`)
       const href = projectedHref(object.href)
-      const hasNestedContainers = containerKeys.some((containerKey) => Array.isArray(object[containerKey]))
+      const hasNestedContainers = [...containerKeys, 'menu'].some((containerKey) => Array.isArray(object[containerKey]))
       if (href && !object.pages && !object.groups && !hasNestedContainers) {
         return [{
           tab,
@@ -508,6 +564,11 @@ function convertContainerToTabs(
       return []
     })
     if (tabs.length > 0) {
+      for (const sibling of ['groups', 'pages', 'menu'] as const) {
+        if (Array.isArray(container[sibling]) && (container[sibling] as Array<unknown>).length > 0) {
+          warnOnce(context, `container-sibling:${key}:${sibling}`, `Mintlify "${sibling}" next to "${key}" was not projected; only the "${key}" containers were kept.`)
+        }
+      }
       if (depth === 0 && trace) trace.rootContainerKind = key
       return tabs
     }
@@ -520,7 +581,10 @@ function convertContainerToTabs(
     ...rawGroups,
     ...rawPages,
   ]
-  const children = convertNavigationValues(values, context)
+  const children = [
+    ...convertNavigationValues(values, context),
+    ...(Array.isArray(container.menu) ? convertMenuItems(container.menu, context) : []),
+  ]
   return children.length > 0
     ? [{
         tab: fallbackTab,
@@ -585,7 +649,7 @@ function projectedGlobalNavigationLinks(
       const label = labelFor(item, '')
       if (label) links.push({ label, href })
     }
-    for (const key of ['tabs', 'anchors', 'dropdowns', 'products', 'versions', 'languages', 'menus']) {
+    for (const key of ['tabs', 'anchors', 'dropdowns', 'products', 'versions', 'languages', 'menus', 'menu']) {
       if (Array.isArray(item[key])) visit(item[key])
     }
   }

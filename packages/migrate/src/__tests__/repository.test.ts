@@ -386,7 +386,7 @@ describe('Mintlify repository migration', () => {
     expect(bundle.docsConfig.tabs[1]).toMatchObject({
       tab: 'API reference',
       groups: [{ group: 'Runs API', pages: ['management/runs'] }],
-      api: { source: '/service.openapi.yml', navigation: false },
+      api: { source: 'openapi/service.openapi.yml', navigation: false },
     })
     expect(bundle.docsConfig).toMatchObject({
       theme: 'maple',
@@ -425,9 +425,15 @@ describe('Mintlify repository migration', () => {
     expect(bundle.assets.map((asset) => asset.path)).toEqual(expect.arrayContaining([
       'logo.svg',
       'images/setup.png',
-      'service.openapi.yml',
+      'openapi/service.openapi.yml',
     ]))
     expect(bundle.warnings).toEqual([])
+
+    // Specs must never land under public/, which the host serves verbatim.
+    const renderedPaths = renderMigrationFiles(bundle).map((file) => file.path)
+    expect(renderedPaths).toContain('openapi/service.openapi.yml')
+    expect(renderedPaths).not.toContain('public/openapi/service.openapi.yml')
+    expect(renderedPaths.some((path) => path.startsWith('public/') && /\.(ya?ml|json)$/.test(path))).toBe(false)
 
     const introduction = renderMigrationFiles(bundle)
       .find((file) => file.path === 'src/content/introduction.mdx')
@@ -458,9 +464,9 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'API Reference')
-    expect(apiTab?.api).toEqual({ source: '/service.yml', navigation: false })
+    expect(apiTab?.api).toEqual({ source: 'openapi/service.yml', navigation: false })
     expect(bundle.docsConfig.tabs.find((tab) => tab.tab === 'Guides')?.api).toBeUndefined()
-    expect(bundle.assets.map((asset) => asset.path)).toContain('service.yml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/service.yml')
   })
 
   it('skips remote OpenAPI URLs without invoking a downloader and keeps the other content', () => {
@@ -486,7 +492,7 @@ describe('Mintlify repository migration', () => {
       expect(bundle.docsConfig.tabs.find((entry) => entry.tab === tab)?.api).toBeUndefined()
     }
     expect(bundle.pages.map((page) => page.id)).toEqual(expect.arrayContaining(['guide', 'rest-landing', 'ws-landing', 'private-landing']))
-    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi.json')
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi/openapi.json')
     for (const url of ['https://api.example.com/openapi.json', 'http://api.example.com/ws-spec.json', 'https://[::ffff:7f00:1]/spec.json']) {
       expect(bundle.warnings).toContainEqual(expect.objectContaining({
         code: 'unsupported-config',
@@ -2209,7 +2215,7 @@ navigation:
     ])
     expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old-install', destination: '/guides/install' })
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
-    expect(apiTab?.api?.source).toBe('/openapi.yml')
+    expect(apiTab?.api?.source).toBe('openapi/openapi.yml')
     expect(bundle.assets.map((asset) => asset.path)).toContain('images/logo.svg')
     expect(bundle.pages.find((page) => page.id === 'welcome')?.body).toContain('<Warning>Read this first.</Warning>')
     expect(bundle.pages.find((page) => page.id === 'welcome')?.body).toContain('![Logo](/images/logo.svg)')
@@ -2262,8 +2268,8 @@ navigation:
 
     const apiTabs = bundle.docsConfig.tabs.filter((tab) => tab.api)
     expect(apiTabs.map((tab) => tab.tab).sort()).toEqual(['Rest Tab', 'Ws Tab'])
-    expect(apiTabs.map((tab) => tab.api?.source).sort()).toEqual(['/rest-openapi.yml', '/ws-openapi.yml'])
-    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['rest-openapi.yml', 'ws-openapi.yml'])
+    expect(apiTabs.map((tab) => tab.api?.source).sort()).toEqual(['openapi/rest-openapi.yml', 'openapi/ws-openapi.yml'])
+    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['openapi/rest-openapi.yml', 'openapi/ws-openapi.yml'])
     expect(bundle.warnings.some((warning) => /only the first was imported/i.test(warning.message))).toBe(false)
   })
 
@@ -2306,7 +2312,7 @@ navigation:
     // not one tab overwritten by the other.
     expect(apiTabs).toHaveLength(2)
     expect(new Set(apiTabs.map((tab) => tab.api?.source)).size).toBe(2)
-    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['openapi.json', 'testnet-rest-openapi.json'])
+    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['openapi/openapi.json', 'openapi/testnet-rest-openapi.json'])
   })
 
   it('warns by name instead of silently dropping an AsyncAPI/OpenRPC-only Fern api: section', () => {
@@ -2483,8 +2489,8 @@ api:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
-    expect(apiTab?.api?.source).toBe('/configured.yml')
-    expect(bundle.assets.map((asset) => asset.path)).toContain('configured.yml')
+    expect(apiTab?.api?.source).toBe('openapi/configured.yml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/configured.yml')
   })
 
   it("resolves a multi-API repo's generators.yml spec path outside its own API folder but inside the repository (Cohere layout)", () => {
@@ -2513,8 +2519,8 @@ api:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
-    expect(apiTab?.api?.source).toBe('/acme-openapi.yaml')
-    expect(bundle.assets.map((asset) => asset.path)).toContain('acme-openapi.yaml')
+    expect(apiTab?.api?.source).toBe('openapi/acme-openapi.yaml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/acme-openapi.yaml')
     expect(bundle.warnings.some((warning) => /outside the repository/i.test(warning.message))).toBe(false)
   })
 
@@ -2595,8 +2601,8 @@ api:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
-    expect(apiTab?.api?.source).toBe('/plants.yml')
-    expect(bundle.assets.map((asset) => asset.path)).toContain('plants.yml')
+    expect(apiTab?.api?.source).toBe('openapi/plants.yml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/plants.yml')
     expect(bundle.warnings.some((warning) => warning.message.includes('No OpenAPI'))).toBe(false)
   })
 
@@ -2653,7 +2659,7 @@ api:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
-    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi.yml')
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi/openapi.yml')
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
       code: 'unsupported-config',
       message: expect.stringContaining('plants'),
@@ -2712,7 +2718,7 @@ navigation:
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
-    expect(bundle.docsConfig.tabs.find((tab) => tab.api)?.api?.source).toBe('/plants.yml')
+    expect(bundle.docsConfig.tabs.find((tab) => tab.api)?.api?.source).toBe('openapi/plants.yml')
     expect(bundle.warnings.some((warning) => warning.message.startsWith('No OpenAPI'))).toBe(false)
   })
 })

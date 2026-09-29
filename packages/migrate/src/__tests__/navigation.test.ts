@@ -7,6 +7,7 @@ import {
   projectMintlifyNavigation,
   pruneMissingNavigationPages,
 } from '../index.js'
+import { mintlifyNavigationApiReferences } from '../navigation.js'
 import { projectFernNavigation } from '../fern.js'
 import type { MigrationDocsConfig, MigrationPage } from '../types.js'
 
@@ -343,5 +344,93 @@ describe('pruning navigation pages excluded after projection', () => {
     const pruned = pruneMissingNavigationPages(config, new Set(['kept']))
 
     expect(pruned.tabs).toEqual([{ tab: 'Docs', pages: ['kept'] }])
+  })
+})
+
+describe('Mintlify tab menus', () => {
+  const menuTab = {
+    tab: 'Developer Tools',
+    icon: 'square-terminal',
+    menu: [
+      { item: 'API reference', icon: 'rocket', groups: [{ group: 'Core endpoints', pages: ['api-reference/get', 'api-reference/post'] }] },
+      { item: 'SDKs', icon: 'code', description: 'SDKs are used to interact with the API.', pages: ['sdk/fetch', 'sdk/create'] },
+    ],
+  }
+
+  it('projects a tab menu as one tab with a group per item and keeps every page', () => {
+    const result = projectMintlifyNavigation({ navigation: { tabs: [menuTab] } })
+
+    expect(result.docsConfig.tabs).toEqual([{
+      tab: 'Developer Tools',
+      icon: 'square-terminal',
+      groups: [
+        { group: 'API reference', icon: 'rocket', pages: [{ group: 'Core endpoints', pages: ['api-reference/get', 'api-reference/post'] }] },
+        { group: 'SDKs', icon: 'code', pages: ['sdk/fetch', 'sdk/create'] },
+      ],
+    }])
+    expect(result.pageReferences.map((reference) => reference.navigationId)).toEqual([
+      'api-reference/get', 'api-reference/post', 'sdk/fetch', 'sdk/create',
+    ])
+  })
+
+  it('warns about a menu item description instead of dropping it silently', () => {
+    const result = projectMintlifyNavigation({ navigation: { tabs: [menuTab] } })
+    expect(result.warnings.map((warning) => warning.message).join('\n')).toContain('"SDKs" has a description')
+  })
+
+  it('warns about an href-only menu item and an empty item', () => {
+    const result = projectMintlifyNavigation({ navigation: { tabs: [{
+      tab: 'Tools',
+      menu: [{ item: 'Blog', href: 'https://example.com/blog' }, { item: 'Docs', pages: ['a'] }],
+    }] } })
+    expect(result.docsConfig.tabs[0]?.groups).toEqual([{ group: 'Docs', pages: ['a'] }])
+    const messages = result.warnings.map((warning) => warning.message).join('\n')
+    expect(messages).toContain('"Blog" links to https://example.com/blog')
+  })
+
+  it('keeps sibling tabs without a menu and nests a menu under a dropdown or version', () => {
+    const mixed = projectMintlifyNavigation({ navigation: { tabs: [
+      { tab: 'Guides', pages: ['guides/start'] },
+      menuTab,
+    ] } })
+    expect(mixed.docsConfig.tabs.map((tab) => tab.tab)).toEqual(['Guides', 'Developer Tools'])
+
+    const nested = projectMintlifyNavigation({ navigation: { versions: [
+      { version: 'v2', tabs: [menuTab] },
+    ] } })
+    expect(nested.docsConfig.tabs[0]?.tab).toBe('v2')
+    expect(nested.pageReferences).toHaveLength(4)
+  })
+
+  it('binds a menu item openapi to the enclosing tab', () => {
+    const references = mintlifyNavigationApiReferences({ navigation: { tabs: [{
+      tab: 'Developer Tools',
+      menu: [{ item: 'API reference', openapi: 'openapi.yaml' }],
+    }] } })
+    expect(references).toEqual([{ value: 'openapi.yaml', kind: 'openapi', tabLabel: 'Developer Tools' }])
+  })
+
+  it('still honors the legacy plural menus container', () => {
+    const result = projectMintlifyNavigation({ navigation: { menus: [{ menu: 'One', pages: ['one'] }] } })
+    expect(result.docsConfig.tabs).toEqual([{ tab: 'One', pages: ['one'] }])
+  })
+
+  it('warns about an unrecognized container instead of dropping it silently', () => {
+    const result = projectMintlifyNavigation({ navigation: {
+      tabs: [{ tab: 'A', pages: ['a'] }],
+      sections: [{ name: 'X', pages: ['x'] }],
+    } })
+    expect(result.warnings.map((warning) => warning.message).join('\n')).toContain('"sections"')
+  })
+
+  it('leaves existing tab, anchor and dropdown output unchanged', () => {
+    const tabs = projectMintlifyNavigation({ navigation: { tabs: [{ tab: 'T', groups: [{ group: 'G', pages: ['g/a'] }] }] } })
+    expect(tabs.docsConfig.tabs).toEqual([{ tab: 'T', groups: [{ group: 'G', pages: ['g/a'] }] }])
+    const anchors = projectMintlifyNavigation({ navigation: { anchors: [{ anchor: 'A', pages: ['a'] }] } })
+    expect(anchors.docsConfig.tabs).toEqual([{ tab: 'A', pages: ['a'] }])
+    const dropdowns = projectMintlifyNavigation({ navigation: { dropdowns: [{ dropdown: 'D', pages: ['d'] }] } })
+    expect(dropdowns.docsConfig.tabs).toEqual([{ tab: 'D', pages: ['d'] }])
+    expect(dropdowns.docsConfig.navigation).toEqual({ display: 'dropdown' })
+    expect(tabs.warnings).toEqual([])
   })
 })

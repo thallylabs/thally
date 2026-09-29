@@ -177,5 +177,96 @@ describe('normalizeSpec', () => {
     const anyOperation = normalized.operations[0]
     expect(anyOperation.security[0][0].name).toBe('bearerAuth')
   })
-})
 
+  describe('x-excluded / x-hidden', () => {
+    const responses = { '200': { description: 'ok' } }
+    const build = (document: Record<string, unknown>, config: Partial<ApiSpecConfig> = {}) =>
+      normalizeSpec({
+        config: { ...baseConfig, operationOverrides: {}, ...config },
+        document: { openapi: '3.1.0', info: { title: 't', version: '1' }, ...document },
+      } as unknown as ResolvedSpec)
+    const keys = (n: ReturnType<typeof normalizeSpec>) => n.operations.map((o) => o.key).sort()
+
+    it('drops operations with x-excluded on the operation', () => {
+      const n = build({
+        paths: {
+          '/a': { get: { tags: ['t'], responses, 'x-excluded': true }, post: { tags: ['t'], responses } },
+        },
+      })
+      expect(keys(n)).toEqual(['POST /a'])
+    })
+
+    it('drops all operations for path-level x-excluded', () => {
+      const n = build({
+        paths: {
+          '/a': { 'x-excluded': true, get: { responses }, post: { responses } },
+          '/b': { get: { responses } },
+        },
+      })
+      expect(keys(n)).toEqual(['GET /b'])
+    })
+
+    it('drops excluded webhooks', () => {
+      const n = build({
+        paths: {},
+        webhooks: { hook: { post: { responses, 'x-excluded': true } }, hook2: { post: { responses } } },
+      })
+      expect(keys(n)).toEqual(['WEBHOOK POST hook2'])
+    })
+
+    it('treats x-hidden like an override hidden, and accepts string "true"', () => {
+      const n = build({
+        paths: {
+          '/a': { get: { responses, 'x-hidden': true } },
+          '/b': { get: { responses } },
+          '/c': { get: { responses, 'x-hidden': 'true' } },
+        },
+      })
+      const viaOverride = build(
+        { paths: { '/a': { get: { responses } } } },
+        { operationOverrides: { 'GET /a': { hidden: true } } },
+      )
+      expect(n.operations.find((o) => o.key === 'GET /a')?.hidden).toBe(true)
+      expect(n.operations.find((o) => o.key === 'GET /a')?.hidden).toBe(viaOverride.operations[0].hidden)
+      expect(n.operations.find((o) => o.key === 'GET /c')?.hidden).toBe(true)
+      expect(n.operations.find((o) => o.key === 'GET /b')?.hidden).toBe(false)
+    })
+
+    it('is a no-op when false', () => {
+      const n = build({ paths: { '/a': { get: { responses, 'x-excluded': false, 'x-hidden': false } } } })
+      expect(n.operations).toHaveLength(1)
+      expect(n.operations[0].hidden).toBe(false)
+    })
+
+    it('leaves no group for a tag whose operations are all excluded', () => {
+      const n = build({
+        paths: {
+          '/a': { get: { tags: ['gone'], responses, 'x-excluded': true } },
+          '/b': { get: { tags: ['kept'], responses } },
+        },
+      })
+      expect(n.operations.map((o) => o.group)).toEqual(['kept'])
+    })
+
+    it('still resolves schemas referenced by kept operations', () => {
+      const n = build({
+        paths: {
+          '/a': { get: { responses, 'x-excluded': true } },
+          '/b': {
+            get: {
+              responses: {
+                '200': {
+                  description: 'ok',
+                  content: { 'application/json': { schema: { $ref: '#/components/schemas/Thing' } } },
+                },
+              },
+            },
+          },
+        },
+        components: { schemas: { Thing: { type: 'object', properties: { id: { type: 'string' } } } } },
+      })
+      const schema = n.operations[0].responses[0].contents[0].schema as { properties?: Record<string, unknown> }
+      expect(schema.properties).toHaveProperty('id')
+    })
+  })
+})

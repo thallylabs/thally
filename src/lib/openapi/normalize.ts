@@ -12,15 +12,11 @@ import type {
   ResolvedSpec,
 } from '@/lib/openapi/types'
 import { getApiPlaygroundCredentials } from '@/data/docs'
+import { HTTP_METHODS, buildOperationKey, isExtensionSet } from '@/lib/openapi/operation-keys'
 
 type RawObject = Record<string, unknown>
 
-const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'trace'] as const
-
-export function buildOperationKey(method: string, path: string, isWebhook = false) {
-  const prefix = isWebhook ? 'WEBHOOK ' : ''
-  return `${prefix}${method.toUpperCase()} ${path}`
-}
+export { HTTP_METHODS, buildOperationKey, isExtensionSet }
 
 export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
   const specServers = normalizeServers((resolved.document as RawObject).servers)
@@ -43,6 +39,9 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
         if (!operation || typeof operation !== 'object') {
           continue
         }
+        if (isExtensionSet(pathItem['x-excluded']) || isExtensionSet((operation as RawObject)['x-excluded'])) {
+          continue
+        }
         operations.push(
           normalizeOperation({
             specId: resolved.config.id,
@@ -55,6 +54,7 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
             config: resolved.config,
             documentSecurity: (resolved.document as RawObject).security,
             securitySchemes: rawSecuritySchemes,
+            pathItem,
             isWebhook: false,
             resolveRef,
           }),
@@ -73,6 +73,9 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
         if (!operation || typeof operation !== 'object') {
           continue
         }
+        if (isExtensionSet(webhookItem['x-excluded']) || isExtensionSet((operation as RawObject)['x-excluded'])) {
+          continue
+        }
         operations.push(
           normalizeOperation({
             specId: resolved.config.id,
@@ -85,6 +88,7 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
             config: resolved.config,
             documentSecurity: (resolved.document as RawObject).security,
             securitySchemes: rawSecuritySchemes,
+            pathItem: webhookItem,
             isWebhook: true,
             resolveRef,
           }),
@@ -118,6 +122,7 @@ interface NormalizeOperationOptions {
   documentSecurity?: unknown
   securitySchemes: Record<string, RawObject>
   config: ApiSpecConfig
+  pathItem: RawObject
   isWebhook: boolean
   resolveRef: (ref: string) => RawObject | null
 }
@@ -178,7 +183,9 @@ function normalizeOperation(options: NormalizeOperationOptions): NormalizedOpera
     requestBody,
     responses,
     security,
-    hidden: override?.hidden ?? false,
+    hidden:
+      override?.hidden ??
+      (isExtensionSet(options.rawOperation['x-hidden']) || isExtensionSet(options.pathItem['x-hidden'])),
     prefill: {
       path: parameterPrefill.path,
       query: parameterPrefill.query,

@@ -149,6 +149,47 @@ describe('thally check OpenAPI migrations', () => {
   })
 })
 
+describe('thally check hidden operations under public/', () => {
+  const spec = (flag: string) => [
+    'openapi: 3.0.0',
+    'info:',
+    '  title: T',
+    '  version: 1.0.0',
+    'paths:',
+    '  /a:',
+    '    get:',
+    ...(flag ? [`      ${flag}`] : []),
+    '      responses:',
+    "        '200':",
+    '          description: ok',
+  ].join('\n')
+
+  async function run(source: string, file: string, body: string, overrides?: unknown) {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-hidden-'))
+    mkdirSync(join(projectDir, file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'API', api: { source, overrides } }] }))
+    writeFileSync(join(projectDir, file), body)
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    return output.join('\n')
+  }
+
+  it('warns for a public/ spec with x-excluded, or an override-hidden op', async () => {
+    expect(await run('/openapi.yaml', 'public/openapi.yaml', spec('x-excluded: true'))).toContain('lives under public/')
+    expect(await run('/openapi.yaml', 'public/openapi.yaml', spec(''), { 'GET /a': { hidden: true } })).toContain('lives under public/')
+  })
+
+  it('stays quiet for a clean public/ spec or a project-root spec', async () => {
+    expect(await run('/openapi.yaml', 'public/openapi.yaml', spec(''))).not.toContain('lives under public/')
+    expect(await run('openapi/api.yaml', 'openapi/api.yaml', spec('x-excluded: true'))).not.toContain('lives under public/')
+  })
+})
+
 describe('thally check image references', () => {
   it('warns about a local image with no file under public/, and accepts one that exists', async () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-images-'))

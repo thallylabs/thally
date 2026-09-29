@@ -117,9 +117,11 @@ export interface MigrationPage {
 }
 
 export interface MigrationAsset {
-  /** Path below `public`, always normalized and traversal-free. */
+  /** Path below `public` (or below the project root when `projectRelative`), always normalized and traversal-free. */
   path: string
   content: Uint8Array
+  /** Write at the project root instead of `public/`, so the host never serves it statically. */
+  projectRelative?: boolean
 }
 
 export interface MigrationWarning {

@@ -1,10 +1,16 @@
 /** Regression coverage for authored files embedded into self-hosted runtimes. */
 
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { collectRuntimeContentFiles } from '../../../scripts/lib/runtime-content-files'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import {
+  MANAGED_CONTENT_ASSET_DIRECTORY,
+  collectRuntimeContentFiles,
+  writeManagedContentAssets,
+} from '../../../scripts/lib/runtime-content-files'
+import { sanitizeSpecForPublication } from '@/lib/openapi/sanitize'
 
 const projectRoots: Array<string> = []
 
@@ -32,6 +38,39 @@ describe('collectRuntimeContentFiles', () => {
     expect(collectRuntimeContentFiles(projectRoot)['openapi/cinderlane.yaml']?.content).toBe(
       'openapi: 3.1.0\n',
     )
+  })
+
+  it('writes sanitized specs (YAML and JSON) without x-excluded operations', () => {
+    const projectRoot = createProject('openapi/api.yaml')
+    mkdirSync(path.join(projectRoot, 'openapi'))
+    const doc = {
+      openapi: '3.1.0',
+      info: { title: 'T', version: '1' },
+      paths: {
+        '/pub': { get: { responses: {} } },
+        '/secret': { get: { 'x-excluded': true, responses: {} } },
+        '/override': { get: { responses: {} } },
+      },
+    }
+    writeFileSync(path.join(projectRoot, 'openapi/api.yaml'), stringifyYaml(doc))
+    writeFileSync(path.join(projectRoot, 'openapi.json'), JSON.stringify(doc))
+    writeFileSync(
+      path.join(projectRoot, 'docs.json'),
+      JSON.stringify({ tabs: [{ api: { source: 'openapi/api.yaml', overrides: { 'GET /override': { hidden: true } } } }] }),
+    )
+
+    const sources = collectRuntimeContentFiles(projectRoot)
+    const yamlOut = parseYaml(sources['openapi/api.yaml']!.content)
+    expect(Object.keys(yamlOut.paths)).toEqual(['/pub'])
+    expect(sources['openapi/api.yaml']!.content).not.toContain('secret')
+    expect(Object.keys(JSON.parse(sources['openapi.json']!.content).paths)).toEqual(['/pub', '/override'])
+    expect(sources['openapi.json']!.content).not.toContain('secret')
+
+    // Emitted managed asset is what the runtime will fetch; it must stay loadable.
+    writeManagedContentAssets(projectRoot, sources)
+    const served = readFileSync(path.join(projectRoot, MANAGED_CONTENT_ASSET_DIRECTORY, 'openapi/api.yaml'), 'utf8')
+    expect(served).not.toContain('secret')
+    expect(sanitizeSpecForPublication(parseYaml(served))).toEqual(parseYaml(served))
   })
 
   it('maps URL-style configured paths to public assets', () => {
