@@ -73,12 +73,19 @@ const BROWSER_IDENTIFIERS = new Set([
   'XMLHttpRequest', 'WebSocket', 'getComputedStyle', 'innerWidth', 'innerHeight', 'scrollTo',
 ])
 /** Bare names any module may reference without declaring them. */
+// An explicit list: the set of globals a Node process happens to have varies by
+// version, and the answer must not depend on which one runs the migration.
 const JS_GLOBALS = new Set([
-  ...Object.getOwnPropertyNames(globalThis),
-  'undefined', 'NaN', 'Infinity', 'arguments', 'console', 'fetch', 'URL', 'URLSearchParams',
-  'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask', 'structuredClone',
-  'Headers', 'Request', 'Response', 'AbortController', 'TextEncoder', 'TextDecoder', 'atob', 'btoa',
-  'Intl', 'Symbol', 'Promise', 'Reflect', 'Proxy', 'Map', 'Set', 'WeakMap', 'WeakSet', 'BigInt',
+  'undefined', 'NaN', 'Infinity', 'globalThis', 'arguments',
+  'Object', 'Function', 'Array', 'Number', 'Boolean', 'String', 'Symbol', 'BigInt', 'Date', 'RegExp',
+  'Error', 'AggregateError', 'EvalError', 'RangeError', 'ReferenceError', 'SyntaxError', 'TypeError', 'URIError',
+  'JSON', 'Math', 'Intl', 'Reflect', 'Proxy', 'Promise', 'Map', 'Set', 'WeakMap', 'WeakSet', 'WeakRef',
+  'ArrayBuffer', 'SharedArrayBuffer', 'DataView', 'Atomics', 'Int8Array', 'Uint8Array', 'Uint8ClampedArray',
+  'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array', 'Float32Array', 'Float64Array', 'BigInt64Array', 'BigUint64Array',
+  'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'encodeURI', 'encodeURIComponent', 'decodeURI', 'decodeURIComponent',
+  'console', 'fetch', 'URL', 'URLSearchParams', 'Headers', 'Request', 'Response', 'AbortController', 'AbortSignal',
+  'TextEncoder', 'TextDecoder', 'atob', 'btoa', 'structuredClone', 'queueMicrotask', 'performance',
+  'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
 ])
 const IMPLICIT_MODULE_NAMES = new Set(['React', 'MintlifyComponents'])
 

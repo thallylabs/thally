@@ -5,7 +5,7 @@
  */
 
 import katex from 'katex'
-import type { ReactNode } from 'react'
+import { isValidElement, type ReactNode } from 'react'
 
 import 'katex/dist/katex.min.css'
 
@@ -18,6 +18,9 @@ function flattenText(children: ReactNode): string {
   if (typeof children === 'string') return children
   if (typeof children === 'number') return String(children)
   if (Array.isArray(children)) return children.map(flattenText).join('')
+  // Markdown inside the tag (`_x_` parsed as emphasis) arrives as elements;
+  // keep their text rather than dropping it.
+  if (isValidElement<{ children?: ReactNode }>(children)) return flattenText(children.props.children)
   return ''
 }
 

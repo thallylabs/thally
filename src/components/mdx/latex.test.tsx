@@ -23,4 +23,10 @@ describe('Latex', () => {
     expect(html).toContain('<code')
     expect(html).toContain('\\unknownCommand')
   })
+
+  it('keeps the text of nested elements instead of dropping it', () => {
+    const html = renderToStaticMarkup(<Latex>{['x', <em key="e">y</em>, 'z']}</Latex>)
+    expect(html).toContain('class="katex"')
+    expect(html).toContain('>y<')
+  })
 })

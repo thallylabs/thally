@@ -501,6 +501,11 @@ describe('orphan capitalized tag escaping', () => {
       .toBe('Add a callout: "&lt;Feature&gt; requires a plan."')
   })
 
+  it('never rewrites tag-like text inside a string of a page that already compiles', () => {
+    const source = "export const label = '<Feature>'\n\nUse {label}."
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
   it('leaves a properly paired tag alone', () => {
     const source = '<Note>hello</Note>'
     expect(normalizeMdx(source)).toBe(source)

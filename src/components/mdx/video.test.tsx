@@ -30,4 +30,22 @@ describe('Video', () => {
     expect(youtube).toContain('src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"')
     expect(lite).toBe(youtube)
   })
+
+  it('does not embed a javascript: or data: source, and shows it as text instead', () => {
+    for (const src of ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', '//evil.example/x']) {
+      const html = renderToStaticMarkup(<Video src={src} />)
+      expect(html).not.toContain('<iframe')
+      expect(html).toContain('<code>')
+    }
+  })
+
+  it('embeds another https URL or a site-relative path unchanged', () => {
+    expect(renderToStaticMarkup(<Video src="https://player.example/v/1" />)).toContain('src="https://player.example/v/1"')
+    expect(renderToStaticMarkup(<Video src="/media/intro" />)).toContain('src="/media/intro"')
+  })
+
+  it('rejects a video id with path or query characters', () => {
+    const html = renderToStaticMarkup(<Video src="https://youtu.be/abc/../../x?y=1" />)
+    expect(html).not.toContain('youtube-nocookie.com/embed/abc')
+  })
 })

@@ -1618,6 +1618,15 @@ function escapeOrphanCapitalizedTags(body: string): string {
     edits.push(...ranges)
   }
   if (edits.length === 0) return body
+  // The scan above is textual, so it cannot tell prose from a string inside an
+  // expression or export. A page that already compiles needs no escaping;
+  // never rewrite one.
+  try {
+    compileSync(body, { outputFormat: 'program' })
+    return body
+  } catch {
+    // Fails to compile: escape the placeholders below.
+  }
   edits.sort((a, b) => a.start - b.start)
   let result = ''
   let cursor = 0
