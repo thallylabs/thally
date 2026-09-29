@@ -15,6 +15,30 @@ import { parse as parseYaml } from 'yaml'
 interface ParsedFrontmatter {
   content: string
   data: Record<string, unknown>
+  /** Set when the frontmatter block was invalid YAML; `data` is a best-effort salvage. */
+  error?: string
+}
+
+/**
+ * Best-effort recovery for frontmatter that failed to parse as a whole block:
+ * try each top-level `key: value` line on its own. A line that is itself
+ * invalid YAML (e.g. an unescaped reserved character) is skipped rather than
+ * aborting the whole page.
+ */
+function salvageFrontmatterLines(matter: string): Record<string, unknown> {
+  const data: Record<string, unknown> = {}
+  for (const line of matter.split(/\r?\n/)) {
+    if (!/^[A-Za-z_][\w-]*:\s?/.test(line)) continue
+    try {
+      const parsedLine = parseYaml(line)
+      if (parsedLine && typeof parsedLine === 'object' && !Array.isArray(parsedLine)) {
+        Object.assign(data, parsedLine)
+      }
+    } catch {
+      // Line is unrecoverable on its own; drop just that field.
+    }
+  }
+  return data
 }
 
 /** Parse frontmatter without any path that can execute the content. */
@@ -34,11 +58,19 @@ export function parseFrontmatter(raw: string): ParsedFrontmatter {
   if (matter.trim() === '' || !['', 'yaml', 'yml'].includes(language)) {
     return { content, data: {} }
   }
-  const parsed = parseYaml(matter)
-  return {
-    content,
-    data: parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {},
+  try {
+    const parsed = parseYaml(matter)
+    return {
+      content,
+      data: parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {},
+    }
+  } catch (err) {
+    return {
+      content,
+      data: salvageFrontmatterLines(matter),
+      error: err instanceof Error ? err.message : String(err),
+    }
   }
 }
