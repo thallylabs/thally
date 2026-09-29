@@ -1911,7 +1911,7 @@ function inlineMdxSnippets(
  * land on the same tab by accident.
  */
 function injectOpenApiSpecs(config: MigrationDocsConfig, specs: Array<{ filename: string; tabLabel?: string; parentTab?: string }>): MigrationDocsConfig {
-  let tabs = config.tabs.map((tab) => ({ ...tab }))
+  const tabs = config.tabs.map((tab) => ({ ...tab }))
   for (const spec of specs) {
     const apiTab = spec.tabLabel
       ? tabs.find((tab) => tab.tab === spec.tabLabel)
