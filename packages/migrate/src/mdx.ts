@@ -1,6 +1,7 @@
 /** Markdown/MDX normalization that preserves every component Thally supports. */
 
 import type * as acorn from 'acorn'
+import { posix } from 'node:path'
 import { compileSync } from '@mdx-js/mdx'
 import { nameToEmoji } from 'gemoji'
 import remarkGfm from 'remark-gfm'
@@ -895,6 +896,77 @@ export function replaceOutsideCode(body: string, transform: (whole: string) => s
 }
 
 /**
+ * Fern authors often link sibling MDX files from Card props and Markdown.
+ * Resolve only links to files that actually became pages; unknown paths,
+ * external URLs, assets, and examples retain their authored destinations.
+ */
+export function rewriteFernRelativePageLinks(
+  body: string,
+  currentSourcePath: string,
+  routesBySourcePath: ReadonlyMap<string, string>,
+): string {
+  const rewrite = (target: string): string => {
+    if (!target || target.startsWith('/') || target.startsWith('#') || target.startsWith('?')
+      || target.includes('\\') || /[\u0000-\u001f\u007f]/.test(target)
+      || /^[A-Za-z][A-Za-z\d+.-]*:/.test(target)) return target
+    const suffixAt = target.search(/[?#]/)
+    const pathname = suffixAt < 0 ? target : target.slice(0, suffixAt)
+    const suffix = suffixAt < 0 ? '' : target.slice(suffixAt)
+    if (!pathname || pathname.startsWith('//') || pathname.split('/').some((part) => /%2f|%5c/i.test(part))) return target
+    const source = posix.normalize(posix.join(posix.dirname(currentSourcePath.replace(/\\/g, '/')), pathname))
+    const candidates = /\.mdx?$/i.test(source) ? [source] : [source, `${source}.mdx`, `${source}.md`, `${source}/index.mdx`, `${source}/index.md`]
+    const route = candidates.map((candidate) => routesBySourcePath.get(candidate)).find(Boolean)
+    return route ? `/${route.replace(/^\/+/, '')}${suffix}` : target
+  }
+  return replaceOutsideCode(body, (text) => text
+    .replace(/(\]\()(<[^>\n]+>|[^\s)]+)(?=\s|\))/g,
+      (_match, opening: string, target: string) => `${opening}${target.startsWith('<') && target.endsWith('>') ? `<${rewrite(target.slice(1, -1))}>` : rewrite(target)}`)
+    .replace(/(\b(?:href|to)\s*=\s*)(["'])([^"'\n]+)\2/g,
+      (_match, opening: string, quote: string, target: string) => `${opening}${quote}${rewrite(target)}${quote}`)
+    .replace(/(\b(?:href|to)\s*=\s*\{\s*)(["'])([^"'\n]+)\2(?=\s*\})/g,
+      (_match, opening: string, quote: string, target: string) => `${opening}${quote}${rewrite(target)}${quote}`))
+}
+
+/** Convert Fern's indented file-list shorthand to Thally's nested Tree nodes. */
+function normalizeFernFileTrees(body: string): string {
+  return replaceOutsideCode(body, (whole) => whole.replace(/<FileTree\s*>\s*\n([\s\S]*?)\n\s*<\/FileTree>/g,
+    (original: string, contents: string) => {
+      const lines = contents.split(/\r?\n/).filter((line) => line.trim())
+      if (!lines.length) return original
+      const nodes: Array<{ indent: number; name: string; isFolder: boolean }> = []
+      for (const line of lines) {
+        const match = /^( *)(?:-|\*|\+)\s+(.+?)\s*$/.exec(line)
+        if (!match || match[1].length % 2 !== 0 || match[2].includes('\u0000')) return original
+        nodes.push({ indent: match[1].length / 2, name: match[2], isFolder: match[2].endsWith('/') })
+      }
+      const output = ['<Tree>']
+      const folders: Array<number> = []
+      for (const node of nodes) {
+        while (folders.length > node.indent) {
+          output.push('</Folder>')
+          folders.pop()
+        }
+        // A child without a parent folder is not a reliable tree. Retain the
+        // Fern source so migration validation can report it explicitly.
+        if (node.indent > folders.length || (node.indent > 0 && folders.length === 0)) return original
+        const name = `{${JSON.stringify(node.name)}}`
+        if (node.isFolder) {
+          output.push(`<Folder name=${name} defaultOpen>`)
+          folders.push(node.indent)
+        } else {
+          output.push(`<File name=${name} />`)
+        }
+      }
+      while (folders.length) {
+        output.push('</Folder>')
+        folders.pop()
+      }
+      output.push('</Tree>')
+      return output.join('\n')
+    }))
+}
+
+/**
  * Converts an HTML comment (`<!-- text -->`) to MDX's own comment syntax
  * (`{/* text *\/}`), skipping fenced/inline code. remark-mdx does not parse
  * `<!-- -->` at all — a real Markdown/Docusaurus source commonly has one
@@ -1441,7 +1513,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   const runDocusaurus = platform === 'docusaurus'
 
   const sourceBody = runDocusaurus && unwrapMdxCodeBlocks ? unwrapDocusaurusMdxCodeBlocks(body) : body
-  let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(runFern ? normalizeFernCallouts(sourceBody) : sourceBody))
+  let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(runFern ? normalizeFernFileTrees(normalizeFernCallouts(sourceBody)) : sourceBody))
   if (runDocusaurus) {
     // Docusaurus resolves GitHub emoji names in Markdown text. Leaving the
     // shortcodes literal makes comparison tables unreadable after import; the
@@ -1495,6 +1567,8 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
           `<a${before}href="${doubleQuoted ?? singleQuoted}"${after}>`
         ))
         .replace(/<\/Link>/g, '</a>')
+        // The repository adapter expands DocCardList from the resolved
+        // sidebar after page discovery. Its source tag has no runtime peer.
         .replace(/<(?:DocCardList|TOCInline)\b[^>]*\/>/g, '')
     }
     if (runMintlify) {

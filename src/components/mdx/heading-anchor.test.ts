@@ -20,4 +20,13 @@ describe('HeadingAnchor', () => {
     expect(markup).not.toContain('<span')
     expect(markup).not.toContain('>#</')
   })
+
+  it('keeps an authored heading link separate from its permalink', () => {
+    const markup = renderToStaticMarkup(createElement(HeadingAnchor, { id: 'details' },
+      createElement('a', { href: '/guide' }, 'Guide details')))
+
+    expect(markup).toContain('<span><a href="/guide">Guide details</a></span>')
+    expect(markup).toContain('<a href="#details"')
+    expect(markup).not.toMatch(/<a[^>]*>[^<]*<a/)
+  })
 })

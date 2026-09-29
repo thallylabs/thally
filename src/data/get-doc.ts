@@ -116,13 +116,17 @@ async function compileDocEntry(
   let frontmatter: DocFrontmatter
 
   if (needsRuntimeCompile(source, filePath, sourceFile.content)) {
-    if (process.env.NODE_ENV === 'development') {
+    if (process.env.NODE_ENV === 'development' && source.kind === 'filesystem') {
       const compiled = await compileMDX<DocFrontmatter>({
         source: cleanedSource,
         components,
         options: {
           parseFrontmatter: true,
+          // Match the build-time MDX compiler: authored exports, expressions,
+          // and local components must render while previewing migrated pages.
+          blockJS: false,
           mdxOptions: {
+            useDynamicImport: true,
             remarkPlugins,
             rehypePlugins,
           },
@@ -131,10 +135,9 @@ async function compileDocEntry(
       content = compiled.content
       frontmatter = compiled.frontmatter
     } else {
-      // Production runtime compiles happen on Cloudflare Workers, where
-      // `compileMDX` is impossible: workerd forbids code generation from
-      // strings, so executing freshly compiled MDX throws EvalError. The
-      // interpreter renders the same pipeline output without codegen.
+      // Remote content remains eval-free in every environment. Production
+      // Workers also forbid code generation from strings, so freshly
+      // published content must use the interpreter.
       const interpreted = await interpretMDX({
         source: cleanedSource,
         components,
@@ -252,18 +255,18 @@ async function compileSnippetFromPath(snippetImportPath: string): Promise<Compon
     return PrecompiledSnippet
   }
 
-  // Same split as compileDocEntry: dev compiles for full MDX fidelity;
-  // production runtime compiles run on workerd, where only the eval-free
-  // interpreter can render freshly published snippet content.
+  // Same trust boundary as compileDocEntry: local development authors can
+  // preview executable MDX, while remote content stays eval-free.
   const content =
-    process.env.NODE_ENV === 'development'
+    process.env.NODE_ENV === 'development' && source.kind === 'filesystem'
       ? (
           await compileMDX({
             source: snippetFile.content,
             components: getMDXComponents({}),
             options: {
               parseFrontmatter: false,
-              mdxOptions: { remarkPlugins, rehypePlugins },
+              blockJS: false,
+              mdxOptions: { useDynamicImport: true, remarkPlugins, rehypePlugins },
             },
           })
         ).content
