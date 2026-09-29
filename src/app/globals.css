@@ -168,6 +168,132 @@ body {
   box-shadow: inset 2px 0 0 hsl(var(--thally-accent));
 }
 
+/* Code blocks — diff markers, focus dimming, and line numbers. */
+.thally-line-add,
+.thally-line-remove {
+  display: inline-block;
+  width: calc(100% + 2rem);
+  margin: 0 -1rem;
+  padding: 0 1rem;
+}
+.thally-line-add {
+  background-color: hsl(142 70% 45% / 0.14);
+  box-shadow: inset 2px 0 0 hsl(142 70% 40%);
+}
+.thally-line-remove {
+  background-color: hsl(0 80% 55% / 0.14);
+  box-shadow: inset 2px 0 0 hsl(0 70% 50%);
+}
+.thally-line-dim {
+  opacity: 0.4;
+}
+.thally-code-lines code {
+  counter-reset: thally-line;
+}
+/* remark-rehype ends every fence with a newline, which Shiki renders as a
+   trailing empty line span. Do not number that artefact. */
+.thally-code-lines code > span:last-child:empty::before {
+  content: none;
+}
+.thally-code-lines code > span::before {
+  counter-increment: thally-line;
+  content: counter(thally-line);
+  display: inline-block;
+  min-width: calc(var(--thally-line-digits, 2) * 1ch);
+  margin-right: 1.25rem;
+  text-align: right;
+  color: hsl(var(--thally-muted-foreground, 0 0% 50%));
+  opacity: 0.6;
+  user-select: none;
+}
+
+/* Non-wrapping fences with tinted lines: stretch the block to the longest line
+   so the tint spans the full scroll width, not just the visible width. */
+pre:not(.whitespace-pre-wrap) code:has(> .thally-line-add, > .thally-line-remove, > .thally-line-highlight) {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+}
+
+/* `lines` + `wrap`: hang wrapped continuation lines past the gutter. The
+   gutter is number width plus its margin; the negative indent pulls only the
+   first line (which holds the number) back to the edge. */
+.thally-code-hang code > span {
+  --thally-gutter: calc(var(--thally-line-digits, 2) * 1ch + 1.25rem);
+  display: inline-block;
+  box-sizing: border-box;
+  width: 100%;
+  padding-left: var(--thally-gutter);
+  text-indent: calc(-1 * var(--thally-gutter));
+}
+.thally-code-hang code > span.thally-line-highlight,
+.thally-code-hang code > span.thally-line-add,
+.thally-code-hang code > span.thally-line-remove {
+  width: calc(100% + 2rem);
+  padding-left: calc(1rem + var(--thally-gutter));
+  padding-right: 1rem;
+}
+.thally-code-hang code > span::before {
+  text-indent: 0;
+}
+
+/* Collapsed `expandable` fences: fade the bottom edge so clipped code reads as
+   continuing. Theme-independent (alpha mask, no colours). */
+.thally-code-collapsed {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
+}
+
+/* Diff lines also carry a +/- glyph so the state is not colour-only (WCAG
+   1.4.1). It is absolutely positioned inside the line's own 1rem left padding
+   (which overlays the pre's 18px padding), so it never shifts code, never
+   meets a `lines` number (those start at 1rem), and is not selectable. */
+.thally-line-add,
+.thally-line-remove {
+  position: relative;
+}
+.thally-line-add::after,
+.thally-line-remove::after {
+  position: absolute;
+  top: 0;
+  left: 0.3rem;
+  width: 0.6rem;
+  text-indent: 0;
+  font-weight: 700;
+  line-height: inherit;
+  user-select: none;
+  pointer-events: none;
+}
+.thally-line-add::after {
+  content: '+';
+  content: '+' / '';
+  color: hsl(142 70% 35%);
+}
+.thally-line-remove::after {
+  content: '\2212';
+  content: '\2212' / '';
+  color: hsl(0 70% 45%);
+}
+.dark .thally-line-add::after {
+  color: hsl(142 70% 60%);
+}
+.dark .thally-line-remove::after {
+  color: hsl(0 85% 68%);
+}
+
+/* Print: expandable fences print in full and the toggle is hidden. */
+@media print {
+  .thally-code-collapsed {
+    max-height: none !important;
+    overflow: visible !important;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .thally-code-toggle {
+    display: none;
+  }
+}
+
 /* Accordion — animate open/close using the Radix content-height CSS var. */
 @keyframes thally-accordion-down {
   from { height: 0; opacity: 0; }
