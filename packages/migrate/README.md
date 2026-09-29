@@ -21,8 +21,11 @@ tab/anchor/dropdown/product/version, e.g. `navigation.tabs[].openapi` — and
 binds to that exact tab, not only the first one found. An `openapi` item inside
 a tab `menu` (string or `{ source, directory }`) becomes its own API tab named
 `<Tab>: <Item>`, so its endpoints appear in the sidebar; when it is the tab's
-only content it binds to the tab itself. An item Thally cannot represent
-produces a warning naming it. Remote `http://` and
+only content it binds to the tab itself. The item's `icon` and `hidden` carry
+onto that tab, and a `directory` output folder is not used (a warning says so:
+endpoint pages are generated under `/api/`). An item Thally cannot represent
+produces a warning naming it. Specs that share a file name across folders are
+kept as separate files in `openapi/`. Remote `http://` and
 `https://` specs are not downloaded during migration. The report names each
 remote URL and tells you to add its spec to a project-root folder such as
 `openapi/`, then set the API source in `docs.json` to that path. Missing local
