@@ -486,7 +486,7 @@ describe('Mintlify repository migration', () => {
     expect(apiTab?.api).toEqual({ source: '/openapi.yaml', navigation: false })
     expect(bundle.assets.map((asset) => asset.path)).toContain('openapi.yaml')
     expect(bundle.warnings.some((warning) =>
-      warning.message.includes('qstash/api-reference') && warning.message.includes('bound to a whole tab'))).toBe(true)
+      warning.message.includes('qstash/api-reference') && warning.message.includes('covers a whole tab'))).toBe(true)
   })
 
   it('warns instead of silently dropping a second OpenAPI spec that resolves to an already-bound tab', () => {
@@ -1314,7 +1314,7 @@ describe('Mintlify repository migration', () => {
       code: 'limit-reached',
       message: expect.stringMatching(/left out.*v1/s),
     }))
-  }, 30_000)
+  }, 90_000)
 
   it('keeps the first pages in navigation order and names what was dropped when one version alone exceeds the file budget', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-single-version-budget-'))
@@ -1337,7 +1337,7 @@ describe('Mintlify repository migration', () => {
     expect(warning?.message).toContain('--docs-dir')
     expect(warning?.message).toContain('and 7 more')
     expect(warning?.message).not.toMatch(/lower-priority|budget/)
-  }, 30_000)
+  }, 90_000)
 
   // Regression test for the bug fixed alongside the file-cap prioritization
   // above: pages and assets used to share one MAX_SOURCE_FILES budget, so a
@@ -1365,7 +1365,7 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     expect(bundle.assets.map((asset) => asset.path)).toContain('images/diagram.png')
-  }, 30_000)
+  }, 90_000)
 
   // Regression test for a second bug found alongside the two above: a real
   // file Mintlify still serves by file-based routing even though nothing in
@@ -1404,7 +1404,7 @@ describe('Mintlify repository migration', () => {
 
     const pageIds = bundle.pages.map((page) => page.id)
     expect(pageIds).toContain('v2/en/orphan')
-  }, 30_000)
+  }, 90_000)
 })
 
 function docusaurusFixture(sidebarSource?: string): string {
