@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- loosely typed spec fixtures */
 import { describe, expect, it } from 'vitest'
 import { sanitizeSpecForPublication } from '@/lib/openapi/sanitize'
-import type { OpenAPIDocument } from '@/lib/openapi/types'
+import { normalizeSpec } from '@/lib/openapi/normalize'
+import type { OpenAPIDocument, ResolvedSpec } from '@/lib/openapi/types'
 
 const ref = (name: string, type = 'schemas') => ({ $ref: `#/components/${type}/${name}` })
 const json = (schema: unknown) => ({ content: { 'application/json': { schema } } })
@@ -138,3 +139,183 @@ function baseSpecWithoutFlag() {
   spec.paths['/pub'].get['x-excluded'] = false
   return spec
 }
+
+describe('path item $refs (sanitize and normalize agree)', () => {
+  const ok = { responses: { 200: { description: 'ok' } } }
+  const doc = (extra: Record<string, any>): Record<string, any> => ({
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    paths: {},
+    ...extra,
+  })
+  const shared = (over: Record<string, any> = {}) => ({ pathItems: { Shared: { get: { ...ok, ...over } } } })
+  const pi = (name = 'Shared') => ({ $ref: `#/components/pathItems/${name}` })
+  const nav = (document: Record<string, any>, overrides: Record<string, any> = {}) =>
+    normalizeSpec({
+      config: { id: 'x', label: 'X', source: { type: 'inline', document }, operationOverrides: overrides },
+      document,
+    } as unknown as ResolvedSpec).operations.filter((o) => !o.hidden).map((o) => o.key).sort()
+  const run = (document: Record<string, any>, overrides: Record<string, any> = {}) => {
+    const out = sanitizeSpecForPublication(document as OpenAPIDocument, { overrides }) as Record<string, any>
+    // Whatever survives publication must show in nav, and nothing else may.
+    expect(nav(out, overrides)).toEqual(nav(document, overrides))
+    return out
+  }
+
+  it('hides a path with x-hidden next to $ref (reviewer repro: /private)', () => {
+    const spec = doc({ paths: { '/private': { ...pi(), 'x-hidden': true }, '/open': { get: ok } }, components: shared() })
+    const out = run(spec)
+    expect(Object.keys(out.paths)).toEqual(['/open'])
+    expect(out.components.pathItems).toEqual({})
+    expect(nav(spec)).toEqual(['GET /open'])
+  })
+
+  it('x-excluded next to $ref drops the path; string "true" works', () => {
+    for (const flag of [true, 'true']) {
+      const out = run(doc({ paths: { '/p': { ...pi(), 'x-excluded': flag } }, components: shared() }))
+      expect(out.paths).toEqual({})
+    }
+  })
+
+  it('a hidden override on one of two paths sharing an item leaves the other intact (reviewer repro)', () => {
+    const spec = doc({ paths: { '/public': pi(), '/hidden': pi() }, components: shared() })
+    const out = run(spec, { 'GET /hidden': { hidden: true } })
+    expect(Object.keys(out.paths)).toEqual(['/public'])
+    expect(out.paths['/public']).toEqual(pi())
+    expect(out.components.pathItems.Shared.get).toBeDefined()
+    expect(nav(spec, { 'GET /hidden': { hidden: true } })).toEqual(['GET /public'])
+  })
+
+  it('a sibling flag on one of two paths sharing an item leaves the other intact', () => {
+    const spec = doc({ paths: { '/public': pi(), '/hidden': { ...pi(), 'x-hidden': true } }, components: shared() })
+    const out = run(spec)
+    expect(out.paths).toEqual({ '/public': pi() })
+    expect(out.components.pathItems.Shared.get).toBeDefined()
+  })
+
+  it('an override hiding one method filters only that path, keeping the others as a copy', () => {
+    const spec = doc({
+      paths: { '/a': { ...pi(), summary: 'kept' }, '/b': pi() },
+      components: { pathItems: { Shared: { get: ok, post: ok } } },
+    })
+    const out = run(spec, { 'POST /a': { hidden: true } })
+    expect(out.paths['/a']).toMatchObject({ summary: 'kept', get: ok })
+    expect(out.paths['/a'].$ref).toBeUndefined()
+    expect(out.paths['/a'].post).toBeUndefined()
+    expect(out.paths['/b']).toEqual(pi())
+    expect(out.components.pathItems.Shared.post).toBeDefined()
+  })
+
+  it('override keyed to one path does not apply to a path sharing the item', () => {
+    const spec = doc({ paths: { '/a': pi(), '/b': pi() }, components: shared() })
+    const out = run(spec, { 'GET /a': { hidden: true } })
+    expect(Object.keys(out.paths)).toEqual(['/b'])
+  })
+
+  it('override hidden:false wins over an item-level x-hidden', () => {
+    const spec = doc({
+      paths: { '/a': pi(), '/b': pi() },
+      components: { pathItems: { Shared: { 'x-hidden': true, get: ok } } },
+    })
+    const out = run(spec, { 'GET /a': { hidden: false } })
+    expect(Object.keys(out.paths)).toEqual(['/a'])
+  })
+
+  it('x-excluded on the referenced item applies to every referrer; op-level flag applies too', () => {
+    const out = run(doc({ paths: { '/a': pi(), '/b': pi() }, components: { pathItems: { Shared: { 'x-excluded': true, get: ok } } } }))
+    expect(out.paths).toEqual({})
+    const out2 = run(doc({ paths: { '/a': pi(), '/b': pi() }, components: shared({ 'x-hidden': true }) }))
+    expect(out2.paths).toEqual({})
+    expect(out2.components.pathItems).toEqual({})
+  })
+
+  it('follows ref chains and #/paths aliases without dangling', () => {
+    const spec = doc({
+      paths: {
+        '/real': { ...pi('B'), 'x-hidden': true },
+        '/alias': { $ref: '#/paths/~1real' },
+        '/chain': pi('A'),
+        '/other': { get: ok },
+      },
+      components: { pathItems: { A: pi('B'), B: { get: ok } } },
+    })
+    const out = run(spec)
+    expect(Object.keys(out.paths).sort()).toEqual(['/chain', '/other'])
+  })
+
+  it('a flag on the target path also hides an alias (flag lives on the referenced item)', () => {
+    const spec = doc({ paths: { '/real': { 'x-hidden': true, get: ok }, '/alias': { $ref: '#/paths/~1real' } } })
+    expect(Object.keys(run(spec).paths)).toEqual([])
+  })
+
+  it('an alias of a filtered path is inlined, not left dangling', () => {
+    const spec = doc({
+      paths: { '/real': { ...pi(), 'x-hidden': true }, '/alias': { $ref: '#/paths/~1real' } },
+      components: shared(),
+    })
+    expect(run(spec).paths).toEqual({})
+    const s2 = doc({
+      paths: { '/real': { get: ok, post: ok }, '/alias': { $ref: '#/paths/~1real' } },
+    })
+    const out = run(s2, { 'POST /real': { hidden: true } })
+    expect(out.paths['/real'].post).toBeUndefined()
+    expect(out.paths['/alias']).toMatchObject({ get: ok, post: ok })
+  })
+
+  it('handles webhooks and x-webhooks the same way', () => {
+    const spec = doc({
+      webhooks: { hidden: { ...pi(), 'x-hidden': true }, open: pi(), viaOverride: pi() },
+      'x-webhooks': { legacy: { ...pi(), 'x-excluded': true } },
+      components: shared(),
+    })
+    const out = run(spec, { 'WEBHOOK GET viaOverride': { hidden: true } })
+    expect(Object.keys(out.webhooks)).toEqual(['open'])
+    expect(out['x-webhooks']).toEqual({})
+  })
+
+  it('prunes a pathItem only when no path references it any more', () => {
+    const both = doc({ paths: { '/a': { ...pi(), 'x-hidden': true }, '/b': pi() }, components: shared() })
+    expect(run(both).components.pathItems.Shared).toBeDefined()
+    const none = doc({ paths: { '/a': { ...pi(), 'x-hidden': true } }, components: shared() })
+    expect(run(none).components.pathItems.Shared).toBeUndefined()
+  })
+
+  it('does not mutate a shared inline object (yaml anchors) or the input', () => {
+    const sharedObj = { get: ok, post: ok }
+    const spec = doc({ paths: { '/a': sharedObj, '/b': sharedObj } })
+    const copy = structuredClone(spec)
+    const out = run(spec, { 'POST /a': { hidden: true } })
+    expect(out.paths['/b'].post).toBeDefined()
+    expect(out.paths['/a'].post).toBeUndefined()
+    expect(spec).toEqual(copy)
+  })
+
+  it('removes the path when every method is removed', () => {
+    const spec = doc({ paths: { '/a': { $ref: '#/components/pathItems/Two' } }, components: { pathItems: { Two: { get: ok, put: ok } } } })
+    const out = run(spec, { 'GET /a': { hidden: true }, 'PUT /a': { hidden: true } })
+    expect(out.paths).toEqual({})
+  })
+
+  it('never crashes on external, missing or circular refs; honours the entry flag, keeps unflagged entries', () => {
+    const spec = doc({
+      paths: {
+        '/ext-hidden': { $ref: 'other.yaml#/paths/x', 'x-hidden': true },
+        '/ext-excluded': { $ref: 'https://example.com/x.yaml', 'x-excluded': true },
+        '/ext-open': { $ref: 'other.yaml#/paths/y' },
+        '/missing-hidden': { $ref: '#/components/pathItems/Nope', 'x-hidden': true },
+        '/loop-hidden': { $ref: '#/paths/~1loop-b', 'x-hidden': true },
+        '/loop-b': { $ref: '#/paths/~1loop-hidden' },
+        '/fine': { get: ok },
+      },
+    })
+    const out = sanitizeSpecForPublication(spec as OpenAPIDocument) as Record<string, any>
+    expect(Object.keys(out.paths).sort()).toEqual(['/ext-open', '/fine'])
+    expect(() => nav(spec)).not.toThrow()
+  })
+
+  it('a hidden path item with an op-level x-hidden and no references is stripped from components', () => {
+    const spec = doc({ paths: { '/a': { get: ok } }, components: shared({ 'x-hidden': true }) })
+    const out = run(spec)
+    expect(out.components.pathItems).toEqual({})
+  })
+})

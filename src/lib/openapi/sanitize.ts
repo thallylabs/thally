@@ -8,10 +8,9 @@
  * together with any component only they referenced.
  */
 
-import { HTTP_METHODS, buildOperationKey, isExtensionSet } from './operation-keys'
+import { HTTP_METHODS, buildOperationKey } from './operation-keys'
+import { isObj, methodsOf, operationVisibility, unescapePointer, viewPathEntry, type Obj } from './path-items'
 import type { OpenAPIDocument, OperationOverride } from './types'
-
-type Obj = Record<string, unknown>
 
 // Component maps we may prune. securitySchemes (and anything else) is always kept.
 const PRUNABLE = new Set([
@@ -25,12 +24,6 @@ const PRUNABLE = new Set([
   'links',
   'pathItems',
 ])
-
-const isObj = (value: unknown): value is Obj =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-
-const unescapePointer = (segment: string) =>
-  decodeURIComponent(segment).replace(/~1/g, '/').replace(/~0/g, '~')
 
 /** `#/components/<type>/<name>[/...]` -> `<type>/<name>` (name pointer-decoded), else null. */
 function componentKey(ref: string): string | null {
@@ -82,72 +75,114 @@ function reachableComponents(document: Obj): Set<string> {
   return found
 }
 
-function opsOf(item: Obj) {
-  return HTTP_METHODS.filter((method) => isObj(item[method]))
-}
-
 function collectTags(op: Obj, into: Set<string>) {
   if (Array.isArray(op.tags)) for (const tag of op.tags) if (typeof tag === 'string') into.add(tag)
 }
 
+/**
+ * Remove excluded / hidden operations from a document for publication.
+ *
+ * Each `paths` / `webhooks` entry is evaluated on its own (see `path-items.ts`):
+ * flags may sit on the entry next to a `$ref`, on any referenced item, or on the
+ * operation, and docs.json overrides apply per path + method. A shared path item
+ * is never edited: an entry that needs filtering is replaced by a filtered deep
+ * copy of its resolved item, so other referrers keep the full definition. The
+ * shared item is pruned from `components.pathItems` only once nothing references it.
+ *
+ * Fail-safe for refs that cannot be followed (external file, missing, circular):
+ * flags on the reachable levels still apply and an entry carrying `x-excluded` /
+ * `x-hidden` is dropped; an unflagged entry is left as written, since its
+ * operations cannot be evaluated.
+ */
 export function sanitizeSpecForPublication(
   document: OpenAPIDocument,
   options: { overrides?: Record<string, OperationOverride> } = {},
 ): OpenAPIDocument {
   const doc = structuredClone(document) as Obj
   const removedTags = new Set<string>()
-  const emptied = new WeakSet<object>()
   let removed = false
 
-  const componentPathItems = isObj(doc.components) && isObj(doc.components.pathItems) ? doc.components.pathItems : {}
-  const resolveItem = (raw: Obj): Obj => {
-    const key = typeof raw.$ref === 'string' ? componentKey(raw.$ref) : null
-    const target = key?.startsWith('pathItems/') ? componentPathItems[key.slice('pathItems/'.length)] : undefined
-    return isObj(target) ? target : raw
+  const dropOperations = (item: Obj, gone: Array<(typeof HTTP_METHODS)[number]>) => {
+    for (const method of gone) {
+      collectTags(item[method] as Obj, removedTags)
+      delete item[method]
+    }
+    removed = true
   }
 
-  const filterItems = (items: unknown, isWebhook: boolean, dropEntries = true) => {
+  // Everything is resolved against the untouched input, never the document being edited.
+  const filterEntries = (items: unknown, isWebhook: boolean) => {
     if (!isObj(items)) return
     for (const [path, raw] of Object.entries(items)) {
       if (!isObj(raw)) continue
-      const item = resolveItem(raw)
-      const before = opsOf(item)
-      for (const method of before) {
-        const op = item[method] as Obj
-        const override = options.overrides?.[buildOperationKey(method, path, isWebhook)]?.hidden
-        const hidden =
-          isExtensionSet(op['x-excluded']) ||
-          isExtensionSet(item['x-excluded']) ||
-          (override ??
-            (isExtensionSet(op['x-hidden']) || isExtensionSet(item['x-hidden'])))
-        if (!hidden) continue
-        collectTags(op, removedTags)
-        delete item[method]
-        removed = true
-      }
-      const nowEmpty = opsOf(item).length === 0
-      if (nowEmpty && before.length > 0) emptied.add(item)
-      if (dropEntries && ((nowEmpty && emptied.has(item)) || isExtensionSet(raw['x-excluded']) || isExtensionSet(item['x-excluded']))) {
+      const view = viewPathEntry(document, raw)
+      if (view.excluded || (!view.complete && view.hidden)) {
+        for (const method of methodsOf(view.item)) collectTags(view.item[method] as Obj, removedTags)
         delete items[path]
         removed = true
+        continue
       }
+      const gone = methodsOf(view.item).filter(
+        (method) =>
+          operationVisibility(view, method, options.overrides?.[buildOperationKey(method, path, isWebhook)]) !== 'visible',
+      )
+      if (!gone.length) continue
+      const copy = structuredClone(view.item)
+      delete copy['x-excluded']
+      delete copy['x-hidden']
+      dropOperations(copy, gone)
+      if (methodsOf(copy).length) items[path] = copy
+      else delete items[path]
     }
   }
 
-  filterItems(componentPathItems, false, false)
-  filterItems(doc.paths, false)
-  filterItems(doc.webhooks, true)
-  filterItems(doc['x-webhooks'], true)
+  filterEntries(doc.paths, false)
+  filterEntries(doc.webhooks, true)
+  filterEntries(doc['x-webhooks'], true)
+
+  // Component path items nothing references any more are not published paths, but
+  // their flagged operations must not linger in the download.
+  if (isObj(doc.components) && isObj(doc.components.pathItems)) {
+    const items = doc.components.pathItems
+    const reachable = reachableComponents(doc)
+    for (const [name, raw] of Object.entries(items)) {
+      if (!isObj(raw) || reachable.has(`pathItems/${name}`)) continue
+      const view = viewPathEntry(document, raw)
+      if (view.excluded) {
+        dropOperations(view.item, methodsOf(view.item))
+        delete items[name]
+        continue
+      }
+      const gone = methodsOf(view.item).filter((method) => operationVisibility(view, method) !== 'visible')
+      if (!gone.length) continue
+      dropOperations(raw, gone)
+      if (!methodsOf(raw).length) delete items[name]
+    }
+  }
 
   if (!removed) return document
 
+  // An entry aliasing another path (`#/paths/...`) would dangle if that path was
+  // filtered above: inline its original definition instead.
+  for (const items of [doc.paths, doc.webhooks, doc['x-webhooks']]) {
+    if (!isObj(items)) continue
+    for (const [path, raw] of Object.entries(items)) {
+      if (!isObj(raw) || typeof raw.$ref !== 'string') continue
+      const view = viewPathEntry(document, raw)
+      const aliasesPath = view.chain.some((level) => typeof level.$ref === 'string' && !level.$ref.startsWith('#/components/'))
+      if (view.complete && aliasesPath) items[path] = structuredClone(view.item)
+    }
+  }
+
   // Tags: drop only those used by removed operations and by no kept one.
   const keptTags = new Set<string>()
+  const componentPathItems = isObj(doc.components) && isObj(doc.components.pathItems) ? doc.components.pathItems : {}
   for (const items of [doc.paths, doc.webhooks, doc['x-webhooks'], componentPathItems]) {
     if (!isObj(items)) continue
-    for (const item of Object.values(items)) {
-      if (!isObj(item)) continue
-      for (const method of opsOf(resolveItem(item))) collectTags(resolveItem(item)[method] as Obj, keptTags)
+    for (const entry of Object.values(items)) {
+      if (!isObj(entry)) continue
+      const { item } = viewPathEntry(document, entry)
+      for (const method of methodsOf(item)) collectTags(item[method] as Obj, keptTags)
     }
   }
   const dropTag = (name: unknown) => typeof name === 'string' && removedTags.has(name) && !keptTags.has(name)

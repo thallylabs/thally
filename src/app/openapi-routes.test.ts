@@ -140,4 +140,37 @@ describe('public OpenAPI routes', () => {
       expect(body).not.toContain('InternalOnly')
     }
   })
+
+  it('does not publish $ref paths hidden by a sibling flag or a docs.json override', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/openapi/fetch')>('@/lib/openapi/fetch')
+    const ok = { get: { responses: { 200: { description: 'ok' } } } }
+    mocks.specs.push({
+      id: 'ref-paths',
+      label: 'API refs',
+      operationOverrides: { 'GET /hidden': { hidden: true } },
+      source: {
+        type: 'inline',
+        document: {
+          openapi: '3.1.0',
+          info: { title: 'T', version: '1' },
+          paths: {
+            '/private': { $ref: '#/components/pathItems/Secret', 'x-hidden': true },
+            '/public': { $ref: '#/components/pathItems/Shared' },
+            '/hidden': { $ref: '#/components/pathItems/Shared' },
+          },
+          components: { pathItems: { Secret: ok, Shared: ok } },
+        },
+      },
+    })
+    mocks.loadSpecDocument.mockImplementation((c) => actual.loadSpecDocument(c))
+
+    const json = await (await getJson(new NextRequest('https://docs.example.com/openapi.json'))).json()
+    const yaml = parseYaml(await (await getYaml(new NextRequest('https://docs.example.com/openapi.yaml'))).text())
+
+    for (const document of [json, yaml]) {
+      expect(Object.keys(document.paths)).toEqual(['/public'])
+      expect(document.components.pathItems.Shared).toBeDefined()
+      expect(document.components.pathItems.Secret).toBeUndefined()
+    }
+  })
 })
