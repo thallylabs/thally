@@ -59,6 +59,7 @@ import {
   readMintlifyConfig,
   type MintlifyApiSpecReference,
 } from './navigation.js'
+import { projectMintlifyIntegrations } from './analytics.js'
 import {
   normalizeAssetPath,
   mintlifyLocalizedReference,
@@ -3083,6 +3084,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     docsConfig = { ...docsConfig, navbar: { ...docsConfig.navbar, logo: null } }
   }
   if (mintlifyConfig) {
+    const analytics = projectMintlifyIntegrations(mintlifyConfig)
+    warnings.push(...analytics.warnings)
+    if (analytics.integrations) docsConfig = { ...docsConfig, integrations: analytics.integrations }
     const appearance = mintlifyConfig.appearance && typeof mintlifyConfig.appearance === 'object'
       ? mintlifyConfig.appearance as Record<string, unknown> : null
     const defaultMode = appearance?.default

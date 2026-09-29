@@ -121,6 +121,10 @@ export function mergeMigrationConfig(
     // architecture; starter defaults must not coerce source dropdowns to tabs.
     navigation: incoming.navigation ?? existing.navigation,
     ...(i18n ? { i18n } : {}),
+    // Existing providers win per provider; imported ones fill the gaps.
+    ...(existing.integrations || incoming.integrations
+      ? { integrations: { ...incoming.integrations, ...existing.integrations } }
+      : {}),
   }
 }
 

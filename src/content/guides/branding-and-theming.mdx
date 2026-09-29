@@ -225,9 +225,27 @@ The defaults are **Inter** (body) and **JetBrains Mono** (code). The monospace f
 
 ## Third-party analytics scripts
 
-Initialize Google Analytics, Plausible, or PostHog by setting one or more
-providers in `siteConfig.analytics`. Thally's root layout renders the provider
-loader when this object is present, so you do not need to edit the layout.
+Load Google Analytics 4, Google Tag Manager, Plausible, or PostHog from
+`docs.json` or `siteConfig.analytics`. Thally's root layout renders each
+configured provider once, so you do not need to edit the layout.
+
+The `docs.json` form uses Mintlify's `integrations` shape, so a migrated site
+works unchanged:
+
+```json
+"integrations": {
+  "ga4": { "measurementId": "G-XXXXXXXXXX" },
+  "gtm": { "tagId": "GTM-XXXXXXX" },
+  "plausible": { "domain": "docs.yourproduct.com", "server": "plausible.yourproduct.com" },
+  "posthog": { "apiKey": "phc_...", "apiHost": "https://us.i.posthog.com", "sessionRecording": true }
+}
+```
+
+`plausible.server` is only for a self-hosted instance (hostname, no `https://`).
+`posthog.apiHost` defaults to `https://us.i.posthog.com`, and
+`sessionRecording: false` disables recordings while keeping analytics.
+
+The code form in `src/data/site.ts` keeps working:
 
 ```ts
 export const siteConfig: SiteConfig = {
@@ -236,6 +254,7 @@ export const siteConfig: SiteConfig = {
     googleAnalyticsId: 'G-XXXXXXXXXX',
     // or
     plausibleDomain: 'docs.yourproduct.com',
+    plausibleScriptUrl: 'https://plausible.io/js/script.js',
     // or
     posthogKey: 'phc_...',
     posthogHost: 'https://us.i.posthog.com',
@@ -243,9 +262,28 @@ export const siteConfig: SiteConfig = {
 }
 ```
 
-Leave `analytics` undefined when you do not want these third-party scripts.
-This setting loads the provider SDKs; it does not replace provider-specific
-single-page navigation, custom-event, privacy, or consent configuration.
+Both can be used together. Each provider is resolved independently:
+`siteConfig.analytics` wins for a provider it sets, and `docs.json` fills the
+providers it does not. Fields are never mixed between the two sources for one
+provider. `siteConfig.analytics` is your own code, so its values are used as
+written. Google Tag Manager is configured in `docs.json` only.
+
+`docs.json` values can be edited outside code review, so they are validated
+before they are placed in a script. An invalid value skips that provider with a
+console warning (the value itself is never logged):
+
+| Provider | Accepted |
+| --- | --- |
+| GA4 | `G-` followed by 4-20 uppercase letters or digits (Universal Analytics `UA-` IDs are unsupported) |
+| GTM | `GTM-` followed by 4-12 uppercase letters or digits |
+| PostHog | `phc_` project key; `apiHost` an `https://` origin, optionally with a path such as a reverse proxy, without credentials, query, or fragment |
+| Plausible | One or more comma-separated hostnames; `server` a hostname (a pasted `https://` origin is accepted) |
+
+Leave both unset when you do not want third-party scripts. These settings load
+the provider SDKs; they do not replace provider-specific single-page
+navigation, custom-event, privacy, or consent configuration. Thally sets no
+Content-Security-Policy, so no extra allow-list is needed; if you add one, allow
+only the hosts of the providers you enable.
 
 ## Version switcher
 
