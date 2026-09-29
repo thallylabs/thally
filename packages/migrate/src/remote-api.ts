@@ -217,7 +217,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
         ? tabs.find((candidate) => candidate.tab === reference.tabLabel)
         : tabs.find((candidate) => candidate.tab.toLowerCase().includes('api'))
       if (tab) tab.api = { source: `openapi/${filename}` }
-      else insertApiTab(tabs, { tab: reference.tabLabel ?? 'API Reference', api: { source: `openapi/${filename}` } }, reference.parentTab)
+      else insertApiTab(tabs, { tab: reference.tabLabel ?? 'API Reference', ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}), api: { source: `openapi/${filename}` } }, reference.parentTab)
 
       const routes = new Map<string, string | null>()
       for (const operation of operations) {

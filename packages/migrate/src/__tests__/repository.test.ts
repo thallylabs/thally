@@ -540,6 +540,60 @@ describe('Mintlify repository migration', () => {
       ])
     })
 
+    it('carries a menu item icon and hidden flag onto its API tab', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [
+          { item: 'Guide', pages: ['guide'] },
+          { item: 'Public', icon: 'code', openapi: 'openapi.json' },
+          { item: 'Internal', hidden: true, openapi: 'a.json' },
+        ],
+      }], ['openapi.json', 'a.json'])
+      expect(bundle.docsConfig.tabs.map((tab) => [tab.tab, tab.icon, tab.hidden])).toEqual([
+        ['Docs', undefined, undefined],
+        ['Docs: Public', 'code', undefined],
+        ['Docs: Internal', undefined, true],
+      ])
+    })
+
+    it('keeps same-named menu items under different versions bound to their own specs', () => {
+      const root = fixture()
+      writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+      writeFileSync(join(root, 'v1.json'), spec)
+      writeFileSync(join(root, 'v2.json'), `${spec}\n`)
+      const menu = (file: string) => [{ item: 'Guide', pages: ['guide'] }, { item: 'REST', openapi: file }]
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { versions: [
+        { version: 'v1', tabs: [{ tab: 'Docs', menu: menu('v1.json') }] },
+        { version: 'v2', tabs: [{ tab: 'Docs', menu: menu('v2.json') }] },
+      ] } }))
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      expect(bundle.docsConfig.tabs.filter((tab) => tab.api).map((tab) => tab.api?.source).sort()).toEqual(['openapi/v1.json', 'openapi/v2.json'])
+    })
+
+    it('keeps two different specs with the same file name from different folders', () => {
+      const root = fixture()
+      mkdirSync(join(root, 'v1'))
+      mkdirSync(join(root, 'v2'))
+      writeFileSync(join(root, 'v1/openapi.json'), spec)
+      writeFileSync(join(root, 'v2/openapi.json'), `${spec}\n# v2`)
+      writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { tabs: [
+        { tab: 'V1', openapi: 'v1/openapi.json' },
+        { tab: 'V2', openapi: 'v2/openapi.json' },
+      ] } }))
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      expect(bundle.docsConfig.tabs.flatMap((tab) => (tab.api ? [tab.api.source] : []))).toEqual(['openapi/openapi.json', 'openapi/v2-openapi.json'])
+      expect(bundle.assets.map((asset) => asset.path).filter((path) => path.startsWith('openapi/')).sort()).toEqual(['openapi/openapi.json', 'openapi/v2-openapi.json'])
+    })
+
+    it('warns that a { source, directory } output folder is not used', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [{ item: 'Guide', pages: ['guide'] }, { item: 'Ref', openapi: { source: 'openapi.json', directory: 'ref' } }],
+      }])
+      expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('directory "ref"')
+    })
+
     it('warns about an API menu item it cannot represent instead of dropping it silently', () => {
       const bundle = migrateMenu([{
         tab: 'Docs',

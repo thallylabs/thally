@@ -288,6 +288,11 @@ export interface MintlifyApiSpecReference {
   tabLabel?: string
   /** Set when `tabLabel` is a per-item sibling tab (`<Tab>: <Item>`): the tab it should be placed after. */
   parentTab?: string
+  /** Menu-item presentation carried onto its sibling tab. */
+  icon?: string
+  hidden?: boolean
+  /** Mintlify's `{ source, directory }` output folder, which Thally does not use (endpoints live under `/api/`). */
+  directory?: string
 }
 
 /** `openapi`/`asyncapi` is a path/URL string, or Mintlify's `{ source, directory }` object. */
@@ -320,11 +325,27 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
   const containerKeys = ['tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus', 'languages'] as const
   const nestedKeys = ['groups', 'pages'] as const
 
-  function collect(node: Record<string, unknown>, tabLabel: string | undefined, parentTab?: string): void {
+  function collect(node: Record<string, unknown>, tabLabel: string | undefined, sibling?: Pick<MintlifyApiSpecReference, 'parentTab' | 'icon' | 'hidden'>): void {
     for (const kind of ['openapi', 'asyncapi'] as const) {
       const value = specSource(node[kind])
-      if (value) references.push({ value, kind, tabLabel, ...(parentTab ? { parentTab } : {}) })
+      const directory = objectValue(node[kind])?.directory
+      if (value) {
+        references.push({
+          value, kind, tabLabel, ...sibling,
+          ...(typeof directory === 'string' && directory.trim() ? { directory: directory.trim() } : {}),
+        })
+      }
     }
+  }
+
+  // Two menu items can share a label (the same item name under two versions):
+  // keep both tabs instead of letting the later spec replace the earlier one.
+  const siblingSources = new Map<string, string>()
+  function uniqueSiblingLabel(label: string, source: string): string {
+    let candidate = label
+    for (let n = 2; siblingSources.has(candidate) && siblingSources.get(candidate) !== source; n++) candidate = `${label} (${n})`
+    siblingSources.set(candidate, source)
+    return candidate
   }
 
   function visitChildren(node: Record<string, unknown>, tabLabel: string | undefined): void {
@@ -360,7 +381,14 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
       const soleContent = apiItems.length === 1 && !hasNavigationChildren(node) && !items.some(hasNavigationChildren)
       items.forEach((item, index) => {
         if (soleContent && apiItems[0] === item) collect(item, tab)
-        else collect(item, `${tab}: ${labelFor(item, `Menu item ${index + 1}`)}`, tab)
+        else if (apiItems.includes(item)) {
+          const label = uniqueSiblingLabel(
+            `${tab}: ${labelFor(item, `Menu item ${index + 1}`)}`,
+            `${specSource(item.openapi) ?? ''}|${specSource(item.asyncapi) ?? ''}`,
+          )
+          const icon = iconName(item.icon)
+          collect(item, label, { parentTab: tab, ...(icon ? { icon } : {}), ...(item.hidden === true ? { hidden: true } : {}) })
+        }
         visitChildren(item, tabLabel)
       })
     }

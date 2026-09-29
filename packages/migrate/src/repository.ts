@@ -1003,6 +1003,10 @@ interface ResolvedApiSpec {
   tabLabel?: string
   /** `tabLabel` is a per-menu-item sibling tab; place it after this tab. */
   parentTab?: string
+  icon?: string
+  hidden?: boolean
+  /** Repository-relative source path, used to keep same-named specs apart. */
+  relativePath?: string
 }
 
 function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): Array<MintlifyApiSpecReference> {
@@ -1035,7 +1039,7 @@ function resolveMintlifyApiSpecs(
   mintlifyConfig: Record<string, unknown> | null,
   files: Array<ScannedFile>,
   warnings: Array<MigrationWarning>,
-  remoteSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string }>,
+  remoteSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>,
 ): Array<ResolvedApiSpec> {
   if (!mintlifyConfig) return []
   const references = [
@@ -1049,6 +1053,12 @@ function resolveMintlifyApiSpecs(
     if (seen.has(dedupeKey)) continue
     seen.add(dedupeKey)
     const tabSuffix = reference.tabLabel ? ` (tab "${reference.tabLabel}")` : ''
+    if (reference.directory) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `The OpenAPI reference "${reference.value}"${tabSuffix} sets directory "${reference.directory}", which Thally does not use; its endpoint pages are generated under /api/ instead. Add redirects if you need the old URLs.`,
+      })
+    }
     if (reference.kind === 'asyncapi') {
       warnings.push({
         code: 'unsupported-config',
@@ -1057,7 +1067,7 @@ function resolveMintlifyApiSpecs(
       continue
     }
     if (/^https:\/\//i.test(reference.value)) {
-      remoteSpecs.push({ url: reference.value, ...(reference.tabLabel ? { tabLabel: reference.tabLabel } : {}), ...(reference.parentTab ? { parentTab: reference.parentTab } : {}) })
+      remoteSpecs.push({ url: reference.value, ...(reference.tabLabel ? { tabLabel: reference.tabLabel } : {}), ...(reference.parentTab ? { parentTab: reference.parentTab } : {}), ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}) })
       warnings.push({
         code: 'unsupported-config',
         message: `The remote OpenAPI spec "${reference.value}"${tabSuffix} requires a network download before this import is complete.`,
@@ -1078,7 +1088,7 @@ function resolveMintlifyApiSpecs(
       })
       continue
     }
-    specs.push({ filename: basename(match.relativePath), content: readFileSync(match.absolutePath), tabLabel: reference.tabLabel, parentTab: reference.parentTab })
+    specs.push({ filename: basename(match.relativePath), content: readFileSync(match.absolutePath), tabLabel: reference.tabLabel, parentTab: reference.parentTab, icon: reference.icon, hidden: reference.hidden, relativePath: match.relativePath })
   }
   return specs
 }
@@ -1910,7 +1920,7 @@ function inlineMdxSnippets(
  * substring fallback, so two specs from two different tabs can never both
  * land on the same tab by accident.
  */
-function injectOpenApiSpecs(config: MigrationDocsConfig, specs: Array<{ filename: string; tabLabel?: string; parentTab?: string }>): MigrationDocsConfig {
+function injectOpenApiSpecs(config: MigrationDocsConfig, specs: Array<{ filename: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>): MigrationDocsConfig {
   const tabs = config.tabs.map((tab) => ({ ...tab }))
   for (const spec of specs) {
     const apiTab = spec.tabLabel
@@ -1922,7 +1932,12 @@ function injectOpenApiSpecs(config: MigrationDocsConfig, specs: Array<{ filename
       // page tab keeps its own groups alongside the bound spec.
       ...((apiTab.groups?.length || apiTab.pages?.length) ? { navigation: false } : {}),
     }
-    else insertApiTab(tabs, { tab: spec.tabLabel ?? 'API Reference', api: { source: specAssetPath(spec.filename) } }, spec.parentTab)
+    else insertApiTab(tabs, {
+      tab: spec.tabLabel ?? 'API Reference',
+      ...(spec.icon ? { icon: spec.icon } : {}),
+      ...(spec.hidden ? { hidden: true } : {}),
+      api: { source: specAssetPath(spec.filename) },
+    }, spec.parentTab)
   }
   return { ...config, tabs }
 }
@@ -2122,7 +2137,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
-  const remoteApiSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string }> = []
+  const remoteApiSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }> = []
   // Which pages reference which asset (by its normalized copy-destination
   // path), so the final asset-copy pass can prioritize referenced assets
   // over unreferenced ones when the budget is tight, and name the
@@ -2699,6 +2714,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (resolvedSpecs.length > 0) docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs)
   } else if (platform === 'mintlify') {
     const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs)
+    // Specs from different folders commonly share a basename (`v1/openapi.json`,
+    // `v2/openapi.json`): a different file gets a folder-derived prefix instead
+    // of silently reusing the first copy.
+    const specSourcesByFilename = new Map<string, Buffer>()
+    for (const spec of resolvedSpecs) {
+      const existing = specSourcesByFilename.get(spec.filename)
+      if (existing && !existing.equals(spec.content)) {
+        const prefix = dirname(spec.relativePath ?? '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/(^-|-$)/g, '').toLowerCase()
+        spec.filename = `${prefix || specSourcesByFilename.size + 1}-${spec.filename}`
+      }
+      specSourcesByFilename.set(spec.filename, spec.content)
+    }
     for (const spec of resolvedSpecs) {
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) {
         assets.push(specAsset(spec.filename, spec.content))

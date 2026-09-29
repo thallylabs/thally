@@ -458,7 +458,7 @@ describe('Mintlify tab menus', () => {
     }] } })
     expect(mixed).toEqual([
       { value: 'rest.yaml', kind: 'openapi', tabLabel: 'Docs: REST', parentTab: 'Docs' },
-      { value: 'admin.yaml', kind: 'openapi', tabLabel: 'Docs: Admin', parentTab: 'Docs' },
+      { value: 'admin.yaml', kind: 'openapi', tabLabel: 'Docs: Admin', parentTab: 'Docs', directory: 'admin' },
     ])
     const two = mintlifyNavigationApiReferences({ navigation: { tabs: [{
       tab: 'API',
