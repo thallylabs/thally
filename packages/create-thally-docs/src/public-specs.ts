@@ -4,7 +4,7 @@
  * publication filter that drops excluded / hidden operations.
  */
 
-import { lstatSync, readFileSync, readdirSync } from 'node:fs'
+import { lstatSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 
@@ -69,6 +69,12 @@ export function findPublicSpecs(projectDir: string): PublicSpecScan {
       let stat
       try {
         stat = lstatSync(full)
+        // A symlinked file is served like any other; symlinked directories are not followed (loops).
+        if (stat.isSymbolicLink()) {
+          const target = statSync(full)
+          if (!target.isFile()) continue
+          stat = target
+        }
       } catch {
         continue
       }

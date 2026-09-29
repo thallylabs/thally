@@ -66,6 +66,11 @@ projected into Thally. A live Mintlify URL uses the structured configuration
 embedded by Mintlify when it is available, with bounded same-site crawling as a
 fallback.
 
+Migrated OpenAPI specs are written to `openapi/`, not `public/` (which the host
+serves as-is). `--into` never deletes files: an older copy of a spec already in
+`public/` stays publicly downloadable, so the migration lists such files and
+`thally check` warns about them until you delete them manually.
+
 Repository-local JSX/TSX components and supported static dependencies are copied
 into the customer-owned MDX registry. Simple interactive HTML blocks are moved
 into client components, and locale/root routing is normalized. Unsupported
