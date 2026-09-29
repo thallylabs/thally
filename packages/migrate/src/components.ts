@@ -1272,6 +1272,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // of, and whether the move is safe at all; an unsafe one is left in place
     // and reported. Whatever the page still renders is wired back as a
     // registered tag, or a real import when it is reached by name.
+    const refusedInlineComponents = new Set<string>()
     {
       const plan = planInlineExtraction({
         declarations,
@@ -1282,6 +1283,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         reactGlobals: REACT_GLOBALS,
       })
       for (const { name, reason } of plan.blocked) {
+        refusedInlineComponents.add(name)
         warn(`Inline component "${name}" calls a React hook but was left in the page: ${reason}. Move it and everything it uses into a client component manually.`, currentFile)
       }
       const moduleSource = plan.moved.length === 0 ? '' : [
@@ -1374,11 +1376,14 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // inline, it compiles into the page's own server-rendered module, where
     // `useState` and friends are never in scope (see `implicitReactImports`,
     // only applied to extracted client files).
+    // A component the extraction above refused (and warned about) stays where
+    // it is; this pass must not move it, and the dependency that blocked it,
+    // behind that decision.
     const statefulDeclarationNames = new Set(
       declarations
         .filter(({ source }) => /\bon[A-Z]\w*\s*=|\buse[A-Z]\w*\s*\(/.test(source))
         .map(({ source }) => source.match(/^export const (\w+)/)?.[1])
-        .filter((name): name is string => !!name),
+        .filter((name): name is string => !!name && !refusedInlineComponents.has(name)),
     )
 
     // Extract whole HTML JSX roots with event handlers. Markdown and global
