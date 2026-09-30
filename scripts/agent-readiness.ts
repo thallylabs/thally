@@ -1,3 +1,4 @@
+import { ensureDocPublication } from '@/data/docs'
 import { computeAgentReadiness } from '@/lib/agent-readiness'
 
 function parseArgs(argv: Array<string>) {
@@ -18,8 +19,9 @@ function parseArgs(argv: Array<string>) {
   return { min, json }
 }
 
-function main() {
+async function main() {
   const { min, json } = parseArgs(process.argv.slice(2))
+  await ensureDocPublication()
   const report = computeAgentReadiness()
 
   if (json) {
@@ -52,4 +54,4 @@ function main() {
   }
 }
 
-main()
+void main()

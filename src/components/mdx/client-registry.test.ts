@@ -25,7 +25,7 @@ import { CLIENT_BUILTIN_COMPONENT_TAGS } from '../../../packages/migrate/src/com
 import { THALLY_BUILTIN_COMPONENTS } from '../../../packages/migrate/src/builtin-components.js'
 
 const mdxDir = dirname(fileURLToPath(import.meta.url))
-const registrySource = readFileSync(join(mdxDir, 'mdx-components.tsx'), 'utf8')
+const registrySource = readFileSync(join(mdxDir, 'builtin-components.tsx'), 'utf8')
 
 function parse(source: string, fileName: string): ts.SourceFile {
   return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -106,7 +106,7 @@ function renderedLocalIdentifier(initializer: ts.Expression): string | undefined
 function registryComponentKeys(sourceFile: ts.SourceFile): Set<string> {
   const keys = new Set<string>()
   const visit = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node) && node.name.getText(sourceFile) === 'components' && node.initializer) {
+    if (ts.isVariableDeclaration(node) && ['components', 'builtinMdxComponents'].includes(node.name.getText(sourceFile)) && node.initializer) {
       const initializer = unwrap(node.initializer)
       if (ts.isObjectLiteralExpression(initializer)) {
         for (const property of initializer.properties) {
@@ -131,7 +131,7 @@ function registryEntries(sourceFile: ts.SourceFile): Map<string, string> {
   const entries = new Map<string, string>()
   let objectLiteral: ts.ObjectLiteralExpression | undefined
   const visit = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node) && node.name.getText(sourceFile) === 'components' && node.initializer) {
+    if (ts.isVariableDeclaration(node) && ['components', 'builtinMdxComponents'].includes(node.name.getText(sourceFile)) && node.initializer) {
       const initializer = unwrap(node.initializer)
       if (ts.isObjectLiteralExpression(initializer)) objectLiteral = initializer
     }
@@ -191,8 +191,8 @@ it('every hand-listed indirect client tag still renders through a use-client fil
   }
 })
 
-it('every mdx-components.tsx registry name backed by a use-client file in this directory is captured', () => {
-  const sourceFile = parse(registrySource, 'mdx-components.tsx')
+it('every builtin-components.tsx registry name backed by a use-client file in this directory is captured', () => {
+  const sourceFile = parse(registrySource, 'builtin-components.tsx')
   const bindings = importedBindings(sourceFile)
   const entries = registryEntries(sourceFile)
   const clientFiles = new Set(readdirSync(mdxDir).filter((f) => f.endsWith('.tsx') && isClientDirectiveFile(f)))
@@ -209,7 +209,7 @@ it('every mdx-components.tsx registry name backed by a use-client file in this d
 })
 
 it('THALLY_BUILTIN_COMPONENTS (the unknown-component fallback\'s allowlist) matches every registry key', () => {
-  const sourceFile = parse(registrySource, 'mdx-components.tsx')
+  const sourceFile = parse(registrySource, 'builtin-components.tsx')
   expect([...THALLY_BUILTIN_COMPONENTS].sort()).toEqual([...registryComponentKeys(sourceFile)].sort())
 })
 

@@ -123,9 +123,11 @@ export interface MigrationPage {
 }
 
 export interface MigrationAsset {
-  /** Path below `public`, always normalized and traversal-free. */
+  /** Path below `public` (or below the project root when `projectRelative`), always normalized and traversal-free. */
   path: string
   content: Uint8Array
+  /** Write at the project root instead of `public/`, so the host never serves it statically. */
+  projectRelative?: boolean
 }
 
 export interface MigrationWarning {
@@ -150,7 +152,7 @@ export interface MigrationBundle {
   pages: Array<MigrationPage>
   assets: Array<MigrationAsset>
   /** Repository-configured remote specs awaiting a bounded network fetch by the host. */
-  remoteApiSpecs?: Array<{ url: string; tabLabel?: string }>
+  remoteApiSpecs?: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>
   /** Customer-owned component source and registry; paths are repository-relative. */
   componentFiles?: Array<RenderedMigrationFile>
   /** Access-restricted source pages, written outside every published path. */

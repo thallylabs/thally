@@ -202,7 +202,7 @@ describe('site-wide scripts, styles and fonts', () => {
     })
     expect(bundle.assets).toEqual([])
     expect(bundle.docsConfig.customScripts).toBeUndefined()
-    expect(bundle.warnings.some((warning) => warning.code === 'limit-reached' && warning.source === 'huge.js')).toBe(true)
+    expect(bundle.warnings.some((warning) => warning.code === 'limit-reached' && /1 asset file was not copied/.test(warning.message))).toBe(true)
   })
 })
 
