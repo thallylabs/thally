@@ -14,7 +14,10 @@ import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNa
 // (repository.ts) can be tested without a real clone.
 // `hang` never exits on its own (only when killed); `ticks` are the times (ms)
 // at which progress is printed before a normal exit one second after the last.
-const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; stderr?: string; hang?: boolean; exitOnly?: boolean; ticks?: Array<number> }> }))
+// `exitAt` makes git itself exit (emitting only `exit`) at that time while a
+// helper keeps stderr open: `helperTicks` are later helper writes, and
+// `closeAt`, if set, is when the pipe finally closes.
+const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; stderr?: string; hang?: boolean; exitOnly?: boolean; ticks?: Array<number>; exitAt?: number; helperTicks?: Array<number>; closeAt?: number }> }))
 const gitKills = vi.hoisted(() => ({ count: 0 }))
 // Remote spec URLs must never invoke a subprocess or make a network request.
 const execFileCalls = vi.hoisted(() => ({ calls: [] as Array<string> }))
@@ -37,6 +40,14 @@ vi.mock('node:child_process', () => {
       }
       const outcome = cloneOutcomes.queue.shift() ?? { code: 0 }
       if (outcome.hang) return child
+      if (outcome.exitAt !== undefined) {
+        const { exitAt } = outcome
+        if (outcome.stderr) setTimeout(() => child.stderr.emit('data', outcome.stderr), Math.max(0, exitAt - 1))
+        setTimeout(() => child.emit('exit', outcome.code), exitAt)
+        for (const tick of outcome.helperTicks ?? []) setTimeout(() => child.stderr.emit('data', 'helper still attached\n'), tick)
+        if (outcome.closeAt !== undefined) setTimeout(() => child.emit('close', outcome.code), outcome.closeAt)
+        return child
+      }
       if (outcome.ticks) {
         for (const tick of outcome.ticks) setTimeout(() => child.stderr.emit('data', 'Receiving objects:  50%\r'), tick)
         setTimeout(() => child.emit('close', outcome.code), Math.max(...outcome.ticks) + 1000)
@@ -3713,6 +3724,45 @@ describe('cloneGitHubRepository retry', () => {
       .rejects.toThrow(/timed out \(no progress for 3s\)/)
     await vi.advanceTimersByTimeAsync(60_000)
     await result
+  })
+
+  it('finishes when git exits before the idle timeout while a helper keeps stderr open', async () => {
+    vi.useFakeTimers()
+    // The idle timeout (500 ms) is shorter than the exit drain, so before the
+    // fix it fired after git had exited and tried to kill a dead process.
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '500'
+    cloneOutcomes.queue.push({ code: 0, exitAt: 100, helperTicks: [300, 900, 1500] })
+    let settled = false
+    const result = cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-exit-first-'))).finally(() => { settled = true })
+    await vi.advanceTimersByTimeAsync(2_200)
+    expect(settled).toBe(true)
+    await expect(result).resolves.toBeUndefined()
+    expect(gitKills.count).toBe(0)
+  })
+
+  it('reports git\'s own error when it exits non-zero before the timeout and the pipe never closes', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '500'
+    cloneOutcomes.queue.push({ code: 128, stderr: 'fatal: repository not found\n', exitAt: 100, helperTicks: [700] })
+    const result = cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-exit-fail-')))
+    const settledError = result.then(() => null, (error: Error) => error)
+    await vi.advanceTimersByTimeAsync(2_200)
+    const error = await settledError
+    expect(error?.message).toMatch(/^Failed to clone acme\/docs: fatal: repository not found/)
+    expect(error?.message).not.toMatch(/timed out/)
+    expect(gitKills.count).toBe(0)
+  })
+
+  it('settles once when git exits and the pipe closes shortly after', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '3000'
+    cloneOutcomes.queue.push({ code: 0, exitAt: 100, closeAt: 150 })
+    const result = cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-exit-close-')))
+    await vi.advanceTimersByTimeAsync(200)
+    await expect(result).resolves.toBeUndefined()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(gitKills.count).toBe(0)
+    expect(gitSpawnCalls.args).toHaveLength(1)
   })
 
   it('does not kill a slow clone that keeps printing progress past the idle timeout', async () => {

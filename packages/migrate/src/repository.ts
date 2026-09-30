@@ -642,6 +642,8 @@ const DEFAULT_CLONE_IDLE_TIMEOUT_MS = 2 * 60_000
 /** Absolute ceiling for one git process, so a connection that trickles progress forever still ends. */
 const MAX_GIT_PROCESS_MS = 60 * 60_000
 const HARD_TIMEOUT_REASON = `still running after ${MAX_GIT_PROCESS_MS / 60_000} minutes`
+/** After git exits, how long to wait for its stderr to close before settling anyway (a helper such as git-remote-https can hold the pipe open). */
+const GIT_EXIT_DRAIN_MS = 2_000
 
 /** Transient network-class git failures a retry can plausibly recover from. Also covers this module's own timeout error below. */
 const RETRYABLE_CLONE_ERROR = /RPC failed|Recv failure|early EOF|curl \d+|Could not resolve host|Connection (?:reset|refused|timed out)|The remote end hung up|SSL[_ ]?(?:read|connect|write) error|timed out|network is unreachable/i
@@ -687,43 +689,65 @@ function runGit(args: Array<string>, options: { cwd?: string; env?: Record<strin
     })
     let stderr = ''
     let timeoutReason = ''
-    const kill = (reason: string) => {
-      timeoutReason = reason
-      child.kill('SIGKILL')
-    }
+    let settled = false
+    // `undefined` until git's own process exits; `close` can come much later,
+    // or never, when a helper (git-remote-https) keeps the stderr pipe open.
+    let exitCode: number | null | undefined
+    let drainTimer: ReturnType<typeof setTimeout> | undefined
     const idleMs = gitIdleTimeoutMs()
     const idleMessage = `no progress for ${idleMs < 1000 ? `${idleMs}ms` : `${Math.round(idleMs / 1000)}s`}`
-    let idleTimer = setTimeout(() => { kill(idleMessage) }, idleMs)
-    const hardTimer = setTimeout(() => { kill(HARD_TIMEOUT_REASON) }, MAX_GIT_PROCESS_MS)
     const clearTimers = () => {
       clearTimeout(idleTimer)
       clearTimeout(hardTimer)
+      clearTimeout(drainTimer)
     }
-    child.stderr.setEncoding('utf8')
-    child.stderr.on('data', (chunk: string) => {
-      clearTimeout(idleTimer)
-      idleTimer = setTimeout(() => { kill(idleMessage) }, idleMs)
-      stderr = (stderr + chunk).slice(-16_000)
-    })
-    child.on('error', (error) => {
-      clearTimers()
-      reject(error)
-    })
     const finish = (code: number | null) => {
+      if (settled) return
+      settled = true
       clearTimers()
+      child.stderr.destroy()
       if (code === 0) resolve()
       else if (timeoutReason) {
         const hint = timeoutReason === HARD_TIMEOUT_REASON ? '' : '; on a very slow link, raise THALLY_MIGRATE_CLONE_TIMEOUT_MS (milliseconds of allowed silence)'
         reject(new Error(`${options.label}: timed out (${timeoutReason}) and was killed. Check your network connection and try again${hint}.`))
       } else reject(new Error(`${options.label}: ${gitErrorTail(stderr) || `git exited ${code}`}`))
     }
+    const kill = (reason: string) => {
+      // Git already exited: there is nothing left to kill, so finish with its
+      // own exit code rather than waiting on whatever holds the pipe.
+      if (exitCode !== undefined) {
+        finish(exitCode)
+        return
+      }
+      timeoutReason = reason
+      child.kill('SIGKILL')
+    }
+    let idleTimer = setTimeout(() => { kill(idleMessage) }, idleMs)
+    const hardTimer = setTimeout(() => { kill(HARD_TIMEOUT_REASON) }, MAX_GIT_PROCESS_MS)
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk: string) => {
+      stderr = (stderr + chunk).slice(-16_000)
+      if (exitCode !== undefined || settled) return
+      clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => { kill(idleMessage) }, idleMs)
+    })
+    child.on('error', (error) => {
+      if (settled) return
+      settled = true
+      clearTimers()
+      reject(error)
+    })
     child.on('close', finish)
-    // A killed git can leave a helper (git-remote-https) holding the stderr
-    // pipe open, so `close` may never fire; settle on `exit` once we killed it.
+    // Don't depend on the order of `exit`, `close` and the timers. Once git
+    // has exited, stop the stall timers (a helper's output is not git
+    // progress), give stderr a short drain for the last error lines, then
+    // settle even if the pipe never closes. A process we killed settles now.
     child.on('exit', (code) => {
-      if (!timeoutReason) return
-      child.stderr.destroy()
-      finish(code)
+      exitCode = code
+      clearTimeout(idleTimer)
+      clearTimeout(hardTimer)
+      if (timeoutReason) finish(code)
+      else drainTimer = setTimeout(() => { finish(code) }, GIT_EXIT_DRAIN_MS)
     })
   })
 }
