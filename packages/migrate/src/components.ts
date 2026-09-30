@@ -15,7 +15,7 @@ import ts from 'typescript'
 import { unified } from 'unified'
 
 import { parseFrontmatter } from './frontmatter.js'
-import { functionDeclaredNames, isFunctionInitializer, normalizeHtmlComments, normalizeExplicitHeadingIds } from './mdx.js'
+import { functionDeclaredNames, isFunctionInitializer, mdxComment, normalizeHtmlComments, normalizeExplicitHeadingIds, replaceOutsideCodeAndComments } from './mdx.js'
 import { resolveWithin } from './path.js'
 import { planInlineExtraction, unboundTags } from './inline-extraction.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
@@ -664,9 +664,10 @@ function neutralizeUnresolvableImportsWithoutAst(content: string, currentFile: s
   })
   for (const { name, specifier } of dropped) {
     warn(`Component import ${JSON.stringify(specifier)} could not be resolved because this page has invalid MDX (see the previous warning), so the import and its usage were removed to keep the site building.`, currentFile)
-    result = result
-      .replace(new RegExp(`<${name}(?:\\s[^>]*)?/>`, 'g'), `{/* Removed <${name}>: unresolved during fallback migration */}`)
-      .replace(new RegExp(`<${name}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${name}>`, 'g'), `{/* Removed <${name}>: unresolved during fallback migration */}`)
+    const removed = mdxComment(` Removed <${name}>: unresolved during fallback migration `)
+    result = replaceOutsideCodeAndComments(result, (segment) => segment
+      .replace(new RegExp(`<${name}(?:\\s[^>]*)?/>`, 'g'), removed)
+      .replace(new RegExp(`<${name}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${name}>`, 'g'), removed))
   }
   return result
 }
@@ -1667,7 +1668,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       const videoId = youtubeEmbedVideoId(node, specifier)
       const value = videoId
         ? `<iframe width="560" height="315" src="https://www.youtube.com/embed/${videoId}" title="Embedded video" allowFullScreen />`
-        : `{/* Removed <${node.name}>: unsupported import '${specifier}' */}`
+        : mdxComment(` Removed <${node.name}>: unsupported import '${specifier}' `)
       edits.push({ start, end, value })
     })
     const rendered = applyReplacements(content, edits)
