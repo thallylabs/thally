@@ -1,6 +1,6 @@
 import { searchDocs } from '@/lib/search/engine'
 import { loadContentDocument } from '@/lib/content'
-import { getDocEntries } from '@/data/docs'
+import { loadDocEntries } from '@/data/docs'
 import { computePublishedAgentReadiness } from '@/lib/agent-readiness'
 import { getSiteUrl } from '@/lib/site-url'
 import { toolMetadata, type McpToolMetadata } from '@/lib/mcp/tool-metadata'
@@ -44,14 +44,14 @@ const handlers: Record<string, McpTool['handler']> = {
     // Resolve to a KNOWN entry only — never pass the raw arg to the content
     // resolver, which path.joins it under CONTENT_ROOT (a "../" would escape
     // and read arbitrary .mdx files on the public endpoint).
-    const entry = getDocEntries().find((e) => e.id === raw || e.slug.join('/') === raw)
+    const entry = (await loadDocEntries()).find((e) => e.id === raw || e.slug.join('/') === raw)
     if (!entry) return `No page found for "${raw}". Call list_pages to see valid page IDs.`
     const doc = await loadContentDocument(entry.id)
     if (!doc) return `No page found for "${raw}". Call list_pages to see valid page IDs.`
     return doc.content.markdown
   },
   list_pages: async () => {
-    const entries = getDocEntries()
+    const entries = await loadDocEntries()
     if (entries.length === 0) return 'This site has no documentation pages yet.'
     return entries.map((e) => `- ${e.id} — ${e.title} (${siteUrl}${e.href})`).join('\n')
   },

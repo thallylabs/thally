@@ -18,6 +18,11 @@ import {
   writeFileSync,
 } from 'node:fs'
 import path from 'node:path'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import { parseOpenApiReference } from '../../src/lib/openapi/doc-reference'
+import { UNPUBLISHED_OPERATIONS_FILE, listUnpublishedOperations, operationPublicationState } from '../../src/lib/openapi/publication'
+import { sanitizeSpecForPublication } from '../../src/lib/openapi/sanitize'
+import type { OpenAPIDocument, OperationOverride } from '../../src/lib/openapi/types'
 
 export interface RuntimeSourceEntry {
   content: string
@@ -62,24 +67,193 @@ function isContainedProjectPath(projectRoot: string, filePath: string): boolean 
   )
 }
 
-function configuredOpenApiSources(projectRoot: string): Array<string> {
+interface ConfiguredOpenApiSource {
+  source: string
+  overrides?: Record<string, OperationOverride>
+}
+
+function configuredOpenApiSources(projectRoot: string): Array<ConfiguredOpenApiSource> {
   const docsJsonPath = path.join(projectRoot, 'docs.json')
   if (!existsSync(docsJsonPath)) return []
 
   const config = JSON.parse(readFileSync(docsJsonPath, 'utf8')) as {
-    tabs?: Array<{ api?: { source?: unknown } }>
+    tabs?: Array<{ api?: { source?: unknown; overrides?: Record<string, OperationOverride> } }>
   }
 
-  return (config.tabs ?? [])
-    .map((tab) => tab.api?.source)
-    .filter((source): source is string => typeof source === 'string')
-    .filter((source) => !source.startsWith('http://') && !source.startsWith('https://'))
+  const bySource = new Map<string, Array<Record<string, OperationOverride> | undefined>>()
+  for (const tab of config.tabs ?? []) {
+    const source = tab.api?.source
+    if (typeof source !== 'string' || source.startsWith('http://') || source.startsWith('https://')) continue
+    bySource.set(source, [...(bySource.get(source) ?? []), tab.api?.overrides])
+  }
+  return [...bySource].map(([source, list]) => ({ source, overrides: mergeOverrides(list) }))
+}
+
+/**
+ * Several tabs may bind one spec file with different overrides, but the managed
+ * copy exists once. Remove an operation from it only when every tab hides it, so
+ * no tab loses an operation it shows; each tab's own overrides still apply at runtime.
+ */
+function mergeOverrides(
+  list: Array<Record<string, OperationOverride> | undefined>,
+): Record<string, OperationOverride> | undefined {
+  if (list.length === 1) return list[0]
+  const merged: Record<string, OperationOverride> = {}
+  for (const key of new Set(list.flatMap((overrides) => Object.keys(overrides ?? {})))) {
+    const hidden = list.map((overrides) => overrides?.[key]?.hidden)
+    if (hidden.every((value) => value === true)) merged[key] = { hidden: true }
+    else if (hidden.some((value) => value === false)) merged[key] = { hidden: false }
+  }
+  return merged
+}
+
+/**
+ * Managed assets are served verbatim from `/_thally/content/…`, so a spec
+ * copied there must already be publication-safe (excluded operations removed).
+ * The runtime re-sanitizes on load, which is idempotent.
+ */
+function addSpecFile(
+  projectRoot: string,
+  sources: RuntimeSourceMap,
+  filePath: string,
+  overrides?: Record<string, OperationOverride>,
+): void {
+  addTextFile(projectRoot, sources, filePath)
+  const entry = sources[projectPath(projectRoot, filePath)]
+  if (!entry) return
+  const isJson = path.extname(filePath).toLowerCase() === '.json'
+  let document: unknown
+  try {
+    document = isJson ? JSON.parse(entry.content) : parseYaml(entry.content)
+  } catch (error) {
+    // Unfilterable, so it must not ship: it may carry hidden or excluded
+    // operations, and managed assets are published as files. The runtime could
+    // not load it anyway, so leaving it out loses nothing a reader could see;
+    // the build keeps going because the file may be an unused root default.
+    delete sources[projectPath(projectRoot, filePath)]
+    console.warn(`[thally] OpenAPI source is not valid ${isJson ? 'JSON' : 'YAML'} and was left out of the build: ${projectPath(projectRoot, filePath)} (${(error as Error).message})`)
+    return
+  }
+  if (!document || typeof document !== 'object' || Array.isArray(document)) {
+    delete sources[projectPath(projectRoot, filePath)]
+    console.warn(`[thally] OpenAPI source is not an object and was left out of the build: ${projectPath(projectRoot, filePath)}`)
+    return
+  }
+  const sanitized = sanitizeSpecForPublication(document as OpenAPIDocument, { overrides })
+  if (sanitized === document) return
+  entry.content = isJson ? `${JSON.stringify(sanitized, null, 2)}\n` : stringifyYaml(sanitized)
+}
+
+/**
+ * `/openapi.json` and `/openapi.yaml` are route handlers that publish the
+ * filtered spec, but the host serves `public/` first: a same-named file there
+ * answers instead, raw. Returns those files when filtering would change them.
+ */
+export function findShadowingPublicSpecs(projectRoot: string): Array<string> {
+  const configured = configuredOpenApiSources(projectRoot)
+  const shadowing: Array<string> = []
+  for (const name of ['openapi.json', 'openapi.yaml']) {
+    const filePath = path.join(projectRoot, 'public', name)
+    let document: unknown
+    try {
+      if (!lstatSync(filePath).isFile()) continue
+      const raw = readFileSync(filePath, 'utf8')
+      document = name.endsWith('.json') ? JSON.parse(raw) : parseYaml(raw)
+    } catch {
+      continue
+    }
+    if (!document || typeof document !== 'object') continue
+    const overrides = configured.find(({ source }) => source === `/${name}` || source === `public/${name}`)?.overrides
+    if (sanitizeSpecForPublication(document as OpenAPIDocument, { overrides }) !== document) shadowing.push(`public/${name}`)
+  }
+  return shadowing
+}
+
+export interface UnpublishedOpenApiPage {
+  /** Project-relative page file. */
+  file: string
+  operation: string
+  state: 'hidden' | 'excluded'
+}
+
+/**
+ * Pages whose `openapi:` frontmatter names a hidden or excluded operation of
+ * the default spec (the first visible API tab's; the docs route looks nowhere
+ * else). Such a page is not published: its route 404s and it is left out of
+ * every listing. Remote specs cannot be judged here, and unknown operations
+ * are not reported.
+ */
+function loadDefaultSpec(projectRoot: string): { document: unknown; overrides?: Record<string, OperationOverride> } | null {
+  const docsJsonPath = path.join(projectRoot, 'docs.json')
+  if (!existsSync(docsJsonPath)) return null
+  let api: { source?: unknown; overrides?: Record<string, OperationOverride> } | undefined
+  try {
+    const config = JSON.parse(readFileSync(docsJsonPath, 'utf8')) as {
+      tabs?: Array<{ hidden?: boolean; api?: { source?: unknown; overrides?: Record<string, OperationOverride> } }>
+    }
+    api = config.tabs?.find((tab) => !tab.hidden && tab.api)?.api
+  } catch {
+    return null
+  }
+  const source = api?.source
+  if (typeof source !== 'string' || /^https?:\/\//i.test(source)) return null
+  const specPath = source.startsWith('/') ? path.join(projectRoot, 'public', source.slice(1)) : path.join(projectRoot, source)
+  let document: unknown
+  try {
+    if (!isContainedProjectPath(projectRoot, path.resolve(specPath)) || !lstatSync(specPath).isFile()) return null
+    const raw = readFileSync(specPath, 'utf8')
+    document = path.extname(specPath).toLowerCase() === '.json' ? JSON.parse(raw) : parseYaml(raw)
+  } catch {
+    return null
+  }
+  return { document, overrides: api?.overrides }
+}
+
+/** Hidden or excluded operations of the default spec, recorded for runtime (see `listUnpublishedOperations`). */
+function findUnpublishedOperations(projectRoot: string) {
+  const spec = loadDefaultSpec(projectRoot)
+  return spec ? listUnpublishedOperations(spec.document, spec.overrides) : []
+}
+
+export function findUnpublishedOpenApiPages(projectRoot: string): Array<UnpublishedOpenApiPage> {
+  const spec = loadDefaultSpec(projectRoot)
+  if (!spec) return []
+  const document = spec.document
+  const api = { overrides: spec.overrides }
+  const pages: Array<UnpublishedOpenApiPage> = []
+  const scan = (directory: string): void => {
+    if (!existsSync(directory)) return
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const filePath = path.join(directory, entry.name)
+      if (entry.isDirectory()) {
+        scan(filePath)
+        continue
+      }
+      if (!entry.isFile() || !/\.mdx?$/.test(entry.name)) continue
+      const head = readFileSync(filePath, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1]
+      if (!head || !/^openapi\s*:/m.test(head)) continue
+      let reference
+      try {
+        reference = parseOpenApiReference((parseYaml(head) as { openapi?: unknown } | null)?.openapi)
+      } catch {
+        continue
+      }
+      if (!reference) continue
+      const state = operationPublicationState(document, reference.method, reference.path, api?.overrides)
+      if (state === 'hidden' || state === 'excluded') {
+        pages.push({ file: projectPath(projectRoot, filePath), operation: `${reference.method} ${reference.path}`, state })
+      }
+    }
+  }
+  scan(path.join(projectRoot, 'src/content'))
+  return pages.sort((a, b) => a.file.localeCompare(b.file))
 }
 
 function addConfiguredOpenApiFile(
   projectRoot: string,
   sources: RuntimeSourceMap,
   configuredPath: string,
+  overrides?: Record<string, OperationOverride>,
 ): void {
   const filePath = configuredPath.startsWith('/')
     ? path.resolve(projectRoot, 'public', configuredPath.slice(1))
@@ -98,7 +272,7 @@ function addConfiguredOpenApiFile(
     throw new Error(`Configured OpenAPI source resolves outside the project: ${configuredPath}`)
   }
 
-  addTextFile(projectRoot, sources, filePath)
+  addSpecFile(projectRoot, sources, filePath, overrides)
 }
 
 function walkTextFiles(
@@ -135,11 +309,17 @@ export function collectRuntimeContentFiles(projectRoot: string): RuntimeSourceMa
     '.yml',
     '.json',
   ])
-  addTextFile(projectRoot, sources, path.join(projectRoot, 'openapi.yaml'))
-  addTextFile(projectRoot, sources, path.join(projectRoot, 'openapi.yml'))
-  addTextFile(projectRoot, sources, path.join(projectRoot, 'openapi.json'))
-  for (const configuredPath of configuredOpenApiSources(projectRoot)) {
-    addConfiguredOpenApiFile(projectRoot, sources, configuredPath)
+  addSpecFile(projectRoot, sources, path.join(projectRoot, 'openapi.yaml'))
+  addSpecFile(projectRoot, sources, path.join(projectRoot, 'openapi.yml'))
+  addSpecFile(projectRoot, sources, path.join(projectRoot, 'openapi.json'))
+  for (const { source, overrides } of configuredOpenApiSources(projectRoot)) {
+    addConfiguredOpenApiFile(projectRoot, sources, source, overrides)
+  }
+  // The copy above is already filtered, so record what it lost: a page bound to
+  // one of these operations is unpublished, which the runtime can no longer see.
+  const unpublished = findUnpublishedOperations(projectRoot)
+  if (unpublished.length > 0) {
+    sources[UNPUBLISHED_OPERATIONS_FILE] = { content: `${JSON.stringify(unpublished)}\n`, modifiedAtMs: Date.now() }
   }
   addTextFile(projectRoot, sources, path.join(projectRoot, 'docs.json'))
   addTextFile(projectRoot, sources, path.join(projectRoot, 'AGENTS.md'))

@@ -5,8 +5,9 @@
 import { createElement, type ComponentType, type ReactNode } from 'react'
 import { compileMDX } from 'next-mdx-remote/rsc'
 import { interpretMDX } from '@/lib/mdx-interpret'
-import type { DocEntry, DocPageMode, OpenApiReference } from '@/data/docs'
+import type { DocEntry, DocPageMode } from '@/data/docs'
 import { deriveTitleFromSlug } from '@/data/docs'
+import { parseOpenApiReference } from '@/lib/openapi/doc-reference'
 import { remarkPlugins } from '@/mdx/remark'
 import { rehypePlugins } from '@/mdx/rehype'
 import { useMDXComponents as getMDXComponents } from '@/components/mdx/mdx-components'
@@ -281,32 +282,4 @@ async function compileSnippetFromPath(snippetImportPath: string): Promise<Compon
     return content
   }
   return SnippetComponent
-}
-
-function parseOpenApiReference(raw?: string): OpenApiReference | null {
-  if (typeof raw !== 'string') {
-    return null
-  }
-
-  const trimmed = raw.trim()
-  if (!trimmed) {
-    return null
-  }
-
-  const parts = trimmed.split(/\s+/)
-  if (parts.length < 2) {
-    return null
-  }
-
-  const method = parts[0]?.toUpperCase()
-  const path = parts.slice(1).join(' ')
-  if (!method || !path.startsWith('/')) {
-    return null
-  }
-
-  return {
-    specId: 'default',
-    method,
-    path,
-  }
 }

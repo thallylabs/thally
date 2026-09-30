@@ -164,6 +164,8 @@ function fixture(): string {
     navigation: { $ref: './navigation.json' },
   }))
   writeFileSync(join(root, 'README.md'), '# Repository readme\n\nThis must not become a docs page.')
+  mkdirSync(join(root, '.claude', 'skills', 'doc-author'), { recursive: true })
+  writeFileSync(join(root, '.claude', 'skills', 'doc-author', 'SKILL.mdx'), '# Not a docs page\n\n</Broken>')
   writeFileSync(join(root, 'en', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\n# Welcome\n\nEnglish docs.')
   writeFileSync(join(root, 'en', 'guides', 'install.mdx'), '---\ntitle: Install\n---\n\nimport Prerequisite from \'/snippets/prerequisite.mdx\'\n\n<Prerequisite />\n\n<Danger>Back up first.</Danger>\n\n<Warn>Review the result.</Warn>')
   writeFileSync(join(root, 'es', 'introduction.mdx'), '---\ntitle: Bienvenido\n---\n\nDocumentación española.')
@@ -214,6 +216,7 @@ describe('Mintlify repository migration', () => {
     expect(bundle.pages[1].body).toContain('<Warning>Review the result.</Warning>')
     expect(bundle.pages[1].body).toContain('Install Node.js before continuing.')
     expect(bundle.pages.map((page) => page.id)).not.toContain('snippets/prerequisite')
+    expect(bundle.pages.map((page) => page.id)).not.toContain('.claude/skills/doc-author/SKILL')
     expect(bundle.docsConfig.i18n).toMatchObject({
       defaultLocale: 'en',
       locales: [
@@ -228,6 +231,83 @@ describe('Mintlify repository migration', () => {
     const files = renderMigrationFiles(bundle)
     expect(files.map((file) => file.path)).toContain('public/images/logo.svg')
     expect(files.map((file) => file.path)).not.toContain('src/content/readme.mdx')
+  })
+
+  it('inlines <Snippet file="..."> references with no import statement', () => {
+    const root = fixture()
+    writeFileSync(
+      join(root, 'en', 'guides', 'install.mdx'),
+      '---\ntitle: Install\n---\n\n<Snippet file="/snippets/prerequisite.mdx" />',
+    )
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'guides/install')
+    expect(page?.body).toContain('Install Node.js before continuing.')
+    expect(page?.body).not.toContain('<Snippet')
+  })
+
+  it('hoists a component snippet as a real declaration instead of splicing its source into the usage tag', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-component-snippet-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'counter.mdx'), "export const Counter = () => {\n  const [n, setN] = useState(0)\n  return <button onClick={() => setN(n + 1)}>{n}</button>\n}")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { Counter } from '/snippets/counter.mdx'\n\n<Counter />")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    // The usage stays a live self-closing tag (here rewritten to the
+    // registered client component by the component migrator); it must not
+    // be replaced by the declaration's own source text.
+    expect(page?.body).not.toMatch(/<Counter\s*>[\s\S]*<\/Counter>/)
+    expect(page?.body).not.toContain('return <button')
+    expect(page?.body.match(/\/>/g)).toHaveLength(1)
+  })
+
+  it('keeps a snippet component together with the sibling it renders when only the hook component is imported', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-sibling-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'counter.mdx'), "export const Label = ({ t }) => <em>{t}</em>\nexport const Counter = () => {\n  const [n, setN] = useState(0)\n  return <button onClick={() => setN(n + 1)}><Label t={n} /></button>\n}\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { Counter } from '/snippets/counter.mdx'\n\n<Counter />\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    expect(bundle.warnings).toEqual([])
+    expect(page?.body).toMatch(/^<Migrated[a-f0-9]+ \/>$/m)
+    expect(page?.body).not.toContain('onClick')
+    const client = bundle.componentFiles?.find((file) => file.path.includes('/inline-'))
+    expect(String(client?.content)).toContain('export const Label')
+    expect(String(client?.content)).toContain('export const Counter')
+  })
+
+  it('does not let a page-local component be shadowed by a same-named global snippet alias', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-alias-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['imports-snippet', 'declares-locally'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'counter.mdx'), 'export const Counter = () => {\n  return <div>from snippet</div>\n}')
+    writeFileSync(join(root, 'imports-snippet.mdx'), "---\ntitle: Imports\n---\n\nimport { Counter } from '/snippets/counter.mdx'\n\n<Counter />")
+    writeFileSync(join(root, 'declares-locally.mdx'), '---\ntitle: Local\n---\n\nexport const Counter = () => {\n  return <div>local component</div>\n}\n\n<Counter />')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const local = bundle.pages.find((candidate) => candidate.id === 'declares-locally')
+    expect(local?.body).toContain('local component')
+    expect(local?.body).not.toContain('from snippet')
+    expect(local?.body.match(/export const Counter/g)).toHaveLength(1)
+
+    // The named-import form (`import { Name } from '...'`) is what Mintlify's
+    // own docs use for snippets; it must be fully consumed, not left behind
+    // as a dead import alongside the inlined content.
+    const imported = bundle.pages.find((candidate) => candidate.id === 'imports-snippet')
+    expect(imported?.body).toContain('from snippet')
+    expect(imported?.body).not.toContain('import')
   })
 
   it('escapes a bare literal brace in Mintlify page prose instead of crashing the build (frontmatter untouched)', () => {
@@ -443,7 +523,7 @@ describe('Mintlify repository migration', () => {
     expect(bundle.docsConfig.tabs[1]).toMatchObject({
       tab: 'API reference',
       groups: [{ group: 'Runs API', pages: ['management/runs'] }],
-      api: { source: '/service.openapi.yml', navigation: false },
+      api: { source: 'openapi/service.openapi.yml', navigation: false },
     })
     expect(bundle.docsConfig).toMatchObject({
       theme: 'maple',
@@ -483,9 +563,15 @@ describe('Mintlify repository migration', () => {
     expect(bundle.assets.map((asset) => asset.path)).toEqual(expect.arrayContaining([
       'logo.svg',
       'images/setup.png',
-      'service.openapi.yml',
+      'openapi/service.openapi.yml',
     ]))
     expect(bundle.warnings).toEqual([])
+
+    // Specs must never land under public/, which the host serves verbatim.
+    const renderedPaths = renderMigrationFiles(bundle).map((file) => file.path)
+    expect(renderedPaths).toContain('openapi/service.openapi.yml')
+    expect(renderedPaths).not.toContain('public/openapi/service.openapi.yml')
+    expect(renderedPaths.some((path) => path.startsWith('public/') && /\.(ya?ml|json)$/.test(path))).toBe(false)
 
     const introduction = renderMigrationFiles(bundle)
       .find((file) => file.path === 'src/content/introduction.mdx')
@@ -516,9 +602,145 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'API Reference')
-    expect(apiTab?.api).toEqual({ source: '/service.yml', navigation: false })
+    expect(apiTab?.api).toEqual({ source: 'openapi/service.yml', navigation: false })
     expect(bundle.docsConfig.tabs.find((tab) => tab.tab === 'Guides')?.api).toBeUndefined()
-    expect(bundle.assets.map((asset) => asset.path)).toContain('service.yml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/service.yml')
+  })
+
+  describe('tab menu API items', () => {
+    const spec = 'openapi: 3.1.0\ninfo: { title: Service, version: "1.0" }\npaths: {}'
+    const migrateMenu = (tabs: Array<Record<string, unknown>>, specs: Array<string> = ['openapi.json']) => {
+      const root = fixture()
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { tabs } }))
+      writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+      for (const name of specs) writeFileSync(join(root, name), spec)
+      return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    }
+    const summary = (bundle: ReturnType<typeof migrateRepository>) =>
+      bundle.docsConfig.tabs.map((tab) => ({ tab: tab.tab, api: tab.api?.source, groups: tab.groups?.map((group) => group.group) }))
+
+    it('keeps a Guide + API reference menu: the API item becomes a sibling tab bound to its spec with generated navigation', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [{ item: 'Guide', pages: ['guide'] }, { item: 'API reference', openapi: 'openapi.json' }],
+      }])
+      expect(summary(bundle)).toEqual([
+        { tab: 'Docs', api: undefined, groups: ['Guide'] },
+        { tab: 'Docs: API reference', api: 'openapi/openapi.json', groups: undefined },
+      ])
+      expect(bundle.docsConfig.tabs[1].api).toEqual({ source: 'openapi/openapi.json' })
+      expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/openapi.json')
+    })
+
+    it('supports the { source, directory } object form and openapi + pages in one item', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [
+          { item: 'Guide', pages: ['guide'] },
+          { item: 'Reference', openapi: { source: 'openapi.json', directory: 'api' }, pages: ['guide'] },
+        ],
+      }])
+      expect(summary(bundle)).toEqual([
+        { tab: 'Docs', api: undefined, groups: ['Guide', 'Reference'] },
+        { tab: 'Docs: Reference', api: 'openapi/openapi.json', groups: undefined },
+      ])
+    })
+
+    it('binds a sole API item to the tab itself, and keeps later tabs after the sibling', () => {
+      const bundle = migrateMenu([
+        { tab: 'API', menu: [{ item: 'Reference', openapi: 'openapi.json' }] },
+        { tab: 'Docs', menu: [{ item: 'Guide', pages: ['guide'] }, { item: 'A', openapi: 'a.json' }] },
+        { tab: 'More', pages: ['guide'] },
+      ], ['openapi.json', 'a.json'])
+      expect(summary(bundle).map((tab) => [tab.tab, tab.api])).toEqual([
+        ['Docs', undefined],
+        ['Docs: A', 'openapi/a.json'],
+        ['More', undefined],
+        ['API', 'openapi/openapi.json'],
+      ])
+    })
+
+    it('gives two API items in one tab their own bindings, even for the same spec', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [
+          { item: 'Guide', pages: ['guide'] },
+          { item: 'REST', openapi: 'openapi.json' },
+          { item: 'Admin', openapi: 'admin.json' },
+          { item: 'REST again', openapi: 'openapi.json' },
+        ],
+      }], ['openapi.json', 'admin.json'])
+      expect(summary(bundle).map((tab) => [tab.tab, tab.api])).toEqual([
+        ['Docs', undefined],
+        ['Docs: REST', 'openapi/openapi.json'],
+        ['Docs: Admin', 'openapi/admin.json'],
+        ['Docs: REST again', 'openapi/openapi.json'],
+      ])
+    })
+
+    it('carries a menu item icon and hidden flag onto its API tab', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [
+          { item: 'Guide', pages: ['guide'] },
+          { item: 'Public', icon: 'code', openapi: 'openapi.json' },
+          { item: 'Internal', hidden: true, openapi: 'a.json' },
+        ],
+      }], ['openapi.json', 'a.json'])
+      expect(bundle.docsConfig.tabs.map((tab) => [tab.tab, tab.icon, tab.hidden])).toEqual([
+        ['Docs', undefined, undefined],
+        ['Docs: Public', 'code', undefined],
+        ['Docs: Internal', undefined, true],
+      ])
+    })
+
+    it('keeps same-named menu items under different versions bound to their own specs', () => {
+      const root = fixture()
+      writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+      writeFileSync(join(root, 'v1.json'), spec)
+      writeFileSync(join(root, 'v2.json'), `${spec}\n`)
+      const menu = (file: string) => [{ item: 'Guide', pages: ['guide'] }, { item: 'REST', openapi: file }]
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { versions: [
+        { version: 'v1', tabs: [{ tab: 'Docs', menu: menu('v1.json') }] },
+        { version: 'v2', tabs: [{ tab: 'Docs', menu: menu('v2.json') }] },
+      ] } }))
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      expect(bundle.docsConfig.tabs.filter((tab) => tab.api).map((tab) => tab.api?.source).sort()).toEqual(['openapi/v1.json', 'openapi/v2.json'])
+    })
+
+    it('keeps two different specs with the same file name from different folders', () => {
+      const root = fixture()
+      mkdirSync(join(root, 'v1'))
+      mkdirSync(join(root, 'v2'))
+      writeFileSync(join(root, 'v1/openapi.json'), spec)
+      writeFileSync(join(root, 'v2/openapi.json'), `${spec}\n# v2`)
+      writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { tabs: [
+        { tab: 'V1', openapi: 'v1/openapi.json' },
+        { tab: 'V2', openapi: 'v2/openapi.json' },
+      ] } }))
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      expect(bundle.docsConfig.tabs.flatMap((tab) => (tab.api ? [tab.api.source] : []))).toEqual(['openapi/openapi.json', 'openapi/v2-openapi.json'])
+      expect(bundle.assets.map((asset) => asset.path).filter((path) => path.startsWith('openapi/')).sort()).toEqual(['openapi/openapi.json', 'openapi/v2-openapi.json'])
+    })
+
+    it('warns that a { source, directory } output folder scopes only part of the spec', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [{ item: 'Guide', pages: ['guide'] }, { item: 'Ref', openapi: { source: 'openapi.json', directory: 'ref' } }],
+      }])
+      expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('limited to pages under "ref"')
+    })
+
+    it('warns about an API menu item it cannot represent instead of dropping it silently', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [{ item: 'Guide', pages: ['guide'] }, { item: 'Broken API', openapi: { directory: 'api' } }, { item: 'Async', asyncapi: 'openapi.json' }],
+      }])
+      const messages = bundle.warnings.map((warning) => warning.message).join('\n')
+      expect(messages).toContain('"Broken API"')
+      expect(messages).toContain('AsyncAPI is not supported')
+    })
   })
 
   it('resolves an object-form `openapi: { source, directory }` group reference and warns that the directory scoping is lost', () => {
@@ -540,8 +762,8 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Documentation')
-    expect(apiTab?.api).toEqual({ source: '/openapi.yaml', navigation: false })
-    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi.yaml')
+    expect(apiTab?.api).toEqual({ source: 'openapi/openapi.yaml', navigation: false })
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/openapi.yaml')
     expect(bundle.warnings.some((warning) =>
       warning.message.includes('qstash/api-reference') && warning.message.includes('covers a whole tab'))).toBe(true)
   })
@@ -567,7 +789,7 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Documentation')
-    expect(apiTab?.api?.source).toBe('/openapi.yaml')
+    expect(apiTab?.api?.source).toBe('openapi/openapi.yaml')
     expect(bundle.warnings.some((warning) =>
       warning.message.includes('already uses another OpenAPI spec'))).toBe(true)
   })
@@ -596,8 +818,8 @@ describe('Mintlify repository migration', () => {
     // Distinct assets, each with the right tab's own content — neither
     // spec silently overwrote the other's bytes.
     expect(qstashTab?.api?.source).not.toBe(workflowTab?.api?.source)
-    const qstashAsset = bundle.assets.find((asset) => `/${asset.path}` === qstashTab?.api?.source)
-    const workflowAsset = bundle.assets.find((asset) => `/${asset.path}` === workflowTab?.api?.source)
+    const qstashAsset = bundle.assets.find((asset) => asset.path === qstashTab?.api?.source)
+    const workflowAsset = bundle.assets.find((asset) => asset.path === workflowTab?.api?.source)
     expect(qstashAsset?.content.toString()).toContain('title: QStash')
     expect(workflowAsset?.content.toString()).toContain('title: Workflow')
     expect(bundle.warnings.some((warning) => warning.message.includes('already uses another OpenAPI spec'))).toBe(false)
@@ -687,7 +909,7 @@ describe('Mintlify repository migration', () => {
       expect(bundle.docsConfig.tabs.find((entry) => entry.tab === tab)?.api).toBeUndefined()
     }
     expect(bundle.pages.map((page) => page.id)).toEqual(expect.arrayContaining(['guide', 'rest-landing', 'ws-landing', 'private-landing']))
-    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi.json')
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi/openapi.json')
     for (const url of ['https://api.example.com/openapi.json', 'http://api.example.com/ws-spec.json', 'https://[::ffff:7f00:1]/spec.json']) {
       expect(bundle.warnings).toContainEqual(expect.objectContaining({
         code: 'unsupported-config',
@@ -2714,7 +2936,7 @@ navigation:
     ])
     expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old-install', destination: '/guides/install' })
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
-    expect(apiTab?.api?.source).toBe('/openapi.yml')
+    expect(apiTab?.api?.source).toBe('openapi/openapi.yml')
     expect(bundle.assets.map((asset) => asset.path)).toContain('images/logo.svg')
     expect(bundle.pages.find((page) => page.id === 'welcome')?.body).toContain('<Warning>Read this first.</Warning>')
     expect(bundle.pages.find((page) => page.id === 'welcome')?.body).toContain('![Logo](/images/logo.svg)')
@@ -2977,8 +3199,8 @@ navigation:
 
     const apiTabs = bundle.docsConfig.tabs.filter((tab) => tab.api)
     expect(apiTabs.map((tab) => tab.tab).sort()).toEqual(['Rest Tab', 'Ws Tab'])
-    expect(apiTabs.map((tab) => tab.api?.source).sort()).toEqual(['/rest-openapi.yml', '/ws-openapi.yml'])
-    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['rest-openapi.yml', 'ws-openapi.yml'])
+    expect(apiTabs.map((tab) => tab.api?.source).sort()).toEqual(['openapi/rest-openapi.yml', 'openapi/ws-openapi.yml'])
+    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['openapi/rest-openapi.yml', 'openapi/ws-openapi.yml'])
     expect(bundle.warnings.some((warning) => /only the first was imported/i.test(warning.message))).toBe(false)
   })
 
@@ -3021,7 +3243,7 @@ navigation:
     // not one tab overwritten by the other.
     expect(apiTabs).toHaveLength(2)
     expect(new Set(apiTabs.map((tab) => tab.api?.source)).size).toBe(2)
-    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['openapi.json', 'testnet-rest-openapi.json'])
+    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['openapi/openapi.json', 'openapi/testnet-rest-openapi.json'])
   })
 
   it('warns by name instead of silently dropping an AsyncAPI/OpenRPC-only Fern api: section', () => {
@@ -3198,8 +3420,8 @@ api:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
-    expect(apiTab?.api?.source).toBe('/configured.yml')
-    expect(bundle.assets.map((asset) => asset.path)).toContain('configured.yml')
+    expect(apiTab?.api?.source).toBe('openapi/configured.yml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/configured.yml')
   })
 
   it("resolves a multi-API repo's generators.yml spec path outside its own API folder but inside the repository (Cohere layout)", () => {
@@ -3228,8 +3450,8 @@ api:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
-    expect(apiTab?.api?.source).toBe('/acme-openapi.yaml')
-    expect(bundle.assets.map((asset) => asset.path)).toContain('acme-openapi.yaml')
+    expect(apiTab?.api?.source).toBe('openapi/acme-openapi.yaml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/acme-openapi.yaml')
     expect(bundle.warnings.some((warning) => /outside the repository/i.test(warning.message))).toBe(false)
   })
 
@@ -3310,8 +3532,8 @@ api:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
-    expect(apiTab?.api?.source).toBe('/plants.yml')
-    expect(bundle.assets.map((asset) => asset.path)).toContain('plants.yml')
+    expect(apiTab?.api?.source).toBe('openapi/plants.yml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/plants.yml')
     expect(bundle.warnings.some((warning) => warning.message.includes('No OpenAPI'))).toBe(false)
   })
 
@@ -3368,7 +3590,7 @@ api:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
-    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi.yml')
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi/openapi.yml')
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
       code: 'unsupported-config',
       message: expect.stringContaining('plants'),
@@ -3427,7 +3649,7 @@ navigation:
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
-    expect(bundle.docsConfig.tabs.find((tab) => tab.api)?.api?.source).toBe('/plants.yml')
+    expect(bundle.docsConfig.tabs.find((tab) => tab.api)?.api?.source).toBe('openapi/plants.yml')
     expect(bundle.warnings.some((warning) => warning.message.startsWith('No OpenAPI'))).toBe(false)
   })
 })
