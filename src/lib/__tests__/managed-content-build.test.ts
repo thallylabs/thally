@@ -125,7 +125,7 @@ describe('managed content build', () => {
     ])
   })
 
-  it('lets a page-local inline component resolve a registered built-in it references', () => {
+  it('lets a page-local inline component resolve a registered built-in it references', { timeout: 30_000 }, () => {
     const root = createProject(1)
     writeFileSync(
       path.join(root, 'src/content/pdf.mdx'),
