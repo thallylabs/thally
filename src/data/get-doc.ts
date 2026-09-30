@@ -75,7 +75,7 @@ async function loadDocFromSource(
   if (!candidate) {
     return null
   }
-  const document = await compileDocEntry(source, candidate.filePath, slugSegments, candidate.isFallback, candidate.isStale)
+  const document = await compileDocEntry(source, candidate.filePath, slugSegments, candidate.isFallback, candidate.isStale, locale)
   if (!document || !candidate.sourcePath || candidate.isFallback) return document
   const sourceFile = await source.read(candidate.sourcePath)
   if (!sourceFile) return null
@@ -107,6 +107,7 @@ async function compileDocEntry(
   slugSegments: Array<string>,
   isFallback: boolean,
   isStale: boolean,
+  locale?: string,
 ): Promise<(DocEntry & { isFallback: boolean; isStale: boolean }) | null> {
   const sourceFile = await source.read(filePath)
   if (!sourceFile) return null
@@ -180,6 +181,7 @@ async function compileDocEntry(
         authMethod: frontmatter.authMethod,
         mdx: parseFrontmatter(sourceFile.content).content,
         config: getApiMdxConfig(),
+        locale,
         warn,
       }) ?? undefined
     }

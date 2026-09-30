@@ -301,6 +301,8 @@ export interface BuildManualOperationInput {
   /** Page MDX with frontmatter removed. */
   mdx: string
   config: ApiMdxConfig
+  /** Non-default locale the page was rendered from; carried so the relay re-reads the same file. */
+  locale?: string
   warn?: Warn
 }
 
@@ -361,5 +363,6 @@ export function buildManualOperation(input: BuildManualOperationInput): Normaliz
     security: [],
     prefill,
     manualPage: input.pageId,
+    ...(input.locale ? { manualLocale: input.locale } : {}),
   }
 }

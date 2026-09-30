@@ -1,6 +1,6 @@
 /** Server-side lookup of a manual API page's operation, used by the Try It relay. */
 
-import { deriveTitleFromSlug, getApiMdxConfig } from '@/data/docs'
+import { deriveTitleFromSlug, getApiMdxConfig, getI18nConfig } from '@/data/docs'
 import { getContentSource } from '@/lib/content-source'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { findDocSource } from '@/lib/i18n/translation-source'
@@ -15,12 +15,15 @@ import type { NormalizedOperation } from '@/lib/openapi/types'
  * relay route does not bundle the MDX render pipeline. Mirrors the manual
  * operation get-doc builds for the page itself.
  */
-export async function getManualApiOperation(pageId: string): Promise<NormalizedOperation | null> {
+export async function getManualApiOperation(pageId: string, locale?: string): Promise<NormalizedOperation | null> {
   const segments = pageId.split('/').filter(Boolean)
   if (segments.length === 0 || segments.some((segment) => segment === '.' || segment === '..')) return null
+  // The locale comes from the browser and becomes a content directory, so it
+  // must be one the site configures.
+  if (locale !== undefined && !getI18nConfig()?.locales.some((entry) => entry.code === locale)) return null
   const slugPath = segments.join('/')
   const source = getContentSource()
-  const candidate = await findDocSource(source, slugPath)
+  const candidate = await findDocSource(source, slugPath, locale)
   if (!candidate) return null
   const file = await source.read(candidate.filePath)
   if (!file) return null
@@ -33,5 +36,6 @@ export async function getManualApiOperation(pageId: string): Promise<NormalizedO
     authMethod: data.authMethod,
     mdx: content,
     config: getApiMdxConfig(),
+    locale,
   })
 }

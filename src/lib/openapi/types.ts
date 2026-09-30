@@ -118,6 +118,8 @@ export interface NormalizedOperation {
    * id the Try It relay re-derives the operation from, server-side.
    */
   manualPage?: string
+  /** Locale the manual page was rendered from; absent for the default locale. */
+  manualLocale?: string
 }
 
 export interface OperationPrefill {

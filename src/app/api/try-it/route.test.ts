@@ -293,6 +293,26 @@ describe('POST /api/try-it for manual api pages', () => {
     }
   })
 
+  it('forwards the page locale to the lookup', async () => {
+    const response = await POST(request(manualPayload({ locale: 'fr' })))
+    expect(response.status).toBe(200)
+    expect(getManualApiOperation).toHaveBeenCalledWith('guides/users', 'fr')
+  })
+
+  it('rejects a non-string locale with 400', async () => {
+    for (const locale of [{ a: 1 }, 5, ['fr'], null]) {
+      expect((await POST(request(manualPayload({ locale })))).status).toBe(400)
+    }
+    expect(getManualApiOperation).not.toHaveBeenCalled()
+  })
+
+  it('refuses a locale the site does not configure', async () => {
+    vi.mocked(getManualApiOperation).mockResolvedValue(null)
+    const response = await POST(request(manualPayload({ locale: 'guides' })))
+    expect(response.status).toBe(403)
+    expect(getApiOperationByKey).not.toHaveBeenCalled()
+  })
+
   it('refuses a non-string page id from the client', async () => {
     const response = await POST(request(manualPayload({ page: { a: 1 } })))
     expect(response.status).toBe(403)

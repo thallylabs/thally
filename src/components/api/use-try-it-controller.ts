@@ -111,6 +111,7 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
         body: JSON.stringify({
           specId: operation.specId,
           ...(operation.manualPage ? { page: operation.manualPage } : {}),
+          ...(operation.manualLocale ? { locale: operation.manualLocale } : {}),
           operationPath: operation.path,
           url: preparedRequest.url,
           method: preparedRequest.method,
@@ -125,7 +126,7 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
     } finally {
       setIsSending(false)
     }
-  }, [operation.manualPage, operation.path, operation.specId, preparedRequest])
+  }, [operation.manualLocale, operation.manualPage, operation.path, operation.specId, preparedRequest])
 
   return {
     operation,

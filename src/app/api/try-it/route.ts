@@ -58,6 +58,8 @@ interface TryItPayload {
   specId?: unknown
   /** Manual `api:` page id; the operation is re-derived from that page server-side. */
   page?: unknown
+  /** Locale the manual page was rendered from; must be a configured locale. */
+  locale?: unknown
   operationPath?: unknown
   method?: unknown
   url?: unknown
@@ -277,6 +279,7 @@ export async function POST(request: NextRequest) {
     return jsonError('Missing operation identity or URL', 400)
   }
   if (!ALLOWED_METHODS.has(method)) return jsonError('Unsupported HTTP method', 400)
+  if (payload.locale !== undefined && typeof payload.locale !== 'string') return jsonError('Invalid locale', 400)
   if (
     typeof payload.body === 'string' &&
     Buffer.byteLength(payload.body, 'utf8') > MAX_UPSTREAM_BODY_BYTES
@@ -301,7 +304,11 @@ export async function POST(request: NextRequest) {
   let operation: { operation: NormalizedOperation } | null
   if (typeof payload.page === 'string') {
     const { getManualApiOperation } = await import('@/data/manual-api')
-    const manual = await getManualApiOperation(payload.page)
+    // The locale selects which translated file the page is re-read from; the
+    // lookup refuses any locale the site does not configure.
+    const manual = payload.locale === undefined
+      ? await getManualApiOperation(payload.page)
+      : await getManualApiOperation(payload.page, payload.locale)
     operation = manual && manual.method === method && manual.path === operationPath
       ? { operation: manual }
       : null

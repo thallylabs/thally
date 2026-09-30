@@ -148,6 +148,11 @@ describe('buildManualOperation', () => {
     return buildManualOperation({ pageId: 'p/users', title: 'Users', api: 'POST https://httpbin.org/anything/users/{id}', mdx, config: noConfig, ...overrides })
   }
 
+  it('sets manualLocale only when a locale is given', () => {
+    expect(build({ locale: 'fr' })).toMatchObject({ manualPage: 'p/users', manualLocale: 'fr' })
+    expect(build()).not.toHaveProperty('manualLocale')
+  })
+
   it('builds a full operation from an absolute URL', () => {
     const op = build()!
     expect(op).toMatchObject({ method: 'POST', path: '/anything/users/{id}', servers: [{ url: 'https://httpbin.org' }], manualPage: 'p/users', isWebhook: false })

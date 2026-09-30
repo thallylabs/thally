@@ -11,7 +11,7 @@ const pages = vi.hoisted(() => ({
 
 vi.mock('@/data/docs', () => ({
   deriveTitleFromSlug: (slug: string) => slug,
-  getI18nConfig: () => ({ defaultLocale: 'en' }),
+  getI18nConfig: () => ({ defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }, { code: 'fr', label: 'French' }, { code: 'de', label: 'German' }] }),
   getApiMdxConfig: () => pages.config,
 }))
 vi.mock('next-mdx-remote/rsc', () => ({ compileMDX: vi.fn() }))
@@ -118,3 +118,43 @@ describe('manual API pages', () => {
     expect(await getManualApiOperation('../relay/user')).toBeNull()
   })
 })
+
+describe('localized manual API pages', () => {
+  const apiPage = (id: string, api?: string) => {
+    pages.files[id] = { frontmatter: api ? { title: 'T', api } : { title: 'T' }, source: `---\ntitle: T\n${api ? `api: "${api}"\n` : ''}---\n` }
+  }
+
+  it('resolves the relay from the locale the page rendered, and the default locale without one', async () => {
+    apiPage('relay/tx', 'GET https://api.example.com/users')
+    apiPage('fr/relay/tx', 'GET https://api.example.com/utilisateurs')
+    const rendered = (await getDocFromParams(['relay', 'tx'], 'fr'))?.manualApi
+    expect(rendered).toMatchObject({ manualLocale: 'fr', path: '/utilisateurs' })
+    expect(await getManualApiOperation('relay/tx', 'fr')).toEqual(rendered)
+    const english = await getManualApiOperation('relay/tx')
+    expect(english).toMatchObject({ path: '/users' })
+    expect(english).not.toHaveProperty('manualLocale')
+  })
+
+  it('finds a translation-only api page only with its locale', async () => {
+    apiPage('relay/only-fr')
+    apiPage('fr/relay/only-fr', 'GET https://api.example.com/seul')
+    const rendered = (await getDocFromParams(['relay', 'only-fr'], 'fr'))?.manualApi
+    expect(rendered).toMatchObject({ path: '/seul' })
+    expect(await getManualApiOperation('relay/only-fr', 'fr')).toEqual(rendered)
+    expect(await getManualApiOperation('relay/only-fr')).toBeNull()
+  })
+
+  it('matches the rendered fallback for a configured locale without a translation file', async () => {
+    apiPage('relay/fallback', 'GET https://api.example.com/users')
+    const rendered = (await getDocFromParams(['relay', 'fallback'], 'de'))?.manualApi
+    expect(rendered).toMatchObject({ manualLocale: 'de', path: '/users' })
+    expect(await getManualApiOperation('relay/fallback', 'de')).toEqual(rendered)
+  })
+
+  it('refuses a locale that is not configured, so it cannot select a content directory', async () => {
+    apiPage('guides/relay/tx', 'GET https://api.example.com/users')
+    apiPage('relay/tx', 'GET https://api.example.com/users')
+    expect(await getManualApiOperation('relay/tx', 'guides')).toBeNull()
+  })
+})
+
