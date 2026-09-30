@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process'
 import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
-import { operationState, parseDocOperation } from './openapi-publication.js'
+import { pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { slugify } from '@thallylabs/core/slugify'
@@ -381,28 +381,34 @@ function checkPublicSpecs(projectDir: string, tabs: Array<{ api?: { source?: str
 function checkUnpublishedOperationPages(
   projectDir: string,
   tabs: Array<{ hidden?: boolean; api?: { source?: string } }>,
-  pages: Array<{ file: string; method: string; path: string }>,
+  pages: Array<{ file: string; reference: DocReference }>,
   issues: LintIssue[],
 ): void {
-  const api = tabs.find((tab) => !tab.hidden && tab.api?.source)?.api
-  const source = api?.source
-  if (!source || pages.length === 0 || /^https?:/i.test(source)) return
-  const specPath = source.startsWith('/') ? join(projectDir, 'public', source.slice(1)) : join(projectDir, source)
-  let spec: unknown
-  try {
-    const raw = readFileSync(specPath, 'utf8')
-    spec = /\.json$/i.test(source) ? JSON.parse(raw) : parseYaml(raw)
-  } catch {
-    return // validateOpenApi reports a missing or invalid spec
-  }
-  const overrides = (api as { overrides?: unknown }).overrides
-  for (const { file, method, path } of pages) {
-    const state = operationState(spec, method, path, overrides)
+  if (pages.length === 0) return
+  // The specs the docs route serves, in its order: visible API tabs, the first being the default.
+  const specs: Array<CheckSpec> = tabs
+    .filter((tab) => !tab.hidden && typeof tab.api?.source === 'string')
+    .map((tab) => {
+      const source = tab.api!.source as string
+      const overrides = (tab.api as { overrides?: unknown }).overrides
+      if (/^https?:/i.test(source)) return { source, overrides }
+      const specPath = source.startsWith('/') ? join(projectDir, 'public', source.slice(1)) : join(projectDir, source)
+      try {
+        const raw = readFileSync(specPath, 'utf8')
+        return { source, overrides, document: /\.json$/i.test(source) ? JSON.parse(raw) : parseYaml(raw) }
+      } catch {
+        return { source, overrides } // validateOpenApi reports a missing or invalid spec
+      }
+    })
+  if (specs.length === 0) return
+  for (const { file, reference } of pages) {
+    const state = pageState(reference, specs)
     if (state === 'hidden' || state === 'excluded') {
+      const operation = `${reference.specRef ? `${reference.specRef} ` : ''}${reference.method} ${reference.path}`
       issues.push({
         severity: 'warning',
         file,
-        message: `page ${file} points at ${state} operation ${method} ${path} and is not published: it returns 404 and is left out of navigation, search, sitemap and llms.txt. Publish the operation or point the page at another one`,
+        message: `page ${file} points at ${state} operation ${operation} and is not published: it returns 404 and is left out of navigation, search, sitemap and llms.txt. Publish the operation or point the page at another one`,
       })
     }
   }
@@ -519,7 +525,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   if (existsSync(contentDir)) scanMdx(contentDir, allFiles)
 
   const fixedOrphans: string[] = []
-  const operationPages: Array<{ file: string; method: string; path: string }> = []
+  const operationPages: Array<{ file: string; reference: DocReference }> = []
   const validPaths = new Set<string>(['/'])
   const anchorsByPath = new Map<string, Set<string>>()
   const linksByFile: Array<{ file: string; path: string; anchors: Set<string>; links: FoundLink[]; images: FoundLink[]; offset: number }> = []
@@ -561,8 +567,8 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
       issues.push({ severity: 'warning', message: `Very short body (${content.trim().length} chars) — page may be empty`, file: rel2 })
     }
 
-    const operation = parseDocOperation(data.openapi)
-    if (operation) operationPages.push({ file: rel2, ...operation })
+    const reference = parseDocReference(data.openapi)
+    if (reference) operationPages.push({ file: rel2, reference })
 
     if (options.drift) checkDrift(projectDir, rel2, data, issues)
 

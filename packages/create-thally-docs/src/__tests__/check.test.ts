@@ -338,6 +338,35 @@ describe('thally check pages bound to unpublished operations', () => {
     expect(output).toContain('0 error(s)')
   })
 
+  it('judges a spec-prefixed page against the spec it names, like the site', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-prefixed-'))
+    mkdirSync(join(projectDir, 'openapi'), { recursive: true })
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    const pages = { 'admin-secret': 'admin.yaml GET /secret', 'main-moved': 'openapi/api.json GET /moved', 'bare-moved': 'GET /moved', 'admin-moved': 'admin.yaml GET /moved' }
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [
+      { tab: 'API', groups: [{ group: 'G', pages: Object.keys(pages) }], api: { source: 'openapi/api.json' } },
+      { tab: 'Admin', api: { source: 'openapi/admin.yaml' } },
+    ] }))
+    writeFileSync(join(projectDir, 'openapi/api.json'), JSON.stringify({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths: { '/moved': { get: { 'x-hidden': true, ...ok } } } }))
+    writeFileSync(join(projectDir, 'openapi/admin.yaml'), 'openapi: 3.1.0\ninfo: { title: A, version: "1" }\npaths:\n  /secret:\n    get: { x-hidden: true, responses: { "200": { description: ok } } }\n  /moved:\n    get: { responses: { "200": { description: ok } } }\n')
+    for (const [id, operation] of Object.entries(pages)) {
+      writeFileSync(join(projectDir, `src/content/${id}.mdx`), `---\ntitle: ${id}\ndescription: d\nopenapi: "${operation}"\n---\n`)
+    }
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    const text = output.join('\n')
+    expect(text).toContain('page src/content/admin-secret.mdx points at hidden operation admin.yaml GET /secret and is not published')
+    expect(text).toContain('page src/content/main-moved.mdx points at hidden operation openapi/api.json GET /moved and is not published')
+    // A bare reference renders from the Admin spec, which publishes it.
+    expect(text).not.toContain('bare-moved.mdx points')
+    expect(text).not.toContain('admin-moved.mdx points')
+  })
+
   it('honours docs.json overrides and does not judge a remote spec', async () => {
     expect(await run({ 'hidden-endpoint': 'GET /hidden' }, { 'GET /hidden': { hidden: false } })).not.toContain('is not published')
     expect(await run({ 'hidden-endpoint': 'GET /hidden' }, undefined, 'https://example.com/spec.json')).not.toContain('is not published')

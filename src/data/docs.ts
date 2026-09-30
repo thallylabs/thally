@@ -9,7 +9,7 @@ import { resolveIconLibrary, type IconLibrary } from '@/lib/icon-library'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { SUPPORTED_LOCALE_OPTIONS } from '@/lib/i18n/config'
 import { parseOpenApiReference, type OpenApiReference } from '@/lib/openapi/doc-reference'
-import { UNPUBLISHED_OPERATIONS_FILE } from '@/lib/openapi/publication'
+import { UNPUBLISHED_PAGES_FILE } from '@/lib/openapi/publication'
 
 export { parseOpenApiReference }
 
@@ -533,14 +533,14 @@ let _allEntries: Array<DocEntry> | null = null
 // ---------------------------------------------------------------------------
 
 /**
- * A page whose `openapi:` frontmatter points at a hidden or excluded operation
- * 404s (see the docs page route), so no listing may offer it. The build records
- * which operations it withheld from the served spec (see
- * `UNPUBLISHED_OPERATIONS_FILE`); a page is unpublished when its operation is
- * among them. Self-hosted builds read that record synchronously from the
- * embedded sources, so the answer is a pure function of the module's own
- * constants: no state to prime, nothing shared between module instances, and
- * every cache below is computed after it is known.
+ * A page whose `openapi:` frontmatter resolves only to hidden or excluded
+ * operations 404s (see the docs page route), so no listing may offer it. The
+ * build decides this with the route's own lookup, spec prefixes included, and
+ * records the withheld page ids (see `UNPUBLISHED_PAGES_FILE`). Self-hosted
+ * builds read that record synchronously from the embedded sources, so the
+ * answer is a pure function of the module's own constants: no state to prime,
+ * nothing shared between module instances, and every cache below is computed
+ * after it is known.
  */
 let embeddedRecord: ReadonlySet<string> | undefined
 /** Managed (assets) releases only: the record cannot be read synchronously, so a loader installs it. */
@@ -548,27 +548,25 @@ let assetRecord: ReadonlySet<string> | undefined
 
 function parseRecord(content: string): ReadonlySet<string> {
   try {
-    const list = JSON.parse(content) as Array<{ method?: unknown; path?: unknown }>
-    return new Set(list.flatMap((entry) =>
-      typeof entry.method === 'string' && typeof entry.path === 'string' ? [`${entry.method.toUpperCase()} ${entry.path}`] : []))
+    const list = JSON.parse(content) as unknown
+    return new Set(Array.isArray(list) ? list.filter((id): id is string => typeof id === 'string') : [])
   } catch {
     return new Set()
   }
 }
 
-function recordedUnpublishedOperations(): ReadonlySet<string> {
+function recordedUnpublishedPages(): ReadonlySet<string> {
   if (assetRecord) return assetRecord
   if (embeddedRecord) return embeddedRecord
-  embeddedRecord = runtimeSourceExists(UNPUBLISHED_OPERATIONS_FILE)
-    ? parseRecord(readRuntimeSource(UNPUBLISHED_OPERATIONS_FILE))
+  embeddedRecord = runtimeSourceExists(UNPUBLISHED_PAGES_FILE)
+    ? parseRecord(readRuntimeSource(UNPUBLISHED_PAGES_FILE))
     : new Set()
   return embeddedRecord
 }
 
 /** False for a page whose documented operation is hidden or excluded. */
 export function isDocPublished(pageId: string): boolean {
-  const operation = parseOpenApiReference(readFrontmatter(pageId).openapi)
-  return !operation || !recordedUnpublishedOperations().has(`${operation.method} ${operation.path}`)
+  return !recordedUnpublishedPages().has(pageId)
 }
 
 let assetRecordPromise: Promise<void> | undefined
@@ -584,7 +582,7 @@ export function ensureDocPublication(): Promise<void> {
   assetRecordPromise ??= (async () => {
     try {
       const { getContentSource } = await import('@/lib/content-source')
-      const file = await getContentSource().read(UNPUBLISHED_OPERATIONS_FILE)
+      const file = await getContentSource().read(UNPUBLISHED_PAGES_FILE)
       assetRecord = file ? parseRecord(String(file.content)) : new Set()
     } catch {
       assetRecord = new Set()
