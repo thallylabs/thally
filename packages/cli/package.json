@@ -1,6 +1,6 @@
 {
   "name": "@thallylabs/cli",
-  "version": "0.8.68",
+  "version": "0.8.69",
   "description": "CLI for publishing Thally docs from Git and turning product changes into evidence-backed updates for human review.",
   "type": "module",
   "engines": {
@@ -24,8 +24,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "@thallylabs/mcp": "0.10.67",
-    "create-thally-docs": "0.10.65"
+    "@thallylabs/mcp": "0.10.68",
+    "create-thally-docs": "0.10.66"
   },
   "devDependencies": {
     "@thallylabs/agent": "*",
