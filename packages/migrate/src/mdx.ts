@@ -1789,20 +1789,6 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
       .replace(/<\/Tree\.File>/g, '</File>')
     if (runDocusaurus) {
       result = result
-        // `mdx-code-block` can introduce a live tag after component import
-        // analysis has run. Those tags were invisible to its AST alias pass,
-        // so map the same known presentation wrappers here as well. The code
-        // masker leaves ordinary examples untouched.
-        .replace(/<APITable\b/g, '<ApiTable')
-        .replace(/<\/APITable>/g, '</ApiTable>')
-        .replace(/<BrowserWindow\b/g, '<BrowserPreview')
-        .replace(/<\/BrowserWindow>/g, '</BrowserPreview>')
-        .replace(/<IframeWindow\b/g, '<IframePreview')
-        .replace(/<\/IframeWindow>/g, '</IframePreview>')
-        // Docusaurus pages use react-medium-image-zoom around an image;
-        // Thally's Frame already provides native zoom for that same shape.
-        .replace(/<Zoom\b/g, '<Frame')
-        .replace(/<\/Zoom>/g, '</Frame>')
         // A TabItem outside any <Tabs>...</Tabs> pair (malformed source)
         // never reaches normalizeDocusaurusTabs' block match above; fall
         // back to its own label/value so it still renders as a Tab.

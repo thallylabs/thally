@@ -3126,7 +3126,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       page.body = replaceUnknownComponents(page.body, (name) => {
         warnings.push({
           code: 'unsupported-config',
-          message: `Component <${name}> has no equivalent in Thally and wasn't found on this page; it was replaced with a plain <div> (or removed, if self-closing) so the page still builds. Add a matching component or edit the page.`,
+          message: `Unresolved MDX component <${name}> was replaced with a plain <div> (or removed, if self-closing) so the page still builds. It may be a site-authored or third-party implementation; review its source before adding a Thally equivalent.`,
           source: file.relativePath,
         })
       })

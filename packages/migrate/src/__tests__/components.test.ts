@@ -25,35 +25,22 @@ function fixture(files: Record<string, string>): string {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('repository component migration', () => {
-  it('renders Docusaurus presentation wrappers with native Thally components', () => {
+  it('copies site-authored Docusaurus components rather than claiming they are platform widgets', () => {
     const root = fixture({
       'website/docusaurus.config.js': 'module.exports = {}',
       'website/docs/index.mdx': [
-        "import APITable from '@site/src/components/APITable'",
-        "import Window from '@site/src/components/BrowserWindow'",
-        "import IframeWindow from '@site/src/components/BrowserWindow/IframeWindow'",
+        "import Showcase from '@site/src/components/Showcase'",
         '',
-        '```mdx-code-block',
-        '<APITable name="config">',
-        '```',
-        '| Name | Value |',
-        '| --- | --- |',
-        '| option | value |',
-        '```mdx-code-block',
-        '</APITable>',
-        '```',
-        '<Window url="https://example.com"><p>Preview</p></Window>',
-        '<IframeWindow url="https://example.com/preview" />',
+        '<Showcase><p>Preview</p></Showcase>',
       ].join('\n'),
+      'website/src/components/Showcase.jsx': 'export default function Showcase({ children }) { return <section className="custom-showcase">{children}</section> }',
     })
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs', platform: 'docusaurus' })
     const body = bundle.pages.find((page) => page.body.includes('Preview'))?.body ?? ''
-    expect(body).toContain('<ApiTable name="config">')
-    expect(body).toContain('<BrowserPreview url="https://example.com">')
-    expect(body).toContain('<IframePreview url="https://example.com/preview" />')
-    expect(body).toContain('option')
-    expect(body).toContain('Preview')
-    expect(bundle.warnings.some((warning) => /APITable|BrowserWindow|<Window>|IframeWindow/.test(warning.message))).toBe(false)
+    expect(body).toMatch(/<Migrated[a-f0-9]+>/)
+    expect(bundle.componentFiles.some((file) => file.path.endsWith('/Showcase.jsx'))).toBe(true)
+    expect(body).not.toContain('<BrowserPreview')
+    expect(bundle.warnings).toEqual([])
   })
 
   it('isolates components and inline handlers from different sources across sequential imports', () => {
@@ -849,7 +836,7 @@ describe('repository component migration', () => {
     expect(warnings[0].message).toContain('could not be copied and was removed')
   })
 
-  it('wraps an impure top-level selector in a copied CSS module with :global(...), leaving a pure one untouched', () => {
+  it('omits global-only CSS module selectors and flags custom styles for review', () => {
     const root = fixture({
       'components/BrowserWindow.jsx': "import styles from './styles.module.css'\n\nexport default ({ children }) => <div className={styles.window}><div className={styles.content}>{children}</div></div>",
       'components/styles.module.css': '[data-theme="light"] { background: white; }\n.content { padding: 1rem; }\n:root, .window { border: 1px solid; }\n',
@@ -858,12 +845,11 @@ describe('repository component migration', () => {
     const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
     migrator.transform("import BrowserWindow from './components/BrowserWindow.jsx'\n\n<BrowserWindow>x</BrowserWindow>", join(root, 'index.mdx'))
     const css = String(migrator.files().find((file) => file.path.endsWith('styles.module.css'))!.content)
-    expect(css).toContain(':global([data-theme="light"])')
+    expect(css).not.toContain('[data-theme="light"]')
     expect(css).toContain('.content {')
-    expect(css).not.toContain(':global(.content)')
-    expect(css).toContain(':global(:root)')
+    expect(css).not.toContain(':root')
     expect(css).toContain('.window {')
-    expect(warnings).toEqual([])
+    expect(warnings.some((warning) => warning.message.includes('Site-authored CSS module') && warning.message.includes('2 global-only selector branch(es)'))).toBe(true)
   })
 
   it('leaves a CSS module with only pure (class-containing) selectors byte-identical', () => {
@@ -876,6 +862,35 @@ describe('repository component migration', () => {
     migrator.transform("import Card from './components/Card.jsx'\n\n<Card>x</Card>", join(root, 'index.mdx'))
     const css = String(migrator.files().find((file) => file.path.endsWith('styles.module.css'))!.content)
     expect(css).not.toContain(':global')
+  })
+
+  it('keeps CSS module keyframes and value exports while removing global-only classes', () => {
+    const root = fixture({
+      'components/Widget.jsx': "import styles from './styles.module.css'\nexport default () => <div className={styles.card} />",
+      'components/styles.module.css': ':export { accent: red; }\n@keyframes pulse { from { opacity: 0; } to { opacity: 1; } }\n:global(.theme-doc-card) { color: red; }\n.card { animation: pulse 1s; }',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    migrator.transform("import Widget from './components/Widget.jsx'\n\n<Widget />", join(root, 'index.mdx'))
+    const css = String(migrator.files().find((file) => file.path.endsWith('styles.module.css'))!.content)
+    expect(css).toContain(':export { accent: red; }')
+    expect(css).toContain('@keyframes pulse { from { opacity: 0; } to { opacity: 1; } }')
+    expect(css).toContain('.card { animation: pulse 1s; }')
+    expect(css).not.toContain('theme-doc-card')
+    expect(warnings.some((warning) => warning.message.includes('1 global-only selector branch(es)'))).toBe(true)
+  })
+
+  it('does not report copied custom CSS when its component graph is rejected', () => {
+    const root = fixture({
+      'components/Widget.jsx': "import styles from './styles.module.css'\nimport Missing from 'uninstalled-widget'\nexport default () => <div className={styles.card}><Missing /></div>",
+      'components/styles.module.css': ':root { color: red; }\n.card { color: blue; }',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    migrator.transform("import Widget from './components/Widget.jsx'\n\n<Widget />", join(root, 'index.mdx'))
+    expect(migrator.files()).toEqual([])
+    expect(warnings.some((warning) => warning.message.includes('Site-authored CSS module'))).toBe(false)
+    expect(warnings.some((warning) => warning.message.includes('Site-authored component import'))).toBe(true)
   })
 
   it('does not touch a plain (non-module) .css file copied as a component dependency', () => {

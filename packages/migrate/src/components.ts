@@ -334,38 +334,40 @@ function portableSpecifier(path: string): string {
 }
 
 /**
- * Turbopack's CSS Modules loader requires every selector to contain at
- * least one class or id ("pure"): a copied `.module.css` file that targets
- * `:root`, an element, or an attribute at the top level (a common way to
- * key off a `data-theme` attribute, e.g. Docusaurus' `BrowserWindow`) fails
- * the whole build with `Selector "..." is not pure`, even though the
- * selector compiled and worked fine in its own Docusaurus build. Wrap only
- * the impure branches of each rule's selector list in `:global(...)`
- * (CSS Modules' own escape hatch) using a real selector parser — a
- * character-scanning approach can't tell a selector's structure (nesting,
- * combinators, pseudo-classes) from its text reliably enough to know where
- * a `:global(...)` wrapper legally starts and ends.
+ * CSS Modules in the Thally scaffold require a local class or ID in each
+ * selector branch. A global-only branch cannot be made local by wrapping it
+ * in :global(...); Turbopack still rejects it. Omit those branches while
+ * preserving local rules, and report the omission for manual review.
  */
-function wrapImpureCssModuleSelectors(css: string): string {
+function sanitizeCssModuleSelectors(css: string): { css: string; omitted: number } {
   const root = postcss.parse(css)
+  let omitted = 0
   root.walkRules((rule) => {
-    rule.selector = selectorParser((selectors) => {
-      selectors.each((selector) => {
-        let hasClassOrId = false
-        selector.walk((node) => {
-          if (node.type === 'class' || node.type === 'id') hasClassOrId = true
-        })
-        if (hasClassOrId) return
-        const nodes = selector.nodes.splice(0, selector.nodes.length)
-        const container = selectorParser.selector({ value: '' })
-        for (const node of nodes) container.append(node)
-        const globalPseudo = selectorParser.pseudo({ value: ':global' })
-        globalPseudo.append(container)
-        selector.append(globalPseudo)
+    // Keyframe selectors and CSS Modules' value exports are not DOM
+    // selectors; removing them breaks otherwise portable local styles.
+    if (rule.parent?.type === 'atrule' && /keyframes$/i.test(rule.parent.name)) return
+    if (/^:export$|^:import\(/.test(rule.selector.trim())) return
+    const selectors = selectorParser().astSync(rule.selector)
+    selectors.each((selector) => {
+      let hasLocalClassOrId = false
+      selector.walk((node) => {
+        if (node.type !== 'class' && node.type !== 'id') return
+        let parent = node.parent
+        while (parent) {
+          if (parent.type === 'pseudo' && parent.value === ':global') return
+          parent = parent.parent
+        }
+        hasLocalClassOrId = true
       })
-    }).processSync(rule.selector)
+      if (!hasLocalClassOrId) {
+        selector.remove()
+        omitted++
+      }
+    })
+    if (selectors.nodes.length === 0) rule.remove()
+    else rule.selector = selectors.toString()
   })
-  return root.toString()
+  return { css: root.toString(), omitted }
 }
 
 function sourceFile(source: string, filename: string): ts.SourceFile {
@@ -774,6 +776,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // Stage the entire graph in memory. A missing leaf must not leave a partly
     // registered component or consume the successful-copy budget.
     const staged = new Map<string, RenderedMigrationFile>()
+    const stagedWarnings: Array<{ path: string; omitted: number }> = []
     let stagedBytes = 0
     /** Stage a small fixed-content shim module (see `DOCUSAURUS_THEME_SHIMS`) once, reused across every component that imports it. */
     function stageShim(filename: string, content: string): string {
@@ -801,13 +804,14 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
           // failure: throw, so the dead-import-removal fallback in the
           // caller can neutralize its usage instead of shipping CSS
           // Turbopack would reject anyway.
-          let wrapped: string
+          let sanitized: { css: string; omitted: number }
           try {
-            wrapped = wrapImpureCssModuleSelectors(content.toString('utf8'))
+            sanitized = sanitizeCssModuleSelectors(content.toString('utf8'))
           } catch {
             throw new Error('CSS module could not be parsed to check for Turbopack-safe selectors')
           }
-          staged.set(destination, { path: destination, content: wrapped })
+          if (sanitized.omitted > 0) stagedWarnings.push({ path, omitted: sanitized.omitted })
+          staged.set(destination, { path: destination, content: sanitized.css })
         }
         return
       }
@@ -898,6 +902,9 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     }
     visit(entry)
     for (const [path, file] of staged) copied.set(path, file)
+    for (const { path, omitted } of stagedWarnings) {
+      warn(`Site-authored CSS module ${relative(root, path).replace(/\\/g, '/')} has ${omitted} global-only selector branch(es) that cannot be copied into Thally CSS Modules; those styles were omitted.`, path)
+    }
     copiedBytes += stagedBytes
     return outputPath(entry)
   }
@@ -1095,20 +1102,6 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         // `resolveDependency` already understands, so a locally-owned
         // component copies the same way a relative import would.
         const specifier = rawSpecifier.startsWith('@site/') ? `/${rawSpecifier.slice('@site/'.length)}` : rawSpecifier
-        // Docusaurus' documentation uses two presentational wrappers whose
-        // implementations import its own router/theme runtime. Their public
-        // MDX signatures are simple, so render the authored children through
-        // Thally widgets instead of copying platform code or losing them.
-        const portableDocusaurusWidget = rawSpecifier === '@site/src/components/APITable'
-          ? 'ApiTable'
-          : rawSpecifier === '@site/src/components/BrowserWindow' ? 'BrowserPreview'
-          : rawSpecifier === '@site/src/components/BrowserWindow/IframeWindow' ? 'IframePreview' : undefined
-        if (portableDocusaurusWidget && bindings.length === 1 && bindings[0].imported === 'default'
-          && !hasExpressionReference(new Set([bindings[0].local]))) {
-          aliases.set(bindings[0].local, portableDocusaurusWidget)
-          edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
-          continue
-        }
         if (isScaffoldProvidedImport(specifier)) {
           // Some translated Mintlify pages place a React hook import above a
           // fenced example. Keeping that unused import turns server MDX into
@@ -1356,7 +1349,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             warn(`Asset import ${JSON.stringify(rawSpecifier)} could not be copied as a component; it was copied to ${rescuedAssetHref} and bound to that URL instead.`, currentFile)
           } else {
             edits.push({ start: importStart, end: importEnd, value: '' })
-            warn(`Component import ${JSON.stringify(rawSpecifier)} could not be copied and was removed: ${error instanceof Error ? error.message : 'unsupported dependency'}. Its usage on this page was neutralized.`, currentFile)
+            warn(`Site-authored component import ${JSON.stringify(rawSpecifier)} could not be copied and was removed: ${error instanceof Error ? error.message : 'unsupported dependency'}. Its usage on this page was neutralized; review this custom implementation manually.`, currentFile)
           }
         }
       }

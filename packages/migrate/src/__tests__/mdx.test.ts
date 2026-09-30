@@ -79,10 +79,10 @@ describe('normalizeMdx', () => {
     expect(output).toContain("```jsx\n<a href={require('@docusaurus/useBaseUrl').default('showcase')} />\n```")
   })
 
-  it('uses Thally image zoom for a Docusaurus Zoom wrapper', () => {
+  it('does not rewrite a site-authored zoom component as a platform widget', () => {
     const output = normalizeMdx('<Zoom>\n\n![Diagram](/img/diagram.png)\n\n</Zoom>', 'docusaurus')
-    expect(output).toContain('<Frame>')
-    expect(output).toContain('</Frame>')
+    expect(output).toContain('<Zoom>')
+    expect(output).toContain('</Zoom>')
     expect(output).toContain('![Diagram](/img/diagram.png)')
   })
 
