@@ -221,6 +221,8 @@ export type ContentIconTone = 'neutral' | 'accent'
 
 interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
+  /** Local, customer-owned stylesheets served from public/. */
+  stylesheets?: Array<string>
   navigation?: {
     display?: 'tabs' | 'dropdown'
   }
@@ -1127,6 +1129,17 @@ export function getRedirectsConfig(): Array<DocsJsonRedirect> {
 
 export function getCustomScriptsConfig(): Array<DocsJsonScript> {
   return docsConfig().customScripts ?? []
+}
+
+/** Only local CSS files may be injected into the document head. */
+export function getStylesheetsConfig(): Array<string> {
+  const configured = docsConfig().stylesheets
+  if (!Array.isArray(configured)) return []
+  return configured.slice(0, 16).filter((path): path is string =>
+    typeof path === 'string' && /^\/[A-Za-z0-9_./-]+\.css$/.test(path)
+      && !path.split('/').some((segment) => segment === '.' || segment === '..')
+      && !path.includes('//'),
+  )
 }
 
 export function getSeoConfig(): DocsJsonSeo {

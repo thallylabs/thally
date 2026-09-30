@@ -72,6 +72,14 @@ describe('migration description fallback', () => {
 })
 
 describe('normalizeMdx', () => {
+  it('keeps styled source paragraphs from hydrating as nested paragraphs', () => {
+    const source = '<p className="source-callout">\n  Text with **emphasis**.\n</p>\n\n```mdx\n<p>Keep this example</p>\n```'
+    const output = normalizeMdx(source, 'mintlify')
+    expect(output).toContain('<div className="source-callout">\n  Text with **emphasis**.\n</div>')
+    expect(output).toContain('```mdx\n<p>Keep this example</p>\n```')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
   it('resolves Docusaurus emoji shortcodes in prose and tables without changing code', () => {
     const source = '| Result |\n| --- |\n| :white_check_mark: |\n\nUse :x: for no. `:x:`\n\n```md\n:x:\n```'
     const output = normalizeMdx(source, 'docusaurus')

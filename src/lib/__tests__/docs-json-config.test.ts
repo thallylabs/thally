@@ -15,6 +15,7 @@ import {
   getNavigationPresentation,
   getSidebarCollections,
   getStructuralTheme,
+  getStylesheetsConfig,
 } from '@/data/docs'
 
 afterEach(() => {
@@ -24,6 +25,17 @@ afterEach(() => {
 })
 
 describe('release-bound docs.json', () => {
+  it('accepts only local CSS paths in imported stylesheet config', () => {
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], stylesheets: [
+      '/migrated/site/style.css', 'https://example.com/remote.css', '/a/../private.css', '//example.com/style.css', '/image.svg',
+    ] }))
+    resetDocsJsonConfigForTests()
+    expect(getStylesheetsConfig()).toEqual(['/migrated/site/style.css'])
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], stylesheets: { href: '/style.css' } }))
+    resetDocsJsonConfigForTests()
+    expect(getStylesheetsConfig()).toEqual([])
+  })
+
   it('uses accent content icons unless a site explicitly selects neutral icons', () => {
     expect(getContentIconTone()).toBe('accent')
 

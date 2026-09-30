@@ -1674,6 +1674,44 @@ function injectReactHookImports(body: string): string {
   return used.length > 0 ? `import { ${used.join(', ')} } from 'react'\n\n${body}` : body
 }
 
+/** Keep authored paragraph styling without emitting an invalid <p><p> tree. */
+function normalizeFlowParagraphContainers(body: string): string {
+  if (!body.includes('<p')) return body
+  interface FlowNode {
+    type: string
+    name?: string | null
+    children?: Array<FlowNode>
+    position?: { start: { offset?: number }; end: { offset?: number } }
+  }
+  let tree: FlowNode
+  try {
+    tree = descriptionParser.parse(body) as FlowNode
+  } catch {
+    return body
+  }
+  const edits: Array<{ offset: number; value: string }> = []
+  function visit(node: FlowNode): void {
+    if (node.type === 'mdxJsxFlowElement' && node.name === 'p'
+      && node.children?.some((child) => child.type === 'paragraph' || child.type === 'list' || child.type === 'mdxJsxFlowElement')) {
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start !== undefined && end !== undefined && body.slice(start, start + 2) === '<p') {
+        const closing = body.slice(start, end).match(/<\/p\s*>\s*$/i)
+        if (closing?.index !== undefined) {
+          edits.push({ offset: start + 1, value: 'div' })
+          edits.push({ offset: start + closing.index + 2, value: 'div' })
+        }
+      }
+    }
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(tree)
+  // Replace only the tag names; every class, inline style, and child stays
+  // authored. Descending offsets keep nested paragraph wrappers stable.
+  return edits.sort((a, b) => b.offset - a.offset)
+    .reduce((text, edit) => text.slice(0, edit.offset) + edit.value + text.slice(edit.offset + 1), body)
+}
+
 /** Normalize only syntax Thally cannot render; supported source JSX stays intact. */
 export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapMdxCodeBlocks = true): string {
   // A caller that doesn't know the source platform (the URL crawler, when it
@@ -1800,7 +1838,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
       return normalizeMdx(body, platform, false)
     }
   }
-  return normalized
+  return normalizeFlowParagraphContainers(normalized)
 }
 
 /** Parse source Markdown or MDX into the canonical page representation. */

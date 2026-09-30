@@ -120,6 +120,9 @@ export function mergeMigrationConfig(
     // Collection presentation belongs to the imported information
     // architecture; starter defaults must not coerce source dropdowns to tabs.
     navigation: incoming.navigation ?? existing.navigation,
+    ...((existing.stylesheets?.length || incoming.stylesheets?.length)
+      ? { stylesheets: [...new Set([...(existing.stylesheets ?? []), ...(incoming.stylesheets ?? [])])] }
+      : {}),
     ...(i18n ? { i18n } : {}),
   }
 }

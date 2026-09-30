@@ -65,6 +65,8 @@ export interface MigrationFooterConfig {
 
 export interface MigrationDocsConfig {
   markdown?: { enabled?: boolean }
+  /** Local CSS copied from a source docs site, served from public/. */
+  stylesheets?: Array<string>
   tabs: Array<MigrationNavigationTab>
   navigation?: {
     /** How sibling documentation collections are presented to readers. */

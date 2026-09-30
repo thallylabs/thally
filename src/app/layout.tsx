@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-css-tags -- docs.json selects local CSS at runtime. */
 import type { Metadata } from 'next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
 import Script from 'next/script'
@@ -10,6 +11,7 @@ import {
   getContentIconTone,
   getCustomScriptsConfig,
   getFontsConfig,
+  getStylesheetsConfig,
   getStructuralTheme,
 } from '@/data/docs'
 import { getBuildIconLibrary } from '@/lib/cloud-link/icon-library'
@@ -251,6 +253,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const themeVars = THEME_VARS[structuralTheme] ?? ''
   const bannerConfig = getBannerConfig()
   const customScripts = getCustomScriptsConfig()
+  const stylesheets = getStylesheetsConfig()
   const i18n = await getEffectiveI18nConfig()
   const effectiveSite = resolveBuildSiteConfig()
   const siteUrl = getSiteUrl()
@@ -303,8 +306,8 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         {/* CSS variable overrides for structural theme (radius, sidebar, nav tabs) */}
         {themeVars && <style>{`:root { ${themeVars} }`}</style>}
         {/* Live admin branding override (theme + accent from the dashboard) — last so it wins */}
-        {/* eslint-disable-next-line @next/next/no-head-element */}
         <link rel="stylesheet" href="/api/brand.css" />
+        {stylesheets.map((href) => <link key={href} rel="stylesheet" href={href} />)}
       </head>
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         {bannerConfig && (

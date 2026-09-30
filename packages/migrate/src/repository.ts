@@ -9,6 +9,7 @@
  */
 
 import { compileSync } from '@mdx-js/mdx'
+import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import {
   closeSync,
@@ -3292,6 +3293,32 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       message: `${lfsPointerAssets.length} asset file${lfsPointerAssets.length === 1 ? ' is a Git LFS pointer' : 's are Git LFS pointers'}, not real content, and ${lfsPointerAssets.length === 1 ? 'was' : 'were'} not copied (Git LFS was skipped during clone because the host has no git-lfs binary): ${listAssetPaths(lfsPointerAssets)}. `
         + 'Install git-lfs and re-run the migration, or copy the real files into public/ manually.',
     })
+  }
+
+  // Mintlify automatically loads a root style.css. Imported JSX often relies
+  // on that file even when no component imports it explicitly; omitting it can
+  // turn decorative SVGs into page-sized shapes and hide interactive controls.
+  if (platform === 'mintlify' && mintlifyProjectRoot) {
+    const stylesheet = resolveWithin(mintlifyProjectRoot, 'style.css')
+    if (existsSync(stylesheet) && lstatSync(stylesheet).isFile() && !lstatSync(stylesheet).isSymbolicLink()) {
+      const size = lstatSync(stylesheet).size
+      if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
+        warnings.push({ code: 'limit-reached', message: 'Mintlify root style.css exceeded the asset budget and was not imported.', source: 'style.css' })
+      } else {
+        const css = readFileSync(stylesheet)
+        // @import can pull in an entire unreviewed stylesheet. Ordinary
+        // image/font URLs remain intact, just as they do in source MDX.
+        if (/@import\b|url\s*\(\s*['"]?\s*(?:javascript:|file:)/i.test(css.toString('utf8'))) {
+          warnings.push({ code: 'unsupported-config', message: 'Mintlify root style.css contains a CSS import or unsafe URL; review and import it manually.', source: 'style.css' })
+        } else {
+          const identity = createHash('sha256').update(componentSourceIdentity(options.sourceUrl, repositoryDir, mintlifyProjectRoot)).digest('hex').slice(0, 12)
+          const assetPath = `migrated/${identity}/style.css`
+          assets.push({ path: assetPath, content: css })
+          docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), `/${assetPath}`] }
+          totalAssetBytes += size
+        }
+      }
+    }
   }
 
   // `selectFilesWithinBudget` already emitted a detailed warning (dropped

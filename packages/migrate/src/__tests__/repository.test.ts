@@ -9,6 +9,32 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
 
+describe('Mintlify root styles', () => {
+  it('copies the implicit stylesheet and wires it into the generated config', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-style-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['introduction'] } }))
+    writeFileSync(join(root, 'introduction.mdx'), '<p className="card">\n  Hello.\n</p>')
+    writeFileSync(join(root, 'style.css'), '.card { padding: 1rem; }')
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    const href = result.docsConfig.stylesheets?.[0]
+    expect(href).toMatch(/^\/migrated\/[a-f0-9]{12}\/style\.css$/)
+    expect(result.assets.find((asset) => `/${asset.path}` === href)?.content.toString()).toBe('.card { padding: 1rem; }')
+    expect(result.pages[0].body).toContain('<div className="card">')
+    const equivalent = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/EXAMPLE/docs.git' })
+    expect(equivalent.docsConfig.stylesheets).toEqual(result.docsConfig.stylesheets)
+  })
+
+  it('does not import a stylesheet with remote resources', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-style-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['introduction'] } }))
+    writeFileSync(join(root, 'introduction.mdx'), 'Hello.')
+    writeFileSync(join(root, 'style.css'), '@import url(https://example.com/tracker.css);')
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    expect(result.docsConfig.stylesheets).toBeUndefined()
+    expect(result.warnings).toContainEqual(expect.objectContaining({ source: 'style.css' }))
+  })
+})
+
 // Queue of scripted `git clone` outcomes consumed in order by the mocked
 // `spawn` below, so `cloneGitHubRepository`'s retry-on-network-failure logic
 // (repository.ts) can be tested without a real clone.
