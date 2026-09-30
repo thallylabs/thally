@@ -182,6 +182,23 @@ the callback cannot be moved safely, it keeps the page and the control's child
 content as a passive fallback, with a warning identifying the control. A
 stateful local snippet component is kept as a client component instead of
 flattening away its hooks and state.
+A component a page declares itself (`export const Counter = () => ...`) that
+calls a React hook is moved into its own `'use client'` module, together with
+every page-local component, helper and constant it uses (a sibling it renders,
+a dependency that is itself stateful, a value only reached through a prop),
+in source order and under their original names. The imports that moved code
+needs move with it. What the page still renders stays reachable: a server-safe
+dependency the page also uses is kept in the page and copied, while a
+client-only one is imported from the module. A page-local name always wins
+over a same-named built-in. If any dependency cannot run in a client module
+(server-only APIs such as `process` or `await`, an undeclared name, a package
+the migration removed, a dynamic `import()`), the component is left where it
+is and a warning names it and the blocker.
+`<Snippet file="...">` accepts the documented `snippets/`-relative path as well
+as a `/snippets/...` or page-relative one. An outer code fence that contains a
+same-length nested fence is widened so the inner fence no longer closes it, and
+a bare placeholder tag in prose (`<Feature> requires a plan`) that would stop
+the page compiling is escaped as text rather than losing the page.
 The Mintlify `search-bar-entry` click trigger is mapped to Thally's search
 shortcut. Markdown mixed inside interactive JSX, computed imports, and
 namespace imports are reported for manual review; unsupported source is

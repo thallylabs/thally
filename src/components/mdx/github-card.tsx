@@ -42,5 +42,9 @@ export function GitHubCard({ repo, title, description, children }: GitHubCardPro
   )
 }
 
-/** Mintlify-compatible component spelling. */
-export const GitHub = GitHubCard
+/**
+ * Mintlify spells this as the compound tag `<GitHub.Repo>`; keep that static
+ * property on the export so a member-expression JSX tag resolves to it (a
+ * plain wrapper component would discard it, since it isn't a prop).
+ */
+export const GitHub = Object.assign(GitHubCard, { Repo: GitHubCard })

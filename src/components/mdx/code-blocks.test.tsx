@@ -14,7 +14,7 @@ vi.mock('@/components/docs/code-actions-provider', () => ({
   }),
 }))
 
-import { Code, CodeGroup, Pre } from './code-blocks'
+import { Code, CodeBlock, CodeGroup, Pre } from './code-blocks'
 
 function renderPanel({
   language,
@@ -70,6 +70,36 @@ describe('code-panel labels', () => {
 
   it('labels explicitly plain fences without claiming a syntax grammar', () => {
     expect(renderPanel({ language: 'txt' })).toContain('Plain text')
+  })
+})
+
+describe('standalone CodeBlock', () => {
+  it('renders code and the filename header like a fenced block', () => {
+    const html = renderToStaticMarkup(
+      <CodeBlock language="ts" filename="x.ts">
+        {'const answer = 42'}
+      </CodeBlock>,
+    )
+    expect(html).toContain('const answer = 42')
+    expect(html).toContain('x.ts')
+  })
+
+  it('passes the fence options through to the panel like a fenced block', () => {
+    const code = Array.from({ length: 20 }, (_, i) => `line ${i}`).join('\n')
+    const html = renderToStaticMarkup(
+      <CodeBlock language="ts" lines icon="code" expandable nocopy filename="x.ts">{code}</CodeBlock>,
+    )
+    expect(html).toContain('thally-code-lines')
+    expect(html).toContain('data-icon-name="code"')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('Copy code')
+  })
+
+  it('tints highlighted lines and dims the rest of a focused block', () => {
+    const highlighted = renderToStaticMarkup(<CodeBlock language="ts" highlight="{2,4-5}">{'a\nb\nc\nd\ne'}</CodeBlock>)
+    expect(highlighted.match(/thally-line-highlight/g)).toHaveLength(3)
+    const focused = renderToStaticMarkup(<CodeBlock language="ts" focus="[2]">{'a\nb\nc'}</CodeBlock>)
+    expect(focused.match(/thally-line-dim/g)).toHaveLength(2)
   })
 })
 
