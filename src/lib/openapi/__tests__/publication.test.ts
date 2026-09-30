@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { operationState } from '../../../../packages/create-thally-docs/src/openapi-publication'
-import { operationPublicationState } from '../publication'
+import { listUnpublishedOperations, operationPublicationState } from '../publication'
 
 const ok = { responses: { 200: { description: 'ok' } } }
 const doc = (paths: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
@@ -98,5 +98,18 @@ describe('operationPublicationState', () => {
         }
       }
     }
+  })
+
+  it('lists every hidden or excluded operation, as the build records them', () => {
+    const document = doc({
+      '/a': { get: { 'x-hidden': true, ...ok }, post: ok },
+      '/e': { $ref: '#/components/pathItems/E' },
+      '/o': { get: ok },
+    }, { components: { pathItems: { E: { 'x-excluded': true, put: ok } } } })
+    expect(listUnpublishedOperations(document, { 'GET /o': { hidden: true } })).toEqual([
+      { method: 'GET', path: '/a', state: 'hidden' },
+      { method: 'PUT', path: '/e', state: 'excluded' },
+      { method: 'GET', path: '/o', state: 'hidden' },
+    ])
   })
 })

@@ -27,3 +27,35 @@ export function operationPublicationState(
   const visibility = operationVisibility(view, verb, overrides?.[buildOperationKey(verb, path)])
   return visibility === 'visible' ? 'published' : visibility
 }
+
+export interface UnpublishedOperation {
+  method: string
+  path: string
+  state: 'hidden' | 'excluded'
+}
+
+/**
+ * Every hidden or excluded operation of an authored document. The build records
+ * these because the copy a deployment serves is already filtered, so at runtime
+ * the operations, and the reason a page bound to one is unpublished, are gone.
+ */
+export function listUnpublishedOperations(
+  document: unknown,
+  overrides?: Record<string, OperationOverride>,
+): Array<UnpublishedOperation> {
+  if (!isObj(document) || !isObj(document.paths)) return []
+  const found: Array<UnpublishedOperation> = []
+  for (const [path, entry] of Object.entries(document.paths)) {
+    if (!isObj(entry)) continue
+    const view = viewPathEntry(document, entry)
+    for (const verb of HTTP_METHODS) {
+      if (!isObj(view.item[verb])) continue
+      const visibility = operationVisibility(view, verb, overrides?.[buildOperationKey(verb, path)])
+      if (visibility !== 'visible') found.push({ method: verb.toUpperCase(), path, state: visibility })
+    }
+  }
+  return found
+}
+
+/** Runtime-source file holding the build's list of unpublished operations. */
+export const UNPUBLISHED_OPERATIONS_FILE = 'thally-unpublished-operations.json'

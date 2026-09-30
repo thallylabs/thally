@@ -20,7 +20,7 @@ import {
 import path from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { parseOpenApiReference } from '../../src/lib/openapi/doc-reference'
-import { operationPublicationState } from '../../src/lib/openapi/publication'
+import { UNPUBLISHED_OPERATIONS_FILE, listUnpublishedOperations, operationPublicationState } from '../../src/lib/openapi/publication'
 import { sanitizeSpecForPublication } from '../../src/lib/openapi/sanitize'
 import type { OpenAPIDocument, OperationOverride } from '../../src/lib/openapi/types'
 
@@ -177,9 +177,9 @@ export interface UnpublishedOpenApiPage {
  * every listing. Remote specs cannot be judged here, and unknown operations
  * are not reported.
  */
-export function findUnpublishedOpenApiPages(projectRoot: string): Array<UnpublishedOpenApiPage> {
+function loadDefaultSpec(projectRoot: string): { document: unknown; overrides?: Record<string, OperationOverride> } | null {
   const docsJsonPath = path.join(projectRoot, 'docs.json')
-  if (!existsSync(docsJsonPath)) return []
+  if (!existsSync(docsJsonPath)) return null
   let api: { source?: unknown; overrides?: Record<string, OperationOverride> } | undefined
   try {
     const config = JSON.parse(readFileSync(docsJsonPath, 'utf8')) as {
@@ -187,19 +187,33 @@ export function findUnpublishedOpenApiPages(projectRoot: string): Array<Unpublis
     }
     api = config.tabs?.find((tab) => !tab.hidden && tab.api)?.api
   } catch {
-    return []
+    return null
   }
   const source = api?.source
-  if (typeof source !== 'string' || /^https?:\/\//i.test(source)) return []
+  if (typeof source !== 'string' || /^https?:\/\//i.test(source)) return null
   const specPath = source.startsWith('/') ? path.join(projectRoot, 'public', source.slice(1)) : path.join(projectRoot, source)
   let document: unknown
   try {
-    if (!isContainedProjectPath(projectRoot, path.resolve(specPath)) || !lstatSync(specPath).isFile()) return []
+    if (!isContainedProjectPath(projectRoot, path.resolve(specPath)) || !lstatSync(specPath).isFile()) return null
     const raw = readFileSync(specPath, 'utf8')
     document = path.extname(specPath).toLowerCase() === '.json' ? JSON.parse(raw) : parseYaml(raw)
   } catch {
-    return []
+    return null
   }
+  return { document, overrides: api?.overrides }
+}
+
+/** Hidden or excluded operations of the default spec, recorded for runtime (see `listUnpublishedOperations`). */
+function findUnpublishedOperations(projectRoot: string) {
+  const spec = loadDefaultSpec(projectRoot)
+  return spec ? listUnpublishedOperations(spec.document, spec.overrides) : []
+}
+
+export function findUnpublishedOpenApiPages(projectRoot: string): Array<UnpublishedOpenApiPage> {
+  const spec = loadDefaultSpec(projectRoot)
+  if (!spec) return []
+  const document = spec.document
+  const api = { overrides: spec.overrides }
   const pages: Array<UnpublishedOpenApiPage> = []
   const scan = (directory: string): void => {
     if (!existsSync(directory)) return
@@ -294,6 +308,12 @@ export function collectRuntimeContentFiles(projectRoot: string): RuntimeSourceMa
   addSpecFile(projectRoot, sources, path.join(projectRoot, 'openapi.json'))
   for (const { source, overrides } of configuredOpenApiSources(projectRoot)) {
     addConfiguredOpenApiFile(projectRoot, sources, source, overrides)
+  }
+  // The copy above is already filtered, so record what it lost: a page bound to
+  // one of these operations is unpublished, which the runtime can no longer see.
+  const unpublished = findUnpublishedOperations(projectRoot)
+  if (unpublished.length > 0) {
+    sources[UNPUBLISHED_OPERATIONS_FILE] = { content: `${JSON.stringify(unpublished)}\n`, modifiedAtMs: Date.now() }
   }
   addTextFile(projectRoot, sources, path.join(projectRoot, 'docs.json'))
   addTextFile(projectRoot, sources, path.join(projectRoot, 'AGENTS.md'))

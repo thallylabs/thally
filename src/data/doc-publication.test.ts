@@ -3,12 +3,18 @@
  * omit it through the one shared predicate; unknown operations are untouched.
  */
 
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { collectRuntimeContentFiles } from '../../scripts/lib/runtime-content-files'
 
 const ok = { responses: { 200: { description: 'ok' } } }
 const spec = vi.hoisted(() => ({
   document: {} as unknown,
 }))
+
+const files = vi.hoisted(() => ({ sources: {} as Record<string, { content: string }> }))
 
 const config = vi.hoisted(() => ({
   tabs: [
@@ -38,6 +44,11 @@ vi.mock('@/lib/runtime-sources', () => ({
   },
   runtimeSourceExists: () => true,
 }))
+vi.mock('@/lib/content-source', () => ({
+  getContentSource: () => ({
+    read: async (file: string) => (files.sources[file] ? { content: files.sources[file].content } : null),
+  }),
+}))
 vi.mock('@/lib/content-index', () => ({ getContentIndex: () => null, loadContentIndex: async () => null }))
 vi.mock('@/config/api-reference', () => ({
   apiReferenceConfig: { defaultSpecId: 'default', specs: [{ id: 'default', label: 'API', source: { type: 'inline', document: {} }, operationOverrides: config.tabs[0].api.overrides }] },
@@ -59,6 +70,7 @@ const load = async () => {
 const ids = (entries: Array<{ id: string }>) => entries.map((entry) => entry.id)
 
 beforeEach(() => {
+  files.sources = {}
   spec.document = {
     openapi: '3.1.0',
     info: { title: 'T', version: '1' },
@@ -131,5 +143,34 @@ describe('every listing routes through isDocPublished', () => {
     expect(ids(await loadDocEntries())).not.toContain('hidden-endpoint')
     const { loadSidebarCollections } = await load()
     expect((await loadSidebarCollections())[0].sections[0].items.map((item) => item.href)).not.toContain('/hidden-endpoint')
+  })
+})
+
+describe('a deployment serves an already-filtered spec', () => {
+  it('still unpublishes pages bound to the operations the build withheld, and only those', async () => {
+    // The real build path: the copy the runtime reads has lost the hidden and
+    // excluded operations, so the runtime alone cannot tell them from typos.
+    const root = mkdtempSync(path.join(tmpdir(), 'thally-publication-'))
+    mkdirSync(path.join(root, 'openapi'))
+    writeFileSync(path.join(root, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'API', api: { source: 'openapi/x.json', overrides: { 'GET /hidden': { hidden: true } } } }] }))
+    writeFileSync(path.join(root, 'openapi/x.json'), JSON.stringify({
+      openapi: '3.1.0', info: { title: 'T', version: '1' },
+      paths: {
+        '/hidden': { $ref: '#/components/pathItems/Shared' },
+        '/excluded': { get: { 'x-excluded': true, ...ok } },
+        '/shown': { get: ok },
+      },
+      components: { pathItems: { Shared: { get: ok } } },
+    }))
+    files.sources = collectRuntimeContentFiles(root)
+    spec.document = JSON.parse(files.sources['openapi/x.json'].content)
+    expect(Object.keys((spec.document as { paths: object }).paths)).toEqual(['/shown'])
+
+    const { isDocPublished, primeDocPublication } = await load()
+    await primeDocPublication()
+    expect(isDocPublished('hidden-endpoint')).toBe(false)
+    expect(isDocPublished('excluded-endpoint')).toBe(false)
+    expect(isDocPublished('shown-endpoint')).toBe(true)
+    expect(isDocPublished('typo-endpoint')).toBe(true)
   })
 })
