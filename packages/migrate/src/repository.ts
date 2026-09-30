@@ -692,7 +692,7 @@ function runGit(args: Array<string>, options: { cwd?: string; env?: Record<strin
       child.kill('SIGKILL')
     }
     const idleMs = gitIdleTimeoutMs()
-    const idleMessage = `no progress for ${Math.round(idleMs / 1000)}s`
+    const idleMessage = `no progress for ${idleMs < 1000 ? `${idleMs}ms` : `${Math.round(idleMs / 1000)}s`}`
     let idleTimer = setTimeout(() => { kill(idleMessage) }, idleMs)
     const hardTimer = setTimeout(() => { kill(HARD_TIMEOUT_REASON) }, MAX_GIT_PROCESS_MS)
     const clearTimers = () => {

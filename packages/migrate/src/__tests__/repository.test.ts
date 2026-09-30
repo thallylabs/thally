@@ -3695,6 +3695,16 @@ describe('cloneGitHubRepository retry', () => {
     expect(gitKills.count).toBe(3)
   })
 
+  it('reports a sub-second idle timeout in milliseconds rather than as 0s', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '400'
+    cloneOutcomes.queue.push({ code: 0, hang: true }, { code: 0, hang: true }, { code: 0, hang: true })
+    const result = expect(cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-subsecond-'))))
+      .rejects.toThrow(/timed out \(no progress for 400ms\)/)
+    await vi.advanceTimersByTimeAsync(60_000)
+    await result
+  })
+
   it('settles a killed clone even when a helper keeps the stderr pipe open (no close event)', async () => {
     vi.useFakeTimers()
     process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '3000'
