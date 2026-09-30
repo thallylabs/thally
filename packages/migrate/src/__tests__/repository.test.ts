@@ -37,10 +37,12 @@ describe('Mintlify root styles', () => {
   it('keeps authored widget styling without leaking Mintlify shell selectors', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-style-'))
     writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['introduction'] } }))
-    writeFileSync(join(root, 'introduction.mdx'), '<div className="widget"><p className="widget-copy">Hello.</p></div>')
+    writeFileSync(join(root, 'introduction.mdx'), '<div className="widget mintlify-layout"><p className="widget-copy">Hello.</p></div>')
     writeFileSync(join(root, 'style.css'), [
       '.widget, li.navbar-link a { padding: 1rem; }',
       '.widget-copy[data-as="p"] { margin: 0; }',
+      '.mintlify-layout .widget { border: 1px solid red; }',
+      '.dark .widget { color: white; }',
       '#footer a.max-w-36 { max-width: none; }',
       'a > div.w-full > div.mt-8 { position: absolute; }',
     ].join('\n'))
@@ -49,6 +51,8 @@ describe('Mintlify root styles', () => {
     const css = result.assets.find((asset) => `/${asset.path}` === href)?.content.toString() ?? ''
     expect(css).toContain('.widget { padding: 1rem; }')
     expect(css).toContain('.widget-copy { margin: 0; }')
+    expect(css).toContain('.dark .widget { color: white; }')
+    expect(css).not.toContain('mintlify-layout')
     expect(css).not.toMatch(/navbar-link|#footer|max-w-36|w-full|mt-8|data-as/)
     expect(result.warnings).toContainEqual(expect.objectContaining({ source: 'style.css' }))
   })
@@ -427,6 +431,38 @@ describe('Mintlify repository migration', () => {
     }))
   })
 
+  it('keeps a page when a missing snippet is used only inside an MDX comment', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-commented-snippet-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['sdk'] } }))
+    writeFileSync(join(root, 'sdk.mdx'), [
+      '---', 'title: SDK', '---', '',
+      "import HiddenExample from '/snippets/missing.mdx'", '',
+      '## Active docs', '', 'This page should remain available.', '',
+      '{/* Disabled example:', '<HiddenExample />', '*/}',
+    ].join('\n'))
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    expect(result.pages.map((page) => page.id)).toContain('sdk')
+    expect(result.pages[0].body).toContain('<HiddenExample />')
+    expect(result.warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+    expect(result.warnings.some((warning) => warning.code === 'missing-page')).toBe(false)
+  })
+
+  it('closes an incomplete imported code snippet before the next component', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-unclosed-snippet-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['batch'] } }))
+    writeFileSync(join(root, 'snippets', 'sample.mdx'), '```python Python\nprint("sample")\n')
+    writeFileSync(join(root, 'batch.mdx'), [
+      '---', 'title: Batch', '---', '',
+      "import Sample from '/snippets/sample.mdx'", '',
+      '<CodeGroup>', '', '<Sample />', '<Sample />', '', '</CodeGroup>',
+    ].join('\n'))
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    expect(result.pages.map((page) => page.id)).toContain('batch')
+    expect(result.pages[0].body.match(/```/g)).toHaveLength(4)
+    expect(result.warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+  })
+
   it('maps a bare <Link href> to <a> and neutralizes any other unresolved component, with a warning', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-unknown-components-'))
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
@@ -582,7 +618,10 @@ describe('Mintlify repository migration', () => {
       icon: 'play',
       pages: ['introduction', { group: 'CLI', pages: ['manualSetup'] }],
     }])
-    expect(bundle.docsConfig.navigation).toEqual({ display: 'dropdown' })
+    expect(bundle.docsConfig.navigation).toEqual({
+      display: 'dropdown',
+      shortcuts: [{ label: 'Community', href: 'https://community.example.com' }],
+    })
     expect(bundle.docsConfig.tabs[0]).toMatchObject({
       tab: 'Documentation',
       description: 'Resources for Acme developers',
@@ -1569,21 +1608,17 @@ describe('Mintlify repository migration', () => {
     expect(paths).toContain('images/greeting.m4a')
   })
 
-  it('warns which page(s) reference an asset that is still dropped for being too large', () => {
+  it('keeps a large image referenced by a page within the aggregate budget', () => {
     const root = fixture()
-    // Over MAX_ASSET_BYTES (25MB) on its own, so it is dropped regardless of
-    // being referenced — the fix only reorders the queue, it does not raise
-    // the budget. The warning must still name the referencing page.
+    // Repository animations often exceed the ordinary 25MB asset budget.
+    // Preserving a referenced one avoids a broken page.
     writeFileSync(join(root, 'images', 'huge.png'), Buffer.alloc(26_000_000))
     writeFileSync(join(root, 'en', 'with-huge-image.mdx'), '---\ntitle: Huge image\n---\n\n![Huge](/images/huge.png)')
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
-    expect(bundle.assets.map((asset) => asset.path)).not.toContain('images/huge.png')
-    const skipped = bundle.warnings.filter((warning) => warning.message.includes('asset file'))
-    expect(skipped).toHaveLength(1)
-    expect(skipped[0]).toMatchObject({ code: 'limit-reached' })
-    expect(skipped[0].message).toMatch(/^1 asset file was not copied.*over 25 MB.*500 MB.*images\/huge\.png.*1 of them is used by pages.*public\/ manually/s)
+    expect(bundle.assets.map((asset) => asset.path)).toContain('images/huge.png')
+    expect(bundle.warnings.filter((warning) => warning.message.includes('asset file'))).toEqual([])
   })
 
   it('reports many oversized assets in one warning with the count and the first five paths', () => {

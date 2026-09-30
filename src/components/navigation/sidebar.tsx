@@ -1,7 +1,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
-import type { NavigationNode, NavigationPresentation, NavigationSection, SidebarCollection } from '@/data/docs'
+import type { NavigationNode, NavigationPresentation, NavigationSection, SidebarCollection, DocsNavigationShortcut } from '@/data/docs'
 import { Icon } from '@/components/mdx/rich-content'
 import { layout, typography } from '@/config/layout'
 import { cn } from '@/lib/utils'
@@ -15,6 +15,7 @@ interface SidebarProps {
   activeCollectionId?: string
   onCollectionChange?: (id: string) => void
   navigationPresentation?: NavigationPresentation
+  shortcuts?: Array<DocsNavigationShortcut>
   showGroupIcons?: boolean
   className?: string
 }
@@ -26,6 +27,7 @@ export function Sidebar({
   activeCollectionId,
   onCollectionChange,
   navigationPresentation = { display: 'tabs' },
+  shortcuts = [],
   showGroupIcons = true,
   className,
 }: SidebarProps) {
@@ -48,11 +50,24 @@ export function Sidebar({
               activeCollectionId={activeCollectionId!}
               onCollectionChange={onCollectionChange!}
             />
-          ) : (
+          ) : shortcuts.length === 0 ? (
             <p className="line-clamp-1 px-2 text-sm font-semibold leading-6 text-foreground">{title}</p>
-          )}
+          ) : null}
         </div>
         <nav className="scrollbar-hide mt-2.5 min-h-0 flex-1 space-y-8 overflow-y-auto overscroll-y-contain pb-5">
+          {shortcuts.length > 0 ? (
+            <div className="space-y-px border-b border-border/60 pb-4">
+              {shortcuts.map((shortcut) => (
+                <a key={`${shortcut.label}:${shortcut.href}`} href={shortcut.href}
+                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                  target={/^https?:\/\//i.test(shortcut.href) ? '_blank' : undefined}
+                  rel={/^https?:\/\//i.test(shortcut.href) ? 'noreferrer' : undefined}>
+                  {shortcut.icon ? <Icon icon={shortcut.icon} className="h-4 w-4 shrink-0" /> : null}
+                  <span className="truncate">{shortcut.label}</span>
+                </a>
+              ))}
+            </div>
+          ) : null}
           {sections.map((section, index) => {
             const nodes: Array<NavigationNode> = section.nodes
               ?? section.items.map((item) => ({ type: 'page' as const, item }))

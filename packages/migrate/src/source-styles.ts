@@ -10,6 +10,7 @@ import ts from 'typescript'
 
 const PLATFORM_CLASSES = new Set(['navbar-link'])
 const PLATFORM_IDS = new Set(['footer', 'navbar', 'sidebar'])
+const PLATFORM_CLASS_PREFIX = /^(?:mintlify[-_]|fern[-_]|docusaurus[-_]|theme-doc-|theme-code-block|DocSearch|pagination-nav|menu__)/i
 const SHARED_THEME_CLASSES = new Set(['dark', 'light'])
 // Framework utility selectors are unsafe global targets even when the same
 // utility happens to occur in an authored example elsewhere in the site.
@@ -78,11 +79,12 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
           let hasPlatformAnchor = false
           selector.walk((node) => {
             if (node.type === 'class') {
-              if (PLATFORM_CLASSES.has(node.value) || UTILITY_CLASS.test(node.value)) hasPlatformAnchor = true
-              else if (names.classes.has(node.value) && !SHARED_THEME_CLASSES.has(node.value)) hasAuthoredAnchor = true
+              if (SHARED_THEME_CLASSES.has(node.value)) return
+              if (PLATFORM_CLASSES.has(node.value) || PLATFORM_CLASS_PREFIX.test(node.value) || UTILITY_CLASS.test(node.value) || !names.classes.has(node.value)) hasPlatformAnchor = true
+              else hasAuthoredAnchor = true
             } else if (node.type === 'id') {
-              if (PLATFORM_IDS.has(node.value)) hasPlatformAnchor = true
-              else if (names.ids.has(node.value)) hasAuthoredAnchor = true
+              if (PLATFORM_IDS.has(node.value) || !names.ids.has(node.value)) hasPlatformAnchor = true
+              else hasAuthoredAnchor = true
             } else if (node.type === 'attribute' && node.attribute === 'data-as') {
               // Mintlify adds this implementation detail to transformed MDX
               // paragraphs. Thally renders the native element and class.

@@ -108,6 +108,13 @@ describe('normalizeMdx', () => {
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
 
+  it('preserves numeric-leading Mintlify heading anchors', () => {
+    const output = normalizeMdx('## Responses 429 {#429-responses}\n\n### Add Firecrawl {#1-add-firecrawl}', 'mintlify')
+    expect(output).toContain('<a id="429-responses"></a>')
+    expect(output).toContain('<a id="1-add-firecrawl"></a>')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
   it('preserves Mintlify parameter anchors for settings headings and fields', () => {
     const body = [
       '### `icons`',

@@ -183,7 +183,9 @@ export function normalizeExplicitHeadingIds(raw: string): string {
       const marker = trimmed.lastIndexOf(' {#')
       if (marker >= 0) {
         const id = trimmed.slice(marker + 3, -1)
-        if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) {
+        // Mintlify accepts anchors starting with a digit (for example,
+        // `{#429-responses}`). They must be lifted out of MDX prose too.
+        if (/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(id)) {
           return `<a id="${id}"></a>\n${trimmed.slice(0, marker).trimEnd()}`
         }
       }
@@ -194,7 +196,7 @@ export function normalizeExplicitHeadingIds(raw: string): string {
       if (marker >= 0) {
         const comment = trimmed.slice(marker + 4, -3).trim()
         const id = comment.startsWith('#') ? comment.slice(1) : ''
-        if (/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(id)) {
+        if (/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(id)) {
           return `<a id="${id}"></a>\n${trimmed.slice(0, marker).trimEnd()}`
         }
       }

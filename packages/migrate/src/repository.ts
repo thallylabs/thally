@@ -86,6 +86,10 @@ import type {
 const MAX_SOURCE_FILES = 5_000
 const MAX_PAGE_BYTES = 2_000_000
 const MAX_ASSET_BYTES = 25_000_000
+// A referenced screenshot or animation is part of the page, not a spare
+// repository asset. Allow a larger individual file while retaining a firm
+// aggregate copy budget for untrusted repositories.
+const MAX_REFERENCED_ASSET_BYTES = 100_000_000
 const MAX_TOTAL_ASSET_BYTES = 500_000_000
 /** A Git LFS pointer file's fixed opening line (the smudge filter replaces this with the real binary; skipping it during clone leaves this text in place). */
 const GIT_LFS_POINTER_PREFIX = 'version https://git-lfs.github.com/spec/v1'
@@ -2328,6 +2332,23 @@ function rewriteRepositoryAssetLinks(
 
 const LOCAL_EXPORT_DECLARATION = /^\s*export\s+(?:const|let|var|function|class|async\s+function)\s+([A-Za-z_$][\w$]*)/
 
+/** Mintlify leaves JSX comments in MDX. Snippet tags inside them are examples or disabled content. */
+function replaceOutsideMdxComments(body: string, transform: (segment: string) => string): string {
+  const comment = /\{\/\*[\s\S]*?\*\/\}/g
+  let cursor = 0
+  let output = ''
+  for (const match of body.matchAll(comment)) {
+    output += transform(body.slice(cursor, match.index)) + match[0]
+    cursor = match.index! + match[0].length
+  }
+  return output + transform(body.slice(cursor))
+}
+
+/** Keep code examples and disabled JSX opaque during snippet expansion. */
+function replaceOutsideCodeAndMdxComments(body: string, transform: (segment: string) => string): string {
+  return replaceOutsideCode(body, (segment) => replaceOutsideMdxComments(segment, transform))
+}
+
 /**
  * Names a page declares itself with a top-level `export const/function/class`.
  * Mintlify treats every file under `/snippets/` as an implicitly available
@@ -2370,7 +2391,7 @@ function inlineMdxSnippets(
   raw = normalizeIndentedFences(raw)
   const snippets = new Map<string, string>()
   const preservedDeclarations = new Map<string, string>()
-  let withoutImports = replaceOutsideCode(raw, (source) => source.replace(
+  let withoutImports = replaceOutsideCodeAndMdxComments(raw, (source) => source.replace(
     SNIPPET_IMPORT_PATTERN,
     (_statement, namedComponent: string | undefined, defaultComponent: string | undefined, sourcePath: string) => {
       const componentName = (namedComponent ?? defaultComponent) as string
@@ -2391,6 +2412,14 @@ function inlineMdxSnippets(
         else snippets.set(componentName, snippetComponentBody(nested, componentName))
         return ''
       } catch {
+        // Disabled JSX examples may import a snippet that no longer exists.
+        // An unused import is safe to drop without a missing-page warning.
+        let hasLiveUsage = false
+        replaceOutsideCodeAndMdxComments(raw, (segment) => {
+          if (new RegExp(`<${componentName}(?:\\s|/?>)`).test(segment)) hasLiveUsage = true
+          return segment
+        })
+        if (!hasLiveUsage) return ''
         warnings.push({
           code: 'missing-page',
           message: `Imported snippet ${sourcePath} could not be resolved and was left as a comment.`,
@@ -2401,7 +2430,7 @@ function inlineMdxSnippets(
       }
     },
   ))
-  withoutImports = replaceOutsideCode(withoutImports, (source) => source.replace(
+  withoutImports = replaceOutsideCodeAndMdxComments(withoutImports, (source) => source.replace(
     SNIPPET_VALUE_IMPORT_PATTERN,
     (statement: string, names: string, sourcePath: string) => {
       const bindings = names.split(',').map((name) => name.trim()).filter(Boolean).map((name) => {
@@ -2440,8 +2469,12 @@ function inlineMdxSnippets(
   // elsewhere in the same docs project.
   const localNames = locallyDeclaredNames(withoutImports)
   for (const [componentName, candidate] of globalAliases) {
-    if (snippets.has(componentName) || localNames.has(componentName)
-      || !new RegExp(`<${componentName}(?:\\s|/?>)`).test(withoutImports)) continue
+    let hasLiveUsage = false
+    replaceOutsideCodeAndMdxComments(withoutImports, (source) => {
+      if (new RegExp(`<${componentName}(?:\\s|/?>)`).test(source)) hasLiveUsage = true
+      return source
+    })
+    if (snippets.has(componentName) || localNames.has(componentName) || !hasLiveUsage) continue
     const nested = inlineMdxSnippets(
       withoutFrontmatter(readFileSync(candidate, 'utf8')),
       candidate,
@@ -2457,15 +2490,15 @@ function inlineMdxSnippets(
   }
   let result = withoutImports
   for (const [componentName, snippet] of snippets) {
-    result = result
+    result = replaceOutsideCodeAndMdxComments(result, (source) => source
       .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)\\s*/>`, 'g'), (_tag, attributes: string) => {
-        return interpolateSnippet(snippet, attributes)
+        return closeOpenCodeFence(interpolateSnippet(snippet, attributes))
       })
       .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)>([\\s\\S]*?)<\\/${componentName}>`, 'g'), (_tag, attributes: string, children: string) => {
-        return interpolateSnippet(snippet, attributes, children)
-      })
+        return closeOpenCodeFence(interpolateSnippet(snippet, attributes, children))
+      }))
   }
-  result = result.replace(SNIPPET_TAG_PATTERN, (_tag, doubleQuoted: string | undefined, singleQuoted: string | undefined) => {
+  result = replaceOutsideCodeAndMdxComments(result, (source) => source.replace(SNIPPET_TAG_PATTERN, (_tag, doubleQuoted: string | undefined, singleQuoted: string | undefined) => {
     const filePath = (doubleQuoted ?? singleQuoted)!
     try {
       // Mintlify's documented form is relative to `snippets/`; sites also write
@@ -2477,7 +2510,7 @@ function inlineMdxSnippets(
         try { return resolveCandidate() } catch { return undefined }
       }).find((path) => path !== undefined && existsSync(path) && lstatSync(path).isFile())
       if (!candidate) throw new Error('file not found')
-      return inlineMdxSnippets(
+      return closeOpenCodeFence(inlineMdxSnippets(
         withoutFrontmatter(readFileSync(candidate, 'utf8')),
         candidate,
         repositoryRoot,
@@ -2485,7 +2518,7 @@ function inlineMdxSnippets(
         depth + 1,
         siteRoot,
         globalAliases,
-      )
+      ))
     } catch {
       warnings.push({
         code: 'missing-page',
@@ -2494,7 +2527,7 @@ function inlineMdxSnippets(
       })
       return `{/* Missing snippet: ${filePath} */}`
     }
-  })
+  }))
   if (preservedDeclarations.size > 0) {
     const frontmatter = result.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
     const prefix = frontmatter?.[0] ?? ''
@@ -2794,10 +2827,21 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const mintignoreFilteredFiles = mintignoreMatcher
     ? scannedFiles.filter((file) => !mintignoreMatcher.ignores(file.relativePath))
     : scannedFiles
-  const discoveryBudgetApplied = discoveryRank !== undefined && mintignoreFilteredFiles.length > MAX_SOURCE_FILES
-  const files = discoveryRank
-    ? selectFilesWithinBudget(mintignoreFilteredFiles, discoveryRank, warnings, allVersionPrefixes)
+  // Mintlify snippet modules are dependencies loaded by path while inlining
+  // pages; they are not published pages. Counting them against the discovery
+  // budget can evict real translated/versioned pages on large sites.
+  const isUnreferencedSnippetModule = (file: ScannedFile): boolean => (
+    file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
+    && isDocumentationExtension(file.relativePath)
+    && !referenceOrder.has(normalizedReferenceKey(file.relativePath))
+  )
+  const publishableFiles = platform === 'mintlify'
+    ? mintignoreFilteredFiles.filter((file) => !isUnreferencedSnippetModule(file))
     : mintignoreFilteredFiles
+  const discoveryBudgetApplied = discoveryRank !== undefined && publishableFiles.length > MAX_SOURCE_FILES
+  const files = discoveryRank
+    ? selectFilesWithinBudget(publishableFiles, discoveryRank, warnings, allVersionPrefixes)
+    : publishableFiles
   // A Fern `versions:` file may live outside fern/ (a sibling `docs/`
   // directory) and its own pages resolve relative to it, so their
   // sourcePath (e.g. `../docs/pages/x.mdx`) falls outside the fern/-rooted
@@ -2854,7 +2898,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     return leftOrder - rightOrder || left.relativePath.localeCompare(right.relativePath)
   })
   const snippetAliases = platform === 'mintlify' && mintlifyProjectRoot
-    ? globalSnippetAliases(files, repositoryDir, mintlifyProjectRoot)
+    // Snippets are dependencies, not publishable pages. They stay outside the
+    // page budget but must remain available for implicit Mintlify aliases.
+    ? globalSnippetAliases([
+      ...files,
+      ...mintignoreFilteredFiles.filter(isUnreferencedSnippetModule),
+    ], repositoryDir, mintlifyProjectRoot)
     : new Map<string, string>()
   for (const file of pageFiles) {
     if (!isDocumentationExtension(file.relativePath)) continue
@@ -3267,7 +3316,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let overBudgetReferenced = 0
   const lfsPointerAssets: Array<string> = []
   for (const { file, assetPath, size } of orderedAssetCandidates) {
-    if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
+    const individualLimit = referencedAssetPaths.has(assetPath) ? MAX_REFERENCED_ASSET_BYTES : MAX_ASSET_BYTES
+    if (size > individualLimit || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
       overBudgetAssets.push(file.relativePath)
       if (referencedAssetPaths.has(assetPath)) overBudgetReferenced++
       continue
@@ -3283,7 +3333,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   if (overBudgetAssets.length > 0) {
     warnings.push({
       code: 'limit-reached',
-      message: `${overBudgetAssets.length} asset file${overBudgetAssets.length === 1 ? ' was' : 's were'} not copied because files over ${MAX_ASSET_BYTES / 1_000_000} MB, or beyond ${MAX_TOTAL_ASSET_BYTES / 1_000_000} MB in total, are skipped: ${listAssetPaths(overBudgetAssets)}. `
+      message: `${overBudgetAssets.length} asset file${overBudgetAssets.length === 1 ? ' was' : 's were'} not copied because unreferenced files over ${MAX_ASSET_BYTES / 1_000_000} MB, referenced files over ${MAX_REFERENCED_ASSET_BYTES / 1_000_000} MB, or files beyond ${MAX_TOTAL_ASSET_BYTES / 1_000_000} MB in total, are skipped: ${listAssetPaths(overBudgetAssets)}. `
         + (overBudgetReferenced > 0 ? `${overBudgetReferenced} of them ${overBudgetReferenced === 1 ? 'is' : 'are'} used by pages, so those images will be broken until you copy ${overBudgetAssets.length === 1 ? 'it' : 'them'}. ` : '')
         + `Copy ${overBudgetAssets.length === 1 ? 'it' : 'them'} into public/ manually.`,
     })

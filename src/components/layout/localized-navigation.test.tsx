@@ -18,7 +18,7 @@ vi.mock('./sidebar-store', () => ({
 }))
 vi.mock('./sidebar-hydrator', () => ({ SidebarCollectionsHydrator: () => null }))
 vi.mock('@/components/layout/top-bar', () => ({
-  TopBar: ({ activeCollectionId }: { activeCollectionId: string }) => createElement('nav', { 'data-active': activeCollectionId }),
+  TopBar: ({ activeCollectionId, collections }: { activeCollectionId: string; collections: Array<SidebarCollection> }) => createElement('nav', { 'data-active': activeCollectionId, 'data-visible': collections.map((item) => item.id).join(',') }),
 }))
 vi.mock('@/components/navigation/sidebar', () => ({
   Sidebar: ({ activeCollectionId }: { activeCollectionId: string }) => createElement('aside', { 'data-active': activeCollectionId }),
@@ -40,11 +40,12 @@ function collections(prefix = ''): Array<SidebarCollection> {
   ]
 }
 
-function shellMarkup(initialCollections = collections()) {
+function shellMarkup(initialCollections = collections(), navigationVersions?: Array<{ label: string; prefix: string; href: string; default?: boolean }>) {
   return renderToStaticMarkup(
     <SiteShell
       initialCollections={initialCollections}
       navigationPresentation={{ display: 'tabs' }}
+      navigationVersions={navigationVersions}
       i18nConfig={{ defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }, { code: 'zh-Hans', label: 'Chinese' }] }}
       identity={{ name: 'Documentation', description: '', repoUrl: '', links: [] }}
     >
@@ -64,6 +65,21 @@ describe('localized collection selection', () => {
     const markup = shellMarkup()
     expect(markup).toContain('<nav data-active="guides"')
     expect(markup).toContain('<aside data-active="guides"')
+  })
+
+  it('shows only the active version tabs on default and deep version routes', () => {
+    const versioned: Array<SidebarCollection> = [
+      { id: 'v2-docs', label: 'Documentation', version: 'v2', sections: [{ title: 'Start', items: [{ id: 'introduction', title: 'Introduction', href: '/' }] }] },
+      { id: 'v1-docs', label: 'Documentation', version: 'v1', sections: [{ title: 'Start', items: [{ id: 'v1/introduction', title: 'Introduction', href: '/v1/introduction' }] }] },
+    ]
+    const versions = [{ label: 'v2', prefix: '', href: '/introduction', default: true }, { label: 'v1', prefix: 'v1', href: '/v1/introduction' }]
+    mocks.pathname = '/introduction'
+    expect(shellMarkup(versioned, versions)).toContain('data-visible="v2-docs"')
+    mocks.pathname = '/v1/introduction'
+    expect(shellMarkup(versioned, versions)).toContain('data-visible="v1-docs"')
+    versioned[1].sections[0].items.push({ id: 'v1/scrape', title: 'Scrape', href: '/api-reference/v1-endpoint/scrape' })
+    mocks.pathname = '/api-reference/v1-endpoint/scrape'
+    expect(shellMarkup(versioned, versions)).toContain('data-visible="v1-docs"')
   })
 
   it('keeps Guides selected after the localized snapshot arrives', async () => {
