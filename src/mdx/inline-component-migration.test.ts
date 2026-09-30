@@ -157,4 +157,3 @@ describe('migrated inline components compile and render through the MDX pipeline
     expect(html).toContain('<b>w0</b>')
   })
 })
-

@@ -12,7 +12,13 @@ import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNa
 // Queue of scripted `git clone` outcomes consumed in order by the mocked
 // `spawn` below, so `cloneGitHubRepository`'s retry-on-network-failure logic
 // (repository.ts) can be tested without a real clone.
-const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; stderr?: string }> }))
+// `hang` never exits on its own (only when killed); `ticks` are the times (ms)
+// at which progress is printed before a normal exit one second after the last.
+// `exitAt` makes git itself exit (emitting only `exit`) at that time while a
+// helper keeps stderr open: `helperTicks` are later helper writes, and
+// `closeAt`, if set, is when the pipe finally closes.
+const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; stderr?: string; hang?: boolean; exitOnly?: boolean; ticks?: Array<number>; exitAt?: number; helperTicks?: Array<number>; closeAt?: number }> }))
+const gitKills = vi.hoisted(() => ({ count: 0 }))
 // Remote spec URLs must never invoke a subprocess or make a network request.
 const execFileCalls = vi.hoisted(() => ({ calls: [] as Array<string> }))
 // Records each `spawn('git', args, options)` call's env, so a test can
@@ -20,14 +26,33 @@ const execFileCalls = vi.hoisted(() => ({ calls: [] as Array<string> }))
 // without a real clone (that's covered manually against BoundaryML/baml, a
 // real Git LFS repo, since a mocked child process can't exercise git's own
 // filter-driver resolution).
-const gitSpawnCalls = vi.hoisted(() => ({ envs: [] as Array<Record<string, string | undefined>> }))
+const gitSpawnCalls = vi.hoisted(() => ({ envs: [] as Array<Record<string, string | undefined>>, args: [] as Array<Array<string>> }))
 vi.mock('node:child_process', () => {
   return {
-    spawn: (_command: string, _args: Array<string>, options: { env?: Record<string, string | undefined> }) => {
+    spawn: (_command: string, args: Array<string>, options: { env?: Record<string, string | undefined> }) => {
       gitSpawnCalls.envs.push(options.env ?? {})
-      const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void } }
-      child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} })
+      gitSpawnCalls.args.push(args)
+      const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void; destroy: () => void }; kill: () => void }
+      child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {}, destroy: () => {} })
+      child.kill = () => {
+        gitKills.count += 1
+        queueMicrotask(() => child.emit(outcome.exitOnly ? 'exit' : 'close', null))
+      }
       const outcome = cloneOutcomes.queue.shift() ?? { code: 0 }
+      if (outcome.hang) return child
+      if (outcome.exitAt !== undefined) {
+        const { exitAt } = outcome
+        if (outcome.stderr) setTimeout(() => child.stderr.emit('data', outcome.stderr), Math.max(0, exitAt - 1))
+        setTimeout(() => child.emit('exit', outcome.code), exitAt)
+        for (const tick of outcome.helperTicks ?? []) setTimeout(() => child.stderr.emit('data', 'helper still attached\n'), tick)
+        if (outcome.closeAt !== undefined) setTimeout(() => child.emit('close', outcome.code), outcome.closeAt)
+        return child
+      }
+      if (outcome.ticks) {
+        for (const tick of outcome.ticks) setTimeout(() => child.stderr.emit('data', 'Receiving objects:  50%\r'), tick)
+        setTimeout(() => child.emit('close', outcome.code), Math.max(...outcome.ticks) + 1000)
+        return child
+      }
       queueMicrotask(() => {
         if (outcome.stderr) child.stderr.emit('data', outcome.stderr)
         child.emit('close', outcome.code)
@@ -79,6 +104,38 @@ describe('linked source anchors', () => {
     writeFileSync(join(root, 'settings.mdx'), '---\ntitle: Settings\n---\n\n## APIParams\n\nDetails.')
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
     expect(bundle.pages.find((page) => page.id === 'settings')?.body).toContain('<a id="api-params"></a>\n## APIParams')
+  })
+
+  it('maps case-different fragments onto numbered ids of repeated headings', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repeated-headings-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['intro', 'cli'] },
+    }))
+    writeFileSync(join(root, 'intro.mdx'), '---\ntitle: Intro\n---\n\n[a](/cli#Options) [b](/cli#Options-1)')
+    writeFileSync(join(root, 'cli.mdx'), '---\ntitle: CLI\n---\n\n## Run\n\n#### Options\n\nx\n\n## Open\n\n#### Options\n\ny')
+    const body = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).pages.find((page) => page.id === 'cli')?.body
+    expect(body).toContain('<a id="Options"></a>\n#### Options\n\nx')
+    expect(body).toContain('<a id="Options-1"></a>\n#### Options\n\ny')
+  })
+
+  it('points a fragment at its one heading when option tables repeat the same name', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-heading-and-tables-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['intro', 'settings'] },
+    }))
+    writeFileSync(join(root, 'intro.mdx'), '---\ntitle: Intro\n---\n\n[Node events](/settings#setupNodeEvents)')
+    writeFileSync(join(root, 'settings.mdx'), [
+      '---', 'title: Settings', '---', '',
+      '| Option | Default |', '| --- | --- |',
+      '| `setupNodeEvents` | `null` |', '',
+      '| Option | Default |', '| --- | --- |',
+      '| `setupNodeEvents` | `null` |', '',
+      '### setupNodeEvents', '', 'Details.',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.pages.find((page) => page.id === 'settings')?.body).toContain('<a id="setupNodeEvents"></a>\n### setupNodeEvents')
   })
 })
 
@@ -1455,11 +1512,28 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     expect(bundle.assets.map((asset) => asset.path)).not.toContain('images/huge.png')
-    expect(bundle.warnings).toContainEqual(expect.objectContaining({
-      code: 'limit-reached',
-      source: 'images/huge.png',
-      message: expect.stringContaining('en/with-huge-image.mdx'),
-    }))
+    const skipped = bundle.warnings.filter((warning) => warning.message.includes('asset file'))
+    expect(skipped).toHaveLength(1)
+    expect(skipped[0]).toMatchObject({ code: 'limit-reached' })
+    expect(skipped[0].message).toMatch(/^1 asset file was not copied.*over 25 MB.*500 MB.*images\/huge\.png.*1 of them is used by pages.*public\/ manually/s)
+  })
+
+  it('reports many oversized assets in one warning with the count and the first five paths', () => {
+    const root = fixture()
+    for (let index = 0; index < 8; index++) writeFileSync(join(root, 'images', `big-${index}.png`), Buffer.alloc(26_000_000))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const skipped = bundle.warnings.filter((warning) => warning.code === 'limit-reached' && warning.message.includes('asset file'))
+    expect(skipped).toHaveLength(1)
+    expect(skipped[0].message).toMatch(/^8 asset files were not copied/)
+    expect(skipped[0].message.match(/images\/big-\d\.png/g)).toHaveLength(5)
+    expect(skipped[0].message).toContain('and 3 more')
+  }, 30_000)
+
+  it('emits no asset-skip warning when every asset is copied', () => {
+    const bundle = migrateRepository({ repositoryDir: fixture(), sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.warnings.filter((warning) => /asset files? (?:was|were|is|are)/.test(warning.message))).toEqual([])
   })
 
   it('warns by name about a Mintlify logo/favicon that were copied but are not wired into the migrated site\'s branding', () => {
@@ -1497,9 +1571,19 @@ describe('Mintlify repository migration', () => {
     expect(bundle.assets.map((asset) => asset.path)).not.toContain('images/diagram.png')
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
       code: 'unsupported-config',
-      source: 'images/diagram.png',
-      message: expect.stringContaining('Git LFS pointer'),
+      message: expect.stringMatching(/^1 asset file is a Git LFS pointer.*images\/diagram\.png.*Install git-lfs/s),
     }))
+  })
+
+  it('reports several Git LFS pointer files in one warning', () => {
+    const root = fixture()
+    for (const name of ['a', 'b', 'c']) {
+      writeFileSync(join(root, 'images', `${name}.png`), 'version https://git-lfs.github.com/spec/v1\noid sha256:00\nsize 1\n')
+    }
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const lfs = bundle.warnings.filter((warning) => warning.message.includes('Git LFS pointer'))
+    expect(lfs).toHaveLength(1)
+    expect(lfs[0].message).toMatch(/^3 asset files are Git LFS pointers/)
   })
 
   // Creating 5,000+ fixture files and migrating them is inherently slower
@@ -3820,6 +3904,103 @@ describe('cloneGitHubRepository retry', () => {
   afterEach(() => {
     cloneOutcomes.queue.length = 0
     gitSpawnCalls.envs.length = 0
+    gitSpawnCalls.args.length = 0
+    gitKills.count = 0
+    delete process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS
+    vi.useRealTimers()
+  })
+
+  const acme = { owner: 'acme', repo: 'docs', branch: 'main', docsDir: '', cloneUrl: 'https://github.com/acme/docs.git' }
+
+  it('asks git for progress output so a healthy transfer is distinguishable from a stall', async () => {
+    await cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-args-')))
+    expect(gitSpawnCalls.args[0]).toEqual(expect.arrayContaining(['clone', '--progress', '--depth', '1', '--single-branch']))
+  })
+
+  it('kills a silent clone after the idle timeout, retries it, and then reports an actionable error', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '3000'
+    cloneOutcomes.queue.push({ code: 0, hang: true }, { code: 0, hang: true }, { code: 0, hang: true })
+    const result = expect(cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-stall-'))))
+      .rejects.toThrow(/timed out \(no progress for 3s\).*THALLY_MIGRATE_CLONE_TIMEOUT_MS/)
+    await vi.advanceTimersByTimeAsync(60_000)
+    await result
+    expect(gitKills.count).toBe(3)
+  })
+
+  it('reports a sub-second idle timeout in milliseconds rather than as 0s', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '400'
+    cloneOutcomes.queue.push({ code: 0, hang: true }, { code: 0, hang: true }, { code: 0, hang: true })
+    const result = expect(cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-subsecond-'))))
+      .rejects.toThrow(/timed out \(no progress for 400ms\)/)
+    await vi.advanceTimersByTimeAsync(60_000)
+    await result
+  })
+
+  it('settles a killed clone even when a helper keeps the stderr pipe open (no close event)', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '3000'
+    cloneOutcomes.queue.push({ code: 0, hang: true, exitOnly: true }, { code: 0, hang: true, exitOnly: true }, { code: 0, hang: true, exitOnly: true })
+    const result = expect(cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-noclose-'))))
+      .rejects.toThrow(/timed out \(no progress for 3s\)/)
+    await vi.advanceTimersByTimeAsync(60_000)
+    await result
+  })
+
+  it('finishes when git exits before the idle timeout while a helper keeps stderr open', async () => {
+    vi.useFakeTimers()
+    // The idle timeout (500 ms) is shorter than the exit drain, so before the
+    // fix it fired after git had exited and tried to kill a dead process.
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '500'
+    cloneOutcomes.queue.push({ code: 0, exitAt: 100, helperTicks: [300, 900, 1500] })
+    let settled = false
+    const result = cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-exit-first-'))).finally(() => { settled = true })
+    await vi.advanceTimersByTimeAsync(2_200)
+    expect(settled).toBe(true)
+    await expect(result).resolves.toBeUndefined()
+    expect(gitKills.count).toBe(0)
+  })
+
+  it('reports git\'s own error when it exits non-zero before the timeout and the pipe never closes', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '500'
+    cloneOutcomes.queue.push({ code: 128, stderr: 'fatal: repository not found\n', exitAt: 100, helperTicks: [700] })
+    const result = cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-exit-fail-')))
+    const settledError = result.then(() => null, (error: Error) => error)
+    await vi.advanceTimersByTimeAsync(2_200)
+    const error = await settledError
+    expect(error?.message).toMatch(/^Failed to clone acme\/docs: fatal: repository not found/)
+    expect(error?.message).not.toMatch(/timed out/)
+    expect(gitKills.count).toBe(0)
+  })
+
+  it('settles once when git exits and the pipe closes shortly after', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '3000'
+    cloneOutcomes.queue.push({ code: 0, exitAt: 100, closeAt: 150 })
+    const result = cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-exit-close-')))
+    await vi.advanceTimersByTimeAsync(200)
+    await expect(result).resolves.toBeUndefined()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(gitKills.count).toBe(0)
+    expect(gitSpawnCalls.args).toHaveLength(1)
+  })
+
+  it('does not kill a slow clone that keeps printing progress past the idle timeout', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '3000'
+    cloneOutcomes.queue.push({ code: 0, ticks: [2000, 4000, 6000, 8000] })
+    const result = cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-slow-')))
+    await vi.advanceTimersByTimeAsync(20_000)
+    await expect(result).resolves.toBeUndefined()
+    expect(gitKills.count).toBe(0)
+  })
+
+  it('reports the real git error, not the progress lines that preceded it', async () => {
+    cloneOutcomes.queue.push({ code: 128, stderr: 'Receiving objects:  42% (10/24)\rReceiving objects: 100% (24/24)\rfatal: Remote branch nope not found in upstream origin\n' })
+    await expect(cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-tail-'))))
+      .rejects.toThrow(/^Failed to clone acme\/docs: fatal: Remote branch nope not found in upstream origin$/)
   })
 
   it("neutralizes the Git LFS filter driver per-process (never the global git config) on the clone", async () => {
