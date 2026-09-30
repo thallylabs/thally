@@ -40,6 +40,10 @@ function componentKey(ref: string, swagger: boolean): string | null {
 const componentMap = (document: Obj, type: string): unknown =>
   type.startsWith('@') ? document[type.slice(1)] : isObj(document.components) ? document.components[type] : undefined
 
+/** A mapping value without `#` or `/` is a schema name, not a URI reference. */
+const mappingRef = (target: string) =>
+  /[#/]/.test(target) ? target : `#/components/schemas/${target.replace(/~/g, '~0')}`
+
 function collectRefs(root: unknown, onRef: (ref: string) => void) {
   const seen = new WeakSet<object>()
   const stack: Array<unknown> = [root]
@@ -53,9 +57,10 @@ function collectRefs(root: unknown, onRef: (ref: string) => void) {
     }
     for (const [key, value] of Object.entries(node)) {
       if (key === '$ref' && typeof value === 'string') onRef(value)
-      // Discriminator mappings reference schemas by plain string.
+      // Discriminator mappings name a schema by `$ref`-style string or, per
+      // OpenAPI, by its bare component name (`SecretChild`).
       else if (key === 'mapping' && 'propertyName' in node && isObj(value)) {
-        for (const target of Object.values(value)) if (typeof target === 'string') onRef(target)
+        for (const target of Object.values(value)) if (typeof target === 'string') onRef(mappingRef(target))
       } else stack.push(value)
     }
   }

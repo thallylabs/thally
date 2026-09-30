@@ -105,6 +105,36 @@ describe('sanitizeSpecForPublication', () => {
     expect(out.components.schemas.Shared).toBeDefined()
   })
 
+  it('follows discriminator mappings that name schemas without a $ref', () => {
+    const spec = baseSpec()
+    // Hidden-only: reached solely through a bare-name mapping on the hidden op's schema.
+    spec.paths['/secret'].get['x-hidden'] = true
+    spec.components.schemas.Secret.discriminator = {
+      propertyName: 'kind',
+      mapping: { child: 'SecretChild', tilde: 'Odd~Name', external: 'other.yaml#/Remote', ref: '#/components/schemas/SecretRefChild' },
+    }
+    spec.components.schemas.SecretChild = { type: 'object', description: 'internal child', properties: { grand: ref('SecretGrandchild') } }
+    spec.components.schemas.SecretGrandchild = { type: 'string', description: 'internal grandchild' }
+    spec.components.schemas['Odd~Name'] = { type: 'string' }
+    spec.components.schemas.SecretRefChild = { type: 'string' }
+    // Public: the same bare-name form on a schema a public endpoint uses.
+    spec.components.schemas.Pub.discriminator = { propertyName: 'kind', mapping: { child: 'PubChild' } }
+    spec.components.schemas.PubChild = { type: 'object', properties: { shared: ref('Shared') } }
+    const out = sanitizeSpecForPublication(spec as OpenAPIDocument) as Record<string, any>
+    expect(Object.keys(out.components.schemas).sort()).toEqual(['Pub', 'PubChild', 'Shared', 'Unused'])
+    expect(JSON.stringify(out)).not.toMatch(/internal (grand)?child/)
+  })
+
+  it('keeps a bare-name mapping target that a public endpoint still reaches', () => {
+    const spec = baseSpec()
+    spec.components.schemas.Secret.discriminator = { propertyName: 'kind', mapping: { child: 'SharedChild' } }
+    spec.components.schemas.Pub.discriminator = { propertyName: 'kind', mapping: { child: 'SharedChild' } }
+    spec.components.schemas.SharedChild = { type: 'string' }
+    const out = sanitizeSpecForPublication(spec as OpenAPIDocument) as Record<string, any>
+    expect(out.components.schemas.SharedChild).toBeDefined()
+    expect(out.components.schemas.Secret).toBeUndefined()
+  })
+
   it('returns the document unchanged when nothing is excluded', () => {
     const spec = baseSpec()
     delete spec.paths['/secret'].get['x-excluded']
