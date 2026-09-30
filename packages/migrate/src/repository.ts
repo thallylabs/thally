@@ -2009,7 +2009,15 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
       const key = comparable(cell.text)
       candidateIndexes.set(key, [...(candidateIndexes.get(key) ?? []), { index: cell.index, kind: 'table' }])
     }
-    for (const heading of headings) existing.add(heading.text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''))
+    const headingSlugs = new Map<string, number>()
+    const slugCounts = new Map<string, number>()
+    for (const heading of headings) {
+      const slug = heading.text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+      existing.add(slug)
+      const seen = slugCounts.get(slug) ?? 0
+      slugCounts.set(slug, seen + 1)
+      if (slug) headingSlugs.set(seen === 0 ? slug : `${slug}-${seen}`, heading.index)
+    }
     const headingAliases = new Map<number, Array<string>>()
     const tableAliases = new Map<number, Array<string>>()
     for (const fragment of fragments) {
@@ -2025,6 +2033,20 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
         const linkIndexes = lines.flatMap((line, index) => linkPattern.test(line) ? [index] : [])
         const selections = linkIndexes.map((index) => matches.filter((candidate) => candidate.index < index).at(-1))
         if (selections.length && selections.every((candidate) => candidate?.index === selections[0]?.index)) match = selections[0]
+      }
+      // A fragment names a heading in the source site; option tables that
+      // repeat the same word are only extra candidates. When exactly one
+      // heading matches, that heading is the target.
+      if (!match && matches.length > 1) {
+        const headingMatches = matches.filter((candidate) => candidate.kind === 'heading')
+        if (headingMatches.length === 1) match = headingMatches[0]
+      }
+      // Repeated headings get numbered ids (`options`, `options-1`, ...). A
+      // fragment that differs from one of those only by letter case names
+      // that specific heading.
+      if (!match) {
+        const index = headingSlugs.get(fragment.toLowerCase())
+        if (index !== undefined) match = { index, kind: 'heading' }
       }
       if (!match) continue
       const { index, kind } = match

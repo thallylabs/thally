@@ -94,6 +94,38 @@ describe('linked source anchors', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
     expect(bundle.pages.find((page) => page.id === 'settings')?.body).toContain('<a id="api-params"></a>\n## APIParams')
   })
+
+  it('maps case-different fragments onto numbered ids of repeated headings', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repeated-headings-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['intro', 'cli'] },
+    }))
+    writeFileSync(join(root, 'intro.mdx'), '---\ntitle: Intro\n---\n\n[a](/cli#Options) [b](/cli#Options-1)')
+    writeFileSync(join(root, 'cli.mdx'), '---\ntitle: CLI\n---\n\n## Run\n\n#### Options\n\nx\n\n## Open\n\n#### Options\n\ny')
+    const body = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).pages.find((page) => page.id === 'cli')?.body
+    expect(body).toContain('<a id="Options"></a>\n#### Options\n\nx')
+    expect(body).toContain('<a id="Options-1"></a>\n#### Options\n\ny')
+  })
+
+  it('points a fragment at its one heading when option tables repeat the same name', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-heading-and-tables-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['intro', 'settings'] },
+    }))
+    writeFileSync(join(root, 'intro.mdx'), '---\ntitle: Intro\n---\n\n[Node events](/settings#setupNodeEvents)')
+    writeFileSync(join(root, 'settings.mdx'), [
+      '---', 'title: Settings', '---', '',
+      '| Option | Default |', '| --- | --- |',
+      '| `setupNodeEvents` | `null` |', '',
+      '| Option | Default |', '| --- | --- |',
+      '| `setupNodeEvents` | `null` |', '',
+      '### setupNodeEvents', '', 'Details.',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.pages.find((page) => page.id === 'settings')?.body).toContain('<a id="setupNodeEvents"></a>\n### setupNodeEvents')
+  })
 })
 
 afterEach(() => { execFileCalls.calls.length = 0 })
