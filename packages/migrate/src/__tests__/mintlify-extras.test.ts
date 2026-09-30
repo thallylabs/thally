@@ -347,11 +347,20 @@ describe('gating bypass hardening', () => {
     expect(codes(bundle, 'gated-page').some((warning) => warning.source === 'host.mdx' && /NOT inlined/.test(warning.message))).toBe(true)
   })
 
-  it('fails the run on invalid frontmatter instead of salvaging a page that declares groups', () => {
-    expect(() => site({
-      'docs.json': JSON.stringify({ navigation: { pages: ['bad'] } }),
+  it('withholds a page whose invalid frontmatter declares groups or public instead of salvaging it', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['bad', 'badpublic', 'badopen'] } }),
       'bad.mdx': '---\ntitle: Bad: colon: here\ngroups: [admin\n---\n\nTOPSECRET\n',
-    })).toThrow()
+      'badpublic.mdx': '---\ntitle: Bad: colon: here\npublic: [false\n---\n\nTOPSECRET\n',
+      'badopen.mdx': '---\ntitle: Open: colon: here\n---\n\nOpen body\n',
+    })
+    expect(bundle.pages.map((entry) => entry.id)).toEqual(['badopen'])
+    expect((bundle.quarantinedFiles ?? []).map((file) => file.path).sort()).toEqual([
+      'migration-quarantine/bad.mdx',
+      'migration-quarantine/badpublic.mdx',
+    ])
+    const published = renderMigrationFiles(bundle).filter((file) => !file.path.startsWith('migration-quarantine/'))
+    expect(published.some((file) => String(Buffer.from(file.content as Uint8Array)).includes('TOPSECRET'))).toBe(false)
   })
 
   it('says in the summary that the quarantine folder is local only and git-ignored', () => {

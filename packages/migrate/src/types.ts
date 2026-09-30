@@ -118,6 +118,8 @@ export interface MigrationPage {
   openapi?: string
   body: string
   source: string
+  /** Set when the page's frontmatter was invalid YAML; the page is kept with a best-effort salvage. */
+  frontmatterError?: string
 }
 
 export interface MigrationAsset {

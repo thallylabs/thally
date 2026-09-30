@@ -25,6 +25,11 @@ export function buildOperationKey(method: string, path: string, isWebhook = fals
 export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
   const specServers = normalizeServers((resolved.document as RawObject).servers)
   const resolveRef = createSchemaResolver(resolved.document as RawObject)
+  // Shared across every operation in this spec: a component schema referenced
+  // by many operations (e.g. a large shared "Assistant" or "Call" object) is
+  // deep-resolved once and reused by reference, instead of being re-expanded
+  // and duplicated in memory for every operation that references it.
+  const deepResolve = createDeepResolver(resolveRef)
   const securitySchemes = (resolved.document as RawObject).components as RawObject | undefined
   const rawSecuritySchemes =
     securitySchemes && typeof securitySchemes.securitySchemes === 'object'
@@ -57,6 +62,7 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
             securitySchemes: rawSecuritySchemes,
             isWebhook: false,
             resolveRef,
+            deepResolve,
           }),
         )
       }
@@ -87,6 +93,7 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
             securitySchemes: rawSecuritySchemes,
             isWebhook: true,
             resolveRef,
+            deepResolve,
           }),
         )
       }
@@ -120,6 +127,7 @@ interface NormalizeOperationOptions {
   config: ApiSpecConfig
   isWebhook: boolean
   resolveRef: (ref: string) => RawObject | null
+  deepResolve: (schema: RawObject) => RawObject
 }
 
 function normalizeOperation(options: NormalizeOperationOptions): NormalizedOperation {
@@ -139,8 +147,8 @@ function normalizeOperation(options: NormalizeOperationOptions): NormalizedOpera
   const pathLevelParameters = options.sharedParameters
   const operationParameters = extractParameters(options.rawOperation.parameters)
   const { groupedParameters, parameterPrefill } = normalizeParameters([...pathLevelParameters, ...operationParameters], options.resolveRef)
-  const { body: requestBody, sample: requestBodySample } = normalizeRequestBody(options.rawOperation.requestBody, options.resolveRef)
-  const responses = normalizeResponses(options.rawOperation.responses, options.resolveRef)
+  const { body: requestBody, sample: requestBodySample } = normalizeRequestBody(options.rawOperation.requestBody, options.resolveRef, options.deepResolve)
+  const responses = normalizeResponses(options.rawOperation.responses, options.resolveRef, options.deepResolve)
   const security = normalizeSecurity(options.rawOperation.security ?? options.documentSecurity)
   const headerPrefill = applySecurityAuthPrefill(
     security,
@@ -264,6 +272,7 @@ function normalizeParameters(
 function normalizeRequestBody(
   raw: unknown,
   resolveRef: (ref: string) => RawObject | null,
+  deepResolve: (schema: RawObject) => RawObject,
 ): {
   body?: NormalizedRequestBody
   sample?: string
@@ -271,7 +280,7 @@ function normalizeRequestBody(
   if (!raw || typeof raw !== 'object') {
     return { body: undefined, sample: undefined }
   }
-  const contents = normalizeContent((raw as RawObject).content, resolveRef)
+  const contents = normalizeContent((raw as RawObject).content, deepResolve)
   if (!contents.length) {
     return { body: undefined, sample: undefined }
   }
@@ -289,7 +298,11 @@ function normalizeRequestBody(
   }
 }
 
-function normalizeResponses(raw: unknown, resolveRef: (ref: string) => RawObject | null): Array<NormalizedResponse> {
+function normalizeResponses(
+  raw: unknown,
+  resolveRef: (ref: string) => RawObject | null,
+  deepResolve: (schema: RawObject) => RawObject,
+): Array<NormalizedResponse> {
   if (!raw || typeof raw !== 'object') {
     return []
   }
@@ -300,13 +313,13 @@ function normalizeResponses(raw: unknown, resolveRef: (ref: string) => RawObject
       return {
         code,
         description: typeof resolved.description === 'string' ? resolved.description : undefined,
-        contents: normalizeContent(resolved.content, resolveRef),
+        contents: normalizeContent(resolved.content, deepResolve),
       }
     })
     .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }))
 }
 
-function normalizeContent(raw: unknown, resolveRef: (ref: string) => RawObject | null): Array<NormalizedMediaType> {
+function normalizeContent(raw: unknown, deepResolve: (schema: RawObject) => RawObject): Array<NormalizedMediaType> {
   if (!raw || typeof raw !== 'object') {
     return []
   }
@@ -314,7 +327,7 @@ function normalizeContent(raw: unknown, resolveRef: (ref: string) => RawObject |
     let schema = typeof definition.schema === 'object' ? (definition.schema as Record<string, unknown>) : undefined
     // Deep-resolve all $refs in the schema tree so the renderer sees plain objects
     if (schema) {
-      schema = deepResolveRefs(schema, resolveRef)
+      schema = deepResolve(schema)
     }
     return {
       mediaType,
@@ -325,60 +338,164 @@ function normalizeContent(raw: unknown, resolveRef: (ref: string) => RawObject |
   })
 }
 
+// Real specs stay far below these caps (VapiAI's, the densest known, needs
+// under 2,000 lookups per schema); they only stop pathological ones —
+// thousands of nesting levels, or a dense clique of mutually-referencing
+// schemas — from overflowing the stack or hanging the build. Past a cap the
+// schema is shown as a short placeholder.
+const MAX_DEPTH = 1000
+const MAX_REF_EXPANSIONS = 200_000
+const MAX_CYCLE_ENTRIES = 1000
+
 /**
- * Recursively walks a schema object and resolves every $ref pointer it finds,
- * including refs inside properties, items, allOf/anyOf/oneOf members, and any
- * further nesting. Circular references are broken by tracking visited $ref paths.
+ * Builds a schema deep-resolver bound to one spec document. Resolves every
+ * $ref pointer it finds — including refs inside properties, items, and
+ * allOf/anyOf/oneOf members — recursively. Circular references are broken by
+ * tracking visited $ref paths.
+ *
+ * A component schema referenced by many operations (e.g. a large shared
+ * "Assistant" or "Call" object in a big API) would otherwise be re-expanded
+ * and duplicated in memory independently for every operation that
+ * references it. This memoizes the fully-resolved result per $ref so it is
+ * computed once per spec and reused by reference everywhere else.
  */
-function deepResolveRefs(
-  schema: Record<string, unknown>,
-  resolveRef: (ref: string) => RawObject | null,
-  seen = new Set<string>(),
-): Record<string, unknown> {
-  // If this node IS a $ref, resolve it first (then recurse into the result)
-  if (typeof schema.$ref === 'string') {
-    if (seen.has(schema.$ref)) {
-      // Break circular reference — return a placeholder
-      return { type: 'object', description: `[Circular: ${schema.$ref.split('/').pop()}]` }
+function createDeepResolver(resolveRef: (ref: string) => RawObject | null) {
+  // Refs that sit on no $ref cycle resolve identically from every entry path,
+  // so one result is shared by reference everywhere.
+  const cache = new Map<string, RawObject>()
+  // A ref on a cycle resolves differently depending on which of its
+  // cycle-mates are already in progress (they become "[Circular]"
+  // placeholders). Its result is memoized together with the context it is
+  // valid for, so it is reused only where the walk would provably come out
+  // the same: every in-progress ref it truncated at (`deps`) is in progress
+  // again, and no ref it expanded (`expanded`) is. Without this, a large
+  // strongly-connected component (VapiAI's has 34 schemas) is re-walked once
+  // per simple path through it, which takes seconds and hundreds of MB per
+  // call and exhausts the heap during `next build`.
+  interface CycleEntry {
+    deps: Array<string>
+    expanded: Set<string>
+    result: RawObject
+  }
+  interface Frame {
+    deps: Set<string>
+    expanded: Set<string>
+    onCycle: boolean
+  }
+  const cycleCache = new Map<string, Array<CycleEntry>>()
+  const stack: Array<string> = []
+  const frames: Array<Frame> = []
+  let depth = 0
+  let budget = 0
+
+  // `ref` (at stack[index]) was reached again while in progress: every frame
+  // from it to the top is on that cycle, and every frame above it depends on
+  // `ref` being in progress.
+  function markCycle(index: number, ref: string) {
+    for (let i = index; i < frames.length; i++) {
+      frames[i].onCycle = true
+      if (i > index) frames[i].deps.add(ref)
     }
-    const resolved = resolveRef(schema.$ref)
-    if (resolved) {
-      const childSeen = new Set(seen)
-      childSeen.add(schema.$ref)
-      return deepResolveRefs(resolved, resolveRef, childSeen)
-    }
-    return schema
   }
 
-  const result: Record<string, unknown> = { ...schema }
+  function resolve(schema: RawObject): RawObject {
+    if (depth >= MAX_DEPTH) return { type: 'object', description: '[Too deeply nested to show]' }
+    depth++
+    try {
+      return resolveNode(schema)
+    } finally {
+      depth--
+    }
+  }
 
-  // Resolve allOf / anyOf / oneOf members
-  for (const compositeKey of ['allOf', 'anyOf', 'oneOf'] as const) {
-    if (Array.isArray(schema[compositeKey])) {
-      result[compositeKey] = (schema[compositeKey] as unknown[]).map((item) =>
-        item && typeof item === 'object' ? deepResolveRefs(item as RawObject, resolveRef, seen) : item,
+  function resolveNode(schema: RawObject): RawObject {
+    // If this node IS a $ref, resolve it first (then recurse into the result)
+    if (typeof schema.$ref === 'string') {
+      const ref = schema.$ref
+      const cached = cache.get(ref)
+      if (cached) {
+        return cached
+      }
+      const cycleStart = stack.indexOf(ref)
+      if (cycleStart !== -1) {
+        // Break circular reference — return a placeholder.
+        markCycle(cycleStart, ref)
+        return { type: 'object', description: `[Circular: ${ref.split('/').pop()}]` }
+      }
+      const candidates = cycleCache.get(ref)
+      // Each lookup costs one unit plus one per cached entry it may scan.
+      budget -= 1 + (candidates?.length ?? 0)
+      if (budget < 0) return { type: 'object', description: `[Too large to show: ${ref.split('/').pop()}]` }
+      const entry = candidates?.find(
+        (e) => e.deps.every((d) => stack.includes(d)) && ![...e.expanded].some((x) => stack.includes(x)),
       )
+      if (entry) {
+        for (const d of entry.deps) markCycle(stack.indexOf(d), d)
+        const parent = frames[frames.length - 1]
+        if (parent) {
+          parent.expanded.add(ref)
+          for (const x of entry.expanded) parent.expanded.add(x)
+        }
+        return entry.result
+      }
+      const resolved = resolveRef(ref)
+      if (resolved) {
+        const frame: Frame = { deps: new Set(), expanded: new Set(), onCycle: false }
+        stack.push(ref)
+        frames.push(frame)
+        const result = resolve(resolved)
+        stack.pop()
+        frames.pop()
+        if (!frame.onCycle) {
+          cache.set(ref, result)
+        } else {
+          const entries = cycleCache.get(ref) ?? []
+          if (entries.length < MAX_CYCLE_ENTRIES) entries.push({ deps: [...frame.deps], expanded: frame.expanded, result })
+          cycleCache.set(ref, entries)
+          const parent = frames[frames.length - 1]
+          if (parent) {
+            parent.expanded.add(ref)
+            for (const x of frame.expanded) parent.expanded.add(x)
+          }
+        }
+        return result
+      }
+      return schema
     }
-  }
 
-  // Resolve each property schema
-  if (schema.properties && typeof schema.properties === 'object') {
-    const resolvedProps: Record<string, unknown> = {}
-    for (const [propKey, propSchema] of Object.entries(schema.properties as Record<string, unknown>)) {
-      resolvedProps[propKey] =
-        propSchema && typeof propSchema === 'object'
-          ? deepResolveRefs(propSchema as RawObject, resolveRef, seen)
-          : propSchema
+    const result: RawObject = { ...schema }
+
+    // Resolve allOf / anyOf / oneOf members
+    for (const compositeKey of ['allOf', 'anyOf', 'oneOf'] as const) {
+      if (Array.isArray(schema[compositeKey])) {
+        result[compositeKey] = (schema[compositeKey] as unknown[]).map((item) =>
+          item && typeof item === 'object' ? resolve(item as RawObject) : item,
+        )
+      }
     }
-    result.properties = resolvedProps
+
+    // Resolve each property schema
+    if (schema.properties && typeof schema.properties === 'object') {
+      const resolvedProps: Record<string, unknown> = {}
+      for (const [propKey, propSchema] of Object.entries(schema.properties as Record<string, unknown>)) {
+        resolvedProps[propKey] =
+          propSchema && typeof propSchema === 'object' ? resolve(propSchema as RawObject) : propSchema
+      }
+      result.properties = resolvedProps
+    }
+
+    // Resolve array items
+    if (schema.items && typeof schema.items === 'object') {
+      result.items = resolve(schema.items as RawObject)
+    }
+
+    return result
   }
 
-  // Resolve array items
-  if (schema.items && typeof schema.items === 'object') {
-    result.items = deepResolveRefs(schema.items as RawObject, resolveRef, seen)
+  return (schema: RawObject) => {
+    budget = MAX_REF_EXPANSIONS
+    return resolve(schema)
   }
-
-  return result
 }
 
 function normalizeExamples(raw: unknown): Array<{ key: string; summary?: string; description?: string; value: unknown }> {
@@ -516,6 +633,15 @@ function buildOperationId(specId: string, slug: Array<string>, isWebhook: boolea
   return [prefix, specId, ...slug].join('-').replace(/-+/g, '-')
 }
 
+/** A `$ref` fragment is URI-encoded (`Pet%20Store`); malformed escapes stay as written. */
+function decodeFragmentSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
 function createSchemaResolver(document: RawObject) {
   return function resolveRef(ref: string): RawObject | null {
     if (typeof ref !== 'string' || !ref.startsWith('#/')) {
@@ -524,7 +650,7 @@ function createSchemaResolver(document: RawObject) {
     const pathSegments = ref
       .slice(2)
       .split('/')
-      .map((segment) => segment.replace(/~1/g, '/').replace(/~0/g, '~'))
+      .map((segment) => decodeFragmentSegment(segment).replace(/~1/g, '/').replace(/~0/g, '~'))
 
     let current: unknown = document
     for (const segment of pathSegments) {
