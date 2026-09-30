@@ -35,8 +35,9 @@ describe('remote OpenAPI hydration', () => {
     const result = await hydrateRemoteApiSpecs(bundle(), fetcher)
     expect(fetcher).toHaveBeenCalledOnce()
     expect(result.assets).toHaveLength(1)
-    expect(result.assets[0].path).toMatch(/^openapi-[0-9a-f]{12}\.json$/)
-    expect(result.docsConfig.tabs[0].api).toEqual({ source: `/${result.assets[0].path}` })
+    expect(result.assets[0].path).toMatch(/^openapi\/openapi-[0-9a-f]{12}\.json$/)
+    expect(result.assets[0].projectRelative).toBe(true)
+    expect(result.docsConfig.tabs[0].api).toEqual({ source: result.assets[0].path })
     expect(result.docsConfig.redirects).toContainEqual({
       source: '/api-reference/scim/list-users',
       destination: '/api/default/api/v1/scim/v2/users/get',
@@ -50,7 +51,7 @@ describe('remote OpenAPI hydration', () => {
     const input = bundle()
     input.pages.push({ id: 'op', navigationId: 'op', title: 'Op', description: '', keywords: [], body: '', source: 'op.mdx', openapi: `${SPEC_URL} GET /api/v1/scim/v2/Users` })
     const result = await hydrateRemoteApiSpecs(input, fetcher)
-    expect(result.pages[1].openapi).toBe(`/${result.assets[0].path} GET /api/v1/scim/v2/Users`)
+    expect(result.pages[1].openapi).toBe(`${result.assets[0].path} GET /api/v1/scim/v2/Users`)
     expect(input.pages[1].openapi).toBe(`${SPEC_URL} GET /api/v1/scim/v2/Users`)
   })
 

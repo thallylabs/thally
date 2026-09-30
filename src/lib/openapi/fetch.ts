@@ -8,6 +8,7 @@
 import path from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { getContentSource } from '@/lib/content-source'
+import { sanitizeSpecForPublication } from '@/lib/openapi/sanitize'
 import type { ApiReferenceConfig, ApiSpecConfig, OpenAPIDocument, ResolvedSpec } from '@/lib/openapi/types'
 
 const specCache = new Map<string, Promise<OpenAPIDocument>>()
@@ -59,7 +60,14 @@ async function readSource(config: ApiSpecConfig): Promise<OpenAPIDocument> {
 export async function loadSpecDocument(config: ApiSpecConfig): Promise<OpenAPIDocument> {
   const key = cacheKey(config)
   if (!specCache.has(key)) {
-    specCache.set(key, readSource(config))
+    // Single choke point: everything downstream (routes, reference, try-it)
+    // only ever sees the publication-safe document.
+    specCache.set(
+      key,
+      readSource(config).then((document) =>
+        sanitizeSpecForPublication(document, { overrides: config.operationOverrides }),
+      ),
+    )
   }
   return specCache.get(key) as Promise<OpenAPIDocument>
 }

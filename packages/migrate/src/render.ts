@@ -139,7 +139,7 @@ export function renderMigrationFiles(
       path: `src/content/${page.id}.mdx`,
       content: renderPage(bundle, page),
     })),
-    ...bundle.assets.map((asset) => ({ path: `public/${asset.path}`, content: asset.content })),
+    ...bundle.assets.map((asset) => ({ path: asset.projectRelative ? asset.path : `public/${asset.path}`, content: asset.content })),
     ...(bundle.componentFiles ?? []).flatMap((file) => file.path === 'src/mdx/custom-components.tsx'
       && options.existingComponentRegistry !== undefined && typeof file.content === 'string'
       ? mergeComponentRegistry(options.existingComponentRegistry, file.content)

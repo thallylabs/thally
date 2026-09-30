@@ -17,7 +17,7 @@ import { LocalizedSidebarHydrator } from '@/components/layout/localized-sidebar-
 import { LocaleAvailabilityHydrator } from '@/components/layout/locale-availability'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { getApiOperationForFrontmatter } from '@/data/api-reference'
-import { getDocEntries, loadNavContext } from '@/data/docs'
+import { ensureDocPublication, getDocEntries, isDocPublished, loadNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { hasDocTranslation } from '@/lib/i18n/translation-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
@@ -80,6 +80,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     route.isLocaleRoute ? route.locale : undefined,
   )
   if (!doc) return {}
+  // The page 404s when its documented operation is hidden or excluded; give it no title, canonical or social preview.
+  await ensureDocPublication()
+  if (!isDocPublished(doc.id)) return {}
 
   const siteUrl = getSiteUrl()
   const primaryHref = docPathFromSlug(doc.slug)

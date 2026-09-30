@@ -2,6 +2,7 @@ import { cache } from 'react'
 import { apiReferenceConfig } from '@/config/api-reference'
 import { getSpecConfig, loadSpec } from '@/lib/openapi/fetch'
 import { buildOperationKey, normalizeSpec } from '@/lib/openapi/normalize'
+import type { NavigationSection, SidebarCollection } from '@/data/docs'
 import type { NormalizedOperation, NormalizedSpec } from '@/lib/openapi/types'
 import { findSpecForRef, type OpenApiFrontmatterRef } from '@/lib/openapi/page-frontmatter'
 
@@ -163,6 +164,36 @@ export async function buildApiNavigation(specId?: string): Promise<Array<ApiNavi
   }))
 
   return sortNavigationGroups(groups, spec)
+}
+
+/**
+ * Append generated endpoint sections to every API collection. Each collection
+ * lists the operations of its own spec (the first API tab is the `default`
+ * spec, later ones are keyed by collection id), so several API tabs never show
+ * one another's endpoints.
+ */
+export async function withApiNavigation(
+  collections: Array<SidebarCollection>,
+  hrefPrefix = '',
+): Promise<Array<SidebarCollection>> {
+  return Promise.all(
+    collections.map(async (collection) => {
+      if (!collection.api || collection.api.navigation === false) return collection
+      const groups = await buildApiNavigation(collection.id)
+      const apiSections: Array<NavigationSection> = groups.map((group, index) => ({
+        id: `openapi-${index}`,
+        title: group.title,
+        items: group.items.map((item) => ({
+          id: item.id,
+          title: item.title,
+          href: `${hrefPrefix}${item.href}`,
+          badge: item.badge,
+          description: `${item.method} ${item.path}`,
+        })),
+      }))
+      return { ...collection, sections: [...(collection.sections ?? []), ...apiSections] }
+    }),
+  )
 }
 
 export async function getApiOperationSearchIndex() {

@@ -10,6 +10,8 @@ import { execFileSync } from 'node:child_process'
 import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
+import { operationState, parseDocOperation } from './openapi-publication.js'
+import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { slugify } from '@thallylabs/core/slugify'
 
@@ -345,7 +347,68 @@ function resolveLink(target: string, redirects: ReadonlyMap<string, string>, dyn
   }
 }
 
-function validateOpenApi(projectDir: string, source: string, issues: LintIssue[]): void {
+/**
+ * Specs under `public/` are served verbatim. Independently of docs.json (which
+ * may already point at a migrated copy elsewhere), flag any that carry hidden or
+ * excluded operations, or that are not the configured source.
+ */
+function checkPublicSpecs(projectDir: string, tabs: Array<{ api?: { source?: string } }>, issues: LintIssue[]): void {
+  const configured = tabs.flatMap((tab) => (tab.api?.source ? [tab.api.source.replace(/^\.\//, '')] : []))
+  const isConfigured = (spec: { path: string; urlPath: string }) =>
+    configured.some((source) => source === `/${spec.urlPath}` || source === spec.path)
+  const hasElsewhereSource = configured.some((source) => !/^https?:/i.test(source))
+  const { specs, skipped } = findPublicSpecs(projectDir)
+  for (const spec of specs) {
+    if (isConfigured(spec)) continue // validateOpenApi already reports it
+    if (!spec.hasHiddenOperations && !hasElsewhereSource) continue
+    issues.push({
+      severity: 'warning',
+      file: spec.path,
+      message: `${spec.path} is an OpenAPI file served publicly as /${spec.urlPath}${spec.hasHiddenOperations ? ' and it contains x-excluded/x-hidden operations, which are downloadable from it' : ' but is not the spec this site is configured with (an old copy?)'}.${shadowNote(spec.urlPath)} Re-running migration into an existing site does not remove old copies from public/: delete this file manually`,
+    })
+  }
+  for (const path of skipped) {
+    issues.push({ severity: 'warning', file: path, message: `${path} is too large to inspect; if it is an OpenAPI file with hidden operations it is served as-is from public/` })
+  }
+}
+
+/**
+ * A page whose `openapi:` frontmatter names a hidden or excluded operation of
+ * the site's default spec (the first visible API tab's, which is what the
+ * route consults) 404s and is left out of every listing. Unknown operations
+ * are not reported, and remote specs cannot be judged here.
+ */
+function checkUnpublishedOperationPages(
+  projectDir: string,
+  tabs: Array<{ hidden?: boolean; api?: { source?: string } }>,
+  pages: Array<{ file: string; method: string; path: string }>,
+  issues: LintIssue[],
+): void {
+  const api = tabs.find((tab) => !tab.hidden && tab.api?.source)?.api
+  const source = api?.source
+  if (!source || pages.length === 0 || /^https?:/i.test(source)) return
+  const specPath = source.startsWith('/') ? join(projectDir, 'public', source.slice(1)) : join(projectDir, source)
+  let spec: unknown
+  try {
+    const raw = readFileSync(specPath, 'utf8')
+    spec = /\.json$/i.test(source) ? JSON.parse(raw) : parseYaml(raw)
+  } catch {
+    return // validateOpenApi reports a missing or invalid spec
+  }
+  const overrides = (api as { overrides?: unknown }).overrides
+  for (const { file, method, path } of pages) {
+    const state = operationState(spec, method, path, overrides)
+    if (state === 'hidden' || state === 'excluded') {
+      issues.push({
+        severity: 'warning',
+        file,
+        message: `page ${file} points at ${state} operation ${method} ${path} and is not published: it returns 404 and is left out of navigation, search, sitemap and llms.txt. Publish the operation or point the page at another one`,
+      })
+    }
+  }
+}
+
+function validateOpenApi(projectDir: string, source: string, issues: LintIssue[], overrides?: unknown): void {
   // Runtime URL-style sources are author-owned files below `public/`, while
   // relative sources are resolved from the project root.
   const specPath = source.startsWith('/')
@@ -364,6 +427,16 @@ function validateOpenApi(projectDir: string, source: string, issues: LintIssue[]
     return
   }
   const s = spec as Record<string, unknown>
+  // Files under public/ are served verbatim by the host, bypassing the
+  // publication filter that drops hidden/excluded operations.
+  if (s && typeof s === 'object' && (source.startsWith('/') || source.replace(/^\.\//, '').startsWith('public/')) &&
+    specHasHiddenOperations(s, overrides)) {
+    issues.push({
+      severity: 'warning',
+      message: `OpenAPI spec "${source}" lives under public/ and contains x-excluded/x-hidden operations; public/ is served as-is, so those operations would be downloadable.${shadowNote(source.replace(/^\.?\/+/, '').replace(/^public\//, ''))} Move it to a project-root path such as "openapi/${source.split('/').pop()}", update docs.json, and delete the copy in public/ (re-running migration into an existing site does not remove old copies from public/)`,
+      file: source,
+    })
+  }
   if (typeof s?.openapi !== 'string' && typeof s?.swagger !== 'string') {
     issues.push({ severity: 'error', message: 'OpenAPI spec is missing the "openapi" (or "swagger") version field', file: source })
   }
@@ -381,7 +454,7 @@ function validateOpenApi(projectDir: string, source: string, issues: LintIssue[]
         continue
       }
       const hasOp = Object.keys(ops as Record<string, unknown>).some((k) => methods.has(k.toLowerCase()))
-      if (!hasOp) {
+      if (!hasOp && typeof (ops as Record<string, unknown>).$ref !== 'string') {
         issues.push({ severity: 'warning', message: `OpenAPI path "${p}" has no operations`, file: source })
       }
     }
@@ -446,6 +519,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   if (existsSync(contentDir)) scanMdx(contentDir, allFiles)
 
   const fixedOrphans: string[] = []
+  const operationPages: Array<{ file: string; method: string; path: string }> = []
   const validPaths = new Set<string>(['/'])
   const anchorsByPath = new Map<string, Set<string>>()
   const linksByFile: Array<{ file: string; path: string; anchors: Set<string>; links: FoundLink[]; images: FoundLink[]; offset: number }> = []
@@ -486,6 +560,9 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     if (typeof data.openapi !== 'string' && content.trim().length < 50) {
       issues.push({ severity: 'warning', message: `Very short body (${content.trim().length} chars) — page may be empty`, file: rel2 })
     }
+
+    const operation = parseDocOperation(data.openapi)
+    if (operation) operationPages.push({ file: rel2, ...operation })
 
     if (options.drift) checkDrift(projectDir, rel2, data, issues)
 
@@ -565,8 +642,11 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
   // OpenAPI validation for each API tab.
   for (const tab of config.tabs) {
-    if (tab.api?.source) validateOpenApi(projectDir, tab.api.source, issues)
+    if (tab.api?.source) validateOpenApi(projectDir, tab.api.source, issues, (tab.api as { overrides?: unknown }).overrides)
   }
+
+  checkPublicSpecs(projectDir, config.tabs, issues)
+  checkUnpublishedOperationPages(projectDir, config.tabs, operationPages, issues)
 
   const errors = issues.filter((i) => i.severity === 'error')
   options.onIssues?.(issues)

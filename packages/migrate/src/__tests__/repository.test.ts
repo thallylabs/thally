@@ -12,7 +12,13 @@ import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNa
 // Queue of scripted `git clone` outcomes consumed in order by the mocked
 // `spawn` below, so `cloneGitHubRepository`'s retry-on-network-failure logic
 // (repository.ts) can be tested without a real clone.
-const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; stderr?: string }> }))
+// `hang` never exits on its own (only when killed); `ticks` are the times (ms)
+// at which progress is printed before a normal exit one second after the last.
+// `exitAt` makes git itself exit (emitting only `exit`) at that time while a
+// helper keeps stderr open: `helperTicks` are later helper writes, and
+// `closeAt`, if set, is when the pipe finally closes.
+const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; stderr?: string; hang?: boolean; exitOnly?: boolean; ticks?: Array<number>; exitAt?: number; helperTicks?: Array<number>; closeAt?: number }> }))
+const gitKills = vi.hoisted(() => ({ count: 0 }))
 // Remote spec URLs must never invoke a subprocess or make a network request.
 const execFileCalls = vi.hoisted(() => ({ calls: [] as Array<string> }))
 // Records each `spawn('git', args, options)` call's env, so a test can
@@ -20,14 +26,33 @@ const execFileCalls = vi.hoisted(() => ({ calls: [] as Array<string> }))
 // without a real clone (that's covered manually against BoundaryML/baml, a
 // real Git LFS repo, since a mocked child process can't exercise git's own
 // filter-driver resolution).
-const gitSpawnCalls = vi.hoisted(() => ({ envs: [] as Array<Record<string, string | undefined>> }))
+const gitSpawnCalls = vi.hoisted(() => ({ envs: [] as Array<Record<string, string | undefined>>, args: [] as Array<Array<string>> }))
 vi.mock('node:child_process', () => {
   return {
-    spawn: (_command: string, _args: Array<string>, options: { env?: Record<string, string | undefined> }) => {
+    spawn: (_command: string, args: Array<string>, options: { env?: Record<string, string | undefined> }) => {
       gitSpawnCalls.envs.push(options.env ?? {})
-      const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void } }
-      child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} })
+      gitSpawnCalls.args.push(args)
+      const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void; destroy: () => void }; kill: () => void }
+      child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {}, destroy: () => {} })
+      child.kill = () => {
+        gitKills.count += 1
+        queueMicrotask(() => child.emit(outcome.exitOnly ? 'exit' : 'close', null))
+      }
       const outcome = cloneOutcomes.queue.shift() ?? { code: 0 }
+      if (outcome.hang) return child
+      if (outcome.exitAt !== undefined) {
+        const { exitAt } = outcome
+        if (outcome.stderr) setTimeout(() => child.stderr.emit('data', outcome.stderr), Math.max(0, exitAt - 1))
+        setTimeout(() => child.emit('exit', outcome.code), exitAt)
+        for (const tick of outcome.helperTicks ?? []) setTimeout(() => child.stderr.emit('data', 'helper still attached\n'), tick)
+        if (outcome.closeAt !== undefined) setTimeout(() => child.emit('close', outcome.code), outcome.closeAt)
+        return child
+      }
+      if (outcome.ticks) {
+        for (const tick of outcome.ticks) setTimeout(() => child.stderr.emit('data', 'Receiving objects:  50%\r'), tick)
+        setTimeout(() => child.emit('close', outcome.code), Math.max(...outcome.ticks) + 1000)
+        return child
+      }
       queueMicrotask(() => {
         if (outcome.stderr) child.stderr.emit('data', outcome.stderr)
         child.emit('close', outcome.code)
@@ -80,6 +105,38 @@ describe('linked source anchors', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
     expect(bundle.pages.find((page) => page.id === 'settings')?.body).toContain('<a id="api-params"></a>\n## APIParams')
   })
+
+  it('maps case-different fragments onto numbered ids of repeated headings', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repeated-headings-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['intro', 'cli'] },
+    }))
+    writeFileSync(join(root, 'intro.mdx'), '---\ntitle: Intro\n---\n\n[a](/cli#Options) [b](/cli#Options-1)')
+    writeFileSync(join(root, 'cli.mdx'), '---\ntitle: CLI\n---\n\n## Run\n\n#### Options\n\nx\n\n## Open\n\n#### Options\n\ny')
+    const body = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).pages.find((page) => page.id === 'cli')?.body
+    expect(body).toContain('<a id="Options"></a>\n#### Options\n\nx')
+    expect(body).toContain('<a id="Options-1"></a>\n#### Options\n\ny')
+  })
+
+  it('points a fragment at its one heading when option tables repeat the same name', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-heading-and-tables-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['intro', 'settings'] },
+    }))
+    writeFileSync(join(root, 'intro.mdx'), '---\ntitle: Intro\n---\n\n[Node events](/settings#setupNodeEvents)')
+    writeFileSync(join(root, 'settings.mdx'), [
+      '---', 'title: Settings', '---', '',
+      '| Option | Default |', '| --- | --- |',
+      '| `setupNodeEvents` | `null` |', '',
+      '| Option | Default |', '| --- | --- |',
+      '| `setupNodeEvents` | `null` |', '',
+      '### setupNodeEvents', '', 'Details.',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.pages.find((page) => page.id === 'settings')?.body).toContain('<a id="setupNodeEvents"></a>\n### setupNodeEvents')
+  })
 })
 
 afterEach(() => { execFileCalls.calls.length = 0 })
@@ -107,6 +164,8 @@ function fixture(): string {
     navigation: { $ref: './navigation.json' },
   }))
   writeFileSync(join(root, 'README.md'), '# Repository readme\n\nThis must not become a docs page.')
+  mkdirSync(join(root, '.claude', 'skills', 'doc-author'), { recursive: true })
+  writeFileSync(join(root, '.claude', 'skills', 'doc-author', 'SKILL.mdx'), '# Not a docs page\n\n</Broken>')
   writeFileSync(join(root, 'en', 'introduction.mdx'), '---\ntitle: Welcome\n---\n\n# Welcome\n\nEnglish docs.')
   writeFileSync(join(root, 'en', 'guides', 'install.mdx'), '---\ntitle: Install\n---\n\nimport Prerequisite from \'/snippets/prerequisite.mdx\'\n\n<Prerequisite />\n\n<Danger>Back up first.</Danger>\n\n<Warn>Review the result.</Warn>')
   writeFileSync(join(root, 'es', 'introduction.mdx'), '---\ntitle: Bienvenido\n---\n\nDocumentación española.')
@@ -157,6 +216,7 @@ describe('Mintlify repository migration', () => {
     expect(bundle.pages[1].body).toContain('<Warning>Review the result.</Warning>')
     expect(bundle.pages[1].body).toContain('Install Node.js before continuing.')
     expect(bundle.pages.map((page) => page.id)).not.toContain('snippets/prerequisite')
+    expect(bundle.pages.map((page) => page.id)).not.toContain('.claude/skills/doc-author/SKILL')
     expect(bundle.docsConfig.i18n).toMatchObject({
       defaultLocale: 'en',
       locales: [
@@ -171,6 +231,83 @@ describe('Mintlify repository migration', () => {
     const files = renderMigrationFiles(bundle)
     expect(files.map((file) => file.path)).toContain('public/images/logo.svg')
     expect(files.map((file) => file.path)).not.toContain('src/content/readme.mdx')
+  })
+
+  it('inlines <Snippet file="..."> references with no import statement', () => {
+    const root = fixture()
+    writeFileSync(
+      join(root, 'en', 'guides', 'install.mdx'),
+      '---\ntitle: Install\n---\n\n<Snippet file="/snippets/prerequisite.mdx" />',
+    )
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'guides/install')
+    expect(page?.body).toContain('Install Node.js before continuing.')
+    expect(page?.body).not.toContain('<Snippet')
+  })
+
+  it('hoists a component snippet as a real declaration instead of splicing its source into the usage tag', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-component-snippet-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'counter.mdx'), "export const Counter = () => {\n  const [n, setN] = useState(0)\n  return <button onClick={() => setN(n + 1)}>{n}</button>\n}")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { Counter } from '/snippets/counter.mdx'\n\n<Counter />")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    // The usage stays a live self-closing tag (here rewritten to the
+    // registered client component by the component migrator); it must not
+    // be replaced by the declaration's own source text.
+    expect(page?.body).not.toMatch(/<Counter\s*>[\s\S]*<\/Counter>/)
+    expect(page?.body).not.toContain('return <button')
+    expect(page?.body.match(/\/>/g)).toHaveLength(1)
+  })
+
+  it('keeps a snippet component together with the sibling it renders when only the hook component is imported', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-sibling-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'counter.mdx'), "export const Label = ({ t }) => <em>{t}</em>\nexport const Counter = () => {\n  const [n, setN] = useState(0)\n  return <button onClick={() => setN(n + 1)}><Label t={n} /></button>\n}\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { Counter } from '/snippets/counter.mdx'\n\n<Counter />\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    expect(bundle.warnings).toEqual([])
+    expect(page?.body).toMatch(/^<Migrated[a-f0-9]+ \/>$/m)
+    expect(page?.body).not.toContain('onClick')
+    const client = bundle.componentFiles?.find((file) => file.path.includes('/inline-'))
+    expect(String(client?.content)).toContain('export const Label')
+    expect(String(client?.content)).toContain('export const Counter')
+  })
+
+  it('does not let a page-local component be shadowed by a same-named global snippet alias', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-alias-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['imports-snippet', 'declares-locally'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'counter.mdx'), 'export const Counter = () => {\n  return <div>from snippet</div>\n}')
+    writeFileSync(join(root, 'imports-snippet.mdx'), "---\ntitle: Imports\n---\n\nimport { Counter } from '/snippets/counter.mdx'\n\n<Counter />")
+    writeFileSync(join(root, 'declares-locally.mdx'), '---\ntitle: Local\n---\n\nexport const Counter = () => {\n  return <div>local component</div>\n}\n\n<Counter />')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const local = bundle.pages.find((candidate) => candidate.id === 'declares-locally')
+    expect(local?.body).toContain('local component')
+    expect(local?.body).not.toContain('from snippet')
+    expect(local?.body.match(/export const Counter/g)).toHaveLength(1)
+
+    // The named-import form (`import { Name } from '...'`) is what Mintlify's
+    // own docs use for snippets; it must be fully consumed, not left behind
+    // as a dead import alongside the inlined content.
+    const imported = bundle.pages.find((candidate) => candidate.id === 'imports-snippet')
+    expect(imported?.body).toContain('from snippet')
+    expect(imported?.body).not.toContain('import')
   })
 
   it('escapes a bare literal brace in Mintlify page prose instead of crashing the build (frontmatter untouched)', () => {
@@ -386,7 +523,7 @@ describe('Mintlify repository migration', () => {
     expect(bundle.docsConfig.tabs[1]).toMatchObject({
       tab: 'API reference',
       groups: [{ group: 'Runs API', pages: ['management/runs'] }],
-      api: { source: '/service.openapi.yml', navigation: false },
+      api: { source: 'openapi/service.openapi.yml', navigation: false },
     })
     expect(bundle.docsConfig).toMatchObject({
       theme: 'maple',
@@ -426,9 +563,15 @@ describe('Mintlify repository migration', () => {
     expect(bundle.assets.map((asset) => asset.path)).toEqual(expect.arrayContaining([
       'logo.svg',
       'images/setup.png',
-      'service.openapi.yml',
+      'openapi/service.openapi.yml',
     ]))
     expect(bundle.warnings).toEqual([])
+
+    // Specs must never land under public/, which the host serves verbatim.
+    const renderedPaths = renderMigrationFiles(bundle).map((file) => file.path)
+    expect(renderedPaths).toContain('openapi/service.openapi.yml')
+    expect(renderedPaths).not.toContain('public/openapi/service.openapi.yml')
+    expect(renderedPaths.some((path) => path.startsWith('public/') && /\.(ya?ml|json)$/.test(path))).toBe(false)
 
     const introduction = renderMigrationFiles(bundle)
       .find((file) => file.path === 'src/content/introduction.mdx')
@@ -459,9 +602,145 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'API Reference')
-    expect(apiTab?.api).toEqual({ source: '/service.yml', navigation: false })
+    expect(apiTab?.api).toEqual({ source: 'openapi/service.yml', navigation: false })
     expect(bundle.docsConfig.tabs.find((tab) => tab.tab === 'Guides')?.api).toBeUndefined()
-    expect(bundle.assets.map((asset) => asset.path)).toContain('service.yml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/service.yml')
+  })
+
+  describe('tab menu API items', () => {
+    const spec = 'openapi: 3.1.0\ninfo: { title: Service, version: "1.0" }\npaths: {}'
+    const migrateMenu = (tabs: Array<Record<string, unknown>>, specs: Array<string> = ['openapi.json']) => {
+      const root = fixture()
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { tabs } }))
+      writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+      for (const name of specs) writeFileSync(join(root, name), spec)
+      return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    }
+    const summary = (bundle: ReturnType<typeof migrateRepository>) =>
+      bundle.docsConfig.tabs.map((tab) => ({ tab: tab.tab, api: tab.api?.source, groups: tab.groups?.map((group) => group.group) }))
+
+    it('keeps a Guide + API reference menu: the API item becomes a sibling tab bound to its spec with generated navigation', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [{ item: 'Guide', pages: ['guide'] }, { item: 'API reference', openapi: 'openapi.json' }],
+      }])
+      expect(summary(bundle)).toEqual([
+        { tab: 'Docs', api: undefined, groups: ['Guide'] },
+        { tab: 'Docs: API reference', api: 'openapi/openapi.json', groups: undefined },
+      ])
+      expect(bundle.docsConfig.tabs[1].api).toEqual({ source: 'openapi/openapi.json' })
+      expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/openapi.json')
+    })
+
+    it('supports the { source, directory } object form and openapi + pages in one item', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [
+          { item: 'Guide', pages: ['guide'] },
+          { item: 'Reference', openapi: { source: 'openapi.json', directory: 'api' }, pages: ['guide'] },
+        ],
+      }])
+      expect(summary(bundle)).toEqual([
+        { tab: 'Docs', api: undefined, groups: ['Guide', 'Reference'] },
+        { tab: 'Docs: Reference', api: 'openapi/openapi.json', groups: undefined },
+      ])
+    })
+
+    it('binds a sole API item to the tab itself, and keeps later tabs after the sibling', () => {
+      const bundle = migrateMenu([
+        { tab: 'API', menu: [{ item: 'Reference', openapi: 'openapi.json' }] },
+        { tab: 'Docs', menu: [{ item: 'Guide', pages: ['guide'] }, { item: 'A', openapi: 'a.json' }] },
+        { tab: 'More', pages: ['guide'] },
+      ], ['openapi.json', 'a.json'])
+      expect(summary(bundle).map((tab) => [tab.tab, tab.api])).toEqual([
+        ['Docs', undefined],
+        ['Docs: A', 'openapi/a.json'],
+        ['More', undefined],
+        ['API', 'openapi/openapi.json'],
+      ])
+    })
+
+    it('gives two API items in one tab their own bindings, even for the same spec', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [
+          { item: 'Guide', pages: ['guide'] },
+          { item: 'REST', openapi: 'openapi.json' },
+          { item: 'Admin', openapi: 'admin.json' },
+          { item: 'REST again', openapi: 'openapi.json' },
+        ],
+      }], ['openapi.json', 'admin.json'])
+      expect(summary(bundle).map((tab) => [tab.tab, tab.api])).toEqual([
+        ['Docs', undefined],
+        ['Docs: REST', 'openapi/openapi.json'],
+        ['Docs: Admin', 'openapi/admin.json'],
+        ['Docs: REST again', 'openapi/openapi.json'],
+      ])
+    })
+
+    it('carries a menu item icon and hidden flag onto its API tab', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [
+          { item: 'Guide', pages: ['guide'] },
+          { item: 'Public', icon: 'code', openapi: 'openapi.json' },
+          { item: 'Internal', hidden: true, openapi: 'a.json' },
+        ],
+      }], ['openapi.json', 'a.json'])
+      expect(bundle.docsConfig.tabs.map((tab) => [tab.tab, tab.icon, tab.hidden])).toEqual([
+        ['Docs', undefined, undefined],
+        ['Docs: Public', 'code', undefined],
+        ['Docs: Internal', undefined, true],
+      ])
+    })
+
+    it('keeps same-named menu items under different versions bound to their own specs', () => {
+      const root = fixture()
+      writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+      writeFileSync(join(root, 'v1.json'), spec)
+      writeFileSync(join(root, 'v2.json'), `${spec}\n`)
+      const menu = (file: string) => [{ item: 'Guide', pages: ['guide'] }, { item: 'REST', openapi: file }]
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { versions: [
+        { version: 'v1', tabs: [{ tab: 'Docs', menu: menu('v1.json') }] },
+        { version: 'v2', tabs: [{ tab: 'Docs', menu: menu('v2.json') }] },
+      ] } }))
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      expect(bundle.docsConfig.tabs.filter((tab) => tab.api).map((tab) => tab.api?.source).sort()).toEqual(['openapi/v1.json', 'openapi/v2.json'])
+    })
+
+    it('keeps two different specs with the same file name from different folders', () => {
+      const root = fixture()
+      mkdirSync(join(root, 'v1'))
+      mkdirSync(join(root, 'v2'))
+      writeFileSync(join(root, 'v1/openapi.json'), spec)
+      writeFileSync(join(root, 'v2/openapi.json'), `${spec}\n# v2`)
+      writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { tabs: [
+        { tab: 'V1', openapi: 'v1/openapi.json' },
+        { tab: 'V2', openapi: 'v2/openapi.json' },
+      ] } }))
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      expect(bundle.docsConfig.tabs.flatMap((tab) => (tab.api ? [tab.api.source] : []))).toEqual(['openapi/openapi.json', 'openapi/v2-openapi.json'])
+      expect(bundle.assets.map((asset) => asset.path).filter((path) => path.startsWith('openapi/')).sort()).toEqual(['openapi/openapi.json', 'openapi/v2-openapi.json'])
+    })
+
+    it('warns that a { source, directory } output folder scopes only part of the spec', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [{ item: 'Guide', pages: ['guide'] }, { item: 'Ref', openapi: { source: 'openapi.json', directory: 'ref' } }],
+      }])
+      expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('limited to pages under "ref"')
+    })
+
+    it('warns about an API menu item it cannot represent instead of dropping it silently', () => {
+      const bundle = migrateMenu([{
+        tab: 'Docs',
+        menu: [{ item: 'Guide', pages: ['guide'] }, { item: 'Broken API', openapi: { directory: 'api' } }, { item: 'Async', asyncapi: 'openapi.json' }],
+      }])
+      const messages = bundle.warnings.map((warning) => warning.message).join('\n')
+      expect(messages).toContain('"Broken API"')
+      expect(messages).toContain('AsyncAPI is not supported')
+    })
   })
 
   describe('API frontmatter', () => {
@@ -499,12 +778,12 @@ describe('Mintlify repository migration', () => {
       const bundle = apiFixture(pages, twoSpecNav)
       const openapi = (id: string) => bundle.pages.find((page) => page.id === id)?.openapi
       expect(openapi('plain')).toBe('POST /things')
-      expect(openapi('prefixed')).toBe('/openapi-b.yaml GET /widgets/{id}')
-      expect(openapi('quoted')).toBe('/openapi-b.yaml get /widgets/{id}')
-      expect(openapi('abs')).toBe('/openapi-a.json POST /things')
+      expect(openapi('prefixed')).toBe('openapi/openapi-b.yaml GET /widgets/{id}')
+      expect(openapi('quoted')).toBe('openapi/openapi-b.yaml get /widgets/{id}')
+      expect(openapi('abs')).toBe('openapi/openapi-a.json POST /things')
       expect(openapi('unknown')).toBe('stray.yaml GET /x')
       expect(bundle.warnings.some((w) => /"stray.yaml".*not migrated/.test(w.message))).toBe(true)
-      expect(bundle.docsConfig.tabs.filter((tab) => tab.api).map((tab) => tab.api?.source)).toEqual(['/openapi-a.json', '/openapi-b.yaml'])
+      expect(bundle.docsConfig.tabs.filter((tab) => tab.api).map((tab) => tab.api?.source)).toEqual(['openapi/openapi-a.json', 'openapi/openapi-b.yaml'])
     })
 
     it('keeps manual api and authMethod frontmatter and maps api.mdx', () => {
@@ -553,8 +832,8 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Documentation')
-    expect(apiTab?.api).toEqual({ source: '/openapi.yaml', navigation: false })
-    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi.yaml')
+    expect(apiTab?.api).toEqual({ source: 'openapi/openapi.yaml', navigation: false })
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/openapi.yaml')
     expect(bundle.warnings.some((warning) =>
       warning.message.includes('qstash/api-reference') && warning.message.includes('covers a whole tab'))).toBe(true)
   })
@@ -580,7 +859,7 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Documentation')
-    expect(apiTab?.api?.source).toBe('/openapi.yaml')
+    expect(apiTab?.api?.source).toBe('openapi/openapi.yaml')
     expect(bundle.warnings.some((warning) =>
       warning.message.includes('already uses another OpenAPI spec'))).toBe(true)
   })
@@ -609,8 +888,8 @@ describe('Mintlify repository migration', () => {
     // Distinct assets, each with the right tab's own content — neither
     // spec silently overwrote the other's bytes.
     expect(qstashTab?.api?.source).not.toBe(workflowTab?.api?.source)
-    const qstashAsset = bundle.assets.find((asset) => `/${asset.path}` === qstashTab?.api?.source)
-    const workflowAsset = bundle.assets.find((asset) => `/${asset.path}` === workflowTab?.api?.source)
+    const qstashAsset = bundle.assets.find((asset) => asset.path === qstashTab?.api?.source)
+    const workflowAsset = bundle.assets.find((asset) => asset.path === workflowTab?.api?.source)
     expect(qstashAsset?.content.toString()).toContain('title: QStash')
     expect(workflowAsset?.content.toString()).toContain('title: Workflow')
     expect(bundle.warnings.some((warning) => warning.message.includes('already uses another OpenAPI spec'))).toBe(false)
@@ -700,7 +979,7 @@ describe('Mintlify repository migration', () => {
       expect(bundle.docsConfig.tabs.find((entry) => entry.tab === tab)?.api).toBeUndefined()
     }
     expect(bundle.pages.map((page) => page.id)).toEqual(expect.arrayContaining(['guide', 'rest-landing', 'ws-landing', 'private-landing']))
-    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi.json')
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi/openapi.json')
     for (const url of ['https://api.example.com/openapi.json', 'http://api.example.com/ws-spec.json', 'https://[::ffff:7f00:1]/spec.json']) {
       expect(bundle.warnings).toContainEqual(expect.objectContaining({
         code: 'unsupported-config',
@@ -1303,11 +1582,28 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     expect(bundle.assets.map((asset) => asset.path)).not.toContain('images/huge.png')
-    expect(bundle.warnings).toContainEqual(expect.objectContaining({
-      code: 'limit-reached',
-      source: 'images/huge.png',
-      message: expect.stringContaining('en/with-huge-image.mdx'),
-    }))
+    const skipped = bundle.warnings.filter((warning) => warning.message.includes('asset file'))
+    expect(skipped).toHaveLength(1)
+    expect(skipped[0]).toMatchObject({ code: 'limit-reached' })
+    expect(skipped[0].message).toMatch(/^1 asset file was not copied.*over 25 MB.*500 MB.*images\/huge\.png.*1 of them is used by pages.*public\/ manually/s)
+  })
+
+  it('reports many oversized assets in one warning with the count and the first five paths', () => {
+    const root = fixture()
+    for (let index = 0; index < 8; index++) writeFileSync(join(root, 'images', `big-${index}.png`), Buffer.alloc(26_000_000))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const skipped = bundle.warnings.filter((warning) => warning.code === 'limit-reached' && warning.message.includes('asset file'))
+    expect(skipped).toHaveLength(1)
+    expect(skipped[0].message).toMatch(/^8 asset files were not copied/)
+    expect(skipped[0].message.match(/images\/big-\d\.png/g)).toHaveLength(5)
+    expect(skipped[0].message).toContain('and 3 more')
+  }, 30_000)
+
+  it('emits no asset-skip warning when every asset is copied', () => {
+    const bundle = migrateRepository({ repositoryDir: fixture(), sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.warnings.filter((warning) => /asset files? (?:was|were|is|are)/.test(warning.message))).toEqual([])
   })
 
   it('warns by name about a Mintlify logo/favicon that were copied but are not wired into the migrated site\'s branding', () => {
@@ -1345,9 +1641,19 @@ describe('Mintlify repository migration', () => {
     expect(bundle.assets.map((asset) => asset.path)).not.toContain('images/diagram.png')
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
       code: 'unsupported-config',
-      source: 'images/diagram.png',
-      message: expect.stringContaining('Git LFS pointer'),
+      message: expect.stringMatching(/^1 asset file is a Git LFS pointer.*images\/diagram\.png.*Install git-lfs/s),
     }))
+  })
+
+  it('reports several Git LFS pointer files in one warning', () => {
+    const root = fixture()
+    for (const name of ['a', 'b', 'c']) {
+      writeFileSync(join(root, 'images', `${name}.png`), 'version https://git-lfs.github.com/spec/v1\noid sha256:00\nsize 1\n')
+    }
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const lfs = bundle.warnings.filter((warning) => warning.message.includes('Git LFS pointer'))
+    expect(lfs).toHaveLength(1)
+    expect(lfs[0].message).toMatch(/^3 asset files are Git LFS pointers/)
   })
 
   // Creating 5,000+ fixture files and migrating them is inherently slower
@@ -2700,7 +3006,7 @@ navigation:
     ])
     expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old-install', destination: '/guides/install' })
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
-    expect(apiTab?.api?.source).toBe('/openapi.yml')
+    expect(apiTab?.api?.source).toBe('openapi/openapi.yml')
     expect(bundle.assets.map((asset) => asset.path)).toContain('images/logo.svg')
     expect(bundle.pages.find((page) => page.id === 'welcome')?.body).toContain('<Warning>Read this first.</Warning>')
     expect(bundle.pages.find((page) => page.id === 'welcome')?.body).toContain('![Logo](/images/logo.svg)')
@@ -2963,8 +3269,8 @@ navigation:
 
     const apiTabs = bundle.docsConfig.tabs.filter((tab) => tab.api)
     expect(apiTabs.map((tab) => tab.tab).sort()).toEqual(['Rest Tab', 'Ws Tab'])
-    expect(apiTabs.map((tab) => tab.api?.source).sort()).toEqual(['/rest-openapi.yml', '/ws-openapi.yml'])
-    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['rest-openapi.yml', 'ws-openapi.yml'])
+    expect(apiTabs.map((tab) => tab.api?.source).sort()).toEqual(['openapi/rest-openapi.yml', 'openapi/ws-openapi.yml'])
+    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['openapi/rest-openapi.yml', 'openapi/ws-openapi.yml'])
     expect(bundle.warnings.some((warning) => /only the first was imported/i.test(warning.message))).toBe(false)
   })
 
@@ -3007,7 +3313,7 @@ navigation:
     // not one tab overwritten by the other.
     expect(apiTabs).toHaveLength(2)
     expect(new Set(apiTabs.map((tab) => tab.api?.source)).size).toBe(2)
-    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['openapi.json', 'testnet-rest-openapi.json'])
+    expect(bundle.assets.map((asset) => asset.path).sort()).toEqual(['openapi/openapi.json', 'openapi/testnet-rest-openapi.json'])
   })
 
   it('warns by name instead of silently dropping an AsyncAPI/OpenRPC-only Fern api: section', () => {
@@ -3184,8 +3490,8 @@ api:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
-    expect(apiTab?.api?.source).toBe('/configured.yml')
-    expect(bundle.assets.map((asset) => asset.path)).toContain('configured.yml')
+    expect(apiTab?.api?.source).toBe('openapi/configured.yml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/configured.yml')
   })
 
   it("resolves a multi-API repo's generators.yml spec path outside its own API folder but inside the repository (Cohere layout)", () => {
@@ -3214,8 +3520,8 @@ api:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
-    expect(apiTab?.api?.source).toBe('/acme-openapi.yaml')
-    expect(bundle.assets.map((asset) => asset.path)).toContain('acme-openapi.yaml')
+    expect(apiTab?.api?.source).toBe('openapi/acme-openapi.yaml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/acme-openapi.yaml')
     expect(bundle.warnings.some((warning) => /outside the repository/i.test(warning.message))).toBe(false)
   })
 
@@ -3296,8 +3602,8 @@ api:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.api)
-    expect(apiTab?.api?.source).toBe('/plants.yml')
-    expect(bundle.assets.map((asset) => asset.path)).toContain('plants.yml')
+    expect(apiTab?.api?.source).toBe('openapi/plants.yml')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/plants.yml')
     expect(bundle.warnings.some((warning) => warning.message.includes('No OpenAPI'))).toBe(false)
   })
 
@@ -3354,7 +3660,7 @@ api:
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
     expect(bundle.docsConfig.tabs.some((tab) => tab.api)).toBe(false)
-    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi.yml')
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('openapi/openapi.yml')
     expect(bundle.warnings).toContainEqual(expect.objectContaining({
       code: 'unsupported-config',
       message: expect.stringContaining('plants'),
@@ -3413,7 +3719,7 @@ navigation:
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
 
-    expect(bundle.docsConfig.tabs.find((tab) => tab.api)?.api?.source).toBe('/plants.yml')
+    expect(bundle.docsConfig.tabs.find((tab) => tab.api)?.api?.source).toBe('openapi/plants.yml')
     expect(bundle.warnings.some((warning) => warning.message.startsWith('No OpenAPI'))).toBe(false)
   })
 })
@@ -3668,6 +3974,103 @@ describe('cloneGitHubRepository retry', () => {
   afterEach(() => {
     cloneOutcomes.queue.length = 0
     gitSpawnCalls.envs.length = 0
+    gitSpawnCalls.args.length = 0
+    gitKills.count = 0
+    delete process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS
+    vi.useRealTimers()
+  })
+
+  const acme = { owner: 'acme', repo: 'docs', branch: 'main', docsDir: '', cloneUrl: 'https://github.com/acme/docs.git' }
+
+  it('asks git for progress output so a healthy transfer is distinguishable from a stall', async () => {
+    await cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-args-')))
+    expect(gitSpawnCalls.args[0]).toEqual(expect.arrayContaining(['clone', '--progress', '--depth', '1', '--single-branch']))
+  })
+
+  it('kills a silent clone after the idle timeout, retries it, and then reports an actionable error', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '3000'
+    cloneOutcomes.queue.push({ code: 0, hang: true }, { code: 0, hang: true }, { code: 0, hang: true })
+    const result = expect(cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-stall-'))))
+      .rejects.toThrow(/timed out \(no progress for 3s\).*THALLY_MIGRATE_CLONE_TIMEOUT_MS/)
+    await vi.advanceTimersByTimeAsync(60_000)
+    await result
+    expect(gitKills.count).toBe(3)
+  })
+
+  it('reports a sub-second idle timeout in milliseconds rather than as 0s', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '400'
+    cloneOutcomes.queue.push({ code: 0, hang: true }, { code: 0, hang: true }, { code: 0, hang: true })
+    const result = expect(cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-subsecond-'))))
+      .rejects.toThrow(/timed out \(no progress for 400ms\)/)
+    await vi.advanceTimersByTimeAsync(60_000)
+    await result
+  })
+
+  it('settles a killed clone even when a helper keeps the stderr pipe open (no close event)', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '3000'
+    cloneOutcomes.queue.push({ code: 0, hang: true, exitOnly: true }, { code: 0, hang: true, exitOnly: true }, { code: 0, hang: true, exitOnly: true })
+    const result = expect(cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-noclose-'))))
+      .rejects.toThrow(/timed out \(no progress for 3s\)/)
+    await vi.advanceTimersByTimeAsync(60_000)
+    await result
+  })
+
+  it('finishes when git exits before the idle timeout while a helper keeps stderr open', async () => {
+    vi.useFakeTimers()
+    // The idle timeout (500 ms) is shorter than the exit drain, so before the
+    // fix it fired after git had exited and tried to kill a dead process.
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '500'
+    cloneOutcomes.queue.push({ code: 0, exitAt: 100, helperTicks: [300, 900, 1500] })
+    let settled = false
+    const result = cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-exit-first-'))).finally(() => { settled = true })
+    await vi.advanceTimersByTimeAsync(2_200)
+    expect(settled).toBe(true)
+    await expect(result).resolves.toBeUndefined()
+    expect(gitKills.count).toBe(0)
+  })
+
+  it('reports git\'s own error when it exits non-zero before the timeout and the pipe never closes', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '500'
+    cloneOutcomes.queue.push({ code: 128, stderr: 'fatal: repository not found\n', exitAt: 100, helperTicks: [700] })
+    const result = cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-exit-fail-')))
+    const settledError = result.then(() => null, (error: Error) => error)
+    await vi.advanceTimersByTimeAsync(2_200)
+    const error = await settledError
+    expect(error?.message).toMatch(/^Failed to clone acme\/docs: fatal: repository not found/)
+    expect(error?.message).not.toMatch(/timed out/)
+    expect(gitKills.count).toBe(0)
+  })
+
+  it('settles once when git exits and the pipe closes shortly after', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '3000'
+    cloneOutcomes.queue.push({ code: 0, exitAt: 100, closeAt: 150 })
+    const result = cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-exit-close-')))
+    await vi.advanceTimersByTimeAsync(200)
+    await expect(result).resolves.toBeUndefined()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(gitKills.count).toBe(0)
+    expect(gitSpawnCalls.args).toHaveLength(1)
+  })
+
+  it('does not kill a slow clone that keeps printing progress past the idle timeout', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '3000'
+    cloneOutcomes.queue.push({ code: 0, ticks: [2000, 4000, 6000, 8000] })
+    const result = cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-slow-')))
+    await vi.advanceTimersByTimeAsync(20_000)
+    await expect(result).resolves.toBeUndefined()
+    expect(gitKills.count).toBe(0)
+  })
+
+  it('reports the real git error, not the progress lines that preceded it', async () => {
+    cloneOutcomes.queue.push({ code: 128, stderr: 'Receiving objects:  42% (10/24)\rReceiving objects: 100% (24/24)\rfatal: Remote branch nope not found in upstream origin\n' })
+    await expect(cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-tail-'))))
+      .rejects.toThrow(/^Failed to clone acme\/docs: fatal: Remote branch nope not found in upstream origin$/)
   })
 
   it("neutralizes the Git LFS filter driver per-process (never the global git config) on the clone", async () => {
