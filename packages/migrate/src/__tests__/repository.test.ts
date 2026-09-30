@@ -3375,7 +3375,7 @@ navigation:
     expect(bundle.warnings.find((warning) => warning.message.includes('AsyncAPI'))?.message).toContain('asyncapi.yml')
   })
 
-  it('keeps a page with a $$\\begin{align*}...\\end{align*}$$ KaTeX block instead of excluding it, and warns', () => {
+  it('renders a $$\\begin{align*}...\\end{align*}$$ KaTeX block with the native component', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-math-'))
     const fernRoot = join(root, 'fern')
     mkdirSync(fernRoot, { recursive: true })
@@ -3402,13 +3402,10 @@ navigation:
 
     expect(bundle.pages.map((page) => page.id)).toContain('math')
     const page = bundle.pages.find((entry) => entry.id === 'math')
-    expect(page?.body).toContain('```math')
+    expect(page?.body).toContain('<Latex block>')
     expect(page?.body).toContain('\\begin{align*}')
-    expect(page?.body).toContain("`$$4'000$$`")
-    expect(bundle.warnings).toContainEqual(expect.objectContaining({
-      code: 'unsupported-config',
-      message: expect.stringContaining('kept as a fenced code block'),
-    }))
+    expect(page?.body).toContain('<Latex>{"4\'000"}</Latex>')
+    expect(bundle.warnings.some((warning) => warning.message.includes('Math (KaTeX'))).toBe(false)
   })
 
   it('redirects an underscore-slug link (matching the on-disk folder name) to the hyphenated route Thally actually uses', () => {

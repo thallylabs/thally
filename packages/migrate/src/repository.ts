@@ -3008,13 +3008,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // handled at this same point is now converted earlier, above, before
       // `componentMigrator.transform` gets a chance to choke on it too.
       const protectedMath = protectMathBlocks(raw)
-      if (protectedMath.converted) {
-        warnings.push({
-          code: 'unsupported-config',
-          message: "Math (KaTeX '$$...$$') has no renderer in Thally yet; it was kept as a fenced code block instead of being dropped.",
-          source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
-        })
-      } else if (protectedMath.guardTriggered) {
+      if (protectedMath.guardTriggered) {
         warnings.push({
           code: 'unsupported-config',
           message: 'A suspected math span looked like it needed converting, but doing so broke the page; the page was kept as originally authored instead.',

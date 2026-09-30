@@ -480,6 +480,11 @@ function bracketDelta(line: string): number {
 /** Trimmed line opens a top-level `import`/`export` ESM statement (Docusaurus/MDX allow one anywhere a block can start, not just at the top of the file). */
 const ESM_OPEN = /^(?:import|export)\b/
 
+/** Keep TeX as a literal JSX string so braces and backslashes survive MDX parsing. */
+function latexElement(source: string, block = false): string {
+  return `<Latex${block ? ' block' : ''}>{${JSON.stringify(source)}}</Latex>`
+}
+
 export function protectMathBlocks(raw: string): { body: string; converted: boolean; guardTriggered?: boolean } {
   const { front, body } = splitFrontmatterBlock(raw)
   const lines = body.split(/\r\n|\r|\n/)
@@ -503,7 +508,7 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
     const trimmed = line.trim()
     if (mathBlockDelimiter) {
       if (trimmed === mathBlockDelimiter) {
-        output.push('```math', ...mathLines, '```')
+        output.push(latexElement(mathLines.join('\n'), true))
         mathBlockDelimiter = null
         mathLines = []
         converted = true
@@ -567,11 +572,11 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
         (whole: string, block: string | undefined, inline: string | undefined) => {
           if (block !== undefined) {
             converted = true
-            return `\`$$${block}$$\``
+            return latexElement(unmask(block))
           }
           if (inline !== undefined && hasTexSignal(unmask(inline))) {
             converted = true
-            return `\`$${inline}$\``
+            return latexElement(unmask(inline))
           }
           return whole
         },
