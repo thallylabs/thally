@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { ensureDocPublication, isDocPublished } from '@/data/docs'
 import path from 'node:path'
 import { stripInternalFrontmatter } from '@/lib/provenance'
 import { getContentSource } from '@/lib/content-source'
@@ -22,6 +23,13 @@ export async function GET(
 
   // Reject any path traversal outright (defense-in-depth beyond Next's routing).
   if (slug.some((seg) => seg === '..' || seg.includes('\0'))) {
+    return new NextResponse('Not Found', { status: 404 })
+  }
+
+  // The HTML page 404s when its documented OpenAPI operation is hidden or
+  // excluded; its Markdown mirror must not publish it either.
+  await ensureDocPublication()
+  if (!isDocPublished(slugPath.replace(/\/index$/, '') || 'introduction')) {
     return new NextResponse('Not Found', { status: 404 })
   }
 

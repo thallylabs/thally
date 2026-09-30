@@ -53,6 +53,7 @@ import {
   addMintlifyHomepageRedirects,
   buildNavigationFromPages,
   isDocumentationExtension,
+  insertApiTab,
   mintlifyAllVersionPrefixes,
   mintlifyDefaultVersionPrefixes,
   mintlifyNavigationApiReferences,
@@ -1187,11 +1188,30 @@ function classifyApiSpec(path: string): 'openapi' | 'asyncapi' | 'unknown' {
   return /asyncapi/i.test(topLevel) ? 'asyncapi' : 'openapi'
 }
 
+/**
+ * Migrated specs live outside `public/`: anything under `public/` is served
+ * verbatim by the host, which would publish `x-excluded` internal operations.
+ * The renderer loads a relative `api.source` from the project root instead.
+ */
+const SPEC_DIRECTORY = 'openapi'
+
+function specAssetPath(filename: string): string {
+  return `${SPEC_DIRECTORY}/${filename}`
+}
+
+function specAsset(filename: string, content: Uint8Array): MigrationAsset {
+  return { path: specAssetPath(filename), content, projectRelative: true }
+}
+
 /** An OpenAPI/AsyncAPI spec resolved and ready to copy into `public/`, optionally bound to one tab. */
 interface ResolvedApiSpec {
   filename: string
   content: Buffer
   tabLabel?: string
+  /** `tabLabel` is a per-menu-item sibling tab; place it after this tab. */
+  parentTab?: string
+  icon?: string
+  hidden?: boolean
   /** Repository-relative path the spec was read from, used only to disambiguate a basename collision across tabs. */
   sourcePath: string
   /** Mintlify's object-form `{ source, directory }` scoping directory, if any — the prefix its auto-generated operation pages live under. */
@@ -1228,7 +1248,7 @@ function resolveMintlifyApiSpecs(
   mintlifyConfig: Record<string, unknown> | null,
   files: Array<ScannedFile>,
   warnings: Array<MigrationWarning>,
-  remoteSpecs: Array<{ url: string; tabLabel?: string }>,
+  remoteSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>,
 ): Array<ResolvedApiSpec> {
   if (!mintlifyConfig) return []
   const references = [
@@ -1238,7 +1258,7 @@ function resolveMintlifyApiSpecs(
   const seen = new Set<string>()
   const specs: Array<ResolvedApiSpec> = []
   for (const reference of references) {
-    const dedupeKey = `${reference.kind}:${reference.value}`
+    const dedupeKey = `${reference.kind}:${reference.value}:${reference.tabLabel ?? ''}`
     if (seen.has(dedupeKey)) continue
     seen.add(dedupeKey)
     const tabSuffix = reference.tabLabel ? ` (tab "${reference.tabLabel}")` : ''
@@ -1250,7 +1270,7 @@ function resolveMintlifyApiSpecs(
       continue
     }
     if (/^https:\/\//i.test(reference.value)) {
-      remoteSpecs.push({ url: reference.value, ...(reference.tabLabel ? { tabLabel: reference.tabLabel } : {}) })
+      remoteSpecs.push({ url: reference.value, ...(reference.tabLabel ? { tabLabel: reference.tabLabel } : {}), ...(reference.parentTab ? { parentTab: reference.parentTab } : {}), ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}) })
       warnings.push({
         code: 'unsupported-config',
         message: `The remote OpenAPI spec "${reference.value}"${tabSuffix} requires a network download before this import is complete.`,
@@ -1281,6 +1301,9 @@ function resolveMintlifyApiSpecs(
       filename: basename(match.relativePath),
       content: readFileSync(match.absolutePath),
       tabLabel: reference.tabLabel,
+      parentTab: reference.parentTab,
+      icon: reference.icon,
+      hidden: reference.hidden,
       sourcePath: match.relativePath,
       directory: reference.directory,
     })
@@ -1294,10 +1317,12 @@ function resolveMintlifyApiSpecs(
   // gets bound (see injectOpenApiSpecs's "already has an OpenAPI spec"
   // warning), so renaming there would produce an asset nothing points to.
   const filenameOwners = new Map<string, string>()
+  const filenameSources = new Map<string, string>()
   for (const spec of specs) {
     const groupKey = spec.tabLabel ?? '\0default'
     const owner = filenameOwners.get(spec.filename)
-    if (owner !== undefined && owner !== groupKey) {
+    // The same file bound to several tabs is one asset, not a collision.
+    if (owner !== undefined && owner !== groupKey && filenameSources.get(spec.filename) !== spec.sourcePath) {
       let disambiguated = spec.sourcePath.replace(/\//g, '-')
       while (filenameOwners.has(disambiguated) && filenameOwners.get(disambiguated) !== groupKey) {
         disambiguated = `${groupKey.replace(/\W+/g, '-')}-${disambiguated}`
@@ -1305,6 +1330,7 @@ function resolveMintlifyApiSpecs(
       spec.filename = disambiguated
     }
     filenameOwners.set(spec.filename, groupKey)
+    filenameSources.set(spec.filename, spec.sourcePath)
   }
   return specs
 }
@@ -1428,7 +1454,7 @@ function apiOperationLinkMap(
   const prefixLandings = new Map<string, string>()
   const apiTabs = docsConfig.tabs.filter((tab) => !tab.hidden && tab.api)
   apiTabs.forEach((tab, index) => {
-    const source = sources.find((entry) => tab.api?.source === `/${entry.filename}`)
+    const source = sources.find((entry) => tab.api?.source === specAssetPath(entry.filename))
     if (!source || !source.prefix) return
     const specId = index === 0 ? 'default' : slugifyApiSpecId(tab.tab)
     const prefix = source.prefix.replace(/^\/+|\/+$/g, '').toLowerCase()
@@ -2396,10 +2422,10 @@ function inlineMdxSnippets(
  */
 function injectOpenApiSpecs(
   config: MigrationDocsConfig,
-  specs: Array<{ filename: string; tabLabel?: string }>,
+  specs: Array<{ filename: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>,
   warnings?: Array<MigrationWarning>,
 ): MigrationDocsConfig {
-  let tabs = config.tabs.map((tab) => ({ ...tab }))
+  const tabs = config.tabs.map((tab) => ({ ...tab }))
   for (const spec of specs) {
     const apiTab = spec.tabLabel
       ? tabs.find((tab) => tab.tab === spec.tabLabel)
@@ -2411,18 +2437,23 @@ function injectOpenApiSpecs(
       if (apiTab.api && warnings) {
         warnings.push({
           code: 'unsupported-config',
-          message: `Tab "${apiTab.tab}" already uses another OpenAPI spec, and Thally supports one API spec per tab, so "/${spec.filename}" was not added. Put it in its own tab to include it.`,
+          message: `Tab "${apiTab.tab}" already uses another OpenAPI spec, and Thally supports one API spec per tab, so "${specAssetPath(spec.filename)}" was not added. Put it in its own tab to include it.`,
         })
         continue
       }
       apiTab.api = {
-        source: `/${spec.filename}`,
+        source: specAssetPath(spec.filename),
         // An API-only tab needs generated endpoint navigation; an authored
         // page tab keeps its own groups alongside the bound spec.
         ...((apiTab.groups?.length || apiTab.pages?.length) ? { navigation: false } : {}),
       }
     } else {
-      tabs = [...tabs, { tab: spec.tabLabel ?? 'API Reference', api: { source: `/${spec.filename}` } }]
+      insertApiTab(tabs, {
+        tab: spec.tabLabel ?? 'API Reference',
+        ...(spec.icon ? { icon: spec.icon } : {}),
+        ...(spec.hidden ? { hidden: true } : {}),
+        api: { source: specAssetPath(spec.filename) },
+      }, spec.parentTab)
     }
   }
   return { ...config, tabs }
@@ -2700,7 +2731,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
-  const remoteApiSpecs: Array<{ url: string; tabLabel?: string }> = []
+  const remoteApiSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }> = []
   // Which pages reference which asset (by its normalized copy-destination
   // path), so the final asset-copy pass can prioritize referenced assets
   // over unreferenced ones when the budget is tight, and name the
@@ -3275,8 +3306,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         }
         specFilenameSources.set(filename, spec.absolutePath)
         const specContent = readFileSync(spec.absolutePath)
-        if (!assets.some((asset) => asset.path === filename)) {
-          assets.push({ path: filename, content: specContent })
+        if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
+          assets.push(specAsset(filename, specContent))
         }
         resolvedSpecs.push({ filename, tabLabel: section.tabLabel, content: specContent, routeSegments: section.routeSegments ?? [] })
         continue
@@ -3327,8 +3358,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   } else if (platform === 'mintlify') {
     const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs)
     for (const spec of resolvedSpecs) {
-      if (!assets.some((asset) => asset.path === spec.filename)) {
-        assets.push({ path: spec.filename, content: spec.content })
+      if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) {
+        assets.push(specAsset(spec.filename, spec.content))
       }
     }
     if (resolvedSpecs.length > 0) {
@@ -3344,8 +3375,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const fallback = findOpenApi(files)
       if (fallback) {
         const filename = basename(fallback.relativePath)
-        if (!assets.some((asset) => asset.path === filename)) {
-          assets.push({ path: filename, content: readFileSync(fallback.absolutePath) })
+        if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
+          assets.push(specAsset(filename, readFileSync(fallback.absolutePath)))
         }
         docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
       }

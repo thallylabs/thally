@@ -445,6 +445,131 @@ describe('pruning navigation pages excluded after projection', () => {
   })
 })
 
+describe('Mintlify tab menus', () => {
+  const menuTab = {
+    tab: 'Developer Tools',
+    icon: 'square-terminal',
+    menu: [
+      { item: 'API reference', icon: 'rocket', groups: [{ group: 'Core endpoints', pages: ['api-reference/get', 'api-reference/post'] }] },
+      { item: 'SDKs', icon: 'code', description: 'SDKs are used to interact with the API.', pages: ['sdk/fetch', 'sdk/create'] },
+    ],
+  }
+
+  it('projects a tab menu as one tab with a group per item and keeps every page', () => {
+    const result = projectMintlifyNavigation({ navigation: { tabs: [menuTab] } })
+
+    expect(result.docsConfig.tabs).toEqual([{
+      tab: 'Developer Tools',
+      icon: 'square-terminal',
+      groups: [
+        { group: 'API reference', icon: 'rocket', pages: [{ group: 'Core endpoints', pages: ['api-reference/get', 'api-reference/post'] }] },
+        { group: 'SDKs', icon: 'code', pages: ['sdk/fetch', 'sdk/create'] },
+      ],
+    }])
+    expect(result.pageReferences.map((reference) => reference.navigationId)).toEqual([
+      'api-reference/get', 'api-reference/post', 'sdk/fetch', 'sdk/create',
+    ])
+  })
+
+  it('warns about a menu item description instead of dropping it silently', () => {
+    const result = projectMintlifyNavigation({ navigation: { tabs: [menuTab] } })
+    expect(result.warnings.map((warning) => warning.message).join('\n')).toContain('"SDKs" has a description')
+  })
+
+  it('warns about an href-only menu item and an empty item', () => {
+    const result = projectMintlifyNavigation({ navigation: { tabs: [{
+      tab: 'Tools',
+      menu: [{ item: 'Blog', href: 'https://example.com/blog' }, { item: 'Docs', pages: ['a'] }],
+    }] } })
+    expect(result.docsConfig.tabs[0]?.groups).toEqual([{ group: 'Docs', pages: ['a'] }])
+    const messages = result.warnings.map((warning) => warning.message).join('\n')
+    expect(messages).toContain('"Blog" links to https://example.com/blog')
+  })
+
+  it('keeps sibling tabs without a menu and nests a menu under a dropdown or version', () => {
+    const mixed = projectMintlifyNavigation({ navigation: { tabs: [
+      { tab: 'Guides', pages: ['guides/start'] },
+      menuTab,
+    ] } })
+    expect(mixed.docsConfig.tabs.map((tab) => tab.tab)).toEqual(['Guides', 'Developer Tools'])
+
+    const nested = projectMintlifyNavigation({ navigation: { versions: [
+      { version: 'v2', tabs: [menuTab] },
+    ] } })
+    expect(nested.docsConfig.tabs[0]?.tab).toBe('v2')
+    expect(nested.pageReferences).toHaveLength(4)
+  })
+
+  it('binds a menu item openapi to the enclosing tab', () => {
+    const references = mintlifyNavigationApiReferences({ navigation: { tabs: [{
+      tab: 'Developer Tools',
+      menu: [{ item: 'API reference', openapi: 'openapi.yaml' }],
+    }] } })
+    expect(references).toEqual([{ value: 'openapi.yaml', kind: 'openapi', tabLabel: 'Developer Tools' }])
+  })
+
+  it('labels menu API references to match the tabs migration creates', () => {
+    const mixed = mintlifyNavigationApiReferences({ navigation: { tabs: [{
+      tab: 'Docs',
+      menu: [
+        { item: 'Guide', pages: ['guide'] },
+        { item: 'REST', openapi: 'rest.yaml' },
+        { item: 'Admin', openapi: { source: 'admin.yaml', directory: 'admin' }, pages: ['admin/x'] },
+      ],
+    }] } })
+    expect(mixed).toEqual([
+      { value: 'rest.yaml', kind: 'openapi', tabLabel: 'Docs: REST', parentTab: 'Docs' },
+      { value: 'admin.yaml', kind: 'openapi', tabLabel: 'Docs: Admin', parentTab: 'Docs', directory: 'admin' },
+    ])
+    const two = mintlifyNavigationApiReferences({ navigation: { tabs: [{
+      tab: 'API',
+      menu: [{ item: 'A', openapi: 'a.yaml' }, { item: 'B', openapi: 'b.yaml' }],
+    }] } })
+    expect(two.map((reference) => reference.tabLabel)).toEqual(['API: A', 'API: B'])
+  })
+
+  it('warns when a menu API item has no spec source', () => {
+    const result = projectMintlifyNavigation({ navigation: { tabs: [{
+      tab: 'Docs',
+      menu: [{ item: 'Guide', pages: ['g'] }, { item: 'Broken', openapi: { directory: 'api' }, pages: ['b'] }],
+    }] } })
+    expect(result.warnings.map((warning) => warning.message).join('\n')).toContain('"Broken" has an openapi/asyncapi value without a "source"')
+  })
+
+  it('still honors the legacy plural menus container', () => {
+    const result = projectMintlifyNavigation({ navigation: { menus: [{ menu: 'One', pages: ['one'] }] } })
+    expect(result.docsConfig.tabs).toEqual([{ tab: 'One', pages: ['one'] }])
+  })
+
+  it('warns about an unrecognized container instead of dropping it silently', () => {
+    const result = projectMintlifyNavigation({ navigation: {
+      tabs: [{ tab: 'A', pages: ['a'] }],
+      sections: [{ name: 'X', pages: ['x'] }],
+    } })
+    expect(result.warnings.map((warning) => warning.message).join('\n')).toContain('"sections"')
+  })
+
+  it('does not warn that productGroups is unsupported, since its products are projected', () => {
+    const result = projectMintlifyNavigation({ navigation: { tabs: [{
+      tab: 'Docs',
+      productGroups: [{ group: 'P', products: [{ product: 'Redis', groups: [{ group: 'Overview', pages: ['redis/a'] }] }] }],
+    }] } })
+    expect(result.docsConfig.tabs[0]?.groups).toEqual([{ group: 'Overview', pages: ['redis/a'] }])
+    expect(result.warnings.map((warning) => warning.message).join('\n')).not.toContain('productGroups')
+  })
+
+  it('leaves existing tab, anchor and dropdown output unchanged', () => {
+    const tabs = projectMintlifyNavigation({ navigation: { tabs: [{ tab: 'T', groups: [{ group: 'G', pages: ['g/a'] }] }] } })
+    expect(tabs.docsConfig.tabs).toEqual([{ tab: 'T', groups: [{ group: 'G', pages: ['g/a'] }] }])
+    const anchors = projectMintlifyNavigation({ navigation: { anchors: [{ anchor: 'A', pages: ['a'] }] } })
+    expect(anchors.docsConfig.tabs).toEqual([{ tab: 'A', pages: ['a'] }])
+    const dropdowns = projectMintlifyNavigation({ navigation: { dropdowns: [{ dropdown: 'D', pages: ['d'] }] } })
+    expect(dropdowns.docsConfig.tabs).toEqual([{ tab: 'D', pages: ['d'] }])
+    expect(dropdowns.docsConfig.navigation).toEqual({ display: 'dropdown' })
+    expect(tabs.warnings).toEqual([])
+  })
+})
+
 describe('Mintlify productGroups wrapper (Upstash-shaped docs.json)', () => {
   const config = {
     navigation: {

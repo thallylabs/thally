@@ -37,6 +37,8 @@ const { injectScopedComponentReferences } = scopedComponentReferencesModule as u
   typeof import('./lib/scoped-component-references')
 const {
   collectRuntimeContentFiles,
+  findShadowingPublicSpecs,
+  findUnpublishedOpenApiPages,
   removeManagedContentAssets,
   writeManagedContentAssets,
 } = runtimeContentFilesModule as unknown as typeof import('./lib/runtime-content-files')
@@ -50,6 +52,16 @@ const isManagedAssetsMode = process.env.THALLY_CONTENT_SOURCE?.trim().toLowerCas
 // itself recursively. Clear the reserved generated tree before every scan.
 removeManagedContentAssets(projectRoot)
 const authoredSources = collectRuntimeContentFiles(projectRoot)
+for (const file of findShadowingPublicSpecs(projectRoot)) {
+  console.warn(
+    `[thally] ${file} is served as-is at /${file.slice('public/'.length)} instead of the filtered specification, so its x-excluded/x-hidden operations are downloadable. Move it out of public/ (for example to openapi/), point docs.json at it, and delete this copy.`,
+  )
+}
+for (const page of findUnpublishedOpenApiPages(projectRoot)) {
+  console.warn(
+    `[thally] page ${page.file} points at ${page.state} operation ${page.operation} and is not published: it returns 404 and is left out of navigation, search, sitemap and llms.txt. Publish the operation or point the page at another one.`,
+  )
+}
 // Managed releases read every authored input through ASSETS. Nothing authored
 // may leak into these maps, otherwise bundle size resumes growing with content.
 const embeddedSources: RuntimeSourceMap = isManagedAssetsMode ? {} : authoredSources
