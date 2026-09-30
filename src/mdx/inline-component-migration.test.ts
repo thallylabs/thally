@@ -116,4 +116,45 @@ describe('migrated inline components compile and render through the MDX pipeline
     const { html } = await render(`${LABEL}\n\n${COUNTER}\n\n{true && <Counter />}\n`)
     expect(html).toContain('<em class="lbl">count 0</em>')
   })
+
+  it('renders a context provider and its consumer from one module', async () => {
+    const source = [
+      'export const Ctx = React.createContext("outside")',
+      'export const Provider = ({ children }) => <Ctx.Provider value="inside">{children}</Ctx.Provider>',
+      'export const Reader = () => {\n  const v = useContext(Ctx)\n  return <b>{v}</b>\n}',
+      '<Provider><Reader /></Provider>\n\n<Reader />',
+    ].join('\n\n')
+    const { html, warnings } = await render(source)
+    expect(warnings).toEqual([])
+    expect(html).toContain('<b>inside</b>')
+    expect(html).toContain('<b>outside</b>')
+  })
+
+  it('renders two components that share one dependency', async () => {
+    const other = 'export const Other = () => {\n  const [m] = useState(5)\n  return <div><Label text={`other ${m}`} /></div>\n}'
+    const { html, warnings } = await render(`${LABEL}\n\n${COUNTER}\n\n${other}\n\n<Counter />\n\n<Other />\n`)
+    expect(warnings).toEqual([])
+    expect(html).toContain('count 0')
+    expect(html).toContain('other 5')
+  })
+
+  it('renders a var, let or destructured dependency and one declared after its use', async () => {
+    for (const label of [
+      'export let Label = ({ text }) => <em className="lbl">{text}</em>',
+      'export var Label = ({ text }) => <em className="lbl">{text}</em>',
+      'export const { Label } = { Label: ({ text }) => <em className="lbl">{text}</em> }',
+    ]) {
+      const { html, warnings } = await render(`${COUNTER}\n\n${label}\n\n<Counter />\n`)
+      expect(warnings).toEqual([])
+      expect(html).toContain('<em class="lbl">count 0</em>')
+    }
+  })
+
+  it('moves a component that touches window inside an effect', async () => {
+    const source = 'export const W = () => {\n  const [w, setW] = useState(0)\n  useEffect(() => { setW(window.innerWidth) }, [])\n  return <b>w{w}</b>\n}\n\n<W />\n'
+    const { html, warnings } = await render(source)
+    expect(warnings).toEqual([])
+    expect(html).toContain('<b>w0</b>')
+  })
 })
+

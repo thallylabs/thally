@@ -241,4 +241,59 @@ describe('a dependency that cannot move safely keeps the whole component in plac
     expect(client).toContain('export const Good')
     expect(client).not.toContain('Bad')
   })
+
+  it('moves a provider that shares a context with the consumer, so the context keeps one identity', () => {
+    const source = [
+      'export const Ctx = React.createContext("x")',
+      'export const Provider = ({ children }) => <Ctx.Provider value="y">{children}</Ctx.Provider>',
+      'export const Reader = () => {\n  const v = useContext(Ctx)\n  return <b>{v}</b>\n}',
+      '<Provider><Reader /></Provider>',
+    ].join('\n\n')
+    const { body, client, warnings } = extract(source)
+    expect(warnings).toEqual([])
+    for (const name of ['Ctx', 'Provider', 'Reader']) {
+      expect(client).toContain(`export const ${name}`)
+      expect(body).not.toContain(`export const ${name}`)
+    }
+  })
+
+  it('treats a component that calls a page-level custom hook as a hook component', () => {
+    const source = [
+      'export const Ctx = createContext(1)',
+      'export const useTheme = () => useContext(Ctx)',
+      'export const Reader = () => <b>{useTheme()}</b>',
+      '<Reader />',
+    ].join('\n\n')
+    const { body, client, warnings } = extract(source)
+    expect(warnings).toEqual([])
+    expect(client).toContain('export const useTheme')
+    expect(client).toContain('export const Reader')
+    expect(body).not.toContain('useTheme')
+  })
+
+  it('leaves a component whose mutable state the page also reads, rather than copying it', () => {
+    const source = [
+      'export let count = 0',
+      'export const bump = () => { count += 1; return count }',
+      'export const Counter = () => {\n  const [n] = useState(0)\n  return <b>{bump() + n}</b>\n}',
+      '<Counter />\n\n{bump()}',
+    ].join('\n\n')
+    const { body, client, warnings } = extract(source)
+    expect(client).toBeUndefined()
+    expect(body).toBe(source)
+    expect(warnings[0].message).toContain('mutable state')
+  })
+
+  it('gives two pages that define the same component name separate modules', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-inline-'))
+    roots.push(root)
+    const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+    const page = (text: string) => `export const Label = () => <em>${text}</em>\n\nexport const C = () => {\n  const [n] = useState(0)\n  return <Label />\n}\n\n<C />\n`
+    migrator.transform(page('one'), join(root, 'index.mdx'))
+    migrator.transform(page('two'), join(root, 'fr', 'index.mdx'))
+    const modules = migrator.files().filter((file) => file.path.includes('/inline-'))
+    expect(new Set(modules.map((file) => file.path)).size).toBe(2)
+    expect(modules.map((file) => String(file.content)).join('').match(/<em>one<\/em>/g)).toHaveLength(1)
+    expect(modules.map((file) => String(file.content)).join('').match(/<em>two<\/em>/g)).toHaveLength(1)
+  })
 })

@@ -24,6 +24,14 @@ describe('Video', () => {
     expect(html).toContain('src="https://example.com/clip.mp4"')
   })
 
+  it('passes playback options through to a native video, and keeps controls unless turned off', () => {
+    const html = renderToStaticMarkup(<Video src="/clip.webm" autoPlay muted loop playsInline poster="/poster.png" />)
+    for (const attribute of ['autoPlay', 'muted', 'loop', 'playsInline']) expect(html.toLowerCase()).toContain(attribute.toLowerCase() + '=""')
+    expect(html).toContain('poster="/poster.png"')
+    expect(html).toContain('controls=""')
+    expect(renderToStaticMarkup(<Video src="/clip.mp4" controls={false} />)).not.toContain('controls')
+  })
+
   it('aliases YouTube and LiteYouTubeEmbed to a Video embed by id', () => {
     const youtube = renderToStaticMarkup(<YouTube id="dQw4w9WgXcQ" />)
     const lite = renderToStaticMarkup(<LiteYouTubeEmbed id="dQw4w9WgXcQ" />)

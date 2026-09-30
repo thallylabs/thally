@@ -25,6 +25,8 @@ interface Unit {
   source: string
   names: Array<string>
   refs: Array<Ref>
+  /** Page-level names this declaration reassigns or mutates. */
+  assigned: Array<string>
   hooks: boolean
   /** Handlers, browser globals: cannot render in a Server Component. */
   clientOnly: boolean
@@ -121,8 +123,9 @@ function functionScope(fn: ts.FunctionLikeDeclaration): Set<string> {
 }
 
 /** Free (unbound) identifier references in one declaration, with how each is used. */
-function collectRefs(root: ts.Node): { refs: Array<Ref>; awaitOutsideAsync: boolean; dynamicImport: boolean } {
+function collectRefs(root: ts.Node): { refs: Array<Ref>; assigned: Array<string>; awaitOutsideAsync: boolean; dynamicImport: boolean } {
   const refs: Array<Ref> = []
+  const assigned: Array<string> = []
   let awaitOutsideAsync = false
   let dynamicImport = false
   function bound(name: string, scopes: Array<Set<string>>): boolean {
@@ -144,6 +147,17 @@ function collectRefs(root: ts.Node): { refs: Array<Ref>; awaitOutsideAsync: bool
       return
     }
     if (ts.isAwaitExpression(node) && !inAsync) awaitOutsideAsync = true
+    const target = ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+      ? node.left
+      : (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
+        && (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)
+        ? node.operand
+        : undefined
+    if (target) {
+      let base: ts.Node = target
+      while (ts.isPropertyAccessExpression(base) || ts.isElementAccessExpression(base)) base = base.expression
+      if (ts.isIdentifier(base) && !bound(base.text, scopes)) assigned.push(base.text)
+    }
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) dynamicImport = true
     if (ts.isIdentifier(node)) {
       const parent = node.parent
@@ -211,7 +225,7 @@ function collectRefs(root: ts.Node): { refs: Array<Ref>; awaitOutsideAsync: bool
   // A top-level declaration's own name is module-level, so a self-reference
   // (recursion) is reported like any other page-level name.
   walkNode(root, [], false)
-  return { refs, awaitOutsideAsync, dynamicImport }
+  return { refs, assigned, awaitOutsideAsync, dynamicImport }
 }
 
 function declaredNames(statement: ts.Statement): { names: Array<string>; componentLike: boolean; defaultExport: boolean } {
@@ -246,11 +260,11 @@ function analyzeUnit(index: number, source: string, reactGlobals: ReadonlySet<st
   const statement = sf.statements[0]
   const blockers: Array<string> = []
   if (!statement || sf.statements.length !== 1) {
-    return { index, source, names: [], refs: [], hooks: false, clientOnly: false, componentLike: false, blockers: ['is not a single declaration'] }
+    return { index, source, names: [], refs: [], assigned: [], hooks: false, clientOnly: false, componentLike: false, blockers: ['is not a single declaration'] }
   }
   const { names, componentLike, defaultExport } = declaredNames(statement)
   if (defaultExport) blockers.push('is a default export')
-  const { refs, awaitOutsideAsync, dynamicImport } = collectRefs(statement)
+  const { refs, assigned, awaitOutsideAsync, dynamicImport } = collectRefs(statement)
   if (awaitOutsideAsync) blockers.push('uses await outside an async function')
   if (dynamicImport) blockers.push('uses a dynamic import()')
   // An async component is a Server Component; it has no client equivalent.
@@ -274,6 +288,7 @@ function analyzeUnit(index: number, source: string, reactGlobals: ReadonlySet<st
     source,
     names,
     refs,
+    assigned,
     hooks: refs.some(({ name }) => reactGlobals.has(name)) || /\bReact\.(?:use[A-Z]\w*|createContext|forwardRef|memo)\b/.test(source),
     clientOnly: handlers || refs.some(({ name }) => BROWSER_IDENTIFIERS.has(name)),
     componentLike,
@@ -348,6 +363,14 @@ export function planInlineExtraction(input: {
   const units = input.declarations.map((declaration, index) => analyzeUnit(index, declaration.source, input.reactGlobals))
   const owner = new Map<string, number>()
   for (const unit of units) for (const name of unit.names) owner.set(name, unit.index)
+  // A page-level custom hook (`useTheme`) makes whatever calls it a hook user too.
+  for (let changed = true; changed;) {
+    changed = false
+    for (const unit of units) {
+      if (unit.hooks) continue
+      if (unit.refs.some(({ name }) => /^use[A-Z]/.test(name) && units[owner.get(name) ?? -1]?.hooks)) { unit.hooks = true; changed = true }
+    }
+  }
 
   const importByLocal = new Map<string, string>()
   for (const statement of input.copyableImports) for (const local of importLocals(statement)) importByLocal.set(local, statement)
@@ -456,10 +479,41 @@ export function planInlineExtraction(input: {
       pageRefs.some((ref) => ref.name === name && ref.kind !== 'tag' && ref.kind !== 'prop')
     )))
     if (violation !== undefined) {
-      const name = units[violation].names[0]
+      const names = units[violation].names
+      const readsIt = (ref: Ref): boolean => names.includes(ref.name) && ref.kind !== 'tag' && ref.kind !== 'prop'
+      // A component that only reads the moved value (a context provider next
+      // to its consumer) can travel with it, so the value keeps one identity.
+      const readers = units.filter((unit) => !moved.has(unit.index) && unit.refs.some(readsIt))
+      const promotable = !body.refs.some(readsIt) && readers.every((unit) => (
+        unit.componentLike && !active.has(unit.index)
+        && [...closureOf(unit.index)].every((member) => !intrinsicBlocker(units[member]))
+      ))
+      if (promotable && readers.length > 0) {
+        for (const unit of readers) active.add(unit.index)
+        continue
+      }
       for (const rootIndex of [...active]) {
         if (closureOf(rootIndex).has(violation)) {
-          block(rootIndex, `\`${name}\` is also read or called by page code that stays on the server`)
+          block(rootIndex, `\`${names[0]}\` is also read or called by page code that stays on the server`)
+        }
+      }
+      continue
+    }
+
+    // A copy of mutable state would diverge: the page and the client module
+    // would each count on their own. Refuse when page code reaches it.
+    const reachable = new Set<number>([...kept].filter(referencedByPage))
+    for (let changed = true; changed;) {
+      changed = false
+      for (const index of [...reachable]) for (const dependency of dependencies(units[index])) {
+        if (kept.has(dependency) && !reachable.has(dependency)) { reachable.add(dependency); changed = true }
+      }
+    }
+    const mutated = [...reachable].find((index) => units.some((unit) => unit.assigned.some((name) => units[index].names.includes(name))))
+    if (mutated !== undefined) {
+      for (const rootIndex of [...active]) {
+        if (closureOf(rootIndex).has(mutated)) {
+          block(rootIndex, `\`${units[mutated].names[0]}\` is mutable state that page code also uses, so a copy in the client module would diverge`)
         }
       }
       continue

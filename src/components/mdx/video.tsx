@@ -7,6 +7,13 @@
 interface VideoProps {
   src: string
   title?: string
+  /** Native `<video>` playback options, used only for a direct file source. */
+  autoPlay?: boolean
+  muted?: boolean
+  loop?: boolean
+  controls?: boolean
+  playsInline?: boolean
+  poster?: string
 }
 
 const VIDEO_ID = /^[\w-]{1,64}$/
@@ -41,9 +48,9 @@ function isEmbeddableSource(src: string): boolean {
   return /^https?:\/\//i.test(src) || (src.startsWith('/') && !src.startsWith('//'))
 }
 
-export function Video({ src, title = 'Embedded video' }: VideoProps) {
-  if (/\.mp4(?:[?#]|$)/i.test(src)) {
-    return <video controls src={src} className="my-6 w-full rounded-[11px] border border-border" />
+export function Video({ src, title = 'Embedded video', controls = true, poster, ...playback }: VideoProps) {
+  if (/\.(?:mp4|webm|ogg|mov|m4v)(?:[?#]|$)/i.test(src)) {
+    return <video {...playback} controls={controls} poster={poster && isEmbeddableSource(poster) ? poster : undefined} src={src} className="my-6 w-full rounded-[11px] border border-border" />
   }
   const embedUrl = embedUrlFor(src) ?? (isEmbeddableSource(src) ? src : null)
   // Never drop the video silently: show what was authored as text when it
