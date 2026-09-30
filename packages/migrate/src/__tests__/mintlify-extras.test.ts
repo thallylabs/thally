@@ -347,6 +347,46 @@ describe('gating bypass hardening', () => {
     expect(codes(bundle, 'gated-page').some((warning) => warning.source === 'host.mdx' && /NOT inlined/.test(warning.message))).toBe(true)
   })
 
+  const privateDoc = page('Private', 'groups: [admin]\ndescription: TOPSECRET desc\n').replace('Body of Private.', 'TOPSECRET')
+  const snippetHost = (host: string, extra: Record<string, string> = {}) => site({
+    'docs.json': JSON.stringify({ navigation: { pages: ['host'] } }),
+    'host.mdx': `---\ntitle: Host\n---\n\nPublic text.\n\n${host}\n`,
+    'private.mdx': privateDoc,
+    ...extra,
+  })
+  const expectSnippetWithheld = (bundle: MigrationBundle, source: string) => {
+    expect(JSON.stringify(bundle.pages)).not.toContain('TOPSECRET')
+    expect(bundle.pages.find((entry) => entry.id === 'host')!.body).toContain('Public text.')
+    expect((bundle.quarantinedFiles ?? []).map((file) => file.path)).toEqual(['migration-quarantine/private.mdx'])
+    const gated = codes(bundle, 'gated-page').filter((warning) => /Snippet file=/.test(warning.message))
+    expect(gated).toHaveLength(1)
+    expect(gated[0].source).toBe(source)
+    expect(gated[0].message).toMatch(/NOT inlined/)
+    expect(codes(bundle, 'missing-page')).toHaveLength(0)
+  }
+
+  it('never inlines an access-restricted page through <Snippet file>', () => {
+    expectSnippetWithheld(snippetHost('<Snippet file="/private.mdx" />'), 'host.mdx')
+  })
+
+  it('never inlines an access-restricted page through page-relative or single-quoted <Snippet file>', () => {
+    expectSnippetWithheld(snippetHost('<Snippet file="private.mdx" />'), 'host.mdx')
+    expectSnippetWithheld(snippetHost("<Snippet file='/private.mdx' />"), 'host.mdx')
+  })
+
+  it('never inlines an access-restricted page through a <Snippet file> nested in a public snippet', () => {
+    const bundle = snippetHost('<Snippet file="wrapper.mdx" />', { 'snippets/wrapper.mdx': 'Wrapper text.\n\n<Snippet file="/private.mdx" />\n' })
+    expectSnippetWithheld(bundle, 'snippets/wrapper.mdx')
+    expect(bundle.pages.find((entry) => entry.id === 'host')!.body).toContain('Wrapper text.')
+  })
+
+  it('still expands an ungated <Snippet file> and reports a missing one', () => {
+    const bundle = snippetHost('<Snippet file="ok.mdx" />\n\n<Snippet file="nope.mdx" />', { 'snippets/ok.mdx': 'Ok snippet body.\n' })
+    const body = bundle.pages.find((entry) => entry.id === 'host')!.body
+    expect(body).toContain('Ok snippet body.')
+    expect(codes(bundle, 'missing-page').filter((warning) => /nope\.mdx/.test(warning.message))).toHaveLength(1)
+  })
+
   it('withholds a page whose invalid frontmatter declares groups or public instead of salvaging it', () => {
     const bundle = site({
       'docs.json': JSON.stringify({ navigation: { pages: ['bad', 'badpublic', 'badopen'] } }),

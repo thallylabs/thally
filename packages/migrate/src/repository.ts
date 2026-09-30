@@ -2493,6 +2493,14 @@ function inlineMdxSnippets(
         try { return resolveCandidate() } catch { return undefined }
       }).find((path) => path !== undefined && existsSync(path) && lstatSync(path).isFile())
       if (!candidate) throw new Error('file not found')
+      if (withheld.has(candidate)) {
+        warnings.push({
+          code: 'gated-page',
+          message: `Snippet file="${filePath}" is access-restricted and was NOT inlined; it was left as a comment.`,
+          source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+        })
+        return `{/* Access-restricted content withheld: ${filePath} */}`
+      }
       return inlineMdxSnippets(
         withoutFrontmatter(readFileSync(candidate, 'utf8')),
         candidate,
