@@ -2,7 +2,7 @@
  * Thally's registered MDX built-in component tag names, kept in one place so
  * the unknown-component fallback (`mdx.ts`) knows what already renders
  * without guessing. Mirrors the registry in the Thally runtime's
- * `src/components/mdx/mdx-components.tsx` (read-only from this package,
+ * `src/components/mdx/builtin-components.tsx` (read-only from this package,
  * which ships standalone and cannot import app source at runtime).
  *
  * A drift guard (`src/components/mdx/client-registry.test.ts`, in the app
@@ -21,7 +21,8 @@ export const THALLY_BUILTIN_COMPONENTS: ReadonlySet<string> = new Set([
   'PromptAssistant', 'Terminal', 'TerminalInput', 'TerminalOutput',
   'AgentPrompt', 'Color', 'Tree', 'Folder', 'File', 'ResponseField',
   'ParamField', 'Expandable', 'Mermaid', 'View', 'Embed', 'LegacyView',
-  'GitHub', 'Github', 'Visibility', 'Human', 'Agent', 'BannerPreview',
+  'GitHub', 'Github', 'Visibility', 'Human', 'Agent', 'BannerPreview', 'Banner',
+  'CodeBlock', 'Column', 'FileTree', 'LiteYouTubeEmbed', 'MDX', 'Video', 'YouTube',
 ])
 
 /** True for a builtin tag, or a member-expression tag on one (`Color.Item` -> `Color`). */

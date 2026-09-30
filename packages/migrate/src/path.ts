@@ -83,6 +83,18 @@ export function mintlifyLocalizedReference(
     const candidateId = pageIdFromReference(candidate, true)
     if (candidateId && defaultPageIds.has(candidateId)) return candidate
   }
+  // A versioned site nests the locale one level in instead of leading
+  // ("edge/ar/introduction", not "ar/edge/introduction") — every version's
+  // page references repeat this shape for every language, so the locale
+  // segment shows up mid-path rather than only as a directory prefix. Drop
+  // the first segment that exactly matches the locale wherever it falls,
+  // so the resulting identity is shared across languages instead of the
+  // caller re-adding a locale prefix on top of one already embedded here.
+  const segments = reference.split('/')
+  const localeIndex = segments.findIndex((segment) => segment.toLowerCase() === locale.toLowerCase())
+  if (localeIndex > 0) {
+    return [...segments.slice(0, localeIndex), ...segments.slice(localeIndex + 1)].join('/')
+  }
   return value
 }
 

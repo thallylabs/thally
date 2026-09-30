@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 }))
 vi.mock('next/navigation', () => ({ usePathname: () => mocks.pathname }))
 vi.mock('@/data/docs', () => ({ loadSidebarCollections: mocks.loadCollections }))
-vi.mock('@/data/api-reference', () => ({ buildApiNavigation: async () => [] }))
+vi.mock('@/data/api-reference', () => ({ withApiNavigation: async (collections: unknown) => collections }))
 vi.mock('./sidebar-store', () => ({
   useSidebarCollectionsStore: (selector: (state: { collectionsByScope: typeof mocks.snapshots }) => unknown) => selector({ collectionsByScope: mocks.snapshots }),
 }))

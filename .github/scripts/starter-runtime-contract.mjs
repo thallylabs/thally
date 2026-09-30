@@ -72,6 +72,8 @@ const SOURCE_ONLY_PATHS = new Set([
   "src/lib/__tests__/frontmatter.test.ts",
   "src/lib/__tests__/frontmatter-parity.test.ts",
   "src/components/mdx/client-registry.test.ts",
+  "src/lib/openapi/__tests__/migrate-operation-slug-parity.test.ts",
+  "src/lib/openapi/__tests__/publication-check-parity.test.ts",
 ]);
 
 function invariant(condition, message) {

@@ -22,7 +22,7 @@ interface MintlifyPageReference {
   locale?: string
 }
 
-const MAX_MINTLIFY_CONFIG_BYTES = 2_000_000
+const MAX_MINTLIFY_CONFIG_BYTES = 20_000_000
 
 export interface MintlifyNavigationResult {
   docsConfig: MigrationDocsConfig
@@ -89,20 +89,20 @@ export function addMintlifyDirectoryRedirects(
       }
     }
   }
-  for (const redirect of config.redirects ?? []) {
-    // An authored redirect is evidence that a directory itself was a public
-    // route, even when its landing page has no overview/introduction filename.
-    // Resolve only that destination, using source navigation order rather than
-    // filesystem order. Required parameters and arbitrary patterns stay intact.
-    const destination = redirect.destination.split(/[?#]/, 1)[0]
-      .replace(/\/:[A-Za-z_][A-Za-z0-9_]*\*\/?$/, '')
-    if (!destination.startsWith('/') || destination.startsWith('//') || /[:*()[\]{}]/.test(destination)) continue
-    const directory = trimEdgeSlashes(destination)
-    if (!directory || pageIds.has(directory)) continue
+  // Mintlify 307s *any* nav-shaped directory path with no page of its own to
+  // its first descendant page in navigation order — not only ones an
+  // overview/introduction page or an authored redirect already pointed at
+  // (e.g. a `product`/`tab`/`group` container path like Upstash's `/redis`,
+  // or a plain mid-tree directory like `/vector/sdks/py/example_calls`).
+  // `firstDescendantByDirectory` already holds every such directory (built
+  // from real page ids in navigation order above), so redirect all of them
+  // in one pass; `hasAuthoredRedirect` skips any directory the overview/
+  // introduction pass above, or the project's own `redirects:`, already
+  // covers, and `pageIds.has(directory)` never overrides a real page.
+  for (const [directory, landing] of firstDescendantByDirectory) {
+    if (pageIds.has(directory)) continue
     const source = `/${directory}`
     if (hasAuthoredRedirect(source)) continue
-    const landing = firstDescendantByDirectory.get(directory)
-    if (!landing) continue
     // Match full stored ids, not locale-independent navigation ids: a French
     // directory must never be redirected to an English descendant.
     redirects.push({ source, destination: `/${landing.id}`, permanent: false })
@@ -175,6 +175,27 @@ function objectValue(value: unknown): Record<string, unknown> | null {
     : null
 }
 
+/**
+ * Some Mintlify sites (e.g. Upstash's docs.json) group `products` under an
+ * extra `productGroups: [{ group, products }]` wrapper instead of a bare
+ * `products` array directly on the tab. Flatten it into `products` so the
+ * existing container handling picks the products up unchanged — otherwise
+ * every page and `openapi`/`asyncapi` reference under it is silently
+ * invisible to navigation projection and API-spec resolution alike.
+ */
+function withFlattenedProductGroups(container: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(container.productGroups)) return container
+  const flattened = (container.productGroups as Array<unknown>).flatMap((entry) => {
+    const group = objectValue(entry)
+    return group && Array.isArray(group.products) ? group.products : []
+  })
+  if (flattened.length === 0) return container
+  return {
+    ...container,
+    products: [...(Array.isArray(container.products) ? container.products : []), ...flattened],
+  }
+}
+
 function projectedHref(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const href = value.trim()
@@ -186,7 +207,7 @@ function projectedHref(value: unknown): string | undefined {
 }
 
 function labelFor(value: Record<string, unknown>, fallback: string): string {
-  for (const key of ['tab', 'group', 'anchor', 'product', 'dropdown', 'version', 'menu', 'label', 'name', 'title']) {
+  for (const key of ['tab', 'group', 'anchor', 'product', 'dropdown', 'version', 'menu', 'item', 'label', 'name', 'title']) {
     if (typeof value[key] === 'string' && value[key]) return String(value[key])
   }
   return fallback
@@ -284,9 +305,25 @@ export interface MintlifyApiSpecReference {
   /** The field's raw value: a repository-relative path, or an `http(s)://` URL. */
   value: string
   kind: 'openapi' | 'asyncapi'
-  /** Label of the nearest enclosing tab/anchor/dropdown/product/version/menu, so the resolved spec binds to that tab specifically. Undefined at the navigation root. */
+  /** Label of the tab the resolved spec binds to (created if the source tab was dropped). Undefined at the navigation root. */
   tabLabel?: string
+  /** Set when `tabLabel` is a per-item sibling tab (`<Tab>: <Item>`): the tab it should be placed after. */
+  parentTab?: string
+  /** Menu-item presentation carried onto its sibling tab. */
+  icon?: string
+  hidden?: boolean
+  /** Mintlify's `{ source, directory }` output folder, which Thally does not use (endpoints live under `/api/`). */
+  directory?: string
 }
+
+/** `openapi`/`asyncapi` is a path/URL string, or Mintlify's `{ source, directory }` object. */
+function specSource(value: unknown): string | undefined {
+  const source = typeof value === 'string' ? value : objectValue(value)?.source
+  return typeof source === 'string' && source.trim() ? source.trim() : undefined
+}
+
+const hasNavigationChildren = (node: Record<string, unknown>): boolean =>
+  ['groups', 'pages'].some((key) => Array.isArray(node[key]) && (node[key] as Array<unknown>).length > 0)
 
 /**
  * Mintlify lets `openapi`/`asyncapi` appear not just at the top-level `api`
@@ -297,6 +334,11 @@ export interface MintlifyApiSpecReference {
  * the whole raw navigation tree (the same shape `convertContainerToTabs`
  * projects) collecting every occurrence, so the caller can resolve and bind
  * each one instead of only ever seeing the single top-level `api` field.
+ *
+ * A tab `menu` item with `openapi` cannot become a group (Thally groups hold
+ * pages, and the generated endpoints live in an API-bound tab). It becomes a
+ * sibling tab `<Tab>: <Item>` bound to its own spec, or binds to the tab
+ * itself when it is the tab's only content.
  */
 export function mintlifyNavigationApiReferences(config: Record<string, unknown>): Array<MintlifyApiSpecReference> {
   const navigation = objectValue(config.navigation) ?? config
@@ -304,13 +346,31 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
   const containerKeys = ['tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus', 'languages'] as const
   const nestedKeys = ['groups', 'pages'] as const
 
-  function visit(node: Record<string, unknown>, tabLabel: string | undefined): void {
-    if (typeof node.openapi === 'string' && node.openapi.trim()) {
-      references.push({ value: node.openapi.trim(), kind: 'openapi', tabLabel })
+  function collect(node: Record<string, unknown>, tabLabel: string | undefined, sibling?: Pick<MintlifyApiSpecReference, 'parentTab' | 'icon' | 'hidden'>): void {
+    for (const kind of ['openapi', 'asyncapi'] as const) {
+      const value = specSource(node[kind])
+      const directory = objectValue(node[kind])?.directory
+      if (value) {
+        references.push({
+          value, kind, tabLabel, ...sibling,
+          ...(typeof directory === 'string' && directory.trim() ? { directory: directory.trim() } : {}),
+        })
+      }
     }
-    if (typeof node.asyncapi === 'string' && node.asyncapi.trim()) {
-      references.push({ value: node.asyncapi.trim(), kind: 'asyncapi', tabLabel })
-    }
+  }
+
+  // Two menu items can share a label (the same item name under two versions):
+  // keep both tabs instead of letting the later spec replace the earlier one.
+  const siblingSources = new Map<string, string>()
+  function uniqueSiblingLabel(label: string, source: string): string {
+    let candidate = label
+    for (let n = 2; siblingSources.has(candidate) && siblingSources.get(candidate) !== source; n++) candidate = `${label} (${n})`
+    siblingSources.set(candidate, source)
+    return candidate
+  }
+
+  function visitChildren(rawNode: Record<string, unknown>, tabLabel: string | undefined): void {
+    const node = withFlattenedProductGroups(rawNode)
     for (const key of containerKeys) {
       const entries = node[key]
       if (!Array.isArray(entries)) continue
@@ -333,9 +393,47 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
         if (object) visit(object, tabLabel)
       }
     }
+    if (Array.isArray(node.menu)) {
+      const tab = tabLabel ?? 'Documentation'
+      const items = node.menu.flatMap((entry): Array<Record<string, unknown>> => {
+        const object = objectValue(entry)
+        return object ? [object] : []
+      })
+      const apiItems = items.filter((item) => specSource(item.openapi) || specSource(item.asyncapi))
+      const soleContent = apiItems.length === 1 && !hasNavigationChildren(node) && !items.some(hasNavigationChildren)
+      items.forEach((item, index) => {
+        if (soleContent && apiItems[0] === item) collect(item, tab)
+        else if (apiItems.includes(item)) {
+          const label = uniqueSiblingLabel(
+            `${tab}: ${labelFor(item, `Menu item ${index + 1}`)}`,
+            `${specSource(item.openapi) ?? ''}|${specSource(item.asyncapi) ?? ''}`,
+          )
+          const icon = iconName(item.icon)
+          collect(item, label, { parentTab: tab, ...(icon ? { icon } : {}), ...(item.hidden === true ? { hidden: true } : {}) })
+        }
+        visitChildren(item, tabLabel)
+      })
+    }
+  }
+
+  function visit(node: Record<string, unknown>, tabLabel: string | undefined): void {
+    collect(node, tabLabel)
+    visitChildren(node, tabLabel)
   }
   visit(navigation, undefined)
   return references
+}
+
+/** Add an API-bound tab, right after `parentTab` (and its earlier per-item siblings) when given, else at the end. */
+export function insertApiTab<T extends { tab: string }>(tabs: Array<T>, tab: T, parentTab?: string): Array<T> {
+  let index = -1
+  if (parentTab) {
+    tabs.forEach((candidate, position) => {
+      if (candidate.tab === parentTab || candidate.tab.startsWith(`${parentTab}: `)) index = position
+    })
+  }
+  tabs.splice(index === -1 ? tabs.length : index + 1, 0, tab)
+  return tabs
 }
 
 function normalizePageRef(value: string, pathPrefix = ''): string | null {
@@ -400,11 +498,34 @@ function registerReference(value: string, context: ProjectionContext): string | 
   return navigationId
 }
 
+/**
+ * Mintlify lets a `pages` entry name a single OpenAPI operation directly
+ * (`"GET /users"`) to hand-pick or reorder which operations of an
+ * already-`openapi`-scoped ancestor appear, instead of a page file
+ * reference. Thally always renders every operation of a bound spec and
+ * has no manual-selection equivalent, so these are not migratable pages —
+ * treating them as one is what produced a "did not resolve to a source
+ * page" warning per operation instead of one explanation for the group.
+ */
+const OPENAPI_OPERATION_REF = /^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S/
+
 function convertPage(
   value: unknown,
   context: ProjectionContext,
 ): string | MigrationNavigationGroup | null {
-  if (typeof value === 'string') return registerReference(value, context)
+  if (typeof value === 'string') {
+    if (OPENAPI_OPERATION_REF.test(value)) {
+      warnOnce(
+        context,
+        'openapi-operation-list',
+        'One or more navigation groups hand-pick or reorder individual OpenAPI operations (e.g. "GET /users"); '
+          + "Thally always renders every operation of a bound spec and has no manual-selection equivalent, so that "
+          + 'list was dropped. The operations themselves are still available through the bound API reference.',
+      )
+      return null
+    }
+    return registerReference(value, context)
+  }
   const object = objectValue(value)
   if (!object) return null
   if (typeof object.page === 'string') return registerReference(object.page, context)
@@ -441,6 +562,61 @@ function convertPage(
   return null
 }
 
+const KNOWN_NAVIGATION_KEYS = new Set([
+  'tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus', 'languages', 'productGroups',
+  'groups', 'pages', 'menu', 'global',
+])
+
+/** A Mintlify tab `menu`: each item becomes a top-level group of the enclosing tab. */
+function convertMenuItems(
+  items: Array<unknown>,
+  context: ProjectionContext,
+): Array<MigrationNavigationGroup> {
+  return items.flatMap((value, index) => {
+    const item = objectValue(value)
+    if (!item) return []
+    const label = labelFor(item, `Menu item ${index + 1}`)
+    if (typeof item.description === 'string' && item.description.trim()) {
+      warnOnce(
+        context,
+        `menu-item-description:${label}`,
+        `Mintlify menu item "${label}" has a description, which Thally groups cannot display; it was omitted.`,
+      )
+    }
+    const hasUnsourcedSpec = Boolean(item.openapi || item.asyncapi) && !specSource(item.openapi) && !specSource(item.asyncapi)
+    if (hasUnsourcedSpec) {
+      warnOnce(
+        context,
+        `menu-item-spec:${label}`,
+        `Mintlify menu item "${label}" has an openapi/asyncapi value without a "source", so its API reference was not migrated.`,
+      )
+    }
+    const children = convertNavigationValues([
+      ...(Array.isArray(item.groups) ? item.groups : []),
+      ...(Array.isArray(item.pages) ? item.pages : []),
+    ], context)
+    if (typeof item.href === 'string' && item.href) {
+      warnOnce(
+        context,
+        `menu-item-href:${label}`,
+        `Mintlify menu item "${label}" links to ${item.href}, which cannot be represented as a Thally group; the link was omitted.`,
+      )
+    }
+    if (children.length === 0) {
+      if (!specSource(item.openapi) && !specSource(item.asyncapi) && !hasUnsourcedSpec) {
+        warnOnce(context, `menu-item-empty:${label}`, `Mintlify menu item "${label}" has no projectable pages and was omitted.`)
+      }
+      return []
+    }
+    return [{
+      group: label,
+      ...(iconName(item.icon) ? { icon: iconName(item.icon) } : {}),
+      ...(item.hidden === true ? { hidden: true } : {}),
+      pages: children,
+    }]
+  })
+}
+
 function convertNavigationValues(
   values: Array<unknown>,
   context: ProjectionContext,
@@ -462,9 +638,17 @@ function convertContainerToTabs(
   trace?: NavigationProjectionTrace,
   depth = 0,
 ): Array<MigrationNavigationTab> {
-  const container = objectValue(containerValue)
-  if (!container) return []
+  const rawContainer = objectValue(containerValue)
+  if (!rawContainer) return []
+  const container = withFlattenedProductGroups(rawContainer)
   const containerKeys = ['tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus'] as const
+  for (const key of Object.keys(container)) {
+    if (KNOWN_NAVIGATION_KEYS.has(key)) continue
+    const entries = container[key]
+    if (Array.isArray(entries) && entries.some((entry) => objectValue(entry))) {
+      warnOnce(context, `unknown-container:${key}`, `Mintlify navigation key "${key}" is not supported and its contents were not projected.`)
+    }
+  }
   for (const key of containerKeys) {
     if (!Array.isArray(container[key])) continue
     const entries = [...container[key] as Array<unknown>]
@@ -476,7 +660,7 @@ function convertContainerToTabs(
       if (!object) return []
       const tab = labelFor(object, `${fallbackTab} ${index + 1}`)
       const href = projectedHref(object.href)
-      const hasNestedContainers = containerKeys.some((containerKey) => Array.isArray(object[containerKey]))
+      const hasNestedContainers = [...containerKeys, 'menu'].some((containerKey) => Array.isArray(object[containerKey]))
       if (href && !object.pages && !object.groups && !hasNestedContainers) {
         return [{
           tab,
@@ -508,6 +692,11 @@ function convertContainerToTabs(
       return []
     })
     if (tabs.length > 0) {
+      for (const sibling of ['groups', 'pages', 'menu'] as const) {
+        if (Array.isArray(container[sibling]) && (container[sibling] as Array<unknown>).length > 0) {
+          warnOnce(context, `container-sibling:${key}:${sibling}`, `Mintlify "${sibling}" next to "${key}" was not projected; only the "${key}" containers were kept.`)
+        }
+      }
       if (depth === 0 && trace) trace.rootContainerKind = key
       return tabs
     }
@@ -520,7 +709,10 @@ function convertContainerToTabs(
     ...rawGroups,
     ...rawPages,
   ]
-  const children = convertNavigationValues(values, context)
+  const children = [
+    ...convertNavigationValues(values, context),
+    ...(Array.isArray(container.menu) ? convertMenuItems(container.menu, context) : []),
+  ]
   return children.length > 0
     ? [{
         tab: fallbackTab,
@@ -585,7 +777,7 @@ function projectedGlobalNavigationLinks(
       const label = labelFor(item, '')
       if (label) links.push({ label, href })
     }
-    for (const key of ['tabs', 'anchors', 'dropdowns', 'products', 'versions', 'languages', 'menus']) {
+    for (const key of ['tabs', 'anchors', 'dropdowns', 'products', 'versions', 'languages', 'menus', 'menu']) {
       if (Array.isArray(item[key])) visit(item[key])
     }
   }
@@ -769,6 +961,68 @@ export function isRedirectPathSafe(rawSource: string, rawDestination: string): b
  * destination have already passed {@link isRedirectPathSafe}.
  */
 export { translateRedirectWildcards }
+
+/**
+ * Mintlify's `versions` container authors every version's own page paths
+ * with the version identifier as a literal leading segment (`v1.15.22/en/
+ * introduction`), including the default version's — the live site still
+ * serves that path, but also serves the same page with the segment
+ * dropped (`/en/introduction` 307s to the versioned URL). Thally has no
+ * multi-version content model of its own (each version becomes its own
+ * tab, per existing behavior), so an in-repo link authored the second way
+ * has nothing to resolve to. Collecting each `versions` container's
+ * default identifier lets the repository scanner add a matching redirect
+ * alongside the one it already adds for a page's literal source path.
+ */
+export function mintlifyDefaultVersionPrefixes(config: Record<string, unknown>): Set<string> {
+  const navigation = objectValue(config.navigation) ?? config
+  const prefixes = new Set<string>()
+  function collect(container: Record<string, unknown>): void {
+    if (Array.isArray(container.versions)) {
+      const entries = container.versions
+        .map((value) => objectValue(value))
+        .filter((value): value is Record<string, unknown> => value !== null)
+      const defaultEntry = entries.find((entry) => entry.default === true) ?? entries[0]
+      if (defaultEntry && typeof defaultEntry.version === 'string' && defaultEntry.version.trim()) {
+        prefixes.add(defaultEntry.version.trim())
+      }
+    }
+    if (Array.isArray(container.languages)) {
+      for (const value of container.languages) {
+        const language = objectValue(value)
+        if (language) collect(language)
+      }
+    }
+  }
+  collect(navigation)
+  return prefixes
+}
+
+/**
+ * Every version identifier declared across all `versions` containers (not
+ * just the default one) — used to label which versions' pages were dropped
+ * when a repository exceeds the source-file discovery budget.
+ */
+export function mintlifyAllVersionPrefixes(config: Record<string, unknown>): Set<string> {
+  const navigation = objectValue(config.navigation) ?? config
+  const prefixes = new Set<string>()
+  function collect(container: Record<string, unknown>): void {
+    if (Array.isArray(container.versions)) {
+      for (const value of container.versions) {
+        const entry = objectValue(value)
+        if (entry && typeof entry.version === 'string' && entry.version.trim()) prefixes.add(entry.version.trim())
+      }
+    }
+    if (Array.isArray(container.languages)) {
+      for (const value of container.languages) {
+        const language = objectValue(value)
+        if (language) collect(language)
+      }
+    }
+  }
+  collect(navigation)
+  return prefixes
+}
 
 /** Convert current and legacy Mintlify navigation into Thally's schema. */
 export function projectMintlifyNavigation(

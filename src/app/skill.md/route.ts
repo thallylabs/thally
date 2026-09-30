@@ -1,9 +1,11 @@
+import { ensureDocPublication } from '@/data/docs'
 import { buildSkillManifest } from '@/lib/agent-manifest'
 import { resolveRequestSiteConfig, siteIdentity } from '@/lib/site-config'
 
 export const runtime = 'nodejs'
 
 export async function GET(request: Request) {
+  await ensureDocPublication()
   const identity = siteIdentity(await resolveRequestSiteConfig())
   return new Response(buildSkillManifest(identity, new URL(request.url).origin), {
     headers: {

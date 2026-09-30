@@ -247,40 +247,113 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => HTML_ESCAPES[char])
 }
 
+/** 1-based line numbers carrying presentation state inside one fence. */
+interface LineMarks {
+  highlight: Set<number>
+  focus: Set<number>
+  add: Set<number>
+  remove: Set<number>
+}
+
 /**
  * Render themed tokens to the same inner HTML the old Shiki `renderToHtml`
  * produced for this pipeline: one `<span>` per line wrapping per-token color
  * spans, with no `<pre>`/`<code>` wrapper (those already exist in the tree).
- * Lines listed in `highlightedLines` (1-based) get a class styled in
- * globals.css.
+ * Marked lines (1-based) get classes styled in globals.css. When a fence has
+ * any focused line, every other line is dimmed.
  */
-function tokensToHtml(lines: Array<Array<ThemedToken>>, highlightedLines: Set<number>): string {
+function tokensToHtml(lines: Array<Array<ThemedToken>>, marks: LineMarks): string {
   return lines
     .map((line, index) => {
       const inner = line
         .map((token) => `<span style="color:${token.color ?? 'inherit'}">${escapeHtml(token.content)}</span>`)
         .join('')
-      const highlightClass = highlightedLines.has(index + 1) ? ' class="thally-line-highlight"' : ''
-      return `<span${highlightClass}>${inner}</span>`
+      const n = index + 1
+      const classes: Array<string> = []
+      if (marks.highlight.has(n)) classes.push('thally-line-highlight')
+      if (marks.add.has(n)) classes.push('thally-line-add')
+      if (marks.remove.has(n)) classes.push('thally-line-remove')
+      if (marks.focus.size > 0 && !marks.focus.has(n)) classes.push('thally-line-dim')
+      const attr = classes.length ? ` class="${classes.join(' ')}"` : ''
+      return `<span${attr}>${inner}</span>`
     })
     .join('\n')
 }
 
+// Trailing notation comment: `// [!code ++]`, `# [!code --:3]`,
+// `<!-- [!code highlight] -->`, `/* [!code focus] */`, `-- [!code ++]`, and the
+// JSX form `{/* [!code ++] */}`.
+// No leading or doubled `[ \t]*`: adjacent optional whitespace runs backtrack
+// quadratically on a long run of spaces (authored input, bounded by nothing).
+const CODE_NOTATION =
+  /(?:\/\/|#|--|\/\*|<!--|\{[ \t]*\/\*)[ \t]*\[!code[ \t]+(\+\+|--|highlight|focus)(?::(\d+))?\](?:[ \t]*(?:\*\/[ \t]*\}|\*\/|-->))?[ \t]*(\r?)$/
+
+/**
+ * Strip notation comments from a fence and report which lines they mark.
+ * Follows Shiki's notation rules: a marker after code marks that line (and,
+ * with `:N`, the N-1 lines after it); a line that holds only a marker comment
+ * is removed and marks the following line(s), counting `:N` from the next line.
+ * Mark sets, and any `{n}` / `focus={n}` authored in the fence meta, refer to
+ * the RENDERED lines, i.e. after marker-only lines are removed.
+ * Returns null when the fence has no markers, leaving plain fences
+ * byte-identical.
+ */
+export function applyCodeNotation(code: string): { code: string; marks: LineMarks } | null {
+  if (!code.includes('[!code')) return null
+  const marks = { highlight: new Set<number>(), focus: new Set<number>(), add: new Set<number>(), remove: new Set<number>() }
+  const kinds = { '++': marks.add, '--': marks.remove, highlight: marks.highlight, focus: marks.focus } as const
+  let found = false
+  const out: Array<string> = []
+  for (const line of code.split('\n')) {
+    if (!line.includes('[!code')) {
+      out.push(line)
+      continue
+    }
+    // Strip every trailing marker (`a // [!code ++] // [!code focus]`).
+    // The current rendered line number is `out.length + 1`; when the line is
+    // marker-only it is dropped, so that same number is the next line's.
+    let rest = line
+    let carriageReturn = ''
+    for (let match = CODE_NOTATION.exec(rest); match; match = CODE_NOTATION.exec(rest)) {
+      found = true
+      if (rest === line) carriageReturn = match[3]
+      const count = Math.min(Number(match[2] ?? 1) || 1, MAX_HIGHLIGHTED_LINES)
+      const target = kinds[match[1] as keyof typeof kinds]
+      for (let offset = 0; offset < count; offset += 1) target.add(out.length + 1 + offset)
+      let end = match.index
+      while (end > 0 && (rest[end - 1] === ' ' || rest[end - 1] === '\t')) end -= 1
+      rest = rest.slice(0, end)
+    }
+    if (rest === line) out.push(line)
+    else if (rest !== '') out.push(rest + carriageReturn)
+  }
+  return found ? { code: out.join('\n'), marks } : null
+}
+
 // ---------------------------------------------------------------------------
-// Fence meta parsing — supports:
-//   ```ts api-client.ts          (bare token → title)
+// Fence meta parsing — supports (Mintlify-compatible):
+//   ```ts api-client.ts          (bare words → title, multi-word allowed)
 //   ```ts title="api-client.ts"  (explicit title/filename attribute)
 //   ```tsx framework="Next.js"   (visible framework tag, TSX grammar)
 //   ```ts {2,4-6}                (highlighted lines)
 //   ```ts highlight={2,4-6}      (highlighted lines, explicit form)
-//   ```bash wrap                 (soft-wrap long lines)
+//   ```ts focus={2,4-6}          (dim every other line)
+//   ```ts icon="python"          (icon in the header)
+//   ```bash wrap lines           (soft-wrap, line numbers)
+//   ```ts expandable nocopy      (collapsible, no copy button)
+// `twoslash` and unknown `key=value` options are accepted and ignored.
 // ---------------------------------------------------------------------------
 
 export interface CodeFenceMeta {
   title?: string
   tag?: string
+  icon?: string
   wrap?: boolean
+  lines?: boolean
+  expandable?: boolean
+  nocopy?: boolean
   highlight?: Array<number>
+  focus?: Array<number>
 }
 
 function expandLineRanges(spec: string): Array<number> {
@@ -309,36 +382,132 @@ function expandLineRanges(spec: string): Array<number> {
   return lines
 }
 
+interface MetaToken {
+  key?: string
+  /** Value with surrounding quotes or braces removed. */
+  value: string
+  /** True when the value was a `{...}` group. */
+  group: boolean
+  /** True for a quoted string; a quoted word is never a boolean flag. */
+  quoted?: boolean
+}
+
+/** End of a bare word: whitespace, or a `{1,2}` highlight group glued on (`file.ts{1,2}`). */
+function wordEnd(meta: string, start: number): number {
+  let j = start
+  while (j < meta.length && !/\s/.test(meta[j])) {
+    if (j > start && meta[j] === '{' && /^\{[\d,\s-]*\}/.test(meta.slice(j))) break
+    j += 1
+  }
+  return j
+}
+
+/** Read one quoted string or balanced `{...}` group starting at `start`. */
+function readDelimited(meta: string, start: number): { value: string; end: number; group: boolean; quoted?: boolean } | null {
+  const open = meta[start]
+  if (open === '"' || open === "'") {
+    // `\"` (or `\'`) is an escaped quote; any other backslash is literal so
+    // Windows paths survive.
+    let close = start + 1
+    while (close < meta.length && meta[close] !== open) close += meta[close] === '\\' && meta[close + 1] === open ? 2 : 1
+    const raw = meta.slice(start + 1, close)
+    return { value: raw.split(`\\${open}`).join(open), end: close < meta.length ? close + 1 : close, group: false, quoted: true }
+  }
+  if (open === '{') {
+    let depth = 0
+    let quote = ''
+    for (let i = start; i < meta.length; i += 1) {
+      const ch = meta[i]
+      if (quote) {
+        if (ch === quote) quote = ''
+      } else if (ch === '"' || ch === "'") quote = ch
+      else if (ch === '{') depth += 1
+      else if (ch === '}' && --depth === 0) return { value: meta.slice(start + 1, i), end: i + 1, group: true }
+    }
+    return { value: meta.slice(start + 1), end: meta.length, group: true }
+  }
+  return null
+}
+
+function tokenizeMeta(meta: string): Array<MetaToken> {
+  const tokens: Array<MetaToken> = []
+  let i = 0
+  while (i < meta.length) {
+    if (/\s/.test(meta[i])) {
+      i += 1
+      continue
+    }
+    const delimited = readDelimited(meta, i)
+    if (delimited) {
+      tokens.push({ value: delimited.value, group: delimited.group, quoted: delimited.quoted })
+      i = delimited.end
+      continue
+    }
+    const key = /^([A-Za-z][\w-]*)=/.exec(meta.slice(i))
+    if (key) {
+      i += key[0].length
+      const value = readDelimited(meta, i)
+      if (value) {
+        tokens.push({ key: key[1], value: value.value, group: value.group })
+        i = value.end
+      } else {
+        const end = meta.slice(i).search(/\s/)
+        const stop = end === -1 ? meta.length : i + end
+        tokens.push({ key: key[1], value: meta.slice(i, stop), group: false })
+        i = stop
+      }
+      continue
+    }
+    const stop = wordEnd(meta, i)
+    tokens.push({ value: meta.slice(i, stop), group: false })
+    i = stop
+  }
+  return tokens
+}
+
+const BOOLEAN_FLAGS = new Set(['wrap', 'lines', 'expandable', 'nocopy', 'twoslash'])
+
 /** Parse portable code-fence metadata and ignore renderer-only props. */
 export function parseCodeFenceMeta(meta: string): CodeFenceMeta {
   const result: CodeFenceMeta = {}
-  const tokens = meta.match(/[^\s"{]+="[^"]*"|\{[^}]*\}|\S+/g) ?? []
-  for (const token of tokens) {
-    if (token === 'wrap') {
-      result.wrap = true
-      continue
-    }
-    const highlightMatch = token.match(/^(?:highlight=)?\{([\d,\s-]+)\}$/)
-    if (highlightMatch) {
-      result.highlight = expandLineRanges(highlightMatch[1])
-      continue
-    }
-    const titleMatch = token.match(/^(?:title|filename)=["']?([^"']+)["']?$/)
-    if (titleMatch) {
-      result.title = titleMatch[1]
-      continue
-    }
-    const tagMatch = token.match(/^(?:framework|tag)=["']?([^"']+)["']?$/)
-    if (tagMatch) {
-      result.tag = tagMatch[1]
-      continue
-    }
-    // Mintlify emits presentation props such as `theme={"system"}` in the
-    // fence metadata. They configure its renderer and are not human-facing
-    // filenames, so carrying them into Thally's title bar is misleading.
-    if (/^[A-Za-z][\w-]*=/.test(token)) continue
-    if (!result.title) result.title = token
+  const words: Array<string> = []
+  let explicitTitle: string | undefined
+  const setBoolean = (name: 'wrap' | 'lines' | 'expandable' | 'nocopy', value: string) => {
+    result[name] = value.trim().toLowerCase() !== 'false'
   }
+  for (const token of tokenizeMeta(meta)) {
+    if (!token.key) {
+      if (token.group) {
+        if (/^[\d,\s-]+$/.test(token.value)) result.highlight = expandLineRanges(token.value)
+      } else if (!token.quoted && BOOLEAN_FLAGS.has(token.value)) {
+        // Flags are case-sensitive and recognised anywhere among bare words
+        // (`Show lines of code` is a title of "Show of code" plus `lines`);
+        // quote the word (`"lines"`) to keep it in a title.
+        if (token.value !== 'twoslash') result[token.value as 'wrap'] = true
+      } else if (token.value && !/^[{}]+$/.test(token.value)) {
+        words.push(token.value)
+      }
+      continue
+    }
+    const key = token.key
+    if (key === 'title' || key === 'filename') explicitTitle = token.value
+    else if (key === 'framework' || key === 'tag') result.tag = token.value
+    else if (key === 'icon') {
+      const icon = token.value.replace(/^["']|["']$/g, '').trim()
+      if (icon) result.icon = icon
+    } else if (key === 'highlight' || key === 'focus') {
+      const spec = token.value.replace(/^["']|["']$/g, '')
+      if (/^[\d,\s-]+$/.test(spec)) result[key] = expandLineRanges(spec)
+    } else if (key === 'wrap' || key === 'lines' || key === 'expandable' || key === 'nocopy') {
+      setBoolean(key, token.value)
+    }
+    // Everything else (`theme={"system"}`, unknown keys) configures another
+    // renderer and is not a human-facing filename.
+  }
+  // Duplicate keys: the last one wins. An empty explicit title falls back to
+  // the bare words.
+  const title = explicitTitle || words.join(' ')
+  if (title) result.title = title
   return result
 }
 
@@ -371,6 +540,11 @@ function rehypeParseCodeBlocks() {
         ...(parsedMeta.title ? { title: parsedMeta.title } : {}),
         ...(parsedMeta.tag ? { tag: parsedMeta.tag } : {}),
         ...(parsedMeta.wrap ? { wrap: '' } : {}),
+        ...(parsedMeta.lines ? { lines: '' } : {}),
+        ...(parsedMeta.expandable ? { expandable: '' } : {}),
+        ...(parsedMeta.nocopy ? { nocopy: '' } : {}),
+        ...(parsedMeta.icon ? { icon: parsedMeta.icon } : {}),
+        ...(parsedMeta.focus?.length ? { focusLines: parsedMeta.focus.join(',') } : {}),
         ...(parsedMeta.highlight?.length
           ? { highlightLines: parsedMeta.highlight.join(',') }
           : {}),
@@ -383,7 +557,13 @@ function rehypeShiki() {
   return async (tree: Root) => {
     // Scan before initializing Shiki. Most prose pages contain no fenced code,
     // so they should not pay the cold-start cost of constructing every grammar.
-    const targets: Array<{ node: Element; code: string; language: string; textNode: { value: string } }> = []
+    const targets: Array<{
+      node: Element
+      code: string
+      language: string
+      textNode: { value: string }
+      notation: ReturnType<typeof applyCodeNotation>
+    }> = []
     const budget: SyntaxHighlightBudget = {
       scheduledBlocks: 0,
       scheduledBytes: 0,
@@ -405,13 +585,17 @@ function rehypeShiki() {
         return
       }
 
+      const language = node.properties?.language as string | undefined
+      // Notation comments are authoring syntax: strip them from what is
+      // rendered and copied. Mermaid consumes the raw fence untouched.
+      const notation = language && language !== 'mermaid' ? applyCodeNotation(textNode.value) : null
+      if (notation) textNode.value = notation.code
       const code = textNode.value
       node.properties = {
         ...node.properties,
         code,
       }
 
-      const language = node.properties?.language as string | undefined
       if (!language) {
         return
       }
@@ -429,7 +613,7 @@ function rehypeShiki() {
         return
       }
 
-      targets.push({ node, code, language, textNode })
+      targets.push({ node, code, language, textNode, notation })
     })
 
     if (targets.length === 0) return
@@ -443,8 +627,26 @@ function rehypeShiki() {
         theme: cssVariablesTheme,
       })
       const highlightSpec = target.node.properties?.highlightLines as string | undefined
-      const highlightedLines = new Set(highlightSpec ? expandLineRanges(highlightSpec) : [])
-      target.textNode.value = tokensToHtml(lines, highlightedLines)
+      const focusSpec = target.node.properties?.focusLines as string | undefined
+      const marks: LineMarks = {
+        highlight: new Set([...(highlightSpec ? expandLineRanges(highlightSpec) : []), ...(target.notation?.marks.highlight ?? [])]),
+        // Only focus lines that exist: `focus={0}` or `focus={99}` on a short
+        // block must not dim every line.
+        focus: new Set(
+          [...(focusSpec ? expandLineRanges(focusSpec) : []), ...(target.notation?.marks.focus ?? [])].filter(
+            (n) => n >= 1 && n <= lines.length,
+          ),
+        ),
+        add: target.notation?.marks.add ?? new Set(),
+        remove: target.notation?.marks.remove ?? new Set(),
+      }
+      target.textNode.value = tokensToHtml(lines, marks)
+      // Lets `expandable` fences start expanded when a mark sits below the fold.
+      const lastMarked = Math.max(
+        0,
+        ...[marks.highlight, marks.focus, marks.add, marks.remove].flatMap((set) => [...set].filter((n) => n <= lines.length)),
+      )
+      if (lastMarked > 0 && target.node.properties?.expandable !== undefined) target.node.properties = { ...target.node.properties, lastmarked: String(lastMarked) }
     }
   }
 }

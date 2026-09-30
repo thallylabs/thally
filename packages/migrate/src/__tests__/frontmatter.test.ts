@@ -24,6 +24,18 @@ describe('parseFrontmatter', () => {
     expect(parsed.data.title).toBe('Hello')
     expect(parsed.content.trim()).toBe('Body.')
   })
+
+  it('salvages readable fields and reports an error instead of throwing on invalid yaml', () => {
+    // A bare backtick is a reserved YAML indicator; this mirrors crewAI's
+    // ragtool.mdx frontmatter that previously aborted the whole migration.
+    const parsed = parseFrontmatter(
+      '---\ntitle: RagTool\ndescription: `RagTool` is great\n---\n\nBody.',
+    )
+    expect(parsed.error).toBeDefined()
+    expect(parsed.data.title).toBe('RagTool')
+    expect(parsed.data.description).toBeUndefined()
+    expect(parsed.content.trim()).toBe('Body.')
+  })
 })
 
 describe('parseMarkdownPage', () => {
@@ -39,5 +51,18 @@ describe('parseMarkdownPage', () => {
     })
 
     expect(globals[marker]).toBeUndefined()
+  })
+
+  it('keeps the page and flags frontmatterError instead of aborting on invalid yaml', () => {
+    const page = parseMarkdownPage({
+      id: 'ragtool',
+      raw: '---\ntitle: RagTool\ndescription: `RagTool` is great\n---\n\nBody text.',
+      source: 'docs/ragtool.mdx',
+    })
+
+    expect(page).not.toBeNull()
+    expect(page?.title).toBe('RagTool')
+    expect(page?.frontmatterError).toBeDefined()
+    expect(page?.description).toContain('Body text.')
   })
 })

@@ -20,7 +20,7 @@ import type {
   MigrationWarning,
 } from './types.js'
 
-const MAX_CONFIG_BYTES = 1_000_000
+const MAX_CONFIG_BYTES = 20_000_000
 const CATEGORY_FILENAMES = ['_category_.json', '_category_.yml', '_category_.yaml']
 const SIDEBAR_FILENAMES = [
   'sidebars.json',
@@ -321,7 +321,12 @@ export function expandDocusaurusDocCardLists(
 /**
  * Rewrite Docusaurus file/doc-id links after every final slug is known. This is
  * deliberately line based so examples inside fenced code remain byte-for-byte
- * source content.
+ * source content. A link whose `#fragment` uses a case-preserved heading id
+ * (live Docusaurus keeps case intact; Thally always lowercases its auto-slug)
+ * is left as-is here — `preserveDocusaurusLinkedAnchors` (repository.ts)
+ * repairs those afterward by adding an explicit anchor matching the literal
+ * fragment, which also covers repeated table-field ids that this
+ * path-only resolver has no visibility into.
  */
 export function rewriteDocusaurusLinks(
   body: string,
@@ -357,7 +362,8 @@ export function rewriteDocusaurusLinks(
   }
 
   function rewriteTarget(target: string): string {
-    if (!target || target.startsWith('#') || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(target)) return target
+    if (!target || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(target)) return target
+    if (target.startsWith('#')) return target
     const suffixIndex = target.search(/[?#]/)
     const path = suffixIndex >= 0 ? target.slice(0, suffixIndex) : target
     const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
@@ -429,7 +435,7 @@ export function readDocusaurusSiteOrigin(repositoryRoot: string): string | undef
 
 function readBoundedText(path: string): string {
   if (lstatSync(path).size > MAX_CONFIG_BYTES) {
-    throw new Error('Docusaurus sidebar config exceeded the 1 MB static-parser limit.')
+    throw new Error('The Docusaurus sidebar config is larger than 20 MB and could not be imported.')
   }
   return readFileSync(path, 'utf8')
 }

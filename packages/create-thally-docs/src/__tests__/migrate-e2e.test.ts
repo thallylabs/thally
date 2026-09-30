@@ -66,6 +66,37 @@ describe('CLI migration flow', () => {
     expect(config.tabs.map((tab) => tab.tab)).toEqual(['Existing'])
   })
 
+  it('warns about OpenAPI files already under public/ when importing into an existing site, without deleting them', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-cli-migrate-public-spec-'))
+    mkdirSync(join(projectDir, 'public'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'Existing', groups: [{ group: 'Keep', pages: ['existing'] }] }] }))
+    const stale = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { '/a': { get: { 'x-hidden': true, responses: {} } } } })
+    writeFileSync(join(projectDir, 'public', 'openapi.json'), stale)
+    writeFileSync(join(projectDir, 'public', 'manifest.json'), '{"name":"not a spec"}')
+    const fetcher: MigrationFetcher = async (url) => {
+      if (url.toString() === 'https://docs.example.com/docs') {
+        return { finalUrl: url, contentType: 'text/html', body: '<html><head><title>Docs</title></head><body><main><h1>Docs</h1><p>Documentation homepage with enough useful content to migrate safely.</p></main></body></html>' }
+      }
+      if (url.toString() === 'https://docs.example.com/docs.md') {
+        return { finalUrl: url, contentType: 'text/markdown', body: '---\ntitle: Imported docs\n---\n\n# Imported docs\n\nThe imported page body.' }
+      }
+      throw new Error('not found')
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let result
+    try {
+      result = await migrateDocs({ sourceUrl: 'https://docs.example.com/docs', projectDir, into: true, yes: true, fetcher })
+    } finally {
+      warn.mockRestore()
+    }
+    const message = result.warnings.map((warning) => warning.message).join('\n')
+    expect(message).toContain('public/openapi.json')
+    expect(message).toContain('contains x-excluded/x-hidden operations')
+    expect(message).toContain('does not remove old copies from public/')
+    expect(message).not.toContain('manifest.json')
+    expect(readFileSync(join(projectDir, 'public', 'openapi.json'), 'utf8')).toBe(stale)
+  })
+
   it.each([
     { yes: false, skipValidation: false, failsInstallation: false },
     { yes: true, skipValidation: false, failsInstallation: false },

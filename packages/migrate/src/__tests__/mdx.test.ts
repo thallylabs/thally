@@ -3,7 +3,7 @@
 import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
-import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -437,6 +437,133 @@ describe('Docusaurus import normalization', () => {
   })
 })
 
+describe('inline component hook imports', () => {
+  function body(raw: string): string | undefined {
+    return parseMarkdownPage({ id: 'page', raw, source: 'https://example.com/page' })?.body
+  }
+
+  it('imports hooks a page-local inline component calls without an import', () => {
+    const page = body('export const Counter = () => {\n  const [n, setN] = useState(0)\n  return <button onClick={() => setN(n + 1)}>{n}</button>\n}\n\n<Counter />')
+    expect(page).toMatch(/^import \{ useState \} from 'react'/)
+  })
+
+  it('imports only the hooks actually called, in the documented order', () => {
+    const page = body('export const X = () => {\n  useEffect(() => {}, [])\n  const [n] = useState(0)\n  return <div>{n}</div>\n}')
+    expect(page).toMatch(/^import \{ useState, useEffect \} from 'react'/)
+  })
+
+  it('does not add an import when no hook is called', () => {
+    const source = 'Just prose.'
+    expect(body(source)).toBe(source)
+  })
+
+  it('does not duplicate an import the page already has', () => {
+    const source = "import { useState } from 'react'\n\nexport const Counter = () => {\n  const [n] = useState(0)\n  return <div>{n}</div>\n}"
+    expect(body(source)).toBe(source)
+  })
+
+  it('does not import a hook shown only in a documentation code sample', () => {
+    // The import alone (unused or not) marks the compiled page a Client
+    // Component and breaks the Server Component build — showing readers what
+    // a hook call looks like must not trigger it.
+    const source = '```mdx\nexport const Counter = () => {\n  const [n] = useState(0)\n}\n```'
+    expect(body(source)).toBe(source)
+  })
+})
+
+describe('nested code fence widening', () => {
+  it('widens an outer fence so a same-length nested fence does not close it early', () => {
+    const source = '```mdx\n<Tabs>\n  <Tab title="npm">\n    ```bash\n    npm install x\n    ```\n  </Tab>\n</Tabs>\n```'
+    expect(normalizeMdx(source)).toBe(
+      '````mdx\n<Tabs>\n  <Tab title="npm">\n    ```bash\n    npm install x\n    ```\n  </Tab>\n</Tabs>\n````',
+    )
+  })
+
+  it('widens each ancestor enough for doubly nested fences of the same length', () => {
+    const source = '```mdx\n```bash\n```diff\ncode\n```\n```\n```'
+    expect(normalizeMdx(source)).toBe('`````mdx\n````bash\n```diff\ncode\n```\n````\n`````')
+  })
+
+  it('leaves ordinary, unnested code fences untouched', () => {
+    const source = '```js\nconst x = 1\n```\n\nMore prose.\n\n```py\nx = 1\n```'
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('leaves unbalanced fences untouched rather than guessing', () => {
+    const source = '```mdx\n```bash\nnpm install x'
+    expect(normalizeMdx(source)).toBe(source)
+  })
+})
+
+describe('orphan capitalized tag escaping', () => {
+  it('escapes a bare placeholder tag that never closes or self-closes', () => {
+    expect(normalizeMdx('Add a callout: "<Feature> requires a plan."'))
+      .toBe('Add a callout: "&lt;Feature&gt; requires a plan."')
+  })
+
+  it('never rewrites tag-like text inside a string of a page that already compiles', () => {
+    const source = "export const label = '<Feature>'\n\nUse {label}."
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('leaves a properly paired tag alone', () => {
+    const source = '<Note>hello</Note>'
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('leaves a self-closing tag alone', () => {
+    const source = '<Icon icon="download" />'
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('recognizes a self-closing tag whose last attribute value ends in a brace', () => {
+    const source = '<Visits initial={4} />'
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('leaves a locally declared inline component alone', () => {
+    const source = 'export const Counter = () => <div/>\n\n<Counter />'
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('leaves an imported component alone', () => {
+    const source = "import { Widget } from '/snippets/widget.mdx'\n\n<Widget>"
+    expect(normalizeMdx(source)).toBe(source)
+  })
+
+  it('does not touch tag-like text inside inline code or a fenced code block', () => {
+    expect(normalizeMdx('Use `<Info>` for callouts.')).toBe('Use `<Info>` for callouts.')
+    const fenced = '```mdx\n<Foo>\n```'
+    expect(normalizeMdx(fenced)).toBe(fenced)
+  })
+})
+
+describe("heading id preservation via normalizeMdx (an explicit `{#id}` anchor is unparsable MDX prose, and Thally's heading renderer can't take an explicit id prop)", () => {
+  it("replaces a heading's explicit {#custom-id} suffix with a preceding anchor element carrying that id", () => {
+    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'docusaurus')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
+  })
+
+  it('does the same with inline code and JSX before it on the same heading line', () => {
+    const source = '### <Icon name="angle-right" /> `cypress-tap` sessions {#cypress-tap-sessions}'
+    expect(normalizeMdx(source, 'docusaurus')).toBe('<a id="cypress-tap-sessions"></a>\n### <Icon name="angle-right" /> `cypress-tap` sessions')
+  })
+
+  it('leaves a heading with no explicit id unchanged', () => {
+    expect(normalizeMdx('## Plain heading', 'docusaurus')).toBe('## Plain heading')
+  })
+
+  it('leaves a `{#...}`-shaped line inside a fenced code block untouched', () => {
+    const body = '```md\n## Heading {#id}\n```'
+    expect(normalizeMdx(body, 'docusaurus')).toBe(body)
+  })
+
+  it('runs for every platform, not just docusaurus — the syntax means the same thing everywhere (e.g. live crewAI/Mintlify docs)', () => {
+    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'mintlify')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
+    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'fern')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
+    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
+  })
+})
+
 describe('multi-line renames (fenced/inline code masked, whole body rewritten)', () => {
   it('converts a multi-line HTML comment to an MDX comment', () => {
     const body = 'Before.\n\n<!--\n  a note\n  spanning lines\n-->\n\nAfter.'
@@ -480,6 +607,38 @@ describe('multi-line renames (fenced/inline code masked, whole body rewritten)',
     // A comment-like fragment inside a fenced block must not be converted either.
     const fencedComment = '```html\n<!--\n  example comment\n-->\n```'
     expect(normalizeMdx(fencedComment)).toBe(fencedComment)
+  })
+})
+
+describe('normalizeExplicitHeadingIds', () => {
+  it('replaces a heading\'s trailing {#custom-id} with an <a id> element, keeping the heading text, and the result compiles', () => {
+    // Real crewAI content: `{#memory-embedder-config}` makes @mdx-js/mdx fail
+    // with "Could not parse expression with acorn" and excluded the whole page.
+    const result = normalizeExplicitHeadingIds('### Memory & embedder config {#memory-embedder-config}\n\nSome prose.')
+    expect(result).toBe('<a id="memory-embedder-config"></a>\n### Memory & embedder config\n\nSome prose.')
+    expect(() => compileSync(result, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('leaves a real fenced code block containing heading-shaped text untouched', () => {
+    const body = ['```md', '### Not a real heading {#fake-id}', '```'].join('\n')
+    expect(normalizeExplicitHeadingIds(body)).toBe(body)
+  })
+
+  it('leaves a heading with no custom id unchanged', () => {
+    const body = '## Plain heading\n\nSome prose.'
+    expect(normalizeExplicitHeadingIds(body)).toBe(body)
+  })
+
+  it('never touches the YAML frontmatter block', () => {
+    const body = '---\ntitle: "{#not-a-heading}"\n---\n\n## Heading {#real-id}'
+    expect(normalizeExplicitHeadingIds(body)).toBe('---\ntitle: "{#not-a-heading}"\n---\n\n<a id="real-id"></a>\n## Heading')
+  })
+
+  it('stays fast on a very long heading with no custom id', () => {
+    const body = `# a${' '.repeat(60_000)}b`
+    const started = Date.now()
+    expect(normalizeExplicitHeadingIds(body)).toBe(body)
+    expect(Date.now() - started).toBeLessThan(500)
   })
 })
 
@@ -839,6 +998,16 @@ describe('escapeFernLiteralBraces', () => {
 
   it('round-trips a body with no frontmatter and no escapable braces unchanged', () => {
     const body = 'Just prose, no braces here.'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
+
+  it('escapes double-mustache template text (`{{now}}`) the same as single-brace text', () => {
+    const body = 'Also remember to format {{now}} with your desired timezone.'
+    expect(escapeFernLiteralBraces(body)).toBe('Also remember to format \\{\\{now\\}\\} with your desired timezone.')
+  })
+
+  it('leaves `{{name}}` alone when `name` is declared by the page\'s own ESM', () => {
+    const body = 'import { now } from "./x"\n\nformat {{now}} for the user.'
     expect(escapeFernLiteralBraces(body)).toBe(body)
   })
 })

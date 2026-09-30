@@ -10,16 +10,19 @@ import clsx from 'clsx'
 import {
   Children,
   createContext,
+  Fragment,
   isValidElement,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useState,
 } from 'react'
-import type { ComponentPropsWithoutRef, ReactNode } from 'react'
+import type { ComponentPropsWithoutRef, CSSProperties, ReactNode } from 'react'
 import { create } from 'zustand'
 
 import { useDocsCodeActions } from '@/components/docs/code-actions-provider'
+import { Icon } from '@/components/mdx/content-icon'
 import { Tag } from '@/components/ui/tag'
 import { Mermaid } from '@/components/mdx/mermaid'
 
@@ -176,7 +179,7 @@ function CopyButton({ code }: { code: string }) {
   )
 }
 
-function CodeActions({ code }: { code: string }) {
+function CodeActions({ code, nocopy }: { code: string; nocopy?: boolean }) {
   const { canReportCode, hasAssistantEntryPoint, assistantLabel, reportCode, askAssistant } = useDocsCodeActions()
 
   return (
@@ -184,7 +187,7 @@ function CodeActions({ code }: { code: string }) {
       <button type="button" onClick={() => reportCode(code)} disabled={!canReportCode} className="inline-flex h-[30px] w-[30px] items-center justify-center rounded-[7px] text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35" aria-label="Report incorrect code" title="Report incorrect code">
         <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true"><path d="M8.2 3h7.6L21 8.2v7.6L15.8 21H8.2L3 15.8V8.2L8.2 3z"/><path d="M12 7.5V13" strokeLinecap="round"/><path d="M12 16.2v.1" strokeLinecap="round" strokeWidth="2.2"/></svg>
       </button>
-      <CopyButton code={code} />
+      {!nocopy && <CopyButton code={code} />}
       {hasAssistantEntryPoint && <button type="button" onClick={() => askAssistant(code)} className="inline-flex h-[30px] w-[30px] items-center justify-center rounded-[7px] text-muted-foreground transition hover:bg-muted hover:text-foreground" aria-label="Ask assistant about this code" title={assistantLabel}>
         <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true"><path d="M12 3.5l1.8 4.9 4.9 1.8-4.9 1.8L12 16.9l-1.8-4.9-4.9-1.8 4.9-1.8L12 3.5z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg>
       </button>}
@@ -192,21 +195,22 @@ function CodeActions({ code }: { code: string }) {
   )
 }
 
-function CodePanelHeader({ tag, label, code }: { tag?: string; label?: string; code: string }) {
+function CodePanelHeader({ tag, label, code, icon, nocopy }: { tag?: string; label?: string; code: string; icon?: string; nocopy?: boolean }) {
   return (
     <div className="flex h-[42px] items-center gap-2 border-b border-border px-4 pr-2">
       {tag && (
-        <div className="flex">
+        <div className="flex shrink-0">
           <Tag variant="small">{tag}</Tag>
         </div>
       )}
       {tag && label && (
         <span className="h-0.5 w-0.5 rounded-full bg-zinc-500" />
       )}
+      {icon && <Icon icon={icon} size={14} className="h-3.5 w-3.5 text-muted-foreground" />}
       {label && (
-        <span className="font-mono text-xs text-muted-foreground">{label}</span>
+        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground" title={label}>{label}</span>
       )}
-      <CodeActions code={code} />
+      <CodeActions code={code} nocopy={nocopy} />
     </div>
   )
 }
@@ -225,6 +229,17 @@ function getRenderableChildren(children: ReactNode) {
     return true
   })
 }
+
+/** MDX serializes boolean fence flags as empty-string attributes. */
+function isFlagOn(value: boolean | string | undefined): boolean {
+  return value === true || value === ''
+}
+
+// Collapsed height for `expandable` fences (Mintlify documents no threshold).
+const EXPANDABLE_COLLAPSED_LINES = 10
+// The pre clips at its padding box, so the cap is its top padding (py-4 =
+// 1rem) plus exactly N lines of `text-[0.84rem] leading-[1.7]`.
+const EXPANDABLE_COLLAPSED_HEIGHT = `${EXPANDABLE_COLLAPSED_LINES * 0.84 * 1.7 + 1}rem`
 
 /** Find the compiler's source-code payload through MDX/client wrappers. */
 function findCodePayload(node: ReactNode): string | undefined {
@@ -245,6 +260,11 @@ function CodePanel({
   code,
   language,
   wrap,
+  icon,
+  lines,
+  expandable,
+  nocopy,
+  lastmarked,
   hasGroupHeader,
 }: {
   children: ReactNode
@@ -252,9 +272,19 @@ function CodePanel({
   label?: string
   code?: string
   language?: string
-  wrap?: boolean
+  wrap?: boolean | string
+  icon?: string
+  lines?: boolean | string
+  expandable?: boolean | string
+  nocopy?: boolean | string
+  /** Highest 1-based line carrying a focus/highlight/diff mark (set by rehype). */
+  lastmarked?: string
   hasGroupHeader?: boolean
 }) {
+  // `null` = untouched by the reader, so the default (see below) applies. Inactive
+  // CodeGroup tabs unmount, so switching tabs simply returns to that default.
+  const [expanded, setExpanded] = useState<boolean | null>(null)
+  const preId = useId()
   const renderableChildren = getRenderableChildren(children)
   if (!renderableChildren.length) {
     return null
@@ -278,7 +308,12 @@ function CodePanel({
   let resolvedLabel = label
   let resolvedCode = code
   let resolvedLanguage = language
-  let resolvedWrap = wrap
+  let resolvedWrap = isFlagOn(wrap)
+  let resolvedIcon = icon
+  let resolvedLines = isFlagOn(lines)
+  let resolvedExpandable = isFlagOn(expandable)
+  let resolvedNocopy = isFlagOn(nocopy)
+  let resolvedLastMarked = Number(lastmarked) || 0
 
   const referenceElement = renderableChildren.find((child) =>
     isValidElement(child),
@@ -292,13 +327,22 @@ function CodePanel({
       code?: string
       language?: string
       wrap?: boolean | string
+      icon?: string
+      lines?: boolean | string
+      expandable?: boolean | string
+      nocopy?: boolean | string
+      lastmarked?: string
     }
     resolvedTag = props.tag ?? resolvedTag
     resolvedLabel = props.label ?? props.title ?? resolvedLabel
     resolvedCode = props.code ?? resolvedCode
     resolvedLanguage = props.language ?? resolvedLanguage
-    // MDX may serialize the boolean fence flag as an empty-string attribute.
-    resolvedWrap = resolvedWrap ?? (props.wrap === '' ? true : Boolean(props.wrap))
+    resolvedWrap = resolvedWrap || isFlagOn(props.wrap)
+    resolvedIcon = props.icon ?? resolvedIcon
+    resolvedLines = resolvedLines || isFlagOn(props.lines)
+    resolvedExpandable = resolvedExpandable || isFlagOn(props.expandable)
+    resolvedNocopy = resolvedNocopy || isFlagOn(props.nocopy)
+    resolvedLastMarked = Number(props.lastmarked) || resolvedLastMarked
   } else if (!resolvedCode) {
     const extractedText = renderableChildren
       .map((child) => (typeof child === 'string' ? child : ''))
@@ -320,22 +364,45 @@ function CodePanel({
       ? getPanelTitle({ language: resolvedLanguage })
       : 'Code')
 
+  // A trailing newline is not a visible line.
+  const lineCount = resolvedCode.replace(/\n$/, '').split('\n').length
+  const collapsible = resolvedExpandable && lineCount > EXPANDABLE_COLLAPSED_LINES
+  // A marked line hidden below the fold would defeat the mark, so those
+  // fences start expanded.
+  const isExpanded = expanded ?? resolvedLastMarked > EXPANDABLE_COLLAPSED_LINES
+  const collapsed = collapsible && !isExpanded
+
   return (
     <div className="group">
       {hasGroupHeader ? (
         <span className="absolute right-3 top-[7px] z-10">
-          <CodeActions code={resolvedCode} />
+          <CodeActions code={resolvedCode} nocopy={resolvedNocopy} />
         </span>
       ) : (
         <CodePanelHeader
           tag={resolvedTag}
           label={resolvedLabel}
           code={resolvedCode}
+          icon={resolvedIcon}
+          nocopy={resolvedNocopy}
         />
       )}
       <div className="relative">
         <pre
+          id={collapsible ? preId : undefined}
+          style={
+            collapsed || resolvedLines
+              ? ({
+                  ...(collapsed ? { maxHeight: EXPANDABLE_COLLAPSED_HEIGHT } : {}),
+                  // Gutter width follows the digit count so 3+ digit numbers do not shift code.
+                  ...(resolvedLines ? { '--thally-line-digits': Math.max(2, String(lineCount).length) } : {}),
+                } as CSSProperties)
+              : undefined
+          }
           className={clsx(
+            resolvedLines && 'thally-code-lines',
+            resolvedLines && resolvedWrap && 'thally-code-hang',
+            collapsed && 'thally-code-collapsed overflow-hidden',
             'px-[18px] py-4 font-mono text-[0.84rem] leading-[1.7] text-foreground',
             resolvedWrap ? 'whitespace-pre-wrap break-words' : 'overflow-x-auto',
             languageClass,
@@ -345,6 +412,17 @@ function CodePanel({
           {content}
         </pre>
       </div>
+      {collapsible && (
+        <button
+          type="button"
+          aria-expanded={isExpanded}
+          aria-controls={preId}
+          onClick={() => setExpanded(!isExpanded)}
+          className="thally-code-toggle w-full border-t border-border py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          {isExpanded ? 'Collapse' : 'Expand'}
+        </button>
+      )}
     </div>
   )
 }
@@ -382,6 +460,13 @@ function CodeGroupHeader({
                   : 'border-transparent text-muted-foreground hover:text-foreground',
               )}
             >
+              {isValidElement(child) && (child.props as { icon?: string }).icon && (
+                <Icon
+                  icon={(child.props as { icon?: string }).icon}
+                  size={14}
+                  className="mr-1.5 inline-block h-3.5 w-3.5 align-[-2px]"
+                />
+              )}
               {getPanelTitle(
                 isValidElement(child)
                   ? (child.props as {
@@ -578,4 +663,62 @@ export function Pre({
   }
 
   return <CodeGroup {...props} label={title}>{children}</CodeGroup>
+}
+
+interface CodeBlockProps extends Omit<PreProps, 'title'> {
+  filename?: string
+  /** Lines to tint, as Mintlify writes them: `"1,3-5"`, `"{1,3-5}"` or `"[1,3]"`. */
+  highlight?: string
+  /** Lines to keep in focus; every other line is dimmed. Same syntax as `highlight`. */
+  focus?: string
+}
+
+/** 1-based line numbers from `1,3-5`, with optional `{}` or `[]` around them. */
+function parseLineSpec(spec: unknown): Set<number> {
+  const lines = new Set<number>()
+  if (typeof spec !== 'string') return lines
+  for (const part of spec.replace(/[{}[\]\s]/g, '').split(',')) {
+    const [from, to = from] = part.split('-').map(Number)
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from) continue
+    for (let line = from; line <= Math.min(to, from + 1000); line += 1) lines.add(line)
+  }
+  return lines
+}
+
+/**
+ * Mintlify-parity standalone code block:
+ * `<CodeBlock language="ts" filename="x.ts" lines highlight="2">{`const x = 1`}</CodeBlock>`.
+ * A thin wrapper around `Pre`, so `lines`, `icon`, `expandable`, `nocopy` and
+ * `wrap` behave exactly as on a fenced block. `highlight` and `focus` are
+ * applied to a plain string child here (a fence has them applied at build
+ * time). `children` may also be an already-rendered `<pre>`/`<code>` element
+ * (e.g. from migrated content), which is passed through unchanged.
+ */
+export function CodeBlock({ children, filename, highlight, focus, ...props }: CodeBlockProps) {
+  if (typeof children !== 'string') {
+    return <Pre {...props} title={filename}>{children}</Pre>
+  }
+  const code = children.replace(/\n$/, '')
+  const highlighted = parseLineSpec(highlight)
+  const focused = parseLineSpec(focus)
+  const marked = [...highlighted, ...focused]
+  return (
+    <Pre {...props} code={code} title={filename} lastmarked={marked.length ? String(Math.max(...marked)) : undefined}>
+      <code className={props.language ? `language-${props.language}` : undefined}>
+        {code.split('\n').map((line, index) => (
+          <Fragment key={index}>
+            {index > 0 && '\n'}
+            <span
+              className={clsx(
+                highlighted.has(index + 1) && 'thally-line-highlight',
+                focused.size > 0 && !focused.has(index + 1) && 'thally-line-dim',
+              ) || undefined}
+            >
+              {line}
+            </span>
+          </Fragment>
+        ))}
+      </code>
+    </Pre>
+  )
 }
