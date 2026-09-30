@@ -13,6 +13,7 @@
  */
 export const THALLY_BUILTIN_COMPONENTS: ReadonlySet<string> = new Set([
   'CodeGroup', 'Info', 'Warning', 'Check', 'Danger', 'Error', 'Note', 'Tip',
+  'ApiTable', 'BrowserPreview', 'IframePreview',
   'Callout', 'AccordionGroup', 'Latex', 'Hero', 'Card', 'CardGroup',
   'Columns', 'Frame', 'Accordion', 'Tooltip', 'Icon', 'Steps', 'Step',
   'Tabs', 'Tab', 'Badge', 'Update', 'RequestExample', 'ResponseExample',

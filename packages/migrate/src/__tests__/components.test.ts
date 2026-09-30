@@ -25,6 +25,37 @@ function fixture(files: Record<string, string>): string {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('repository component migration', () => {
+  it('renders Docusaurus presentation wrappers with native Thally components', () => {
+    const root = fixture({
+      'website/docusaurus.config.js': 'module.exports = {}',
+      'website/docs/index.mdx': [
+        "import APITable from '@site/src/components/APITable'",
+        "import Window from '@site/src/components/BrowserWindow'",
+        "import IframeWindow from '@site/src/components/BrowserWindow/IframeWindow'",
+        '',
+        '```mdx-code-block',
+        '<APITable name="config">',
+        '```',
+        '| Name | Value |',
+        '| --- | --- |',
+        '| option | value |',
+        '```mdx-code-block',
+        '</APITable>',
+        '```',
+        '<Window url="https://example.com"><p>Preview</p></Window>',
+        '<IframeWindow url="https://example.com/preview" />',
+      ].join('\n'),
+    })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs', platform: 'docusaurus' })
+    const body = bundle.pages.find((page) => page.body.includes('Preview'))?.body ?? ''
+    expect(body).toContain('<ApiTable name="config">')
+    expect(body).toContain('<BrowserPreview url="https://example.com">')
+    expect(body).toContain('<IframePreview url="https://example.com/preview" />')
+    expect(body).toContain('option')
+    expect(body).toContain('Preview')
+    expect(bundle.warnings.some((warning) => /APITable|BrowserWindow|<Window>|IframeWindow/.test(warning.message))).toBe(false)
+  })
+
   it('isolates components and inline handlers from different sources across sequential imports', () => {
     function source(pageName: string, label: string): string {
       return fixture({

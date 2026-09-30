@@ -55,6 +55,7 @@ import { BannerPreview } from '@/components/layout/site-banner'
 import { Steps, Step } from '@/components/mdx/steps'
 import { Tabs, Tab } from '@/components/mdx/content-tabs'
 import { HeadingAnchor } from '@/components/mdx/heading-anchor'
+import { ApiTable, BrowserPreview, IframePreview } from '@/components/mdx/portable-widgets'
 import { cn, slugify } from '@/lib/utils'
 
 function flattenText(node: ReactNode): string {
@@ -123,6 +124,9 @@ export const builtinMdxComponents: MDXComponents = {
   },
   AccordionGroup: (props) => <AccordionGroup {...props} />,
   Latex: (props) => <Latex {...(props as ComponentPropsWithoutRef<typeof Latex>)} />,
+  ApiTable: (props) => <ApiTable {...(props as ComponentPropsWithoutRef<typeof ApiTable>)} />,
+  BrowserPreview: (props) => <BrowserPreview {...(props as ComponentPropsWithoutRef<typeof BrowserPreview>)} />,
+  IframePreview: (props) => <IframePreview {...(props as ComponentPropsWithoutRef<typeof IframePreview>)} />,
   // MDX: Mintlify pass-through wrapper — children are already compiled MDX.
   MDX: ({ children }: { children?: ReactNode }) => <>{children}</>,
   Hero: (props) => <Hero {...props} />,

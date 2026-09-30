@@ -72,6 +72,20 @@ describe('migration description fallback', () => {
 })
 
 describe('normalizeMdx', () => {
+  it('projects a static Docusaurus useBaseUrl require without changing code samples', () => {
+    const body = "<a href={require('@docusaurus/useBaseUrl').default('showcase')}>Showcase</a>\n\n```jsx\n<a href={require('@docusaurus/useBaseUrl').default('showcase')} />\n```"
+    const output = normalizeMdx(body, 'docusaurus')
+    expect(output).toContain('<a href="/showcase">Showcase</a>')
+    expect(output).toContain("```jsx\n<a href={require('@docusaurus/useBaseUrl').default('showcase')} />\n```")
+  })
+
+  it('uses Thally image zoom for a Docusaurus Zoom wrapper', () => {
+    const output = normalizeMdx('<Zoom>\n\n![Diagram](/img/diagram.png)\n\n</Zoom>', 'docusaurus')
+    expect(output).toContain('<Frame>')
+    expect(output).toContain('</Frame>')
+    expect(output).toContain('![Diagram](/img/diagram.png)')
+  })
+
   it('keeps styled source paragraphs from hydrating as nested paragraphs', () => {
     const source = '<p className="source-callout">\n  Text with **emphasis**.\n</p>\n\n```mdx\n<p>Keep this example</p>\n```'
     const output = normalizeMdx(source, 'mintlify')

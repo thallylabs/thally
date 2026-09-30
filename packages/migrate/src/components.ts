@@ -1095,6 +1095,20 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         // `resolveDependency` already understands, so a locally-owned
         // component copies the same way a relative import would.
         const specifier = rawSpecifier.startsWith('@site/') ? `/${rawSpecifier.slice('@site/'.length)}` : rawSpecifier
+        // Docusaurus' documentation uses two presentational wrappers whose
+        // implementations import its own router/theme runtime. Their public
+        // MDX signatures are simple, so render the authored children through
+        // Thally widgets instead of copying platform code or losing them.
+        const portableDocusaurusWidget = rawSpecifier === '@site/src/components/APITable'
+          ? 'ApiTable'
+          : rawSpecifier === '@site/src/components/BrowserWindow' ? 'BrowserPreview'
+          : rawSpecifier === '@site/src/components/BrowserWindow/IframeWindow' ? 'IframePreview' : undefined
+        if (portableDocusaurusWidget && bindings.length === 1 && bindings[0].imported === 'default'
+          && !hasExpressionReference(new Set([bindings[0].local]))) {
+          aliases.set(bindings[0].local, portableDocusaurusWidget)
+          edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+          continue
+        }
         if (isScaffoldProvidedImport(specifier)) {
           // Some translated Mintlify pages place a React hook import above a
           // fenced example. Keeping that unused import turns server MDX into

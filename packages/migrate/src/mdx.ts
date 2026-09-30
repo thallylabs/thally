@@ -1747,6 +1747,17 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
       /:([+\w-]+):/g,
       (shortcode: string, name: string) => nameToEmoji[name] ?? shortcode,
     ))
+    // Some authored JSX uses Docusaurus' runtime helper through `require()`
+    // directly in a link attribute. That package is absent from a generated
+    // Thally site; a static, confined path can be projected without running
+    // source code or leaving a build-breaking module reference.
+    rewritten = replaceOutsideCode(rewritten, (segment) => segment.replace(
+      /\b(href|src)=\{\s*require\(\s*(['"])@docusaurus\/useBaseUrl\2\s*\)\.default\(\s*(['"])([^'"]+)\3\s*\)\s*\}/g,
+      (original: string, attribute: string, _moduleQuote: string, _pathQuote: string, path: string) => {
+        if (!/^[\w./~%-]+$/.test(path) || path.split('/').includes('..')) return original
+        return `${attribute}="/${path.replace(/^\.\//, '').replace(/^\/+/, '')}"`
+      },
+    ))
     // Docusaurus injects these theme components globally. Thally also
     // exposes its equivalents globally, so source-only imports must not survive.
     rewritten = normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(removeGlobalDocusaurusImports(rewritten)))
@@ -1778,6 +1789,20 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
       .replace(/<\/Tree\.File>/g, '</File>')
     if (runDocusaurus) {
       result = result
+        // `mdx-code-block` can introduce a live tag after component import
+        // analysis has run. Those tags were invisible to its AST alias pass,
+        // so map the same known presentation wrappers here as well. The code
+        // masker leaves ordinary examples untouched.
+        .replace(/<APITable\b/g, '<ApiTable')
+        .replace(/<\/APITable>/g, '</ApiTable>')
+        .replace(/<BrowserWindow\b/g, '<BrowserPreview')
+        .replace(/<\/BrowserWindow>/g, '</BrowserPreview>')
+        .replace(/<IframeWindow\b/g, '<IframePreview')
+        .replace(/<\/IframeWindow>/g, '</IframePreview>')
+        // Docusaurus pages use react-medium-image-zoom around an image;
+        // Thally's Frame already provides native zoom for that same shape.
+        .replace(/<Zoom\b/g, '<Frame')
+        .replace(/<\/Zoom>/g, '</Frame>')
         // A TabItem outside any <Tabs>...</Tabs> pair (malformed source)
         // never reaches normalizeDocusaurusTabs' block match above; fall
         // back to its own label/value so it still renders as a Tab.
