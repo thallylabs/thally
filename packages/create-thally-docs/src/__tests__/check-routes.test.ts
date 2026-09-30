@@ -139,6 +139,43 @@ describe('thally check reader routes', () => {
     expect(result.output).not.toContain('Broken')
   })
 
+  it('resolves a link through a Next.js-style wildcard/param redirect source the same way the runtime matches it', async () => {
+    const result = await checkLinks('[Old reference](/old/api-reference/token)', [
+      { source: '/old/:slug*', destination: '/:slug*' },
+    ])
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken')
+  })
+
+  it('still reports a broken link when a wildcard/param redirect resolves to a page that does not exist', async () => {
+    const result = await checkLinks('[Missing](/old/nowhere)', [
+      { source: '/old/:slug*', destination: '/:slug*' },
+    ])
+    expect(result.exit).toBe(1)
+    expect(result.output).toContain('Broken link: "/old/nowhere"')
+  })
+
+  it('terminates on a wildcard redirect whose destination keeps matching its own source', async () => {
+    const result = await checkLinks('[Docs](/docs/intro)', [
+      { source: '/docs/:slug*', destination: '/docs/v2/:slug*' },
+    ])
+    expect(result.exit).toBe(1)
+  })
+
+  it('matches a trailing :param* with zero segments, like Next.js', async () => {
+    const result = await checkLinks('[Old](/old)', [
+      { source: '/old/:slug*', destination: '/introduction/:slug*' },
+    ])
+    expect(result.exit).toBe(0)
+  })
+
+  it('substitutes params by exact name when one name prefixes another', async () => {
+    const result = await checkLinks('[Old](/x/1/token)', [
+      { source: '/x/:a/:abc', destination: '/api-reference/:abc' },
+    ])
+    expect(result.exit).toBe(0)
+  })
+
   it('keeps missing locale targets, missing changelog content, and redirect cycles as errors', async () => {
     const result = await checkLinks('[Missing](/zh-Hans/quickstart) [Changes](/changelog) [Cycle](/loop)', [
       { source: '/loop', destination: '/other' },

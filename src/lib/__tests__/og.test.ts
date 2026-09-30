@@ -28,6 +28,7 @@ describe('buildOgImageUrl', () => {
       crumb: 'SDK / Configuration',
       url: 'docs.example.com/sdk/jobs',
       theme: 'dark',
+      v: '2',
     })
   })
 })

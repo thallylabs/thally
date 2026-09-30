@@ -34,6 +34,25 @@ instead of silently dropping that API tab's reference. AsyncAPI has no Thally
 renderer, so it always produces a clear warning naming the spec instead of
 disappearing.
 
+In-content links to auto-generated API operation pages are rewritten to the
+matching Thally `/api/...` route. A link under a known API section that matches
+no operation points to that section's overview page instead, and one warning
+lists the affected links (up to ten). A Mintlify default version's pages also
+get a redirect from their address without the version segment, since the
+original site serves them both ways.
+
+A repository is limited to 5,000 documentation files and, separately, 5,000
+asset files. Past that, files are kept in navigation order with the default
+version first, then pages not listed in navigation, and one warning counts and
+names (the first three of) the pages left out and suggests `--docs-dir` to
+migrate a smaller part of the repository. Scanning itself stops after 100,000
+files with its own warning. Individual assets over 25 MB, or beyond 500 MB in
+total, are not copied and are warned about one by one.
+
+Headings written with an explicit `{#custom-id}` become a preceding
+`<a id="custom-id"></a>` anchor and keep their text, so links to that id still
+work and the page still compiles as MDX.
+
 Migrated specs are written to `openapi/`, never `public/`, because the host
 serves `public/` as-is and would publish operations marked `x-excluded` or
 `x-hidden`. Migrating into an existing site does not delete anything: an

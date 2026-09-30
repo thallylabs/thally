@@ -47,13 +47,15 @@ import {
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
-import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
   buildNavigationFromPages,
   isDocumentationExtension,
   insertApiTab,
+  mintlifyAllVersionPrefixes,
+  mintlifyDefaultVersionPrefixes,
   mintlifyNavigationApiReferences,
   projectMintlifyNavigation,
   pruneMissingNavigationPages,
@@ -106,8 +108,8 @@ function isIgnoredContentDirectory(name: string): boolean {
 }
 const ASSET_DIRECTORIES = new Set(['assets', 'images', 'img', 'media', 'public', 'static'])
 const ASSET_EXTENSIONS = new Set([
-  '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.mp3', '.mp4',
-  '.pdf', '.png', '.svg', '.webm', '.webp',
+  '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.m4a', '.mp3', '.mp4',
+  '.ogg', '.pdf', '.png', '.svg', '.wav', '.webm', '.webp',
 ])
 const REPOSITORY_ONLY_DOCUMENTS = new Set([
   'agents.md', 'claude.md', 'code_of_conduct.md', 'contributing.md',
@@ -386,9 +388,107 @@ function readDocusaurusConfigSource(projectRoot: string): string {
   return readFileSync(path, 'utf8')
 }
 
+/**
+ * Scans forward from a `{` for its matching `}`, skipping over string,
+ * template, and comment contents so braces inside them don't throw off the
+ * depth count. Returns -1 if the object is never closed.
+ */
+function matchingBraceIndex(source: string, openBraceIndex: number): number {
+  let depth = 0
+  for (let i = openBraceIndex; i < source.length; i++) {
+    const ch = source[i]
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch
+      i++
+      while (i < source.length && source[i] !== quote) {
+        if (source[i] === '\\') i++
+        i++
+      }
+      continue
+    }
+    if (ch === '/' && source[i + 1] === '/') {
+      const newline = source.indexOf('\n', i)
+      i = newline === -1 ? source.length : newline
+      continue
+    }
+    if (ch === '/' && source[i + 1] === '*') {
+      const end = source.indexOf('*/', i + 2)
+      i = end === -1 ? source.length : end + 1
+      continue
+    }
+    if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+/** Finds a `key: 'value'` or `key: "value"` pair at the top level of an object body (not nested inside a further `{`, `[`, or `(`). */
+function topLevelStringProperty(objectBody: string, key: string): string | undefined {
+  let depth = 0
+  const keyPattern = new RegExp(`^${key}\\s*:\\s*(['"])`)
+  for (let i = 0; i < objectBody.length; i++) {
+    const ch = objectBody[i]
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch
+      i++
+      while (i < objectBody.length && objectBody[i] !== quote) {
+        if (objectBody[i] === '\\') i++
+        i++
+      }
+      continue
+    }
+    if (ch === '/' && objectBody[i + 1] === '/') {
+      const newline = objectBody.indexOf('\n', i)
+      i = newline === -1 ? objectBody.length : newline
+      continue
+    }
+    if (ch === '/' && objectBody[i + 1] === '*') {
+      const end = objectBody.indexOf('*/', i + 2)
+      i = end === -1 ? objectBody.length : end + 1
+      continue
+    }
+    if (ch === '{' || ch === '[' || ch === '(') {
+      depth++
+      continue
+    }
+    if (ch === '}' || ch === ']' || ch === ')') {
+      depth--
+      continue
+    }
+    if (depth === 0) {
+      const match = keyPattern.exec(objectBody.slice(i))
+      if (match) {
+        const quote = match[1]
+        const valueStart = i + match[0].length
+        const valueEnd = objectBody.indexOf(quote, valueStart)
+        if (valueEnd !== -1) return objectBody.slice(valueStart, valueEnd)
+      }
+    }
+  }
+  return undefined
+}
+
 function primaryDocusaurusDocsDirectory(projectRoot: string): string {
   const source = readDocusaurusConfigSource(projectRoot)
-  const configured = source.match(/\bdocs\s*:\s*\{[\s\S]{0,4000}?\bpath\s*:\s*(['"])([^'"]+)\1/)?.[2]
+  // The classic preset's `docs: { ... }` object configures the primary docs
+  // instance. Its `path` (when present) must come from directly inside that
+  // object, not from a `path` belonging to a nested value (e.g. a versions
+  // entry) or to an unrelated plugin's config further down the file — a
+  // brace-blind regex can walk straight through the docs object's closing
+  // brace into the next plugin's `path` (see the standalone content-docs
+  // plugin case handled by `additionalDocusaurusPluginRoots`).
+  const docsKeyMatch = source.match(/\bdocs\s*:\s*\{/)
+  let configured: string | undefined
+  if (docsKeyMatch?.index !== undefined) {
+    const openBrace = docsKeyMatch.index + docsKeyMatch[0].length - 1
+    const closeBrace = matchingBraceIndex(source, openBrace)
+    if (closeBrace !== -1) {
+      configured = topLevelStringProperty(source.slice(openBrace + 1, closeBrace), 'path')
+    }
+  }
   return trimTrailingSlashes(configured?.replace(/^\.\//, '') ?? '') || 'docs'
 }
 
@@ -454,7 +554,9 @@ function additionalDocusaurusPluginRoots(
 ): Array<DocusaurusPluginRoot> {
   const source = readDocusaurusConfigSource(projectRoot)
   const plugins: Array<DocusaurusPluginRoot> = []
-  const matcher = /['"]@docusaurus\/plugin-content-docs['"][\s\S]{0,3000}?\bpath\s*:\s*(['"])([^'"]+)\1[\s\S]{0,1000}?\brouteBasePath\s*:\s*(['"])([^'"]+)\3/g
+  // Docusaurus resolves the bare shorthand ('content-docs') to the same
+  // official plugin as the full package name, so both forms are matched.
+  const matcher = /['"](?:@docusaurus\/plugin-)?content-docs['"][\s\S]{0,3000}?\bpath\s*:\s*(['"])([^'"]+)\1[\s\S]{0,1000}?\brouteBasePath\s*:\s*(['"])([^'"]+)\3/g
   for (const match of source.matchAll(matcher)) {
     const localPath = trimTrailingSlashes(match[2].replace(/^\.\//, ''))
     const routePrefix = trimEdgeSlashes(match[4])
@@ -799,8 +901,29 @@ interface ScannedFile {
  * against a cycle (a symlink pointing at an ancestor, or two symlinks
  * pointing at each other).
  */
-function scanFiles(root: string, confinementRoot: string = root, warnings?: Array<MigrationWarning>): Array<ScannedFile> {
+/**
+ * A generous ceiling on how many *directory entries* `scanFiles` will walk
+ * when a `rank` function is supplied (see below) — far above
+ * `MAX_SOURCE_FILES` so a repository the size of crewAI's (~28k files) is
+ * walked in full, but still bounded so a pathologically huge tree can't
+ * make discovery itself slow. Walking is cheap (no file content is read
+ * here); only the final `MAX_SOURCE_FILES` selection is expensive to get
+ * wrong.
+ */
+const MAX_RANKED_WALK_FILES = MAX_SOURCE_FILES * 20
+
+/**
+ * Scan `root` for its files. When `rank` is given, the walk isn't cut off at
+ * `MAX_SOURCE_FILES` — it continues (bounded by `MAX_RANKED_WALK_FILES`) so
+ * every file's priority can be considered before any are dropped; the
+ * caller is responsible for sorting by `rank` and trimming to
+ * `MAX_SOURCE_FILES` afterward (see `selectFilesWithinBudget`). Without
+ * `rank`, the walk stops as soon as `MAX_SOURCE_FILES` files are found, same
+ * as before.
+ */
+function scanFiles(root: string, confinementRoot: string = root, warnings?: Array<MigrationWarning>, rank?: (relativePath: string) => number): Array<ScannedFile> {
   const files: Array<ScannedFile> = []
+  const walkCap = rank ? MAX_RANKED_WALK_FILES : MAX_SOURCE_FILES
   let confinementReal: string
   try {
     confinementReal = realpathSync(confinementRoot)
@@ -818,7 +941,7 @@ function scanFiles(root: string, confinementRoot: string = root, warnings?: Arra
   // so a page inside a symlinked submodule gets a sensible id like
   // `core/overview` instead of a `../../..`-laden physical path).
   function visit(directory: string, logicalDirectory: string = directory): void {
-    if (files.length >= MAX_SOURCE_FILES) return
+    if (files.length >= walkCap) return
     let directoryReal: string
     try {
       directoryReal = realpathSync(directory)
@@ -834,7 +957,7 @@ function scanFiles(root: string, confinementRoot: string = root, warnings?: Arra
       return
     }
     for (const entry of entries) {
-      if (files.length >= MAX_SOURCE_FILES) return
+      if (files.length >= walkCap) return
       if (isIgnoredContentDirectory(entry.name)) {
         // Still skipped (`.git`, `node_modules`, ...) — but never silently:
         // warn if it turns out to hold real pages, since that's exactly the
@@ -875,7 +998,91 @@ function scanFiles(root: string, confinementRoot: string = root, warnings?: Arra
     }
   }
   visit(root)
+  if (rank && files.length >= walkCap) {
+    warnings?.push({
+      code: 'limit-reached',
+      message: `Stopped scanning after ${walkCap} files, so the rest of the repository was not looked at. Run the migration on a smaller part of the repository with --docs-dir.`,
+    })
+  }
   return files
+}
+
+/**
+ * Applies the `MAX_SOURCE_FILES` budget to one homogeneous group (either
+ * documentation pages or assets — see `selectFilesWithinBudget`), keeping
+ * the highest-priority files and emitting one warning naming how many were
+ * dropped and — for Mintlify — which versions they belonged to.
+ */
+function selectGroupWithinBudget(
+  scanned: Array<ScannedFile>,
+  rank: (relativePath: string) => number,
+  warnings: Array<MigrationWarning> | undefined,
+  allVersionPrefixes: ReadonlySet<string>,
+  label: 'file' | 'asset',
+): Array<ScannedFile> {
+  if (scanned.length <= MAX_SOURCE_FILES) return scanned
+  // Ties (unreferenced files sharing a ceiling) break by path, not by
+  // directory-listing order, so the same repository always keeps the same files.
+  const ranked = scanned
+    .map((file) => ({ file, priority: rank(file.relativePath) }))
+    .sort((left, right) => left.priority - right.priority
+      || (left.file.relativePath < right.file.relativePath ? -1 : left.file.relativePath > right.file.relativePath ? 1 : 0))
+  const dropped = ranked.slice(MAX_SOURCE_FILES).map(({ file }) => file)
+  if (warnings) {
+    const droppedPages = label === 'file' ? dropped.filter((file) => isDocumentationExtension(file.relativePath)) : dropped
+    const noun = label === 'file' ? 'page' : 'image or media file'
+    const droppedVersions = new Set<string>()
+    for (const file of dropped) {
+      const firstSegment = file.relativePath.split('/', 1)[0]
+      if (allVersionPrefixes.has(firstSegment)) droppedVersions.add(firstSegment)
+    }
+    const examples = droppedPages.slice(0, 3).map((file) => file.relativePath)
+    const rest = droppedPages.length - examples.length
+    warnings.push({
+      code: 'limit-reached',
+      message: `This repository has more than ${MAX_SOURCE_FILES} ${label === 'file' ? 'files' : 'assets'}, so only the first ${MAX_SOURCE_FILES} (in navigation order, default version first) were migrated. `
+        + `${droppedPages.length} ${noun}(s) were left out`
+        + (examples.length > 0 ? `: ${examples.join(', ')}${rest > 0 ? `, and ${rest} more` : ''}` : '')
+        + (droppedVersions.size > 0 ? ` (versions: ${[...droppedVersions].slice(0, 5).join(', ')}${droppedVersions.size > 5 ? `, and ${droppedVersions.size - 5} more` : ''})` : '')
+        + (label === 'file'
+          ? '. To include them, run the migration on a smaller part of the repository with --docs-dir.'
+          : '. Copy them into public/ manually if your pages use them.'),
+    })
+  }
+  return ranked.slice(0, MAX_SOURCE_FILES).map(({ file }) => file)
+}
+
+/**
+ * When a `scanFiles` walk (run with a `rank` function) found more than
+ * `MAX_SOURCE_FILES` files, keep the highest-priority files and drop the
+ * rest. `rank` comes from `referenceOrder` (navigation traversal order:
+ * default version before non-default, newest non-default before older, per
+ * `projectMintlifyNavigation`'s version sort), so referenced pages always
+ * win over unreferenced ones, and within referenced pages the default
+ * version's own pages always win over other versions'.
+ *
+ * Assets get their own `MAX_SOURCE_FILES` budget, separate from pages: a
+ * repository with more than `MAX_SOURCE_FILES` navigation-referenced pages
+ * (e.g. crewAI's ~40 Mintlify versions) would otherwise fill the entire
+ * shared budget with pages before a single image is ever considered,
+ * since `rank` only orders *pages* (assets always sort last, at
+ * `Number.MAX_SAFE_INTEGER` — see `discoveryRank` in `migrateRepository`)
+ * — starving every asset even though the asset budget
+ * (`MAX_ASSET_BYTES`/`MAX_TOTAL_ASSET_BYTES`) was never reached.
+ */
+function selectFilesWithinBudget(
+  scanned: Array<ScannedFile>,
+  rank: (relativePath: string) => number,
+  warnings: Array<MigrationWarning> | undefined,
+  allVersionPrefixes: ReadonlySet<string>,
+): Array<ScannedFile> {
+  const isAsset = (file: ScannedFile): boolean => ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())
+  const assetFiles = scanned.filter(isAsset)
+  const otherFiles = scanned.filter((file) => !isAsset(file))
+  return [
+    ...selectGroupWithinBudget(otherFiles, rank, warnings, allVersionPrefixes, 'file'),
+    ...selectGroupWithinBudget(assetFiles, rank, warnings, allVersionPrefixes, 'asset'),
+  ]
 }
 
 /**
@@ -1005,8 +1212,10 @@ interface ResolvedApiSpec {
   parentTab?: string
   icon?: string
   hidden?: boolean
-  /** Repository-relative source path, used to keep same-named specs apart. */
-  relativePath?: string
+  /** Repository-relative path the spec was read from, used only to disambiguate a basename collision across tabs. */
+  sourcePath: string
+  /** Mintlify's object-form `{ source, directory }` scoping directory, if any — the prefix its auto-generated operation pages live under. */
+  directory?: string
 }
 
 function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): Array<MintlifyApiSpecReference> {
@@ -1053,12 +1262,6 @@ function resolveMintlifyApiSpecs(
     if (seen.has(dedupeKey)) continue
     seen.add(dedupeKey)
     const tabSuffix = reference.tabLabel ? ` (tab "${reference.tabLabel}")` : ''
-    if (reference.directory) {
-      warnings.push({
-        code: 'unsupported-config',
-        message: `The OpenAPI reference "${reference.value}"${tabSuffix} sets directory "${reference.directory}", which Thally does not use; its endpoint pages are generated under /api/ instead. Add redirects if you need the old URLs.`,
-      })
-    }
     if (reference.kind === 'asyncapi') {
       warnings.push({
         code: 'unsupported-config',
@@ -1088,9 +1291,291 @@ function resolveMintlifyApiSpecs(
       })
       continue
     }
-    specs.push({ filename: basename(match.relativePath), content: readFileSync(match.absolutePath), tabLabel: reference.tabLabel, parentTab: reference.parentTab, icon: reference.icon, hidden: reference.hidden, relativePath: match.relativePath })
+    if (reference.directory) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `The OpenAPI spec "${reference.value}"${tabSuffix} was limited to pages under "${reference.directory}" in the source, but Thally's API reference always covers a whole tab, so it was migrated as the tab's full API reference. Update any links to "${reference.directory}/..." pages manually.`,
+      })
+    }
+    specs.push({
+      filename: basename(match.relativePath),
+      content: readFileSync(match.absolutePath),
+      tabLabel: reference.tabLabel,
+      parentTab: reference.parentTab,
+      icon: reference.icon,
+      hidden: reference.hidden,
+      sourcePath: match.relativePath,
+      directory: reference.directory,
+    })
+  }
+  // Two specs bound to *different* tabs can share a basename (e.g.
+  // "qstash/openapi.yaml" and "workflow/openapi.yaml" both resolve to
+  // "openapi.yaml") — without disambiguation the second spec's asset
+  // write collides with the first's, silently discarding its content
+  // even though both tabs believe they have a working spec bound. Specs
+  // that land on the *same* tab are left alone: only one of them ever
+  // gets bound (see injectOpenApiSpecs's "already has an OpenAPI spec"
+  // warning), so renaming there would produce an asset nothing points to.
+  const filenameOwners = new Map<string, string>()
+  const filenameSources = new Map<string, string>()
+  for (const spec of specs) {
+    const groupKey = spec.tabLabel ?? '\0default'
+    const owner = filenameOwners.get(spec.filename)
+    // The same file bound to several tabs is one asset, not a collision.
+    if (owner !== undefined && owner !== groupKey && filenameSources.get(spec.filename) !== spec.sourcePath) {
+      let disambiguated = spec.sourcePath.replace(/\//g, '-')
+      while (filenameOwners.has(disambiguated) && filenameOwners.get(disambiguated) !== groupKey) {
+        disambiguated = `${groupKey.replace(/\W+/g, '-')}-${disambiguated}`
+      }
+      spec.filename = disambiguated
+    }
+    filenameOwners.set(spec.filename, groupKey)
+    filenameSources.set(spec.filename, spec.sourcePath)
   }
   return specs
+}
+
+const OPENAPI_HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'trace']
+
+/** NestJS's conventional CRUD controller method names, mapped to the REST-conventional slug Fern renders them under (confirmed against a live site). */
+const FERN_CRUD_METHOD_NAMES: Record<string, string> = {
+  findall: 'list',
+  findone: 'get',
+  remove: 'delete',
+}
+
+/** Kebab-case a label the way Mintlify slugs its auto-generated OpenAPI operation pages (tag folder, operation leaf). */
+function mintlifyOperationSlugSegment(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+}
+
+/**
+ * Thally's own API operation route segment: path segments (braces stripped)
+ * plus the HTTP method — never the summary. Mirrors `buildSlugSegments` in
+ * src/lib/openapi/normalize.ts; duplicated rather than imported because
+ * packages/migrate cannot depend on the Next.js app. Ceiling: webhook
+ * operations (`x-webhooks`) aren't covered — normalize.ts prefixes those
+ * with "webhooks", update this alongside it if that ever matters here.
+ */
+export function thallyOperationSlugSegments(path: string, method: string): Array<string> {
+  const cleaned = path
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => segment.replace(/[{}]/g, '').replace(/[^a-zA-Z0-9-]/g, '-').replace(/-+/g, '-').toLowerCase())
+  if (!cleaned.length) cleaned.push('root')
+  cleaned.push(method.toLowerCase())
+  return cleaned
+}
+
+/** Mirrors `slugifyId` in src/data/docs.ts, which turns a tab label into its API spec id. */
+function slugifyApiSpecId(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9/]+/g, '-').replace(/(^-|-$)+/g, '').replace(/\//g, '-') || value.toLowerCase()
+}
+
+interface OpenApiOperationForLinking {
+  method: string
+  path: string
+  tag?: string
+  summary?: string
+  operationId?: string
+}
+
+/** Read just enough of an OpenAPI document to match Mintlify's auto-generated operation pages. Malformed input yields no operations rather than throwing. */
+function parseOpenApiOperationsForLinking(content: Buffer): Array<OpenApiOperationForLinking> {
+  let document: unknown
+  try {
+    document = parseYaml(content.toString('utf8'))
+  } catch {
+    return []
+  }
+  const paths = document && typeof document === 'object' ? (document as Record<string, unknown>).paths : null
+  if (!paths || typeof paths !== 'object') return []
+  const operations: Array<OpenApiOperationForLinking> = []
+  for (const [path, pathItem] of Object.entries(paths as Record<string, unknown>)) {
+    if (!pathItem || typeof pathItem !== 'object') continue
+    for (const method of OPENAPI_HTTP_METHODS) {
+      const operation = (pathItem as Record<string, unknown>)[method]
+      if (!operation || typeof operation !== 'object') continue
+      const op = operation as Record<string, unknown>
+      const tags = Array.isArray(op.tags) ? op.tags.filter((tag): tag is string => typeof tag === 'string') : []
+      operations.push({
+        method,
+        path,
+        tag: tags[0],
+        summary: typeof op.summary === 'string' ? op.summary : undefined,
+        operationId: typeof op.operationId === 'string' ? op.operationId : undefined,
+      })
+    }
+  }
+  return operations
+}
+
+/**
+ * Map Mintlify's auto-generated operation page path (e.g.
+ * "qstash/api-reference/messages/publish-a-message", from the `directory`
+ * an object-form `openapi: { source, directory }` reference scoped its
+ * pages under) to Thally's actual operation route
+ * (`/api/<specId>/<method+path slug>`), so in-content links to those
+ * Mintlify-only pages can be rewritten instead of staying broken.
+ *
+ * `specId` mirrors buildApiReferenceConfig in src/config/api-reference.ts:
+ * the first non-hidden tab with a bound spec is `'default'`, every other
+ * one is keyed by its own tab id. Ceiling: matches by tag + (summary,
+ * operationId, or "method path"), the same fields Mintlify's generator
+ * itself falls back through — an operation whose tag Mintlify computed
+ * differently still won't resolve, and stays a broken link as before.
+ */
+/** A spec bound to a tab, plus the source-platform's own route prefix its auto-generated operation pages live under (Mintlify's `directory`, Fern's section route). */
+interface ApiOperationLinkSource {
+  filename: string
+  content: Buffer
+  /** Prefix path segment(s) the source platform served its auto-generated operation pages under (no leading/trailing slash); absent or empty means "no known auto-generated prefix for this spec" and it's skipped. */
+  prefix?: string
+}
+
+interface ApiOperationLinkMaps {
+  /** Exact source-platform operation-page path (lowercased) -> Thally operation route. */
+  operationLinks: Map<string, string>
+  /**
+   * Source-platform API-section route prefix (lowercased, no leading/trailing
+   * slash) -> that spec's Thally landing route (`/api` for the first spec,
+   * `/api/<specId>` for the rest). Used both for a bare tab-landing link
+   * (the prefix on its own) and as the fallback for an operation link under
+   * this prefix that didn't match any known operation.
+   */
+  prefixLandings: Map<string, string>
+}
+
+function apiOperationLinkMap(
+  sources: Array<ApiOperationLinkSource>,
+  docsConfig: MigrationDocsConfig,
+): ApiOperationLinkMaps {
+  const map = new Map<string, string>()
+  const prefixLandings = new Map<string, string>()
+  const apiTabs = docsConfig.tabs.filter((tab) => !tab.hidden && tab.api)
+  apiTabs.forEach((tab, index) => {
+    const source = sources.find((entry) => tab.api?.source === specAssetPath(entry.filename))
+    if (!source || !source.prefix) return
+    const specId = index === 0 ? 'default' : slugifyApiSpecId(tab.tab)
+    const prefix = source.prefix.replace(/^\/+|\/+$/g, '').toLowerCase()
+    if (prefix) prefixLandings.set(prefix, specId === 'default' ? '/api' : `/api/${specId}`)
+    for (const operation of parseOpenApiOperationsForLinking(source.content)) {
+      const thallyHref = `/api/${specId}/${thallyOperationSlugSegments(operation.path, operation.method).join('/')}`
+      // Leaf candidates, tried in order of how likely a source generator is
+      // to have used them: Mintlify slugs from the summary; Fern instead
+      // prefers an SDK-style method name — confirmed against a live Fern
+      // site, where `operationId: "ToolController_create"` (summary
+      // "Create Tool") rendered its page at ".../tools/create", the
+      // operationId's segment after its last "_"/".", not the summary.
+      const leafCandidates = new Set<string>()
+      if (operation.operationId) {
+        const parts = operation.operationId.split(/[_.]/).filter(Boolean)
+        const lastPart = parts.at(-1) ?? operation.operationId
+        // A NestJS-style controller method name (findOne/findAll/remove) is
+        // common enough in real OpenAPI generators that Fern renders it
+        // under its REST-conventional name instead — also confirmed live:
+        // "CallController_findOne" rendered at ".../calls/get", not
+        // ".../calls/find-one".
+        const conventional = FERN_CRUD_METHOD_NAMES[lastPart.toLowerCase()]
+        if (conventional) leafCandidates.add(conventional)
+        leafCandidates.add(mintlifyOperationSlugSegment(lastPart))
+      }
+      if (operation.summary) leafCandidates.add(mintlifyOperationSlugSegment(operation.summary))
+      if (operation.operationId) leafCandidates.add(mintlifyOperationSlugSegment(operation.operationId))
+      leafCandidates.add(mintlifyOperationSlugSegment(`${operation.method} ${operation.path}`))
+      // Two prefix conventions get registered for every leaf candidate:
+      // Mintlify nests auto-generated pages under a tag folder
+      // ("<prefix>/<tag>/<leaf>"); Fern's default layout serves them flat
+      // under the section route ("<prefix>/<leaf>") instead. Registering
+      // every combination costs nothing (an operation matches at most one
+      // of them in practice) and avoids guessing which convention and
+      // which leaf a given source actually used.
+      const tagSegment = mintlifyOperationSlugSegment(operation.tag ?? 'default')
+      for (const leaf of leafCandidates) {
+        if (!leaf) continue
+        const tagged = `${source.prefix}/${tagSegment}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
+        const flat = `${source.prefix}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
+        if (!map.has(tagged)) map.set(tagged, thallyHref)
+        if (!map.has(flat)) map.set(flat, thallyHref)
+      }
+    }
+  })
+  return { operationLinks: map, prefixLandings }
+}
+
+/** Rewrite API operation links in every page body, with one capped warning for links that matched no operation. */
+function rewriteApiLinksInPages(
+  pages: Array<MigrationPage>,
+  operationLinks: Map<string, string>,
+  prefixLandings: Map<string, string>,
+  warnings: Array<MigrationWarning>,
+): void {
+  if (operationLinks.size === 0 && prefixLandings.size === 0) return
+  const unmatched = new Set<string>()
+  for (const page of pages) {
+    page.body = rewriteApiOperationLinks(page.body, operationLinks, prefixLandings, unmatched)
+  }
+  if (unmatched.size === 0) return
+  const sorted = [...unmatched].sort()
+  warnings.push({
+    code: 'unsupported-config',
+    message: `${sorted.length} link(s) to API endpoints matched no endpoint in the OpenAPI spec, so they now point to the API section's overview page instead: `
+      + `${sorted.slice(0, 10).join(', ')}${sorted.length > 10 ? `, and ${sorted.length - 10} more` : ''}. Update those links if you want them to reach a specific endpoint.`,
+  })
+}
+
+/**
+ * Rewrite in-content links matching a source platform's auto-generated
+ * OpenAPI operation pages to Thally's actual `/api/...` routes. A link
+ * that is exactly a known API-section prefix (a bare tab-landing link, e.g.
+ * "/api-reference") is rewritten to that spec's Thally landing route. A
+ * link under a known prefix that doesn't match any specific operation
+ * (renamed/removed operation, or a match this rewrite's heuristics missed)
+ * falls back to the same landing route rather than staying broken, and its
+ * original target is recorded into `unmatched` so the caller can emit one
+ * aggregated warning instead of one per link. Links outside every known
+ * prefix are left untouched — still broken, but no worse than before this
+ * rewrite existed.
+ */
+function rewriteApiOperationLinks(
+  body: string,
+  linkMap: Map<string, string>,
+  prefixLandings: Map<string, string>,
+  unmatched: Set<string>,
+): string {
+  if (linkMap.size === 0 && prefixLandings.size === 0) return body
+  // Longest prefix first, so a more specific API section (e.g.
+  // "api-reference/webhooks") is preferred over a shorter one that happens
+  // to also match ("api-reference").
+  const orderedPrefixes = [...prefixLandings.entries()].sort((a, b) => b[0].length - a[0].length)
+  let codeFence: string | null = null
+  return body.split('\n').map((line) => {
+    const fence = line.match(/^\s*(`{3,}|~{3,})/)
+    if (fence) {
+      if (!codeFence) codeFence = fence[1][0]
+      else if (fence[1][0] === codeFence) codeFence = null
+      return line
+    }
+    if (codeFence) return line
+    const rewriteTarget = (target: string): string => {
+      const suffixIndex = target.search(/[?#]/)
+      const path = (suffixIndex >= 0 ? target.slice(0, suffixIndex) : target).replace(/^\/+/, '').toLowerCase()
+      const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
+      const mapped = linkMap.get(path)
+      if (mapped) return `${mapped}${suffix}`
+      for (const [prefix, landing] of orderedPrefixes) {
+        if (path === prefix) return `${landing}${suffix}`
+        if (path.startsWith(`${prefix}/`)) {
+          unmatched.add(target)
+          return `${landing}${suffix}`
+        }
+      }
+      return target
+    }
+    return line
+      .replace(/(\]\()\/([^\s)]+)(?=[\s)]|$)/g, (_match, prefix: string, target: string) => `${prefix}${rewriteTarget(`/${target}`)}`)
+      .replace(/(\bhref=")\/([^"]+)(")/g, (_match, prefix: string, target: string, suffix: string) => `${prefix}${rewriteTarget(`/${target}`)}${suffix}`)
+  }).join('\n')
 }
 
 const MAX_FERN_GENERATORS_BYTES = 2_000_000
@@ -1920,24 +2405,41 @@ function inlineMdxSnippets(
  * substring fallback, so two specs from two different tabs can never both
  * land on the same tab by accident.
  */
-function injectOpenApiSpecs(config: MigrationDocsConfig, specs: Array<{ filename: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>): MigrationDocsConfig {
+function injectOpenApiSpecs(
+  config: MigrationDocsConfig,
+  specs: Array<{ filename: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>,
+  warnings?: Array<MigrationWarning>,
+): MigrationDocsConfig {
   const tabs = config.tabs.map((tab) => ({ ...tab }))
   for (const spec of specs) {
     const apiTab = spec.tabLabel
       ? tabs.find((tab) => tab.tab === spec.tabLabel)
       : tabs.find((tab) => tab.tab.toLowerCase().includes('api'))
-    if (apiTab) apiTab.api = {
-      source: specAssetPath(spec.filename),
-      // An API-only tab needs generated endpoint navigation; an authored
-      // page tab keeps its own groups alongside the bound spec.
-      ...((apiTab.groups?.length || apiTab.pages?.length) ? { navigation: false } : {}),
+    if (apiTab) {
+      // Thally binds one API spec per tab; a second spec that resolves to
+      // the same tab would otherwise silently replace the first one's
+      // binding with no trace of it ever having existed.
+      if (apiTab.api && warnings) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Tab "${apiTab.tab}" already uses another OpenAPI spec, and Thally supports one API spec per tab, so "${specAssetPath(spec.filename)}" was not added. Put it in its own tab to include it.`,
+        })
+        continue
+      }
+      apiTab.api = {
+        source: specAssetPath(spec.filename),
+        // An API-only tab needs generated endpoint navigation; an authored
+        // page tab keeps its own groups alongside the bound spec.
+        ...((apiTab.groups?.length || apiTab.pages?.length) ? { navigation: false } : {}),
+      }
+    } else {
+      insertApiTab(tabs, {
+        tab: spec.tabLabel ?? 'API Reference',
+        ...(spec.icon ? { icon: spec.icon } : {}),
+        ...(spec.hidden ? { hidden: true } : {}),
+        api: { source: specAssetPath(spec.filename) },
+      }, spec.parentTab)
     }
-    else insertApiTab(tabs, {
-      tab: spec.tabLabel ?? 'API Reference',
-      ...(spec.icon ? { icon: spec.icon } : {}),
-      ...(spec.hidden ? { hidden: true } : {}),
-      api: { source: specAssetPath(spec.filename) },
-    }, spec.parentTab)
   }
   return { ...config, tabs }
 }
@@ -2008,6 +2510,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ? createComponentMigrator(componentRoot, repositoryDir, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
     : undefined
   let docsConfig: MigrationDocsConfig = { tabs: [] }
+  // Literal leading path segments (e.g. "v1.15.22") that identify a
+  // Mintlify `versions` container's default version — see
+  // `mintlifyDefaultVersionPrefixes`.
+  let defaultVersionPrefixes: ReadonlySet<string> = new Set()
+  // Every version identifier declared in the config (default and
+  // non-default) — used only to name which versions' pages were dropped if
+  // discovery exceeds MAX_SOURCE_FILES; see `selectFilesWithinBudget`.
+  let allVersionPrefixes: ReadonlySet<string> = new Set()
   const referenceMap = new Map<string, { navigationId: string; locale?: string }>()
   const exactReferenceMap = new Map<string, { navigationId: string; locale?: string }>()
   const referenceOrder = new Map<string, number>()
@@ -2017,6 +2527,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let fernBasePath = ''
   let fernVersionPath = ''
   let fernApiSections: Array<FernApiSection> = []
+  // sourcePaths of Fern descriptors that resolve outside fern/ (from a
+  // `versions:` file living in a sibling directory) — resolved directly,
+  // below, since the ordinary fern/-rooted scan can't reach them.
+  const fernExternalSourcePaths = new Set<string>()
   let fernChangelogIndexes: Array<{ route: string; entries: Array<string> }> = []
   const fernReferencedPaths = new Set<string>()
   const fernSourceLinkAliases = new Map<string, string>()
@@ -2028,6 +2542,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const config = readMintlifyConfig(mintlifyProjectRoot ?? repositoryDir)
       if (config) {
         mintlifyConfig = config
+        defaultVersionPrefixes = mintlifyDefaultVersionPrefixes(config)
+        allVersionPrefixes = mintlifyAllVersionPrefixes(config)
         const projected = projectMintlifyNavigation(config)
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
@@ -2086,6 +2602,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           const exactKey = exactReferenceKey(descriptor.sourcePath)
           if (!exactReferenceMap.has(exactKey)) exactReferenceMap.set(exactKey, { navigationId: descriptor.navigationId })
           if (!referenceOrder.has(key)) referenceOrder.set(key, index)
+          if (descriptor.sourcePath.startsWith('../')) fernExternalSourcePaths.add(descriptor.sourcePath)
         }
       }
     } catch (error) {
@@ -2116,20 +2633,82 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const mintignoreMatcher = platform === 'mintlify' && mintlifyProjectRoot
     ? readMintignoreMatcher(mintlifyProjectRoot)
     : null
-  const files = mintignoreMatcher
-    ? scanFiles(contentRoot, repositoryDir, warnings).filter((file) => !mintignoreMatcher.ignores(file.relativePath))
-    : scanFiles(contentRoot, repositoryDir, warnings)
-  // A Fern docs.yml may intentionally point at sibling content such as
-  // `../docs/overview.mdx`. Read only files explicitly referenced by its
-  // navigation, and keep the whole checkout as the confinement boundary.
+  // Referenced files (found in the navigation config) are ranked ahead of
+  // unreferenced ones, in navigation traversal order — which already puts a
+  // Mintlify default version's pages before non-default versions' (and
+  // newer non-default versions before older ones); see
+  // `selectFilesWithinBudget`. Only meaningful when a nav was actually
+  // parsed (Mintlify/Fern); Docusaurus has no pre-scan reference set.
+  //
+  // An *unreferenced* page (a real file Mintlify still serves by its own
+  // file-based routing even though no sidebar entry points at it, e.g.
+  // crewAI's `tools/web-scraping/firecrawlsearchtool.mdx`) used to get the
+  // exact same flat lowest priority regardless of which version it belonged
+  // to. Ranking it just after a single *global* floor (every referenced
+  // page, from every version) isn't enough to fix that: a repository whose
+  // total *referenced*-page count alone already exceeds the budget (e.g.
+  // crewAI's ~40 versions x ~180 pages each) would still starve every
+  // orphan, including the default version's own, since literally every
+  // referenced page from every version would still outrank it. Instead,
+  // each orphan is ranked right after the *last* referenced page found
+  // under its own version+locale block — traversal is contiguous per
+  // (language, version) pair (a whole version's pages, referenced and its
+  // own orphans together, are visited before the next version starts, and
+  // a whole language's versions before the next language's) — so grouping
+  // by version alone (dropping the locale segment) would still pool an
+  // English orphan's ceiling together with, say, Arabic's or Korean's much
+  // later-traversed pages under the same version identifier. Keying by the
+  // first two path segments (version, then locale) — rather than requiring
+  // an exact match against `allVersionPrefixes` (the `version:` label
+  // declared in config) — also keeps this working even when a version's
+  // declared label and its actual directory prefix disagree in spelling or
+  // case (e.g. crewAI's own `"version": "Edge"` label for its lowercase
+  // `edge/` directory): what matters for contiguity is purely the directory
+  // structure real pages were discovered under, not the label text. A
+  // version's orphans land immediately behind that same version+locale's
+  // own referenced pages, never behind another locale's or version's.
+  const lastReferencedIndexByVersionLocale = new Map<string, number>()
+  for (const [key, index] of referenceOrder) {
+    const blockKey = key.split('/').slice(0, 2).join('/')
+    const current = lastReferencedIndexByVersionLocale.get(blockKey)
+    if (current === undefined || index > current) lastReferencedIndexByVersionLocale.set(blockKey, index)
+  }
+  const discoveryRank = referenceOrder.size > 0
+    ? (relativePath: string): number => {
+        const referencedIndex = referenceOrder.get(normalizedReferenceKey(relativePath))
+        if (referencedIndex !== undefined) return referencedIndex
+        const blockKey = relativePath.split('/').slice(0, 2).join('/')
+        const versionCeiling = lastReferencedIndexByVersionLocale.get(blockKey)
+        return versionCeiling !== undefined ? versionCeiling + 1 : Number.MAX_SAFE_INTEGER
+      }
+    : undefined
+  const scannedFiles = scanFiles(contentRoot, repositoryDir, warnings, discoveryRank)
+  const mintignoreFilteredFiles = mintignoreMatcher
+    ? scannedFiles.filter((file) => !mintignoreMatcher.ignores(file.relativePath))
+    : scannedFiles
+  const discoveryBudgetApplied = discoveryRank !== undefined && mintignoreFilteredFiles.length > MAX_SOURCE_FILES
+  const files = discoveryRank
+    ? selectFilesWithinBudget(mintignoreFilteredFiles, discoveryRank, warnings, allVersionPrefixes)
+    : mintignoreFilteredFiles
+  // A Fern `versions:` file may live outside fern/ (a sibling `docs/`
+  // directory) and its own pages resolve relative to it, so their
+  // sourcePath (e.g. `../docs/pages/x.mdx`) falls outside the fern/-rooted
+  // scan above. Resolve exactly those referenced files directly, rather
+  // than rescanning the whole repository (which would also shift every
+  // asset's firstSegment and break the fern/-relative asset-bucket
+  // detection below).
   if (platform === 'fern' && fernProjectRoot) {
-    const scanned = new Set(files.map((file) => file.absolutePath))
-    for (const sourcePath of fernReferencedPaths) {
+    const discovered = new Set(files.map((file) => file.relativePath))
+    for (const sourcePath of fernExternalSourcePaths) {
+      if (discovered.has(sourcePath)) continue
       try {
         const absolutePath = resolveWithinRoot(fernProjectRoot, sourcePath, repositoryDir)
-        if (scanned.has(absolutePath) || !existsSync(absolutePath) || !lstatSync(absolutePath).isFile()) continue
-        files.push({ absolutePath, relativePath: sourcePath })
-        scanned.add(absolutePath)
+        if (existsSync(absolutePath) && lstatSync(absolutePath).isFile()) {
+          files.push({ absolutePath, relativePath: sourcePath })
+          discovered.add(sourcePath)
+        } else {
+          warnings.push({ code: 'missing-page', message: 'A Fern navigation path could not be read within this repository.', source: sourcePath })
+        }
       } catch {
         warnings.push({ code: 'missing-page', message: 'A Fern navigation path could not be read within this repository.', source: sourcePath })
       }
@@ -2232,6 +2811,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir,
       snippetAliases,
     )
+    if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
+      // A heading's `{#custom-id}` anchor (`## Title {#custom-id}`) crashes
+      // `@mdx-js/mdx`'s parser outright, so it must be converted to a
+      // preceding `<a id="custom-id"></a>` (see `normalizeExplicitHeadingIds`)
+      // before ANY MDX parse of this page is attempted — including
+      // `componentMigrator.transform` below, whose own early parse would
+      // otherwise choke on it and skip the page's import analysis entirely.
+      raw = normalizeExplicitHeadingIds(raw)
+    }
     if (componentMigrator) {
       const warningsBeforeTransform = warnings.length
       raw = componentMigrator.transform(raw, file.absolutePath)
@@ -2257,9 +2845,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // run it for every platform Thally migrates from.
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
       // Math must be protected before the AST-based brace escaper runs:
-      // raw `$$\begin{align*}...\end{align*}$$` crashes that parser outright
+      // `$$\begin{align*}...\end{align*}$$` crashes that parser outright
       // (see `protectMathBlocks`), which is what excluded these pages
-      // before this ran.
+      // before this ran. The heading-custom-id case that used to be
+      // handled at this same point is now converted earlier, above, before
+      // `componentMigrator.transform` gets a chance to choke on it too.
       const protectedMath = protectMathBlocks(raw)
       if (protectedMath.converted) {
         warnings.push({
@@ -2333,6 +2923,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (!page) {
       skipped++
       continue
+    }
+    if (page.frontmatterError) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `The page's frontmatter is not valid YAML (${page.frontmatterError}); the page was kept and as much of its metadata as could be read was used.`,
+        source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
+      })
     }
     if (platform === 'fern' && !page.navTitle) {
       const navTitle = fernNavTitles.get(navigationId)
@@ -2452,6 +3049,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (sourcePath !== page.id && /^[A-Za-z0-9_./-]+$/.test(sourcePath)) {
         routeAliases.push({ source: `/${sourcePath}`, destination: `/${page.id}`, permanent: false })
       }
+      // The default version's own pages are also linked without the
+      // version segment (the live Mintlify site 307s such a link to the
+      // versioned page) — add the matching alias so those in-repo links
+      // resolve instead of dead-ending. See `mintlifyDefaultVersionPrefixes`.
+      const versionPrefix = [...defaultVersionPrefixes].find((prefix) => sourcePath === prefix || sourcePath.startsWith(`${prefix}/`))
+      if (versionPrefix) {
+        const unversioned = sourcePath.slice(versionPrefix.length).replace(/^\/+/, '')
+        if (unversioned && unversioned !== sourcePath && unversioned !== page.id
+          && /^[A-Za-z0-9_./-]+$/.test(unversioned)
+          && !routeAliases.some((redirect) => redirect.source === `/${unversioned}`)) {
+          routeAliases.push({ source: `/${unversioned}`, destination: `/${page.id}`, permanent: false })
+        }
+      }
     }
     if (docusaurusDescriptor) {
       docusaurusDescriptors.push({ ...docusaurusDescriptor, title: page.title })
@@ -2548,9 +3158,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const referencingPages = referencedAssetPaths.get(assetPath)
       warnings.push({
         code: 'limit-reached',
-        message: referencingPages
-          ? `Asset was skipped because the migration asset budget was exhausted, but it is referenced by: ${[...referencingPages].join(', ')}.`
-          : 'An asset was skipped because the migration asset budget was exhausted.',
+        message: 'This file was not copied because it is larger than 25 MB or the copied files would exceed 500 MB in total. Add it to public/ manually'
+          + (referencingPages
+            ? `; it is used by ${[...referencingPages].slice(0, 3).join(', ')}${referencingPages.size > 3 ? `, and ${referencingPages.size - 3} more` : ''}.`
+            : '.'),
         source: file.relativePath,
       })
       continue
@@ -2568,8 +3179,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     totalAssetBytes += size
   }
 
-  if (files.length >= MAX_SOURCE_FILES) {
-    warnings.push({ code: 'limit-reached', message: `Repository discovery stopped at ${MAX_SOURCE_FILES} files.` })
+  // `selectFilesWithinBudget` already emitted a detailed warning (dropped
+  // count + versions) when it ran; this generic fallback only covers the
+  // case it couldn't run (no `discoveryRank`, e.g. Docusaurus) or the rare
+  // case where later additions (Fern's external sourcePaths, above) pushed
+  // the count back over budget after the event.
+  if (!discoveryBudgetApplied && files.length >= MAX_SOURCE_FILES) {
+    warnings.push({ code: 'limit-reached', message: `Stopped scanning after ${MAX_SOURCE_FILES} files, so the rest of the repository was not looked at. Run the migration on a smaller part of the repository with --docs-dir.` })
   }
   if (platform === 'docusaurus') {
     const projected = projectDocusaurusNavigation({
@@ -2652,10 +3268,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // root `generators.yml` rule is in `fernOpenApiCandidateDirs`). A docs.yml
     // with no `api:` node at all falls back to the naive scan, bound to
     // whatever tab `injectOpenApiSpecs` picks for an unbound spec.
-    const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string }> = fernApiSections.length > 0
+    const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string; routeSegments?: Array<string> }> = fernApiSections.length > 0
       ? fernApiSections
       : [{ nameExplicit: false }]
-    const resolvedSpecs: Array<{ filename: string; tabLabel?: string }> = []
+    const resolvedSpecs: Array<{ filename: string; tabLabel?: string; content: Buffer; routeSegments: Array<string> }> = []
     // Two different multi-API specs commonly share a basename (Paradex's
     // prod_rest and testnet_rest both resolve to their own
     // apis/<name>/openapi/openapi.json) — track which absolute file a
@@ -2674,10 +3290,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           filename = `${prefix}${filename}`
         }
         specFilenameSources.set(filename, spec.absolutePath)
+        const specContent = readFileSync(spec.absolutePath)
         if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
-          assets.push(specAsset(filename, readFileSync(spec.absolutePath)))
+          assets.push(specAsset(filename, specContent))
         }
-        resolvedSpecs.push({ filename, tabLabel: section.tabLabel })
+        resolvedSpecs.push({ filename, tabLabel: section.tabLabel, content: specContent, routeSegments: section.routeSegments ?? [] })
         continue
       }
       if (resolution.unsupported.length > 0) {
@@ -2711,28 +3328,32 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           : `No OpenAPI/AsyncAPI spec could be found for the "${section.name}" API, because its api-name is not a valid folder name. Add the spec manually.`,
       })
     }
-    if (resolvedSpecs.length > 0) docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs)
+    if (resolvedSpecs.length > 0) {
+      docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
+      // Fern serves each api: section's auto-generated operation pages
+      // under that section's own route (e.g. "api-reference/messages/...")
+      // — the same shape Mintlify's `directory` scoping produces, so the
+      // same rewrite applies, keyed by the section's route instead.
+      const { operationLinks, prefixLandings } = apiOperationLinkMap(
+        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.routeSegments.join('/') })),
+        docsConfig,
+      )
+      rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
+    }
   } else if (platform === 'mintlify') {
     const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs)
-    // Specs from different folders commonly share a basename (`v1/openapi.json`,
-    // `v2/openapi.json`): a different file gets a folder-derived prefix instead
-    // of silently reusing the first copy.
-    const specSourcesByFilename = new Map<string, Buffer>()
-    for (const spec of resolvedSpecs) {
-      const existing = specSourcesByFilename.get(spec.filename)
-      if (existing && !existing.equals(spec.content)) {
-        const prefix = dirname(spec.relativePath ?? '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/(^-|-$)/g, '').toLowerCase()
-        spec.filename = `${prefix || specSourcesByFilename.size + 1}-${spec.filename}`
-      }
-      specSourcesByFilename.set(spec.filename, spec.content)
-    }
     for (const spec of resolvedSpecs) {
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) {
         assets.push(specAsset(spec.filename, spec.content))
       }
     }
     if (resolvedSpecs.length > 0) {
-      docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs)
+      docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
+      const { operationLinks, prefixLandings } = apiOperationLinkMap(
+        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.directory })),
+        docsConfig,
+      )
+      rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
     } else {
       // No docs.json-configured spec at all: fall back to a naive repo scan,
       // matching every other platform's baseline behavior.
@@ -2772,7 +3393,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ]
     for (const plugin of additionalRoots) {
       if (discovered >= MAX_SOURCE_FILES) {
-        warnings.push({ code: 'limit-reached', message: `Docusaurus docs import stopped at the ${MAX_SOURCE_FILES}-file discovery budget.` })
+        warnings.push({ code: 'limit-reached', message: `Stopped importing Docusaurus docs plugins after ${MAX_SOURCE_FILES} files; the remaining plugin docs were not migrated.` })
         break
       }
       if (plugin.docsDir === configuredDocsDir) continue
