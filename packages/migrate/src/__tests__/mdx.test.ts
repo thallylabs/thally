@@ -3,7 +3,7 @@
 import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
-import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -538,6 +538,32 @@ describe('orphan capitalized tag escaping', () => {
   })
 })
 
+describe("heading id preservation via normalizeMdx (an explicit `{#id}` anchor is unparsable MDX prose, and Thally's heading renderer can't take an explicit id prop)", () => {
+  it("replaces a heading's explicit {#custom-id} suffix with a preceding anchor element carrying that id", () => {
+    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'docusaurus')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
+  })
+
+  it('does the same with inline code and JSX before it on the same heading line', () => {
+    const source = '### <Icon name="angle-right" /> `cypress-tap` sessions {#cypress-tap-sessions}'
+    expect(normalizeMdx(source, 'docusaurus')).toBe('<a id="cypress-tap-sessions"></a>\n### <Icon name="angle-right" /> `cypress-tap` sessions')
+  })
+
+  it('leaves a heading with no explicit id unchanged', () => {
+    expect(normalizeMdx('## Plain heading', 'docusaurus')).toBe('## Plain heading')
+  })
+
+  it('leaves a `{#...}`-shaped line inside a fenced code block untouched', () => {
+    const body = '```md\n## Heading {#id}\n```'
+    expect(normalizeMdx(body, 'docusaurus')).toBe(body)
+  })
+
+  it('runs for every platform, not just docusaurus — the syntax means the same thing everywhere (e.g. live crewAI/Mintlify docs)', () => {
+    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'mintlify')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
+    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'fern')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
+    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
+  })
+})
+
 describe('multi-line renames (fenced/inline code masked, whole body rewritten)', () => {
   it('converts a multi-line HTML comment to an MDX comment', () => {
     const body = 'Before.\n\n<!--\n  a note\n  spanning lines\n-->\n\nAfter.'
@@ -581,6 +607,38 @@ describe('multi-line renames (fenced/inline code masked, whole body rewritten)',
     // A comment-like fragment inside a fenced block must not be converted either.
     const fencedComment = '```html\n<!--\n  example comment\n-->\n```'
     expect(normalizeMdx(fencedComment)).toBe(fencedComment)
+  })
+})
+
+describe('normalizeExplicitHeadingIds', () => {
+  it('replaces a heading\'s trailing {#custom-id} with an <a id> element, keeping the heading text, and the result compiles', () => {
+    // Real crewAI content: `{#memory-embedder-config}` makes @mdx-js/mdx fail
+    // with "Could not parse expression with acorn" and excluded the whole page.
+    const result = normalizeExplicitHeadingIds('### Memory & embedder config {#memory-embedder-config}\n\nSome prose.')
+    expect(result).toBe('<a id="memory-embedder-config"></a>\n### Memory & embedder config\n\nSome prose.')
+    expect(() => compileSync(result, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('leaves a real fenced code block containing heading-shaped text untouched', () => {
+    const body = ['```md', '### Not a real heading {#fake-id}', '```'].join('\n')
+    expect(normalizeExplicitHeadingIds(body)).toBe(body)
+  })
+
+  it('leaves a heading with no custom id unchanged', () => {
+    const body = '## Plain heading\n\nSome prose.'
+    expect(normalizeExplicitHeadingIds(body)).toBe(body)
+  })
+
+  it('never touches the YAML frontmatter block', () => {
+    const body = '---\ntitle: "{#not-a-heading}"\n---\n\n## Heading {#real-id}'
+    expect(normalizeExplicitHeadingIds(body)).toBe('---\ntitle: "{#not-a-heading}"\n---\n\n<a id="real-id"></a>\n## Heading')
+  })
+
+  it('stays fast on a very long heading with no custom id', () => {
+    const body = `# a${' '.repeat(60_000)}b`
+    const started = Date.now()
+    expect(normalizeExplicitHeadingIds(body)).toBe(body)
+    expect(Date.now() - started).toBeLessThan(500)
   })
 })
 
@@ -940,6 +998,16 @@ describe('escapeFernLiteralBraces', () => {
 
   it('round-trips a body with no frontmatter and no escapable braces unchanged', () => {
     const body = 'Just prose, no braces here.'
+    expect(escapeFernLiteralBraces(body)).toBe(body)
+  })
+
+  it('escapes double-mustache template text (`{{now}}`) the same as single-brace text', () => {
+    const body = 'Also remember to format {{now}} with your desired timezone.'
+    expect(escapeFernLiteralBraces(body)).toBe('Also remember to format \\{\\{now\\}\\} with your desired timezone.')
+  })
+
+  it('leaves `{{name}}` alone when `name` is declared by the page\'s own ESM', () => {
+    const body = 'import { now } from "./x"\n\nformat {{now}} for the user.'
     expect(escapeFernLiteralBraces(body)).toBe(body)
   })
 })

@@ -170,9 +170,10 @@ function unwrapDocusaurusMdxCodeBlocks(body: string): string {
   return isMdxCodeBlock ? body : output.join('\n')
 }
 
-/** Keep explicit heading anchors without leaving `{#id}` as an MDX expression. */
-function normalizeExplicitHeadingIds(body: string): string {
-  return replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
+/** Keep explicit heading anchors without leaving `{#id}` as an MDX expression. Frontmatter is left untouched. */
+export function normalizeExplicitHeadingIds(raw: string): string {
+  const { front, body } = splitFrontmatterBlock(raw)
+  return front + replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
     if (!/^[ \t]{0,3}#{1,6}[ \t]+/.test(line)) return line
     const trimmed = line.trimEnd()
     // Check suffixes from the end instead of matching unbounded whitespace
@@ -225,6 +226,16 @@ const JS_LITERAL_KEYWORDS = new Set(['true', 'false', 'null', 'undefined'])
 // (the thing this whole pass is trying to leave alone) never happens to
 // look like one, so escaping stays conservative either way.
 const BARE_IDENTIFIER_PATH = /^[\p{ID_Start}$_][\p{ID_Continue}$‌‍]*(?:\.[\p{ID_Start}$_][\p{ID_Continue}$‌‍]*)*$/u
+// Double-mustache templating syntax (`{{now}}`, `{{customer}}`) is common in
+// prose copied from other platforms (Liquid/Handlebars-style variable
+// interpolation). MDX parses the outer `{...}` as an expression container and
+// the inner `{now}` as a JS object-literal shorthand property, so the node's
+// value looks like `{now}` — a single bare identifier wrapped in its own
+// braces — never a real JSX prop (which appears inside an attribute, not
+// standalone body/flow text). Matching this shape lets the same "leave a
+// $ref alone unless we can hint an undeclared reference" caution apply to
+// double-brace template text as it already does to single-brace text.
+const BARE_OBJECT_SHORTHAND = /^\{\s*([\p{ID_Start}$_][\p{ID_Continue}$‌‍]*)\s*\}$/u
 /**
  * Pure JS built-ins that exist identically in the server and browser render.
  * Only a dotted path rooted at one (`{Math.PI}`, `{Number.MAX_SAFE_INTEGER}`)
@@ -625,13 +636,17 @@ export function escapeFernLiteralBraces(raw: string): string {
       const end = node.position?.end.offset
       const root = value.split('.')[0]
       const safeBuiltinPath = value.includes('.') && SAFE_BUILTIN_ROOTS.has(root)
-      const isTemplatePlaceholder = /^\{\s*[A-Za-z_$][\w$.-]*\s*\}$/.test(value)
+      const isBareIdentifier = BARE_IDENTIFIER_PATH.test(value) && !JS_LITERAL_KEYWORDS.has(value)
+        && !declared.has(root) && !safeBuiltinPath
+      const shorthandMatch = value.match(BARE_OBJECT_SHORTHAND)
+      const isDoubleBraceTemplate = shorthandMatch !== null && !declared.has(shorthandMatch[1])
       const isIssueList = /^[A-Za-z][A-Za-z0-9]*-\d+(?:\s*,\s*[A-Za-z][A-Za-z0-9]*-\d+)*$/.test(value)
-      if ((isTemplatePlaceholder || isIssueList) && start !== undefined && end !== undefined) {
-        edits.push({ start, end, value: body.slice(start, end).replace(/\\/g, '\\\\').replace(/[{}]/g, '\\$&') })
-      } else if (BARE_IDENTIFIER_PATH.test(value) && !JS_LITERAL_KEYWORDS.has(value)
-        && !declared.has(root) && !safeBuiltinPath && start !== undefined && end !== undefined) {
-        edits.push({ start, end, value: `\\{${value}\\}` })
+      if ((isBareIdentifier || isDoubleBraceTemplate || isIssueList) && start !== undefined && end !== undefined) {
+        // Escape every literal brace in the matched span rather than
+        // rebuilding it from `value`, so this handles both `{name}` and
+        // `{{name}}` (and any other brace nesting) the same way.
+        const rawSpan = body.slice(start, end)
+        edits.push({ start, end, value: rawSpan.replace(/\\/g, '\\\\').replace(/[{}]/g, '\\$&') })
       }
       // A leaf node: mdast never gives it further `children` (its JSX, if
       // any, lives only inside `data.estree`), so there is nothing to recurse into.
@@ -1672,6 +1687,11 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   const runMintlify = platform === 'mintlify'
   const runDocusaurus = platform === 'docusaurus'
 
+  // A heading's explicit `{#custom-id}` anchor (see `normalizeExplicitHeadingIds`)
+  // means the same thing on every platform, so — unlike the platform-specific
+  // renames below — this always runs, even when `platform` is omitted.
+  // `normalizeExplicitHeadingIds` also covers Docusaurus' `{/* #id */}`
+  // comment form.
   const sourceBody = runDocusaurus && unwrapMdxCodeBlocks ? unwrapDocusaurusMdxCodeBlocks(body) : body
   let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(runFern ? normalizeFernFileTrees(normalizeFernCallouts(normalizeNestedCodeFences(sourceBody))) : normalizeNestedCodeFences(sourceBody)))
   if (runDocusaurus) {
@@ -1855,5 +1875,6 @@ export function parseMarkdownPage(input: {
     openapi: typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined,
     body,
     source: input.source,
+    ...(parsed.error ? { frontmatterError: parsed.error } : {}),
   }
 }

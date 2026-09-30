@@ -19,7 +19,7 @@ import type {
   MigrationWarning,
 } from './types.js'
 
-const MAX_CONFIG_BYTES = 2_000_000
+const MAX_CONFIG_BYTES = 20_000_000
 
 /** Retain safe Fern announcement links without emitting source-controlled HTML. */
 function announcementMarkdown(message: string): string {
@@ -105,7 +105,7 @@ function titleCase(value: string): string {
 
 function readBoundedYaml(path: string): unknown {
   if (lstatSync(path).size > MAX_CONFIG_BYTES) {
-    throw new Error('Fern config exceeded the 2 MB static-parser limit.')
+    throw new Error('The Fern config is larger than 20 MB and could not be imported.')
   }
   return parseYaml(readFileSync(path, 'utf8'))
 }
@@ -254,7 +254,7 @@ function registerPageAt(rawPath: string, base: string, context: WalkContext, nav
   let sourcePath: string
   try {
     const absolute = resolveWithinRoot(
-      context.pathPrefix ? resolveWithin(context.fernRoot, context.pathPrefix) : context.fernRoot,
+      context.pathPrefix ? resolveWithinRoot(context.fernRoot, context.pathPrefix, context.repositoryRoot) : context.fernRoot,
       rawPath.trim(),
       context.repositoryRoot,
     )
@@ -297,7 +297,7 @@ function registerFolder(
   let folder: string
   try {
     folder = resolveWithinRoot(
-      context.pathPrefix ? resolveWithin(context.fernRoot, context.pathPrefix) : context.fernRoot,
+      context.pathPrefix ? resolveWithinRoot(context.fernRoot, context.pathPrefix, context.repositoryRoot) : context.fernRoot,
       rawPath,
       context.repositoryRoot,
     )
@@ -440,10 +440,19 @@ function convertNode(
     // can declare several `api:` nodes (e.g. a REST API and a WebSocket API
     // in separate tabs) — each is tracked and resolved independently rather
     // than only ever importing the first one found.
+    // Like a section or page, an `api:` node contributes its own slug to the
+    // route unless `skip-slug: true` (confirmed against a live Fern site:
+    // VapiAI's `api-reference` tab has one `api:` node with `skip-slug:
+    // true` served directly at the tab's own route, and a second `Webhooks`
+    // node — no skip-slug — served one level deeper, at
+    // ".../api-reference/webhooks"). This is also this node's own auto-
+    // generated operation page prefix, used to rewrite in-content links to
+    // those pages onto Thally's route.
+    const ownSegment = segmentFor(object, object.api, context)
     context.apiSections.push({
       name: typeof object['api-name'] === 'string' ? object['api-name'] : object.api,
       nameExplicit: typeof object['api-name'] === 'string',
-      routeSegments: parentSegments,
+      routeSegments: ownSegment ? [...parentSegments, ownSegment] : parentSegments,
     })
     return null
   }
@@ -478,7 +487,14 @@ function groupsFromConverted(
  * Resolve the default Fern version's navigation when no top-level nav
  * exists. `configDir` is the directory `chosen.path` is conventionally
  * relative to (the Fern root for a top-level docs.yml, or a product's own
- * directory for a product config); `fernRoot` remains the security boundary.
+ * directory for a product config); `context.repositoryRoot` (the whole
+ * repository checkout) is the security boundary. A version file is a
+ * legitimate Fern layout even when it lives outside `fern/` (e.g. a sibling
+ * `docs/` directory referenced as `../docs/index.yml`), so it may resolve
+ * anywhere inside the repository, not just under the Fern root — escapes
+ * from the repository itself are still rejected. Once a version file loads,
+ * its own `path:` entries are relative to *its* directory, not the Fern
+ * root, so `pathPrefix` is shifted there for the rest of this config's walk.
  */
 function resolveVersionedNavigation(
   config: Record<string, unknown>,
@@ -509,7 +525,7 @@ function resolveVersionedNavigation(
   }
   if (!chosen || typeof chosen.path !== 'string') return config
   try {
-    const versionPath = resolveWithinRoot(configDir, chosen.path, fernRoot)
+    const versionPath = resolveWithinRoot(configDir, chosen.path, context.repositoryRoot)
     if (!existsSync(versionPath) || !lstatSync(versionPath).isFile()) {
       warnOnce(context, 'fern-version-not-file', `Fern version file "${chosen.path}" is not a regular file and was skipped.`)
       return config
@@ -698,6 +714,13 @@ function projectFernProducts(
 export function projectFernNavigation(input: {
   config: Record<string, unknown>
   fernRoot: string
+  /**
+   * The whole repository checkout — the security boundary for anything a
+   * config file references (e.g. a `versions:` file living outside
+   * `fern/`). Defaults to `fernRoot` for callers with no wider repository
+   * context (e.g. unit tests), which reproduces the previous fernRoot-only
+   * confinement.
+   */
   repositoryRoot?: string
 }): FernNavigationResult {
   const context: WalkContext = {
@@ -846,7 +869,22 @@ export function projectFernNavigation(input: {
       return section
     }
     const distinguishingSegment = section.routeSegments.at(-1)
-    const tabLabel = distinguishingSegment ? `${section.tabLabel}: ${titleCase(distinguishingSegment)}` : section.tabLabel
+    let tabLabel = distinguishingSegment ? `${section.tabLabel}: ${titleCase(distinguishingSegment)}` : section.tabLabel
+    // The route segment can itself title-case back to the tab's own label
+    // (e.g. a section nested under a route segment also called
+    // "api-reference"), producing a redundant "API Reference: API
+    // Reference" name, or the segment-based label can still collide with
+    // another section's. Either way, fall back to a plain ordinal suffix
+    // instead of shipping a confusing or still-colliding tab name.
+    if (!tabLabel || tabLabel === `${section.tabLabel}: ${section.tabLabel}` || claimedTabLabels.has(tabLabel)) {
+      let ordinal = 2
+      let candidate = `${section.tabLabel} (${ordinal})`
+      while (claimedTabLabels.has(candidate)) {
+        ordinal += 1
+        candidate = `${section.tabLabel} (${ordinal})`
+      }
+      tabLabel = candidate
+    }
     claimedTabLabels.add(tabLabel)
     return { ...section, tabLabel }
   })
