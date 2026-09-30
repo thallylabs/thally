@@ -1514,6 +1514,166 @@ function normalizeMintlifyParameterAnchors(body: string): string {
         `${anchorFor(doubleQuoted ?? singleQuoted)}${match}`))
 }
 
+interface FenceLine { index: number; indent: string; char: string; length: number; info: string; rest: string }
+
+function matchFenceLine(line: string): FenceLine | null {
+  const match = line.match(/^(\s*)(`{3,}|~{3,})(.*)$/)
+  if (!match) return null
+  return { index: -1, indent: match[1], char: match[2][0], length: match[2].length, info: match[3].trim(), rest: match[3] }
+}
+
+/**
+ * Widen an outer fence (for example a ```mdx block demonstrating authored
+ * Markdown) whose content contains a same-or-greater-length nested fence.
+ * CommonMark has no concept of fence nesting, so an inner fence of matching
+ * length closes the outer one early and strands the rest as raw JSX/markdown.
+ * A nested fence is identified by carrying an info string; a bare fence line
+ * always closes the innermost open block, matching authoring convention.
+ */
+function normalizeNestedCodeFences(body: string): string {
+  const lines = body.split('\n')
+  const fences = lines
+    .map((line, index) => {
+      const fence = matchFenceLine(line)
+      return fence ? { ...fence, index } : null
+    })
+    .filter((fence): fence is FenceLine => fence !== null)
+  if (fences.length === 0) return body
+
+  interface Block { open: FenceLine; close: FenceLine; children: Array<Block> }
+  const stack: Array<{ open: FenceLine; children: Array<Block> }> = []
+  const roots: Array<Block> = []
+  for (const fence of fences) {
+    const top = stack.at(-1)
+    if (top && fence.info === '' && fence.char === top.open.char && fence.length >= top.open.length) {
+      stack.pop()
+      const block: Block = { open: top.open, close: fence, children: top.children }
+      const parent = stack.at(-1)
+      if (parent) parent.children.push(block)
+      else roots.push(block)
+    } else {
+      stack.push({ open: fence, children: [] })
+    }
+  }
+  // An unresolved stack means the fences do not actually nest; leave the
+  // source untouched rather than guess at intent.
+  if (stack.length > 0) return body
+
+  const widenedLengths = new Map<number, number>()
+  function requiredLength(block: Block): number {
+    const deepestChild = Math.max(0, ...block.children.map(requiredLength))
+    const length = Math.max(block.open.length, deepestChild > 0 ? deepestChild + 1 : 0)
+    widenedLengths.set(block.open.index, length)
+    widenedLengths.set(block.close.index, length)
+    return length
+  }
+  roots.forEach(requiredLength)
+
+  return lines
+    .map((line, index) => {
+      const targetLength = widenedLengths.get(index)
+      const fence = targetLength ? matchFenceLine(line) : null
+      if (!targetLength || !fence || targetLength <= fence.length) return line
+      return `${fence.indent}${fence.char.repeat(targetLength)}${fence.rest}`
+    })
+    .join('\n')
+}
+
+/** Replace fenced code blocks and inline code spans with same-length filler. */
+function maskCodeRegions(body: string): string {
+  let inFence = false
+  return body.split('\n').map((line) => {
+    if (/^\s*(`{3,}|~{3,})/.test(line)) {
+      inFence = !inFence
+      return ' '.repeat(line.length)
+    }
+    if (inFence) return ' '.repeat(line.length)
+    return line.replace(/`[^`]*`/g, (span) => ' '.repeat(span.length))
+  }).join('\n')
+}
+
+function isKnownComponentName(name: string, body: string): boolean {
+  if (isThallyBuiltinComponent(name)) return true
+  if (new RegExp(`^\\s*export\\s+(?:const|function|default\\s+function)\\s+${name}\\b`, 'm').test(body)) return true
+  if (new RegExp(`^\\s*import\\s+(?:\\{[^}]*\\b${name}\\b[^}]*\\}|${name})\\s+from\\s+['"][^'"]+['"]`, 'm').test(body)) return true
+  return false
+}
+
+/**
+ * Mintlify content occasionally uses a bare capitalized word in angle
+ * brackets as a prose placeholder — for example "<Feature> requires a Pro
+ * plan" — which is invalid JSX: a tag must self-close or have a matching
+ * close. Left alone, this crashes MDX compilation for the whole page. A tag
+ * name that never closes or self-closes anywhere in the document, and isn't
+ * a known built-in, imported, or locally declared component, is almost
+ * certainly such a placeholder — escape it to literal text rather than
+ * losing the page.
+ */
+function escapeOrphanCapitalizedTags(body: string): string {
+  const masked = maskCodeRegions(body)
+  // The attribute group is lazy so a trailing self-close slash is captured by
+  // its own group instead of being swallowed as the last attribute character.
+  const tagPattern = /<(\/?)([A-Z][A-Za-z0-9]*)(?:\s+[^<>]*?)?(\/?)>/g
+  const opens = new Map<string, Array<{ start: number; end: number }>>()
+  const closedOrSelfClosed = new Set<string>()
+  for (const match of masked.matchAll(tagPattern)) {
+    const [full, closing, name, selfClosing] = match
+    if (closing || selfClosing) {
+      closedOrSelfClosed.add(name)
+      continue
+    }
+    const start = match.index!
+    const list = opens.get(name) ?? []
+    list.push({ start, end: start + full.length })
+    opens.set(name, list)
+  }
+  const edits: Array<{ start: number; end: number }> = []
+  for (const [name, ranges] of opens) {
+    if (closedOrSelfClosed.has(name) || isKnownComponentName(name, body)) continue
+    edits.push(...ranges)
+  }
+  if (edits.length === 0) return body
+  // The scan above is textual, so it cannot tell prose from a string inside an
+  // expression or export. A page that already compiles needs no escaping;
+  // never rewrite one.
+  try {
+    compileSync(body, { outputFormat: 'program' })
+    return body
+  } catch {
+    // Fails to compile: escape the placeholders below.
+  }
+  edits.sort((a, b) => a.start - b.start)
+  let result = ''
+  let cursor = 0
+  for (const edit of edits) {
+    result += body.slice(cursor, edit.start)
+    result += body.slice(edit.start, edit.end).replace(/^</, '&lt;').replace(/>$/, '&gt;')
+    cursor = edit.end
+  }
+  return result + body.slice(cursor)
+}
+
+const REACT_HOOK_NAMES = ['useState', 'useEffect', 'useRef', 'useCallback', 'useMemo', 'useContext', 'useReducer']
+
+/**
+ * Mintlify documents these seven hooks as pre-injected globals for a page's
+ * inline `export const Widget = () => {...}` components. The migrator's
+ * component extraction (components.ts) moves a component that really calls
+ * one of these hooks into its own client module, so this is only a fallback
+ * for a hook call the extractor doesn't own (for example directly in the
+ * page body). Detection is fence-aware: merely showing `useState(...)` in a
+ * documentation code sample must not import it — that import alone, unused
+ * or not, marks the compiled page a Client Component and breaks the build.
+ */
+function injectReactHookImports(body: string): string {
+  const masked = maskCodeRegions(body)
+  const used = REACT_HOOK_NAMES.filter((hook) => (
+    new RegExp(`\\b${hook}\\s*\\(`).test(masked)
+    && !new RegExp(`import\\s*\\{[^}]*\\b${hook}\\b[^}]*\\}\\s*from\\s*['"]react['"]`).test(body)
+  ))
+  return used.length > 0 ? `import { ${used.join(', ')} } from 'react'\n\n${body}` : body
+}
+
 /** Normalize only syntax Thally cannot render; supported source JSX stays intact. */
 export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapMdxCodeBlocks = true): string {
   // A caller that doesn't know the source platform (the URL crawler, when it
@@ -1533,7 +1693,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   // `normalizeExplicitHeadingIds` also covers Docusaurus' `{/* #id */}`
   // comment form.
   const sourceBody = runDocusaurus && unwrapMdxCodeBlocks ? unwrapDocusaurusMdxCodeBlocks(body) : body
-  let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(runFern ? normalizeFernFileTrees(normalizeFernCallouts(sourceBody)) : sourceBody))
+  let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(runFern ? normalizeFernFileTrees(normalizeFernCallouts(normalizeNestedCodeFences(sourceBody))) : normalizeNestedCodeFences(sourceBody)))
   if (runDocusaurus) {
     // Docusaurus resolves GitHub emoji names in Markdown text. Leaving the
     // shortcodes literal makes comparison tables unreadable after import; the
@@ -1629,7 +1789,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
     return result
   })
   if (runFern) rewritten = unwrapFernCodeBlockTabs(rewritten)
-  const normalized = provideScopedGlobalReferences(rewritten)
+  const normalized = escapeOrphanCapitalizedTags(provideScopedGlobalReferences(rewritten))
   if (runDocusaurus && sourceBody !== body) {
     try {
       compileSync(normalized, { outputFormat: 'program' })
@@ -1665,7 +1825,7 @@ export function parseMarkdownPage(input: {
     ...(input.locale ? { locale: input.locale } : {}),
   }
   const identity = input.resolveIdentity?.(parsed.data, fallbackIdentity) ?? fallbackIdentity
-  let body = normalizeMdx(parsed.content, input.platform).trim()
+  let body = injectReactHookImports(normalizeMdx(parsed.content, input.platform)).trim()
   const keywords = Array.isArray(parsed.data.keywords)
     ? parsed.data.keywords.filter((value): value is string => typeof value === 'string')
     : []

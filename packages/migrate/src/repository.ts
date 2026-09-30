@@ -1757,13 +1757,21 @@ function snippetComponentBody(source: string, componentName: string): string {
 /** Keep a stateful snippet intact so its hooks and local values move with its JSX. */
 function statefulSnippetDeclaration(source: string, componentName: string): string | null {
   const parsed = ts.createSourceFile('snippet.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-  if (parsed.statements.length !== 1) return null
-  const statement = parsed.statements[0]
-  if (!ts.isVariableStatement(statement) || !statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
-    || statement.declarationList.declarations.length !== 1) return null
+  // A snippet may declare helpers next to the component (a sibling component
+  // it renders); the whole file travels so those stay declared on the page,
+  // where the component migrator moves what the component needs. Anything
+  // that is not plain ESM is prose, which cannot be preserved as a declaration.
+  const isEsm = (statement: ts.Statement): boolean => ts.isImportDeclaration(statement)
+    || (ts.isVariableStatement(statement) || ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement))
+      && !!ts.getModifiers(statement as ts.HasModifiers)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+  if (parsed.statements.length === 0 || !parsed.statements.every(isEsm)) return null
+  const statement = parsed.statements.find((candidate) => ts.isVariableStatement(candidate)
+    && candidate.declarationList.declarations.length === 1
+    && ts.isIdentifier(candidate.declarationList.declarations[0].name)
+    && candidate.declarationList.declarations[0].name.text === componentName)
+  if (!statement || !ts.isVariableStatement(statement)) return null
   const declaration = statement.declarationList.declarations[0]
-  if (!ts.isIdentifier(declaration.name) || declaration.name.text !== componentName
-    || !declaration.initializer || !ts.isArrowFunction(declaration.initializer)
+  if (!declaration.initializer || !ts.isArrowFunction(declaration.initializer)
     || !ts.isBlock(declaration.initializer.body)) return null
   const body = declaration.initializer.body.statements
   // A component with setup statements before its return cannot be flattened
@@ -2341,8 +2349,15 @@ function inlineMdxSnippets(
   result = result.replace(SNIPPET_TAG_PATTERN, (_tag, doubleQuoted: string | undefined, singleQuoted: string | undefined) => {
     const filePath = (doubleQuoted ?? singleQuoted)!
     try {
-      const candidate = resolveWithin(siteRoot, `snippets/${filePath}`)
-      if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
+      // Mintlify's documented form is relative to `snippets/`; sites also write
+      // the full `/snippets/x.mdx` (or a page-relative) path.
+      const candidate = [
+        () => resolveWithin(siteRoot, `snippets/${filePath}`),
+        () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
+      ].map((resolveCandidate) => {
+        try { return resolveCandidate() } catch { return undefined }
+      }).find((path) => path !== undefined && existsSync(path) && lstatSync(path).isFile())
+      if (!candidate) throw new Error('file not found')
       return inlineMdxSnippets(
         withoutFrontmatter(readFileSync(candidate, 'utf8')),
         candidate,
@@ -2364,7 +2379,7 @@ function inlineMdxSnippets(
   if (preservedDeclarations.size > 0) {
     const frontmatter = result.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
     const prefix = frontmatter?.[0] ?? ''
-    result = `${prefix}${[...preservedDeclarations.values()].join('\n\n')}\n\n${result.slice(prefix.length)}`
+    result = `${prefix}${[...new Set(preservedDeclarations.values())].join('\n\n')}\n\n${result.slice(prefix.length)}`
   }
   return depth === 0 ? hoistMdxImports(result) : result
 }
