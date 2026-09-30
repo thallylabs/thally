@@ -126,13 +126,19 @@ function addSpecFile(
   try {
     document = isJson ? JSON.parse(entry.content) : parseYaml(entry.content)
   } catch (error) {
-    // The runtime cannot load an unparseable spec either, so it publishes no
-    // operations from it; never fail the whole build over a file (possibly an
-    // unused root default) that is broken on its own.
-    console.warn(`[thally] OpenAPI source is not valid ${isJson ? 'JSON' : 'YAML'} and was copied unfiltered: ${projectPath(projectRoot, filePath)} (${(error as Error).message})`)
+    // Unfilterable, so it must not ship: it may carry hidden or excluded
+    // operations, and managed assets are published as files. The runtime could
+    // not load it anyway, so leaving it out loses nothing a reader could see;
+    // the build keeps going because the file may be an unused root default.
+    delete sources[projectPath(projectRoot, filePath)]
+    console.warn(`[thally] OpenAPI source is not valid ${isJson ? 'JSON' : 'YAML'} and was left out of the build: ${projectPath(projectRoot, filePath)} (${(error as Error).message})`)
     return
   }
-  if (!document || typeof document !== 'object') return
+  if (!document || typeof document !== 'object' || Array.isArray(document)) {
+    delete sources[projectPath(projectRoot, filePath)]
+    console.warn(`[thally] OpenAPI source is not an object and was left out of the build: ${projectPath(projectRoot, filePath)}`)
+    return
+  }
   const sanitized = sanitizeSpecForPublication(document as OpenAPIDocument, { overrides })
   if (sanitized === document) return
   entry.content = isJson ? `${JSON.stringify(sanitized, null, 2)}\n` : stringifyYaml(sanitized)

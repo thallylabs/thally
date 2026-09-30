@@ -1,6 +1,6 @@
 /** Regression coverage for authored files embedded into self-hosted runtimes. */
 
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -110,15 +110,45 @@ describe('collectRuntimeContentFiles', () => {
     expect(findShadowingPublicSpecs(projectRoot)).toEqual([])
   })
 
-  it('does not fail the build for an unparseable root spec', () => {
+  it('leaves an unparseable root spec out without failing the build', () => {
     const projectRoot = createProject('openapi/api.yaml')
     mkdirSync(path.join(projectRoot, 'openapi'))
     writeFileSync(path.join(projectRoot, 'openapi/api.yaml'), 'openapi: 3.1.0\n')
     writeFileSync(path.join(projectRoot, 'openapi.yaml'), 'paths: [unclosed')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      expect(collectRuntimeContentFiles(projectRoot)['openapi.yaml']?.content).toBe('paths: [unclosed')
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('openapi.yaml'))
+      const sources = collectRuntimeContentFiles(projectRoot)
+      expect(sources).not.toHaveProperty('openapi.yaml')
+      expect(sources).toHaveProperty('openapi/api.yaml')
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/left out of the build: openapi\.yaml /))
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('never ships an unfilterable spec, even one bound to a hidden API tab', () => {
+    const projectRoot = mkdtempSync(path.join(tmpdir(), 'thally-runtime-content-'))
+    projectRoots.push(projectRoot)
+    writeFileSync(path.join(projectRoot, 'docs.json'), JSON.stringify({
+      tabs: [
+        { tab: 'API', api: { source: 'openapi/public.json' } },
+        { tab: 'Internal', hidden: true, api: { source: 'openapi/internal.json' } },
+        { tab: 'Scalar', api: { source: 'openapi/scalar.json' } },
+      ],
+    }))
+    mkdirSync(path.join(projectRoot, 'openapi'))
+    writeFileSync(path.join(projectRoot, 'openapi/public.json'), '{"openapi":"3.1.0","paths":{}}')
+    // Trailing comma: not valid JSON, and the raw text still names the hidden endpoint.
+    writeFileSync(path.join(projectRoot, 'openapi/internal.json'), '{"openapi":"3.1.0","paths":{"/secret":{"get":{"x-hidden":true,"responses":{}}}},}')
+    writeFileSync(path.join(projectRoot, 'openapi/scalar.json'), '["/secret"]')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const sources = collectRuntimeContentFiles(projectRoot)
+      expect(Object.keys(sources).filter((file) => file.startsWith('openapi/'))).toEqual(['openapi/public.json'])
+      expect(Object.values(sources).some((entry) => entry.content.includes('/secret'))).toBe(false)
+      const manifest = writeManagedContentAssets(projectRoot, sources)
+      expect(Object.keys(manifest.files)).not.toContain('openapi/internal.json')
+      expect(existsSync(path.join(projectRoot, MANAGED_CONTENT_ASSET_DIRECTORY, 'openapi/internal.json'))).toBe(false)
     } finally {
       warn.mockRestore()
     }
