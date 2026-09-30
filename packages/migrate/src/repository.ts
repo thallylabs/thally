@@ -31,6 +31,7 @@ import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
 
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent } from './components.js'
+import { projectAuthoredStyles } from './source-styles.js'
 
 import {
   addDocusaurusTranslatedHeadingAliases,
@@ -3295,9 +3296,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     })
   }
 
-  // Mintlify automatically loads a root style.css. Imported JSX often relies
-  // on that file even when no component imports it explicitly; omitting it can
-  // turn decorative SVGs into page-sized shapes and hide interactive controls.
+  // Mintlify loads root style.css implicitly. Keep rules for authored markup,
+  // but never ship selectors coupled to Mintlify's private shell classes.
+  // Thally owns the navbar, cards and footer through docs.json and its theme.
   if (platform === 'mintlify' && mintlifyProjectRoot) {
     const stylesheet = resolveWithin(mintlifyProjectRoot, 'style.css')
     if (existsSync(stylesheet) && lstatSync(stylesheet).isFile() && !lstatSync(stylesheet).isSymbolicLink()) {
@@ -3311,11 +3312,29 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         if (/@import\b|url\s*\(\s*['"]?\s*(?:javascript:|file:)/i.test(css.toString('utf8'))) {
           warnings.push({ code: 'unsupported-config', message: 'Mintlify root style.css contains a CSS import or unsafe URL; review and import it manually.', source: 'style.css' })
         } else {
-          const identity = createHash('sha256').update(componentSourceIdentity(options.sourceUrl, repositoryDir, mintlifyProjectRoot)).digest('hex').slice(0, 12)
-          const assetPath = `migrated/${identity}/style.css`
-          assets.push({ path: assetPath, content: css })
-          docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), `/${assetPath}`] }
-          totalAssetBytes += size
+          try {
+            const projected = projectAuthoredStyles(css.toString('utf8'), [
+              ...pages.map((page) => page.body),
+              ...(componentMigrator?.files() ?? []).map((file) => typeof file.content === 'string' ? file.content : ''),
+            ])
+            if (projected.omittedSelectors > 0) warnings.push({
+              code: 'unsupported-config',
+              source: 'style.css',
+              message: `Skipped ${projected.omittedSelectors} stylesheet selector${projected.omittedSelectors === 1 ? '' : 's'} that target platform-owned or unreferenced markup. Recreate any intentional shell customization with Thally configuration.`,
+            })
+            const identity = createHash('sha256').update(componentSourceIdentity(options.sourceUrl, repositoryDir, mintlifyProjectRoot)).digest('hex').slice(0, 12)
+            const assetPath = `migrated/${identity}/style.css`
+            if (projected.css.trim()) {
+              const content = Buffer.from(projected.css)
+              assets.push({ path: assetPath, content })
+              docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), `/${assetPath}`] }
+              totalAssetBytes += content.length
+            }
+          } catch {
+            // Invalid source CSS must not turn a successful content migration
+            // into a failed site. The report gives the owner the path to fix.
+            warnings.push({ code: 'unsupported-config', message: 'Mintlify root style.css could not be parsed and was not imported.', source: 'style.css' })
+          }
         }
       }
     }

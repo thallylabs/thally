@@ -33,6 +33,48 @@ describe('Mintlify root styles', () => {
     expect(result.docsConfig.stylesheets).toBeUndefined()
     expect(result.warnings).toContainEqual(expect.objectContaining({ source: 'style.css' }))
   })
+
+  it('keeps authored widget styling without leaking Mintlify shell selectors', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-style-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['introduction'] } }))
+    writeFileSync(join(root, 'introduction.mdx'), '<div className="widget"><p className="widget-copy">Hello.</p></div>')
+    writeFileSync(join(root, 'style.css'), [
+      '.widget, li.navbar-link a { padding: 1rem; }',
+      '.widget-copy[data-as="p"] { margin: 0; }',
+      '#footer a.max-w-36 { max-width: none; }',
+      'a > div.w-full > div.mt-8 { position: absolute; }',
+    ].join('\n'))
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    const href = result.docsConfig.stylesheets?.[0]
+    const css = result.assets.find((asset) => `/${asset.path}` === href)?.content.toString() ?? ''
+    expect(css).toContain('.widget { padding: 1rem; }')
+    expect(css).toContain('.widget-copy { margin: 0; }')
+    expect(css).not.toMatch(/navbar-link|#footer|max-w-36|w-full|mt-8|data-as/)
+    expect(result.warnings).toContainEqual(expect.objectContaining({ source: 'style.css' }))
+  })
+
+  it('does not publish a stylesheet containing only platform shell overrides', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-style-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['introduction'] } }))
+    writeFileSync(join(root, 'introduction.mdx'), 'Hello.')
+    writeFileSync(join(root, 'style.css'), 'li.navbar-link a { color: red; } #footer a.max-w-36 { max-width: none; }')
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    expect(result.docsConfig.stylesheets).toBeUndefined()
+    expect(result.assets.some((asset) => asset.path.endsWith('/style.css'))).toBe(false)
+  })
+
+  it('ignores classes shown only in examples and keeps authored animations', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-style-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['introduction'] } }))
+    writeFileSync(join(root, 'introduction.mdx'), '<div className="widget">Live widget</div>\n\n```jsx\n<div className="platform-shell" />\n```')
+    writeFileSync(join(root, 'style.css'), '@keyframes pulse { from { opacity: 0; } to { opacity: 1; } } .widget { animation: pulse 1s; } .platform-shell { display: none; }')
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    const href = result.docsConfig.stylesheets?.[0]
+    const css = result.assets.find((asset) => `/${asset.path}` === href)?.content.toString() ?? ''
+    expect(css).toContain('@keyframes pulse')
+    expect(css).toContain('.widget { animation: pulse 1s; }')
+    expect(css).not.toContain('platform-shell')
+  })
 })
 
 // Queue of scripted `git clone` outcomes consumed in order by the mocked
