@@ -34,6 +34,7 @@ const { remarkPlugins } = remarkModule as unknown as typeof import('../src/mdx/r
 const {
   collectRuntimeContentFiles,
   findShadowingPublicSpecs,
+  findUnpublishedOpenApiPages,
   removeManagedContentAssets,
   writeManagedContentAssets,
 } = runtimeContentFilesModule as unknown as typeof import('./lib/runtime-content-files')
@@ -50,6 +51,11 @@ const authoredSources = collectRuntimeContentFiles(projectRoot)
 for (const file of findShadowingPublicSpecs(projectRoot)) {
   console.warn(
     `[thally] ${file} is served as-is at /${file.slice('public/'.length)} instead of the filtered specification, so its x-excluded/x-hidden operations are downloadable. Move it out of public/ (for example to openapi/), point docs.json at it, and delete this copy.`,
+  )
+}
+for (const page of findUnpublishedOpenApiPages(projectRoot)) {
+  console.warn(
+    `[thally] page ${page.file} points at ${page.state} operation ${page.operation} and is not published: it returns 404 and is left out of navigation, search, sitemap and llms.txt. Publish the operation or point the page at another one.`,
   )
 }
 // Managed releases read every authored input through ASSETS. Nothing authored

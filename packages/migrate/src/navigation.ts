@@ -563,7 +563,7 @@ function convertPage(
 }
 
 const KNOWN_NAVIGATION_KEYS = new Set([
-  'tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus', 'languages',
+  'tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus', 'languages', 'productGroups',
   'groups', 'pages', 'menu', 'global',
 ])
 

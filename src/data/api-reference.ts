@@ -1,7 +1,8 @@
 import { cache } from 'react'
 import { apiReferenceConfig } from '@/config/api-reference'
-import { getSpecConfig, loadSpec } from '@/lib/openapi/fetch'
+import { getSpecConfig, loadRawSpecDocument, loadSpec } from '@/lib/openapi/fetch'
 import { buildOperationKey, normalizeSpec } from '@/lib/openapi/normalize'
+import { operationPublicationState, type OperationPublicationState } from '@/lib/openapi/publication'
 import type { NavigationSection, SidebarCollection } from '@/data/docs'
 import type { NormalizedOperation, NormalizedSpec } from '@/lib/openapi/types'
 
@@ -96,6 +97,35 @@ export async function getApiOperationByKey(
 
   const allNodes = await getAllApiOperationNodes()
   return allNodes.find((node) => node.operation.key === key) ?? null
+}
+
+/**
+ * Why `getApiOperationByKey` finds nothing: the operation is hidden or
+ * excluded (`hidden` / `excluded`), or it is simply not there (`unknown`).
+ * Same spec selection as `getApiOperationByKey`; a spec that cannot be loaded
+ * is `unknown`, never a reason to unpublish a page.
+ */
+export async function getOperationPublicationState(
+  method: string,
+  path: string,
+  specId?: string,
+): Promise<OperationPublicationState> {
+  if (!method || !path || apiReferenceConfig.specs.length === 0) return 'unknown'
+  const configs = specId
+    ? [getSpecConfig(apiReferenceConfig, resolveSpecId(specId))]
+    : apiReferenceConfig.specs
+  let result: OperationPublicationState = 'unknown'
+  for (const config of configs) {
+    let state: OperationPublicationState
+    try {
+      state = operationPublicationState(await loadRawSpecDocument(config), method, path, config.operationOverrides)
+    } catch {
+      continue
+    }
+    if (state === 'published') return 'published'
+    if (state !== 'unknown') result = state
+  }
+  return result
 }
 
 export async function buildApiNavigation(specId?: string): Promise<Array<ApiNavigationGroup>> {

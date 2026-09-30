@@ -534,6 +534,15 @@ describe('Mintlify tab menus', () => {
     expect(result.warnings.map((warning) => warning.message).join('\n')).toContain('"sections"')
   })
 
+  it('does not warn that productGroups is unsupported, since its products are projected', () => {
+    const result = projectMintlifyNavigation({ navigation: { tabs: [{
+      tab: 'Docs',
+      productGroups: [{ group: 'P', products: [{ product: 'Redis', groups: [{ group: 'Overview', pages: ['redis/a'] }] }] }],
+    }] } })
+    expect(result.docsConfig.tabs[0]?.groups).toEqual([{ group: 'Overview', pages: ['redis/a'] }])
+    expect(result.warnings.map((warning) => warning.message).join('\n')).not.toContain('productGroups')
+  })
+
   it('leaves existing tab, anchor and dropdown output unchanged', () => {
     const tabs = projectMintlifyNavigation({ navigation: { tabs: [{ tab: 'T', groups: [{ group: 'G', pages: ['g/a'] }] }] } })
     expect(tabs.docsConfig.tabs).toEqual([{ tab: 'T', groups: [{ group: 'G', pages: ['g/a'] }] }])

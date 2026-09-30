@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process'
 import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
+import { operationState, parseDocOperation } from './openapi-publication.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { slugify } from '@thallylabs/core/slugify'
@@ -371,6 +372,42 @@ function checkPublicSpecs(projectDir: string, tabs: Array<{ api?: { source?: str
   }
 }
 
+/**
+ * A page whose `openapi:` frontmatter names a hidden or excluded operation of
+ * the site's default spec (the first visible API tab's, which is what the
+ * route consults) 404s and is left out of every listing. Unknown operations
+ * are not reported, and remote specs cannot be judged here.
+ */
+function checkUnpublishedOperationPages(
+  projectDir: string,
+  tabs: Array<{ hidden?: boolean; api?: { source?: string } }>,
+  pages: Array<{ file: string; method: string; path: string }>,
+  issues: LintIssue[],
+): void {
+  const api = tabs.find((tab) => !tab.hidden && tab.api?.source)?.api
+  const source = api?.source
+  if (!source || pages.length === 0 || /^https?:/i.test(source)) return
+  const specPath = source.startsWith('/') ? join(projectDir, 'public', source.slice(1)) : join(projectDir, source)
+  let spec: unknown
+  try {
+    const raw = readFileSync(specPath, 'utf8')
+    spec = /\.json$/i.test(source) ? JSON.parse(raw) : parseYaml(raw)
+  } catch {
+    return // validateOpenApi reports a missing or invalid spec
+  }
+  const overrides = (api as { overrides?: unknown }).overrides
+  for (const { file, method, path } of pages) {
+    const state = operationState(spec, method, path, overrides)
+    if (state === 'hidden' || state === 'excluded') {
+      issues.push({
+        severity: 'warning',
+        file,
+        message: `page ${file} points at ${state} operation ${method} ${path} and is not published: it returns 404 and is left out of navigation, search, sitemap and llms.txt. Publish the operation or point the page at another one`,
+      })
+    }
+  }
+}
+
 function validateOpenApi(projectDir: string, source: string, issues: LintIssue[], overrides?: unknown): void {
   // Runtime URL-style sources are author-owned files below `public/`, while
   // relative sources are resolved from the project root.
@@ -482,6 +519,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   if (existsSync(contentDir)) scanMdx(contentDir, allFiles)
 
   const fixedOrphans: string[] = []
+  const operationPages: Array<{ file: string; method: string; path: string }> = []
   const validPaths = new Set<string>(['/'])
   const anchorsByPath = new Map<string, Set<string>>()
   const linksByFile: Array<{ file: string; path: string; anchors: Set<string>; links: FoundLink[]; images: FoundLink[]; offset: number }> = []
@@ -522,6 +560,9 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     if (typeof data.openapi !== 'string' && content.trim().length < 50) {
       issues.push({ severity: 'warning', message: `Very short body (${content.trim().length} chars) — page may be empty`, file: rel2 })
     }
+
+    const operation = parseDocOperation(data.openapi)
+    if (operation) operationPages.push({ file: rel2, ...operation })
 
     if (options.drift) checkDrift(projectDir, rel2, data, issues)
 
@@ -605,6 +646,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   }
 
   checkPublicSpecs(projectDir, config.tabs, issues)
+  checkUnpublishedOperationPages(projectDir, config.tabs, operationPages, issues)
 
   const errors = issues.filter((i) => i.severity === 'error')
   options.onIssues?.(issues)

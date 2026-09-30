@@ -9,6 +9,7 @@ import {
   MANAGED_CONTENT_ASSET_DIRECTORY,
   collectRuntimeContentFiles,
   findShadowingPublicSpecs,
+  findUnpublishedOpenApiPages,
   writeManagedContentAssets,
 } from '../../../scripts/lib/runtime-content-files'
 import { sanitizeSpecForPublication } from '@/lib/openapi/sanitize'
@@ -162,5 +163,45 @@ describe('collectRuntimeContentFiles', () => {
     expect(() => collectRuntimeContentFiles(projectRoot)).toThrow(
       'Configured OpenAPI source resolves outside the project',
     )
+  })
+})
+
+describe('findUnpublishedOpenApiPages', () => {
+  const ok = { responses: {} }
+  function project(files: Record<string, string>, api: Record<string, unknown> = { source: 'openapi/api.json' }): string {
+    const projectRoot = mkdtempSync(path.join(tmpdir(), 'thally-unpublished-'))
+    projectRoots.push(projectRoot)
+    writeFileSync(path.join(projectRoot, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'API', api }] }))
+    const spec = {
+      openapi: '3.1.0', info: { title: 'T', version: '1' },
+      paths: { '/h': { get: { 'x-hidden': true, ...ok } }, '/e': { get: { 'x-excluded': true, ...ok } }, '/v': { get: ok } },
+    }
+    for (const [file, body] of Object.entries({ 'openapi/api.json': JSON.stringify(spec), ...files })) {
+      mkdirSync(path.dirname(path.join(projectRoot, file)), { recursive: true })
+      writeFileSync(path.join(projectRoot, file), body)
+    }
+    return projectRoot
+  }
+  const page = (operation: string) => `---\ntitle: T\nopenapi: "${operation}"\n---\nBody`
+
+  it('names each page bound to a hidden or excluded operation, and only those', () => {
+    const projectRoot = project({
+      'src/content/hidden-endpoint.mdx': page('GET /h'),
+      'src/content/sub/excluded.mdx': page('GET /e'),
+      'src/content/visible.mdx': page('GET /v'),
+      'src/content/typo.mdx': page('GET /nope'),
+      'src/content/plain.mdx': '---\ntitle: P\n---\nText',
+    })
+    expect(findUnpublishedOpenApiPages(projectRoot)).toEqual([
+      { file: 'src/content/hidden-endpoint.mdx', operation: 'GET /h', state: 'hidden' },
+      { file: 'src/content/sub/excluded.mdx', operation: 'GET /e', state: 'excluded' },
+    ])
+  })
+
+  it('honours docs.json overrides and stays quiet for a remote or missing spec', () => {
+    const files = { 'src/content/hidden-endpoint.mdx': page('GET /h') }
+    expect(findUnpublishedOpenApiPages(project(files, { source: 'openapi/api.json', overrides: { 'GET /h': { hidden: false } } }))).toEqual([])
+    expect(findUnpublishedOpenApiPages(project(files, { source: 'https://example.com/spec.json' }))).toEqual([])
+    expect(findUnpublishedOpenApiPages(project(files, { source: 'openapi/missing.json' }))).toEqual([])
   })
 })

@@ -12,6 +12,7 @@ import { sanitizeSpecForPublication } from '@/lib/openapi/sanitize'
 import type { ApiReferenceConfig, ApiSpecConfig, OpenAPIDocument, ResolvedSpec } from '@/lib/openapi/types'
 
 const specCache = new Map<string, Promise<OpenAPIDocument>>()
+const rawSpecCache = new Map<string, Promise<OpenAPIDocument>>()
 
 function cacheKey(config: ApiSpecConfig) {
   return config.id
@@ -57,6 +58,17 @@ async function readSource(config: ApiSpecConfig): Promise<OpenAPIDocument> {
   }
 }
 
+/**
+ * The document exactly as authored, before excluded/hidden operations are
+ * removed. Only publication decisions (is this documented page published?)
+ * need it; everything that renders or serves the spec uses the sanitized one.
+ */
+export async function loadRawSpecDocument(config: ApiSpecConfig): Promise<OpenAPIDocument> {
+  const key = cacheKey(config)
+  if (!rawSpecCache.has(key)) rawSpecCache.set(key, readSource(config))
+  return rawSpecCache.get(key) as Promise<OpenAPIDocument>
+}
+
 export async function loadSpecDocument(config: ApiSpecConfig): Promise<OpenAPIDocument> {
   const key = cacheKey(config)
   if (!specCache.has(key)) {
@@ -64,7 +76,7 @@ export async function loadSpecDocument(config: ApiSpecConfig): Promise<OpenAPIDo
     // only ever sees the publication-safe document.
     specCache.set(
       key,
-      readSource(config).then((document) =>
+      loadRawSpecDocument(config).then((document) =>
         sanitizeSpecForPublication(document, { overrides: config.operationOverrides }),
       ),
     )

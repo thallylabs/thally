@@ -299,3 +299,47 @@ describe('thally check image references', () => {
     expect(text).toContain('Image not found: "/images/also-missing.png"')
   })
 })
+
+describe('thally check pages bound to unpublished operations', () => {
+  const ok = { responses: { 200: { description: 'ok' } } }
+  async function run(pages: Record<string, string>, overrides?: Record<string, unknown>, source = 'openapi/api.json') {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-unpublished-'))
+    mkdirSync(join(projectDir, 'openapi'), { recursive: true })
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'API', groups: [{ group: 'G', pages: Object.keys(pages) }], api: { source, ...(overrides ? { overrides } : {}) } }] }))
+    writeFileSync(join(projectDir, 'openapi/api.json'), JSON.stringify({
+      openapi: '3.1.0', info: { title: 'T', version: '1' },
+      paths: {
+        '/hidden': { get: { 'x-hidden': true, ...ok } },
+        '/excluded': { $ref: '#/components/pathItems/E' },
+        '/visible': { get: ok },
+      },
+      components: { pathItems: { E: { 'x-excluded': true, get: ok } } },
+    }))
+    for (const [id, operation] of Object.entries(pages)) {
+      writeFileSync(join(projectDir, `src/content/${id}.mdx`), `---\ntitle: ${id}\ndescription: d\nopenapi: "${operation}"\n---\n`)
+    }
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    return output.join('\n')
+  }
+
+  it('warns for each page whose operation is hidden or excluded, naming the page and operation', async () => {
+    const output = await run({ 'hidden-endpoint': 'GET /hidden', 'excluded-endpoint': 'GET /excluded', 'visible-endpoint': 'GET /visible', 'typo-endpoint': 'GET /typo' })
+    expect(output).toContain('page src/content/hidden-endpoint.mdx points at hidden operation GET /hidden and is not published')
+    expect(output).toContain('page src/content/excluded-endpoint.mdx points at excluded operation GET /excluded and is not published')
+    expect(output).not.toContain('visible-endpoint.mdx points')
+    expect(output).not.toContain('typo-endpoint.mdx points')
+    expect(output).toContain('0 error(s)')
+  })
+
+  it('honours docs.json overrides and does not judge a remote spec', async () => {
+    expect(await run({ 'hidden-endpoint': 'GET /hidden' }, { 'GET /hidden': { hidden: false } })).not.toContain('is not published')
+    expect(await run({ 'hidden-endpoint': 'GET /hidden' }, undefined, 'https://example.com/spec.json')).not.toContain('is not published')
+  })
+})

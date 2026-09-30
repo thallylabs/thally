@@ -93,6 +93,8 @@ Set `x-hidden: true` or `x-excluded: true` in the spec, or use the `hidden` over
 
 The extensions can sit on an operation, on a path item, or on a `paths` entry next to its `$ref`. A `$ref` path item shared by several paths is never edited: `x-hidden` or an override on one path only hides that path, and the shared item stays for the others. An `x-excluded` flag anywhere in a shared item applies to every path that uses it. A `$ref` that cannot be followed (another file, a missing target, a cycle) is left as written unless the entry itself carries a flag.
 
+A page whose `openapi:` frontmatter names a hidden or excluded operation is not published. Its address returns 404, and it is left out of navigation, breadcrumbs, previous and next links, search, the sitemap, `llms.txt`, the Markdown pages and the agent and MCP listings. `thally check` and the build warn and name each such page. An `openapi:` value that matches no operation at all is not treated this way.
+
 <Warning title="Keep specs out of public/">
 Keep spec files outside `public/`, for example in `openapi/`. Everything under `public/` is served as-is, so a spec there stays fully downloadable, hidden operations included. A file named `public/openapi.json` or `public/openapi.yaml` also answers `/openapi.json` or `/openapi.yaml` in place of the filtered specification. `thally check` and the build warn about OpenAPI files under `public/`. Re-running a migration into an existing site does not remove old copies from `public/`; delete them manually.
 </Warning>

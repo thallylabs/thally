@@ -6,6 +6,9 @@ import { getDocsJsonConfig, getDocsJsonConfigRevision } from '@/lib/docs-json-co
 import { resolveIconLibrary, type IconLibrary } from '@/lib/icon-library'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { SUPPORTED_LOCALE_OPTIONS } from '@/lib/i18n/config'
+import { parseOpenApiReference, type OpenApiReference } from '@/lib/openapi/doc-reference'
+
+export { parseOpenApiReference }
 
 // ---------------------------------------------------------------------------
 // Public interfaces (consumed by components, pages, and stores)
@@ -36,11 +39,7 @@ export interface DocEntry {
   mode?: DocPageMode
 }
 
-export interface OpenApiReference {
-  specId: string
-  method: string
-  path: string
-}
+export type { OpenApiReference }
 
 export interface NavigationSection {
   /** Stable structural identity; unlike a title, this remains unique when a group is split. */
@@ -507,6 +506,7 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
     verifiedVersion: fm.verifiedVersion,
     noindex: fm.noindex,
     hidden: fm.hidden,
+    openapi: parseOpenApiReference(fm.openapi) ?? undefined,
   }
 }
 
@@ -515,6 +515,39 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
 // ---------------------------------------------------------------------------
 
 let _allEntries: Array<DocEntry> | null = null
+
+// ---------------------------------------------------------------------------
+// Publication
+// ---------------------------------------------------------------------------
+
+/**
+ * A page whose `openapi:` frontmatter points at a hidden or excluded operation
+ * 404s (see the docs page route), so no listing may offer it. The set is
+ * decided asynchronously in `@/data/doc-publication` (it needs the spec) and
+ * installed here so the synchronous navigation and enumeration code below, and
+ * every surface built on it, applies one shared predicate.
+ */
+let unpublishedPageIds: ReadonlySet<string> = new Set()
+
+export function setUnpublishedPageIds(ids: Iterable<string>): void {
+  const next = new Set(ids)
+  if (next.size === unpublishedPageIds.size && [...next].every((id) => unpublishedPageIds.has(id))) return
+  unpublishedPageIds = next
+  _allEntries = null
+  loadedEntriesPromise = null
+  sidebarCollectionsCache.clear()
+}
+
+/** False for a page whose documented operation is hidden or excluded. */
+export function isDocPublished(pageId: string): boolean {
+  return !unpublishedPageIds.has(pageId)
+}
+
+/** Awaited by every async loader and route that lists or serves pages, before the first check of {@link isDocPublished}. */
+export async function ensureDocPublication(): Promise<void> {
+  // Dynamic: the publication module imports the API reference, which imports this one.
+  await (await import('@/data/doc-publication')).primeDocPublication()
+}
 
 /** Locale directories are reserved even when Cloud selects them after build. */
 function localeDirectoryCodes(): Set<string> {
@@ -536,13 +569,18 @@ function getAllContentPageIds(): Array<string> {
 }
 
 function getAllDocEntries(): Array<DocEntry> {
-  const config = docsConfig()
+  docsConfig()
   if (_allEntries) return _allEntries
+  _allEntries = collectDocEntries(true)
+  return _allEntries
+}
 
+function collectDocEntries(publishedOnly: boolean): Array<DocEntry> {
+  const config = docsConfig()
   const seen = new Set<string>()
   const entries: Array<DocEntry> = []
   const add = (id: string) => {
-    if (!id || seen.has(id)) return
+    if (!id || seen.has(id) || (publishedOnly && !isDocPublished(id))) return
     seen.add(id)
     entries.push(buildDocEntryFromPageId(id))
   }
@@ -554,13 +592,12 @@ function getAllDocEntries(): Array<DocEntry> {
   //    endpoints cover the whole site, not just pages listed in a nav group.
   for (const id of getAllContentPageIds()) add(id)
 
-  _allEntries = entries
   return entries
 }
 
 /** Page IDs reachable from navigation: nav-group pages + standalone href tabs. */
 export function getNavigablePageIds(): Set<string> {
-  return new Set(projectNavigationContract(docsConfig()).authoredPageIds)
+  return new Set(projectNavigationContract(docsConfig()).authoredPageIds.filter(isDocPublished))
 }
 
 // ---------------------------------------------------------------------------
@@ -608,17 +645,30 @@ function indexedFrontmatter(index: ContentIndex, pageId: string): FrontmatterDat
  * The synchronous API remains unchanged for local/build consumers; managed
  * routes use this async twin when the index is too large for a text binding.
  */
-export function loadDocEntries(): Promise<Array<DocEntry>> {
+export async function loadDocEntries(): Promise<Array<DocEntry>> {
+  await ensureDocPublication()
+  return loadEntries(true)
+}
+
+/**
+ * Every page regardless of publication, for deciding publication itself.
+ * Not for listings: use {@link loadDocEntries}.
+ */
+export function loadUnfilteredDocEntries(): Promise<Array<DocEntry>> {
+  return loadEntries(false)
+}
+
+function loadEntries(publishedOnly: boolean): Promise<Array<DocEntry>> {
   docsConfig()
-  if (loadedEntriesPromise) return loadedEntriesPromise
-  loadedEntriesPromise = (async () => {
+  if (publishedOnly && loadedEntriesPromise) return loadedEntriesPromise
+  const promise = (async () => {
     const index = await loadContentIndex()
-    if (!index) return getDocEntries()
+    if (!index) return publishedOnly ? getDocEntries() : collectDocEntries(false)
     hydrateContentIndex(index)
     const seen = new Set<string>()
     const ids: Array<string> = []
     const add = (id: string) => {
-      if (!id || seen.has(id)) return
+      if (!id || seen.has(id) || (publishedOnly && !isDocPublished(id))) return
       seen.add(id)
       ids.push(id)
     }
@@ -626,7 +676,8 @@ export function loadDocEntries(): Promise<Array<DocEntry>> {
     for (const id of defaultLocalePageIds(index)) add(id)
     return ids.map((id) => buildDocEntryFromPageId(id, indexedFrontmatter(index, id)))
   })()
-  return loadedEntriesPromise
+  if (publishedOnly) loadedEntriesPromise = promise
+  return promise
 }
 
 export function getDocEntryBySlug(slugPath: string): DocEntry | null
@@ -707,6 +758,7 @@ function buildNavigationNodes(
       // Fern and some legacy docs configs list pages that are reachable by
       // direct link but explicitly hidden from the rendered sidebar.
       if (readFrontmatter(page, locale).hidden) return []
+      if (!isDocPublished(page)) return []
       return [{ type: 'page', item: resolveNavItem(page, locale, ancestors) }]
     }
     const child = buildNavigationGroup(page, [...indexPath, index], ancestors, locale)
@@ -778,6 +830,7 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
  * too large for a Worker text binding.
  */
 export async function loadSidebarCollections(locale?: string): Promise<Array<SidebarCollection>> {
+  await ensureDocPublication()
   const index = await loadContentIndex()
   if (index) hydrateContentIndex(index)
   return getSidebarCollections(locale)
@@ -937,6 +990,7 @@ export function getNavContext(pageId: string, locale?: string): NavContext {
 
 /** Async managed-release twin of {@link getNavContext}. */
 export async function loadNavContext(pageId: string, locale?: string): Promise<NavContext> {
+  await ensureDocPublication()
   const index = await loadContentIndex()
   if (index) hydrateContentIndex(index)
   return getNavContext(pageId, locale)
