@@ -125,7 +125,8 @@ export function resolveAnalyticsConfig(site: unknown, integrations: unknown): Re
     }
     return value
   }
-  const set = (value: unknown) => value !== undefined && value !== null && value !== ''
+  // Only an ABSENT field is defaulted or ignored; a present empty/null/invalid one is a config error.
+  const set = (value: unknown) => value !== undefined
 
   // `siteConfig.analytics` is author-written code: its values render exactly as
   // they always have (no validation), only serialised safely. Everything below

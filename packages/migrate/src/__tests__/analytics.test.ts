@@ -228,6 +228,11 @@ describe('renderer and migrator agree (src/lib/analytics-config.ts)', () => {
     { posthog: { apiKey: KEY, apiHost: 'https://u:p@ph.example.com' } },
     { posthog: { apiKey: KEY, apiHost: 'https://ph.example.com/../x' } },
     { posthog: { apiKey: 'phc_short' } },
+    { posthog: { apiKey: KEY, apiHost: '' } },
+    { posthog: { apiKey: KEY, apiHost: null } },
+    { posthog: { apiKey: KEY, apiHost: '  ' } },
+    { posthog: { apiKey: KEY, sessionRecording: null } },
+    { posthog: { apiKey: KEY, sessionRecording: 'false' } },
     { plausible: { domain: 'Docs.Example.com,example.org' } },
     { plausible: { domain: 'https://docs.example.com' } },
     { plausible: { domain: 'docs.example.com', server: 'plausible.example.com' } },
@@ -235,6 +240,8 @@ describe('renderer and migrator agree (src/lib/analytics-config.ts)', () => {
     { plausible: { domain: 'docs.example.com', server: 'plausible.example.com:8443' } },
     { plausible: { domain: 'docs.example.com', server: 'http://p.example.com' } },
     { plausible: { domain: 'docs.example.com', server: 'p.example.com/js' } },
+    { plausible: { domain: 'docs.example.com', server: '' } },
+    { plausible: { domain: 'docs.example.com', server: null } },
     { ga4: { measurementId: 5 }, gtm: [] },
   ]
   it.each(inputs)('%j', (integrations) => {

@@ -159,6 +159,32 @@ describe('analytics validation', () => {
     if (!valid) expect(buildAnalyticsScripts(out)).toEqual([])
   })
 
+  it.each(['', null, '  '])('skips PostHog, with a warning, for a present empty apiHost %j', (apiHost) => {
+    expect(resolveAnalyticsConfig(undefined, { posthog: { apiKey: KEY, apiHost } }).posthog).toBeUndefined()
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('integrations.posthog'))
+  })
+
+  it.each(['', null])('skips Plausible, with a warning, for a present empty server %j', (server) => {
+    expect(resolveAnalyticsConfig(undefined, { plausible: { domain: 'docs.example.com', server } }).plausible).toBeUndefined()
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('integrations.plausible'))
+  })
+
+  it('still defaults an absent apiHost and server', () => {
+    expect(resolveAnalyticsConfig(undefined, { posthog: { apiKey: KEY } }).posthog?.apiHost).toBe('https://us.i.posthog.com')
+    expect(resolveAnalyticsConfig(undefined, { plausible: { domain: 'docs.example.com' } }).plausible?.scriptUrl)
+      .toBe('https://plausible.io/js/script.js')
+  })
+
+  it.each([
+    ['ga4', { ga4: { measurementId: '' } }],
+    ['gtm', { gtm: { tagId: null } }],
+    ['posthog', { posthog: { apiKey: '' } }],
+    ['plausible', { plausible: { domain: null } }],
+  ])('warns when the required %s field is present but empty', (provider, integrations) => {
+    expect(resolveAnalyticsConfig(undefined, integrations)).toEqual({})
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(`integrations.${provider}`))
+  })
+
   it('never throws or pollutes on hostile integrations shapes', () => {
     for (const bad of [null, 5, 'x', [], [1], { ga4: null }, { ga4: [] }, { __proto__: { ga4: { measurementId: 'G-TEST12345' } } }]) {
       expect(() => resolveAnalyticsConfig(undefined, bad)).not.toThrow()
