@@ -641,6 +641,7 @@ const CLONE_RETRY_DELAY_MS = 1_000
 const DEFAULT_CLONE_IDLE_TIMEOUT_MS = 2 * 60_000
 /** Absolute ceiling for one git process, so a connection that trickles progress forever still ends. */
 const MAX_GIT_PROCESS_MS = 60 * 60_000
+const HARD_TIMEOUT_REASON = `still running after ${MAX_GIT_PROCESS_MS / 60_000} minutes`
 
 /** Transient network-class git failures a retry can plausibly recover from. Also covers this module's own timeout error below. */
 const RETRYABLE_CLONE_ERROR = /RPC failed|Recv failure|early EOF|curl \d+|Could not resolve host|Connection (?:reset|refused|timed out)|The remote end hung up|SSL[_ ]?(?:read|connect|write) error|timed out|network is unreachable/i
@@ -693,7 +694,7 @@ function runGit(args: Array<string>, options: { cwd?: string; env?: Record<strin
     const idleMs = gitIdleTimeoutMs()
     const idleMessage = `no progress for ${Math.round(idleMs / 1000)}s`
     let idleTimer = setTimeout(() => { kill(idleMessage) }, idleMs)
-    const hardTimer = setTimeout(() => { kill(`still running after ${MAX_GIT_PROCESS_MS / 60_000} minutes`) }, MAX_GIT_PROCESS_MS)
+    const hardTimer = setTimeout(() => { kill(HARD_TIMEOUT_REASON) }, MAX_GIT_PROCESS_MS)
     const clearTimers = () => {
       clearTimeout(idleTimer)
       clearTimeout(hardTimer)
@@ -708,12 +709,21 @@ function runGit(args: Array<string>, options: { cwd?: string; env?: Record<strin
       clearTimers()
       reject(error)
     })
-    child.on('close', (code) => {
+    const finish = (code: number | null) => {
       clearTimers()
       if (code === 0) resolve()
       else if (timeoutReason) {
-        reject(new Error(`${options.label}: timed out (${timeoutReason}) and was killed. Check your network connection and try again; on a very slow link, raise THALLY_MIGRATE_CLONE_TIMEOUT_MS (milliseconds of allowed silence).`))
+        const hint = timeoutReason === HARD_TIMEOUT_REASON ? '' : '; on a very slow link, raise THALLY_MIGRATE_CLONE_TIMEOUT_MS (milliseconds of allowed silence)'
+        reject(new Error(`${options.label}: timed out (${timeoutReason}) and was killed. Check your network connection and try again${hint}.`))
       } else reject(new Error(`${options.label}: ${gitErrorTail(stderr) || `git exited ${code}`}`))
+    }
+    child.on('close', finish)
+    // A killed git can leave a helper (git-remote-https) holding the stderr
+    // pipe open, so `close` may never fire; settle on `exit` once we killed it.
+    child.on('exit', (code) => {
+      if (!timeoutReason) return
+      child.stderr.destroy()
+      finish(code)
     })
   })
 }
@@ -3201,7 +3211,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   if (overBudgetAssets.length > 0) {
     warnings.push({
       code: 'limit-reached',
-      message: `${overBudgetAssets.length} asset file${overBudgetAssets.length === 1 ? ' was' : 's were'} not copied because a file over ${MAX_ASSET_BYTES / 1_000_000} MB, or files beyond ${MAX_TOTAL_ASSET_BYTES / 1_000_000} MB in total, are skipped: ${listAssetPaths(overBudgetAssets)}. `
+      message: `${overBudgetAssets.length} asset file${overBudgetAssets.length === 1 ? ' was' : 's were'} not copied because files over ${MAX_ASSET_BYTES / 1_000_000} MB, or beyond ${MAX_TOTAL_ASSET_BYTES / 1_000_000} MB in total, are skipped: ${listAssetPaths(overBudgetAssets)}. `
         + (overBudgetReferenced > 0 ? `${overBudgetReferenced} of them ${overBudgetReferenced === 1 ? 'is' : 'are'} used by pages, so those images will be broken until you copy ${overBudgetAssets.length === 1 ? 'it' : 'them'}. ` : '')
         + `Copy ${overBudgetAssets.length === 1 ? 'it' : 'them'} into public/ manually.`,
     })

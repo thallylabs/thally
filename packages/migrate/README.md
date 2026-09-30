@@ -39,8 +39,8 @@ version first, then pages not listed in navigation, and one warning counts and
 names (the first three of) the pages left out and suggests `--docs-dir` to
 migrate a smaller part of the repository. Scanning itself stops after 100,000
 files with its own warning. Individual assets over 25 MB, or beyond 500 MB in
-total, are not copied; one warning per reason gives the count, the limits, the first five
-paths, and the action (copy them into `public/` manually).
+total, are not copied; one warning per reason gives the count, the first five
+paths, and the next step (copy them into `public/` manually).
 
 Headings written with an explicit `{#custom-id}` become a preceding
 `<a id="custom-id"></a>` anchor and keep their text, so links to that id still
@@ -233,7 +233,8 @@ fetch) is killed and treated as a retryable failure if it stalls, meaning
 git prints no progress for 2 minutes (a large repository that is still
 downloading is never cut off; an hour is the absolute ceiling for one git
 process). The allowed silence is configurable via
-`THALLY_MIGRATE_CLONE_TIMEOUT_MS` (milliseconds) for an unusually slow link. The clone neutralizes the `filter.lfs.*`
+`THALLY_MIGRATE_CLONE_TIMEOUT_MS` (milliseconds) for an unusually slow link.
+The clone neutralizes the `filter.lfs.*`
 smudge/clean/process filter driver for that one process only (via
 `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`, never the user's
 global git config), so a repository that uses Git LFS still clones even when

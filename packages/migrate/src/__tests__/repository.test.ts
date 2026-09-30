@@ -14,7 +14,7 @@ import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNa
 // (repository.ts) can be tested without a real clone.
 // `hang` never exits on its own (only when killed); `ticks` are the times (ms)
 // at which progress is printed before a normal exit one second after the last.
-const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; stderr?: string; hang?: boolean; ticks?: Array<number> }> }))
+const cloneOutcomes = vi.hoisted(() => ({ queue: [] as Array<{ code: number; stderr?: string; hang?: boolean; exitOnly?: boolean; ticks?: Array<number> }> }))
 const gitKills = vi.hoisted(() => ({ count: 0 }))
 // Remote spec URLs must never invoke a subprocess or make a network request.
 const execFileCalls = vi.hoisted(() => ({ calls: [] as Array<string> }))
@@ -29,11 +29,11 @@ vi.mock('node:child_process', () => {
     spawn: (_command: string, args: Array<string>, options: { env?: Record<string, string | undefined> }) => {
       gitSpawnCalls.envs.push(options.env ?? {})
       gitSpawnCalls.args.push(args)
-      const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void }; kill: () => void }
-      child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} })
+      const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter & { setEncoding: (encoding: string) => void; destroy: () => void }; kill: () => void }
+      child.stderr = Object.assign(new EventEmitter(), { setEncoding: () => {}, destroy: () => {} })
       child.kill = () => {
         gitKills.count += 1
-        queueMicrotask(() => child.emit('close', null))
+        queueMicrotask(() => child.emit(outcome.exitOnly ? 'exit' : 'close', null))
       }
       const outcome = cloneOutcomes.queue.shift() ?? { code: 0 }
       if (outcome.hang) return child
@@ -3693,6 +3693,16 @@ describe('cloneGitHubRepository retry', () => {
     await vi.advanceTimersByTimeAsync(60_000)
     await result
     expect(gitKills.count).toBe(3)
+  })
+
+  it('settles a killed clone even when a helper keeps the stderr pipe open (no close event)', async () => {
+    vi.useFakeTimers()
+    process.env.THALLY_MIGRATE_CLONE_TIMEOUT_MS = '3000'
+    cloneOutcomes.queue.push({ code: 0, hang: true, exitOnly: true }, { code: 0, hang: true, exitOnly: true }, { code: 0, hang: true, exitOnly: true })
+    const result = expect(cloneGitHubRepository(acme, mkdtempSync(join(tmpdir(), 'thally-clone-noclose-'))))
+      .rejects.toThrow(/timed out \(no progress for 3s\)/)
+    await vi.advanceTimersByTimeAsync(60_000)
+    await result
   })
 
   it('does not kill a slow clone that keeps printing progress past the idle timeout', async () => {
