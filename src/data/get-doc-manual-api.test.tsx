@@ -2,6 +2,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { getDocFromParams } from './get-doc'
+import { getManualApiOperation } from './manual-api'
 
 const pages = vi.hoisted(() => ({
   files: {} as Record<string, { frontmatter: Record<string, unknown>; source: string }>,
@@ -100,5 +101,20 @@ describe('manual API pages', () => {
       expect((await getDocFromParams([`n${i}`]))?.manualApi).toBeUndefined()
     }
     warn.mockRestore()
+  })
+  it('gives the Try It relay the same operation the page renders, without compiling the page', async () => {
+    const body = '<ParamField path="id" type="string" default="7" />\n<ParamField query="q" type="string" />'
+    const frontmatter = { title: 'Get user', api: 'GET /users/{id}', authMethod: 'bearer' }
+    pages.files['relay/user'] = {
+      frontmatter,
+      source: `---\ntitle: Get user\napi: "GET /users/{id}"\nauthMethod: bearer\n---\n${body}`,
+    }
+    const rendered = (await getDocFromParams(['relay', 'user']))?.manualApi
+    expect(rendered).toBeDefined()
+    expect(await getManualApiOperation('relay/user')).toEqual(rendered)
+    pages.files['relay/both'] = { frontmatter: {}, source: '---\napi: "GET /x"\nopenapi: "GET /x"\n---\n' }
+    expect(await getManualApiOperation('relay/both')).toBeNull()
+    expect(await getManualApiOperation('relay/missing')).toBeNull()
+    expect(await getManualApiOperation('../relay/user')).toBeNull()
   })
 })

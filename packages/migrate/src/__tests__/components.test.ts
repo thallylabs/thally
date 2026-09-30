@@ -1,5 +1,6 @@
 /** Component migration preserves executable source without running source code. */
 
+import { compileSync } from '@mdx-js/mdx'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
@@ -226,6 +227,50 @@ describe('repository component migration', () => {
     expect(result.trim()).toMatch(/^<Migrated[a-f0-9]+ \/>$/)
     expect(migrator.files().some((file) => file.path.endsWith('/DetailedExplanation.jsx'))).toBe(true)
     expect(warnings).toEqual([])
+  })
+
+  it("drops a named (non-component) .mdx import and its spread usage instead of leaving an unresolvable module reference (cypress-documentation's views.mdx: `import { toc as viewsToc } from '@site/docs/partials/_views.mdx'`, merged via `export const toc = [...viewsToc, ...]`)", () => {
+    const root = fixture({
+      'website/docusaurus.config.js': 'module.exports = {}',
+      'docs/partials/_views.mdx': '## Why use views?\n\nSome content.',
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(join(root, 'website'), root, warnings, 'https://github.com/example/docs')
+    const source = [
+      "import { toc as viewsToc } from '@site/docs/partials/_views.mdx'",
+      '',
+      'export const toc = [',
+      '  ...viewsToc,',
+      "  { value: 'See also', id: 'See-also', level: 2 },",
+      ']',
+      '',
+      '# Views',
+    ].join('\n')
+    const result = migrator.transform(source, join(root, 'docs', 'views.mdx'))
+    expect(result).not.toContain("from '@site/docs/partials/_views.mdx'")
+    expect(result).not.toContain('viewsToc')
+    expect(result).toContain("export const toc = [")
+    expect(result).toContain("{ value: 'See also', id: 'See-also', level: 2 }")
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toContain('_views.mdx')
+    expect(warnings[0].message).toContain('removed')
+  })
+
+  it("neutralizes a @site component import even when the page's MDX can't be parsed at all, instead of leaving the raw import in place to break next build (safety net for the 'could not parse this MDX' fallback)", () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(join(root, 'docs'), root, warnings, 'https://github.com/example/docs')
+    // An unclosed JSX tag (a real, independent MDX parse failure Docusaurus
+    // itself tolerates less strictly) breaks remark-mdx's parse before this
+    // migration's own AST walk — the walk that would normally copy or drop
+    // the import below — ever gets a chance to run.
+    const source = "import Thumbnail from '@site/src/components/Thumbnail'\n\n<Note>\n\n<Thumbnail src=\"/img/x.png\" />\n\nUnclosed admonition."
+    const result = migrator.transform(source, join(root, 'docs', 'broken.mdx'))
+    expect(result).not.toContain("from '@site/src/components/Thumbnail'")
+    expect(result).not.toContain('<Thumbnail ')
+    expect(result).toContain('{/* Removed <Thumbnail>')
+    expect(warnings.some((w) => w.message.includes('could not parse this MDX'))).toBe(true)
+    expect(warnings.some((w) => w.message.includes('Thumbnail') && w.message.includes('removed'))).toBe(true)
   })
 
   it('reports a dangling relative import as unresolved instead of silently shadowing it with an unrelated same-named file at the repository root (a plain nested docs/ layout, not a flattened monorepo)', () => {
@@ -888,10 +933,19 @@ describe('repository component migration', () => {
     const source = "import Doc from './assets/guide.docx'\n\n<a href={Doc}>Download</a>"
     const result = migrator.transform(source, join(root, 'index.mdx'))
     expect(result).not.toContain("import Doc from './assets/guide.docx'")
-    expect(result).toMatch(/^const Doc = "\/migrated-[a-f0-9]+\.docx";\n\n<a href=\{Doc\}>Download<\/a>$/)
+    expect(result).toMatch(/^export const Doc = "\/migrated-[a-f0-9]+\.docx";\n\n<a href=\{Doc\}>Download<\/a>$/)
     const publicFile = migrator.files().find((file) => file.path.startsWith('public/'))
     expect(publicFile?.content.toString()).toBe('binary-ish content')
     expect(warnings[0].message).toContain('bound to that URL')
+    // A bare `const` (no `export`) in this position is prose to a fresh MDX
+    // parse, not an executable declaration — `Doc` would then be an
+    // undefined free variable at render ("ReferenceError: Doc is not
+    // defined"), reproduced against hasura/graphql-engine's
+    // databases/overview.mdx. Compile the actual output the same way the
+    // real build does and check the binding survived as real ESM, not text.
+    const compiled = String(compileSync(result, { outputFormat: 'program' }))
+    expect(compiled).toContain('const Doc =')
+    expect(compiled).not.toContain('"const Doc =')
   })
 
   it('rescues an asset import bound to a lowercase local name used in an expression (Docusaurus\' own convention, e.g. a logo)', () => {
@@ -905,7 +959,7 @@ describe('repository component migration', () => {
     const source = "import docusaurusLogo from '@site/static/img/docusaurus.svg'\n\n<img src={docusaurusLogo} alt=\"logo\" />"
     const result = migrator.transform(source, join(root, 'index.mdx'))
     expect(result).not.toContain('import docusaurusLogo')
-    expect(result).toMatch(/^const docusaurusLogo = "\/migrated-[a-f0-9]+\.svg";\n\n<img src=\{docusaurusLogo\} alt="logo" \/>$/)
+    expect(result).toMatch(/^export const docusaurusLogo = "\/migrated-[a-f0-9]+\.svg";\n\n<img src=\{docusaurusLogo\} alt="logo" \/>$/)
     expect(migrator.files().some((file) => file.path.startsWith('public/'))).toBe(true)
   })
 

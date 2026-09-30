@@ -14,7 +14,7 @@ vi.mock('@/components/docs/code-actions-provider', () => ({
   }),
 }))
 
-import { Code, Pre } from './code-blocks'
+import { Code, CodeGroup, Pre } from './code-blocks'
 
 function renderPanel({
   language,
@@ -70,5 +70,57 @@ describe('code-panel labels', () => {
 
   it('labels explicitly plain fences without claiming a syntax grammar', () => {
     expect(renderPanel({ language: 'txt' })).toContain('Plain text')
+  })
+})
+
+describe('code-panel fence options', () => {
+  beforeEach(() => { assistant.available = false })
+
+  const render = (props: Record<string, unknown>, code = 'const answer = 42') =>
+    renderToStaticMarkup(
+      <Pre language="typescript" code={code} {...props}>
+        <Code className="language-typescript">{code}</Code>
+      </Pre>,
+    )
+
+  it('leaves plain fences without option markup', () => {
+    const html = render({})
+    expect(html).not.toContain('thally-code-lines')
+    expect(html).not.toContain('aria-expanded')
+    expect(html).not.toContain('data-icon-name')
+    expect(html).toContain('Copy code')
+  })
+
+  it('marks line-numbered fences', () => {
+    expect(render({ lines: '' })).toContain('thally-code-lines')
+  })
+
+  it('hides only the copy button for nocopy', () => {
+    const html = render({ nocopy: '' })
+    expect(html).not.toContain('Copy code')
+    expect(html).toContain('Report incorrect code')
+  })
+
+  it('renders a header icon', () => {
+    expect(render({ icon: 'code', title: 'app.ts' })).toContain('data-icon-name="code"')
+  })
+
+  it('renders an accessible toggle only for long expandable fences', () => {
+    const long = Array.from({ length: 20 }, (_, i) => `line ${i}`).join('\n')
+    const html = render({ expandable: '' }, long)
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('Expand')
+    expect(render({ expandable: '' })).not.toContain('aria-expanded')
+  })
+
+  it('works inside a multi-panel CodeGroup', () => {
+    const html = renderToStaticMarkup(
+      <CodeGroup>
+        <Pre language="typescript" code="a" lines="" icon="code" title="one.ts"><Code className="language-typescript">a</Code></Pre>
+        <Pre language="python" code="b" nocopy=""><Code className="language-python">b</Code></Pre>
+      </CodeGroup>,
+    )
+    expect(html).toContain('thally-code-lines')
+    expect(html).toContain('data-icon-name="code"')
   })
 })
