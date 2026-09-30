@@ -2,7 +2,7 @@
  * Whether one OpenAPI operation is published, judged on the authored document
  * with the same path-item rules the normalizer and sanitizer use. A page bound
  * to a hidden or excluded operation is not published (its route 404s), so
- * every listing of pages consults this through `@/data/doc-publication`.
+ * the build records the withheld operations, and `isDocPublished` in `@/data/docs` is the one predicate every listing consults.
  */
 
 import { HTTP_METHODS, buildOperationKey } from './operation-keys'

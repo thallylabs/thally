@@ -7,6 +7,7 @@ import { resolveIconLibrary, type IconLibrary } from '@/lib/icon-library'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { SUPPORTED_LOCALE_OPTIONS } from '@/lib/i18n/config'
 import { parseOpenApiReference, type OpenApiReference } from '@/lib/openapi/doc-reference'
+import { UNPUBLISHED_OPERATIONS_FILE } from '@/lib/openapi/publication'
 
 export { parseOpenApiReference }
 
@@ -522,31 +523,66 @@ let _allEntries: Array<DocEntry> | null = null
 
 /**
  * A page whose `openapi:` frontmatter points at a hidden or excluded operation
- * 404s (see the docs page route), so no listing may offer it. The set is
- * decided asynchronously in `@/data/doc-publication` (it needs the spec) and
- * installed here so the synchronous navigation and enumeration code below, and
- * every surface built on it, applies one shared predicate.
+ * 404s (see the docs page route), so no listing may offer it. The build records
+ * which operations it withheld from the served spec (see
+ * `UNPUBLISHED_OPERATIONS_FILE`); a page is unpublished when its operation is
+ * among them. Self-hosted builds read that record synchronously from the
+ * embedded sources, so the answer is a pure function of the module's own
+ * constants: no state to prime, nothing shared between module instances, and
+ * every cache below is computed after it is known.
  */
-let unpublishedPageIds: ReadonlySet<string> = new Set()
+let embeddedRecord: ReadonlySet<string> | undefined
+/** Managed (assets) releases only: the record cannot be read synchronously, so a loader installs it. */
+let assetRecord: ReadonlySet<string> | undefined
 
-export function setUnpublishedPageIds(ids: Iterable<string>): void {
-  const next = new Set(ids)
-  if (next.size === unpublishedPageIds.size && [...next].every((id) => unpublishedPageIds.has(id))) return
-  unpublishedPageIds = next
-  _allEntries = null
-  loadedEntriesPromise = null
-  sidebarCollectionsCache.clear()
+function parseRecord(content: string): ReadonlySet<string> {
+  try {
+    const list = JSON.parse(content) as Array<{ method?: unknown; path?: unknown }>
+    return new Set(list.flatMap((entry) =>
+      typeof entry.method === 'string' && typeof entry.path === 'string' ? [`${entry.method.toUpperCase()} ${entry.path}`] : []))
+  } catch {
+    return new Set()
+  }
+}
+
+function recordedUnpublishedOperations(): ReadonlySet<string> {
+  if (assetRecord) return assetRecord
+  if (embeddedRecord) return embeddedRecord
+  embeddedRecord = runtimeSourceExists(UNPUBLISHED_OPERATIONS_FILE)
+    ? parseRecord(readRuntimeSource(UNPUBLISHED_OPERATIONS_FILE))
+    : new Set()
+  return embeddedRecord
 }
 
 /** False for a page whose documented operation is hidden or excluded. */
 export function isDocPublished(pageId: string): boolean {
-  return !unpublishedPageIds.has(pageId)
+  const operation = parseOpenApiReference(readFrontmatter(pageId).openapi)
+  return !operation || !recordedUnpublishedOperations().has(`${operation.method} ${operation.path}`)
 }
 
-/** Awaited by every async loader and route that lists or serves pages, before the first check of {@link isDocPublished}. */
-export async function ensureDocPublication(): Promise<void> {
-  // Dynamic: the publication module imports the API reference, which imports this one.
-  await (await import('@/data/doc-publication')).primeDocPublication()
+let assetRecordPromise: Promise<void> | undefined
+
+/**
+ * Awaited by every async loader and route that lists or serves pages. A no-op
+ * for self-hosted builds; for a managed release it loads the record from the
+ * release assets and drops any list computed before it was known.
+ */
+export function ensureDocPublication(): Promise<void> {
+  // Same test as `isRemoteContentSource`, inline so this module stays free of the content-source providers.
+  if (process.env.THALLY_CONTENT_SOURCE?.trim().toLowerCase() !== 'assets') return Promise.resolve()
+  assetRecordPromise ??= (async () => {
+    try {
+      const { getContentSource } = await import('@/lib/content-source')
+      const file = await getContentSource().read(UNPUBLISHED_OPERATIONS_FILE)
+      assetRecord = file ? parseRecord(String(file.content)) : new Set()
+    } catch {
+      assetRecord = new Set()
+    }
+    _allEntries = null
+    loadedEntriesPromise = null
+    sidebarCollectionsCache.clear()
+  })()
+  return assetRecordPromise
 }
 
 /** Locale directories are reserved even when Cloud selects them after build. */
@@ -569,18 +605,13 @@ function getAllContentPageIds(): Array<string> {
 }
 
 function getAllDocEntries(): Array<DocEntry> {
-  docsConfig()
-  if (_allEntries) return _allEntries
-  _allEntries = collectDocEntries(true)
-  return _allEntries
-}
-
-function collectDocEntries(publishedOnly: boolean): Array<DocEntry> {
   const config = docsConfig()
+  if (_allEntries) return _allEntries
+
   const seen = new Set<string>()
   const entries: Array<DocEntry> = []
   const add = (id: string) => {
-    if (!id || seen.has(id) || (publishedOnly && !isDocPublished(id))) return
+    if (!id || seen.has(id) || !isDocPublished(id)) return
     seen.add(id)
     entries.push(buildDocEntryFromPageId(id))
   }
@@ -592,6 +623,7 @@ function collectDocEntries(publishedOnly: boolean): Array<DocEntry> {
   //    endpoints cover the whole site, not just pages listed in a nav group.
   for (const id of getAllContentPageIds()) add(id)
 
+  _allEntries = entries
   return entries
 }
 
@@ -647,28 +679,16 @@ function indexedFrontmatter(index: ContentIndex, pageId: string): FrontmatterDat
  */
 export async function loadDocEntries(): Promise<Array<DocEntry>> {
   await ensureDocPublication()
-  return loadEntries(true)
-}
-
-/**
- * Every page regardless of publication, for deciding publication itself.
- * Not for listings: use {@link loadDocEntries}.
- */
-export function loadUnfilteredDocEntries(): Promise<Array<DocEntry>> {
-  return loadEntries(false)
-}
-
-function loadEntries(publishedOnly: boolean): Promise<Array<DocEntry>> {
   docsConfig()
-  if (publishedOnly && loadedEntriesPromise) return loadedEntriesPromise
-  const promise = (async () => {
+  if (loadedEntriesPromise) return loadedEntriesPromise
+  loadedEntriesPromise = (async () => {
     const index = await loadContentIndex()
-    if (!index) return publishedOnly ? getDocEntries() : collectDocEntries(false)
+    if (!index) return getDocEntries()
     hydrateContentIndex(index)
     const seen = new Set<string>()
     const ids: Array<string> = []
     const add = (id: string) => {
-      if (!id || seen.has(id) || (publishedOnly && !isDocPublished(id))) return
+      if (!id || seen.has(id) || !isDocPublished(id)) return
       seen.add(id)
       ids.push(id)
     }
@@ -676,8 +696,7 @@ function loadEntries(publishedOnly: boolean): Promise<Array<DocEntry>> {
     for (const id of defaultLocalePageIds(index)) add(id)
     return ids.map((id) => buildDocEntryFromPageId(id, indexedFrontmatter(index, id)))
   })()
-  if (publishedOnly) loadedEntriesPromise = promise
-  return promise
+  return loadedEntriesPromise
 }
 
 export function getDocEntryBySlug(slugPath: string): DocEntry | null

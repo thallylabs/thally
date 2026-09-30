@@ -1,6 +1,6 @@
 /**
  * Every place that lists or serves documentation pages must apply the shared
- * "is this doc published" decision (`@/data/doc-publication`, consulted through
+ * "is this doc published" decision (`isDocPublished` in
  * `@/data/docs`). These checks fail when a surface is added or rewired around it.
  */
 
@@ -49,7 +49,6 @@ describe('publication is applied by every surface', () => {
   it('no other module lists pages from the synchronous, unprimed enumerators', () => {
     const allowed = new Set([
       'src/data/docs.ts',
-      'src/data/doc-publication.ts',
       // Static params only: an unpublished page is a build-time 404 either way.
       'src/app/(docs)/[[...slug]]/page.tsx',
       'src/app/(docs)/api/[[...slug]]/page.tsx',
