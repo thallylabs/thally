@@ -202,13 +202,18 @@ body {
   border-bottom-color: var(--docs-accent);
 }
 
+/* Migrated explicit heading anchors (<a id="..."></a>) need the same offset as headings. */
+.thally-docs-root a[id]:empty {
+  scroll-margin-top: 6rem;
+}
+
 @media (min-width: 881px) {
   .thally-docs-root[data-header-layout='stacked'] {
     --docs-header-height: 104px;
   }
 
   /* The second row must not cover headings reached through the page TOC. */
-  .thally-docs-root[data-header-layout='stacked'] :is([data-heading], .scroll-mt-24) {
+  .thally-docs-root[data-header-layout='stacked'] :is([data-heading], .scroll-mt-24, a[id]:empty) {
     scroll-margin-top: calc(var(--docs-header-height, 104px) + 24px);
   }
 }

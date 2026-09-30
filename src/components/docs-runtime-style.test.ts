@@ -35,6 +35,13 @@ describe('documentation visual system', () => {
     expect(css).not.toMatch(/\.thally-docs-brand (?:img|svg)\s*[,\{]/)
   })
 
+  it('offsets empty explicit heading anchors below the sticky header', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const css = await readFile('src/styles/docs-handoff.css', 'utf8')
+    expect(css).toMatch(/\.thally-docs-root a\[id\]:empty \{\s*scroll-margin-top: 6rem;/)
+    expect(css).toMatch(/:is\(\[data-heading\], \.scroll-mt-24, a\[id\]:empty\)/)
+  })
+
   it('brands only the active collection underline, not its neutral label', async () => {
     const { readFile } = await import('node:fs/promises')
     const css = await readFile('src/styles/docs-handoff.css', 'utf8')
