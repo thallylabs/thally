@@ -156,6 +156,7 @@ export function renderMigrationFiles(
       && options.existingComponentRegistry !== undefined && typeof file.content === 'string'
       ? mergeComponentRegistry(options.existingComponentRegistry, file.content)
       : [file]),
+    ...(bundle.quarantinedFiles ?? []),
     { path: 'docs.json', content: `${JSON.stringify(config, null, 2)}\n` },
   ]
 }
