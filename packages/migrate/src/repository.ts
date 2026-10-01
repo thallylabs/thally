@@ -2264,7 +2264,8 @@ function globalSnippetAliases(
   }
   for (const file of files) {
     if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())) continue
-    const raw = readFileSync(file.absolutePath, 'utf8')
+    let raw: string
+    try { raw = readFileSync(file.absolutePath, 'utf8') } catch { continue } // best-effort: an unreadable page is reported when it is reached
     for (const match of raw.matchAll(SNIPPET_IMPORT_PATTERN)) {
       try {
         const componentName = match[1] ?? match[2]
@@ -3062,7 +3063,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       skipped++
       warnings.push({ code: 'skipped-file', message: 'Page exceeded the 2 MB repository import limit.', source: file.relativePath })
       // Known restricted from its frontmatter; its assets must stay out of public/ too.
-      if (gateByPath.get(file.absolutePath)?.reason && mintlifyProjectRoot) {
+      const oversizedGate = gateByPath.get(file.absolutePath)?.reason
+      if (oversizedGate) {
+        warnings.push({
+          code: 'gated-page',
+          message: `Access-restricted page (${oversizedGate}) is too large to migrate (over 2 MB), so it was NOT published and was not saved under ${QUARANTINE_DIRECTORY}/; recover it from the source repository.`,
+          source: file.relativePath,
+        })
+      }
+      if (oversizedGate && mintlifyProjectRoot) {
         if (size > MAX_WITHHELD_SCAN_BYTES) {
           warnings.push({
             code: 'gated-page',
@@ -3090,15 +3099,25 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           warnings.push({ code: 'gated-page', message: `Access-restricted page (${gateReason}) was withheld from the site, but its path could not be preserved safely; recover it from the source repository.`, source: file.relativePath })
           continue
         }
-        if (mintlifyProjectRoot) {
-          rewriteRepositoryAssetLinks(
-            inlineMdxSnippets(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, [], 0, mintlifyProjectRoot, snippetAliases, inlineGate),
-            file.absolutePath,
-            mintlifyProjectRoot,
-            (assetPath) => withheldAssetPaths.add(assetPath),
-          )
+        try {
+          if (mintlifyProjectRoot) {
+            rewriteRepositoryAssetLinks(
+              inlineMdxSnippets(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, [], 0, mintlifyProjectRoot, snippetAliases, inlineGate),
+              file.absolutePath,
+              mintlifyProjectRoot,
+              (assetPath) => withheldAssetPaths.add(assetPath),
+            )
+          }
+          quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/${file.relativePath}`, content: readFileSync(file.absolutePath) })
+        } catch {
+          // An unreadable restricted page must not abort the migration or be published.
+          warnings.push({
+            code: 'gated-page',
+            message: `Access-restricted page (${gateReason}) was NOT published, but it could not be read, so it was not copied to ${QUARANTINE_DIRECTORY}/; recover it from the source repository.`,
+            source: file.relativePath,
+          })
+          continue
         }
-        quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/${file.relativePath}`, content: readFileSync(file.absolutePath) })
         warnings.push({
           code: 'gated-page',
           message: `Access-restricted on the source site (${gateReason}), so it was NOT published. The original is saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}; links from other pages to it will break.`,

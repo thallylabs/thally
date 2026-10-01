@@ -1,6 +1,6 @@
 /** Access gating, site-wide CSS/JS/font assets, and legacy config mapping for Mintlify sources. */
 
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -842,5 +842,32 @@ describe('fail-closed inlining of gated and unclassified files', () => {
       'p.mdx': page('P'),
     })
     expect(bundle.quarantinedFiles).toBeUndefined()
+  })
+})
+
+describe('oversized and unreadable gated pages', () => {
+  it('warns with a source that an oversized gated page was not published, even without assets', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub'] } }),
+      'pub.mdx': page('Pub'),
+      'big.mdx': `---\ntitle: Big\ngroups: [admin]\n---\n\n${'x'.repeat(2_100_000)}\n`,
+    })
+    const warning = codes(bundle, 'gated-page').find((item) => item.source === 'big.mdx')
+    expect(warning !== undefined && /too large to migrate.*NOT published/.test(warning.message)).toBe(true)
+  })
+
+  it.skipIf(process.getuid?.() === 0)('warns instead of crashing when a gated page cannot be read', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-extras-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['pub', 'locked'] } }))
+    writeFileSync(join(root, 'pub.mdx'), page('Pub'))
+    writeFileSync(join(root, 'locked.mdx'), page('Locked', 'groups: [admin]\n'))
+    chmodSync(join(root, 'locked.mdx'), 0o000)
+    try {
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+      expect(codes(bundle, 'gated-page').some((item) => item.source === 'locked.mdx' && /could not be read/.test(item.message))).toBe(true)
+      expect(bundle.pages.map((entry) => entry.id)).toEqual(['pub'])
+    } finally {
+      chmodSync(join(root, 'locked.mdx'), 0o644)
+    }
   })
 })
