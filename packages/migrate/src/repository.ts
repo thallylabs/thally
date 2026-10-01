@@ -48,7 +48,7 @@ import {
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
 import { parseFrontmatter } from './frontmatter.js'
-import { frontmatterGateReason, isMintlifyServedScriptOrStyle, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
+import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
 import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
@@ -3063,7 +3063,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // from the same bounded head read, before anything trims them.
   const keptFiles = new Set(files)
   const droppedGatedFiles: Array<{ file: ScannedFile; reason: string }> = []
-  const withheldSnippetFiles: Array<ScannedFile> = []
+  // Restricted documents never published as pages (snippets, and .mintignore'd
+  // files): their assets are withheld and the site fails closed.
+  const withheldDocFiles: Array<ScannedFile> = []
   let droppedPageCount = 0
   const scanTruncated = scannedFiles.length >= (discoveryRank ? sourceBudget * RANKED_WALK_FACTOR : sourceBudget)
   if (platform === 'mintlify') {
@@ -3072,7 +3074,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // content, so its assets are withheld and the site fails closed too.
       if (isDocFile(file) && !isGateCandidate(file)) {
         const snippetReason = classifyPageGate(file).reason
-        if (snippetReason) withheldSnippetFiles.push(file)
+        if (snippetReason) withheldDocFiles.push(file)
         continue
       }
       if (!isGateCandidate(file)) continue
@@ -3082,20 +3084,38 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (verdict.reason) withheldPaths.add(file.absolutePath)
     }
     for (const file of mintignoreFilteredFiles) {
-      if (keptFiles.has(file) || !isGateCandidate(file)) continue
+      if (keptFiles.has(file) || !isDocFile(file)) continue
+      // Every dropped document, snippet or page, fails the site closed for assets.
       droppedPageCount++
+      if (!isGateCandidate(file)) {
+        const snippetReason = classifyPageGate(file).reason
+        if (snippetReason) {
+          withheldDocFiles.push(file)
+          warnings.push({ code: 'gated-page', message: `Access-restricted snippet (${snippetReason}) was dropped by the file limit; its assets were kept out of public/.`, source: file.relativePath })
+        }
+        continue
+      }
       const verdict = classifyPageGate(file)
       if (!verdict.reason) continue
       if (verdict.openapi) withheldSpecRefs.push(verdict.openapi)
       withheldPaths.add(file.absolutePath)
       droppedGatedFiles.push({ file, reason: verdict.reason })
     }
+    // A .mintignore'd document is not migrated, but if it is restricted, the
+    // assets it uses are still restricted.
+    for (const file of scannedFiles) {
+      if (!mintignoreMatcher?.ignores(file.relativePath) || !isDocFile(file)) continue
+      const verdict = classifyPageGate(file)
+      if (!verdict.reason) continue
+      if (verdict.openapi) withheldSpecRefs.push(verdict.openapi)
+      withheldDocFiles.push(file)
+    }
   }
   // Pages that were never classified (dropped by the budget, or beyond the walk
   // cap) could be restricted: assets no published page names by exact path stay
   // out of public/ on such a site, as on one with known restricted pages.
   const pagesNotClassified = droppedPageCount > 0 || (platform === 'mintlify' && scanTruncated)
-  const hasWithheldContent = withheldPaths.size > 0 || withheldSnippetFiles.length > 0
+  const hasWithheldContent = withheldPaths.size > 0 || withheldDocFiles.length > 0
   const trackPublishedRefs = platform === 'mintlify' && (hasWithheldContent || pagesNotClassified)
   // Mintlify only. The pre-pass covers only files inside the file budget, so a
   // candidate it never saw (dropped by the budget, in a snippet directory, under
@@ -3169,9 +3189,17 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // Unscannable, so its assets are unknown: they stay out of public/ unless a published page names them by exact path.
     }
   })
-  for (const file of withheldSnippetFiles) {
+  for (const file of withheldDocFiles) {
     try {
-      if (!mintlifyProjectRoot || lstatSync(file.absolutePath).size > MAX_WITHHELD_SCAN_BYTES) continue
+      if (!mintlifyProjectRoot) continue
+      if (lstatSync(file.absolutePath).size > MAX_WITHHELD_SCAN_BYTES) {
+        warnings.push({
+          code: 'gated-page',
+          message: 'Access-restricted file is too large to scan, so the assets it uses could not be checked and may have been copied to public/. Review them before publishing.',
+          source: file.relativePath,
+        })
+        continue
+      }
       rewriteRepositoryAssetLinks(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, mintlifyProjectRoot, withholdAsset)
     } catch {
       // Unscannable: its assets stay out of public/ unless a published page names them by exact path.
@@ -3695,7 +3723,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // never counts: it cannot be told apart from another folder's file).
   // Untrackable, so quarantined: paths built at runtime (template strings,
   // concatenation) and references from remote content.
-  if (trackPublishedRefs) addPathReferences(JSON.stringify(mintlifyConfig ?? {}), '', publishedExact, publishedLoose)
+  // A restricted navigation container (and everything under it) publishes nothing.
+  if (trackPublishedRefs) {
+    const publishedConfig = JSON.stringify(mintlifyConfig ?? {}, (_key, value: unknown) => (
+      value && typeof value === 'object' && !Array.isArray(value) && navigationGateReason(value as Record<string, unknown>) ? undefined : value))
+    addPathReferences(publishedConfig, '', publishedExact, publishedLoose)
+  }
   for (const file of componentMigrator?.files() ?? []) {
     if (!trackPublishedRefs || typeof file.content !== 'string') continue
     // A copied component source resolves relative paths from where it came from.

@@ -1024,6 +1024,66 @@ describe('assets when the file budget dropped pages', () => {
     expect(conservative).toHaveLength(1)
   }, 30_000)
 
+  it('keeps the image of a restricted snippet out of public/ when the budget dropped only that snippet', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),
+      'index.mdx': page('I'),
+      'snippets/secret.mdx': '---\ngroups: [admin]\n---\n\n![s](/img/secret.png)\n',
+      'img/secret.png': png,
+    }, { maxSourceFiles: 2 })
+    expect(publicPaths(bundle)).not.toContain('img/secret.png')
+    expect((bundle.quarantinedFiles ?? []).map((file) => file.path)).toContain('migration-quarantine/assets/img/secret.png')
+  }, 30_000)
+
+  it('never publishes a restricted page or snippet image at any file budget', () => {
+    const files = {
+      'docs.json': JSON.stringify({ navigation: { pages: ['index', 'private'] } }),
+      'index.mdx': '---\ntitle: I\n---\n\n![p](/img/public.png)\n',
+      'private.mdx': '---\ntitle: P\ngroups: [admin]\n---\n\n![x](/img/private.png)\n',
+      'guide.mdx': '---\ntitle: G\n---\n\nNo images.\n',
+      'snippets/secret.mdx': '---\ngroups: [admin]\n---\n\n![s](/img/secret.png)\n',
+      'snippets/open.mdx': 'Shared text.\n',
+      'img/public.png': png,
+      'img/private.png': png,
+      'img/secret.png': png,
+    }
+    // Without the restricted page, the snippet is the only restricted content.
+    const { 'private.mdx': _private, ...snippetOnly } = files
+    for (const variant of [files, snippetOnly]) {
+      for (let budget = 1; budget <= Object.keys(variant).length + 1; budget++) {
+        const published = publicPaths(site(variant, { maxSourceFiles: budget }))
+        expect(published, `${variant === files ? "full" : "snippet-only"} budget ${budget}`).not.toContain('img/private.png')
+        expect(published, `${variant === files ? "full" : "snippet-only"} budget ${budget}`).not.toContain('img/secret.png')
+      }
+    }
+  }, 60_000)
+
+  it('keeps the image of a .mintignore\'d restricted page or snippet out of public/', () => {
+    for (const [ignore, path] of [['r.mdx', 'r.mdx'], ['snippets/', 'snippets/s.mdx']]) {
+      const bundle = site({
+        'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),
+        'index.mdx': page('I'),
+        '.mintignore': `${ignore}\n`,
+        [path]: '---\ntitle: R\ngroups: [a]\n---\n\n![s](/img/secret.png)\n',
+        'img/secret.png': png,
+      })
+      expect(publicPaths(bundle), ignore).not.toContain('img/secret.png')
+    }
+  }, 30_000)
+
+  it('does not let the icon of a restricted navigation group make an image public', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { groups: [
+        { group: 'G', pages: ['index'] },
+        { group: 'P', groups: ['a'], icon: '/img/secret.png', pages: ['r'] },
+      ] } }),
+      'index.mdx': page('I'),
+      'r.mdx': page('R'),
+      'img/secret.png': png,
+    })
+    expect(publicPaths(bundle)).not.toContain('img/secret.png')
+  }, 30_000)
+
   it('counts the restricted pages the budget dropped on the bundle', () => {
     const bundle = site({
       'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),
