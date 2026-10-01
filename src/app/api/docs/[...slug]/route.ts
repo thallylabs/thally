@@ -11,6 +11,7 @@ import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { localizeDocNavigation } from '@/lib/i18n/navigation'
 import { localizedPath } from '@/lib/i18n/config'
 import { docApiJson } from '@/lib/openapi/page-api'
+import { servedSpecPathForFrontmatter } from '@/data/api-reference'
 
 /** Nearest valid pages for a missing slug, so a 404'd agent can self-correct. */
 function suggestSlugs(
@@ -174,7 +175,7 @@ export async function GET(
   // JSON response — all fields derived from the content graph
   // -------------------------------------------------------------------------
   if (wantsJson) {
-    const apiJson = docApiJson(entry) ?? (frontmatter.openapi ? { spec_url: '/openapi.yaml' } : undefined)
+    const apiJson = docApiJson(entry, entry.openapi ? await servedSpecPathForFrontmatter(entry.openapi) : undefined)
     const payload = {
       schema_version: '1',
 

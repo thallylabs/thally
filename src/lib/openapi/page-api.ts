@@ -27,12 +27,16 @@ export function pageApiMetadata(
   return { openapi: null, manual: parseApiFrontmatter(frontmatter.api, warn), shadowedApi: false }
 }
 
-/** The `openapi` block of the `/api/docs` JSON for an indexed page, or undefined for a regular doc. */
+/**
+ * The `openapi` block of the `/api/docs` JSON for an indexed page, or undefined
+ * for a regular doc. `specUrl` is the served path of the page's own spec
+ * (`servedSpecPathForFrontmatter`); without one no `spec_url` is advertised.
+ */
 export function docApiJson(entry: {
   openapi?: Pick<OpenApiFrontmatterRef, 'method' | 'path'>
   manualTarget?: Pick<ManualApiTarget, 'method' | 'path'>
-}): { spec_url?: string; operations: Array<string> } | undefined {
-  if (entry.openapi) return { spec_url: '/openapi.yaml', operations: [`${entry.openapi.method.toUpperCase()} ${entry.openapi.path}`] }
+}, specUrl?: string): { spec_url?: string; operations: Array<string> } | undefined {
+  if (entry.openapi) return { ...(specUrl ? { spec_url: specUrl } : {}), operations: [`${entry.openapi.method.toUpperCase()} ${entry.openapi.path}`] }
   if (entry.manualTarget) return { operations: [`${entry.manualTarget.method} ${entry.manualTarget.path}`] }
   return undefined
 }

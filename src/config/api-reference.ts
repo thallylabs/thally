@@ -45,12 +45,16 @@ function buildSpecFromDocsJson(api: DocsJsonApiConfig, id: string, label: string
 
 export const apiReferenceConfig: ApiReferenceConfig = buildApiReferenceConfig()
 
-/** Return the canonical public YAML projection for the configured specification. */
-export function getOpenApiSpecUrl(siteUrl = getSiteUrl()): string | null {
+/**
+ * Return the canonical public YAML projection for the configured specification.
+ * Only the default spec is published (`/openapi.yaml`), so a `specId` naming any
+ * other spec has no URL rather than borrowing the default's.
+ */
+export function getOpenApiSpecUrl(siteUrl = getSiteUrl(), specId?: string): string | null {
   const spec = apiReferenceConfig.specs.find((entry) => entry.id === apiReferenceConfig.defaultSpecId)
     ?? apiReferenceConfig.specs[0]
 
-  if (!spec) {
+  if (!spec || (specId !== undefined && specId !== spec.id)) {
     return null
   }
 

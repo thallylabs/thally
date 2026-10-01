@@ -137,6 +137,22 @@ export async function getApiOperationForFrontmatter(ref: OpenApiFrontmatterRef):
   return matches[0] ?? null
 }
 
+/**
+ * The public path serving the spec a page's `openapi:` resolves to, or
+ * undefined. Only the default spec is published (`/openapi.yaml`, sanitised);
+ * other local specs and remote URLs have no public route, and a remote URL is
+ * never echoed since it may be private. Unresolvable or hidden operations
+ * have none either.
+ */
+export async function servedSpecPathForFrontmatter(ref: OpenApiFrontmatterRef): Promise<string | undefined> {
+  try {
+    const node = await getApiOperationForFrontmatter(ref)
+    return node?.operation.specId === apiReferenceConfig.defaultSpecId ? '/openapi.yaml' : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export async function buildApiNavigation(specId?: string): Promise<Array<ApiNavigationGroup>> {
   if (apiReferenceConfig.specs.length === 0) return []
   const spec = await getNormalizedSpec(specId)
