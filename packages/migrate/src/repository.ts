@@ -24,7 +24,7 @@ import {
 } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { createRequire } from 'node:module'
-import { basename, dirname, extname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, posix, relative, resolve as resolvePath, sep } from 'node:path'
 
 import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
@@ -1253,23 +1253,51 @@ function specRefMatches(ref: string, specPath: string, specFilename: string, isD
 }
 
 const TOKEN_SEPARATORS = /[\s"'()<>[\]{}=,;:|\\/`*!?#&]+/
+/** Like TOKEN_SEPARATORS but keeps `/`, so a word is a whole path. */
+const PATH_SEPARATORS = /[\s"'()<>[\]{}=,;:|\\`*!?#&]+/
 
-/** Adds every file-like word (`name.ext`) of the text, lowercased, to the set. Linear, no backtracking. */
-function addFileTokens(text: string, into: Set<string>): void {
-  for (const word of text.split(TOKEN_SEPARATORS)) {
-    const token = word.replace(/\.+$/, '').toLowerCase()
-    if (!/\.[a-z0-9]{2,5}$/.test(token)) continue
-    into.add(token)
+/** The public/ destination key of a repo-relative file: Thally serves `public/x` at `/x`, exactly as the asset copy pass keys it. */
+function publicAssetKey(repoRelative: string): string {
+  return repoRelative.split('/', 1)[0].toLowerCase() === 'public' ? repoRelative.slice('public/'.length) : repoRelative
+}
+
+/**
+ * Collects what a published text (page source with frontmatter, copied CSS/JS,
+ * docs.json, migrated components) points at.
+ * `exact` gets the destination key of every path it spells in full: absolute
+ * from the site root (`/img/a.png`, `/public/a.png`) or relative with a folder
+ * (`./img/a.png`, `../a.png`) resolved against `baseDir`, the referring file's
+ * folder relative to the site root (undefined: relative forms cannot be
+ * resolved and are ignored). A bare file name (`a.png`) names no folder, so it
+ * cannot be resolved to one file: it goes to `loose` (lowercased, as does the
+ * lowercased key of every exact one, for a letter-case mismatch) and never
+ * makes anything public. Linear, no backtracking.
+ */
+function addPathReferences(text: string, baseDir: string | undefined, exact: Set<string>, loose: Set<string>): void {
+  for (const word of text.split(PATH_SEPARATORS)) {
+    let token = word.replace(/\.+$/, '')
+    if (!/\.[a-z0-9]{2,5}$/i.test(token) || token.startsWith('//')) continue
     if (token.includes('%')) {
-      try { into.add(decodeURIComponent(token)) } catch { /* keep the raw token */ }
+      try { token = decodeURIComponent(token) } catch { /* keep the raw token */ }
     }
+    if (!token.includes('/')) {
+      loose.add(token.toLowerCase())
+      continue
+    }
+    if (!token.startsWith('/') && baseDir === undefined) continue
+    const resolved = normalizeAssetPath(posix.normalize(token.startsWith('/') ? token.slice(1) : posix.join(baseDir ?? '', token)))
+    if (!resolved) continue
+    const key = publicAssetKey(resolved)
+    exact.add(key)
+    loose.add(key.toLowerCase())
   }
 }
 
-/** Whether an asset's basename appears among the tokens; a name with spaces is matched by its last word (errs toward public). */
-function namesFileToken(assetBasename: string, tokens: ReadonlySet<string>): boolean {
-  const lower = assetBasename.toLowerCase()
-  return tokens.has(lower) || tokens.has(lower.split(TOKEN_SEPARATORS).filter(Boolean).pop() ?? lower)
+/** Whether a bare file name (or the last word of a name with spaces) or a letter-case variant of this destination was spelled by published text. */
+function looselyNamed(assetPath: string, loose: ReadonlySet<string>): boolean {
+  const lower = assetPath.toLowerCase()
+  const name = lower.split('/').pop() ?? lower
+  return loose.has(lower) || loose.has(name) || loose.has(name.split(TOKEN_SEPARATORS).filter(Boolean).pop() ?? name)
 }
 
 function findOpenApi(files: Array<ScannedFile>): ScannedFile | null {
@@ -2319,7 +2347,7 @@ function repositoryAssetHref(
   value: string,
   currentFile: string,
   siteRoot: string,
-  onReferenced?: (normalizedPath: string) => void,
+  onReferenced?: (normalizedPath: string, onDiskSpelling?: string) => void,
 ): string | null {
   const isBracketed = value.startsWith('<') && value.endsWith('>')
   const raw = isBracketed ? value.slice(1, -1) : value
@@ -2352,7 +2380,10 @@ function repositoryAssetHref(
     if (!existsSync(candidate) || !lstatSync(candidate).isFile()) return null
     const normalized = normalizeAssetPath(siteRelative)
     if (!normalized) return null
-    onReferenced?.(normalized)
+    // On a case-insensitive filesystem a differently-cased reference opens the
+    // file; report the spelling it really has so it matches the scanned asset.
+    const onDisk = realRelative.replace(/\\/g, '/').toLowerCase() === siteRelative.toLowerCase() ? normalizeAssetPath(realRelative.replace(/\\/g, '/')) : null
+    onReferenced?.(normalized, onDisk ?? undefined)
     const rewritten = `/${normalized}${suffix}`
     // Markdown destinations containing parentheses must stay angle-bracketed;
     // removing the wrapper makes CommonMark terminate the URL too early.
@@ -2386,7 +2417,7 @@ function rewriteRepositoryAssetLinks(
   body: string,
   currentFile: string,
   siteRoot: string,
-  onReferenced?: (normalizedPath: string) => void,
+  onReferenced?: (normalizedPath: string, onDiskSpelling?: string) => void,
 ): string {
   return body
     .replace(/(!?\[[^\]]*\]\()(<[^>]+>|[^)\s]+)([^)]*\))/g, (
@@ -2987,9 +3018,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // frontmatter included, plus copied CSS/JS and migrated components), which
   // asset rewriting does not fully track: images named only there stay public.
   const withheldAssetPaths = new Set<string>()
-  // Lowercase file-like tokens of everything published, filled only on a site
-  // with withheld content (the only place they are read); no page text is kept.
-  const publishedTokens = new Set<string>()
+  // What published text points at, by destination path (`publishedExact`: a path
+  // spelled in full) or only by name (`publishedLoose`, which never makes an
+  // asset public). Filled only on a site that fails closed for assets (the only
+  // place they are read); no page text is kept.
+  const publishedExact = new Set<string>()
+  const publishedLoose = new Set<string>()
+  const withholdAsset = (assetPath: string, onDiskSpelling?: string): void => { withheldAssetPaths.add(publicAssetKey(onDiskSpelling ?? assetPath)) }
   let sawPublicTrue = false
   // Gate verdicts are computed up front so a page that imports an
   // access-restricted page as a component can never inline its content.
@@ -3022,7 +3057,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (reason) withheldPaths.add(file.absolutePath)
     }
   }
-  const collectPublishedTokens = platform === 'mintlify' && withheldPaths.size > 0
+  const trackPublishedRefs = platform === 'mintlify' && withheldPaths.size > 0
   // Mintlify only. The pre-pass covers only files inside the file budget, so a
   // candidate it never saw (dropped by the budget, in a snippet directory, under
   // a case-variant path) is classified on demand: frontmatter gates, navigation
@@ -3120,7 +3155,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
             source: file.relativePath,
           })
         } else {
-          rewriteRepositoryAssetLinks(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, mintlifyProjectRoot, (assetPath) => withheldAssetPaths.add(assetPath))
+          rewriteRepositoryAssetLinks(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, mintlifyProjectRoot, withholdAsset)
         }
       }
       continue
@@ -3146,7 +3181,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
               inlineMdxSnippets(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, [], 0, mintlifyProjectRoot, snippetAliases, inlineGate),
               file.absolutePath,
               mintlifyProjectRoot,
-              (assetPath) => withheldAssetPaths.add(assetPath),
+              withholdAsset,
             )
           }
           quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/${file.relativePath}`, content: readFileSync(file.absolutePath) })
@@ -3196,7 +3231,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       snippetAliases,
       inlineGate,
     )
-    if (collectPublishedTokens) addFileTokens(raw, publishedTokens)
+    // Counted as published only once the page is certain to be (below).
+    const publishedText = trackPublishedRefs ? raw : undefined
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
       // A heading's `{#custom-id}` anchor (`## Title {#custom-id}`) crashes
       // `@mdx-js/mdx`'s parser outright, so it must be converted to a
@@ -3323,8 +3359,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (platform === 'fern' && fernHiddenIds.has(navigationId)) page.hidden = true
     if (platform === 'mintlify' && mintlifyProjectRoot) {
-      page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath) => {
-        addAssetReference(assetPath, file.relativePath)
+      page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath, onDiskSpelling) => {
+        addAssetReference(publicAssetKey(onDiskSpelling ?? assetPath), file.relativePath)
       })
     }
     if (platform === 'fern' && fernProjectRoot) {
@@ -3422,6 +3458,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     seenPageIds.add(page.id)
     pages.push(page)
+    if (publishedText !== undefined) addPathReferences(publishedText, posix.dirname(file.relativePath).replace(/^\.$/, ''), publishedExact, publishedLoose)
     // MDX normalization removes DocCardList because Thally has no matching
     // component. Remember its authored route so the resolved sidebar can
     // supply the cards once every page and category has been discovered.
@@ -3552,7 +3589,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const candidateSize = lstatSync(file.absolutePath).size
     // Site-wide CSS/JS can load images by url(); a published page may use them.
     if (siteKind === 'style' || siteKind === 'script') {
-      if (collectPublishedTokens && candidateSize <= MAX_PAGE_BYTES) addFileTokens(readFileSync(file.absolutePath, 'utf8'), publishedTokens)
+      if (trackPublishedRefs && candidateSize <= MAX_PAGE_BYTES) addPathReferences(readFileSync(file.absolutePath, 'utf8'), posix.dirname(file.relativePath).replace(/^\.$/, ''), publishedExact, publishedLoose)
     }
     assetCandidates.push({ file, assetPath, size: candidateSize })
   }
@@ -3569,16 +3606,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // reaches could belong to the gated pages (referenced dynamically, or not
   // tracked), so it stays out of public/. Any mention by a published page, its
   // frontmatter, docs.json, copied CSS/JS or a migrated component keeps it
-  // public (basename match: errs toward public). Untrackable: paths built at
-  // runtime (template strings, concatenation) and references from remote
-  // content.
-  if (collectPublishedTokens) addFileTokens(JSON.stringify(mintlifyConfig ?? {}), publishedTokens)
+  // public, but only by the exact destination path it spells (a bare file name
+  // never counts: it cannot be told apart from another folder's file).
+  // Untrackable, so quarantined: paths built at runtime (template strings,
+  // concatenation) and references from remote content.
+  if (trackPublishedRefs) addPathReferences(JSON.stringify(mintlifyConfig ?? {}), '', publishedExact, publishedLoose)
   for (const file of componentMigrator?.files() ?? []) {
-    if (collectPublishedTokens && typeof file.content === 'string') addFileTokens(file.content, publishedTokens)
+    if (!trackPublishedRefs || typeof file.content !== 'string') continue
+    // A copied component source resolves relative paths from where it came from.
+    const original = /^src\/mdx\/migrated\/[^/]+\/source\/(.+)$/.exec(file.path)?.[1]
+    addPathReferences(file.content, original === undefined ? '' : posix.dirname(original).replace(/^\.$/, ''), publishedExact, publishedLoose)
   }
-  const hasWithheldContent = collectPublishedTokens
-  const isPublicReachable = (assetPath: string): boolean => referencedAssetPaths.has(assetPath)
-    || namesFileToken(basename(assetPath), publishedTokens)
+  const hasWithheldContent = trackPublishedRefs
+  const isPublicReachable = (assetPath: string): boolean => referencedAssetPaths.has(assetPath) || publishedExact.has(assetPath)
   const isQuarantinedAsset = (assetPath: string): boolean => (withheldAssetPaths.has(assetPath) || (hasWithheldContent && !siteAssetPaths.has(assetPath)))
     && platform === 'mintlify'
     && !isPublicReachable(assetPath)
@@ -3590,6 +3630,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const overBudgetAssets: Array<string> = []
   let overBudgetReferenced = 0
   const lfsPointerAssets: Array<string> = []
+  const ambiguouslyNamedAssets: Array<string> = []
   for (const { file, assetPath, size } of orderedAssetCandidates) {
     if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
       overBudgetAssets.push(file.relativePath)
@@ -3603,12 +3644,20 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (isQuarantinedAsset(assetPath)) {
       quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${assetPath}`, content })
+      if (looselyNamed(assetPath, publishedLoose)) ambiguouslyNamedAssets.push(assetPath)
       if (withheldAssetPaths.has(assetPath)) withheldAssetCount++
       else unreferencedAssetCount++
       continue
     }
     assets.push({ path: assetPath, content })
     totalAssetBytes += size
+  }
+  if (ambiguouslyNamedAssets.length > 0) {
+    warnings.push({
+      code: 'gated-page',
+      message: `${ambiguouslyNamedAssets.length} asset(s) were kept out of public/ because a published page names a file like ${ambiguouslyNamedAssets.length === 1 ? 'it' : 'them'} in a way that does not give its folder (or differs in letter case), so it cannot be matched to one file: ${listAssetPaths(ambiguouslyNamedAssets)}. `
+        + `Copy any that published pages need from ${QUARANTINE_DIRECTORY}/assets/ into public/ by hand.`,
+    })
   }
   if (platform === 'mintlify') {
     const copiedSite = assets.flatMap((asset) => siteAssetPaths.has(asset.path) ? [{ path: asset.path, kind: siteAssetPaths.get(asset.path)! }] : [])

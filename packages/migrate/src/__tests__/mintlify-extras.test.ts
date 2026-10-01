@@ -904,3 +904,76 @@ describe('OpenAPI specs referenced by gated pages', () => {
     expect(codes(bundle, 'gated-page').some((item) => /shared with access-restricted pages/.test(item.message))).toBe(true)
   })
 })
+
+describe('asset reach is decided by exact normalized path, never by file name', () => {
+  const png = Buffer.from('PNGDATA')
+  const nav = JSON.stringify({ navigation: { pages: ['pub', 'secret'] } })
+  const secret = (body: string) => `---\ntitle: Secret\ngroups: [admin]\n---\n\n${body}\n`
+  const publicPaths = (bundle: MigrationBundle) => bundle.assets.map((asset) => asset.path)
+  const quarantined = (bundle: MigrationBundle) => (bundle.quarantinedFiles ?? []).map((file) => file.path)
+
+  it('keeps /private/logo.png in quarantine when a public page uses /public/logo.png', () => {
+    const bundle = site({
+      'docs.json': nav,
+      'pub.mdx': '---\ntitle: Pub\n---\n\n![l](/public/logo.png)\n',
+      'secret.mdx': secret('![l](/private/logo.png)'),
+      'public/logo.png': png,
+      'private/logo.png': png,
+    })
+    expect(publicPaths(bundle)).toContain('logo.png')
+    expect(publicPaths(bundle)).not.toContain('private/logo.png')
+    expect(quarantined(bundle)).toContain('migration-quarantine/assets/private/logo.png')
+  })
+
+  it('keeps the restricted folder copy private when the same filename is referenced relatively from two folders', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['open/page', 'closed/page'] } }),
+      'open/page.mdx': '---\ntitle: Open\n---\n\n![l](./img/logo.png)\n',
+      'closed/page.mdx': secret('![l](./img/logo.png)'),
+      'open/img/logo.png': png,
+      'closed/img/logo.png': png,
+    })
+    expect(publicPaths(bundle)).toContain('open/img/logo.png')
+    expect(publicPaths(bundle)).not.toContain('closed/img/logo.png')
+    expect(quarantined(bundle)).toContain('migration-quarantine/assets/closed/img/logo.png')
+  })
+
+  it('matches a docs.json logo by its full path', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ logo: { light: '/brand/logo.svg', dark: '/brand/logo.svg' }, navigation: { pages: ['pub', 'secret'] } }),
+      'pub.mdx': page('Pub'),
+      'secret.mdx': secret('![l](/internal/logo.svg)'),
+      'brand/logo.svg': png,
+      'internal/logo.svg': png,
+    })
+    expect(publicPaths(bundle)).toContain('brand/logo.svg')
+    expect(publicPaths(bundle)).not.toContain('internal/logo.svg')
+  })
+
+  it('matches a frontmatter image by its full path', () => {
+    const bundle = site({
+      'docs.json': nav,
+      'pub.mdx': '---\ntitle: Pub\nimage: /img/cover.png\n---\n\nHi\n',
+      'secret.mdx': secret('![c](/restricted/cover.png)'),
+      'img/cover.png': png,
+      'restricted/cover.png': png,
+    })
+    expect(publicPaths(bundle)).toContain('img/cover.png')
+    expect(publicPaths(bundle)).not.toContain('restricted/cover.png')
+  })
+
+  it('keeps candidates of an ambiguous bare-filename reference in quarantine and names them', () => {
+    const bundle = site({
+      'docs.json': nav,
+      'pub.mdx': '---\ntitle: Pub\n---\n\nSee the file logo.png for the mark.\n',
+      'secret.mdx': secret('![l](/private/logo.png)'),
+      'private/logo.png': png,
+      'other/logo.png': png,
+    })
+    expect(publicPaths(bundle)).not.toContain('private/logo.png')
+    expect(publicPaths(bundle)).not.toContain('other/logo.png')
+    const warning = codes(bundle, 'gated-page').find((item) => /does not give its folder/.test(item.message))
+    expect(warning?.message).toContain('private/logo.png')
+    expect(warning?.message).toContain('other/logo.png')
+  })
+})
