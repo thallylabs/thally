@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { installDepsMock, initGitMock, validateMigrationMock, fixture } = vi.hoisted(() => ({
-  fixture: { gated: true, oversized: false },
+  fixture: { gated: true, oversized: false, droppedGated: 0 },
   installDepsMock: vi.fn(),
   initGitMock: vi.fn(),
   validateMigrationMock: vi.fn(),
@@ -15,8 +15,15 @@ const { installDepsMock, initGitMock, validateMigrationMock, fixture } = vi.hois
 
 vi.mock('../utils.js', () => ({ installDeps: installDepsMock, initGit: initGitMock }))
 vi.mock('../migrate/validate.js', () => ({ validateMigration: validateMigrationMock }))
-vi.mock('@thallylabs/migrate', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@thallylabs/migrate')>(),
+vi.mock('@thallylabs/migrate', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@thallylabs/migrate')>()
+  return {
+  ...original,
+  // The file-limit drop itself is tested in packages/migrate; here only the CLI/report plumbing.
+  migrateRepository: (options: Parameters<typeof original.migrateRepository>[0]) => {
+    const bundle = original.migrateRepository(options)
+    return fixture.droppedGated > 0 ? { ...bundle, droppedGatedPages: fixture.droppedGated } : bundle
+  },
   cloneGitHubRepository: async (_source: unknown, directory: string) => {
     mkdirSync(directory, { recursive: true })
     writeFileSync(join(directory, 'docs.json'), JSON.stringify({ navigation: { pages: ['intro', 'private'] } }))
@@ -29,7 +36,8 @@ vi.mock('@thallylabs/migrate', async (importOriginal) => ({
     mkdirSync(join(directory, 'img'), { recursive: true })
     writeFileSync(join(directory, 'img/p.png'), 'PNG')
   },
-}))
+  }
+})
 
 import { migrateDocs } from '../migrate/index.js'
 
@@ -37,6 +45,7 @@ describe('gated page migration output', () => {
   beforeEach(() => {
     fixture.gated = true
     fixture.oversized = false
+    fixture.droppedGated = 0
     vi.clearAllMocks()
     validateMigrationMock.mockResolvedValue({ content: 'passed', build: 'passed', messages: [] })
   })
@@ -63,6 +72,30 @@ describe('gated page migration output', () => {
     expect(printed.slice(header).filter((line) => line.includes('private.mdx'))).toHaveLength(1)
     expect(printed.slice(0, header).some((line) => line.includes('private.mdx'))).toBe(false)
   })
+
+  it('counts gated pages dropped by the file limit in the report and the restricted-content block', async () => {
+    fixture.droppedGated = 3
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-cli-gated-dropped-'))
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [] }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const result = await migrateDocs({ sourceUrl: 'https://github.com/acme/docs', projectDir, into: true, yes: true, platform: 'mintlify' })
+    const report = JSON.parse(readFileSync(result.reportPath, 'utf8')) as { quarantined: number; droppedGatedPages: number }
+    expect(report.droppedGatedPages).toBe(3)
+    expect(report.quarantined).toBe(1)
+    const printed = warn.mock.calls.map((call) => String(call[0]))
+    const header = printed.findIndex((line) => line.includes('ACCESS-RESTRICTED CONTENT'))
+    expect(printed.slice(header).some((line) => /3 access-restricted page\(s\) were dropped by the file limit/.test(line))).toBe(true)
+  }, 30_000)
+
+  it('reports zero dropped gated pages when none were dropped', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-cli-gated-nodrop-'))
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [] }))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const result = await migrateDocs({ sourceUrl: 'https://github.com/acme/docs', projectDir, into: true, yes: true, platform: 'mintlify' })
+    expect((JSON.parse(readFileSync(result.reportPath, 'utf8')) as { droppedGatedPages: number }).droppedGatedPages).toBe(0)
+  }, 30_000)
 
   it('git-ignores the quarantine folder without clobbering or duplicating .gitignore entries', async () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'thally-cli-gated-ignore-'))

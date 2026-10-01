@@ -222,6 +222,9 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   if (gatedWarnings.length > 0) {
     console.warn('\n  🔒 ACCESS-RESTRICTED CONTENT — review before publishing')
     for (const warning of gatedWarnings) console.warn(`  🔒 ${format(warning)}`)
+    if (bundle.droppedGatedPages) {
+      console.warn(`  🔒 ${bundle.droppedGatedPages} access-restricted page(s) were dropped by the file limit: not published and not saved under migration-quarantine/; recover them from the source repository.`)
+    }
     // Quarantined assets may include files the gated pages needed; the dashboard
     // settings are not in the repository. Say both once, only for gated sites.
     if (bundle.quarantinedFiles?.length || gatedWarnings.some((warning) => !/dashboard access settings/i.test(warning.message))) {
@@ -257,6 +260,7 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     components: bundle.componentFiles?.length ?? 0,
     quarantined: quarantinedPages,
     quarantinedAssets: (bundle.quarantinedFiles?.length ?? 0) - quarantinedPages,
+    droppedGatedPages: bundle.droppedGatedPages ?? 0,
     warnings: bundle.warnings,
     validation,
   }, null, 2)}\n`)
