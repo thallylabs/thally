@@ -1,6 +1,6 @@
 {
   "name": "create-thally-docs",
-  "version": "0.10.65",
+  "version": "0.10.66",
   "description": "Scaffold an open-source Thally docs site for people, search engines, and AI tools.",
   "type": "module",
   "engines": {
@@ -47,7 +47,10 @@
     "@thallylabs/core": "0.2.9",
     "@thallylabs/migrate": "0.2.14",
     "p-limit": "^6.1.0",
+    "remark-mdx": "^3.1.1",
+    "remark-parse": "^11.0.0",
     "tar": "^7.5.22",
+    "unified": "^11.0.5",
     "yaml": "^2.6.0"
   },
   "devDependencies": {
