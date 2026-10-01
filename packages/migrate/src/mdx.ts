@@ -862,7 +862,7 @@ export function replaceUnknownComponents(
  * this module that isn't already AST-based goes through this one masker
  * instead of re-implementing fence tracking.
  */
-function maskCode(body: string): { masked: string; unmask: (text: string) => string } {
+function maskCode(body: string): { masked: string; unmask: (text: string) => string; openFence: string | null } {
   // NUL is never valid in MDX; strip it so it can't collide with the \u0000
   // placeholder markers stashed below.
   const source = body.replace(/\u0000/g, '')
@@ -910,7 +910,19 @@ function maskCode(body: string): { masked: string; unmask: (text: string) => str
   return {
     masked: lines.join('\n'),
     unmask: (text) => text.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => blocks[Number(index)]),
+    openFence: codeFence,
   }
+}
+
+/**
+ * Mintlify compiles every snippet as its own MDX file, where a fence left open
+ * ends at EOF. Inlined into a page it would swallow the tags that follow, so
+ * close it (same character, same length) on its own line. Balanced input is
+ * returned unchanged.
+ */
+export function closeOpenFence(body: string): string {
+  const { openFence } = maskCode(body)
+  return openFence ? `${body}${body.endsWith('\n') ? '' : '\n'}${openFence}\n` : body
 }
 
 /**
