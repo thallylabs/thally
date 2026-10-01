@@ -54,12 +54,14 @@ export function parseOpenApiFrontmatter(raw: unknown): OpenApiFrontmatterRef | n
   }
 }
 
-function normalizeRef(value: string): string {
-  return value.trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/^\/+/, '').toLowerCase()
+/** Path syntax is made uniform, but case survives except in a URL's scheme and host, which are case-insensitive. */
+function canonicalRef(value: string): string {
+  return value.trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/^\/+/, '')
+    .replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, (origin) => origin.toLowerCase())
 }
 
 function baseName(value: string): string {
-  return normalizeRef(value).split(/[?#]/, 1)[0].split('/').filter(Boolean).pop() ?? ''
+  return canonicalRef(value).split(/[?#]/, 1)[0].split('/').filter(Boolean).pop() ?? ''
 }
 
 function specLocation(spec: ApiSpecConfig): string | null {
@@ -69,20 +71,23 @@ function specLocation(spec: ApiSpecConfig): string | null {
 }
 
 /**
- * Resolve an authored spec prefix to a configured spec. A full path/URL match
- * wins; otherwise the file name alone matches (migrated sites flatten specs
- * to `/<file name>`). Ties resolve to the first configured spec.
+ * Resolve an authored spec prefix to a configured spec. A case-exact full
+ * path/URL match wins, then a case-insensitive one; otherwise the file name
+ * alone matches (migrated sites flatten specs to `/<file name>`), again exact
+ * case first. Ties resolve to the first configured spec.
  */
 export function findSpecForRef(specs: Array<ApiSpecConfig>, specRef: string): ApiSpecConfig | null {
-  const wanted = normalizeRef(specRef)
+  const wanted = canonicalRef(specRef)
   if (!wanted) return null
   const located = specs.flatMap((spec) => {
     const location = specLocation(spec)
     return location ? [{ spec, location }] : []
   })
-  const exact = located.find(({ location }) => normalizeRef(location) === wanted)
-  if (exact) return exact.spec
   const wantedBase = baseName(specRef)
-  if (!wantedBase) return null
-  return located.find(({ location }) => baseName(location) === wantedBase)?.spec ?? null
+  const match =
+    located.find(({ location }) => canonicalRef(location) === wanted)
+    ?? located.find(({ location }) => canonicalRef(location).toLowerCase() === wanted.toLowerCase())
+    ?? (wantedBase ? located.find(({ location }) => baseName(location) === wantedBase) : undefined)
+    ?? (wantedBase ? located.find(({ location }) => baseName(location).toLowerCase() === wantedBase.toLowerCase()) : undefined)
+  return match?.spec ?? null
 }

@@ -51,6 +51,27 @@ describe('findSpecForRef', () => {
     expect(findSpecForRef(specs, 'api.json')?.id).toBe('c')
   })
 
+  it('resolves case-distinct sources to their own spec', () => {
+    const cased: Array<ApiSpecConfig> = [
+      { id: 'upper', label: 'U', source: { type: 'file', path: 'openapi/Orders.yaml' } },
+      { id: 'lower', label: 'L', source: { type: 'file', path: 'openapi/orders.yaml' } },
+    ]
+    expect(findSpecForRef(cased, 'openapi/orders.yaml')?.id).toBe('lower')
+    expect(findSpecForRef(cased, './openapi/Orders.yaml')?.id).toBe('upper')
+    expect(findSpecForRef(cased, 'orders.yaml')?.id).toBe('lower')
+    expect(findSpecForRef(cased, 'Orders.yaml')?.id).toBe('upper')
+    expect(findSpecForRef(cased, 'OPENAPI/ORDERS.YAML')?.id).toBe('upper')
+  })
+
+  it('lowercases only the URL scheme and host for an exact match', () => {
+    const remote: Array<ApiSpecConfig> = [
+      { id: 'a', label: 'A', source: { type: 'url', url: 'https://example.com/v1/Api.json' } },
+      { id: 'b', label: 'B', source: { type: 'url', url: 'https://EXAMPLE.com/v1/api.json' } },
+    ]
+    expect(findSpecForRef(remote, 'HTTPS://Example.COM/v1/api.json')?.id).toBe('b')
+    expect(findSpecForRef(remote, 'https://example.com/v1/Api.json')?.id).toBe('a')
+  })
+
   it('returns null for unknown specs', () => {
     expect(findSpecForRef(specs, 'nope.json')).toBeNull()
     expect(findSpecForRef(specs, '')).toBeNull()

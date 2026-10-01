@@ -43,8 +43,10 @@ export function parseDocReference(raw: unknown): DocReference | null {
   return { ...(specRef ? { specRef } : {}), method: operation[2].toUpperCase(), path: operation[3].trim().split(/\s+/).join(' ') }
 }
 
-const normalizeRef = (value: string) => value.trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/^\/+/, '').toLowerCase()
-const baseName = (value: string) => normalizeRef(value).split(/[?#]/, 1)[0].split('/').filter(Boolean).pop() ?? ''
+/** Case survives except in a URL's scheme and host. Mirrors `canonicalRef` in src/lib/openapi/page-frontmatter.ts. */
+const canonicalRef = (value: string) => value.trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/^\/+/, '')
+  .replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, (origin) => origin.toLowerCase())
+const baseName = (value: string) => canonicalRef(value).split(/[?#]/, 1)[0].split('/').filter(Boolean).pop() ?? ''
 
 /** A spec the docs route serves, in route order (visible API tabs, default first). No document when it cannot be read here. */
 export interface CheckSpec {
@@ -55,7 +57,7 @@ export interface CheckSpec {
 
 /**
  * Whether the docs route renders the operation a page names: a spec prefix
- * pins that spec (full path, else file name); a bare reference renders when
+ * pins that spec (full path, else file name; exact case before case-insensitive); a bare reference renders when
  * any spec publishes it. Mirrors `pageReferenceState` in
  * src/lib/openapi/publication.ts.
  */
@@ -63,11 +65,13 @@ export function pageState(ref: DocReference, specs: ReadonlyArray<CheckSpec>): '
   if (ref.webhook) return 'unknown'
   const judge = (spec: CheckSpec) => spec.document === undefined ? 'unknown' : operationState(spec.document, ref.method, ref.path, spec.overrides)
   if (ref.specRef) {
-    const wanted = normalizeRef(ref.specRef)
+    const wanted = canonicalRef(ref.specRef)
     if (!wanted) return 'unknown'
     const wantedBase = baseName(ref.specRef)
-    const spec = specs.find((entry) => normalizeRef(entry.source) === wanted)
+    const spec = specs.find((entry) => canonicalRef(entry.source) === wanted)
+      ?? specs.find((entry) => canonicalRef(entry.source).toLowerCase() === wanted.toLowerCase())
       ?? (wantedBase ? specs.find((entry) => baseName(entry.source) === wantedBase) : undefined)
+      ?? (wantedBase ? specs.find((entry) => baseName(entry.source).toLowerCase() === wantedBase.toLowerCase()) : undefined)
     return spec ? judge(spec) : 'unknown'
   }
   const states = specs.map(judge)

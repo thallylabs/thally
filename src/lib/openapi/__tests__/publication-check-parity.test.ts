@@ -47,12 +47,16 @@ describe('thally check page-reference parity', () => {
     [{ source: 'openapi/a.json', document: docA }, { source: 'openapi/b.yaml', document: docB, overrides: { 'GET /o': { hidden: true } } }],
     [{ source: '/specs/a.json', document: docA }, { source: 'https://example.com/b.yaml' }],
     [{ source: 'openapi/a.json' }, { source: 'openapi/b.yaml', document: docB }],
+    [{ source: 'openapi/Orders.yaml', document: docA }, { source: 'openapi/orders.yaml', document: docB }],
+    [{ source: 'https://example.com/V1/api.yaml', document: docB }],
     [],
   ]
   const references = [
     'GET /h', 'GET /moved', 'GET /v', 'GET /secret', 'GET /o', 'GET /typo', 'get   /h', 'FETCH /h', 'GET h', '',
     'openapi/a.json GET /h', 'a.json GET /h', '/openapi/a.json GET /v', './openapi/b.yaml GET /secret', "'b.yaml' GET /o",
     '"OpenAPI/B.YAML" GET /moved', 'specs/a.json GET /h', 'https://example.com/b.yaml GET /secret', 'other.yaml GET /h',
+    'openapi/Orders.yaml GET /h', 'openapi/orders.yaml GET /secret', 'OPENAPI/ORDERS.YAML GET /h', 'orders.yaml GET /secret',
+    'HTTPS://Example.COM/V1/api.yaml GET /secret', 'https://example.com/v1/API.yaml GET /secret',
     'webhook orderUpdated', 'b.yaml webhook orderUpdated', 'my spec.json GET /v',
   ]
 
@@ -81,6 +85,22 @@ describe('thally check page-reference parity', () => {
         if (!site || !check) continue
         expect(pageState(check, setup), `${raw} with ${setup.map((spec) => spec.source).join(', ')}`).toBe(pageReferenceState(site, routed))
       }
+    }
+  })
+
+  it('judges a pin against its own case-distinct source in both implementations', () => {
+    const setup = setups[3]
+    const routed: Array<RoutedSpec> = setup.map((spec, index) => ({
+      config: { id: `s${index}`, label: '', source: { type: 'file', path: spec.source } },
+      document: spec.document,
+    }))
+    for (const [raw, expected] of [
+      ['openapi/orders.yaml GET /secret', 'excluded'],
+      ['openapi/Orders.yaml GET /h', 'hidden'],
+      ['openapi/orders.yaml GET /h', 'unknown'],
+    ] as const) {
+      expect(pageState(parseDocReference(raw)!, setup), raw).toBe(expected)
+      expect(pageReferenceState(parseOpenApiFrontmatter(raw)!, routed), raw).toBe(expected)
     }
   })
 })
