@@ -220,7 +220,9 @@ export function validateIntegrations(integrations: unknown): Array<string> {
   if (integrations === undefined) return []
   const result = projectMintlifyIntegrations({ integrations })
   const messages = result.warnings.map((warning) =>
-    warning.message.replace(/^Mintlify /, 'docs.json ').replace(/\b(?:was|were|are) not imported\b/g, 'will not be rendered'),
+    warning.message
+      .replace(/^Mintlify analytics\/integration providers Thally cannot render were not imported: /, 'docs.json integrations: Thally does not support these providers, so they will not be rendered: ')
+      .replace(/^Mintlify /, 'docs.json ').replace(/\b(?:was|were|are) not imported\b/g, 'will not be rendered'),
   )
   if (result.integrations?.ga4 && result.integrations.gtm) {
     messages.push('docs.json integrations enable both ga4 and gtm; a GA4 tag inside the GTM container would double-count page views.')

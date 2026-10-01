@@ -376,6 +376,9 @@ describe('thally check integrations', () => {
     expect(found.length).toBeGreaterThanOrEqual(4)
     expect(found.every((issue) => issue.severity === 'warning')).toBe(true)
     expect(found.map((issue) => issue.message).join('\n')).not.toContain('SECRETVALUE')
+    expect(found.map((issue) => issue.message)).toContain(
+      'docs.json integrations: Thally does not support these providers, so they will not be rendered: amplitude. Supported: ga4, gtm, posthog, plausible.',
+    )
     expect((await run('nope')).length).toBe(1)
   })
 
