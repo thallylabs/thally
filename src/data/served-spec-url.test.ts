@@ -63,6 +63,12 @@ describe('spec_url names the spec the page resolves to', () => {
     expect(await pathFor('admin webhook orderUpdated')).toBeUndefined()
   })
 
+  it('a default-spec webhook page lists the webhook name, not an operation', async () => {
+    const ref = parseOpenApiFrontmatter('webhook orderUpdated')!
+    expect(await servedSpecPathForFrontmatter(ref)).toBeUndefined()
+    expect(docApiJson({ openapi: ref }, '/openapi.yaml')).toEqual({ spec_url: '/openapi.yaml', webhooks: ['orderUpdated'] })
+  })
+
   it('an operation no spec publishes gets no spec_url', async () => {
     expect(await pathFor('GET /missing')).toBeUndefined()
     expect(await pathFor('GET /hid')).toBeUndefined()

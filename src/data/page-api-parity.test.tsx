@@ -75,7 +75,7 @@ describe('API frontmatter parity between renderer, index, JSON and readiness', (
   it('exposes spec-prefixed, webhook and manual operations in the JSON docs output', () => {
     const byId = (id: string) => docApiJson(getDocEntries().find((entry) => entry.id === id)!)
     expect(byId('prefixed')).toEqual({ operations: ['GET /moved'] })
-    expect(byId('hook')).toEqual({ operations: ['WEBHOOK orderUpdated'] })
+    expect(byId('hook')).toEqual({ webhooks: ['orderUpdated'] })
     expect(byId('manual')).toEqual({ operations: ['POST /users'] })
     expect(byId('manualPath')).toEqual({ operations: ['GET /status'] })
     expect(byId('both')).toEqual({ operations: ['GET /a'] })

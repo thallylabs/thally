@@ -29,14 +29,16 @@ export function pageApiMetadata(
 
 /**
  * The `openapi` block of the `/api/docs` JSON for an indexed page, or undefined
- * for a regular doc. `specUrl` is the served path of the page's own spec
+ * for a regular doc. A webhook page lists `webhooks` (names), never `operations`. `specUrl` is the served path of the page's own spec
  * (`servedSpecPathForFrontmatter`); without one no `spec_url` is advertised.
  */
 export function docApiJson(entry: {
-  openapi?: Pick<OpenApiFrontmatterRef, 'method' | 'path'>
+  openapi?: Pick<OpenApiFrontmatterRef, 'method' | 'path' | 'webhook'>
   manualTarget?: Pick<ManualApiTarget, 'method' | 'path'>
-}, specUrl?: string): { spec_url?: string; operations: Array<string> } | undefined {
-  if (entry.openapi) return { ...(specUrl ? { spec_url: specUrl } : {}), operations: [`${entry.openapi.method.toUpperCase()} ${entry.openapi.path}`] }
+}, specUrl?: string): { spec_url?: string; operations?: Array<string>; webhooks?: Array<string> } | undefined {
+  const spec = specUrl ? { spec_url: specUrl } : {}
+  if (entry.openapi?.webhook) return { ...spec, webhooks: [entry.openapi.path] }
+  if (entry.openapi) return { ...spec, operations: [`${entry.openapi.method.toUpperCase()} ${entry.openapi.path}`] }
   if (entry.manualTarget) return { operations: [`${entry.manualTarget.method} ${entry.manualTarget.path}`] }
   return undefined
 }
