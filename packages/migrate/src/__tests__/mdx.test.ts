@@ -669,6 +669,50 @@ describe('normalizeExplicitHeadingIds', () => {
     expect(normalizeExplicitHeadingIds(body)).toBe(body)
     expect(Date.now() - started).toBeLessThan(500)
   })
+
+  it.each(['1-add-firecrawl', '123', '429-responses', 'v1.2', 'a:b', 'café', '入门', '_x'])('keeps the valid HTML5 id %s', (id) => {
+    const result = normalizeExplicitHeadingIds(`### 1. 获取 API 密钥 {#${id}}\n\nProse.`)
+    expect(result).toBe(`<a id="${id}"></a>\n### 1. 获取 API 密钥\n\nProse.`)
+    expect(() => compileSync(result, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('keeps the same ids in the Docusaurus comment form', () => {
+    for (const id of ['1-intro', 'café', 'v1.2']) {
+      expect(normalizeExplicitHeadingIds(`## Intro {/* #${id} */}`)).toBe(`<a id="${id}"></a>\n## Intro`)
+    }
+  })
+
+  it.each(['a b', 'a"b', "a'b", 'a<b', 'a>b', 'a`b', 'a&b', ''])('rejects the id %j but still compiles the page', (id) => {
+    const warnings: Array<string> = []
+    const result = normalizeExplicitHeadingIds(`## Title {#${id}}\n\nProse.`, (message) => warnings.push(message))
+    expect(result).not.toContain('<a id')
+    expect(result).not.toMatch(/\{#/)
+    expect(result).toContain('## Title')
+    expect(warnings).toHaveLength(1)
+    expect(() => compileSync(result, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('leaves a heading whose brace suffix is not a single anchor untouched, without a warning', () => {
+    const warnings: Array<string> = []
+    const body = '## Use {#if} blocks {x}'
+    expect(normalizeExplicitHeadingIds(body, (message) => warnings.push(message))).toBe(body)
+    expect(warnings).toEqual([])
+  })
+
+  it('keeps only the last of two anchors on a heading', () => {
+    expect(normalizeExplicitHeadingIds('## A {#x} {#y}')).toBe('<a id="y"></a>\n## A {#x}')
+  })
+
+  it('leaves a non-id brace suffix that is not an anchor attempt alone', () => {
+    expect(normalizeExplicitHeadingIds('## Uses {value}')).toBe('## Uses {value}')
+  })
+
+  it('stays fast on a 10k-character heading ending in a rejected id', () => {
+    const body = `# ${'a {#'.repeat(2500)}}`
+    const started = Date.now()
+    normalizeExplicitHeadingIds(body)
+    expect(Date.now() - started).toBeLessThan(500)
+  })
 })
 
 describe('Fern relative page links', () => {
