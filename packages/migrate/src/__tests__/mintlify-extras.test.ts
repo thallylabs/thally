@@ -695,6 +695,12 @@ describe('assets used only by oversized withheld pages', () => {
     expect(publicPaths(build(2_000_001)).includes('img/shared.png')).toBe(true)
   })
 
+  it('emits one summary warning with the withheld asset count when only an oversized gated page exists', () => {
+    const summaries = codes(build(2_000_001), 'gated-page').filter((item) => /kept out of public\//.test(item.message))
+    expect(summaries).toHaveLength(1)
+    expect(/1 file\(s\) used only by access-restricted pages/.test(summaries[0].message)).toBe(true)
+  })
+
   it('warns, naming the page, when a gated page is too large to scan for assets', () => {
     const bundle = build(16_000_001)
     const warning = codes(bundle, 'gated-page').find((item) => item.source === 'big.mdx')

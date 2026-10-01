@@ -4153,11 +4153,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // Mintlify serves a Markdown mirror of every page by default. The mirror
     // route reads only src/content, the same files the HTML routes serve.
     docsConfig = { ...docsConfig, markdown: { enabled: true } }
-    if (quarantinedPageCount > 0) {
+    if (quarantinedPageCount > 0 || withheldAssetCount > 0) {
+      const assetNote = withheldAssetCount > 0
+        ? `${withheldAssetCount} file(s) used only by access-restricted pages were kept out of public/ and saved under ${QUARANTINE_DIRECTORY}/assets/. `
+        : ''
       warnings.push({
         code: 'gated-page',
-        message: `${quarantinedPageCount} access-restricted page(s) were withheld from the published site and saved under ${QUARANTINE_DIRECTORY}/ (local only: git-ignored, never served or deployed). `
-          + (withheldAssetCount > 0 ? `${withheldAssetCount} image/file(s) used only by those pages were kept out of public/ and saved under ${QUARANTINE_DIRECTORY}/assets/. ` : '')
+        message: (quarantinedPageCount > 0
+          ? `${quarantinedPageCount} access-restricted page(s) were withheld from the published site and saved under ${QUARANTINE_DIRECTORY}/ (local only: git-ignored, never served or deployed). `
+          : '')
+          + assetNote
           + 'Assets that published pages also use, and unreferenced assets, are still copied to public/. Review them before deciding how to publish or protect that content.',
       })
     }
