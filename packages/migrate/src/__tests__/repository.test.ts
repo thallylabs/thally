@@ -1646,6 +1646,27 @@ describe('Mintlify repository migration', () => {
     expect(bundle.warnings.filter((warning) => warning.code === 'limit-reached')).toEqual([])
   }, 90_000)
 
+  it('bounds snippet files with their own budget and leaves pages unaffected', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-snippet-bound-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['introduction'] },
+    }))
+    writeFileSync(join(root, 'introduction.mdx'), '---\ntitle: Intro\n---\n\nHello.')
+    for (let index = 0; index < 5003; index++) {
+      writeFileSync(join(root, 'snippets', `s-${index}.mdx`), `Snippet ${index}`)
+    }
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.id)).toEqual(['introduction'])
+    const limits = bundle.warnings.filter((warning) => warning.code === 'limit-reached')
+    expect(limits).toHaveLength(1)
+    expect(limits[0].message).toContain('more than 5000 snippets')
+    expect(limits[0].message).toContain('3 snippet file(s) were left out')
+  }, 90_000)
+
   it('keeps the first pages in navigation order and names what was dropped when one version alone exceeds the file budget', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-single-version-budget-'))
     mkdirSync(join(root, 'en'), { recursive: true })
