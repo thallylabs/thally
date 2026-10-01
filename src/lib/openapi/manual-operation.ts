@@ -336,8 +336,9 @@ export function buildManualOperation(input: BuildManualOperationInput): Normaliz
   const body = buildManualBody(fields)
   if (body !== undefined) {
     prefill.body = body
-    // The relay forwards these headers verbatim, so the JSON body must carry its media type from here.
-    if (!Object.keys(prefill.header).some((name) => name.toLowerCase() === 'content-type')) prefill.header['Content-Type'] = 'application/json'
+    // The relay forwards these headers verbatim, so a JSON body that is sent must carry its media type from here.
+    // Same method rule as `canSendBody` in the Try It controller: GET and HEAD never send a body.
+    if (!['GET', 'HEAD'].includes(target.method) && !Object.keys(prefill.header).some((name) => name.toLowerCase() === 'content-type')) prefill.header['Content-Type'] = 'application/json'
   }
 
   const parameters: NormalizedOperation['parameters'] = { path: [], query: [], header: [], cookie: [] }

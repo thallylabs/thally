@@ -171,6 +171,11 @@ describe('buildManualOperation', () => {
     expect(authored.parameters.header).toHaveLength(1)
   })
 
+  it('declares no media type when the method never sends the body', () => {
+    for (const method of ['GET', 'HEAD']) expect(build({ api: `${method} /users` })!.prefill.header).toEqual({ 'X-Trace': '' })
+    expect(build({ api: 'POST /users' })!.prefill.header['Content-Type']).toBe('application/json')
+  })
+
   it('uses docs.json servers and auth for path-only values; absolute URL wins', () => {
     const config = { servers: ['https://httpbin.org', 'https://b.example.com'], auth: { method: 'bearer' as const } }
     const op = build({ api: 'GET /status', mdx: '', config })!
