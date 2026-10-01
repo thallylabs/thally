@@ -26,12 +26,18 @@ function renderPage(bundle: MigrationBundle, page: MigrationBundle['pages'][numb
     page.hidden ? 'hidden: true' : null,
     page.noindex ? 'noindex: true' : null,
     page.openapi ? `openapi: ${yamlString(page.openapi)}` : null,
+    page.api ? `api: ${yamlString(page.api)}` : null,
+    page.authMethod ? `authMethod: ${yamlString(page.authMethod)}` : null,
     bundle.sourceKind === 'url' ? `source: ${yamlString(page.source)}` : null,
     '---',
     '',
     page.body,
     '',
   ].filter((line) => line !== null).join('\n')
+}
+
+function isIntegrationsObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 /** Merge imported tabs into an existing site without duplicating changelog tabs. */
@@ -121,6 +127,16 @@ export function mergeMigrationConfig(
     // architecture; starter defaults must not coerce source dropdowns to tabs.
     navigation: incoming.navigation ?? existing.navigation,
     ...(i18n ? { i18n } : {}),
+    // Existing providers win per provider; imported ones fill the gaps.
+    // A malformed (string/array) existing value must not spread into index keys.
+    ...(isIntegrationsObject(existing.integrations) || isIntegrationsObject(incoming.integrations)
+      ? {
+          integrations: {
+            ...(isIntegrationsObject(incoming.integrations) ? incoming.integrations : {}),
+            ...(isIntegrationsObject(existing.integrations) ? existing.integrations : {}),
+          },
+        }
+      : {}),
   }
 }
 
@@ -142,6 +158,7 @@ export function renderMigrationFiles(
       && options.existingComponentRegistry !== undefined && typeof file.content === 'string'
       ? mergeComponentRegistry(options.existingComponentRegistry, file.content)
       : [file]),
+    ...(bundle.quarantinedFiles ?? []),
     { path: 'docs.json', content: `${JSON.stringify(config, null, 2)}\n` },
   ]
 }

@@ -56,8 +56,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const i18n = await getEffectiveI18nConfig()
   if (!isValidSecondaryLocale(resolved.locale, i18n)) return {}
   const siteUrl = getSiteUrl()
-  const specUrl = getOpenApiSpecUrl(siteUrl)
   const node = await getApiOperationBySlug(resolved.slug)
+  const specUrl = node ? getOpenApiSpecUrl(siteUrl, node.operation.specId) : null
   if (!node) {
     return generateDocsMetadata({ params: Promise.resolve({ slug: [resolved.locale, 'api', ...(resolved.slug ?? [])] }) })
   }
@@ -100,7 +100,6 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function LocaleApiReferencePage({ params }: PageProps) {
   const resolved = await params
   const siteUrl = getSiteUrl()
-  const specUrl = getOpenApiSpecUrl(siteUrl)
   const i18n = await getEffectiveI18nConfig()
   const effectiveSite = resolveBuildSiteConfig()
 
@@ -125,6 +124,7 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
   }
 
   const node = await getApiOperationBySlug(resolved.slug)
+  const specUrl = node ? getOpenApiSpecUrl(siteUrl, node.operation.specId) : null
   if (!node) {
     // /{locale}/api/* also belongs to authored MDX; the OpenAPI operation
     // surface only owns slugs present in the spec.

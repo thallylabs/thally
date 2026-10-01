@@ -85,9 +85,19 @@ export interface MigrationDocsConfig {
     heading?: { family: string; weight?: Array<string> }
   }
   feedback?: { thumbsRating?: boolean }
+  customScripts?: Array<{ src: string; strategy?: 'beforeInteractive' | 'afterInteractive' | 'lazyOnload' }>
   ai?: { chat?: boolean; label?: string; icon?: string }
   admin?: { enabled?: boolean }
   analytics?: { enabled?: boolean }
+  /** Manual API pages: default server(s) and auth for `api:` frontmatter pages. */
+  api?: { mdx?: { server?: string | Array<string>; auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string } } }
+  /** Third-party analytics in Mintlify's `integrations` shape; validated again by the renderer. */
+  integrations?: {
+    ga4?: { measurementId: string }
+    gtm?: { tagId: string }
+    posthog?: { apiKey: string; apiHost?: string; sessionRecording?: boolean }
+    plausible?: { domain: string; server?: string }
+  }
   redirects?: Array<{ source: string; destination: string; permanent?: boolean }>
   i18n?: {
     defaultLocale: string
@@ -115,6 +125,10 @@ export interface MigrationPage {
   noindex?: boolean
   /** OpenAPI operation key rendered by Thally instead of ordinary MDX. */
   openapi?: string
+  /** Manual API page: `METHOD <url-or-path>`; rendered by Thally's playground. */
+  api?: string
+  /** Page-level playground auth override: bearer | basic | key | none. */
+  authMethod?: string
   body: string
   source: string
   /** Set when the page's frontmatter was invalid YAML; the page is kept with a best-effort salvage. */
@@ -138,6 +152,8 @@ export interface MigrationWarning {
     | 'limit-reached'
     | 'fetch-failed'
     | 'skipped-file'
+    /** Access-restricted source page withheld from the published site (or a site-wide auth risk). */
+    | 'gated-page'
   message: string
   source?: string
 }
@@ -152,6 +168,10 @@ export interface MigrationBundle {
   remoteApiSpecs?: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>
   /** Customer-owned component source and registry; paths are repository-relative. */
   componentFiles?: Array<RenderedMigrationFile>
+  /** Access-restricted source pages, written outside every published path. */
+  quarantinedFiles?: Array<RenderedMigrationFile>
+  /** Access-restricted pages the file limit dropped: neither published nor saved in quarantinedFiles. */
+  droppedGatedPages?: number
   docsConfig: MigrationDocsConfig
   site?: {
     name?: string

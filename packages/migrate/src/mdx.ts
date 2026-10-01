@@ -1829,6 +1829,8 @@ export function parseMarkdownPage(input: {
     frontmatter: Record<string, unknown>,
     fallback: MarkdownPageIdentity,
   ) => MarkdownPageIdentity
+  /** Receives a message when frontmatter is dropped or altered. */
+  warn?: (message: string) => void
 }): MigrationPage | null {
   const parsed = parseFrontmatter(input.raw)
   const fallbackIdentity: MarkdownPageIdentity = {
@@ -1885,8 +1887,29 @@ export function parseMarkdownPage(input: {
     hidden: parsed.data.hidden === true ? true : undefined,
     noindex: parsed.data.noindex === true || parsed.data.noindex === 'true' ? true : undefined,
     openapi: typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined,
+    ...apiFrontmatter(parsed.data, input.warn),
     body,
     source: input.source,
     ...(parsed.error ? { frontmatterError: parsed.error } : {}),
   }
+}
+
+const AUTH_METHODS = new Set(['bearer', 'basic', 'key', 'none'])
+
+/** Carry manual-API frontmatter (`api`, `authMethod`) through; report what cannot be kept. */
+function apiFrontmatter(
+  data: Record<string, unknown>,
+  warn?: (message: string) => void,
+): Pick<MigrationPage, 'api' | 'authMethod'> {
+  const result: Pick<MigrationPage, 'api' | 'authMethod'> = {}
+  if (data.api !== undefined && data.api !== null) {
+    if (typeof data.api === 'string' && data.api.trim()) result.api = data.api.trim()
+    else warn?.('The page\'s "api" frontmatter is not a "METHOD url-or-path" string and was dropped.')
+  }
+  if (data.authMethod !== undefined && data.authMethod !== null) {
+    const method = typeof data.authMethod === 'string' ? data.authMethod.trim().toLowerCase() : ''
+    if (AUTH_METHODS.has(method)) result.authMethod = method
+    else warn?.(`The page's "authMethod" frontmatter ${JSON.stringify(data.authMethod)} is not one of bearer, basic, key, none and was dropped.`)
+  }
+  return result
 }

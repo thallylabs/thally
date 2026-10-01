@@ -35,9 +35,16 @@ export function Logo({ className, showText = true }: LogoProps) {
 
   // The <img> is server-rendered, so it can finish loading BEFORE React attaches
   // onLoad (the event never fires). Check completeness on mount to catch that.
+  // The default mark can be missing too (a site that pruned public/brand):
+  // drop it rather than show a broken-image icon; the site name stays.
+  const defaultRef = useRef<HTMLImageElement>(null)
+  const [defaultOk, setDefaultOk] = useState(true)
+
   useEffect(() => {
     const img = imgRef.current
     if (img?.complete) setCustomOk(img.naturalWidth > 0)
+    const fallback = defaultRef.current
+    if (fallback?.complete && fallback.naturalWidth === 0) setDefaultOk(false)
   }, [])
 
   return (
@@ -58,14 +65,18 @@ export function Logo({ className, showText = true }: LogoProps) {
         <>
           {/* The default Thally leaf keeps its exact olive in both modes. A
               site owner's uploaded logo still replaces it above. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/brand/default-logo-light.svg"
-            alt=""
-            width={28}
-            height={28}
-            className="shrink-0"
-          />
+          {defaultOk ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              ref={defaultRef}
+              src="/brand/default-logo-light.svg"
+              alt=""
+              width={28}
+              height={28}
+              className="shrink-0"
+              onError={() => setDefaultOk(false)}
+            />
+          ) : null}
           {showText ? (
             <span className="font-heading text-lg font-semibold tracking-tight text-foreground">{displaySiteName(siteName)}</span>
           ) : null}

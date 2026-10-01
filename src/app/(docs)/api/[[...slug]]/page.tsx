@@ -36,9 +36,9 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const resolved = await params
   const siteUrl = getSiteUrl()
-  const specUrl = getOpenApiSpecUrl(siteUrl)
 
   const node = await getApiOperationBySlug(resolved.slug)
+  const specUrl = node ? getOpenApiSpecUrl(siteUrl, node.operation.specId) : null
   if (node) {
     const title = node.operation.title
     const description = node.operation.description ?? `${node.operation.method} ${node.operation.path}`
@@ -80,7 +80,6 @@ export default async function ApiReferencePage({ params }: PageProps) {
   const resolved = await params
   const siteUrl = getSiteUrl()
   const effectiveSite = resolveBuildSiteConfig()
-  const specUrl = getOpenApiSpecUrl(siteUrl)
 
   // No slug — redirect to the first MDX page in the API group if one exists,
   // otherwise fall through to the first OpenAPI operation.
@@ -100,6 +99,7 @@ export default async function ApiReferencePage({ params }: PageProps) {
 
   // OpenAPI operation match
   const node = await getApiOperationBySlug(resolved.slug)
+  const specUrl = node ? getOpenApiSpecUrl(siteUrl, node.operation.specId) : null
   if (node) {
     const pageUrl = `${siteUrl}${node.href}`
     const jsonLd = buildApiOperationJsonLd({
