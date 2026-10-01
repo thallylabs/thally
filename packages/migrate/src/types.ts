@@ -85,6 +85,7 @@ export interface MigrationDocsConfig {
     heading?: { family: string; weight?: Array<string> }
   }
   feedback?: { thumbsRating?: boolean }
+  customScripts?: Array<{ src: string; strategy?: 'beforeInteractive' | 'afterInteractive' | 'lazyOnload' }>
   ai?: { chat?: boolean; label?: string; icon?: string }
   admin?: { enabled?: boolean }
   analytics?: { enabled?: boolean }
@@ -144,6 +145,8 @@ export interface MigrationWarning {
     | 'limit-reached'
     | 'fetch-failed'
     | 'skipped-file'
+    /** Access-restricted source page withheld from the published site (or a site-wide auth risk). */
+    | 'gated-page'
   message: string
   source?: string
 }
@@ -158,6 +161,10 @@ export interface MigrationBundle {
   remoteApiSpecs?: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>
   /** Customer-owned component source and registry; paths are repository-relative. */
   componentFiles?: Array<RenderedMigrationFile>
+  /** Access-restricted source pages, written outside every published path. */
+  quarantinedFiles?: Array<RenderedMigrationFile>
+  /** Access-restricted pages the file limit dropped: neither published nor saved in quarantinedFiles. */
+  droppedGatedPages?: number
   docsConfig: MigrationDocsConfig
   site?: {
     name?: string
