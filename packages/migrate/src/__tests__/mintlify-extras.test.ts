@@ -387,6 +387,66 @@ describe('gating bypass hardening', () => {
     expect(codes(bundle, 'missing-page').filter((warning) => /nope\.mdx/.test(warning.message))).toHaveLength(1)
   })
 
+  // Pages above the repository size cap are never imported, so the gate prepass
+  // must still classify them or a snippet reference would inline them.
+  const padding = 'x'.repeat(2_000_001)
+  const oversize = (frontmatter: string) => `---\n${frontmatter}---\n\nTOPSECRET\n${padding}\n`
+  const expectOversizedWithheld = (bundle: MigrationBundle) => {
+    expect(JSON.stringify(bundle.pages).includes('TOPSECRET')).toBe(false)
+    expect(bundle.pages.find((entry) => entry.id === 'host')!.body).toContain('Public text.')
+    expect(bundle.pages.map((entry) => entry.id)).toEqual(['host'])
+    expect(bundle.quarantinedFiles ?? []).toHaveLength(0)
+    expect(codes(bundle, 'skipped-file').filter((warning) => warning.source === 'private.mdx')).toHaveLength(1)
+    expect(codes(bundle, 'gated-page').filter((warning) => warning.source === 'host.mdx' && /NOT inlined/.test(warning.message))).toHaveLength(1)
+    expect(codes(bundle, 'missing-page')).toHaveLength(0)
+  }
+  const oversizedHost = (host: string, frontmatter = 'title: Private\ngroups: [admin]\ndescription: TOPSECRET desc\n') => site({
+    'docs.json': JSON.stringify({ navigation: { pages: ['host'] } }),
+    'host.mdx': `---\ntitle: Host\n---\n\nPublic text.\n\n${host}\n`,
+    'private.mdx': oversize(frontmatter),
+  })
+
+  it('never inlines an oversized access-restricted page through <Snippet file>', () => {
+    expectOversizedWithheld(oversizedHost('<Snippet file="/private.mdx" />'))
+  })
+
+  it('never inlines an oversized access-restricted page through a component or value import', () => {
+    expectOversizedWithheld(oversizedHost('import Secret from "/private.mdx"\n\n<Secret />'))
+    expectOversizedWithheld(oversizedHost('import { Secret } from "/private.mdx"\n\n<Secret />'))
+  })
+
+  it('never inlines an oversized access-restricted page through an alias imported elsewhere', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['host', 'other'] } }),
+      'host.mdx': '---\ntitle: Host\n---\n\nPublic text.\n\n<Secret />\n',
+      'other.mdx': '---\ntitle: Other\n---\n\nimport Secret from "/private.mdx"\n\nOther text.\n',
+      'private.mdx': oversize('title: Private\ngroups: [admin]\n'),
+    })
+    expect(JSON.stringify(bundle.pages).includes('TOPSECRET')).toBe(false)
+  })
+
+  it('withholds an oversized page restricted by its navigation container', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { groups: [
+        { group: 'Public', pages: ['host'] }, { group: 'Staff', groups: ['staff'], pages: ['private'] },
+      ] } }),
+      'host.mdx': '---\ntitle: Host\n---\n\nPublic text.\n\n<Snippet file="/private.mdx" />\n',
+      'private.mdx': oversize('title: Private\n'),
+    })
+    expect(JSON.stringify(bundle.pages).includes('TOPSECRET')).toBe(false)
+  })
+
+  it('withholds an oversized page whose frontmatter cannot be bounded or parsed', () => {
+    const unterminated = `---\ntitle: Private\n${'x: y\n'.repeat(20_000)}`
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['host'] } }),
+      'host.mdx': '---\ntitle: Host\n---\n\nPublic text.\n\n<Snippet file="/private.mdx" />\n',
+      'private.mdx': `${unterminated}groups: [admin]\nTOPSECRET\n${padding}`,
+    })
+    expect(JSON.stringify(bundle.pages).includes('TOPSECRET')).toBe(false)
+    expect(codes(bundle, 'gated-page').some((warning) => /NOT inlined/.test(warning.message))).toBe(true)
+  })
+
   it('withholds a page whose invalid frontmatter declares groups or public instead of salvaging it', () => {
     const bundle = site({
       'docs.json': JSON.stringify({ navigation: { pages: ['bad', 'badpublic', 'badopen'] } }),

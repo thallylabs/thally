@@ -86,6 +86,8 @@ import type {
 
 const MAX_SOURCE_FILES = 5_000
 const MAX_PAGE_BYTES = 2_000_000
+/** Window read to classify the access gate of an oversized page. */
+const FRONTMATTER_HEAD_BYTES = 65_536
 const MAX_ASSET_BYTES = 25_000_000
 const MAX_TOTAL_ASSET_BYTES = 500_000_000
 /** A Git LFS pointer file's fixed opening line (the smudge filter replaces this with the real binary; skipping it during clone leaves this text in place). */
@@ -1793,6 +1795,20 @@ function fernDefinitionExists(fernRoot: string, apiName: string | undefined): bo
   return candidateDirs.some((dir) => existsSync(dir) && lstatSync(dir).isDirectory())
 }
 
+/** Leading frontmatter of a file without loading all of it; undefined when it is not closed within the window. */
+function readFrontmatterHead(path: string): string | undefined {
+  const fd = openSync(path, 'r')
+  try {
+    const buffer = Buffer.alloc(FRONTMATTER_HEAD_BYTES)
+    const head = buffer.toString('utf8', 0, readSync(fd, buffer, 0, buffer.length, 0))
+    const opening = /^\uFEFF?---([^\r\n]*)\r?\n/.exec(head)
+    if (!opening || opening[1].startsWith('-')) return head
+    return /^---[ \t]*\r?\n/m.test(head.slice(opening[0].length)) ? head : undefined
+  } finally {
+    closeSync(fd)
+  }
+}
+
 function withoutFrontmatter(value: string): string {
   return value.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim()
 }
@@ -2878,12 +2894,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   if (platform === 'mintlify') {
     for (const file of files) {
       if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())
-        || file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
-        || lstatSync(file.absolutePath).size > MAX_PAGE_BYTES) continue
+        || file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))) continue
       let frontmatter: Record<string, unknown> = {}
       let unreadableGate: string | undefined
       try {
-        const raw = readFileSync(file.absolutePath, 'utf8')
+        // Pages above the size cap are never imported, but another page can
+        // still inline them, so they are classified from their frontmatter.
+        const raw = lstatSync(file.absolutePath).size > MAX_PAGE_BYTES
+          ? readFrontmatterHead(file.absolutePath)
+          : readFileSync(file.absolutePath, 'utf8')
+        if (raw === undefined) throw new Error('frontmatter is not terminated within the bounded read')
         const parsed = parseFrontmatter(raw)
         frontmatter = parsed.data
         // Invalid YAML is salvaged line by line, which can drop the very line
