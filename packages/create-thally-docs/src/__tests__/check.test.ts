@@ -392,3 +392,47 @@ describe('thally check pages bound to unpublished operations', () => {
     expect(await run({ 'hidden-endpoint': 'GET /hidden' }, undefined, 'https://example.com/spec.json')).not.toContain('is not published')
   })
 })
+
+describe('thally check manual api pages', () => {
+  async function run(frontmatter: string, body = '', docsExtra: Record<string, unknown> = {}) {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-manual-'))
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'Docs', groups: [{ group: 'G', pages: ['page'] }] }], ...docsExtra }))
+    writeFileSync(join(projectDir, 'src/content/page.mdx'), `---\ntitle: T\ndescription: d\n${frontmatter}\n---\n${body}\nSome body text that is long enough to not be flagged as empty.\n`)
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    return output.join('\n')
+  }
+  const server = { api: { mdx: { server: 'https://api.example.com' } } }
+
+  it('warns for an unparseable api value', async () => {
+    expect(await run('api: "FETCH"', '', server)).toContain('page src/content/page.mdx: "api" frontmatter is not "METHOD https://host/path" or "METHOD /path"')
+    expect(await run('api: 42', '', server)).toContain('"api" frontmatter is not')
+  })
+
+  it('warns for a path-only api without docs.json api.mdx.server', async () => {
+    expect(await run('api: "GET /status"')).toContain('has no server: set docs.json "api.mdx.server" or use a full URL')
+    expect(await run('api: "GET /status"', '', { api: { mdx: { server: 'not a url' } } })).toContain('has no server')
+    expect(await run('api: "GET /status"', '', server)).not.toContain('has no server')
+    expect(await run('api: "GET https://api.example.com/status"')).not.toContain('has no server')
+  })
+
+  it('warns for a ParamField path parameter missing from the URL template', async () => {
+    expect(await run('api: "GET /users"', '<ParamField path="id" type="string" />', server)).toContain('<ParamField path="id"> has no matching {id}')
+    expect(await run('api: "GET /users/{id}"', '<ParamField path="id" type="string" />', server)).not.toContain('has no matching')
+  })
+
+  it('warns when openapi and api are both set', async () => {
+    expect(await run('openapi: "GET /a"\napi: "GET /b"', '', server)).toContain('both "openapi" and "api" are set; "api" is ignored')
+  })
+
+  it('stays quiet for a sound manual page', async () => {
+    const output = await run('api: "POST /users/{id}"', '<ParamField path="id" type="string" />\n<ParamField body="name" type="string" />', server)
+    expect(output).not.toMatch(/"api"|ParamField|has no server/)
+  })
+})

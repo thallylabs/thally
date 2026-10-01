@@ -11,6 +11,7 @@ import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
 import { pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
+import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { slugify } from '@thallylabs/core/slugify'
@@ -569,6 +570,9 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
     const reference = parseDocReference(data.openapi)
     if (reference) operationPages.push({ file: rel2, reference })
+    for (const message of manualApiProblems(rel2, data, Boolean(reference), content, (config as { api?: unknown }).api)) {
+      issues.push({ severity: 'warning', file: rel2, message })
+    }
 
     if (options.drift) checkDrift(projectDir, rel2, data, issues)
 

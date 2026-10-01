@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 // standalone starter does not have (see SOURCE_ONLY_PATHS in
 // .github/scripts/starter-runtime-contract.mjs).
 import { operationState, pageState, parseDocReference } from '../../../../packages/create-thally-docs/src/openapi-publication'
+import { mdxServers, paramFieldPathNames, parseManualApi } from '../../../../packages/create-thally-docs/src/manual-api-check'
+import { extractParamFields, parseApiFrontmatter, sanitizeApiMdxConfig } from '../manual-operation'
 import { parseOpenApiFrontmatter } from '../page-frontmatter'
 import { operationPublicationState, pageReferenceState, type RoutedSpec } from '../publication'
 
@@ -146,6 +148,39 @@ describe('thally check page-reference parity', () => {
     ] as const) {
       expect(pageState(parseDocReference(raw)!, setup), raw).toBe(expected)
       expect(pageReferenceState(parseOpenApiFrontmatter(raw)!, routed), raw).toBe(expected)
+    }
+  })
+})
+
+describe('thally check manual api parity', () => {
+  it('reads `api:` the same way as the site', () => {
+    for (const raw of [
+      'GET /status', 'post https://api.example.com/users?x=1&y=2#frag', '"PUT /a/{id}"', "'DELETE https://h.test'", 'GET https://h.test/',
+      'FETCH /x', 'GET', 'GET x', 'GET /a b', 'GET https://u:p@h.test/x', 'GET https://h.test:8080/x', 'GET http://[::1]/x', 'GET ftp://h/x',
+      '', '   ', 42, null, undefined, ['GET /x'], { a: 1 },
+    ]) {
+      const site = parseApiFrontmatter(raw)
+      expect(parseManualApi(raw), String(raw)).toEqual(site)
+    }
+  })
+
+  it('collects ParamField path names the same way as the site', () => {
+    for (const mdx of [
+      '<ParamField path="id" type="string" />',
+      '<ParamField path="id" /><ParamField path="id" /><ParamField query="id" />',
+      '<ParamField body="a" path="b" /><ParamField name="n" /><ParamField path={"x"} /><ParamField path />',
+      '<ParamField path="false" path="id" />',
+      'text <ParamField path="inline" /> text',
+      '<ParamField path="a">\n  <ParamField path="nested" />\n</ParamField>',
+      '<ParamField path="broken"', '{unclosed',
+    ]) {
+      expect(paramFieldPathNames(mdx), mdx).toEqual(extractParamFields(mdx).filter((field) => field.location === 'path').map((field) => field.name))
+    }
+  })
+
+  it('reads docs.json api.mdx.server the same way as the site', () => {
+    for (const api of [undefined, {}, { mdx: {} }, { mdx: { server: 'https://a.test/' } }, { mdx: { server: ['https://a.test', 'nope', 'https://a.test', 'https://u@h.test'] } }, { mdx: 5 }]) {
+      expect(mdxServers(api), JSON.stringify(api)).toEqual(sanitizeApiMdxConfig((api as { mdx?: unknown } | undefined)?.mdx).servers)
     }
   })
 })
