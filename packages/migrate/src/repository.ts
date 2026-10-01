@@ -24,7 +24,7 @@ import {
 } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { createRequire } from 'node:module'
-import { basename, dirname, extname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, posix, relative, resolve as resolvePath, sep } from 'node:path'
 
 import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
@@ -47,6 +47,8 @@ import {
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
+import { parseFrontmatter } from './frontmatter.js'
+import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
 import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
@@ -79,10 +81,17 @@ import type {
   MigrationPage,
   MigrationPlatform,
   MigrationWarning,
+  RenderedMigrationFile,
 } from './types.js'
 
 const MAX_SOURCE_FILES = 5_000
 const MAX_PAGE_BYTES = 2_000_000
+/** Window read to classify the access gate of an oversized page. */
+const FRONTMATTER_HEAD_BYTES = 65_536
+/** Largest withheld page still read to find the assets it uses; beyond this they are unknown and reported. */
+const MAX_WITHHELD_SCAN_BYTES = MAX_PAGE_BYTES * 8
+/** Per-page warnings for restricted pages the file budget dropped; the rest are counted in one more. */
+const MAX_DROPPED_GATED_WARNINGS = 20
 const MAX_ASSET_BYTES = 25_000_000
 const MAX_TOTAL_ASSET_BYTES = 500_000_000
 /** A Git LFS pointer file's fixed opening line (the smudge filter replaces this with the real binary; skipping it during clone leaves this text in place). */
@@ -112,6 +121,8 @@ const IGNORED_DIRECTORIES = new Set([
 function isIgnoredContentDirectory(name: string): boolean {
   return name.startsWith('.') || name === 'node_modules'
 }
+/** Project-root directory for withheld access-restricted pages; never read by the runtime. */
+const QUARANTINE_DIRECTORY = 'migration-quarantine'
 const ASSET_DIRECTORIES = new Set(['assets', 'images', 'img', 'media', 'public', 'static'])
 const ASSET_EXTENSIONS = new Set([
   '.avif', '.bmp', '.gif', '.ico', '.jpeg', '.jpg', '.m4a', '.mp3', '.mp4',
@@ -181,6 +192,8 @@ export interface RepositoryMigrationOptions {
   docusaurusSidebarPath?: string
   /** @internal Static assets are shared across docs-plugin instances. */
   docusaurusSkipAssets?: boolean
+  /** @internal Test seam: lowers the 5,000-file budget so budget behaviour can be exercised with small fixtures. */
+  maxSourceFiles?: number
   /** @internal Redirects are global config, read once, not per plugin instance. */
   docusaurusSkipRedirects?: boolean
 }
@@ -970,29 +983,21 @@ interface ScannedFile {
  * against a cycle (a symlink pointing at an ancestor, or two symlinks
  * pointing at each other).
  */
-/**
- * A generous ceiling on how many *directory entries* `scanFiles` will walk
- * when a `rank` function is supplied (see below) — far above
- * `MAX_SOURCE_FILES` so a repository the size of crewAI's (~28k files) is
- * walked in full, but still bounded so a pathologically huge tree can't
- * make discovery itself slow. Walking is cheap (no file content is read
- * here); only the final `MAX_SOURCE_FILES` selection is expensive to get
- * wrong.
- */
-const MAX_RANKED_WALK_FILES = MAX_SOURCE_FILES * 20
+/** A ranked walk is bounded at this many times the file budget: far above it so a ~28k-file repository is walked in full, yet a pathologically huge tree cannot make discovery slow. */
+const RANKED_WALK_FACTOR = 20
 
 /**
  * Scan `root` for its files. When `rank` is given, the walk isn't cut off at
- * `MAX_SOURCE_FILES` — it continues (bounded by `MAX_RANKED_WALK_FILES`) so
+ * `MAX_SOURCE_FILES` — it continues (bounded by 20x the budget) so
  * every file's priority can be considered before any are dropped; the
  * caller is responsible for sorting by `rank` and trimming to
  * `MAX_SOURCE_FILES` afterward (see `selectFilesWithinBudget`). Without
  * `rank`, the walk stops as soon as `MAX_SOURCE_FILES` files are found, same
  * as before.
  */
-function scanFiles(root: string, confinementRoot: string = root, warnings?: Array<MigrationWarning>, rank?: (relativePath: string) => number): Array<ScannedFile> {
+function scanFiles(root: string, confinementRoot: string = root, warnings?: Array<MigrationWarning>, rank?: (relativePath: string) => number, budget: number = MAX_SOURCE_FILES): Array<ScannedFile> {
   const files: Array<ScannedFile> = []
-  const walkCap = rank ? MAX_RANKED_WALK_FILES : MAX_SOURCE_FILES
+  const walkCap = rank ? budget * RANKED_WALK_FACTOR : budget
   let confinementReal: string
   try {
     confinementReal = realpathSync(confinementRoot)
@@ -1088,15 +1093,16 @@ function selectGroupWithinBudget(
   warnings: Array<MigrationWarning> | undefined,
   allVersionPrefixes: ReadonlySet<string>,
   label: 'file' | 'asset',
+  budget: number = MAX_SOURCE_FILES,
 ): Array<ScannedFile> {
-  if (scanned.length <= MAX_SOURCE_FILES) return scanned
+  if (scanned.length <= budget) return scanned
   // Ties (unreferenced files sharing a ceiling) break by path, not by
   // directory-listing order, so the same repository always keeps the same files.
   const ranked = scanned
     .map((file) => ({ file, priority: rank(file.relativePath) }))
     .sort((left, right) => left.priority - right.priority
       || (left.file.relativePath < right.file.relativePath ? -1 : left.file.relativePath > right.file.relativePath ? 1 : 0))
-  const dropped = ranked.slice(MAX_SOURCE_FILES).map(({ file }) => file)
+  const dropped = ranked.slice(budget).map(({ file }) => file)
   if (warnings) {
     const droppedPages = label === 'file' ? dropped.filter((file) => isDocumentationExtension(file.relativePath)) : dropped
     const noun = label === 'file' ? 'page' : 'image or media file'
@@ -1109,7 +1115,7 @@ function selectGroupWithinBudget(
     const rest = droppedPages.length - examples.length
     warnings.push({
       code: 'limit-reached',
-      message: `This repository has more than ${MAX_SOURCE_FILES} ${label === 'file' ? 'files' : 'assets'}, so only the first ${MAX_SOURCE_FILES} (in navigation order, default version first) were migrated. `
+      message: `This repository has more than ${budget} ${label === 'file' ? 'files' : 'assets'}, so only the first ${budget} (in navigation order, default version first) were migrated. `
         + `${droppedPages.length} ${noun}(s) were left out`
         + (examples.length > 0 ? `: ${examples.join(', ')}${rest > 0 ? `, and ${rest} more` : ''}` : '')
         + (droppedVersions.size > 0 ? ` (versions: ${[...droppedVersions].slice(0, 5).join(', ')}${droppedVersions.size > 5 ? `, and ${droppedVersions.size - 5} more` : ''})` : '')
@@ -1118,7 +1124,7 @@ function selectGroupWithinBudget(
           : '. Copy them into public/ manually if your pages use them.'),
     })
   }
-  return ranked.slice(0, MAX_SOURCE_FILES).map(({ file }) => file)
+  return ranked.slice(0, budget).map(({ file }) => file)
 }
 
 /**
@@ -1144,13 +1150,14 @@ function selectFilesWithinBudget(
   rank: (relativePath: string) => number,
   warnings: Array<MigrationWarning> | undefined,
   allVersionPrefixes: ReadonlySet<string>,
+  budget: number = MAX_SOURCE_FILES,
 ): Array<ScannedFile> {
   const isAsset = (file: ScannedFile): boolean => ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())
   const assetFiles = scanned.filter(isAsset)
   const otherFiles = scanned.filter((file) => !isAsset(file))
   return [
-    ...selectGroupWithinBudget(otherFiles, rank, warnings, allVersionPrefixes, 'file'),
-    ...selectGroupWithinBudget(assetFiles, rank, warnings, allVersionPrefixes, 'asset'),
+    ...selectGroupWithinBudget(otherFiles, rank, warnings, allVersionPrefixes, 'file', budget),
+    ...selectGroupWithinBudget(assetFiles, rank, warnings, allVersionPrefixes, 'asset', budget),
   ]
 }
 
@@ -1229,6 +1236,68 @@ function exactReferenceKey(value: string): string {
     .replace(/^\/+/, '')
     .replace(/\\/g, '/')
     .replace(/\.(?:mdx?|rst|txt)$/i, '')
+}
+
+/**
+ * Whether a frontmatter `openapi:` value ("GET /x", "specs/api.json GET /x")
+ * names this spec. A bare operation resolves to the default spec; a prefixed
+ * one to the spec whose path ends with the prefix, on a segment boundary.
+ */
+function specRefMatches(ref: string, specPath: string, specFilename: string, isDefault: boolean): boolean {
+  const prefix = /^(?:(\S+)\s+)?(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|WEBHOOK)\s/i.exec(`${ref} `)?.[1]
+  if (!prefix) return isDefault
+  const wanted = prefix.replace(/^\/+/, '').toLowerCase()
+  // Whole path segments only: `pi/openapi.json` does not name `api/openapi.json`.
+  const lowerPath = specPath.toLowerCase()
+  return lowerPath === wanted || lowerPath.endsWith(`/${wanted}`) || specFilename.toLowerCase() === wanted
+}
+
+const TOKEN_SEPARATORS = /[\s"'()<>[\]{}=,;:|\\/`*!?#&]+/
+/** Like TOKEN_SEPARATORS but keeps `/`, so a word is a whole path. */
+const PATH_SEPARATORS = /[\s"'()<>[\]{}=,;:|\\`*!?#&]+/
+
+/** The public/ destination key of a repo-relative file: Thally serves `public/x` at `/x`, exactly as the asset copy pass keys it. */
+function publicAssetKey(repoRelative: string): string {
+  return repoRelative.split('/', 1)[0].toLowerCase() === 'public' ? repoRelative.slice('public/'.length) : repoRelative
+}
+
+/**
+ * Collects what a published text (page source with frontmatter, copied CSS/JS,
+ * docs.json, migrated components) points at.
+ * `exact` gets the destination key of every path it spells in full: absolute
+ * from the site root (`/img/a.png`, `/public/a.png`) or relative with a folder
+ * (`./img/a.png`, `../a.png`) resolved against `baseDir`, the referring file's
+ * folder relative to the site root (undefined: relative forms cannot be
+ * resolved and are ignored). A bare file name (`a.png`) names no folder, so it
+ * cannot be resolved to one file: it goes to `loose` (lowercased, as does the
+ * lowercased key of every exact one, for a letter-case mismatch) and never
+ * makes anything public. Linear, no backtracking.
+ */
+function addPathReferences(text: string, baseDir: string | undefined, exact: Set<string>, loose: Set<string>): void {
+  for (const word of text.split(PATH_SEPARATORS)) {
+    let token = word.replace(/\.+$/, '')
+    if (!/\.[a-z0-9]{2,5}$/i.test(token) || token.startsWith('//')) continue
+    if (token.includes('%')) {
+      try { token = decodeURIComponent(token) } catch { /* keep the raw token */ }
+    }
+    if (!token.includes('/')) {
+      loose.add(token.toLowerCase())
+      continue
+    }
+    if (!token.startsWith('/') && baseDir === undefined) continue
+    const resolved = normalizeAssetPath(posix.normalize(token.startsWith('/') ? token.slice(1) : posix.join(baseDir ?? '', token)))
+    if (!resolved) continue
+    const key = publicAssetKey(resolved)
+    exact.add(key)
+    loose.add(key.toLowerCase())
+  }
+}
+
+/** Whether a bare file name (or the last word of a name with spaces) or a letter-case variant of this destination was spelled by published text. */
+function looselyNamed(assetPath: string, loose: ReadonlySet<string>): boolean {
+  const lower = assetPath.toLowerCase()
+  const name = lower.split('/').pop() ?? lower
+  return loose.has(lower) || loose.has(name) || loose.has(name.split(TOKEN_SEPARATORS).filter(Boolean).pop() ?? name)
 }
 
 function findOpenApi(files: Array<ScannedFile>): ScannedFile | null {
@@ -1788,6 +1857,49 @@ function fernDefinitionExists(fernRoot: string, apiName: string | undefined): bo
   return candidateDirs.some((dir) => existsSync(dir) && lstatSync(dir).isDirectory())
 }
 
+/** Leading frontmatter of a file without loading all of it; undefined when it is not closed within the window. */
+function readFrontmatterHead(path: string): string | undefined {
+  const fd = openSync(path, 'r')
+  try {
+    const buffer = Buffer.alloc(FRONTMATTER_HEAD_BYTES)
+    const head = buffer.toString('utf8', 0, readSync(fd, buffer, 0, buffer.length, 0))
+    const opening = /^\uFEFF?---([^\r\n]*)\r?\n/.exec(head)
+    if (!opening || opening[1].startsWith('-')) return head
+    return /^---[ \t]*\r?\n/m.test(head.slice(opening[0].length)) ? head : undefined
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/**
+ * Why a file must never be spliced into another page (Mintlify only):
+ * `gated` is an access-restricted page, `snippet-gated` a snippet that declares
+ * access rules Mintlify does not enforce on snippets, `oversized` and
+ * `unreadable` are files that cannot be classified safely.
+ */
+interface InlineVerdict { kind: 'gated' | 'snippet-gated' | 'oversized' | 'unreadable'; reason: string }
+type InlineGate = (candidate: string) => InlineVerdict | undefined
+
+/** The real on-disk spelling of a path, so a case-variant import cannot dodge a path lookup on a case-insensitive filesystem. */
+function canonicalPath(path: string): string {
+  try { return realpathSync.native(path) } catch { return path }
+}
+
+/**
+ * The gate verdict from a page's raw (or frontmatter-head) text. Invalid YAML is
+ * salvaged line by line, which can drop the very line that restricts access, so
+ * it withholds rather than guesses. Key casing (`Groups:`) and TOML frontmatter
+ * are deliberately not treated as gates: Mintlify ignores them too.
+ */
+function pageHeadGateReason(raw: string): { reason?: string; publicTrue: boolean; openapi?: string } {
+  const parsed = parseFrontmatter(raw)
+  const unreadable = parsed.error && /^(groups|public)\s*:/m.test(raw.slice(0, raw.length - parsed.content.length))
+    ? 'frontmatter could not be parsed and declares `groups` or `public`'
+    : undefined
+  const openapi = typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined
+  return { reason: frontmatterGateReason(parsed.data) ?? unreadable, publicTrue: isPublicTrue(parsed.data.public), openapi }
+}
+
 function withoutFrontmatter(value: string): string {
   return value.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim()
 }
@@ -2213,7 +2325,8 @@ function globalSnippetAliases(
   }
   for (const file of files) {
     if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())) continue
-    const raw = readFileSync(file.absolutePath, 'utf8')
+    let raw: string
+    try { raw = readFileSync(file.absolutePath, 'utf8') } catch { continue } // best-effort: an unreadable page is reported when it is reached
     for (const match of raw.matchAll(SNIPPET_IMPORT_PATTERN)) {
       try {
         const componentName = match[1] ?? match[2]
@@ -2234,7 +2347,7 @@ function repositoryAssetHref(
   value: string,
   currentFile: string,
   siteRoot: string,
-  onReferenced?: (normalizedPath: string) => void,
+  onReferenced?: (normalizedPath: string, onDiskSpelling?: string) => void,
 ): string | null {
   const isBracketed = value.startsWith('<') && value.endsWith('>')
   const raw = isBracketed ? value.slice(1, -1) : value
@@ -2267,7 +2380,11 @@ function repositoryAssetHref(
     if (!existsSync(candidate) || !lstatSync(candidate).isFile()) return null
     const normalized = normalizeAssetPath(siteRelative)
     if (!normalized) return null
-    onReferenced?.(normalized)
+    // On a case-insensitive filesystem a differently-cased reference opens the
+    // file; report the spelling it really has so it matches the scanned asset.
+    const onDiskRelative = relative(realRoot, realpathSync.native(candidate)).replace(/\\/g, '/')
+    const onDisk = onDiskRelative.toLowerCase() === siteRelative.toLowerCase() ? normalizeAssetPath(onDiskRelative) : null
+    onReferenced?.(normalized, onDisk ?? undefined)
     const rewritten = `/${normalized}${suffix}`
     // Markdown destinations containing parentheses must stay angle-bracketed;
     // removing the wrapper makes CommonMark terminate the URL too early.
@@ -2301,7 +2418,7 @@ function rewriteRepositoryAssetLinks(
   body: string,
   currentFile: string,
   siteRoot: string,
-  onReferenced?: (normalizedPath: string) => void,
+  onReferenced?: (normalizedPath: string, onDiskSpelling?: string) => void,
 ): string {
   return body
     .replace(/(!?\[[^\]]*\]\()(<[^>]+>|[^)\s]+)([^)]*\))/g, (
@@ -2360,6 +2477,8 @@ function inlineMdxSnippets(
   depth = 0,
   siteRoot = repositoryRoot,
   globalAliases: Map<string, string> = new Map(),
+  /** Mintlify only: refuses access-restricted, oversized or unclassifiable files. Fern and Docusaurus pass none. */
+  gate?: InlineGate,
 ): string {
   if (depth >= 8) return raw
   // Hoisting page imports must see indented JSX code examples as fenced code.
@@ -2368,6 +2487,33 @@ function inlineMdxSnippets(
   raw = normalizeIndentedFences(raw)
   const snippets = new Map<string, string>()
   const preservedDeclarations = new Map<string, string>()
+  // Fail closed: a restricted, oversized or unclassifiable file is never
+  // inlined, whatever its directory. One warning per occurrence; the returned
+  // comment replaces the content.
+  const source = relative(repositoryRoot, currentFile).replace(/\\/g, '/')
+  const blockInline = (candidate: string, shownPath: string, label = shownPath): string | undefined => {
+    const verdict = gate?.(candidate)
+    if (!verdict) return undefined
+    const shown = shownPath.replace(/\*\//g, '* /')
+    if (verdict.kind === 'gated') {
+      warnings.push({ code: 'gated-page', message: `${label} is access-restricted and was NOT inlined; it was left as a comment.`, source })
+      return `{/* Access-restricted content withheld: ${shown} */}`
+    }
+    if (verdict.kind === 'snippet-gated') {
+      warnings.push({
+        code: 'gated-page',
+        message: `${label} declares access rules (${verdict.reason}). Mintlify does not enforce groups on snippets, but it was NOT inlined to be safe; it was left as a comment.`,
+        source,
+      })
+      return `{/* Access-restricted content withheld: ${shown} */}`
+    }
+    warnings.push({
+      code: 'skipped-file',
+      message: `${label} ${verdict.kind === 'oversized' ? 'is too large to inline (over 2 MB)' : 'has frontmatter that could not be read'} and was NOT inlined; it was left as a comment.`,
+      source,
+    })
+    return `{/* ${verdict.kind === 'oversized' ? 'Oversized' : 'Unreadable'} content not inlined: ${shown} */}`
+  }
   let withoutImports = replaceOutsideCode(raw, (source) => source.replace(
     SNIPPET_IMPORT_PATTERN,
     (_statement, namedComponent: string | undefined, defaultComponent: string | undefined, sourcePath: string) => {
@@ -2375,6 +2521,11 @@ function inlineMdxSnippets(
       try {
         const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
         if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
+        const blocked = blockInline(candidate, sourcePath, `Imported ${sourcePath}`)
+        if (blocked) {
+          snippets.set(componentName, blocked)
+          return ''
+        }
         const nested = inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
           candidate,
@@ -2383,6 +2534,7 @@ function inlineMdxSnippets(
           depth + 1,
           siteRoot,
           globalAliases,
+          gate,
         )
         const declaration = statefulSnippetDeclaration(nested, componentName)
         if (declaration) preservedDeclarations.set(componentName, declaration)
@@ -2409,7 +2561,17 @@ function inlineMdxSnippets(
       if (bindings.length === 0 || bindings.some((binding) => !binding)) return statement
       try {
         const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
-        if (!existsSync(candidate) || !lstatSync(candidate).isFile()) return statement
+        if (!existsSync(candidate) || !lstatSync(candidate).isFile() || gate?.(candidate)?.kind === 'gated') return statement
+        const blocked = blockInline(candidate, sourcePath)
+        if (blocked) {
+          // Drop the import so the build never resolves the file; bind its names to the comment/empty.
+          const declarations: Array<string> = []
+          for (const binding of bindings) {
+            if (/^[A-Z]/.test(binding!.exported)) snippets.set(binding!.local, blocked)
+            else declarations.push(`export const ${binding!.local} = undefined;`)
+          }
+          return declarations.join('\n')
+        }
         const snippetSource = readFileSync(candidate, 'utf8')
         const values = staticNamedSnippetValues(snippetSource)
         const declarations: Array<string> = []
@@ -2438,8 +2600,13 @@ function inlineMdxSnippets(
   // elsewhere in the same docs project.
   const localNames = locallyDeclaredNames(withoutImports)
   for (const [componentName, candidate] of globalAliases) {
-    if (snippets.has(componentName) || localNames.has(componentName)
+    if (snippets.has(componentName) || localNames.has(componentName) || gate?.(candidate)?.kind === 'gated'
       || !new RegExp(`<${componentName}(?:\\s|/?>)`).test(withoutImports)) continue
+    const blocked = blockInline(candidate, relative(repositoryRoot, candidate).replace(/\\/g, '/'))
+    if (blocked) {
+      snippets.set(componentName, blocked)
+      continue
+    }
     const nested = inlineMdxSnippets(
       withoutFrontmatter(readFileSync(candidate, 'utf8')),
       candidate,
@@ -2448,6 +2615,7 @@ function inlineMdxSnippets(
       depth + 1,
       siteRoot,
       globalAliases,
+      gate,
     )
     const declaration = statefulSnippetDeclaration(nested, componentName)
     if (declaration) preservedDeclarations.set(componentName, declaration)
@@ -2475,6 +2643,8 @@ function inlineMdxSnippets(
         try { return resolveCandidate() } catch { return undefined }
       }).find((path) => path !== undefined && existsSync(path) && lstatSync(path).isFile())
       if (!candidate) throw new Error('file not found')
+      const blocked = blockInline(candidate, filePath, `Snippet file="${filePath}"`)
+      if (blocked) return blocked
       return inlineMdxSnippets(
         withoutFrontmatter(readFileSync(candidate, 'utf8')),
         candidate,
@@ -2483,6 +2653,7 @@ function inlineMdxSnippets(
         depth + 1,
         siteRoot,
         globalAliases,
+        gate,
       )
     } catch {
       warnings.push({
@@ -2629,6 +2800,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const referenceOrder = new Map<string, number>()
   let docusaurusSidebars: DocusaurusSidebars | null = null
   let mintlifyConfig: Record<string, unknown> | null = null
+  /** Pages under a restricted Mintlify navigation container, keyed like page references. */
+  const mintlifyGatedRefs = new Map<string, string>()
   let fernRawConfig: Record<string, unknown> | null = null
   let fernBasePath = ''
   let fernVersionPath = ''
@@ -2653,6 +2826,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         const projected = projectMintlifyNavigation(config)
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
+        for (const gated of projected.gatedReferences) {
+          const gatedKey = normalizedReferenceKey(gated.ref).toLowerCase()
+          if (!mintlifyGatedRefs.has(gatedKey)) mintlifyGatedRefs.set(gatedKey, gated.reason)
+        }
         for (const [index, reference] of projected.pageReferences.entries()) {
           const key = normalizedReferenceKey(reference.ref)
           // Shared source pages may appear in several language menus. The
@@ -2788,13 +2965,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         return versionCeiling !== undefined ? versionCeiling + 1 : Number.MAX_SAFE_INTEGER
       }
     : undefined
-  const scannedFiles = scanFiles(contentRoot, repositoryDir, warnings, discoveryRank)
+  const sourceBudget = options.maxSourceFiles ?? MAX_SOURCE_FILES
+  const scannedFiles = scanFiles(contentRoot, repositoryDir, warnings, discoveryRank, sourceBudget)
   const mintignoreFilteredFiles = mintignoreMatcher
     ? scannedFiles.filter((file) => !mintignoreMatcher.ignores(file.relativePath))
     : scannedFiles
-  const discoveryBudgetApplied = discoveryRank !== undefined && mintignoreFilteredFiles.length > MAX_SOURCE_FILES
+  const discoveryBudgetApplied = discoveryRank !== undefined && mintignoreFilteredFiles.length > sourceBudget
   const files = discoveryRank
-    ? selectFilesWithinBudget(mintignoreFilteredFiles, discoveryRank, warnings, allVersionPrefixes)
+    ? selectFilesWithinBudget(mintignoreFilteredFiles, discoveryRank, warnings, allVersionPrefixes, sourceBudget)
     : mintignoreFilteredFiles
   // A Fern `versions:` file may live outside fern/ (a sibling `docs/`
   // directory) and its own pages resolve relative to it, so their
@@ -2836,6 +3014,139 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const docusaurusDescriptors: Array<DocusaurusPageDescriptor> = []
   const docusaurusDocCardRoutes = new Set<string>()
   const seenPageIds = new Set<string>()
+  const quarantinedFiles: Array<RenderedMigrationFile> = []
+  // Assets that withheld pages use (their own and via inlined snippets), and
+  // the raw text of everything published (page source with snippets inlined,
+  // frontmatter included, plus copied CSS/JS and migrated components), which
+  // asset rewriting does not fully track: images named only there stay public.
+  const withheldAssetPaths = new Set<string>()
+  // What published text points at, by destination path (`publishedExact`: a path
+  // spelled in full) or only by name (`publishedLoose`, which never makes an
+  // asset public). Filled only on a site that fails closed for assets (the only
+  // place they are read); no page text is kept.
+  const publishedExact = new Set<string>()
+  const publishedLoose = new Set<string>()
+  const withholdAsset = (assetPath: string, onDiskSpelling?: string): void => { withheldAssetPaths.add(publicAssetKey(onDiskSpelling ?? assetPath)) }
+  let sawPublicTrue = false
+  // Gate verdicts are computed up front so a page that imports an
+  // access-restricted page as a component can never inline its content.
+  const gateByPath = new Map<string, { reason?: string; publicTrue: boolean }>()
+  // Frontmatter `openapi:` references, split by whether the page is withheld.
+  const withheldSpecRefs: Array<string> = []
+  const publishedSpecRefs: Array<string> = []
+  const withheldPaths = new Set<string>()
+  // The gate verdict of one Mintlify page: a bounded read of its frontmatter
+  // head, then the navigation gate. Unreadable means withheld.
+  const isDocFile = (file: ScannedFile): boolean => ['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())
+  const isGateCandidate = (file: ScannedFile): boolean => isDocFile(file)
+    && !file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
+  const classifyPageGate = (file: ScannedFile): { reason?: string; publicTrue: boolean; openapi?: string } => {
+    let head: { reason?: string; publicTrue: boolean; openapi?: string } = { publicTrue: false }
+    let unreadableGate: string | undefined
+    try {
+      // Pages above the size cap are never imported, but another page can
+      // still inline them, so they are classified from their frontmatter.
+      // One bounded read for nearly every page; a frontmatter longer than the
+      // head window falls back to the whole file, as before.
+      const size = lstatSync(file.absolutePath).size
+      const raw = readFrontmatterHead(file.absolutePath) ?? (size > MAX_PAGE_BYTES ? undefined : readFileSync(file.absolutePath, 'utf8'))
+      if (raw === undefined) throw new Error('frontmatter is not terminated within the bounded read')
+      head = pageHeadGateReason(raw)
+    } catch {
+      unreadableGate = 'frontmatter could not be read'
+    }
+    const reason = head.reason ?? unreadableGate ?? mintlifyGatedRefs.get(normalizedReferenceKey(file.relativePath).toLowerCase())
+    return { reason, publicTrue: head.publicTrue, openapi: head.openapi }
+  }
+  // Pages the file budget dropped, or a walk that hit its cap, are not
+  // published, but their gate still decides what is withheld: classified here
+  // from the same bounded head read, before anything trims them.
+  const keptFiles = new Set(files)
+  const droppedGatedFiles: Array<{ file: ScannedFile; reason: string }> = []
+  // Restricted documents never published as pages (snippets, and .mintignore'd
+  // files): their assets are withheld and the site fails closed.
+  const withheldDocFiles: Array<ScannedFile> = []
+  let droppedPageCount = 0
+  const scanTruncated = scannedFiles.length >= (discoveryRank ? sourceBudget * RANKED_WALK_FACTOR : sourceBudget)
+  if (platform === 'mintlify') {
+    for (const file of files) {
+      // A snippet that declares access rules is never inlined: it is restricted
+      // content, so its assets are withheld and the site fails closed too.
+      if (isDocFile(file) && !isGateCandidate(file)) {
+        const snippetReason = classifyPageGate(file).reason
+        if (snippetReason) withheldDocFiles.push(file)
+        continue
+      }
+      if (!isGateCandidate(file)) continue
+      const verdict = classifyPageGate(file)
+      gateByPath.set(file.absolutePath, { reason: verdict.reason, publicTrue: verdict.publicTrue })
+      if (verdict.openapi) (verdict.reason ? withheldSpecRefs : publishedSpecRefs).push(verdict.openapi)
+      if (verdict.reason) withheldPaths.add(file.absolutePath)
+    }
+    for (const file of mintignoreFilteredFiles) {
+      if (keptFiles.has(file) || !isDocFile(file)) continue
+      // Every dropped document, snippet or page, fails the site closed for assets.
+      droppedPageCount++
+      if (!isGateCandidate(file)) {
+        const snippetReason = classifyPageGate(file).reason
+        if (snippetReason) {
+          withheldDocFiles.push(file)
+          warnings.push({ code: 'gated-page', message: `Access-restricted snippet (${snippetReason}) was dropped by the file limit; its assets were kept out of public/.`, source: file.relativePath })
+        }
+        continue
+      }
+      const verdict = classifyPageGate(file)
+      if (!verdict.reason) continue
+      if (verdict.openapi) withheldSpecRefs.push(verdict.openapi)
+      withheldPaths.add(file.absolutePath)
+      droppedGatedFiles.push({ file, reason: verdict.reason })
+    }
+    // A .mintignore'd document is not migrated, but if it is restricted, the
+    // assets it uses are still restricted.
+    for (const file of scannedFiles) {
+      if (!mintignoreMatcher?.ignores(file.relativePath) || !isDocFile(file)) continue
+      const verdict = classifyPageGate(file)
+      if (!verdict.reason) continue
+      if (verdict.openapi) withheldSpecRefs.push(verdict.openapi)
+      withheldDocFiles.push(file)
+    }
+  }
+  // Pages that were never classified (dropped by the budget, or beyond the walk
+  // cap) could be restricted: assets no published page names by exact path stay
+  // out of public/ on such a site, as on one with known restricted pages.
+  const pagesNotClassified = droppedPageCount > 0 || (platform === 'mintlify' && scanTruncated)
+  const hasWithheldContent = withheldPaths.size > 0 || withheldDocFiles.length > 0
+  const trackPublishedRefs = platform === 'mintlify' && (hasWithheldContent || pagesNotClassified)
+  // Mintlify only. The pre-pass covers only files inside the file budget, so a
+  // candidate it never saw (dropped by the budget, in a snippet directory, under
+  // a case-variant path) is classified on demand: frontmatter gates, navigation
+  // gates, then size/readability. Cached per real path.
+  const withheldCanonical = new Set([...withheldPaths].map(canonicalPath))
+  const verdictCache = new Map<string, InlineVerdict | null>()
+  const classifyInlineCandidate = (candidate: string, key: string): InlineVerdict | undefined => {
+    if (withheldCanonical.has(key)) return { kind: 'gated', reason: 'access-restricted' }
+    const shown = relative(contentRoot, candidate).replace(/\\/g, '/')
+    const inSnippetDirectory = shown.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
+    let head: string | undefined
+    try { head = readFrontmatterHead(candidate) } catch { return { kind: 'unreadable', reason: 'could not be read' } }
+    const gated = head === undefined ? undefined : pageHeadGateReason(head).reason
+    if (gated) return { kind: inSnippetDirectory ? 'snippet-gated' : 'gated', reason: gated }
+    const navigationGated = inSnippetDirectory ? undefined : mintlifyGatedRefs.get(normalizedReferenceKey(shown).toLowerCase())
+    if (navigationGated) return { kind: 'gated', reason: navigationGated }
+    if (lstatSync(candidate).size > MAX_PAGE_BYTES) return { kind: 'oversized', reason: 'over 2 MB' }
+    return head === undefined ? { kind: 'unreadable', reason: 'frontmatter not terminated in the bounded read' } : undefined
+  }
+  const inlineGate: InlineGate | undefined = platform === 'mintlify'
+    ? (candidate) => {
+        const key = canonicalPath(candidate)
+        let verdict = verdictCache.get(key)
+        if (verdict === undefined) {
+          verdict = classifyInlineCandidate(candidate, key) ?? null
+          verdictCache.set(key, verdict)
+        }
+        return verdict ?? undefined
+      }
+    : undefined
   /** docs.yml-derived navigationId -> final id, when a page's frontmatter `slug` overrides it. */
   const fernIdRenames = new Map<string, string>()
   let skipped = 0
@@ -2854,6 +3165,52 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const snippetAliases = platform === 'mintlify' && mintlifyProjectRoot
     ? globalSnippetAliases(files, repositoryDir, mintlifyProjectRoot)
     : new Map<string, string>()
+  // A restricted page the budget dropped is not published or saved, but the
+  // assets it uses must still stay out of public/ (bounded scan, like the
+  // oversized restricted pages).
+  droppedGatedFiles.forEach(({ file, reason }, index) => {
+    if (index < MAX_DROPPED_GATED_WARNINGS) {
+      warnings.push({
+        code: 'gated-page',
+        message: `Access-restricted page (${reason}) was dropped by the file limit, so it was NOT published and was not saved under ${QUARANTINE_DIRECTORY}/; recover it from the source repository.`,
+        source: file.relativePath,
+      })
+    }
+    if (!mintlifyProjectRoot) return
+    try {
+      if (lstatSync(file.absolutePath).size > MAX_WITHHELD_SCAN_BYTES) throw new Error('too large to scan')
+      rewriteRepositoryAssetLinks(
+        inlineMdxSnippets(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, [], 0, mintlifyProjectRoot, snippetAliases, inlineGate),
+        file.absolutePath,
+        mintlifyProjectRoot,
+        withholdAsset,
+      )
+    } catch {
+      // Unscannable, so its assets are unknown: they stay out of public/ unless a published page names them by exact path.
+    }
+  })
+  for (const file of withheldDocFiles) {
+    try {
+      if (!mintlifyProjectRoot) continue
+      if (lstatSync(file.absolutePath).size > MAX_WITHHELD_SCAN_BYTES) {
+        warnings.push({
+          code: 'gated-page',
+          message: 'Access-restricted file is too large to scan, so the assets it uses could not be checked and may have been copied to public/. Review them before publishing.',
+          source: file.relativePath,
+        })
+        continue
+      }
+      rewriteRepositoryAssetLinks(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, mintlifyProjectRoot, withholdAsset)
+    } catch {
+      // Unscannable: its assets stay out of public/ unless a published page names them by exact path.
+    }
+  }
+  if (droppedGatedFiles.length > MAX_DROPPED_GATED_WARNINGS) {
+    warnings.push({
+      code: 'gated-page',
+      message: `${droppedGatedFiles.length - MAX_DROPPED_GATED_WARNINGS} more access-restricted page(s) were dropped by the file limit and NOT published; recover them from the source repository.`,
+    })
+  }
   for (const file of pageFiles) {
     if (!isDocumentationExtension(file.relativePath)) continue
     // Unlike Mintlify/Docusaurus, Fern only ever serves pages reachable from
@@ -2886,9 +3243,70 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (size > MAX_PAGE_BYTES) {
       skipped++
       warnings.push({ code: 'skipped-file', message: 'Page exceeded the 2 MB repository import limit.', source: file.relativePath })
+      // Known restricted from its frontmatter; its assets must stay out of public/ too.
+      const oversizedGate = gateByPath.get(file.absolutePath)?.reason
+      if (oversizedGate) {
+        warnings.push({
+          code: 'gated-page',
+          message: `Access-restricted page (${oversizedGate}) is too large to migrate (over 2 MB), so it was NOT published and was not saved under ${QUARANTINE_DIRECTORY}/; recover it from the source repository.`,
+          source: file.relativePath,
+        })
+      }
+      if (oversizedGate && mintlifyProjectRoot) {
+        if (size > MAX_WITHHELD_SCAN_BYTES) {
+          warnings.push({
+            code: 'gated-page',
+            message: 'Access-restricted page is too large to scan, so the assets it uses could not be checked and may have been copied to public/. Review them before publishing.',
+            source: file.relativePath,
+          })
+        } else {
+          rewriteRepositoryAssetLinks(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, mintlifyProjectRoot, withholdAsset)
+        }
+      }
       continue
     }
     const key = normalizedReferenceKey(file.relativePath)
+    if (platform === 'mintlify') {
+      // Access-restricted pages must never migrate as public. Certain signals
+      // only: frontmatter `groups` / `public: false`, or a restricted
+      // navigation container. The original file is kept outside every
+      // published path so nothing is lost.
+      const gate = gateByPath.get(file.absolutePath)
+      if (gate?.publicTrue) sawPublicTrue = true
+      const gateReason = gate?.reason
+      if (gateReason) {
+        skipped++
+        if (file.relativePath.split('/').some((segment) => segment === '..')) {
+          warnings.push({ code: 'gated-page', message: `Access-restricted page (${gateReason}) was withheld from the site, but its path could not be preserved safely; recover it from the source repository.`, source: file.relativePath })
+          continue
+        }
+        try {
+          if (mintlifyProjectRoot) {
+            rewriteRepositoryAssetLinks(
+              inlineMdxSnippets(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, [], 0, mintlifyProjectRoot, snippetAliases, inlineGate),
+              file.absolutePath,
+              mintlifyProjectRoot,
+              withholdAsset,
+            )
+          }
+          quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/${file.relativePath}`, content: readFileSync(file.absolutePath) })
+        } catch {
+          // An unreadable restricted page must not abort the migration or be published.
+          warnings.push({
+            code: 'gated-page',
+            message: `Access-restricted page (${gateReason}) was NOT published, but it could not be read, so it was not copied to ${QUARANTINE_DIRECTORY}/; recover it from the source repository.`,
+            source: file.relativePath,
+          })
+          continue
+        }
+        warnings.push({
+          code: 'gated-page',
+          message: `Access-restricted on the source site (${gateReason}), so it was NOT published. The original is saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}; links from other pages to it will break.`,
+          source: file.relativePath,
+        })
+        continue
+      }
+    }
     const referenced = exactReferenceMap.get(exactReferenceKey(file.relativePath)) ?? referenceMap.get(key)
     let locale = referenced?.locale
     let navigationId = referenced?.navigationId ?? pageIdFromReference(file.relativePath, platform === 'mintlify')
@@ -2916,7 +3334,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       0,
       mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir,
       snippetAliases,
+      inlineGate,
     )
+    // Counted as published only once the page is certain to be (below).
+    const publishedText = trackPublishedRefs ? raw : undefined
+    const pageAssetReferences: Array<string> = []
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
       // A heading's `{#custom-id}` anchor (`## Title {#custom-id}`) crashes
       // `@mdx-js/mdx`'s parser outright, so it must be converted to a
@@ -3043,8 +3465,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (platform === 'fern' && fernHiddenIds.has(navigationId)) page.hidden = true
     if (platform === 'mintlify' && mintlifyProjectRoot) {
-      page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath) => {
-        addAssetReference(assetPath, file.relativePath)
+      // Counted as published only once the page is certain to be (below).
+      page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath, onDiskSpelling) => {
+        pageAssetReferences.push(publicAssetKey(onDiskSpelling ?? assetPath))
       })
     }
     if (platform === 'fern' && fernProjectRoot) {
@@ -3142,6 +3565,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     seenPageIds.add(page.id)
     pages.push(page)
+    for (const assetPath of pageAssetReferences) addAssetReference(assetPath, file.relativePath)
+    if (publishedText !== undefined) addPathReferences(publishedText, posix.dirname(file.relativePath).replace(/^\.$/, ''), publishedExact, publishedLoose)
     // MDX normalization removes DocCardList because Thally has no matching
     // component. Remember its authored route so the resolved sidebar can
     // supply the cards once every page and category has been discovered.
@@ -3236,9 +3661,26 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     : []
   interface AssetCandidate { file: ScannedFile; assetPath: string; size: number }
   const assetCandidates: Array<AssetCandidate> = []
+  // Mintlify serves every `.css`/`.js` file in its content directory
+  // site-wide, plus any font file named by docs.json `fonts.source`.
+  const mintlifyFonts = platform === 'mintlify' ? mintlifyFontSources(mintlifyConfig) : []
+  const fontRelativePaths = new Set(mintlifyFonts.flatMap((font) => font.path ? [font.path] : []))
+  // A `.js` that pages import as a component was copied under src/mdx/migrated;
+  // loading it again as a site-wide script would run a module as a plain script.
+  const importedComponentSources = new Set((componentMigrator?.files() ?? []).flatMap((file) => {
+    const source = /^src\/mdx\/migrated\/[^/]+\/source\/(.+)$/.exec(file.path)?.[1]
+    return source ? [resolvePath(repositoryDir, source)] : []
+  }))
+  const siteAssetPaths = new Map<string, 'style' | 'script' | 'font'>()
+  const fontAssetByRelative = new Map<string, string>()
   for (const file of [...files, ...repositoryAssets, ...fernReferencedAssets]) {
     const firstSegment = file.relativePath.split('/', 1)[0].toLowerCase()
-    if (!ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
+    const siteKind = platform !== 'mintlify' ? undefined
+      : fontRelativePaths.has(file.relativePath) ? 'font' as const
+        : isMintlifyServedScriptOrStyle(file.relativePath) && !importedComponentSources.has(file.absolutePath)
+          ? (extname(file.relativePath).toLowerCase() === '.css' ? 'style' as const : 'script' as const)
+          : undefined
+    if (!siteKind && !ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())) continue
     if (platform !== 'mintlify' && !ASSET_DIRECTORIES.has(firstSegment)
       && !(platform === 'fern' && referencedAssetPaths.has(file.relativePath))) continue
     const isDocusaurusStatic = platform === 'docusaurus' && firstSegment === 'static'
@@ -3248,7 +3690,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         ? file.relativePath.slice('static/'.length)
         : file.relativePath)
     if (!assetPath) continue
-    assetCandidates.push({ file, assetPath, size: lstatSync(file.absolutePath).size })
+    if (siteKind) {
+      siteAssetPaths.set(assetPath, siteKind)
+      if (siteKind === 'font') fontAssetByRelative.set(file.relativePath, assetPath)
+    }
+    const candidateSize = lstatSync(file.absolutePath).size
+    // Site-wide CSS/JS can load images by url(); a published page may use them.
+    if (siteKind === 'style' || siteKind === 'script') {
+      if (trackPublishedRefs && candidateSize <= MAX_PAGE_BYTES) addPathReferences(readFileSync(file.absolutePath, 'utf8'), posix.dirname(file.relativePath).replace(/^\.$/, ''), publishedExact, publishedLoose)
+    }
+    assetCandidates.push({ file, assetPath, size: candidateSize })
   }
   // Copy assets that pages actually reference before unreferenced ones, so a
   // tight budget drops decorative/unused files first instead of screenshots
@@ -3258,12 +3709,46 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ...assetCandidates.filter((candidate) => isReferenced(candidate)),
     ...assetCandidates.filter((candidate) => !isReferenced(candidate)),
   ]
+  const quarantinedPageCount = quarantinedFiles.length
+  // Two files can map to one public path (`logo.png` and `public/logo.png`);
+  // only one would survive the copy, so on a site that fails closed neither is
+  // trusted to be the one a published page means.
+  const destinationCounts = new Map<string, number>()
+  for (const { assetPath } of assetCandidates) destinationCounts.set(assetPath, (destinationCounts.get(assetPath) ?? 0) + 1)
+  // Fail closed on a site with withheld content: an asset no published page
+  // reaches could belong to the gated pages (referenced dynamically, or not
+  // tracked), so it stays out of public/. Any mention by a published page, its
+  // frontmatter, docs.json, copied CSS/JS or a migrated component keeps it
+  // public, but only by the exact destination path it spells (a bare file name
+  // never counts: it cannot be told apart from another folder's file).
+  // Untrackable, so quarantined: paths built at runtime (template strings,
+  // concatenation) and references from remote content.
+  // A restricted navigation container (and everything under it) publishes nothing.
+  if (trackPublishedRefs) {
+    const publishedConfig = JSON.stringify(mintlifyConfig ?? {}, (_key, value: unknown) => (
+      value && typeof value === 'object' && !Array.isArray(value) && navigationGateReason(value as Record<string, unknown>) ? undefined : value))
+    addPathReferences(publishedConfig, '', publishedExact, publishedLoose)
+  }
+  for (const file of componentMigrator?.files() ?? []) {
+    if (!trackPublishedRefs || typeof file.content !== 'string') continue
+    // A copied component source resolves relative paths from where it came from.
+    const original = /^src\/mdx\/migrated\/[^/]+\/source\/(.+)$/.exec(file.path)?.[1]
+    addPathReferences(file.content, original === undefined ? '' : posix.dirname(original).replace(/^\.$/, ''), publishedExact, publishedLoose)
+  }
+  const failClosedAssets = trackPublishedRefs
+  const isPublicReachable = (assetPath: string): boolean => referencedAssetPaths.has(assetPath) || publishedExact.has(assetPath)
+  const isQuarantinedAsset = (assetPath: string): boolean => (withheldAssetPaths.has(assetPath) || (failClosedAssets && !siteAssetPaths.has(assetPath)))
+    && platform === 'mintlify'
+    && !(isPublicReachable(assetPath) && !(failClosedAssets && (destinationCounts.get(assetPath) ?? 0) > 1))
+  let withheldAssetCount = 0
+  let unreferencedAssetCount = 0
   let totalAssetBytes = 0
   // One summary warning per skip reason, not one per file: a repository with
   // hundreds of oversized assets would otherwise bury every other warning.
   const overBudgetAssets: Array<string> = []
   let overBudgetReferenced = 0
   const lfsPointerAssets: Array<string> = []
+  const ambiguouslyNamedAssets: Array<string> = []
   for (const { file, assetPath, size } of orderedAssetCandidates) {
     if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
       overBudgetAssets.push(file.relativePath)
@@ -3275,8 +3760,61 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       lfsPointerAssets.push(file.relativePath)
       continue
     }
+    if (isQuarantinedAsset(assetPath)) {
+      quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${assetPath}`, content })
+      if (looselyNamed(assetPath, publishedLoose) || (destinationCounts.get(assetPath) ?? 0) > 1) ambiguouslyNamedAssets.push(assetPath)
+      if (withheldAssetPaths.has(assetPath)) withheldAssetCount++
+      else unreferencedAssetCount++
+      continue
+    }
     assets.push({ path: assetPath, content })
     totalAssetBytes += size
+  }
+  if (ambiguouslyNamedAssets.length > 0) {
+    warnings.push({
+      code: 'gated-page',
+      message: `${ambiguouslyNamedAssets.length} asset(s) were kept out of public/ because a published page names a file like ${ambiguouslyNamedAssets.length === 1 ? 'it' : 'them'} in a way that does not give its folder (or differs in letter case), so it cannot be matched to one file (or two files share one public path): ${listAssetPaths(ambiguouslyNamedAssets)}. `
+        + `Copy any that published pages need from ${QUARANTINE_DIRECTORY}/assets/ into public/ by hand.`,
+    })
+  }
+  if (platform === 'mintlify') {
+    const copiedSite = assets.flatMap((asset) => siteAssetPaths.has(asset.path) ? [{ path: asset.path, kind: siteAssetPaths.get(asset.path)! }] : [])
+    const scripts = copiedSite.filter((entry) => entry.kind === 'script')
+    if (scripts.length > 0) {
+      docsConfig = {
+        ...docsConfig,
+        customScripts: [...(docsConfig.customScripts ?? []), ...scripts.map((entry) => ({ src: `/${entry.path.split('/').map(encodeURIComponent).join('/')}`, strategy: 'afterInteractive' as const }))],
+      }
+      warnings.push({
+        code: 'unsupported-config',
+        message: `${scripts.length} script(s) from the content directory (${scripts.map((entry) => entry.path).join(', ')}) now load on every page via docs.json customScripts, as they did on Mintlify. They may target Mintlify's page structure; review them.`,
+      })
+    }
+    for (const entry of copiedSite.filter((item) => item.kind === 'style')) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `Migration gap: custom stylesheet ${entry.path} is NOT applied. It was copied to public/${entry.path} but no page loads it, Thally cannot load a stylesheet from docs.json, and Mintlify-specific selectors will not match Thally's markup. Port the styles you need by hand into src/app/globals.css.`,
+        source: entry.path,
+      })
+    }
+    for (const font of mintlifyFonts) {
+      const copiedPath = font.path ? fontAssetByRelative.get(font.path) : undefined
+      const copied = copiedPath !== undefined && assets.some((asset) => asset.path === copiedPath)
+      const detail = font.remote
+        ? `its source ${font.source} is a remote URL and was not downloaded`
+        : !font.path
+          ? `its source ${font.source} is not a safe local .woff/.woff2/.ttf/.otf path inside the docs directory and was not imported`
+          : !copiedPath
+            ? `its source file ${font.source} was not found in the docs directory`
+            : copied
+              ? `its file was copied to public/${copiedPath}`
+              : null
+      if (detail === null) continue
+      warnings.push({
+        code: 'unsupported-config',
+        message: `Self-hosted font "${font.family}" is not applied: Thally's fonts setting loads Google Fonts by family only; ${detail}. The family name was still mapped, which loads a Google font of that name if one exists.`,
+      })
+    }
   }
   if (overBudgetAssets.length > 0) {
     warnings.push({
@@ -3299,8 +3837,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // case it couldn't run (no `discoveryRank`, e.g. Docusaurus) or the rare
   // case where later additions (Fern's external sourcePaths, above) pushed
   // the count back over budget after the event.
-  if (!discoveryBudgetApplied && files.length >= MAX_SOURCE_FILES) {
-    warnings.push({ code: 'limit-reached', message: `Stopped scanning after ${MAX_SOURCE_FILES} files, so the rest of the repository was not looked at. Run the migration on a smaller part of the repository with --docs-dir.` })
+  if (!discoveryBudgetApplied && files.length >= sourceBudget) {
+    warnings.push({ code: 'limit-reached', message: `Stopped scanning after ${sourceBudget} files, so the rest of the repository was not looked at. Run the migration on a smaller part of the repository with --docs-dir.` })
   }
   if (platform === 'docusaurus') {
     const projected = projectDocusaurusNavigation({
@@ -3456,11 +3994,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
     }
   } else if (platform === 'mintlify') {
+    const warnSharedSpec = (path: string): void => {
+      warnings.push({
+        code: 'gated-page',
+        message: `OpenAPI spec ${path} is shared with access-restricted pages and is published; it may describe restricted endpoints. Review it before publishing.`,
+        source: path,
+      })
+    }
     const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs)
     for (const spec of resolvedSpecs) {
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) {
         assets.push(specAsset(spec.filename, spec.content))
       }
+      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath)
     }
     if (resolvedSpecs.length > 0) {
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
@@ -3475,10 +4021,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const fallback = findOpenApi(files)
       if (fallback) {
         const filename = basename(fallback.relativePath)
-        if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
-          assets.push(specAsset(filename, readFileSync(fallback.absolutePath)))
+        const matches = (ref: string): boolean => specRefMatches(ref, fallback.relativePath, filename, true)
+        if (withheldSpecRefs.some(matches) && !publishedSpecRefs.some(matches)) {
+          // Only restricted pages name this spec, and docs.json does not list it.
+          quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(filename)}`, content: readFileSync(fallback.absolutePath) })
+          withheldAssetCount++
+        } else {
+          if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
+            assets.push(specAsset(filename, readFileSync(fallback.absolutePath)))
+          }
+          docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
+          if (withheldSpecRefs.some(matches)) warnSharedSpec(fallback.relativePath)
         }
-        docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
       }
     }
   }
@@ -3864,11 +4418,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     docsConfig = { ...docsConfig, navbar: { ...docsConfig.navbar, logo: null } }
   }
   if (mintlifyConfig) {
-    const appearance = mintlifyConfig.appearance && typeof mintlifyConfig.appearance === 'object'
-      ? mintlifyConfig.appearance as Record<string, unknown> : null
-    const defaultMode = appearance?.default
-    if (defaultMode === 'light' || defaultMode === 'dark' || defaultMode === 'system') {
-      docsConfig = { ...docsConfig, appearance: { ...docsConfig.appearance, default: defaultMode } }
+    const appearance = mintlifyAppearance(mintlifyConfig, warnings)
+    if (Object.keys(appearance).length > 0) {
+      docsConfig = { ...docsConfig, appearance: { ...docsConfig.appearance, ...appearance } }
     }
     const background = mintlifyConfig.background && typeof mintlifyConfig.background === 'object'
       ? mintlifyConfig.background as Record<string, unknown> : null
@@ -3902,6 +4454,40 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     code: 'unsupported-config',
     message: `Brand asset(s) were referenced but not imported: ${[...new Set(missingBrand)].join(', ')}. Add these files under public/ or update docs.json.`,
   })
+  if (platform === 'mintlify') {
+    // Mintlify serves a Markdown mirror of every page by default. The mirror
+    // route reads only src/content, the same files the HTML routes serve.
+    docsConfig = { ...docsConfig, markdown: { enabled: true } }
+    if (quarantinedPageCount > 0 || withheldAssetCount > 0 || unreferencedAssetCount > 0) {
+      const assetNote = withheldAssetCount > 0
+        ? `${withheldAssetCount} file(s) used only by access-restricted pages were kept out of public/ and saved under ${QUARANTINE_DIRECTORY}/assets/. `
+        : ''
+      const unreferencedReason = [
+        ...(hasWithheldContent ? ['this site has access-restricted content'] : []),
+        ...(pagesNotClassified ? ['pages were dropped by the file limit (or the file scan stopped at its cap) and could not all be checked for access restrictions'] : []),
+      ].join(' and ')
+      const unreferencedNote = unreferencedAssetCount > 0
+        ? `${unreferencedAssetCount} unreferenced asset(s) were kept out of public/ because ${unreferencedReason}; review ${QUARANTINE_DIRECTORY}/assets/ and copy any that published pages need. `
+        : ''
+      warnings.push({
+        code: 'gated-page',
+        message: (quarantinedPageCount > 0
+          ? `${quarantinedPageCount} access-restricted page(s) were withheld from the published site and saved under ${QUARANTINE_DIRECTORY}/ (local only: git-ignored, never served or deployed). `
+          : '')
+          + assetNote
+          + unreferencedNote
+          + 'Assets that published pages also use are still copied to public/. Review them before deciding how to publish or protect that content.',
+      })
+    }
+    // Dashboard-level access control (a private site, SSO, groups) is not in
+    // the repository, so every Mintlify migration must be checked by hand.
+    warnings.push({
+      code: 'gated-page',
+      message: (sawPublicTrue ? 'Some pages set `public: true`, which means the source site used Mintlify authentication and every page WITHOUT it was private. ' : '')
+        + 'Access control set in the Mintlify dashboard is not visible in the repository. Check the source site\'s dashboard access settings before publishing: Thally will publish ALL imported pages publicly. '
+        + 'Confirm nothing here was meant to stay private before deploying.',
+    })
+  }
   if (fernRawConfig?.logo && !logoLight && !logo.light) warnings.push({
     code: 'unsupported-config',
     message: 'Fern supplied a logo through its global theme without a local asset; add a logo path to docs.json after import.',
@@ -3914,6 +4500,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     assets,
     ...(remoteApiSpecs.length > 0 ? { remoteApiSpecs } : {}),
     ...(componentMigrator ? { componentFiles: componentMigrator.files() } : {}),
+    ...(quarantinedFiles.length > 0 ? { quarantinedFiles } : {}),
+    ...(droppedGatedFiles.length > 0 ? { droppedGatedPages: droppedGatedFiles.length } : {}),
     docsConfig,
     ...(mintlifyConfig ? {
       site: {

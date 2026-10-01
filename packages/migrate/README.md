@@ -245,6 +245,56 @@ YouTube-embed package (e.g. a custom `LiteYouTube` wrapping
 page that imports that package directly, instead of losing the embed to the
 generic unknown-component fallback.
 
+### Access-restricted pages
+
+A gated Mintlify page must never migrate as public. A page is withheld when its
+frontmatter sets a non-empty `groups` (list or string) or `public: false`
+(also `"false"`, `no`, `off`, `0`; empty `groups` restricts nothing), or when it sits
+under a navigation group or tab that sets `groups` (a list of strings) or
+`public: false`. `public: true` alone is not gating. Withheld pages are not
+written to `src/content` and are removed from navigation (emptied groups and
+tabs included), whether or not navigation lists them. The original file is
+written unchanged to `migration-quarantine/<original path>` at the project
+root, which no runtime content reader, search index, or `llms` output walks;
+`create-thally-docs` also adds it to the project's `.gitignore` (appended once,
+existing entries kept) so it is never committed or pushed. A public page that
+imports a withheld page as a component does not inline it (a `gated-page`
+warning names the importer). Invalid frontmatter fails the run rather than
+importing the page. Each page gets a
+`gated-page` warning, plus a summary; `create-thally-docs` prints these last
+under an "ACCESS-RESTRICTED CONTENT" heading and the report records them and a
+`quarantined` count. Links from other pages to a withheld page are left as
+authored and will fail `thally check`; images and other assets used only by
+gated pages are still copied to `public/`. Mintlify's site-wide authentication mode lives in its
+dashboard and cannot be read from a repository, so when any page sets
+`public: true` (which implies the source site required sign-in for everything
+else) one `gated-page` warning says Thally will publish every imported page.
+Restricted-container `groups` and `public: false` are honored fail-closed even
+though Mintlify documents only `"public": true` on a group.
+
+### Site-wide scripts, styles, fonts, and settings
+
+Mintlify serves every `.css` and `.js` file in the content directory on every
+page. Those files are copied to `public/` (tooling config such as
+`*.config.js`, `tailwind.*`, `postcss.*`, plus `dist`/`build`/`coverage`
+output, dot-directories, and `node_modules` are not) under the normal asset
+size limits. Scripts are added to `docs.json` `customScripts` (URL-encoded),
+except modules that pages import as components, which are copied as components
+instead. Thally cannot
+load a stylesheet from `docs.json`, so each `.css` is preserved with a warning
+that it is not applied and likely targets Mintlify's DOM. Fonts named by
+`fonts.source` (top level, `heading`, `body`) that are local `.woff`, `.woff2`,
+`.ttf`, or `.otf` files are copied; Thally's `fonts` setting loads Google Fonts
+by family only, so a warning says the file is not applied. Remote font URLs
+are not downloaded, and unsafe or missing paths are warned about.
+
+Legacy `mint.json` `topbarLinks` and `topbarCtaButton` (including
+`type: github`) map to `navbar.links` and `navbar.primary`; `docs.json`
+`navbar` fields win, with a warning. `appearance.default`, `appearance.strict`
+(`showToggle: false`), and legacy `modeToggle.default` / `isHidden` map to
+`appearance`; invalid values are skipped with a warning. Mintlify sources set
+`markdown.enabled: true`, matching Mintlify's default Markdown mirrors.
+
 ## Branding
 
 A source site's logo, favicon, and theme accent color(s) are extracted where

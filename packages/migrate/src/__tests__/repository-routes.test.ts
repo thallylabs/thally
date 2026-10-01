@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { migrateRepository, projectMintlifyNavigation } from '../index.js'
+import { withoutDashboardWarning } from './dashboard-warning.js'
 
 function repository(config: Record<string, unknown>, pages: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'thally-migrate-routes-'))
@@ -66,7 +67,7 @@ describe('Mintlify repository route identity', () => {
       { source: '/introduction', destination: '/introduction/introduction', permanent: false },
       { source: '/zh-Hans/introduction', destination: '/zh-Hans/introduction/introduction', permanent: false },
     ]))
-    expect(bundle.warnings).toEqual([])
+    expect(withoutDashboardWarning(bundle.warnings)).toEqual([])
   })
 
   it('preserves source redirects and default-language directory aliases', () => {
