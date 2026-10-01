@@ -3845,9 +3845,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       })
     }
     for (const entry of copiedSite.filter((item) => item.kind === 'style')) {
+      // The root Mintlify stylesheet is projected below; that path reports
+      // precisely which authored rules survived instead of a stale gap.
+      if (entry.path === 'style.css') continue
       warnings.push({
         code: 'unsupported-config',
-        message: `Migration gap: custom stylesheet ${entry.path} is NOT applied. It was copied to public/${entry.path} but no page loads it, Thally cannot load a stylesheet from docs.json, and Mintlify-specific selectors will not match Thally's markup. Port the styles you need by hand into src/app/globals.css.`,
+        message: `Migration gap: custom stylesheet ${entry.path} is NOT applied. It was copied to public/${entry.path} but was not declared in docs.json stylesheets; its selectors may target Mintlify's markup. Review and port its authored rules into a Thally stylesheet.`,
         source: entry.path,
       })
     }
