@@ -219,6 +219,11 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   if (gatedWarnings.length > 0) {
     console.warn('\n  🔒 ACCESS-RESTRICTED CONTENT — review before publishing')
     for (const warning of gatedWarnings) console.warn(`  🔒 ${format(warning)}`)
+    // Quarantined assets may include files the gated pages needed; the dashboard
+    // settings are not in the repository. Say both once, only for gated sites.
+    if (bundle.quarantinedFiles?.length || gatedWarnings.some((warning) => warning.source)) {
+      console.warn('  🔒 Before publishing, review migration-quarantine/assets/ and the dashboard access settings of the source site.')
+    }
   }
   console.log(`  ✓ Imported ${bundle.pages.length} pages and ${bundle.assets.length} assets from ${bundle.platform}.`)
 

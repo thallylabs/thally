@@ -608,11 +608,55 @@ describe('assets used only by withheld pages', () => {
     expect(publicPaths(withheldSite()).includes('img/via-snippet.png')).toBe(false)
   })
 
-  it('still copies an image shared by a gated and a published page, and unreferenced ones', () => {
+  it('still copies an image shared by a gated and a published page', () => {
     const paths = publicPaths(withheldSite())
     expect(paths.includes('img/shared.png')).toBe(true)
     expect(paths.includes('img/open.png')).toBe(true)
-    expect(paths.includes('img/unreferenced.png')).toBe(true)
+  })
+
+  it('keeps an unreferenced image out of public/ on a gated site, quarantines it and counts it in one summary', () => {
+    const bundle = withheldSite()
+    expect(publicPaths(bundle).includes('img/unreferenced.png')).toBe(false)
+    expect((bundle.quarantinedFiles ?? []).some((file) => file.path === 'migration-quarantine/assets/img/unreferenced.png')).toBe(true)
+    const summaries = codes(bundle, 'gated-page').filter((item) => /kept out of public\//.test(item.message))
+    expect(summaries).toHaveLength(1)
+    expect(summaries[0].message).toContain('1 unreferenced asset(s) were kept out of public/ because this site has access-restricted content; review migration-quarantine/assets/ and copy any that published pages need')
+  })
+
+  it('still copies an unreferenced image when nothing is withheld', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub'] } }),
+      'pub.mdx': page('Pub'),
+      'img/unreferenced.png': png,
+    })
+    expect(publicPaths(bundle).includes('img/unreferenced.png')).toBe(true)
+    expect(bundle.quarantinedFiles).toBeUndefined()
+  })
+
+  it.each([
+    ['markdown image', { 'pub.mdx': '---\ntitle: Pub\n---\n\n![a](/img/x.png)\n' }],
+    ['img tag', { 'pub.mdx': '---\ntitle: Pub\n---\n\n<img src="/img/x.png" />\n' }],
+    ['JSX src', { 'pub.mdx': '---\ntitle: Pub\n---\n\n<Frame src={"/img/x.png"} />\n' }],
+    ['Card img', { 'pub.mdx': '---\ntitle: Pub\n---\n\n<Card title="t" img="/img/x.png">c</Card>\n' }],
+    ['inline style url()', { 'pub.mdx': '---\ntitle: Pub\n---\n\n<div style={{ backgroundImage: "url(/img/x.png)" }} />\n' }],
+    ['frontmatter image', { 'pub.mdx': '---\ntitle: Pub\nimage: /img/x.png\n---\n\nHi\n' }],
+    ['frontmatter og:image', { 'pub.mdx': '---\ntitle: Pub\n"og:image": /img/x.png\n---\n\nHi\n' }],
+    ['frontmatter icon', { 'pub.mdx': '---\ntitle: Pub\nicon: /img/x.png\n---\n\nHi\n' }],
+    ['docs.json logo', { 'docs.json': JSON.stringify({ logo: { light: '/img/x.png', dark: '/img/x.png' }, navigation: { pages: ['pub', 'secret'] } }) }],
+    ['docs.json favicon', { 'docs.json': JSON.stringify({ favicon: '/img/x.png', navigation: { pages: ['pub', 'secret'] } }) }],
+    ['docs.json background', { 'docs.json': JSON.stringify({ background: { image: '/img/x.png' }, navigation: { pages: ['pub', 'secret'] } }) }],
+    ['stylesheet url()', { 'style.css': 'body { background: url("img/x.png") }\n' }],
+    ['snippet', { 'pub.mdx': '---\ntitle: Pub\n---\n\n<Snippet file="s.mdx" />\n', 'snippets/s.mdx': '![s](/img/x.png)\n' }],
+  ])('keeps an otherwise unreferenced image public on a gated site when used by a published %s', (_name, extra) => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub', 'secret'] } }),
+      'pub.mdx': page('Pub'),
+      'secret.mdx': page('Secret', 'groups: [admin]\n'),
+      'img/x.png': png,
+      ...extra,
+    })
+    expect(publicPaths(bundle).includes('img/x.png')).toBe(true)
+    expect((bundle.quarantinedFiles ?? []).some((file) => file.path.endsWith('img/x.png'))).toBe(false)
   })
 
   it('keeps an image that a published page names only in its frontmatter', () => {

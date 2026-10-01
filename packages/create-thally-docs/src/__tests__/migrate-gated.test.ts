@@ -6,7 +6,8 @@ import { join } from 'node:path'
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { installDepsMock, initGitMock, validateMigrationMock } = vi.hoisted(() => ({
+const { installDepsMock, initGitMock, validateMigrationMock, fixture } = vi.hoisted(() => ({
+  fixture: { gated: true },
   installDepsMock: vi.fn(),
   initGitMock: vi.fn(),
   validateMigrationMock: vi.fn(),
@@ -20,7 +21,7 @@ vi.mock('@thallylabs/migrate', async (importOriginal) => ({
     mkdirSync(directory, { recursive: true })
     writeFileSync(join(directory, 'docs.json'), JSON.stringify({ navigation: { pages: ['intro', 'private'] } }))
     writeFileSync(join(directory, 'intro.mdx'), '---\ntitle: Intro\n---\n\nHello\n')
-    writeFileSync(join(directory, 'private.mdx'), '---\ntitle: Private\ngroups: [admin]\n---\n\nSecret\n\n![p](/img/p.png)\n')
+    writeFileSync(join(directory, 'private.mdx'), `---\ntitle: Private\n${fixture.gated ? 'groups: [admin]\n' : ''}---\n\nSecret\n\n![p](/img/p.png)\n`)
     mkdirSync(join(directory, 'img'), { recursive: true })
     writeFileSync(join(directory, 'img/p.png'), 'PNG')
   },
@@ -30,6 +31,7 @@ import { migrateDocs } from '../migrate/index.js'
 
 describe('gated page migration output', () => {
   beforeEach(() => {
+    fixture.gated = true
     vi.clearAllMocks()
     validateMigrationMock.mockResolvedValue({ content: 'passed', build: 'passed', messages: [] })
   })
@@ -86,5 +88,23 @@ describe('gated page migration output', () => {
     }
     expect(readFileSync(join(fresh, '.gitignore'), 'utf8')).toContain('/migration-quarantine/')
     expect(readFileSync(join(existing, '.gitignore'), 'utf8')).toBe('migration-quarantine\n')
+  })
+
+  const reviewLines = async (gated: boolean): Promise<Array<string>> => {
+    fixture.gated = gated
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-cli-gated-review-'))
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [] }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    await migrateDocs({ sourceUrl: 'https://github.com/acme/docs', projectDir, into: true, yes: true, platform: 'mintlify' })
+    return warn.mock.calls.map((call) => String(call[0])).filter((line) => /migration-quarantine\/assets\/ and the dashboard access settings/.test(line))
+  }
+
+  it('tells a gated site once to review the quarantined assets and the dashboard access settings', async () => {
+    expect(await reviewLines(true)).toHaveLength(1)
+  })
+
+  it('never shows that review instruction for a site with no withheld content', async () => {
+    expect(await reviewLines(false)).toHaveLength(0)
   })
 })
