@@ -1809,6 +1809,12 @@ function readFrontmatterHead(path: string): string | undefined {
   }
 }
 
+/** Why a file must never be spliced into another page: too large, or its frontmatter is not fully readable in the bounded head. */
+function inlineBlockReason(candidate: string): string | undefined {
+  if (lstatSync(candidate).size > MAX_PAGE_BYTES) return 'is too large to inline (over 2 MB)'
+  return readFrontmatterHead(candidate) === undefined ? 'has frontmatter that could not be read' : undefined
+}
+
 function withoutFrontmatter(value: string): string {
   return value.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim()
 }
@@ -2391,6 +2397,18 @@ function inlineMdxSnippets(
   raw = normalizeIndentedFences(raw)
   const snippets = new Map<string, string>()
   const preservedDeclarations = new Map<string, string>()
+  // Fail closed: an oversized or unclassifiable file is never inlined, whatever
+  // its access rules or directory. One warning per occurrence.
+  const blockInline = (candidate: string, shownPath: string): string | undefined => {
+    const reason = inlineBlockReason(candidate)
+    if (!reason) return undefined
+    warnings.push({
+      code: 'skipped-file',
+      message: `${shownPath} ${reason} and was NOT inlined; it was left as a comment.`,
+      source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+    })
+    return `{/* Oversized content not inlined: ${shownPath.replace(/\*\//g, '* /')} */}`
+  }
   let withoutImports = replaceOutsideCode(raw, (source) => source.replace(
     SNIPPET_IMPORT_PATTERN,
     (_statement, namedComponent: string | undefined, defaultComponent: string | undefined, sourcePath: string) => {
@@ -2405,6 +2423,11 @@ function inlineMdxSnippets(
             source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
           })
           snippets.set(componentName, `{/* Access-restricted content withheld: ${sourcePath} */}`)
+          return ''
+        }
+        const blocked = blockInline(candidate, sourcePath)
+        if (blocked) {
+          snippets.set(componentName, blocked)
           return ''
         }
         const nested = inlineMdxSnippets(
@@ -2443,6 +2466,16 @@ function inlineMdxSnippets(
       try {
         const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
         if (!existsSync(candidate) || !lstatSync(candidate).isFile() || withheld.has(candidate)) return statement
+        const blocked = blockInline(candidate, sourcePath)
+        if (blocked) {
+          // Drop the import so the build never resolves the file; bind its names to the comment/empty.
+          const declarations: Array<string> = []
+          for (const binding of bindings) {
+            if (/^[A-Z]/.test(binding!.exported)) snippets.set(binding!.local, blocked)
+            else declarations.push(`export const ${binding!.local} = undefined;`)
+          }
+          return declarations.join('\n')
+        }
         const snippetSource = readFileSync(candidate, 'utf8')
         const values = staticNamedSnippetValues(snippetSource)
         const declarations: Array<string> = []
@@ -2473,6 +2506,11 @@ function inlineMdxSnippets(
   for (const [componentName, candidate] of globalAliases) {
     if (snippets.has(componentName) || localNames.has(componentName) || withheld.has(candidate)
       || !new RegExp(`<${componentName}(?:\\s|/?>)`).test(withoutImports)) continue
+    const blocked = blockInline(candidate, relative(repositoryRoot, candidate).replace(/\\/g, '/'))
+    if (blocked) {
+      snippets.set(componentName, blocked)
+      continue
+    }
     const nested = inlineMdxSnippets(
       withoutFrontmatter(readFileSync(candidate, 'utf8')),
       candidate,
@@ -2517,6 +2555,8 @@ function inlineMdxSnippets(
         })
         return `{/* Access-restricted content withheld: ${filePath} */}`
       }
+      const blocked = blockInline(candidate, filePath)
+      if (blocked) return blocked
       return inlineMdxSnippets(
         withoutFrontmatter(readFileSync(candidate, 'utf8')),
         candidate,

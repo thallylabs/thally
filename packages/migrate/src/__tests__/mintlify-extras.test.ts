@@ -447,6 +447,92 @@ describe('gating bypass hardening', () => {
     expect(codes(bundle, 'gated-page').some((warning) => /NOT inlined/.test(warning.message))).toBe(true)
   })
 
+  // Fail closed: an oversized or unclassifiable file is never inlined, restricted or not.
+  const openBig = `---\ntitle: Big\n---\n\nBIGMARKER\n${padding}\n`
+  const expectOversizedBlocked = (bundle: MigrationBundle, source = 'host.mdx') => {
+    expect(JSON.stringify(bundle.pages).includes('BIGMARKER')).toBe(false)
+    const host = bundle.pages.find((entry) => entry.id === 'host')!.body
+    expect(host.includes('Public text.')).toBe(true)
+    expect(host.includes('{/* Oversized content not inlined:')).toBe(true)
+    const warnings = codes(bundle, 'skipped-file').filter((warning) => warning.source === source && /NOT inlined/.test(warning.message))
+    expect(warnings).toHaveLength(1)
+    expect(/too large/.test(warnings[0].message)).toBe(true)
+    expect(codes(bundle, 'missing-page')).toHaveLength(0)
+    expect(codes(bundle, 'gated-page').some((warning) => /NOT inlined/.test(warning.message))).toBe(false)
+  }
+  const bigHost = (host: string, extra: Record<string, string> = {}) => site({
+    'docs.json': JSON.stringify({ navigation: { pages: ['host'] } }),
+    'host.mdx': `---\ntitle: Host\n---\n\nPublic text.\n\n${host}\n`,
+    'big.mdx': openBig,
+    ...extra,
+  })
+
+  it('never inlines an unrestricted oversized page through <Snippet file>', () => {
+    expectOversizedBlocked(bigHost('<Snippet file="/big.mdx" />'))
+  })
+
+  it('never inlines an unrestricted oversized page through a component import', () => {
+    expectOversizedBlocked(bigHost('import Big from "/big.mdx"\n\n<Big />'))
+  })
+
+  it('never inlines an unrestricted oversized page through a value import, and drops the import', () => {
+    const bundle = bigHost('import { Big } from "/big.mdx"\n\n<Big />')
+    expectOversizedBlocked(bundle)
+    expect(bundle.pages.find((entry) => entry.id === 'host')!.body.includes('import ')).toBe(false)
+  })
+
+  it('never inlines an unrestricted oversized page through an alias imported elsewhere', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['host', 'other'] } }),
+      'host.mdx': '---\ntitle: Host\n---\n\nPublic text.\n\n<Big />\n',
+      'other.mdx': '---\ntitle: Other\n---\n\nimport Big from "/big.mdx"\n\nOther text.\n',
+      'big.mdx': openBig,
+    })
+    expectOversizedBlocked(bundle)
+  })
+
+  it('never inlines an unrestricted oversized page nested in a public snippet', () => {
+    const bundle = bigHost('<Snippet file="wrapper.mdx" />', { 'snippets/wrapper.mdx': 'Wrapper text.\n\n<Snippet file="/big.mdx" />\n' })
+    expect(JSON.stringify(bundle.pages).includes('BIGMARKER')).toBe(false)
+    expect(bundle.pages.find((entry) => entry.id === 'host')!.body.includes('{/* Oversized content not inlined:')).toBe(true)
+    expect(codes(bundle, 'skipped-file').filter((warning) => warning.source === 'snippets/wrapper.mdx' && /NOT inlined/.test(warning.message))).toHaveLength(1)
+  })
+
+  it('never inlines an oversized file under snippets/', () => {
+    expectOversizedBlocked(bigHost('<Snippet file="huge.mdx" />', { 'snippets/huge.mdx': openBig }))
+  })
+
+  it('inlines a file of exactly the size cap', () => {
+    const head = '---\ntitle: Edge\n---\n\nEDGEMARKER\n'
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['host'] } }),
+      'host.mdx': '---\ntitle: Host\n---\n\nPublic text.\n\n<Snippet file="/edge.mdx" />\n',
+      'edge.mdx': head + 'x'.repeat(2_000_000 - head.length),
+    })
+    expect(JSON.stringify(bundle.pages).includes('EDGEMARKER')).toBe(true)
+    expect(codes(bundle, 'skipped-file').some((warning) => /NOT inlined/.test(warning.message))).toBe(false)
+  }, 120_000)
+
+  it('blocks a small file whose frontmatter is not closed within the bounded read', () => {
+    const unterminated = `---\ntitle: Open\n${'x: y\n'.repeat(20_000)}UNPARSEABLEMARKER\n`
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['host'] } }),
+      'host.mdx': '---\ntitle: Host\n---\n\nPublic text.\n\n<Snippet file="/open.mdx" />\n',
+      'open.mdx': unterminated,
+    })
+    expect(JSON.stringify(bundle.pages).includes('UNPARSEABLEMARKER')).toBe(false)
+    const warnings = codes(bundle, 'skipped-file').filter((warning) => warning.source === 'host.mdx' && /NOT inlined/.test(warning.message))
+    expect(warnings).toHaveLength(1)
+    expect(/frontmatter that could not be read/.test(warnings[0].message)).toBe(true)
+  }, 60_000)
+
+  it('still inlines small snippets and still reports a small restricted page as access-restricted', () => {
+    const bundle = snippetHost('<Snippet file="ok.mdx" />\n\n<Snippet file="/private.mdx" />', { 'snippets/ok.mdx': 'Ok snippet body.\n' })
+    expect(bundle.pages.find((entry) => entry.id === 'host')!.body.includes('Ok snippet body.')).toBe(true)
+    expect(codes(bundle, 'gated-page').filter((warning) => /Snippet file=.*access-restricted/.test(warning.message))).toHaveLength(1)
+    expect(codes(bundle, 'skipped-file').some((warning) => /NOT inlined/.test(warning.message))).toBe(false)
+  })
+
   it('withholds a page whose invalid frontmatter declares groups or public instead of salvaging it', () => {
     const bundle = site({
       'docs.json': JSON.stringify({ navigation: { pages: ['bad', 'badpublic', 'badopen'] } }),
