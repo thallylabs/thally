@@ -653,7 +653,7 @@ function getAllDocEntries(): Array<DocEntry> {
 
 /** Page IDs reachable from navigation: nav-group pages + standalone href tabs. */
 export function getNavigablePageIds(): Set<string> {
-  return new Set(projectNavigationContract(docsConfig()).authoredPageIds.filter(isDocPublished))
+  return new Set(projectNavigationContract(docsConfig()).authoredPageIds.filter((id) => isDocPublished(id)))
 }
 
 // ---------------------------------------------------------------------------
