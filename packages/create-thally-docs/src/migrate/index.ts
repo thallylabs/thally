@@ -73,7 +73,10 @@ function projectPath(projectDir: string, candidate: string): string {
 function ignoreQuarantineDirectory(projectDir: string): void {
   const ignorePath = projectPath(projectDir, '.gitignore')
   const existing = existsSync(ignorePath) ? readFileSync(ignorePath, 'utf8') : ''
-  if (existing.split(/\r?\n/).some((line) => /^\/?migration-quarantine\/?$/.test(line.trim()))) return
+  // The last matching rule wins in .gitignore: an existing entry only counts if
+  // no later `!migration-quarantine` line re-includes the folder.
+  const rules = existing.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^!?\/?migration-quarantine(?:\/(?:\*\*?)?)?$/.test(line))
+  if (rules.length > 0 && !rules[rules.length - 1].startsWith('!')) return
   const separator = existing === '' || existing.endsWith('\n') ? '' : '\n'
   writeFileSync(ignorePath, `${existing}${separator}\n# Access-restricted pages withheld by migration: local only, never commit or deploy\n/migration-quarantine/\n`)
 }

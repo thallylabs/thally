@@ -95,6 +95,17 @@ describe('gated page migration output', () => {
     expect(readFileSync(join(existing, '.gitignore'), 'utf8')).toBe('migration-quarantine\n')
   })
 
+  it('adds the quarantine entry again when a later .gitignore line re-includes the folder', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-cli-gated-negated-'))
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [] }))
+    writeFileSync(join(projectDir, '.gitignore'), 'migration-quarantine\n!migration-quarantine/\n')
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    await migrateDocs({ sourceUrl: 'https://github.com/acme/docs', projectDir, into: true, yes: true, platform: 'mintlify' })
+    const lines = readFileSync(join(projectDir, '.gitignore'), 'utf8').split('\n')
+    expect(lines.lastIndexOf('/migration-quarantine/')).toBeGreaterThan(lines.lastIndexOf('!migration-quarantine/'))
+  })
+
   const reviewLines = async (gated: boolean, oversized = false): Promise<Array<string>> => {
     fixture.gated = gated
     fixture.oversized = oversized
