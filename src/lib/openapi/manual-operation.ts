@@ -293,6 +293,33 @@ function authHeaders(
   return {}
 }
 
+/**
+ * A translated page's `api:` and `authMethod` as the playground may trust them.
+ * The playground sends the reader's token to the page's server, so a
+ * translation may not redirect it: when the primary-language page declares
+ * `api:`, the translation keeps its own only if it targets the same servers
+ * and uses the same `authMethod`; otherwise the primary's pair is used. A
+ * primary without `api:` leaves the translation free (translation-only pages).
+ * The page renderer and the Try It relay both call this, so they agree.
+ */
+export function resolveTranslatedManualApi(
+  own: { api?: unknown; authMethod?: unknown },
+  primary: { api?: unknown; authMethod?: unknown } | null,
+  config: ApiMdxConfig,
+  warn: Warn = () => {},
+): { api: unknown; authMethod: unknown } {
+  if (!primary || primary.api === undefined || primary.api === null || own.api === undefined || own.api === null) return own as { api: unknown; authMethod: unknown }
+  const servers = (api: unknown) => {
+    const target = parseApiFrontmatter(api)
+    return target ? JSON.stringify(target.server ? [target.server] : config.servers) : undefined
+  }
+  const auth = (value: unknown) => (typeof value === 'string' ? value.trim().toLowerCase() : value === undefined ? '' : JSON.stringify(value))
+  const ownServers = servers(own.api)
+  if (ownServers !== undefined && ownServers === servers(primary.api) && auth(own.authMethod) === auth(primary.authMethod)) return own as { api: unknown; authMethod: unknown }
+  warn('this translation\'s "api" or "authMethod" frontmatter targets a different server or authentication than the primary-language page; using the primary page\'s.')
+  return { api: primary.api, authMethod: primary.authMethod }
+}
+
 export interface BuildManualOperationInput {
   pageId: string
   title: string

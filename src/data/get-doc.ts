@@ -8,7 +8,7 @@ import { interpretMDX } from '@/lib/mdx-interpret'
 import type { DocEntry, DocPageMode } from '@/data/docs'
 import { deriveTitleFromSlug, getApiMdxConfig } from '@/data/docs'
 import { pageApiMetadata } from '@/lib/openapi/page-api'
-import { buildManualOperation } from '@/lib/openapi/manual-operation'
+import { buildManualOperation, resolveTranslatedManualApi } from '@/lib/openapi/manual-operation'
 import { remarkPlugins } from '@/mdx/remark'
 import { rehypePlugins } from '@/mdx/rehype'
 import { useMDXComponents as getMDXComponents } from '@/components/mdx/mdx-components'
@@ -75,7 +75,7 @@ async function loadDocFromSource(
   if (!candidate) {
     return null
   }
-  const document = await compileDocEntry(source, candidate.filePath, slugSegments, candidate.isFallback, candidate.isStale, locale)
+  const document = await compileDocEntry(source, candidate.filePath, slugSegments, candidate.isFallback, candidate.isStale, locale, candidate.sourcePath)
   if (!document || !candidate.sourcePath || candidate.isFallback) return document
   const sourceFile = await source.read(candidate.sourcePath)
   if (!sourceFile) return null
@@ -108,6 +108,7 @@ async function compileDocEntry(
   isFallback: boolean,
   isStale: boolean,
   locale?: string,
+  primaryPath?: string,
 ): Promise<(DocEntry & { isFallback: boolean; isStale: boolean }) | null> {
   const sourceFile = await source.read(filePath)
   if (!sourceFile) return null
@@ -167,7 +168,15 @@ async function compileDocEntry(
 
   const warn = (message: string) => console.warn(`[thally] ${filePath}: ${message}`)
   // The page index (docs.ts) reads the same metadata through the same function.
-  const meta = pageApiMetadata(frontmatter, warn)
+  // A translation may not redirect the playground away from the primary page's server or auth.
+  const primaryFile = !isFallback && primaryPath && frontmatter?.api !== undefined && frontmatter.api !== null ? await source.read(primaryPath) : null
+  const trusted = resolveTranslatedManualApi(
+    { api: frontmatter?.api, authMethod: frontmatter?.authMethod },
+    primaryFile ? parseFrontmatter(primaryFile.content).data : null,
+    getApiMdxConfig(),
+    warn,
+  )
+  const meta = pageApiMetadata({ ...frontmatter, api: trusted.api }, warn)
   const openapi = meta.openapi
   const title = frontmatter?.title ?? deriveTitleFromSlug(slugPath)
   // `openapi:` wins when a page declares both: it is the existing behaviour.
@@ -176,8 +185,8 @@ async function compileDocEntry(
     ? buildManualOperation({
         pageId: slugPath || 'introduction',
         title,
-        api: frontmatter?.api,
-        authMethod: frontmatter?.authMethod,
+        api: trusted.api,
+        authMethod: trusted.authMethod,
         mdx: parseFrontmatter(sourceFile.content).content,
         config: getApiMdxConfig(),
         locale,

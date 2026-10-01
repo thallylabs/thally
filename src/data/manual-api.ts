@@ -4,7 +4,7 @@ import { deriveTitleFromSlug, getApiMdxConfig, getI18nConfig } from '@/data/docs
 import { getContentSource } from '@/lib/content-source'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { findDocSource } from '@/lib/i18n/translation-source'
-import { buildManualOperation } from '@/lib/openapi/manual-operation'
+import { buildManualOperation, resolveTranslatedManualApi } from '@/lib/openapi/manual-operation'
 import { pageApiMetadata } from '@/lib/openapi/page-api'
 import type { NormalizedOperation } from '@/lib/openapi/types'
 
@@ -33,14 +33,20 @@ export async function getManualApiOperation(pageId: string, locale?: string): Pr
   const file = await source.read(candidate.filePath)
   if (!file) return null
   const { data, content } = parseFrontmatter(file.content)
-  if (!pageApiMetadata(data).manual) return null
+  const config = getApiMdxConfig()
+  // Same rule as get-doc: a translation may not redirect the playground away from the primary page's server or auth.
+  const primaryFile = !candidate.isFallback && candidate.sourcePath && data.api !== undefined && data.api !== null
+    ? await source.read(candidate.sourcePath)
+    : null
+  const trusted = resolveTranslatedManualApi({ api: data.api, authMethod: data.authMethod }, primaryFile ? parseFrontmatter(primaryFile.content).data : null, config)
+  if (!pageApiMetadata({ ...data, api: trusted.api }).manual) return null
   return buildManualOperation({
     pageId: slugPath,
     title: typeof data.title === 'string' ? data.title : deriveTitleFromSlug(slugPath),
-    api: data.api,
-    authMethod: data.authMethod,
+    api: trusted.api,
+    authMethod: trusted.authMethod,
     mdx: content,
-    config: getApiMdxConfig(),
+    config,
     locale,
   })
 }

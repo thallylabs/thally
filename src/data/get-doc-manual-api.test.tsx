@@ -166,6 +166,60 @@ describe('localized manual API pages', () => {
     expect(await getManualApiOperation('relay/fallback', 'de')).toEqual(rendered)
   })
 
+  describe('a translation cannot redirect the playground', () => {
+    const withAuth = (id: string, api: string | undefined, authMethod?: string) => {
+      pages.files[id] = {
+        frontmatter: { title: 'T', ...(api ? { api } : {}), ...(authMethod ? { authMethod } : {}) },
+        source: `---\ntitle: T\n${api ? `api: "${api}"\n` : ''}${authMethod ? `authMethod: ${authMethod}\n` : ''}---\n`,
+      }
+    }
+    const both = async (id: string) => {
+      const rendered = (await getDocFromParams(id.split('/'), 'fr'))?.manualApi
+      expect(await getManualApiOperation(id, 'fr')).toEqual(rendered)
+      return rendered
+    }
+
+    it('allows a path difference on the same origin', async () => {
+      withAuth('tr/same', 'GET https://api.example.com/users')
+      withAuth('fr/tr/same', 'GET https://api.example.com/utilisateurs')
+      expect(await both('tr/same')).toMatchObject({ path: '/utilisateurs', servers: [{ url: 'https://api.example.com' }] })
+      withAuth('tr/path', 'GET /users')
+      withAuth('fr/tr/path', 'GET /utilisateurs')
+      expect(await both('tr/path')).toMatchObject({ path: '/utilisateurs', servers: [{ url: 'https://httpbin.org' }] })
+    })
+
+    it('falls back to the primary api in the render and the relay when the origin differs, without echoing values', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      withAuth('tr/host', 'GET https://api.example.com/users')
+      withAuth('fr/tr/host', 'GET https://evil.example/users')
+      expect(await both('tr/host')).toMatchObject({ path: '/users', servers: [{ url: 'https://api.example.com' }] })
+      // A path-only translation of an absolute primary is a different origin unless docs.json names the same one.
+      withAuth('tr/rel', 'GET https://api.example.com/users')
+      withAuth('fr/tr/rel', 'GET /users')
+      expect(await both('tr/rel')).toMatchObject({ servers: [{ url: 'https://api.example.com' }] })
+      expect(warn).toHaveBeenCalled()
+      expect(warn.mock.calls.flat().join(' ')).not.toContain('evil.example')
+      warn.mockRestore()
+    })
+
+    it('falls back to the primary authMethod when the translation changes it', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      withAuth('tr/auth', 'GET /users', 'none')
+      withAuth('fr/tr/auth', 'GET /utilisateurs', 'bearer')
+      expect((await both('tr/auth'))?.prefill.header).toEqual({})
+      withAuth('tr/auth2', 'GET /users')
+      withAuth('fr/tr/auth2', 'GET /users', 'none')
+      expect((await both('tr/auth2'))?.prefill.header.Authorization).toMatch(/^Bearer /)
+      warn.mockRestore()
+    })
+
+    it('keeps a translation-only api page working', async () => {
+      withAuth('tr/only', undefined)
+      withAuth('fr/tr/only', 'POST https://other.example/seul', 'bearer')
+      expect(await both('tr/only')).toMatchObject({ path: '/seul', servers: [{ url: 'https://other.example' }] })
+    })
+  })
+
   it('refuses a locale that is not configured, so it cannot select a content directory', async () => {
     apiPage('guides/relay/tx', 'GET https://api.example.com/users')
     apiPage('relay/tx', 'GET https://api.example.com/users')
