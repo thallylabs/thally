@@ -177,7 +177,7 @@ describe('site-wide scripts, styles and fonts', () => {
   it('warns that the stylesheet is preserved but not applied, and about fonts', () => {
     const bundle = site(files)
     const messages = bundle.warnings.map((warning) => warning.message)
-    expect(messages.some((message) => /Stylesheet preserved at public\/style\.css but NOT applied/.test(message))).toBe(true)
+    expect(messages.some((message) => /Migration gap: custom stylesheet style\.css is NOT applied/.test(message))).toBe(true)
     expect(messages.some((message) => /"Mine".*copied to public\/fonts\/mine\.woff2/.test(message))).toBe(true)
     expect(messages.some((message) => /"Remote".*remote URL and was not downloaded/.test(message))).toBe(true)
     expect(messages.some((message) => /customScripts/.test(message))).toBe(true)
@@ -648,5 +648,27 @@ describe('dashboard access warning', () => {
     writeFileSync(join(root, 'docs', 'intro.md'), '---\ntitle: Intro\n---\n\nHello\n')
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
     expect(bundle.warnings.some((warning) => /Mintlify dashboard/.test(warning.message))).toBe(false)
+  })
+})
+
+describe('custom stylesheet migration gap', () => {
+  const cssWarnings = (bundle: MigrationBundle) => bundle.warnings.filter((warning) => warning.code === 'unsupported-config' && /stylesheet/i.test(warning.message))
+
+  it('names the stylesheet as a migration gap with where to port it', () => {
+    const warnings = cssWarnings(site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }),
+      'a.mdx': page('A'),
+      'style.css': '#navbar { color: red }\n',
+    }))
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].source).toBe('style.css')
+    expect(/Migration gap/.test(warnings[0].message)).toBe(true)
+    expect(/NOT applied/.test(warnings[0].message)).toBe(true)
+    expect(/Mintlify-specific selectors will not match/.test(warnings[0].message)).toBe(true)
+    expect(/by hand into src\/app\/globals\.css/.test(warnings[0].message)).toBe(true)
+  })
+
+  it('does not warn when there is no stylesheet', () => {
+    expect(cssWarnings(site({ 'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }), 'a.mdx': page('A') }))).toHaveLength(0)
   })
 })

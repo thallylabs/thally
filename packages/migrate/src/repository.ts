@@ -3490,7 +3490,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     for (const entry of copiedSite.filter((item) => item.kind === 'style')) {
       warnings.push({
         code: 'unsupported-config',
-        message: `Stylesheet preserved at public/${entry.path} but NOT applied: Thally cannot load a stylesheet from docs.json, and it likely targets Mintlify's DOM ids and classes. Review it manually.`,
+        message: `Migration gap: custom stylesheet ${entry.path} is NOT applied. It was copied to public/${entry.path} but no page loads it, Thally cannot load a stylesheet from docs.json, and Mintlify-specific selectors will not match Thally's markup. Port the styles you need by hand into src/app/globals.css.`,
         source: entry.path,
       })
     }
