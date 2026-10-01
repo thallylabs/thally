@@ -11,7 +11,7 @@ export {
 export { addMintlifyDirectoryRedirects, buildNavigationFromPages, projectMintlifyNavigation, pruneMissingNavigationPages, readMintlifyConfig } from './navigation.js'
 export { projectFernNavigation, readFernConfig } from './fern.js'
 export { normalizeMdx, parseMarkdownPage } from './mdx.js'
-export { projectMintlifyIntegrations } from './analytics.js'
+export { projectMintlifyIntegrations, validateIntegrations } from './analytics.js'
 export { mergeMigrationConfig, renderMigrationFiles } from './render.js'
 export { defaultMigrationFetcher, migrateUrl, validateMigrationUrl } from './url.js'
 export { hydrateRemoteApiSpecs } from './remote-api.js'

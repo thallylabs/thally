@@ -211,3 +211,19 @@ function project(config: Record<string, unknown>): {
 
   return { ...(Object.keys(integrations).length > 0 ? { integrations } : {}), warnings }
 }
+
+/**
+ * Validate an authored Thally `docs.json` `integrations` value with the same
+ * rules as the import and the renderer; one value-free message per problem.
+ */
+export function validateIntegrations(integrations: unknown): Array<string> {
+  if (integrations === undefined) return []
+  const result = projectMintlifyIntegrations({ integrations })
+  const messages = result.warnings.map((warning) =>
+    warning.message.replace(/^Mintlify /, 'docs.json ').replace(/\b(?:was|were|are) not imported\b/g, 'will not be rendered'),
+  )
+  if (result.integrations?.ga4 && result.integrations.gtm) {
+    messages.push('docs.json integrations enable both ga4 and gtm; a GA4 tag inside the GTM container would double-count page views.')
+  }
+  return messages
+}
