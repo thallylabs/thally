@@ -1146,9 +1146,14 @@ function selectFilesWithinBudget(
   allVersionPrefixes: ReadonlySet<string>,
 ): Array<ScannedFile> {
   const isAsset = (file: ScannedFile): boolean => ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())
+  // Snippet files are only ever inlined into pages (read from disk), never
+  // imported as pages, so they must not take budget away from real pages.
+  const isSnippet = (file: ScannedFile): boolean => file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
+  const snippetFiles = scanned.filter((file) => !isAsset(file) && isSnippet(file))
   const assetFiles = scanned.filter(isAsset)
-  const otherFiles = scanned.filter((file) => !isAsset(file))
+  const otherFiles = scanned.filter((file) => !isAsset(file) && !isSnippet(file))
   return [
+    ...snippetFiles,
     ...selectGroupWithinBudget(otherFiles, rank, warnings, allVersionPrefixes, 'file'),
     ...selectGroupWithinBudget(assetFiles, rank, warnings, allVersionPrefixes, 'asset'),
   ]
