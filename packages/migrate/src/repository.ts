@@ -3075,10 +3075,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // content, so its assets are withheld and the site fails closed too.
       if (isDocFile(file) && !isGateCandidate(file)) {
         const snippetReason = classifyPageGate(file).reason
-        if (snippetReason) {
-          withheldPaths.add(file.absolutePath)
-          withheldSnippetFiles.push(file)
-        }
+        if (snippetReason) withheldSnippetFiles.push(file)
         continue
       }
       if (!isGateCandidate(file)) continue
@@ -3101,7 +3098,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // cap) could be restricted: assets no published page names by exact path stay
   // out of public/ on such a site, as on one with known restricted pages.
   const pagesNotClassified = droppedPageCount > 0 || (platform === 'mintlify' && scanTruncated)
-  const trackPublishedRefs = platform === 'mintlify' && (withheldPaths.size > 0 || pagesNotClassified)
+  const hasWithheldContent = withheldPaths.size > 0 || withheldSnippetFiles.length > 0
+  const trackPublishedRefs = platform === 'mintlify' && (hasWithheldContent || pagesNotClassified)
   // Mintlify only. The pre-pass covers only files inside the file budget, so a
   // candidate it never saw (dropped by the budget, in a snippet directory, under
   // a case-variant path) is classified on demand: frontmatter gates, navigation
@@ -4435,7 +4433,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         ? `${withheldAssetCount} file(s) used only by access-restricted pages were kept out of public/ and saved under ${QUARANTINE_DIRECTORY}/assets/. `
         : ''
       const unreferencedReason = [
-        ...(withheldPaths.size > 0 ? ['this site has access-restricted content'] : []),
+        ...(hasWithheldContent ? ['this site has access-restricted content'] : []),
         ...(pagesNotClassified ? ['pages were dropped by the file limit (or the file scan stopped at its cap) and could not all be checked for access restrictions'] : []),
       ].join(' and ')
       const unreferencedNote = unreferencedAssetCount > 0
