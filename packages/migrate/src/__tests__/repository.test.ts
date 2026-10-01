@@ -10,6 +10,84 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
 import { withoutDashboardWarning } from './dashboard-warning.js'
 
+describe('Mintlify root styles', () => {
+  it('copies the implicit stylesheet and wires it into the generated config', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-style-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['introduction'] } }))
+    writeFileSync(join(root, 'introduction.mdx'), '<p className="card">\n  Hello.\n</p>')
+    writeFileSync(join(root, 'style.css'), '.card { padding: 1rem; }')
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    const href = result.docsConfig.stylesheets?.[0]
+    expect(href).toMatch(/^\/migrated\/[a-f0-9]{12}\/style\.css$/)
+    expect(result.assets.find((asset) => `/${asset.path}` === href)?.content.toString()).toBe('.card { padding: 1rem; }')
+    expect(result.assets.some((asset) => asset.path === 'style.css')).toBe(false)
+    expect(result.pages[0].body).toContain('<div className="card">')
+    const equivalent = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/EXAMPLE/docs.git' })
+    expect(equivalent.docsConfig.stylesheets).toEqual(result.docsConfig.stylesheets)
+  })
+
+  it('does not import a stylesheet with remote resources', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-style-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['introduction'] } }))
+    writeFileSync(join(root, 'introduction.mdx'), 'Hello.')
+    writeFileSync(join(root, 'style.css'), '@import url(https://example.com/tracker.css);')
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    expect(result.docsConfig.stylesheets).toBeUndefined()
+    expect(result.assets.some((asset) => asset.path === 'style.css')).toBe(false)
+    expect(result.warnings).toContainEqual(expect.objectContaining({ source: 'style.css' }))
+  })
+
+  it('keeps authored widget styling without leaking Mintlify shell selectors', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-style-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['introduction'] } }))
+    writeFileSync(join(root, 'introduction.mdx'), '<div className="widget mintlify-layout"><p className="widget-copy">Hello.</p></div>')
+    writeFileSync(join(root, 'style.css'), [
+      '.widget, li.navbar-link a { padding: 1rem; }',
+      '.widget-copy[data-as="p"] { margin: 0; }',
+      '.mintlify-layout .widget { border: 1px solid red; }',
+      '.dark .widget { color: white; }',
+      '#footer a.max-w-36 { max-width: none; }',
+      'a > div.w-full > div.mt-8 { position: absolute; }',
+      'body:not(.widget) { display: none; }',
+      'body:has(.widget) { overflow: hidden; }',
+    ].join('\n'))
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    const href = result.docsConfig.stylesheets?.[0]
+    const css = result.assets.find((asset) => `/${asset.path}` === href)?.content.toString() ?? ''
+    expect(css).toContain('.widget { padding: 1rem; }')
+    expect(css).toContain('.widget-copy { margin: 0; }')
+    expect(css).toContain('.dark .widget { color: white; }')
+    expect(css).not.toContain('mintlify-layout')
+    expect(css).not.toMatch(/navbar-link|#footer|max-w-36|w-full|mt-8|data-as/)
+    expect(css).not.toMatch(/body:not|body:has/)
+    expect(result.assets.some((asset) => asset.path === 'style.css')).toBe(false)
+    expect(result.warnings).toContainEqual(expect.objectContaining({ source: 'style.css' }))
+  })
+
+  it('does not publish a stylesheet containing only platform shell overrides', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-style-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['introduction'] } }))
+    writeFileSync(join(root, 'introduction.mdx'), 'Hello.')
+    writeFileSync(join(root, 'style.css'), 'li.navbar-link a { color: red; } #footer a.max-w-36 { max-width: none; }')
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    expect(result.docsConfig.stylesheets).toBeUndefined()
+    expect(result.assets.some((asset) => asset.path.endsWith('/style.css') || asset.path === 'style.css')).toBe(false)
+  })
+
+  it('ignores classes shown only in examples and keeps authored animations', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-style-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['introduction'] } }))
+    writeFileSync(join(root, 'introduction.mdx'), '<div className="widget">Live widget</div>\n\n```jsx\n<div className="platform-shell" />\n```')
+    writeFileSync(join(root, 'style.css'), '@keyframes pulse { from { opacity: 0; } to { opacity: 1; } } .widget { animation: pulse 1s; } .platform-shell { display: none; }')
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    const href = result.docsConfig.stylesheets?.[0]
+    const css = result.assets.find((asset) => `/${asset.path}` === href)?.content.toString() ?? ''
+    expect(css).toContain('@keyframes pulse')
+    expect(css).toContain('.widget { animation: pulse 1s; }')
+    expect(css).not.toContain('platform-shell')
+  })
+})
+
 // Queue of scripted `git clone` outcomes consumed in order by the mocked
 // `spawn` below, so `cloneGitHubRepository`'s retry-on-network-failure logic
 // (repository.ts) can be tested without a real clone.
@@ -360,6 +438,38 @@ describe('Mintlify repository migration', () => {
     }))
   })
 
+  it('keeps a page when a missing snippet is used only inside an MDX comment', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-commented-snippet-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['sdk'] } }))
+    writeFileSync(join(root, 'sdk.mdx'), [
+      '---', 'title: SDK', '---', '',
+      "import HiddenExample from '/snippets/missing.mdx'", '',
+      '## Active docs', '', 'This page should remain available.', '',
+      '{/* Disabled example:', '<HiddenExample />', '*/}',
+    ].join('\n'))
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    expect(result.pages.map((page) => page.id)).toContain('sdk')
+    expect(result.pages[0].body).toContain('<HiddenExample />')
+    expect(result.warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+    expect(result.warnings.some((warning) => warning.code === 'missing-page')).toBe(false)
+  })
+
+  it('closes an incomplete imported code snippet before the next component', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-unclosed-snippet-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { pages: ['batch'] } }))
+    writeFileSync(join(root, 'snippets', 'sample.mdx'), '```python Python\nprint("sample")\n')
+    writeFileSync(join(root, 'batch.mdx'), [
+      '---', 'title: Batch', '---', '',
+      "import Sample from '/snippets/sample.mdx'", '',
+      '<CodeGroup>', '', '<Sample />', '<Sample />', '', '</CodeGroup>',
+    ].join('\n'))
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    expect(result.pages.map((page) => page.id)).toContain('batch')
+    expect(result.pages[0].body.match(/```/g)).toHaveLength(4)
+    expect(result.warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+  })
+
   it('maps a bare <Link href> to <a> and neutralizes any other unresolved component, with a warning', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-unknown-components-'))
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
@@ -515,7 +625,10 @@ describe('Mintlify repository migration', () => {
       icon: 'play',
       pages: ['introduction', { group: 'CLI', pages: ['manualSetup'] }],
     }])
-    expect(bundle.docsConfig.navigation).toEqual({ display: 'dropdown' })
+    expect(bundle.docsConfig.navigation).toEqual({
+      display: 'dropdown',
+      shortcuts: [{ label: 'Community', href: 'https://community.example.com' }],
+    })
     expect(bundle.docsConfig.tabs[0]).toMatchObject({
       tab: 'Documentation',
       description: 'Resources for Acme developers',
@@ -1572,21 +1685,17 @@ describe('Mintlify repository migration', () => {
     expect(paths).toContain('images/greeting.m4a')
   })
 
-  it('warns which page(s) reference an asset that is still dropped for being too large', () => {
+  it('keeps a large image referenced by a page within the aggregate budget', () => {
     const root = fixture()
-    // Over MAX_ASSET_BYTES (25MB) on its own, so it is dropped regardless of
-    // being referenced — the fix only reorders the queue, it does not raise
-    // the budget. The warning must still name the referencing page.
+    // Repository animations often exceed the ordinary 25MB asset budget.
+    // Preserving a referenced one avoids a broken page.
     writeFileSync(join(root, 'images', 'huge.png'), Buffer.alloc(26_000_000))
     writeFileSync(join(root, 'en', 'with-huge-image.mdx'), '---\ntitle: Huge image\n---\n\n![Huge](/images/huge.png)')
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
-    expect(bundle.assets.map((asset) => asset.path)).not.toContain('images/huge.png')
-    const skipped = bundle.warnings.filter((warning) => warning.message.includes('asset file'))
-    expect(skipped).toHaveLength(1)
-    expect(skipped[0]).toMatchObject({ code: 'limit-reached' })
-    expect(skipped[0].message).toMatch(/^1 asset file was not copied.*over 25 MB.*500 MB.*images\/huge\.png.*1 of them is used by pages.*public\/ manually/s)
+    expect(bundle.assets.map((asset) => asset.path)).toContain('images/huge.png')
+    expect(bundle.warnings.filter((warning) => warning.message.includes('asset file'))).toEqual([])
   })
 
   it('reports many oversized assets in one warning with the count and the first five paths', () => {
@@ -3388,7 +3497,7 @@ navigation:
     expect(bundle.warnings.find((warning) => warning.message.includes('AsyncAPI'))?.message).toContain('asyncapi.yml')
   })
 
-  it('keeps a page with a $$\\begin{align*}...\\end{align*}$$ KaTeX block instead of excluding it, and warns', () => {
+  it('renders a $$\\begin{align*}...\\end{align*}$$ KaTeX block with the native component', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-math-'))
     const fernRoot = join(root, 'fern')
     mkdirSync(fernRoot, { recursive: true })
@@ -3415,13 +3524,10 @@ navigation:
 
     expect(bundle.pages.map((page) => page.id)).toContain('math')
     const page = bundle.pages.find((entry) => entry.id === 'math')
-    expect(page?.body).toContain('```math')
+    expect(page?.body).toContain('<Latex block>')
     expect(page?.body).toContain('\\begin{align*}')
-    expect(page?.body).toContain("`$$4'000$$`")
-    expect(bundle.warnings).toContainEqual(expect.objectContaining({
-      code: 'unsupported-config',
-      message: expect.stringContaining('kept as a fenced code block'),
-    }))
+    expect(page?.body).toContain('<Latex>{"4\'000"}</Latex>')
+    expect(bundle.warnings.some((warning) => warning.message.includes('Math (KaTeX'))).toBe(false)
   })
 
   it('redirects an underscore-slug link (matching the on-disk folder name) to the hyphenated route Thally actually uses', () => {

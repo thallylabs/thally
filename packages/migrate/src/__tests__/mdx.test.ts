@@ -72,6 +72,28 @@ describe('migration description fallback', () => {
 })
 
 describe('normalizeMdx', () => {
+  it('projects a static Docusaurus useBaseUrl require without changing code samples', () => {
+    const body = "<a href={require('@docusaurus/useBaseUrl').default('showcase')}>Showcase</a>\n\n```jsx\n<a href={require('@docusaurus/useBaseUrl').default('showcase')} />\n```"
+    const output = normalizeMdx(body, 'docusaurus')
+    expect(output).toContain('<a href="/showcase">Showcase</a>')
+    expect(output).toContain("```jsx\n<a href={require('@docusaurus/useBaseUrl').default('showcase')} />\n```")
+  })
+
+  it('does not rewrite a site-authored zoom component as a platform widget', () => {
+    const output = normalizeMdx('<Zoom>\n\n![Diagram](/img/diagram.png)\n\n</Zoom>', 'docusaurus')
+    expect(output).toContain('<Zoom>')
+    expect(output).toContain('</Zoom>')
+    expect(output).toContain('![Diagram](/img/diagram.png)')
+  })
+
+  it('keeps styled source paragraphs from hydrating as nested paragraphs', () => {
+    const source = '<p className="source-callout">\n  Text with **emphasis**.\n</p>\n\n```mdx\n<p>Keep this example</p>\n```'
+    const output = normalizeMdx(source, 'mintlify')
+    expect(output).toContain('<div className="source-callout">\n  Text with **emphasis**.\n</div>')
+    expect(output).toContain('```mdx\n<p>Keep this example</p>\n```')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
   it('resolves Docusaurus emoji shortcodes in prose and tables without changing code', () => {
     const source = '| Result |\n| --- |\n| :white_check_mark: |\n\nUse :x: for no. `:x:`\n\n```md\n:x:\n```'
     const output = normalizeMdx(source, 'docusaurus')
@@ -97,6 +119,13 @@ describe('normalizeMdx', () => {
   it('preserves an explicit heading anchor in a Mintlify page', () => {
     const output = normalizeMdx('## Install help {#smartscreen}', 'mintlify')
     expect(output).toContain('<a id="smartscreen"></a>')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('preserves numeric-leading Mintlify heading anchors', () => {
+    const output = normalizeMdx('## Responses 429 {#429-responses}\n\n### Add Firecrawl {#1-add-firecrawl}', 'mintlify')
+    expect(output).toContain('<a id="429-responses"></a>')
+    expect(output).toContain('<a id="1-add-firecrawl"></a>')
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
 
@@ -706,7 +735,7 @@ describe('Fern relative page links', () => {
 })
 
 describe('protectMathBlocks', () => {
-  it('converts a block $$...$$ (KaTeX align, backslashes and braces) into a fenced ```math block', () => {
+  it('renders a block $$...$$ with the native KaTeX component', () => {
     const body = [
       'Some prose before.',
       '',
@@ -721,7 +750,7 @@ describe('protectMathBlocks', () => {
     ].join('\n')
     const result = protectMathBlocks(body)
     expect(result.converted).toBe(true)
-    expect(result.body).toContain('```math')
+    expect(result.body).toContain('<Latex block>')
     expect(result.body).toContain('\\begin{align*}')
     expect(result.body).not.toMatch(/\n\$\$\n/)
     // The content actually compiles as MDX now (this exact construct is
@@ -729,11 +758,11 @@ describe('protectMathBlocks', () => {
     expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
   })
 
-  it('converts an inline $$...$$ span mid-paragraph into an inline code span, preserving surrounding prose', () => {
+  it('converts an inline $$...$$ span to native KaTeX, preserving surrounding prose', () => {
     const body = "Therefore the Total Exchange USDC Balance is $$4'000$$ today."
     const result = protectMathBlocks(body)
     expect(result.converted).toBe(true)
-    expect(result.body).toBe("Therefore the Total Exchange USDC Balance is `$$4'000$$` today.")
+    expect(result.body).toBe('Therefore the Total Exchange USDC Balance is <Latex>{"4\'000"}</Latex> today.')
     expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
   })
 
@@ -755,7 +784,7 @@ describe('protectMathBlocks', () => {
     const body = '---\ntitle: "$$weird$$"\n---\n\nBody with $$x=1$$ math.'
     const result = protectMathBlocks(body)
     expect(result.body).toContain('title: "$$weird$$"')
-    expect(result.body).toContain('`$$x=1$$`')
+    expect(result.body).toContain('<Latex>{"x=1"}</Latex>')
   })
 
   it('converts single-$...$ inline math (the paradex-docs greeks.mdx repro)', () => {
@@ -763,7 +792,7 @@ describe('protectMathBlocks', () => {
     const result = protectMathBlocks(body)
     expect(result.converted).toBe(true)
     expect(result.body).toBe(
-      'Under Black-76, the forward is `$F = S \\times e^{\\,f\\,T}$`, so a move in `$S$` matters.',
+      'Under Black-76, the forward is <Latex>{"F = S \\\\times e^{\\\\,f\\\\,T}"}</Latex>, so a move in <Latex>{"S"}</Latex> matters.',
     )
     expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
   })
@@ -787,7 +816,7 @@ describe('protectMathBlocks', () => {
     expect(result.converted).toBe(true)
     // A bare dollar amount elsewhere in the prose is left alone.
     expect(result.body).toContain('$100,000:')
-    expect(result.body).toContain('```math')
+    expect(result.body).toContain('<Latex block>')
     expect(result.body).toContain('\\text{External Fair Price}')
     expect(() => compileSync(result.body, { format: 'mdx' })).not.toThrow()
   })

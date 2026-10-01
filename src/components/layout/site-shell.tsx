@@ -8,7 +8,7 @@ import { getHeaderNavigationLayout } from '@/components/navigation/header-layout
 import { Sidebar } from '@/components/navigation/sidebar'
 import { PageContainer } from '@/components/layout/sections'
 import { layout, shell } from '@/config/layout'
-import type { SidebarCollection, DocsJsonNavbar, DocsJsonFooter, NavigationPresentation } from '@/data/docs'
+import type { SidebarCollection, DocsJsonNavbar, DocsJsonFooter, NavigationPresentation, DocsNavigationVersion, DocsNavigationShortcut } from '@/data/docs'
 import { useSidebarCollectionsStore } from './sidebar-store'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
@@ -46,6 +46,8 @@ function matchesPath(targetHref: string, pathname: string, localeRoot?: string) 
   // locale prefix must not turn it into the parent of every translated page.
   if (normalizedTarget === '/' || normalizedTarget === localeRoot) {
     return normalizedPath === normalizedTarget
+      || (normalizedTarget === '/' && normalizedPath === '/introduction')
+      || (normalizedTarget === localeRoot && normalizedPath === `${localeRoot}/introduction`)
   }
   return normalizedPath === normalizedTarget || normalizedPath.startsWith(`${normalizedTarget}/`)
 }
@@ -84,6 +86,8 @@ interface SiteShellProps {
   showSidebarGroupIcons?: boolean
   footerConfig?: DocsJsonFooter | null
   navigationPresentation: NavigationPresentation
+  navigationVersions?: Array<DocsNavigationVersion>
+  navigationShortcuts?: Array<DocsNavigationShortcut>
   identity: SiteIdentity
 }
 
@@ -97,6 +101,8 @@ export function SiteShell({
   showPoweredBy = true,
   showSidebarGroupIcons = true,
   navigationPresentation,
+  navigationVersions = [],
+  navigationShortcuts = [],
   identity,
 }: SiteShellProps) {
   const pathname = usePathname()
@@ -120,11 +126,24 @@ export function SiteShell({
     (state) => state.collectionsByScope[scopeKey],
   )
   const collections = hydratedCollections ?? initialCollections
-  const navigableCollections = collections.filter((collection) => collection.sections.length > 0)
+  const routeOwningVersions = navigationVersions.filter((version) => collections.some((collection) =>
+    collection.version === version.label && collectionContainsPath(collection, pathname, currentPath, localeRoot)))
+  const activeVersion = navigationVersions.find((version) => version.prefix
+    && (currentPath === `/${version.prefix}` || currentPath.startsWith(`/${version.prefix}/`)))
+    // A source can serve versioned pages outside its version prefix (for
+    // example `/api-reference/v1-endpoint/scrape`). Use unique navigation
+    // ownership before falling back to the default version.
+    ?? (routeOwningVersions.length === 1 ? routeOwningVersions[0] : undefined)
+    ?? navigationVersions.find((version) => version.default)
+    ?? navigationVersions[0]
+  const visibleCollections = activeVersion
+    ? collections.filter((collection) => !collection.version || collection.version === activeVersion.label)
+    : collections
+  const navigableCollections = visibleCollections.filter((collection) => collection.sections.length > 0)
   const matchedCollection =
     navigableCollections.find((collection) => collectionContainsPath(collection, pathname, currentPath, localeRoot)) ??
     navigableCollections[0] ??
-    collections[0]
+    visibleCollections[0]
   // Manual override: set when the user clicks a tab and ignored once navigation
   // leaves that collection. Deriving validity here avoids an effect-driven state reset.
   const [selectedCollectionId, setSelectedCollectionId] = useState<SidebarCollection['id'] | null>(null)
@@ -142,7 +161,7 @@ export function SiteShell({
   // sidebar sections still wins the highlight when its href matches the current
   // path — otherwise the section-derived collection (Overview/API/…) does.
   const activeTabId =
-    collections.find(
+    visibleCollections.find(
       (collection) =>
         collection.href &&
         !/^https?:\/\//.test(collection.href) &&
@@ -154,7 +173,7 @@ export function SiteShell({
   // which lets the banner-aware desktop sidebar remain sticky.
   return (
     <SiteNameProvider initialName={identity.name}>
-      <div className="thally-docs-root min-h-screen w-full overflow-x-clip bg-background text-foreground" data-navigation={navigationPresentation.display} data-header-layout={getHeaderNavigationLayout(navigationPresentation.display, collections.length)}>
+      <div className="thally-docs-root min-h-screen w-full overflow-x-clip bg-background text-foreground" data-navigation={navigationPresentation.display} data-header-layout={getHeaderNavigationLayout(navigationPresentation.display, visibleCollections.length)}>
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-background focus:px-4 focus:py-2 focus:text-foreground focus:shadow-lg"
@@ -162,15 +181,17 @@ export function SiteShell({
           Skip to content
         </a>
         <TopBar
-          collections={collections}
+          collections={visibleCollections}
           activeCollectionId={activeTabId}
           onCollectionChange={(id) => {
-            const target = collections.find((collection) => collection.id === id)
+            const target = visibleCollections.find((collection) => collection.id === id)
             if (!target) return
             setSelectedCollectionId(target.id)
           }}
           activeSections={activeCollection.sections}
           navigationPresentation={navigationPresentation}
+          navigationVersions={navigationVersions}
+          activeVersion={activeVersion?.label}
           i18nConfig={i18nConfig ?? null}
           currentLocale={currentLocale}
           currentPath={currentPath}
@@ -182,10 +203,11 @@ export function SiteShell({
           <Sidebar
             sections={activeCollection.sections}
             title={activeCollection.label}
-            collections={collections}
+            collections={visibleCollections}
             activeCollectionId={activeCollection.id}
             onCollectionChange={setSelectedCollectionId}
             navigationPresentation={navigationPresentation}
+            shortcuts={navigationShortcuts}
             showGroupIcons={showSidebarGroupIcons}
           />
           <div className="flex min-h-[calc(100dvh-var(--docs-header-height,60px))] w-full min-w-0 flex-1 flex-col">

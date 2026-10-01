@@ -253,6 +253,13 @@ describe('Mintlify navigation projection', () => {
       'v1: Guides',
       'v1: API',
     ])
+    expect(result.docsConfig.tabs.map((tab) => [tab.version, tab.displayLabel])).toEqual([
+      ['v2', 'Guides'], ['v2', 'API'], ['v1', 'Guides'], ['v1', 'API'],
+    ])
+    expect(result.docsConfig.navigation?.versions).toEqual([
+      { label: 'v2', prefix: 'v2', href: '/v2/introduction', default: true },
+      { label: 'v1', prefix: 'v1', href: '/v1/introduction' },
+    ])
     expect(result.docsConfig.tabs[0]).toMatchObject({
       description: 'Current documentation',
       icon: 'book-open',
@@ -265,6 +272,14 @@ describe('Mintlify navigation projection', () => {
     expect(result.docsConfig.tabs[1]?.href).toBeUndefined()
     expect(result.docsConfig.tabs[2]?.href).toBe('/v1')
     expect(result.docsConfig.tabs[3]?.href).toBeUndefined()
+  })
+
+  it('projects global language anchors as sidebar shortcuts', () => {
+    const result = projectMintlifyNavigation({ navigation: { languages: [{ language: 'en', default: true,
+      global: { anchors: [{ anchor: 'Playground', href: 'https://example.com/play', icon: 'play' }] },
+      tabs: [{ tab: 'Docs', pages: ['introduction'] }],
+    }] } })
+    expect(result.docsConfig.navigation?.shortcuts).toEqual([{ label: 'Playground', href: 'https://example.com/play', icon: 'play' }])
   })
 
   it('translates a trailing Mintlify wildcard redirect into a Next.js named catch-all', () => {

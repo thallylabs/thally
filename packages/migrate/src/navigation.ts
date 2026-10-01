@@ -1268,6 +1268,62 @@ export function projectMintlifyNavigation(
       message: 'Mintlify navigation could not be projected; generated navigation will be used.',
     })
   }
+  // A version selector is a separate control from the sibling tabs. Keep
+  // the source tab identity unique while giving Thally a clean visible label
+  // and a route prefix for selecting the matching version on deep links.
+  const versionOwner = languages.length > 0
+    ? languages.find((entry) => entry.default === true) ?? languages[0]
+    : navigation
+  const globalNavigation = objectValue(versionOwner.global) ?? objectValue(navigation.global)
+  const shortcuts = Array.isArray(globalNavigation?.anchors)
+    ? globalNavigation.anchors.flatMap((value) => {
+        const anchor = objectValue(value)
+        const label = typeof anchor?.anchor === 'string' ? anchor.anchor.trim() : ''
+        const href = projectedHref(anchor?.href)
+        if (!label || !href) return []
+        return [{ label, href, ...(iconName(anchor?.icon) ? { icon: iconName(anchor?.icon) } : {}) }]
+      })
+    : []
+  const rawVersions = Array.isArray(versionOwner.versions)
+    ? versionOwner.versions.map(objectValue).filter((value): value is Record<string, unknown> => value !== null)
+      .sort((left, right) => Number(right.default === true) - Number(left.default === true))
+    : []
+  const versionNames = rawVersions
+    .map((entry) => typeof entry.version === 'string' ? entry.version.trim() : '')
+    .filter(Boolean)
+  const annotateVersions = (items: Array<MigrationNavigationTab>): Array<MigrationNavigationTab> => items.map((item) => {
+    const version = versionNames.find((name) => item.tab.startsWith(`${name}: `))
+    return version ? { ...item, version, displayLabel: item.tab.slice(version.length + 2) } : item
+  })
+  const firstPage = (item: MigrationNavigationTab): string | undefined => {
+    const visit = (entries: Array<string | MigrationNavigationGroup>): string | undefined => {
+      for (const entry of entries) {
+        if (typeof entry === 'string') return entry
+        const nested = visit(entry.pages)
+        if (nested) return nested
+      }
+      return undefined
+    }
+    return visit([...(item.pages ?? []), ...(item.groups ?? [])])
+  }
+  const defaultVersion = rawVersions.find((entry) => entry.default === true) ?? rawVersions[0]
+  const versions = rawVersions.length > 1 ? rawVersions.flatMap((entry) => {
+    const label = typeof entry.version === 'string' ? entry.version.trim() : ''
+    if (!label) return []
+    const candidates = tabs.filter((item) => item.tab.startsWith(`${label}: `))
+      .map(firstPage).filter((page): page is string => Boolean(page))
+    // Versions sometimes reuse unversioned guide pages but still own a
+    // versioned API tab. Enter through an owned route when one exists.
+    const landing = candidates.find((page) => page.startsWith(`${label}/`)) ?? candidates[0]
+    if (!landing) return []
+    const firstSegment = landing.split('/')[0]
+    const prefix = firstSegment === label ? label : ''
+    return [{ label, prefix, href: `/${landing}`, ...(entry === defaultVersion ? { default: true } : {}) }]
+  }) : []
+  if (versions.length > 1) {
+    tabs = annotateVersions(tabs)
+    for (const [locale, items] of Object.entries(localizedNavigation)) localizedNavigation[locale] = annotateVersions(items)
+  }
   const redirects = Array.isArray(config.redirects)
     ? config.redirects.flatMap((value) => {
         const redirect = objectValue(value)
@@ -1294,8 +1350,12 @@ export function projectMintlifyNavigation(
   return {
     docsConfig: {
       tabs,
-      ...(projectionTrace.rootContainerKind === 'dropdowns'
-        ? { navigation: { display: 'dropdown' as const } }
+      ...(projectionTrace.rootContainerKind === 'dropdowns' || versions.length > 1 || shortcuts.length > 0
+        ? { navigation: {
+          ...(projectionTrace.rootContainerKind === 'dropdowns' ? { display: 'dropdown' as const } : {}),
+          ...(versions.length > 1 ? { versions } : {}),
+          ...(shortcuts.length > 0 ? { shortcuts } : {}),
+        } }
         : {}),
       ...projectedCompatibleConfig(config, warnings),
       ...projectedApiMdx(config, warnings),

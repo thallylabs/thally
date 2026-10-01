@@ -4,7 +4,7 @@
 
 import { useEffect, useRef } from 'react'
 import { ExternalLink, Sparkles } from 'lucide-react'
-import type { SidebarCollection, DocsJsonNavbar, NavigationPresentation } from '@/data/docs'
+import type { SidebarCollection, DocsJsonNavbar, NavigationPresentation, DocsNavigationVersion } from '@/data/docs'
 import { MobileNav } from '@/components/navigation/mobile-nav'
 import { CollectionTabs } from '@/components/navigation/collection-tabs'
 import { getHeaderNavigationLayout } from '@/components/navigation/header-layout'
@@ -29,6 +29,8 @@ interface TopBarProps {
   onCollectionChange: (id: SidebarCollection['id']) => void
   activeSections: SidebarCollection['sections']
   navigationPresentation: NavigationPresentation
+  navigationVersions?: Array<DocsNavigationVersion>
+  activeVersion?: string
   i18nConfig?: I18nConfig | null
   currentLocale?: string
   currentPath?: string
@@ -43,6 +45,8 @@ export function TopBar({
   onCollectionChange,
   activeSections,
   navigationPresentation,
+  navigationVersions,
+  activeVersion,
   i18nConfig,
   currentLocale,
   currentPath,
@@ -123,6 +127,9 @@ export function TopBar({
             <span className="-ml-1 shrink-0 font-heading text-[1rem] font-medium text-foreground/55">Docs</span>
           ) : null}
         </IntentPrefetchLink>
+        {navigationVersions && navigationVersions.length > 1 ? (
+          <VersionSwitcher versions={navigationVersions} activeLabel={activeVersion} />
+        ) : null}
         {i18nConfig && i18nConfig.locales.length >= 2 ? (
           <LocaleSwitcher locales={i18nConfig.locales} availableLocales={availableLocales ?? [i18nConfig.defaultLocale]} currentLocale={currentLocale ?? i18nConfig.defaultLocale} currentPath={currentPath ?? '/'} defaultLocale={i18nConfig.defaultLocale} />
         ) : null}
@@ -158,7 +165,7 @@ export function TopBar({
             : supportLink ? (
                 <IntentPrefetchLink href={supportLink.href} className="thally-docs-topbar-link hidden whitespace-nowrap text-[0.86rem] font-medium text-foreground/70 hover:text-foreground sm:inline-flex">{supportLink.label}</IntentPrefetchLink>
               ) : null}
-          <VersionSwitcher />
+          {!navigationVersions || navigationVersions.length === 0 ? <VersionSwitcher /> : null}
           <ThemeSwitch />
           {primaryCta ? (
             <IntentPrefetchLink href={primaryCta.href} className="thally-docs-primary inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-[10px] bg-primary px-[15px] text-[0.84rem] font-semibold text-primary-foreground transition hover:brightness-110 active:scale-[0.98]">{primaryCta.label}</IntentPrefetchLink>

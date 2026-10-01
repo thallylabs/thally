@@ -195,6 +195,7 @@ export function normalizeExplicitHeadingIds(raw: string, warn?: (message: string
         const heading = trimmed.slice(0, marker).trimEnd()
         // Braces in the "id" mean this is prose like `{#if} blocks {x}`, not one anchor.
         if (/[{}]/.test(id)) return line
+        // Numeric starts are valid here; Mintlify uses ids such as 429-responses.
         if (HTML_ID.test(id)) return `<a id="${id}"></a>\n${heading}`
         warn?.(`Heading anchor {#${id}} is not a valid HTML id and was removed from "${heading.replace(/^\s*#+\s*/, '')}".`)
         return heading
@@ -490,6 +491,11 @@ function bracketDelta(line: string): number {
 /** Trimmed line opens a top-level `import`/`export` ESM statement (Docusaurus/MDX allow one anywhere a block can start, not just at the top of the file). */
 const ESM_OPEN = /^(?:import|export)\b/
 
+/** Keep TeX as a literal JSX string so braces and backslashes survive MDX parsing. */
+function latexElement(source: string, block = false): string {
+  return `<Latex${block ? ' block' : ''}>{${JSON.stringify(source)}}</Latex>`
+}
+
 export function protectMathBlocks(raw: string): { body: string; converted: boolean; guardTriggered?: boolean } {
   const { front, body } = splitFrontmatterBlock(raw)
   const lines = body.split(/\r\n|\r|\n/)
@@ -513,7 +519,7 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
     const trimmed = line.trim()
     if (mathBlockDelimiter) {
       if (trimmed === mathBlockDelimiter) {
-        output.push('```math', ...mathLines, '```')
+        output.push(latexElement(mathLines.join('\n'), true))
         mathBlockDelimiter = null
         mathLines = []
         converted = true
@@ -577,11 +583,11 @@ export function protectMathBlocks(raw: string): { body: string; converted: boole
         (whole: string, block: string | undefined, inline: string | undefined) => {
           if (block !== undefined) {
             converted = true
-            return `\`$$${block}$$\``
+            return latexElement(unmask(block))
           }
           if (inline !== undefined && hasTexSignal(unmask(inline))) {
             converted = true
-            return `\`$${inline}$\``
+            return latexElement(unmask(inline))
           }
           return whole
         },
@@ -1714,6 +1720,44 @@ function injectReactHookImports(body: string): string {
   return used.length > 0 ? `import { ${used.join(', ')} } from 'react'\n\n${body}` : body
 }
 
+/** Keep authored paragraph styling without emitting an invalid <p><p> tree. */
+function normalizeFlowParagraphContainers(body: string): string {
+  if (!body.includes('<p')) return body
+  interface FlowNode {
+    type: string
+    name?: string | null
+    children?: Array<FlowNode>
+    position?: { start: { offset?: number }; end: { offset?: number } }
+  }
+  let tree: FlowNode
+  try {
+    tree = descriptionParser.parse(body) as FlowNode
+  } catch {
+    return body
+  }
+  const edits: Array<{ offset: number; value: string }> = []
+  function visit(node: FlowNode): void {
+    if (node.type === 'mdxJsxFlowElement' && node.name === 'p'
+      && node.children?.some((child) => child.type === 'paragraph' || child.type === 'list' || child.type === 'mdxJsxFlowElement')) {
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start !== undefined && end !== undefined && body.slice(start, start + 2) === '<p') {
+        const closing = body.slice(start, end).match(/<\/p\s*>\s*$/i)
+        if (closing?.index !== undefined) {
+          edits.push({ offset: start + 1, value: 'div' })
+          edits.push({ offset: start + closing.index + 2, value: 'div' })
+        }
+      }
+    }
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(tree)
+  // Replace only the tag names; every class, inline style, and child stays
+  // authored. Descending offsets keep nested paragraph wrappers stable.
+  return edits.sort((a, b) => b.offset - a.offset)
+    .reduce((text, edit) => text.slice(0, edit.offset) + edit.value + text.slice(edit.offset + 1), body)
+}
+
 /** Normalize only syntax Thally cannot render; supported source JSX stays intact. */
 export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapMdxCodeBlocks = true): string {
   // A caller that doesn't know the source platform (the URL crawler, when it
@@ -1741,6 +1785,17 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
     rewritten = replaceOutsideCode(rewritten, (segment) => segment.replace(
       /:([+\w-]+):/g,
       (shortcode: string, name: string) => nameToEmoji[name] ?? shortcode,
+    ))
+    // Some authored JSX uses Docusaurus' runtime helper through `require()`
+    // directly in a link attribute. That package is absent from a generated
+    // Thally site; a static, confined path can be projected without running
+    // source code or leaving a build-breaking module reference.
+    rewritten = replaceOutsideCode(rewritten, (segment) => segment.replace(
+      /\b(href|src)=\{\s*require\(\s*(['"])@docusaurus\/useBaseUrl\2\s*\)\.default\(\s*(['"])([^'"]+)\3\s*\)\s*\}/g,
+      (original: string, attribute: string, _moduleQuote: string, _pathQuote: string, path: string) => {
+        if (!/^[\w./~%-]+$/.test(path) || path.split('/').includes('..')) return original
+        return `${attribute}="/${path.replace(/^\.\//, '').replace(/^\/+/, '')}"`
+      },
     ))
     // Docusaurus injects these theme components globally. Thally also
     // exposes its equivalents globally, so source-only imports must not survive.
@@ -1840,7 +1895,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
       return normalizeMdx(body, platform, false)
     }
   }
-  return normalized
+  return normalizeFlowParagraphContainers(normalized)
 }
 
 /** Parse source Markdown or MDX into the canonical page representation. */

@@ -32,10 +32,10 @@ describe('snippet replacement versus MDX comments', () => {
     expect(body).not.toContain('Real')
   })
 
-  it('does not nest a missing-snippet comment inside a one-line comment, and keeps the warning', () => {
+  it('does not nest a missing-snippet comment inside a one-line comment', () => {
     const { body, warnings } = migrate(`${IMPORT}{/* <Extract /> */}\n\nvisible`)
     expect(body).not.toContain('Missing imported snippet')
-    expect(warnings.map((warning) => warning.message).join('\n')).toContain('/snippets/extract.mdx could not be resolved')
+    expect(warnings.some((warning) => warning.code === 'missing-page')).toBe(false)
   })
 
   it('still comments out a missing snippet used at the top level', () => {

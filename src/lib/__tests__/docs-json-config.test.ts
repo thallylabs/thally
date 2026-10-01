@@ -13,8 +13,11 @@ import {
   getNavContext,
   getNavigablePageIds,
   getNavigationPresentation,
+  getNavigationVersions,
+  getNavigationShortcuts,
   getSidebarCollections,
   getStructuralTheme,
+  getStylesheetsConfig,
 } from '@/data/docs'
 
 afterEach(() => {
@@ -24,6 +27,56 @@ afterEach(() => {
 })
 
 describe('release-bound docs.json', () => {
+  it('accepts local version routes and rejects external or traversal destinations', () => {
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], navigation: { versions: [
+      { label: 'v2', prefix: '', href: '/introduction', default: true },
+      { label: 'v1', prefix: 'v1', href: '/v1/introduction' },
+      { label: 'bad', prefix: '..', href: '/other' },
+      { label: 'remote', prefix: 'remote', href: 'https://example.com' },
+    ] } }))
+    resetDocsJsonConfigForTests()
+    expect(getNavigationVersions().map((version) => version.label)).toEqual(['v2', 'v1'])
+  })
+
+  it('keeps hidden non-default version tabs available to the version picker', () => {
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({
+      tabs: [
+        { tab: 'v2: Docs', version: 'v2', displayLabel: 'Docs', groups: [{ group: 'Start', pages: ['introduction'] }] },
+        { tab: 'v1: Docs', version: 'v1', displayLabel: 'Docs', hidden: true, groups: [{ group: 'Start', pages: ['v1/introduction'] }] },
+        { tab: 'Internal', hidden: true, groups: [{ group: 'Start', pages: ['internal'] }] },
+      ],
+      navigation: { versions: [
+        { label: 'v2', prefix: '', href: '/introduction', default: true },
+        { label: 'v1', prefix: 'v1', href: '/v1/introduction' },
+      ] },
+    }))
+    resetDocsJsonConfigForTests()
+    expect(getSidebarCollections().map((collection) => collection.id)).toEqual(['v2-docs', 'v1-docs'])
+  })
+
+  it('keeps safe global sidebar links in source order', () => {
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], navigation: { shortcuts: [
+      { label: 'Playground', href: 'https://example.com/play', icon: 'play' },
+      { label: 'Support', href: 'mailto:support@example.com' },
+      { label: 'Unsafe', href: 'javascript:alert(1)' },
+    ] } }))
+    resetDocsJsonConfigForTests()
+    expect(getNavigationShortcuts()).toEqual([
+      { label: 'Playground', href: 'https://example.com/play', icon: 'play' },
+      { label: 'Support', href: 'mailto:support@example.com' },
+    ])
+  })
+  it('accepts only local CSS paths in imported stylesheet config', () => {
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], stylesheets: [
+      '/migrated/site/style.css', 'https://example.com/remote.css', '/a/../private.css', '//example.com/style.css', '/image.svg',
+    ] }))
+    resetDocsJsonConfigForTests()
+    expect(getStylesheetsConfig()).toEqual(['/migrated/site/style.css'])
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], stylesheets: { href: '/style.css' } }))
+    resetDocsJsonConfigForTests()
+    expect(getStylesheetsConfig()).toEqual([])
+  })
+
   it('uses accent content icons unless a site explicitly selects neutral icons', () => {
     expect(getContentIconTone()).toBe('accent')
 

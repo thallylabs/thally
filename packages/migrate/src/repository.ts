@@ -9,6 +9,7 @@
  */
 
 import { compileSync } from '@mdx-js/mdx'
+import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import {
   closeSync,
@@ -30,6 +31,7 @@ import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
 
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent } from './components.js'
+import { projectAuthoredStyles } from './source-styles.js'
 
 import {
   addDocusaurusTranslatedHeadingAliases,
@@ -95,6 +97,10 @@ const MAX_WITHHELD_SCAN_BYTES = MAX_PAGE_BYTES * 8
 /** Per-page warnings for restricted pages the file budget dropped; the rest are counted in one more. */
 const MAX_DROPPED_GATED_WARNINGS = 20
 const MAX_ASSET_BYTES = 25_000_000
+// A referenced screenshot or animation is part of the page, not a spare
+// repository asset. Allow a larger individual file while retaining a firm
+// aggregate copy budget for untrusted repositories.
+const MAX_REFERENCED_ASSET_BYTES = 100_000_000
 const MAX_TOTAL_ASSET_BYTES = 500_000_000
 /** A Git LFS pointer file's fixed opening line (the smudge filter replaces this with the real binary; skipping it during clone leaves this text in place). */
 const GIT_LFS_POINTER_PREFIX = 'version https://git-lfs.github.com/spec/v1'
@@ -2495,6 +2501,23 @@ function rewriteRepositoryAssetLinks(
 
 const LOCAL_EXPORT_DECLARATION = /^\s*export\s+(?:const|let|var|function|class|async\s+function)\s+([A-Za-z_$][\w$]*)/
 
+/** Mintlify leaves JSX comments in MDX. Snippet tags inside them are examples or disabled content. */
+function replaceOutsideMdxComments(body: string, transform: (segment: string) => string): string {
+  const comment = /\{\/\*[\s\S]*?\*\/\}/g
+  let cursor = 0
+  let output = ''
+  for (const match of body.matchAll(comment)) {
+    output += transform(body.slice(cursor, match.index)) + match[0]
+    cursor = match.index! + match[0].length
+  }
+  return output + transform(body.slice(cursor))
+}
+
+/** Keep code examples and disabled JSX opaque during snippet expansion. */
+function replaceOutsideCodeAndMdxComments(body: string, transform: (segment: string) => string): string {
+  return replaceOutsideCode(body, (segment) => replaceOutsideMdxComments(segment, transform))
+}
+
 /**
  * Names a page declares itself with a top-level `export const/function/class`.
  * Mintlify treats every file under `/snippets/` as an implicitly available
@@ -2566,7 +2589,7 @@ function inlineMdxSnippets(
     })
     return `{/* ${verdict.kind === 'oversized' ? 'Oversized' : 'Unreadable'} content not inlined: ${shown} */}`
   }
-  let withoutImports = replaceOutsideCode(raw, (source) => source.replace(
+  let withoutImports = replaceOutsideCodeAndMdxComments(raw, (source) => source.replace(
     SNIPPET_IMPORT_PATTERN,
     (_statement, namedComponent: string | undefined, defaultComponent: string | undefined, sourcePath: string) => {
       const componentName = (namedComponent ?? defaultComponent) as string
@@ -2593,6 +2616,14 @@ function inlineMdxSnippets(
         else snippets.set(componentName, snippetComponentBody(nested, componentName))
         return ''
       } catch {
+        // Disabled JSX examples may import a snippet that no longer exists.
+        // An unused import is safe to drop without a missing-page warning.
+        let hasLiveUsage = false
+        replaceOutsideCodeAndMdxComments(raw, (segment) => {
+          if (new RegExp(`<${componentName}(?:\\s|/?>)`).test(segment)) hasLiveUsage = true
+          return segment
+        })
+        if (!hasLiveUsage) return ''
         warnings.push({
           code: 'missing-page',
           message: `Imported snippet ${sourcePath} could not be resolved and was left as a comment.`,
@@ -2603,7 +2634,7 @@ function inlineMdxSnippets(
       }
     },
   ))
-  withoutImports = replaceOutsideCode(withoutImports, (source) => source.replace(
+  withoutImports = replaceOutsideCodeAndMdxComments(withoutImports, (source) => source.replace(
     SNIPPET_VALUE_IMPORT_PATTERN,
     (statement: string, names: string, sourcePath: string) => {
       const bindings = names.split(',').map((name) => name.trim()).filter(Boolean).map((name) => {
@@ -2652,8 +2683,13 @@ function inlineMdxSnippets(
   // elsewhere in the same docs project.
   const localNames = locallyDeclaredNames(withoutImports)
   for (const [componentName, candidate] of globalAliases) {
+    let hasLiveUsage = false
+    replaceOutsideCodeAndMdxComments(withoutImports, (source) => {
+      if (new RegExp(`<${componentName}(?:\\s|/?>)`).test(source)) hasLiveUsage = true
+      return source
+    })
     if (snippets.has(componentName) || localNames.has(componentName) || gate?.(candidate)?.kind === 'gated'
-      || !new RegExp(`<${componentName}(?:\\s|/?>)`).test(withoutImports)) continue
+      || !hasLiveUsage) continue
     const blocked = blockInline(candidate, relative(repositoryRoot, candidate).replace(/\\/g, '/'))
     if (blocked) {
       snippets.set(componentName, blocked)
@@ -2679,12 +2715,11 @@ function inlineMdxSnippets(
     for (const [componentName, snippet] of snippets) {
       segment = segment
         .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)\\s*/>`, 'g'), (tag: string, attributes: string, offset: number, source: string) => {
-          return isolateFences(interpolateSnippet(snippet, attributes), source, offset, offset + tag.length)
+          return isolateFences(closeOpenCodeFence(interpolateSnippet(snippet, attributes)), source, offset, offset + tag.length)
         })
         .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)>([\\s\\S]*?)<\\/${componentName}>`, 'g'), (tag: string, attributes: string, children: string, offset: number, source: string) => {
-          return isolateFences(interpolateSnippet(snippet, attributes, children), source, offset, offset + tag.length)
+          return isolateFences(closeOpenCodeFence(interpolateSnippet(snippet, attributes, children)), source, offset, offset + tag.length)
         })
-
     }
     return segment.replace(SNIPPET_TAG_PATTERN, (tag: string, doubleQuoted: string | undefined, singleQuoted: string | undefined, offset: number, source: string) => {
       const filePath = (doubleQuoted ?? singleQuoted)!
@@ -2700,7 +2735,7 @@ function inlineMdxSnippets(
         if (!candidate) throw new Error('file not found')
         const blocked = blockInline(candidate, filePath, `Snippet file="${filePath}"`)
         if (blocked) return blocked
-        return isolateFences(inlineMdxSnippets(
+        return isolateFences(closeOpenCodeFence(inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
           candidate,
           repositoryRoot,
@@ -2709,7 +2744,7 @@ function inlineMdxSnippets(
           siteRoot,
           globalAliases,
           gate,
-        ), source, offset, offset + tag.length)
+        )), source, offset, offset + tag.length)
       } catch {
         warnings.push({
           code: 'missing-page',
@@ -3026,7 +3061,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const mintignoreFilteredFiles = mintignoreMatcher
     ? scannedFiles.filter((file) => !mintignoreMatcher.ignores(file.relativePath))
     : scannedFiles
-  const discoveryBudgetApplied = discoveryRank !== undefined && mintignoreFilteredFiles.length > sourceBudget
+  // Mintlify snippet modules are dependencies loaded by path while inlining
+  // pages; they are not published pages. The selector gives snippets their own
+  // bounded group so they cannot evict translated or versioned pages.
+  const isUnreferencedSnippetModule = (file: ScannedFile): boolean => (
+    file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
+    && isDocumentationExtension(file.relativePath)
+    && !referenceOrder.has(normalizedReferenceKey(file.relativePath))
+  )
   const files = discoveryRank
     ? selectFilesWithinBudget(mintignoreFilteredFiles, discoveryRank, warnings, allVersionPrefixes, sourceBudget)
     : mintignoreFilteredFiles
@@ -3141,6 +3183,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     for (const file of mintignoreFilteredFiles) {
       if (keptFiles.has(file) || !isDocFile(file)) continue
+      // Snippet modules do not consume the page budget. Classify their access
+      // rules without treating every ordinary snippet as a dropped page.
+      if (isUnreferencedSnippetModule(file)) {
+        if (classifyPageGate(file).reason) withheldDocFiles.push(file)
+        continue
+      }
       // Every dropped document, snippet or page, fails the site closed for assets.
       droppedPageCount++
       if (!isGateCandidate(file)) {
@@ -3219,6 +3267,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     return leftOrder - rightOrder || left.relativePath.localeCompare(right.relativePath)
   })
   const snippetAliases = platform === 'mintlify' && mintlifyProjectRoot
+    // Snippets are dependencies, not publishable pages. They stay outside the
+    // page budget but must remain available for implicit Mintlify aliases.
     ? globalSnippetAliases(files, repositoryDir, mintlifyProjectRoot)
     : new Map<string, string>()
   // A restricted page the budget dropped is not published or saved, but the
@@ -3435,13 +3485,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // handled at this same point is now converted earlier, above, before
       // `componentMigrator.transform` gets a chance to choke on it too.
       const protectedMath = protectMathBlocks(raw)
-      if (protectedMath.converted) {
-        warnings.push({
-          code: 'unsupported-config',
-          message: "Math (KaTeX '$$...$$') has no renderer in Thally yet; it was kept as a fenced code block instead of being dropped.",
-          source: relative(repositoryDir, file.absolutePath).replace(/\\/g, '/'),
-        })
-      } else if (protectedMath.guardTriggered) {
+      if (protectedMath.guardTriggered) {
         warnings.push({
           code: 'unsupported-config',
           message: 'A suspected math span looked like it needed converting, but doing so broke the page; the page was kept as originally authored instead.',
@@ -3561,7 +3605,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       page.body = replaceUnknownComponents(page.body, (name) => {
         warnings.push({
           code: 'unsupported-config',
-          message: `Component <${name}> has no equivalent in Thally and wasn't found on this page; it was replaced with a plain <div> (or removed, if self-closing) so the page still builds. Add a matching component or edit the page.`,
+          message: `Unresolved MDX component <${name}> was replaced with a plain <div> (or removed, if self-closing) so the page still builds. It may be a site-authored or third-party implementation; review its source before adding a Thally equivalent.`,
           source: file.relativePath,
         })
       })
@@ -3728,9 +3772,39 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const source = /^src\/mdx\/migrated\/[^/]+\/source\/(.+)$/.exec(file.path)?.[1]
     return source ? [resolvePath(repositoryDir, source)] : []
   }))
+  // Mintlify loads its root stylesheet implicitly. Project it once, before
+  // asset publication, so only URLs retained in authored rules can keep an
+  // otherwise withheld asset public. The unfiltered source is never copied.
+  const rootStylesheetPath = platform === 'mintlify' && mintlifyProjectRoot
+    ? resolveWithin(mintlifyProjectRoot, 'style.css')
+    : undefined
+  const hasRootStylesheet = Boolean(rootStylesheetPath && existsSync(rootStylesheetPath)
+    && lstatSync(rootStylesheetPath).isFile() && !lstatSync(rootStylesheetPath).isSymbolicLink())
+  let rootStyleProjection: ReturnType<typeof projectAuthoredStyles> | undefined
+  let rootStyleProblem: 'unsafe' | 'parse' | undefined
+  if (hasRootStylesheet && rootStylesheetPath && lstatSync(rootStylesheetPath).size <= MAX_ASSET_BYTES) {
+    const css = readFileSync(rootStylesheetPath, 'utf8')
+    // An import may fetch arbitrary CSS; URL schemes that read local files or
+    // execute script are not transferable into a public Thally stylesheet.
+    if (/@import\b|url\s*\(\s*['"]?\s*(?:javascript:|file:)/i.test(css)) rootStyleProblem = 'unsafe'
+    else {
+      try {
+        rootStyleProjection = projectAuthoredStyles(css, [
+          ...pages.map((page) => page.body),
+          ...(componentMigrator?.files() ?? []).map((file) => typeof file.content === 'string' ? file.content : ''),
+        ])
+      } catch {
+        rootStyleProblem = 'parse'
+      }
+    }
+  }
+  if (trackPublishedRefs && rootStyleProjection?.css) {
+    addPathReferences(rootStyleProjection.css, '', publishedExact, publishedLoose)
+  }
   const siteAssetPaths = new Map<string, 'style' | 'script' | 'font'>()
   const fontAssetByRelative = new Map<string, string>()
   for (const file of [...files, ...repositoryAssets, ...fernReferencedAssets]) {
+    if (rootStylesheetPath && file.absolutePath === rootStylesheetPath) continue
     const firstSegment = file.relativePath.split('/', 1)[0].toLowerCase()
     const siteKind = platform !== 'mintlify' ? undefined
       : fontRelativePaths.has(file.relativePath) ? 'font' as const
@@ -3807,7 +3881,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const lfsPointerAssets: Array<string> = []
   const ambiguouslyNamedAssets: Array<string> = []
   for (const { file, assetPath, size } of orderedAssetCandidates) {
-    if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
+    const individualLimit = referencedAssetPaths.has(assetPath) ? MAX_REFERENCED_ASSET_BYTES : MAX_ASSET_BYTES
+    if (size > individualLimit || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
       overBudgetAssets.push(file.relativePath)
       if (referencedAssetPaths.has(assetPath)) overBudgetReferenced++
       continue
@@ -3850,7 +3925,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     for (const entry of copiedSite.filter((item) => item.kind === 'style')) {
       warnings.push({
         code: 'unsupported-config',
-        message: `Migration gap: custom stylesheet ${entry.path} is NOT applied. It was copied to public/${entry.path} but no page loads it, Thally cannot load a stylesheet from docs.json, and Mintlify-specific selectors will not match Thally's markup. Port the styles you need by hand into src/app/globals.css.`,
+        message: `Migration gap: custom stylesheet ${entry.path} is NOT applied. It was copied to public/${entry.path} but was not declared in docs.json stylesheets; its selectors may target Mintlify's markup. Review and port its authored rules into a Thally stylesheet.`,
         source: entry.path,
       })
     }
@@ -3876,7 +3951,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   if (overBudgetAssets.length > 0) {
     warnings.push({
       code: 'limit-reached',
-      message: `${overBudgetAssets.length} asset file${overBudgetAssets.length === 1 ? ' was' : 's were'} not copied because files over ${MAX_ASSET_BYTES / 1_000_000} MB, or beyond ${MAX_TOTAL_ASSET_BYTES / 1_000_000} MB in total, are skipped: ${listAssetPaths(overBudgetAssets)}. `
+      message: `${overBudgetAssets.length} asset file${overBudgetAssets.length === 1 ? ' was' : 's were'} not copied because unreferenced files over ${MAX_ASSET_BYTES / 1_000_000} MB, referenced files over ${MAX_REFERENCED_ASSET_BYTES / 1_000_000} MB, or files beyond ${MAX_TOTAL_ASSET_BYTES / 1_000_000} MB in total, are skipped: ${listAssetPaths(overBudgetAssets)}. `
         + (overBudgetReferenced > 0 ? `${overBudgetReferenced} of them ${overBudgetReferenced === 1 ? 'is' : 'are'} used by pages, so those images will be broken until you copy ${overBudgetAssets.length === 1 ? 'it' : 'them'}. ` : '')
         + `Copy ${overBudgetAssets.length === 1 ? 'it' : 'them'} into public/ manually.`,
     })
@@ -3889,12 +3964,39 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     })
   }
 
-  // `selectFilesWithinBudget` already emitted a detailed warning (dropped
-  // count + versions) when it ran; this generic fallback only covers the
-  // case it couldn't run (no `discoveryRank`, e.g. Docusaurus) or the rare
-  // case where later additions (Fern's external sourcePaths, above) pushed
-  // the count back over budget after the event.
-  if (!discoveryBudgetApplied && files.length >= sourceBudget) {
+  // Mintlify loads root style.css implicitly. Keep rules for authored markup,
+  // but never ship selectors coupled to Mintlify's private shell classes.
+  // Thally owns the navbar, cards and footer through docs.json and its theme.
+  if (hasRootStylesheet && rootStylesheetPath && mintlifyProjectRoot) {
+    const size = lstatSync(rootStylesheetPath).size
+    if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
+      warnings.push({ code: 'limit-reached', message: 'Mintlify root style.css exceeded the asset budget and was not imported.', source: 'style.css' })
+    } else if (rootStyleProblem === 'unsafe') {
+      warnings.push({ code: 'unsupported-config', message: 'Mintlify root style.css contains a CSS import or unsafe URL; review and import it manually.', source: 'style.css' })
+    } else if (rootStyleProblem === 'parse' || !rootStyleProjection) {
+      // Invalid CSS is reported without breaking an otherwise valid site.
+      warnings.push({ code: 'unsupported-config', message: 'Mintlify root style.css could not be parsed and was not imported.', source: 'style.css' })
+    } else {
+      if (rootStyleProjection.omittedSelectors > 0) warnings.push({
+        code: 'unsupported-config',
+        source: 'style.css',
+        message: `Skipped ${rootStyleProjection.omittedSelectors} stylesheet selector${rootStyleProjection.omittedSelectors === 1 ? '' : 's'} that target platform-owned or unreferenced markup. Recreate any intentional shell customization with Thally configuration.`,
+      })
+      if (rootStyleProjection.css.trim()) {
+        const identity = createHash('sha256').update(componentSourceIdentity(options.sourceUrl, repositoryDir, mintlifyProjectRoot)).digest('hex').slice(0, 12)
+        const assetPath = `migrated/${identity}/style.css`
+        const content = Buffer.from(rootStyleProjection.css)
+        assets.push({ path: assetPath, content })
+        docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), `/${assetPath}`] }
+        totalAssetBytes += content.length
+      }
+    }
+  }
+
+  // Ranked discovery gives pages, snippets and assets separate budgets and
+  // reports dropped groups itself. A total across those groups is not evidence
+  // that the scan stopped early. Only the unranked walk uses this fallback.
+  if (!discoveryRank && files.length >= sourceBudget) {
     warnings.push({ code: 'limit-reached', message: `Stopped scanning after ${sourceBudget} files, so the rest of the repository was not looked at. Run the migration on a smaller part of the repository with --docs-dir.` })
   }
   if (platform === 'docusaurus') {

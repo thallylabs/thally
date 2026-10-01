@@ -30,7 +30,10 @@ function matchesPath(href: string, pathname: string) {
   // A page only owns its exact route. Prefix matching is useful for opening a
   // parent group, but marks both `/guide` and `/guide/advanced` as the current
   // page when a collection contains a landing page alongside its children.
+  // The home document is also reachable at `/introduction` on many migrated
+  // sites; treat that exact alias as the same page without prefix matching.
   return normalizedPath === normalizedHref
+    || (normalizedHref === '/' && normalizedPath === '/introduction')
 }
 
 function groupContainsPath(group: NavigationGroup, pathname: string): boolean {

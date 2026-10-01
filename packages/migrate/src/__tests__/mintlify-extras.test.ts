@@ -170,14 +170,14 @@ describe('site-wide scripts, styles and fonts', () => {
   it('copies css, js and referenced fonts only, and wires scripts', () => {
     const bundle = site(files)
     const paths = bundle.assets.map((asset) => asset.path).sort()
-    expect(paths).toEqual(['assets/custom.js', 'fonts/mine.woff2', 'style.css'])
+    expect(paths).toEqual(['assets/custom.js', 'fonts/mine.woff2'])
     expect(bundle.docsConfig.customScripts).toEqual([{ src: '/assets/custom.js', strategy: 'afterInteractive' }])
   })
 
-  it('warns that the stylesheet is preserved but not applied, and about fonts', () => {
+  it('warns about shell CSS, fonts, and copied scripts', () => {
     const bundle = site(files)
     const messages = bundle.warnings.map((warning) => warning.message)
-    expect(messages.some((message) => /Migration gap: custom stylesheet style\.css is NOT applied/.test(message))).toBe(true)
+    expect(messages.some((message) => /Skipped 1 stylesheet selector/.test(message))).toBe(true)
     expect(messages.some((message) => /"Mine".*copied to public\/fonts\/mine\.woff2/.test(message))).toBe(true)
     expect(messages.some((message) => /"Remote".*remote URL and was not downloaded/.test(message))).toBe(true)
     expect(messages.some((message) => /customScripts/.test(message))).toBe(true)
@@ -648,7 +648,7 @@ describe('assets used only by withheld pages', () => {
     ['docs.json logo', { 'docs.json': JSON.stringify({ logo: { light: '/img/x.png', dark: '/img/x.png' }, navigation: { pages: ['pub', 'secret'] } }) }],
     ['docs.json favicon', { 'docs.json': JSON.stringify({ favicon: '/img/x.png', navigation: { pages: ['pub', 'secret'] } }) }],
     ['docs.json background', { 'docs.json': JSON.stringify({ background: { image: '/img/x.png' }, navigation: { pages: ['pub', 'secret'] } }) }],
-    ['stylesheet url()', { 'style.css': 'body { background: url("img/x.png") }\n' }],
+    ['stylesheet url()', { 'pub.mdx': '---\ntitle: Pub\n---\n\n<div className="widget">Hello.</div>\n', 'style.css': '.widget { background: url("img/x.png") }\n' }],
     ['snippet', { 'pub.mdx': '---\ntitle: Pub\n---\n\n<Snippet file="s.mdx" />\n', 'snippets/s.mdx': '![s](/img/x.png)\n' }],
   ])('keeps an otherwise unreferenced image public on a gated site when used by a published %s', (_name, extra) => {
     const bundle = site({
@@ -660,6 +660,18 @@ describe('assets used only by withheld pages', () => {
     })
     expect(publicPaths(bundle).includes('img/x.png')).toBe(true)
     expect((bundle.quarantinedFiles ?? []).some((file) => file.path.endsWith('img/x.png'))).toBe(false)
+  })
+
+  it('does not publish an asset referenced only by a discarded shell selector', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub', 'secret'] } }),
+      'pub.mdx': page('Pub'),
+      'secret.mdx': page('Secret', 'groups: [admin]\n'),
+      'style.css': 'body { background: url("img/x.png") }\n',
+      'img/x.png': png,
+    })
+    expect(publicPaths(bundle)).not.toContain('img/x.png')
+    expect(publicPaths(bundle)).not.toContain('style.css')
   })
 
   it('keeps an image that a published page names only in its frontmatter', () => {
@@ -698,21 +710,20 @@ describe('dashboard access warning', () => {
   })
 })
 
-describe('custom stylesheet migration gap', () => {
+describe('custom stylesheet migration', () => {
   const cssWarnings = (bundle: MigrationBundle) => bundle.warnings.filter((warning) => warning.code === 'unsupported-config' && /stylesheet/i.test(warning.message))
 
-  it('names the stylesheet as a migration gap with where to port it', () => {
-    const warnings = cssWarnings(site({
+  it('reports platform shell selectors that cannot be projected', () => {
+    const bundle = site({
       'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }),
       'a.mdx': page('A'),
       'style.css': '#navbar { color: red }\n',
-    }))
+    })
+    const warnings = cssWarnings(bundle)
     expect(warnings).toHaveLength(1)
     expect(warnings[0].source).toBe('style.css')
-    expect(/Migration gap/.test(warnings[0].message)).toBe(true)
-    expect(/NOT applied/.test(warnings[0].message)).toBe(true)
-    expect(/Mintlify-specific selectors will not match/.test(warnings[0].message)).toBe(true)
-    expect(/by hand into src\/app\/globals\.css/.test(warnings[0].message)).toBe(true)
+    expect(warnings[0].message).toMatch(/Skipped 1 stylesheet selector/)
+    expect(bundle.docsConfig.stylesheets).toBeUndefined()
   })
 
   it('does not warn when there is no stylesheet', () => {

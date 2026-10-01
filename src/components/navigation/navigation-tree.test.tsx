@@ -12,6 +12,16 @@ vi.mock('./intent-prefetch-link', () => ({
 import { NavigationTree } from './navigation-tree'
 
 describe('sidebar current page', () => {
+  it('selects the home document on its introduction alias', () => {
+    const nodes = [
+      { type: 'page', item: { id: 'introduction', title: 'Introduction', href: '/' } },
+      { type: 'page', item: { id: 'other', title: 'Other', href: '/other' } },
+    ] as Array<NavigationNode>
+    const html = renderToStaticMarkup(<NavigationTree nodes={nodes} pathname="/introduction" />)
+    expect(html.match(/aria-current="page"/g)).toHaveLength(1)
+    expect(html).toContain('href="/" aria-current="page"')
+  })
+
   it('selects the child route without also selecting its parent landing page', () => {
     const nodes = [
       { type: 'page', item: { id: 'pnpr', title: 'Introduction', href: '/pnpr' } },

@@ -74,9 +74,23 @@ export interface NavigationPresentation {
   display: 'tabs' | 'dropdown'
 }
 
+export interface DocsNavigationVersion {
+  label: string
+  prefix: string
+  href: string
+  default?: boolean
+}
+
+export interface DocsNavigationShortcut {
+  label: string
+  href: string
+  icon?: string
+}
+
 export interface SidebarCollection {
   id: string
   label: string
+  version?: string
   description?: string
   icon?: string
   sections: Array<NavigationSection>
@@ -135,6 +149,8 @@ export interface DocsJsonApiConfig {
 
 interface DocsJsonTab {
   tab: string
+  displayLabel?: string
+  version?: string
   description?: string
   icon?: string
   href?: string
@@ -227,6 +243,8 @@ export type ContentIconTone = 'neutral' | 'accent'
 
 interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
+  /** Local, customer-owned stylesheets served from public/. */
+  stylesheets?: Array<string>
   /** Manual API pages (`api:` frontmatter): default server(s) and auth for the playground. */
   api?: {
     mdx?: {
@@ -236,6 +254,8 @@ interface DocsJsonConfig {
   }
   navigation?: {
     display?: 'tabs' | 'dropdown'
+    versions?: Array<DocsNavigationVersion>
+    shortcuts?: Array<DocsNavigationShortcut>
   }
   redirects?: Array<DocsJsonRedirect>
   banner?: DocsJsonBanner
@@ -831,7 +851,10 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
   }
 
   const collections = ((locale ? config.i18n?.navigation?.[locale] : undefined) ?? config.tabs)
-    .filter((tab) => !tab.hidden)
+    // Mintlify marks non-default versions hidden in the combined navigation.
+    // Once a version picker scopes the tabs, those entries must be available
+    // when their version is active or its entire route renders an empty shell.
+    .filter((tab) => !tab.hidden || Boolean(tab.version && config.navigation?.versions?.some((version) => version.label === tab.version)))
     .map((tab) => {
       const id = slugifyId(tab.tab) || tab.tab.toLowerCase()
       const groups = tab.groups ?? []
@@ -852,7 +875,7 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
       const sections = [
         ...(rootNodes.length > 0 ? [{
           id: `nav-root-${id}`,
-          title: tab.tab,
+          title: tab.displayLabel ?? tab.tab,
           items: collectNavigationItems(rootNodes),
           nodes: rootNodes,
         }] : []),
@@ -861,7 +884,8 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
 
       return {
         id,
-        label: tab.tab,
+        label: tab.displayLabel ?? tab.tab,
+        version: tab.version,
         description: tab.description,
         icon: tab.icon,
         sections,
@@ -1175,6 +1199,41 @@ export function getIntegrationsConfig(): unknown {
 
 export function getCustomScriptsConfig(): Array<DocsJsonScript> {
   return docsConfig().customScripts ?? []
+}
+
+/** Only local CSS files may be injected into the document head. */
+export function getStylesheetsConfig(): Array<string> {
+  const configured = docsConfig().stylesheets
+  if (!Array.isArray(configured)) return []
+  return configured.slice(0, 16).filter((path): path is string =>
+    typeof path === 'string' && /^\/[A-Za-z0-9_./-]+\.css$/.test(path)
+      && !path.split('/').some((segment) => segment === '.' || segment === '..')
+      && !path.includes('//'),
+  )
+}
+
+/** Version navigation stays in docs.json so scaffolded sites carry it intact. */
+export function getNavigationVersions(): Array<DocsNavigationVersion> {
+  const versions = docsConfig().navigation?.versions
+  if (!Array.isArray(versions)) return []
+  return versions.slice(0, 32).filter((item): item is DocsNavigationVersion =>
+    Boolean(item && typeof item.label === 'string' && item.label.trim()
+      && typeof item.prefix === 'string' && (!item.prefix || (/^[A-Za-z0-9._-]+$/.test(item.prefix) && item.prefix !== '.' && item.prefix !== '..'))
+      && typeof item.href === 'string' && /^\/(?!\/)[A-Za-z0-9_./-]*$/.test(item.href)
+      && !item.href.split('/').some((segment) => segment === '.' || segment === '..')),
+  )
+}
+
+/** Global shortcut links sit above the active collection's sidebar tree. */
+export function getNavigationShortcuts(): Array<DocsNavigationShortcut> {
+  const shortcuts = docsConfig().navigation?.shortcuts
+  if (!Array.isArray(shortcuts)) return []
+  return shortcuts.slice(0, 24).filter((item): item is DocsNavigationShortcut =>
+    Boolean(item && typeof item.label === 'string' && item.label.trim()
+      && typeof item.href === 'string'
+      && (/^\/(?!\/)[^\s\\]*$/.test(item.href) || /^https?:\/\//i.test(item.href)
+        || /^(?:mailto|tel):[^\s]+$/i.test(item.href))),
+  )
 }
 
 export function getSeoConfig(): DocsJsonSeo {

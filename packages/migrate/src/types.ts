@@ -25,6 +25,9 @@ export interface MigrationNavigationGroup {
 
 export interface MigrationNavigationTab {
   tab: string
+  /** Reader-facing label when `tab` includes a version for unique identity. */
+  displayLabel?: string
+  version?: string
   description?: string
   icon?: string
   href?: string
@@ -65,10 +68,14 @@ export interface MigrationFooterConfig {
 
 export interface MigrationDocsConfig {
   markdown?: { enabled?: boolean }
+  /** Local site-authored CSS projected from a source docs site, served from public/. */
+  stylesheets?: Array<string>
   tabs: Array<MigrationNavigationTab>
   navigation?: {
     /** How sibling documentation collections are presented to readers. */
     display?: 'tabs' | 'dropdown'
+    versions?: Array<{ label: string; prefix: string; href: string; default?: boolean }>
+    shortcuts?: Array<{ label: string; href: string; icon?: string }>
   }
   theme?: 'default' | 'maple' | 'sharp' | 'minimal'
   appearance?: { default?: 'system' | 'light' | 'dark'; showToggle?: boolean }
