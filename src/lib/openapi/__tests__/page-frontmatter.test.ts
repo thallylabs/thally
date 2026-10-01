@@ -86,4 +86,34 @@ describe('findSpecForRef', () => {
     expect(findSpecForRef(dup, 'b/openapi.json')?.id).toBe('two')
     expect(findSpecForRef(dup, 'openapi.json')?.id).toBe('one')
   })
+
+  it('only ever returns a configured spec for hostile refs, never a path built from the ref', () => {
+    const configured = [
+      { id: 'default', label: 'O', source: { type: 'file', path: 'openapi/orders.yaml' } },
+      { id: 'u', label: 'U', source: { type: 'url', url: 'https://api.example.com/spec.json' } },
+    ] as Array<ApiSpecConfig>
+    const hostile = [
+      '__proto__', 'constructor', 'prototype', 'hasOwnProperty', 'toString', 'openapi/../../secret.yaml', '../../etc/passwd', '/etc/passwd', 'C:\\x\\y.yaml',
+      '%2e%2e%2fsecret.yaml', '%252e%252e%252fsecret.yaml', 'openapi\\..\\..\\secret.yaml', 'secret.yaml\0', 'https://user:pw@evil.example/secret.json',
+      'HtTpS://API.example.com./spec.json', 'https://xn--e1afmkfd.example/spec.json', 'https://\u0430pi.example.com/x', 'orders.yaml?x=1#y', '?', '#', '.', '..', '/', '\\',
+      'x'.repeat(100_000),
+    ]
+    for (const ref of hostile) {
+      const found = findSpecForRef(configured, ref)
+      expect(found === null || configured.includes(found), ref).toBe(true)
+    }
+    expect(findSpecForRef(configured, '__proto__')).toBeNull()
+    expect(findSpecForRef(configured, 'openapi/../../secret.yaml')).toBeNull()
+    expect(findSpecForRef(configured, 'orders.yaml?x=1#y')?.id).toBe('default')
+  })
+
+  it('keeps three case-variant sources distinct and in configured order', () => {
+    const three = ['Orders.yaml', 'orders.yaml', 'ORDERS.YAML'].map((path, index) => (
+      { id: `s${index}`, label: path, source: { type: 'file', path } }
+    )) as Array<ApiSpecConfig>
+    expect(findSpecForRef(three, 'Orders.yaml')?.id).toBe('s0')
+    expect(findSpecForRef(three, 'orders.yaml')?.id).toBe('s1')
+    expect(findSpecForRef(three, 'ORDERS.YAML')?.id).toBe('s2')
+    expect(findSpecForRef(three, 'oRdErS.yAmL')?.id).toBe('s0')
+  })
 })

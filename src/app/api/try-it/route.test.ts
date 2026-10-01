@@ -338,4 +338,31 @@ describe('POST /api/try-it for manual api pages', () => {
     const response = await POST(request(manualPayload({ page: { a: 1 } })))
     expect(response.status).toBe(403)
   })
+
+  it('passes a hostile string locale or page verbatim to the lookup, which refuses it, and never reads spec operations', async () => {
+    vi.mocked(getManualApiOperation).mockResolvedValue(null)
+    const hostile = ['../fr', '..%2Ffr', '%252e%252e%252f', '..\\', 'fr/../..', 'fr\u0000', '/etc/passwd', 'C:\\x', 'FR', '', '__proto__', 'constructor', 'hasOwnProperty', 'x'.repeat(100_000)]
+    for (const value of hostile) {
+      expect((await POST(request(manualPayload({ locale: value })))).status).toBe(403)
+      expect((await POST(request(manualPayload({ page: value })))).status).toBe(403)
+    }
+    expect(getApiOperationByKey).not.toHaveBeenCalled()
+  })
+
+  it('does not let an own __proto__ key or prototype names in the envelope act as fields', async () => {
+    const body = '{"__proto__":{"page":"guides/users","locale":"fr"},"constructor":{"prototype":{"page":"x"}},'
+      + '"specId":"default","operationPath":"/posts/{id}","method":"GET","url":"https://api.example.com/v1/posts/42","headers":{"__proto__":"x","constructor":"y"}}'
+    const response = await POST(new NextRequest('https://docs.example.com/api/try-it', { method: 'POST', headers: { 'content-type': 'application/json' }, body }))
+    expect(getManualApiOperation).not.toHaveBeenCalled()
+    expect(getApiOperationByKey).toHaveBeenCalled()
+    expect(response.status).toBe(200)
+  })
+
+  it('treats an array or object page id as no page, so only a published spec operation can match', async () => {
+    vi.mocked(getApiOperationByKey).mockResolvedValue(null)
+    for (const page of [['guides/users'], { toString: 'x' }, 7, null, true]) {
+      expect((await POST(request(manualPayload({ page })))).status).toBe(403)
+    }
+    expect(getManualApiOperation).not.toHaveBeenCalled()
+  })
 })

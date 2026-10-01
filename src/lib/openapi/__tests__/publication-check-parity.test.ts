@@ -58,6 +58,8 @@ describe('thally check page-reference parity', () => {
     'openapi/Orders.yaml GET /h', 'openapi/orders.yaml GET /secret', 'OPENAPI/ORDERS.YAML GET /h', 'orders.yaml GET /secret',
     'HTTPS://Example.COM/V1/api.yaml GET /secret', 'https://example.com/v1/API.yaml GET /secret',
     'webhook orderUpdated', 'b.yaml webhook orderUpdated', 'my spec.json GET /v',
+    '__proto__ GET /v', 'constructor GET /v', 'openapi/../../b.yaml GET /o', '..\\b.yaml GET /o', '%2e%2e%2fb.yaml GET /o',
+    'https://user@EXAMPLE.com./b.yaml GET /o', 'b.yaml?x#y GET /o', 'ORDERS.YAML GET /h', 'orders.yaml GET /v',
   ]
 
   it('parses `openapi:` frontmatter the same way', () => {

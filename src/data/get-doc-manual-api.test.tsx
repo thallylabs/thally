@@ -6,6 +6,7 @@ import { getManualApiOperation } from './manual-api'
 
 const pages = vi.hoisted(() => ({
   files: {} as Record<string, { frontmatter: Record<string, unknown>; source: string }>,
+  touched: [] as Array<string>,
   config: { servers: ['https://httpbin.org'] as Array<string>, auth: { method: 'bearer' } as { method: string } | undefined },
 }))
 
@@ -24,9 +25,14 @@ vi.mock('@/lib/runtime-sources', () => ({ runtimeSourceExists: () => true, readR
 vi.mock('@/lib/content-source', () => ({
   getContentSource: () => ({
     kind: 'filesystem',
-    exists: async (path: string) => path.replace('src/content/', '').replace('.mdx', '') in pages.files,
+    exists: async (path: string) => {
+      pages.touched.push(path)
+      return Object.hasOwn(pages.files, path.replace('src/content/', '').replace('.mdx', ''))
+    },
     read: async (path: string) => {
-      const entry = pages.files[path.replace('src/content/', '').replace('.mdx', '')]
+      pages.touched.push(path)
+      const key = path.replace('src/content/', '').replace('.mdx', '')
+      const entry = Object.hasOwn(pages.files, key) ? pages.files[key] : undefined
       return entry ? { content: entry.source } : null
     },
   }),
@@ -167,3 +173,53 @@ describe('localized manual API pages', () => {
   })
 })
 
+
+describe('hostile locale and page ids reaching the relay lookup', () => {
+  const seed = () => {
+    for (const id of ['relay/tx', 'fr/relay/tx', 'secret']) {
+      pages.files[id] = { frontmatter: { title: 'T', api: 'GET https://api.example.com/users' }, source: '---\ntitle: T\napi: "GET https://api.example.com/users"\n---\n' }
+    }
+    pages.touched.length = 0
+  }
+  const contained = () => {
+    for (const path of pages.touched) {
+      expect(path).toMatch(/^src\/content\/[^\\\0]*$/)
+      expect(path.split('/')).not.toContain('..')
+    }
+  }
+
+  const locales: Array<unknown> = [
+    '../fr', '..%2Ffr', '%2e%2e%2f', '%252e%252e%252f', '..\\', 'fr/../..', 'fr%00', 'fr\u0000', '/etc/passwd', 'C:\\x',
+    '\uFF46\uFF52', 'F\u0052', 'FR', 'Fr', '\u0131', 'f\u0131', '', ' fr', 'fr ', 'fr\n', '__proto__', 'constructor', 'prototype', 'hasOwnProperty', 'toString',
+    'x'.repeat(200_000), ['fr'], { toString: () => 'fr' }, { code: 'fr' }, null, 0, true,
+  ]
+  it.each(locales.map((value, index) => [index, value]))('refuses locale #%s', async (_index, locale) => {
+    seed()
+    expect(await getManualApiOperation('relay/tx', locale as string)).toBeNull()
+    contained()
+  })
+
+  const pageIds = [
+    '../secret', '..%2Fsecret', '%2e%2e%2fsecret', '%252e%252e%252fsecret', '..\\secret', 'relay/../secret', 'relay/tx%00', 'relay/tx\u0000',
+    '/etc/passwd', 'C:\\x', '\uFF52elay/tx', '', '/', '//', '.', '__proto__', 'constructor', 'prototype', 'hasOwnProperty', 'x/__proto__', 'x'.repeat(200_000),
+  ]
+  it.each(pageIds.map((value, index) => [index, value]))('refuses page id #%s with and without a locale', async (_index, id) => {
+    seed()
+    for (const locale of [undefined, 'fr']) {
+      expect(await getManualApiOperation(id, locale)).toBeNull()
+    }
+    contained()
+  })
+
+  it('does not decode percent escapes into traversal', async () => {
+    seed()
+    expect(await getManualApiOperation('relay%2Ftx')).toBeNull()
+    expect(pages.touched).toEqual(['src/content/relay%2Ftx.mdx', 'src/content/relay%2Ftx/index.mdx'])
+  })
+
+  it('still resolves a configured locale and the default locale code', async () => {
+    seed()
+    expect(await getManualApiOperation('relay/tx', 'fr')).not.toBeNull()
+    expect(await getManualApiOperation('relay/tx', 'en')).not.toBeNull()
+  })
+})
