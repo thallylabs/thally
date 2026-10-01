@@ -68,7 +68,8 @@ describe('API frontmatter parity between renderer, index, JSON and readiness', (
     if (doc.manualApi) expect(entry.manualTarget).toMatchObject({ method: doc.manualApi.method, path: doc.manualApi.path })
     const fact = gatherPageFacts().find((candidate) => candidate.pageId === id)!
     expect(fact.isApi).toBe(Boolean(doc.openapi || doc.manualApi))
-    expect(fact.hasOpenApiSpec).toBe(fact.isApi)
+    expect(fact.hasOpenApiSpec).toBe(Boolean(doc.openapi))
+    expect(fact.hasManualOperation).toBe(Boolean(doc.manualApi))
   })
 
   it('exposes spec-prefixed, webhook and manual operations in the JSON docs output', () => {

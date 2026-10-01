@@ -21,8 +21,6 @@ function buildPageFact(
   // Only pages bound to an operation (OpenAPI or manual `api:`) count as API
   // pages; MDX overview pages under /api are regular docs and shouldn't be
   // penalized.
-  // A manual page documents its operation by hand, so it is covered, not an
-  // OpenAPI page missing its operation.
   const isApi = Boolean(entry.openapi || entry.manualTarget)
 
   return {
@@ -37,7 +35,8 @@ function buildPageFact(
     codeBlocksCount: document?.content.codeBlocks.length ?? 0,
     inNav: navPages.has(entry.id) || entry.href === '/',
     isApi,
-    hasOpenApiSpec: isApi,
+    hasOpenApiSpec: Boolean(entry.openapi),
+    hasManualOperation: Boolean(entry.manualTarget && !entry.openapi),
     jsonLdValid: Boolean(entry.title) && Boolean(entry.description),
   }
 }

@@ -12,6 +12,8 @@ export interface PageFact {
   inNav: boolean
   isApi: boolean
   hasOpenApiSpec: boolean
+  /** A manual `api:` page: it declares its own operation and has no spec. */
+  hasManualOperation: boolean
   /** JSON-LD can be emitted with the required schema.org fields. */
   jsonLdValid: boolean
 }
