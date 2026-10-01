@@ -1240,6 +1240,18 @@ function exactReferenceKey(value: string): string {
     .replace(/\.(?:mdx?|rst|txt)$/i, '')
 }
 
+/**
+ * Whether a frontmatter `openapi:` value ("GET /x", "specs/api.json GET /x")
+ * names this spec. A bare operation resolves to the default spec; a prefixed
+ * one to the spec whose path ends with the prefix. Errs toward matching.
+ */
+function specRefMatches(ref: string, specPath: string, specFilename: string, isDefault: boolean): boolean {
+  const prefix = /^(?:(\S+)\s+)?(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|WEBHOOK)\s/i.exec(`${ref} `)?.[1]
+  if (!prefix) return isDefault
+  const wanted = prefix.replace(/^\/+/, '').toLowerCase()
+  return specPath.toLowerCase().endsWith(wanted) || specFilename.toLowerCase() === wanted
+}
+
 function findOpenApi(files: Array<ScannedFile>): ScannedFile | null {
   return files.find((file) => OPENAPI_FILENAMES.has(basename(file.relativePath).toLowerCase())
     && classifyApiSpec(file.absolutePath) === 'openapi') ?? null
@@ -1831,12 +1843,13 @@ function canonicalPath(path: string): string {
  * it withholds rather than guesses. Key casing (`Groups:`) and TOML frontmatter
  * are deliberately not treated as gates: Mintlify ignores them too.
  */
-function pageHeadGateReason(raw: string): { reason?: string; publicTrue: boolean } {
+function pageHeadGateReason(raw: string): { reason?: string; publicTrue: boolean; openapi?: string } {
   const parsed = parseFrontmatter(raw)
   const unreadable = parsed.error && /^(groups|public)\s*:/m.test(raw.slice(0, raw.length - parsed.content.length))
     ? 'frontmatter could not be parsed and declares `groups` or `public`'
     : undefined
-  return { reason: frontmatterGateReason(parsed.data) ?? unreadable, publicTrue: isPublicTrue(parsed.data.public) }
+  const openapi = typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined
+  return { reason: frontmatterGateReason(parsed.data) ?? unreadable, publicTrue: isPublicTrue(parsed.data.public), openapi }
 }
 
 function withoutFrontmatter(value: string): string {
@@ -2959,12 +2972,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // Gate verdicts are computed up front so a page that imports an
   // access-restricted page as a component can never inline its content.
   const gateByPath = new Map<string, { reason?: string; publicTrue: boolean }>()
+  // Frontmatter `openapi:` references, split by whether the page is withheld.
+  const withheldSpecRefs: Array<string> = []
+  const publishedSpecRefs: Array<string> = []
   const withheldPaths = new Set<string>()
   if (platform === 'mintlify') {
     for (const file of files) {
       if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())
         || file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))) continue
-      let head: { reason?: string; publicTrue: boolean } = { publicTrue: false }
+      let head: { reason?: string; publicTrue: boolean; openapi?: string } = { publicTrue: false }
       let unreadableGate: string | undefined
       try {
         // Pages above the size cap are never imported, but another page can
@@ -2979,6 +2995,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }
       const reason = head.reason ?? unreadableGate ?? mintlifyGatedRefs.get(normalizedReferenceKey(file.relativePath).toLowerCase())
       gateByPath.set(file.absolutePath, { reason, publicTrue: head.publicTrue })
+      if (head.openapi) (reason ? withheldSpecRefs : publishedSpecRefs).push(head.openapi)
       if (reason) withheldPaths.add(file.absolutePath)
     }
   }
@@ -3787,11 +3804,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
     }
   } else if (platform === 'mintlify') {
+    const warnSharedSpec = (path: string): void => {
+      warnings.push({
+        code: 'gated-page',
+        message: `OpenAPI spec ${path} is shared with access-restricted pages and is published; it may describe restricted endpoints. Review it before publishing.`,
+        source: path,
+      })
+    }
     const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs)
     for (const spec of resolvedSpecs) {
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) {
         assets.push(specAsset(spec.filename, spec.content))
       }
+      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath)
     }
     if (resolvedSpecs.length > 0) {
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
@@ -3806,10 +3831,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const fallback = findOpenApi(files)
       if (fallback) {
         const filename = basename(fallback.relativePath)
-        if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
-          assets.push(specAsset(filename, readFileSync(fallback.absolutePath)))
+        const matches = (ref: string): boolean => specRefMatches(ref, fallback.relativePath, filename, true)
+        if (withheldSpecRefs.some(matches) && !publishedSpecRefs.some(matches)) {
+          // Only restricted pages name this spec, and docs.json does not list it.
+          quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(filename)}`, content: readFileSync(fallback.absolutePath) })
+          withheldAssetCount++
+        } else {
+          if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
+            assets.push(specAsset(filename, readFileSync(fallback.absolutePath)))
+          }
+          docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
+          if (withheldSpecRefs.some(matches)) warnSharedSpec(fallback.relativePath)
         }
-        docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
       }
     }
   }

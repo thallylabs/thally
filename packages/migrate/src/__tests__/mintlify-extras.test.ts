@@ -747,8 +747,8 @@ describe('assets used only by oversized withheld pages', () => {
 
   it('warns, naming the page, when a gated page is too large to scan for assets', () => {
     const bundle = build(16_000_001)
-    const warning = codes(bundle, 'gated-page').find((item) => item.source === 'big.mdx')
-    expect(warning !== undefined && /could not be checked/.test(warning.message)).toBe(true)
+    const warning = codes(bundle, 'gated-page').find((item) => item.source === 'big.mdx' && /could not be checked/.test(item.message))
+    expect(warning).toBeDefined()
   }, 60_000)
 })
 
@@ -869,5 +869,38 @@ describe('oversized and unreadable gated pages', () => {
     } finally {
       chmodSync(join(root, 'locked.mdx'), 0o644)
     }
+  })
+})
+
+describe('OpenAPI specs referenced by gated pages', () => {
+  const spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { '/x': { get: { summary: 'SECRETSUMMARY' } } } })
+  const base = {
+    'docs.json': JSON.stringify({ navigation: { pages: ['pub', 's'] } }),
+    's.mdx': page('S', 'groups: [admin]\nopenapi: GET /x\n'),
+    'openapi/openapi.json': spec,
+  }
+  const specPaths = (bundle: MigrationBundle) => bundle.assets.map((asset) => asset.path).filter((path) => path.endsWith('openapi.json'))
+
+  it('quarantines a spec every referencing page of which is withheld', () => {
+    const bundle = site({ ...base, 'pub.mdx': page('Pub') })
+    expect(specPaths(bundle)).toEqual([])
+    expect((bundle.quarantinedFiles ?? []).some((file) => file.path === 'migration-quarantine/assets/openapi/openapi.json')).toBe(true)
+    expect(JSON.stringify(bundle.docsConfig)).not.toContain('openapi.json')
+  })
+
+  it('keeps the spec and warns when a published page also uses it', () => {
+    const bundle = site({ ...base, 'pub.mdx': page('Pub', 'openapi: GET /x\n') })
+    expect(specPaths(bundle)).toEqual(['openapi/openapi.json'])
+    expect(codes(bundle, 'gated-page').some((item) => /shared with access-restricted pages.*may describe restricted endpoints/.test(item.message))).toBe(true)
+  })
+
+  it('keeps a spec listed in docs.json and warns that restricted pages use it', () => {
+    const bundle = site({
+      ...base,
+      'docs.json': JSON.stringify({ api: { openapi: 'openapi/openapi.json' }, navigation: { pages: ['pub', 's'] } }),
+      'pub.mdx': page('Pub'),
+    })
+    expect(specPaths(bundle)).toEqual(['openapi/openapi.json'])
+    expect(codes(bundle, 'gated-page').some((item) => /shared with access-restricted pages/.test(item.message))).toBe(true)
   })
 })
