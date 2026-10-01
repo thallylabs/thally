@@ -264,6 +264,7 @@ describe('release-bound docs.json', () => {
       'getContentIconTone()',
       'getBannerConfig()',
       'getCustomScriptsConfig()',
+      'getIntegrationsConfig()',
     ]) {
       expect(source.indexOf(call, rootLayoutStart)).toBeGreaterThan(rootLayoutStart)
     }

@@ -11,6 +11,7 @@ import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunc
 import { migrateRepository } from '../repository.js'
 import { renderMigrationFiles } from '../render.js'
 import type { MigrationWarning } from '../types.js'
+import { withoutDashboardWarning } from './dashboard-warning.js'
 
 const roots: Array<string> = []
 function fixture(files: Record<string, string>): string {
@@ -68,7 +69,7 @@ describe('repository component migration', () => {
     const mergedRegistry = String(secondFiles.find((file) => file.path === 'src/mdx/custom-components.tsx')!.content)
     for (const line of firstRegistry.split('\n').filter((line) => line.startsWith('import '))) expect(mergedRegistry).toContain(line)
     expect(mergedRegistry).toContain('...MigratedRegistry')
-    expect(second.warnings).toEqual([])
+    expect(withoutDashboardWarning(second.warnings)).toEqual([])
   })
 
   it('keeps repeat imports stable across clone directories and equivalent GitHub URLs', () => {
@@ -438,7 +439,7 @@ describe('repository component migration', () => {
       'snippets/data.ts': `export const label = 'Visits';`,
     })
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://example.com/docs', platform: 'mintlify' })
-    expect(bundle.warnings).toEqual([])
+    expect(withoutDashboardWarning(bundle.warnings)).toEqual([])
     const body = bundle.pages[0].body
     expect(body).not.toContain('import ')
     expect(body).not.toContain('<Visits')

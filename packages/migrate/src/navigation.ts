@@ -7,6 +7,7 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, extname, relative } from 'node:path'
 
+import { navigationGateReason } from './mintlify-extras.js'
 import { mintlifyLocalizedReference, pageIdFromReference, resolveWithin, trimEdgeSlashes } from './path.js'
 import type {
   MigrationDocsConfig,
@@ -24,9 +25,17 @@ interface MintlifyPageReference {
 
 const MAX_MINTLIFY_CONFIG_BYTES = 20_000_000
 
+/** A page listed under an access-restricted navigation container. */
+export interface MintlifyGatedReference {
+  ref: string
+  reason: string
+}
+
 export interface MintlifyNavigationResult {
   docsConfig: MigrationDocsConfig
   pageReferences: Array<MintlifyPageReference>
+  /** Pages under a restricted container; withheld from `docsConfig` and `pageReferences`. */
+  gatedReferences: Array<MintlifyGatedReference>
   warnings: Array<MigrationWarning>
 }
 
@@ -458,6 +467,38 @@ interface ProjectionContext {
   seenReferences: Set<string>
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
+  gated: Array<MintlifyGatedReference>
+  /** Set while walking below a restricted group or tab. */
+  gateReason?: string
+}
+
+/**
+ * Container-agnostic sweep for pages under a restricted node. The projection
+ * only walks container kinds it understands; a page under any other one (a
+ * tab's `menu` items, say) would otherwise fall through as an ungated orphan.
+ */
+function collectGatedReferences(
+  node: unknown,
+  gate: string | undefined,
+  pathPrefix: string | undefined,
+  out: Array<MintlifyGatedReference>,
+  depth = 0,
+): void {
+  if (depth > 32) return
+  if (Array.isArray(node)) {
+    for (const item of node) collectGatedReferences(item, gate, pathPrefix, out, depth + 1)
+    return
+  }
+  const object = objectValue(node)
+  if (!object) return
+  const reason = gate ?? navigationGateReason(object)
+  if (reason) {
+    const refs = [object.page, object.root, ...(Array.isArray(object.pages) ? object.pages : [])]
+    for (const ref of refs) {
+      if (typeof ref === 'string' && normalizePageRef(ref, pathPrefix)) out.push({ ref, reason })
+    }
+  }
+  for (const value of Object.values(object)) collectGatedReferences(value, reason, pathPrefix, out, depth + 1)
 }
 
 function warnOnce(context: ProjectionContext, key: string, message: string): void {
@@ -485,6 +526,10 @@ function containerPresentation(value: Record<string, unknown>): {
 }
 
 function registerReference(value: string, context: ProjectionContext): string | null {
+  if (context.gateReason) {
+    if (normalizePageRef(value, context.pathPrefix)) context.gated.push({ ref: value, reason: context.gateReason })
+    return null
+  }
   const localizedValue = context.locale
     ? mintlifyLocalizedReference(value, context.locale, context.defaultPageIds)
     : value
@@ -528,11 +573,26 @@ function convertPage(
   }
   const object = objectValue(value)
   if (!object) return null
+  const outerGate = context.gateReason
+  const gate = navigationGateReason(object)
+  if (gate && !outerGate) context.gateReason = gate
+  try {
+    return convertPageObject(object, context)
+  } finally {
+    context.gateReason = outerGate
+  }
+}
+
+function convertPageObject(
+  object: Record<string, unknown>,
+  context: ProjectionContext,
+): string | MigrationNavigationGroup | null {
   if (typeof object.page === 'string') return registerReference(object.page, context)
   const href = projectedHref(object.href)
   if (href && !object.pages && !object.groups) {
     const page = registerReference(href, context)
     if (page) return page
+    if (context.gateReason) return null
     warnOnce(
       context,
       'external-page-link',
@@ -669,7 +729,15 @@ function convertContainerToTabs(
           ...(object.hidden === true ? { hidden: true } : {}),
         }]
       }
-      const nested = convertContainerToTabs(object, context, tab, trace, depth + 1)
+      const outerGate = context.gateReason
+      const gate = navigationGateReason(object)
+      if (gate && !outerGate) context.gateReason = gate
+      let nested: Array<MigrationNavigationTab>
+      try {
+        nested = convertContainerToTabs(object, context, tab, trace, depth + 1)
+      } finally {
+        context.gateReason = outerGate
+      }
       if (nested.length > 0) {
         if (nested.length === 1) {
           return [{
@@ -759,6 +827,28 @@ function projectedNavbar(value: unknown): MigrationDocsConfig['navbar'] {
   return links.length > 0 || primary ? { ...(links.length > 0 ? { links } : {}), ...(primary ? { primary } : {}) } : undefined
 }
 
+/**
+ * Legacy mint.json `topbarLinks` (`{ name, url }`) and `topbarCtaButton`
+ * (`{ name, url }` or `{ type: 'github', url }`), reshaped as docs.json
+ * `navbar` so both sources share `projectedNavbar`.
+ */
+function legacyTopbarNavbar(config: Record<string, unknown>): Record<string, unknown> | undefined {
+  const links = Array.isArray(config.topbarLinks)
+    ? config.topbarLinks.flatMap((entry) => {
+        const link = objectValue(entry)
+        if (!link) return []
+        return [{
+          label: link.name ?? link.label ?? (link.type === 'github' ? 'GitHub' : undefined),
+          href: link.url ?? link.href,
+          ...(link.type === 'github' ? { type: 'github' } : {}),
+        }]
+      })
+    : []
+  const cta = objectValue(config.topbarCtaButton)
+  const primary = cta ? { label: cta.name ?? cta.label, href: cta.url ?? cta.href, type: cta.type } : undefined
+  return links.length > 0 || primary ? { ...(links.length > 0 ? { links } : {}), ...(primary ? { primary } : {}) } : undefined
+}
+
 function projectedGlobalNavigationLinks(
   value: unknown,
 ): NonNullable<NonNullable<MigrationDocsConfig['navbar']>['links']> {
@@ -831,7 +921,7 @@ function projectedFont(value: unknown): { family: string; weight?: Array<string>
   return { family, ...(weight && weight.length > 0 ? { weight } : {}) }
 }
 
-function projectedCompatibleConfig(config: Record<string, unknown>): Omit<MigrationDocsConfig, 'tabs' | 'i18n' | 'redirects'> {
+function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Array<MigrationWarning>): Omit<MigrationDocsConfig, 'tabs' | 'i18n' | 'redirects'> {
   const banner = objectValue(config.banner)
   const bannerContent = banner && (typeof banner.content === 'string' || objectValue(banner.content))
     ? banner.content as string | Record<string, string>
@@ -848,7 +938,28 @@ function projectedCompatibleConfig(config: Record<string, unknown>): Omit<Migrat
   const projectedIconLibrary = ['lucide', 'fontawesome', 'tabler'].includes(String(iconLibrary))
     ? String(iconLibrary) as 'lucide' | 'fontawesome' | 'tabler'
     : undefined
-  const navbar = projectedNavbar(config.navbar)
+  const docsNavbar = projectedNavbar(config.navbar)
+  const legacyRaw = legacyTopbarNavbar(config)
+  const legacyNavbar = projectedNavbar(legacyRaw)
+  const legacyLinkCount = Array.isArray(legacyRaw?.links) ? legacyRaw.links.length : 0
+  if (legacyNavbar?.links && legacyNavbar.links.length < legacyLinkCount) {
+    warnings.push({ code: 'unsupported-config', message: `${legacyLinkCount - legacyNavbar.links.length} mint.json topbarLinks entr${legacyLinkCount - legacyNavbar.links.length === 1 ? 'y' : 'ies'} without a valid name and url were skipped.` })
+  }
+  if (docsNavbar?.links && legacyNavbar?.links) {
+    warnings.push({ code: 'unsupported-config', message: 'Both docs.json navbar.links and mint.json topbarLinks are set; the docs.json navbar.links were used and topbarLinks ignored.' })
+  }
+  if (docsNavbar?.primary && legacyNavbar?.primary) {
+    warnings.push({ code: 'unsupported-config', message: 'Both docs.json navbar.primary and mint.json topbarCtaButton are set; navbar.primary was used and topbarCtaButton ignored.' })
+  }
+  if (legacyRaw?.primary && !legacyNavbar?.primary) {
+    warnings.push({ code: 'unsupported-config', message: 'mint.json topbarCtaButton has no valid url and was skipped.' })
+  }
+  const navbar = docsNavbar || legacyNavbar
+    ? {
+        ...(docsNavbar?.links ?? legacyNavbar?.links ? { links: docsNavbar?.links ?? legacyNavbar?.links } : {}),
+        ...(docsNavbar?.primary ?? legacyNavbar?.primary ? { primary: docsNavbar?.primary ?? legacyNavbar?.primary } : {}),
+      }
+    : undefined
   const globalLinks = projectedGlobalNavigationLinks(objectValue(config.navigation)?.global)
   const navbarLinks = [...new Map(
     [...(navbar?.links ?? []), ...globalLinks].map((link) => [`${link.label}:${link.href}`, link]),
@@ -1033,6 +1144,7 @@ export function projectMintlifyNavigation(
   const references: Array<MintlifyPageReference> = []
   const seenReferences = new Set<string>()
   const warningKeys = new Set<string>()
+  const gated: Array<MintlifyGatedReference> = []
   const navigation = objectValue(config.navigation) ?? config
   const languages = Array.isArray(navigation.languages)
     ? navigation.languages.flatMap((value): Array<Record<string, unknown>> => {
@@ -1079,6 +1191,7 @@ export function projectMintlifyNavigation(
         seenReferences,
         warnings,
         warningKeys,
+        gated,
       }
       const languageTabs = convertContainerToTabs(
         language,
@@ -1095,7 +1208,7 @@ export function projectMintlifyNavigation(
     }
     if (Object.keys(localizedNavigation).length > 0) i18n.navigation = localizedNavigation
   } else {
-    const context = { references, seenReferences, warnings, warningKeys, pathPrefix: options.pathPrefix }
+    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, gated, pathPrefix: options.pathPrefix }
     tabs = convertContainerToTabs(navigation, context, 'Documentation', projectionTrace)
     if (tabs.length === 0 && Array.isArray(config.navigation)) {
       const children = convertNavigationValues(config.navigation, context)
@@ -1195,6 +1308,7 @@ export function projectMintlifyNavigation(
         }]
       })
     : []
+  collectGatedReferences(navigation, undefined, options.pathPrefix, gated)
   return {
     docsConfig: {
       tabs,
@@ -1205,11 +1319,12 @@ export function projectMintlifyNavigation(
           ...(shortcuts.length > 0 ? { shortcuts } : {}),
         } }
         : {}),
-      ...projectedCompatibleConfig(config),
+      ...projectedCompatibleConfig(config, warnings),
       ...(i18n ? { i18n } : {}),
       ...(redirects.length > 0 ? { redirects } : {}),
     },
     pageReferences: references,
+    gatedReferences: gated,
     warnings,
   }
 }
