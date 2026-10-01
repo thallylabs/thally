@@ -672,3 +672,32 @@ describe('custom stylesheet migration gap', () => {
     expect(cssWarnings(site({ 'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }), 'a.mdx': page('A') }))).toHaveLength(0)
   })
 })
+
+describe('assets used only by oversized withheld pages', () => {
+  const png = Buffer.from('PNGDATA')
+  const bigGated = (padding: number) => `---\ntitle: Big\ngroups: [admin]\n---\n\n![o](/img/only.png)\n\n![s](/img/shared.png)\n${'x'.repeat(padding)}\n`
+  const build = (padding: number) => site({
+    'docs.json': JSON.stringify({ navigation: { pages: ['pub'] } }),
+    'pub.mdx': '---\ntitle: Pub\n---\n\n![s](/img/shared.png)\n',
+    'big.mdx': bigGated(padding),
+    'img/only.png': png,
+    'img/shared.png': png,
+  })
+  const publicPaths = (bundle: MigrationBundle) => bundle.assets.map((asset) => asset.path)
+
+  it('keeps an image used only by an oversized gated page out of public/ and quarantines it', () => {
+    const bundle = build(2_000_001)
+    expect(publicPaths(bundle).includes('img/only.png')).toBe(false)
+    expect((bundle.quarantinedFiles ?? []).some((file) => file.path === 'migration-quarantine/assets/img/only.png')).toBe(true)
+  })
+
+  it('still copies an image the oversized gated page shares with a published page', () => {
+    expect(publicPaths(build(2_000_001)).includes('img/shared.png')).toBe(true)
+  })
+
+  it('warns, naming the page, when a gated page is too large to scan for assets', () => {
+    const bundle = build(16_000_001)
+    const warning = codes(bundle, 'gated-page').find((item) => item.source === 'big.mdx')
+    expect(warning !== undefined && /could not be checked/.test(warning.message)).toBe(true)
+  }, 60_000)
+})

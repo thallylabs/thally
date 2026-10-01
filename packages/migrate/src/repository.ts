@@ -88,6 +88,8 @@ const MAX_SOURCE_FILES = 5_000
 const MAX_PAGE_BYTES = 2_000_000
 /** Window read to classify the access gate of an oversized page. */
 const FRONTMATTER_HEAD_BYTES = 65_536
+/** Largest withheld page still read to find the assets it uses; beyond this they are unknown and reported. */
+const MAX_WITHHELD_SCAN_BYTES = MAX_PAGE_BYTES * 8
 const MAX_ASSET_BYTES = 25_000_000
 const MAX_TOTAL_ASSET_BYTES = 500_000_000
 /** A Git LFS pointer file's fixed opening line (the smudge filter replaces this with the real binary; skipping it during clone leaves this text in place). */
@@ -3013,6 +3015,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (size > MAX_PAGE_BYTES) {
       skipped++
       warnings.push({ code: 'skipped-file', message: 'Page exceeded the 2 MB repository import limit.', source: file.relativePath })
+      // Known restricted from its frontmatter; its assets must stay out of public/ too.
+      if (gateByPath.get(file.absolutePath)?.reason && mintlifyProjectRoot) {
+        if (size > MAX_WITHHELD_SCAN_BYTES) {
+          warnings.push({
+            code: 'gated-page',
+            message: 'Access-restricted page is too large to scan, so the assets it uses could not be checked and may have been copied to public/. Review them before publishing.',
+            source: file.relativePath,
+          })
+        } else {
+          rewriteRepositoryAssetLinks(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, mintlifyProjectRoot, (assetPath) => withheldAssetPaths.add(assetPath))
+        }
+      }
       continue
     }
     const key = normalizedReferenceKey(file.relativePath)
