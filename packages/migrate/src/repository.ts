@@ -192,7 +192,7 @@ export interface RepositoryMigrationOptions {
   docusaurusSidebarPath?: string
   /** @internal Static assets are shared across docs-plugin instances. */
   docusaurusSkipAssets?: boolean
-  /** Test seam: lowers the 5,000-file budget so budget behaviour can be exercised with small fixtures. */
+  /** @internal Test seam: lowers the 5,000-file budget so budget behaviour can be exercised with small fixtures. */
   maxSourceFiles?: number
   /** @internal Redirects are global config, read once, not per plugin instance. */
   docusaurusSkipRedirects?: boolean
@@ -3805,7 +3805,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // case where later additions (Fern's external sourcePaths, above) pushed
   // the count back over budget after the event.
   if (!discoveryBudgetApplied && files.length >= sourceBudget) {
-    warnings.push({ code: 'limit-reached', message: `Stopped scanning after ${MAX_SOURCE_FILES} files, so the rest of the repository was not looked at. Run the migration on a smaller part of the repository with --docs-dir.` })
+    warnings.push({ code: 'limit-reached', message: `Stopped scanning after ${sourceBudget} files, so the rest of the repository was not looked at. Run the migration on a smaller part of the repository with --docs-dir.` })
   }
   if (platform === 'docusaurus') {
     const projected = projectDocusaurusNavigation({
