@@ -11,6 +11,7 @@ import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunc
 import { migrateRepository } from '../repository.js'
 import { renderMigrationFiles } from '../render.js'
 import type { MigrationWarning } from '../types.js'
+import { withoutDashboardWarning } from './dashboard-warning.js'
 
 const roots: Array<string> = []
 function fixture(files: Record<string, string>): string {
@@ -50,7 +51,7 @@ describe('repository component migration', () => {
     const mergedRegistry = String(secondFiles.find((file) => file.path === 'src/mdx/custom-components.tsx')!.content)
     for (const line of firstRegistry.split('\n').filter((line) => line.startsWith('import '))) expect(mergedRegistry).toContain(line)
     expect(mergedRegistry).toContain('...MigratedRegistry')
-    expect(second.warnings).toEqual([])
+    expect(withoutDashboardWarning(second.warnings)).toEqual([])
   })
 
   it('keeps repeat imports stable across clone directories and equivalent GitHub URLs', () => {
@@ -327,6 +328,54 @@ describe('repository component migration', () => {
     expect(warnings).toEqual([])
   })
 
+  it('extracts a page-local inline component that calls a hook into its own client module', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = 'export const Counter = () => {\n  const [n, setN] = useState(0)\n  return <button onClick={() => setN(n + 1)}>{n}</button>\n}\n\n<Counter />'
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+
+    expect(body).not.toContain('export const Counter')
+    expect(body).not.toContain('useState')
+    expect(body.trim()).toMatch(/^<Migrated[a-f0-9]+ \/>$/)
+    expect(warnings).toEqual([])
+
+    const client = migrator.files().find((file) => file.path.includes('inline-'))!
+    expect(client.content).toMatch(/^'use client';/)
+    expect(client.content).toContain("import { useState } from 'react'")
+    expect(client.content).toContain('export const Counter')
+    const registry = migrator.files().find((file) => file.path === 'src/mdx/custom-components.tsx')!
+    expect(registry.content).toContain('Counter as Migrated')
+  })
+
+  it('extracts an inline hook-using component that the page renders with children', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = 'export const Counter = ({ children }) => {\n  const [n] = useState(0)\n  return <span>{n}{children}</span>\n}\n\n<Counter>child</Counter>'
+    const body = migrator.transform(source, join(root, 'index.mdx'))
+
+    expect(body).not.toContain('export const Counter')
+    expect(body).toMatch(/<Migrated[a-f0-9]+>child<\/Migrated[a-f0-9]+>/)
+    expect(warnings).toEqual([])
+  })
+
+  it('resolves a Thally built-in used by an extracted hook component from the built-in registry', () => {
+    const root = fixture({})
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    const source = 'export const Snippet2 = () => {\n  const [n] = useState(0)\n  return <CodeBlock>{n}</CodeBlock>\n}\n\n<Snippet2 />'
+    migrator.transform(source, join(root, 'index.mdx'))
+
+    const client = migrator.files().find((file) => file.path.includes('inline-'))!
+    // `CodeBlock` is a Thally built-in, not declared or imported inside this
+    // extracted module: it must be resolved from the built-in registry
+    // directly instead of being left as a bare, unbound identifier.
+    expect(client.content).toContain("import { builtinMdxComponents } from '@/components/mdx/builtin-components';")
+    expect(client.content).toMatch(/const \{ CodeBlock \} = builtinMdxComponents;/)
+    expect(warnings).toEqual([])
+  })
+
   it('provides the implicit MintlifyComponents global copied .jsx snippets rely on', () => {
     const root = fixture({
       // Mirrors Mintlify's own snippet convention: no import, a global
@@ -372,7 +421,7 @@ describe('repository component migration', () => {
       'snippets/data.ts': `export const label = 'Visits';`,
     })
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://example.com/docs', platform: 'mintlify' })
-    expect(bundle.warnings).toEqual([])
+    expect(withoutDashboardWarning(bundle.warnings)).toEqual([])
     const body = bundle.pages[0].body
     expect(body).not.toContain('import ')
     expect(body).not.toContain('<Visits')

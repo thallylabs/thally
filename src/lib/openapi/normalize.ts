@@ -12,15 +12,12 @@ import type {
   ResolvedSpec,
 } from '@/lib/openapi/types'
 import { getApiPlaygroundCredentials } from '@/data/docs'
+import { HTTP_METHODS, buildOperationKey, isExtensionSet } from '@/lib/openapi/operation-keys'
+import { isObj, operationVisibility, viewPathEntry } from '@/lib/openapi/path-items'
 
 type RawObject = Record<string, unknown>
 
-const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'trace'] as const
-
-export function buildOperationKey(method: string, path: string, isWebhook = false) {
-  const prefix = isWebhook ? 'WEBHOOK ' : ''
-  return `${prefix}${method.toUpperCase()} ${path}`
-}
+export { HTTP_METHODS, buildOperationKey, isExtensionSet }
 
 export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
   const specServers = normalizeServers((resolved.document as RawObject).servers)
@@ -39,13 +36,24 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
 
   const paths = (resolved.document as RawObject).paths
   if (paths && typeof paths === 'object') {
-    Object.entries(paths as Record<string, RawObject>).forEach(([pathKey, pathItem]) => {
+    Object.entries(paths as Record<string, RawObject>).forEach(([pathKey, entry]) => {
+      if (!isObj(entry)) return
+      const view = viewPathEntry(resolved.document, entry)
+      const pathItem = view.item
       const pathParameters = extractParameters(pathItem.parameters)
       const pathServers = normalizeServers(pathItem.servers)
 
       for (const method of HTTP_METHODS) {
         const operation = pathItem[method]
         if (!operation || typeof operation !== 'object') {
+          continue
+        }
+        const visibility = operationVisibility(
+          view,
+          method,
+          resolved.config.operationOverrides?.[buildOperationKey(method, pathKey)],
+        )
+        if (visibility === 'excluded') {
           continue
         }
         operations.push(
@@ -60,6 +68,7 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
             config: resolved.config,
             documentSecurity: (resolved.document as RawObject).security,
             securitySchemes: rawSecuritySchemes,
+            hidden: visibility === 'hidden',
             isWebhook: false,
             resolveRef,
             deepResolve,
@@ -71,12 +80,23 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
 
   const webhooks = (resolved.document as RawObject).webhooks
   if (webhooks && typeof webhooks === 'object') {
-    Object.entries(webhooks as Record<string, RawObject>).forEach(([webhookKey, webhookItem]) => {
+    Object.entries(webhooks as Record<string, RawObject>).forEach(([webhookKey, entry]) => {
+      if (!isObj(entry)) return
+      const view = viewPathEntry(resolved.document, entry)
+      const webhookItem = view.item
       const hookParameters = extractParameters(webhookItem.parameters)
       const hookServers = normalizeServers(webhookItem.servers)
       for (const method of HTTP_METHODS) {
         const operation = webhookItem[method]
         if (!operation || typeof operation !== 'object') {
+          continue
+        }
+        const visibility = operationVisibility(
+          view,
+          method,
+          resolved.config.operationOverrides?.[buildOperationKey(method, webhookKey, true)],
+        )
+        if (visibility === 'excluded') {
           continue
         }
         operations.push(
@@ -91,6 +111,7 @@ export function normalizeSpec(resolved: ResolvedSpec): NormalizedSpec {
             config: resolved.config,
             documentSecurity: (resolved.document as RawObject).security,
             securitySchemes: rawSecuritySchemes,
+            hidden: visibility === 'hidden',
             isWebhook: true,
             resolveRef,
             deepResolve,
@@ -125,6 +146,7 @@ interface NormalizeOperationOptions {
   documentSecurity?: unknown
   securitySchemes: Record<string, RawObject>
   config: ApiSpecConfig
+  hidden: boolean
   isWebhook: boolean
   resolveRef: (ref: string) => RawObject | null
   deepResolve: (schema: RawObject) => RawObject
@@ -186,7 +208,7 @@ function normalizeOperation(options: NormalizeOperationOptions): NormalizedOpera
     requestBody,
     responses,
     security,
-    hidden: override?.hidden ?? false,
+    hidden: options.hidden,
     prefill: {
       path: parameterPrefill.path,
       query: parameterPrefill.query,

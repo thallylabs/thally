@@ -17,6 +17,7 @@ import { unified } from 'unified'
 import { parseFrontmatter } from './frontmatter.js'
 import { functionDeclaredNames, isFunctionInitializer, normalizeHtmlComments, normalizeExplicitHeadingIds } from './mdx.js'
 import { resolveWithin } from './path.js'
+import { planInlineExtraction, unboundTags } from './inline-extraction.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
 
 interface MdxNode {
@@ -26,7 +27,7 @@ interface MdxNode {
   attributes?: Array<{
     name?: string
     type: string
-    value?: string | { value?: string } | null
+    value?: string | { type?: string; value?: string } | null
     position?: { start: { offset?: number }; end: { offset?: number } }
   }>
   children?: Array<MdxNode>
@@ -246,7 +247,7 @@ const MAX_FILE_BYTES = 2_000_000
  * migrated component — including this very generated file — so importing
  * it here would be circular (`ReferenceError: Cannot access 'X' before
  * initialization` at build time). Kept in sync with
- * `src/components/mdx/mdx-components.tsx`'s own imports by hand; a drift
+ * `src/components/mdx/builtin-components.tsx`'s own imports by hand; a drift
  * here only means `MintlifyComponents.<Name>` is `undefined` for a name
  * added there, not a crash.
  */
@@ -422,6 +423,28 @@ function implicitReactImports(source: ts.SourceFile): string {
   ].filter(Boolean).join('\n')
 }
 
+/**
+ * A component extracted into its own client module (see `createComponentMigrator`'s
+ * inline-hook extraction below) loses the page's implicit access to Thally's
+ * built-in MDX components: unlike a component that stays inline in the page,
+ * this module never receives a `components` prop to read a name such as
+ * `CodeBlock` from. Any JSX tag it uses that isn't locally declared or
+ * imported is resolved instead from `builtinMdxComponents`, the same
+ * built-in registry every MDX page reads from — imported directly rather
+ * than through `useMDXComponents`, which in turn imports the customer
+ * registry that imports every extracted module, closing an import cycle
+ * that throws at runtime once bundled.
+ */
+function resolveInlineBuiltinReferences(source: string, moduleNames: ReadonlySet<string>): string {
+  const unresolved = unboundTags(source, moduleNames)
+  if (unresolved.length === 0) return source
+  return [
+    "import { builtinMdxComponents } from '@/components/mdx/builtin-components';",
+    `const { ${unresolved.join(', ')} } = builtinMdxComponents;`,
+    source,
+  ].join('\n')
+}
+
 function imports(statement: ts.ImportDeclaration): Array<Binding> {
   if (!ts.isStringLiteral(statement.moduleSpecifier) || !statement.importClause) return []
   const clause = statement.importClause
@@ -446,7 +469,7 @@ function imports(statement: ts.ImportDeclaration): Array<Binding> {
 const EXTRACTED_CLIENT_COMPONENT_TAG = /^(?:Migrated[0-9a-f]+|Inline\d+)$/
 
 /**
- * Thally's own runtime `src/components/mdx/mdx-components.tsx` registry names
+ * Thally's own runtime `src/components/mdx/builtin-components.tsx` registry names
  * whose backing module is a 'use client' file under `src/components/mdx/`.
  * Passing a page-authored function as a prop into any of these also throws
  * "Functions cannot be passed directly to Client Components" at render, the
@@ -456,7 +479,7 @@ const EXTRACTED_CLIENT_COMPONENT_TAG = /^(?:Migrated[0-9a-f]+|Inline\d+)$/
  * This list is a snapshot, not a live read of the app (a published migrate
  * package cannot import from the app's `src/`). It is drift-guarded by
  * `src/components/mdx/client-registry.test.ts`, which recomputes the same
- * set from `src/components/mdx/*.tsx` and `mdx-components.tsx` and fails CI
+ * set from `src/components/mdx/*.tsx` and `builtin-components.tsx` and fails CI
  * if this snapshot goes stale.
  *
  * Source file per name (all under `src/components/mdx/`):
@@ -489,11 +512,11 @@ export const CLIENT_BUILTIN_COMPONENT_TAGS: ReadonlySet<string> = new Set([
   'Accordion', 'AccordionGroup',
   'AgentPrompt',
   'ResponseField', 'ParamField', 'Expandable',
-  'CodeGroup',
+  'CodeGroup', 'CodeBlock',
   'Badge', 'Tooltip',
   'Tabs', 'Tab',
   'RequestExample', 'ResponseExample', 'InlineRequestExample', 'InlineResponseExample',
-  'Tree', 'Folder', 'File',
+  'Tree', 'FileTree', 'Folder', 'File',
   'Mermaid',
   'Panel', 'ContentPanel', 'InlinePanel',
   'Prompt', 'PromptUser', 'PromptAssistant', 'Terminal', 'TerminalInput', 'TerminalOutput',
@@ -1325,6 +1348,68 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       }
     }
 
+    // Extract a page's own inline component that calls a React hook (Mintlify
+    // treats hooks as pre-injected globals for such components, but Thally's
+    // page module is a Server Component and cannot import a hook itself) into
+    // a client module, together with every page-local declaration it uses.
+    // `planInlineExtraction` decides what moves, what the page keeps a copy
+    // of, and whether the move is safe at all; an unsafe one is left in place
+    // and reported. Whatever the page still renders is wired back as a
+    // registered tag, or a real import when it is reached by name.
+    const refusedInlineComponents = new Set<string>()
+    {
+      const plan = planInlineExtraction({
+        declarations,
+        tree,
+        copyableImports: [...moduleImports, ...realPageImports],
+        helperDeclarations: serverPageDeclarations,
+        unavailableImports: unsupportedImports,
+        reactGlobals: REACT_GLOBALS,
+      })
+      for (const { name, reason } of plan.blocked) {
+        refusedInlineComponents.add(name)
+        warn(`Inline component "${name}" calls a React hook but was left in the page: ${reason}. Move it and everything it uses into a client component manually.`, currentFile)
+      }
+      const moduleSource = plan.moved.length === 0 ? '' : [
+        ...plan.moduleImports, ...plan.moduleHelpers,
+        ...[...plan.moved, ...plan.copied].sort((a, b) => a - b).map((index) => declarations[index].source),
+      ].join('\n\n')
+      if (plan.moved.length > 0
+        && (copied.size >= MAX_COMPONENT_FILES || Buffer.byteLength(moduleSource) > MAX_FILE_BYTES
+          || copiedBytes + Buffer.byteLength(moduleSource) > MAX_COMPONENT_BYTES)) {
+        warn(`Inline component "${plan.movedNames[0]}" exceeded the component migration budget; source was preserved.`, currentFile)
+      } else if (plan.moved.length > 0) {
+        const path = `${destinationRoot}/inline-${hash(`${relative(root, currentFile)}:components`)}.jsx`
+        const inlineSource = `${resolveInlineBuiltinReferences(moduleSource, plan.moduleNames)}\n`
+        copied.set(path, { path, content: `'use client';\n${implicitReactImports(sourceFile(inlineSource, 'inline.jsx'))}\n${inlineSource}` })
+        copiedBytes += Buffer.byteLength(inlineSource)
+        const movedIndexes = new Set(plan.moved)
+        for (const index of plan.moved) edits.push({ start: declarations[index].start, end: declarations[index].end, value: '' })
+        for (const name of plan.registryNames) {
+          const registered = register(path, name)
+          aliases.set(name, registered)
+          // A root the page still extracts as interactive JSX (below) imports
+          // the moved component from this module by its real name.
+          moduleImports.push(`import { ${name} } from ${JSON.stringify(portableSpecifier(`./${relative(destinationRoot, path).replace(/\\/g, '/')}`))};`)
+        }
+        if (plan.pageImportNames.length > 0) {
+          realPageImports.push(`import { ${plan.pageImportNames.join(', ')} } from ${JSON.stringify(portableSpecifier(`@/${path.replace(/^src\//, '').replace(/\\/g, '/')}`))};`)
+        }
+        // A React import the page only kept for the code that just moved would
+        // make the page itself import a hook; drop it once nothing else uses it.
+        for (const entry of [...sharedImportEdits]) {
+          const locals = [...sourceFile(content.slice(entry.start, entry.end), 'shared.tsx').statements]
+            .flatMap((statement) => ts.isImportDeclaration(statement) ? imports(statement).map((binding) => binding.local) : [])
+          if (locals.length === 0 || locals.some((local) => plan.pageReferences.has(local))) continue
+          edits.push(entry)
+          sharedImportEdits.splice(sharedImportEdits.indexOf(entry), 1)
+        }
+        for (let index = declarations.length - 1; index >= 0; index -= 1) {
+          if (movedIndexes.has(index)) declarations.splice(index, 1)
+        }
+      }
+    }
+
     // Remove every `...name` spread of a dropped MDX data import (see the
     // lowercase-binding `.mdx?` case above) from any array literal it
     // appears in, so the export that merges it (`export const toc =
@@ -1405,11 +1490,14 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // inline, it compiles into the page's own server-rendered module, where
     // `useState` and friends are never in scope (see `implicitReactImports`,
     // only applied to extracted client files).
+    // A component the extraction above refused (and warned about) stays where
+    // it is; this pass must not move it, and the dependency that blocked it,
+    // behind that decision.
     const statefulDeclarationNames = new Set(
       declarations
         .filter(({ source }) => /\bon[A-Z]\w*\s*=|\buse[A-Z]\w*\s*\(/.test(source))
         .map(({ source }) => source.match(/^export const (\w+)/)?.[1])
-        .filter((name): name is string => !!name),
+        .filter((name): name is string => !!name && !refusedInlineComponents.has(name)),
     )
 
     // Extract whole HTML JSX roots with event handlers. Markdown and global

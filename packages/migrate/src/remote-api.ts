@@ -10,6 +10,8 @@ import { isIP } from 'node:net'
 
 import { parse as parseYaml } from 'yaml'
 
+import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
+import { insertApiTab } from './navigation.js'
 import type { MigrationBundle, MigrationFetcher } from './types.js'
 
 const MAX_SPEC_BYTES = 25_000_000
@@ -190,6 +192,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   const tabs = bundle.docsConfig.tabs.map((tab) => ({ ...tab }))
   const redirects = [...(bundle.docsConfig.redirects ?? [])]
   const warnings = [...bundle.warnings]
+  const pages = bundle.pages.map((page) => ({ ...page }))
   const authoredLinks = new Set<string>()
   for (const page of bundle.pages) {
     // Scan path-shaped tokens once, then inspect segments without nested
@@ -211,12 +214,17 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       const body = await downloadSpec(reference.url, fetcher)
       const operations = parseOpenApi(body, extension)
       const filename = `openapi-${createHash('sha256').update(reference.url).digest('hex').slice(0, 12)}.${extension}`
-      assets.push({ path: filename, content: body })
+      assets.push({ path: `openapi/${filename}`, content: body, projectRelative: true })
+      // Pages that name this spec by URL now resolve to the downloaded copy.
+      for (const page of pages) {
+        const ref = page.openapi ? splitOpenApiRef(page.openapi) : null
+        if (ref?.specRef === reference.url) page.openapi = withSpecRef(ref, `openapi/${filename}`)
+      }
       const tab = reference.tabLabel
         ? tabs.find((candidate) => candidate.tab === reference.tabLabel)
         : tabs.find((candidate) => candidate.tab.toLowerCase().includes('api'))
-      if (tab) tab.api = { source: `/${filename}` }
-      else tabs.push({ tab: reference.tabLabel ?? 'API Reference', api: { source: `/${filename}` } })
+      if (tab) tab.api = { source: `openapi/${filename}` }
+      else insertApiTab(tabs, { tab: reference.tabLabel ?? 'API Reference', ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}), api: { source: `openapi/${filename}` } }, reference.parentTab)
 
       const routes = new Map<string, string | null>()
       for (const operation of operations) {
@@ -243,6 +251,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   }
   return {
     ...bundle,
+    pages,
     assets,
     docsConfig: { ...bundle.docsConfig, tabs, ...(redirects.length > 0 ? { redirects } : {}) },
     warnings,

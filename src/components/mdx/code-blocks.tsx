@@ -10,6 +10,7 @@ import clsx from 'clsx'
 import {
   Children,
   createContext,
+  Fragment,
   isValidElement,
   useContext,
   useEffect,
@@ -662,4 +663,62 @@ export function Pre({
   }
 
   return <CodeGroup {...props} label={title}>{children}</CodeGroup>
+}
+
+interface CodeBlockProps extends Omit<PreProps, 'title'> {
+  filename?: string
+  /** Lines to tint, as Mintlify writes them: `"1,3-5"`, `"{1,3-5}"` or `"[1,3]"`. */
+  highlight?: string
+  /** Lines to keep in focus; every other line is dimmed. Same syntax as `highlight`. */
+  focus?: string
+}
+
+/** 1-based line numbers from `1,3-5`, with optional `{}` or `[]` around them. */
+function parseLineSpec(spec: unknown): Set<number> {
+  const lines = new Set<number>()
+  if (typeof spec !== 'string') return lines
+  for (const part of spec.replace(/[{}[\]\s]/g, '').split(',')) {
+    const [from, to = from] = part.split('-').map(Number)
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from) continue
+    for (let line = from; line <= Math.min(to, from + 1000); line += 1) lines.add(line)
+  }
+  return lines
+}
+
+/**
+ * Mintlify-parity standalone code block:
+ * `<CodeBlock language="ts" filename="x.ts" lines highlight="2">{`const x = 1`}</CodeBlock>`.
+ * A thin wrapper around `Pre`, so `lines`, `icon`, `expandable`, `nocopy` and
+ * `wrap` behave exactly as on a fenced block. `highlight` and `focus` are
+ * applied to a plain string child here (a fence has them applied at build
+ * time). `children` may also be an already-rendered `<pre>`/`<code>` element
+ * (e.g. from migrated content), which is passed through unchanged.
+ */
+export function CodeBlock({ children, filename, highlight, focus, ...props }: CodeBlockProps) {
+  if (typeof children !== 'string') {
+    return <Pre {...props} title={filename}>{children}</Pre>
+  }
+  const code = children.replace(/\n$/, '')
+  const highlighted = parseLineSpec(highlight)
+  const focused = parseLineSpec(focus)
+  const marked = [...highlighted, ...focused]
+  return (
+    <Pre {...props} code={code} title={filename} lastmarked={marked.length ? String(Math.max(...marked)) : undefined}>
+      <code className={props.language ? `language-${props.language}` : undefined}>
+        {code.split('\n').map((line, index) => (
+          <Fragment key={index}>
+            {index > 0 && '\n'}
+            <span
+              className={clsx(
+                highlighted.has(index + 1) && 'thally-line-highlight',
+                focused.size > 0 && !focused.has(index + 1) && 'thally-line-dim',
+              ) || undefined}
+            >
+              {line}
+            </span>
+          </Fragment>
+        ))}
+      </code>
+    </Pre>
+  )
 }

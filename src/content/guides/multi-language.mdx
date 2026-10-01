@@ -149,7 +149,8 @@ Claude translates with these rules applied automatically:
 
 - **Translates:** all prose text, headings, frontmatter `title`, `description`, and `keywords`
 - **Preserves:** MDX component tags verbatim (`<Note>`, `<Steps>`, `<CodeGroup>`, etc.)
-- **Preserves:** all code blocks and inline code exactly as written
+- **Translates within examples:** standalone comments in supported code languages and reader-facing prose in Markdown/MDX fences, including headings, descriptions, and display labels
+- **Preserves:** commands, identifiers, syntax, unknown or ambiguous code examples, and inline code exactly as written
 - **Preserves:** all URLs, file paths, and import statements
 - **Preserves:** all frontmatter structure and non-text fields
 

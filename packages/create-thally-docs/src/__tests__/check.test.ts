@@ -149,6 +149,119 @@ describe('thally check OpenAPI migrations', () => {
   })
 })
 
+describe('thally check hidden operations under public/', () => {
+  const spec = (flag: string) => [
+    'openapi: 3.0.0',
+    'info:',
+    '  title: T',
+    '  version: 1.0.0',
+    'paths:',
+    '  /a:',
+    '    get:',
+    ...(flag ? [`      ${flag}`] : []),
+    '      responses:',
+    "        '200':",
+    '          description: ok',
+  ].join('\n')
+
+  async function run(source: string, file: string, body: string, overrides?: unknown) {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-hidden-'))
+    mkdirSync(join(projectDir, file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'API', api: { source, overrides } }] }))
+    writeFileSync(join(projectDir, file), body)
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    return output.join('\n')
+  }
+
+  it('warns for a public/ spec with x-excluded, or an override-hidden op', async () => {
+    expect(await run('/openapi.yaml', 'public/openapi.yaml', spec('x-excluded: true'))).toContain('lives under public/')
+    expect(await run('/openapi.yaml', 'public/openapi.yaml', spec(''), { 'GET /a': { hidden: true } })).toContain('lives under public/')
+  })
+
+  it('stays quiet for a clean public/ spec or a project-root spec', async () => {
+    expect(await run('/openapi.yaml', 'public/openapi.yaml', spec(''))).not.toContain('lives under public/')
+    expect(await run('openapi/api.yaml', 'openapi/api.yaml', spec('x-excluded: true'))).not.toContain('lives under public/')
+  })
+})
+
+describe('thally check stale specs under public/', () => {
+  const doc = (paths: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths, ...extra })
+  const ok = { get: { responses: { 200: { description: 'ok' } } } }
+
+  async function run(files: Record<string, string>, source = 'openapi/api.json') {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-stale-'))
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'API', api: { source } }] }))
+    for (const [file, body] of Object.entries(files)) {
+      mkdirSync(join(projectDir, file.slice(0, file.lastIndexOf('/'))), { recursive: true })
+      writeFileSync(join(projectDir, file), body)
+    }
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    return output.join('\n')
+  }
+
+  it('warns about a leftover public/ spec even though docs.json points at the new file', async () => {
+    const output = await run({
+      'openapi/api.json': doc({ '/a': ok }),
+      'public/openapi.json': doc({ '/a': { ...ok, get: { 'x-hidden': true, responses: {} } } }),
+    })
+    expect(output).toContain('public/openapi.json')
+    expect(output).toContain('x-excluded/x-hidden')
+    expect(output).toContain('does not remove old copies from public/')
+  })
+
+  it('says a leftover public/openapi.json answers /openapi.json instead of the filtered spec; other names do not', async () => {
+    const flagged = doc({ '/a': { get: { 'x-hidden': true, responses: {} } } })
+    const shadowed = await run({ 'openapi/api.json': doc({ '/a': ok }), 'public/openapi.json': flagged })
+    expect(shadowed).toContain('in place of the filtered specification')
+    const other = await run({ 'openapi/api.json': doc({ '/a': ok }), 'public/old.json': flagged })
+    expect(other).toContain('public/old.json')
+    expect(other).not.toContain('in place of the filtered specification')
+    // Configured at /openapi.json itself: the validateOpenApi warning carries the same consequence.
+    const configured = await run({ 'public/openapi.json': flagged }, '/openapi.json')
+    expect(configured).toContain('in place of the filtered specification')
+  })
+
+  it('detects flags on a $ref sibling, a path item, a webhook and nested directories', async () => {
+    for (const spec of [
+      doc({ '/a': { $ref: '#/components/pathItems/X', 'x-hidden': true } }),
+      doc({ '/a': { 'x-excluded': true, ...ok } }),
+      doc({}, { webhooks: { h: { post: { 'x-excluded': 'true' } } } }),
+    ]) {
+      expect(await run({ 'openapi/api.json': doc({ '/a': ok }), 'public/deep/nested/spec.yaml': spec })).toContain('public/deep/nested/spec.yaml')
+    }
+  })
+
+  it('warns about an unflagged leftover only when the configured spec lives elsewhere; ignores non-specs', async () => {
+    const files = { 'openapi/api.json': doc({ '/a': ok }), 'public/old.json': doc({ '/a': ok }), 'public/manifest.json': '{"name":"x"}', 'public/data.yaml': 'a: 1' }
+    const output = await run(files)
+    expect(output).toContain('public/old.json')
+    expect(output).toContain('an old copy')
+    expect(output).not.toContain('manifest.json')
+    expect(output).not.toContain('data.yaml')
+    // No configured spec elsewhere and nothing hidden: a plain public spec is left alone.
+    expect(await run({ 'public/old.json': doc({ '/a': ok }) }, 'https://example.com/spec.json')).not.toContain('public/old.json')
+  })
+
+  it('does not double-report the configured public/ spec and never errors', async () => {
+    const output = await run({ 'public/openapi.json': doc({ '/a': { 'x-excluded': true, ...ok } }) }, '/openapi.json')
+    expect(output.match(/public\/openapi\.json|lives under public\//g)?.length).toBe(1)
+    expect(output).toContain('0 error(s)')
+  })
+})
+
 describe('thally check image references', () => {
   it('warns about a local image with no file under public/, and accepts one that exists', async () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-images-'))
@@ -184,5 +297,187 @@ describe('thally check image references', () => {
     expect(text).not.toContain('/images/present.png')
     expect(text).toContain('Image not found: "/images/missing.png"')
     expect(text).toContain('Image not found: "/images/also-missing.png"')
+  })
+})
+
+describe('thally check pages bound to unpublished operations', () => {
+  const ok = { responses: { 200: { description: 'ok' } } }
+  async function run(pages: Record<string, string>, overrides?: Record<string, unknown>, source = 'openapi/api.json') {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-unpublished-'))
+    mkdirSync(join(projectDir, 'openapi'), { recursive: true })
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'API', groups: [{ group: 'G', pages: Object.keys(pages) }], api: { source, ...(overrides ? { overrides } : {}) } }] }))
+    writeFileSync(join(projectDir, 'openapi/api.json'), JSON.stringify({
+      openapi: '3.1.0', info: { title: 'T', version: '1' },
+      paths: {
+        '/hidden': { get: { 'x-hidden': true, ...ok } },
+        '/excluded': { $ref: '#/components/pathItems/E' },
+        '/visible': { get: ok },
+      },
+      webhooks: {
+        orderUpdated: { post: { 'x-hidden': true, ...ok } },
+        refunded: { $ref: '#/components/pathItems/E' },
+        shipped: { post: ok },
+      },
+      components: { pathItems: { E: { 'x-excluded': true, get: ok } } },
+    }))
+    for (const [id, operation] of Object.entries(pages)) {
+      writeFileSync(join(projectDir, `src/content/${id}.mdx`), `---\ntitle: ${id}\ndescription: d\nopenapi: "${operation}"\n---\n`)
+    }
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    return output.join('\n')
+  }
+
+  it('warns for each page whose operation is hidden or excluded, naming the page and operation', async () => {
+    const output = await run({ 'hidden-endpoint': 'GET /hidden', 'excluded-endpoint': 'GET /excluded', 'visible-endpoint': 'GET /visible', 'typo-endpoint': 'GET /typo' })
+    expect(output).toContain('page src/content/hidden-endpoint.mdx points at hidden operation GET /hidden and is not published')
+    expect(output).toContain('page src/content/excluded-endpoint.mdx points at excluded operation GET /excluded and is not published')
+    expect(output).not.toContain('visible-endpoint.mdx points')
+    expect(output).not.toContain('typo-endpoint.mdx points')
+    expect(output).toContain('0 error(s)')
+  })
+
+  it('warns for pages bound to hidden or excluded webhooks, bare or spec-prefixed', async () => {
+    const output = await run({
+      'hook-hidden': 'webhook orderUpdated',
+      'hook-prefixed': 'openapi/api.json webhook orderUpdated',
+      'hook-excluded': 'webhook refunded',
+      'hook-shown': 'webhook shipped',
+      'hook-typo': 'webhook nope',
+    })
+    expect(output).toContain('page src/content/hook-hidden.mdx points at hidden operation WEBHOOK orderUpdated and is not published')
+    expect(output).toContain('page src/content/hook-prefixed.mdx points at hidden operation openapi/api.json WEBHOOK orderUpdated and is not published')
+    expect(output).toContain('page src/content/hook-excluded.mdx points at excluded operation WEBHOOK refunded and is not published')
+    expect(output).not.toContain('hook-shown.mdx points')
+    expect(output).not.toContain('hook-typo.mdx points')
+  })
+
+  it('judges a spec-prefixed page against the spec it names, like the site', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-prefixed-'))
+    mkdirSync(join(projectDir, 'openapi'), { recursive: true })
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    const pages = { 'admin-secret': 'admin.yaml GET /secret', 'main-moved': 'openapi/api.json GET /moved', 'bare-moved': 'GET /moved', 'admin-moved': 'admin.yaml GET /moved' }
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [
+      { tab: 'API', groups: [{ group: 'G', pages: Object.keys(pages) }], api: { source: 'openapi/api.json' } },
+      { tab: 'Admin', api: { source: 'openapi/admin.yaml' } },
+    ] }))
+    writeFileSync(join(projectDir, 'openapi/api.json'), JSON.stringify({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths: { '/moved': { get: { 'x-hidden': true, ...ok } } } }))
+    writeFileSync(join(projectDir, 'openapi/admin.yaml'), 'openapi: 3.1.0\ninfo: { title: A, version: "1" }\npaths:\n  /secret:\n    get: { x-hidden: true, responses: { "200": { description: ok } } }\n  /moved:\n    get: { responses: { "200": { description: ok } } }\n')
+    for (const [id, operation] of Object.entries(pages)) {
+      writeFileSync(join(projectDir, `src/content/${id}.mdx`), `---\ntitle: ${id}\ndescription: d\nopenapi: "${operation}"\n---\n`)
+    }
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    const text = output.join('\n')
+    expect(text).toContain('page src/content/admin-secret.mdx points at hidden operation admin.yaml GET /secret and is not published')
+    expect(text).toContain('page src/content/main-moved.mdx points at hidden operation openapi/api.json GET /moved and is not published')
+    // A bare reference renders from the Admin spec, which publishes it.
+    expect(text).not.toContain('bare-moved.mdx points')
+    expect(text).not.toContain('admin-moved.mdx points')
+  })
+
+  it('honours docs.json overrides and does not judge a remote spec', async () => {
+    expect(await run({ 'hidden-endpoint': 'GET /hidden' }, { 'GET /hidden': { hidden: false } })).not.toContain('is not published')
+    expect(await run({ 'hidden-endpoint': 'GET /hidden' }, undefined, 'https://example.com/spec.json')).not.toContain('is not published')
+  })
+})
+
+describe('thally check manual api pages', () => {
+  async function run(frontmatter: string, body = '', docsExtra: Record<string, unknown> = {}) {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-manual-'))
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'Docs', groups: [{ group: 'G', pages: ['page'] }] }], ...docsExtra }))
+    writeFileSync(join(projectDir, 'src/content/page.mdx'), `---\ntitle: T\ndescription: d\n${frontmatter}\n---\n${body}\nSome body text that is long enough to not be flagged as empty.\n`)
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    return output.join('\n')
+  }
+  const server = { api: { mdx: { server: 'https://api.example.com' } } }
+
+  it('warns for an unparseable api value', async () => {
+    expect(await run('api: "FETCH"', '', server)).toContain('page src/content/page.mdx: "api" frontmatter is not "METHOD https://host/path" or "METHOD /path"')
+    expect(await run('api: 42', '', server)).toContain('"api" frontmatter is not')
+  })
+
+  it('warns for a path-only api without docs.json api.mdx.server', async () => {
+    expect(await run('api: "GET /status"')).toContain('has no server: set docs.json "api.mdx.server" or use a full URL')
+    expect(await run('api: "GET /status"', '', { api: { mdx: { server: 'not a url' } } })).toContain('has no server')
+    expect(await run('api: "GET /status"', '', server)).not.toContain('has no server')
+    expect(await run('api: "GET https://api.example.com/status"')).not.toContain('has no server')
+  })
+
+  it('warns for a ParamField path parameter missing from the URL template', async () => {
+    expect(await run('api: "GET /users"', '<ParamField path="id" type="string" />', server)).toContain('<ParamField path="id"> has no matching {id}')
+    expect(await run('api: "GET /users/{id}"', '<ParamField path="id" type="string" />', server)).not.toContain('has no matching')
+  })
+
+  it('warns when openapi and api are both set', async () => {
+    expect(await run('openapi: "GET /a"\napi: "GET /b"', '', server)).toContain('both "openapi" and "api" are set; "api" is ignored')
+  })
+
+  it('stays quiet for a sound manual page', async () => {
+    const output = await run('api: "POST /users/{id}"', '<ParamField path="id" type="string" />\n<ParamField body="name" type="string" />', server)
+    expect(output).not.toMatch(/"api"|ParamField|has no server/)
+  })
+})
+
+describe('thally check integrations', () => {
+  const run = async (integrations: unknown) => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-integrations-'))
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({
+      tabs: [{ tab: 'Documentation', pages: ['introduction'] }],
+      ...(integrations === undefined ? {} : { integrations }),
+    }))
+    writeFileSync(join(projectDir, 'src/content/introduction.mdx'), [
+      '---', 'title: Introduction', 'description: Product documentation introduction.', '---', '',
+      'Welcome to the product documentation and its complete setup guide.',
+    ].join('\n'))
+    let issues: Array<{ severity: string; message: string }> = []
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await runCheck(projectDir, { fix: false, ci: true, onIssues: (found) => { issues = found } })
+    } finally {
+      log.mockRestore()
+    }
+    return issues.filter((issue) => /integration/i.test(issue.message))
+  }
+
+  it('warns, without echoing values, on invalid integrations', async () => {
+    const found = await run({
+      ga4: { measurementId: 'UA-SECRETVALUE-1' },
+      posthog: { apiKey: `phc_${'a'.repeat(30)}`, sessionRecording: 'false' },
+      plausible: { domain: 'docs.example.com', server: '127.0.0.1' },
+      amplitude: {},
+    })
+    expect(found.length).toBeGreaterThanOrEqual(4)
+    expect(found.every((issue) => issue.severity === 'warning')).toBe(true)
+    expect(found.map((issue) => issue.message).join('\n')).not.toContain('SECRETVALUE')
+    expect(found.map((issue) => issue.message)).toContain(
+      'docs.json integrations: Thally does not support these providers, so they will not be rendered: amplitude. Supported: ga4, gtm, posthog, plausible.',
+    )
+    expect((await run('nope')).length).toBe(1)
+  })
+
+  it('stays quiet for valid or absent integrations', async () => {
+    expect(await run(undefined)).toEqual([])
+    expect(await run({ ga4: { measurementId: 'G-TEST12345' }, gtm: { tagId: 'GTM-TEST123' } })).toHaveLength(1) // GTM + GA4 double count only
+    expect(await run({ ga4: { measurementId: 'G-TEST12345' } })).toEqual([])
   })
 })

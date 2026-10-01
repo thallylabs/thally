@@ -6,7 +6,7 @@
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import {
   cloneGitHubRepository,
@@ -22,6 +22,7 @@ import {
   type MigrationWarning,
 } from '@thallylabs/migrate'
 
+import { findPublicSpecs, shadowNote } from '../public-specs.js'
 import { scaffold } from '../scaffold.js'
 import { initGit, installDeps } from '../utils.js'
 import { validateMigration, type MigrationValidation } from './validate.js'
@@ -62,6 +63,22 @@ function projectPath(projectDir: string, candidate: string): string {
     throw new Error(`Generated migration path escapes the project: ${candidate}`)
   }
   return target
+}
+
+/**
+ * Keep withheld access-restricted pages out of git: the new project is
+ * committed by `initGit`, and a public push must not publish them. Appends to
+ * (never replaces) an existing .gitignore, once.
+ */
+function ignoreQuarantineDirectory(projectDir: string): void {
+  const ignorePath = projectPath(projectDir, '.gitignore')
+  const existing = existsSync(ignorePath) ? readFileSync(ignorePath, 'utf8') : ''
+  // The last matching rule wins in .gitignore: an existing entry only counts if
+  // no later `!migration-quarantine` line re-includes the folder.
+  const rules = existing.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^!?\/?migration-quarantine(?:\/(?:\*\*?)?)?$/.test(line))
+  if (rules.length > 0 && !rules[rules.length - 1].startsWith('!')) return
+  const separator = existing === '' || existing.endsWith('\n') ? '' : '\n'
+  writeFileSync(ignorePath, `${existing}${separator}\n# Access-restricted pages withheld by migration: local only, never commit or deploy\n/migration-quarantine/\n`)
 }
 
 function readExistingConfig(projectDir: string): MigrationDocsConfig | undefined {
@@ -120,6 +137,25 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
   }
 }
 
+/**
+ * Migrated specs are written outside `public/`, but a spec already there (from
+ * an earlier import or an older release) stays served as-is. Never deleted
+ * here: list it so the owner can remove it.
+ */
+function publicSpecWarning(projectDir: string, bundle: MigrationBundle): MigrationWarning | null {
+  const { specs, skipped } = findPublicSpecs(projectDir)
+  if (specs.length === 0 && skipped.length === 0) return null
+  const migrated = new Set(bundle.assets.filter((asset) => asset.projectRelative).map((asset) => basename(asset.path)))
+  const lines = [
+    ...specs.map((spec) => `${spec.path}${migrated.has(basename(spec.path)) ? ' (same file name as a migrated spec)' : ''}${spec.hasHiddenOperations ? ' (contains x-excluded/x-hidden operations)' : ''}${shadowNote(spec.urlPath) ? ` (answers /${spec.urlPath} in place of the filtered specification)` : ''}`),
+    ...skipped.map((path) => `${path} (too large to inspect)`),
+  ]
+  return {
+    code: 'unsupported-config',
+    message: `Existing OpenAPI files under public/ are served publicly as-is: ${lines.join('; ')}. Migrated specs are written to openapi/, and re-running migration does not remove old copies from public/. Delete any old copy manually (nothing was deleted), or its hidden operations stay downloadable.`,
+  }
+}
+
 /** Import a GitHub docs repository or public docs URL into a Thally project. */
 export async function migrateDocs(options: MigrateOptions): Promise<MigrateResult> {
   const projectDir = resolve(options.projectDir)
@@ -144,10 +180,11 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   }
 
   // Preserve portable runtime capabilities, not the starter's sample pages,
-  // navigation or locale setup. Mintlify has no equivalent Markdown toggle.
+  // navigation or locale setup. A source-derived Markdown setting (Mintlify
+  // serves .md mirrors by default) wins over the starter's.
   if (!options.into) {
     const starterConfig = readExistingConfig(projectDir)
-    if (starterConfig?.markdown) bundle.docsConfig.markdown = starterConfig.markdown
+    if (starterConfig?.markdown) bundle.docsConfig.markdown ??= starterConfig.markdown
     // The starter's "Get started" link points at its sample quickstart. A
     // migrated source without its own primary action must not inherit it.
     if (!bundle.docsConfig.navbar?.primary) {
@@ -156,6 +193,11 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     // An absent locale block invokes the runtime's legacy bilingual fallback.
     // A single-language source must not acquire a phantom translation menu.
     bundle.docsConfig.i18n ??= { defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }] }
+  }
+
+  if (options.into) {
+    const stale = publicSpecWarning(projectDir, bundle)
+    if (stale) bundle.warnings.unshift(stale)
   }
 
   const rendered = renderMigrationFiles(bundle, {
@@ -170,8 +212,24 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     writeFileSync(destination, file.content)
   }
 
-  for (const warning of bundle.warnings) {
-    console.warn(`  ⚠  ${warning.message}${warning.source ? ` (${warning.source})` : ''}`)
+  if (bundle.quarantinedFiles?.length) ignoreQuarantineDirectory(projectDir)
+
+  const format = (warning: MigrationWarning): string => `${warning.message}${warning.source ? ` (${warning.source})` : ''}`
+  for (const warning of bundle.warnings.filter((item) => item.code !== 'gated-page')) console.warn(`  ⚠  ${format(warning)}`)
+  // Access-restricted content is a security matter: keep it together, last,
+  // and unmistakable so it is not lost among compatibility notes.
+  const gatedWarnings = bundle.warnings.filter((item) => item.code === 'gated-page')
+  if (gatedWarnings.length > 0) {
+    console.warn('\n  🔒 ACCESS-RESTRICTED CONTENT — review before publishing')
+    for (const warning of gatedWarnings) console.warn(`  🔒 ${format(warning)}`)
+    if (bundle.droppedGatedPages) {
+      console.warn(`  🔒 ${bundle.droppedGatedPages} access-restricted page(s) were dropped by the file limit: not published and not saved under migration-quarantine/; recover them from the source repository.`)
+    }
+    // Quarantined assets may include files the gated pages needed; the dashboard
+    // settings are not in the repository. Say both once, only for gated sites.
+    if (bundle.quarantinedFiles?.length || gatedWarnings.some((warning) => !/dashboard access settings/i.test(warning.message))) {
+      console.warn('  🔒 Before publishing, review migration-quarantine/assets/ and the dashboard access settings of the source site.')
+    }
   }
   console.log(`  ✓ Imported ${bundle.pages.length} pages and ${bundle.assets.length} assets from ${bundle.platform}.`)
 
@@ -190,6 +248,8 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   }
   console.log('\n  Validating imported documentation...')
   const validation = await validateMigration(projectDir, options.skipValidation, installationFailed)
+  // Quarantine holds withheld pages and the assets only they use; count them apart.
+  const quarantinedPages = (bundle.quarantinedFiles ?? []).filter((file) => /\.mdx?$/i.test(file.path)).length
   const reportPath = projectPath(projectDir, 'migration-report.json')
   writeFileSync(reportPath, `${JSON.stringify({
     version: 1,
@@ -198,6 +258,9 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     pages: bundle.pages.length,
     assets: bundle.assets.length,
     components: bundle.componentFiles?.length ?? 0,
+    quarantined: quarantinedPages,
+    quarantinedAssets: (bundle.quarantinedFiles?.length ?? 0) - quarantinedPages,
+    droppedGatedPages: bundle.droppedGatedPages ?? 0,
     warnings: bundle.warnings,
     validation,
   }, null, 2)}\n`)

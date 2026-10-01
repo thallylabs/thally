@@ -7,7 +7,7 @@ import { OperationCodePanel } from '@/components/api/operation-code-panel'
 import { useTryItController } from '@/components/api/use-try-it-controller'
 import { ParamField, ResponseField, Expandable } from '@/components/mdx/api-fields'
 import type { NormalizedOperation, NormalizedParameter, NormalizedResponse } from '@/lib/openapi/types'
-import { getMethodToken } from '@/components/api/tokens'
+import { EndpointBar } from '@/components/api/endpoint-bar'
 import { cn } from '@/lib/utils'
 import Markdown from '@/components/mdx/markdown'
 
@@ -17,7 +17,6 @@ interface OperationPanelProps {
 
 export function OperationPanel({ operation }: OperationPanelProps) {
   const controller = useTryItController(operation)
-  const methodToken = getMethodToken(operation.method)
   const [isDialogOpen, setDialogOpen] = useState(false)
 
   type ParamLocation = 'path' | 'query' | 'header' | 'cookie'
@@ -49,20 +48,7 @@ export function OperationPanel({ operation }: OperationPanelProps) {
               )}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-4 border-y border-border py-3">
-            <span className={cn('rounded-[5px] px-2 py-1 font-mono text-[0.7rem] font-medium uppercase tracking-[0.02em]', methodToken.bg, methodToken.text)}>{operation.method}</span>
-            <code className="flex-1 text-sm font-semibold text-foreground break-all">
-              {(operation.servers[0]?.url?.replace(/\/$/, '') ?? '')}
-              {operation.path}
-            </code>
-            <button
-              type="button"
-              onClick={() => setDialogOpen(true)}
-              className="rounded-[9px] bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition hover:brightness-125 active:scale-[0.98]"
-            >
-              Try it
-            </button>
-          </div>
+          <EndpointBar operation={operation} onTryIt={() => setDialogOpen(true)} />
         </header>
 
         {/* Servers */}

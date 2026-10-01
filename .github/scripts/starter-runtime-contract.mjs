@@ -45,6 +45,7 @@ export const FRAMEWORK_SYNC_ELIGIBLE = Object.freeze([
   "src/data/api-reference.ts",
   "src/data/docs.ts",
   "src/data/get-doc.ts",
+  "src/data/manual-api.ts",
   "src/lib/**",
   "src/mdx/rehype.ts",
   "src/mdx/rehype.test.ts",
@@ -73,6 +74,7 @@ const SOURCE_ONLY_PATHS = new Set([
   "src/lib/__tests__/frontmatter-parity.test.ts",
   "src/components/mdx/client-registry.test.ts",
   "src/lib/openapi/__tests__/migrate-operation-slug-parity.test.ts",
+  "src/lib/openapi/__tests__/publication-check-parity.test.ts",
 ]);
 
 function invariant(condition, message) {

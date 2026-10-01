@@ -5,8 +5,7 @@ import { getBuildContentControls } from '@/lib/cloud-link/content-controls'
 import { SiteShell } from '@/components/layout/site-shell'
 import { SidebarCollectionsHydrator } from '@/components/layout/sidebar-hydrator'
 import { loadSidebarCollections, getAiConfig, getNavbarConfig, getFooterConfig, getNavigationPresentation } from '@/data/docs'
-import type { NavigationSection } from '@/data/docs'
-import { buildApiNavigation } from '@/data/api-reference'
+import { withApiNavigation } from '@/data/api-reference'
 import { DocsCodeActionsProvider } from '@/components/docs/code-actions-provider'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig, siteIdentity } from '@/lib/site-config'
@@ -19,29 +18,7 @@ interface DocsLayoutProps {
 export default async function DocsLayout({ children }: DocsLayoutProps) {
   const showPoweredBy = await shouldShowPoweredBy()
   const contentControls = getBuildContentControls()
-  const navigation = await buildApiNavigation()
-  const apiSections: Array<NavigationSection> = navigation.map((group, index) => ({
-    id: `openapi-${index}`,
-    title: group.title,
-    items: group.items.map((item) => ({
-      id: item.id,
-      title: item.title,
-      href: item.href,
-      badge: item.badge,
-      description: `${item.method} ${item.path}`,
-    })),
-  }))
-
-  const sidebarCollections = await loadSidebarCollections()
-  const collections = sidebarCollections.map((collection) => {
-    if (collection.api && collection.api.navigation !== false) {
-      // Merge MDX-based sections (from docs.json groups) with OpenAPI-generated sections
-      const mdxSections = collection.sections ?? []
-      const mergedSections = [...mdxSections, ...apiSections]
-      return { ...collection, sections: mergedSections }
-    }
-    return collection
-  })
+  const collections = await withApiNavigation(await loadSidebarCollections())
   const aiConfig = getAiConfig()
   const i18nConfig = await getEffectiveI18nConfig()
   const navbarConfig = getNavbarConfig()

@@ -9,8 +9,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 // This workflow bootstrap intentionally stays dependency-free JavaScript so
@@ -159,6 +160,30 @@ function createStarter(
   );
   return directory;
 }
+
+// Directories that are only partly synchronized: a runtime module added here
+// and imported by synced code must be eligible, or generated sites fail to
+// build. Files the starter owns are listed explicitly.
+const STARTER_OWNED = new Set(["src/data/site.ts", "src/mdx/custom-components.tsx"]);
+
+describe("partially synchronized runtime directories", () => {
+  it("lists every non-test module as sync-eligible or starter-owned", () => {
+    const root = resolve(__dirname, "../../../..");
+    const covered = (path: string) =>
+      (FRAMEWORK_SYNC_ELIGIBLE as Array<string>).some((rule) =>
+        rule.endsWith("/**") ? path.startsWith(rule.slice(0, -2)) : rule === path,
+      );
+    const unlisted: Array<string> = [];
+    for (const directory of ["src/data", "src/mdx"]) {
+      for (const name of readdirSync(join(root, directory))) {
+        const path = `${directory}/${name}`;
+        if (!/\.tsx?$/.test(name) || /\.test\.tsx?$/.test(name)) continue;
+        if (!covered(path) && !STARTER_OWNED.has(path)) unlisted.push(path);
+      }
+    }
+    expect(unlisted).toEqual([]);
+  });
+});
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
