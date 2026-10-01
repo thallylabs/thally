@@ -170,8 +170,17 @@ function unwrapDocusaurusMdxCodeBlocks(body: string): string {
   return isMdxCodeBlock ? body : output.join('\n')
 }
 
-/** Keep explicit heading anchors without leaving `{#id}` as an MDX expression. Frontmatter is left untouched. */
-export function normalizeExplicitHeadingIds(raw: string): string {
+// Any HTML5 id: non-empty, no whitespace. `"` `'` `<` `>` `&` and backticks
+// would break the generated `id="..."` attribute and `{` `}` would reopen an MDX
+// expression. A single character class, so it cannot backtrack.
+const HTML_ID = /^[^\s"'<>`{}&]+$/u
+
+/**
+ * Keep explicit heading anchors without leaving `{#id}` as an MDX expression.
+ * An id that is not a valid HTML id is stripped (and reported through `warn`)
+ * so the page still compiles. Frontmatter is left untouched.
+ */
+export function normalizeExplicitHeadingIds(raw: string, warn?: (message: string) => void): string {
   const { front, body } = splitFrontmatterBlock(raw)
   return front + replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
     if (!/^[ \t]{0,3}#{1,6}[ \t]+/.test(line)) return line
@@ -183,9 +192,12 @@ export function normalizeExplicitHeadingIds(raw: string): string {
       const marker = trimmed.lastIndexOf(' {#')
       if (marker >= 0) {
         const id = trimmed.slice(marker + 3, -1)
-        if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) {
-          return `<a id="${id}"></a>\n${trimmed.slice(0, marker).trimEnd()}`
-        }
+        const heading = trimmed.slice(0, marker).trimEnd()
+        // Braces in the "id" mean this is prose like `{#if} blocks {x}`, not one anchor.
+        if (/[{}]/.test(id)) return line
+        if (HTML_ID.test(id)) return `<a id="${id}"></a>\n${heading}`
+        warn?.(`Heading anchor {#${id}} is not a valid HTML id and was removed from "${heading.replace(/^\s*#+\s*/, '')}".`)
+        return heading
       }
     }
     // Docusaurus' heading plugin also accepts a trailing MDX comment.
@@ -194,7 +206,7 @@ export function normalizeExplicitHeadingIds(raw: string): string {
       if (marker >= 0) {
         const comment = trimmed.slice(marker + 4, -3).trim()
         const id = comment.startsWith('#') ? comment.slice(1) : ''
-        if (/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(id)) {
+        if (HTML_ID.test(id)) {
           return `<a id="${id}"></a>\n${trimmed.slice(0, marker).trimEnd()}`
         }
       }
@@ -923,6 +935,22 @@ export function replaceOutsideCode(body: string, transform: (whole: string) => s
 }
 
 /**
+ * The one way the migrator emits an MDX comment. A `*\/` inside `text` would
+ * close the comment early, so interpolated paths and source text are defused.
+ */
+export function mdxComment(text: string): string {
+  return `{/*${text.replace(/\*\//g, '* /')}*/}`
+}
+
+/**
+ * `replaceOutsideCode` that also leaves existing `{/* ... *\/}` comments alone,
+ * so a rewrite cannot nest (and thereby corrupt) a comment inside another one.
+ */
+export function replaceOutsideCodeAndComments(body: string, transform: (whole: string) => string): string {
+  return replaceOutsideCode(body, (masked) => masked.split(/(\{\s*\/\*[\s\S]*?\*\/\s*\})/).map((part, index) => index % 2 ? part : transform(part)).join(''))
+}
+
+/**
  * Fern authors often link sibling MDX files from Card props and Markdown.
  * Resolve only links to files that actually became pages; unknown paths,
  * external URLs, assets, and examples retain their authored destinations.
@@ -1004,7 +1032,7 @@ function normalizeFernFileTrees(body: string): string {
  * analysis too, before that pass ever gets a chance to run.
  */
 export function normalizeHtmlComments(body: string): string {
-  return replaceOutsideCode(body, (whole) => whole.replace(/<!--([\s\S]*?)-->/g, (_match, comment: string) => `{/*${comment}*/}`))
+  return replaceOutsideCode(body, (whole) => whole.replace(/<!--([\s\S]*?)-->/g, (_match, comment: string) => mdxComment(comment)))
 }
 
 /**
@@ -1732,7 +1760,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   if (runMintlify) rewritten = normalizeMintlifyParameterAnchors(rewritten)
   rewritten = replaceOutsideCode(rewritten, (segment) => {
     let result = convertHtmlStyleAttributes(segment)
-      .replace(/<!--([\s\S]*?)-->/g, (_match, content: string) => `{/*${content}*/}`)
+      .replace(/<!--([\s\S]*?)-->/g, (_match, content: string) => mdxComment(content))
       .replace(/<Danger(\s[^>]*)?>/g, '<Error$1>')
       .replace(/<\/Danger>/g, '</Error>')
       .replace(/<Warn(\s[^>]*)?>/g, '<Warning$1>')
