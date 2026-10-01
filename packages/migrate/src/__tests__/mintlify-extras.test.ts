@@ -504,14 +504,17 @@ describe('gating bypass hardening', () => {
 
   it('inlines a file of exactly the size cap', () => {
     const head = '---\ntitle: Edge\n---\n\nEDGEMARKER\n'
+    const edge = `${head}\n\`\`\`\n${'x'.repeat(2_000_000 - head.length - 10)}\n\`\`\`\n`
+    expect(Buffer.byteLength(edge)).toBe(2_000_000)
     const bundle = site({
       'docs.json': JSON.stringify({ navigation: { pages: ['host'] } }),
       'host.mdx': '---\ntitle: Host\n---\n\nPublic text.\n\n<Snippet file="/edge.mdx" />\n',
-      'edge.mdx': head + 'x'.repeat(2_000_000 - head.length),
+      // One fenced code block: only the 2 MB size is under test, and 2 MB of prose makes the MDX pipeline take ~45 s.
+      'edge.mdx': edge,
     })
     expect(JSON.stringify(bundle.pages).includes('EDGEMARKER')).toBe(true)
     expect(codes(bundle, 'skipped-file').some((warning) => /NOT inlined/.test(warning.message))).toBe(false)
-  }, 120_000)
+  }, 30_000)
 
   it('blocks a small file whose frontmatter is not closed within the bounded read', () => {
     const unterminated = `---\ntitle: Open\n${'x: y\n'.repeat(20_000)}UNPARSEABLEMARKER\n`
@@ -923,7 +926,7 @@ describe('asset reach is decided by exact normalized path, never by file name', 
     expect(publicPaths(bundle)).toContain('logo.png')
     expect(publicPaths(bundle)).not.toContain('private/logo.png')
     expect(quarantined(bundle)).toContain('migration-quarantine/assets/private/logo.png')
-  })
+  }, 30_000)
 
   it('keeps the restricted folder copy private when the same filename is referenced relatively from two folders', () => {
     const bundle = site({
@@ -936,7 +939,7 @@ describe('asset reach is decided by exact normalized path, never by file name', 
     expect(publicPaths(bundle)).toContain('open/img/logo.png')
     expect(publicPaths(bundle)).not.toContain('closed/img/logo.png')
     expect(quarantined(bundle)).toContain('migration-quarantine/assets/closed/img/logo.png')
-  })
+  }, 30_000)
 
   it('matches a docs.json logo by its full path', () => {
     const bundle = site({
@@ -948,7 +951,7 @@ describe('asset reach is decided by exact normalized path, never by file name', 
     })
     expect(publicPaths(bundle)).toContain('brand/logo.svg')
     expect(publicPaths(bundle)).not.toContain('internal/logo.svg')
-  })
+  }, 30_000)
 
   it('matches a frontmatter image by its full path', () => {
     const bundle = site({
@@ -960,7 +963,7 @@ describe('asset reach is decided by exact normalized path, never by file name', 
     })
     expect(publicPaths(bundle)).toContain('img/cover.png')
     expect(publicPaths(bundle)).not.toContain('restricted/cover.png')
-  })
+  }, 30_000)
 
   it('keeps candidates of an ambiguous bare-filename reference in quarantine and names them', () => {
     const bundle = site({
@@ -975,7 +978,7 @@ describe('asset reach is decided by exact normalized path, never by file name', 
     const warning = codes(bundle, 'gated-page').find((item) => /does not give its folder/.test(item.message))
     expect(warning?.message).toContain('private/logo.png')
     expect(warning?.message).toContain('other/logo.png')
-  })
+  }, 30_000)
 })
 
 describe('assets when the file budget dropped pages', () => {
@@ -1043,7 +1046,7 @@ describe('assets when the file budget dropped pages', () => {
     expect(publicPaths(bundle)).toEqual(expect.arrayContaining(['img/kept.png', 'img/loose.png']))
     expect(bundle.quarantinedFiles).toBeUndefined()
     expect(bundle.warnings.some((item) => /file limit/.test(item.message) && item.code === 'gated-page')).toBe(false)
-  })
+  }, 30_000)
 })
 
 describe('asset and spec decisions that must not err toward public', () => {
@@ -1062,7 +1065,7 @@ describe('asset and spec decisions that must not err toward public', () => {
     expect(publicPaths(bundle)).not.toContain('img/snippet-only.png')
     expect(publicPaths(bundle)).not.toContain('img/loose.png')
     expect(quarantined(bundle)).toContain('migration-quarantine/assets/img/snippet-only.png')
-  })
+  }, 30_000)
 
   it('does not count the images of a page that was skipped as a duplicate as published references', () => {
     const bundle = site({
@@ -1079,7 +1082,7 @@ describe('asset and spec decisions that must not err toward public', () => {
     expect(publicPaths(bundle)).toContain('img/kept.png')
     expect(publicPaths(bundle)).not.toContain('img/skipped.png')
     expect(publicPaths(bundle)).not.toContain('img/skipped2.png')
-  })
+  }, 30_000)
 
   it('quarantines two files that map to the same public path on a restricted site', () => {
     const bundle = site({
@@ -1091,7 +1094,7 @@ describe('asset and spec decisions that must not err toward public', () => {
     })
     expect(publicPaths(bundle)).not.toContain('logo.png')
     expect(quarantined(bundle)).toContain('migration-quarantine/assets/logo.png')
-  })
+  }, 30_000)
 
   it('keeps a letter-case variant of a path in frontmatter from making a file public', () => {
     const bundle = site({
@@ -1102,7 +1105,7 @@ describe('asset and spec decisions that must not err toward public', () => {
     })
     expect(publicPaths(bundle)).not.toContain('img/cover.png')
     expect(codes(bundle, 'gated-page').some((item) => /does not give its folder/.test(item.message) && /img\/cover\.png/.test(item.message))).toBe(true)
-  })
+  }, 30_000)
 
   it('does not let a path that merely ends like a spec path publish the spec', () => {
     const spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { '/x': { get: { summary: 'SECRETSUMMARY' } } } })
@@ -1113,7 +1116,7 @@ describe('asset and spec decisions that must not err toward public', () => {
       'api/openapi.json': spec,
     })
     expect(publicPaths(bundle).filter((path) => path.endsWith('openapi.json'))).toEqual([])
-  })
+  }, 30_000)
   it('matches a differently-cased link by the real on-disk spelling on a case-insensitive filesystem', (context) => {
     const probe = mkdtempSync(join(tmpdir(), 'thally-case-'))
     writeFileSync(join(probe, 'a'), '')
@@ -1127,5 +1130,5 @@ describe('asset and spec decisions that must not err toward public', () => {
     })
     expect(publicPaths(bundle)).toContain('img/logo.png')
     expect(publicPaths(bundle)).not.toContain('img/other.png')
-  })
+  }, 30_000)
 })

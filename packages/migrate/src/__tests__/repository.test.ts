@@ -1587,8 +1587,8 @@ describe('Mintlify repository migration', () => {
     expect(lfs[0].message).toMatch(/^3 asset files are Git LFS pointers/)
   })
 
-  // Creating 5,000+ fixture files and migrating them is inherently slower
-  // than the suite's default 5s per-test timeout.
+  // The 5,000-file budget is lowered to 50 through the maxSourceFiles seam, so
+  // these scenarios need ~50 files instead of 5,000+.
   it('keeps the default version\'s referenced pages over unreferenced ones when discovery exceeds the file budget', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-discovery-budget-'))
     mkdirSync(join(root, 'v2', 'en'), { recursive: true })
@@ -1608,11 +1608,11 @@ describe('Mintlify repository migration', () => {
     // push total discovery past the 5,000-file budget: the two referenced
     // pages above must survive regardless of scan order, and the dropped
     // filler files (all under v1/) must be named in the warning.
-    for (let index = 0; index < 5000; index++) {
+    for (let index = 0; index < 50; index++) {
       writeFileSync(join(root, 'v1', 'en', `filler-${index}.mdx`), `---\ntitle: Filler ${index}\n---\n\nUnreferenced filler page.`)
     }
 
-    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', maxSourceFiles: 50 })
 
     const pageIds = bundle.pages.map((page) => page.id)
     expect(pageIds).toContain('v2/en/introduction')
@@ -1621,30 +1621,30 @@ describe('Mintlify repository migration', () => {
       code: 'limit-reached',
       message: expect.stringMatching(/left out.*v1/s),
     }))
-  }, 90_000)
+  }, 30_000)
 
   it('keeps the first pages in navigation order and names what was dropped when one version alone exceeds the file budget', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-single-version-budget-'))
     mkdirSync(join(root, 'en'), { recursive: true })
-    const pageIds = Array.from({ length: 5010 }, (_, index) => `en/page-${String(index).padStart(4, '0')}`)
+    const pageIds = Array.from({ length: 60 }, (_, index) => `en/page-${String(index).padStart(4, '0')}`)
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
       $schema: 'https://mintlify.com/docs.json',
       navigation: { tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: pageIds }] }] },
     }))
     for (const id of pageIds) writeFileSync(join(root, `${id}.mdx`), `---\ntitle: ${id}\n---\n\nPage.`)
 
-    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', maxSourceFiles: 50 })
 
     const migrated = bundle.pages.map((page) => page.id)
-    expect(migrated).toContain('en/page-4999')
-    expect(migrated).not.toContain('en/page-5000')
+    expect(migrated).toContain('en/page-0049')
+    expect(migrated).not.toContain('en/page-0050')
     const warning = bundle.warnings.find((entry) => entry.code === 'limit-reached')
     expect(warning?.message).toContain('10 page(s) were left out')
-    expect(warning?.message).toContain('en/page-5000.mdx')
+    expect(warning?.message).toContain('en/page-0050.mdx')
     expect(warning?.message).toContain('--docs-dir')
     expect(warning?.message).toContain('and 7 more')
     expect(warning?.message).not.toMatch(/lower-priority|budget/)
-  }, 90_000)
+  }, 30_000)
 
   // Regression test for the bug fixed alongside the file-cap prioritization
   // above: pages and assets used to share one MAX_SOURCE_FILES budget, so a
@@ -1656,7 +1656,7 @@ describe('Mintlify repository migration', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-asset-budget-'))
     mkdirSync(join(root, 'en'), { recursive: true })
     mkdirSync(join(root, 'images'), { recursive: true })
-    const pageIds = Array.from({ length: 5001 }, (_, index) => `en/page-${index}`)
+    const pageIds = Array.from({ length: 51 }, (_, index) => `en/page-${index}`)
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
       $schema: 'https://mintlify.com/docs.json',
       navigation: { tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: pageIds }] }] },
@@ -1669,10 +1669,10 @@ describe('Mintlify repository migration', () => {
     }
     writeFileSync(join(root, 'images', 'diagram.png'), 'fake-png-bytes')
 
-    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', maxSourceFiles: 50 })
 
     expect(bundle.assets.map((asset) => asset.path)).toContain('images/diagram.png')
-  }, 90_000)
+  }, 30_000)
 
   // Regression test for a second bug found alongside the two above: a real
   // file Mintlify still serves by file-based routing even though nothing in
@@ -1703,15 +1703,15 @@ describe('Mintlify repository migration', () => {
     writeFileSync(join(root, 'v2', 'en', 'orphan.mdx'), '---\ntitle: Orphan v2\n---\n\nNot in the sidebar, but live on the site.')
     // Enough unreferenced filler under the older, non-default version to
     // push total discovery past the 5,000-file budget on its own.
-    for (let index = 0; index < 5000; index++) {
+    for (let index = 0; index < 50; index++) {
       writeFileSync(join(root, 'v1', 'en', `filler-${index}.mdx`), `---\ntitle: Filler ${index}\n---\n\nUnreferenced filler page.`)
     }
 
-    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', maxSourceFiles: 50 })
 
     const pageIds = bundle.pages.map((page) => page.id)
     expect(pageIds).toContain('v2/en/orphan')
-  }, 90_000)
+  }, 30_000)
 })
 
 function docusaurusFixture(sidebarSource?: string): string {
