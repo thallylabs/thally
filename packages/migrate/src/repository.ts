@@ -1252,6 +1252,26 @@ function specRefMatches(ref: string, specPath: string, specFilename: string, isD
   return specPath.toLowerCase().endsWith(wanted) || specFilename.toLowerCase() === wanted
 }
 
+const TOKEN_SEPARATORS = /[\s"'()<>[\]{}=,;:|\\/`*!?#&]+/
+
+/** Adds every file-like word (`name.ext`) of the text, lowercased, to the set. Linear, no backtracking. */
+function addFileTokens(text: string, into: Set<string>): void {
+  for (const word of text.split(TOKEN_SEPARATORS)) {
+    const token = word.replace(/\.+$/, '').toLowerCase()
+    if (!/\.[a-z0-9]{2,5}$/.test(token)) continue
+    into.add(token)
+    if (token.includes('%')) {
+      try { into.add(decodeURIComponent(token)) } catch { /* keep the raw token */ }
+    }
+  }
+}
+
+/** Whether an asset's basename appears among the tokens; a name with spaces is matched by its last word (errs toward public). */
+function namesFileToken(assetBasename: string, tokens: ReadonlySet<string>): boolean {
+  const lower = assetBasename.toLowerCase()
+  return tokens.has(lower) || tokens.has(lower.split(TOKEN_SEPARATORS).filter(Boolean).pop() ?? lower)
+}
+
 function findOpenApi(files: Array<ScannedFile>): ScannedFile | null {
   return files.find((file) => OPENAPI_FILENAMES.has(basename(file.relativePath).toLowerCase())
     && classifyApiSpec(file.absolutePath) === 'openapi') ?? null
@@ -2967,7 +2987,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // frontmatter included, plus copied CSS/JS and migrated components), which
   // asset rewriting does not fully track: images named only there stay public.
   const withheldAssetPaths = new Set<string>()
-  const publishedText: Array<string> = []
+  // Lowercase file-like tokens of everything published, filled only on a site
+  // with withheld content (the only place they are read); no page text is kept.
+  const publishedTokens = new Set<string>()
   let sawPublicTrue = false
   // Gate verdicts are computed up front so a page that imports an
   // access-restricted page as a component can never inline its content.
@@ -2985,9 +3007,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       try {
         // Pages above the size cap are never imported, but another page can
         // still inline them, so they are classified from their frontmatter.
-        const raw = lstatSync(file.absolutePath).size > MAX_PAGE_BYTES
-          ? readFrontmatterHead(file.absolutePath)
-          : readFileSync(file.absolutePath, 'utf8')
+        // One bounded read for nearly every page; a frontmatter longer than the
+        // head window falls back to the whole file, as before.
+        const size = lstatSync(file.absolutePath).size
+        const raw = readFrontmatterHead(file.absolutePath) ?? (size > MAX_PAGE_BYTES ? undefined : readFileSync(file.absolutePath, 'utf8'))
         if (raw === undefined) throw new Error('frontmatter is not terminated within the bounded read')
         head = pageHeadGateReason(raw)
       } catch {
@@ -2999,6 +3022,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (reason) withheldPaths.add(file.absolutePath)
     }
   }
+  const collectPublishedTokens = platform === 'mintlify' && withheldPaths.size > 0
   // Mintlify only. The pre-pass covers only files inside the file budget, so a
   // candidate it never saw (dropped by the budget, in a snippet directory, under
   // a case-variant path) is classified on demand: frontmatter gates, navigation
@@ -3172,7 +3196,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       snippetAliases,
       inlineGate,
     )
-    if (platform === 'mintlify') publishedText.push(raw)
+    if (collectPublishedTokens) addFileTokens(raw, publishedTokens)
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
       // A heading's `{#custom-id}` anchor (`## Title {#custom-id}`) crashes
       // `@mdx-js/mdx`'s parser outright, so it must be converted to a
@@ -3528,7 +3552,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const candidateSize = lstatSync(file.absolutePath).size
     // Site-wide CSS/JS can load images by url(); a published page may use them.
     if (siteKind === 'style' || siteKind === 'script') {
-      if (candidateSize <= MAX_PAGE_BYTES) publishedText.push(readFileSync(file.absolutePath, 'utf8'))
+      if (collectPublishedTokens && candidateSize <= MAX_PAGE_BYTES) addFileTokens(readFileSync(file.absolutePath, 'utf8'), publishedTokens)
     }
     assetCandidates.push({ file, assetPath, size: candidateSize })
   }
@@ -3548,14 +3572,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // public (basename match: errs toward public). Untrackable: paths built at
   // runtime (template strings, concatenation) and references from remote
   // content.
-  const publicConfigText = JSON.stringify(mintlifyConfig ?? {})
+  if (collectPublishedTokens) addFileTokens(JSON.stringify(mintlifyConfig ?? {}), publishedTokens)
   for (const file of componentMigrator?.files() ?? []) {
-    if (typeof file.content === 'string') publishedText.push(file.content)
+    if (collectPublishedTokens && typeof file.content === 'string') addFileTokens(file.content, publishedTokens)
   }
-  const hasWithheldContent = platform === 'mintlify' && withheldPaths.size > 0
+  const hasWithheldContent = collectPublishedTokens
   const isPublicReachable = (assetPath: string): boolean => referencedAssetPaths.has(assetPath)
-    || publishedText.some((text) => text.includes(basename(assetPath)))
-    || publicConfigText.includes(basename(assetPath))
+    || namesFileToken(basename(assetPath), publishedTokens)
   const isQuarantinedAsset = (assetPath: string): boolean => (withheldAssetPaths.has(assetPath) || (hasWithheldContent && !siteAssetPaths.has(assetPath)))
     && platform === 'mintlify'
     && !isPublicReachable(assetPath)
