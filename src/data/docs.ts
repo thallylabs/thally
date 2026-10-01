@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 import type { NormalizedOperation } from '@/lib/openapi/types'
-import { sanitizeApiMdxConfig, type ApiMdxConfig } from '@/lib/openapi/api-frontmatter'
+import { sanitizeApiMdxConfig, type ApiMdxConfig } from '@/lib/openapi/manual-operation'
 import { getContentIndex, loadContentIndex, type ContentIndex } from '@/lib/content-index'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
@@ -10,7 +10,7 @@ import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { SUPPORTED_LOCALE_OPTIONS } from '@/lib/i18n/config'
 import { pageApiMetadata } from '@/lib/openapi/page-api'
 import type { OpenApiFrontmatterRef } from '@/lib/openapi/page-frontmatter'
-import type { ManualApiTarget } from '@/lib/openapi/api-frontmatter'
+import type { ManualApiTarget } from '@/lib/openapi/manual-operation'
 import { UNPUBLISHED_PAGES_FILE } from '@/lib/openapi/publication'
 
 

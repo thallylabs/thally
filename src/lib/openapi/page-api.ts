@@ -5,7 +5,7 @@
  * page documents an operation.
  */
 
-import { parseApiFrontmatter, type ManualApiTarget, type Warn } from '@/lib/openapi/api-frontmatter'
+import { parseApiFrontmatter, type ManualApiTarget, type Warn } from '@/lib/openapi/manual-operation'
 import { parseOpenApiFrontmatter, type OpenApiFrontmatterRef } from '@/lib/openapi/page-frontmatter'
 
 export interface PageApiMetadata {

@@ -170,10 +170,12 @@ async function compileDocEntry(
   // The page index (docs.ts) reads the same metadata through the same function.
   // A translation may not redirect the playground away from the primary page's server or auth.
   const primaryFile = !isFallback && primaryPath && frontmatter?.api !== undefined && frontmatter.api !== null ? await source.read(primaryPath) : null
-  const own = { api: frontmatter?.api, authMethod: frontmatter?.authMethod }
-  const trusted = primaryFile
-    ? resolveTranslatedManualApi(own, parseFrontmatter(primaryFile.content).data, getApiMdxConfig(), warn)
-    : own
+  const trusted = resolveTranslatedManualApi(
+    { api: frontmatter?.api, authMethod: frontmatter?.authMethod },
+    primaryFile ? parseFrontmatter(primaryFile.content).data : null,
+    getApiMdxConfig(),
+    warn,
+  )
   const meta = pageApiMetadata({ ...frontmatter, api: trusted.api }, warn)
   const openapi = meta.openapi
   const title = frontmatter?.title ?? deriveTitleFromSlug(slugPath)
