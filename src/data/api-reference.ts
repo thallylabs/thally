@@ -34,12 +34,24 @@ function resolveSpecId(specId?: string) {
   return apiReferenceConfig.specs.some((spec) => spec.id === specId) ? specId : apiReferenceConfig.defaultSpecId
 }
 
+/**
+ * Normalization is pure in (spec config, raw document), and `React.cache` does
+ * not memoize outside a render (the Try It relay, route handlers), so keep the
+ * result per spec. It is tied to the raw document the spec cache handed out:
+ * whenever that cache serves a new document, the old result is not reused.
+ */
+const normalizedSpecs = new WeakMap<object, { document: unknown; spec: NormalizedSpec }>()
+
 const getNormalizedSpec = cache(async (specId?: string): Promise<NormalizedSpec> => {
   if (apiReferenceConfig.specs.length === 0) return { operations: [], config: {} as NormalizedSpec['config'], servers: [] }
   const resolvedSpecId = resolveSpecId(specId)
   const config = getSpecConfig(apiReferenceConfig, resolvedSpecId)
   const resolved = await loadSpec(config)
-  return normalizeSpec(resolved)
+  const hit = normalizedSpecs.get(config)
+  if (hit && hit.document === resolved.document) return hit.spec
+  const spec = normalizeSpec(resolved)
+  normalizedSpecs.set(config, { document: resolved.document, spec })
+  return spec
 })
 
 export const getApiOperationNodes = cache(async (specId?: string): Promise<Array<ApiOperationNode>> => {
