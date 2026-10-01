@@ -3062,20 +3062,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ? scannedFiles.filter((file) => !mintignoreMatcher.ignores(file.relativePath))
     : scannedFiles
   // Mintlify snippet modules are dependencies loaded by path while inlining
-  // pages; they are not published pages. Counting them against the discovery
-  // budget can evict real translated/versioned pages on large sites.
+  // pages; they are not published pages. The selector gives snippets their own
+  // bounded group so they cannot evict translated or versioned pages.
   const isUnreferencedSnippetModule = (file: ScannedFile): boolean => (
     file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
     && isDocumentationExtension(file.relativePath)
     && !referenceOrder.has(normalizedReferenceKey(file.relativePath))
   )
-  const publishableFiles = platform === 'mintlify'
-    ? mintignoreFilteredFiles.filter((file) => !isUnreferencedSnippetModule(file))
-    : mintignoreFilteredFiles
-  const discoveryBudgetApplied = discoveryRank !== undefined && publishableFiles.length > sourceBudget
   const files = discoveryRank
-    ? selectFilesWithinBudget(publishableFiles, discoveryRank, warnings, allVersionPrefixes, sourceBudget)
-    : publishableFiles
+    ? selectFilesWithinBudget(mintignoreFilteredFiles, discoveryRank, warnings, allVersionPrefixes, sourceBudget)
+    : mintignoreFilteredFiles
   // A Fern `versions:` file may live outside fern/ (a sibling `docs/`
   // directory) and its own pages resolve relative to it, so their
   // sourcePath (e.g. `../docs/pages/x.mdx`) falls outside the fern/-rooted
@@ -3273,10 +3269,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const snippetAliases = platform === 'mintlify' && mintlifyProjectRoot
     // Snippets are dependencies, not publishable pages. They stay outside the
     // page budget but must remain available for implicit Mintlify aliases.
-    ? globalSnippetAliases([
-      ...files,
-      ...mintignoreFilteredFiles.filter(isUnreferencedSnippetModule),
-    ], repositoryDir, mintlifyProjectRoot)
+    ? globalSnippetAliases(files, repositoryDir, mintlifyProjectRoot)
     : new Map<string, string>()
   // A restricted page the budget dropped is not published or saved, but the
   // assets it uses must still stay out of public/ (bounded scan, like the
@@ -3988,12 +3981,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
 
-  // `selectFilesWithinBudget` already emitted a detailed warning (dropped
-  // count + versions) when it ran; this generic fallback only covers the
-  // case it couldn't run (no `discoveryRank`, e.g. Docusaurus) or the rare
-  // case where later additions (Fern's external sourcePaths, above) pushed
-  // the count back over budget after the event.
-  if (!discoveryBudgetApplied && files.length >= sourceBudget) {
+  // Ranked discovery gives pages, snippets and assets separate budgets and
+  // reports dropped groups itself. A total across those groups is not evidence
+  // that the scan stopped early. Only the unranked walk uses this fallback.
+  if (!discoveryRank && files.length >= sourceBudget) {
     warnings.push({ code: 'limit-reached', message: `Stopped scanning after ${sourceBudget} files, so the rest of the repository was not looked at. Run the migration on a smaller part of the repository with --docs-dir.` })
   }
   if (platform === 'docusaurus') {
