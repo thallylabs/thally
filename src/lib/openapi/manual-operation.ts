@@ -334,7 +334,11 @@ export function buildManualOperation(input: BuildManualOperationInput): Normaliz
     prefill[field.location][field.name] = field.default ?? current ?? ''
   }
   const body = buildManualBody(fields)
-  if (body !== undefined) prefill.body = body
+  if (body !== undefined) {
+    prefill.body = body
+    // The relay forwards these headers verbatim, so the JSON body must carry its media type from here.
+    if (!Object.keys(prefill.header).some((name) => name.toLowerCase() === 'content-type')) prefill.header['Content-Type'] = 'application/json'
+  }
 
   const parameters: NormalizedOperation['parameters'] = { path: [], query: [], header: [], cookie: [] }
   for (const field of fields) {

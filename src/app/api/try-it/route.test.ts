@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getApiOperationByKey } from '@/data/api-reference'
 import { getManualApiOperation } from '@/data/manual-api'
+import { buildManualOperation } from '@/lib/openapi/manual-operation'
 import { POST } from './route'
 
 vi.mock('@/data/api-reference', () => ({
@@ -258,6 +259,26 @@ describe('POST /api/try-it for manual api pages', () => {
 
   beforeEach(() => {
     vi.mocked(getManualApiOperation).mockResolvedValue(manual() as never)
+  })
+
+  it('sends the media type of a synthesized body upstream', async () => {
+    const built = buildManualOperation({
+      pageId: 'guides/users',
+      title: 'Users',
+      api: 'POST https://httpbin.org/anything/users/{id}',
+      mdx: '<ParamField body="name" type="string" />',
+      config: { servers: [] },
+    })!
+    vi.mocked(getManualApiOperation).mockResolvedValue(built as never)
+    vi.stubGlobal('navigator', { userAgent: 'Cloudflare-Workers' })
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    // The playground seeds its request headers from the operation's prefill.
+    const response = await POST(request(manualPayload({ headers: built.prefill.header, body: built.prefill.body })))
+
+    expect(response.status).toBe(200)
+    const [, init] = fetchMock.mock.calls[0] as [URL, RequestInit]
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' })
   })
 
   it('relays to the origin declared by the page, never consulting spec operations', async () => {

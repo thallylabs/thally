@@ -102,6 +102,15 @@ describe('manual API pages', () => {
     }
     warn.mockRestore()
   })
+  it('declares the JSON media type for a body on both the rendered page and the relay', async () => {
+    pages.files['relay/create'] = {
+      frontmatter: { title: 'Create', api: 'POST /users' },
+      source: '---\ntitle: Create\napi: "POST /users"\n---\n<ParamField body="name" type="string" />',
+    }
+    const rendered = (await getDocFromParams(['relay', 'create']))?.manualApi
+    expect(rendered?.prefill.header['Content-Type']).toBe('application/json')
+    expect((await getManualApiOperation('relay/create'))?.prefill.header['Content-Type']).toBe('application/json')
+  })
   it('gives the Try It relay the same operation the page renders, without compiling the page', async () => {
     const body = '<ParamField path="id" type="string" default="7" />\n<ParamField query="q" type="string" />'
     const frontmatter = { title: 'Get user', api: 'GET /users/{id}', authMethod: 'bearer' }

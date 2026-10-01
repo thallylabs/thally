@@ -158,9 +158,17 @@ describe('buildManualOperation', () => {
     expect(op).toMatchObject({ method: 'POST', path: '/anything/users/{id}', servers: [{ url: 'https://httpbin.org' }], manualPage: 'p/users', isWebhook: false })
     expect(op.prefill.path).toEqual({ id: '42' })
     expect(op.prefill.query).toEqual({ verbose: '' })
-    expect(op.prefill.header).toEqual({ 'X-Trace': '' })
+    expect(op.prefill.header).toEqual({ 'X-Trace': '', 'Content-Type': 'application/json' })
     expect(JSON.parse(op.prefill.body!)).toEqual({ name: '', age: 0 })
     expect(op.parameters.path[0]).toMatchObject({ name: 'id', required: true })
+  })
+
+  it('declares the JSON media type for a synthesized body, keeping an authored Content-Type', () => {
+    expect(build()!.prefill.header['Content-Type']).toBe('application/json')
+    expect(build({ mdx: '<ParamField path="id" type="string" />' })!.prefill.header).toEqual({})
+    const authored = build({ mdx: '<ParamField header="content-type" type="string" default="application/vnd.api+json" />\n<ParamField body="name" type="string" />' })!
+    expect(authored.prefill.header).toEqual({ 'content-type': 'application/vnd.api+json' })
+    expect(authored.parameters.header).toHaveLength(1)
   })
 
   it('uses docs.json servers and auth for path-only values; absolute URL wins', () => {
@@ -180,7 +188,7 @@ describe('buildManualOperation', () => {
 
   it('maps authMethod overrides', () => {
     const config = { servers: [], auth: { method: 'bearer' as const } }
-    expect(build({ authMethod: 'none', config })!.prefill.header).toEqual({ 'X-Trace': '' })
+    expect(build({ authMethod: 'none', config })!.prefill.header).toEqual({ 'X-Trace': '', 'Content-Type': 'application/json' })
     expect(build({ authMethod: 'basic', config })!.prefill.header.Authorization).toMatch(/^Basic /)
     const warn = vi.fn()
     expect(build({ authMethod: 'key', config, warn })!.prefill.header.Authorization).toBeUndefined()
