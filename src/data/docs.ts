@@ -569,9 +569,19 @@ function recordedUnpublishedPages(): ReadonlySet<string> {
   return embeddedRecord
 }
 
-/** False for a page whose documented operation is hidden or excluded. */
-export function isDocPublished(pageId: string): boolean {
-  return !recordedUnpublishedPages().has(pageId)
+/**
+ * False for a page whose documented operation is hidden or excluded. A
+ * secondary-locale route renders its own translation when one exists (the
+ * build records it as `<locale>/<id>`) and the primary page otherwise, so
+ * `locale` judges the file that route would render.
+ */
+export function isDocPublished(pageId: string, locale?: string): boolean {
+  const record = recordedUnpublishedPages()
+  if (!locale || locale === (getI18nConfig()?.defaultLocale ?? 'en')) return !record.has(pageId)
+  const translation = `${locale}/${pageId}`
+  if (record.has(translation)) return false
+  const translated = runtimeSourceExists(`${CONTENT_ROOT}/${translation}.mdx`) || runtimeSourceExists(`${CONTENT_ROOT}/${translation}/index.mdx`)
+  return translated || !record.has(pageId)
 }
 
 let assetRecordPromise: Promise<void> | undefined
@@ -791,7 +801,7 @@ function buildNavigationNodes(
       // Fern and some legacy docs configs list pages that are reachable by
       // direct link but explicitly hidden from the rendered sidebar.
       if (readFrontmatter(page, locale).hidden) return []
-      if (!isDocPublished(page)) return []
+      if (!isDocPublished(page, locale)) return []
       return [{ type: 'page', item: resolveNavItem(page, locale, ancestors) }]
     }
     const child = buildNavigationGroup(page, [...indexPath, index], ancestors, locale)

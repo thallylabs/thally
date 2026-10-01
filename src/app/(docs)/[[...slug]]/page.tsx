@@ -82,7 +82,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!doc) return {}
   // The page 404s when its documented operation is hidden or excluded; give it no title, canonical or social preview.
   await ensureDocPublication()
-  if (!isDocPublished(doc.id)) return {}
+  if (!isDocPublished(doc.id, route.isLocaleRoute ? route.locale : undefined)) return {}
 
   const siteUrl = getSiteUrl()
   const primaryHref = docPathFromSlug(doc.slug)

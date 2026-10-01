@@ -4,7 +4,7 @@
  * compiler bundle.
  */
 
-import { getI18nConfig } from '@/data/docs'
+import { ensureDocPublication, getI18nConfig, isDocPublished } from '@/data/docs'
 import { getContentSource, type ContentSource } from '@/lib/content-source'
 import { parseFrontmatter } from '@/lib/frontmatter'
 
@@ -36,7 +36,10 @@ export async function hasDocTranslation(
     ? slugSegments.filter(Boolean)
     : []
   const candidate = await findDocSource(source, normalized.join('/'), locale)
-  return Boolean(candidate && !candidate.isFallback)
+  if (!candidate || candidate.isFallback) return false
+  // A translation bound to a hidden or excluded operation 404s: it does not exist for readers.
+  await ensureDocPublication()
+  return isDocPublished(normalized.join('/'), locale)
 }
 
 /** Read crawler eligibility from the translated file, not just its existence. */
@@ -53,6 +56,8 @@ export async function getIndexableDocTranslation(
   const slugPath = (slugSegments ?? []).filter(Boolean).join('/')
   const candidate = await findDocSource(source, slugPath, locale)
   if (!candidate || candidate.isFallback) return null
+  await ensureDocPublication()
+  if (!isDocPublished(slugPath, locale)) return null
   const file = await source.read(candidate.filePath)
   if (!file) return null
   const data = parseFrontmatter(file.content).data
