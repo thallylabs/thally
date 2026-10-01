@@ -20,7 +20,9 @@ vi.mock('@thallylabs/migrate', async (importOriginal) => ({
     mkdirSync(directory, { recursive: true })
     writeFileSync(join(directory, 'docs.json'), JSON.stringify({ navigation: { pages: ['intro', 'private'] } }))
     writeFileSync(join(directory, 'intro.mdx'), '---\ntitle: Intro\n---\n\nHello\n')
-    writeFileSync(join(directory, 'private.mdx'), '---\ntitle: Private\ngroups: [admin]\n---\n\nSecret\n')
+    writeFileSync(join(directory, 'private.mdx'), '---\ntitle: Private\ngroups: [admin]\n---\n\nSecret\n\n![p](/img/p.png)\n')
+    mkdirSync(join(directory, 'img'), { recursive: true })
+    writeFileSync(join(directory, 'img/p.png'), 'PNG')
   },
 }))
 
@@ -43,8 +45,10 @@ describe('gated page migration output', () => {
     expect(result.pagesWritten).toBe(1)
     expect(existsSync(join(projectDir, 'src/content/private.mdx'))).toBe(false)
     expect(readFileSync(join(projectDir, 'migration-quarantine/private.mdx'), 'utf8')).toContain('Secret')
-    const report = JSON.parse(readFileSync(result.reportPath, 'utf8')) as { quarantined: number; warnings: Array<{ code: string }> }
+    const report = JSON.parse(readFileSync(result.reportPath, 'utf8')) as { quarantined: number; quarantinedAssets: number; warnings: Array<{ code: string }> }
     expect(report.quarantined).toBe(1)
+    expect(report.quarantinedAssets).toBe(1)
+    expect(existsSync(join(projectDir, 'public/img/p.png'))).toBe(false)
     expect(report.warnings.some((warning) => warning.code === 'gated-page')).toBe(true)
     const printed = warn.mock.calls.map((call) => String(call[0]))
     const header = printed.findIndex((line) => line.includes('ACCESS-RESTRICTED CONTENT'))

@@ -237,6 +237,8 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   }
   console.log('\n  Validating imported documentation...')
   const validation = await validateMigration(projectDir, options.skipValidation, installationFailed)
+  // Quarantine holds withheld pages and the assets only they use; count them apart.
+  const quarantinedPages = (bundle.quarantinedFiles ?? []).filter((file) => /\.mdx?$/i.test(file.path)).length
   const reportPath = projectPath(projectDir, 'migration-report.json')
   writeFileSync(reportPath, `${JSON.stringify({
     version: 1,
@@ -245,7 +247,8 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     pages: bundle.pages.length,
     assets: bundle.assets.length,
     components: bundle.componentFiles?.length ?? 0,
-    quarantined: bundle.quarantinedFiles?.length ?? 0,
+    quarantined: quarantinedPages,
+    quarantinedAssets: (bundle.quarantinedFiles?.length ?? 0) - quarantinedPages,
     warnings: bundle.warnings,
     validation,
   }, null, 2)}\n`)
