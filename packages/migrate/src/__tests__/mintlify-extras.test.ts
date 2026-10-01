@@ -582,3 +582,46 @@ describe('script hardening', () => {
     expect(bundle.docsConfig.customScripts).toEqual([{ src: '/my%20scripts/a%20b%23c.js', strategy: 'afterInteractive' }])
   })
 })
+
+describe('assets used only by withheld pages', () => {
+  const png = Buffer.from('PNGDATA')
+  const withheldSite = () => site({
+    'docs.json': JSON.stringify({ navigation: { pages: ['pub', 'secret'] } }),
+    'pub.mdx': '---\ntitle: Pub\n---\n\n![shared](/img/shared.png)\n\n![open](/img/open.png)\n',
+    'secret.mdx': '---\ntitle: Secret\ngroups: [admin]\n---\n\n![a](/img/private.png)\n\n![shared](/img/shared.png)\n\n<Snippet file="private-snippet.mdx" />\n',
+    'snippets/private-snippet.mdx': '![b](/img/via-snippet.png)\n',
+    'img/private.png': png,
+    'img/shared.png': png,
+    'img/open.png': png,
+    'img/via-snippet.png': png,
+    'img/unreferenced.png': png,
+  })
+  const publicPaths = (bundle: MigrationBundle) => bundle.assets.map((asset) => asset.path)
+
+  it('keeps an image used only by a gated page out of public/ and saves it in quarantine', () => {
+    const bundle = withheldSite()
+    expect(publicPaths(bundle).includes('img/private.png')).toBe(false)
+    expect((bundle.quarantinedFiles ?? []).some((file) => file.path === 'migration-quarantine/assets/img/private.png')).toBe(true)
+  })
+
+  it('keeps an image used only through a gated page snippet out of public/', () => {
+    expect(publicPaths(withheldSite()).includes('img/via-snippet.png')).toBe(false)
+  })
+
+  it('still copies an image shared by a gated and a published page, and unreferenced ones', () => {
+    const paths = publicPaths(withheldSite())
+    expect(paths.includes('img/shared.png')).toBe(true)
+    expect(paths.includes('img/open.png')).toBe(true)
+    expect(paths.includes('img/unreferenced.png')).toBe(true)
+  })
+
+  it('keeps an image that a published page names only in its frontmatter', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub', 'secret'] } }),
+      'pub.mdx': '---\ntitle: Pub\nimage: /img/cover.png\n---\n\nHello.\n',
+      'secret.mdx': '---\ntitle: Secret\ngroups: [admin]\n---\n\n![a](/img/cover.png)\n',
+      'img/cover.png': png,
+    })
+    expect(publicPaths(bundle).includes('img/cover.png')).toBe(true)
+  })
+})

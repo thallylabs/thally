@@ -2926,6 +2926,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const docusaurusDocCardRoutes = new Set<string>()
   const seenPageIds = new Set<string>()
   const quarantinedFiles: Array<RenderedMigrationFile> = []
+  // Assets that withheld pages use (their own and via inlined snippets), and
+  // the frontmatter of published pages, which asset rewriting does not track.
+  const withheldAssetPaths = new Set<string>()
+  const publishedFrontmatter: Array<string> = []
   let sawPublicTrue = false
   // Gate verdicts are computed up front so a page that imports an
   // access-restricted page as a component can never inline its content.
@@ -3026,6 +3030,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           warnings.push({ code: 'gated-page', message: `Access-restricted page (${gateReason}) was withheld from the site, but its path could not be preserved safely; recover it from the source repository.`, source: file.relativePath })
           continue
         }
+        if (mintlifyProjectRoot) {
+          rewriteRepositoryAssetLinks(
+            inlineMdxSnippets(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, [], 0, mintlifyProjectRoot, snippetAliases, withheldPaths),
+            file.absolutePath,
+            mintlifyProjectRoot,
+            (assetPath) => withheldAssetPaths.add(assetPath),
+          )
+        }
         quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/${file.relativePath}`, content: readFileSync(file.absolutePath) })
         warnings.push({
           code: 'gated-page',
@@ -3064,6 +3076,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       snippetAliases,
       withheldPaths,
     )
+    if (platform === 'mintlify') publishedFrontmatter.push(raw.match(/^---\r?\n[\s\S]*?\r?\n---/)?.[0] ?? '')
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
       // A heading's `{#custom-id}` anchor (`## Title {#custom-id}`) crashes
       // `@mdx-js/mdx`'s parser outright, so it must be converted to a
@@ -3426,6 +3439,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ...assetCandidates.filter((candidate) => isReferenced(candidate)),
     ...assetCandidates.filter((candidate) => !isReferenced(candidate)),
   ]
+  const quarantinedPageCount = quarantinedFiles.length
+  // An asset only withheld pages use must not be served from public/. Any
+  // mention by a published page, its frontmatter or docs.json keeps it public.
+  const publicConfigText = JSON.stringify(mintlifyConfig ?? {})
+  const isWithheldOnly = (assetPath: string): boolean => platform === 'mintlify'
+    && withheldAssetPaths.has(assetPath)
+    && !referencedAssetPaths.has(assetPath)
+    && !publishedFrontmatter.some((text) => text.includes(basename(assetPath)))
+    && !publicConfigText.includes(basename(assetPath))
+  let withheldAssetCount = 0
   let totalAssetBytes = 0
   // One summary warning per skip reason, not one per file: a repository with
   // hundreds of oversized assets would otherwise bury every other warning.
@@ -3441,6 +3464,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const content = readFileSync(file.absolutePath)
     if (isGitLfsPointer(content)) {
       lfsPointerAssets.push(file.relativePath)
+      continue
+    }
+    if (isWithheldOnly(assetPath)) {
+      quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${assetPath}`, content })
+      withheldAssetCount++
       continue
     }
     assets.push({ path: assetPath, content })
@@ -4111,10 +4139,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // Mintlify serves a Markdown mirror of every page by default. The mirror
     // route reads only src/content, the same files the HTML routes serve.
     docsConfig = { ...docsConfig, markdown: { enabled: true } }
-    if (quarantinedFiles.length > 0) {
+    if (quarantinedPageCount > 0) {
       warnings.push({
         code: 'gated-page',
-        message: `${quarantinedFiles.length} access-restricted page(s) were withheld from the published site and saved under ${QUARANTINE_DIRECTORY}/ (local only: git-ignored, never served or deployed). Images and other assets those pages used were still copied to public/. Review them before deciding how to publish or protect that content.`,
+        message: `${quarantinedPageCount} access-restricted page(s) were withheld from the published site and saved under ${QUARANTINE_DIRECTORY}/ (local only: git-ignored, never served or deployed). `
+          + (withheldAssetCount > 0 ? `${withheldAssetCount} image/file(s) used only by those pages were kept out of public/ and saved under ${QUARANTINE_DIRECTORY}/assets/. ` : '')
+          + 'Assets that published pages also use, and unreferenced assets, are still copied to public/. Review them before deciding how to publish or protect that content.',
       })
     }
     if (sawPublicTrue) {
