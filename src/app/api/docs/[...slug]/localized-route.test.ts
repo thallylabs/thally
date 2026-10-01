@@ -34,6 +34,7 @@ vi.mock('@/lib/content', () => ({
   }),
 }))
 vi.mock('@/lib/site-config', () => ({ resolveSiteConfig: async () => ({ name: 'Docs' }) }))
+vi.mock('@/data/api-reference', () => ({ servedSpecPathForFrontmatter: async () => undefined }))
 
 import { GET } from './route'
 

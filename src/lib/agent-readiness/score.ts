@@ -131,13 +131,13 @@ const SIGNALS: Array<SignalDefinition> = [
       }
       const offenders: Array<ReadinessOffender> = []
       for (const page of apiPages) {
-        if (!page.hasOpenApiSpec) {
+        if (!page.hasOpenApiSpec && !page.hasManualOperation) {
           offenders.push({ pageId: page.pageId, href: page.href, reason: 'API page without an OpenAPI operation' })
         }
       }
       return {
         score: ratio(apiPages.length - offenders.length, apiPages.length),
-        detail: `${apiPages.length - offenders.length}/${apiPages.length} API pages map to an OpenAPI operation`,
+        detail: `${apiPages.length - offenders.length}/${apiPages.length} API pages map to an OpenAPI operation or declare their own`,
         offenders,
       }
     },

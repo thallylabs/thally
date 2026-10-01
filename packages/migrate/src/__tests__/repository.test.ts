@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
+import { withoutDashboardWarning } from './dashboard-warning.js'
 
 // Queue of scripted `git clone` outcomes consumed in order by the mocked
 // `spawn` below, so `cloneGitHubRepository`'s retry-on-network-failure logic
@@ -277,7 +278,7 @@ describe('Mintlify repository migration', () => {
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
     const page = bundle.pages.find((candidate) => candidate.id === 'home')
-    expect(bundle.warnings).toEqual([])
+    expect(withoutDashboardWarning(bundle.warnings)).toEqual([])
     expect(page?.body).toMatch(/^<Migrated[a-f0-9]+ \/>$/m)
     expect(page?.body).not.toContain('onClick')
     const client = bundle.componentFiles?.find((file) => file.path.includes('/inline-'))
@@ -565,7 +566,7 @@ describe('Mintlify repository migration', () => {
       'images/setup.png',
       'openapi/service.openapi.yml',
     ]))
-    expect(bundle.warnings).toEqual([])
+    expect(withoutDashboardWarning(bundle.warnings)).toEqual([])
 
     // Specs must never land under public/, which the host serves verbatim.
     const renderedPaths = renderMigrationFiles(bundle).map((file) => file.path)
@@ -740,6 +741,76 @@ describe('Mintlify repository migration', () => {
       const messages = bundle.warnings.map((warning) => warning.message).join('\n')
       expect(messages).toContain('"Broken API"')
       expect(messages).toContain('AsyncAPI is not supported')
+    })
+  })
+
+  describe('API frontmatter', () => {
+    function apiFixture(pages: Record<string, string>, docs: Record<string, unknown>) {
+      const root = fixture()
+      writeFileSync(join(root, 'docs.json'), JSON.stringify(docs))
+      mkdirSync(join(root, 'specs'), { recursive: true })
+      writeFileSync(join(root, 'openapi-a.json'), '{"openapi":"3.1.0","info":{"title":"A","version":"1"},"paths":{}}')
+      writeFileSync(join(root, 'specs', 'openapi-b.yaml'), 'openapi: 3.1.0\ninfo: { title: B, version: "1" }\npaths: {}')
+      writeFileSync(join(root, 'stray.yaml'), 'openapi: 3.1.0\ninfo: { title: S, version: "1" }\npaths: {}')
+      for (const [name, body] of Object.entries(pages)) writeFileSync(join(root, `${name}.mdx`), body)
+      return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    }
+    const twoSpecNav = {
+      navigation: {
+        tabs: [
+          { tab: 'Guides', pages: ['plain', 'prefixed', 'quoted', 'abs', 'unknown', 'manual', 'bad'] },
+          { tab: 'API A', openapi: 'openapi-a.json' },
+          { tab: 'API B', openapi: 'specs/openapi-b.yaml' },
+        ],
+      },
+      api: { mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } } },
+    }
+    const pages = {
+      plain: '---\ntitle: Plain\nopenapi: "POST /things"\n---\n',
+      prefixed: '---\ntitle: Prefixed\nopenapi: "specs/openapi-b.yaml GET /widgets/{id}"\n---\n',
+      quoted: '---\ntitle: Quoted\nopenapi: "\'./specs/openapi-b.yaml\' get /widgets/{id}"\n---\n',
+      abs: '---\ntitle: Abs\nopenapi: "/openapi-a.json POST /things"\n---\n',
+      unknown: '---\ntitle: Unknown\nopenapi: "stray.yaml GET /x"\n---\n',
+      manual: '---\ntitle: Manual\napi: "POST https://httpbin.org/anything"\nauthMethod: Bearer\n---\n<ParamField body="a" type="string" />\n',
+      bad: '---\ntitle: Bad\napi: [1, 2]\nauthMethod: oauth\n---\n',
+    }
+
+    it('rewrites spec prefixes to the migrated location and warns about unmigrated specs', () => {
+      const bundle = apiFixture(pages, twoSpecNav)
+      const openapi = (id: string) => bundle.pages.find((page) => page.id === id)?.openapi
+      expect(openapi('plain')).toBe('POST /things')
+      expect(openapi('prefixed')).toBe('openapi/openapi-b.yaml GET /widgets/{id}')
+      expect(openapi('quoted')).toBe('openapi/openapi-b.yaml get /widgets/{id}')
+      expect(openapi('abs')).toBe('openapi/openapi-a.json POST /things')
+      expect(openapi('unknown')).toBe('stray.yaml GET /x')
+      expect(bundle.warnings.some((w) => /"stray.yaml".*not migrated/.test(w.message))).toBe(true)
+      expect(bundle.docsConfig.tabs.filter((tab) => tab.api).map((tab) => tab.api?.source)).toEqual(['openapi/openapi-a.json', 'openapi/openapi-b.yaml'])
+    })
+
+    it('keeps manual api and authMethod frontmatter and maps api.mdx', () => {
+      const bundle = apiFixture(pages, twoSpecNav)
+      const manual = bundle.pages.find((page) => page.id === 'manual')
+      expect(manual).toMatchObject({ api: 'POST https://httpbin.org/anything', authMethod: 'bearer' })
+      expect(bundle.docsConfig.api).toEqual({ mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } } })
+      const rendered = renderMigrationFiles(bundle).find((file) => file.path.endsWith('manual.mdx'))
+      expect(String(rendered?.content)).toContain('api: "POST https://httpbin.org/anything"')
+      expect(String(rendered?.content)).toContain('authMethod: "bearer"')
+    })
+
+    it('drops invalid api frontmatter and api.mdx values with warnings', () => {
+      const bundle = apiFixture(pages, {
+        ...twoSpecNav,
+        api: { mdx: { server: ['javascript:alert(1)', 'https://ok.example.com'], auth: { method: 'key' } } },
+      })
+      const bad = bundle.pages.find((page) => page.id === 'bad')
+      expect(bad?.api).toBeUndefined()
+      expect(bad?.authMethod).toBeUndefined()
+      expect(bundle.docsConfig.api).toEqual({ mdx: { server: ['https://ok.example.com'] } })
+      const messages = bundle.warnings.map((w) => w.message).join('\n')
+      expect(messages).toContain('"api" frontmatter')
+      expect(messages).toContain('authMethod')
+      expect(messages).toContain('javascript:alert(1)')
+      expect(messages).toContain('api.mdx.auth')
     })
   })
 
@@ -1586,8 +1657,8 @@ describe('Mintlify repository migration', () => {
     expect(lfs[0].message).toMatch(/^3 asset files are Git LFS pointers/)
   })
 
-  // Creating 5,000+ fixture files and migrating them is inherently slower
-  // than the suite's default 5s per-test timeout.
+  // The 5,000-file budget is lowered to 50 through the maxSourceFiles seam, so
+  // these scenarios need ~50 files instead of 5,000+.
   it('keeps the default version\'s referenced pages over unreferenced ones when discovery exceeds the file budget', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-discovery-budget-'))
     mkdirSync(join(root, 'v2', 'en'), { recursive: true })
@@ -1607,11 +1678,11 @@ describe('Mintlify repository migration', () => {
     // push total discovery past the 5,000-file budget: the two referenced
     // pages above must survive regardless of scan order, and the dropped
     // filler files (all under v1/) must be named in the warning.
-    for (let index = 0; index < 5000; index++) {
+    for (let index = 0; index < 50; index++) {
       writeFileSync(join(root, 'v1', 'en', `filler-${index}.mdx`), `---\ntitle: Filler ${index}\n---\n\nUnreferenced filler page.`)
     }
 
-    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', maxSourceFiles: 50 })
 
     const pageIds = bundle.pages.map((page) => page.id)
     expect(pageIds).toContain('v2/en/introduction')
@@ -1620,30 +1691,30 @@ describe('Mintlify repository migration', () => {
       code: 'limit-reached',
       message: expect.stringMatching(/left out.*v1/s),
     }))
-  }, 90_000)
+  }, 30_000)
 
   it('keeps the first pages in navigation order and names what was dropped when one version alone exceeds the file budget', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-single-version-budget-'))
     mkdirSync(join(root, 'en'), { recursive: true })
-    const pageIds = Array.from({ length: 5010 }, (_, index) => `en/page-${String(index).padStart(4, '0')}`)
+    const pageIds = Array.from({ length: 60 }, (_, index) => `en/page-${String(index).padStart(4, '0')}`)
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
       $schema: 'https://mintlify.com/docs.json',
       navigation: { tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: pageIds }] }] },
     }))
     for (const id of pageIds) writeFileSync(join(root, `${id}.mdx`), `---\ntitle: ${id}\n---\n\nPage.`)
 
-    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', maxSourceFiles: 50 })
 
     const migrated = bundle.pages.map((page) => page.id)
-    expect(migrated).toContain('en/page-4999')
-    expect(migrated).not.toContain('en/page-5000')
+    expect(migrated).toContain('en/page-0049')
+    expect(migrated).not.toContain('en/page-0050')
     const warning = bundle.warnings.find((entry) => entry.code === 'limit-reached')
     expect(warning?.message).toContain('10 page(s) were left out')
-    expect(warning?.message).toContain('en/page-5000.mdx')
+    expect(warning?.message).toContain('en/page-0050.mdx')
     expect(warning?.message).toContain('--docs-dir')
     expect(warning?.message).toContain('and 7 more')
     expect(warning?.message).not.toMatch(/lower-priority|budget/)
-  }, 90_000)
+  }, 30_000)
 
   // Regression test for the bug fixed alongside the file-cap prioritization
   // above: pages and assets used to share one MAX_SOURCE_FILES budget, so a
@@ -1655,7 +1726,7 @@ describe('Mintlify repository migration', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-asset-budget-'))
     mkdirSync(join(root, 'en'), { recursive: true })
     mkdirSync(join(root, 'images'), { recursive: true })
-    const pageIds = Array.from({ length: 5001 }, (_, index) => `en/page-${index}`)
+    const pageIds = Array.from({ length: 51 }, (_, index) => `en/page-${index}`)
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
       $schema: 'https://mintlify.com/docs.json',
       navigation: { tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: pageIds }] }] },
@@ -1668,10 +1739,10 @@ describe('Mintlify repository migration', () => {
     }
     writeFileSync(join(root, 'images', 'diagram.png'), 'fake-png-bytes')
 
-    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', maxSourceFiles: 50 })
 
     expect(bundle.assets.map((asset) => asset.path)).toContain('images/diagram.png')
-  }, 90_000)
+  }, 30_000)
 
   // Regression test for a second bug found alongside the two above: a real
   // file Mintlify still serves by file-based routing even though nothing in
@@ -1702,15 +1773,15 @@ describe('Mintlify repository migration', () => {
     writeFileSync(join(root, 'v2', 'en', 'orphan.mdx'), '---\ntitle: Orphan v2\n---\n\nNot in the sidebar, but live on the site.')
     // Enough unreferenced filler under the older, non-default version to
     // push total discovery past the 5,000-file budget on its own.
-    for (let index = 0; index < 5000; index++) {
+    for (let index = 0; index < 50; index++) {
       writeFileSync(join(root, 'v1', 'en', `filler-${index}.mdx`), `---\ntitle: Filler ${index}\n---\n\nUnreferenced filler page.`)
     }
 
-    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', maxSourceFiles: 50 })
 
     const pageIds = bundle.pages.map((page) => page.id)
     expect(pageIds).toContain('v2/en/orphan')
-  }, 90_000)
+  }, 30_000)
 })
 
 function docusaurusFixture(sidebarSource?: string): string {

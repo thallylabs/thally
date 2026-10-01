@@ -31,6 +31,20 @@ describe('public OpenAPI specification URL', () => {
   })
 })
 
+describe('spec URL for a specific spec', () => {
+  it('is only advertised for the spec that /openapi.yaml serves', async () => {
+    vi.doMock('@/data/docs', () => ({
+      getSidebarCollections: () => [
+        { id: 'rest', label: 'REST', api: { source: 'openapi.json' } },
+        { id: 'admin', label: 'Admin', api: { source: 'openapi/admin.json' } },
+      ],
+    }))
+    const { getOpenApiSpecUrl } = await import('@/config/api-reference')
+    expect(getOpenApiSpecUrl('https://docs.example.com', 'default')).toBe('https://docs.example.com/openapi.yaml')
+    expect(getOpenApiSpecUrl('https://docs.example.com', 'admin')).toBeNull()
+  })
+})
+
 describe('multiple API-bound tabs', () => {
   afterEach(() => {
     vi.doUnmock('@/data/docs')
