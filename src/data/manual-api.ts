@@ -18,6 +18,11 @@ import type { NormalizedOperation } from '@/lib/openapi/types'
 export async function getManualApiOperation(pageId: string, locale?: string): Promise<NormalizedOperation | null> {
   const segments = pageId.split('/').filter(Boolean)
   if (segments.length === 0 || segments.some((segment) => segment === '.' || segment === '..')) return null
+  // Default-locale page ids never start with a locale directory (the docs
+  // route strips it), and the locale must arrive only through `locale`. Compare
+  // case-insensitively: a case-insensitive filesystem reads `FR/` as `fr/`.
+  const first = segments[0].toLowerCase()
+  if (getI18nConfig()?.locales.some((entry) => entry.code.toLowerCase() === first)) return null
   // The locale comes from the browser and becomes a content directory, so it
   // must be one the site configures.
   if (locale !== undefined && !getI18nConfig()?.locales.some((entry) => entry.code === locale)) return null

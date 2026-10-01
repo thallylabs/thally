@@ -222,4 +222,23 @@ describe('hostile locale and page ids reaching the relay lookup', () => {
     expect(await getManualApiOperation('relay/tx', 'fr')).not.toBeNull()
     expect(await getManualApiOperation('relay/tx', 'en')).not.toBeNull()
   })
+
+  it('takes the locale only from the argument: a configured-locale first segment is not a page id', async () => {
+    seed()
+    expect(await getManualApiOperation('fr/relay/tx')).toBeNull()
+    expect(await getManualApiOperation('fr/relay/tx', 'fr')).toBeNull()
+    expect(await getManualApiOperation('en/relay/tx')).toBeNull()
+    expect(await getManualApiOperation('FR/relay/tx')).toBeNull()
+    expect(await getManualApiOperation('relay/tx', 'fr')).not.toBeNull()
+  })
+
+  it('treats a locale-looking first segment that is not configured as an ordinary directory', async () => {
+    seed()
+    pages.files['de-x/page'] = { frontmatter: {}, source: '---\ntitle: T\napi: "GET https://api.example.com/d"\n---\n' }
+    pages.files['xx/page'] = pages.files['de-x/page']
+    // `de` is configured in this file's mock but `xx` is not: it is just a folder.
+    expect(await getManualApiOperation('xx/page')).toMatchObject({ path: '/d' })
+    expect(await getManualApiOperation('de-x/page')).toMatchObject({ path: '/d' })
+    expect(await getManualApiOperation('de/page')).toBeNull()
+  })
 })

@@ -36,13 +36,13 @@ export function parseOpenApiFrontmatter(raw: unknown): OpenApiFrontmatterRef | n
   const trimmed = unquote(raw)
   if (!trimmed) return null
 
-  const webhook = /^(?:(.+?)\s+)?webhook\s+([^\s/]\S*)$/i.exec(trimmed)
+  const webhook = /^(?:(.*?\S)\s+)?webhook\s+([^\s/]\S*)$/i.exec(trimmed)
   if (webhook) {
     const specRef = webhook[1] ? unquote(webhook[1]) : undefined
     return { specId: 'default', ...(specRef ? { specRef } : {}), method: 'WEBHOOK', path: webhook[2], webhook: true }
   }
 
-  const operation = /^(?:(.+?)\s+)?([A-Za-z]+)\s+(\/.*)$/.exec(trimmed)
+  const operation = /^(?:(.*?\S)\s+)?([A-Za-z]+)\s+(\/.*)$/.exec(trimmed)
   if (!operation) return null
   const specRef = operation[1] ? unquote(operation[1]) : undefined
   return {

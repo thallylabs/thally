@@ -34,6 +34,18 @@ describe('parseOpenApiFrontmatter', () => {
   })
 })
 
+describe('parseOpenApiFrontmatter on pathological whitespace', () => {
+  it('stays linear on 100k whitespace runs', () => {
+    const gap = ' '.repeat(100_000)
+    const inputs = [`a${gap}x`, `a${gap}GET${gap}x`, `a${gap}webhook${gap}`, `GET${gap}/x`, `${'a '.repeat(50_000)}!`, `${'webhook '.repeat(12_000)}`]
+    const started = performance.now()
+    for (const input of inputs) parseOpenApiFrontmatter(input)
+    // Quadratic backtracking took many seconds here; linear takes milliseconds.
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(parseOpenApiFrontmatter(`spec.json${gap}GET${gap}/x`)).toMatchObject({ specRef: 'spec.json', method: 'GET', path: '/x' })
+  })
+})
+
 describe('findSpecForRef', () => {
   const specs: Array<ApiSpecConfig> = [
     { id: 'default', label: 'A', source: { type: 'file', path: '/openapi-a.json' } },
