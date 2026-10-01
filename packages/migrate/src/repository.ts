@@ -50,7 +50,7 @@ import { projectFernNavigation, readFernConfig } from './fern.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { parseFrontmatter } from './frontmatter.js'
 import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
-import { escapeFernLiteralBraces, functionDeclaredNames, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { escapeFernLiteralBraces, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -1973,6 +1973,18 @@ function interpolateSnippet(snippet: string, attributes: string, children?: stri
   }).join('\n')
 }
 
+/**
+ * A fence only opens or closes on a line of its own, so an inlined snippet that
+ * starts or ends with one must not share its line with text around the tag.
+ */
+function isolateFences(snippet: string, source: string, start: number, end: number): string {
+  const fence = /^\s*(?:`{3,}|~{3,})/
+  const lines = snippet.split('\n')
+  const before = source.slice(source.lastIndexOf('\n', start - 1) + 1, start)
+  const after = source.slice(end, source.indexOf('\n', end) < 0 ? undefined : source.indexOf('\n', end))
+  return `${fence.test(lines[0]) && /\S/.test(before) ? '\n' : ''}${snippet}${fence.test(lines[lines.length - 1]) && /\S/.test(after) ? '\n' : ''}`
+}
+
 /** Extract JSX from a statically declared snippet component before inlining it. */
 function snippetComponentBody(source: string, componentName: string): string {
   const parsed = ts.createSourceFile('snippet.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -2581,7 +2593,7 @@ function inlineMdxSnippets(
           message: `Imported snippet ${sourcePath} could not be resolved and was left as a comment.`,
           source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
         })
-        snippets.set(componentName, `{/* Missing imported snippet: ${sourcePath} */}`)
+        snippets.set(componentName, mdxComment(` Missing imported snippet: ${sourcePath} `))
         return ''
       }
     },
@@ -2656,48 +2668,52 @@ function inlineMdxSnippets(
     if (declaration) preservedDeclarations.set(componentName, declaration)
     else snippets.set(componentName, snippetComponentBody(nested, componentName))
   }
-  let result = withoutImports
-  for (const [componentName, snippet] of snippets) {
-    result = result
-      .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)\\s*/>`, 'g'), (_tag, attributes: string) => {
-        return interpolateSnippet(snippet, attributes)
-      })
-      .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)>([\\s\\S]*?)<\\/${componentName}>`, 'g'), (_tag, attributes: string, children: string) => {
-        return interpolateSnippet(snippet, attributes, children)
-      })
-  }
-  result = result.replace(SNIPPET_TAG_PATTERN, (_tag, doubleQuoted: string | undefined, singleQuoted: string | undefined) => {
-    const filePath = (doubleQuoted ?? singleQuoted)!
-    try {
-      // Mintlify's documented form is relative to `snippets/`; sites also write
-      // the full `/snippets/x.mdx` (or a page-relative) path.
-      const candidate = [
-        () => resolveWithin(siteRoot, `snippets/${filePath}`),
-        () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
-      ].map((resolveCandidate) => {
-        try { return resolveCandidate() } catch { return undefined }
-      }).find((path) => path !== undefined && existsSync(path) && lstatSync(path).isFile())
-      if (!candidate) throw new Error('file not found')
-      const blocked = blockInline(candidate, filePath, `Snippet file="${filePath}"`)
-      if (blocked) return blocked
-      return inlineMdxSnippets(
-        withoutFrontmatter(readFileSync(candidate, 'utf8')),
-        candidate,
-        repositoryRoot,
-        warnings,
-        depth + 1,
-        siteRoot,
-        globalAliases,
-        gate,
-      )
-    } catch {
-      warnings.push({
-        code: 'missing-page',
-        message: `Snippet file="${filePath}" could not be resolved and was left as a comment.`,
-        source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
-      })
-      return `{/* Missing snippet: ${filePath} */}`
+  // Usages inside code or an existing comment stay literal: splicing a snippet
+  // (or a missing-snippet comment) there would nest or corrupt the outer block.
+  let result = replaceOutsideCodeAndComments(withoutImports, (segment) => {
+    for (const [componentName, snippet] of snippets) {
+      segment = segment
+        .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)\\s*/>`, 'g'), (tag: string, attributes: string, offset: number, source: string) => {
+          return isolateFences(interpolateSnippet(snippet, attributes), source, offset, offset + tag.length)
+        })
+        .replace(new RegExp(`<${componentName}((?:\\s[^>]*)?)>([\\s\\S]*?)<\\/${componentName}>`, 'g'), (tag: string, attributes: string, children: string, offset: number, source: string) => {
+          return isolateFences(interpolateSnippet(snippet, attributes, children), source, offset, offset + tag.length)
+        })
+
     }
+    return segment.replace(SNIPPET_TAG_PATTERN, (tag: string, doubleQuoted: string | undefined, singleQuoted: string | undefined, offset: number, source: string) => {
+      const filePath = (doubleQuoted ?? singleQuoted)!
+      try {
+        // Mintlify's documented form is relative to `snippets/`; sites also write
+        // the full `/snippets/x.mdx` (or a page-relative) path.
+        const candidate = [
+          () => resolveWithin(siteRoot, `snippets/${filePath}`),
+          () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
+        ].map((resolveCandidate) => {
+          try { return resolveCandidate() } catch { return undefined }
+        }).find((path) => path !== undefined && existsSync(path) && lstatSync(path).isFile())
+        if (!candidate) throw new Error('file not found')
+        const blocked = blockInline(candidate, filePath, `Snippet file="${filePath}"`)
+        if (blocked) return blocked
+        return isolateFences(inlineMdxSnippets(
+          withoutFrontmatter(readFileSync(candidate, 'utf8')),
+          candidate,
+          repositoryRoot,
+          warnings,
+          depth + 1,
+          siteRoot,
+          globalAliases,
+          gate,
+        ), source, offset, offset + tag.length)
+      } catch {
+        warnings.push({
+          code: 'missing-page',
+          message: `Snippet file="${filePath}" could not be resolved and was left as a comment.`,
+          source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+        })
+        return mdxComment(` Missing snippet: ${filePath} `)
+      }
+    })
   })
   if (preservedDeclarations.size > 0) {
     const frontmatter = result.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
@@ -3381,7 +3397,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // before ANY MDX parse of this page is attempted — including
       // `componentMigrator.transform` below, whose own early parse would
       // otherwise choke on it and skip the page's import analysis entirely.
-      raw = normalizeExplicitHeadingIds(raw)
+      raw = normalizeExplicitHeadingIds(raw, (message) => warnings.push({ code: 'invalid-page', message, source: file.relativePath }))
     }
     if (componentMigrator) {
       const warningsBeforeTransform = warnings.length
