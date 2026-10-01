@@ -59,9 +59,15 @@ export function frontmatterGateReason(data: Record<string, unknown>): string | u
  */
 export function navigationGateReason(node: Record<string, unknown>): string | undefined {
   const groups = node.groups
+  // A tab also calls its nested navigation group objects `groups`, so an array
+  // made only of such containers restricts nothing; any other non-empty array
+  // (strings, or a mix with other values) is an access list and gates. As in
+  // frontmatter, `Groups:`/`Public:` key casing is ignored, as Mintlify does.
+  const isContainer = (entry: unknown): boolean => typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+    && ['group', 'pages', 'tab', 'groups', 'page', 'root', 'menu', 'href'].some((key) => key in entry)
   const restricted = typeof groups === 'string'
     ? groups.trim() !== ''
-    : Array.isArray(groups) && groups.length > 0 && groups.every((entry) => typeof entry === 'string')
+    : Array.isArray(groups) && groups.length > 0 && !groups.every(isContainer)
   if (restricted) return 'its navigation container sets `groups`'
   if (isPublicFalse(node.public)) return 'its navigation container sets `public: false`'
   return undefined

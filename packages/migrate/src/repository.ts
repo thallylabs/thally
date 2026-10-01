@@ -1811,10 +1811,32 @@ function readFrontmatterHead(path: string): string | undefined {
   }
 }
 
-/** Why a file must never be spliced into another page: too large, or its frontmatter is not fully readable in the bounded head. */
-function inlineBlockReason(candidate: string): string | undefined {
-  if (lstatSync(candidate).size > MAX_PAGE_BYTES) return 'is too large to inline (over 2 MB)'
-  return readFrontmatterHead(candidate) === undefined ? 'has frontmatter that could not be read' : undefined
+/**
+ * Why a file must never be spliced into another page (Mintlify only):
+ * `gated` is an access-restricted page, `snippet-gated` a snippet that declares
+ * access rules Mintlify does not enforce on snippets, `oversized` and
+ * `unreadable` are files that cannot be classified safely.
+ */
+interface InlineVerdict { kind: 'gated' | 'snippet-gated' | 'oversized' | 'unreadable'; reason: string }
+type InlineGate = (candidate: string) => InlineVerdict | undefined
+
+/** The real on-disk spelling of a path, so a case-variant import cannot dodge a path lookup on a case-insensitive filesystem. */
+function canonicalPath(path: string): string {
+  try { return realpathSync.native(path) } catch { return path }
+}
+
+/**
+ * The gate verdict from a page's raw (or frontmatter-head) text. Invalid YAML is
+ * salvaged line by line, which can drop the very line that restricts access, so
+ * it withholds rather than guesses. Key casing (`Groups:`) and TOML frontmatter
+ * are deliberately not treated as gates: Mintlify ignores them too.
+ */
+function pageHeadGateReason(raw: string): { reason?: string; publicTrue: boolean } {
+  const parsed = parseFrontmatter(raw)
+  const unreadable = parsed.error && /^(groups|public)\s*:/m.test(raw.slice(0, raw.length - parsed.content.length))
+    ? 'frontmatter could not be parsed and declares `groups` or `public`'
+    : undefined
+  return { reason: frontmatterGateReason(parsed.data) ?? unreadable, publicTrue: isPublicTrue(parsed.data.public) }
 }
 
 function withoutFrontmatter(value: string): string {
@@ -2389,8 +2411,8 @@ function inlineMdxSnippets(
   depth = 0,
   siteRoot = repositoryRoot,
   globalAliases: Map<string, string> = new Map(),
-  /** Absolute paths of access-restricted pages, which must never be inlined into another page. */
-  withheld: ReadonlySet<string> = new Set(),
+  /** Mintlify only: refuses access-restricted, oversized or unclassifiable files. Fern and Docusaurus pass none. */
+  gate?: InlineGate,
 ): string {
   if (depth >= 8) return raw
   // Hoisting page imports must see indented JSX code examples as fenced code.
@@ -2399,17 +2421,32 @@ function inlineMdxSnippets(
   raw = normalizeIndentedFences(raw)
   const snippets = new Map<string, string>()
   const preservedDeclarations = new Map<string, string>()
-  // Fail closed: an oversized or unclassifiable file is never inlined, whatever
-  // its access rules or directory. One warning per occurrence.
-  const blockInline = (candidate: string, shownPath: string): string | undefined => {
-    const reason = inlineBlockReason(candidate)
-    if (!reason) return undefined
+  // Fail closed: a restricted, oversized or unclassifiable file is never
+  // inlined, whatever its directory. One warning per occurrence; the returned
+  // comment replaces the content.
+  const source = relative(repositoryRoot, currentFile).replace(/\\/g, '/')
+  const blockInline = (candidate: string, shownPath: string, label = shownPath): string | undefined => {
+    const verdict = gate?.(candidate)
+    if (!verdict) return undefined
+    const shown = shownPath.replace(/\*\//g, '* /')
+    if (verdict.kind === 'gated') {
+      warnings.push({ code: 'gated-page', message: `${label} is access-restricted and was NOT inlined; it was left as a comment.`, source })
+      return `{/* Access-restricted content withheld: ${shown} */}`
+    }
+    if (verdict.kind === 'snippet-gated') {
+      warnings.push({
+        code: 'gated-page',
+        message: `${label} declares access rules (${verdict.reason}). Mintlify does not enforce groups on snippets, but it was NOT inlined to be safe; it was left as a comment.`,
+        source,
+      })
+      return `{/* Access-restricted content withheld: ${shown} */}`
+    }
     warnings.push({
       code: 'skipped-file',
-      message: `${shownPath} ${reason} and was NOT inlined; it was left as a comment.`,
-      source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+      message: `${label} ${verdict.kind === 'oversized' ? 'is too large to inline (over 2 MB)' : 'has frontmatter that could not be read'} and was NOT inlined; it was left as a comment.`,
+      source,
     })
-    return `{/* Oversized content not inlined: ${shownPath.replace(/\*\//g, '* /')} */}`
+    return `{/* ${verdict.kind === 'oversized' ? 'Oversized' : 'Unreadable'} content not inlined: ${shown} */}`
   }
   let withoutImports = replaceOutsideCode(raw, (source) => source.replace(
     SNIPPET_IMPORT_PATTERN,
@@ -2418,16 +2455,7 @@ function inlineMdxSnippets(
       try {
         const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
         if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
-        if (withheld.has(candidate)) {
-          warnings.push({
-            code: 'gated-page',
-            message: `Imported ${sourcePath} is access-restricted and was NOT inlined; the import was left as a comment.`,
-            source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
-          })
-          snippets.set(componentName, `{/* Access-restricted content withheld: ${sourcePath} */}`)
-          return ''
-        }
-        const blocked = blockInline(candidate, sourcePath)
+        const blocked = blockInline(candidate, sourcePath, `Imported ${sourcePath}`)
         if (blocked) {
           snippets.set(componentName, blocked)
           return ''
@@ -2440,7 +2468,7 @@ function inlineMdxSnippets(
           depth + 1,
           siteRoot,
           globalAliases,
-          withheld,
+          gate,
         )
         const declaration = statefulSnippetDeclaration(nested, componentName)
         if (declaration) preservedDeclarations.set(componentName, declaration)
@@ -2467,7 +2495,7 @@ function inlineMdxSnippets(
       if (bindings.length === 0 || bindings.some((binding) => !binding)) return statement
       try {
         const candidate = resolveSnippetPath(sourcePath, currentFile, repositoryRoot, siteRoot)
-        if (!existsSync(candidate) || !lstatSync(candidate).isFile() || withheld.has(candidate)) return statement
+        if (!existsSync(candidate) || !lstatSync(candidate).isFile() || gate?.(candidate)?.kind === 'gated') return statement
         const blocked = blockInline(candidate, sourcePath)
         if (blocked) {
           // Drop the import so the build never resolves the file; bind its names to the comment/empty.
@@ -2506,7 +2534,7 @@ function inlineMdxSnippets(
   // elsewhere in the same docs project.
   const localNames = locallyDeclaredNames(withoutImports)
   for (const [componentName, candidate] of globalAliases) {
-    if (snippets.has(componentName) || localNames.has(componentName) || withheld.has(candidate)
+    if (snippets.has(componentName) || localNames.has(componentName) || gate?.(candidate)?.kind === 'gated'
       || !new RegExp(`<${componentName}(?:\\s|/?>)`).test(withoutImports)) continue
     const blocked = blockInline(candidate, relative(repositoryRoot, candidate).replace(/\\/g, '/'))
     if (blocked) {
@@ -2521,7 +2549,7 @@ function inlineMdxSnippets(
       depth + 1,
       siteRoot,
       globalAliases,
-      withheld,
+      gate,
     )
     const declaration = statefulSnippetDeclaration(nested, componentName)
     if (declaration) preservedDeclarations.set(componentName, declaration)
@@ -2549,15 +2577,7 @@ function inlineMdxSnippets(
         try { return resolveCandidate() } catch { return undefined }
       }).find((path) => path !== undefined && existsSync(path) && lstatSync(path).isFile())
       if (!candidate) throw new Error('file not found')
-      if (withheld.has(candidate)) {
-        warnings.push({
-          code: 'gated-page',
-          message: `Snippet file="${filePath}" is access-restricted and was NOT inlined; it was left as a comment.`,
-          source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
-        })
-        return `{/* Access-restricted content withheld: ${filePath} */}`
-      }
-      const blocked = blockInline(candidate, filePath)
+      const blocked = blockInline(candidate, filePath, `Snippet file="${filePath}"`)
       if (blocked) return blocked
       return inlineMdxSnippets(
         withoutFrontmatter(readFileSync(candidate, 'utf8')),
@@ -2567,7 +2587,7 @@ function inlineMdxSnippets(
         depth + 1,
         siteRoot,
         globalAliases,
-        withheld,
+        gate,
       )
     } catch {
       warnings.push({
@@ -2741,7 +2761,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
         for (const gated of projected.gatedReferences) {
-          const gatedKey = normalizedReferenceKey(gated.ref)
+          const gatedKey = normalizedReferenceKey(gated.ref).toLowerCase()
           if (!mintlifyGatedRefs.has(gatedKey)) mintlifyGatedRefs.set(gatedKey, gated.reason)
         }
         for (const [index, reference] of projected.pageReferences.entries()) {
@@ -2943,7 +2963,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     for (const file of files) {
       if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())
         || file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))) continue
-      let frontmatter: Record<string, unknown> = {}
+      let head: { reason?: string; publicTrue: boolean } = { publicTrue: false }
       let unreadableGate: string | undefined
       try {
         // Pages above the size cap are never imported, but another page can
@@ -2952,21 +2972,45 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           ? readFrontmatterHead(file.absolutePath)
           : readFileSync(file.absolutePath, 'utf8')
         if (raw === undefined) throw new Error('frontmatter is not terminated within the bounded read')
-        const parsed = parseFrontmatter(raw)
-        frontmatter = parsed.data
-        // Invalid YAML is salvaged line by line, which can drop the very line
-        // that restricts access. Withhold rather than guess.
-        if (parsed.error && /^(groups|public)\s*:/m.test(raw.slice(0, raw.length - parsed.content.length))) {
-          unreadableGate = 'frontmatter could not be parsed and declares `groups` or `public`'
-        }
+        head = pageHeadGateReason(raw)
       } catch {
         unreadableGate = 'frontmatter could not be read'
       }
-      const reason = frontmatterGateReason(frontmatter) ?? unreadableGate ?? mintlifyGatedRefs.get(normalizedReferenceKey(file.relativePath))
-      gateByPath.set(file.absolutePath, { reason, publicTrue: isPublicTrue(frontmatter.public) })
+      const reason = head.reason ?? unreadableGate ?? mintlifyGatedRefs.get(normalizedReferenceKey(file.relativePath).toLowerCase())
+      gateByPath.set(file.absolutePath, { reason, publicTrue: head.publicTrue })
       if (reason) withheldPaths.add(file.absolutePath)
     }
   }
+  // Mintlify only. The pre-pass covers only files inside the file budget, so a
+  // candidate it never saw (dropped by the budget, in a snippet directory, under
+  // a case-variant path) is classified on demand: frontmatter gates, navigation
+  // gates, then size/readability. Cached per real path.
+  const withheldCanonical = new Set([...withheldPaths].map(canonicalPath))
+  const verdictCache = new Map<string, InlineVerdict | null>()
+  const classifyInlineCandidate = (candidate: string, key: string): InlineVerdict | undefined => {
+    if (withheldCanonical.has(key)) return { kind: 'gated', reason: 'access-restricted' }
+    const shown = relative(contentRoot, candidate).replace(/\\/g, '/')
+    const inSnippetDirectory = shown.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
+    let head: string | undefined
+    try { head = readFrontmatterHead(candidate) } catch { return { kind: 'unreadable', reason: 'could not be read' } }
+    const gated = head === undefined ? undefined : pageHeadGateReason(head).reason
+    if (gated) return { kind: inSnippetDirectory ? 'snippet-gated' : 'gated', reason: gated }
+    const navigationGated = inSnippetDirectory ? undefined : mintlifyGatedRefs.get(normalizedReferenceKey(shown).toLowerCase())
+    if (navigationGated) return { kind: 'gated', reason: navigationGated }
+    if (lstatSync(candidate).size > MAX_PAGE_BYTES) return { kind: 'oversized', reason: 'over 2 MB' }
+    return head === undefined ? { kind: 'unreadable', reason: 'frontmatter not terminated in the bounded read' } : undefined
+  }
+  const inlineGate: InlineGate | undefined = platform === 'mintlify'
+    ? (candidate) => {
+        const key = canonicalPath(candidate)
+        let verdict = verdictCache.get(key)
+        if (verdict === undefined) {
+          verdict = classifyInlineCandidate(candidate, key) ?? null
+          verdictCache.set(key, verdict)
+        }
+        return verdict ?? undefined
+      }
+    : undefined
   /** docs.yml-derived navigationId -> final id, when a page's frontmatter `slug` overrides it. */
   const fernIdRenames = new Map<string, string>()
   let skipped = 0
@@ -3048,7 +3092,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         }
         if (mintlifyProjectRoot) {
           rewriteRepositoryAssetLinks(
-            inlineMdxSnippets(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, [], 0, mintlifyProjectRoot, snippetAliases, withheldPaths),
+            inlineMdxSnippets(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, [], 0, mintlifyProjectRoot, snippetAliases, inlineGate),
             file.absolutePath,
             mintlifyProjectRoot,
             (assetPath) => withheldAssetPaths.add(assetPath),
@@ -3090,7 +3134,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       0,
       mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir,
       snippetAliases,
-      withheldPaths,
+      inlineGate,
     )
     if (platform === 'mintlify') publishedText.push(raw)
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {

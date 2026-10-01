@@ -1,6 +1,6 @@
 /** Access gating, site-wide CSS/JS/font assets, and legacy config mapping for Mintlify sources. */
 
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -750,4 +750,97 @@ describe('assets used only by oversized withheld pages', () => {
     const warning = codes(bundle, 'gated-page').find((item) => item.source === 'big.mdx')
     expect(warning !== undefined && /could not be checked/.test(warning.message)).toBe(true)
   }, 60_000)
+})
+
+describe('fail-closed inlining of gated and unclassified files', () => {
+  const secretBody = (extra = 'groups: [a]\n') => `---\ntitle: Sec\n${extra}---\n\nTOPSECRET\n`
+  const bodies = (bundle: MigrationBundle) => bundle.pages.map((entry) => entry.body).join('\n')
+  const nav = (...pages: Array<string>) => JSON.stringify({ navigation: { pages } })
+
+  it('does not inline a gated page the file budget dropped', () => {
+    const files: Record<string, string> = {
+      'docs.json': nav('index'),
+      'index.mdx': "---\ntitle: I\n---\n\nimport Sec from '/zz/deep/secret.mdx'\n\n<Sec/>\n",
+      'zz/deep/secret.mdx': secretBody(),
+    }
+    for (let i = 0; i < 5300; i++) files[`filler/f${i}.mdx`] = '---\ntitle: F\n---\n\nx\n'
+    const bundle = site(files)
+    expect(bodies(bundle)).not.toContain('TOPSECRET')
+  }, 120_000)
+
+  it('does not inline a gated page imported with a different path case', (context) => {
+    const probe = mkdtempSync(join(tmpdir(), 'thally-case-'))
+    writeFileSync(join(probe, 'a'), '')
+    if (!existsSync(join(probe, 'A'))) { context.skip(); return }
+    const bundle = site({
+      'docs.json': nav('index', 's'),
+      'index.mdx': "---\ntitle: I\n---\n\nimport Sec from '/S.mdx'\n\n<Sec/>\n",
+      's.mdx': secretBody(),
+    })
+    expect(bodies(bundle)).not.toContain('TOPSECRET')
+  })
+
+  it('still inlines a Docusaurus partial that starts with a thematic break', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-extras-'))
+    writeFileSync(join(root, 'docusaurus.config.js'), 'module.exports = { title: "T" }\n')
+    mkdirSync(join(root, 'docs'))
+    writeFileSync(join(root, 'docs', '_part.mdx'), '---\n\nPARTIALTEXT\n')
+    writeFileSync(join(root, 'docs', 'intro.md'), "---\ntitle: Intro\n---\n\nimport Part from './_part.mdx'\n\n<Part />\n")
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+    expect(bodies(bundle)).toContain('PARTIALTEXT')
+  })
+
+  it('does not say "too large" for a Mintlify block whose frontmatter is unclosed', () => {
+    const bundle = site({
+      'docs.json': nav('index'),
+      'index.mdx': "---\ntitle: I\n---\n\nimport Part from '/snippets/p.mdx'\n\n<Part />\n",
+      'snippets/p.mdx': '---\n\nUNCLOSED\n',
+    })
+    const warning = bundle.warnings.find((item) => /snippets\/p\.mdx/.test(item.message))
+    expect(warning).toBeDefined()
+    expect(bodies(bundle)).not.toContain('Oversized')
+  })
+
+  it.each([
+    ['default import', "import S from '/snippets/s.mdx'\n\n<S />\n", ''],
+    ['value import', "import { x } from '/snippets/s.mdx'\n\n{x}\n", ''],
+    ['global alias', '<S />\n', "---\ntitle: Other\n---\n\nimport S from '/snippets/s.mdx'\n\n<S />\n"],
+    ['Snippet tag', '<Snippet file="s.mdx" />\n', ''],
+  ])('refuses to inline a snippet that declares groups (%s) and warns', (_name, hostBody, otherPage) => {
+    const bundle = site({
+      'docs.json': nav('index', 'other'),
+      'index.mdx': `---\ntitle: I\n---\n\n${hostBody}`,
+      'other.mdx': otherPage || page('Other'),
+      'snippets/s.mdx': '---\ngroups: [a]\n---\n\nexport const x = "TOPSECRET"\n\nTOPSECRET <b>y</b>\n',
+    })
+    expect(bodies(bundle)).not.toContain('TOPSECRET')
+    expect(codes(bundle, 'gated-page').some((item) => /does not enforce groups on snippets/.test(item.message))).toBe(true)
+    expect((bundle.quarantinedFiles ?? []).some((file) => file.path.endsWith('s.mdx'))).toBe(false)
+  })
+
+  it('gates a page listed under a navigation entry with different letter case', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { groups: [{ group: 'G', groups: ['admin'], pages: ['S'] }, { group: 'Open', pages: ['pub'] }] } }),
+      's.mdx': page('S'),
+      'pub.mdx': page('Pub'),
+    })
+    expect((bundle.quarantinedFiles ?? []).map((file) => file.path)).toEqual(['migration-quarantine/s.mdx'])
+  })
+
+  it('gates a navigation container whose groups array mixes strings and objects', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { groups: [{ group: 'G', groups: ['x', { y: 1 }], pages: ['p'] }, { group: 'Open', pages: ['pub'] }] } }),
+      'p.mdx': page('P'),
+      'pub.mdx': page('Pub'),
+    })
+    expect((bundle.quarantinedFiles ?? []).map((file) => file.path)).toEqual(['migration-quarantine/p.mdx'])
+  })
+
+  it('does not gate a tab whose groups are nested navigation groups', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { tabs: [{ tab: 'T', groups: [{ group: 'G', pages: ['p'] }] }] } }),
+      'p.mdx': page('P'),
+    })
+    expect(bundle.quarantinedFiles).toBeUndefined()
+  })
 })
