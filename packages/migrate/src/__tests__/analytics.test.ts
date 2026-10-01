@@ -243,7 +243,26 @@ describe('renderer and migrator agree (src/lib/analytics-config.ts)', () => {
     { plausible: { domain: 'docs.example.com', server: '' } },
     { plausible: { domain: 'docs.example.com', server: null } },
     { ga4: { measurementId: 5 }, gtm: [] },
+    { posthog: { apiKey: KEY, sessionRecording: 0 } },
+    { posthog: { apiKey: KEY, sessionRecording: {} } },
+    { posthog: { apiKey: KEY, sessionRecording: true } },
+    { posthog: { apiKey: KEY, sessionRecording: false } },
+    { posthog: { apiKey: KEY, apiHost: 'https://ph.example.com//x' } },
+    { posthog: { apiKey: KEY, apiHost: 'https://127.0.0.1' } },
+    { posthog: { apiKey: KEY, apiHost: 'https://0x7f.1' } },
+    { posthog: { apiKey: KEY, apiHost: 'https://[::1]' } },
+    { posthog: { apiKey: KEY, apiHost: 'https://a.localhost' } },
+    ...['p.example.com:0', 'p.example.com:65536', 'p.example.com:99999', '127.0.0.1', '0x7f.1', '[::1]', 'localhost', 'a.localhost', '10.0.0.1:8443',
+      'https://p.example.com:0', 'https://127.0.0.1', 'https://p.example.com//'].map((server) => ({ plausible: { domain: 'docs.example.com', server } })),
   ]
+  it('maps a non-boolean sessionRecording to recording off, not on', () => {
+    for (const bad of ['false', 0, null, {}]) {
+      const result = projectMintlifyIntegrations({ integrations: { posthog: { apiKey: KEY, sessionRecording: bad } } })
+      expect(result.integrations?.posthog?.sessionRecording).toBe(false)
+      expect(text(result)).toContain('sessionRecording')
+    }
+  })
+
   it.each(inputs)('%j', (integrations) => {
     const migrated = projectMintlifyIntegrations({ integrations }).integrations
     const rendered = resolveAnalyticsConfig(undefined, migrated)

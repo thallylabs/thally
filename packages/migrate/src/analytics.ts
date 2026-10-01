@@ -38,6 +38,11 @@ function redact(value: unknown): string {
   return value.length === 0 ? 'empty string' : `"${value.trim().slice(0, 4).replace(/[^\x20-\x7e]/g, '?')}..." (${value.length} chars)`
 }
 
+/** Public DNS names only: no localhost, and no IP literal in any form `URL` normalises (`0x7f.1`, `2130706433`, `[::1]`). */
+function isPublicHostname(hostname: string): boolean {
+  return !/(^|\.)localhost$/.test(hostname) && !/(^|\.)\d+$/.test(hostname) && !hostname.includes(':') && !hostname.startsWith('[')
+}
+
 function normalizeHttpsUrl(value: string, allowPath: boolean): string | null {
   if (!/^https:\/\//i.test(value) || /[?#\\]/.test(value)) return null
   let url: URL
@@ -47,9 +52,11 @@ function normalizeHttpsUrl(value: string, allowPath: boolean): string | null {
     return null
   }
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return null
-  if (!HOSTNAME.test(url.hostname)) return null
+  if (!HOSTNAME.test(url.hostname) || !isPublicHostname(url.hostname) || url.port === '0') return null
   // Judge the path as written: URL parsing would silently resolve `..` segments.
-  const path = (/^https:\/\/[^/]*(\/.*)?$/i.exec(value)?.[1] ?? '').replace(/\/+$/, '')
+  const fullPath = /^https:\/\/[^/]*(\/.*)?$/i.exec(value)?.[1] ?? ''
+  if (fullPath.includes('//')) return null
+  const path = fullPath.replace(/\/+$/, '')
   if (path && (!allowPath || !SAFE_PATH.test(path) || path.split('/').some((s) => s === '..' || s === '.'))) return null
   return `${url.origin}${path}`
 }
@@ -66,8 +73,10 @@ function normalizeServer(value: string): string | null {
     const origin = normalizeHttpsUrl(value, false)
     return origin ? origin.replace(/^https:\/\//, '') : null
   }
-  const bare = /^([a-z0-9.-]+)(:\d{1,5})?$/i.exec(value)
-  return bare && HOSTNAME.test(bare[1].toLowerCase()) ? `${bare[1].toLowerCase()}${bare[2] ?? ''}` : null
+  const bare = /^([a-z0-9.-]+)(?::(\d{1,5}))?$/i.exec(value)
+  if (!bare || (bare[2] !== undefined && (Number(bare[2]) < 1 || Number(bare[2]) > 65_535))) return null
+  const origin = normalizeHttpsUrl(`https://${bare[1].toLowerCase()}${bare[2] === undefined ? '' : `:${Number(bare[2])}`}`, false)
+  return origin ? origin.replace(/^https:\/\//, '') : null
 }
 
 function text(value: unknown): string | null {
@@ -174,14 +183,15 @@ function project(config: Record<string, unknown>): {
     const hostRaw = field(posthog.label, posthogBlock, 'apiHost', false)
     const host = hostRaw ? normalizeHttpsUrl(hostRaw, true) : hostRaw
     const recording = own(posthogBlock, 'sessionRecording')
-    if (recording !== undefined && typeof recording !== 'boolean') warn(`Mintlify ${posthog.label}.sessionRecording must be a boolean (found ${redact(recording)}); field ignored.`)
+    if (recording !== undefined && typeof recording !== 'boolean') warn(`Mintlify ${posthog.label}.sessionRecording must be a boolean (found ${redact(recording)}); session recording disabled.`)
     if (key && !POSTHOG_KEY.test(key)) warn(`Mintlify ${posthog.label}.apiKey ${redact(key)} is not a PostHog project key (phc_...); PostHog was not imported.`)
     if (hostRaw && !host) warn(`Mintlify ${posthog.label}.apiHost ${redact(hostRaw)} must be an https URL without credentials, query, or fragment; PostHog was not imported.`)
     if (key && POSTHOG_KEY.test(key) && host !== null) {
       integrations.posthog = {
         apiKey: key,
         ...(host ? { apiHost: host } : {}),
-        ...(typeof recording === 'boolean' ? { sessionRecording: recording } : {}),
+        // Fail closed: a present non-boolean value turns recording off.
+        ...(recording !== undefined ? { sessionRecording: recording === true } : {}),
       }
     }
   }

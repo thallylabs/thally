@@ -235,7 +235,7 @@ describe('analytics script plan', () => {
     expect(scripts.find((s) => s.key === 'ga-init')?.inline).toContain(`gtag('config', "G-TEST12345")`)
     expect(scripts.find((s) => s.key === 'gtm-init')?.inline).toContain(`'dataLayer',"GTM-TEST123")`)
     expect(scripts.find((s) => s.key === 'posthog-init')?.inline).toContain(
-      `posthog.init("${KEY}", {"api_host":"https://eu.i.posthog.com","person_profiles":"identified_only"});`,
+      `posthog.init("${KEY}", {"api_host":"https://eu.i.posthog.com","person_profiles":"identified_only","capture_pageview":"history_change"});`,
     )
   })
 
@@ -376,5 +376,64 @@ describe('hostile input table', () => {
     const out = resolveAnalyticsConfig({ googleAnalyticsId: BigInt(10), posthogKey: cyc, plausibleDomain: cyc, posthogHost: BigInt(10) }, { ga4: { measurementId: 'G-TEST12345' } })
     expect(out).toEqual({ ga4: { measurementId: 'G-TEST12345' } })
     expect(() => JSON.stringify(buildAnalyticsScripts(out))).not.toThrow()
+  })
+})
+
+describe('analytics hardening round 2', () => {
+  const ph = (extra: Record<string, unknown>) => resolveAnalyticsConfig(undefined, { posthog: { apiKey: KEY, ...extra } })
+  const pl = (server: unknown) => resolveAnalyticsConfig(undefined, { plausible: { domain: 'docs.example.com', server } })
+  const warned = () => vi.mocked(console.warn).mock.calls.flat().join('\n')
+
+  it('fails closed on a present non-boolean sessionRecording, without echoing it', () => {
+    for (const bad of ['false', 0, null, 'no', {}, []]) {
+      resetAnalyticsWarningsForTests()
+      vi.mocked(console.warn).mockClear()
+      expect(ph({ sessionRecording: bad }).posthog?.sessionRecording).toBe(false)
+      expect(warned()).toContain('sessionRecording')
+    }
+    expect(ph({}).posthog?.sessionRecording).toBe(true)
+    expect(ph({ sessionRecording: true }).posthog?.sessionRecording).toBe(true)
+    expect(ph({ sessionRecording: false }).posthog?.sessionRecording).toBe(false)
+  })
+
+  it('validates the bare server port range', () => {
+    for (const bad of ['p.example.com:0', 'p.example.com:65536', 'p.example.com:99999', 'p.example.com:00000']) expect(pl(bad)).toEqual({})
+    expect(pl('p.example.com:8443').plausible?.scriptUrl).toBe('https://p.example.com:8443/js/script.js')
+    expect(pl('https://p.example.com:0')).toEqual({})
+  })
+
+  it('rejects IP-literal and localhost hosts for apiHost and server', () => {
+    const hosts = ['127.0.0.1', '0x7f.1', '2130706433', '10.0.0.1:8443', '[::1]', '[::ffff:7f00:1]', 'localhost', 'a.localhost', 'localhost:8080', '1.2.3']
+    for (const h of hosts) {
+      expect(ph({ apiHost: `https://${h}` }), h).toEqual({})
+      expect(pl(h), h).toEqual({})
+      expect(pl(`https://${h}`), h).toEqual({})
+    }
+    expect(ph({ apiHost: 'https://ph.example.com' }).posthog?.apiHost).toBe('https://ph.example.com')
+  })
+
+  it('rejects // in apiHost and server paths', () => {
+    for (const bad of ['https://ph.example.com//x', 'https://ph.example.com/a//b', 'https://ph.example.com//']) expect(ph({ apiHost: bad }), bad).toEqual({})
+    expect(pl('https://p.example.com//')).toEqual({})
+    expect(ph({ apiHost: 'https://ph.example.com/ingest/' }).posthog?.apiHost).toBe('https://ph.example.com/ingest')
+  })
+
+  it('emits capture_pageview history_change for both sources', () => {
+    for (const config of [resolveAnalyticsConfig({ posthogKey: KEY }, undefined), ph({})]) {
+      const inline = buildAnalyticsScripts(config).find((s) => s.key === 'posthog-init')?.inline ?? ''
+      expect(inline).toContain('"capture_pageview":"history_change"')
+    }
+  })
+
+  it('warns once, value-free, when GTM and GA4 are both enabled', () => {
+    resolveAnalyticsConfig({ googleAnalyticsId: 'G-SITE12345' }, { gtm: { tagId: 'GTM-TEST123' } })
+    resolveAnalyticsConfig(undefined, { ga4: { measurementId: 'G-TEST12345' }, gtm: { tagId: 'GTM-TEST123' } })
+    const lines = warned().split('\n').filter((l) => /double-count/i.test(l))
+    expect(lines).toHaveLength(1)
+    expect(warned()).not.toContain('GTM-TEST123')
+    resetAnalyticsWarningsForTests()
+    vi.mocked(console.warn).mockClear()
+    resolveAnalyticsConfig(undefined, { gtm: { tagId: 'GTM-TEST123' } })
+    expect(warned()).not.toMatch(/double-count/i)
   })
 })

@@ -48,6 +48,11 @@ export function cleanString(value: unknown): string | undefined {
   return trimmed && trimmed.length <= 2_048 ? trimmed : undefined
 }
 
+/** Public DNS names only: no localhost, and no IP literal in any form `URL` normalises (`0x7f.1`, `2130706433`, `[::1]`). */
+function isPublicHostname(hostname: string): boolean {
+  return !/(^|\.)localhost$/.test(hostname) && !/(^|\.)\d+$/.test(hostname) && !hostname.includes(':') && !hostname.startsWith('[')
+}
+
 /** `https://host[:port][/safe/path]` only: no credentials, query, fragment, or dot segments. */
 export function normalizeHttpsUrl(value: string, opts: { path: 'none' | 'any' }): string | null {
   if (!/^https:\/\//i.test(value)) return null
@@ -59,9 +64,11 @@ export function normalizeHttpsUrl(value: string, opts: { path: 'none' | 'any' })
   }
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return null
   if (value.includes('?') || value.includes('#') || value.includes('\\')) return null
-  if (!HOSTNAME.test(url.hostname)) return null
+  if (!HOSTNAME.test(url.hostname) || !isPublicHostname(url.hostname) || url.port === '0') return null
   // Judge the path as written: URL parsing would silently resolve `..` segments.
-  const rawPath = (/^https:\/\/[^/]*(\/.*)?$/i.exec(value)?.[1] ?? '').replace(/\/+$/, '')
+  const rawFullPath = /^https:\/\/[^/]*(\/.*)?$/i.exec(value)?.[1] ?? ''
+  if (rawFullPath.includes('//')) return null
+  const rawPath = rawFullPath.replace(/\/+$/, '')
   if (rawPath && (!SAFE_PATH.test(rawPath) || rawPath.split('/').some((segment) => segment === '..' || segment === '.'))) return null
   if (rawPath && opts.path === 'none') return null
   const path = rawPath
@@ -82,9 +89,10 @@ export function normalizePlausibleDomains(value: string): string | null {
 export function plausibleScriptFromServer(value: string): string | null {
   const host = /^https:\/\//i.test(value) ? normalizeHttpsUrl(value, { path: 'none' }) : null
   if (host) return `${host}/js/script.js`
-  const bare = /^([a-z0-9.-]+)(:\d{1,5})?$/i.exec(value)
-  if (!bare || !HOSTNAME.test(bare[1].toLowerCase())) return null
-  return `https://${bare[1].toLowerCase()}${bare[2] ?? ''}/js/script.js`
+  const bare = /^([a-z0-9.-]+)(?::(\d{1,5}))?$/i.exec(value)
+  if (!bare || (bare[2] !== undefined && (Number(bare[2]) < 1 || Number(bare[2]) > 65_535))) return null
+  const origin = normalizeHttpsUrl(`https://${bare[1].toLowerCase()}${bare[2] === undefined ? '' : `:${Number(bare[2])}`}`, { path: 'none' })
+  return origin ? `${origin}/js/script.js` : null
 }
 
 const warned = new Set<string>()
@@ -212,12 +220,18 @@ function resolveUnguarded(site: unknown, integrations: unknown): ResolvedAnalyti
       const hostRaw = own(posthogBlock, 'apiHost')
       const hostClean = set(hostRaw) ? cleanString(hostRaw) : DEFAULT_POSTHOG_HOST
       const host = hostClean ? normalizeHttpsUrl(hostClean, { path: 'any' }) : null
+      // Privacy fails closed: a present, non-boolean value turns recording OFF.
+      const recording = own(posthogBlock, 'sessionRecording')
+      if (recording !== undefined && typeof recording !== 'boolean') warn('integrations.posthog.sessionRecording must be true or false; session recording disabled.')
       if (key && POSTHOG_KEY.test(key) && host) {
-        out.posthog = { apiKey: key, apiHost: host, sessionRecording: own(posthogBlock, 'sessionRecording') !== false }
+        out.posthog = { apiKey: key, apiHost: host, sessionRecording: recording === undefined || recording === true }
       } else warn('integrations.posthog needs a phc_ apiKey and an https apiHost without credentials, query, or fragment; provider skipped.')
     }
   }
 
+  if (out.ga4 && out.gtm) {
+    warn('Both GA4 and GTM are enabled; a GA4 tag inside the GTM container would double-count page views.')
+  }
   return out
 }
 
@@ -267,7 +281,7 @@ export function buildAnalyticsScripts(config: ResolvedAnalytics): Array<Analytic
     })
   }
   if (config.posthog) {
-    const options: Record<string, unknown> = { api_host: config.posthog.apiHost, person_profiles: 'identified_only' }
+    const options: Record<string, unknown> = { api_host: config.posthog.apiHost, person_profiles: 'identified_only', capture_pageview: 'history_change' }
     if (!config.posthog.sessionRecording) options.disable_session_recording = true
     scripts.push({
       key: 'posthog-init',
