@@ -8,7 +8,7 @@
 
 import { HTTP_METHODS, buildOperationKey } from './operation-keys'
 import { findSpecForRef, type OpenApiFrontmatterRef } from './page-frontmatter'
-import { isObj, operationVisibility, viewPathEntry } from './path-items'
+import { isObj, methodsOf, operationVisibility, viewPathEntry } from './path-items'
 import type { ApiSpecConfig, OperationOverride } from './types'
 
 /** `unknown`: no such operation (a typo, an unreachable `$ref`); treated as before, i.e. not judged. */
@@ -30,6 +30,25 @@ export function operationPublicationState(
   return visibility === 'visible' ? 'published' : visibility
 }
 
+/**
+ * A webhook page renders when any method of the `webhooks` entry is visible
+ * (the normalizer only reads `webhooks`, so `x-webhooks` never renders one).
+ * Overrides key webhooks as `WEBHOOK METHOD name`.
+ */
+export function webhookPublicationState(
+  document: unknown,
+  name: string,
+  overrides?: Record<string, OperationOverride>,
+): OperationPublicationState {
+  if (!isObj(document) || !isObj(document.webhooks) || !Object.hasOwn(document.webhooks, name)) return 'unknown'
+  const entry = document.webhooks[name]
+  if (!isObj(entry)) return 'unknown'
+  const view = viewPathEntry(document, entry)
+  const states = methodsOf(view.item).map((method) => operationVisibility(view, method, overrides?.[buildOperationKey(method, name, true)]))
+  if (states.length === 0) return 'unknown'
+  return states.find((state) => state === 'visible') ? 'published' : states[0] as 'hidden' | 'excluded'
+}
+
 /** A spec the docs route can serve operations from, as the build sees it. */
 export interface RoutedSpec {
   config: ApiSpecConfig
@@ -42,14 +61,15 @@ export interface RoutedSpec {
  * following `getApiOperationForFrontmatter` in `@/data/api-reference`:
  * a spec prefix pins that one spec; a bare reference tries the default spec
  * and then every other one, so it renders when any of them publishes it.
- * `specs` must be in route order (the default spec first). Webhooks and
- * anything that cannot be read are `unknown`, which is never withheld.
+ * `specs` must be in route order (the default spec first). Anything that
+ * cannot be read is `unknown`, which is never withheld.
  */
 export function pageReferenceState(ref: OpenApiFrontmatterRef, specs: ReadonlyArray<RoutedSpec>): OperationPublicationState {
-  if (ref.webhook) return 'unknown'
   const judge = (spec: RoutedSpec): OperationPublicationState => spec.document === undefined
     ? 'unknown'
-    : operationPublicationState(spec.document, ref.method, ref.path, spec.config.operationOverrides)
+    : ref.webhook
+      ? webhookPublicationState(spec.document, ref.path, spec.config.operationOverrides)
+      : operationPublicationState(spec.document, ref.method, ref.path, spec.config.operationOverrides)
   if (ref.specRef) {
     const config = findSpecForRef(specs.map((spec) => spec.config), ref.specRef)
     const spec = config ? specs.find((entry) => entry.config === config) : undefined

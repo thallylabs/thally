@@ -40,6 +40,49 @@ describe('thally check publication parity', () => {
   })
 })
 
+describe('thally check webhook parity', () => {
+  const hook = (extra: Record<string, unknown> = {}) => ({ ...extra, post: ok })
+  const document = doc({}, {
+    webhooks: {
+      hidden: hook({ 'x-hidden': true }),
+      excluded: hook({ 'x-excluded': true }),
+      opHidden: { post: { 'x-hidden': true, ...ok } },
+      mixed: { post: { 'x-hidden': true, ...ok }, put: ok },
+      shown: hook(),
+      ref: { $ref: '#/components/pathItems/Flagged' },
+      overridden: { post: { 'x-hidden': true, ...ok } },
+      external: { $ref: 'other.yaml#/x' },
+    },
+    // The renderer only reads `webhooks`; `x-webhooks` never makes a page render.
+    'x-webhooks': { onlyExt: hook({ 'x-hidden': true }), shown: hook({ 'x-hidden': true }) },
+    components: { pathItems: { Flagged: { 'x-hidden': true, post: ok } } },
+  })
+  const overrides = { 'WEBHOOK POST overridden': { hidden: false }, 'WEBHOOK POST shown': { hidden: true } }
+  const names = ['hidden', 'excluded', 'opHidden', 'mixed', 'shown', 'ref', 'overridden', 'external', 'onlyExt', 'missing']
+
+  it('judges webhook pages the same in both implementations, spec-prefixed or bare', () => {
+    for (const withOverrides of [undefined, overrides]) {
+      const routed: Array<RoutedSpec> = [{
+        config: { id: 'default', label: '', source: { type: 'file', path: 'openapi.yaml' }, operationOverrides: withOverrides },
+        document,
+      }]
+      const specs = [{ source: 'openapi.yaml', document, overrides: withOverrides }]
+      for (const name of names) {
+        for (const raw of [`webhook ${name}`, `openapi.yaml webhook ${name}`]) {
+          expect(pageState(parseDocReference(raw)!, specs), raw).toBe(pageReferenceState(parseOpenApiFrontmatter(raw)!, routed))
+        }
+      }
+    }
+  })
+
+  it('withholds hidden and excluded webhooks and nothing the renderer can show', () => {
+    const state = (name: string) => pageReferenceState(parseOpenApiFrontmatter(`openapi.yaml webhook ${name}`)!, [{ config: { id: 'default', label: '', source: { type: 'file', path: 'openapi.yaml' } }, document }])
+    expect(['hidden', 'excluded', 'opHidden', 'ref'].map(state)).toEqual(['hidden', 'excluded', 'hidden', 'hidden'])
+    // One visible method renders the page; an unreadable ref, a typo and x-webhooks-only entries are not judged.
+    expect(['mixed', 'shown', 'external', 'onlyExt', 'missing'].map(state)).toEqual(['published', 'published', 'unknown', 'unknown', 'unknown'])
+  })
+})
+
 describe('thally check page-reference parity', () => {
   const docA = doc({ '/h': { get: { 'x-hidden': true, ...ok } }, '/moved': { get: { 'x-hidden': true, ...ok } }, '/v': { get: ok } })
   const docB = doc({ '/moved': { get: ok }, '/secret': { get: { 'x-excluded': true, ...ok } }, '/o': { get: ok } })

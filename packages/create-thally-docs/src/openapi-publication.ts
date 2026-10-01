@@ -62,8 +62,9 @@ export interface CheckSpec {
  * src/lib/openapi/publication.ts.
  */
 export function pageState(ref: DocReference, specs: ReadonlyArray<CheckSpec>): 'published' | 'hidden' | 'excluded' | 'unknown' {
-  if (ref.webhook) return 'unknown'
-  const judge = (spec: CheckSpec) => spec.document === undefined ? 'unknown' : operationState(spec.document, ref.method, ref.path, spec.overrides)
+  const judge = (spec: CheckSpec) => spec.document === undefined
+    ? 'unknown'
+    : ref.webhook ? webhookState(spec.document, ref.path, spec.overrides) : operationState(spec.document, ref.method, ref.path, spec.overrides)
   if (ref.specRef) {
     const wanted = canonicalRef(ref.specRef)
     if (!wanted) return 'unknown'
@@ -96,17 +97,10 @@ function resolveLocalRef(document: unknown, ref: string): unknown {
   return node
 }
 
-/** `unknown` when the operation is absent or its `$ref` cannot be followed: never reported. */
-export function operationState(
-  document: unknown,
-  method: string,
-  path: string,
-  overrides?: unknown,
-): 'published' | 'hidden' | 'excluded' | 'unknown' {
-  const verb = method.toLowerCase()
-  if (!METHODS.includes(verb) || !isObj(document) || !isObj(document.paths)) return 'unknown'
-  const entry = document.paths[path]
-  if (!isObj(entry)) return 'unknown'
+type State = 'published' | 'hidden' | 'excluded' | 'unknown'
+
+/** A path-item entry followed through local `$ref`s, as `viewPathEntry` does: the chain and the merged item. */
+function viewEntry(document: unknown, entry: Obj): { chain: Array<Obj>; item: Obj } {
   const chain: Array<Obj> = [entry]
   const seen = new Set<Obj>([entry])
   for (let current = entry; typeof current.$ref === 'string'; ) {
@@ -116,13 +110,44 @@ export function operationState(
     chain.push(target)
     current = target
   }
-  const item: Obj = Object.assign({}, ...[...chain].reverse())
-  const operation = item[verb]
-  if (!isObj(operation)) return 'unknown'
+  return { chain, item: Object.assign({}, ...[...chain].reverse()) }
+}
+
+/** One method of an entry: `excluded` wins, an override decides `hidden`, otherwise the flags do. */
+function visibility(chain: Array<Obj>, operation: Obj, override: unknown): 'visible' | 'hidden' | 'excluded' {
   if (chain.some((level) => flagged(level['x-excluded'])) || flagged(operation['x-excluded'])) return 'excluded'
-  const override = isObj(overrides) ? overrides[`${verb.toUpperCase()} ${path}`] : undefined
   const hidden = isObj(override) && typeof override.hidden === 'boolean'
     ? override.hidden
     : chain.some((level) => flagged(level['x-hidden'])) || flagged(operation['x-hidden'])
-  return hidden ? 'hidden' : 'published'
+  return hidden ? 'hidden' : 'visible'
+}
+
+/** `unknown` when the operation is absent or its `$ref` cannot be followed: never reported. */
+export function operationState(
+  document: unknown,
+  method: string,
+  path: string,
+  overrides?: unknown,
+): State {
+  const verb = method.toLowerCase()
+  if (!METHODS.includes(verb) || !isObj(document) || !isObj(document.paths)) return 'unknown'
+  const entry = document.paths[path]
+  if (!isObj(entry)) return 'unknown'
+  const { chain, item } = viewEntry(document, entry)
+  const operation = item[verb]
+  if (!isObj(operation)) return 'unknown'
+  const result = visibility(chain, operation, isObj(overrides) ? overrides[`${verb.toUpperCase()} ${path}`] : undefined)
+  return result === 'visible' ? 'published' : result
+}
+
+/** A webhook page renders when any method of the `webhooks` entry is visible; `x-webhooks` never renders one. */
+export function webhookState(document: unknown, name: string, overrides?: unknown): State {
+  if (!isObj(document) || !isObj(document.webhooks) || !Object.hasOwn(document.webhooks, name)) return 'unknown'
+  const entry = document.webhooks[name]
+  if (!isObj(entry)) return 'unknown'
+  const { chain, item } = viewEntry(document, entry)
+  const states = METHODS.filter((verb) => isObj(item[verb])).map((verb) =>
+    visibility(chain, item[verb] as Obj, isObj(overrides) ? overrides[`WEBHOOK ${verb.toUpperCase()} ${name}`] : undefined))
+  if (states.length === 0) return 'unknown'
+  return states.includes('visible') ? 'published' : states[0] as 'hidden' | 'excluded'
 }

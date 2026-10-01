@@ -314,6 +314,11 @@ describe('thally check pages bound to unpublished operations', () => {
         '/excluded': { $ref: '#/components/pathItems/E' },
         '/visible': { get: ok },
       },
+      webhooks: {
+        orderUpdated: { post: { 'x-hidden': true, ...ok } },
+        refunded: { $ref: '#/components/pathItems/E' },
+        shipped: { post: ok },
+      },
       components: { pathItems: { E: { 'x-excluded': true, get: ok } } },
     }))
     for (const [id, operation] of Object.entries(pages)) {
@@ -336,6 +341,21 @@ describe('thally check pages bound to unpublished operations', () => {
     expect(output).not.toContain('visible-endpoint.mdx points')
     expect(output).not.toContain('typo-endpoint.mdx points')
     expect(output).toContain('0 error(s)')
+  })
+
+  it('warns for pages bound to hidden or excluded webhooks, bare or spec-prefixed', async () => {
+    const output = await run({
+      'hook-hidden': 'webhook orderUpdated',
+      'hook-prefixed': 'openapi/api.json webhook orderUpdated',
+      'hook-excluded': 'webhook refunded',
+      'hook-shown': 'webhook shipped',
+      'hook-typo': 'webhook nope',
+    })
+    expect(output).toContain('page src/content/hook-hidden.mdx points at hidden operation WEBHOOK orderUpdated and is not published')
+    expect(output).toContain('page src/content/hook-prefixed.mdx points at hidden operation openapi/api.json WEBHOOK orderUpdated and is not published')
+    expect(output).toContain('page src/content/hook-excluded.mdx points at excluded operation WEBHOOK refunded and is not published')
+    expect(output).not.toContain('hook-shown.mdx points')
+    expect(output).not.toContain('hook-typo.mdx points')
   })
 
   it('judges a spec-prefixed page against the spec it names, like the site', async () => {
