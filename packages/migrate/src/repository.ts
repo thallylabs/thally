@@ -90,6 +90,8 @@ const MAX_PAGE_BYTES = 2_000_000
 const FRONTMATTER_HEAD_BYTES = 65_536
 /** Largest withheld page still read to find the assets it uses; beyond this they are unknown and reported. */
 const MAX_WITHHELD_SCAN_BYTES = MAX_PAGE_BYTES * 8
+/** Per-page warnings for restricted pages the file budget dropped; the rest are counted in one more. */
+const MAX_DROPPED_GATED_WARNINGS = 20
 const MAX_ASSET_BYTES = 25_000_000
 const MAX_TOTAL_ASSET_BYTES = 500_000_000
 /** A Git LFS pointer file's fixed opening line (the smudge filter replaces this with the real binary; skipping it during clone leaves this text in place). */
@@ -3033,31 +3035,58 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const withheldSpecRefs: Array<string> = []
   const publishedSpecRefs: Array<string> = []
   const withheldPaths = new Set<string>()
+  // The gate verdict of one Mintlify page: a bounded read of its frontmatter
+  // head, then the navigation gate. Unreadable means withheld.
+  const isGateCandidate = (file: ScannedFile): boolean => ['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())
+    && !file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
+  const classifyPageGate = (file: ScannedFile): { reason?: string; publicTrue: boolean; openapi?: string } => {
+    let head: { reason?: string; publicTrue: boolean; openapi?: string } = { publicTrue: false }
+    let unreadableGate: string | undefined
+    try {
+      // Pages above the size cap are never imported, but another page can
+      // still inline them, so they are classified from their frontmatter.
+      // One bounded read for nearly every page; a frontmatter longer than the
+      // head window falls back to the whole file, as before.
+      const size = lstatSync(file.absolutePath).size
+      const raw = readFrontmatterHead(file.absolutePath) ?? (size > MAX_PAGE_BYTES ? undefined : readFileSync(file.absolutePath, 'utf8'))
+      if (raw === undefined) throw new Error('frontmatter is not terminated within the bounded read')
+      head = pageHeadGateReason(raw)
+    } catch {
+      unreadableGate = 'frontmatter could not be read'
+    }
+    const reason = head.reason ?? unreadableGate ?? mintlifyGatedRefs.get(normalizedReferenceKey(file.relativePath).toLowerCase())
+    return { reason, publicTrue: head.publicTrue, openapi: head.openapi }
+  }
+  // Pages the file budget dropped, or a walk that hit its cap, are not
+  // published, but their gate still decides what is withheld: classified here
+  // from the same bounded head read, before anything trims them.
+  const keptFiles = new Set(files)
+  const droppedGatedFiles: Array<{ file: ScannedFile; reason: string }> = []
+  let droppedPageCount = 0
+  const scanTruncated = scannedFiles.length >= (discoveryRank ? MAX_RANKED_WALK_FILES : MAX_SOURCE_FILES)
   if (platform === 'mintlify') {
     for (const file of files) {
-      if (!['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())
-        || file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))) continue
-      let head: { reason?: string; publicTrue: boolean; openapi?: string } = { publicTrue: false }
-      let unreadableGate: string | undefined
-      try {
-        // Pages above the size cap are never imported, but another page can
-        // still inline them, so they are classified from their frontmatter.
-        // One bounded read for nearly every page; a frontmatter longer than the
-        // head window falls back to the whole file, as before.
-        const size = lstatSync(file.absolutePath).size
-        const raw = readFrontmatterHead(file.absolutePath) ?? (size > MAX_PAGE_BYTES ? undefined : readFileSync(file.absolutePath, 'utf8'))
-        if (raw === undefined) throw new Error('frontmatter is not terminated within the bounded read')
-        head = pageHeadGateReason(raw)
-      } catch {
-        unreadableGate = 'frontmatter could not be read'
-      }
-      const reason = head.reason ?? unreadableGate ?? mintlifyGatedRefs.get(normalizedReferenceKey(file.relativePath).toLowerCase())
-      gateByPath.set(file.absolutePath, { reason, publicTrue: head.publicTrue })
-      if (head.openapi) (reason ? withheldSpecRefs : publishedSpecRefs).push(head.openapi)
-      if (reason) withheldPaths.add(file.absolutePath)
+      if (!isGateCandidate(file)) continue
+      const verdict = classifyPageGate(file)
+      gateByPath.set(file.absolutePath, { reason: verdict.reason, publicTrue: verdict.publicTrue })
+      if (verdict.openapi) (verdict.reason ? withheldSpecRefs : publishedSpecRefs).push(verdict.openapi)
+      if (verdict.reason) withheldPaths.add(file.absolutePath)
+    }
+    for (const file of mintignoreFilteredFiles) {
+      if (keptFiles.has(file) || !isGateCandidate(file)) continue
+      droppedPageCount++
+      const verdict = classifyPageGate(file)
+      if (!verdict.reason) continue
+      if (verdict.openapi) withheldSpecRefs.push(verdict.openapi)
+      withheldPaths.add(file.absolutePath)
+      droppedGatedFiles.push({ file, reason: verdict.reason })
     }
   }
-  const trackPublishedRefs = platform === 'mintlify' && withheldPaths.size > 0
+  // Pages that were never classified (dropped by the budget, or beyond the walk
+  // cap) could be restricted: assets no published page names by exact path stay
+  // out of public/ on such a site, as on one with known restricted pages.
+  const pagesNotClassified = droppedPageCount > 0 || (platform === 'mintlify' && scanTruncated)
+  const trackPublishedRefs = platform === 'mintlify' && (withheldPaths.size > 0 || pagesNotClassified)
   // Mintlify only. The pre-pass covers only files inside the file budget, so a
   // candidate it never saw (dropped by the budget, in a snippet directory, under
   // a case-variant path) is classified on demand: frontmatter gates, navigation
@@ -3106,6 +3135,36 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const snippetAliases = platform === 'mintlify' && mintlifyProjectRoot
     ? globalSnippetAliases(files, repositoryDir, mintlifyProjectRoot)
     : new Map<string, string>()
+  // A restricted page the budget dropped is not published or saved, but the
+  // assets it uses must still stay out of public/ (bounded scan, like the
+  // oversized restricted pages).
+  droppedGatedFiles.forEach(({ file, reason }, index) => {
+    if (index < MAX_DROPPED_GATED_WARNINGS) {
+      warnings.push({
+        code: 'gated-page',
+        message: `Access-restricted page (${reason}) was dropped by the file limit, so it was NOT published and was not saved under ${QUARANTINE_DIRECTORY}/; recover it from the source repository.`,
+        source: file.relativePath,
+      })
+    }
+    if (!mintlifyProjectRoot) return
+    try {
+      if (lstatSync(file.absolutePath).size > MAX_WITHHELD_SCAN_BYTES) throw new Error('too large to scan')
+      rewriteRepositoryAssetLinks(
+        inlineMdxSnippets(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, [], 0, mintlifyProjectRoot, snippetAliases, inlineGate),
+        file.absolutePath,
+        mintlifyProjectRoot,
+        withholdAsset,
+      )
+    } catch {
+      // Unscannable, so its assets are unknown: they stay out of public/ unless a published page names them by exact path.
+    }
+  })
+  if (droppedGatedFiles.length > MAX_DROPPED_GATED_WARNINGS) {
+    warnings.push({
+      code: 'gated-page',
+      message: `${droppedGatedFiles.length - MAX_DROPPED_GATED_WARNINGS} more access-restricted page(s) were dropped by the file limit and NOT published; recover them from the source repository.`,
+    })
+  }
   for (const file of pageFiles) {
     if (!isDocumentationExtension(file.relativePath)) continue
     // Unlike Mintlify/Docusaurus, Fern only ever serves pages reachable from
@@ -3617,9 +3676,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const original = /^src\/mdx\/migrated\/[^/]+\/source\/(.+)$/.exec(file.path)?.[1]
     addPathReferences(file.content, original === undefined ? '' : posix.dirname(original).replace(/^\.$/, ''), publishedExact, publishedLoose)
   }
-  const hasWithheldContent = trackPublishedRefs
+  const failClosedAssets = trackPublishedRefs
   const isPublicReachable = (assetPath: string): boolean => referencedAssetPaths.has(assetPath) || publishedExact.has(assetPath)
-  const isQuarantinedAsset = (assetPath: string): boolean => (withheldAssetPaths.has(assetPath) || (hasWithheldContent && !siteAssetPaths.has(assetPath)))
+  const isQuarantinedAsset = (assetPath: string): boolean => (withheldAssetPaths.has(assetPath) || (failClosedAssets && !siteAssetPaths.has(assetPath)))
     && platform === 'mintlify'
     && !isPublicReachable(assetPath)
   let withheldAssetCount = 0
@@ -4344,8 +4403,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const assetNote = withheldAssetCount > 0
         ? `${withheldAssetCount} file(s) used only by access-restricted pages were kept out of public/ and saved under ${QUARANTINE_DIRECTORY}/assets/. `
         : ''
+      const unreferencedReason = [
+        ...(withheldPaths.size > 0 ? ['this site has access-restricted content'] : []),
+        ...(pagesNotClassified ? ['pages were dropped by the file limit (or the file scan stopped at its cap) and could not all be checked for access restrictions'] : []),
+      ].join(' and ')
       const unreferencedNote = unreferencedAssetCount > 0
-        ? `${unreferencedAssetCount} unreferenced asset(s) were kept out of public/ because this site has access-restricted content; review ${QUARANTINE_DIRECTORY}/assets/ and copy any that published pages need. `
+        ? `${unreferencedAssetCount} unreferenced asset(s) were kept out of public/ because ${unreferencedReason}; review ${QUARANTINE_DIRECTORY}/assets/ and copy any that published pages need. `
         : ''
       warnings.push({
         code: 'gated-page',

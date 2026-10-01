@@ -977,3 +977,60 @@ describe('asset reach is decided by exact normalized path, never by file name', 
     expect(warning?.message).toContain('other/logo.png')
   })
 })
+
+describe('assets when the file budget dropped pages', () => {
+  const png = Buffer.from('PNGDATA')
+  const filler = (count: number): Record<string, string> => {
+    const files: Record<string, string> = {}
+    for (let i = 0; i < count; i++) files[`filler/f${i}.mdx`] = '---\ntitle: F\n---\n\nx\n'
+    return files
+  }
+  const publicPaths = (bundle: MigrationBundle) => bundle.assets.map((asset) => asset.path)
+
+  it('keeps the image of the only restricted page out of public/ when the budget dropped that page', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),
+      'index.mdx': '---\ntitle: I\n---\n\n![k](/img/kept.png)\n',
+      ...filler(5300),
+      'zz/secret.mdx': '---\ntitle: S\ngroups: [admin]\n---\n\n![p](/img/private.png)\n',
+      'img/kept.png': png,
+      'img/private.png': png,
+    })
+    expect(bundle.pages.some((entry) => entry.id.includes('secret'))).toBe(false)
+    expect(publicPaths(bundle)).not.toContain('img/private.png')
+    expect((bundle.quarantinedFiles ?? []).some((file) => file.path === 'migration-quarantine/assets/img/private.png')).toBe(true)
+    expect(publicPaths(bundle)).toContain('img/kept.png')
+    expect(codes(bundle, 'gated-page').some((item) => item.source === 'zz/secret.mdx' && /file limit/.test(item.message))).toBe(true)
+  }, 120_000)
+
+  it('quarantines the image of a dropped non-restricted page and says why', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),
+      'index.mdx': '---\ntitle: I\n---\n\n![k](/img/kept.png)\n',
+      ...filler(5300),
+      'zz/dropped.mdx': '---\ntitle: D\n---\n\n![d](/img/dropped.png)\n',
+      'img/kept.png': png,
+      'img/dropped.png': png,
+      'img/loose.png': png,
+    })
+    expect(publicPaths(bundle)).toContain('img/kept.png')
+    expect(publicPaths(bundle)).not.toContain('img/dropped.png')
+    expect(publicPaths(bundle)).not.toContain('img/loose.png')
+    expect((bundle.quarantinedFiles ?? []).map((file) => file.path)).toContain('migration-quarantine/assets/img/dropped.png')
+    const conservative = codes(bundle, 'gated-page').filter((item) => /dropped by the file limit/.test(item.message))
+    expect(conservative).toHaveLength(1)
+  }, 120_000)
+
+  it('is unchanged for a site under the budget', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),
+      'index.mdx': '---\ntitle: I\n---\n\n![k](/img/kept.png)\n',
+      ...filler(50),
+      'img/kept.png': png,
+      'img/loose.png': png,
+    })
+    expect(publicPaths(bundle)).toEqual(expect.arrayContaining(['img/kept.png', 'img/loose.png']))
+    expect(bundle.quarantinedFiles).toBeUndefined()
+    expect(bundle.warnings.some((item) => /file limit/.test(item.message) && item.code === 'gated-page')).toBe(false)
+  })
+})
