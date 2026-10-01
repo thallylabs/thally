@@ -3772,9 +3772,39 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const source = /^src\/mdx\/migrated\/[^/]+\/source\/(.+)$/.exec(file.path)?.[1]
     return source ? [resolvePath(repositoryDir, source)] : []
   }))
+  // Mintlify loads its root stylesheet implicitly. Project it once, before
+  // asset publication, so only URLs retained in authored rules can keep an
+  // otherwise withheld asset public. The unfiltered source is never copied.
+  const rootStylesheetPath = platform === 'mintlify' && mintlifyProjectRoot
+    ? resolveWithin(mintlifyProjectRoot, 'style.css')
+    : undefined
+  const hasRootStylesheet = Boolean(rootStylesheetPath && existsSync(rootStylesheetPath)
+    && lstatSync(rootStylesheetPath).isFile() && !lstatSync(rootStylesheetPath).isSymbolicLink())
+  let rootStyleProjection: ReturnType<typeof projectAuthoredStyles> | undefined
+  let rootStyleProblem: 'unsafe' | 'parse' | undefined
+  if (hasRootStylesheet && rootStylesheetPath && lstatSync(rootStylesheetPath).size <= MAX_ASSET_BYTES) {
+    const css = readFileSync(rootStylesheetPath, 'utf8')
+    // An import may fetch arbitrary CSS; URL schemes that read local files or
+    // execute script are not transferable into a public Thally stylesheet.
+    if (/@import\b|url\s*\(\s*['"]?\s*(?:javascript:|file:)/i.test(css)) rootStyleProblem = 'unsafe'
+    else {
+      try {
+        rootStyleProjection = projectAuthoredStyles(css, [
+          ...pages.map((page) => page.body),
+          ...(componentMigrator?.files() ?? []).map((file) => typeof file.content === 'string' ? file.content : ''),
+        ])
+      } catch {
+        rootStyleProblem = 'parse'
+      }
+    }
+  }
+  if (trackPublishedRefs && rootStyleProjection?.css) {
+    addPathReferences(rootStyleProjection.css, '', publishedExact, publishedLoose)
+  }
   const siteAssetPaths = new Map<string, 'style' | 'script' | 'font'>()
   const fontAssetByRelative = new Map<string, string>()
   for (const file of [...files, ...repositoryAssets, ...fernReferencedAssets]) {
+    if (rootStylesheetPath && file.absolutePath === rootStylesheetPath) continue
     const firstSegment = file.relativePath.split('/', 1)[0].toLowerCase()
     const siteKind = platform !== 'mintlify' ? undefined
       : fontRelativePaths.has(file.relativePath) ? 'font' as const
@@ -3893,9 +3923,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       })
     }
     for (const entry of copiedSite.filter((item) => item.kind === 'style')) {
-      // The root Mintlify stylesheet is projected below; that path reports
-      // precisely which authored rules survived instead of a stale gap.
-      if (entry.path === 'style.css') continue
       warnings.push({
         code: 'unsupported-config',
         message: `Migration gap: custom stylesheet ${entry.path} is NOT applied. It was copied to public/${entry.path} but was not declared in docs.json stylesheets; its selectors may target Mintlify's markup. Review and port its authored rules into a Thally stylesheet.`,
@@ -3940,43 +3967,28 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // Mintlify loads root style.css implicitly. Keep rules for authored markup,
   // but never ship selectors coupled to Mintlify's private shell classes.
   // Thally owns the navbar, cards and footer through docs.json and its theme.
-  if (platform === 'mintlify' && mintlifyProjectRoot) {
-    const stylesheet = resolveWithin(mintlifyProjectRoot, 'style.css')
-    if (existsSync(stylesheet) && lstatSync(stylesheet).isFile() && !lstatSync(stylesheet).isSymbolicLink()) {
-      const size = lstatSync(stylesheet).size
-      if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
-        warnings.push({ code: 'limit-reached', message: 'Mintlify root style.css exceeded the asset budget and was not imported.', source: 'style.css' })
-      } else {
-        const css = readFileSync(stylesheet)
-        // @import can pull in an entire unreviewed stylesheet. Ordinary
-        // image/font URLs remain intact, just as they do in source MDX.
-        if (/@import\b|url\s*\(\s*['"]?\s*(?:javascript:|file:)/i.test(css.toString('utf8'))) {
-          warnings.push({ code: 'unsupported-config', message: 'Mintlify root style.css contains a CSS import or unsafe URL; review and import it manually.', source: 'style.css' })
-        } else {
-          try {
-            const projected = projectAuthoredStyles(css.toString('utf8'), [
-              ...pages.map((page) => page.body),
-              ...(componentMigrator?.files() ?? []).map((file) => typeof file.content === 'string' ? file.content : ''),
-            ])
-            if (projected.omittedSelectors > 0) warnings.push({
-              code: 'unsupported-config',
-              source: 'style.css',
-              message: `Skipped ${projected.omittedSelectors} stylesheet selector${projected.omittedSelectors === 1 ? '' : 's'} that target platform-owned or unreferenced markup. Recreate any intentional shell customization with Thally configuration.`,
-            })
-            const identity = createHash('sha256').update(componentSourceIdentity(options.sourceUrl, repositoryDir, mintlifyProjectRoot)).digest('hex').slice(0, 12)
-            const assetPath = `migrated/${identity}/style.css`
-            if (projected.css.trim()) {
-              const content = Buffer.from(projected.css)
-              assets.push({ path: assetPath, content })
-              docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), `/${assetPath}`] }
-              totalAssetBytes += content.length
-            }
-          } catch {
-            // Invalid source CSS must not turn a successful content migration
-            // into a failed site. The report gives the owner the path to fix.
-            warnings.push({ code: 'unsupported-config', message: 'Mintlify root style.css could not be parsed and was not imported.', source: 'style.css' })
-          }
-        }
+  if (hasRootStylesheet && rootStylesheetPath && mintlifyProjectRoot) {
+    const size = lstatSync(rootStylesheetPath).size
+    if (size > MAX_ASSET_BYTES || totalAssetBytes + size > MAX_TOTAL_ASSET_BYTES) {
+      warnings.push({ code: 'limit-reached', message: 'Mintlify root style.css exceeded the asset budget and was not imported.', source: 'style.css' })
+    } else if (rootStyleProblem === 'unsafe') {
+      warnings.push({ code: 'unsupported-config', message: 'Mintlify root style.css contains a CSS import or unsafe URL; review and import it manually.', source: 'style.css' })
+    } else if (rootStyleProblem === 'parse' || !rootStyleProjection) {
+      // Invalid CSS is reported without breaking an otherwise valid site.
+      warnings.push({ code: 'unsupported-config', message: 'Mintlify root style.css could not be parsed and was not imported.', source: 'style.css' })
+    } else {
+      if (rootStyleProjection.omittedSelectors > 0) warnings.push({
+        code: 'unsupported-config',
+        source: 'style.css',
+        message: `Skipped ${rootStyleProjection.omittedSelectors} stylesheet selector${rootStyleProjection.omittedSelectors === 1 ? '' : 's'} that target platform-owned or unreferenced markup. Recreate any intentional shell customization with Thally configuration.`,
+      })
+      if (rootStyleProjection.css.trim()) {
+        const identity = createHash('sha256').update(componentSourceIdentity(options.sourceUrl, repositoryDir, mintlifyProjectRoot)).digest('hex').slice(0, 12)
+        const assetPath = `migrated/${identity}/style.css`
+        const content = Buffer.from(rootStyleProjection.css)
+        assets.push({ path: assetPath, content })
+        docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), `/${assetPath}`] }
+        totalAssetBytes += content.length
       }
     }
   }

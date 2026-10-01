@@ -78,13 +78,22 @@ export function projectAuthoredStyles(css: string, contents: ReadonlyArray<strin
           let hasAuthoredAnchor = false
           let hasPlatformAnchor = false
           selector.walk((node) => {
+            // A class inside :not() or :has() does not constrain the element
+            // being styled. Treating it as the only authored anchor could
+            // retain a body-wide platform override.
+            let ancestor = node.parent
+            let isNestedInPseudo = false
+            while (ancestor && ancestor !== selector) {
+              if (ancestor.type === 'pseudo') isNestedInPseudo = true
+              ancestor = ancestor.parent
+            }
             if (node.type === 'class') {
               if (SHARED_THEME_CLASSES.has(node.value)) return
               if (PLATFORM_CLASSES.has(node.value) || PLATFORM_CLASS_PREFIX.test(node.value) || UTILITY_CLASS.test(node.value) || !names.classes.has(node.value)) hasPlatformAnchor = true
-              else hasAuthoredAnchor = true
+              else if (!isNestedInPseudo) hasAuthoredAnchor = true
             } else if (node.type === 'id') {
               if (PLATFORM_IDS.has(node.value) || !names.ids.has(node.value)) hasPlatformAnchor = true
-              else hasAuthoredAnchor = true
+              else if (!isNestedInPseudo) hasAuthoredAnchor = true
             } else if (node.type === 'attribute' && node.attribute === 'data-as') {
               // Mintlify adds this implementation detail to transformed MDX
               // paragraphs. Thally renders the native element and class.

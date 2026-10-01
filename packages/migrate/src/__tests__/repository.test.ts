@@ -20,6 +20,7 @@ describe('Mintlify root styles', () => {
     const href = result.docsConfig.stylesheets?.[0]
     expect(href).toMatch(/^\/migrated\/[a-f0-9]{12}\/style\.css$/)
     expect(result.assets.find((asset) => `/${asset.path}` === href)?.content.toString()).toBe('.card { padding: 1rem; }')
+    expect(result.assets.some((asset) => asset.path === 'style.css')).toBe(false)
     expect(result.pages[0].body).toContain('<div className="card">')
     const equivalent = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/EXAMPLE/docs.git' })
     expect(equivalent.docsConfig.stylesheets).toEqual(result.docsConfig.stylesheets)
@@ -32,6 +33,7 @@ describe('Mintlify root styles', () => {
     writeFileSync(join(root, 'style.css'), '@import url(https://example.com/tracker.css);')
     const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
     expect(result.docsConfig.stylesheets).toBeUndefined()
+    expect(result.assets.some((asset) => asset.path === 'style.css')).toBe(false)
     expect(result.warnings).toContainEqual(expect.objectContaining({ source: 'style.css' }))
   })
 
@@ -46,6 +48,8 @@ describe('Mintlify root styles', () => {
       '.dark .widget { color: white; }',
       '#footer a.max-w-36 { max-width: none; }',
       'a > div.w-full > div.mt-8 { position: absolute; }',
+      'body:not(.widget) { display: none; }',
+      'body:has(.widget) { overflow: hidden; }',
     ].join('\n'))
     const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
     const href = result.docsConfig.stylesheets?.[0]
@@ -55,6 +59,8 @@ describe('Mintlify root styles', () => {
     expect(css).toContain('.dark .widget { color: white; }')
     expect(css).not.toContain('mintlify-layout')
     expect(css).not.toMatch(/navbar-link|#footer|max-w-36|w-full|mt-8|data-as/)
+    expect(css).not.toMatch(/body:not|body:has/)
+    expect(result.assets.some((asset) => asset.path === 'style.css')).toBe(false)
     expect(result.warnings).toContainEqual(expect.objectContaining({ source: 'style.css' }))
   })
 
@@ -65,7 +71,7 @@ describe('Mintlify root styles', () => {
     writeFileSync(join(root, 'style.css'), 'li.navbar-link a { color: red; } #footer a.max-w-36 { max-width: none; }')
     const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
     expect(result.docsConfig.stylesheets).toBeUndefined()
-    expect(result.assets.some((asset) => asset.path.endsWith('/style.css'))).toBe(false)
+    expect(result.assets.some((asset) => asset.path.endsWith('/style.css') || asset.path === 'style.css')).toBe(false)
   })
 
   it('ignores classes shown only in examples and keeps authored animations', () => {

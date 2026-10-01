@@ -170,7 +170,7 @@ describe('site-wide scripts, styles and fonts', () => {
   it('copies css, js and referenced fonts only, and wires scripts', () => {
     const bundle = site(files)
     const paths = bundle.assets.map((asset) => asset.path).sort()
-    expect(paths).toEqual(['assets/custom.js', 'fonts/mine.woff2', 'style.css'])
+    expect(paths).toEqual(['assets/custom.js', 'fonts/mine.woff2'])
     expect(bundle.docsConfig.customScripts).toEqual([{ src: '/assets/custom.js', strategy: 'afterInteractive' }])
   })
 
@@ -648,7 +648,7 @@ describe('assets used only by withheld pages', () => {
     ['docs.json logo', { 'docs.json': JSON.stringify({ logo: { light: '/img/x.png', dark: '/img/x.png' }, navigation: { pages: ['pub', 'secret'] } }) }],
     ['docs.json favicon', { 'docs.json': JSON.stringify({ favicon: '/img/x.png', navigation: { pages: ['pub', 'secret'] } }) }],
     ['docs.json background', { 'docs.json': JSON.stringify({ background: { image: '/img/x.png' }, navigation: { pages: ['pub', 'secret'] } }) }],
-    ['stylesheet url()', { 'style.css': 'body { background: url("img/x.png") }\n' }],
+    ['stylesheet url()', { 'pub.mdx': '---\ntitle: Pub\n---\n\n<div className="widget">Hello.</div>\n', 'style.css': '.widget { background: url("img/x.png") }\n' }],
     ['snippet', { 'pub.mdx': '---\ntitle: Pub\n---\n\n<Snippet file="s.mdx" />\n', 'snippets/s.mdx': '![s](/img/x.png)\n' }],
   ])('keeps an otherwise unreferenced image public on a gated site when used by a published %s', (_name, extra) => {
     const bundle = site({
@@ -660,6 +660,18 @@ describe('assets used only by withheld pages', () => {
     })
     expect(publicPaths(bundle).includes('img/x.png')).toBe(true)
     expect((bundle.quarantinedFiles ?? []).some((file) => file.path.endsWith('img/x.png'))).toBe(false)
+  })
+
+  it('does not publish an asset referenced only by a discarded shell selector', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub', 'secret'] } }),
+      'pub.mdx': page('Pub'),
+      'secret.mdx': page('Secret', 'groups: [admin]\n'),
+      'style.css': 'body { background: url("img/x.png") }\n',
+      'img/x.png': png,
+    })
+    expect(publicPaths(bundle)).not.toContain('img/x.png')
+    expect(publicPaths(bundle)).not.toContain('style.css')
   })
 
   it('keeps an image that a published page names only in its frontmatter', () => {
