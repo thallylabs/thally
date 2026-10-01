@@ -14,6 +14,7 @@ import { operationState, parseDocOperation } from './openapi-publication.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { slugify } from '@thallylabs/core/slugify'
+import { validateIntegrations } from '@thallylabs/migrate'
 
 export interface LintIssue {
   severity: 'error' | 'warning'
@@ -494,6 +495,10 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
     const compiled = compileDynamicRedirectSource(redirect.source, redirect.destination)
     return compiled ? [compiled] : []
   })
+
+  for (const message of validateIntegrations((config as { integrations?: unknown }).integrations)) {
+    issues.push({ severity: 'warning', message, file: 'docs.json' })
+  }
 
   const navigation = projectNavigationContract(config)
   const navPageIds = new Set(navigation.authoredPageIds)

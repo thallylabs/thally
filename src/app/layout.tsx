@@ -10,6 +10,7 @@ import {
   getContentIconTone,
   getCustomScriptsConfig,
   getFontsConfig,
+  getIntegrationsConfig,
   getStructuralTheme,
 } from '@/data/docs'
 import { getBuildIconLibrary } from '@/lib/cloud-link/icon-library'
@@ -19,7 +20,8 @@ import { buildOgImageUrl } from '@/lib/og'
 import { buildSiteJsonLd } from '@/lib/json-ld'
 import { getSiteUrl } from '@/lib/site-url'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
-import { AnalyticsProvider } from '@/components/analytics/analytics-provider'
+import { AnalyticsProvider, GtmNoScript } from '@/components/analytics/analytics-provider'
+import { resolveAnalyticsConfig } from '@/lib/analytics-config'
 import { SiteBanner } from '@/components/layout/site-banner'
 import { WebMcpTools } from '@/components/agent/web-mcp-tools'
 import { CloudHandshake } from '@/components/cloud/cloud-handshake'
@@ -251,6 +253,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const themeVars = THEME_VARS[structuralTheme] ?? ''
   const bannerConfig = getBannerConfig()
   const customScripts = getCustomScriptsConfig()
+  const analyticsConfig = resolveAnalyticsConfig(siteConfig.analytics, getIntegrationsConfig())
   const i18n = await getEffectiveI18nConfig()
   const effectiveSite = resolveBuildSiteConfig()
   const siteUrl = getSiteUrl()
@@ -307,6 +310,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <link rel="stylesheet" href="/api/brand.css" />
       </head>
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
+        <GtmNoScript config={analyticsConfig} />
         {bannerConfig && (
           <SiteBanner
             banner={bannerConfig}
@@ -316,7 +320,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         )}
         <Providers appearance={appearance}>{children}</Providers>
         <CloudHandshake />
-        {siteConfig.analytics && <AnalyticsProvider />}
+        <AnalyticsProvider config={analyticsConfig} />
         <WebMcpTools />
         {customScripts.map((script) => (
           <Script key={script.src} src={script.src} strategy={script.strategy ?? 'afterInteractive'} />

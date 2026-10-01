@@ -89,6 +89,13 @@ export interface MigrationDocsConfig {
   ai?: { chat?: boolean; label?: string; icon?: string }
   admin?: { enabled?: boolean }
   analytics?: { enabled?: boolean }
+  /** Third-party analytics in Mintlify's `integrations` shape; validated again by the renderer. */
+  integrations?: {
+    ga4?: { measurementId: string }
+    gtm?: { tagId: string }
+    posthog?: { apiKey: string; apiHost?: string; sessionRecording?: boolean }
+    plausible?: { domain: string; server?: string }
+  }
   redirects?: Array<{ source: string; destination: string; permanent?: boolean }>
   i18n?: {
     defaultLocale: string

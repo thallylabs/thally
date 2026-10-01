@@ -9,7 +9,7 @@ function response(url: string, body: string, contentType: string) {
 }
 
 describe('public URL migration', () => {
-  it('uses Mintlify React Flight config instead of promoting sidebar pages to tabs', async () => {
+  async function migrateFlightFixture(integrations?: unknown) {
     const sourceUrl = 'https://product.test/docs/introduction'
     const navigation = {
       global: null,
@@ -42,6 +42,7 @@ describe('public URL migration', () => {
       navbar: { primary: { type: 'github', href: 'https://github.com/acme/product' } },
       footer: { links: [{ header: 'Docs', items: [{ label: 'Home', href: '/introduction' }] }] },
       navigation: { pages: [] },
+      ...(integrations ? { integrations } : {}),
     }
     const flight = [
       `18:["$","$Provider",null,{"value":{"docsConfig":${JSON.stringify(docsConfig)}}}]`,
@@ -76,7 +77,11 @@ describe('public URL migration', () => {
       throw new Error(`missing fixture: ${url}`)
     }
 
-    const bundle = await migrateUrl({ sourceUrl, platform: 'mintlify', fetcher })
+    return migrateUrl({ sourceUrl, platform: 'mintlify', fetcher })
+  }
+
+  it('uses Mintlify React Flight config instead of promoting sidebar pages to tabs', async () => {
+    const bundle = await migrateFlightFixture()
 
     expect(bundle.docsConfig.tabs.map((tab) => tab.tab)).toEqual([
       'Documentation',
@@ -104,6 +109,30 @@ describe('public URL migration', () => {
       'management/runs',
       'guides/examples',
     ])
+  })
+
+  it('imports Mintlify analytics integrations from the embedded config', async () => {
+    const key = `phc_${'a1B2'.repeat(8)}`
+    const bundle = await migrateFlightFixture({
+      ga4: { measurementId: 'G-TEST12345' },
+      posthog: { apiKey: key, apiHost: 'https://eu.i.posthog.com' },
+      amplitude: { apiKey: 'AMPSECRET' },
+      segment: { key: 'SEGSECRET' },
+    })
+    expect(bundle.docsConfig.integrations).toEqual({
+      ga4: { measurementId: 'G-TEST12345' },
+      posthog: { apiKey: key, apiHost: 'https://eu.i.posthog.com' },
+    })
+    const unsupported = bundle.warnings.filter((warning) => warning.code === 'unsupported-config' && /amplitude/.test(warning.message))
+    expect(unsupported).toHaveLength(1)
+    expect(unsupported[0].message).toMatch(/segment/)
+    expect(JSON.stringify(bundle.warnings)).not.toMatch(/AMPSECRET|SEGSECRET/)
+  })
+
+  it('leaves integrations unset, with no analytics warning, when the embedded config has none', async () => {
+    const bundle = await migrateFlightFixture()
+    expect(bundle.docsConfig.integrations).toBeUndefined()
+    expect(bundle.warnings.some((warning) => /analytics|integration/i.test(warning.message))).toBe(false)
   })
 
   it('imports only the submitted docs path and prefers llms Markdown pages', async () => {

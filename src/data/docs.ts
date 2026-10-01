@@ -232,6 +232,12 @@ interface DocsJsonConfig {
   footer?: DocsJsonFooter
   seo?: DocsJsonSeo
   customScripts?: Array<DocsJsonScript>
+  /**
+   * Mintlify-shaped third-party analytics: `ga4.measurementId`, `gtm.tagId`,
+   * `posthog.{apiKey,apiHost,sessionRecording}`, `plausible.{domain,server}`.
+   * Validated by `resolveAnalyticsConfig`; `siteConfig.analytics` wins per provider.
+   */
+  integrations?: Record<string, unknown>
   fonts?: DocsJsonFonts
   feedback?: DocsJsonFeedback
   /** Visual choices that remain independent of the structural theme. */
@@ -1123,6 +1129,11 @@ export function getFontsConfig(): DocsJsonFonts {
 
 export function getRedirectsConfig(): Array<DocsJsonRedirect> {
   return docsConfig().redirects ?? []
+}
+
+/** Raw, unvalidated `integrations` block; callers must run it through `resolveAnalyticsConfig`. */
+export function getIntegrationsConfig(): unknown {
+  return docsConfig().integrations
 }
 
 export function getCustomScriptsConfig(): Array<DocsJsonScript> {

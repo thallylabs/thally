@@ -11,6 +11,7 @@ import TurndownService from 'turndown'
 import { unified } from 'unified'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
+import { projectMintlifyIntegrations } from './analytics.js'
 import { parseMarkdownPage } from './mdx.js'
 import { addMintlifyDirectoryRedirects, buildNavigationFromPages, projectMintlifyNavigation } from './navigation.js'
 import { pageIdFromReference } from './path.js'
@@ -1840,6 +1841,11 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
           topLevelNavigation,
         })
   if (sourceMintlifyProjection) warnings.push(...sourceMintlifyProjection.warnings)
+  if (sourceMintlifyConfig) {
+    const analytics = projectMintlifyIntegrations(sourceMintlifyConfig)
+    warnings.push(...analytics.warnings)
+    if (analytics.integrations) docsConfig.integrations = analytics.integrations
+  }
   if (docusaurusRedirects.length > 0) {
     docsConfig.redirects = [...new Map(docusaurusRedirects.map((redirect) => [
       `${redirect.source}:${redirect.destination}`,
