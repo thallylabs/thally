@@ -143,7 +143,7 @@ describe('gated pages', () => {
     expect(siteWide).toHaveLength(1)
     expect(siteWide[0].message).toMatch(/authentication.*ALL imported pages publicly/s)
     expect(bundle.pages).toHaveLength(2)
-    expect(codes(site({ 'docs.json': '{"navigation":{"pages":["a"]}}', 'a.mdx': page('A') }), 'gated-page')).toHaveLength(0)
+    expect(codes(site({ 'docs.json': '{"navigation":{"pages":["a"]}}', 'a.mdx': page('A') }), 'gated-page').every((warning) => !/public: true/.test(warning.message))).toBe(true)
   })
 })
 
@@ -623,5 +623,30 @@ describe('assets used only by withheld pages', () => {
       'img/cover.png': png,
     })
     expect(publicPaths(bundle).includes('img/cover.png')).toBe(true)
+  })
+})
+
+describe('dashboard access warning', () => {
+  const dashboardWarnings = (bundle: MigrationBundle) => bundle.warnings.filter((warning) => /dashboard/i.test(warning.message) && warning.code === 'gated-page')
+
+  it('warns exactly once on a Mintlify migration with no public flags', () => {
+    const warnings = dashboardWarnings(site({ 'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }), 'a.mdx': page('A') }))
+    expect(warnings).toHaveLength(1)
+    expect(/Check the source site's dashboard access settings before publishing/.test(warnings[0].message)).toBe(true)
+  })
+
+  it('merges the public: true specifics into the same single warning', () => {
+    const warnings = dashboardWarnings(site({ 'docs.json': JSON.stringify({ navigation: { pages: ['a'] } }), 'a.mdx': page('A', 'public: true\n') }))
+    expect(warnings).toHaveLength(1)
+    expect(/public: true/.test(warnings[0].message)).toBe(true)
+  })
+
+  it('does not warn on non-Mintlify migrations', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-extras-'))
+    writeFileSync(join(root, 'docusaurus.config.js'), 'module.exports = { title: "T" }\n')
+    mkdirSync(join(root, 'docs'))
+    writeFileSync(join(root, 'docs', 'intro.md'), '---\ntitle: Intro\n---\n\nHello\n')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+    expect(bundle.warnings.some((warning) => /Mintlify dashboard/.test(warning.message))).toBe(false)
   })
 })

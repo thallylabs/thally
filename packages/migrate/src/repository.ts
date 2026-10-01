@@ -4147,12 +4147,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           + 'Assets that published pages also use, and unreferenced assets, are still copied to public/. Review them before deciding how to publish or protect that content.',
       })
     }
-    if (sawPublicTrue) {
-      warnings.push({
-        code: 'gated-page',
-        message: 'Some pages set `public: true`, which means the source site used Mintlify authentication and every page WITHOUT it was private. Site-wide authentication is configured in the Mintlify dashboard and cannot be read from the repository, so Thally will publish ALL imported pages publicly. Confirm nothing here was meant to stay private before deploying.',
-      })
-    }
+    // Dashboard-level access control (a private site, SSO, groups) is not in
+    // the repository, so every Mintlify migration must be checked by hand.
+    warnings.push({
+      code: 'gated-page',
+      message: (sawPublicTrue ? 'Some pages set `public: true`, which means the source site used Mintlify authentication and every page WITHOUT it was private. ' : '')
+        + 'Access control set in the Mintlify dashboard is not visible in the repository. Check the source site\'s dashboard access settings before publishing: Thally will publish ALL imported pages publicly. '
+        + 'Confirm nothing here was meant to stay private before deploying.',
+    })
   }
   if (fernRawConfig?.logo && !logoLight && !logo.light) warnings.push({
     code: 'unsupported-config',

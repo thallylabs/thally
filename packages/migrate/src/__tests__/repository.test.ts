@@ -277,7 +277,7 @@ describe('Mintlify repository migration', () => {
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
     const page = bundle.pages.find((candidate) => candidate.id === 'home')
-    expect(bundle.warnings).toEqual([])
+    expect(bundle.warnings.filter((warning) => !/Mintlify dashboard/.test(warning.message))).toEqual([])
     expect(page?.body).toMatch(/^<Migrated[a-f0-9]+ \/>$/m)
     expect(page?.body).not.toContain('onClick')
     const client = bundle.componentFiles?.find((file) => file.path.includes('/inline-'))
@@ -565,7 +565,7 @@ describe('Mintlify repository migration', () => {
       'images/setup.png',
       'openapi/service.openapi.yml',
     ]))
-    expect(bundle.warnings).toEqual([])
+    expect(bundle.warnings.filter((warning) => !/Mintlify dashboard/.test(warning.message))).toEqual([])
 
     // Specs must never land under public/, which the host serves verbatim.
     const renderedPaths = renderMigrationFiles(bundle).map((file) => file.path)
