@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { listUnpublishedOperations, operationPublicationState } from '../publication'
+import { operationPublicationState, pageReferenceState, type RoutedSpec } from '../publication'
+import { parseOpenApiFrontmatter } from '../page-frontmatter'
 
 const ok = { responses: { 200: { description: 'ok' } } }
 const doc = (paths: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
@@ -72,16 +73,43 @@ describe('operationPublicationState', () => {
     }
   })
 
-  it('lists every hidden or excluded operation, as the build records them', () => {
-    const document = doc({
-      '/a': { get: { 'x-hidden': true, ...ok }, post: ok },
-      '/e': { $ref: '#/components/pathItems/E' },
-      '/o': { get: ok },
-    }, { components: { pathItems: { E: { 'x-excluded': true, put: ok } } } })
-    expect(listUnpublishedOperations(document, { 'GET /o': { hidden: true } })).toEqual([
-      { method: 'GET', path: '/a', state: 'hidden' },
-      { method: 'PUT', path: '/e', state: 'excluded' },
-      { method: 'GET', path: '/o', state: 'hidden' },
-    ])
+  it('judges a page reference with the docs route lookup, spec prefixes included', () => {
+    const spec = (id: string, path: string, document?: unknown, operationOverrides?: Record<string, { hidden: boolean }>): RoutedSpec => ({
+      config: { id, label: id, source: path.startsWith('http') ? { type: 'url', url: path } : { type: 'file', path }, operationOverrides },
+      document,
+    })
+    const main = spec('default', 'openapi/main.json', doc({
+      '/shared': { get: { 'x-hidden': true, ...ok } },
+      '/only-main': { get: { 'x-excluded': true, ...ok } },
+      '/public': { get: ok },
+    }))
+    const admin = spec('admin', 'openapi/admin.yaml', doc({
+      '/shared': { get: ok },
+      '/secret': { get: { 'x-hidden': true, ...ok } },
+      '/by-override': { get: ok },
+    }), { 'GET /by-override': { hidden: true } })
+    const specs = [main, admin]
+    const state = (raw: string, list = specs) => pageReferenceState(parseOpenApiFrontmatter(raw)!, list)
+
+    // A prefix pins one spec, matched by path or file name, like the route.
+    expect(state('openapi/admin.yaml GET /secret')).toBe('hidden')
+    expect(state('admin.yaml GET /secret')).toBe('hidden')
+    expect(state('"./openapi/admin.yaml" GET /secret')).toBe('hidden')
+    expect(state('openapi/main.json GET /shared')).toBe('hidden')
+    expect(state('openapi/admin.yaml GET /shared')).toBe('published')
+    expect(state('admin.yaml GET /by-override')).toBe('hidden')
+    // A bare reference renders from any spec that publishes it.
+    expect(state('GET /shared')).toBe('published')
+    expect(state('GET /secret')).toBe('hidden')
+    expect(state('GET /only-main')).toBe('excluded')
+    expect(state('GET /public')).toBe('published')
+    // Never withheld: typos, unmatched prefixes, webhooks, and anything a remote spec might serve.
+    expect(state('GET /typo')).toBe('unknown')
+    expect(state('missing.yaml GET /secret')).toBe('unknown')
+    expect(state('openapi/admin.yaml webhook secret')).toBe('unknown')
+    const remote = spec('remote', 'https://example.com/spec.json')
+    expect(state('GET /secret', [main, admin, remote])).toBe('unknown')
+    expect(state('openapi/admin.yaml GET /secret', [main, admin, remote])).toBe('hidden')
+    expect(state('https://example.com/spec.json GET /secret', [main, admin, remote])).toBe('unknown')
   })
 })

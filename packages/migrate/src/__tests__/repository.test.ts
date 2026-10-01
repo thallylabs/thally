@@ -744,6 +744,76 @@ describe('Mintlify repository migration', () => {
     })
   })
 
+  describe('API frontmatter', () => {
+    function apiFixture(pages: Record<string, string>, docs: Record<string, unknown>) {
+      const root = fixture()
+      writeFileSync(join(root, 'docs.json'), JSON.stringify(docs))
+      mkdirSync(join(root, 'specs'), { recursive: true })
+      writeFileSync(join(root, 'openapi-a.json'), '{"openapi":"3.1.0","info":{"title":"A","version":"1"},"paths":{}}')
+      writeFileSync(join(root, 'specs', 'openapi-b.yaml'), 'openapi: 3.1.0\ninfo: { title: B, version: "1" }\npaths: {}')
+      writeFileSync(join(root, 'stray.yaml'), 'openapi: 3.1.0\ninfo: { title: S, version: "1" }\npaths: {}')
+      for (const [name, body] of Object.entries(pages)) writeFileSync(join(root, `${name}.mdx`), body)
+      return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    }
+    const twoSpecNav = {
+      navigation: {
+        tabs: [
+          { tab: 'Guides', pages: ['plain', 'prefixed', 'quoted', 'abs', 'unknown', 'manual', 'bad'] },
+          { tab: 'API A', openapi: 'openapi-a.json' },
+          { tab: 'API B', openapi: 'specs/openapi-b.yaml' },
+        ],
+      },
+      api: { mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } } },
+    }
+    const pages = {
+      plain: '---\ntitle: Plain\nopenapi: "POST /things"\n---\n',
+      prefixed: '---\ntitle: Prefixed\nopenapi: "specs/openapi-b.yaml GET /widgets/{id}"\n---\n',
+      quoted: '---\ntitle: Quoted\nopenapi: "\'./specs/openapi-b.yaml\' get /widgets/{id}"\n---\n',
+      abs: '---\ntitle: Abs\nopenapi: "/openapi-a.json POST /things"\n---\n',
+      unknown: '---\ntitle: Unknown\nopenapi: "stray.yaml GET /x"\n---\n',
+      manual: '---\ntitle: Manual\napi: "POST https://httpbin.org/anything"\nauthMethod: Bearer\n---\n<ParamField body="a" type="string" />\n',
+      bad: '---\ntitle: Bad\napi: [1, 2]\nauthMethod: oauth\n---\n',
+    }
+
+    it('rewrites spec prefixes to the migrated location and warns about unmigrated specs', () => {
+      const bundle = apiFixture(pages, twoSpecNav)
+      const openapi = (id: string) => bundle.pages.find((page) => page.id === id)?.openapi
+      expect(openapi('plain')).toBe('POST /things')
+      expect(openapi('prefixed')).toBe('openapi/openapi-b.yaml GET /widgets/{id}')
+      expect(openapi('quoted')).toBe('openapi/openapi-b.yaml get /widgets/{id}')
+      expect(openapi('abs')).toBe('openapi/openapi-a.json POST /things')
+      expect(openapi('unknown')).toBe('stray.yaml GET /x')
+      expect(bundle.warnings.some((w) => /"stray.yaml".*not migrated/.test(w.message))).toBe(true)
+      expect(bundle.docsConfig.tabs.filter((tab) => tab.api).map((tab) => tab.api?.source)).toEqual(['openapi/openapi-a.json', 'openapi/openapi-b.yaml'])
+    })
+
+    it('keeps manual api and authMethod frontmatter and maps api.mdx', () => {
+      const bundle = apiFixture(pages, twoSpecNav)
+      const manual = bundle.pages.find((page) => page.id === 'manual')
+      expect(manual).toMatchObject({ api: 'POST https://httpbin.org/anything', authMethod: 'bearer' })
+      expect(bundle.docsConfig.api).toEqual({ mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } } })
+      const rendered = renderMigrationFiles(bundle).find((file) => file.path.endsWith('manual.mdx'))
+      expect(String(rendered?.content)).toContain('api: "POST https://httpbin.org/anything"')
+      expect(String(rendered?.content)).toContain('authMethod: "bearer"')
+    })
+
+    it('drops invalid api frontmatter and api.mdx values with warnings', () => {
+      const bundle = apiFixture(pages, {
+        ...twoSpecNav,
+        api: { mdx: { server: ['javascript:alert(1)', 'https://ok.example.com'], auth: { method: 'key' } } },
+      })
+      const bad = bundle.pages.find((page) => page.id === 'bad')
+      expect(bad?.api).toBeUndefined()
+      expect(bad?.authMethod).toBeUndefined()
+      expect(bundle.docsConfig.api).toEqual({ mdx: { server: ['https://ok.example.com'] } })
+      const messages = bundle.warnings.map((w) => w.message).join('\n')
+      expect(messages).toContain('"api" frontmatter')
+      expect(messages).toContain('authMethod')
+      expect(messages).toContain('javascript:alert(1)')
+      expect(messages).toContain('api.mdx.auth')
+    })
+  })
+
   it('resolves an object-form `openapi: { source, directory }` group reference and warns that the directory scoping is lost', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

@@ -2,7 +2,8 @@
  * Bounded OpenAPI request relay for the reader-facing Try It console.
  *
  * The browser supplies parameters, never authority: the target method, path,
- * and origin must match an operation in the site owner's published spec.
+ * and origin must match an operation in the site owner's published spec, or
+ * a manual `api:` page whose operation the server re-derives from that page.
  */
 
 import { lookup } from 'node:dns/promises'
@@ -55,6 +56,10 @@ function isSemanticOverrideHeader(name: string): boolean {
 
 interface TryItPayload {
   specId?: unknown
+  /** Manual `api:` page id; the operation is re-derived from that page server-side. */
+  page?: unknown
+  /** Locale the manual page was rendered from; must be a configured locale. */
+  locale?: unknown
   operationPath?: unknown
   method?: unknown
   url?: unknown
@@ -274,6 +279,7 @@ export async function POST(request: NextRequest) {
     return jsonError('Missing operation identity or URL', 400)
   }
   if (!ALLOWED_METHODS.has(method)) return jsonError('Unsupported HTTP method', 400)
+  if (payload.locale !== undefined && typeof payload.locale !== 'string') return jsonError('Invalid locale', 400)
   if (
     typeof payload.body === 'string' &&
     Buffer.byteLength(payload.body, 'utf8') > MAX_UPSTREAM_BODY_BYTES
@@ -295,7 +301,20 @@ export async function POST(request: NextRequest) {
     return jsonError('Encoded path separators are not allowed', 403)
   }
 
-  const operation = await getApiOperationByKey(method, operationPath, specId)
+  let operation: { operation: NormalizedOperation } | null
+  if (typeof payload.page === 'string') {
+    const { getManualApiOperation } = await import('@/data/manual-api')
+    // The locale selects which translated file the page is re-read from; the
+    // lookup refuses any locale the site does not configure.
+    const manual = payload.locale === undefined
+      ? await getManualApiOperation(payload.page)
+      : await getManualApiOperation(payload.page, payload.locale)
+    operation = manual && manual.method === method && manual.path === operationPath
+      ? { operation: manual }
+      : null
+  } else {
+    operation = await getApiOperationByKey(method, operationPath, specId)
+  }
   if (
     !operation ||
     operation.operation.isWebhook ||

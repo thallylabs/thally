@@ -45,6 +45,7 @@ export const FRAMEWORK_SYNC_ELIGIBLE = Object.freeze([
   "src/data/api-reference.ts",
   "src/data/docs.ts",
   "src/data/get-doc.ts",
+  "src/data/manual-api.ts",
   "src/lib/**",
   "src/mdx/rehype.ts",
   "src/mdx/rehype.test.ts",

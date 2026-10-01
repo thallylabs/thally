@@ -7,6 +7,8 @@ const fixture = vi.hoisted(() => ({ files: new Map<string, { content: string; mo
 vi.mock('@/data/docs', () => ({
   deriveTitleFromSlug: (slug: string) => slug,
   getI18nConfig: () => ({ defaultLocale: 'en' }),
+  ensureDocPublication: async () => {},
+  isDocPublished: () => true,
 }))
 vi.mock('next-mdx-remote/rsc', () => ({ compileMDX: vi.fn() }))
 vi.mock('@/lib/mdx-interpret', () => ({ interpretMDX: vi.fn() }))

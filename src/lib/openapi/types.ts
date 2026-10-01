@@ -113,6 +113,13 @@ export interface NormalizedOperation {
   security: Array<Array<NormalizedSecurityRequirement>>
   hidden?: boolean
   prefill: OperationPrefill
+  /**
+   * Set only on synthetic operations built from a manual `api:` page: the page
+   * id the Try It relay re-derives the operation from, server-side.
+   */
+  manualPage?: string
+  /** Locale the manual page was rendered from; absent for the default locale. */
+  manualLocale?: string
 }
 
 export interface OperationPrefill {
