@@ -16,6 +16,7 @@ function perfectPage(overrides: Partial<PageFact> = {}): PageFact {
     inNav: true,
     isApi: false,
     hasOpenApiSpec: false,
+    hasManualOperation: false,
     jsonLdValid: true,
     ...overrides,
   }
@@ -67,5 +68,13 @@ describe('scoreAgentReadiness', () => {
     const report = scoreAgentReadiness([perfectPage()])
     const openapi = report.subscores.find((sub) => sub.id === 'openapi')
     expect(openapi?.score).toBe(1)
+  })
+
+  it('covers a manual API page by its declared operation, and still flags an API page with neither', () => {
+    const coverage = (overrides: Partial<PageFact>) =>
+      scoreAgentReadiness([perfectPage({ isApi: true, ...overrides })]).subscores.find((sub) => sub.id === 'openapi')
+    expect(coverage({ hasOpenApiSpec: true })?.score).toBe(1)
+    expect(coverage({ hasManualOperation: true })).toMatchObject({ score: 1, offenders: [] })
+    expect(coverage({})).toMatchObject({ score: 0, offenders: [expect.objectContaining({ reason: 'API page without an OpenAPI operation' })] })
   })
 })

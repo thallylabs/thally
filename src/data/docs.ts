@@ -1,4 +1,6 @@
 import type { ComponentType } from 'react'
+import type { NormalizedOperation } from '@/lib/openapi/types'
+import { sanitizeApiMdxConfig, type ApiMdxConfig } from '@/lib/openapi/manual-operation'
 import { getContentIndex, loadContentIndex, type ContentIndex } from '@/lib/content-index'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
@@ -6,10 +8,11 @@ import { getDocsJsonConfig, getDocsJsonConfigRevision } from '@/lib/docs-json-co
 import { resolveIconLibrary, type IconLibrary } from '@/lib/icon-library'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { SUPPORTED_LOCALE_OPTIONS } from '@/lib/i18n/config'
-import { parseOpenApiReference, type OpenApiReference } from '@/lib/openapi/doc-reference'
-import { UNPUBLISHED_OPERATIONS_FILE } from '@/lib/openapi/publication'
+import { pageApiMetadata } from '@/lib/openapi/page-api'
+import type { OpenApiFrontmatterRef } from '@/lib/openapi/page-frontmatter'
+import type { ManualApiTarget } from '@/lib/openapi/manual-operation'
+import { UNPUBLISHED_PAGES_FILE } from '@/lib/openapi/publication'
 
-export { parseOpenApiReference }
 
 // ---------------------------------------------------------------------------
 // Public interfaces (consumed by components, pages, and stores)
@@ -34,13 +37,16 @@ export interface DocEntry {
   lastVerified?: string
   /** Public provenance: product version this page was verified against. */
   verifiedVersion?: string
-  openapi?: OpenApiReference
+  openapi?: OpenApiFrontmatterRef
+  /** Target of a manual `api:` page, as the page index sees it (no ParamFields: that needs the MDX body). */
+  manualTarget?: ManualApiTarget
+  /** Synthetic operation for a manual `api:` page (header + Try It); see manual-operation.ts. */
+  manualApi?: NormalizedOperation
   noindex?: boolean
   hidden?: boolean
   mode?: DocPageMode
 }
 
-export type { OpenApiReference }
 
 export interface NavigationSection {
   /** Stable structural identity; unlike a title, this remains unique when a group is split. */
@@ -239,6 +245,13 @@ interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
   /** Local, customer-owned stylesheets served from public/. */
   stylesheets?: Array<string>
+  /** Manual API pages (`api:` frontmatter): default server(s) and auth for the playground. */
+  api?: {
+    mdx?: {
+      server?: string | Array<string>
+      auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string }
+    }
+  }
   navigation?: {
     display?: 'tabs' | 'dropdown'
     versions?: Array<DocsNavigationVersion>
@@ -377,7 +390,8 @@ interface FrontmatterData {
   lastUpdated?: string
   lastVerified?: string
   verifiedVersion?: string
-  openapi?: string
+  openapi?: unknown
+  api?: unknown
   hidden?: boolean
   noindex?: boolean
   mode?: DocPageMode
@@ -516,6 +530,7 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
   const href = slug.length ? `/${slug.join('/')}` : '/'
   const title = fm.title ?? deriveTitleFromSlug(pageId)
+  const api = pageApiMetadata(fm)
   return {
     id: pageId,
     title,
@@ -533,7 +548,8 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
     verifiedVersion: fm.verifiedVersion,
     noindex: fm.noindex,
     hidden: fm.hidden,
-    openapi: parseOpenApiReference(fm.openapi) ?? undefined,
+    ...(api.openapi ? { openapi: api.openapi } : {}),
+    ...(api.manual ? { manualTarget: api.manual } : {}),
   }
 }
 
@@ -548,14 +564,14 @@ let _allEntries: Array<DocEntry> | null = null
 // ---------------------------------------------------------------------------
 
 /**
- * A page whose `openapi:` frontmatter points at a hidden or excluded operation
- * 404s (see the docs page route), so no listing may offer it. The build records
- * which operations it withheld from the served spec (see
- * `UNPUBLISHED_OPERATIONS_FILE`); a page is unpublished when its operation is
- * among them. Self-hosted builds read that record synchronously from the
- * embedded sources, so the answer is a pure function of the module's own
- * constants: no state to prime, nothing shared between module instances, and
- * every cache below is computed after it is known.
+ * A page whose `openapi:` frontmatter resolves only to hidden or excluded
+ * operations 404s (see the docs page route), so no listing may offer it. The
+ * build decides this with the route's own lookup, spec prefixes included, and
+ * records the withheld page ids (see `UNPUBLISHED_PAGES_FILE`). Self-hosted
+ * builds read that record synchronously from the embedded sources, so the
+ * answer is a pure function of the module's own constants: no state to prime,
+ * nothing shared between module instances, and every cache below is computed
+ * after it is known.
  */
 let embeddedRecord: ReadonlySet<string> | undefined
 /** Managed (assets) releases only: the record cannot be read synchronously, so a loader installs it. */
@@ -563,27 +579,35 @@ let assetRecord: ReadonlySet<string> | undefined
 
 function parseRecord(content: string): ReadonlySet<string> {
   try {
-    const list = JSON.parse(content) as Array<{ method?: unknown; path?: unknown }>
-    return new Set(list.flatMap((entry) =>
-      typeof entry.method === 'string' && typeof entry.path === 'string' ? [`${entry.method.toUpperCase()} ${entry.path}`] : []))
+    const list = JSON.parse(content) as unknown
+    return new Set(Array.isArray(list) ? list.filter((id): id is string => typeof id === 'string') : [])
   } catch {
     return new Set()
   }
 }
 
-function recordedUnpublishedOperations(): ReadonlySet<string> {
+function recordedUnpublishedPages(): ReadonlySet<string> {
   if (assetRecord) return assetRecord
   if (embeddedRecord) return embeddedRecord
-  embeddedRecord = runtimeSourceExists(UNPUBLISHED_OPERATIONS_FILE)
-    ? parseRecord(readRuntimeSource(UNPUBLISHED_OPERATIONS_FILE))
+  embeddedRecord = runtimeSourceExists(UNPUBLISHED_PAGES_FILE)
+    ? parseRecord(readRuntimeSource(UNPUBLISHED_PAGES_FILE))
     : new Set()
   return embeddedRecord
 }
 
-/** False for a page whose documented operation is hidden or excluded. */
-export function isDocPublished(pageId: string): boolean {
-  const operation = parseOpenApiReference(readFrontmatter(pageId).openapi)
-  return !operation || !recordedUnpublishedOperations().has(`${operation.method} ${operation.path}`)
+/**
+ * False for a page whose documented operation is hidden or excluded. A
+ * secondary-locale route renders its own translation when one exists (the
+ * build records it as `<locale>/<id>`) and the primary page otherwise, so
+ * `locale` judges the file that route would render.
+ */
+export function isDocPublished(pageId: string, locale?: string): boolean {
+  const record = recordedUnpublishedPages()
+  if (!locale || locale === (getI18nConfig()?.defaultLocale ?? 'en')) return !record.has(pageId)
+  const translation = `${locale}/${pageId}`
+  if (record.has(translation)) return false
+  const translated = runtimeSourceExists(`${CONTENT_ROOT}/${translation}.mdx`) || runtimeSourceExists(`${CONTENT_ROOT}/${translation}/index.mdx`)
+  return translated || !record.has(pageId)
 }
 
 let assetRecordPromise: Promise<void> | undefined
@@ -599,7 +623,7 @@ export function ensureDocPublication(): Promise<void> {
   assetRecordPromise ??= (async () => {
     try {
       const { getContentSource } = await import('@/lib/content-source')
-      const file = await getContentSource().read(UNPUBLISHED_OPERATIONS_FILE)
+      const file = await getContentSource().read(UNPUBLISHED_PAGES_FILE)
       assetRecord = file ? parseRecord(String(file.content)) : new Set()
     } catch {
       assetRecord = new Set()
@@ -655,7 +679,7 @@ function getAllDocEntries(): Array<DocEntry> {
 
 /** Page IDs reachable from navigation: nav-group pages + standalone href tabs. */
 export function getNavigablePageIds(): Set<string> {
-  return new Set(projectNavigationContract(docsConfig()).authoredPageIds.filter(isDocPublished))
+  return new Set(projectNavigationContract(docsConfig()).authoredPageIds.filter((id) => isDocPublished(id)))
 }
 
 // ---------------------------------------------------------------------------
@@ -803,7 +827,7 @@ function buildNavigationNodes(
       // Fern and some legacy docs configs list pages that are reachable by
       // direct link but explicitly hidden from the rendered sidebar.
       if (readFrontmatter(page, locale).hidden) return []
-      if (!isDocPublished(page)) return []
+      if (!isDocPublished(page, locale)) return []
       return [{ type: 'page', item: resolveNavItem(page, locale, ancestors) }]
     }
     const child = buildNavigationGroup(page, [...indexPath, index], ancestors, locale)
@@ -1052,6 +1076,19 @@ export function getAiConfig(): {
   systemPrompt?: string
 } {
   return docsConfig().ai ?? {}
+}
+
+const apiMdxCache = new WeakMap<object, ApiMdxConfig>()
+
+/** Validated docs.json `api.mdx` settings; invalid parts are dropped with one warning each. */
+export function getApiMdxConfig(): ApiMdxConfig {
+  const config = docsConfig()
+  let cached = apiMdxCache.get(config)
+  if (!cached) {
+    cached = sanitizeApiMdxConfig(config.api?.mdx, (message) => console.warn(`[thally] ${message}`))
+    apiMdxCache.set(config, cached)
+  }
+  return cached
 }
 
 export function getApiPlaygroundCredentials(): Record<string, string> {

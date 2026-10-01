@@ -96,6 +96,8 @@ export interface MigrationDocsConfig {
   ai?: { chat?: boolean; label?: string; icon?: string }
   admin?: { enabled?: boolean }
   analytics?: { enabled?: boolean }
+  /** Manual API pages: default server(s) and auth for `api:` frontmatter pages. */
+  api?: { mdx?: { server?: string | Array<string>; auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string } } }
   /** Third-party analytics in Mintlify's `integrations` shape; validated again by the renderer. */
   integrations?: {
     ga4?: { measurementId: string }
@@ -130,6 +132,10 @@ export interface MigrationPage {
   noindex?: boolean
   /** OpenAPI operation key rendered by Thally instead of ordinary MDX. */
   openapi?: string
+  /** Manual API page: `METHOD <url-or-path>`; rendered by Thally's playground. */
+  api?: string
+  /** Page-level playground auth override: bearer | basic | key | none. */
+  authMethod?: string
   body: string
   source: string
   /** Set when the page's frontmatter was invalid YAML; the page is kept with a best-effort salvage. */

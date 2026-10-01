@@ -1,7 +1,7 @@
 'use client'
 
 import { Loader2 } from 'lucide-react'
-import type { TryItController } from '@/components/api/use-try-it-controller'
+import { MANUAL_NO_SERVER, type TryItController } from '@/components/api/use-try-it-controller'
 import { CopyButton } from '@/components/api/copy-button'
 import { cn } from '@/lib/utils'
 
@@ -132,7 +132,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
         {variant === 'inline' ? (
           <div className="flex flex-col items-end gap-2">
             {!preparedRequest.isServerConfigured ? (
-              <p className="text-xs text-amber-400">Add a server URL to the OpenAPI spec to enable live requests.</p>
+              <p className="text-xs text-amber-400">{operation.manualPage ? MANUAL_NO_SERVER : 'Add a server URL to the OpenAPI spec to enable live requests.'}</p>
             ) : null}
             <button
               type="submit"

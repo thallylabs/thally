@@ -1,0 +1,131 @@
+import { describe, expect, it } from 'vitest'
+import { findSpecForRef, parseOpenApiFrontmatter } from '@/lib/openapi/page-frontmatter'
+import type { ApiSpecConfig } from '@/lib/openapi/types'
+
+describe('parseOpenApiFrontmatter', () => {
+  it('keeps the legacy bare form', () => {
+    expect(parseOpenApiFrontmatter('POST /things')).toEqual({ specId: 'default', method: 'POST', path: '/things' })
+    expect(parseOpenApiFrontmatter('  get   /users/{id}  ')).toEqual({ specId: 'default', method: 'GET', path: '/users/{id}' })
+    expect(parseOpenApiFrontmatter('\tGET\t/x')).toMatchObject({ method: 'GET', path: '/x' })
+  })
+
+  it('parses spec-prefixed values, quoted and with a leading slash', () => {
+    expect(parseOpenApiFrontmatter('openapi-b.yaml GET /widgets/{id}')).toMatchObject({ specRef: 'openapi-b.yaml', method: 'GET', path: '/widgets/{id}' })
+    expect(parseOpenApiFrontmatter('/path/to/spec.yaml GET /x')).toMatchObject({ specRef: '/path/to/spec.yaml' })
+    expect(parseOpenApiFrontmatter('"my spec.json" post /x')).toMatchObject({ specRef: 'my spec.json', method: 'POST' })
+    expect(parseOpenApiFrontmatter('my spec.json GET /x')).toMatchObject({ specRef: 'my spec.json' })
+    expect(parseOpenApiFrontmatter('"openapi.json GET /x"')).toMatchObject({ specRef: 'openapi.json', path: '/x' })
+    expect(parseOpenApiFrontmatter('https://example.com/spec.json GET /x')).toMatchObject({ specRef: 'https://example.com/spec.json' })
+  })
+
+  it('parses the webhook form', () => {
+    expect(parseOpenApiFrontmatter('openapi.json webhook orderUpdated')).toEqual({ specId: 'default', specRef: 'openapi.json', method: 'WEBHOOK', path: 'orderUpdated', webhook: true })
+    expect(parseOpenApiFrontmatter('webhook orderUpdated')).toMatchObject({ webhook: true, path: 'orderUpdated' })
+  })
+
+  it('rejects malformed and non-string values', () => {
+    for (const value of ['', '   ', 'GET', 'GET users', '/users', 123, ['GET /x'], { a: 1 }, null, undefined]) {
+      expect(parseOpenApiFrontmatter(value)).toBeNull()
+    }
+  })
+
+  it('passes unknown methods through so the lookup misses like before', () => {
+    expect(parseOpenApiFrontmatter('FETCH /x')).toMatchObject({ method: 'FETCH' })
+  })
+})
+
+describe('parseOpenApiFrontmatter on pathological whitespace', () => {
+  it('stays linear on 100k whitespace runs', () => {
+    const gap = ' '.repeat(100_000)
+    const inputs = [`a${gap}x`, `a${gap}GET${gap}x`, `a${gap}webhook${gap}`, `GET${gap}/x`, `${'a '.repeat(50_000)}!`, `${'webhook '.repeat(12_000)}`]
+    const started = performance.now()
+    for (const input of inputs) parseOpenApiFrontmatter(input)
+    // Quadratic backtracking took many seconds here; linear takes milliseconds.
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(parseOpenApiFrontmatter(`spec.json${gap}GET${gap}/x`)).toMatchObject({ specRef: 'spec.json', method: 'GET', path: '/x' })
+  })
+})
+
+describe('findSpecForRef', () => {
+  const specs: Array<ApiSpecConfig> = [
+    { id: 'default', label: 'A', source: { type: 'file', path: '/openapi-a.json' } },
+    { id: 'b', label: 'B', source: { type: 'file', path: 'specs/openapi-b.yaml' } },
+    { id: 'c', label: 'C', source: { type: 'url', url: 'https://example.com/v1/api.json' } },
+    { id: 'd', label: 'D', source: { type: 'inline', document: {} } },
+  ]
+
+  it('matches by path, file name, leading slash, ./ and case', () => {
+    expect(findSpecForRef(specs, 'openapi-a.json')?.id).toBe('default')
+    expect(findSpecForRef(specs, './specs/openapi-b.yaml')?.id).toBe('b')
+    expect(findSpecForRef(specs, '/openapi-b.yaml')?.id).toBe('b')
+    expect(findSpecForRef(specs, 'OpenAPI-A.JSON')?.id).toBe('default')
+    expect(findSpecForRef(specs, 'https://example.com/v1/api.json')?.id).toBe('c')
+    expect(findSpecForRef(specs, 'api.json')?.id).toBe('c')
+  })
+
+  it('resolves case-distinct sources to their own spec', () => {
+    const cased: Array<ApiSpecConfig> = [
+      { id: 'upper', label: 'U', source: { type: 'file', path: 'openapi/Orders.yaml' } },
+      { id: 'lower', label: 'L', source: { type: 'file', path: 'openapi/orders.yaml' } },
+    ]
+    expect(findSpecForRef(cased, 'openapi/orders.yaml')?.id).toBe('lower')
+    expect(findSpecForRef(cased, './openapi/Orders.yaml')?.id).toBe('upper')
+    expect(findSpecForRef(cased, 'orders.yaml')?.id).toBe('lower')
+    expect(findSpecForRef(cased, 'Orders.yaml')?.id).toBe('upper')
+    expect(findSpecForRef(cased, 'OPENAPI/ORDERS.YAML')?.id).toBe('upper')
+  })
+
+  it('lowercases only the URL scheme and host for an exact match', () => {
+    const remote: Array<ApiSpecConfig> = [
+      { id: 'a', label: 'A', source: { type: 'url', url: 'https://example.com/v1/Api.json' } },
+      { id: 'b', label: 'B', source: { type: 'url', url: 'https://EXAMPLE.com/v1/api.json' } },
+    ]
+    expect(findSpecForRef(remote, 'HTTPS://Example.COM/v1/api.json')?.id).toBe('b')
+    expect(findSpecForRef(remote, 'https://example.com/v1/Api.json')?.id).toBe('a')
+  })
+
+  it('returns null for unknown specs', () => {
+    expect(findSpecForRef(specs, 'nope.json')).toBeNull()
+    expect(findSpecForRef(specs, '')).toBeNull()
+    expect(findSpecForRef([], 'openapi-a.json')).toBeNull()
+  })
+
+  it('prefers a full path match over a file name match, then the first configured', () => {
+    const dup: Array<ApiSpecConfig> = [
+      { id: 'one', label: '1', source: { type: 'file', path: 'a/openapi.json' } },
+      { id: 'two', label: '2', source: { type: 'file', path: 'b/openapi.json' } },
+    ]
+    expect(findSpecForRef(dup, 'b/openapi.json')?.id).toBe('two')
+    expect(findSpecForRef(dup, 'openapi.json')?.id).toBe('one')
+  })
+
+  it('only ever returns a configured spec for hostile refs, never a path built from the ref', () => {
+    const configured = [
+      { id: 'default', label: 'O', source: { type: 'file', path: 'openapi/orders.yaml' } },
+      { id: 'u', label: 'U', source: { type: 'url', url: 'https://api.example.com/spec.json' } },
+    ] as Array<ApiSpecConfig>
+    const hostile = [
+      '__proto__', 'constructor', 'prototype', 'hasOwnProperty', 'toString', 'openapi/../../secret.yaml', '../../etc/passwd', '/etc/passwd', 'C:\\x\\y.yaml',
+      '%2e%2e%2fsecret.yaml', '%252e%252e%252fsecret.yaml', 'openapi\\..\\..\\secret.yaml', 'secret.yaml\0', 'https://user:pw@evil.example/secret.json',
+      'HtTpS://API.example.com./spec.json', 'https://xn--e1afmkfd.example/spec.json', 'https://\u0430pi.example.com/x', 'orders.yaml?x=1#y', '?', '#', '.', '..', '/', '\\',
+      'x'.repeat(100_000),
+    ]
+    for (const ref of hostile) {
+      const found = findSpecForRef(configured, ref)
+      expect(found === null || configured.includes(found), ref).toBe(true)
+    }
+    expect(findSpecForRef(configured, '__proto__')).toBeNull()
+    expect(findSpecForRef(configured, 'openapi/../../secret.yaml')).toBeNull()
+    expect(findSpecForRef(configured, 'orders.yaml?x=1#y')?.id).toBe('default')
+  })
+
+  it('keeps three case-variant sources distinct and in configured order', () => {
+    const three = ['Orders.yaml', 'orders.yaml', 'ORDERS.YAML'].map((path, index) => (
+      { id: `s${index}`, label: path, source: { type: 'file', path } }
+    )) as Array<ApiSpecConfig>
+    expect(findSpecForRef(three, 'Orders.yaml')?.id).toBe('s0')
+    expect(findSpecForRef(three, 'orders.yaml')?.id).toBe('s1')
+    expect(findSpecForRef(three, 'ORDERS.YAML')?.id).toBe('s2')
+    expect(findSpecForRef(three, 'oRdErS.yAmL')?.id).toBe('s0')
+  })
+})

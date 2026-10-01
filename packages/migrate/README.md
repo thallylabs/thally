@@ -40,6 +40,13 @@ instead of silently dropping that API tab's reference. AsyncAPI has no Thally
 renderer, so it always produces a clear warning naming the spec instead of
 disappearing.
 
+Page `openapi:` frontmatter with a spec prefix
+(`openapi: "specs/openapi-b.yaml GET /widgets/{id}"`) is rewritten to where the
+spec lands in the output (`/openapi-b.yaml GET /widgets/{id}`). A prefix naming
+a spec that was not migrated is kept and reported. Manual API pages keep their
+`api:` and `authMethod:` frontmatter, and `api.mdx.server` / `api.mdx.auth` map
+into `docs.json`; invalid values are dropped with a warning.
+
 In-content links to auto-generated API operation pages are rewritten to the
 matching Thally `/api/...` route. A link under a known API section that matches
 no operation points to that section's overview page instead, and one warning

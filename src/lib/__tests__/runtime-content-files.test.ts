@@ -223,9 +223,29 @@ describe('findUnpublishedOpenApiPages', () => {
       'src/content/plain.mdx': '---\ntitle: P\n---\nText',
     })
     expect(findUnpublishedOpenApiPages(projectRoot)).toEqual([
-      { file: 'src/content/hidden-endpoint.mdx', operation: 'GET /h', state: 'hidden' },
-      { file: 'src/content/sub/excluded.mdx', operation: 'GET /e', state: 'excluded' },
+      { file: 'src/content/hidden-endpoint.mdx', id: 'hidden-endpoint', operation: 'GET /h', state: 'hidden' },
+      { file: 'src/content/sub/excluded.mdx', id: 'sub/excluded', operation: 'GET /e', state: 'excluded' },
     ])
+  })
+
+  it('judges spec-prefixed references against the spec they name, like the docs route', () => {
+    const projectRoot = project({
+      'openapi/admin.yaml': 'openapi: 3.1.0\ninfo: { title: A, version: "1" }\npaths:\n  /v:\n    get: { x-hidden: true, responses: {} }\n  /h:\n    get: { responses: {} }\n',
+      'src/content/admin/index.mdx': page("'openapi/admin.yaml' GET /v"),
+      'src/content/by-name.mdx': page('admin.yaml GET /v'),
+      'src/content/main-prefixed.mdx': page('openapi/api.json GET /h'),
+      'src/content/admin-visible.mdx': page('admin.yaml GET /h'),
+      'src/content/bare-fallback.mdx': page('GET /h'),
+      'src/content/unknown-spec.mdx': page('other.yaml GET /h'),
+    })
+    const docsJson = { tabs: [{ tab: 'API', api: { source: 'openapi/api.json' } }, { tab: 'Admin', api: { source: 'openapi/admin.yaml' } }, { tab: 'Old', hidden: true, api: { source: 'openapi/admin.yaml' } }] }
+    writeFileSync(path.join(projectRoot, 'docs.json'), JSON.stringify(docsJson))
+    expect(findUnpublishedOpenApiPages(projectRoot)).toEqual([
+      { file: 'src/content/admin/index.mdx', id: 'admin', operation: 'openapi/admin.yaml GET /v', state: 'hidden' },
+      { file: 'src/content/by-name.mdx', id: 'by-name', operation: 'admin.yaml GET /v', state: 'hidden' },
+      { file: 'src/content/main-prefixed.mdx', id: 'main-prefixed', operation: 'openapi/api.json GET /h', state: 'hidden' },
+    ])
+    expect(JSON.parse(collectRuntimeContentFiles(projectRoot)['thally-unpublished-pages.json'].content)).toEqual(['admin', 'by-name', 'main-prefixed'])
   })
 
   it('honours docs.json overrides and stays quiet for a remote or missing spec', () => {

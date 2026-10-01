@@ -314,6 +314,11 @@ describe('thally check pages bound to unpublished operations', () => {
         '/excluded': { $ref: '#/components/pathItems/E' },
         '/visible': { get: ok },
       },
+      webhooks: {
+        orderUpdated: { post: { 'x-hidden': true, ...ok } },
+        refunded: { $ref: '#/components/pathItems/E' },
+        shipped: { post: ok },
+      },
       components: { pathItems: { E: { 'x-excluded': true, get: ok } } },
     }))
     for (const [id, operation] of Object.entries(pages)) {
@@ -338,9 +343,97 @@ describe('thally check pages bound to unpublished operations', () => {
     expect(output).toContain('0 error(s)')
   })
 
+  it('warns for pages bound to hidden or excluded webhooks, bare or spec-prefixed', async () => {
+    const output = await run({
+      'hook-hidden': 'webhook orderUpdated',
+      'hook-prefixed': 'openapi/api.json webhook orderUpdated',
+      'hook-excluded': 'webhook refunded',
+      'hook-shown': 'webhook shipped',
+      'hook-typo': 'webhook nope',
+    })
+    expect(output).toContain('page src/content/hook-hidden.mdx points at hidden operation WEBHOOK orderUpdated and is not published')
+    expect(output).toContain('page src/content/hook-prefixed.mdx points at hidden operation openapi/api.json WEBHOOK orderUpdated and is not published')
+    expect(output).toContain('page src/content/hook-excluded.mdx points at excluded operation WEBHOOK refunded and is not published')
+    expect(output).not.toContain('hook-shown.mdx points')
+    expect(output).not.toContain('hook-typo.mdx points')
+  })
+
+  it('judges a spec-prefixed page against the spec it names, like the site', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-prefixed-'))
+    mkdirSync(join(projectDir, 'openapi'), { recursive: true })
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    const pages = { 'admin-secret': 'admin.yaml GET /secret', 'main-moved': 'openapi/api.json GET /moved', 'bare-moved': 'GET /moved', 'admin-moved': 'admin.yaml GET /moved' }
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [
+      { tab: 'API', groups: [{ group: 'G', pages: Object.keys(pages) }], api: { source: 'openapi/api.json' } },
+      { tab: 'Admin', api: { source: 'openapi/admin.yaml' } },
+    ] }))
+    writeFileSync(join(projectDir, 'openapi/api.json'), JSON.stringify({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths: { '/moved': { get: { 'x-hidden': true, ...ok } } } }))
+    writeFileSync(join(projectDir, 'openapi/admin.yaml'), 'openapi: 3.1.0\ninfo: { title: A, version: "1" }\npaths:\n  /secret:\n    get: { x-hidden: true, responses: { "200": { description: ok } } }\n  /moved:\n    get: { responses: { "200": { description: ok } } }\n')
+    for (const [id, operation] of Object.entries(pages)) {
+      writeFileSync(join(projectDir, `src/content/${id}.mdx`), `---\ntitle: ${id}\ndescription: d\nopenapi: "${operation}"\n---\n`)
+    }
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    const text = output.join('\n')
+    expect(text).toContain('page src/content/admin-secret.mdx points at hidden operation admin.yaml GET /secret and is not published')
+    expect(text).toContain('page src/content/main-moved.mdx points at hidden operation openapi/api.json GET /moved and is not published')
+    // A bare reference renders from the Admin spec, which publishes it.
+    expect(text).not.toContain('bare-moved.mdx points')
+    expect(text).not.toContain('admin-moved.mdx points')
+  })
+
   it('honours docs.json overrides and does not judge a remote spec', async () => {
     expect(await run({ 'hidden-endpoint': 'GET /hidden' }, { 'GET /hidden': { hidden: false } })).not.toContain('is not published')
     expect(await run({ 'hidden-endpoint': 'GET /hidden' }, undefined, 'https://example.com/spec.json')).not.toContain('is not published')
+  })
+})
+
+describe('thally check manual api pages', () => {
+  async function run(frontmatter: string, body = '', docsExtra: Record<string, unknown> = {}) {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-manual-'))
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'Docs', groups: [{ group: 'G', pages: ['page'] }] }], ...docsExtra }))
+    writeFileSync(join(projectDir, 'src/content/page.mdx'), `---\ntitle: T\ndescription: d\n${frontmatter}\n---\n${body}\nSome body text that is long enough to not be flagged as empty.\n`)
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    return output.join('\n')
+  }
+  const server = { api: { mdx: { server: 'https://api.example.com' } } }
+
+  it('warns for an unparseable api value', async () => {
+    expect(await run('api: "FETCH"', '', server)).toContain('page src/content/page.mdx: "api" frontmatter is not "METHOD https://host/path" or "METHOD /path"')
+    expect(await run('api: 42', '', server)).toContain('"api" frontmatter is not')
+  })
+
+  it('warns for a path-only api without docs.json api.mdx.server', async () => {
+    expect(await run('api: "GET /status"')).toContain('has no server: set docs.json "api.mdx.server" or use a full URL')
+    expect(await run('api: "GET /status"', '', { api: { mdx: { server: 'not a url' } } })).toContain('has no server')
+    expect(await run('api: "GET /status"', '', server)).not.toContain('has no server')
+    expect(await run('api: "GET https://api.example.com/status"')).not.toContain('has no server')
+  })
+
+  it('warns for a ParamField path parameter missing from the URL template', async () => {
+    expect(await run('api: "GET /users"', '<ParamField path="id" type="string" />', server)).toContain('<ParamField path="id"> has no matching {id}')
+    expect(await run('api: "GET /users/{id}"', '<ParamField path="id" type="string" />', server)).not.toContain('has no matching')
+  })
+
+  it('warns when openapi and api are both set', async () => {
+    expect(await run('openapi: "GET /a"\napi: "GET /b"', '', server)).toContain('both "openapi" and "api" are set; "api" is ignored')
+  })
+
+  it('stays quiet for a sound manual page', async () => {
+    const output = await run('api: "POST /users/{id}"', '<ParamField path="id" type="string" />\n<ParamField body="name" type="string" />', server)
+    expect(output).not.toMatch(/"api"|ParamField|has no server/)
   })
 })
 
