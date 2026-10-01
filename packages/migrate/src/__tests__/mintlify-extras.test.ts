@@ -9,13 +9,13 @@ import { describe, expect, it } from 'vitest'
 import { migrateRepository, renderMigrationFiles } from '../index.js'
 import type { MigrationBundle } from '../index.js'
 
-function site(files: Record<string, string | Buffer>): MigrationBundle {
+function site(files: Record<string, string | Buffer>, extra: { maxSourceFiles?: number } = {}): MigrationBundle {
   const root = mkdtempSync(join(tmpdir(), 'thally-migrate-extras-'))
   for (const [name, content] of Object.entries(files)) {
     mkdirSync(dirname(join(root, name)), { recursive: true })
     writeFileSync(join(root, name), content)
   }
-  return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+  return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify', ...extra })
 }
 
 const page = (title: string, extra = ''): string => `---\ntitle: ${title}\n${extra}---\n\nBody of ${title}.\n`
@@ -763,10 +763,10 @@ describe('fail-closed inlining of gated and unclassified files', () => {
       'index.mdx': "---\ntitle: I\n---\n\nimport Sec from '/zz/deep/secret.mdx'\n\n<Sec/>\n",
       'zz/deep/secret.mdx': secretBody(),
     }
-    for (let i = 0; i < 5300; i++) files[`filler/f${i}.mdx`] = '---\ntitle: F\n---\n\nx\n'
-    const bundle = site(files)
+    for (let i = 0; i < 30; i++) files[`filler/f${i}.mdx`] = '---\ntitle: F\n---\n\nx\n'
+    const bundle = site(files, { maxSourceFiles: 20 })
     expect(bodies(bundle)).not.toContain('TOPSECRET')
-  }, 120_000)
+  }, 30_000)
 
   it('does not inline a gated page imported with a different path case', (context) => {
     const probe = mkdtempSync(join(tmpdir(), 'thally-case-'))
@@ -991,35 +991,46 @@ describe('assets when the file budget dropped pages', () => {
     const bundle = site({
       'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),
       'index.mdx': '---\ntitle: I\n---\n\n![k](/img/kept.png)\n',
-      ...filler(5300),
+      ...filler(30),
       'zz/secret.mdx': '---\ntitle: S\ngroups: [admin]\n---\n\n![p](/img/private.png)\n',
       'img/kept.png': png,
       'img/private.png': png,
-    })
+    }, { maxSourceFiles: 20 })
     expect(bundle.pages.some((entry) => entry.id.includes('secret'))).toBe(false)
     expect(publicPaths(bundle)).not.toContain('img/private.png')
     expect((bundle.quarantinedFiles ?? []).some((file) => file.path === 'migration-quarantine/assets/img/private.png')).toBe(true)
     expect(publicPaths(bundle)).toContain('img/kept.png')
     expect(codes(bundle, 'gated-page').some((item) => item.source === 'zz/secret.mdx' && /file limit/.test(item.message))).toBe(true)
-  }, 120_000)
+  }, 30_000)
 
   it('quarantines the image of a dropped non-restricted page and says why', () => {
     const bundle = site({
       'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),
       'index.mdx': '---\ntitle: I\n---\n\n![k](/img/kept.png)\n',
-      ...filler(5300),
+      ...filler(30),
       'zz/dropped.mdx': '---\ntitle: D\n---\n\n![d](/img/dropped.png)\n',
       'img/kept.png': png,
       'img/dropped.png': png,
       'img/loose.png': png,
-    })
+    }, { maxSourceFiles: 20 })
     expect(publicPaths(bundle)).toContain('img/kept.png')
     expect(publicPaths(bundle)).not.toContain('img/dropped.png')
     expect(publicPaths(bundle)).not.toContain('img/loose.png')
     expect((bundle.quarantinedFiles ?? []).map((file) => file.path)).toContain('migration-quarantine/assets/img/dropped.png')
     const conservative = codes(bundle, 'gated-page').filter((item) => /dropped by the file limit/.test(item.message))
     expect(conservative).toHaveLength(1)
-  }, 120_000)
+  }, 30_000)
+
+  it('counts the restricted pages the budget dropped on the bundle', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),
+      'index.mdx': page('I'),
+      ...filler(30),
+      'zz/a.mdx': page('A', 'groups: [admin]\n'),
+      'zz/b.mdx': page('B', 'public: false\n'),
+    }, { maxSourceFiles: 20 })
+    expect(bundle.droppedGatedPages).toBe(2)
+  }, 30_000)
 
   it('is unchanged for a site under the budget', () => {
     const bundle = site({

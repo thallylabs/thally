@@ -192,6 +192,8 @@ export interface RepositoryMigrationOptions {
   docusaurusSidebarPath?: string
   /** @internal Static assets are shared across docs-plugin instances. */
   docusaurusSkipAssets?: boolean
+  /** Test seam: lowers the 5,000-file budget so budget behaviour can be exercised with small fixtures. */
+  maxSourceFiles?: number
   /** @internal Redirects are global config, read once, not per plugin instance. */
   docusaurusSkipRedirects?: boolean
 }
@@ -981,29 +983,21 @@ interface ScannedFile {
  * against a cycle (a symlink pointing at an ancestor, or two symlinks
  * pointing at each other).
  */
-/**
- * A generous ceiling on how many *directory entries* `scanFiles` will walk
- * when a `rank` function is supplied (see below) — far above
- * `MAX_SOURCE_FILES` so a repository the size of crewAI's (~28k files) is
- * walked in full, but still bounded so a pathologically huge tree can't
- * make discovery itself slow. Walking is cheap (no file content is read
- * here); only the final `MAX_SOURCE_FILES` selection is expensive to get
- * wrong.
- */
-const MAX_RANKED_WALK_FILES = MAX_SOURCE_FILES * 20
+/** A ranked walk is bounded at this many times the file budget: far above it so a ~28k-file repository is walked in full, yet a pathologically huge tree cannot make discovery slow. */
+const RANKED_WALK_FACTOR = 20
 
 /**
  * Scan `root` for its files. When `rank` is given, the walk isn't cut off at
- * `MAX_SOURCE_FILES` — it continues (bounded by `MAX_RANKED_WALK_FILES`) so
+ * `MAX_SOURCE_FILES` — it continues (bounded by 20x the budget) so
  * every file's priority can be considered before any are dropped; the
  * caller is responsible for sorting by `rank` and trimming to
  * `MAX_SOURCE_FILES` afterward (see `selectFilesWithinBudget`). Without
  * `rank`, the walk stops as soon as `MAX_SOURCE_FILES` files are found, same
  * as before.
  */
-function scanFiles(root: string, confinementRoot: string = root, warnings?: Array<MigrationWarning>, rank?: (relativePath: string) => number): Array<ScannedFile> {
+function scanFiles(root: string, confinementRoot: string = root, warnings?: Array<MigrationWarning>, rank?: (relativePath: string) => number, budget: number = MAX_SOURCE_FILES): Array<ScannedFile> {
   const files: Array<ScannedFile> = []
-  const walkCap = rank ? MAX_RANKED_WALK_FILES : MAX_SOURCE_FILES
+  const walkCap = rank ? budget * RANKED_WALK_FACTOR : budget
   let confinementReal: string
   try {
     confinementReal = realpathSync(confinementRoot)
@@ -1099,15 +1093,16 @@ function selectGroupWithinBudget(
   warnings: Array<MigrationWarning> | undefined,
   allVersionPrefixes: ReadonlySet<string>,
   label: 'file' | 'asset',
+  budget: number = MAX_SOURCE_FILES,
 ): Array<ScannedFile> {
-  if (scanned.length <= MAX_SOURCE_FILES) return scanned
+  if (scanned.length <= budget) return scanned
   // Ties (unreferenced files sharing a ceiling) break by path, not by
   // directory-listing order, so the same repository always keeps the same files.
   const ranked = scanned
     .map((file) => ({ file, priority: rank(file.relativePath) }))
     .sort((left, right) => left.priority - right.priority
       || (left.file.relativePath < right.file.relativePath ? -1 : left.file.relativePath > right.file.relativePath ? 1 : 0))
-  const dropped = ranked.slice(MAX_SOURCE_FILES).map(({ file }) => file)
+  const dropped = ranked.slice(budget).map(({ file }) => file)
   if (warnings) {
     const droppedPages = label === 'file' ? dropped.filter((file) => isDocumentationExtension(file.relativePath)) : dropped
     const noun = label === 'file' ? 'page' : 'image or media file'
@@ -1120,7 +1115,7 @@ function selectGroupWithinBudget(
     const rest = droppedPages.length - examples.length
     warnings.push({
       code: 'limit-reached',
-      message: `This repository has more than ${MAX_SOURCE_FILES} ${label === 'file' ? 'files' : 'assets'}, so only the first ${MAX_SOURCE_FILES} (in navigation order, default version first) were migrated. `
+      message: `This repository has more than ${budget} ${label === 'file' ? 'files' : 'assets'}, so only the first ${budget} (in navigation order, default version first) were migrated. `
         + `${droppedPages.length} ${noun}(s) were left out`
         + (examples.length > 0 ? `: ${examples.join(', ')}${rest > 0 ? `, and ${rest} more` : ''}` : '')
         + (droppedVersions.size > 0 ? ` (versions: ${[...droppedVersions].slice(0, 5).join(', ')}${droppedVersions.size > 5 ? `, and ${droppedVersions.size - 5} more` : ''})` : '')
@@ -1129,7 +1124,7 @@ function selectGroupWithinBudget(
           : '. Copy them into public/ manually if your pages use them.'),
     })
   }
-  return ranked.slice(0, MAX_SOURCE_FILES).map(({ file }) => file)
+  return ranked.slice(0, budget).map(({ file }) => file)
 }
 
 /**
@@ -1155,13 +1150,14 @@ function selectFilesWithinBudget(
   rank: (relativePath: string) => number,
   warnings: Array<MigrationWarning> | undefined,
   allVersionPrefixes: ReadonlySet<string>,
+  budget: number = MAX_SOURCE_FILES,
 ): Array<ScannedFile> {
   const isAsset = (file: ScannedFile): boolean => ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())
   const assetFiles = scanned.filter(isAsset)
   const otherFiles = scanned.filter((file) => !isAsset(file))
   return [
-    ...selectGroupWithinBudget(otherFiles, rank, warnings, allVersionPrefixes, 'file'),
-    ...selectGroupWithinBudget(assetFiles, rank, warnings, allVersionPrefixes, 'asset'),
+    ...selectGroupWithinBudget(otherFiles, rank, warnings, allVersionPrefixes, 'file', budget),
+    ...selectGroupWithinBudget(assetFiles, rank, warnings, allVersionPrefixes, 'asset', budget),
   ]
 }
 
@@ -2969,13 +2965,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         return versionCeiling !== undefined ? versionCeiling + 1 : Number.MAX_SAFE_INTEGER
       }
     : undefined
-  const scannedFiles = scanFiles(contentRoot, repositoryDir, warnings, discoveryRank)
+  const sourceBudget = options.maxSourceFiles ?? MAX_SOURCE_FILES
+  const scannedFiles = scanFiles(contentRoot, repositoryDir, warnings, discoveryRank, sourceBudget)
   const mintignoreFilteredFiles = mintignoreMatcher
     ? scannedFiles.filter((file) => !mintignoreMatcher.ignores(file.relativePath))
     : scannedFiles
-  const discoveryBudgetApplied = discoveryRank !== undefined && mintignoreFilteredFiles.length > MAX_SOURCE_FILES
+  const discoveryBudgetApplied = discoveryRank !== undefined && mintignoreFilteredFiles.length > sourceBudget
   const files = discoveryRank
-    ? selectFilesWithinBudget(mintignoreFilteredFiles, discoveryRank, warnings, allVersionPrefixes)
+    ? selectFilesWithinBudget(mintignoreFilteredFiles, discoveryRank, warnings, allVersionPrefixes, sourceBudget)
     : mintignoreFilteredFiles
   // A Fern `versions:` file may live outside fern/ (a sibling `docs/`
   // directory) and its own pages resolve relative to it, so their
@@ -3068,7 +3065,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const droppedGatedFiles: Array<{ file: ScannedFile; reason: string }> = []
   const withheldSnippetFiles: Array<ScannedFile> = []
   let droppedPageCount = 0
-  const scanTruncated = scannedFiles.length >= (discoveryRank ? MAX_RANKED_WALK_FILES : MAX_SOURCE_FILES)
+  const scanTruncated = scannedFiles.length >= (discoveryRank ? sourceBudget * RANKED_WALK_FACTOR : sourceBudget)
   if (platform === 'mintlify') {
     for (const file of files) {
       // A snippet that declares access rules is never inlined: it is restricted
@@ -3807,7 +3804,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // case it couldn't run (no `discoveryRank`, e.g. Docusaurus) or the rare
   // case where later additions (Fern's external sourcePaths, above) pushed
   // the count back over budget after the event.
-  if (!discoveryBudgetApplied && files.length >= MAX_SOURCE_FILES) {
+  if (!discoveryBudgetApplied && files.length >= sourceBudget) {
     warnings.push({ code: 'limit-reached', message: `Stopped scanning after ${MAX_SOURCE_FILES} files, so the rest of the repository was not looked at. Run the migration on a smaller part of the repository with --docs-dir.` })
   }
   if (platform === 'docusaurus') {
@@ -4471,6 +4468,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ...(remoteApiSpecs.length > 0 ? { remoteApiSpecs } : {}),
     ...(componentMigrator ? { componentFiles: componentMigrator.files() } : {}),
     ...(quarantinedFiles.length > 0 ? { quarantinedFiles } : {}),
+    ...(droppedGatedFiles.length > 0 ? { droppedGatedPages: droppedGatedFiles.length } : {}),
     docsConfig,
     ...(mintlifyConfig ? {
       site: {

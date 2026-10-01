@@ -157,6 +157,8 @@ export interface MigrationBundle {
   componentFiles?: Array<RenderedMigrationFile>
   /** Access-restricted source pages, written outside every published path. */
   quarantinedFiles?: Array<RenderedMigrationFile>
+  /** Access-restricted pages the file limit dropped: neither published nor saved in quarantinedFiles. */
+  droppedGatedPages?: number
   docsConfig: MigrationDocsConfig
   site?: {
     name?: string
