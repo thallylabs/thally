@@ -11,7 +11,13 @@ authored nesting or order. The adapter supports tabs, dropdowns, products,
 versions, languages, and reusable `$ref` navigation files; it also preserves
 dropdown presentation, collection descriptions and icons, explicit default
 versions, page route casing, redirects, local snippets, static assets,
-compatible page frontmatter, site identity, and OpenAPI configuration. For public Mintlify
+compatible page frontmatter, site identity, and OpenAPI configuration.
+Analytics come across too: docs.json `integrations` and legacy mint.json
+`analytics` for GA4, Google Tag Manager, PostHog, and Plausible are validated
+and written to `docs.json` `integrations` (`integrations` wins per provider when
+both exist). Invalid values are skipped with a warning, and every other
+Mintlify provider (Amplitude, Mixpanel, Segment, and so on) is listed once in a
+warning instead of being dropped silently. For public Mintlify
 sites, the URL adapter reads the structured configuration embedded in the
 rendered application before falling back to DOM link inference.
 

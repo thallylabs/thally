@@ -436,3 +436,48 @@ describe('thally check manual api pages', () => {
     expect(output).not.toMatch(/"api"|ParamField|has no server/)
   })
 })
+
+describe('thally check integrations', () => {
+  const run = async (integrations: unknown) => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-integrations-'))
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({
+      tabs: [{ tab: 'Documentation', pages: ['introduction'] }],
+      ...(integrations === undefined ? {} : { integrations }),
+    }))
+    writeFileSync(join(projectDir, 'src/content/introduction.mdx'), [
+      '---', 'title: Introduction', 'description: Product documentation introduction.', '---', '',
+      'Welcome to the product documentation and its complete setup guide.',
+    ].join('\n'))
+    let issues: Array<{ severity: string; message: string }> = []
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await runCheck(projectDir, { fix: false, ci: true, onIssues: (found) => { issues = found } })
+    } finally {
+      log.mockRestore()
+    }
+    return issues.filter((issue) => /integration/i.test(issue.message))
+  }
+
+  it('warns, without echoing values, on invalid integrations', async () => {
+    const found = await run({
+      ga4: { measurementId: 'UA-SECRETVALUE-1' },
+      posthog: { apiKey: `phc_${'a'.repeat(30)}`, sessionRecording: 'false' },
+      plausible: { domain: 'docs.example.com', server: '127.0.0.1' },
+      amplitude: {},
+    })
+    expect(found.length).toBeGreaterThanOrEqual(4)
+    expect(found.every((issue) => issue.severity === 'warning')).toBe(true)
+    expect(found.map((issue) => issue.message).join('\n')).not.toContain('SECRETVALUE')
+    expect(found.map((issue) => issue.message)).toContain(
+      'docs.json integrations: Thally does not support these providers, so they will not be rendered: amplitude. Supported: ga4, gtm, posthog, plausible.',
+    )
+    expect((await run('nope')).length).toBe(1)
+  })
+
+  it('stays quiet for valid or absent integrations', async () => {
+    expect(await run(undefined)).toEqual([])
+    expect(await run({ ga4: { measurementId: 'G-TEST12345' }, gtm: { tagId: 'GTM-TEST123' } })).toHaveLength(1) // GTM + GA4 double count only
+    expect(await run({ ga4: { measurementId: 'G-TEST12345' } })).toEqual([])
+  })
+})

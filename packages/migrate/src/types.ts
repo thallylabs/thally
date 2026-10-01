@@ -91,6 +91,13 @@ export interface MigrationDocsConfig {
   analytics?: { enabled?: boolean }
   /** Manual API pages: default server(s) and auth for `api:` frontmatter pages. */
   api?: { mdx?: { server?: string | Array<string>; auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string } } }
+  /** Third-party analytics in Mintlify's `integrations` shape; validated again by the renderer. */
+  integrations?: {
+    ga4?: { measurementId: string }
+    gtm?: { tagId: string }
+    posthog?: { apiKey: string; apiHost?: string; sessionRecording?: boolean }
+    plausible?: { domain: string; server?: string }
+  }
   redirects?: Array<{ source: string; destination: string; permanent?: boolean }>
   i18n?: {
     defaultLocale: string
