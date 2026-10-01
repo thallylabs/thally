@@ -118,7 +118,7 @@ function encode(span: Span, value: string, original: string): string {
   if (!value.trim() || value.includes('\0') || /[\r\n]/.test(value)) throw new Error('The example translation contains invalid prose.')
   if (span.kind === 'yaml') return JSON.stringify(value)
   if (span.kind === 'comment') {
-    if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value) || /\*\/|<!--|-->/.test(value)) throw new Error('The example translation changed comment syntax.')
+    if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value) || /\*\/|<!--|--!?>/.test(value)) throw new Error('The example translation changed comment syntax.')
     return value.trim()
   }
   if (span.kind === 'attribute') return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')

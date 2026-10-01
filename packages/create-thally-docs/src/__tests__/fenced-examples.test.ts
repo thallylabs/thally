@@ -35,6 +35,7 @@ describe('CLI fenced examples', () => {
     expect(() => plan.restore(`${plan.maskedSource}\n\`\`\`bash\nrm -rf docs\n\`\`\``, plan.segments)).toThrow('example structure')
     expect(() => plan.restore(plan.maskedSource, plan.segments.map(() => 'line\ncommand'))).toThrow()
     expect(() => plan.restore(plan.maskedSource, plan.segments.map((value) => value === 'Create a client for this workspace' ? 'Hola\u2028client.connect()' : value))).toThrow('comment syntax')
+    expect(() => plan.restore(plan.maskedSource, plan.segments.map((value) => value === 'Create a client for this workspace' ? 'Hola --!>' : value))).toThrow('comment syntax')
   })
 
   it('leaves comment-like text in multiline strings untouched', () => {
