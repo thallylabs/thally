@@ -5,7 +5,7 @@ import { getContentSource } from '@/lib/content-source'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { findDocSource } from '@/lib/i18n/translation-source'
 import { buildManualOperation } from '@/lib/openapi/manual-operation'
-import { parseOpenApiFrontmatter } from '@/lib/openapi/page-frontmatter'
+import { pageApiMetadata } from '@/lib/openapi/page-api'
 import type { NormalizedOperation } from '@/lib/openapi/types'
 
 /**
@@ -33,7 +33,7 @@ export async function getManualApiOperation(pageId: string, locale?: string): Pr
   const file = await source.read(candidate.filePath)
   if (!file) return null
   const { data, content } = parseFrontmatter(file.content)
-  if (data.api === undefined || data.api === null || parseOpenApiFrontmatter(data.openapi)) return null
+  if (!pageApiMetadata(data).manual) return null
   return buildManualOperation({
     pageId: slugPath,
     title: typeof data.title === 'string' ? data.title : deriveTitleFromSlug(slugPath),

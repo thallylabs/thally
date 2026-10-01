@@ -8,10 +8,11 @@ import { getDocsJsonConfig, getDocsJsonConfigRevision } from '@/lib/docs-json-co
 import { resolveIconLibrary, type IconLibrary } from '@/lib/icon-library'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { SUPPORTED_LOCALE_OPTIONS } from '@/lib/i18n/config'
-import { parseOpenApiReference, type OpenApiReference } from '@/lib/openapi/doc-reference'
+import { pageApiMetadata } from '@/lib/openapi/page-api'
+import type { OpenApiFrontmatterRef } from '@/lib/openapi/page-frontmatter'
+import type { ManualApiTarget } from '@/lib/openapi/manual-operation'
 import { UNPUBLISHED_PAGES_FILE } from '@/lib/openapi/publication'
 
-export { parseOpenApiReference }
 
 // ---------------------------------------------------------------------------
 // Public interfaces (consumed by components, pages, and stores)
@@ -36,7 +37,9 @@ export interface DocEntry {
   lastVerified?: string
   /** Public provenance: product version this page was verified against. */
   verifiedVersion?: string
-  openapi?: OpenApiReference
+  openapi?: OpenApiFrontmatterRef
+  /** Target of a manual `api:` page, as the page index sees it (no ParamFields: that needs the MDX body). */
+  manualTarget?: ManualApiTarget
   /** Synthetic operation for a manual `api:` page (header + Try It); see manual-operation.ts. */
   manualApi?: NormalizedOperation
   noindex?: boolean
@@ -44,7 +47,6 @@ export interface DocEntry {
   mode?: DocPageMode
 }
 
-export type { OpenApiReference }
 
 export interface NavigationSection {
   /** Stable structural identity; unlike a title, this remains unique when a group is split. */
@@ -362,7 +364,8 @@ interface FrontmatterData {
   lastUpdated?: string
   lastVerified?: string
   verifiedVersion?: string
-  openapi?: string
+  openapi?: unknown
+  api?: unknown
   hidden?: boolean
   noindex?: boolean
   mode?: DocPageMode
@@ -501,6 +504,7 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
   const href = slug.length ? `/${slug.join('/')}` : '/'
   const title = fm.title ?? deriveTitleFromSlug(pageId)
+  const api = pageApiMetadata(fm)
   return {
     id: pageId,
     title,
@@ -518,7 +522,8 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
     verifiedVersion: fm.verifiedVersion,
     noindex: fm.noindex,
     hidden: fm.hidden,
-    openapi: parseOpenApiReference(fm.openapi) ?? undefined,
+    ...(api.openapi ? { openapi: api.openapi } : {}),
+    ...(api.manual ? { manualTarget: api.manual } : {}),
   }
 }
 

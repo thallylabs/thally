@@ -7,7 +7,7 @@ import { compileMDX } from 'next-mdx-remote/rsc'
 import { interpretMDX } from '@/lib/mdx-interpret'
 import type { DocEntry, DocPageMode } from '@/data/docs'
 import { deriveTitleFromSlug, getApiMdxConfig } from '@/data/docs'
-import { parseOpenApiFrontmatter } from '@/lib/openapi/page-frontmatter'
+import { pageApiMetadata } from '@/lib/openapi/page-api'
 import { buildManualOperation } from '@/lib/openapi/manual-operation'
 import { remarkPlugins } from '@/mdx/remark'
 import { rehypePlugins } from '@/mdx/rehype'
@@ -165,27 +165,25 @@ async function compileDocEntry(
   }
   GeneratedDoc.displayName = `DocContent(${href})`
 
-  const openapi = parseOpenApiFrontmatter(frontmatter?.openapi)
+  const warn = (message: string) => console.warn(`[thally] ${filePath}: ${message}`)
+  // The page index (docs.ts) reads the same metadata through the same function.
+  const meta = pageApiMetadata(frontmatter, warn)
+  const openapi = meta.openapi
   const title = frontmatter?.title ?? deriveTitleFromSlug(slugPath)
   // `openapi:` wins when a page declares both: it is the existing behaviour.
-  let manualApi: DocEntry['manualApi']
-  if (frontmatter?.api !== undefined && frontmatter.api !== null) {
-    const warn = (message: string) => console.warn(`[thally] ${filePath}: ${message}`)
-    if (openapi) {
-      warn('both "openapi" and "api" frontmatter are set; using "openapi" and ignoring "api".')
-    } else {
-      manualApi = buildManualOperation({
+  if (meta.shadowedApi) warn('both "openapi" and "api" frontmatter are set; using "openapi" and ignoring "api".')
+  const manualApi = meta.manual
+    ? buildManualOperation({
         pageId: slugPath || 'introduction',
         title,
-        api: frontmatter.api,
-        authMethod: frontmatter.authMethod,
+        api: frontmatter?.api,
+        authMethod: frontmatter?.authMethod,
         mdx: parseFrontmatter(sourceFile.content).content,
         config: getApiMdxConfig(),
         locale,
         warn,
       }) ?? undefined
-    }
-  }
+    : undefined
 
   return {
     // The empty route resolves introduction.mdx; titles are display metadata,
