@@ -1,4 +1,8 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { AnalyticsProvider, GtmNoScript } from '../../components/analytics/analytics-provider'
 
 import {
   buildAnalyticsScripts,
@@ -264,5 +268,98 @@ describe('analytics script plan', () => {
     const only = resolveAnalyticsConfig(undefined, { plausible: { domain: 'docs.example.com' } })
     const serialized = JSON.stringify(buildAnalyticsScripts(only))
     expect(serialized).not.toMatch(/googletagmanager|posthog/)
+  })
+})
+
+describe('hostile input table', () => {
+  const big = 'x'.repeat(100_000)
+  const hostileValues: Array<[string, unknown]> = [
+    ['undefined', undefined], ['null', null], ['number', 7], ['NaN', NaN], ['true', true], ['false', false],
+    ['array', []], ['array of strings', ['G-TEST12345']], ['string', 'G-TEST12345'], ['empty string', ''],
+    ['empty object', {}], ['nested object', { a: { b: 1 } }], ['long string', big],
+    ['NUL', 'G-TEST\u00001234'], ['line separators', 'G-TEST\u2028\u20291234'], ['script close', '</script><script>x</script>'],
+    ['null-prototype object', Object.assign(Object.create(null), { measurementId: 'G-TEST12345' })],
+    ['frozen object', Object.freeze({ measurementId: 'bad' })],
+    ['proto key', JSON.parse('{"__proto__":{"measurementId":"G-TEST12345"}}')],
+    ['constructor key', JSON.parse('{"constructor":{"prototype":{"measurementId":"G-TEST12345"}}}')],
+    ['prototype key', JSON.parse('{"prototype":{"x":1}}')],
+    ['throwing getter', Object.defineProperty({}, 'measurementId', { get() { throw new Error('boom') }, enumerable: true })],
+    ['revoked proxy', (() => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy })()],
+    ['bigint', BigInt(10)],
+    ['cyclic', (() => { const o: Record<string, unknown> = {}; o.self = o; return o })()],
+  ]
+  const fields = ['measurementId', 'tagId', 'domain', 'server', 'apiKey', 'apiHost', 'sessionRecording']
+  const SECRET = 'ZZSECRETZZ'
+
+  const sink = (value: unknown) => {
+    const providers = ['ga4', 'gtm', 'plausible', 'posthog']
+    const shapes: Array<unknown> = [value, { [providers[0]]: value }]
+    for (const provider of providers) {
+      shapes.push({ [provider]: value })
+      for (const field of fields) shapes.push({ [provider]: { [field]: value } })
+    }
+    return shapes
+  }
+
+  it.each(hostileValues)('integrations: %s never throws, emits no provider, echoes nothing', (_name, value) => {
+    for (const shape of sink(value)) {
+      resetAnalyticsWarningsForTests()
+      vi.mocked(console.warn).mockClear()
+      let out: ResolvedAnalytics = {}
+      expect(() => { out = resolveAnalyticsConfig(undefined, shape) }).not.toThrow()
+      expect(() => JSON.stringify(buildAnalyticsScripts(out))).not.toThrow()
+      expect(() => renderToStaticMarkup(createElement(AnalyticsProvider, { config: out }))).not.toThrow()
+      expect(() => renderToStaticMarkup(createElement(GtmNoScript, { config: out }))).not.toThrow()
+      const logged = vi.mocked(console.warn).mock.calls.flat().join('\n')
+      expect(logged).not.toContain('xxxxxxxx')
+      expect(logged).not.toContain('</script>')
+      expect(logged).not.toContain('\u0000')
+      expect(logged).not.toContain('\u2028')
+      // Strings and objects carrying a real ID can legitimately emit; every other class cannot.
+      if (!['string', 'array of strings', 'null-prototype object', 'proto key', 'constructor key'].includes(_name)) {
+        expect(out).toEqual({})
+      }
+    }
+  })
+
+  it.each(hostileValues)('site.ts analytics: %s never throws', (_name, value) => {
+    for (const key of ['googleAnalyticsId', 'plausibleDomain', 'plausibleScriptUrl', 'posthogKey', 'posthogHost']) {
+      let out: ResolvedAnalytics = {}
+      expect(() => { out = resolveAnalyticsConfig({ [key]: value }, undefined) }).not.toThrow()
+      expect(() => renderToStaticMarkup(createElement(AnalyticsProvider, { config: out }))).not.toThrow()
+    }
+    expect(() => resolveAnalyticsConfig(value, value)).not.toThrow()
+    expect(() => resolveAnalyticsConfig({ analytics: value }, value)).not.toThrow()
+  })
+
+  it('does not emit a provider for hostile docs.json values', () => {
+    for (const bad of [null, 7, true, [], {}, big, 'G-TEST\u00001234', '</script>']) {
+      expect(resolveAnalyticsConfig(undefined, {
+        ga4: { measurementId: bad }, gtm: { tagId: bad }, plausible: { domain: bad }, posthog: { apiKey: bad },
+      })).toEqual({})
+    }
+  })
+
+  it('never echoes a rejected docs.json value, whatever the field', () => {
+    for (const provider of ['ga4', 'gtm', 'plausible', 'posthog']) {
+      for (const field of fields) {
+        resolveAnalyticsConfig(undefined, { [provider]: { [field]: SECRET + '\u0000' + big } })
+      }
+    }
+    expect(vi.mocked(console.warn).mock.calls.flat().join('\n')).not.toContain(SECRET)
+  })
+
+  it('falls back to defaults for empty site.ts Plausible script URL and PostHog host', () => {
+    const out = resolveAnalyticsConfig({ plausibleDomain: 'docs.example.com', plausibleScriptUrl: '', posthogKey: KEY, posthogHost: '' }, undefined)
+    expect(out.plausible?.scriptUrl).toBe('https://plausible.io/js/script.js')
+    expect(out.posthog?.apiHost).toBe('https://us.i.posthog.com')
+  })
+
+  it('does not throw for BigInt or cyclic values in site.ts', () => {
+    const cyc: Record<string, unknown> = {}
+    cyc.self = cyc
+    const out = resolveAnalyticsConfig({ googleAnalyticsId: BigInt(10), posthogKey: cyc, plausibleDomain: cyc, posthogHost: BigInt(10) }, { ga4: { measurementId: 'G-TEST12345' } })
+    expect(out).toEqual({ ga4: { measurementId: 'G-TEST12345' } })
+    expect(() => JSON.stringify(buildAnalyticsScripts(out))).not.toThrow()
   })
 })

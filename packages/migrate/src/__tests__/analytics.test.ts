@@ -255,3 +255,73 @@ describe('renderer and migrator agree (src/lib/analytics-config.ts)', () => {
     expect(direct).toEqual(rendered)
   })
 })
+
+describe('hostile input table', () => {
+  const big = 'x'.repeat(100_000)
+  const SECRET = 'ZZSECRETZZ'
+  const values: Array<[string, unknown]> = [
+    ['undefined', undefined], ['null', null], ['number', 7], ['NaN', NaN], ['true', true], ['false', false],
+    ['array', []], ['array of strings', ['G-TEST12345']], ['empty string', ''], ['empty object', {}],
+    ['long string', big], ['NUL', `${SECRET}\u0000`], ['line separators', 'a\u2028\u2029b'], ['script close', '</script>'],
+    ['null-prototype', Object.assign(Object.create(null), { measurementId: 'bad' })],
+    ['frozen', Object.freeze({ measurementId: 'bad' })],
+    ['proto key', JSON.parse('{"__proto__":{"measurementId":"bad"}}')],
+    ['constructor key', JSON.parse('{"constructor":{"prototype":{}}}')],
+    ['throwing getter', Object.defineProperty({}, 'measurementId', { get() { throw new Error('boom') }, enumerable: true })],
+    ['revoked proxy', (() => { const r = Proxy.revocable({}, {}); r.revoke(); return r.proxy })()],
+    ['bigint', BigInt(10)],
+  ]
+  const fields = ['measurementId', 'tagId', 'domain', 'server', 'apiKey', 'apiHost', 'sessionRecording']
+  const shapes = (value: unknown): Array<Record<string, unknown>> => {
+    const out: Array<Record<string, unknown>> = [
+      { integrations: value }, { analytics: value }, { integrations: { [`${SECRET}-`.repeat(8)]: value }, analytics: { [`${SECRET}\u0000`]: value } },
+    ]
+    for (const source of ['integrations', 'analytics']) {
+      for (const provider of ['ga4', 'gtm', 'plausible', 'posthog', 'googleAnalytics']) {
+        out.push({ [source]: { [provider]: value } })
+        for (const field of fields) out.push({ [source]: { [provider]: { [field]: value } } })
+      }
+    }
+    return out
+  }
+
+  it.each(values)('%s: no throw, no provider, no echo', (name, value) => {
+    for (const config of shapes(value)) {
+      let result: ReturnType<typeof project> = { warnings: [] }
+      expect(() => { result = project(config) }).not.toThrow()
+      expect(() => JSON.stringify(result)).not.toThrow()
+      expect(result.integrations).toBeUndefined()
+      const warned = text(result)
+      expect(warned).not.toContain(SECRET)
+      expect(warned).not.toContain('xxxxxxxx')
+      expect(warned).not.toContain('</script>')
+      expect([...warned].some((c) => c === String.fromCharCode(0) || c === String.fromCharCode(0x2028) || c === String.fromCharCode(0x2029))).toBe(false)
+      // Whatever the migrator accepts the renderer accepts identically (nothing, here).
+      expect(resolveAnalyticsConfig(undefined, result.integrations)).toEqual({})
+    }
+    void name
+  })
+
+  it('tolerates a non-object top-level config', () => {
+    for (const bad of [null, undefined, 5, 'x', true, [], [1], BigInt(10)]) {
+      expect(() => project(bad as never)).not.toThrow()
+      expect(project(bad as never).integrations).toBeUndefined()
+    }
+  })
+
+  it('never echoes a hostile provider key', () => {
+    const result = project({ integrations: { ga4: { measurementId: 'G-TEST12345' }, [`${SECRET}\u0000x`]: {}, '__proto__x': {} } })
+    expect(result.integrations).toEqual({ ga4: { measurementId: 'G-TEST12345' } })
+    expect(text(result)).not.toContain(SECRET)
+  })
+
+  it('does not turn a malformed existing integrations value into character keys on merge', () => {
+    for (const bad of ['abc', ['G-TEST12345'], 7]) {
+      const merged = mergeMigrationConfig(
+        { tabs: [], integrations: bad } as never,
+        { tabs: [], integrations: { gtm: { tagId: 'GTM-TEST123' } } },
+      )
+      expect(merged.integrations).toEqual({ gtm: { tagId: 'GTM-TEST123' } })
+    }
+  })
+})

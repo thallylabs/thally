@@ -113,6 +113,17 @@ function own(record: Record<string, unknown>, key: string): unknown {
  * (the provider is then skipped rather than silently swapped for another source).
  */
 export function resolveAnalyticsConfig(site: unknown, integrations: unknown): ResolvedAnalytics {
+  // Analytics must never break a build or request: a throwing getter or revoked
+  // proxy (reachable from site.ts) degrades to "no analytics".
+  try {
+    return resolveUnguarded(site, integrations)
+  } catch {
+    warn('analytics configuration could not be read; analytics disabled.')
+    return {}
+  }
+}
+
+function resolveUnguarded(site: unknown, integrations: unknown): ResolvedAnalytics {
   const out: ResolvedAnalytics = {}
   const s = isRecord(site) ? site : {}
   const i = isRecord(integrations) ? integrations : {}
@@ -160,8 +171,7 @@ export function resolveAnalyticsConfig(site: unknown, integrations: unknown): Re
   // Plausible
   const plausibleSite = siteString('plausibleDomain')
   if (plausibleSite) {
-    const custom = own(s, 'plausibleScriptUrl')
-    out.plausible = { domain: plausibleSite, scriptUrl: typeof custom === 'string' ? custom : DEFAULT_PLAUSIBLE_SCRIPT }
+    out.plausible = { domain: plausibleSite, scriptUrl: siteString('plausibleScriptUrl') ?? DEFAULT_PLAUSIBLE_SCRIPT }
   } else {
     const plausibleBlock = block('plausible')
     const raw = plausibleBlock ? own(plausibleBlock, 'domain') : undefined
@@ -181,8 +191,7 @@ export function resolveAnalyticsConfig(site: unknown, integrations: unknown): Re
   // PostHog
   const posthogSite = siteString('posthogKey')
   if (posthogSite) {
-    const host = own(s, 'posthogHost')
-    out.posthog = { apiKey: posthogSite, apiHost: typeof host === 'string' ? host : DEFAULT_POSTHOG_HOST, sessionRecording: true }
+    out.posthog = { apiKey: posthogSite, apiHost: siteString('posthogHost') ?? DEFAULT_POSTHOG_HOST, sessionRecording: true }
   } else {
     const posthogBlock = block('posthog')
     const raw = posthogBlock ? own(posthogBlock, 'apiKey') : undefined

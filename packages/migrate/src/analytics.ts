@@ -34,7 +34,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function redact(value: unknown): string {
   if (typeof value !== 'string') return Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value
-  return value.length === 0 ? 'empty string' : `"${value.trim().slice(0, 4)}..." (${value.length} chars)`
+  // Printable ASCII only: control and line-separator characters must not reach logs or reports.
+  return value.length === 0 ? 'empty string' : `"${value.trim().slice(0, 4).replace(/[^\x20-\x7e]/g, '?')}..." (${value.length} chars)`
 }
 
 function normalizeHttpsUrl(value: string, allowPath: boolean): string | null {
@@ -79,6 +80,20 @@ interface Source {
 }
 
 export function projectMintlifyIntegrations(config: Record<string, unknown>): {
+  integrations?: MigrationIntegrations
+  warnings: Array<MigrationWarning>
+} {
+  // Analytics is optional: an unreadable config (non-object, throwing getter)
+  // must never fail the migration.
+  if (!isRecord(config)) return { warnings: [] }
+  try {
+    return project(config)
+  } catch {
+    return { warnings: [{ code: 'unsupported-config', message: 'Mintlify analytics configuration could not be read; analytics were not imported.' }] }
+  }
+}
+
+function project(config: Record<string, unknown>): {
   integrations?: MigrationIntegrations
   warnings: Array<MigrationWarning>
 } {

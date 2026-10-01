@@ -34,6 +34,10 @@ function renderPage(bundle: MigrationBundle, page: MigrationBundle['pages'][numb
   ].filter((line) => line !== null).join('\n')
 }
 
+function isIntegrationsObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 /** Merge imported tabs into an existing site without duplicating changelog tabs. */
 export function mergeMigrationConfig(
   existing: MigrationDocsConfig,
@@ -122,8 +126,14 @@ export function mergeMigrationConfig(
     navigation: incoming.navigation ?? existing.navigation,
     ...(i18n ? { i18n } : {}),
     // Existing providers win per provider; imported ones fill the gaps.
-    ...(existing.integrations || incoming.integrations
-      ? { integrations: { ...incoming.integrations, ...existing.integrations } }
+    // A malformed (string/array) existing value must not spread into index keys.
+    ...(isIntegrationsObject(existing.integrations) || isIntegrationsObject(incoming.integrations)
+      ? {
+          integrations: {
+            ...(isIntegrationsObject(incoming.integrations) ? incoming.integrations : {}),
+            ...(isIntegrationsObject(existing.integrations) ? existing.integrations : {}),
+          },
+        }
       : {}),
   }
 }
