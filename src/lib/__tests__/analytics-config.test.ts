@@ -349,10 +349,25 @@ describe('hostile input table', () => {
     expect(vi.mocked(console.warn).mock.calls.flat().join('\n')).not.toContain(SECRET)
   })
 
-  it('falls back to defaults for empty site.ts Plausible script URL and PostHog host', () => {
-    const out = resolveAnalyticsConfig({ plausibleDomain: 'docs.example.com', plausibleScriptUrl: '', posthogKey: KEY, posthogHost: '' }, undefined)
-    expect(out.plausible?.scriptUrl).toBe('https://plausible.io/js/script.js')
-    expect(out.posthog?.apiHost).toBe('https://us.i.posthog.com')
+  it('skips, with a value-free warning, a present empty/blank/invalid site.ts host', () => {
+    for (const bad of ['', '   ', null, 7, {}]) {
+      resetAnalyticsWarningsForTests()
+      vi.mocked(console.warn).mockClear()
+      expect(resolveAnalyticsConfig({ plausibleDomain: 'docs.example.com', plausibleScriptUrl: bad }, undefined)).toEqual({})
+      expect(resolveAnalyticsConfig({ posthogKey: KEY, posthogHost: bad }, undefined)).toEqual({})
+      expect(vi.mocked(console.warn).mock.calls.length).toBe(2)
+    }
+  })
+
+  it('still defaults an absent site.ts host and keeps a custom one verbatim', () => {
+    expect(resolveAnalyticsConfig({ plausibleDomain: 'docs.example.com', posthogKey: KEY }, undefined)).toEqual({
+      plausible: { domain: 'docs.example.com', scriptUrl: 'https://plausible.io/js/script.js' },
+      posthog: { apiKey: KEY, apiHost: 'https://us.i.posthog.com', sessionRecording: true },
+    })
+    expect(resolveAnalyticsConfig({ plausibleDomain: 'd.example.com', plausibleScriptUrl: 'http://x.test/a.js', posthogKey: KEY, posthogHost: 'http://ph.test/' }, undefined)).toEqual({
+      plausible: { domain: 'd.example.com', scriptUrl: 'http://x.test/a.js' },
+      posthog: { apiKey: KEY, apiHost: 'http://ph.test/', sessionRecording: true },
+    })
   })
 
   it('does not throw for BigInt or cyclic values in site.ts', () => {

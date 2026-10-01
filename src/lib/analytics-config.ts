@@ -147,6 +147,14 @@ function resolveUnguarded(site: unknown, integrations: unknown): ResolvedAnalyti
     return typeof value === 'string' && value ? value : undefined
   }
 
+  // Absent host: the default. Present but empty/blank/non-string: '' (skip the
+  // provider rather than send analytics to an endpoint the author did not choose).
+  const siteHost = (key: string, fallback: string): string => {
+    const value = own(s, key)
+    if (value === undefined) return fallback
+    return typeof value === 'string' && value.trim() ? value : ''
+  }
+
   // Google Analytics 4
   const ga4Site = siteString('googleAnalyticsId')
   if (ga4Site) out.ga4 = { measurementId: ga4Site }
@@ -171,7 +179,9 @@ function resolveUnguarded(site: unknown, integrations: unknown): ResolvedAnalyti
   // Plausible
   const plausibleSite = siteString('plausibleDomain')
   if (plausibleSite) {
-    out.plausible = { domain: plausibleSite, scriptUrl: siteString('plausibleScriptUrl') ?? DEFAULT_PLAUSIBLE_SCRIPT }
+    const custom = siteHost('plausibleScriptUrl', DEFAULT_PLAUSIBLE_SCRIPT)
+    if (custom) out.plausible = { domain: plausibleSite, scriptUrl: custom }
+    else warn('site.ts analytics.plausibleScriptUrl is present but not a usable URL; Plausible skipped.')
   } else {
     const plausibleBlock = block('plausible')
     const raw = plausibleBlock ? own(plausibleBlock, 'domain') : undefined
@@ -191,7 +201,9 @@ function resolveUnguarded(site: unknown, integrations: unknown): ResolvedAnalyti
   // PostHog
   const posthogSite = siteString('posthogKey')
   if (posthogSite) {
-    out.posthog = { apiKey: posthogSite, apiHost: siteString('posthogHost') ?? DEFAULT_POSTHOG_HOST, sessionRecording: true }
+    const host = siteHost('posthogHost', DEFAULT_POSTHOG_HOST)
+    if (host) out.posthog = { apiKey: posthogSite, apiHost: host, sessionRecording: true }
+    else warn('site.ts analytics.posthogHost is present but not a usable URL; PostHog skipped.')
   } else {
     const posthogBlock = block('posthog')
     const raw = posthogBlock ? own(posthogBlock, 'apiKey') : undefined
