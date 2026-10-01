@@ -52,7 +52,7 @@ import { projectFernNavigation, readFernConfig } from './fern.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { parseFrontmatter } from './frontmatter.js'
 import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
-import { escapeFernLiteralBraces, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { closeOpenFence, escapeFernLiteralBraces, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -1100,7 +1100,7 @@ function selectGroupWithinBudget(
   rank: (relativePath: string) => number,
   warnings: Array<MigrationWarning> | undefined,
   allVersionPrefixes: ReadonlySet<string>,
-  label: 'file' | 'asset',
+  label: 'file' | 'asset' | 'snippet',
   budget: number = MAX_SOURCE_FILES,
 ): Array<ScannedFile> {
   if (scanned.length <= budget) return scanned
@@ -1113,7 +1113,7 @@ function selectGroupWithinBudget(
   const dropped = ranked.slice(budget).map(({ file }) => file)
   if (warnings) {
     const droppedPages = label === 'file' ? dropped.filter((file) => isDocumentationExtension(file.relativePath)) : dropped
-    const noun = label === 'file' ? 'page' : 'image or media file'
+    const noun = label === 'file' ? 'page' : label === 'snippet' ? 'snippet file' : 'image or media file'
     const droppedVersions = new Set<string>()
     for (const file of dropped) {
       const firstSegment = file.relativePath.split('/', 1)[0]
@@ -1123,13 +1123,13 @@ function selectGroupWithinBudget(
     const rest = droppedPages.length - examples.length
     warnings.push({
       code: 'limit-reached',
-      message: `This repository has more than ${budget} ${label === 'file' ? 'files' : 'assets'}, so only the first ${budget} (in navigation order, default version first) were migrated. `
+      message: `This repository has more than ${budget} ${label === 'file' ? 'files' : label === 'snippet' ? 'snippets' : 'assets'}, so only the first ${budget} (in navigation order, default version first) were migrated. `
         + `${droppedPages.length} ${noun}(s) were left out`
         + (examples.length > 0 ? `: ${examples.join(', ')}${rest > 0 ? `, and ${rest} more` : ''}` : '')
         + (droppedVersions.size > 0 ? ` (versions: ${[...droppedVersions].slice(0, 5).join(', ')}${droppedVersions.size > 5 ? `, and ${droppedVersions.size - 5} more` : ''})` : '')
-        + (label === 'file'
-          ? '. To include them, run the migration on a smaller part of the repository with --docs-dir.'
-          : '. Copy them into public/ manually if your pages use them.'),
+        + (label === 'asset'
+          ? '. Copy them into public/ manually if your pages use them.'
+          : '. To include them, run the migration on a smaller part of the repository with --docs-dir.'),
     })
   }
   return ranked.slice(0, budget).map(({ file }) => file)
@@ -1161,9 +1161,14 @@ function selectFilesWithinBudget(
   budget: number = MAX_SOURCE_FILES,
 ): Array<ScannedFile> {
   const isAsset = (file: ScannedFile): boolean => ASSET_EXTENSIONS.has(extname(file.relativePath).toLowerCase())
+  // Snippet files are only ever inlined into pages (read from disk), never
+  // imported as pages, so they get their own budget instead of taking pages'.
+  const isSnippet = (file: ScannedFile): boolean => file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
+  const snippetFiles = scanned.filter((file) => !isAsset(file) && isSnippet(file))
   const assetFiles = scanned.filter(isAsset)
-  const otherFiles = scanned.filter((file) => !isAsset(file))
+  const otherFiles = scanned.filter((file) => !isAsset(file) && !isSnippet(file))
   return [
+    ...selectGroupWithinBudget(snippetFiles, rank, warnings, allVersionPrefixes, 'snippet', budget),
     ...selectGroupWithinBudget(otherFiles, rank, warnings, allVersionPrefixes, 'file', budget),
     ...selectGroupWithinBudget(assetFiles, rank, warnings, allVersionPrefixes, 'asset', budget),
   ]
@@ -2755,7 +2760,7 @@ function inlineMdxSnippets(
     const prefix = frontmatter?.[0] ?? ''
     result = `${prefix}${[...new Set(preservedDeclarations.values())].join('\n\n')}\n\n${result.slice(prefix.length)}`
   }
-  return depth === 0 ? hoistMdxImports(result) : result
+  return depth === 0 ? hoistMdxImports(result) : closeOpenFence(result)
 }
 
 /**
