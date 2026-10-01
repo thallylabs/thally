@@ -1245,13 +1245,15 @@ function exactReferenceKey(value: string): string {
 /**
  * Whether a frontmatter `openapi:` value ("GET /x", "specs/api.json GET /x")
  * names this spec. A bare operation resolves to the default spec; a prefixed
- * one to the spec whose path ends with the prefix. Errs toward matching.
+ * one to the spec whose path ends with the prefix, on a segment boundary.
  */
 function specRefMatches(ref: string, specPath: string, specFilename: string, isDefault: boolean): boolean {
   const prefix = /^(?:(\S+)\s+)?(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|WEBHOOK)\s/i.exec(`${ref} `)?.[1]
   if (!prefix) return isDefault
   const wanted = prefix.replace(/^\/+/, '').toLowerCase()
-  return specPath.toLowerCase().endsWith(wanted) || specFilename.toLowerCase() === wanted
+  // Whole path segments only: `pi/openapi.json` does not name `api/openapi.json`.
+  const lowerPath = specPath.toLowerCase()
+  return lowerPath === wanted || lowerPath.endsWith(`/${wanted}`) || specFilename.toLowerCase() === wanted
 }
 
 const TOKEN_SEPARATORS = /[\s"'()<>[\]{}=,;:|\\/`*!?#&]+/
@@ -2384,7 +2386,8 @@ function repositoryAssetHref(
     if (!normalized) return null
     // On a case-insensitive filesystem a differently-cased reference opens the
     // file; report the spelling it really has so it matches the scanned asset.
-    const onDisk = realRelative.replace(/\\/g, '/').toLowerCase() === siteRelative.toLowerCase() ? normalizeAssetPath(realRelative.replace(/\\/g, '/')) : null
+    const onDiskRelative = relative(realRoot, realpathSync.native(candidate)).replace(/\\/g, '/')
+    const onDisk = onDiskRelative.toLowerCase() === siteRelative.toLowerCase() ? normalizeAssetPath(onDiskRelative) : null
     onReferenced?.(normalized, onDisk ?? undefined)
     const rewritten = `/${normalized}${suffix}`
     // Markdown destinations containing parentheses must stay angle-bracketed;
@@ -3037,7 +3040,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const withheldPaths = new Set<string>()
   // The gate verdict of one Mintlify page: a bounded read of its frontmatter
   // head, then the navigation gate. Unreadable means withheld.
-  const isGateCandidate = (file: ScannedFile): boolean => ['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())
+  const isDocFile = (file: ScannedFile): boolean => ['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())
+  const isGateCandidate = (file: ScannedFile): boolean => isDocFile(file)
     && !file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
   const classifyPageGate = (file: ScannedFile): { reason?: string; publicTrue: boolean; openapi?: string } => {
     let head: { reason?: string; publicTrue: boolean; openapi?: string } = { publicTrue: false }
@@ -3062,10 +3066,21 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // from the same bounded head read, before anything trims them.
   const keptFiles = new Set(files)
   const droppedGatedFiles: Array<{ file: ScannedFile; reason: string }> = []
+  const withheldSnippetFiles: Array<ScannedFile> = []
   let droppedPageCount = 0
   const scanTruncated = scannedFiles.length >= (discoveryRank ? MAX_RANKED_WALK_FILES : MAX_SOURCE_FILES)
   if (platform === 'mintlify') {
     for (const file of files) {
+      // A snippet that declares access rules is never inlined: it is restricted
+      // content, so its assets are withheld and the site fails closed too.
+      if (isDocFile(file) && !isGateCandidate(file)) {
+        const snippetReason = classifyPageGate(file).reason
+        if (snippetReason) {
+          withheldPaths.add(file.absolutePath)
+          withheldSnippetFiles.push(file)
+        }
+        continue
+      }
       if (!isGateCandidate(file)) continue
       const verdict = classifyPageGate(file)
       gateByPath.set(file.absolutePath, { reason: verdict.reason, publicTrue: verdict.publicTrue })
@@ -3159,6 +3174,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // Unscannable, so its assets are unknown: they stay out of public/ unless a published page names them by exact path.
     }
   })
+  for (const file of withheldSnippetFiles) {
+    try {
+      if (!mintlifyProjectRoot || lstatSync(file.absolutePath).size > MAX_WITHHELD_SCAN_BYTES) continue
+      rewriteRepositoryAssetLinks(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, mintlifyProjectRoot, withholdAsset)
+    } catch {
+      // Unscannable: its assets stay out of public/ unless a published page names them by exact path.
+    }
+  }
   if (droppedGatedFiles.length > MAX_DROPPED_GATED_WARNINGS) {
     warnings.push({
       code: 'gated-page',
@@ -3292,6 +3315,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     )
     // Counted as published only once the page is certain to be (below).
     const publishedText = trackPublishedRefs ? raw : undefined
+    const pageAssetReferences: Array<string> = []
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
       // A heading's `{#custom-id}` anchor (`## Title {#custom-id}`) crashes
       // `@mdx-js/mdx`'s parser outright, so it must be converted to a
@@ -3418,8 +3442,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (platform === 'fern' && fernHiddenIds.has(navigationId)) page.hidden = true
     if (platform === 'mintlify' && mintlifyProjectRoot) {
+      // Counted as published only once the page is certain to be (below).
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath, onDiskSpelling) => {
-        addAssetReference(publicAssetKey(onDiskSpelling ?? assetPath), file.relativePath)
+        pageAssetReferences.push(publicAssetKey(onDiskSpelling ?? assetPath))
       })
     }
     if (platform === 'fern' && fernProjectRoot) {
@@ -3517,6 +3542,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     seenPageIds.add(page.id)
     pages.push(page)
+    for (const assetPath of pageAssetReferences) addAssetReference(assetPath, file.relativePath)
     if (publishedText !== undefined) addPathReferences(publishedText, posix.dirname(file.relativePath).replace(/^\.$/, ''), publishedExact, publishedLoose)
     // MDX normalization removes DocCardList because Thally has no matching
     // component. Remember its authored route so the resolved sidebar can
@@ -3661,6 +3687,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ...assetCandidates.filter((candidate) => !isReferenced(candidate)),
   ]
   const quarantinedPageCount = quarantinedFiles.length
+  // Two files can map to one public path (`logo.png` and `public/logo.png`);
+  // only one would survive the copy, so on a site that fails closed neither is
+  // trusted to be the one a published page means.
+  const destinationCounts = new Map<string, number>()
+  for (const { assetPath } of assetCandidates) destinationCounts.set(assetPath, (destinationCounts.get(assetPath) ?? 0) + 1)
   // Fail closed on a site with withheld content: an asset no published page
   // reaches could belong to the gated pages (referenced dynamically, or not
   // tracked), so it stays out of public/. Any mention by a published page, its
@@ -3680,7 +3711,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const isPublicReachable = (assetPath: string): boolean => referencedAssetPaths.has(assetPath) || publishedExact.has(assetPath)
   const isQuarantinedAsset = (assetPath: string): boolean => (withheldAssetPaths.has(assetPath) || (failClosedAssets && !siteAssetPaths.has(assetPath)))
     && platform === 'mintlify'
-    && !isPublicReachable(assetPath)
+    && !(isPublicReachable(assetPath) && !(failClosedAssets && (destinationCounts.get(assetPath) ?? 0) > 1))
   let withheldAssetCount = 0
   let unreferencedAssetCount = 0
   let totalAssetBytes = 0
@@ -3703,7 +3734,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     if (isQuarantinedAsset(assetPath)) {
       quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${assetPath}`, content })
-      if (looselyNamed(assetPath, publishedLoose)) ambiguouslyNamedAssets.push(assetPath)
+      if (looselyNamed(assetPath, publishedLoose) || (destinationCounts.get(assetPath) ?? 0) > 1) ambiguouslyNamedAssets.push(assetPath)
       if (withheldAssetPaths.has(assetPath)) withheldAssetCount++
       else unreferencedAssetCount++
       continue
@@ -3714,7 +3745,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   if (ambiguouslyNamedAssets.length > 0) {
     warnings.push({
       code: 'gated-page',
-      message: `${ambiguouslyNamedAssets.length} asset(s) were kept out of public/ because a published page names a file like ${ambiguouslyNamedAssets.length === 1 ? 'it' : 'them'} in a way that does not give its folder (or differs in letter case), so it cannot be matched to one file: ${listAssetPaths(ambiguouslyNamedAssets)}. `
+      message: `${ambiguouslyNamedAssets.length} asset(s) were kept out of public/ because a published page names a file like ${ambiguouslyNamedAssets.length === 1 ? 'it' : 'them'} in a way that does not give its folder (or differs in letter case), so it cannot be matched to one file (or two files share one public path): ${listAssetPaths(ambiguouslyNamedAssets)}. `
         + `Copy any that published pages need from ${QUARANTINE_DIRECTORY}/assets/ into public/ by hand.`,
     })
   }

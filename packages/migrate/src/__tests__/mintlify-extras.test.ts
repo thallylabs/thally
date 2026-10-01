@@ -1034,3 +1034,87 @@ describe('assets when the file budget dropped pages', () => {
     expect(bundle.warnings.some((item) => /file limit/.test(item.message) && item.code === 'gated-page')).toBe(false)
   })
 })
+
+describe('asset and spec decisions that must not err toward public', () => {
+  const png = Buffer.from('PNGDATA')
+  const publicPaths = (bundle: MigrationBundle) => bundle.assets.map((asset) => asset.path)
+  const quarantined = (bundle: MigrationBundle) => (bundle.quarantinedFiles ?? []).map((file) => file.path)
+
+  it('treats a snippet that declares groups as restricted content: its image and unreferenced images stay out of public/', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub'] } }),
+      'pub.mdx': page('Pub'),
+      'snippets/s.mdx': '---\ngroups: [a]\n---\n\n![s](/img/snippet-only.png)\n',
+      'img/snippet-only.png': png,
+      'img/loose.png': png,
+    })
+    expect(publicPaths(bundle)).not.toContain('img/snippet-only.png')
+    expect(publicPaths(bundle)).not.toContain('img/loose.png')
+    expect(quarantined(bundle)).toContain('migration-quarantine/assets/img/snippet-only.png')
+  })
+
+  it('does not count the images of a page that was skipped as a duplicate as published references', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub', 'secret'] } }),
+      'pub.mdx': page('Pub'),
+      'secret.mdx': page('Secret', 'groups: [admin]\n'),
+      'dup.mdx': '---\ntitle: Dup\nimage: /img/kept.png\n---\n\n![k](/img/kept.png)\n',
+      'dup/index.mdx': '---\ntitle: Dup2\nimage: /img/skipped2.png\n---\n\n![s](/img/skipped.png)\n',
+      'img/kept.png': png,
+      'img/skipped.png': png,
+      'img/skipped2.png': png,
+    })
+    expect(codes(bundle, 'collision')).toHaveLength(1)
+    expect(publicPaths(bundle)).toContain('img/kept.png')
+    expect(publicPaths(bundle)).not.toContain('img/skipped.png')
+    expect(publicPaths(bundle)).not.toContain('img/skipped2.png')
+  })
+
+  it('quarantines two files that map to the same public path on a restricted site', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub', 'secret'] } }),
+      'pub.mdx': '---\ntitle: Pub\n---\n\n![l](/logo.png)\n',
+      'secret.mdx': page('Secret', 'groups: [admin]\n'),
+      'public/logo.png': png,
+      'logo.png': Buffer.from('RESTRICTED'),
+    })
+    expect(publicPaths(bundle)).not.toContain('logo.png')
+    expect(quarantined(bundle)).toContain('migration-quarantine/assets/logo.png')
+  })
+
+  it('keeps a letter-case variant of a path in frontmatter from making a file public', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub', 'secret'] } }),
+      'pub.mdx': '---\ntitle: Pub\nimage: /IMG/cover.png\n---\n\nHi\n',
+      'secret.mdx': page('Secret', 'groups: [admin]\n'),
+      'img/cover.png': png,
+    })
+    expect(publicPaths(bundle)).not.toContain('img/cover.png')
+    expect(codes(bundle, 'gated-page').some((item) => /does not give its folder/.test(item.message) && /img\/cover\.png/.test(item.message))).toBe(true)
+  })
+
+  it('does not let a path that merely ends like a spec path publish the spec', () => {
+    const spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { '/x': { get: { summary: 'SECRETSUMMARY' } } } })
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub', 's'] } }),
+      's.mdx': page('S', 'groups: [admin]\nopenapi: GET /x\n'),
+      'pub.mdx': page('Pub', 'openapi: pi/openapi.json GET /x\n'),
+      'api/openapi.json': spec,
+    })
+    expect(publicPaths(bundle).filter((path) => path.endsWith('openapi.json'))).toEqual([])
+  })
+  it('matches a differently-cased link by the real on-disk spelling on a case-insensitive filesystem', (context) => {
+    const probe = mkdtempSync(join(tmpdir(), 'thally-case-'))
+    writeFileSync(join(probe, 'a'), '')
+    if (!existsSync(join(probe, 'A'))) { context.skip(); return }
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub', 'secret'] } }),
+      'pub.mdx': '---\ntitle: Pub\n---\n\n![l](/IMG/Logo.PNG)\n',
+      'secret.mdx': page('Secret', 'groups: [admin]\n'),
+      'img/logo.png': png,
+      'img/other.png': png,
+    })
+    expect(publicPaths(bundle)).toContain('img/logo.png')
+    expect(publicPaths(bundle)).not.toContain('img/other.png')
+  })
+})
