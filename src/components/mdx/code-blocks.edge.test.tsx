@@ -119,8 +119,11 @@ describe('CodeGroup options', () => {
   )
 
   it('hides copy only for the tab that opted out', () => {
-    // The first tab is selected on the server render and has nocopy.
-    expect(group).not.toContain('Copy code')
+    // The first tab is selected on the server render and has nocopy; the hidden
+    // second panel is rendered too and keeps its own copy button.
+    const [first, second] = group.split('role="tabpanel"').slice(1)
+    expect(first).not.toContain('Copy code')
+    expect(second).toContain('Copy code')
   })
 
   it('shows copy when the selected tab has no nocopy', () => {

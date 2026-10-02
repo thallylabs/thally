@@ -281,8 +281,7 @@ function CodePanel({
   lastmarked?: string
   hasGroupHeader?: boolean
 }) {
-  // `null` = untouched by the reader, so the default (see below) applies. Inactive
-  // CodeGroup tabs unmount, so switching tabs simply returns to that default.
+  // `null` = untouched by the reader, so the default (see below) applies.
   const [expanded, setExpanded] = useState<boolean | null>(null)
   const preId = useId()
   const renderableChildren = getRenderableChildren(children)
@@ -494,7 +493,7 @@ function CodeGroupPanels({
     return (
       <TabPanels>
         {Children.map(children, (child) => (
-          <TabPanel>
+          <TabPanel unmount={false}>
             <CodePanel {...props}>{child}</CodePanel>
           </TabPanel>
         ))}

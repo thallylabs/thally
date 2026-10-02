@@ -153,4 +153,17 @@ describe('code-panel fence options', () => {
     expect(html).toContain('thally-code-lines')
     expect(html).toContain('data-icon-name="code"')
   })
+
+  it('renders every CodeGroup panel in the server HTML, hiding the inactive ones', () => {
+    const html = renderToStaticMarkup(
+      <CodeGroup>
+        <Pre language="typescript" code="first-panel"><Code className="language-typescript">first-panel</Code></Pre>
+        <Pre language="python" code="second-panel"><Code className="language-python">second-panel</Code></Pre>
+      </CodeGroup>,
+    )
+    expect(html).toContain('first-panel')
+    expect(html).toContain('second-panel')
+    expect(html.match(/role="tabpanel"/g)).toHaveLength(2)
+    expect(html.match(/<[^>]*role="tabpanel"[^>]*hidden/g)).toHaveLength(1)
+  })
 })
