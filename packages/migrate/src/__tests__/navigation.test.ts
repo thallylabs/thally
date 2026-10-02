@@ -149,6 +149,12 @@ describe('Mintlify referenced directory landings', () => {
 })
 
 describe('Mintlify navigation projection', () => {
+  it('defaults icons to Font Awesome like Mintlify, unless the source names a library', () => {
+    const nav = { pages: ['introduction'] }
+    expect(projectMintlifyNavigation({ navigation: nav }).docsConfig.icons).toEqual({ library: 'fontawesome' })
+    expect(projectMintlifyNavigation({ navigation: nav, icons: { library: 'lucide' } }).docsConfig.icons).toEqual({ library: 'lucide' })
+  })
+
   it('preserves interleaved root pages and nested groups in authored order', () => {
     const result = projectMintlifyNavigation({
       navigation: {

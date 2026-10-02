@@ -935,9 +935,12 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
   const feedback = objectValue(config.feedback)
   const seo = objectValue(config.seo)
   const iconLibrary = objectValue(config.icons)?.library
-  const projectedIconLibrary = ['lucide', 'fontawesome', 'tabler'].includes(String(iconLibrary))
-    ? String(iconLibrary) as 'lucide' | 'fontawesome' | 'tabler'
-    : undefined
+  // Mintlify's default icon library is Font Awesome when docs.json names none.
+  const projectedIconLibrary = iconLibrary === undefined
+    ? 'fontawesome'
+    : ['lucide', 'fontawesome', 'tabler'].includes(String(iconLibrary))
+      ? String(iconLibrary) as 'lucide' | 'fontawesome' | 'tabler'
+      : undefined
   const docsNavbar = projectedNavbar(config.navbar)
   const legacyRaw = legacyTopbarNavbar(config)
   const legacyNavbar = projectedNavbar(legacyRaw)
