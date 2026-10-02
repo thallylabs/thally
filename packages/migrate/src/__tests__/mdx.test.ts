@@ -645,6 +645,11 @@ describe('Mintlify explicit heading ids stay on the heading', () => {
     expect(output).not.toContain('<a id')
   })
 
+  it('keeps the id on the heading when the page is normalized a second time', () => {
+    const once = normalizeMdx('## Primeros pasos {#get-started}', 'mintlify')
+    expect(normalizeMdx(once, 'mintlify')).toBe(once)
+  })
+
   it('keeps ids with characters an HTML anchor would reject, and still compiles', () => {
     const output = normalizeMdx('## Team {#team-management-&-roles}\n\n## Plus {#scrape-+-interact}', 'mintlify')
     expect(output).toContain('## Team {/* #team-management-&-roles */}')

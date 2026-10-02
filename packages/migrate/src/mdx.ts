@@ -212,7 +212,8 @@ export function normalizeExplicitHeadingIds(
       }
     }
     // Docusaurus' heading plugin also accepts a trailing MDX comment.
-    if (trimmed.endsWith('*/}')) {
+    // (Mintlify output uses that same comment as its marker, so it stays.)
+    if (!options.headingMarkers && trimmed.endsWith('*/}')) {
       const marker = trimmed.lastIndexOf(' {/*')
       if (marker >= 0) {
         const comment = trimmed.slice(marker + 4, -3).trim()
