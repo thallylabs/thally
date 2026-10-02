@@ -2,6 +2,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog'
 import { Loader2, X } from 'lucide-react'
+import { useApiLabels } from '@/components/api/api-locale'
 import { TryItPanel } from '@/components/api/try-it-panel'
 import { Markdown } from '@/components/mdx/markdown'
 import { OperationCodePanel } from '@/components/api/operation-code-panel'
@@ -16,6 +17,7 @@ interface TryItDialogProps {
 }
 
 export function SendButton({ controller }: { controller: TryItController }) {
+  const t = useApiLabels()
   const { isSending, confirmingSend, requestSend, cancelSend, preparedRequest } = controller
   return (
     <button
@@ -29,7 +31,7 @@ export function SendButton({ controller }: { controller: TryItController }) {
       )}
     >
       {isSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-      {isSending ? 'Sending' : confirmingSend ? 'Confirm delete' : 'Send'}
+      {isSending ? t('sending') : confirmingSend ? t('confirmDelete') : t('send')}
     </button>
   )
 }
@@ -40,6 +42,7 @@ export function SendButton({ controller }: { controller: TryItController }) {
  * closes on Esc and returns focus to the control that opened it.
  */
 export function TryItDialog({ controller, open, onOpenChange }: TryItDialogProps) {
+  const t = useApiLabels()
   const { operation, serverUrl, setServerUrl, preparedRequest } = controller
   const methodToken = getMethodToken(operation.method)
 
@@ -57,7 +60,7 @@ export function TryItDialog({ controller, open, onOpenChange }: TryItDialogProps
             </span>
             {operation.servers.length > 1 ? (
               <select
-                aria-label="API server"
+                aria-label={t('apiServer')}
                 value={serverUrl}
                 onChange={(event) => setServerUrl(event.target.value)}
                 className="rounded-[9px] border border-border bg-background px-3 py-1 text-sm"
@@ -71,13 +74,13 @@ export function TryItDialog({ controller, open, onOpenChange }: TryItDialogProps
               className="min-w-0 flex-1 break-all rounded-[9px] border border-border px-3 py-2 font-mono text-xs text-foreground/80"
               title={preparedRequest.url || undefined}
             >
-              {preparedRequest.url || 'Select a server to build the URL'}
+              {preparedRequest.url || t('noServer')}
             </div>
             <SendButton controller={controller} />
             <Dialog.Close asChild>
               <button type="button" className="rounded-[9px] border border-border p-2 text-foreground/70 transition hover:bg-muted hover:text-foreground">
                 <X className="h-4 w-4" />
-                <span className="sr-only">Close</span>
+                <span className="sr-only">{t('close')}</span>
               </button>
             </Dialog.Close>
           </header>

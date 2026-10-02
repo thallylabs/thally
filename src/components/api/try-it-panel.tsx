@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { useApiLabels } from '@/components/api/api-locale'
 import { BodyForm } from '@/components/api/body-form'
 import { isFormEditable } from '@/lib/openapi/body-form'
 import { MANUAL_NO_SERVER, type TryItController } from '@/components/api/use-try-it-controller'
@@ -16,6 +17,7 @@ interface TryItPanelProps {
 }
 
 export function TryItPanel({ controller, variant = 'inline', showHeading = true }: TryItPanelProps) {
+  const t = useApiLabels()
   const { operation, serverUrl, setServerUrl, pathParams, queryParams, headerParams, authValues, setAuthValue, setParamValue, preparedRequest, isSending, canSendBody, response } =
     controller
   const containerStyles =
@@ -26,12 +28,12 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
   const heading = (
     <div className="flex items-center justify-between">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">Try It</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">{t('tryIt')}</p>
         <p className="text-sm text-foreground/70">Execute this endpoint with prefilled parameters.</p>
       </div>
       {operation.servers.length > 1 ? (
         <select
-          aria-label="API server"
+          aria-label={t('apiServer')}
           value={serverUrl}
           onChange={(event) => setServerUrl(event.target.value)}
           className="rounded-[9px] border border-border bg-background px-3 py-1 text-sm"
@@ -57,7 +59,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
       <form className="space-y-6" onSubmit={handleSubmit}>
         {operation.authSchemes.filter(isSendableScheme).length ? (
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">Authorization</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">{t('authorization')}</p>
             <div className="grid gap-3 sm:grid-cols-2">
               {operation.authSchemes.filter(isSendableScheme).map((scheme) => (
                 <label key={scheme.name} className="space-y-1 text-sm text-foreground/70">
@@ -72,7 +74,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
                       spellCheck={false}
                       value={authValues[scheme.name] ?? ''}
                       onChange={(event) => setAuthValue(scheme.name, event.target.value)}
-                      placeholder={scheme.kind === 'basic' ? 'username:password' : scheme.kind === 'bearer' ? 'Enter bearer token' : 'Enter API key'}
+                      placeholder={scheme.kind === 'basic' ? 'username:password' : scheme.kind === 'bearer' ? t('bearerPlaceholder') : t('keyPlaceholder')}
                       className="w-full rounded-[9px] border border-border bg-background px-3 py-2 text-sm"
                     />
                   </span>
@@ -81,9 +83,9 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
             </div>
           </div>
         ) : null}
-        <ParamGroup title="Path parameters" values={pathParams} onChange={(key, value) => setParamValue('path', key, value)} />
-        <ParamGroup title="Query parameters" values={queryParams} onChange={(key, value) => setParamValue('query', key, value)} />
-        <ParamGroup title="Headers" values={headerParams} onChange={(key, value) => setParamValue('header', key, value)} />
+        <ParamGroup title={t('pathParameters')} values={pathParams} onChange={(key, value) => setParamValue('path', key, value)} />
+        <ParamGroup title={t('queryParameters')} values={queryParams} onChange={(key, value) => setParamValue('query', key, value)} />
+        <ParamGroup title={t('headers')} values={headerParams} onChange={(key, value) => setParamValue('header', key, value)} />
         {canSendBody ? <BodySection controller={controller} /> : null}
         {variant === 'inline' ? (
           <div className="flex flex-col items-end gap-2">
@@ -96,7 +98,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
               className="flex items-center gap-2 rounded-[9px] bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground transition hover:brightness-125 disabled:opacity-60"
             >
               {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Send request
+              {t('send')}
             </button>
           </div>
         ) : null}
@@ -108,6 +110,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
 
 /** The request body: a typed form from the schema, with a raw JSON editor kept in step with it. */
 function BodySection({ controller }: { controller: TryItController }) {
+  const t = useApiLabels()
   const { operation, bodyValue, setBodyValue, setFile } = controller
   const schema = operation.requestBody?.contents[0]?.schema
   const editable = isFormEditable(schema)
@@ -122,7 +125,7 @@ function BodySection({ controller }: { controller: TryItController }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">
-        <p>Request body</p>
+        <p>{t('requestBody')}</p>
         {editable ? (
           <button
             type="button"
@@ -174,10 +177,11 @@ function ParamGroup({ title, values, onChange }: { title: string; values: Record
 }
 
 export function TryItResponse({ response }: { response: TryItController['response'] }) {
+  const t = useApiLabels()
   if (!response) {
     return (
       <div aria-live="polite" className="rounded-[11px] border border-dashed border-border p-4 text-sm text-foreground/60">
-        Responses will appear here.
+        {t('sendToPreview')}
       </div>
     )
   }
@@ -197,7 +201,7 @@ export function TryItResponse({ response }: { response: TryItController['respons
         <span className="text-xs text-foreground/60">{response.duration} ms</span>
       </div>
       <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">Body</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">{t('body')}</p>
         <ResponseBody body={response.body} />
       </div>
     </div>

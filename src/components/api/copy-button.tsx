@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Check, Copy } from 'lucide-react'
+import { useApiLabels } from '@/components/api/api-locale'
 
 /** Copy-to-clipboard button with a transient "Copied!" success indication. */
 export function CopyButton({
@@ -15,6 +16,7 @@ export function CopyButton({
   disabled?: boolean
   iconClassName?: string
 }) {
+  const t = useApiLabels()
   const [copied, setCopied] = useState(false)
 
   function handleCopy() {
@@ -30,9 +32,9 @@ export function CopyButton({
   }
 
   return (
-    <button type="button" disabled={disabled} onClick={handleCopy} className={className} aria-label={copied ? 'Copied' : 'Copy'}>
+    <button type="button" disabled={disabled} onClick={handleCopy} className={className} aria-label={copied ? t('copied') : t('copy')}>
       {copied ? <Check className={`${iconClassName} text-green-500`} /> : <Copy className={iconClassName} />}
-      {copied ? 'Copied!' : 'Copy'}
+      {copied ? t('copied') : t('copy')}
     </button>
   )
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { CopyButton } from '@/components/api/copy-button'
+import { useApiLabels } from '@/components/api/api-locale'
 import type { TryItController } from '@/components/api/use-try-it-controller'
 import { ResponseBody } from '@/components/api/try-it-panel'
 import { statusColorClass, statusUnderlineClass } from '@/components/api/tokens'
@@ -13,6 +14,7 @@ interface OperationCodePanelProps {
 }
 
 export function OperationCodePanel({ controller }: OperationCodePanelProps) {
+  const t = useApiLabels()
   const { sampleRequest, operation } = controller
   const { preferredLanguages, addPreferredLanguage } = usePreferredLanguageStore()
   const samples = buildCodeSamples(sampleRequest, operation.codeSamples)
@@ -26,12 +28,12 @@ export function OperationCodePanel({ controller }: OperationCodePanelProps) {
         <div className="flex items-center justify-between border-b border-border px-4 py-2">
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-blue-400" />
-            <span className="text-xs font-semibold uppercase tracking-wide text-foreground/60">Request</span>
+            <span className="text-xs font-semibold uppercase tracking-wide text-foreground/60">{t('request')}</span>
           </div>
           <div className="flex items-center gap-1">
             {samples.length ? (
               <select
-                aria-label="Select language"
+                aria-label={t('selectLanguage')}
                 value={language}
                 onChange={(event) => addPreferredLanguage(event.target.value)}
                 className="rounded-[7px] bg-transparent px-1 py-1 text-xs text-foreground/60 hover:text-foreground"
@@ -60,6 +62,7 @@ export function OperationCodePanel({ controller }: OperationCodePanelProps) {
 
 /** Response box: a tab per status in the spec with its example, plus the real result once a request was sent. */
 function ResponseExamples({ controller }: OperationCodePanelProps) {
+  const t = useApiLabels()
   const { operation, response } = controller
   // A status with no body has nothing to show, so it gets no tab, as on live.
   const withExamples = operation.responses.filter((candidate) => responseExamples(candidate).length)
@@ -75,8 +78,8 @@ function ResponseExamples({ controller }: OperationCodePanelProps) {
 
   return (
     <div className="overflow-hidden rounded-[11px] border border-border bg-muted/40">
-      <div className="flex items-center gap-1 overflow-x-auto border-b border-border px-2" role="tablist" aria-label="Response status">
-        {sent ? <span className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/60">Result</span> : null}
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-border px-2" role="tablist" aria-label={t('responseStatus')}>
+        {sent ? <span className="px-2 text-xs font-semibold uppercase tracking-wide text-foreground/60">{t('result')}</span> : null}
         {tabs.map((tab, index) => (
           <button
             key={tab.code}
@@ -94,7 +97,7 @@ function ResponseExamples({ controller }: OperationCodePanelProps) {
             {tab.code === active ? <span className={cn('absolute inset-x-1 -bottom-px h-0.5 rounded-full', statusUnderlineClass(tab.status))} /> : null}
           </button>
         ))}
-        {!tabs.length ? <span className="px-2 py-2 text-xs font-semibold uppercase tracking-wide text-foreground/60">Response</span> : null}
+        {!tabs.length ? <span className="px-2 py-2 text-xs font-semibold uppercase tracking-wide text-foreground/60">{t('response')}</span> : null}
       </div>
       <div className="min-h-[80px] bg-transparent p-4">
         {active === 'sent' && sent ? (
@@ -103,7 +106,7 @@ function ResponseExamples({ controller }: OperationCodePanelProps) {
           <div className="space-y-2">
             {examples.length > 1 ? (
               <select
-                aria-label="Select example"
+                aria-label={t('selectExample')}
                 value={example.key}
                 onChange={(event) => setExampleKeys((prev) => ({ ...prev, [active]: event.target.value }))}
                 className="rounded-[7px] border border-border bg-transparent px-1 py-1 text-xs text-foreground/70"
@@ -116,7 +119,7 @@ function ResponseExamples({ controller }: OperationCodePanelProps) {
             <pre className="scrollbar-hide max-h-[320px] overflow-auto font-mono text-[0.82rem] leading-[1.65] text-foreground/80">{formatExample(example.value)}</pre>
           </div>
         ) : (
-          <p className="text-xs text-foreground/50">Send a request to preview the response.</p>
+          <p className="text-xs text-foreground/50">{t('sendToPreview')}</p>
         )}
       </div>
     </div>

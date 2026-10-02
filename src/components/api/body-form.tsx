@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
+import { useApiLabels } from '@/components/api/api-locale'
 import { Markdown } from '@/components/mdx/markdown'
 import { activeVariant, emptyValue, schemaKind, withField } from '@/lib/openapi/body-form'
 import { flattenSchema, unionVariants } from '@/lib/openapi/schema-variants'
@@ -22,6 +23,7 @@ export function BodyForm({ schema, value, onChange, onFile }: FormProps & { sche
 }
 
 function Control({ schema, value, onChange, name, depth, required, top, onFile }: FormProps & { schema: Schema; value: unknown; onChange: Change; name: string; depth: number; required?: boolean; top?: boolean }) {
+  const t = useApiLabels()
   const flat = flattenSchema(schema)
   const variants = flat.type === undefined ? unionVariants(flat) : null
   if (variants) {
@@ -30,13 +32,13 @@ function Control({ schema, value, onChange, name, depth, required, top, onFile }
       <div className="space-y-2">
         {variants.length > 1 ? (
           <select
-            aria-label={`${name} variant`}
+            aria-label={`${name} ${t('variant')}`}
             value={index}
             onChange={(event) => onChange(emptyValue(variants[Number(event.target.value)].schema))}
             className={inputClass}
           >
             {variants.map((variant, i) => (
-              <option key={i} value={i}>{variant.label ?? `Option ${i + 1}`}</option>
+              <option key={i} value={i}>{variant.label ?? t('option', i + 1)}</option>
             ))}
           </select>
         ) : null}
@@ -61,13 +63,13 @@ function Control({ schema, value, onChange, name, depth, required, top, onFile }
             <div className="min-w-0 flex-1">
               <Control schema={itemSchema} value={item} onChange={(next) => onChange(items.map((old, j) => (j === i ? next : old)))} name={`${name} ${i + 1}`} depth={depth + 1} required onFile={onFile} />
             </div>
-            <button type="button" aria-label={`Remove ${name} ${i + 1}`} onClick={() => onChange(items.filter((_, j) => j !== i))} className="rounded-[9px] border border-border p-2 text-foreground/60 hover:text-foreground">
+            <button type="button" aria-label={`${t('remove')} ${name} ${i + 1}`} onClick={() => onChange(items.filter((_, j) => j !== i))} className="rounded-[9px] border border-border p-2 text-foreground/60 hover:text-foreground">
               <X className="h-4 w-4" />
             </button>
           </div>
         ))}
         <button type="button" onClick={() => onChange([...items, emptyValue(itemSchema) ?? 0])} className="flex items-center gap-1 text-xs text-foreground/70 hover:text-foreground">
-          <Plus className="h-3.5 w-3.5" /> Add an item
+          <Plus className="h-3.5 w-3.5" /> {t('addItem')}
         </button>
       </div>
     )
@@ -137,6 +139,7 @@ function Control({ schema, value, onChange, name, depth, required, top, onFile }
 
 /** Free-form values (an object with no declared properties) are edited as JSON. */
 function JsonControl({ name, value, onChange }: { name: string; value: unknown; onChange: Change }) {
+  const t = useApiLabels()
   const [text, setText] = useState(() => (value === undefined ? '' : JSON.stringify(value)))
   const [invalid, setInvalid] = useState(false)
   return (
@@ -156,12 +159,13 @@ function JsonControl({ name, value, onChange }: { name: string; value: unknown; 
         }}
         className={`${inputClass} font-mono`}
       />
-      {invalid ? <p role="alert" className="mt-1 text-xs text-rose-500">Not valid JSON</p> : null}
+      {invalid ? <p role="alert" className="mt-1 text-xs text-rose-500">{t('notValidJson')}</p> : null}
     </>
   )
 }
 
 function ObjectFields({ schema, value, onChange, depth, top, onFile }: FormProps & { schema: Schema; value: unknown; onChange: Change; depth: number; top?: boolean }) {
+  const t = useApiLabels()
   const properties = Object.entries(schema.properties as Record<string, Schema>)
   const required = new Set(Array.isArray(schema.required) ? (schema.required as Array<string>) : [])
   const current = typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
@@ -173,7 +177,7 @@ function ObjectFields({ schema, value, onChange, depth, top, onFile }: FormProps
       <>
         <span className="font-mono text-xs font-semibold text-foreground">{key}</span>
         <span className="ml-2 text-[11px] text-foreground/50">{typeof flat.type === 'string' ? flat.type : ''}</span>
-        {required.has(key) ? <span className="ml-2 rounded bg-rose-500/10 px-1.5 py-0.5 text-[10px] text-rose-400">required</span> : null}
+        {required.has(key) ? <span className="ml-2 rounded bg-rose-500/10 px-1.5 py-0.5 text-[10px] text-rose-400">{t('required')}</span> : null}
       </>
     )
     const control = (
@@ -199,7 +203,7 @@ function ObjectFields({ schema, value, onChange, depth, top, onFile }: FormProps
       {requiredRows.map(row)}
       {optionalRows.length ? (
         <details open={!top} className="space-y-4">
-          <summary className="cursor-pointer text-xs text-foreground/70">Show {optionalRows.length} optional fields</summary>
+          <summary className="cursor-pointer text-xs text-foreground/70">{t('showOptional', optionalRows.length)}</summary>
           <div className="mt-4 space-y-4">{optionalRows.map(row)}</div>
         </details>
       ) : null}

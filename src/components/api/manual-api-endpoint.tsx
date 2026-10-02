@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { ApiLocaleProvider } from '@/components/api/api-locale'
 import { EndpointBar } from '@/components/api/endpoint-bar'
 import { TryItDialog } from '@/components/api/try-it-dialog'
 import { useTryItController } from '@/components/api/use-try-it-controller'
@@ -8,10 +9,11 @@ import type { NormalizedOperation } from '@/lib/openapi/types'
 import type { PlaygroundDisplay } from '@/lib/openapi/playground-display'
 
 /** Endpoint header + Try It for a page authored with `api:` frontmatter. */
-export function ManualApiEndpoint({ operation, playground = 'interactive' }: { operation: NormalizedOperation; playground?: PlaygroundDisplay }) {
+export function ManualApiEndpoint({ operation, playground = 'interactive', locale }: { operation: NormalizedOperation; playground?: PlaygroundDisplay; locale?: string }) {
   const controller = useTryItController(operation)
   const [open, setOpen] = useState(false)
   return (
+    <ApiLocaleProvider value={locale}>
     <div className="not-prose mb-8" data-manual-api="">
       <EndpointBar operation={operation} display={playground} onTryIt={() => setOpen(true)} />
       {operation.servers.length === 0 ? (
@@ -21,5 +23,6 @@ export function ManualApiEndpoint({ operation, playground = 'interactive' }: { o
       ) : null}
       {playground === 'interactive' ? <TryItDialog controller={controller} open={open} onOpenChange={setOpen} /> : null}
     </div>
+    </ApiLocaleProvider>
   )
 }

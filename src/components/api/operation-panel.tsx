@@ -11,6 +11,8 @@ import type { NormalizedOperation, NormalizedParameter, NormalizedResponse } fro
 import { EndpointBar } from '@/components/api/endpoint-bar'
 import { statusColorClass, statusUnderlineClass } from '@/components/api/tokens'
 import { flattenSchema, unionVariants, type SchemaVariant } from '@/lib/openapi/schema-variants'
+import { ApiLocaleProvider, useApiLabels } from '@/components/api/api-locale'
+import { apiLabel, type ApiLabelKey } from '@/lib/i18n/api-labels'
 import { authDescription } from '@/lib/openapi/auth'
 import { cn } from '@/lib/utils'
 import Markdown from '@/components/mdx/markdown'
@@ -24,9 +26,12 @@ interface OperationPanelProps {
   showDescription?: boolean
   /** Mintlify `playground` display; `simple` has no Try it, `none` hides the endpoint bar too. */
   playground?: PlaygroundDisplay
+  /** Locale of the page, for the panel's own labels. */
+  locale?: string
 }
 
-export function OperationPanel({ operation, children, showDescription = true, playground = 'interactive' }: OperationPanelProps) {
+export function OperationPanel({ operation, children, showDescription = true, playground = 'interactive', locale }: OperationPanelProps) {
+  const t = (key: ApiLabelKey, n?: number) => apiLabel(locale, key, n)
   const controller = useTryItController(operation)
   const interactive = playground === 'interactive' && !operation.isWebhook
   // `?playground=open` opens the playground straight away, as on live. The
@@ -37,13 +42,14 @@ export function OperationPanel({ operation, children, showDescription = true, pl
 
   type ParamLocation = 'path' | 'query' | 'header' | 'cookie'
   const parameterGroups: Array<{ title: string; location: ParamLocation; parameters: Array<NormalizedParameter> }> = [
-    { title: 'Path parameters', location: 'path' as const, parameters: operation.parameters.path },
-    { title: 'Query parameters', location: 'query' as const, parameters: operation.parameters.query },
-    { title: 'Headers', location: 'header' as const, parameters: operation.parameters.header },
-    { title: 'Cookie parameters', location: 'cookie' as const, parameters: operation.parameters.cookie },
+    { title: t('pathParameters'), location: 'path' as const, parameters: operation.parameters.path },
+    { title: t('queryParameters'), location: 'query' as const, parameters: operation.parameters.query },
+    { title: t('headers'), location: 'header' as const, parameters: operation.parameters.header },
+    { title: t('cookieParameters'), location: 'cookie' as const, parameters: operation.parameters.cookie },
   ].filter((group) => group.parameters.length > 0)
 
   return (
+    <ApiLocaleProvider value={locale}>
     <div className="grid gap-12 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="space-y-10">
         {/* Header */}
@@ -66,7 +72,7 @@ export function OperationPanel({ operation, children, showDescription = true, pl
         {/* Servers */}
         {operation.servers.length > 1 ? (
           <section className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">Servers</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">{t('servers')}</p>
             <div className="border-y border-border">
               {operation.servers.map((server) => (
                 <div key={server.url} className="flex flex-wrap items-baseline gap-x-4 border-b border-border px-0 py-3 last:border-b-0">
@@ -81,7 +87,7 @@ export function OperationPanel({ operation, children, showDescription = true, pl
         {/* Authorizations */}
         {operation.authSchemes.length ? (
           <section className="space-y-3">
-            <h2 className="text-lg font-semibold text-foreground">Authorizations</h2>
+            <h2 className="text-lg font-semibold text-foreground">{t('authorizations')}</h2>
             <div className="border-y border-border">
               {operation.authSchemes.map((scheme) => (
                 <ParamField
@@ -102,7 +108,7 @@ export function OperationPanel({ operation, children, showDescription = true, pl
         {/* Parameters */}
         {parameterGroups.length ? (
           <section className="space-y-6">
-            <h2 className="text-lg font-semibold text-foreground">Parameters</h2>
+            <h2 className="text-lg font-semibold text-foreground">{t('parameters')}</h2>
             {parameterGroups.map((group) => (
               <div key={group.title}>
                 <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">{group.title}</p>
@@ -131,14 +137,14 @@ export function OperationPanel({ operation, children, showDescription = true, pl
         {operation.requestBody ? (
           <section className="space-y-4">
             <div className="space-y-1">
-              <h2 className="text-lg font-semibold text-foreground">Request body</h2>
+              <h2 className="text-lg font-semibold text-foreground">{t('requestBody')}</h2>
               {operation.requestBody.description ? <Markdown className="text-sm text-foreground/70">{operation.requestBody.description}</Markdown> : null}
             </div>
             {operation.requestBody.contents.map((content) => (
               <div key={content.mediaType}>
                 <div className="mb-2 flex items-center gap-2">
                   <span className="rounded border border-border/40 bg-muted px-2 py-0.5 font-mono text-xs text-foreground/70">{content.mediaType}</span>
-                  <span className="text-xs text-foreground/50">{operation.requestBody?.required ? 'Required' : 'Optional'}</span>
+                  <span className="text-xs text-foreground/50">{operation.requestBody?.required ? t('requiredCap') : t('optional')}</span>
                 </div>
                 <div className="border-y border-border">
                   <SchemaAsParamFields schema={content.schema} />
@@ -151,7 +157,7 @@ export function OperationPanel({ operation, children, showDescription = true, pl
         {/* Responses */}
         {operation.responses.length ? (
           <section className="space-y-4">
-            <h2 className="text-lg font-semibold text-foreground">Responses</h2>
+            <h2 className="text-lg font-semibold text-foreground">{t('responses')}</h2>
             <ResponseTabs responses={operation.responses} />
           </section>
         ) : null}
@@ -166,15 +172,17 @@ export function OperationPanel({ operation, children, showDescription = true, pl
         </>
       )}
     </div>
+    </ApiLocaleProvider>
   )
 }
 
 /** Webhooks are received, not called: show the payload we send instead of a request sample. */
 function WebhookExample({ body }: { body?: string }) {
+  const t = useApiLabels()
   if (!body) return <div />
   return (
     <div className="overflow-hidden rounded-[11px] border border-border bg-muted/40">
-      <div className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground/60">Example</div>
+      <div className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground/60">{t('example')}</div>
       <pre className="scrollbar-hide max-h-[480px] overflow-auto bg-transparent p-4 font-mono text-[0.82rem] leading-[1.65] text-foreground/80">{body}</pre>
     </div>
   )
@@ -185,6 +193,7 @@ function WebhookExample({ body }: { body?: string }) {
 // ---------------------------------------------------------------------------
 
 function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
+  const t = useApiLabels()
   if (!schema) return null
 
   const flat = flattenSchema(schema)
@@ -225,16 +234,16 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
             {description ? <Markdown>{description}</Markdown> : null}
             {enumValues ? (
               <p className="mt-1 text-xs text-foreground/50">
-                Allowed: {enumValues.join(', ')}
+                {t('allowed')}: {enumValues.join(', ')}
               </p>
             ) : null}
             {flatProp.const !== undefined ? (
               <p className="mt-1 text-xs text-foreground/50">
-                Allowed value: <code>{JSON.stringify(flatProp.const)}</code>
+                {t('allowedValue')}: <code>{JSON.stringify(flatProp.const)}</code>
               </p>
             ) : null}
             {nested ? (
-              <Expandable title={`${name} properties`}>
+              <Expandable title={`${name} ${t('properties')}`}>
                 <NestedFields schema={flatProp} depth={1} />
               </Expandable>
             ) : null}
@@ -250,6 +259,7 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
 // ---------------------------------------------------------------------------
 
 function ResponseTabs({ responses }: { responses: Array<NormalizedResponse> }) {
+  const t = useApiLabels()
   const [activeCode, setActiveCode] = useState(responses[0]?.code ?? '')
   const active = responses.find((r) => r.code === activeCode) ?? responses[0]
 
@@ -287,11 +297,11 @@ function ResponseTabs({ responses }: { responses: Array<NormalizedResponse> }) {
             active.contents.map((content) => (
               <div key={content.mediaType}>
                 <SchemaAsResponseFields schema={content.schema} />
-                <ExamplePanel title="Example" mediaType={content.mediaType} example={content.example} examples={content.examples} />
+                <ExamplePanel title={t('example')} mediaType={content.mediaType} example={content.example} examples={content.examples} />
               </div>
             ))
           ) : (
-            <p className="text-sm text-foreground/50">No response body.</p>
+            <p className="text-sm text-foreground/50">{t('noResponseBody')}</p>
           )}
         </div>
       ) : null}
@@ -304,6 +314,7 @@ function ResponseTabs({ responses }: { responses: Array<NormalizedResponse> }) {
 // ---------------------------------------------------------------------------
 
 function SchemaAsResponseFields({ schema, depth = 0 }: { schema?: Record<string, unknown>; depth?: number }) {
+  const t = useApiLabels()
   if (!schema) return null
 
   const flat = flattenSchema(schema)
@@ -330,16 +341,16 @@ function SchemaAsResponseFields({ schema, depth = 0 }: { schema?: Record<string,
             {description ? <Markdown>{description}</Markdown> : null}
             {enumValues ? (
               <p className="mt-1 text-xs text-foreground/50">
-                Allowed: {enumValues.join(', ')}
+                {t('allowed')}: {enumValues.join(', ')}
               </p>
             ) : null}
             {flatProp.const !== undefined ? (
               <p className="mt-1 text-xs text-foreground/50">
-                Allowed value: <code>{JSON.stringify(flatProp.const)}</code>
+                {t('allowedValue')}: <code>{JSON.stringify(flatProp.const)}</code>
               </p>
             ) : null}
             {nested ? (
-              <Expandable title={`${name} properties`}>
+              <Expandable title={`${name} ${t('properties')}`}>
                 <NestedFields schema={flatProp} depth={depth + 1} />
               </Expandable>
             ) : null}
@@ -373,6 +384,7 @@ function NestedFields({ schema, depth }: { schema: Record<string, unknown>; dept
 }
 
 function SchemaVariants({ variants, depth }: { variants: Array<SchemaVariant>; depth: number }) {
+  const t = useApiLabels()
   const [active, setActive] = useState(0)
   const current = variants[active] ?? variants[0]
   const description = typeof current.schema.description === 'string' ? current.schema.description : undefined
@@ -381,7 +393,7 @@ function SchemaVariants({ variants, depth }: { variants: Array<SchemaVariant>; d
   return (
     <div>
       {variants.length > 1 ? (
-        <div role="tablist" aria-label="Variants" className="mb-3 flex flex-wrap gap-1.5">
+        <div role="tablist" aria-label={t('variants')} className="mb-3 flex flex-wrap gap-1.5">
           {variants.map((variant, index) => (
             <button
               key={index}
@@ -394,7 +406,7 @@ function SchemaVariants({ variants, depth }: { variants: Array<SchemaVariant>; d
                 index === active ? 'border-accent/50 bg-accent/10 text-accent' : 'border-border text-foreground/60 hover:text-foreground',
               )}
             >
-              {variant.label ?? `Option ${index + 1}`}
+              {variant.label ?? t('option', index + 1)}
             </button>
           ))}
         </div>
@@ -404,7 +416,7 @@ function SchemaVariants({ variants, depth }: { variants: Array<SchemaVariant>; d
         <SchemaAsResponseFields schema={current.schema} depth={depth} />
       ) : (
         <p className="text-xs text-foreground/60">
-          Type: <code>{resolveSchemaType(current.schema) ?? 'any'}</code>
+          {t('type')}: <code>{resolveSchemaType(current.schema) ?? 'any'}</code>
         </p>
       )}
     </div>

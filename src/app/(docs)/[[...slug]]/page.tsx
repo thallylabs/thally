@@ -238,7 +238,7 @@ export default async function DocsPage({ params }: PageProps) {
             <DocHeader doc={doc} eyebrow={nav.group} />
           </div>
           <ApiLayout>
-            <OperationPanel operation={operationNode.operation} showDescription={!doc.description} playground={playground}>
+            <OperationPanel operation={operationNode.operation} showDescription={!doc.description} playground={playground} locale={contentLocale}>
               <Body />
             </OperationPanel>
           </ApiLayout>
@@ -259,7 +259,7 @@ export default async function DocsPage({ params }: PageProps) {
       <JsonLdScript data={jsonLd} />
       <DocLayout doc={doc} locale={contentLocale} navigation={nav}>
         {localeNotice}
-        {doc.manualApi ? <ManualApiEndpoint operation={doc.manualApi} playground={playground} /> : null}
+        {doc.manualApi ? <ManualApiEndpoint operation={doc.manualApi} playground={playground} locale={contentLocale} /> : null}
         <Content />
       </DocLayout>
     </>
