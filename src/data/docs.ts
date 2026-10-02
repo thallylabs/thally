@@ -228,6 +228,8 @@ export interface DocsJsonSeo {
   indexing?: 'navigable' | 'all'
   /** Joins a page title and the site name in `<title>`; unset keeps the `title | site` template. */
   titleSeparator?: string
+  /** "navigable" lists only pages shown in navigation in the sitemap, like Mintlify; default lists every indexable page. */
+  sitemap?: 'navigable'
 }
 
 export interface DocsJsonScript {
@@ -709,6 +711,11 @@ function getAllDocEntries(): Array<DocEntry> {
 /** Page IDs reachable from navigation: nav-group pages + standalone href tabs. */
 export function getNavigablePageIds(): Set<string> {
   return new Set(projectNavigationContract(docsConfig()).authoredPageIds.filter((id) => isDocPublished(id)))
+}
+
+/** Page IDs shown in visible navigation, so not hidden tabs, versions, groups or orphans. */
+export function getVisiblePageIds(): Set<string> {
+  return new Set(projectNavigationContract(docsConfig()).visiblePageIds.filter((id) => isDocPublished(id)))
 }
 
 // ---------------------------------------------------------------------------

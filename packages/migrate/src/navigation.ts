@@ -989,8 +989,9 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
     ...(projectedNavigation ? { navbar: projectedNavigation } : {}),
     ...(projectedFooter(config.footer) ? { footer: projectedFooter(config.footer) } : {}),
     ...(bodyFont || headingFont ? { fonts: { ...(bodyFont ? { body: bodyFont } : {}), ...(headingFont ? { heading: headingFont } : {}) } } : {}),
-    // Mintlify titles pages "<title> - <site name>" unless `og:title` overrides them.
-    seo: { ...(seo?.indexing === 'all' ? { indexing: 'all' as const } : {}), titleSeparator: ' - ' },
+    // Mintlify titles pages "<title> - <site name>" unless `og:title` overrides them,
+    // and its sitemap lists navigation pages only.
+    seo: { ...(seo?.indexing === 'all' ? { indexing: 'all' as const } : {}), titleSeparator: ' - ', sitemap: 'navigable' },
     ...(typeof feedback?.thumbsRating === 'boolean' ? { feedback: { thumbsRating: feedback.thumbsRating } } : {}),
   }
 }

@@ -86,7 +86,7 @@ export interface MigrationDocsConfig {
   navbar?: MigrationNavbarConfig
   favicon?: { light: string; dark?: string }
   footer?: MigrationFooterConfig
-  seo?: { indexing?: 'navigable' | 'all'; titleSeparator?: string }
+  seo?: { indexing?: 'navigable' | 'all'; titleSeparator?: string; sitemap?: 'navigable' }
   fonts?: {
     body?: { family: string; weight?: Array<string> }
     heading?: { family: string; weight?: Array<string> }

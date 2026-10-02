@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next'
-import { loadDocEntries } from '@/data/docs'
+import { getSeoConfig, getVisiblePageIds, loadDocEntries } from '@/data/docs'
 import { getAllApiOperationNodes } from '@/data/api-reference'
 
 import { getRequestOrigin } from '@/lib/cloud-link/request'
@@ -12,7 +12,8 @@ import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = await getRequestOrigin()
   const allEntries = await loadDocEntries()
-  const docEntries = allEntries.filter((doc) => !doc.hidden && !doc.noindex)
+  const visibleIds = getSeoConfig().sitemap === 'navigable' ? getVisiblePageIds() : null
+  const docEntries = allEntries.filter((doc) => !doc.hidden && !doc.noindex && (!visibleIds || visibleIds.has(doc.id)))
   const apiNodes = await getAllApiOperationNodes()
   const i18n = await getEffectiveI18nConfig()
 

@@ -36,6 +36,7 @@ describe('page social metadata', () => {
     expect(page).toContain('ogTitle: "Intro | Acme"')
     expect(page).toContain('ogDescription: "Short blurb"')
     expect(bundle.docsConfig.seo?.titleSeparator).toBe(' - ')
+    expect(bundle.docsConfig.seo?.sitemap).toBe('navigable')
   })
 })
 

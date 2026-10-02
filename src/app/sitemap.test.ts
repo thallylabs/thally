@@ -2,11 +2,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ translated: vi.fn() }))
+const docs = vi.hoisted(() => ({ sitemap: undefined as 'navigable' | undefined }))
 vi.mock('@/data/docs', () => ({
-  loadDocEntries: async () => [{
-    id: 'guide', slug: ['guide'], href: '/guide', hidden: false, noindex: false,
-    lastUpdated: '2026-01-01',
-  }],
+  loadDocEntries: async () => [
+    { id: 'guide', slug: ['guide'], href: '/guide', hidden: false, noindex: false, lastUpdated: '2026-01-01' },
+    { id: 'orphan', slug: ['orphan'], href: '/orphan', hidden: false, noindex: false },
+  ],
+  getSeoConfig: () => ({ sitemap: docs.sitemap }),
+  getVisiblePageIds: () => new Set(['guide']),
 }))
 vi.mock('@/data/api-reference', () => ({ getAllApiOperationNodes: async () => [] }))
 vi.mock('@/lib/cloud-link/request', () => ({ getRequestOrigin: async () => 'https://docs.example.com' }))
@@ -20,13 +23,27 @@ vi.mock('@/lib/i18n/translation-source', () => ({ getIndexableDocTranslation: mo
 
 import sitemap from './sitemap'
 
-beforeEach(() => mocks.translated.mockReset())
+beforeEach(() => {
+  mocks.translated.mockReset()
+  docs.sitemap = undefined
+})
 
 describe('static sitemap entries', () => {
   it('omits /changelog when the site has no changelog page, since that URL 404s', async () => {
     mocks.translated.mockResolvedValue(null)
     const urls = await sitemap()
     expect(urls.some((entry) => entry.url.endsWith('/changelog'))).toBe(false)
+  })
+})
+
+describe('navigable-only sitemap', () => {
+  it('lists every page by default and only navigation pages when docs.json asks for it', async () => {
+    mocks.translated.mockResolvedValue(null)
+    expect((await sitemap()).some((entry) => entry.url.endsWith('/orphan'))).toBe(true)
+    docs.sitemap = 'navigable'
+    const urls = await sitemap()
+    expect(urls.some((entry) => entry.url.endsWith('/orphan'))).toBe(false)
+    expect(urls.some((entry) => entry.url.endsWith('/guide'))).toBe(true)
   })
 })
 
