@@ -378,3 +378,22 @@ Fine-tune spacing and widths in `src/config/layout.ts`:
 - Content max-width
 - Padding and gaps
 - Typography scale for meta text
+
+## Brand colors and page menu in `docs.json`
+
+`docs.json` can set brand colors without editing `site.ts`:
+
+```json
+"colors": {
+  "light": { "primary": "#16a34a", "accent": "#16a34a" },
+  "dark": { "primary": "#4ade80", "accent": "#4ade80" }
+}
+```
+
+Use six-digit hex values. `primary` fills buttons; `accent` colors links and highlights.
+
+`contextual.options` sets the entries of the page menu, in display order. Supported entries are `copy`, `view`, `chatgpt`, `claude` and `perplexity`:
+
+```json
+"contextual": { "options": ["copy", "view", "chatgpt"] }
+```

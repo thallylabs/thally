@@ -198,3 +198,11 @@ Set `hidden: true` on a group or tab to exclude it from the sidebar while keepin
 Hidden pages remain reachable by direct URL, but they do not appear in
 navigation or sitemaps. See [Control search and page visibility](/guides/seo-and-visibility)
 for more indexing controls.
+
+## Hiding a version
+
+In `navigation.versions`, set `hidden: true` on an entry to remove it from the version switcher while keeping its pages reachable by URL. The switcher stays visible as long as one visible entry is left:
+
+```json
+{ "label": "v1", "prefix": "v1", "href": "/v1/introduction", "hidden": true }
+```

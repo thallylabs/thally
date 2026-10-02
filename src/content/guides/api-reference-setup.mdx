@@ -213,3 +213,14 @@ and compare its parameters and schemas with the source specification. Then run:
 npx thally check
 npm run build
 ```
+
+## Playground settings in `docs.json`
+
+```json
+"api": { "playground": { "display": "interactive" } },
+"apiPlayground": { "timeoutMs": 60000 }
+```
+
+- `api.playground.display` is `"interactive"` (default, shows Try it), `"simple"` (request samples only) or `"none"` (no playground). `"auth"` is not supported and behaves as `"simple"`. A page can override it with `playground:` frontmatter.
+- `apiPlayground.timeoutMs` is how long the Try it relay waits for your API, in milliseconds. The default is 60000, clamped to 1000 through 120000.
+- Try it sends header credentials only. An API key declared in a query string or cookie is not sent from the playground; readers can copy the code sample instead.
