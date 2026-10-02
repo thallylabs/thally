@@ -565,10 +565,22 @@ function deriveKeywords(title: string, slug: Array<string>): Array<string> {
   return Array.from(words).slice(0, 12)
 }
 
+/**
+ * A migrated Mintlify site redirects its root to `/introduction`. Link that page
+ * by the URL it is served at instead of the redirecting alias, so no click costs a hop.
+ */
+function servedRootHref(href: string): string {
+  const root = href.replace(/\/$/, '') || '/'
+  const served = `${root === '/' ? '' : root}/introduction`
+  return docsConfig().redirects?.some((redirect) => (redirect.source.replace(/\/$/, '') || '/') === root && redirect.destination === served)
+    ? served
+    : href
+}
+
 function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: FrontmatterData): DocEntry {
   const fm = indexedFrontmatter ?? readFrontmatter(pageId)
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
-  const href = slug.length ? `/${slug.join('/')}` : '/'
+  const href = slug.length ? `/${slug.join('/')}` : servedRootHref('/')
   const title = fm.title ?? deriveTitleFromSlug(pageId)
   const api = pageApiMetadata(fm)
   return {
@@ -841,7 +853,7 @@ function resolveNavItem(
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
   const baseHref = slug.length ? `/${slug.join('/')}` : '/'
   const operation = pageApiMetadata(fm).openapi
-  const href = locale ? (baseHref === '/' ? `/${locale}` : `/${locale}${baseHref}`) : baseHref
+  const href = servedRootHref(locale ? (baseHref === '/' ? `/${locale}` : `/${locale}${baseHref}`) : baseHref)
   return {
     id: slugifyId(pageId) || 'introduction',
     title: fm.navTitle ?? fm.title ?? deriveTitleFromSlug(pageId),
@@ -1094,8 +1106,8 @@ export interface NavContext {
 export function getNavContext(pageId: string, locale?: string): NavContext {
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
   const baseHref = slug.length ? `/${slug.join('/')}` : '/'
-  const href = locale && locale !== docsConfig().i18n?.defaultLocale
-    ? `/${locale}${baseHref === '/' ? '' : baseHref}` : baseHref
+  const href = servedRootHref(locale && locale !== docsConfig().i18n?.defaultLocale
+    ? `/${locale}${baseHref === '/' ? '' : baseHref}` : baseHref)
 
   const { prev, next } = getPrevNextLinks(href)
   const breadcrumb = getBreadcrumbs(href)
