@@ -7,12 +7,18 @@ import { Readable } from 'node:stream'
 import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getApiOperationByKey } from '@/data/api-reference'
+import { getApiPlaygroundTimeoutMs } from '@/data/docs'
 import { getManualApiOperation } from '@/data/manual-api'
 import { buildManualOperation } from '@/lib/openapi/manual-operation'
 import { POST } from './route'
 
 vi.mock('@/data/api-reference', () => ({
   getApiOperationByKey: vi.fn(),
+}))
+
+vi.mock('@/data/docs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/data/docs')>()),
+  getApiPlaygroundTimeoutMs: vi.fn(() => 60_000),
 }))
 
 vi.mock('@/data/manual-api', () => ({
@@ -230,6 +236,62 @@ describe('POST /api/try-it', () => {
     const big = Buffer.alloc(256 * 1024 + 1).toString('base64')
     const response = await POST(request(allowedPayload({ method: 'POST', bodyBase64: big })))
     expect(response.status).toBe(413)
+  })
+
+  describe('long calls and the reader key', () => {
+    const hang = () =>
+      vi.mocked(httpsRequest).mockImplementationOnce(((options: { signal: AbortSignal }) => {
+        const client = new EventEmitter() as EventEmitter & { write: () => void; end: () => void }
+        client.write = () => {}
+        client.end = () => {}
+        options.signal.addEventListener('abort', () => client.emit('error', new Error('aborted')))
+        return client as never
+      }) as never)
+
+    afterEach(() => {
+      vi.useRealTimers()
+      vi.mocked(getApiPlaygroundTimeoutMs).mockReturnValue(60_000)
+    })
+
+    async function settle(ms: number) {
+      let result: Response | undefined
+      const pending = POST(request(allowedPayload())).then((response) => { result = response })
+      await vi.advanceTimersByTimeAsync(ms)
+      return { get result() { return result }, pending }
+    }
+
+    it('waits past the old 10 s limit and gives up at 60 s by default', async () => {
+      vi.useFakeTimers()
+      hang()
+      const early = await settle(11_000)
+      expect(early.result).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(49_000)
+      await early.pending
+      expect(early.result?.status).toBe(504)
+    })
+
+    it('uses the configured timeout', async () => {
+      vi.useFakeTimers()
+      vi.mocked(getApiPlaygroundTimeoutMs).mockReturnValue(2_000)
+      hang()
+      const late = await settle(2_100)
+      await late.pending
+      expect(late.result?.status).toBe(504)
+    })
+
+    it('never logs the Authorization header, on success or failure, and forbids caching', async () => {
+      const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map((method) => vi.spyOn(console, method).mockImplementation(() => {}))
+      const key = 'Bearer fc-secret-key-123'
+      const ok = await POST(request(allowedPayload({ headers: { Authorization: key } })))
+      vi.mocked(httpsRequest).mockImplementationOnce((() => { throw new Error(`boom ${key}`) }) as never)
+      const failed = await POST(request(allowedPayload({ headers: { Authorization: key } })))
+      const bad = await POST(request(allowedPayload({ url: 'https://evil.example.com/x', headers: { Authorization: key } })))
+      expect([ok.status, failed.status, bad.status]).toEqual([200, 502, 403])
+      for (const response of [ok, failed, bad]) expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(JSON.stringify(spies.flatMap((spy) => spy.mock.calls))).not.toContain('fc-secret-key')
+      expect(await failed.text()).not.toContain('fc-secret-key')
+      spies.forEach((spy) => spy.mockRestore())
+    })
   })
 
   it('rejects responses above the declared byte budget', async () => {

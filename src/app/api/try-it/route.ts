@@ -10,6 +10,7 @@ import { lookup } from 'node:dns/promises'
 import ipaddr from 'ipaddr.js'
 import { NextResponse, type NextRequest } from 'next/server'
 import { getApiOperationByKey } from '@/data/api-reference'
+import { getApiPlaygroundTimeoutMs } from '@/data/docs'
 import type { NormalizedOperation } from '@/lib/openapi/types'
 import { readBoundedJson } from '@/lib/http/bounded-json'
 
@@ -18,7 +19,6 @@ export const runtime = 'nodejs'
 const MAX_ENVELOPE_BYTES = 384 * 1024
 const MAX_UPSTREAM_BODY_BYTES = 256 * 1024
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
-const REQUEST_TIMEOUT_MS = 10_000
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
 const BLOCKED_HEADERS = new Set([
   'cf-connecting-ip',
@@ -69,8 +69,11 @@ interface TryItPayload {
   bodyBase64?: unknown
 }
 
+// The relay carries the reader's API key and the API's answer: neither may be cached by a browser, CDN or proxy.
+const NO_STORE = { 'Cache-Control': 'no-store' }
+
 function jsonError(error: string, status: number) {
-  return NextResponse.json({ error }, { status })
+  return NextResponse.json({ error }, { status, headers: NO_STORE })
 }
 
 function escapeRegex(value: string): string {
@@ -331,7 +334,7 @@ export async function POST(request: NextRequest) {
   if (!headers) return jsonError('Invalid request headers', 400)
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), getApiPlaygroundTimeoutMs())
   const startedAt = Date.now()
   try {
     // Cloudflare's `global_fetch_strictly_public` compatibility flag performs
@@ -360,7 +363,7 @@ export async function POST(request: NextRequest) {
       headers: Object.fromEntries(response.headers.entries()),
       body: textBody,
       duration: Date.now() - startedAt,
-    })
+    }, { headers: NO_STORE })
   } catch (error) {
     if (error instanceof Error && error.message === 'private_target') {
       return jsonError('Private or unsafe targets are not allowed', 403)

@@ -333,6 +333,8 @@ interface DocsJsonConfig {
   /** Credentials applied to the API Try It playground from OpenAPI security scheme names. */
   apiPlayground?: {
     credentials?: Record<string, string>
+    /** How long the Try It relay waits for the API, in milliseconds. Default 60000, clamped to 1000-120000. */
+    timeoutMs?: number
   }
   /** Built-in analytics dashboard at /admin (requires THALLY_ADMIN_PASSWORD env). */
   admin?: {
@@ -1125,6 +1127,15 @@ export function getApiMdxConfig(): ApiMdxConfig {
 /** Raw docs.json `api.playground.display`; resolve it with `resolvePlaygroundDisplay`. */
 export function getApiPlaygroundDisplay(): unknown {
   return docsConfig().api?.playground?.display
+}
+
+export const TRY_IT_DEFAULT_TIMEOUT_MS = 60_000
+
+export function getApiPlaygroundTimeoutMs(): number {
+  const configured = docsConfig().apiPlayground?.timeoutMs
+  return typeof configured === 'number' && Number.isFinite(configured)
+    ? Math.min(120_000, Math.max(1_000, Math.round(configured)))
+    : TRY_IT_DEFAULT_TIMEOUT_MS
 }
 
 export function getApiPlaygroundCredentials(): Record<string, string> {
