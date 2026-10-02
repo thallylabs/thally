@@ -17,7 +17,7 @@ vi.mock('@thallylabs/core/registry', () => ({
 }))
 vi.mock('@/data/docs', () => ({
   getDocEntries: () => [],
-  getHiddenVersionPageIds: () => new Set(['v1/guide']),
+  getCurrentVersionPageIds: () => new Set(['guide', 'draft']),
   loadDocEntries: async () => [
     { id: 'guide', slug: ['guide'], href: '/guide', title: 'Guide', description: 'Source', keywords: [] },
     { id: 'draft', slug: ['draft'], href: '/draft', title: 'Draft', description: 'Draft', keywords: [], noindex: true },

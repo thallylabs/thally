@@ -739,14 +739,13 @@ export function getVisiblePageIds(): Set<string> {
   return new Set(projectNavigationContract(docsConfig()).visiblePageIds.filter((id) => isDocPublished(id)))
 }
 
-/** Page IDs that exist only in hidden, non-default version tabs; search leaves them out so current pages rank. */
-export function getHiddenVersionPageIds(): Set<string> {
-  const config = docsConfig()
-  const hiddenVersionTabs = config.tabs.filter((tab) => tab.hidden && tab.version)
-  const hidden = new Set(projectNavigationContract({ ...config, tabs: hiddenVersionTabs }).authoredPageIds)
-  const current = projectNavigationContract({ ...config, tabs: config.tabs.filter((tab) => !hiddenVersionTabs.includes(tab)) }).authoredPageIds
-  for (const id of current) hidden.delete(id)
-  return hidden
+/**
+ * Page IDs search may return on a versioned site: the visible (current) version's navigation.
+ * Older versions stay reachable by URL but must not outrank current pages. Null when the site has
+ * no versions, where every indexable page stays searchable.
+ */
+export function getCurrentVersionPageIds(): Set<string> | null {
+  return docsConfig().navigation?.versions?.length ? getVisiblePageIds() : null
 }
 
 // ---------------------------------------------------------------------------

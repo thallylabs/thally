@@ -18,29 +18,29 @@ import {
   registerContentDocumentSource,
   registerDocEntriesSource,
 } from '@thallylabs/core/registry'
-import { getDocEntries, getHiddenVersionPageIds, loadDocEntries } from '@/data/docs'
+import { getDocEntries, getCurrentVersionPageIds, loadDocEntries } from '@/data/docs'
 import { getContentDocument, loadContentDocument } from '@/lib/content/document'
 import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 import { localizedPath } from '@/lib/i18n/config'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 
-/** Hidden-version pages (v1, v0) stay reachable by URL but never outrank the current docs in search. */
-const isSearchable = (entry: { id: string; noindex?: boolean; hidden?: boolean }, hiddenVersionIds: Set<string>) =>
-  !entry.noindex && !entry.hidden && !hiddenVersionIds.has(entry.id)
+/** On a versioned site, older versions (v1, v0) stay reachable by URL but never outrank the current docs in search. */
+const isSearchable = (entry: { id: string; noindex?: boolean; hidden?: boolean }, currentVersionIds: Set<string> | null) =>
+  !entry.noindex && !entry.hidden && (!currentVersionIds || currentVersionIds.has(entry.id))
 
 registerDocEntriesSource(() => {
-  const hiddenVersionIds = getHiddenVersionPageIds()
-  return getDocEntries().filter((entry) => isSearchable(entry, hiddenVersionIds))
+  const currentVersionIds = getCurrentVersionPageIds()
+  return getDocEntries().filter((entry) => isSearchable(entry, currentVersionIds))
 })
 registerContentDocumentSource((pageId, locale) => getContentDocument(pageId, locale))
 registerAsyncDocEntriesSource(async (locale) => {
   const entries = await loadDocEntries()
   const i18n = await getEffectiveI18nConfig()
-  const hiddenVersionIds = getHiddenVersionPageIds()
-  if (!locale || locale === i18n.defaultLocale) return entries.filter((entry) => isSearchable(entry, hiddenVersionIds))
+  const currentVersionIds = getCurrentVersionPageIds()
+  if (!locale || locale === i18n.defaultLocale) return entries.filter((entry) => isSearchable(entry, currentVersionIds))
   if (!i18n.locales.some((item) => item.code === locale)) return []
   const translated = await Promise.all(entries.map(async (entry) => {
-    if (!isSearchable(entry, hiddenVersionIds)) return null
+    if (!isSearchable(entry, currentVersionIds)) return null
     const metadata = await getIndexableDocTranslation(entry.slug, locale)
     if (!metadata) return null
     return {
