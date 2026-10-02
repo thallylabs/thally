@@ -225,5 +225,11 @@ export function buildCodeSamples(request: SampleRequest, authored: Array<CodeSam
   const generated = request.url
     ? SAMPLE_LANGUAGES.filter((label) => !taken.has(sampleKey(label)) && (!request.form || label === 'cURL')).map((label) => ({ label, source: generators[label](shown) }))
     : []
-  return [...authored, ...generated]
+  // Two authored samples may share a label; the dropdown selects by label, so number the repeats.
+  const seen = new Map<string, number>()
+  return [...authored, ...generated].map((sample) => {
+    const count = (seen.get(sample.label) ?? 0) + 1
+    seen.set(sample.label, count)
+    return count === 1 ? sample : { ...sample, label: `${sample.label} (${count})` }
+  })
 }

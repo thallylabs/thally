@@ -465,6 +465,12 @@ describe('buildCodeSamples', () => {
       ])
     })
 
+    it('numbers authored samples that share a label so each stays selectable', () => {
+      const labels = buildCodeSamples(post, [{ label: 'Custom', source: 'a' }, { label: 'Custom', source: 'b' }]).map((sample) => sample.label)
+      expect(labels.slice(0, 2)).toEqual(['Custom', 'Custom (2)'])
+      expect(new Set(labels).size).toBe(labels.length)
+    })
+
     it('puts authored samples first and replaces the generated sample for the same language', () => {
       const samples = buildCodeSamples(post, operationFrom(spec('x-codeSamples')).codeSamples)
       expect(samples.map((s) => s.label)).toEqual(['Python', 'rust', 'cURL', 'JavaScript', 'PHP', 'Go', 'Java', 'Ruby'])
