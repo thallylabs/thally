@@ -185,6 +185,27 @@ describe('linked source anchors', () => {
     expect(bundle.pages.find((page) => page.id === 'settings')?.body).toContain('<a id="api-params"></a>\n## APIParams')
   })
 
+  it('keeps a Mintlify page\'s explicit heading id on the heading when it also imports a component', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-heading-id-'))
+    mkdirSync(join(root, 'snippets'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['es/intro'] },
+    }))
+    writeFileSync(join(root, 'snippets/widget.jsx'), 'export const Widget = () => <div>Hi</div>\n')
+    mkdirSync(join(root, 'es'))
+    writeFileSync(join(root, 'es/intro.mdx'), [
+      '---', 'title: Intro', '---', '',
+      'import { Widget } from "/snippets/widget.jsx";', '',
+      '<Widget />', '',
+      '## Primeros pasos {#get-started}', '',
+      '[Ir](#get-started)',
+    ].join('\n'))
+    const body = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).pages.find((page) => page.id === 'es/intro')?.body
+    expect(body).toContain('## Primeros pasos {/* #get-started */}')
+    expect(body).not.toContain('<a id="get-started">')
+  })
+
   it('maps case-different fragments onto numbered ids of repeated headings', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repeated-headings-'))
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

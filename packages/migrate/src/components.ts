@@ -989,7 +989,9 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // function's own parse below, or that parse throws first and this
     // whole page's import analysis is skipped instead of just this one
     // page's expression.
-    const content = normalizeExplicitHeadingIds(normalizeIndentedFences(normalizeHtmlComments(parsedFrontmatter)))
+    // A `{/* #id */}` comment already on a heading is a Mintlify heading id and
+    // is valid MDX, so it is kept rather than rewritten to an anchor.
+    const content = normalizeExplicitHeadingIds(normalizeIndentedFences(normalizeHtmlComments(parsedFrontmatter)), undefined, { keepIdComments: true })
     let tree: MdxNode
     try {
       tree = parser.parse(content) as MdxNode

@@ -184,7 +184,7 @@ const HTML_ID = /^[^\s"'<>`{}&]+$/u
 export function normalizeExplicitHeadingIds(
   raw: string,
   warn?: (message: string) => void,
-  options: { headingMarkers?: boolean } = {},
+  options: { headingMarkers?: boolean; keepIdComments?: boolean } = {},
 ): string {
   const { front, body } = splitFrontmatterBlock(raw)
   return front + replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
@@ -213,7 +213,7 @@ export function normalizeExplicitHeadingIds(
     }
     // Docusaurus' heading plugin also accepts a trailing MDX comment.
     // (Mintlify output uses that same comment as its marker, so it stays.)
-    if (!options.headingMarkers && trimmed.endsWith('*/}')) {
+    if (!options.headingMarkers && !options.keepIdComments && trimmed.endsWith('*/}')) {
       const marker = trimmed.lastIndexOf(' {/*')
       if (marker >= 0) {
         const comment = trimmed.slice(marker + 4, -3).trim()
