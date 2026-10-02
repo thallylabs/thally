@@ -255,6 +255,16 @@ function thallyHeadingSlug(text: string): string {
   return text.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '-').replace(/(^-|-$)/g, '')
 }
 
+/** Mintlify typesets straight quotes in heading text, and its ids keep the typographic characters. */
+function typesetQuotes(text: string): string {
+  return text.split(/(`[^`]*`|<[^>]*>|\]\([^)]*\))/).map((part, index) => {
+    if (index % 2) return part
+    return part
+      .replace(/(^|[\s([{\u2014\u2013])"/g, '$1\u201c').replace(/"/g, '\u201d')
+      .replace(/(^|[\s([{\u2014\u2013\u201c])'(?=\S)/g, '$1\u2018').replace(/'/g, '\u2019')
+  }).join('')
+}
+
 /** Visible text of a heading's inline Markdown. */
 function plainHeadingText(source: string): string {
   return source
@@ -270,6 +280,7 @@ function plainHeadingText(source: string): string {
  * Give each Mintlify heading the id Mintlify serves, so in-page and cross-page
  * `#anchor` links from the source still land. Only headings whose id differs
  * from Thally's own slug get a marker, which leaves every other anchor alone.
+ * Straight quotes in heading text are typeset as Mintlify does.
  */
 export function markMintlifyHeadings(body: string): string {
   let fence: string | undefined
@@ -285,10 +296,12 @@ export function markMintlifyHeadings(body: string): string {
     const heading = line.match(/^( {0,3}#{2,6}[ \t]+)(.+?)(?:[ \t]+#+)?[ \t]*$/)
     if (!heading) return line
     // An explicit `{#id}` is already a marker and wins over the computed id.
-    if (/\{\/\*[ \t]*#\S+[ \t]*\*\/\}$/.test(heading[2])) return line
-    const text = plainHeadingText(heading[2])
+    const explicit = heading[2].match(/^(.*?)([ \t]*\{\/\*[ \t]*#\S+[ \t]*\*\/\})$/)
+    const source = typesetQuotes(explicit ? explicit[1] : heading[2])
+    if (explicit) return `${heading[1]}${source}${explicit[2]}`
+    const text = plainHeadingText(source)
     const id = mintlifyHeadingSlug(text)
-    return id && id !== thallyHeadingSlug(text) ? `${heading[1]}${heading[2]} ${headingIdMarker(id)}` : line
+    return `${heading[1]}${source}${id && id !== thallyHeadingSlug(text) ? ` ${headingIdMarker(id)}` : ''}`
   }).join('\n')
 }
 

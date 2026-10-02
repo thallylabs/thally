@@ -683,6 +683,19 @@ describe('Mintlify heading ids', () => {
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
 
+  it('typesets straight quotes in heading text and ids as Mintlify does', () => {
+    const output = normalizeMdx([
+      "## What's Not Included",
+      '### Example: "Find the founders" and `it\'s`',
+      "## Les cl\u00e9s d'API {#api-keys}",
+    ].join('\n'), 'mintlify')
+    expect(output).toBe([
+      '## What\u2019s Not Included {/* #what\u2019s-not-included */}',
+      '### Example: \u201cFind the founders\u201d and `it\'s` {/* #example-\u201cfind-the-founders\u201d-and-its */}',
+      '## Les cl\u00e9s d\u2019API {/* #api-keys */}',
+    ].join('\n'))
+  })
+
   it('leaves other platforms alone', () => {
     expect(normalizeMdx('## Scrape + Interact', 'docusaurus')).toBe('## Scrape + Interact')
   })
