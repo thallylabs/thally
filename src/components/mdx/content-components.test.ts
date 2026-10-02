@@ -64,6 +64,14 @@ describe('standalone rich-content primitives', () => {
     expect(renderToStaticMarkup(createElement(Icon, { icon: '../etc' }))).toBe('')
   })
 
+  it('maps Font Awesome Pro-only names to assets that exist instead of a blank mask', () => {
+    const browser = renderToStaticMarkup(createElement(Icon, { icon: 'browser' }))
+    expect(browser).toContain('--thally-icon-fontawesome:url(&quot;https://cdn.jsdelivr.net/npm/lucide-static@')
+    expect(browser).not.toContain('fontawesome-free@7.3.1/svgs/solid/browser.svg')
+    const read = renderToStaticMarkup(createElement(Icon, { icon: 'barcode-read' }))
+    expect(read).toContain('fontawesome-free@7.3.1/svgs/solid/barcode.svg')
+  })
+
   it('renders brand marks inline under every icon library', () => {
     for (const name of ['python', 'node', 'golang', 'java', 'rust', 'php', 'x-twitter', 'fa-brands fa-github']) {
       const markup = renderToStaticMarkup(createElement(Icon, { icon: name }))
