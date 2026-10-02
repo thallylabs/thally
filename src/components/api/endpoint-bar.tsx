@@ -1,11 +1,25 @@
 'use client'
 
+import { CopyButton } from '@/components/api/copy-button'
 import { getMethodToken } from '@/components/api/tokens'
 import type { NormalizedOperation } from '@/lib/openapi/types'
+import type { PlaygroundDisplay } from '@/lib/openapi/playground-display'
 import { cn } from '@/lib/utils'
 
-/** Method badge, path, and the Try it button shared by every API page. */
-export function EndpointBar({ operation, onTryIt }: { operation: NormalizedOperation; onTryIt: () => void }) {
+/**
+ * Method badge, path, and the Try it button shared by every API page.
+ * `simple` shows a copyable endpoint with no playground; `none` shows nothing.
+ */
+export function EndpointBar({
+  operation,
+  onTryIt,
+  display = 'interactive',
+}: {
+  operation: NormalizedOperation
+  onTryIt: () => void
+  display?: PlaygroundDisplay
+}) {
+  if (display === 'none') return null
   const methodToken = getMethodToken(operation.method)
   return (
     <div className="flex flex-wrap items-center gap-4 border-y border-border py-3">
@@ -13,7 +27,12 @@ export function EndpointBar({ operation, onTryIt }: { operation: NormalizedOpera
       <code className="min-w-0 flex-1 !whitespace-normal text-sm font-semibold text-foreground break-all">
         {operation.path}
       </code>
-      {operation.isWebhook ? null : (
+      {operation.isWebhook ? null : display === 'simple' ? (
+        <CopyButton
+          value={operation.path}
+          className="flex items-center gap-1.5 rounded-[9px] border border-border px-3 py-2 text-xs text-foreground/70 transition hover:bg-muted hover:text-foreground"
+        />
+      ) : (
         <button
           type="button"
           onClick={onTryIt}

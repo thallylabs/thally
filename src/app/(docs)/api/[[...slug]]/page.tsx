@@ -2,11 +2,12 @@ import type { Metadata } from 'next'
 import { notFound, redirect } from 'next/navigation'
 import { ApiLayout } from '@/components/api/api-layout'
 import { OperationPanel } from '@/components/api/operation-panel'
+import { resolvePlaygroundDisplay } from '@/lib/openapi/playground-display'
 import { getSiteUrl } from '@/lib/site-url'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { apiReferenceConfig, getOpenApiSpecUrl } from '@/config/api-reference'
 import { getAllApiOperationNodes, getApiOperationBySlug, getApiOperationNodes } from '@/data/api-reference'
-import { getBreadcrumbs, getDocEntries, loadDocEntries } from '@/data/docs'
+import { getApiPlaygroundDisplay, getBreadcrumbs, getDocEntries, loadDocEntries } from '@/data/docs'
 import { isRemoteContentSource } from '@/lib/content-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { buildApiOperationJsonLd } from '@/lib/json-ld'
@@ -125,7 +126,7 @@ export default async function ApiReferencePage({ params }: PageProps) {
           </p>
         ) : null}
         <JsonLdScript data={jsonLd} />
-        <OperationPanel operation={node.operation} />
+        <OperationPanel operation={node.operation} playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
       </ApiLayout>
     )
   }

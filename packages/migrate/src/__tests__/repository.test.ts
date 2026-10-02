@@ -910,6 +910,27 @@ describe('Mintlify repository migration', () => {
       expect(String(rendered?.content)).toContain('authMethod: "bearer"')
     })
 
+    it('maps api.playground.display and the page-level playground frontmatter', () => {
+      const bundle = apiFixture(
+        {
+          ...pages,
+          quiet: '---\ntitle: Quiet\nopenapi: "POST /things"\nplayground: none\n---\n',
+          gated: '---\ntitle: Gated\nopenapi: "POST /things"\nplayground: auth\n---\n',
+          odd: '---\ntitle: Odd\nopenapi: "POST /things"\nplayground: fancy\n---\n',
+        },
+        { ...twoSpecNav, api: { mdx: twoSpecNav.api.mdx, playground: { display: 'simple' } } },
+      )
+      expect(bundle.docsConfig.api).toEqual({ mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } }, playground: { display: 'simple' } })
+      const page = (id: string) => bundle.pages.find((candidate) => candidate.id === id)
+      expect(page('quiet')?.playground).toBe('none')
+      // No viewer sign-in exists here, so Mintlify's "auth" shows no playground rather than showing it to everyone.
+      expect(page('gated')?.playground).toBe('simple')
+      expect(page('odd')?.playground).toBeUndefined()
+      const rendered = renderMigrationFiles(bundle).find((file) => file.path.endsWith('quiet.mdx'))
+      expect(String(rendered?.content)).toContain('playground: "none"')
+      expect(bundle.warnings.map((w) => w.message).join('\n')).toContain('playground')
+    })
+
     it('drops invalid api frontmatter and api.mdx values with warnings', () => {
       const bundle = apiFixture(pages, {
         ...twoSpecNav,

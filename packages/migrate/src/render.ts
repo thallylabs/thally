@@ -31,6 +31,7 @@ function renderPage(bundle: MigrationBundle, page: MigrationBundle['pages'][numb
     page.openapi ? `openapi: ${yamlString(page.openapi)}` : null,
     page.api ? `api: ${yamlString(page.api)}` : null,
     page.authMethod ? `authMethod: ${yamlString(page.authMethod)}` : null,
+    page.playground ? `playground: ${yamlString(page.playground)}` : null,
     bundle.sourceKind === 'url' ? `source: ${yamlString(page.source)}` : null,
     '---',
     '',

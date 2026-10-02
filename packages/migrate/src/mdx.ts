@@ -10,6 +10,7 @@ import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 
 import { isThallyBuiltinComponent } from './builtin-components.js'
+import { playgroundDisplay } from './mintlify-extras.js'
 import { parseFrontmatter } from './frontmatter.js'
 import type { MigrationPage, MigrationPlatform } from './types.js'
 
@@ -2007,8 +2008,12 @@ const AUTH_METHODS = new Set(['bearer', 'basic', 'key', 'none'])
 function apiFrontmatter(
   data: Record<string, unknown>,
   warn?: (message: string) => void,
-): Pick<MigrationPage, 'api' | 'authMethod'> {
-  const result: Pick<MigrationPage, 'api' | 'authMethod'> = {}
+): Pick<MigrationPage, 'api' | 'authMethod' | 'playground'> {
+  const result: Pick<MigrationPage, 'api' | 'authMethod' | 'playground'> = {}
+  if (data.playground !== undefined && data.playground !== null) {
+    const display = playgroundDisplay(data.playground, 'The page\'s "playground" frontmatter', warn)
+    if (display) result.playground = display
+  }
   if (data.api !== undefined && data.api !== null) {
     if (typeof data.api === 'string' && data.api.trim()) result.api = data.api.trim()
     else warn?.('The page\'s "api" frontmatter is not a "METHOD url-or-path" string and was dropped.')

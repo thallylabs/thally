@@ -24,6 +24,10 @@ export interface TryItController {
   sampleRequest: PreparedRequest
   response: ResponsePayload | { error: string } | null
   sendRequest: () => Promise<void>
+  /** Send, but a DELETE first asks for a second click instead of a native confirm. */
+  requestSend: () => void
+  confirmingSend: boolean
+  cancelSend: () => void
   isSending: boolean
   canSendBody: boolean
 }
@@ -55,6 +59,7 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
   )
   const [response, setResponse] = useState<ResponsePayload | { error: string } | null>(null)
   const [isSending, setIsSending] = useState(false)
+  const [confirmingSend, setConfirmingSend] = useState(false)
 
   const canSendBody = !['GET', 'HEAD'].includes(operation.method.toUpperCase())
   const isServerConfigured = Boolean(serverUrl)
@@ -146,6 +151,16 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
     }
   }, [operation.manualLocale, operation.manualPage, operation.path, operation.specId, preparedRequest])
 
+  const requestSend = useCallback(() => {
+    if (operation.method.toUpperCase() === 'DELETE' && !confirmingSend) {
+      setConfirmingSend(true)
+      return
+    }
+    setConfirmingSend(false)
+    void sendRequest()
+  }, [confirmingSend, operation.method, sendRequest])
+  const cancelSend = useCallback(() => setConfirmingSend(false), [])
+
   return {
     operation,
     serverUrl,
@@ -162,6 +177,9 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
     sampleRequest,
     response,
     sendRequest,
+    requestSend,
+    confirmingSend,
+    cancelSend,
     isSending,
     canSendBody,
   }

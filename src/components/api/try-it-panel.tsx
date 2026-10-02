@@ -13,12 +13,11 @@ interface TryItPanelProps {
 }
 
 export function TryItPanel({ controller, variant = 'inline', showHeading = true }: TryItPanelProps) {
-  const { operation, serverUrl, setServerUrl, pathParams, queryParams, headerParams, bodyValue, setBodyValue, authValues, setAuthValue, setParamValue, preparedRequest, sendRequest, isSending, canSendBody, response } =
+  const { operation, serverUrl, setServerUrl, pathParams, queryParams, headerParams, bodyValue, setBodyValue, authValues, setAuthValue, setParamValue, preparedRequest, isSending, canSendBody, response } =
     controller
-  const queryPairs = Object.entries(queryParams ?? {})
   const containerStyles =
     variant === 'dialog'
-      ? 'space-y-4 rounded-[11px] border border-border bg-background p-4'
+      ? 'space-y-4'
       : 'space-y-4 rounded-[11px] border border-border bg-background p-4'
 
   const heading = (
@@ -46,13 +45,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (
-      operation.method === 'DELETE' &&
-      !window.confirm('Send this DELETE request? This may permanently remove data.')
-    ) {
-      return
-    }
-    void sendRequest()
+    controller.requestSend()
   }
 
   return (
@@ -85,63 +78,9 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
             </div>
           </div>
         ) : null}
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">Path parameters</p>
-          {Object.keys(pathParams).length ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {Object.entries(pathParams).map(([key, value]) => (
-                <label key={key} className="space-y-1 text-sm text-foreground/70">
-                  <span className="font-mono text-xs uppercase text-foreground/60">{key}</span>
-                  <input
-                    value={value}
-                    onChange={(event) => setParamValue('path', key, event.target.value)}
-                    className="w-full rounded-[9px] border border-border bg-background px-3 py-2 text-sm"
-                  />
-                </label>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-foreground/50">No path parameters.</p>
-          )}
-        </div>
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">Query parameters</p>
-          {queryPairs.length ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {queryPairs.map(([key, value]) => (
-                <label key={key} className="space-y-1 text-sm text-foreground/70">
-                  <span className="font-mono text-xs uppercase text-foreground/60">{key}</span>
-                  <input
-                    value={value}
-                    onChange={(event) => setParamValue('query', key, event.target.value)}
-                    className="w-full rounded-[9px] border border-border bg-background px-3 py-2 text-sm"
-                  />
-                </label>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-foreground/50">No query parameters.</p>
-          )}
-        </div>
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">Headers</p>
-          {Object.keys(headerParams).length ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {Object.entries(headerParams).map(([key, value]) => (
-                <label key={key} className="space-y-1 text-sm text-foreground/70">
-                  <span className="font-mono text-xs uppercase text-foreground/60">{key}</span>
-                  <input
-                    value={value}
-                    onChange={(event) => setParamValue('header', key, event.target.value)}
-                    className="w-full rounded-[9px] border border-border bg-background px-3 py-2 text-sm"
-                  />
-                </label>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-foreground/50">No header parameters declared.</p>
-          )}
-        </div>
+        <ParamGroup title="Path parameters" values={pathParams} onChange={(key, value) => setParamValue('path', key, value)} />
+        <ParamGroup title="Query parameters" values={queryParams} onChange={(key, value) => setParamValue('query', key, value)} />
+        <ParamGroup title="Headers" values={headerParams} onChange={(key, value) => setParamValue('header', key, value)} />
         {canSendBody ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">
@@ -172,8 +111,31 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
           </div>
         ) : null}
       </form>
-      <TryItResponse response={response} />
+      {variant === 'dialog' ? (response && 'error' in response ? <TryItResponse response={response} /> : null) : <TryItResponse response={response} />}
     </section>
+  )
+}
+
+/** A labelled group of text inputs; a group with no fields is not shown at all. */
+function ParamGroup({ title, values, onChange }: { title: string; values: Record<string, string>; onChange: (key: string, value: string) => void }) {
+  const entries = Object.entries(values ?? {})
+  if (!entries.length) return null
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">{title}</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {entries.map(([key, value]) => (
+          <label key={key} className="space-y-1 text-sm text-foreground/70">
+            <span className="font-mono text-xs uppercase text-foreground/60">{key}</span>
+            <input
+              value={value}
+              onChange={(event) => onChange(key, event.target.value)}
+              className="w-full rounded-[9px] border border-border bg-background px-3 py-2 text-sm"
+            />
+          </label>
+        ))}
+      </div>
+    </div>
   )
 }
 

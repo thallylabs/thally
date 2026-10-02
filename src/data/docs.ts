@@ -42,6 +42,8 @@ export interface DocEntry {
   manualTarget?: ManualApiTarget
   /** Synthetic operation for a manual `api:` page (header + Try It); see manual-operation.ts. */
   manualApi?: NormalizedOperation
+  /** Page-level `playground` frontmatter; see `resolvePlaygroundDisplay`. */
+  playground?: string
   noindex?: boolean
   hidden?: boolean
   mode?: DocPageMode
@@ -267,6 +269,8 @@ interface DocsJsonConfig {
       server?: string | Array<string>
       auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string }
     }
+    /** Mintlify `api.playground.display`: interactive (default), simple, none or auth. */
+    playground?: { display?: string }
   }
   navigation?: {
     display?: 'tabs' | 'dropdown'
@@ -1116,6 +1120,11 @@ export function getApiMdxConfig(): ApiMdxConfig {
     apiMdxCache.set(config, cached)
   }
   return cached
+}
+
+/** Raw docs.json `api.playground.display`; resolve it with `resolvePlaygroundDisplay`. */
+export function getApiPlaygroundDisplay(): unknown {
+  return docsConfig().api?.playground?.display
 }
 
 export function getApiPlaygroundCredentials(): Record<string, string> {

@@ -7,7 +7,7 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, extname, relative } from 'node:path'
 
-import { navigationGateReason } from './mintlify-extras.js'
+import { navigationGateReason, playgroundDisplay } from './mintlify-extras.js'
 import { mintlifyLocalizedReference, pageIdFromReference, resolveWithin, trimEdgeSlashes } from './path.js'
 import type {
   MigrationDocsConfig,
@@ -999,6 +999,14 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
  * Mintlify's `api.mdx.server` / `api.mdx.auth` (defaults for manual `api:`
  * pages). Only well-formed values are kept; each dropped one is reported.
  */
+function projectedApi(config: Record<string, unknown>, warnings: Array<MigrationWarning>): Pick<MigrationDocsConfig, 'api'> {
+  const mdx = projectedApiMdx(config, warnings).api?.mdx
+  const raw = objectValue(objectValue(config.api)?.playground)?.display
+  const display = raw === undefined ? undefined : playgroundDisplay(raw, 'api.playground.display', (message) => warnings.push({ code: 'unsupported-config', message }))
+  if (!mdx && !display) return {}
+  return { api: { ...(mdx ? { mdx } : {}), ...(display ? { playground: { display } } : {}) } }
+}
+
 function projectedApiMdx(config: Record<string, unknown>, warnings: Array<MigrationWarning>): Pick<MigrationDocsConfig, 'api'> {
   const mdx = objectValue(objectValue(config.api)?.mdx)
   if (!mdx) return {}
@@ -1362,7 +1370,7 @@ export function projectMintlifyNavigation(
         } }
         : {}),
       ...projectedCompatibleConfig(config, warnings),
-      ...projectedApiMdx(config, warnings),
+      ...projectedApi(config, warnings),
       ...(i18n ? { i18n } : {}),
       ...(redirects.length > 0 ? { redirects } : {}),
     },

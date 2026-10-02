@@ -97,7 +97,11 @@ export interface MigrationDocsConfig {
   admin?: { enabled?: boolean }
   analytics?: { enabled?: boolean }
   /** Manual API pages: default server(s) and auth for `api:` frontmatter pages. */
-  api?: { mdx?: { server?: string | Array<string>; auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string } } }
+  api?: {
+    mdx?: { server?: string | Array<string>; auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string } }
+    /** Mintlify `api.playground.display`; `auth` is carried as `simple`. */
+    playground?: { display: 'interactive' | 'simple' | 'none' }
+  }
   /** Third-party analytics in Mintlify's `integrations` shape; validated again by the renderer. */
   integrations?: {
     ga4?: { measurementId: string }
@@ -141,6 +145,8 @@ export interface MigrationPage {
   api?: string
   /** Page-level playground auth override: bearer | basic | key | none. */
   authMethod?: string
+  /** Page-level `playground` override: interactive | simple | none (`auth` becomes `simple`). */
+  playground?: 'interactive' | 'simple' | 'none'
   body: string
   source: string
   /** Set when the page's frontmatter was invalid YAML; the page is kept with a best-effort salvage. */

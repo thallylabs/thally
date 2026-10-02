@@ -32,6 +32,7 @@ interface DocFrontmatter {
   openapi?: unknown
   api?: unknown
   authMethod?: unknown
+  playground?: unknown
   noindex?: boolean
   hidden?: boolean
   mode?: DocPageMode
@@ -226,6 +227,7 @@ async function compileDocEntry(
     lastUpdated: frontmatter?.lastUpdated ?? new Date().toISOString().slice(0, 10),
     openapi: openapi ?? undefined,
     manualApi,
+    playground: typeof frontmatter?.playground === 'string' ? frontmatter.playground : undefined,
     noindex: frontmatter?.noindex,
     hidden: frontmatter?.hidden,
     mode: frontmatter?.mode,

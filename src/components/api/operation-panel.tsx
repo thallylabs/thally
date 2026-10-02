@@ -6,6 +6,7 @@ import { TryItDialog } from '@/components/api/try-it-dialog'
 import { OperationCodePanel } from '@/components/api/operation-code-panel'
 import { useTryItController } from '@/components/api/use-try-it-controller'
 import { ParamField, ResponseField, Expandable } from '@/components/mdx/api-fields'
+import type { PlaygroundDisplay } from '@/lib/openapi/playground-display'
 import type { NormalizedOperation, NormalizedParameter, NormalizedResponse } from '@/lib/openapi/types'
 import { EndpointBar } from '@/components/api/endpoint-bar'
 import { statusColorClass, statusUnderlineClass } from '@/components/api/tokens'
@@ -20,11 +21,18 @@ interface OperationPanelProps {
   children?: React.ReactNode
   /** False when the page header already shows the page's authored description. */
   showDescription?: boolean
+  /** Mintlify `playground` display; `simple` has no Try it, `none` hides the endpoint bar too. */
+  playground?: PlaygroundDisplay
 }
 
-export function OperationPanel({ operation, children, showDescription = true }: OperationPanelProps) {
+export function OperationPanel({ operation, children, showDescription = true, playground = 'interactive' }: OperationPanelProps) {
   const controller = useTryItController(operation)
-  const [isDialogOpen, setDialogOpen] = useState(false)
+  const interactive = playground === 'interactive' && !operation.isWebhook
+  // `?playground=open` opens the playground straight away, as on live. The
+  // dialog renders in a client-only portal, so reading the URL here is safe.
+  const [isDialogOpen, setDialogOpen] = useState(
+    () => interactive && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('playground') === 'open',
+  )
 
   type ParamLocation = 'path' | 'query' | 'header' | 'cookie'
   const parameterGroups: Array<{ title: string; location: ParamLocation; parameters: Array<NormalizedParameter> }> = [
@@ -39,7 +47,7 @@ export function OperationPanel({ operation, children, showDescription = true }: 
       <div className="space-y-10">
         {/* Header */}
         <header className="space-y-6">
-          <EndpointBar operation={operation} onTryIt={() => setDialogOpen(true)} />
+          <EndpointBar operation={operation} display={playground} onTryIt={() => setDialogOpen(true)} />
           {!showDescription ? null : operation.description ? (
             <div className="prose prose-neutral dark:prose-invert max-w-none text-base text-foreground/70">
               <Markdown>{operation.description}</Markdown>
@@ -153,7 +161,7 @@ export function OperationPanel({ operation, children, showDescription = true }: 
       ) : (
         <>
           <OperationCodePanel controller={controller} />
-          <TryItDialog controller={controller} open={isDialogOpen} onOpenChange={setDialogOpen} />
+          {interactive ? <TryItDialog controller={controller} open={isDialogOpen} onOpenChange={setDialogOpen} /> : null}
         </>
       )}
     </div>

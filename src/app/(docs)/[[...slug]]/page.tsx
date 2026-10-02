@@ -9,6 +9,7 @@ import { notFound } from 'next/navigation'
 import { ApiLayout } from '@/components/api/api-layout'
 import { ManualApiEndpoint } from '@/components/api/manual-api-endpoint'
 import { OperationPanel } from '@/components/api/operation-panel'
+import { resolvePlaygroundDisplay } from '@/lib/openapi/playground-display'
 import { DocHeader } from '@/components/docs/doc-header'
 import { DocPagination } from '@/components/docs/doc-pagination'
 import { DocLayout } from '@/components/docs/doc-layout'
@@ -18,7 +19,7 @@ import { LocalizedSidebarHydrator } from '@/components/layout/localized-sidebar-
 import { LocaleAvailabilityHydrator } from '@/components/layout/locale-availability'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { getApiOperationForFrontmatter } from '@/data/api-reference'
-import { ensureDocPublication, getDocEntries, getSeoConfig, isDocPublished, loadNavContext } from '@/data/docs'
+import { ensureDocPublication, getApiPlaygroundDisplay, getDocEntries, getSeoConfig, isDocPublished, loadNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { hasDocTranslation } from '@/lib/i18n/translation-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
@@ -200,6 +201,7 @@ export default async function DocsPage({ params }: PageProps) {
     <LocalizedSidebarHydrator locale={route.locale} />
   ) : null
 
+  const playground = resolvePlaygroundDisplay(doc.playground, getApiPlaygroundDisplay())
   if (doc.openapi) {
     const operationNode = await getApiOperationForFrontmatter(doc.openapi)
     // A hidden or excluded operation is withheld on purpose (the build records
@@ -236,7 +238,7 @@ export default async function DocsPage({ params }: PageProps) {
             <DocHeader doc={doc} eyebrow={nav.group} />
           </div>
           <ApiLayout>
-            <OperationPanel operation={operationNode.operation} showDescription={!doc.description}>
+            <OperationPanel operation={operationNode.operation} showDescription={!doc.description} playground={playground}>
               <Body />
             </OperationPanel>
           </ApiLayout>
@@ -257,7 +259,7 @@ export default async function DocsPage({ params }: PageProps) {
       <JsonLdScript data={jsonLd} />
       <DocLayout doc={doc} locale={contentLocale} navigation={nav}>
         {localeNotice}
-        {doc.manualApi ? <ManualApiEndpoint operation={doc.manualApi} /> : null}
+        {doc.manualApi ? <ManualApiEndpoint operation={doc.manualApi} playground={playground} /> : null}
         <Content />
       </DocLayout>
     </>
