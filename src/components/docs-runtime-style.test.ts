@@ -513,7 +513,7 @@ describe('Card title cascade', () => {
     const rules = new Map<string, Map<string, string>>()
     root.walkRules((rule) => {
       const declarations = new Map<string, string>()
-      rule.walkDecls((decl) => declarations.set(decl.prop, decl.value))
+      rule.walkDecls((decl) => { declarations.set(decl.prop, decl.value) })
       for (const selector of rule.selectors) rules.set(selector.trim().replace(/\s+/g, ' '), declarations)
     })
     const prose = '.thally-docs-prose :where(h2)'
