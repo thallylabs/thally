@@ -3,7 +3,7 @@
 import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
-import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
+import { mintlifyHeadingSlug, escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -635,6 +635,56 @@ describe('multi-line renames (fenced/inline code masked, whole body rewritten)',
     // A comment-like fragment inside a fenced block must not be converted either.
     const fencedComment = '```html\n<!--\n  example comment\n-->\n```'
     expect(normalizeMdx(fencedComment)).toBe(fencedComment)
+  })
+})
+
+describe('Mintlify heading ids', () => {
+  // Pairs read from the ids docs.firecrawl.dev serves.
+  it.each([
+    ['Persistent Profiles with Scrape + Interact', 'persistent-profiles-with-scrape-+-interact'],
+    ['Team management & roles', 'team-management-&-roles'],
+    ['/scrape endpoint', '/scrape-endpoint'],
+    ['1. /agent Endpoint', '1-/agent-endpoint'],
+    ['Node.js (Playwright)', 'node-js-playwright'],
+    ['X (x.com) billing', 'x-x-com-billing'],
+    ['batch_scrape.started', 'batch_scrape-started'],
+    ['Day 2 - FIRE-1 Agent', 'day-2-fire-1-agent'],
+    ['Day 7 \u2013 Integration Day', 'day-7-\u2013-integration-day'],
+    ['Migration: /extract \u2192 /agent', 'migration-/extract-\u2192-/agent'],
+    ['Firecrawl search returns titles, and URLs \u2014 and more.', 'firecrawl-search-returns-titles-and-urls-\u2014-and-more'],
+    ['What\u2019s Not Included', 'what\u2019s-not-included'],
+    ['4. Done!', '4-done'],
+    ['What can Firecrawl do?', 'what-can-firecrawl-do'],
+    ['Introducing LLMs.txt Generator Endpoint (Alpha) \u{1F4C3}', 'introducing-llms-txt-generator-endpoint-alpha-'],
+  ])('slugs %j as %s', (text, id) => {
+    expect(mintlifyHeadingSlug(text)).toBe(id)
+  })
+
+  it('marks only the headings whose id differs from the one Thally would generate', () => {
+    const output = normalizeMdx([
+      '## Quick start',
+      '## Scrape + Interact',
+      '### Formats (`formats`)',
+      '## Team **roles** & [links](/x)',
+      '```md',
+      '## Not + a heading',
+      '```',
+    ].join('\n'), 'mintlify')
+    expect(output).toBe([
+      '## Quick start',
+      '## Scrape + Interact {/* #scrape-+-interact */}',
+      '### Formats (`formats`)',
+      '## Team **roles** & [links](/x) {/* #team-roles-&-links */}',
+      '```md',
+      '## Not + a heading',
+      '```',
+    ].join('\n'))
+    expect(normalizeMdx(output, 'mintlify')).toBe(output)
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('leaves other platforms alone', () => {
+    expect(normalizeMdx('## Scrape + Interact', 'docusaurus')).toBe('## Scrape + Interact')
   })
 })
 

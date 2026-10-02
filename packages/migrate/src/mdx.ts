@@ -232,6 +232,66 @@ function headingIdMarker(id: string): string {
   return `{/* #${id} */}`
 }
 
+/**
+ * The id Mintlify gives a heading with no explicit `{#id}`. Derived from the
+ * live ids of a Mintlify site: whitespace and `.` become `-`, and `+ & / _`,
+ * typographic quotes and dashes and arrows are kept, other punctuation and
+ * emoji are dropped. Repeats are numbered `-2`, `-3`, ... by the renderer.
+ */
+export function mintlifyHeadingSlug(text: string): string {
+  return text
+    .replace(/\u200b/g, '')
+    .normalize('NFC')
+    .trim()
+    .toLowerCase()
+    .replace(/[.\s]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '')
+    .replace(/[^\p{L}\p{M}\p{N}_\-+&/\u2019\u201c\u201d\u2014\u2013\u2192]/gu, '')
+}
+
+/** Thally's own heading slug (`slugify` in `@thallylabs/core`), used to tell which headings already match. */
+function thallyHeadingSlug(text: string): string {
+  return text.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '-').replace(/(^-|-$)/g, '')
+}
+
+/** Visible text of a heading's inline Markdown. */
+function plainHeadingText(source: string): string {
+  return source
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/<\/?[A-Za-z][^>]*>/g, '')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/(\*\*|__|~~|\*)/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/\\([\\`*_{}[\]()#+.!&<>|~-])/g, '$1')
+}
+
+/**
+ * Give each Mintlify heading the id Mintlify serves, so in-page and cross-page
+ * `#anchor` links from the source still land. Only headings whose id differs
+ * from Thally's own slug get a marker, which leaves every other anchor alone.
+ */
+export function markMintlifyHeadings(body: string): string {
+  let fence: string | undefined
+  return body.split('\n').map((line) => {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
+    if (marker) {
+      if (!fence) fence = marker[1]
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length
+        && /^\s*$/.test(line.slice(marker[0].length))) fence = undefined
+      return line
+    }
+    if (fence) return line
+    const heading = line.match(/^( {0,3}#{2,6}[ \t]+)(.+?)(?:[ \t]+#+)?[ \t]*$/)
+    if (!heading) return line
+    // An explicit `{#id}` is already a marker and wins over the computed id.
+    if (/\{\/\*[ \t]*#\S+[ \t]*\*\/\}$/.test(heading[2])) return line
+    const text = plainHeadingText(heading[2])
+    const id = mintlifyHeadingSlug(text)
+    return id && id !== thallyHeadingSlug(text) ? `${heading[1]}${heading[2]} ${headingIdMarker(id)}` : line
+  }).join('\n')
+}
+
 const GLOBAL_DOCUSARUS_COMPONENTS = new Set([
   'Tabs',
   'TabItem',
@@ -1798,6 +1858,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
     undefined,
     { headingMarkers: runMintlify },
   ))
+  if (runMintlify) rewritten = markMintlifyHeadings(rewritten)
   if (runDocusaurus) {
     // Docusaurus resolves GitHub emoji names in Markdown text. Leaving the
     // shortcodes literal makes comparison tables unreadable after import; the
