@@ -71,7 +71,7 @@ describe('snippet replacement versus MDX comments', () => {
     // Source of the localized Firecrawl acorn failure: the snippet's closing fence
     // became "``` */}", so the page's later `{#id}` heading was masked as code.
     const { body } = migrate(`${IMPORT}{/* ### Hidden\n\n<Extract /> */}\n\n## Next {#next}\n\nText.`, { 'snippets/extract.mdx': '```python\nprint(1)\n```' })
-    expect(body).toContain('<a id="next"></a>')
+    expect(body).toContain('## Next {/* #next */}')
   })
 
   it.each([
@@ -80,12 +80,12 @@ describe('snippet replacement versus MDX comments', () => {
     ['preceded by text', 'text <Extract />'],
   ])('keeps a fenced snippet valid when its tag is glued to other text (%s)', (_name, line) => {
     const { body } = migrate(`${IMPORT}${line}\n\n## Next {#next}\n\nText.`, { 'snippets/extract.mdx': '```python\nprint(1)\n```' })
-    expect(body).toContain('<a id="next"></a>')
+    expect(body).toContain('## Next {/* #next */}')
   })
 
   it('keeps a fenced <Snippet file> valid when glued to other text', () => {
     const { body } = migrate('text <Snippet file="/snippets/extract.mdx" /> more\n\n## Next {#next}\n\nText.', { 'snippets/extract.mdx': '```python\nprint(1)\n```' })
-    expect(body).toContain('<a id="next"></a>')
+    expect(body).toContain('## Next {/* #next */}')
   })
 
   it('leaves a tag inside a fenced block and inline code as literal text', () => {
