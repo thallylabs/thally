@@ -51,8 +51,10 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
 
   const buildResolvedUrl = useCallback(() => {
     const populatedPath = operation.path.replace(/{([^}]+)}/g, (_match, key) => {
-      const value = pathParams[key] ?? `{${key}}`
-      return encodeURIComponent(value)
+      // An empty path value keeps its visible `{name}` placeholder instead of
+      // silently turning `/monitor/{id}` into the list endpoint `/monitor/`.
+      const value = pathParams[key]
+      return value ? encodeURIComponent(value) : `{${key}}`
     })
     const searchParams = new URLSearchParams()
     Object.entries(queryParams).forEach(([key, value]) => {

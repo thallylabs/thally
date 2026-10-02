@@ -140,3 +140,19 @@ describe('OperationPanel endpoint bar and servers', () => {
     expect(two).toContain('Servers')
   })
 })
+
+describe('OperationPanel $ref path parameter', () => {
+  it('lists the path parameter and keeps {id} visible in the sample URL until it is filled in', () => {
+    const spec = {
+      openapi: '3.1.0',
+      info: { title: 'T', version: '1' },
+      servers: [{ url: 'https://api.example.com/v2' }],
+      paths: { '/monitor/{id}': { get: { summary: 'Get', parameters: [{ $ref: '#/components/parameters/Id' }], responses: {} } } },
+      components: { parameters: { Id: { name: 'id', in: 'path', required: true, schema: { type: 'string' } } } },
+    }
+    const html = renderToStaticMarkup(<OperationPanel operation={operationFrom(spec)} />)
+    expect(html).toContain('>id</code>')
+    expect(html).toContain('--url https://api.example.com/v2/monitor/{id}')
+    expect(html).not.toContain('%7Bid%7D')
+  })
+})
