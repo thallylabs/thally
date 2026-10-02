@@ -118,14 +118,14 @@ describe('normalizeMdx', () => {
 
   it('preserves an explicit heading anchor in a Mintlify page', () => {
     const output = normalizeMdx('## Install help {#smartscreen}', 'mintlify')
-    expect(output).toContain('<a id="smartscreen"></a>')
+    expect(output).toBe('## Install help {/* #smartscreen */}')
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
 
   it('preserves numeric-leading Mintlify heading anchors', () => {
     const output = normalizeMdx('## Responses 429 {#429-responses}\n\n### Add Firecrawl {#1-add-firecrawl}', 'mintlify')
-    expect(output).toContain('<a id="429-responses"></a>')
-    expect(output).toContain('<a id="1-add-firecrawl"></a>')
+    expect(output).toContain('## Responses 429 {/* #429-responses */}')
+    expect(output).toContain('### Add Firecrawl {/* #1-add-firecrawl */}')
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
 
@@ -587,7 +587,6 @@ describe("heading id preservation via normalizeMdx (an explicit `{#id}` anchor i
   })
 
   it('runs for every platform, not just docusaurus — the syntax means the same thing everywhere (e.g. live crewAI/Mintlify docs)', () => {
-    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'mintlify')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
     expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'fern')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
     expect(normalizeMdx('### Timeouts {#Notes-Timeouts}')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
   })
@@ -636,6 +635,21 @@ describe('multi-line renames (fenced/inline code masked, whole body rewritten)',
     // A comment-like fragment inside a fenced block must not be converted either.
     const fencedComment = '```html\n<!--\n  example comment\n-->\n```'
     expect(normalizeMdx(fencedComment)).toBe(fencedComment)
+  })
+})
+
+describe('Mintlify explicit heading ids stay on the heading', () => {
+  it('keeps a translated heading\'s English id as the heading id, not as a separate anchor', () => {
+    const output = normalizeMdx('## Primeros pasos {#get-started}\n\nTexto.', 'mintlify')
+    expect(output).toBe('## Primeros pasos {/* #get-started */}\n\nTexto.')
+    expect(output).not.toContain('<a id')
+  })
+
+  it('keeps ids with characters an HTML anchor would reject, and still compiles', () => {
+    const output = normalizeMdx('## Team {#team-management-&-roles}\n\n## Plus {#scrape-+-interact}', 'mintlify')
+    expect(output).toContain('## Team {/* #team-management-&-roles */}')
+    expect(output).toContain('## Plus {/* #scrape-+-interact */}')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
 })
 

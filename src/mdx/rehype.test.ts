@@ -157,6 +157,32 @@ describe('heading anchors', () => {
     expect(headings.map((heading) => heading.properties?.id)).toEqual(['key-features-2', 'key-features', 'key-features-3'])
   })
 
+  it('uses a trailing {/* #id */} comment as the heading id and removes the comment', () => {
+    const marker = (value: string) => ({ type: 'mdxTextExpression', value }) as unknown as Element['children'][number]
+    const headings: Array<Element> = [
+      { type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: 'Scrape + Interact ' }, marker('/* #scrape-+-interact */')] },
+      { type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: 'Primeros pasos ' }, marker('/* #get-started */')] },
+      { type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: 'Get started' }] },
+      { type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: 'Otra ' }, marker('/* #get-started */')] },
+    ]
+    const transform = rehypePlugins[2]() as (tree: Root) => void
+    transform({ type: 'root', children: headings })
+    expect(headings.map((heading) => heading.properties?.id)).toEqual([
+      'scrape-+-interact', 'get-started', 'get-started-2', 'get-started-3',
+    ])
+    expect(headings[0].children).toEqual([{ type: 'text', value: 'Scrape + Interact' }])
+  })
+
+  it('applies the comment id in a real MDX compile', async () => {
+    const { compile } = await import('@mdx-js/mdx')
+    const compiled = String(await compile('## Scrape + Interact {/* #scrape-+-interact */}\n\n## Scrape + Interact', {
+      rehypePlugins: [rehypePlugins[2]],
+    }))
+    expect(compiled).toContain('id: "scrape-+-interact"')
+    expect(compiled).toContain('id: "scrape-interact"')
+    expect(compiled).not.toContain('#scrape-+-interact */')
+  })
+
   it('preserves Unicode heading IDs and suffixes repeated translated headings', () => {
     const headings: Array<Element> = ['Überblick', 'Überblick', '日本語 API'].map((value) => ({
       type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value }],

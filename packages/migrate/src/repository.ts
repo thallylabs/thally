@@ -2247,11 +2247,12 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
       const tableCell = line.match(/^ {0,3}\|\s*([^|]+?)\s*\|/)
       if (tableCell && !/^[:\s-]+$/.test(tableCell[1])) tableCells.push({ index, text: tableCell[1] })
       const match = line.match(/^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
-      return match ? { index, text: match[1] } : null
+      return match ? { index, text: match[1].replace(/\s*\{\/\*\s*#\S+?\s*\*\/\}$/, '') } : null
     }).filter((entry): entry is { index: number; text: string } => entry !== null)
     const existing = new Set<string>()
     replaceOutsideCode(page.body, (text) => {
       for (const match of text.matchAll(/\bid=(?:"([^"]+)"|'([^']+)')/g)) existing.add(match[1] ?? match[2])
+      for (const match of text.matchAll(/\{\/\*\s*#(\S+?)\s*\*\/\}/g)) existing.add(match[1])
       return text
     })
     const candidateIndexes = new Map<string, Array<{ index: number; kind: 'heading' | 'table' }>>()
@@ -3468,7 +3469,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // before ANY MDX parse of this page is attempted — including
       // `componentMigrator.transform` below, whose own early parse would
       // otherwise choke on it and skip the page's import analysis entirely.
-      raw = normalizeExplicitHeadingIds(raw, (message) => warnings.push({ code: 'invalid-page', message, source: file.relativePath }))
+      raw = normalizeExplicitHeadingIds(
+        raw,
+        (message) => warnings.push({ code: 'invalid-page', message, source: file.relativePath }),
+        { headingMarkers: platform === 'mintlify' },
+      )
     }
     if (componentMigrator) {
       const warningsBeforeTransform = warnings.length

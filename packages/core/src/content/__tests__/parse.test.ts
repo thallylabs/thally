@@ -163,3 +163,13 @@ Use the API.
     expect(parsed.text).not.toContain('Agent shorthand.')
   })
 })
+
+describe('heading id markers', () => {
+  it('uses a trailing {/* #id */} comment as the heading id and keeps it out of the heading text', () => {
+    const parsed = parseMdxContent('## Primeros pasos {/* #get-started */}\n\nTexto.\n\n## Scrape + Interact {/* #scrape-+-interact */}\n')
+    expect(parsed.headings.map((heading) => [heading.text, heading.id])).toEqual([
+      ['Primeros pasos', 'get-started'],
+      ['Scrape + Interact', 'scrape-+-interact'],
+    ])
+  })
+})

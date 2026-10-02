@@ -181,7 +181,11 @@ const HTML_ID = /^[^\s"'<>`{}&]+$/u
  * An id that is not a valid HTML id is stripped (and reported through `warn`)
  * so the page still compiles. Frontmatter is left untouched.
  */
-export function normalizeExplicitHeadingIds(raw: string, warn?: (message: string) => void): string {
+export function normalizeExplicitHeadingIds(
+  raw: string,
+  warn?: (message: string) => void,
+  options: { headingMarkers?: boolean } = {},
+): string {
   const { front, body } = splitFrontmatterBlock(raw)
   return front + replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
     if (!/^[ \t]{0,3}#{1,6}[ \t]+/.test(line)) return line
@@ -196,8 +200,13 @@ export function normalizeExplicitHeadingIds(raw: string, warn?: (message: string
         const heading = trimmed.slice(0, marker).trimEnd()
         // Braces in the "id" mean this is prose like `{#if} blocks {x}`, not one anchor.
         if (/[{}]/.test(id)) return line
+        // Mintlify keeps the authored id on the heading itself. The renderer
+        // reads `{/* #id */}`, so the id may hold any character React can put
+        // in an attribute; only whitespace and a comment terminator are unsafe.
+        const usable = options.headingMarkers ? id && !/\s/.test(id) && !id.includes('*/') : HTML_ID.test(id)
+        if (usable && options.headingMarkers) return `${heading} ${headingIdMarker(id)}`
         // Numeric starts are valid here; Mintlify uses ids such as 429-responses.
-        if (HTML_ID.test(id)) return `<a id="${id}"></a>\n${heading}`
+        if (usable) return `<a id="${id}"></a>\n${heading}`
         warn?.(`Heading anchor {#${id}} is not a valid HTML id and was removed from "${heading.replace(/^\s*#+\s*/, '')}".`)
         return heading
       }
@@ -215,6 +224,11 @@ export function normalizeExplicitHeadingIds(raw: string, warn?: (message: string
     }
     return line
   }).join('\n'))
+}
+
+/** The trailing comment that gives a heading an explicit id; read by the renderer, `thally check` and the content parser. */
+function headingIdMarker(id: string): string {
+  return `{/* #${id} */}`
 }
 
 const GLOBAL_DOCUSARUS_COMPONENTS = new Set([
@@ -1778,7 +1792,11 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   // `normalizeExplicitHeadingIds` also covers Docusaurus' `{/* #id */}`
   // comment form.
   const sourceBody = runDocusaurus && unwrapMdxCodeBlocks ? unwrapDocusaurusMdxCodeBlocks(body) : body
-  let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(runFern ? normalizeFernFileTrees(normalizeFernCallouts(normalizeNestedCodeFences(sourceBody))) : normalizeNestedCodeFences(sourceBody)))
+  let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(
+    runFern ? normalizeFernFileTrees(normalizeFernCallouts(normalizeNestedCodeFences(sourceBody))) : normalizeNestedCodeFences(sourceBody),
+    undefined,
+    { headingMarkers: runMintlify },
+  ))
   if (runDocusaurus) {
     // Docusaurus resolves GitHub emoji names in Markdown text. Leaving the
     // shortcodes literal makes comparison tables unreadable after import; the

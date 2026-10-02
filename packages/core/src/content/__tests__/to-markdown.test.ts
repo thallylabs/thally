@@ -8,6 +8,10 @@ describe('mdxToMarkdown', () => {
     expect(out).not.toMatch(/<\/?Steps/)
   })
 
+  it('drops a heading id comment from the Markdown view', () => {
+    expect(mdxToMarkdown('## Scrape + Interact {/* #scrape-+-interact */}\n\ntext')).toBe('## Scrape + Interact\n\ntext')
+  })
+
   it('promotes title-bearing components to headings', () => {
     expect(mdxToMarkdown('<Step title="Create your project">\nbody\n</Step>')).toContain('#### Create your project')
     expect(mdxToMarkdown('<Card title="Quickstart" href="/quickstart">x</Card>')).toContain(

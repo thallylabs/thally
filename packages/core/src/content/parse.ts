@@ -65,7 +65,18 @@ interface WalkState {
   codeIndex: number
 }
 
-function startSection(state: WalkState, depth: number, text: string) {
+const HEADING_ID_MARKER = /^\s*\/\*\s*#(\S+?)\s*\*\/\s*$/
+
+/** A heading may end with a JSX comment holding `#id`; the renderer uses that id instead of slugging the text. */
+function headingTextAndId(node: Extract<RootContent, { type: 'heading' }>): { text: string; explicitId?: string } {
+  const children = node.children as Array<{ type: string; value?: string }>
+  const marker = children.findIndex((child) => child.type === 'mdxTextExpression' && HEADING_ID_MARKER.test(child.value ?? ''))
+  if (marker < 0) return { text: mdastToString(node).trim() }
+  const rest = { ...node, children: node.children.filter((_, index) => index !== marker) }
+  return { text: mdastToString(rest).trim(), explicitId: HEADING_ID_MARKER.exec(children[marker].value ?? '')![1] }
+}
+
+function startSection(state: WalkState, depth: number, text: string, explicitId?: string) {
   // Flush the previous section's accumulated text.
   state.current.text = cleanText(state.sectionTextParts.join(' '))
   state.sectionTextParts = []
@@ -76,7 +87,7 @@ function startSection(state: WalkState, depth: number, text: string) {
   const headingPath = [...state.stack.map((s) => s.text), text]
   state.stack.push({ depth, text })
 
-  const id = ensureUniqueId(slugify(text), state.seen)
+  const id = ensureUniqueId(explicitId ?? slugify(text), state.seen)
   state.headings.push({ depth, text, id })
 
   const section: ContentSection = { id, title: text, depth, headingPath, text: '', code: [] }
@@ -123,7 +134,8 @@ function jsxProseAttributes(node: RootContent): Array<string> {
 function walk(state: WalkState, nodes: Array<RootContent>) {
   for (const node of nodes) {
     if (node.type === 'heading') {
-      startSection(state, node.depth, mdastToString(node).trim())
+      const { text, explicitId } = headingTextAndId(node)
+      startSection(state, node.depth, text, explicitId)
       continue
     }
     if (node.type === 'code') {
