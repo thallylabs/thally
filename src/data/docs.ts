@@ -1168,6 +1168,7 @@ export function getApiPlaygroundDisplay(): unknown {
 
 export const TRY_IT_DEFAULT_TIMEOUT_MS = 60_000
 
+/** How long the Try it relay waits for the API: `apiPlayground.timeoutMs` clamped to 1-120 s, else 60 s. */
 export function getApiPlaygroundTimeoutMs(): number {
   const configured = docsConfig().apiPlayground?.timeoutMs
   return typeof configured === 'number' && Number.isFinite(configured)
@@ -1175,6 +1176,7 @@ export function getApiPlaygroundTimeoutMs(): number {
     : TRY_IT_DEFAULT_TIMEOUT_MS
 }
 
+/** Credentials from `apiPlayground.credentials`, keyed by OpenAPI security scheme name. */
 export function getApiPlaygroundCredentials(): Record<string, string> {
   return docsConfig().apiPlayground?.credentials ?? {}
 }

@@ -20,6 +20,10 @@ export const usePreferredLanguageStore = create<{
     })),
 }))
 
+/**
+ * The language to show: the most recently picked one that this group offers,
+ * else its first. Undefined when the group offers none.
+ */
 export function resolvePreferredLanguage(
   availableLanguages: Array<string>,
   preferredLanguages: Array<string>,
