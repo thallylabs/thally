@@ -84,7 +84,7 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
       isServerConfigured,
       curlLines,
     }
-  }, [buildResolvedUrl, headerParams, operation.method, canSendBody, bodyValue, isServerConfigured])
+  }, [buildResolvedUrl, headerParams, operation.method, operation.requestBody?.contents, canSendBody, bodyValue, isServerConfigured])
 
   const setParamValue = useCallback(
     (group: 'path' | 'query' | 'header', key: string, value: string) => {
