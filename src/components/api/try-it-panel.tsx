@@ -83,6 +83,11 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
             </div>
           </div>
         ) : null}
+        {operation.authSchemes.some((scheme) => !isSendableScheme(scheme)) ? (
+          <p role="note" className="text-xs text-foreground/60">
+            {operation.authSchemes.filter((scheme) => !isSendableScheme(scheme)).map((scheme) => `${scheme.paramName} (${scheme.in})`).join(', ')} is not sent from the playground, so this request goes out without it. Copy the code sample to send it.
+          </p>
+        ) : null}
         <ParamGroup title={t('pathParameters')} values={pathParams} onChange={(key, value) => setParamValue('path', key, value)} />
         <ParamGroup title={t('queryParameters')} values={queryParams} onChange={(key, value) => setParamValue('query', key, value)} />
         <ParamGroup title={t('headers')} values={headerParams} onChange={(key, value) => setParamValue('header', key, value)} />

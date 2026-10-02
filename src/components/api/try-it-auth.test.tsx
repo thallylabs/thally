@@ -35,4 +35,20 @@ describe('Authorizations', () => {
     expect(html).toContain('Bearer')
     expect(html).not.toContain('YOUR_API_KEY')
   })
+
+  it('says so when a credential lives in a query or cookie the playground never sends', () => {
+    const operation = operationFrom({
+      ...document,
+      security: [{ keyAuth: [] }],
+      components: { securitySchemes: { keyAuth: { type: 'apiKey', in: 'query', name: 'api_key' } } },
+    })
+    const controller = {
+      operation, serverUrl: '', setServerUrl: () => {}, pathParams: {}, queryParams: {}, headerParams: {}, bodyValue: '', setBodyValue: () => {},
+      authValues: {}, setAuthValue: () => {}, setParamValue: () => {}, preparedRequest: { url: '', method: 'POST', headers: {}, isServerConfigured: false },
+      response: null, sendRequest: async () => {}, isSending: false, canSendBody: true,
+    } as unknown as TryItController
+    const html = renderToStaticMarkup(<TryItPanel controller={controller} variant="dialog" />)
+    expect(html).toContain('api_key (query) is not sent from the playground')
+    expect(html).not.toMatch(/<input[^>]*type="password"/)
+  })
 })
