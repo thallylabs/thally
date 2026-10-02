@@ -126,10 +126,11 @@ export function SiteShell({
   const hydratedCollections = useSidebarCollectionsStore(
     (state) => state.collectionsByScope[scopeKey],
   )
-  const isSecondaryLocale = Boolean(i18nConfig) && currentLocale !== i18nConfig?.defaultLocale
+  const routeLocale = currentLocale
+  const isSecondaryLocale = Boolean(i18nConfig) && routeLocale !== i18nConfig?.defaultLocale
   const localizedInitialCollections = useMemo(
-    () => (isSecondaryLocale ? localizeCollectionHrefs(initialCollections, currentLocale) : initialCollections),
-    [initialCollections, isSecondaryLocale, currentLocale],
+    () => (isSecondaryLocale ? localizeCollectionHrefs(initialCollections, routeLocale) : initialCollections),
+    [initialCollections, isSecondaryLocale, routeLocale],
   )
   const collections = hydratedCollections ?? localizedInitialCollections
   const routeOwningVersions = navigationVersions.filter((version) => collections.some((collection) =>
