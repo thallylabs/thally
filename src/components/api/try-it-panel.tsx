@@ -3,6 +3,7 @@
 import { Loader2 } from 'lucide-react'
 import { MANUAL_NO_SERVER, type TryItController } from '@/components/api/use-try-it-controller'
 import { CopyButton } from '@/components/api/copy-button'
+import { isSendableScheme } from '@/lib/openapi/auth'
 import { cn } from '@/lib/utils'
 
 interface TryItPanelProps {
@@ -12,7 +13,7 @@ interface TryItPanelProps {
 }
 
 export function TryItPanel({ controller, variant = 'inline', showHeading = true }: TryItPanelProps) {
-  const { operation, serverUrl, setServerUrl, pathParams, queryParams, headerParams, bodyValue, setBodyValue, setParamValue, preparedRequest, sendRequest, isSending, canSendBody, response } =
+  const { operation, serverUrl, setServerUrl, pathParams, queryParams, headerParams, bodyValue, setBodyValue, authValues, setAuthValue, setParamValue, preparedRequest, sendRequest, isSending, canSendBody, response } =
     controller
   const queryPairs = Object.entries(queryParams ?? {})
   const containerStyles =
@@ -58,6 +59,32 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
     <section className={cn(containerStyles, variant === 'inline' && 'mt-6')} id={variant === 'inline' ? 'try-it' : undefined}>
       {showHeading ? heading : null}
       <form className="space-y-6" onSubmit={handleSubmit}>
+        {operation.authSchemes.filter(isSendableScheme).length ? (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">Authorization</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {operation.authSchemes.filter(isSendableScheme).map((scheme) => (
+                <label key={scheme.name} className="space-y-1 text-sm text-foreground/70">
+                  <span className="font-mono text-xs uppercase text-foreground/60">{scheme.paramName}</span>
+                  <span className="flex items-center gap-2">
+                    {scheme.kind === 'apiKey' ? null : (
+                      <span className="rounded-[9px] border border-border px-2 py-2 text-xs">{scheme.kind === 'bearer' ? 'Bearer' : 'Basic'}</span>
+                    )}
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={authValues[scheme.name] ?? ''}
+                      onChange={(event) => setAuthValue(scheme.name, event.target.value)}
+                      placeholder={scheme.kind === 'basic' ? 'username:password' : scheme.kind === 'bearer' ? 'Enter bearer token' : 'Enter API key'}
+                      className="w-full rounded-[9px] border border-border bg-background px-3 py-2 text-sm"
+                    />
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">Path parameters</p>
           {Object.keys(pathParams).length ? (

@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
+import { authHeaders } from '@/lib/openapi/auth'
 import type { NormalizedOperation } from '@/lib/openapi/types'
 
 export { buildCurlCommand } from '@/lib/openapi/code-samples'
@@ -14,8 +15,13 @@ export interface TryItController {
   headerParams: Record<string, string>
   bodyValue: string
   setBodyValue: (value: string) => void
+  /** Typed credential per security scheme name; never stored, only sent with this request. */
+  authValues: Record<string, string>
+  setAuthValue: (scheme: string, value: string) => void
   setParamValue: (group: 'path' | 'query' | 'header', key: string, value: string) => void
   preparedRequest: PreparedRequest
+  /** The request as shown in code samples: a missing credential reads `<token>`. */
+  sampleRequest: PreparedRequest
   response: ResponsePayload | { error: string } | null
   sendRequest: () => Promise<void>
   isSending: boolean
@@ -44,6 +50,9 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
   const [queryParams, setQueryParams] = useState<Record<string, string>>(operation.prefill.query)
   const [headerParams, setHeaderParams] = useState<Record<string, string>>(operation.prefill.header)
   const [bodyValue, setBodyValue] = useState(operation.prefill.body ?? '')
+  const [authValues, setAuthValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(operation.authSchemes.flatMap((scheme) => (scheme.prefill ? [[scheme.name, scheme.prefill]] : []))),
+  )
   const [response, setResponse] = useState<ResponsePayload | { error: string } | null>(null)
   const [isSending, setIsSending] = useState(false)
 
@@ -68,22 +77,24 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
     return `${base}${populatedPath.startsWith('/') ? populatedPath : `/${populatedPath}`}${queryString ? `?${queryString}` : ''}`
   }, [operation.path, pathParams, queryParams, serverUrl])
 
-  const preparedRequest = useMemo<PreparedRequest>(() => {
-    const url = isServerConfigured ? buildResolvedUrl() : ''
-    const body = canSendBody && bodyValue ? bodyValue : undefined
-    const mediaType = operation.requestBody?.contents[0]?.mediaType
-    const headers =
-      body && mediaType && !Object.keys(headerParams).some((key) => key.toLowerCase() === 'content-type')
-        ? { ...headerParams, 'Content-Type': mediaType }
-        : headerParams
-    return {
-      url,
-      method: operation.method,
-      headers,
-      body: canSendBody ? bodyValue : undefined,
-      isServerConfigured,
-    }
-  }, [buildResolvedUrl, headerParams, operation.method, operation.requestBody?.contents, canSendBody, bodyValue, isServerConfigured])
+  const buildRequest = useCallback(
+    (placeholders: boolean): PreparedRequest => {
+      const url = isServerConfigured ? buildResolvedUrl() : ''
+      const body = canSendBody && bodyValue ? bodyValue : undefined
+      const mediaType = operation.requestBody?.contents[0]?.mediaType
+      const withAuth = { ...headerParams, ...authHeaders(operation.authSchemes, authValues, placeholders) }
+      const headers =
+        body && mediaType && !Object.keys(withAuth).some((key) => key.toLowerCase() === 'content-type')
+          ? { ...withAuth, 'Content-Type': mediaType }
+          : withAuth
+      return { url, method: operation.method, headers, body: canSendBody ? bodyValue : undefined, isServerConfigured }
+    },
+    [authValues, buildResolvedUrl, headerParams, operation.authSchemes, operation.method, operation.requestBody?.contents, canSendBody, bodyValue, isServerConfigured],
+  )
+  const preparedRequest = useMemo(() => buildRequest(false), [buildRequest])
+  const sampleRequest = useMemo(() => buildRequest(true), [buildRequest])
+
+  const setAuthValue = useCallback((scheme: string, value: string) => setAuthValues((prev) => ({ ...prev, [scheme]: value })), [])
 
   const setParamValue = useCallback(
     (group: 'path' | 'query' | 'header', key: string, value: string) => {
@@ -144,8 +155,11 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
     headerParams,
     bodyValue,
     setBodyValue,
+    authValues,
+    setAuthValue,
     setParamValue,
     preparedRequest,
+    sampleRequest,
     response,
     sendRequest,
     isSending,

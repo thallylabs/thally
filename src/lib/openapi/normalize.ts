@@ -5,6 +5,7 @@ import type {
   NormalizedParameter,
   NormalizedRequestBody,
   NormalizedResponse,
+  NormalizedAuthScheme,
   NormalizedSecurityRequirement,
   NormalizedServer,
   NormalizedSpec,
@@ -173,12 +174,7 @@ function normalizeOperation(options: NormalizeOperationOptions): NormalizedOpera
   const { body: requestBody, sample: requestBodySample } = normalizeRequestBody(options.rawOperation.requestBody, options.resolveRef, options.deepResolve)
   const responses = normalizeResponses(options.rawOperation.responses, options.resolveRef, options.deepResolve)
   const security = normalizeSecurity(options.rawOperation.security ?? options.documentSecurity)
-  const headerPrefill = applySecurityAuthPrefill(
-    security,
-    options.securitySchemes,
-    options.resolveRef,
-    { ...parameterPrefill.header },
-  )
+  const authSchemes = buildAuthSchemes(security, options.securitySchemes, options.resolveRef)
 
   const operationServers = normalizeServers(options.rawOperation.servers)
   const servers =
@@ -209,12 +205,13 @@ function normalizeOperation(options: NormalizeOperationOptions): NormalizedOpera
     requestBody,
     responses,
     security,
+    authSchemes,
     codeSamples: normalizeCodeSamples(options.rawOperation['x-codeSamples'] ?? options.rawOperation['x-code-samples']),
     hidden: options.hidden,
     prefill: {
       path: parameterPrefill.path,
       query: parameterPrefill.query,
-      header: headerPrefill,
+      header: parameterPrefill.header,
       cookie: parameterPrefill.cookie,
       body: requestBodySample,
     },
@@ -593,35 +590,33 @@ function resolveSecurityScheme(
   return scheme
 }
 
-function applySecurityAuthPrefill(
+/**
+ * The credentials the operation accepts, one per distinct scheme in its
+ * security requirements. A token is prefilled only from the site's own
+ * `apiPlayground.credentials`; there is never a placeholder key.
+ */
+function buildAuthSchemes(
   security: Array<Array<NormalizedSecurityRequirement>>,
   securitySchemes: Record<string, RawObject>,
   resolveRef: (ref: string) => RawObject | null,
-  headerPrefill: Record<string, string>,
-): Record<string, string> {
+): Array<NormalizedAuthScheme> {
   const credentials = getApiPlaygroundCredentials()
-  const result = { ...headerPrefill }
-
-  for (const requirementGroup of security) {
-    for (const requirement of requirementGroup) {
-      const scheme = resolveSecurityScheme(securitySchemes, requirement.name, resolveRef)
-      if (!scheme) continue
-
-      const configured = credentials[requirement.name]
-      const type = scheme.type as string | undefined
-
-      if (type === 'http' && scheme.scheme === 'bearer') {
-        const token = configured ?? 'YOUR_API_KEY'
-        result.Authorization = token.startsWith('Bearer ') ? token : `Bearer ${token}`
-      } else if (type === 'apiKey' && scheme.in === 'header' && typeof scheme.name === 'string') {
-        result[scheme.name as string] = configured ?? 'YOUR_API_KEY'
-      } else if (type === 'http' && scheme.scheme === 'basic') {
-        result.Authorization = configured ? `Basic ${configured}` : 'Basic YOUR_BASE64_CREDENTIALS'
-      }
+  const result: Array<NormalizedAuthScheme> = []
+  for (const requirement of security.flat()) {
+    if (result.some((entry) => entry.name === requirement.name)) continue
+    const scheme = resolveSecurityScheme(securitySchemes, requirement.name, resolveRef)
+    if (!scheme) continue
+    const configured = credentials[requirement.name]
+    const description = typeof scheme.description === 'string' ? scheme.description : undefined
+    const base = { name: requirement.name, description }
+    if (scheme.type === 'http' && scheme.scheme === 'bearer') {
+      result.push({ ...base, kind: 'bearer', in: 'header', paramName: 'Authorization', prefill: configured?.replace(/^Bearer /, '') })
+    } else if (scheme.type === 'http' && scheme.scheme === 'basic') {
+      result.push({ ...base, kind: 'basic', in: 'header', paramName: 'Authorization', prefill: configured?.replace(/^Basic /, '') })
+    } else if (scheme.type === 'apiKey' && typeof scheme.name === 'string' && (scheme.in === 'header' || scheme.in === 'query' || scheme.in === 'cookie')) {
+      result.push({ ...base, kind: 'apiKey', in: scheme.in, paramName: scheme.name, prefill: configured })
     }
-    break
   }
-
   return result
 }
 

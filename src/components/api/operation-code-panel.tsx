@@ -13,9 +13,9 @@ interface OperationCodePanelProps {
 }
 
 export function OperationCodePanel({ controller }: OperationCodePanelProps) {
-  const { preparedRequest, operation } = controller
+  const { sampleRequest, operation } = controller
   const { preferredLanguages, addPreferredLanguage } = usePreferredLanguageStore()
-  const samples = buildCodeSamples(preparedRequest, operation.codeSamples)
+  const samples = buildCodeSamples(sampleRequest, operation.codeSamples)
   const language = resolvePreferredLanguage(samples.map((sample) => sample.label), preferredLanguages)
   const sample = samples.find((candidate) => candidate.label === language)
 

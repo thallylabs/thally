@@ -9,6 +9,7 @@ import { ParamField, ResponseField, Expandable } from '@/components/mdx/api-fiel
 import type { NormalizedOperation, NormalizedParameter, NormalizedResponse } from '@/lib/openapi/types'
 import { EndpointBar } from '@/components/api/endpoint-bar'
 import { statusColorClass, statusUnderlineClass } from '@/components/api/tokens'
+import { authDescription } from '@/lib/openapi/auth'
 import { cn } from '@/lib/utils'
 import Markdown from '@/components/mdx/markdown'
 import { Prose } from '@/components/mdx/prose'
@@ -68,6 +69,27 @@ export function OperationPanel({ operation, children, showDescription = true }: 
           </section>
         ) : null}
 
+        {/* Authorizations */}
+        {operation.authSchemes.length ? (
+          <section className="space-y-3">
+            <h2 className="text-lg font-semibold text-foreground">Authorizations</h2>
+            <div className="border-y border-border">
+              {operation.authSchemes.map((scheme) => (
+                <ParamField
+                  key={scheme.name}
+                  name={scheme.paramName}
+                  type="string"
+                  required
+                  header={scheme.in === 'header'}
+                  query={scheme.in === 'query'}
+                >
+                  <Markdown>{authDescription(scheme)}</Markdown>
+                </ParamField>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
         {/* Parameters */}
         {parameterGroups.length ? (
           <section className="space-y-6">
@@ -122,32 +144,6 @@ export function OperationPanel({ operation, children, showDescription = true }: 
           <section className="space-y-4">
             <h2 className="text-lg font-semibold text-foreground">Responses</h2>
             <ResponseTabs responses={operation.responses} />
-          </section>
-        ) : null}
-
-        {/* Security */}
-        {operation.security.length ? (
-          <section className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">Security</p>
-            <div className="space-y-3">
-              {operation.security.map((group, index) => (
-                <div key={`${group.map((item) => item.name).join('-')}-${index}`} className="border-y border-border py-4">
-                  <p className="text-xs uppercase tracking-[0.3em] text-foreground/60">One of the following</p>
-                  <div className="mt-2 space-y-2">
-                    {group.map((requirement) => (
-                      <div key={requirement.name} className="border-t border-border py-3">
-                        <p className="text-sm font-semibold text-foreground">{requirement.name}</p>
-                        {requirement.scopes.length ? (
-                          <p className="text-xs text-foreground/60">Scopes: {requirement.scopes.join(', ')}</p>
-                        ) : (
-                          <p className="text-xs text-foreground/60">No scopes required</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
           </section>
         ) : null}
       </div>
