@@ -86,7 +86,11 @@ async function registryTarball(metadata) {
 }
 
 /** Validate and publish every tarball in topological order. */
-export async function publishReleaseArtifacts(manifestPath, expectedPlanSha256, { verifyOnly = false } = {}) {
+export async function publishReleaseArtifacts(manifestPath, expectedPlanSha256, {
+  verifyOnly = false,
+  runCommand = run,
+  sleep,
+} = {}) {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   if (
     manifest.schemaVersion !== 2 ||
@@ -139,7 +143,7 @@ export async function publishReleaseArtifacts(manifestPath, expectedPlanSha256, 
     if ((await sha512Integrity(tarball)) !== artifact.integrity) {
       throw new Error(`${artifact.name} tarball integrity changed after packing.`)
     }
-    const embedded = run('tar', ['-xOf', tarball, 'package/package.json'])
+    const embedded = runCommand('tar', ['-xOf', tarball, 'package/package.json'])
     if (embedded.status !== 0) {
       throw new Error(`Unable to read ${artifact.filename}.`)
     }
@@ -162,7 +166,13 @@ export async function publishReleaseArtifacts(manifestPath, expectedPlanSha256, 
     }
 
     const spec = `${artifact.name}@${artifact.version}`
-    const existing = await registryMetadata(spec, 6)
+    // A new version is expected to be absent. Waiting for repeated E404s
+    // before its first publish only delays the dependency-ordered release.
+    // Verify-only mode still waits for metadata from an earlier publish.
+    const existing = await registryMetadata(spec, verifyOnly ? 6 : 1, {
+      runCommand,
+      sleep,
+    })
     if (existing && existing.integrity !== artifact.integrity) {
       const localPayload = tarPayloadSha256(await readFile(tarball))
       const publishedPayload = tarPayloadSha256(await registryTarball(existing))
@@ -186,14 +196,14 @@ export async function publishReleaseArtifacts(manifestPath, expectedPlanSha256, 
   }
   for (const { artifact, tarball, spec, existing } of verifiedArtifacts) {
     if (!existing) {
-      const published = run(
+      const published = runCommand(
         'npm',
         ['publish', tarball, '--access', 'public', '--ignore-scripts', '--provenance'],
         true,
       )
       if (published.status !== 0) throw new Error(`Publishing ${spec} failed.`)
     }
-    const settled = await registryMetadata(spec, REGISTRY_SETTLE_ATTEMPTS)
+    const settled = await registryMetadata(spec, REGISTRY_SETTLE_ATTEMPTS, { runCommand, sleep })
     if (settled?.integrity !== (existing?.integrity ?? artifact.integrity)) {
       throw new Error(`${spec} did not settle with the expected integrity.`)
     }
