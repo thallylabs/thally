@@ -65,6 +65,8 @@ interface TryItPayload {
   url?: unknown
   headers?: unknown
   body?: unknown
+  /** A binary (multipart) body, base64-encoded; used instead of `body`. */
+  bodyBase64?: unknown
 }
 
 function jsonError(error: string, status: number) {
@@ -145,7 +147,7 @@ function isCloudflareWorkerRuntime(): boolean {
 async function fetchPinnedToAddresses(
   target: URL,
   addresses: Array<ResolvedAddress>,
-  init: { method: string; headers: Record<string, string>; body?: string; signal: AbortSignal },
+  init: { method: string; headers: Record<string, string>; body?: string | Uint8Array; signal: AbortSignal },
 ): Promise<Response> {
   const transport = target.protocol === 'https:'
     ? await import('node:https')
@@ -286,6 +288,9 @@ export async function POST(request: NextRequest) {
   ) {
     return jsonError('Request body is too large', 413)
   }
+  if (payload.bodyBase64 !== undefined && typeof payload.bodyBase64 !== 'string') return jsonError('Invalid request body', 400)
+  const binaryBody = typeof payload.bodyBase64 === 'string' ? new Uint8Array(Buffer.from(payload.bodyBase64, 'base64')) : undefined
+  if (binaryBody && binaryBody.byteLength > MAX_UPSTREAM_BODY_BYTES) return jsonError('Request body is too large', 413)
 
   let target: URL
   try {
@@ -338,10 +343,7 @@ export async function POST(request: NextRequest) {
     const requestInit = {
       method,
       headers,
-      body:
-        shouldIncludeBody(method) && typeof payload.body === 'string'
-          ? payload.body
-          : undefined,
+      body: !shouldIncludeBody(method) ? undefined : (binaryBody ?? (typeof payload.body === 'string' ? payload.body : undefined)),
       signal: controller.signal,
     }
     const response = isCloudflareWorkerRuntime()

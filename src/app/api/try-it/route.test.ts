@@ -206,6 +206,32 @@ describe('POST /api/try-it', () => {
     })
   })
 
+  it('forwards a base64 multipart body as raw bytes with its own content type', async () => {
+    vi.mocked(getApiOperationByKey).mockResolvedValue({
+      operation: { specId: 'default', path: '/posts/{id}', method: 'POST', isWebhook: false, servers: [{ url: 'https://api.example.com/v1' }] },
+    } as never)
+    const bytes = Buffer.from([0, 255, 10, 13, 65])
+    const response = await POST(request(allowedPayload({
+      method: 'POST',
+      headers: { 'Content-Type': 'multipart/form-data; boundary=x' },
+      bodyBase64: bytes.toString('base64'),
+    })))
+    expect(response.status).toBe(200)
+    const client = vi.mocked(httpsRequest).mock.results[0].value as { write: ReturnType<typeof vi.fn> }
+    expect(Buffer.from(client.write.mock.calls[0][0]).equals(bytes)).toBe(true)
+    const [options] = vi.mocked(httpsRequest).mock.calls[0] as unknown as [{ headers: Record<string, string> }]
+    expect(options.headers['Content-Type']).toBe('multipart/form-data; boundary=x')
+  })
+
+  it('rejects a base64 body above the byte budget', async () => {
+    vi.mocked(getApiOperationByKey).mockResolvedValue({
+      operation: { specId: 'default', path: '/posts/{id}', method: 'POST', isWebhook: false, servers: [{ url: 'https://api.example.com/v1' }] },
+    } as never)
+    const big = Buffer.alloc(256 * 1024 + 1).toString('base64')
+    const response = await POST(request(allowedPayload({ method: 'POST', bodyBase64: big })))
+    expect(response.status).toBe(413)
+  })
+
   it('rejects responses above the declared byte budget', async () => {
     vi.stubGlobal('navigator', { userAgent: 'Cloudflare-Workers' })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(

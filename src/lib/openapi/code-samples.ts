@@ -9,6 +9,8 @@ export interface SampleRequest {
   url: string
   headers: Record<string, string>
   body?: string
+  /** A multipart body as `name=value` fields (files as `@name`); only the cURL sample can show it. */
+  form?: Array<[string, string]>
 }
 
 export interface CodeSample {
@@ -20,7 +22,7 @@ export const SAMPLE_LANGUAGES = ['cURL', 'Python', 'JavaScript', 'PHP', 'Go', 'J
 
 const q = (value: string) => JSON.stringify(value)
 
-export function buildCurlCommand(method: string, url: string, headers: Record<string, string>, body?: string) {
+export function buildCurlCommand(method: string, url: string, headers: Record<string, string>, body?: string, form?: Array<[string, string]>) {
   if (!url) {
     return []
   }
@@ -32,6 +34,9 @@ export function buildCurlCommand(method: string, url: string, headers: Record<st
   ]
   if (body) {
     parts.push(`--data '${body.replace(/'/g, `'"'"'`)}'`)
+  }
+  for (const [name, value] of form ?? []) {
+    parts.push(`--form '${`${name}=${value}`.replace(/'/g, `'"'"'`)}'`)
   }
   return [`curl --request ${method.toUpperCase()}`, ...parts].map((line, index, all) => `${index ? '  ' : ''}${line}${index < all.length - 1 ? ' \\' : ''}`)
 }
@@ -189,7 +194,7 @@ const rubySample = ({ method, url, headers, body }: SampleRequest) => {
 }
 
 const generators: Record<(typeof SAMPLE_LANGUAGES)[number], (request: SampleRequest) => string> = {
-  cURL: (r) => buildCurlCommand(r.method, r.url, r.headers, r.body).join('\n'),
+  cURL: (r) => buildCurlCommand(r.method, r.url, r.headers, r.body, r.form).join('\n'),
   Python: pythonSample,
   JavaScript: javascriptSample,
   PHP: phpSample,
@@ -215,7 +220,7 @@ export function buildCodeSamples(request: SampleRequest, authored: Array<CodeSam
   }
   const taken = new Set(authored.map((sample) => sampleKey(sample.label)))
   const generated = request.url
-    ? SAMPLE_LANGUAGES.filter((label) => !taken.has(sampleKey(label))).map((label) => ({ label, source: generators[label](shown) }))
+    ? SAMPLE_LANGUAGES.filter((label) => !taken.has(sampleKey(label)) && (!request.form || label === 'cURL')).map((label) => ({ label, source: generators[label](shown) }))
     : []
   return [...authored, ...generated]
 }

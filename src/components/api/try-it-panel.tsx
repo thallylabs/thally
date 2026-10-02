@@ -1,6 +1,9 @@
 'use client'
 
+import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { BodyForm } from '@/components/api/body-form'
+import { isFormEditable } from '@/lib/openapi/body-form'
 import { MANUAL_NO_SERVER, type TryItController } from '@/components/api/use-try-it-controller'
 import { CopyButton } from '@/components/api/copy-button'
 import { isSendableScheme } from '@/lib/openapi/auth'
@@ -13,7 +16,7 @@ interface TryItPanelProps {
 }
 
 export function TryItPanel({ controller, variant = 'inline', showHeading = true }: TryItPanelProps) {
-  const { operation, serverUrl, setServerUrl, pathParams, queryParams, headerParams, bodyValue, setBodyValue, authValues, setAuthValue, setParamValue, preparedRequest, isSending, canSendBody, response } =
+  const { operation, serverUrl, setServerUrl, pathParams, queryParams, headerParams, authValues, setAuthValue, setParamValue, preparedRequest, isSending, canSendBody, response } =
     controller
   const containerStyles =
     variant === 'dialog'
@@ -81,20 +84,7 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
         <ParamGroup title="Path parameters" values={pathParams} onChange={(key, value) => setParamValue('path', key, value)} />
         <ParamGroup title="Query parameters" values={queryParams} onChange={(key, value) => setParamValue('query', key, value)} />
         <ParamGroup title="Headers" values={headerParams} onChange={(key, value) => setParamValue('header', key, value)} />
-        {canSendBody ? (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">
-              <p>Request body</p>
-              <span className="text-[10px] text-foreground/50">JSON</span>
-            </div>
-            <textarea
-              aria-label="JSON request body"
-              value={bodyValue}
-              onChange={(event) => setBodyValue(event.target.value)}
-              className="min-h-[180px] w-full rounded-[9px] border border-border bg-background px-4 py-3 font-mono text-sm text-foreground"
-            />
-          </div>
-        ) : null}
+        {canSendBody ? <BodySection controller={controller} /> : null}
         {variant === 'inline' ? (
           <div className="flex flex-col items-end gap-2">
             {!preparedRequest.isServerConfigured ? (
@@ -113,6 +103,50 @@ export function TryItPanel({ controller, variant = 'inline', showHeading = true 
       </form>
       {variant === 'dialog' ? (response && 'error' in response ? <TryItResponse response={response} /> : null) : <TryItResponse response={response} />}
     </section>
+  )
+}
+
+/** The request body: a typed form from the schema, with a raw JSON editor kept in step with it. */
+function BodySection({ controller }: { controller: TryItController }) {
+  const { operation, bodyValue, setBodyValue, setFile } = controller
+  const schema = operation.requestBody?.contents[0]?.schema
+  const editable = isFormEditable(schema)
+  const [raw, setRaw] = useState(!editable)
+  let parsed: unknown
+  try {
+    parsed = bodyValue.trim() ? JSON.parse(bodyValue) : {}
+  } catch {
+    parsed = undefined
+  }
+  const showForm = editable && !raw && parsed !== undefined && schema !== undefined
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.3em] text-foreground/60">
+        <p>Request body</p>
+        {editable ? (
+          <button
+            type="button"
+            aria-pressed={raw}
+            disabled={raw && parsed === undefined}
+            onClick={() => setRaw(!raw)}
+            className="rounded-[7px] border border-border px-2 py-1 text-[10px] tracking-normal disabled:opacity-40"
+          >
+            JSON
+          </button>
+        ) : null}
+      </div>
+      {showForm ? (
+        <BodyForm schema={schema} value={parsed} onChange={(next) => setBodyValue(JSON.stringify(next, null, 2))} onFile={setFile} />
+      ) : (
+        <textarea
+          aria-label="JSON request body"
+          aria-invalid={parsed === undefined && Boolean(bodyValue.trim())}
+          value={bodyValue}
+          onChange={(event) => setBodyValue(event.target.value)}
+          className="min-h-[180px] w-full rounded-[9px] border border-border bg-background px-4 py-3 font-mono text-sm text-foreground"
+        />
+      )}
+    </div>
   )
 }
 
