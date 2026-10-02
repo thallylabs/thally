@@ -1304,7 +1304,8 @@ function excludeWithheldOperations(
   const untouched = { content: spec.content, excluded: [] as Array<string> }
   if (gone.length === 0) return untouched
   const text = spec.content.toString('utf8')
-  let doc: Record<string, any>
+  type Entries = Record<string, Record<string, unknown> | undefined>
+  let doc: { paths?: Entries; webhooks?: Entries; 'x-webhooks'?: Entries }
   try { doc = parseYaml(text) } catch { return untouched }
   if (!doc || typeof doc !== 'object') return untouched
   const excluded: Array<string> = []
@@ -1322,7 +1323,7 @@ function excludeWithheldOperations(
     const target = typeof entry.$ref === 'string'
       ? ([...kept].some((k) => k.slice(k.indexOf(' ') + 1) === name) ? undefined : entry)
       : entry[method]
-    if (target && typeof target === 'object') { target['x-excluded'] = true; excluded.push(`${method.toUpperCase()} ${name}`) }
+    if (target && typeof target === 'object') { (target as Record<string, unknown>)['x-excluded'] = true; excluded.push(`${method.toUpperCase()} ${name}`) }
   }
   if (excluded.length === 0) return untouched
   const out = text.trimStart().startsWith('{') ? `${JSON.stringify(doc, null, 2)}\n` : stringifyYaml(doc)
