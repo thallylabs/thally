@@ -24,6 +24,7 @@ vi.mock('@/data/get-doc', () => ({
 vi.mock('@/data/api-reference', () => ({ getApiOperationForFrontmatter: async () => fixtures.operation }))
 vi.mock('@/data/docs', () => ({
   ensureDocPublication: async () => undefined,
+  getApiPlaygroundDisplay: () => undefined,
   getDocEntries: async () => [],
   isDocPublished: () => fixtures.published,
   loadNavContext: async () => ({ breadcrumb: [], prev: { title: 'Previous page', href: '/prev' }, next: null }),
