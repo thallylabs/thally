@@ -190,6 +190,33 @@ describe('thally check hidden operations under public/', () => {
   })
 })
 
+describe('thally check OpenAPI root objects', () => {
+  async function run(body: Record<string, unknown>) {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-roots-'))
+    mkdirSync(join(projectDir, 'openapi'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'API', api: { source: 'openapi/api.json' } }] }))
+    writeFileSync(join(projectDir, 'openapi/api.json'), JSON.stringify({ info: { title: 'T', version: '1' }, ...body }))
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    return output.join('\n')
+  }
+  const hook = { post: { responses: { 200: { description: 'ok' } } } }
+
+  it('accepts an OpenAPI 3.1 spec with only webhooks', async () => {
+    expect(await run({ openapi: '3.1.0', webhooks: { 'crawl.page': hook } })).not.toMatch(/OpenAPI spec (is missing the "paths"|needs a "paths")/)
+  })
+
+  it('still requires paths in OpenAPI 3.0, and some root object in 3.1', async () => {
+    expect(await run({ openapi: '3.0.3', webhooks: { 'crawl.page': hook } })).toContain('OpenAPI spec is missing the "paths" object')
+    expect(await run({ openapi: '3.1.0' })).toContain('OpenAPI spec needs a "paths", "webhooks" or "components" object')
+  })
+})
+
 describe('thally check stale specs under public/', () => {
   const doc = (paths: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
     JSON.stringify({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths, ...extra })

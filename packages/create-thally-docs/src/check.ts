@@ -470,8 +470,13 @@ function validateOpenApi(projectDir: string, source: string, issues: LintIssue[]
     issues.push({ severity: 'error', message: 'OpenAPI spec is missing the "info" object', file: source })
   }
   const paths = s?.paths
+  // OpenAPI 3.1 only needs one of paths, webhooks or components (a webhook-only spec is valid).
+  const is31 = typeof s?.openapi === 'string' && s.openapi.startsWith('3.1')
+  const hasOtherRoot = (key: string): boolean => typeof s?.[key] === 'object' && s[key] !== null
   if (typeof paths !== 'object' || paths === null) {
-    issues.push({ severity: 'error', message: 'OpenAPI spec is missing the "paths" object', file: source })
+    if (!is31 || !(hasOtherRoot('webhooks') || hasOtherRoot('components'))) {
+      issues.push({ severity: 'error', message: is31 ? 'OpenAPI spec needs a "paths", "webhooks" or "components" object' : 'OpenAPI spec is missing the "paths" object', file: source })
+    }
   } else {
     const methods = new Set(['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'trace'])
     for (const [p, ops] of Object.entries(paths as Record<string, unknown>)) {
