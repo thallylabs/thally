@@ -8,6 +8,7 @@ import { useTryItController } from '@/components/api/use-try-it-controller'
 import { ParamField, ResponseField, Expandable } from '@/components/mdx/api-fields'
 import type { NormalizedOperation, NormalizedParameter, NormalizedResponse } from '@/lib/openapi/types'
 import { EndpointBar } from '@/components/api/endpoint-bar'
+import { statusColorClass, statusUnderlineClass } from '@/components/api/tokens'
 import { cn } from '@/lib/utils'
 import Markdown from '@/components/mdx/markdown'
 import { Prose } from '@/components/mdx/prose'
@@ -289,22 +290,6 @@ function ResponseTabs({ responses }: { responses: Array<NormalizedResponse> }) {
       ) : null}
     </div>
   )
-}
-
-function statusColorClass(code: string) {
-  if (code.startsWith('2')) return 'text-green-600 dark:text-green-400'
-  if (code.startsWith('3')) return 'text-sky-600 dark:text-sky-400'
-  if (code.startsWith('4')) return 'text-amber-600 dark:text-amber-400'
-  if (code.startsWith('5')) return 'text-rose-600 dark:text-rose-400'
-  return 'text-foreground'
-}
-
-function statusUnderlineClass(code: string) {
-  if (code.startsWith('2')) return 'bg-green-500'
-  if (code.startsWith('3')) return 'bg-sky-500'
-  if (code.startsWith('4')) return 'bg-amber-500'
-  if (code.startsWith('5')) return 'bg-rose-500'
-  return 'bg-accent'
 }
 
 // ---------------------------------------------------------------------------

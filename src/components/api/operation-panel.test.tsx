@@ -191,3 +191,33 @@ describe('OperationPanel code samples', () => {
     expect(html).toContain('curl --request POST')
   })
 })
+
+describe('OperationPanel response examples', () => {
+  const spec = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.com/v2' }],
+    paths: {
+      '/scrape': {
+        post: {
+          summary: 'Scrape',
+          responses: {
+            '200': { description: 'ok', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' } } } } } },
+            '404': { description: 'not found' },
+            '429': { description: 'slow', content: { 'application/json': { schema: { type: 'object', properties: { error: { type: 'string' } } } } } },
+          },
+        },
+      },
+    },
+  }
+
+  it('shows a status tab per response and the first one example under the request', () => {
+    const html = renderToStaticMarkup(<OperationPanel operation={operationFrom(spec)} />)
+    const tabs = html.match(/role="tablist" aria-label="Response status".*?<\/div>/)![0]
+    expect(tabs).toContain('>200<')
+    expect(tabs).toContain('>429<')
+    expect(tabs).not.toContain('>404<')
+    expect(html).toContain('&quot;success&quot;: true')
+    expect(html).not.toContain('Send a request to preview the response.')
+  })
+})
