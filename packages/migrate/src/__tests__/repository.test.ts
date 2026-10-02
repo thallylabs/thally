@@ -321,7 +321,7 @@ describe('Mintlify repository migration', () => {
       defaultLocale: 'en',
       locales: [
         { code: 'en', label: 'English' },
-        { code: 'es', label: 'Spanish' },
+        { code: 'es', label: 'Español' },
       ],
     })
     expect(bundle.docsConfig.tabs[0]).toMatchObject({

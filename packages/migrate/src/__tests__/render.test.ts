@@ -56,7 +56,7 @@ describe('migration config merge', () => {
         navigation: { display: 'tabs' },
         i18n: {
           defaultLocale: 'en',
-          locales: [{ code: 'en', label: 'English' }, { code: 'es', label: 'Spanish' }],
+          locales: [{ code: 'en', label: 'English' }, { code: 'es', label: 'Español' }],
         },
       },
       {

@@ -233,6 +233,12 @@ describe('config mapping', () => {
     expect(css).not.toContain('navbar-link')
   })
 
+  it('labels languages with their native names like the Mintlify picker', () => {
+    const lang = (language: string) => ({ language, pages: ['intro'] })
+    const bundle = site({ 'docs.json': JSON.stringify({ navigation: { languages: [lang('en'), lang('es'), lang('ja'), lang('zh'), lang('pt-BR')] } }), ...intro })
+    expect(bundle.docsConfig.i18n?.locales.map((locale) => locale.label)).toEqual(['English', 'Español', '日本語', '简体中文', 'Português (BR)'])
+  })
+
   it('maps Mintlify colors to per-mode brand colors with six-digit hex', () => {
     const bundle = site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: '#F60', light: '#fff', dark: '#000000' } }), ...intro })
     expect(bundle.docsConfig.colors).toEqual({

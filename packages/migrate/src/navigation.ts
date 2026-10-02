@@ -159,23 +159,27 @@ export function addMintlifyHomepageRedirects(
   return { ...config, redirects }
 }
 
+/** Native names, as Mintlify's language picker shows them. */
 const LANGUAGE_LABELS: Record<string, string> = {
-  ar: 'Arabic',
-  de: 'German',
+  ar: 'العربية',
+  de: 'Deutsch',
   en: 'English',
-  es: 'Spanish',
-  fr: 'French',
-  hi: 'Hindi',
-  it: 'Italian',
-  ja: 'Japanese',
-  ko: 'Korean',
-  nl: 'Dutch',
-  pl: 'Polish',
-  pt: 'Portuguese',
-  ru: 'Russian',
-  tr: 'Turkish',
-  uk: 'Ukrainian',
-  zh: 'Chinese',
+  es: 'Español',
+  fr: 'Français',
+  hi: 'हिन्दी',
+  it: 'Italiano',
+  ja: '日本語',
+  ko: '한국어',
+  nl: 'Nederlands',
+  pl: 'Polski',
+  pt: 'Português',
+  'pt-BR': 'Português (BR)',
+  ru: 'Русский',
+  tr: 'Türkçe',
+  uk: 'Українська',
+  zh: '简体中文',
+  'zh-Hans': '简体中文',
+  'zh-Hant': '繁體中文',
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
