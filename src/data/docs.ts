@@ -499,6 +499,11 @@ function slugifyId(value: string) {
     .replace(/\//g, '-')
 }
 
+/** The collection id a docs.json tab gets in the sidebar; hidden-tab API specs are keyed by it too. */
+export function tabCollectionId(tab: string) {
+  return slugifyId(tab) || tab.toLowerCase()
+}
+
 const KEYWORD_STOPWORDS = new Set([
   'the',
   'a',
@@ -874,7 +879,7 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
     // when their version is active or its entire route renders an empty shell.
     .filter((tab) => !tab.hidden || Boolean(tab.version && config.navigation?.versions?.some((version) => version.label === tab.version)))
     .map((tab) => {
-      const id = slugifyId(tab.tab) || tab.tab.toLowerCase()
+      const id = tabCollectionId(tab.tab)
       const groups = tab.groups ?? []
       const groupSections = groups.flatMap((group, index) => {
         const tree = buildNavigationGroup(group, [index], [], locale)

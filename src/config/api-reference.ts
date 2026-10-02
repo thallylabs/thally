@@ -4,7 +4,7 @@
  */
 
 import type { ApiReferenceConfig, ApiSpecConfig } from '@/lib/openapi/types'
-import { getSidebarCollections } from '@/data/docs'
+import { getSidebarCollections, tabCollectionId } from '@/data/docs'
 import type { DocsJsonApiConfig } from '@/data/docs'
 import { getDocsJsonConfig } from '@/lib/docs-json-config'
 import { getSiteUrl } from '@/lib/site-url'
@@ -18,7 +18,7 @@ import { getSiteUrl } from '@/lib/site-url'
 function hiddenApiCollections(visibleIds: Set<string>): Array<{ id: string; label: string; api: DocsJsonApiConfig; pageOnly?: boolean }> {
   const tabs = getDocsJsonConfig<{ tabs?: Array<{ tab: string; displayLabel?: string; hidden?: boolean; api?: DocsJsonApiConfig }> }>().tabs ?? []
   return tabs.flatMap((tab) => {
-    const id = tab.tab.toLowerCase().replace(/[^a-z0-9/]+/g, '-').replace(/(^-|-$)+/g, '').replace(/\//g, '-') || tab.tab.toLowerCase()
+    const id = tabCollectionId(tab.tab)
     return tab.hidden && tab.api && !visibleIds.has(id) ? [{ id, label: tab.displayLabel ?? tab.tab, api: tab.api, pageOnly: true }] : []
   })
 }
