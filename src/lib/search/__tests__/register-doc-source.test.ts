@@ -17,9 +17,11 @@ vi.mock('@thallylabs/core/registry', () => ({
 }))
 vi.mock('@/data/docs', () => ({
   getDocEntries: () => [],
+  getHiddenVersionPageIds: () => new Set(['v1/guide']),
   loadDocEntries: async () => [
     { id: 'guide', slug: ['guide'], href: '/guide', title: 'Guide', description: 'Source', keywords: [] },
     { id: 'draft', slug: ['draft'], href: '/draft', title: 'Draft', description: 'Draft', keywords: [], noindex: true },
+    { id: 'v1/guide', slug: ['v1', 'guide'], href: '/v1/guide', title: 'Old guide', description: 'Old', keywords: [] },
   ],
 }))
 vi.mock('@/lib/i18n/translation-source', () => ({ getIndexableDocTranslation: mocks.getIndexableDocTranslation }))
@@ -45,5 +47,10 @@ describe('registered search doc entries', () => {
       keywords: [],
     }])
     expect(mocks.getIndexableDocTranslation).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves hidden-version pages out of the default search corpus', async () => {
+    const ids = (await mocks.asyncEntriesResolver?.())?.map((entry) => (entry as { id?: string }).id)
+    expect(ids).toEqual(['guide'])
   })
 })
