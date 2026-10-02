@@ -185,6 +185,8 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
   const flat = flattenSchema(schema)
   const properties = flat.properties as Record<string, Record<string, unknown>> | undefined
   if (!properties || typeof properties !== 'object') {
+    const variants = unionVariants(flat)
+    if (variants) return <SchemaVariants variants={variants} depth={0} />
     return (
       <ParamField name="(body)" type={resolveSchemaType(flat)}>
         {typeof flat.description === 'string' ? <Markdown>{flat.description}</Markdown> : null}
@@ -228,7 +230,7 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
             ) : null}
             {nested ? (
               <Expandable title={`${name} properties`}>
-                <SchemaAsResponseFields schema={flatProp} />
+                <NestedFields schema={flatProp} depth={1} />
               </Expandable>
             ) : null}
           </ParamField>
@@ -296,12 +298,15 @@ function ResponseTabs({ responses }: { responses: Array<NormalizedResponse> }) {
 // SchemaAsResponseFields — renders object properties as ResponseField rows
 // ---------------------------------------------------------------------------
 
-function SchemaAsResponseFields({ schema }: { schema?: Record<string, unknown> }) {
+function SchemaAsResponseFields({ schema, depth = 0 }: { schema?: Record<string, unknown>; depth?: number }) {
   if (!schema) return null
 
   const flat = flattenSchema(schema)
   const properties = flat.properties as Record<string, Record<string, unknown>> | undefined
-  if (!properties || typeof properties !== 'object') return null
+  if (!properties || typeof properties !== 'object') {
+    const variants = unionVariants(flat)
+    return variants ? <SchemaVariants variants={variants} depth={depth} /> : null
+  }
 
   const required = Array.isArray(flat.required) ? (flat.required as string[]) : []
 
@@ -312,7 +317,7 @@ function SchemaAsResponseFields({ schema }: { schema?: Record<string, unknown> }
         const type = resolveSchemaType(flatProp)
         const description = typeof flatProp.description === 'string' ? flatProp.description : undefined
         const isRequired = required.includes(name)
-        const nested = getNestedProperties(flatProp)
+        const nested = depth < MAX_NESTING && getNestedProperties(flatProp)
         const enumValues = Array.isArray(flatProp.enum) ? (flatProp.enum as unknown[]).map(String) : null
 
         return (
@@ -330,13 +335,99 @@ function SchemaAsResponseFields({ schema }: { schema?: Record<string, unknown> }
             ) : null}
             {nested ? (
               <Expandable title={`${name} properties`}>
-                <SchemaAsResponseFields schema={getNestedSchema(flatProp)} />
+                <NestedFields schema={flatProp} depth={depth + 1} />
               </Expandable>
             ) : null}
           </ResponseField>
         )
       })}
     </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// oneOf / anyOf — a tab per variant, each with its own fields
+// ---------------------------------------------------------------------------
+
+/** Nested levels expanded before a schema is cut off, so a deeply recursive one stays finite. */
+const MAX_NESTING = 6
+
+interface SchemaVariant {
+  /** The variant's own title, or its discriminator value. */
+  label?: string
+  schema: Record<string, unknown>
+}
+
+function unionVariants(schema: Record<string, unknown>): Array<SchemaVariant> | null {
+  const list = Array.isArray(schema.oneOf) ? schema.oneOf : Array.isArray(schema.anyOf) ? schema.anyOf : null
+  const entries = list?.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+  if (!entries?.length) return null
+  const discriminator = (schema.discriminator as { propertyName?: unknown } | undefined)?.propertyName
+  return entries.flatMap((entry) => {
+    const flat = flattenSchema(entry)
+    // A variant that is only a union itself is spread into this one, as live does.
+    const inner = flat.properties ? null : unionVariants(flat)
+    if (inner) return inner
+    const property = typeof discriminator === 'string' ? (flat.properties as Record<string, Record<string, unknown>> | undefined)?.[discriminator] : undefined
+    const value = property?.const ?? (Array.isArray(property?.enum) ? property.enum[0] : undefined)
+    return [{
+      label: typeof flat.title === 'string' ? flat.title : value !== undefined ? String(value) : undefined,
+      schema: flat,
+    }]
+  })
+}
+
+function unionType(variants: Array<SchemaVariant>): string {
+  return variants
+    .map((variant) => {
+      const type = resolveSchemaType(variant.schema) ?? 'any'
+      return variant.label ? `${variant.label} · ${type}` : type
+    })
+    .join(' | ')
+}
+
+function NestedFields({ schema, depth }: { schema: Record<string, unknown>; depth: number }) {
+  const nested = getNestedSchema(schema)
+  const variants = unionVariants(nested)
+  return variants ? <SchemaVariants variants={variants} depth={depth} /> : <SchemaAsResponseFields schema={nested} depth={depth} />
+}
+
+function SchemaVariants({ variants, depth }: { variants: Array<SchemaVariant>; depth: number }) {
+  const [active, setActive] = useState(0)
+  const current = variants[active] ?? variants[0]
+  const description = typeof current.schema.description === 'string' ? current.schema.description : undefined
+  const hasFields = getNestedProperties(current.schema)
+
+  return (
+    <div>
+      {variants.length > 1 ? (
+        <div role="tablist" aria-label="Variants" className="mb-3 flex flex-wrap gap-1.5">
+          {variants.map((variant, index) => (
+            <button
+              key={index}
+              type="button"
+              role="tab"
+              aria-selected={index === active}
+              onClick={() => setActive(index)}
+              className={cn(
+                'rounded-md border px-2 py-1 text-xs font-medium transition',
+                index === active ? 'border-accent/50 bg-accent/10 text-accent' : 'border-border text-foreground/60 hover:text-foreground',
+              )}
+            >
+              {variant.label ?? `Option ${index + 1}`}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {description ? <Markdown className="mb-2 text-sm text-foreground/70">{description}</Markdown> : null}
+      {hasFields ? (
+        <SchemaAsResponseFields schema={current.schema} depth={depth} />
+      ) : (
+        <p className="text-xs text-foreground/60">
+          Type: <code>{resolveSchemaType(current.schema) ?? 'any'}</code>
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -386,6 +477,8 @@ function resolveSchemaType(schema?: Record<string, unknown>): string | undefined
     const parts = schema.$ref.split('/')
     return parts[parts.length - 1]
   }
+  const variants = schema.type === undefined ? unionVariants(schema) : null
+  if (variants) return unionType(variants)
   if (Array.isArray(schema.type)) {
     return (schema.type as string[]).join(' | ')
   }
@@ -393,14 +486,14 @@ function resolveSchemaType(schema?: Record<string, unknown>): string | undefined
     if (schema.type === 'array' && schema.items && typeof schema.items === 'object') {
       const items = flattenSchema(schema.items as Record<string, unknown>)
       const itemType = resolveSchemaType(items)
-      return itemType ? `${itemType}[]` : 'array'
+      const several = (unionVariants(items)?.length ?? 0) > 1
+      return itemType ? `${several ? `(${itemType})` : itemType}[]` : 'array'
     }
     if (Array.isArray(schema.enum)) return `enum<${schema.type}>`
     if (schema.type === 'string' && typeof schema.format === 'string') return `string<${schema.format}>`
     return schema.type
   }
   if (Array.isArray(schema.allOf)) return 'object'
-  if (Array.isArray(schema.oneOf) || Array.isArray(schema.anyOf)) return 'oneOf'
   if (schema.properties) return 'object'
   if (schema.items) return 'array'
   return undefined
@@ -413,18 +506,16 @@ function resolveDefault(schema?: Record<string, unknown>): string | undefined {
 
 function getNestedProperties(schema: Record<string, unknown>): boolean {
   const flat = flattenSchema(schema)
-  if ((flat.type === 'object' || flat.properties) && flat.properties) return true
-  if (flat.type === 'array' && flat.items && typeof flat.items === 'object') {
-    const items = flattenSchema(flat.items as Record<string, unknown>)
-    return !!(items.properties || Array.isArray(items.allOf))
-  }
-  return false
+  if (flat.properties) return true
+  const variants = unionVariants(flat)
+  if (variants) return variants.some((variant) => getNestedProperties(variant.schema))
+  return flat.type === 'array' && Boolean(flat.items) && typeof flat.items === 'object' && getNestedProperties(flat.items as Record<string, unknown>)
 }
 
 function getNestedSchema(schema: Record<string, unknown>): Record<string, unknown> {
   const flat = flattenSchema(schema)
   if (flat.type === 'array' && flat.items && typeof flat.items === 'object') {
-    return flattenSchema(flat.items as Record<string, unknown>)
+    return getNestedSchema(flat.items as Record<string, unknown>)
   }
   return flat
 }

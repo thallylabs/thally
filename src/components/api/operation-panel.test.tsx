@@ -221,3 +221,86 @@ describe('OperationPanel response examples', () => {
     expect(html).not.toContain('Send a request to preview the response.')
   })
 })
+
+describe('OperationPanel oneOf / anyOf', () => {
+  const wait = { title: 'Wait by Duration', type: 'object', properties: { type: { type: 'string', enum: ['wait'] }, milliseconds: { type: 'integer' } }, required: ['type'] }
+  const click = { title: 'Click', type: 'object', properties: { type: { type: 'string', enum: ['click'] }, selector: { type: 'string' } } }
+  const spec = (extra: Record<string, unknown> = {}) => ({
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.com/v2' }],
+    paths: {
+      '/scrape': {
+        post: {
+          summary: 'Scrape',
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    actions: { type: 'array', items: { oneOf: [wait, click] } },
+                    source: { oneOf: [{ type: 'object', properties: { kind: { const: 'a' } } }, { type: 'object', properties: { other: { type: 'string' } } }] },
+                    flag: { oneOf: [{ type: 'boolean' }, { type: 'object', properties: { deep: { type: 'string' } } }] },
+                    kinds: { discriminator: { propertyName: 'kind' }, oneOf: [{ type: 'object', properties: { kind: { const: 'pdf' } } }, { type: 'object', properties: { kind: { const: 'doc' } } }] },
+                    ...extra,
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              description: 'ok',
+              content: { 'application/json': { schema: { anyOf: [{ title: 'Done', type: 'object', properties: { id: { type: 'string' } } }, { title: 'Pending', type: 'object', properties: { eta: { type: 'integer' } } }] } } },
+            },
+          },
+        },
+      },
+    },
+  })
+  const render = (extra?: Record<string, unknown>) => renderToStaticMarkup(<OperationPanel operation={operationFrom(spec(extra))} />)
+
+  it('lists the variant titles in the type, not the literal oneOf', () => {
+    const html = render()
+    expect(html).not.toContain('oneOf')
+    expect(html).toContain('(Wait by Duration · object | Click · object)[]')
+    expect(html).toContain('object | object')
+    expect(html).toContain('boolean | object')
+  })
+
+  it('shows a tab per variant and the first variant\'s fields', () => {
+    const html = render()
+    for (const label of ['Wait by Duration', 'Click', 'Option 1', 'Option 2', 'Done', 'Pending']) {
+      expect(html).toMatch(new RegExp(`role="tab"[^>]*>${label}</button>`))
+    }
+    expect(html).toContain('milliseconds')
+    expect(html).not.toContain('selector')
+    expect(html).toContain('>id<')
+    expect(html).not.toContain('>eta<')
+  })
+
+  it('spreads a variant that is only a union into the list', () => {
+    const html = render({
+      nested: { type: 'array', items: { oneOf: [{ title: 'Wrapper', oneOf: [{ title: 'Inner A', type: 'object', properties: { a: { type: 'string' } } }, { title: 'Inner B', type: 'object', properties: { b: { type: 'string' } } }] }, { title: 'Outer', type: 'object', properties: { c: { type: 'string' } } }] } },
+    })
+    expect(html).toContain('(Inner A · object | Inner B · object | Outer · object)[]')
+    expect(html).not.toContain('Wrapper')
+  })
+
+  it('labels variants by the discriminator value when they have no title', () => {
+    const html = render()
+    expect(html).toMatch(/role="tab"[^>]*>pdf<\/button>/)
+    expect(html).toMatch(/role="tab"[^>]*>doc<\/button>/)
+  })
+
+  it('stops expanding a deeply recursive union at a depth limit', () => {
+    let schema: Record<string, unknown> = { type: 'object', properties: { leaf: { type: 'string' } } }
+    for (let level = 12; level >= 1; level -= 1) {
+      schema = { type: 'object', properties: { [`level${level}`]: { oneOf: [schema, { type: 'object', properties: { other: { type: 'string' } } }] } } }
+    }
+    const html = render({ deep: schema })
+    expect(html).toContain('>level3<')
+    expect(html).not.toContain('>level12<')
+  })
+})
