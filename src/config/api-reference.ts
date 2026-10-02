@@ -15,11 +15,11 @@ import { getSiteUrl } from '@/lib/site-url'
  * from page frontmatter) resolves against them. Hidden tabs already served as
  * a version's tabs are excluded: getSidebarCollections returns those.
  */
-function hiddenApiCollections(visibleIds: Set<string>): Array<{ id: string; label: string; api: DocsJsonApiConfig }> {
+function hiddenApiCollections(visibleIds: Set<string>): Array<{ id: string; label: string; api: DocsJsonApiConfig; pageOnly?: boolean }> {
   const tabs = getDocsJsonConfig<{ tabs?: Array<{ tab: string; displayLabel?: string; hidden?: boolean; api?: DocsJsonApiConfig }> }>().tabs ?? []
   return tabs.flatMap((tab) => {
     const id = tab.tab.toLowerCase().replace(/[^a-z0-9/]+/g, '-').replace(/(^-|-$)+/g, '').replace(/\//g, '-') || tab.tab.toLowerCase()
-    return tab.hidden && tab.api && !visibleIds.has(id) ? [{ id, label: tab.displayLabel ?? tab.tab, api: tab.api }] : []
+    return tab.hidden && tab.api && !visibleIds.has(id) ? [{ id, label: tab.displayLabel ?? tab.tab, api: tab.api, pageOnly: true }] : []
   })
 }
 
@@ -41,11 +41,11 @@ function buildApiReferenceConfig(): ApiReferenceConfig {
   return {
     defaultSpecId: 'default',
     specs: apiCollections.map((collection, index) =>
-      buildSpecFromDocsJson(collection.api!, index === 0 ? 'default' : collection.id, index === 0 ? 'API Reference' : collection.label)),
+      buildSpecFromDocsJson(collection.api!, index === 0 ? 'default' : collection.id, index === 0 ? 'API Reference' : collection.label, 'pageOnly' in collection)),
   }
 }
 
-function buildSpecFromDocsJson(api: DocsJsonApiConfig, id: string, label: string): ApiSpecConfig {
+function buildSpecFromDocsJson(api: DocsJsonApiConfig, id: string, label: string, pageOnly = false): ApiSpecConfig {
   const isUrl = api.source.startsWith('http://') || api.source.startsWith('https://')
   return {
     id,
@@ -57,6 +57,7 @@ function buildSpecFromDocsJson(api: DocsJsonApiConfig, id: string, label: string
     defaultGroup: api.defaultGroup,
     webhookGroup: api.webhookGroup,
     operationOverrides: api.overrides,
+    ...(pageOnly ? { pageOnly: true } : {}),
   }
 }
 

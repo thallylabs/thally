@@ -37,6 +37,12 @@ export interface ApiSpecConfig {
   defaultGroup?: string
   webhookGroup?: string
   operationOverrides?: Record<string, OperationOverride>
+  /**
+   * Bound to a hidden tab: pages whose `openapi:` frontmatter names the spec
+   * render its operations, but it gets no `/api/<id>/...` pages, search
+   * entries or sitemap URLs of its own.
+   */
+  pageOnly?: boolean
 }
 
 export interface ApiReferenceConfig {

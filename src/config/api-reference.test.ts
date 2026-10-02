@@ -87,6 +87,7 @@ describe('specs bound to hidden tabs', () => {
       ['default', { type: 'file', path: 'openapi.json' }],
       ['openapi-v2-json', { type: 'file', path: 'openapi/v2.json' }],
     ])
+    expect(apiReferenceConfig.specs.map((spec) => spec.pageOnly)).toEqual([undefined, true])
     vi.doUnmock('@/lib/docs-json-config')
   })
 })

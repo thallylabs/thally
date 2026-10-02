@@ -8,6 +8,7 @@ const documents: Record<string, unknown> = {
     '/hidden': { get: { summary: 'Hidden op', 'x-hidden': true, ...ok } },
     '/excluded': { get: { summary: 'Excluded op', 'x-excluded': true, ...ok } },
   } },
+  'page-only': { openapi: '3.1.0', info: { title: 'C', version: '1' }, paths: { '/named': { get: { summary: 'Named op', ...ok } } } },
   'docs-admin': { openapi: '3.1.0', info: { title: 'B', version: '1' }, paths: { '/admin': { get: { summary: 'Admin op', ...ok } } } },
 }
 
@@ -17,6 +18,7 @@ vi.mock('@/config/api-reference', () => ({
     specs: [
       { id: 'default', label: 'API', source: { type: 'inline', document: {} } },
       { id: 'docs-admin', label: 'Admin', source: { type: 'inline', document: {} } },
+      { id: 'page-only', label: 'Page only', source: { type: 'inline', document: {} }, pageOnly: true },
     ],
   },
 }))
@@ -68,5 +70,14 @@ describe('hidden and excluded operations reach no consumer', () => {
     expect(await getApiOperationBySlug(slug)).toBeNull()
     expect(await getApiOperationByKey('GET', `/${name}`)).toBeNull()
     expect(await getApiOperationByKey('get', `/${name}`, 'default')).toBeNull()
+  })
+})
+
+describe('specs bound to hidden page-only tabs', () => {
+  it('resolve for pages that name them but get no operation pages, search entries or sitemap URLs', async () => {
+    expect((await getAllApiOperationNodes()).map((node) => node.href)).not.toContain('/api/page-only/named/get')
+    expect((await getApiOperationSearchIndex()).map((entry) => entry.href)).not.toContain('/api/page-only/named/get')
+    expect(await getApiOperationBySlug(['page-only', 'named', 'get'])).toBeNull()
+    expect((await getApiOperationByKey('GET', '/named', 'page-only'))?.operation.title).toBe('Named op')
   })
 })
