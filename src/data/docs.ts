@@ -285,6 +285,8 @@ interface DocsJsonConfig {
   redirects?: Array<DocsJsonRedirect>
   banner?: DocsJsonBanner
   navbar?: DocsJsonNavbar
+  /** Hex brand colours per mode (six digits); `primary` fills buttons, `accent` links and highlights. */
+  colors?: Partial<Record<'light' | 'dark', { primary?: string; accent?: string }>>
   /** Public favicon fallback when no managed or admin asset is configured. */
   favicon?: { light: string; dark?: string }
   footer?: DocsJsonFooter
@@ -1291,6 +1293,11 @@ export function getNavigationShortcuts(): Array<DocsNavigationShortcut> {
       && (/^\/(?!\/)[^\s\\]*$/.test(item.href) || /^https?:\/\//i.test(item.href)
         || /^(?:mailto|tel):[^\s]+$/i.test(item.href))),
   )
+}
+
+/** Brand colours per mode; `/api/brand.css` from the managed dashboard still wins. */
+export function getBrandColors(): DocsJsonConfig['colors'] {
+  return docsConfig().colors
 }
 
 export function getSeoConfig(): DocsJsonSeo {

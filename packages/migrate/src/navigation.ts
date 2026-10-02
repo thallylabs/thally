@@ -801,6 +801,27 @@ function projectedTheme(value: unknown): MigrationDocsConfig['theme'] {
   return typeof value === 'string' ? 'default' : undefined
 }
 
+/**
+ * Mintlify `colors`: `primary` is the brand colour in light mode, `light` the
+ * one used in dark mode and `dark` the button fill. Three-digit hex is
+ * expanded because the renderer only accepts six digits.
+ */
+function projectedColors(value: unknown): MigrationDocsConfig['colors'] {
+  const colors = objectValue(value)
+  if (!colors) return undefined
+  const hex = (entry: unknown): string | undefined => {
+    const match = typeof entry === 'string' ? /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(entry.trim()) : null
+    if (!match) return undefined
+    const digits = match[1].length === 3 ? [...match[1]].map((digit) => digit + digit).join('') : match[1]
+    return `#${digits.toLowerCase()}`
+  }
+  const primary = hex(colors.primary)
+  const light = hex(colors.light) ?? primary
+  const dark = hex(colors.dark) ?? primary
+  if (!primary) return undefined
+  return { light: { accent: primary, primary: dark ?? primary }, dark: { accent: light ?? primary, primary: light ?? primary } }
+}
+
 function projectedNavbar(value: unknown): MigrationDocsConfig['navbar'] {
   const navbar = objectValue(value)
   if (!navbar) return undefined
@@ -973,6 +994,7 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
     : undefined
   return {
     ...(projectedTheme(config.theme) ? { theme: projectedTheme(config.theme) } : {}),
+    ...(projectedColors(config.colors) ? { colors: projectedColors(config.colors) } : {}),
     ...(projectedIconLibrary ? { icons: { library: projectedIconLibrary } } : {}),
     ...(bannerContent ? {
       banner: {

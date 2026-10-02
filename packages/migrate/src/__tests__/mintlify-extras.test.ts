@@ -233,6 +233,15 @@ describe('config mapping', () => {
     expect(css).not.toContain('navbar-link')
   })
 
+  it('maps Mintlify colors to per-mode brand colors with six-digit hex', () => {
+    const bundle = site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: '#F60', light: '#fff', dark: '#000000' } }), ...intro })
+    expect(bundle.docsConfig.colors).toEqual({
+      light: { accent: '#ff6600', primary: '#000000' },
+      dark: { accent: '#ffffff', primary: '#ffffff' },
+    })
+    expect(site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: 'red' } }), ...intro }).docsConfig.colors).toBeUndefined()
+  })
+
   it('rejects script-bearing and control-character urls in legacy topbar entries', () => {
     const bundle = site({ 'mint.json': JSON.stringify({ ...nav,
       topbarLinks: [{ name: 'X', url: 'javascript:alert(1)' }, { name: 'Y', url: ' JaVaScRiPt:alert(1)' }, { name: 'Z', url: 'java\tscript:alert(1)' }, { name: 'D', url: 'data:text/html,x' }, { name: 'Ok', url: '/relative' }],

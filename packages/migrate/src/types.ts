@@ -81,6 +81,7 @@ export interface MigrationDocsConfig {
   appearance?: { default?: 'system' | 'light' | 'dark'; showToggle?: boolean }
   background?: { image?: string; imageDark?: string; decoration?: 'none' | 'grid' | 'gradient' }
   /** Icon set for content `icon` names; Mintlify's `icons.library` carries through. */
+  colors?: Partial<Record<'light' | 'dark', { primary?: string; accent?: string }>>
   icons?: { library?: 'lucide' | 'fontawesome' | 'tabler' }
   banner?: MigrationBannerConfig
   navbar?: MigrationNavbarConfig
