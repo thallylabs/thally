@@ -26,6 +26,12 @@ describe('standalone rich-content primitives', () => {
     expect(markup.match(/<summary/g)).toHaveLength(2)
   })
 
+  it('renders an image-path icon on a Card as an img', () => {
+    const markup = renderToStaticMarkup(createElement(Card, { title: 'ChatGPT', icon: '/images/chatgpt.svg' }, 'x'))
+    expect(markup).toContain('<img src="/images/chatgpt.svg"')
+    expect(renderToStaticMarkup(createElement(Icon, { icon: 'https://cdn.example/a.png' }))).toContain('<img src="https://cdn.example/a.png"')
+  })
+
   it('keeps collapsed accordion bodies and their headings in the server HTML', () => {
     const markup = renderToStaticMarkup(
       createElement(Accordion, { title: 'Closed' }, createElement('h3', { id: 'inside' }, 'Hidden heading'), 'Body text'),
