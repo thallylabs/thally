@@ -67,11 +67,17 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
 
   const preparedRequest = useMemo<PreparedRequest>(() => {
     const url = isServerConfigured ? buildResolvedUrl() : ''
-    const curlLines = buildCurlCommand(operation.method, url, headerParams, canSendBody ? bodyValue : undefined)
+    const body = canSendBody && bodyValue ? bodyValue : undefined
+    const mediaType = operation.requestBody?.contents[0]?.mediaType
+    const headers =
+      body && mediaType && !Object.keys(headerParams).some((key) => key.toLowerCase() === 'content-type')
+        ? { ...headerParams, 'Content-Type': mediaType }
+        : headerParams
+    const curlLines = buildCurlCommand(operation.method, url, headers, body)
     return {
       url,
       method: operation.method,
-      headers: headerParams,
+      headers,
       body: canSendBody ? bodyValue : undefined,
       isServerConfigured,
       curlLines,
@@ -146,18 +152,18 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
   }
 }
 
-function buildCurlCommand(method: string, url: string, headers: Record<string, string>, body?: string) {
+export function buildCurlCommand(method: string, url: string, headers: Record<string, string>, body?: string) {
   if (!url) {
     return []
   }
-  const lines = [`curl --request ${method.toUpperCase()} \\`, `  --url '${url}'`]
-  Object.entries(headers)
-    .filter(([, value]) => Boolean(value))
-    .forEach(([key, value]) => {
-      lines.push(`  -H '${key}: ${value}'`)
-    })
+  const parts = [
+    `--url ${/[\s&?'"$`\\]/.test(url) ? `'${url.replace(/'/g, `'"'"'`)}'` : url}`,
+    ...Object.entries(headers)
+      .filter(([, value]) => Boolean(value))
+      .map(([key, value]) => `--header '${`${key}: ${value}`.replace(/'/g, `'"'"'`)}'`),
+  ]
   if (body) {
-    lines.push(`  --data '${body.replace(/'/g, `'"'"'`)}'`)
+    parts.push(`--data '${body.replace(/'/g, `'"'"'`)}'`)
   }
-  return lines
+  return [`curl --request ${method.toUpperCase()}`, ...parts].map((line, index, all) => `${index ? '  ' : ''}${line}${index < all.length - 1 ? ' \\' : ''}`)
 }
