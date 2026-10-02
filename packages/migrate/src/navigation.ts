@@ -157,7 +157,7 @@ export function addMintlifyHomepageRedirects(
   for (const locale of roots) {
     const source = locale ? `/${locale}` : '/'
     if (sources.has(source)) continue
-    redirects.push({ source, destination: `${locale ? `/${locale}` : ''}/${homepage}`, permanent: false })
+    redirects.push({ source, destination: `${locale ? `/${locale}` : ''}/${homepage}`, permanent: true })
   }
   return { ...config, redirects }
 }

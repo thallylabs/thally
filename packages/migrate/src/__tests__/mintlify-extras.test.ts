@@ -257,7 +257,7 @@ describe('config mapping', () => {
 
   it('redirects / to the introduction page like Mintlify does', () => {
     const bundle = site({ 'docs.json': JSON.stringify({ navigation: { pages: ['introduction', 'guide'] } }), 'introduction.mdx': page('Intro'), 'guide.mdx': page('Guide') })
-    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/', destination: '/introduction', permanent: false })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/', destination: '/introduction', permanent: true })
   })
 
   it('maps Mintlify colors to per-mode brand colors with six-digit hex', () => {

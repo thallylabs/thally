@@ -32,7 +32,7 @@ describe('Mintlify repository route identity', () => {
     expect(bundle.pages.map((page) => page.id)).toEqual(['introduction/introduction', 'home'])
     expect(bundle.docsConfig.tabs[0].groups?.[0].pages).toEqual(['introduction/introduction'])
     expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([
-      { source: '/', destination: '/introduction/introduction', permanent: false },
+      { source: '/', destination: '/introduction/introduction', permanent: true },
       { source: '/introduction', destination: '/introduction/introduction', permanent: false },
     ]))
   })
@@ -158,6 +158,6 @@ describe('Mintlify repository route identity', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
     expect(bundle.pages.map((page) => page.id)).toEqual(['introduction'])
     // `/` still goes to /introduction, but /fr has no page of its own to go to.
-    expect(bundle.docsConfig.redirects).toEqual([{ source: '/', destination: '/introduction', permanent: false }])
+    expect(bundle.docsConfig.redirects).toEqual([{ source: '/', destination: '/introduction', permanent: true }])
   })
 })
