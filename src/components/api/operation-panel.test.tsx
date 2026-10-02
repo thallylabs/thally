@@ -44,3 +44,43 @@ describe('OperationPanel webhook', () => {
     expect(html).toContain('&quot;type&quot;: &quot;crawl.page&quot;')
   })
 })
+
+describe('OperationPanel field details', () => {
+  const spec = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    paths: {
+      '/x': {
+        post: {
+          summary: 'X',
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    mode: { type: 'string', enum: ['a', 'b'] },
+                    modes: { type: 'array', items: { type: 'string', enum: ['a'] } },
+                    kind: { type: 'string', const: 'crawl.page' },
+                    old: { type: 'boolean', deprecated: true },
+                  },
+                },
+              },
+            },
+          },
+          responses: {},
+        },
+      },
+    },
+  }
+
+  it('shows format, enum, const and a deprecated badge in the field types', () => {
+    const html = renderToStaticMarkup(<OperationPanel operation={operationFrom(spec)} />)
+    expect(html).toContain('string&lt;uuid&gt;')
+    expect(html).toContain('enum&lt;string&gt;<')
+    expect(html).toContain('enum&lt;string&gt;[]')
+    expect(html).toContain('Allowed value: <code>&quot;crawl.page&quot;</code>')
+    expect(html).toContain('>deprecated<')
+  })
+})

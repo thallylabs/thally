@@ -208,6 +208,7 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
             name={name}
             type={type}
             required={isRequired}
+            deprecated={flatProp.deprecated === true}
             default={defaultVal}
             body
           >
@@ -215,6 +216,11 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
             {enumValues ? (
               <p className="mt-1 text-xs text-foreground/50">
                 Allowed: {enumValues.join(', ')}
+              </p>
+            ) : null}
+            {flatProp.const !== undefined ? (
+              <p className="mt-1 text-xs text-foreground/50">
+                Allowed value: <code>{JSON.stringify(flatProp.const)}</code>
               </p>
             ) : null}
             {nested ? (
@@ -323,11 +329,16 @@ function SchemaAsResponseFields({ schema }: { schema?: Record<string, unknown> }
         const enumValues = Array.isArray(flatProp.enum) ? (flatProp.enum as unknown[]).map(String) : null
 
         return (
-          <ResponseField key={name} name={name} type={type} required={isRequired}>
+          <ResponseField key={name} name={name} type={type} required={isRequired} deprecated={flatProp.deprecated === true}>
             {description ?? null}
             {enumValues ? (
               <p className="mt-1 text-xs text-foreground/50">
                 Allowed: {enumValues.join(', ')}
+              </p>
+            ) : null}
+            {flatProp.const !== undefined ? (
+              <p className="mt-1 text-xs text-foreground/50">
+                Allowed value: <code>{JSON.stringify(flatProp.const)}</code>
               </p>
             ) : null}
             {nested ? (
@@ -397,6 +408,8 @@ function resolveSchemaType(schema?: Record<string, unknown>): string | undefined
       const itemType = resolveSchemaType(items)
       return itemType ? `${itemType}[]` : 'array'
     }
+    if (Array.isArray(schema.enum)) return `enum<${schema.type}>`
+    if (schema.type === 'string' && typeof schema.format === 'string') return `string<${schema.format}>`
     return schema.type
   }
   if (Array.isArray(schema.allOf)) return 'object'
