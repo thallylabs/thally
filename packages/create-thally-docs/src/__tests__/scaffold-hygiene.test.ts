@@ -29,6 +29,7 @@ import {
 import {
   personalizeStarter,
   updateEnvExample,
+  pruneMissingSiteLinks,
   updateSiteConfig,
 } from '../customize.js'
 import { resetTrackingConfig, writeTrackingConfig } from '../docs-json.js'
@@ -456,6 +457,29 @@ export const siteConfig = {
     // The unselected preset keeps its own accents untouched.
     expect(site).toContain("accent: '#8B5CF6'")
     expect(site).toContain("accent: '#C084FC'")
+  })
+
+  it('drops starter links to pages a migration did not bring along', () => {
+    const directory = temporaryDirectory('thally-starter-links-')
+    mkdirSync(join(directory, 'src', 'data'), { recursive: true })
+    writeFileSync(
+      join(directory, 'src', 'data', 'site.ts'),
+      `export const siteConfig = {
+  links: [
+    { label: 'Get started', href: '/quickstart' },
+    { label: 'Support', href: 'https://example.com/issues/new' },
+    { label: 'Changelog', href: '/changelog' },
+  ],
+}
+`,
+    )
+
+    pruneMissingSiteLinks(directory, new Set(['quickstart']))
+
+    const site = readFileSync(join(directory, 'src', 'data', 'site.ts'), 'utf8')
+    expect(site).toContain("{ label: 'Get started', href: '/quickstart' },")
+    expect(site).toContain('https://example.com/issues/new')
+    expect(site).not.toContain('/changelog')
   })
 
   it('rejects a malformed accent color and keeps the preset default', () => {

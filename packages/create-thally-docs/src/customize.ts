@@ -265,6 +265,21 @@ export function updateSiteConfig(
   writeFileSync(siteFile, source, 'utf8')
 }
 
+/**
+ * Drop starter footer links to sample pages a migration did not bring along
+ * (the starter's `/quickstart` and `/changelog`), so no link leads to a 404.
+ */
+export function pruneMissingSiteLinks(targetDir: string, pageIds: ReadonlySet<string>): void {
+  const siteFile = join(targetDir, 'src', 'data', 'site.ts')
+  if (!existsSync(siteFile)) return
+  const source = readFileSync(siteFile, 'utf8')
+  const pruned = source.replace(
+    /\r?\n[ \t]*\{[ \t]*label:[ \t]*'(?:\\.|[^'\\\r\n])*',[ \t]*href:[ \t]*'\/([\w/-]*)'[ \t]*\},?/g,
+    (match, pageId: string) => (pageIds.has(pageId) ? match : ''),
+  )
+  if (pruned !== source) writeFileSync(siteFile, pruned, 'utf8')
+}
+
 /** Rename only the root package identity; dependency pins belong to starter. */
 export function updatePackageIdentity(targetDir: string, packageName: string): void {
   const packagePath = join(targetDir, 'package.json')
