@@ -65,4 +65,23 @@ describe('automatic header navigation rows', () => {
     expect(markup(0)).not.toContain('aria-label="Documentation sections"')
     expect([6, 7, 6].map(count => getHeaderNavigationLayout('tabs', count))).toEqual(['stacked', 'stacked', 'stacked'])
   })
+
+  it('renders a github primary as a repository link and a styled link as a button', () => {
+    const html = renderToStaticMarkup(<TopBar
+      collections={[]}
+      activeCollectionId="0"
+      onCollectionChange={() => {}}
+      activeSections={[]}
+      navigationPresentation={{ display: 'tabs' }}
+      navbarConfig={{
+        primary: { label: 'GitHub', href: 'https://github.com/acme/widgets', type: 'github' },
+        links: [{ label: 'Sign Up', href: 'https://acme.dev/signin', button: { background: '#ff4d00' } }],
+      }}
+      siteLinks={[]}
+    />)
+    expect(html).toContain('acme/widgets')
+    expect(html).not.toContain('thally-docs-primary')
+    expect(html).toMatch(/background-color:#ff4d00;color:#fff[^>]*>[^<]*<span>Sign Up/)
+    expect(html.indexOf('acme/widgets')).toBeLessThan(html.indexOf('Sign Up'))
+  })
 })

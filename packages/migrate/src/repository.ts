@@ -31,7 +31,7 @@ import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
 
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent } from './components.js'
-import { projectAuthoredStyles } from './source-styles.js'
+import { navbarLinkButtons, projectAuthoredStyles } from './source-styles.js'
 
 import {
   addDocusaurusTranslatedHeadingAliases,
@@ -3802,6 +3802,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const hasRootStylesheet = Boolean(rootStylesheetPath && existsSync(rootStylesheetPath)
     && lstatSync(rootStylesheetPath).isFile() && !lstatSync(rootStylesheetPath).isSymbolicLink())
   let rootStyleProjection: ReturnType<typeof projectAuthoredStyles> | undefined
+  let rootNavbarButtons: ReturnType<typeof navbarLinkButtons> = []
   let rootStyleProblem: 'unsafe' | 'parse' | undefined
   if (hasRootStylesheet && rootStylesheetPath && lstatSync(rootStylesheetPath).size <= MAX_ASSET_BYTES) {
     const css = readFileSync(rootStylesheetPath, 'utf8')
@@ -3810,6 +3811,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (/@import\b|url\s*\(\s*['"]?\s*(?:javascript:|file:)/i.test(css)) rootStyleProblem = 'unsafe'
     else {
       try {
+        rootNavbarButtons = navbarLinkButtons(css)
         rootStyleProjection = projectAuthoredStyles(css, [
           ...pages.map((page) => page.body),
           ...(componentMigrator?.files() ?? []).map((file) => typeof file.content === 'string' ? file.content : ''),
@@ -3998,6 +4000,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // Invalid CSS is reported without breaking an otherwise valid site.
       warnings.push({ code: 'unsupported-config', message: 'Mintlify root style.css could not be parsed and was not imported.', source: 'style.css' })
     } else {
+      if (rootNavbarButtons.length > 0 && docsConfig.navbar?.links) {
+        docsConfig = {
+          ...docsConfig,
+          navbar: {
+            ...docsConfig.navbar,
+            links: docsConfig.navbar.links.map((link) => {
+              const rule = rootNavbarButtons.find((entry) => entry.exact ? link.href === entry.href : link.href.includes(entry.href))
+              return rule ? { ...link, button: { background: rule.background, ...(rule.color ? { color: rule.color } : {}) } } : link
+            }),
+          },
+        }
+      }
       if (rootStyleProjection.omittedSelectors > 0) warnings.push({
         code: 'unsupported-config',
         source: 'style.css',

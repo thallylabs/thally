@@ -48,9 +48,9 @@ export interface MigrationBannerConfig {
 }
 
 export interface MigrationNavbarConfig {
-  links?: Array<{ label: string; href: string; type?: 'github' }>
+  links?: Array<{ label: string; href: string; type?: 'github'; button?: { background: string; color?: string } }>
   /** Explicit null suppresses the starter's sample call to action. */
-  primary?: { label: string; href: string } | null
+  primary?: { label: string; href: string; type?: 'github' } | null
   /** Local public assets used until an owner uploads a brand replacement. */
   /** Explicit null requests a text-only brand when the source has no logo. */
   logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string } | null

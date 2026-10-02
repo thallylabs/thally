@@ -201,11 +201,14 @@ export interface DocsJsonNavLink {
   label: string
   href: string
   type?: 'github'
+  /** Render the link as a filled button, for a source site that styled it that way. */
+  button?: { background: string; color?: string }
 }
 
 export interface DocsJsonNavbar {
   links?: Array<DocsJsonNavLink>
-  primary?: { label: string; href: string } | null
+  /** `type: 'github'` shows the repository name and its star count instead of a labelled button. */
+  primary?: { label: string; href: string; type?: 'github' } | null
   /** Public assets for a portable, source-owned logo fallback. */
   /** Explicit null keeps a source site's text-only wordmark. */
   logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string } | null

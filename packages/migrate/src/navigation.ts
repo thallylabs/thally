@@ -822,6 +822,7 @@ function projectedNavbar(value: unknown): MigrationDocsConfig['navbar'] {
           ? primaryValue.label
           : primaryValue.type === 'github' ? 'GitHub' : 'Get started',
         href: primaryHref,
+        ...(primaryValue.type === 'github' ? { type: 'github' as const } : {}),
       }
     : undefined
   return links.length > 0 || primary ? { ...(links.length > 0 ? { links } : {}), ...(primary ? { primary } : {}) } : undefined

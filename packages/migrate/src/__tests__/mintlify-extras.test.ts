@@ -216,6 +216,18 @@ describe('config mapping', () => {
     expect(bundle.warnings.some((warning) => /topbarLinks entry without a valid name and url/.test(warning.message))).toBe(true)
   })
 
+  it('turns a styled navbar link into a button', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ ...nav, navbar: { links: [{ label: 'Docs', href: 'https://a.example/docs' }, { label: 'Sign Up', href: 'https://a.example/signin?x=1' }] } }),
+      'style.css': 'li.navbar-link a[href*="a.example/signin"] { background-color: #ff4d00; color: #fff; }\n',
+      ...intro,
+    })
+    expect(bundle.docsConfig.navbar?.links).toEqual([
+      { label: 'Docs', href: 'https://a.example/docs' },
+      { label: 'Sign Up', href: 'https://a.example/signin?x=1', button: { background: '#ff4d00', color: '#fff' } },
+    ])
+  })
+
   it('rejects script-bearing and control-character urls in legacy topbar entries', () => {
     const bundle = site({ 'mint.json': JSON.stringify({ ...nav,
       topbarLinks: [{ name: 'X', url: 'javascript:alert(1)' }, { name: 'Y', url: ' JaVaScRiPt:alert(1)' }, { name: 'Z', url: 'java\tscript:alert(1)' }, { name: 'D', url: 'data:text/html,x' }, { name: 'Ok', url: '/relative' }],
@@ -227,7 +239,7 @@ describe('config mapping', () => {
   it('maps a github topbarCtaButton like the docs.json github primary', () => {
     const legacy = site({ 'mint.json': JSON.stringify({ ...nav, topbarCtaButton: { type: 'github', url: 'https://github.com/a/b' } }), ...intro })
     const current = site({ 'docs.json': JSON.stringify({ ...nav, navbar: { primary: { type: 'github', href: 'https://github.com/a/b' } } }), ...intro })
-    expect(legacy.docsConfig.navbar).toEqual({ primary: { label: 'GitHub', href: 'https://github.com/a/b' } })
+    expect(legacy.docsConfig.navbar).toEqual({ primary: { label: 'GitHub', href: 'https://github.com/a/b', type: 'github' } })
     expect(legacy.docsConfig.navbar).toEqual(current.docsConfig.navbar)
   })
 

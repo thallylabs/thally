@@ -32,6 +32,27 @@ function withoutFencedCode(content: string): string {
   }).join('\n')
 }
 
+/**
+ * Mintlify sites make a navbar link look like a button with a rule such as
+ * `li.navbar-link a[href*="/signin"] { background-color: ... }`. Thally keeps
+ * that intent as a link setting instead of importing the platform selector.
+ */
+export function navbarLinkButtons(css: string): Array<{ href: string; exact: boolean; background: string; color?: string }> {
+  const buttons: Array<{ href: string; exact: boolean; background: string; color?: string }> = []
+  postcss.parse(css).walkRules((rule) => {
+    const match = /^(?:li)?\.navbar-link\s+a\[href(\*)?=["']([^"']+)["']\]$/.exec(rule.selector.trim())
+    if (!match) return
+    let background: string | undefined
+    let color: string | undefined
+    rule.walkDecls((decl) => {
+      if (decl.prop === 'background-color' || decl.prop === 'background') background = decl.value
+      else if (decl.prop === 'color') color = decl.value
+    })
+    if (background) buttons.push({ href: match[2], exact: !match[1], background, ...(color ? { color } : {}) })
+  })
+  return buttons
+}
+
 /** Find classes and IDs actually authored in migrated pages and components. */
 export function authoredStyleNames(contents: ReadonlyArray<string>): { classes: Set<string>; ids: Set<string> } {
   const classes = new Set<string>()

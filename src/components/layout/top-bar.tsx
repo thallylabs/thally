@@ -2,8 +2,8 @@
 
 /** Shared documentation header with a dedicated full-width collection row. */
 
-import { useEffect, useRef } from 'react'
-import { ExternalLink, Sparkles } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ExternalLink, Sparkles, Star } from 'lucide-react'
 import type { SidebarCollection, DocsJsonNavbar, NavigationPresentation, DocsNavigationVersion } from '@/data/docs'
 import { MobileNav } from '@/components/navigation/mobile-nav'
 import { CollectionTabs } from '@/components/navigation/collection-tabs'
@@ -22,6 +22,27 @@ import { Logo } from '@/components/layout/logo'
 import { displaySiteName, useSiteName } from '@/components/layout/use-site-name'
 import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
 import { useDocsCodeActions } from '@/components/docs/code-actions-provider'
+
+const GITHUB_REPO = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/?$/i
+
+/** Repository link with a live star count, like Mintlify's `navbar.primary` of type github. */
+function GithubRepoLink({ href, label }: { href: string; label: string }) {
+  const repo = GITHUB_REPO.exec(href)?.[1]
+  const [stars, setStars] = useState<number | null>(null)
+  useEffect(() => {
+    if (!repo) return
+    fetch(`https://api.github.com/repos/${repo}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { stargazers_count?: number } | null) => setStars(typeof data?.stargazers_count === 'number' ? data.stargazers_count : null))
+      .catch(() => {})
+  }, [repo])
+  return (
+    <a href={href} target="_blank" rel="noreferrer" data-topbar-link className="thally-docs-topbar-link inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-[10px] px-2 text-[0.86rem] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground">
+      <span>{repo ?? label}</span>
+      {stars === null ? null : <span className="inline-flex items-center gap-0.5 text-foreground/50"><Star className="h-3.5 w-3.5" aria-hidden="true" />{stars.toLocaleString('en-US')}</span>}
+    </a>
+  )
+}
 
 interface TopBarProps {
   collections: Array<SidebarCollection>
@@ -84,10 +105,11 @@ export function TopBar({
 
   // navbarConfig.primary overrides the siteConfig CTA when present
   const primaryCta = navbarConfig && Object.hasOwn(navbarConfig, 'primary')
-    ? navbarConfig.primary
+    ? navbarConfig.primary && navbarConfig.primary.type !== 'github'
       ? { label: navbarConfig.primary.label, href: navbarConfig.primary.href }
       : undefined
     : siteConfigCta
+  const githubPrimary = navbarConfig?.primary?.type === 'github' ? navbarConfig.primary : undefined
   // GitHub is part of the footer's social cluster in the default docs shell.
   // SiteShell carries legacy navbar-only GitHub links into the footer so an
   // existing site does not lose its repository destination during upgrade.
@@ -152,12 +174,13 @@ export function TopBar({
           {hasAssistantEntryPoint ? (
             <span className="thally-docs-action-divider h-5 w-px bg-border" aria-hidden="true" />
           ) : null}
+          {githubPrimary ? <GithubRepoLink href={githubPrimary.href} label={githubPrimary.label} /> : null}
           {navbarConfig?.links
             ? navbarLinks.map((link) => {
                 const isExternal = /^https?:\/\//.test(link.href)
                 return (
-                  <a key={link.href} href={link.href} target={isExternal ? '_blank' : undefined} rel={isExternal ? 'noreferrer' : undefined} aria-label={link.label} title={link.label} data-topbar-link className="thally-docs-topbar-link inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-[10px] px-2 text-[0.86rem] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground">
-                    {isExternal ? <ExternalLink className="h-3.5 w-3.5" /> : null}
+                  <a key={link.href} href={link.href} target={isExternal ? '_blank' : undefined} rel={isExternal ? 'noreferrer' : undefined} aria-label={link.label} title={link.label} data-topbar-link style={link.button ? { backgroundColor: link.button.background, color: link.button.color ?? '#fff' } : undefined} className={cn('thally-docs-topbar-link inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-[10px] px-2 text-[0.86rem] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground', link.button && 'px-[15px] font-semibold hover:brightness-110')}>
+                    {isExternal && !link.button ? <ExternalLink className="h-3.5 w-3.5" /> : null}
                     <span>{link.label}</span>
                   </a>
                 )
