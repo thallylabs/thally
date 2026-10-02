@@ -799,8 +799,9 @@ function convertContainerToTabs(
 }
 
 function projectedTheme(value: unknown): MigrationDocsConfig['theme'] {
-  if (value === 'maple') return 'maple'
-  if (['aspen', 'luma', 'sequoia'].includes(String(value))) return 'sharp'
+  // Aspen rounds its sidebar highlight (12px) and search box like Maple, not like Sharp's 3px corners.
+  if (value === 'maple' || value === 'aspen') return 'maple'
+  if (['luma', 'sequoia'].includes(String(value))) return 'sharp'
   if (['almond', 'palm'].includes(String(value))) return 'minimal'
   return typeof value === 'string' ? 'default' : undefined
 }

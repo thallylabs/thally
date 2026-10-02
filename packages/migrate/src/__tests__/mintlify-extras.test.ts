@@ -250,6 +250,11 @@ describe('config mapping', () => {
     expect(bundle.docsConfig.seo?.metatags).toEqual({ 'google-site-verification': 'abc123' })
   })
 
+  it('maps the rounded Aspen theme to Maple and keeps Sharp for the square ones', () => {
+    const theme = (name: string) => site({ 'docs.json': JSON.stringify({ ...nav, theme: name }), ...intro }).docsConfig.theme
+    expect([theme('aspen'), theme('maple'), theme('luma')]).toEqual(['maple', 'maple', 'sharp'])
+  })
+
   it('maps Mintlify colors to per-mode brand colors with six-digit hex', () => {
     const bundle = site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: '#F60', light: '#fff', dark: '#000000' } }), ...intro })
     expect(bundle.docsConfig.colors).toEqual({
