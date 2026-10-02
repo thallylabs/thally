@@ -188,7 +188,27 @@ export default async function DocsPage({ params }: PageProps) {
 
   if (doc.openapi) {
     const operationNode = await getApiOperationForFrontmatter(doc.openapi)
-    if (!operationNode) notFound()
+    // A hidden or excluded operation is withheld on purpose (the build records
+    // it); one that cannot be resolved at all keeps the authored page, with a notice.
+    if (!operationNode && !isDocPublished(doc.id, route.isLocaleRoute ? route.locale : undefined)) notFound()
+
+    if (!operationNode) {
+      const Body = doc.component
+      return (
+        <>
+          {localeAvailability}
+          {localizedNavigation}
+          <JsonLdScript data={jsonLd} />
+          <DocLayout doc={doc} locale={contentLocale} navigation={nav}>
+            {localeNotice}
+            <p role="note" className="not-prose rounded-md border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
+              The API endpoint for this page could not be loaded, so only the page text is shown.
+            </p>
+            <Body />
+          </DocLayout>
+        </>
+      )
+    }
 
     return (
       <>

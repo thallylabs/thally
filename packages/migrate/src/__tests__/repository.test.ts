@@ -883,7 +883,7 @@ describe('Mintlify repository migration', () => {
       prefixed: '---\ntitle: Prefixed\nopenapi: "specs/openapi-b.yaml GET /widgets/{id}"\n---\n',
       quoted: '---\ntitle: Quoted\nopenapi: "\'./specs/openapi-b.yaml\' get /widgets/{id}"\n---\n',
       abs: '---\ntitle: Abs\nopenapi: "/openapi-a.json POST /things"\n---\n',
-      unknown: '---\ntitle: Unknown\nopenapi: "stray.yaml GET /x"\n---\n',
+      unknown: '---\ntitle: Unknown\nopenapi: "missing.yaml GET /x"\n---\n',
       manual: '---\ntitle: Manual\napi: "POST https://httpbin.org/anything"\nauthMethod: Bearer\n---\n<ParamField body="a" type="string" />\n',
       bad: '---\ntitle: Bad\napi: [1, 2]\nauthMethod: oauth\n---\n',
     }
@@ -895,8 +895,8 @@ describe('Mintlify repository migration', () => {
       expect(openapi('prefixed')).toBe('openapi/openapi-b.yaml GET /widgets/{id}')
       expect(openapi('quoted')).toBe('openapi/openapi-b.yaml get /widgets/{id}')
       expect(openapi('abs')).toBe('openapi/openapi-a.json POST /things')
-      expect(openapi('unknown')).toBe('stray.yaml GET /x')
-      expect(bundle.warnings.some((w) => /"stray.yaml".*not migrated/.test(w.message))).toBe(true)
+      expect(openapi('unknown')).toBe('missing.yaml GET /x')
+      expect(bundle.warnings.some((w) => /"missing.yaml".*not migrated/.test(w.message))).toBe(true)
       expect(bundle.docsConfig.tabs.filter((tab) => tab.api).map((tab) => tab.api?.source)).toEqual(['openapi/openapi-a.json', 'openapi/openapi-b.yaml'])
     })
 

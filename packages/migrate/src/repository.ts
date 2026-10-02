@@ -1363,6 +1363,8 @@ interface ResolvedApiSpec {
   parentTab?: string
   icon?: string
   hidden?: boolean
+  /** Named only by published pages' `openapi:` frontmatter, never by docs.json: bound to a hidden tab so no navigation is generated. */
+  pageOnly?: boolean
   /** Repository-relative path the spec was read from, used only to disambiguate a basename collision across tabs. */
   sourcePath: string
   /** Mintlify's object-form `{ source, directory }` scoping directory, if any — the prefix its auto-generated operation pages live under. */
@@ -1400,12 +1402,25 @@ function resolveMintlifyApiSpecs(
   files: Array<ScannedFile>,
   warnings: Array<MigrationWarning>,
   remoteSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>,
+  /** Published pages' `openapi:` frontmatter: Mintlify renders a spec named only here, so it is migrated too. */
+  pages: ReadonlyArray<{ openapi?: string }> = [],
 ): Array<ResolvedApiSpec> {
   if (!mintlifyConfig) return []
-  const references = [
+  const references: Array<MintlifyApiSpecReference & { pageOnly?: boolean }> = [
     ...mintlifyTopLevelApiReferences(mintlifyConfig),
     ...mintlifyNavigationApiReferences(mintlifyConfig),
   ]
+  const specKey = (value: string): string => value.split(/[?#]/, 1)[0].replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/^\/+/, '')
+  const known = new Set(references.map((reference) => specKey(reference.value)))
+  for (const page of pages) {
+    const specRef = page.openapi ? splitOpenApiRef(page.openapi)?.specRef : undefined
+    // Remote refs are reported by rewriteMintlifyPageSpecRefs; a missing file is warned about there too.
+    if (!specRef || /^[a-z][a-z0-9+.-]*:/i.test(specRef)) continue
+    const key = specKey(specRef)
+    if (known.has(key) || !files.some((file) => file.relativePath === key)) continue
+    known.add(key)
+    references.push({ value: key, kind: 'openapi', tabLabel: `OpenAPI: ${key}`, hidden: true, pageOnly: true })
+  }
   const seen = new Set<string>()
   const specs: Array<ResolvedApiSpec> = []
   for (const reference of references) {
@@ -1455,6 +1470,7 @@ function resolveMintlifyApiSpecs(
       parentTab: reference.parentTab,
       icon: reference.icon,
       hidden: reference.hidden,
+      ...(reference.pageOnly ? { pageOnly: true } : {}),
       sourcePath: match.relativePath,
       directory: reference.directory,
     })
@@ -4160,7 +4176,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         source: path,
       })
     }
-    const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs)
+    const allSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs, pages)
+    const resolvedSpecs = allSpecs.filter((spec) => !spec.pageOnly)
+    const pageOnlySpecs = allSpecs.filter((spec) => spec.pageOnly)
     for (const spec of resolvedSpecs) {
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) {
         assets.push(specAsset(spec.filename, spec.content))
@@ -4195,6 +4213,17 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           if (withheldSpecRefs.some(matches)) warnSharedSpec(fallback.relativePath)
         }
       }
+    }
+    // Specs named only by published pages: copied (and bound to a hidden tab)
+    // so those pages render. A spec only withheld pages name never gets here,
+    // because `pages` holds the published pages alone.
+    for (const spec of pageOnlySpecs) {
+      if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) assets.push(specAsset(spec.filename, spec.content))
+      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath)
+    }
+    if (pageOnlySpecs.length > 0) {
+      docsConfig = injectOpenApiSpecs(docsConfig, pageOnlySpecs, warnings)
+      pageSpecs = [...pageSpecs, ...pageOnlySpecs]
     }
     rewriteMintlifyPageSpecRefs(pages, pageSpecs, new Set(remoteApiSpecs.map((spec) => spec.url)), warnings)
   }

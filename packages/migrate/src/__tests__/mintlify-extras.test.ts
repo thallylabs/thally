@@ -919,6 +919,38 @@ describe('OpenAPI specs referenced by gated pages', () => {
   })
 })
 
+describe('OpenAPI specs named only by page frontmatter', () => {
+  const spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { '/x': { get: { summary: 'SECRETSUMMARY' } } } })
+  const files = (extra: Record<string, string>) => ({
+    'docs.json': JSON.stringify({ navigation: { pages: ['pub', 's'] } }),
+    'api-reference/spec.json': spec,
+    ...extra,
+  })
+  const specPaths = (bundle: MigrationBundle) => bundle.assets.map((asset) => asset.path).filter((path) => path.endsWith('spec.json'))
+
+  it('migrates the spec of a published page and binds it to a hidden tab', () => {
+    const bundle = site(files({
+      'pub.mdx': page('Pub', 'openapi: "/api-reference/spec.json GET /x"\n'),
+      's.mdx': page('S'),
+    }))
+    expect(specPaths(bundle)).toEqual(['openapi/spec.json'])
+    expect(bundle.pages.find((entry) => entry.id === 'pub')?.openapi).toBe('openapi/spec.json GET /x')
+    expect(bundle.docsConfig.tabs.filter((tab) => tab.api)).toEqual([
+      expect.objectContaining({ hidden: true, api: { source: 'openapi/spec.json' } }),
+    ])
+    expect(codes(bundle, 'unsupported-config').some((item) => /not referenced from docs.json/.test(item.message))).toBe(false)
+  })
+
+  it('keeps a spec out of the published output when only a withheld page names it', () => {
+    const bundle = site(files({
+      'pub.mdx': page('Pub'),
+      's.mdx': page('S', 'groups: [admin]\nopenapi: "/api-reference/spec.json GET /x"\n'),
+    }))
+    expect(specPaths(bundle)).toEqual([])
+    expect(JSON.stringify(bundle.docsConfig)).not.toContain('spec.json')
+  })
+})
+
 describe('asset reach is decided by exact normalized path, never by file name', () => {
   const png = Buffer.from('PNGDATA')
   const nav = JSON.stringify({ navigation: { pages: ['pub', 'secret'] } })

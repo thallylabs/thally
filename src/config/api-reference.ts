@@ -6,11 +6,28 @@
 import type { ApiReferenceConfig, ApiSpecConfig } from '@/lib/openapi/types'
 import { getSidebarCollections } from '@/data/docs'
 import type { DocsJsonApiConfig } from '@/data/docs'
+import { getDocsJsonConfig } from '@/lib/docs-json-config'
 import { getSiteUrl } from '@/lib/site-url'
+
+/**
+ * Specs bound to hidden tabs. They never show in navigation, but a page whose
+ * `openapi:` frontmatter names one (Mintlify allows a spec referenced only
+ * from page frontmatter) resolves against them. Hidden tabs already served as
+ * a version's tabs are excluded: getSidebarCollections returns those.
+ */
+function hiddenApiCollections(visibleIds: Set<string>): Array<{ id: string; label: string; api: DocsJsonApiConfig }> {
+  const tabs = getDocsJsonConfig<{ tabs?: Array<{ tab: string; displayLabel?: string; hidden?: boolean; api?: DocsJsonApiConfig }> }>().tabs ?? []
+  return tabs.flatMap((tab) => {
+    const id = tab.tab.toLowerCase().replace(/[^a-z0-9/]+/g, '-').replace(/(^-|-$)+/g, '').replace(/\//g, '-') || tab.tab.toLowerCase()
+    return tab.hidden && tab.api && !visibleIds.has(id) ? [{ id, label: tab.displayLabel ?? tab.tab, api: tab.api }] : []
+  })
+}
 
 function buildApiReferenceConfig(): ApiReferenceConfig {
   const collections = getSidebarCollections()
-  const apiCollections = collections.filter((c) => c.api)
+  const visibleApi = collections.filter((c) => c.api)
+  // Hidden-tab specs come after every visible one, so the visible first spec stays `default`.
+  const apiCollections = [...visibleApi, ...hiddenApiCollections(new Set(collections.map((c) => c.id)))]
 
   if (apiCollections.length === 0) {
     return { defaultSpecId: 'default', specs: [] }

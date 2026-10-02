@@ -65,3 +65,28 @@ describe('multiple API-bound tabs', () => {
     expect(apiReferenceConfig.defaultSpecId).toBe('default')
   })
 })
+
+describe('specs bound to hidden tabs', () => {
+  it('registers them after every visible spec, so page frontmatter can name them', async () => {
+    vi.doMock('@/data/docs', () => ({
+      getSidebarCollections: () => [
+        { id: 'guides', label: 'Guides' },
+        { id: 'rest-api', label: 'REST API', api: { source: 'openapi.json' } },
+      ],
+    }))
+    vi.doMock('@/lib/docs-json-config', () => ({
+      getDocsJsonConfig: () => ({
+        tabs: [
+          { tab: 'OpenAPI: v2.json', hidden: true, api: { source: 'openapi/v2.json', navigation: false } },
+          { tab: 'REST API', api: { source: 'openapi.json' } },
+        ],
+      }),
+    }))
+    const { apiReferenceConfig } = await import('@/config/api-reference')
+    expect(apiReferenceConfig.specs.map((spec) => [spec.id, spec.source])).toEqual([
+      ['default', { type: 'file', path: 'openapi.json' }],
+      ['openapi-v2-json', { type: 'file', path: 'openapi/v2.json' }],
+    ])
+    vi.doUnmock('@/lib/docs-json-config')
+  })
+})
