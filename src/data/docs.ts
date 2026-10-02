@@ -233,6 +233,8 @@ export interface DocsJsonSeo {
   titleSeparator?: string
   /** "navigable" lists only pages shown in navigation in the sitemap, like Mintlify; default lists every indexable page. */
   sitemap?: 'navigable'
+  /** Extra `<meta name content>` tags for every page, e.g. a search console verification token. */
+  metatags?: Record<string, string>
 }
 
 export interface DocsJsonScript {

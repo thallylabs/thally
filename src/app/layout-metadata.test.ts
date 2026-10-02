@@ -11,4 +11,8 @@ describe('root layout page title', () => {
     expect(source).toContain('template: `%s | ${effectiveSite.name}`')
     expect(source).not.toContain('%s •')
   })
+
+  it('emits the docs.json seo.metatags on every page', async () => {
+    expect(await readFile('src/app/layout.tsx', 'utf8')).toContain('other: getSeoConfig().metatags')
+  })
 })

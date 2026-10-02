@@ -245,6 +245,11 @@ describe('config mapping', () => {
     expect(bundle.docsConfig.i18n?.locales.map((locale) => locale.label)).toEqual(['English', 'Español', '日本語', '简体中文', 'Português (BR)'])
   })
 
+  it('carries seo.metatags through as page meta tags', () => {
+    const bundle = site({ 'docs.json': JSON.stringify({ ...nav, seo: { metatags: { 'google-site-verification': 'abc123', 'bad name': 'x', count: 5 } } }), ...intro })
+    expect(bundle.docsConfig.seo?.metatags).toEqual({ 'google-site-verification': 'abc123' })
+  })
+
   it('maps Mintlify colors to per-mode brand colors with six-digit hex', () => {
     const bundle = site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: '#F60', light: '#fff', dark: '#000000' } }), ...intro })
     expect(bundle.docsConfig.colors).toEqual({

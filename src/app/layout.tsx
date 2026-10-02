@@ -12,6 +12,7 @@ import {
   getContentIconTone,
   getCustomScriptsConfig,
   getFontsConfig,
+  getSeoConfig,
   getStylesheetsConfig,
   getIntegrationsConfig,
   getStructuralTheme,
@@ -132,6 +133,7 @@ export async function generateMetadata(): Promise<Metadata> {
       template: `%s | ${effectiveSite.name}`,
     },
     description: effectiveSite.description,
+    other: getSeoConfig().metatags,
     // Derived from the request-bound site config so a fork never inherits
     // the baseline's marketing keywords.
     keywords: [effectiveSite.name, `${effectiveSite.name} documentation`, 'docs'],

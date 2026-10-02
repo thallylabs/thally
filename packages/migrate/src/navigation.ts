@@ -966,6 +966,9 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
   if (droppedContextual.length > 0) {
     warnings.push({ code: 'unsupported-config', message: `contextual.options entries not supported by the page menu were dropped: ${droppedContextual.map((option) => typeof option === 'string' ? option : 'custom entry').join(', ')}.`, source: 'docs.json' })
   }
+  const metatagEntries = Object.entries(objectValue(seo?.metatags) ?? {})
+    .filter((entry): entry is [string, string] => /^[\w:.-]+$/.test(entry[0]) && typeof entry[1] === 'string' && entry[1].length <= 1000)
+  const projectedMetatags = metatagEntries.length > 0 ? Object.fromEntries(metatagEntries) : undefined
   const iconLibrary = objectValue(config.icons)?.library
   // Mintlify's default icon library is Font Awesome when docs.json names none.
   const projectedIconLibrary = iconLibrary === undefined
@@ -1025,7 +1028,7 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
     ...(bodyFont || headingFont ? { fonts: { ...(bodyFont ? { body: bodyFont } : {}), ...(headingFont ? { heading: headingFont } : {}) } } : {}),
     // Mintlify titles pages "<title> - <site name>" unless `og:title` overrides them,
     // and its sitemap lists navigation pages only.
-    seo: { ...(seo?.indexing === 'all' ? { indexing: 'all' as const } : {}), titleSeparator: ' - ', sitemap: 'navigable' },
+    seo: { ...(seo?.indexing === 'all' ? { indexing: 'all' as const } : {}), titleSeparator: ' - ', sitemap: 'navigable', ...(projectedMetatags ? { metatags: projectedMetatags } : {}) },
     ...(typeof feedback?.thumbsRating === 'boolean' ? { feedback: { thumbsRating: feedback.thumbsRating } } : {}),
   }
 }
