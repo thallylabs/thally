@@ -3815,6 +3815,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         rootStyleProjection = projectAuthoredStyles(css, [
           ...pages.map((page) => page.body),
           ...(componentMigrator?.files() ?? []).map((file) => typeof file.content === 'string' ? file.content : ''),
+          // Site-wide scripts build markup of their own (a CTA card, say) that the stylesheet is meant for.
+          ...files.filter((file) => isMintlifyServedScriptOrStyle(file.relativePath) && extname(file.relativePath).toLowerCase() === '.js'
+            && lstatSync(file.absolutePath).size <= MAX_PAGE_BYTES).map((file) => readFileSync(file.absolutePath, 'utf8')),
         ])
       } catch {
         rootStyleProblem = 'parse'

@@ -36,6 +36,10 @@ describe('table of contents scroll tracking', () => {
     expect(html).toContain(`href="#${activeId}" aria-current="location"`)
   })
 
+  it('carries the id Mintlify site scripts use to add a card under the table of contents', () => {
+    expect(renderToStaticMarkup(<TableOfContents />)).toContain('id="table-of-contents-content"')
+  })
+
   it('does not mark a heading current before scroll tracking resolves it', () => {
     expect(renderToStaticMarkup(<TableOfContents />)).not.toContain('aria-current')
   })

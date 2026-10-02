@@ -216,16 +216,21 @@ describe('config mapping', () => {
     expect(bundle.warnings.some((warning) => /topbarLinks entry without a valid name and url/.test(warning.message))).toBe(true)
   })
 
-  it('turns a styled navbar link into a button', () => {
+  it('turns a styled navbar link into a button and keeps styles for markup a site script builds', () => {
     const bundle = site({
       'docs.json': JSON.stringify({ ...nav, navbar: { links: [{ label: 'Docs', href: 'https://a.example/docs' }, { label: 'Sign Up', href: 'https://a.example/signin?x=1' }] } }),
-      'style.css': 'li.navbar-link a[href*="a.example/signin"] { background-color: #ff4d00; color: #fff; }\n',
+      'style.css': 'li.navbar-link a[href*="a.example/signin"] { background-color: #ff4d00; color: #fff; }\n#cta-widget { margin-top: 24px; }\n.cta-box { padding: 20px; }\n',
+      'cta.js': "const w = document.createElement('div'); w.id = 'cta-widget'; w.innerHTML = '<div class=\"cta-box\"></div>'\n",
       ...intro,
     })
     expect(bundle.docsConfig.navbar?.links).toEqual([
       { label: 'Docs', href: 'https://a.example/docs' },
       { label: 'Sign Up', href: 'https://a.example/signin?x=1', button: { background: '#ff4d00', color: '#fff' } },
     ])
+    const css = bundle.assets.filter((asset) => /style\.css$/.test(asset.path)).map((asset) => String(asset.content)).join('')
+    expect(css).toContain('#cta-widget')
+    expect(css).toContain('.cta-box')
+    expect(css).not.toContain('navbar-link')
   })
 
   it('rejects script-bearing and control-character urls in legacy topbar entries', () => {
