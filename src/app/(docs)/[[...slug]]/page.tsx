@@ -17,7 +17,7 @@ import { LocalizedSidebarHydrator } from '@/components/layout/localized-sidebar-
 import { LocaleAvailabilityHydrator } from '@/components/layout/locale-availability'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { getApiOperationForFrontmatter } from '@/data/api-reference'
-import { ensureDocPublication, getDocEntries, isDocPublished, loadNavContext } from '@/data/docs'
+import { ensureDocPublication, getDocEntries, getSeoConfig, isDocPublished, loadNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { hasDocTranslation } from '@/lib/i18n/translation-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
@@ -32,6 +32,7 @@ import {
   getRepositoryI18nConfig,
 } from '@/lib/i18n/request'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
+import { pageFullTitle } from '@/lib/page-meta'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { getSiteUrl } from '@/lib/site-url'
@@ -100,9 +101,18 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     url: formatOgDisplayUrl(canonicalHref, siteUrl),
   })
   const isNoindex = doc.noindex || doc.hidden || !hasTranslation
+  const siteName = resolveBuildSiteConfig().name
+  const fullTitle = pageFullTitle({
+    title: doc.title,
+    ogTitle: doc.ogTitle,
+    siteName,
+    separator: getSeoConfig().titleSeparator,
+  })
+  const socialTitle = fullTitle ?? doc.title
+  const socialDescription = doc.ogDescription ?? doc.description
 
   return {
-    title: doc.title,
+    title: fullTitle ? { absolute: fullTitle } : doc.title,
     description: doc.description,
     ...(isNoindex
       ? { robots: { index: false, follow: !doc.noindex && !doc.hidden } }
@@ -115,15 +125,18 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       types: buildAgentAlternateLinks(canonicalHref, siteUrl),
     },
     openGraph: {
-      title: doc.title,
-      description: doc.description,
-      images: [{ url: ogImageUrl, width: 1200, height: 630 }],
+      title: socialTitle,
+      description: socialDescription,
+      url: `${siteUrl}${canonicalHref}`,
+      siteName,
+      type: 'website',
+      images: [doc.ogImage ? { url: doc.ogImage } : { url: ogImageUrl, width: 1200, height: 630 }],
     },
     twitter: {
       card: 'summary_large_image',
-      title: doc.title,
-      description: doc.description,
-      images: [ogImageUrl],
+      title: doc.twitterTitle ?? socialTitle,
+      description: doc.twitterDescription ?? socialDescription,
+      images: [doc.twitterImage ?? doc.ogImage ?? ogImageUrl],
     },
   }
 }

@@ -45,6 +45,13 @@ export interface DocEntry {
   noindex?: boolean
   hidden?: boolean
   mode?: DocPageMode
+  /** Social/SEO overrides migrated from `og:*` / `twitter:*` frontmatter. */
+  ogTitle?: string
+  ogDescription?: string
+  ogImage?: string
+  twitterTitle?: string
+  twitterDescription?: string
+  twitterImage?: string
 }
 
 
@@ -213,6 +220,8 @@ export interface DocsJsonFooter {
 export interface DocsJsonSeo {
   /** "navigable" (default) excludes hidden pages; "all" indexes them too */
   indexing?: 'navigable' | 'all'
+  /** Joins a page title and the site name in `<title>`; unset keeps the `title | site` template. */
+  titleSeparator?: string
 }
 
 export interface DocsJsonScript {

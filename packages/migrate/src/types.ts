@@ -86,7 +86,7 @@ export interface MigrationDocsConfig {
   navbar?: MigrationNavbarConfig
   favicon?: { light: string; dark?: string }
   footer?: MigrationFooterConfig
-  seo?: { indexing?: 'navigable' | 'all' }
+  seo?: { indexing?: 'navigable' | 'all'; titleSeparator?: string }
   fonts?: {
     body?: { family: string; weight?: Array<string> }
     heading?: { family: string; weight?: Array<string> }
@@ -133,6 +133,8 @@ export interface MigrationPage {
   mode?: 'default' | 'wide' | 'custom' | 'center' | 'home'
   hidden?: boolean
   noindex?: boolean
+  /** Social/SEO overrides from `og:*` and `twitter:*` frontmatter, keyed by the migrated frontmatter field. */
+  meta?: Partial<Record<'ogTitle' | 'ogDescription' | 'ogImage' | 'twitterTitle' | 'twitterDescription' | 'twitterImage', string>>
   /** OpenAPI operation key rendered by Thally instead of ordinary MDX. */
   openapi?: string
   /** Manual API page: `METHOD <url-or-path>`; rendered by Thally's playground. */

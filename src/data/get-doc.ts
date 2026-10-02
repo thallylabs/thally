@@ -35,6 +35,23 @@ interface DocFrontmatter {
   noindex?: boolean
   hidden?: boolean
   mode?: DocPageMode
+  ogTitle?: string
+  ogDescription?: string
+  ogImage?: string
+  twitterTitle?: string
+  twitterDescription?: string
+  twitterImage?: string
+}
+
+const PAGE_META_KEYS = ['ogTitle', 'ogDescription', 'ogImage', 'twitterTitle', 'twitterDescription', 'twitterImage'] as const
+
+function pageMetaFields(frontmatter: DocFrontmatter | undefined): Partial<Record<(typeof PAGE_META_KEYS)[number], string>> {
+  const out: Partial<Record<(typeof PAGE_META_KEYS)[number], string>> = {}
+  for (const key of PAGE_META_KEYS) {
+    const value = frontmatter?.[key]
+    if (typeof value === 'string' && value.trim()) out[key] = value.trim()
+  }
+  return out
 }
 
 function projectJoin(...segments: Array<string>): string {
@@ -212,6 +229,7 @@ async function compileDocEntry(
     noindex: frontmatter?.noindex,
     hidden: frontmatter?.hidden,
     mode: frontmatter?.mode,
+    ...pageMetaFields(frontmatter),
     isFallback,
     isStale,
   }

@@ -25,6 +25,20 @@ function renderedPage(files: Record<string, string>, id: string): string {
   return String(renderMigrationFiles(bundle).find((file) => file.path === `src/content/${id}.mdx`)!.content)
 }
 
+describe('page social metadata', () => {
+  it('carries og:title and og:description into the migrated page and sets the Mintlify title separator', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-meta-'))
+    roots.push(root)
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ name: 'Acme Docs', navigation: { pages: ['intro'] } }))
+    writeFileSync(join(root, 'intro.mdx'), '---\ntitle: Intro page\nog:title: "Intro | Acme"\nog:description: "Short blurb"\n---\nHello\n')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = String(renderMigrationFiles(bundle).find((file) => file.path === 'src/content/intro.mdx')!.content)
+    expect(page).toContain('ogTitle: "Intro | Acme"')
+    expect(page).toContain('ogDescription: "Short blurb"')
+    expect(bundle.docsConfig.seo?.titleSeparator).toBe(' - ')
+  })
+})
+
 describe('page icon frontmatter', () => {
   it('carries icon and a supported iconType into the migrated page', () => {
     const out = renderedPage({ 'intro.mdx': '---\ntitle: Intro\nicon: book-open\niconType: solid\n---\nHello\n' }, 'intro')

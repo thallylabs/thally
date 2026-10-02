@@ -989,7 +989,8 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
     ...(projectedNavigation ? { navbar: projectedNavigation } : {}),
     ...(projectedFooter(config.footer) ? { footer: projectedFooter(config.footer) } : {}),
     ...(bodyFont || headingFont ? { fonts: { ...(bodyFont ? { body: bodyFont } : {}), ...(headingFont ? { heading: headingFont } : {}) } } : {}),
-    ...(seo?.indexing === 'all' ? { seo: { indexing: 'all' } } : {}),
+    // Mintlify titles pages "<title> - <site name>" unless `og:title` overrides them.
+    seo: { ...(seo?.indexing === 'all' ? { indexing: 'all' as const } : {}), titleSeparator: ' - ' },
     ...(typeof feedback?.thumbsRating === 'boolean' ? { feedback: { thumbsRating: feedback.thumbsRating } } : {}),
   }
 }

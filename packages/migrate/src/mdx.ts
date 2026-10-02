@@ -1942,6 +1942,11 @@ export function parseMarkdownPage(input: {
   const iconType = icon && ['regular', 'solid', 'outline', 'brands'].includes(String(parsed.data.iconType))
     ? parsed.data.iconType as MigrationPage['iconType']
     : undefined
+  const meta: NonNullable<MigrationPage['meta']> = {}
+  for (const [source, field] of PAGE_META_FIELDS) {
+    const value = parsed.data[source]
+    if (typeof value === 'string' && value.trim()) meta[field] = value.trim()
+  }
   const badge = typeof parsed.data.tag === 'string' && parsed.data.tag.trim()
     ? parsed.data.tag.trim()
     : typeof parsed.data.badge === 'string' && parsed.data.badge.trim()
@@ -1975,6 +1980,7 @@ export function parseMarkdownPage(input: {
     mode,
     hidden: parsed.data.hidden === true ? true : undefined,
     noindex: parsed.data.noindex === true || parsed.data.noindex === 'true' ? true : undefined,
+    ...(Object.keys(meta).length > 0 ? { meta } : {}),
     openapi: typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined,
     ...apiFrontmatter(parsed.data, input.warn),
     body,
@@ -1982,6 +1988,15 @@ export function parseMarkdownPage(input: {
     ...(parsed.error ? { frontmatterError: parsed.error } : {}),
   }
 }
+
+const PAGE_META_FIELDS = [
+  ['og:title', 'ogTitle'],
+  ['og:description', 'ogDescription'],
+  ['og:image', 'ogImage'],
+  ['twitter:title', 'twitterTitle'],
+  ['twitter:description', 'twitterDescription'],
+  ['twitter:image', 'twitterImage'],
+] as const
 
 const AUTH_METHODS = new Set(['bearer', 'basic', 'key', 'none'])
 
