@@ -1,6 +1,6 @@
 /** Access gating, site-wide CSS/JS/font assets, and legacy config mapping for Mintlify sources. */
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -1045,6 +1045,38 @@ describe('operations documented only on access-restricted pages', () => {
     const out = parseYaml(text)
     expect(out.paths['/internal'].get['x-excluded']).toBe(true)
     expect(out.paths['/x'].get['x-excluded']).toBeUndefined()
+  })
+})
+
+describe('page spec references that cannot be migrated explain why', () => {
+  const spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { '/x': { get: { summary: 'S' } } } })
+  const missing = (bundle: MigrationBundle) => codes(bundle, 'unsupported-config').find((item) => /references the OpenAPI spec/.test(item.message))!.message
+  const nav = JSON.stringify({ navigation: { pages: ['pub'] } })
+
+  it('names a case mismatch', () => {
+    const message = missing(site({ 'docs.json': nav, 'api/spec.json': spec, 'pub.mdx': page('Pub', 'openapi: "/API/SPEC.json GET /x"\n') }))
+    expect(message).toContain('paths are case-sensitive; the file is at "api/spec.json"')
+    expect(message).not.toMatch(/api setting|not referenced from docs.json/)
+  })
+
+  it('names a .mintignore exclusion', () => {
+    const message = missing(site({ '.mintignore': 'private/\n', 'docs.json': nav, 'private/spec.json': spec, 'pub.mdx': page('Pub', 'openapi: "/private/spec.json GET /x"\n') }))
+    expect(message).toContain('excluded by .mintignore')
+  })
+
+  it('names a symbolic link', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-extras-'))
+    writeFileSync(join(root, 'docs.json'), nav)
+    writeFileSync(join(root, 'pub.mdx'), page('Pub', 'openapi: "/link.json GET /x"\n'))
+    const outside = mkdtempSync(join(tmpdir(), 'thally-migrate-outside-'))
+    writeFileSync(join(outside, 'real.json'), spec)
+    symlinkSync(join(outside, 'real.json'), join(root, 'link.json'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+    expect(missing(bundle)).toContain('symbolic link')
+  })
+
+  it('names a missing file', () => {
+    expect(missing(site({ 'docs.json': nav, 'pub.mdx': page('Pub', 'openapi: "/nope.json GET /x"\n') }))).toContain('no file exists at "nope.json"')
   })
 })
 

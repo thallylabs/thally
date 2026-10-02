@@ -1576,6 +1576,8 @@ function rewriteMintlifyPageSpecRefs(
   specs: Array<{ filename: string; sourcePath?: string }>,
   remoteUrls: Set<string>,
   warnings: Array<MigrationWarning>,
+  /** Why a spec path that matched no migrated spec is missing, e.g. a case mismatch, an ignored file or a symlink. */
+  explainMissing: (key: string) => string = () => 'no such file was found',
 ): void {
   for (const page of pages) {
     const ref = page.openapi ? splitOpenApiRef(page.openapi) : null
@@ -1594,7 +1596,7 @@ function rewriteMintlifyPageSpecRefs(
     if (match) {
       page.openapi = withSpecRef(ref, specAssetPath(match.filename))
     } else {
-      warnings.push({ code: 'unsupported-config', message: `Page "${page.id}" references the OpenAPI spec "${ref.specRef}", which is not referenced from docs.json and was not migrated; the page will not render an endpoint. Add the spec to a tab's api setting.`, source: page.source })
+      warnings.push({ code: 'unsupported-config', message: `Page "${page.id}" references the OpenAPI spec "${ref.specRef}", which was not migrated (${explainMissing(key)}); the page will not render an endpoint.`, source: page.source })
     }
   }
 }
@@ -4329,7 +4331,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       docsConfig = injectOpenApiSpecs(docsConfig, pageOnlySpecs, warnings)
       pageSpecs = [...pageSpecs, ...pageOnlySpecs]
     }
-    rewriteMintlifyPageSpecRefs(pages, pageSpecs, new Set(remoteApiSpecs.map((spec) => spec.url)), warnings)
+    const explainMissingSpec = (key: string): string => {
+      const sameName = scannedFiles.find((file) => file.relativePath.toLowerCase() === key.toLowerCase())
+      if (sameName && sameName.relativePath !== key) return `paths are case-sensitive; the file is at "${sameName.relativePath}"`
+      if (sameName && mintignoreMatcher?.ignores(sameName.relativePath)) return 'the file is excluded by .mintignore'
+      try { if (lstatSync(resolvePath(repositoryDir, key)).isSymbolicLink()) return 'the file is a symbolic link, which is never followed' } catch { /* missing */ }
+      return sameName ? 'the file could not be read as an OpenAPI document' : `no file exists at "${key}"`
+    }
+    rewriteMintlifyPageSpecRefs(pages, pageSpecs, new Set(remoteApiSpecs.map((spec) => spec.url)), warnings, explainMissingSpec)
   }
   if (platform === 'mintlify') {
     const sources = new Set((docsConfig.redirects ?? []).map((redirect) => redirect.source))
