@@ -20,7 +20,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const docPages: MetadataRoute.Sitemap = (
     await Promise.all(
       docEntries.map(async (doc) => {
-        const href = doc.href
+        // A migrated Mintlify site redirects `/` to `/introduction`; list the page's own URL.
+        const href = visibleIds && doc.id === 'introduction' ? '/introduction' : doc.href
         const availableI18n = await getContentI18nConfig(doc.slug, i18n)
         const languages = buildLocaleAlternates(baseUrl, href, availableI18n)
         return Promise.all(availableI18n.locales.map(async (locale) => {

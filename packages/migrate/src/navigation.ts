@@ -145,11 +145,14 @@ export function addMintlifyHomepageRedirects(
   const homepage = config.tabs.filter((tab) => !tab.hidden)
     .map((tab) => firstPage([...(tab.pages ?? []), ...(tab.groups ?? [])]))
     .find(Boolean)
-  if (!homepage || homepage === 'introduction') return config
+  // Mintlify sends `/` to the first page even when that page is `introduction`, so the
+  // renderer's root alias for it is not served and links, canonicals and the sitemap agree on one URL.
+  if (!homepage) return config
   const redirects = [...(config.redirects ?? [])]
   const sources = new Set(redirects.map((redirect) => redirect.source.replace(/\/$/, '') || '/'))
   const roots = ['', ...(config.i18n?.locales ?? [])
     .filter((locale) => locale.code !== config.i18n?.defaultLocale)
+    .filter((locale) => homepage !== 'introduction' || pages.some((page) => page.locale === locale.code && page.navigationId === homepage))
     .map((locale) => locale.code)]
   for (const locale of roots) {
     const source = locale ? `/${locale}` : '/'

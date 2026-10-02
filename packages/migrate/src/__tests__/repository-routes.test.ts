@@ -157,6 +157,7 @@ describe('Mintlify repository route identity', () => {
     ] } }, { introduction: '# Welcome\n\nA shared overview for both language menus.' })
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
     expect(bundle.pages.map((page) => page.id)).toEqual(['introduction'])
-    expect(bundle.docsConfig.redirects).toBeUndefined()
+    // `/` still goes to /introduction, but /fr has no page of its own to go to.
+    expect(bundle.docsConfig.redirects).toEqual([{ source: '/', destination: '/introduction', permanent: false }])
   })
 })

@@ -676,6 +676,7 @@ describe('Mintlify repository migration', () => {
       redirects: [
         { source: '/guides', destination: '/guides/introduction', permanent: false },
         { source: '/management', destination: '/management/runs', permanent: false },
+        { source: '/', destination: '/introduction', permanent: false },
       ],
     })
     expect(bundle.pages.map((page) => page.id)).toEqual([

@@ -255,6 +255,11 @@ describe('config mapping', () => {
     expect([theme('aspen'), theme('maple'), theme('luma')]).toEqual(['maple', 'maple', 'sharp'])
   })
 
+  it('redirects / to the introduction page like Mintlify does', () => {
+    const bundle = site({ 'docs.json': JSON.stringify({ navigation: { pages: ['introduction', 'guide'] } }), 'introduction.mdx': page('Intro'), 'guide.mdx': page('Guide') })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/', destination: '/introduction', permanent: false })
+  })
+
   it('maps Mintlify colors to per-mode brand colors with six-digit hex', () => {
     const bundle = site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: '#F60', light: '#fff', dark: '#000000' } }), ...intro })
     expect(bundle.docsConfig.colors).toEqual({
