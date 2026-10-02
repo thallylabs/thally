@@ -67,10 +67,16 @@ export function Tabs({ children, className }: TabsProps) {
         })}
       </div>
 
-      {/* Active panel */}
-      <div className="pt-4">
-        {tabs[activeIndex]}
-      </div>
+      {/* Every panel is rendered so inactive content stays in the server HTML. */}
+      {tabs.map((tab, index) => (
+        <div
+          key={index}
+          hidden={index !== activeIndex}
+          className="pt-4"
+        >
+          {tab}
+        </div>
+      ))}
     </div>
   )
 }
