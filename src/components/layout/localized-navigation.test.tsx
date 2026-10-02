@@ -21,7 +21,10 @@ vi.mock('@/components/layout/top-bar', () => ({
   TopBar: ({ activeCollectionId, collections }: { activeCollectionId: string; collections: Array<SidebarCollection> }) => createElement('nav', { 'data-active': activeCollectionId, 'data-visible': collections.map((item) => item.id).join(',') }),
 }))
 vi.mock('@/components/navigation/sidebar', () => ({
-  Sidebar: ({ activeCollectionId }: { activeCollectionId: string }) => createElement('aside', { 'data-active': activeCollectionId }),
+  Sidebar: ({ activeCollectionId, sections }: { activeCollectionId: string; sections: SidebarCollection['sections'] }) => createElement('aside', {
+    'data-active': activeCollectionId,
+    'data-hrefs': sections.flatMap((section) => section.items.map((item) => item.href)).join(','),
+  }),
 }))
 vi.mock('@/components/layout/footer', () => ({ Footer: () => null }))
 vi.mock('@/components/layout/sections', () => ({ PageContainer: ({ children }: { children: ReactNode }) => children }))
@@ -65,6 +68,12 @@ describe('localized collection selection', () => {
     const markup = shellMarkup()
     expect(markup).toContain('<nav data-active="guides"')
     expect(markup).toContain('<aside data-active="guides"')
+  })
+
+  it('keeps server-rendered sidebar links inside the locale before the snapshot hydrates', () => {
+    expect(shellMarkup()).toContain('data-hrefs="/zh-Hans/guides/fees-monetization/faq"')
+    mocks.pathname = '/guides/fees-monetization/faq'
+    expect(shellMarkup()).toContain('data-hrefs="/guides/fees-monetization/faq"')
   })
 
   it('shows only the active version tabs on default and deep version routes', () => {
