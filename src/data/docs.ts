@@ -86,6 +86,8 @@ export interface DocsNavigationVersion {
   prefix: string
   href: string
   default?: boolean
+  /** Hidden from the version switcher; its pages stay reachable by URL. */
+  hidden?: boolean
 }
 
 export interface DocsNavigationShortcut {

@@ -28,7 +28,7 @@ export function VersionSwitcher({ versions: configured, activeLabel }: VersionSw
     }
   }, [open])
 
-  const versions = configured ?? siteConfig.versions
+  const versions = (configured ?? siteConfig.versions)?.filter((version) => !('hidden' in version && version.hidden))
   if (!versions || versions.length < 2) return null
 
   const current = versions.find((version) => version.label === activeLabel)

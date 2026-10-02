@@ -1322,7 +1322,7 @@ export function projectMintlifyNavigation(
     if (!landing) return []
     const firstSegment = landing.split('/')[0]
     const prefix = firstSegment === label ? label : ''
-    return [{ label, prefix, href: `/${landing}`, ...(entry === defaultVersion ? { default: true } : {}) }]
+    return [{ label, prefix, href: `/${landing}`, ...(entry === defaultVersion ? { default: true } : {}), ...(entry.hidden === true ? { hidden: true } : {}) }]
   }) : []
   if (versions.length > 1) {
     tabs = annotateVersions(tabs)

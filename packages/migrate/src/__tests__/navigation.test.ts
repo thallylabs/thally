@@ -280,6 +280,21 @@ describe('Mintlify navigation projection', () => {
     expect(result.docsConfig.tabs[3]?.href).toBeUndefined()
   })
 
+  it('keeps a version hidden flag so the switcher can omit it', () => {
+    const result = projectMintlifyNavigation({
+      navigation: {
+        versions: [
+          { version: 'v2', default: true, tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['v2/introduction'] }] }, { tab: 'API', groups: [{ group: 'Ref', pages: ['v2/api'] }] }] },
+          { version: 'v1', hidden: true, tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['v1/introduction'] }] }, { tab: 'API', groups: [{ group: 'Ref', pages: ['v1/api'] }] }] },
+        ],
+      },
+    })
+    expect(result.docsConfig.navigation?.versions).toEqual([
+      { label: 'v2', prefix: 'v2', href: '/v2/introduction', default: true },
+      { label: 'v1', prefix: 'v1', href: '/v1/introduction', hidden: true },
+    ])
+  })
+
   it('projects global language anchors as sidebar shortcuts', () => {
     const result = projectMintlifyNavigation({ navigation: { languages: [{ language: 'en', default: true,
       global: { anchors: [{ anchor: 'Playground', href: 'https://example.com/play', icon: 'play' }] },
