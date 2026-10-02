@@ -27,7 +27,7 @@ import type { Dirent } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, extname, isAbsolute, posix, relative, resolve as resolvePath, sep } from 'node:path'
 
-import { parse as parseYaml } from 'yaml'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import * as ts from 'typescript'
 
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent } from './components.js'
@@ -1263,6 +1263,70 @@ function specRefMatches(ref: string, specPath: string, specFilename: string, isD
   // Whole path segments only: `pi/openapi.json` does not name `api/openapi.json`.
   const lowerPath = specPath.toLowerCase()
   return lowerPath === wanted || lowerPath.endsWith(`/${wanted}`) || specFilename.toLowerCase() === wanted
+}
+
+/** `GET /x` / `webhook name` normalised so two spellings of one operation compare equal. */
+function operationKey(operation: string): string {
+  const [first, ...rest] = operation.trim().split(/\s+/)
+  return `${first.toLowerCase()} ${rest.join(' ')}`
+}
+
+/** Every operation reference docs.json navigation names explicitly. */
+function navigationOperationRefs(config: Record<string, unknown> | null): Array<string> {
+  const refs: Array<string> = []
+  const visit = (node: unknown): void => {
+    if (typeof node === 'string') { if (splitOpenApiRef(node)) refs.push(node) }
+    else if (Array.isArray(node)) node.forEach(visit)
+    else if (node && typeof node === 'object') Object.values(node).forEach(visit)
+  }
+  visit(config?.navigation)
+  return refs
+}
+
+/**
+ * Fail closed: an operation named only by access-restricted pages must not be
+ * published with a spec that published pages or docs.json also use. Marks such
+ * operations `x-excluded` (the renderer's sanitizer then drops them from every
+ * published surface) and returns the new bytes and the operations withheld.
+ * `keptRefs` are the references that keep an operation public.
+ */
+function excludeWithheldOperations(
+  spec: { sourcePath: string; filename: string; content: Buffer },
+  withheldRefs: ReadonlyArray<string>,
+  keptRefs: ReadonlyArray<string>,
+): { content: Buffer; excluded: Array<string> } {
+  const keysFor = (refs: ReadonlyArray<string>): Set<string> => new Set(
+    refs.filter((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))
+      .map((ref) => splitOpenApiRef(ref)?.operation).filter((op): op is string => !!op).map(operationKey),
+  )
+  const kept = keysFor(keptRefs)
+  const gone = [...keysFor(withheldRefs)].filter((key) => !kept.has(key))
+  const untouched = { content: spec.content, excluded: [] as Array<string> }
+  if (gone.length === 0) return untouched
+  const text = spec.content.toString('utf8')
+  let doc: Record<string, any>
+  try { doc = parseYaml(text) } catch { return untouched }
+  if (!doc || typeof doc !== 'object') return untouched
+  const excluded: Array<string> = []
+  for (const key of gone) {
+    const [method, ...rest] = key.split(' ')
+    const name = rest.join(' ')
+    if (method === 'webhook') {
+      const entry = doc.webhooks?.[name] ?? doc['x-webhooks']?.[name]
+      if (entry && typeof entry === 'object') { entry['x-excluded'] = true; excluded.push(`WEBHOOK ${name}`) }
+      continue
+    }
+    const entry = doc.paths?.[name]
+    if (!entry || typeof entry !== 'object') continue
+    // A `$ref` entry may share its item with other operations: exclude it only when no kept ref names the path.
+    const target = typeof entry.$ref === 'string'
+      ? ([...kept].some((k) => k.slice(k.indexOf(' ') + 1) === name) ? undefined : entry)
+      : entry[method]
+    if (target && typeof target === 'object') { target['x-excluded'] = true; excluded.push(`${method.toUpperCase()} ${name}`) }
+  }
+  if (excluded.length === 0) return untouched
+  const out = text.trimStart().startsWith('{') ? `${JSON.stringify(doc, null, 2)}\n` : stringifyYaml(doc)
+  return { content: Buffer.from(out), excluded }
 }
 
 const TOKEN_SEPARATORS = /[\s"'()<>[\]{}=,;:|\\/`*!?#&]+/
@@ -4198,21 +4262,31 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
     }
   } else if (platform === 'mintlify') {
-    const warnSharedSpec = (path: string): void => {
+    const warnSharedSpec = (path: string, excluded: Array<string> = []): void => {
       warnings.push({
         code: 'gated-page',
-        message: `OpenAPI spec ${path} is shared with access-restricted pages and is published; it may describe restricted endpoints. Review it before publishing.`,
+        message: excluded.length
+          ? `OpenAPI spec ${path} is shared with access-restricted pages and is published, but ${excluded.length} operation(s) documented only on those pages were withheld from it (${excluded.join(', ')}). Review the rest of the spec before publishing.`
+          : `OpenAPI spec ${path} is shared with access-restricted pages and is published; it may describe restricted endpoints. Review it before publishing.`,
         source: path,
       })
     }
+    // Operations docs.json lists explicitly stay public like those on published pages.
+    const keptSpecRefs = [...publishedSpecRefs, ...navigationOperationRefs(mintlifyConfig)]
     const allSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs, pages)
+    const withheldOperations = new Map<ResolvedApiSpec, Array<string>>()
+    for (const spec of allSpecs) {
+      const result = excludeWithheldOperations(spec, withheldSpecRefs, keptSpecRefs)
+      spec.content = result.content
+      withheldOperations.set(spec, result.excluded)
+    }
     const resolvedSpecs = allSpecs.filter((spec) => !spec.pageOnly)
     const pageOnlySpecs = allSpecs.filter((spec) => spec.pageOnly)
     for (const spec of resolvedSpecs) {
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) {
         assets.push(specAsset(spec.filename, spec.content))
       }
-      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath)
+      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
     }
     let pageSpecs: Array<{ filename: string; sourcePath?: string }> = resolvedSpecs
     if (resolvedSpecs.length > 0) {
@@ -4234,12 +4308,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(filename)}`, content: readFileSync(fallback.absolutePath) })
           withheldAssetCount++
         } else {
+          const pruned = excludeWithheldOperations({ sourcePath: fallback.relativePath, filename, content: readFileSync(fallback.absolutePath) }, withheldSpecRefs, keptSpecRefs)
           if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
-            assets.push(specAsset(filename, readFileSync(fallback.absolutePath)))
+            assets.push(specAsset(filename, pruned.content))
           }
           docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
           pageSpecs = [{ filename, sourcePath: fallback.relativePath }]
-          if (withheldSpecRefs.some(matches)) warnSharedSpec(fallback.relativePath)
+          if (withheldSpecRefs.some(matches)) warnSharedSpec(fallback.relativePath, pruned.excluded)
         }
       }
     }
@@ -4248,7 +4323,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // because `pages` holds the published pages alone.
     for (const spec of pageOnlySpecs) {
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) assets.push(specAsset(spec.filename, spec.content))
-      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath)
+      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
     }
     if (pageOnlySpecs.length > 0) {
       docsConfig = injectOpenApiSpecs(docsConfig, pageOnlySpecs, warnings)

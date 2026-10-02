@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
+import { parse as parseYaml } from 'yaml'
 
 import { migrateRepository, renderMigrationFiles } from '../index.js'
 import type { MigrationBundle } from '../index.js'
@@ -1001,6 +1002,49 @@ describe('OpenAPI specs named only by page frontmatter', () => {
     }))
     expect(specPaths(bundle)).toEqual([])
     expect(JSON.stringify(bundle.docsConfig)).not.toContain('spec.json')
+  })
+})
+
+describe('operations documented only on access-restricted pages', () => {
+  const spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { '/x': { get: { summary: 'PUBLICOP' } }, '/internal': { get: { summary: 'INTERNALSECRET' } } } })
+  const specContent = (bundle: MigrationBundle) => JSON.parse(String(bundle.assets.find((asset) => asset.path.endsWith('spec.json'))!.content))
+
+  it('marks an operation only a gated page names x-excluded in a page-only spec', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub', 's'] } }),
+      'spec.json': spec,
+      'pub.mdx': page('Pub', 'openapi: "/spec.json GET /x"\n'),
+      's.mdx': page('S', 'groups: [admin]\nopenapi: "/spec.json GET /internal"\n'),
+    })
+    const out = specContent(bundle)
+    expect(out.paths['/internal'].get['x-excluded']).toBe(true)
+    expect(out.paths['/x'].get['x-excluded']).toBeUndefined()
+    expect(codes(bundle, 'gated-page').some((item) => /withheld from it \(GET \/internal\)/.test(item.message))).toBe(true)
+  })
+
+  it('keeps an operation a published page or docs.json also names', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ api: { openapi: 'spec.json' }, navigation: { pages: ['pub', 's', 'GET /internal'] } }),
+      'spec.json': spec,
+      'pub.mdx': page('Pub', 'openapi: "/spec.json GET /x"\n'),
+      's.mdx': page('S', 'groups: [admin]\nopenapi: "/spec.json GET /internal"\n'),
+    })
+    const out = specContent(bundle)
+    expect(out.paths['/internal'].get['x-excluded']).toBeUndefined()
+  })
+
+  it('applies to a spec listed in docs.json and to YAML specs', () => {
+    const yaml = 'openapi: 3.0.0\ninfo: {title: T, version: "1"}\npaths:\n  /x:\n    get: {summary: A}\n  /internal:\n    get: {summary: B}\n'
+    const bundle = site({
+      'docs.json': JSON.stringify({ api: { openapi: 'spec.yaml' }, navigation: { pages: ['pub', 's'] } }),
+      'spec.yaml': yaml,
+      'pub.mdx': page('Pub'),
+      's.mdx': page('S', 'groups: [admin]\nopenapi: "/spec.yaml GET /internal"\n'),
+    })
+    const text = String(bundle.assets.find((asset) => asset.path.endsWith('spec.yaml'))!.content)
+    const out = parseYaml(text)
+    expect(out.paths['/internal'].get['x-excluded']).toBe(true)
+    expect(out.paths['/x'].get['x-excluded']).toBeUndefined()
   })
 })
 
