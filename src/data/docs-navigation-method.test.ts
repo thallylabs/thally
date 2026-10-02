@@ -22,8 +22,8 @@ vi.mock('@/lib/runtime-sources', () => ({
 import { getSidebarCollections } from './docs'
 
 describe('sidebar method', () => {
-  it('carries the upper-cased operation method, and nothing for webhooks or plain pages', () => {
+  it('carries the upper-cased operation method, HOOK for webhooks, and nothing for plain pages', () => {
     const items = getSidebarCollections()[0].sections[0].items
-    expect(items.map((item) => item.method)).toEqual(['DELETE', undefined, undefined])
+    expect(items.map((item) => item.method)).toEqual(['DELETE', 'HOOK', undefined])
   })
 })

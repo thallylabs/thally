@@ -847,7 +847,7 @@ function resolveNavItem(
     title: fm.navTitle ?? fm.title ?? deriveTitleFromSlug(pageId),
     href,
     badge: fm.badge,
-    ...(operation && !operation.webhook ? { method: operation.method.toUpperCase() } : {}),
+    ...(operation ? { method: operation.webhook ? 'HOOK' : operation.method.toUpperCase() } : {}),
     ...(typeof fm.icon === 'string' && fm.icon ? { icon: fm.icon } : {}),
     ...(fm.iconType ? { iconType: fm.iconType } : {}),
     description: fm.description,
