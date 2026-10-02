@@ -100,6 +100,11 @@ describe('standalone rich-content primitives', () => {
     expect(unsafe).not.toContain('href=')
   })
 
+  it('renders card titles as h2 headings', () => {
+    expect(renderToStaticMarkup(createElement(Card, { title: 'Plain' }))).toMatch(/<h2[^>]*>Plain<\/h2>/)
+    expect(renderToStaticMarkup(createElement(Card, { title: 'Linked', href: '/x' }))).toMatch(/<h2[^>]*>Linked<\/h2>/)
+  })
+
   it('stacks the icon above the title and hides the arrow unless asked', () => {
     const markup = renderToStaticMarkup(createElement(Card, {
       title: 'Python SDK', icon: 'terminal', href: '/sdks/python',

@@ -88,7 +88,7 @@ function ContentCardSurface({ kind, title, href, icon, iconType, iconColor, colo
     </span>
   ) : null
   const titleNode = title ? (
-    <span className={cn('thally-docs-card-title block min-w-0 font-heading text-base font-semibold leading-6 text-foreground', !horizontal && iconNode && 'mt-4')}>{title}</span>
+    <h2 className={cn('thally-docs-card-title not-prose block min-w-0 font-heading text-base font-semibold leading-6 text-foreground', !horizontal && iconNode && 'mt-4')}>{title}</h2>
   ) : null
 
   // The radius is a literal on purpose. Tailwind's `rounded-2xl` maps to
