@@ -51,7 +51,7 @@ export function OperationPanel({ operation, children }: OperationPanelProps) {
         {children ? <Prose>{children}</Prose> : null}
 
         {/* Servers */}
-        {operation.servers.length ? (
+        {operation.servers.length > 1 ? (
           <section className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">Servers</p>
             <div className="border-y border-border">

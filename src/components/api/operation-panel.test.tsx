@@ -120,3 +120,23 @@ describe('OperationPanel field descriptions', () => {
     expect(html).not.toContain('`basic`')
   })
 })
+
+describe('OperationPanel endpoint bar and servers', () => {
+  const withServers = (servers: Array<{ url: string }>) => ({
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    servers,
+    paths: { '/scrape': { post: { summary: 'Scrape', responses: {} } } },
+  })
+
+  it('shows the path only, and a Servers block only when there are several servers', () => {
+    const one = renderToStaticMarkup(<OperationPanel operation={operationFrom(withServers([{ url: 'https://api.example.com/v2' }]))} />)
+    expect(one).toContain('>/scrape</code>')
+    expect(one).not.toContain('Servers')
+    expect(one).not.toContain('>https://api.example.com/v2/scrape<')
+    const two = renderToStaticMarkup(
+      <OperationPanel operation={operationFrom(withServers([{ url: 'https://a.example.com' }, { url: 'https://b.example.com' }]))} />,
+    )
+    expect(two).toContain('Servers')
+  })
+})
