@@ -207,7 +207,7 @@ export function normalizeExplicitHeadingIds(
         if (usable && options.headingMarkers) return `${heading} ${headingIdMarker(id)}`
         // Numeric starts are valid here; Mintlify uses ids such as 429-responses.
         if (usable) return `<a id="${id}"></a>\n${heading}`
-        warn?.(`Heading anchor {#${id}} is not a valid HTML id and was removed from "${heading.replace(/^\s*#+\s*/, '')}".`)
+        warn?.(`Heading anchor {#${id}} ${options.headingMarkers ? 'contains whitespace or "*/"' : 'is not a valid HTML id'} and was removed from "${heading.replace(/^\s*#+\s*/, '')}".`)
         return heading
       }
     }

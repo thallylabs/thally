@@ -164,7 +164,7 @@ export function playgroundDisplay(value: unknown, where: string, warn?: (message
   const mode = typeof value === 'string' ? value.trim().toLowerCase() : ''
   if (mode === 'interactive' || mode === 'simple' || mode === 'none') return mode
   if (mode === 'auth') {
-    warn?.(`${where} "auth" shows the playground only to signed-in readers, which Thally cannot tell; migrated as "simple" (no playground).`)
+    warn?.(`${where} "auth" requires reader sign-in, which Thally does not support. Migrated as "simple" (no Try it). Set it to "interactive" to allow everyone.`)
     return 'simple'
   }
   warn?.(`${where} ${JSON.stringify(value)} is not one of interactive, simple, none, auth and was dropped.`)

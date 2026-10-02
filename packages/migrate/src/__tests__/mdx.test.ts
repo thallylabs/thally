@@ -691,6 +691,12 @@ describe('Mintlify heading ids', () => {
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
 
+  it('says what is wrong with an unusable heading anchor', () => {
+    const messages: Array<string> = []
+    normalizeExplicitHeadingIds('## T {#a*/b}', (message) => messages.push(message), { headingMarkers: true })
+    expect(messages).toEqual(['Heading anchor {#a*/b} contains whitespace or "*/" and was removed from "T".'])
+  })
+
   it('typesets straight quotes in heading text and ids as Mintlify does', () => {
     const output = normalizeMdx([
       "## What's Not Included",

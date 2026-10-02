@@ -1048,6 +1048,15 @@ describe('operations documented only on access-restricted pages', () => {
   })
 })
 
+describe('playground display "auth"', () => {
+  it('says plainly that reader sign-in is unsupported and what to set instead', () => {
+    const bundle = site({ 'docs.json': JSON.stringify({ api: { playground: { display: 'auth' } }, navigation: { pages: ['a'] } }), 'a.mdx': page('A') })
+    const warning = codes(bundle, 'unsupported-config').find((item) => /"auth"/.test(item.message))
+    expect(warning?.message).toContain('requires reader sign-in, which Thally does not support')
+    expect(warning?.message).toContain('Set it to "interactive"')
+  })
+})
+
 describe('dropped colors and metatags are reported', () => {
   const withConfig = (extra: Record<string, unknown>) => site({ 'docs.json': JSON.stringify({ navigation: { pages: ['a'] }, ...extra }), 'a.mdx': page('A') })
   const messages = (bundle: MigrationBundle) => codes(bundle, 'unsupported-config').map((item) => item.message)
