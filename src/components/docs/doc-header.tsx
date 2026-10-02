@@ -1,4 +1,4 @@
-import type { DocEntry } from '@/data/docs'
+import { getContextualOptions, type DocEntry } from '@/data/docs'
 import { CopyPageButton } from '@/components/docs/copy-page-button'
 
 interface DocHeaderProps {
@@ -25,7 +25,7 @@ export function DocHeader({ doc, eyebrow, showCopyPage = true }: DocHeaderProps)
             <p className="mt-2 max-w-[58ch] text-lg leading-7 text-foreground/80">{doc.description}</p>
           ) : null}
         </div>
-        {showCopyPage ? <CopyPageButton /> : null}
+        {showCopyPage ? <CopyPageButton options={getContextualOptions()} /> : null}
       </div>
     </header>
   )

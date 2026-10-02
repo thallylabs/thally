@@ -285,6 +285,8 @@ interface DocsJsonConfig {
   redirects?: Array<DocsJsonRedirect>
   banner?: DocsJsonBanner
   navbar?: DocsJsonNavbar
+  /** Page-menu entries (`copy`, `view`, `chatgpt`, `claude`, `perplexity`) in display order. */
+  contextual?: { options?: Array<string> }
   /** Hex brand colours per mode (six digits); `primary` fills buttons, `accent` links and highlights. */
   colors?: Partial<Record<'light' | 'dark', { primary?: string; accent?: string }>>
   /** Public favicon fallback when no managed or admin asset is configured. */
@@ -1293,6 +1295,11 @@ export function getNavigationShortcuts(): Array<DocsNavigationShortcut> {
       && (/^\/(?!\/)[^\s\\]*$/.test(item.href) || /^https?:\/\//i.test(item.href)
         || /^(?:mailto|tel):[^\s]+$/i.test(item.href))),
   )
+}
+
+/** docs.json `contextual.options`: which page-menu entries show, in order. Undefined keeps every entry. */
+export function getContextualOptions(): Array<string> | undefined {
+  return docsConfig().contextual?.options
 }
 
 /** Brand colours per mode; `/api/brand.css` from the managed dashboard still wins. */
