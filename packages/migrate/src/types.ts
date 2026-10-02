@@ -122,6 +122,9 @@ export interface MigrationPage {
   locale?: string
   title: string
   navTitle?: string
+  /** Sidebar icon name or image URL from page frontmatter, with its optional style. */
+  icon?: string
+  iconType?: 'regular' | 'solid' | 'outline' | 'brands'
   description: string
   /** Keep SEO/search description without repeating it above Docusaurus body copy. */
   descriptionPlacement?: 'body'

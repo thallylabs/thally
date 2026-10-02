@@ -147,6 +147,13 @@ function NavigationNodes({
         )}
       >
         <span className="flex min-h-5 items-center gap-2">
+          {showGroupIcons && node.item.icon ? (
+            <Icon
+              {...(/^(\/(?!\/)|https:\/\/)/i.test(node.item.icon) ? { src: node.item.icon } : { icon: node.item.icon })}
+              iconType={node.item.iconType}
+              className="h-3.5 w-3.5 shrink-0 text-foreground/50"
+            />
+          ) : null}
           <span className="line-clamp-2 break-words">{node.item.title}</span>
           {node.item.badge ? <Badge className="shrink-0 text-[10px] uppercase">{node.item.badge}</Badge> : null}
         </span>

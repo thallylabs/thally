@@ -32,4 +32,12 @@ describe('sidebar current page', () => {
     expect(html).toContain('href="/pnpr/configuration" aria-current="page"')
     expect(html).not.toContain('href="/pnpr" aria-current="page"')
   })
+
+  it('shows a page icon from frontmatter beside its sidebar label', () => {
+    const nodes = [
+      { type: 'page', item: { id: 'research', title: 'Research Index', href: '/research', icon: 'book-open' } },
+    ] as Array<NavigationNode>
+    const html = renderToStaticMarkup(<NavigationTree nodes={nodes} pathname="/" />)
+    expect(html).toContain('data-icon-name="book-open"')
+  })
 })

@@ -1,8 +1,37 @@
 /** Merge invariants for importing into an existing localized Thally site. */
 
-import { describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { mergeMigrationConfig } from '../index.js'
+import { migrateRepository } from '../repository.js'
+import { renderMigrationFiles } from '../render.js'
+
+const roots: Array<string> = []
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+
+/** Migrate a one-off Mintlify source and return the rendered page file for `id`. */
+function renderedPage(files: Record<string, string>, id: string): string {
+  const root = mkdtempSync(join(tmpdir(), 'thally-render-'))
+  roots.push(root)
+  const all = { 'docs.json': JSON.stringify({ name: 'Acme', navigation: { pages: ['intro'] } }), ...files }
+  for (const [path, content] of Object.entries(all)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true })
+    writeFileSync(join(root, path), content)
+  }
+  const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+  return String(renderMigrationFiles(bundle).find((file) => file.path === `src/content/${id}.mdx`)!.content)
+}
+
+describe('page icon frontmatter', () => {
+  it('carries icon and a supported iconType into the migrated page', () => {
+    const out = renderedPage({ 'intro.mdx': '---\ntitle: Intro\nicon: book-open\niconType: solid\n---\nHello\n' }, 'intro')
+    expect(out).toContain('icon: "book-open"')
+    expect(out).toContain('iconType: "solid"')
+  })
+})
 
 describe('migration config merge', () => {
   it('unions existing and imported locales without duplicating page ids', () => {

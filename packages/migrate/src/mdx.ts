@@ -1938,6 +1938,10 @@ export function parseMarkdownPage(input: {
     : typeof parsed.data.navTitle === 'string' && parsed.data.navTitle.trim()
       ? parsed.data.navTitle.trim()
       : undefined
+  const icon = typeof parsed.data.icon === 'string' && parsed.data.icon.trim() ? parsed.data.icon.trim() : undefined
+  const iconType = icon && ['regular', 'solid', 'outline', 'brands'].includes(String(parsed.data.iconType))
+    ? parsed.data.iconType as MigrationPage['iconType']
+    : undefined
   const badge = typeof parsed.data.tag === 'string' && parsed.data.tag.trim()
     ? parsed.data.tag.trim()
     : typeof parsed.data.badge === 'string' && parsed.data.badge.trim()
@@ -1960,6 +1964,8 @@ export function parseMarkdownPage(input: {
     locale: identity.locale,
     title,
     navTitle,
+    icon,
+    iconType,
     description,
     ...(input.platform === 'docusaurus' || input.platform === 'fern'
       ? { descriptionPlacement: 'body' as const }

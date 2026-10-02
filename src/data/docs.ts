@@ -5,7 +5,7 @@ import { getContentIndex, loadContentIndex, type ContentIndex } from '@/lib/cont
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 import { getDocsJsonConfig, getDocsJsonConfigRevision } from '@/lib/docs-json-config'
-import { resolveIconLibrary, type IconLibrary } from '@/lib/icon-library'
+import { resolveIconLibrary, type IconLibrary, type IconStyle } from '@/lib/icon-library'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { SUPPORTED_LOCALE_OPTIONS } from '@/lib/i18n/config'
 import { pageApiMetadata } from '@/lib/openapi/page-api'
@@ -103,6 +103,9 @@ export interface NavigationItem {
   title: string
   href: string
   badge?: string
+  /** Sidebar icon from page frontmatter (name, or an image path/URL). */
+  icon?: string
+  iconType?: IconStyle
   description?: string
   /** Authored group ancestry, used by breadcrumbs without flattening the visible sidebar. */
   groupPath?: Array<string>
@@ -382,6 +385,8 @@ interface FrontmatterData {
   title?: string
   /** Optional compact label used only in sidebar and previous/next navigation. */
   navTitle?: string
+  icon?: string
+  iconType?: IconStyle
   description?: string
   descriptionPlacement?: 'body'
   badge?: string
@@ -791,6 +796,8 @@ function resolveNavItem(
     title: fm.navTitle ?? fm.title ?? deriveTitleFromSlug(pageId),
     href,
     badge: fm.badge,
+    ...(typeof fm.icon === 'string' && fm.icon ? { icon: fm.icon } : {}),
+    ...(fm.iconType ? { iconType: fm.iconType } : {}),
     description: fm.description,
     ...(groupPath?.length ? { groupPath } : {}),
   }
