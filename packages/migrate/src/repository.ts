@@ -2489,6 +2489,8 @@ function repositoryAssetHref(
   currentFile: string,
   siteRoot: string,
   onReferenced?: (normalizedPath: string, onDiskSpelling?: string) => void,
+  /** Called when a page-relative path missed beside the page and the site-root file of that name was used. */
+  onRootFallback?: (spelled: string, used: string) => void,
 ): string | null {
   const isBracketed = value.startsWith('<') && value.endsWith('>')
   const raw = isBracketed ? value.slice(1, -1) : value
@@ -2504,6 +2506,7 @@ function repositoryAssetHref(
   }
   if (!ASSET_EXTENSIONS.has(extname(decodedPath).toLowerCase())) return null
   try {
+    let usedRootFallback = false
     let candidate = decodedPath.startsWith('/')
       ? resolveWithin(siteRoot, decodedPath.replace(/^\/+/, ''))
       : resolveWithinRoot(dirname(currentFile), decodedPath, siteRoot)
@@ -2512,7 +2515,7 @@ function repositoryAssetHref(
     // nothing exists beside the page.
     if (!decodedPath.startsWith('/') && !existsSync(candidate)) {
       const fromRoot = resolveWithin(siteRoot, decodedPath.replace(/^(?:\.\/)+/, ''))
-      if (existsSync(fromRoot)) candidate = fromRoot
+      if (existsSync(fromRoot)) { candidate = fromRoot; usedRootFallback = true }
     }
     // Resolve every path component before accepting an asset. A repository
     // could contain a symlinked directory whose lexical path stays under
@@ -2533,6 +2536,7 @@ function repositoryAssetHref(
     const onDiskRelative = relative(realRoot, realpathSync.native(candidate)).replace(/\\/g, '/')
     const onDisk = onDiskRelative.toLowerCase() === siteRelative.toLowerCase() ? normalizeAssetPath(onDiskRelative) : null
     onReferenced?.(normalized, onDisk ?? undefined)
+    if (usedRootFallback) onRootFallback?.(decodedPath, normalized)
     const rewritten = `/${normalized}${suffix}`
     // Markdown destinations containing parentheses must stay angle-bracketed;
     // removing the wrapper makes CommonMark terminate the URL too early.
@@ -2567,6 +2571,7 @@ function rewriteRepositoryAssetLinks(
   currentFile: string,
   siteRoot: string,
   onReferenced?: (normalizedPath: string, onDiskSpelling?: string) => void,
+  onRootFallback?: (spelled: string, used: string) => void,
 ): string {
   return body
     .replace(/(!?\[[^\]]*\]\()(<[^>]+>|[^)\s]+)([^)]*\))/g, (
@@ -2575,7 +2580,7 @@ function rewriteRepositoryAssetLinks(
       destination: string,
       closing: string,
     ) => {
-      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced)
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback)
       return rewritten ? `${opening}${rewritten}${closing}` : original
     })
     .replace(/\b(src|img|image|href)=(['"])([^'"]+)\2/g, (
@@ -2584,7 +2589,7 @@ function rewriteRepositoryAssetLinks(
       quote: string,
       destination: string,
     ) => {
-      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced)
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback)
       return rewritten ? `${property}=${quote}${rewritten}${quote}` : original
     })
 }
@@ -3663,6 +3668,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // Counted as published only once the page is certain to be (below).
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath, onDiskSpelling) => {
         pageAssetReferences.push(publicAssetKey(onDiskSpelling ?? assetPath))
+      }, (spelled, used) => {
+        warnings.push({ code: 'unsupported-config', message: `"${spelled}" was not found beside this page; the file "${used}" in the site root was used instead and will be published.`, source: file.relativePath })
       })
     }
     if (platform === 'fern' && fernProjectRoot) {

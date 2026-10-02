@@ -1073,6 +1073,40 @@ describe('dropped colors and metatags are reported', () => {
   })
 })
 
+describe('page-relative image that falls back to the site root', () => {
+  const png = Buffer.from('PNGDATA')
+  const nested = (gatedBody: string) => site({
+    'docs.json': JSON.stringify({ navigation: { pages: ['v1/intro', 'secret'] } }),
+    'v1/intro.mdx': '---\ntitle: Intro\n---\n\n![x](./images/shared.png)\n',
+    'secret.mdx': `---\ntitle: Secret\ngroups: [admin]\n---\n\n${gatedBody}\n`,
+    'images/shared.png': png,
+  })
+
+  it('warns that the root file was used and published, naming the page', () => {
+    const bundle = nested('No image.')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('images/shared.png')
+    const warning = codes(bundle, 'unsupported-config').find((item) => /not found beside this page/.test(item.message))
+    expect(warning?.source).toBe('v1/intro.mdx')
+    expect(warning?.message).toContain('"./images/shared.png"')
+    expect(warning?.message).toContain('"images/shared.png" in the site root')
+  })
+
+  it('still publishes it when a gated page also uses the same file, because a published page spells it', () => {
+    const bundle = nested('![x](/images/shared.png)')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('images/shared.png')
+    expect(codes(bundle, 'unsupported-config').some((item) => /not found beside this page/.test(item.message))).toBe(true)
+  })
+
+  it('does not warn when the image sits beside the page', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['v1/intro'] } }),
+      'v1/intro.mdx': '---\ntitle: Intro\n---\n\n![x](./images/own.png)\n',
+      'v1/images/own.png': png,
+    })
+    expect(codes(bundle, 'unsupported-config').some((item) => /not found beside this page/.test(item.message))).toBe(false)
+  })
+})
+
 describe('page spec references that cannot be migrated explain why', () => {
   const spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { '/x': { get: { summary: 'S' } } } })
   const missing = (bundle: MigrationBundle) => codes(bundle, 'unsupported-config').find((item) => /references the OpenAPI spec/.test(item.message))!.message
