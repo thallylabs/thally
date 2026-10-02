@@ -50,6 +50,26 @@ describe('OperationPanel webhook', () => {
   })
 })
 
+describe('OperationPanel object defaults', () => {
+  it('prints an object default as JSON, not [object Object]', () => {
+    const spec = {
+      openapi: '3.1.0',
+      info: { title: 'T', version: '1' },
+      paths: {
+        '/x': {
+          post: {
+            summary: 'X',
+            requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { opts: { type: 'object', default: {} } } } } } },
+            responses: {},
+          },
+        },
+      },
+    }
+    const html = renderToStaticMarkup(<OperationPanel operation={operationFrom(spec)} />)
+    expect(html).not.toContain('[object Object]')
+  })
+})
+
 describe('OperationPanel field details', () => {
   const spec = {
     openapi: '3.1.0',

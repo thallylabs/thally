@@ -423,7 +423,7 @@ function resolveSchemaType(schema?: Record<string, unknown>): string | undefined
 
 function resolveDefault(schema?: Record<string, unknown>): string | undefined {
   if (!schema || schema.default === undefined) return undefined
-  return String(schema.default)
+  return typeof schema.default === 'object' ? JSON.stringify(schema.default) : String(schema.default)
 }
 
 function getNestedProperties(schema: Record<string, unknown>): boolean {
