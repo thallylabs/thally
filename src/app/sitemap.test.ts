@@ -44,6 +44,8 @@ describe('navigable-only sitemap', () => {
     const urls = await sitemap()
     expect(urls.some((entry) => entry.url.endsWith('/orphan'))).toBe(false)
     expect(urls.some((entry) => entry.url.endsWith('/guide'))).toBe(true)
+    // Mintlify's sitemap lists documentation pages only, not the agent text files.
+    expect(urls.some((entry) => /\/(llms|ai)\.txt$/.test(entry.url))).toBe(false)
   })
 })
 

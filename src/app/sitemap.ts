@@ -20,8 +20,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const docPages: MetadataRoute.Sitemap = (
     await Promise.all(
       docEntries.map(async (doc) => {
+        const href = doc.href
         const availableI18n = await getContentI18nConfig(doc.slug, i18n)
-        const languages = buildLocaleAlternates(baseUrl, doc.href, availableI18n)
+        const languages = buildLocaleAlternates(baseUrl, href, availableI18n)
         return Promise.all(availableI18n.locales.map(async (locale) => {
           const translation = locale.code === i18n.defaultLocale
             ? null
@@ -32,7 +33,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
             ? doc.lastUpdated
             : translation?.lastUpdated
           return {
-            url: `${baseUrl}${localizedPath(doc.href, locale.code, i18n.defaultLocale)}`,
+            url: `${baseUrl}${localizedPath(href, locale.code, i18n.defaultLocale)}`,
             changeFrequency: 'weekly' as const,
             priority: doc.href === '/' ? 1.0 : 0.7,
             alternates: { languages },
@@ -51,7 +52,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.6,
   }))
 
-  const staticPages: MetadataRoute.Sitemap = [
+  const staticPages: MetadataRoute.Sitemap = visibleIds ? [] : [
     // /changelog is only served when the site has a changelog page.
     ...(allEntries.some((doc) => doc.id === 'changelog')
       ? [{ url: `${baseUrl}/changelog`, changeFrequency: 'weekly' as const, priority: 0.5 }]
