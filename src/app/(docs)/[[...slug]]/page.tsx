@@ -232,7 +232,7 @@ export default async function DocsPage({ params }: PageProps) {
           <JsonLdScript data={jsonLd} />
           {localeNotice}
           <div className="not-prose">
-            <DocHeader doc={doc} />
+            <DocHeader doc={{ ...doc, descriptionPlacement: 'body' }} eyebrow={nav.group} />
           </div>
           <ApiLayout>
             <OperationPanel operation={operationNode.operation}>

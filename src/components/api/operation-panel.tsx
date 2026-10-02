@@ -35,23 +35,17 @@ export function OperationPanel({ operation, children }: OperationPanelProps) {
       <div className="space-y-10">
         {/* Header */}
         <header className="space-y-6">
-          <div className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-foreground/50">{operation.group}</p>
-            <div className="space-y-2">
-              <h1 className="font-heading text-[2rem] font-medium leading-9 tracking-[-0.025em] text-foreground sm:text-4xl sm:leading-10">{operation.title}</h1>
-              {operation.description ? (
-                <div className="prose prose-neutral dark:prose-invert max-w-none text-base text-foreground/70">
-                  <Markdown>{operation.description}</Markdown>
-                </div>
-              ) : (
-                <p className="text-base text-foreground/70">
-                  This endpoint handles {operation.method} requests for <code className="font-mono text-sm">{operation.path}</code>.
-                  Review the request parameters and response schema below.
-                </p>
-              )}
-            </div>
-          </div>
           <EndpointBar operation={operation} onTryIt={() => setDialogOpen(true)} />
+          {operation.description ? (
+            <div className="prose prose-neutral dark:prose-invert max-w-none text-base text-foreground/70">
+              <Markdown>{operation.description}</Markdown>
+            </div>
+          ) : (
+            <p className="text-base text-foreground/70">
+              This endpoint handles {operation.method} requests for <code className="font-mono text-sm">{operation.path}</code>.
+              Review the request parameters and response schema below.
+            </p>
+          )}
         </header>
 
         {children ? <Prose>{children}</Prose> : null}
