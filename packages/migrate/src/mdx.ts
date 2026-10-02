@@ -268,6 +268,8 @@ function typesetQuotes(text: string): string {
 /** Visible text of a heading's inline Markdown. */
 function plainHeadingText(source: string): string {
   return source
+    // An authored MDX comment is not rendered, so Mintlify's id never sees it.
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/<\/?[A-Za-z][^>]*>/g, '')
     .replace(/`([^`]*)`/g, '$1')
