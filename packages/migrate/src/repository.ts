@@ -2438,9 +2438,16 @@ function repositoryAssetHref(
   }
   if (!ASSET_EXTENSIONS.has(extname(decodedPath).toLowerCase())) return null
   try {
-    const candidate = decodedPath.startsWith('/')
+    let candidate = decodedPath.startsWith('/')
       ? resolveWithin(siteRoot, decodedPath.replace(/^\/+/, ''))
       : resolveWithinRoot(dirname(currentFile), decodedPath, siteRoot)
+    // Authors of nested pages (e.g. v1/introduction) often write `./images/x.png`
+    // for a file that lives in the shared root images folder; use it when
+    // nothing exists beside the page.
+    if (!decodedPath.startsWith('/') && !existsSync(candidate)) {
+      const fromRoot = resolveWithin(siteRoot, decodedPath.replace(/^(?:\.\/)+/, ''))
+      if (existsSync(fromRoot)) candidate = fromRoot
+    }
     // Resolve every path component before accepting an asset. A repository
     // could contain a symlinked directory whose lexical path stays under
     // the docs root while its file contents live elsewhere on the host.

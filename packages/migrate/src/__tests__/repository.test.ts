@@ -1714,6 +1714,16 @@ describe('Mintlify repository migration', () => {
     expect(paths.indexOf('images/referenced.png')).toBeLessThan(paths.indexOf('images/unreferenced.png'))
   })
 
+  it('resolves a page-relative image from the site root when the page folder lacks it', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'images', 'cloud.png'), 'cloud-bytes')
+    writeFileSync(join(root, 'en', 'introduction.mdx'), '---\ntitle: Relative\n---\n\n![Cloud](./images/cloud.png)')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.find((page) => page.id === 'introduction')?.body).toContain('](/images/cloud.png)')
+  })
+
   it('migrates .wav, .ogg, and .m4a audio assets', () => {
     const root = fixture()
     writeFileSync(join(root, 'images', 'greeting.wav'), 'wav-bytes')
