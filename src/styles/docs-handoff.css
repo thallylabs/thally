@@ -350,6 +350,19 @@ body {
   letter-spacing: -0.025em;
 }
 
+/* A Card title is an <h2> inside the prose. This out-ranks the prose heading rule above
+   (and the utilities on the element) so it keeps the card's own size and spacing. */
+.thally-docs-prose .thally-docs-card-title {
+  margin-block: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.5rem;
+}
+
+.thally-docs-prose .thally-docs-card-title[data-icon-stacked] {
+  margin-top: 1rem;
+}
+
 .thally-docs-prose :where(h3) {
   margin-top: 2rem;
   margin-bottom: 0.875rem;

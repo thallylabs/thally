@@ -94,7 +94,7 @@ function ContentCardSurface({ kind, title, href, icon, iconType, iconColor, colo
   const external = linkHref ? isExternalLink(linkHref) : false
   const linkProps = { className: 'thally-docs-card-link no-underline', target: external ? '_blank' : undefined, rel: external ? 'noreferrer' : undefined }
   const titleNode = title ? (
-    <h2 className={cn('thally-docs-card-title not-prose block min-w-0 font-heading text-base font-semibold leading-6 text-foreground', !horizontal && iconNode && 'mt-4')}>
+    <h2 className="thally-docs-card-title not-prose block min-w-0 font-heading text-base font-semibold leading-6 text-foreground" data-icon-stacked={!horizontal && iconNode ? '' : undefined}>
       {linkHref ? <IntentPrefetchLink href={linkHref} {...linkProps}>{title}</IntentPrefetchLink> : title}
     </h2>
   ) : null

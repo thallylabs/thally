@@ -490,3 +490,49 @@ describe('documentation visual system', () => {
     expect(composerFocus.slice(0, composerFocus.indexOf('}'))).toContain('color-mix')
   })
 })
+
+describe('Card title cascade', () => {
+  // The prose heading rule styles every h2; a Card title (an h2 inside the prose) must out-rank it.
+  const specificity = async (selector: string): Promise<number> => {
+    const { default: parser } = await import('postcss-selector-parser')
+    let score = 0
+    parser((root) => {
+      root.walk((node) => {
+        if (node.type === 'class' || node.type === 'attribute') score += 10
+        if (node.type === 'tag') score += 1
+        if (node.type === 'pseudo' && node.value === ':where') node.empty()
+      })
+    }).processSync(selector)
+    return score
+  }
+
+  it('out-ranks the prose h2 rule and sets the card size and margins', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const { default: postcss } = await import('postcss')
+    const root = postcss.parse(await readFile('src/styles/docs-handoff.css', 'utf8'))
+    const rules = new Map<string, Map<string, string>>()
+    root.walkRules((rule) => {
+      const declarations = new Map<string, string>()
+      rule.walkDecls((decl) => declarations.set(decl.prop, decl.value))
+      for (const selector of rule.selectors) rules.set(selector.trim().replace(/\s+/g, ' '), declarations)
+    })
+    const prose = '.thally-docs-prose :where(h2)'
+    const title = '.thally-docs-prose .thally-docs-card-title'
+    expect(rules.has(prose)).toBe(true)
+    expect(await specificity(title)).toBeGreaterThan(await specificity(prose))
+    expect(rules.get(title)?.get('font-size')).toBe('1rem')
+    expect(rules.get(title)?.get('line-height')).toBe('1.5rem')
+    expect(rules.get(title)?.get('margin-block')).toBe('0')
+    // The stacked-icon gap comes from an attribute rule, which also out-ranks the prose margin.
+    expect(await specificity(`${title}[data-icon-stacked]`)).toBeGreaterThan(await specificity(prose))
+    expect(rules.get(`${title}[data-icon-stacked]`)?.get('margin-top')).toBe('1rem')
+  })
+
+  it('renders a stacked icon card title without heading ids, anchors or TOC markers', () => {
+    const html = renderToStaticMarkup(createElement(Card, { title: 'Scrape', icon: 'flame', href: '/scrape' }, 'Body'))
+    const title = html.match(/<h2[^>]*>/)?.[0] ?? ''
+    expect(title).toContain('thally-docs-card-title')
+    expect(title).toContain('data-icon-stacked')
+    expect(title).not.toMatch(/\bid=|data-heading/)
+  })
+})
