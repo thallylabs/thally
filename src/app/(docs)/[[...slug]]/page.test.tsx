@@ -2,7 +2,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 
-const fixtures = vi.hoisted(() => ({ published: true, operation: null as unknown }))
+const fixtures = vi.hoisted(() => ({ lookup: { node: null, reason: 'unresolved' } as unknown }))
 
 vi.mock('next/navigation', () => ({
   notFound: () => {
@@ -21,12 +21,12 @@ vi.mock('@/data/get-doc', () => ({
     openapi: { specId: 'default', specRef: 'openapi/missing.json', method: 'POST', path: '/scrape' },
   }),
 }))
-vi.mock('@/data/api-reference', () => ({ getApiOperationForFrontmatter: async () => fixtures.operation }))
+vi.mock('@/data/api-reference', () => ({ lookupApiOperationForFrontmatter: async () => fixtures.lookup }))
 vi.mock('@/data/docs', () => ({
   ensureDocPublication: async () => undefined,
   getApiPlaygroundDisplay: () => undefined,
   getDocEntries: async () => [],
-  isDocPublished: () => fixtures.published,
+  isDocPublished: () => true,
   loadNavContext: async () => ({ breadcrumb: [], prev: { title: 'Previous page', href: '/prev' }, next: null }),
 }))
 vi.mock('@/components/docs/doc-layout', () => ({ DocLayout: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }))
@@ -57,25 +57,23 @@ import DocsPage from './page'
 const render = async () => renderToStaticMarkup(await DocsPage({ params: Promise.resolve({ slug: ['api-reference', 'endpoint', 'scrape'] }) }))
 
 describe('docs page with an unresolved openapi spec', () => {
-  it('renders the authored body with a notice', async () => {
-    fixtures.published = true
-    fixtures.operation = null
+  it('renders the authored body with a notice when the spec or operation cannot be found', async () => {
+    fixtures.lookup = { node: null, reason: 'unresolved' }
     const html = await render()
     expect(html).toContain('Authored scrape body')
     expect(html).toContain('role="note"')
   })
 
   it('renders the page body inside the operation panel when the operation resolves', async () => {
-    fixtures.operation = { operation: {} }
+    fixtures.lookup = { node: { operation: {} } }
     const html = await render()
     expect(html).toContain('<section><p>Authored scrape body</p></section>')
     expect(html).not.toContain('role="note"')
     expect(html).toContain('Previous page')
   })
 
-  it('still 404s a page the build withheld for a hidden operation', async () => {
-    fixtures.published = false
-    fixtures.operation = null
+  it('404s a hidden or excluded operation even when the page is listed as published', async () => {
+    fixtures.lookup = { node: null, reason: 'withheld' }
     await expect(render()).rejects.toThrow('NEXT_NOT_FOUND')
   })
 })

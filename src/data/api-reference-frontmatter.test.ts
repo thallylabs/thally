@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const docs = vi.hoisted(() => ({
-  a: { openapi: '3.0.0', paths: { '/things': { post: { summary: 'A things' } }, '/dup': { get: {} } }, webhooks: { orderUpdated: { post: {} } } },
+  a: { openapi: '3.0.0', paths: { '/things': { post: { summary: 'A things' } }, '/dup': { get: {} }, '/hidden': { get: { 'x-hidden': true } }, '/excluded': { get: { 'x-excluded': true } } }, webhooks: { orderUpdated: { post: {} } } },
   b: { openapi: '3.0.0', paths: { '/widgets/{id}': { get: { summary: 'B widget' } }, '/dup': { get: {} } } },
   c: { openapi: '3.0.0', paths: { '/dup': { get: {} }, '/only-c': { get: {} } } },
 }))
@@ -25,9 +25,10 @@ vi.mock('@/lib/openapi/fetch', () => ({
     config,
     document: config.id === 'default' ? docs.a : config.id === 'b' ? docs.b : docs.c,
   }),
+  loadAuthoredSpecDocument: async (config: { id: string }) => (config.id === 'default' ? docs.a : config.id === 'b' ? docs.b : docs.c),
 }))
 
-import { getApiOperationForFrontmatter } from '@/data/api-reference'
+import { getApiOperationForFrontmatter, lookupApiOperationForFrontmatter } from '@/data/api-reference'
 import { parseOpenApiFrontmatter } from '@/lib/openapi/page-frontmatter'
 
 async function resolve(value: string) {
@@ -63,5 +64,24 @@ describe('getApiOperationForFrontmatter', () => {
   it('resolves webhooks by name', async () => {
     expect((await resolve('openapi-a.json webhook orderUpdated'))?.operation.isWebhook).toBe(true)
     expect(await resolve('openapi-b.yaml webhook orderUpdated')).toBeNull()
+  })
+})
+
+describe('lookupApiOperationForFrontmatter', () => {
+  const lookup = (value: string) => lookupApiOperationForFrontmatter(parseOpenApiFrontmatter(value)!)
+
+  it('returns the node when the operation resolves', async () => {
+    expect((await lookup('POST /things')).node?.operation.specId).toBe('default')
+  })
+
+  it('reports a hidden or excluded operation as withheld', async () => {
+    expect(await lookup('GET /hidden')).toEqual({ node: null, reason: 'withheld' })
+    expect(await lookup('GET /excluded')).toEqual({ node: null, reason: 'withheld' })
+    expect(await lookup('openapi-a.json GET /excluded')).toEqual({ node: null, reason: 'withheld' })
+  })
+
+  it('reports an unknown spec or operation as unresolved', async () => {
+    expect(await lookup('GET /missing')).toEqual({ node: null, reason: 'unresolved' })
+    expect(await lookup('nope.json GET /things')).toEqual({ node: null, reason: 'unresolved' })
   })
 })

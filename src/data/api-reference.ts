@@ -1,10 +1,11 @@
 import { cache } from 'react'
 import { apiReferenceConfig } from '@/config/api-reference'
-import { getSpecConfig, loadSpec } from '@/lib/openapi/fetch'
+import { getSpecConfig, loadAuthoredSpecDocument, loadSpec } from '@/lib/openapi/fetch'
 import { buildOperationKey, normalizeSpec } from '@/lib/openapi/normalize'
 import type { NavigationSection, SidebarCollection } from '@/data/docs'
 import type { NormalizedOperation, NormalizedSpec } from '@/lib/openapi/types'
 import { findSpecForRef, type OpenApiFrontmatterRef } from '@/lib/openapi/page-frontmatter'
+import { pageReferenceState } from '@/lib/openapi/publication'
 
 export interface ApiNavigationItem {
   id: string
@@ -158,6 +159,29 @@ export async function getApiOperationForFrontmatter(ref: OpenApiFrontmatterRef):
     console.warn(`[thally] openapi frontmatter "${ref.method} ${ref.path}" matches ${matches.length} specs; using the first. Prefix the spec file to disambiguate.`)
   }
   return matches[0] ?? null
+}
+
+/**
+ * `withheld`: the operation exists but is hidden or excluded on purpose, so its
+ * page is not published. `unresolved`: no spec or operation matches (a missing
+ * file, a typo, a spec this build cannot read); the page keeps its authored body.
+ */
+export type FrontmatterOperationLookup =
+  | { node: ApiOperationNode }
+  | { node: null; reason: 'withheld' | 'unresolved' }
+
+/** Like `getApiOperationForFrontmatter`, but says why nothing was found. */
+export async function lookupApiOperationForFrontmatter(ref: OpenApiFrontmatterRef): Promise<FrontmatterOperationLookup> {
+  const node = await getApiOperationForFrontmatter(ref)
+  if (node) return { node }
+  // Default spec first, as the route resolves a bare reference.
+  const configs = [...apiReferenceConfig.specs].sort((a, b) => Number(b.id === apiReferenceConfig.defaultSpecId) - Number(a.id === apiReferenceConfig.defaultSpecId))
+  const specs = await Promise.all(configs.map(async (config) => ({
+    config,
+    document: await loadAuthoredSpecDocument(config).catch(() => undefined),
+  })))
+  const state = pageReferenceState(ref, specs)
+  return { node: null, reason: state === 'hidden' || state === 'excluded' ? 'withheld' : 'unresolved' }
 }
 
 /**

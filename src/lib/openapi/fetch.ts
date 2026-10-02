@@ -57,6 +57,18 @@ async function readSource(config: ApiSpecConfig): Promise<OpenAPIDocument> {
   }
 }
 
+const authoredCache = new Map<string, Promise<OpenAPIDocument>>()
+
+/**
+ * The spec exactly as authored, before publication filtering. Only for deciding
+ * why an operation is missing (hidden or excluded versus unknown); never serve it.
+ */
+export function loadAuthoredSpecDocument(config: ApiSpecConfig): Promise<OpenAPIDocument> {
+  const key = cacheKey(config)
+  if (!authoredCache.has(key)) authoredCache.set(key, readSource(config))
+  return authoredCache.get(key) as Promise<OpenAPIDocument>
+}
+
 export async function loadSpecDocument(config: ApiSpecConfig): Promise<OpenAPIDocument> {
   const key = cacheKey(config)
   if (!specCache.has(key)) {
@@ -64,7 +76,7 @@ export async function loadSpecDocument(config: ApiSpecConfig): Promise<OpenAPIDo
     // only ever sees the publication-safe document.
     specCache.set(
       key,
-      readSource(config).then((document) =>
+      loadAuthoredSpecDocument(config).then((document) =>
         sanitizeSpecForPublication(document, { overrides: config.operationOverrides }),
       ),
     )
