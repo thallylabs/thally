@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { VersionSwitcher } from './version-switcher'
 
 describe('VersionSwitcher', () => {
-  it('is not shown when the only other version is hidden', () => {
+  it('lists only the visible version when the other version is hidden', () => {
     const html = renderToStaticMarkup(
       <VersionSwitcher
         versions={[
@@ -12,6 +12,14 @@ describe('VersionSwitcher', () => {
         ]}
         activeLabel="v2"
       />,
+    )
+    expect(html).toContain('v2')
+    expect(html).not.toContain('v1')
+  })
+
+  it('is not shown for a site with a single version', () => {
+    const html = renderToStaticMarkup(
+      <VersionSwitcher versions={[{ label: 'v2', prefix: '', href: '/', default: true }]} activeLabel="v2" />,
     )
     expect(html).toBe('')
   })
