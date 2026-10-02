@@ -294,28 +294,6 @@ pre:not(.whitespace-pre-wrap) code:has(> .thally-line-add, > .thally-line-remove
   }
 }
 
-/* Accordion — animate open/close using the Radix content-height CSS var. */
-@keyframes thally-accordion-down {
-  from { height: 0; opacity: 0; }
-  to { height: var(--radix-accordion-content-height); opacity: 1; }
-}
-@keyframes thally-accordion-up {
-  from { height: var(--radix-accordion-content-height); opacity: 1; }
-  to { height: 0; opacity: 0; }
-}
-.thally-accordion-content[data-state='open'] {
-  animation: thally-accordion-down 0.2s ease-out;
-}
-.thally-accordion-content[data-state='closed'] {
-  animation: thally-accordion-up 0.2s ease-out;
-}
-@media (prefers-reduced-motion: reduce) {
-  .thally-accordion-content[data-state='open'],
-  .thally-accordion-content[data-state='closed'] {
-    animation: none;
-  }
-}
-
 @layer utilities {
   .overflow-touch {
     -webkit-overflow-scrolling: touch;

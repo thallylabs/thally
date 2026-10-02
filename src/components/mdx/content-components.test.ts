@@ -23,7 +23,30 @@ describe('standalone rich-content primitives', () => {
     )
     expect(markup).toContain('id="first"')
     expect(markup).toContain('Details')
-    expect(markup.match(/data-radix-collection-item/g)).toHaveLength(2)
+    expect(markup.match(/<summary/g)).toHaveLength(2)
+  })
+
+  it('keeps collapsed accordion bodies and their headings in the server HTML', () => {
+    const markup = renderToStaticMarkup(
+      createElement(Accordion, { title: 'Closed' }, createElement('h3', { id: 'inside' }, 'Hidden heading'), 'Body text'),
+    )
+    expect(markup).toContain('<details')
+    expect(markup).not.toMatch(/<details[^>]* open/)
+    expect(markup).toContain('<h3 id="inside">Hidden heading</h3>')
+    expect(markup).toContain('Body text')
+  })
+
+  it('honours defaultOpen on a standalone accordion and inside a group', () => {
+    const standalone = renderToStaticMarkup(createElement(Accordion, { id: 'a', title: 'A', defaultOpen: true }, 'x'))
+    expect(standalone).toMatch(/<details[^>]* open/)
+    const grouped = renderToStaticMarkup(
+      createElement(AccordionGroup, null,
+        createElement(Accordion, { id: 'a', title: 'A', defaultOpen: true }, 'x'),
+        createElement(Accordion, { id: 'b', title: 'B' }, 'y'),
+      ),
+    )
+    expect(grouped.match(/<details[^>]* open/g)).toHaveLength(1)
+    expect(grouped).toMatch(/<details[^>]*id="a"[^>]* open|<details[^>]* open[^>]*id="a"/)
   })
 
   it('resolves unknown names through the configured icon library instead of a placeholder glyph', () => {
