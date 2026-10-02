@@ -582,3 +582,33 @@ describe('normalizeSpec parameter $ref resolution', () => {
     expect(hook?.parameters.header.map((p) => p.name)).toEqual(['X-Signature'])
   })
 })
+
+describe('normalizeSpec request body sample', () => {
+  const body = (schema: unknown, extra: Record<string, unknown> = {}) => {
+    const document = {
+      openapi: '3.1.0',
+      info: { title: 'T', version: '1' },
+      paths: { '/x': { post: { responses: {}, requestBody: { content: { 'application/json': { schema, ...extra } } } } } },
+    }
+    const op = normalizeSpec({ config: { ...baseConfig, source: { type: 'inline', document } }, document } as ResolvedSpec).operations[0]
+    return JSON.parse(op.prefill.body ?? 'null')
+  }
+
+  it('uses spec values (examples, default, enum, const, first oneOf variant) instead of empty placeholders', () => {
+    expect(body({ type: 'object' }, { examples: { a: { value: { name: 'Blog' } } } })).toEqual({ name: 'Blog' })
+    expect(
+      body({
+        type: 'object',
+        properties: {
+          url: { type: 'string' },
+          kind: { const: 'crawl.page' },
+          mode: { type: 'string', enum: ['fast', 'slow'] },
+          wait: { type: 'integer', default: 5 },
+          min: { type: 'integer', minimum: 1 },
+          age: { type: 'integer' },
+          action: { oneOf: [{ type: 'object', properties: { type: { type: 'string', enum: ['wait'] } } }, { type: 'string' }] },
+        },
+      }),
+    ).toEqual({ url: '<string>', kind: 'crawl.page', mode: 'fast', wait: 5, min: 2, age: 123, action: { type: 'wait' } })
+  })
+})

@@ -307,7 +307,7 @@ function normalizeRequestBody(
     return { body: undefined, sample: undefined }
   }
   const primaryContent = contents[0]
-  const sampleValue = primaryContent?.schema ? buildSchemaExample(primaryContent.schema, resolveRef) : undefined
+  const sampleValue = primaryContent ? buildBodyExample(primaryContent, resolveRef) : undefined
   const sample = sampleValue !== undefined ? JSON.stringify(sampleValue, null, 2) : undefined
 
   return {
@@ -318,6 +318,18 @@ function normalizeRequestBody(
     },
     sample,
   }
+}
+
+// Request-body sample: the media type's own example(s) first, then the schema.
+function buildBodyExample(content: NormalizedMediaType, resolveRef: (ref: string) => RawObject | null): unknown {
+  if (content.example !== undefined) {
+    return content.example
+  }
+  const first = content.examples?.[0]
+  if (first && first.value !== undefined) {
+    return first.value
+  }
+  return content.schema ? buildSchemaExample(content.schema, resolveRef, new Set<string>(), true) : undefined
 }
 
 function normalizeResponses(
@@ -685,7 +697,7 @@ function createSchemaResolver(document: RawObject) {
   }
 }
 
-function buildSchemaExample(schema: RawObject | undefined, resolveRef: (ref: string) => RawObject | null, seen = new Set<string>()): unknown {
+function buildSchemaExample(schema: RawObject | undefined, resolveRef: (ref: string) => RawObject | null, seen = new Set<string>(), placeholders = false): unknown {
   if (!schema) {
     return undefined
   }
@@ -694,6 +706,9 @@ function buildSchemaExample(schema: RawObject | undefined, resolveRef: (ref: str
   }
   if (schema.default !== undefined) {
     return schema.default
+  }
+  if (schema.const !== undefined) {
+    return schema.const
   }
   if (Array.isArray(schema.enum) && schema.enum.length > 0) {
     return schema.enum[0]
@@ -705,12 +720,17 @@ function buildSchemaExample(schema: RawObject | undefined, resolveRef: (ref: str
     seen.add(schema.$ref)
     const resolved = resolveRef(schema.$ref)
     if (resolved) {
-      return buildSchemaExample(resolved, resolveRef, seen)
+      return buildSchemaExample(resolved, resolveRef, seen, placeholders)
     }
+  }
+  // A union is sampled by its first variant, as the live docs do.
+  const variants = Array.isArray(schema.oneOf) ? schema.oneOf : Array.isArray(schema.anyOf) ? schema.anyOf : undefined
+  if (variants?.length && variants[0] && typeof variants[0] === 'object') {
+    return buildSchemaExample(variants[0] as RawObject, resolveRef, new Set(seen), placeholders)
   }
   if (Array.isArray(schema.allOf)) {
     return schema.allOf.reduce<unknown>((acc, fragment) => {
-      const sample = fragment && typeof fragment === 'object' ? buildSchemaExample(fragment as RawObject, resolveRef, new Set(seen)) : undefined
+      const sample = fragment && typeof fragment === 'object' ? buildSchemaExample(fragment as RawObject, resolveRef, new Set(seen), placeholders) : undefined
       if (Array.isArray(acc) || Array.isArray(sample)) {
         return sample ?? acc
       }
@@ -726,21 +746,24 @@ function buildSchemaExample(schema: RawObject | undefined, resolveRef: (ref: str
     const properties = schema.properties && typeof schema.properties === 'object' ? (schema.properties as Record<string, RawObject>) : {}
     const result: Record<string, unknown> = {}
     Object.entries(properties).forEach(([key, value]) => {
-      result[key] = buildSchemaExample(value, resolveRef, new Set(seen)) ?? ''
+      result[key] = buildSchemaExample(value, resolveRef, new Set(seen), placeholders) ?? ''
     })
     return result
   }
   if (type === 'array' && schema.items && typeof schema.items === 'object') {
-    const sampleItem = buildSchemaExample(schema.items as RawObject, resolveRef, new Set(seen))
+    const sampleItem = buildSchemaExample(schema.items as RawObject, resolveRef, new Set(seen), placeholders)
     return sampleItem !== undefined ? [sampleItem] : []
   }
   if (type === 'boolean') {
     return true
   }
   if (type === 'integer' || type === 'number') {
-    return 0
+    if (!placeholders) {
+      return 0
+    }
+    return typeof schema.minimum === 'number' ? schema.minimum + 1 : 123
   }
-  return ''
+  return placeholders ? '<string>' : ''
 }
 
 function buildParameterSampleValue(
