@@ -15,10 +15,17 @@ import { spawnSync } from 'node:child_process'
 import { gunzipSync } from 'node:zlib'
 
 function run(command, argumentsList, inherit = false) {
-  return spawnSync(command, argumentsList, {
+  const result = spawnSync(command, argumentsList, {
     encoding: 'utf8',
-    stdio: inherit ? 'inherit' : 'pipe',
+    maxBuffer: 8 * 1024 * 1024,
   })
+  // Preserve npm's publish diagnostics while retaining its exact conflict
+  // response for the narrow same-version recovery below.
+  if (inherit) {
+    if (result.stdout) process.stdout.write(result.stdout)
+    if (result.stderr) process.stderr.write(result.stderr)
+  }
+  return result
 }
 
 async function sha512Integrity(path) {
@@ -85,11 +92,30 @@ async function registryTarball(metadata) {
   return bytes
 }
 
+/** A generic E403 can mean missing permission; recover only npm's version-exists response. */
+function isVersionExistsConflict(result, version) {
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
+  const exactVersion = version.replaceAll('.', '\\.')
+  return /\bE403\b/.test(output) &&
+    new RegExp(`cannot publish over the previously published versions?:\\s*${exactVersion}(?:\\W|$)`, 'i').test(output)
+}
+
+/** Compare registry bytes with the already-attested local tarball before accepting a retry. */
+async function verifyExistingPackage(spec, artifact, tarball, metadata, fetchRegistryTarball) {
+  if (metadata.integrity === artifact.integrity) return
+  const localPayload = tarPayloadSha256(await readFile(tarball))
+  const publishedPayload = tarPayloadSha256(await fetchRegistryTarball(metadata))
+  if (localPayload !== publishedPayload) {
+    throw new Error(`${spec} exists with different package content.`)
+  }
+}
+
 /** Validate and publish every tarball in topological order. */
 export async function publishReleaseArtifacts(manifestPath, expectedPlanSha256, {
   verifyOnly = false,
   runCommand = run,
   sleep,
+  fetchRegistryTarball = registryTarball,
 } = {}) {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   if (
@@ -173,13 +199,7 @@ export async function publishReleaseArtifacts(manifestPath, expectedPlanSha256, 
       runCommand,
       sleep,
     })
-    if (existing && existing.integrity !== artifact.integrity) {
-      const localPayload = tarPayloadSha256(await readFile(tarball))
-      const publishedPayload = tarPayloadSha256(await registryTarball(existing))
-      if (localPayload !== publishedPayload) {
-        throw new Error(`${spec} exists with different package content.`)
-      }
-    }
+    if (existing) await verifyExistingPackage(spec, artifact, tarball, existing, fetchRegistryTarball)
     verifiedArtifacts.push({ artifact, tarball, spec, existing })
     validatedNames.add(artifact.name)
   }
@@ -195,16 +215,29 @@ export async function publishReleaseArtifacts(manifestPath, expectedPlanSha256, 
     return
   }
   for (const { artifact, tarball, spec, existing } of verifiedArtifacts) {
+    let settled
+    let expectedIntegrity = existing?.integrity ?? artifact.integrity
     if (!existing) {
       const published = runCommand(
         'npm',
         ['publish', tarball, '--access', 'public', '--ignore-scripts', '--provenance'],
         true,
       )
-      if (published.status !== 0) throw new Error(`Publishing ${spec} failed.`)
+      if (published.status !== 0) {
+        if (!isVersionExistsConflict(published, artifact.version)) {
+          throw new Error(`Publishing ${spec} failed.`)
+        }
+        // Another publisher may win after the single absent preflight lookup.
+        // The same version is safe to accept only after its exact registry
+        // metadata and tar payload match this attested artifact.
+        settled = await registryMetadata(spec, REGISTRY_SETTLE_ATTEMPTS, { runCommand, sleep })
+        if (!settled) throw new Error(`Publishing ${spec} failed: conflicting version is unavailable.`)
+        await verifyExistingPackage(spec, artifact, tarball, settled, fetchRegistryTarball)
+        expectedIntegrity = settled.integrity
+      }
     }
-    const settled = await registryMetadata(spec, REGISTRY_SETTLE_ATTEMPTS, { runCommand, sleep })
-    if (settled?.integrity !== (existing?.integrity ?? artifact.integrity)) {
+    settled ??= await registryMetadata(spec, REGISTRY_SETTLE_ATTEMPTS, { runCommand, sleep })
+    if (settled?.integrity !== expectedIntegrity) {
       throw new Error(`${spec} did not settle with the expected integrity.`)
     }
     console.info(`${spec} verified at ${artifact.integrity}.`)

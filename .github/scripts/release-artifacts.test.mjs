@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
-import { gzipSync } from 'node:zlib'
+import { gunzipSync, gzipSync } from 'node:zlib'
 
 import {
   publishReleaseArtifacts,
@@ -55,7 +55,7 @@ async function writeReleaseFixture() {
     planSha256: planSha256(plan),
     packages: [{ ...plan.packages[0], filename, integrity }],
   }))
-  return { manifestPath, planHash: planSha256(plan), integrity }
+  return { manifestPath, planHash: planSha256(plan), integrity, tarballPath: join(directory, filename) }
 }
 
 test('rejects a release plan that differs from the trusted planning job', async () => {
@@ -157,6 +157,84 @@ test('an already-published identical version remains an idempotent retry', async
     },
   })
   assert.equal(views, 2)
+})
+
+test('accepts a concurrent version conflict only when registry tar content matches', async () => {
+  const { manifestPath, planHash, tarballPath } = await writeReleaseFixture()
+  const repacked = gzipSync(gunzipSync(await readFile(tarballPath)), { level: 1 })
+  const metadata = {
+    integrity: `sha512-${createHash('sha512').update(repacked).digest('base64')}`,
+    tarball: 'https://registry.npmjs.org/@thallylabs/cli/-/cli-1.2.3.tgz',
+  }
+  let views = 0
+  let fetchedTarballs = 0
+  await publishReleaseArtifacts(manifestPath, planHash, {
+    runCommand: (command, args) => {
+      if (command === 'tar') return spawnSync(command, args, { encoding: 'utf8' })
+      if (command === 'npm' && args[0] === 'view') {
+        views += 1
+        return views === 1
+          ? { status: 1, stderr: 'npm error code E404' }
+          : { status: 0, stdout: JSON.stringify(metadata) }
+      }
+      if (command === 'npm' && args[0] === 'publish') {
+        return { status: 1, stderr: 'npm error code E403\nnpm error You cannot publish over the previously published versions: 1.2.3.' }
+      }
+      throw new Error(`Unexpected command: ${command} ${args.join(' ')}`)
+    },
+    fetchRegistryTarball: async () => {
+      fetchedTarballs += 1
+      return repacked
+    },
+  })
+  assert.equal(views, 2)
+  assert.equal(fetchedTarballs, 1)
+})
+
+test('rejects a concurrent version conflict with different registry content', async () => {
+  const { manifestPath, planHash } = await writeReleaseFixture()
+  const otherTarball = gzipSync(Buffer.from('different package content'))
+  const metadata = {
+    integrity: `sha512-${createHash('sha512').update(otherTarball).digest('base64')}`,
+    tarball: 'https://registry.npmjs.org/@thallylabs/cli/-/cli-1.2.3.tgz',
+  }
+  let views = 0
+  await assert.rejects(publishReleaseArtifacts(manifestPath, planHash, {
+    runCommand: (command, args) => {
+      if (command === 'tar') return spawnSync(command, args, { encoding: 'utf8' })
+      if (command === 'npm' && args[0] === 'view') {
+        views += 1
+        return views === 1
+          ? { status: 1, stderr: 'npm error code E404' }
+          : { status: 0, stdout: JSON.stringify(metadata) }
+      }
+      if (command === 'npm' && args[0] === 'publish') {
+        return { status: 1, stderr: 'npm error code E403\nnpm error You cannot publish over the previously published versions: 1.2.3.' }
+      }
+      throw new Error(`Unexpected command: ${command} ${args.join(' ')}`)
+    },
+    fetchRegistryTarball: async () => otherTarball,
+  }), /exists with different package content/)
+  assert.equal(views, 2)
+})
+
+test('does not treat an unrelated publish error as a version conflict', async () => {
+  const { manifestPath, planHash } = await writeReleaseFixture()
+  let views = 0
+  await assert.rejects(publishReleaseArtifacts(manifestPath, planHash, {
+    runCommand: (command, args) => {
+      if (command === 'tar') return spawnSync(command, args, { encoding: 'utf8' })
+      if (command === 'npm' && args[0] === 'view') {
+        views += 1
+        return { status: 1, stderr: 'npm error code E404' }
+      }
+      if (command === 'npm' && args[0] === 'publish') {
+        return { status: 1, stderr: 'npm error code E403\nnpm error Publishing is forbidden by repository policy.' }
+      }
+      throw new Error(`Unexpected command: ${command} ${args.join(' ')}`)
+    },
+  }), /Publishing @thallylabs\/cli@1\.2\.3 failed/)
+  assert.equal(views, 1)
 })
 
 test('rejects an omitted planned package before any registry call', async () => {
