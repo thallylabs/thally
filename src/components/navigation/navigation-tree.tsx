@@ -5,6 +5,7 @@
 import { ChevronRight } from 'lucide-react'
 import { useState } from 'react'
 import type { NavigationGroup, NavigationNode } from '@/data/docs'
+import { getMethodToken } from '@/components/api/tokens'
 import { Badge } from '@/components/ui/badge'
 import { Icon } from '@/components/mdx/rich-content'
 import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
@@ -16,6 +17,15 @@ interface NavigationTreeProps {
   onNavigate?: () => void
   mobile?: boolean
   showGroupIcons?: boolean
+}
+
+function MethodPill({ method }: { method: string }) {
+  const token = getMethodToken(method)
+  return (
+    <span className={cn('shrink-0 rounded px-1 py-px font-mono text-[10px] font-semibold uppercase leading-4', token.bg, token.text)}>
+      {method === 'DELETE' ? 'DEL' : method}
+    </span>
+  )
 }
 
 function normalizePath(value: string) {
@@ -154,6 +164,7 @@ function NavigationNodes({
               className="h-3.5 w-3.5 shrink-0 text-foreground/50"
             />
           ) : null}
+          {node.item.method ? <MethodPill method={node.item.method} /> : null}
           <span className="line-clamp-2 break-words">{node.item.title}</span>
           {node.item.badge ? <Badge className="shrink-0 text-[10px] uppercase">{node.item.badge}</Badge> : null}
         </span>

@@ -26,9 +26,10 @@ vi.mock('@/data/docs', () => ({
   ensureDocPublication: async () => undefined,
   getDocEntries: async () => [],
   isDocPublished: () => fixtures.published,
-  loadNavContext: async () => ({ breadcrumb: [] }),
+  loadNavContext: async () => ({ breadcrumb: [], prev: { title: 'Previous page', href: '/prev' }, next: null }),
 }))
 vi.mock('@/components/docs/doc-layout', () => ({ DocLayout: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }))
+vi.mock('@/components/docs/doc-pagination', () => ({ DocPagination: ({ prev }: { prev: { title: string } | null }) => <nav>{prev?.title}</nav> }))
 vi.mock('@/components/docs/doc-header', () => ({ DocHeader: () => null }))
 vi.mock('@/components/api/api-layout', () => ({ ApiLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }))
 vi.mock('@/components/api/operation-panel', () => ({ OperationPanel: ({ children }: { children: React.ReactNode }) => <section>{children}</section> }))
@@ -68,6 +69,7 @@ describe('docs page with an unresolved openapi spec', () => {
     const html = await render()
     expect(html).toContain('<section><p>Authored scrape body</p></section>')
     expect(html).not.toContain('role="note"')
+    expect(html).toContain('Previous page')
   })
 
   it('still 404s a page the build withheld for a hidden operation', async () => {

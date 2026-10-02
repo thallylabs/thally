@@ -10,6 +10,7 @@ import { ApiLayout } from '@/components/api/api-layout'
 import { ManualApiEndpoint } from '@/components/api/manual-api-endpoint'
 import { OperationPanel } from '@/components/api/operation-panel'
 import { DocHeader } from '@/components/docs/doc-header'
+import { DocPagination } from '@/components/docs/doc-pagination'
 import { DocLayout } from '@/components/docs/doc-layout'
 import { LocaleFallbackBanner } from '@/components/docs/locale-fallback-banner'
 import { LocaleStaleBanner } from '@/components/docs/locale-stale-banner'
@@ -239,6 +240,9 @@ export default async function DocsPage({ params }: PageProps) {
               <Body />
             </OperationPanel>
           </ApiLayout>
+          <div className="not-prose">
+            <DocPagination prev={nav.prev} next={nav.next} />
+          </div>
         </div>
       </>
     )

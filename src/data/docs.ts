@@ -112,6 +112,8 @@ export interface NavigationItem {
   title: string
   href: string
   badge?: string
+  /** HTTP method of the page's `openapi:` operation, shown as a pill in the sidebar. */
+  method?: string
   /** Sidebar icon from page frontmatter (name, or an image path/URL). */
   icon?: string
   iconType?: IconStyle
@@ -806,12 +808,14 @@ function resolveNavItem(
   const fm = readFrontmatter(pageId, locale)
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
   const baseHref = slug.length ? `/${slug.join('/')}` : '/'
+  const operation = pageApiMetadata(fm).openapi
   const href = locale ? (baseHref === '/' ? `/${locale}` : `/${locale}${baseHref}`) : baseHref
   return {
     id: slugifyId(pageId) || 'introduction',
     title: fm.navTitle ?? fm.title ?? deriveTitleFromSlug(pageId),
     href,
     badge: fm.badge,
+    ...(operation && !operation.webhook ? { method: operation.method.toUpperCase() } : {}),
     ...(typeof fm.icon === 'string' && fm.icon ? { icon: fm.icon } : {}),
     ...(fm.iconType ? { iconType: fm.iconType } : {}),
     description: fm.description,
