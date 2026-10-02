@@ -173,3 +173,23 @@ describe('heading id markers', () => {
     ])
   })
 })
+
+describe('duplicate heading ids', () => {
+  const ids = (source: string) => parseMdxContent(source).headings.map((heading) => heading.id)
+
+  it('numbers repeated headings foo, foo-2, foo-3', () => {
+    expect(ids('## Foo\n\n## Foo\n\n## Foo\n')).toEqual(['foo', 'foo-2', 'foo-3'])
+  })
+
+  it('lets an explicit id reserve its id, so a generated id skips it', () => {
+    expect(ids('## Foo\n\n## Foo\n\n## Foo {/* #foo-2 */}\n')).toEqual(['foo', 'foo-3', 'foo-2'])
+    expect(ids('## Foo\n\n## Foo\n\n## Foo {/* #foo-1 */}\n')).toEqual(['foo', 'foo-2', 'foo-1'])
+    expect(ids('## Bar\n\n## X {/* #bar */}\n')).toEqual(['bar-2', 'bar'])
+  })
+
+  it('numbers a repeated explicit id and never repeats an id', () => {
+    const result = ids('## A {/* #x */}\n\n## B {/* #x */}\n\n## X\n')
+    expect(result).toEqual(['x', 'x-2', 'x-3'])
+    expect(new Set(result).size).toBe(result.length)
+  })
+})

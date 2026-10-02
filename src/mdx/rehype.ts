@@ -670,30 +670,47 @@ function takeHeadingIdMarker(node: Element): string | undefined {
   return values[index]
 }
 
-/** Give repeated headings distinct, stable fragments in document order. */
+/**
+ * Give repeated headings distinct, stable fragments in document order:
+ * `foo`, `foo-2`, `foo-3`. An explicit id (`{/* #id *\/}` or an `id` attribute)
+ * reserves it for the whole page, so a generated id never takes it. The same
+ * numbering is used by the content parser (search anchors) and `thally check`.
+ */
 function rehypeUniqueHeadingIds() {
   return (tree: Root) => {
     const occurrences = new Map<string, number>()
     const usedIds = new Set<string>()
+    const headings: Array<Element> = []
+    const explicit = new Map<Element, string>()
     const text = (node: Element): string => node.children.map((child) =>
       child.type === 'text' ? child.value
         : child.type === 'element' ? text(child)
           : '').join('')
     visit(tree, 'element', (node: Element) => {
       if (!/^h[2-6]$/.test(node.tagName)) return
-      const base = typeof node.properties?.id === 'string' && node.properties.id
-        ? node.properties.id : takeHeadingIdMarker(node) ?? slugify(text(node))
-      if (!base) return
-      let occurrence = (occurrences.get(base) ?? 0) + 1
-      let id = occurrence === 1 ? base : `${base}-${occurrence}`
-      while (usedIds.has(id)) {
-        occurrence++
-        id = `${base}-${occurrence}`
+      headings.push(node)
+      const given = typeof node.properties?.id === 'string' && node.properties.id
+        ? node.properties.id : takeHeadingIdMarker(node)
+      if (given) explicit.set(node, given)
+    })
+    const reserved = new Set(explicit.values())
+    for (const node of headings) {
+      const given = explicit.get(node)
+      const base = given ?? slugify(text(node))
+      if (!base) continue
+      let id = base
+      let occurrence = 1
+      if (given) {
+        while (usedIds.has(id)) id = `${base}-${++occurrence}`
+      } else {
+        occurrence = occurrences.get(base) ?? 0
+        do id = ++occurrence === 1 ? base : `${base}-${occurrence}`
+        while (usedIds.has(id) || reserved.has(id))
+        occurrences.set(base, occurrence)
       }
-      occurrences.set(base, occurrence)
       usedIds.add(id)
       node.properties = { ...node.properties, id }
-    })
+    }
   }
 }
 

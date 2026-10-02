@@ -193,6 +193,18 @@ describe('heading anchors', () => {
     expect(headings[0].children).toEqual([{ type: 'text', value: 'Scrape + Interact' }])
   })
 
+  it('reserves an explicit comment id so generated duplicates skip it', () => {
+    const marker = (value: string) => ({ type: 'mdxTextExpression', value }) as unknown as Element['children'][number]
+    const plain = (): Element => ({ type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: 'Foo' }] })
+    const headings: Array<Element> = [
+      plain(), plain(),
+      { type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: 'Foo ' }, marker('/* #foo-2 */')] },
+    ]
+    const transform = rehypePlugins[2]() as (tree: Root) => void
+    transform({ type: 'root', children: headings })
+    expect(headings.map((heading) => heading.properties?.id)).toEqual(['foo', 'foo-3', 'foo-2'])
+  })
+
   it('applies the comment id in a real MDX compile', async () => {
     const { compile } = await import('@mdx-js/mdx')
     const compiled = String(await compile('## Scrape + Interact {/* #scrape-+-interact */}\n\n## Scrape + Interact', {

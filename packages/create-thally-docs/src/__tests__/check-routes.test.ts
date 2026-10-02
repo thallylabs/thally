@@ -116,6 +116,13 @@ describe('thally check reader routes', () => {
     expect(result.output).not.toContain('Broken anchor')
   })
 
+  it('lets an explicit id reserve its id so a generated duplicate skips it', async () => {
+    const result = await checkLinks('## Foo\n\n## Foo\n\n## Foo {/* #foo-2 */}\n\n[Second](#foo-3) [Explicit](#foo-2) [Gone](#foo-4)')
+    expect(result.output).not.toContain('"#foo-3"')
+    expect(result.output).not.toContain('"#foo-2"')
+    expect(result.output).toContain('"#foo-4"')
+  })
+
   it('ignores links, images, and headings inside nested code fences', async () => {
     const result = await checkLinks([
       '````mdx',
