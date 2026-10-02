@@ -76,6 +76,7 @@ describe('standalone rich-content primitives', () => {
     expect(browser).not.toContain('fontawesome-free@7.3.1/svgs/solid/browser.svg')
     const read = renderToStaticMarkup(createElement(Icon, { icon: 'barcode-read' }))
     expect(read).toContain('fontawesome-free@7.3.1/svgs/solid/barcode.svg')
+    expect(renderToStaticMarkup(createElement(Icon, { icon: 'code-change' }))).toContain('fontawesome-free@7.3.1/svgs/solid/code-compare.svg')
   })
 
   it('renders brand marks inline under every icon library', () => {
