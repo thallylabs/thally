@@ -84,4 +84,18 @@ describe('automatic header navigation rows', () => {
     expect(html).toMatch(/background-color:#ff4d00;color:#fff[^>]*>[^<]*<span>Sign Up/)
     expect(html.indexOf('acme/widgets')).toBeLessThan(html.indexOf('Sign Up'))
   })
+
+  it('never lets a navbar button colour add declarations to the inline style', () => {
+    const html = renderToStaticMarkup(<TopBar
+      collections={[]}
+      activeCollectionId="0"
+      onCollectionChange={() => {}}
+      activeSections={[]}
+      navigationPresentation={{ display: 'tabs' }}
+      navbarConfig={{ links: [{ label: 'Sign Up', href: 'https://acme.dev/signin', button: { background: 'red;position:fixed;inset:0', color: 'rgb(1, 2, 3)' } }] }}
+      siteLinks={[]}
+    />)
+    expect(html).not.toContain('position:fixed')
+    expect(html).toContain('color:rgb(1, 2, 3)')
+  })
 })
