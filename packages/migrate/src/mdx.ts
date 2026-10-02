@@ -1962,7 +1962,10 @@ export function parseMarkdownPage(input: {
       : undefined
   const description = typeof parsed.data.description === 'string' && parsed.data.description.trim()
     ? parsed.data.description.trim()
-    : firstParagraph(body)
+    // An API reference page is described by its operation, not by its prose.
+    : typeof parsed.data.openapi === 'string' && parsed.data.openapi.trim()
+      ? ''
+      : firstParagraph(body)
   return {
     id: identity.id,
     navigationId: identity.navigationId,
