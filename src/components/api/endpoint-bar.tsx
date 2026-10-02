@@ -9,18 +9,20 @@ export function EndpointBar({ operation, onTryIt }: { operation: NormalizedOpera
   const methodToken = getMethodToken(operation.method)
   return (
     <div className="flex flex-wrap items-center gap-4 border-y border-border py-3">
-      <span className={cn('rounded-[5px] px-2 py-1 font-mono text-[0.7rem] font-medium uppercase tracking-[0.02em]', methodToken.bg, methodToken.text)}>{operation.method}</span>
+      <span className={cn('rounded-[5px] px-2 py-1 font-mono text-[0.7rem] font-medium uppercase tracking-[0.02em]', methodToken.bg, methodToken.text)}>{operation.isWebhook ? 'Webhook' : operation.method}</span>
       <code className="min-w-0 flex-1 !whitespace-normal text-sm font-semibold text-foreground break-all">
-        {(operation.servers[0]?.url?.replace(/\/$/, '') ?? '')}
+        {operation.isWebhook ? '' : (operation.servers[0]?.url?.replace(/\/$/, '') ?? '')}
         {operation.path}
       </code>
-      <button
-        type="button"
-        onClick={onTryIt}
-        className="rounded-[9px] bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition hover:brightness-125 active:scale-[0.98]"
-      >
-        Try it
-      </button>
+      {operation.isWebhook ? null : (
+        <button
+          type="button"
+          onClick={onTryIt}
+          className="rounded-[9px] bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition hover:brightness-125 active:scale-[0.98]"
+        >
+          Try it
+        </button>
+      )}
     </div>
   )
 }

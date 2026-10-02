@@ -149,8 +149,25 @@ export function OperationPanel({ operation, children }: OperationPanelProps) {
         ) : null}
       </div>
 
-      <OperationCodePanel controller={controller} />
-      <TryItDialog controller={controller} open={isDialogOpen} onOpenChange={setDialogOpen} />
+      {operation.isWebhook ? (
+        <WebhookExample body={operation.prefill.body} />
+      ) : (
+        <>
+          <OperationCodePanel controller={controller} />
+          <TryItDialog controller={controller} open={isDialogOpen} onOpenChange={setDialogOpen} />
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Webhooks are received, not called: show the payload we send instead of a request sample. */
+function WebhookExample({ body }: { body?: string }) {
+  if (!body) return <div />
+  return (
+    <div className="overflow-hidden rounded-[11px] border border-border bg-muted/40">
+      <div className="border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground/60">Example</div>
+      <pre className="scrollbar-hide max-h-[480px] overflow-auto bg-transparent p-4 font-mono text-[0.82rem] leading-[1.65] text-foreground/80">{body}</pre>
     </div>
   )
 }
