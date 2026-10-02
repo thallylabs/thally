@@ -43,6 +43,19 @@ describe('buildCodeSamples', () => {
     }
   })
 
+  it('keeps PHP sample inputs literal across backslashes and quotes', () => {
+    const literal = String.raw`before\'; system('id'); $HOME`
+    const php = bySource({
+      method: 'POST',
+      url: `https://example.test/${literal}`,
+      headers: { 'X-Probe': literal },
+      body: literal,
+    }).PHP
+
+    expect(php).toContain(String.raw`before\\\'; system(\'id\'); $HOME`)
+    expect(php).not.toContain(String.raw`before\'; system('id'); $HOME`)
+  })
+
   it('pins a POST with a JSON body', () => {
     expect(bySource(post)).toMatchInlineSnapshot(`
       {
@@ -105,17 +118,28 @@ describe('buildCodeSamples', () => {
       $curl = curl_init();
 
       curl_setopt_array($curl, [
-        CURLOPT_URL => "https://api.example.com/v2/scrape",
+        CURLOPT_URL => 'https://api.example.com/v2/scrape',
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_ENCODING => "",
         CURLOPT_MAXREDIRS => 10,
         CURLOPT_TIMEOUT => 30,
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-        CURLOPT_CUSTOMREQUEST => "POST",
-        CURLOPT_POSTFIELDS => "{\\n  \\"url\\": \\"https://x.dev/it's\\",\\n  \\"formats\\": [\\n    \\"markdown\\"\\n  ],\\n  \\"onlyMainContent\\": true,\\n  \\"maxAge\\": null,\\n  \\"note\\": \\"cost \\$5 #{x}\\",\\n  \\"location\\": {\\n    \\"country\\": \\"US\\"\\n  }\\n}",
+        CURLOPT_CUSTOMREQUEST => 'POST',
+        CURLOPT_POSTFIELDS => '{
+        "url": "https://x.dev/it\\'s",
+        "formats": [
+          "markdown"
+        ],
+        "onlyMainContent": true,
+        "maxAge": null,
+        "note": "cost $5 #{x}",
+        "location": {
+          "country": "US"
+        }
+      }',
         CURLOPT_HTTPHEADER => [
-          "Authorization: Bearer <token>",
-          "Content-Type: application/json"
+          'Authorization: Bearer <token>',
+          'Content-Type: application/json'
         ],
       ]);
 
@@ -221,15 +245,15 @@ describe('buildCodeSamples', () => {
       $curl = curl_init();
 
       curl_setopt_array($curl, [
-        CURLOPT_URL => "https://api.example.com/v2/monitor/{monitorId}?limit=10&status=ok",
+        CURLOPT_URL => 'https://api.example.com/v2/monitor/{monitorId}?limit=10&status=ok',
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_ENCODING => "",
         CURLOPT_MAXREDIRS => 10,
         CURLOPT_TIMEOUT => 30,
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-        CURLOPT_CUSTOMREQUEST => "GET",
+        CURLOPT_CUSTOMREQUEST => 'GET',
         CURLOPT_HTTPHEADER => [
-          "Authorization: Bearer <token>"
+          'Authorization: Bearer <token>'
         ],
       ]);
 
@@ -316,15 +340,15 @@ describe('buildCodeSamples', () => {
       $curl = curl_init();
 
       curl_setopt_array($curl, [
-        CURLOPT_URL => "https://api.example.com/v2/monitor/m1",
+        CURLOPT_URL => 'https://api.example.com/v2/monitor/m1',
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_ENCODING => "",
         CURLOPT_MAXREDIRS => 10,
         CURLOPT_TIMEOUT => 30,
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-        CURLOPT_CUSTOMREQUEST => "DELETE",
+        CURLOPT_CUSTOMREQUEST => 'DELETE',
         CURLOPT_HTTPHEADER => [
-          "Authorization: Bearer <token>"
+          'Authorization: Bearer <token>'
         ],
       ]);
 
