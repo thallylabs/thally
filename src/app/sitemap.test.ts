@@ -22,6 +22,14 @@ import sitemap from './sitemap'
 
 beforeEach(() => mocks.translated.mockReset())
 
+describe('static sitemap entries', () => {
+  it('omits /changelog when the site has no changelog page, since that URL 404s', async () => {
+    mocks.translated.mockResolvedValue(null)
+    const urls = await sitemap()
+    expect(urls.some((entry) => entry.url.endsWith('/changelog'))).toBe(false)
+  })
+})
+
 describe('localized sitemap', () => {
   it('does not advertise a missing or noindex translation', async () => {
     mocks.translated.mockResolvedValue(null)

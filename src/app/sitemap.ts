@@ -11,7 +11,8 @@ import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = await getRequestOrigin()
-  const docEntries = (await loadDocEntries()).filter((doc) => !doc.hidden && !doc.noindex)
+  const allEntries = await loadDocEntries()
+  const docEntries = allEntries.filter((doc) => !doc.hidden && !doc.noindex)
   const apiNodes = await getAllApiOperationNodes()
   const i18n = await getEffectiveI18nConfig()
 
@@ -50,11 +51,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   }))
 
   const staticPages: MetadataRoute.Sitemap = [
-    {
-      url: `${baseUrl}/changelog`,
-      changeFrequency: 'weekly',
-      priority: 0.5,
-    },
+    // /changelog is only served when the site has a changelog page.
+    ...(allEntries.some((doc) => doc.id === 'changelog')
+      ? [{ url: `${baseUrl}/changelog`, changeFrequency: 'weekly' as const, priority: 0.5 }]
+      : []),
     {
       url: `${baseUrl}/llms.txt`,
       changeFrequency: 'weekly',
