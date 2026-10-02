@@ -13,6 +13,6 @@ describe('root layout page title', () => {
   })
 
   it('emits the docs.json seo.metatags on every page', async () => {
-    expect(await readFile('src/app/layout.tsx', 'utf8')).toContain('other: getSeoConfig().metatags')
+    expect(await readFile('src/app/layout.tsx', 'utf8')).toContain('other: validMetatags(getSeoConfig().metatags)')
   })
 })

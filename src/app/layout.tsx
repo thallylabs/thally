@@ -32,6 +32,7 @@ import { CloudHandshake } from '@/components/cloud/cloud-handshake'
 import { localeDirection } from '@/lib/i18n/config'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
+import { validMetatags } from '@/lib/metatags'
 import { getBuildSiteAppearance } from '@/lib/cloud-link/appearance'
 import { lockedAppearanceScript } from '@/lib/site-appearance'
 import { brandRuntimeCss } from '@/lib/brand-runtime-css'
@@ -133,7 +134,7 @@ export async function generateMetadata(): Promise<Metadata> {
       template: `%s | ${effectiveSite.name}`,
     },
     description: effectiveSite.description,
-    other: getSeoConfig().metatags,
+    other: validMetatags(getSeoConfig().metatags),
     // Derived from the request-bound site config so a fork never inherits
     // the baseline's marketing keywords.
     keywords: [effectiveSite.name, `${effectiveSite.name} documentation`, 'docs'],

@@ -1048,6 +1048,31 @@ describe('operations documented only on access-restricted pages', () => {
   })
 })
 
+describe('dropped colors and metatags are reported', () => {
+  const withConfig = (extra: Record<string, unknown>) => site({ 'docs.json': JSON.stringify({ navigation: { pages: ['a'] }, ...extra }), 'a.mdx': page('A') })
+  const messages = (bundle: MigrationBundle) => codes(bundle, 'unsupported-config').map((item) => item.message)
+
+  it('warns with the names of dropped seo.metatags entries and keeps the valid ones', () => {
+    const bundle = withConfig({ seo: { metatags: { good: 'yes', refresh: '0;url=https://x.test', 'http-equiv': 'refresh', obj: { a: 1 }, 'bad name': 'x', long: 'x'.repeat(1001) } } })
+    expect(bundle.docsConfig.seo?.metatags).toEqual({ good: 'yes' })
+    const warning = messages(bundle).find((message) => message.startsWith('seo.metatags entries were dropped'))!
+    for (const key of ['refresh', 'http-equiv', 'obj', 'bad name', 'long']) expect(warning).toContain(key)
+    expect(warning).not.toContain('good')
+  })
+
+  it('warns when a colour is not a hex value, and says which', () => {
+    const bundle = withConfig({ colors: { primary: '#16A34A', dark: 'hsl(140 70% 40%)' } })
+    expect(bundle.docsConfig.colors).toBeDefined()
+    expect(messages(bundle).some((message) => message.includes('colors.dark "hsl(140 70% 40%)" is not a 3- or 6-digit hex colour'))).toBe(true)
+    expect(messages(withConfig({ colors: { primary: 'green' } })).some((message) => message.includes('colors.primary "green"'))).toBe(true)
+  })
+
+  it('stays quiet for valid colours and metatags', () => {
+    const bundle = withConfig({ colors: { primary: '#16a34a' }, seo: { metatags: { good: 'yes' } } })
+    expect(messages(bundle).some((message) => /colors|metatags/.test(message))).toBe(false)
+  })
+})
+
 describe('page spec references that cannot be migrated explain why', () => {
   const spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { '/x': { get: { summary: 'S' } } } })
   const missing = (bundle: MigrationBundle) => codes(bundle, 'unsupported-config').find((item) => /references the OpenAPI spec/.test(item.message))!.message
