@@ -87,8 +87,16 @@ function ContentCardSurface({ kind, title, href, icon, iconType, iconColor, colo
         : icon}
     </span>
   ) : null
+  // A linked card is not wrapped in <a>: authored links in the body would nest
+  // anchors (invalid HTML, a hydration error). The title carries the link and
+  // stretches over the whole card; body links sit above it (see docs-handoff.css).
+  const linkHref = href && isSafeLink(href) ? href : undefined
+  const external = linkHref ? isExternalLink(linkHref) : false
+  const linkProps = { className: 'thally-docs-card-link no-underline', target: external ? '_blank' : undefined, rel: external ? 'noreferrer' : undefined }
   const titleNode = title ? (
-    <h2 className={cn('thally-docs-card-title not-prose block min-w-0 font-heading text-base font-semibold leading-6 text-foreground', !horizontal && iconNode && 'mt-4')}>{title}</h2>
+    <h2 className={cn('thally-docs-card-title not-prose block min-w-0 font-heading text-base font-semibold leading-6 text-foreground', !horizontal && iconNode && 'mt-4')}>
+      {linkHref ? <IntentPrefetchLink href={linkHref} {...linkProps}>{title}</IntentPrefetchLink> : title}
+    </h2>
   ) : null
 
   // The radius is a literal on purpose. Tailwind's `rounded-2xl` maps to
@@ -105,6 +113,7 @@ function ContentCardSurface({ kind, title, href, icon, iconType, iconColor, colo
       data-card-kind={kind}
       data-card-layout={horizontal ? 'horizontal' : 'stacked'}
       data-card-arrow={arrow ? '' : undefined}
+      data-card-external={external ? '' : undefined}
       data-callout={resolvedCallout}
     >
       {showImage ? (
@@ -132,13 +141,14 @@ function ContentCardSurface({ kind, title, href, icon, iconType, iconColor, colo
           </span>
         ) : null}
       </div>
+      {linkHref && !title ? (
+        <IntentPrefetchLink href={linkHref} aria-label={typeof cta === 'string' ? cta : linkHref} {...linkProps}>{null}</IntentPrefetchLink>
+      ) : null}
       {arrow ? <ArrowRight className="thally-docs-card-arrow absolute right-5 top-5 h-4 w-4 text-foreground/40 transition group-hover/card:translate-x-[3px] group-hover/card:text-accent" aria-hidden="true" /> : null}
     </article>
   )
 
-  if (!href || !isSafeLink(href)) return content
-  const external = isExternalLink(href)
-  return <IntentPrefetchLink href={href} className="block h-full" target={external ? '_blank' : undefined} rel={external ? 'noreferrer' : undefined}>{content}</IntentPrefetchLink>
+  return content
 }
 
 /** Render a compact documentation card. */

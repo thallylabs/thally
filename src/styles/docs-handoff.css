@@ -548,10 +548,6 @@ body {
   color: hsl(var(--thally-accent));
 }
 
-.thally-docs-prose a:has(> .thally-docs-card) {
-  text-decoration: none;
-}
-
 .thally-docs-prose :where(h1, h2, h3, h4) a {
   color: inherit;
 }
@@ -729,9 +725,23 @@ html[data-icon-library='tabler'] .thally-icon[data-icon-source='lucide'] > .thal
   margin-bottom: 0;
 }
 
+/* A linked card's title link stretches over the whole card; links authored in
+   the body sit above it so both stay clickable without nesting anchors. */
+.thally-docs-card-link::after {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  content: '';
+}
+
+.thally-docs-card-body a {
+  position: relative;
+  z-index: 2;
+}
+
 /* External cards reveal a corner glyph on hover unless an explicit arrow
    already occupies that corner. */
-a[target='_blank'] > .thally-docs-card:not([data-card-arrow])::after {
+.thally-docs-card[data-card-external]:not([data-card-arrow])::after {
   position: absolute;
   top: 12px;
   right: 15px;
@@ -743,7 +753,7 @@ a[target='_blank'] > .thally-docs-card:not([data-card-arrow])::after {
   transition: opacity 120ms ease;
 }
 
-a[target='_blank']:hover > .thally-docs-card:not([data-card-arrow])::after {
+.thally-docs-card[data-card-external]:hover:not([data-card-arrow])::after {
   opacity: 1;
 }
 

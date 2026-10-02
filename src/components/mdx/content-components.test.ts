@@ -100,9 +100,18 @@ describe('standalone rich-content primitives', () => {
     expect(unsafe).not.toContain('href=')
   })
 
+  it('never nests anchors when a linked card body contains a link', () => {
+    const markup = renderToStaticMarkup(createElement(Card, { title: 'Repo', href: '/repo' },
+      createElement('a', { href: 'https://github.com/x' }, 'GitHub Repo')))
+    expect(markup.match(/<a /g)).toHaveLength(2)
+    expect(markup).not.toMatch(/<a [^>]*>(?:(?!<\/a>)[\s\S])*<a /)
+    expect(markup).toContain('href="/repo"')
+    expect(markup).toContain('href="https://github.com/x"')
+  })
+
   it('renders card titles as h2 headings', () => {
     expect(renderToStaticMarkup(createElement(Card, { title: 'Plain' }))).toMatch(/<h2[^>]*>Plain<\/h2>/)
-    expect(renderToStaticMarkup(createElement(Card, { title: 'Linked', href: '/x' }))).toMatch(/<h2[^>]*>Linked<\/h2>/)
+    expect(renderToStaticMarkup(createElement(Card, { title: 'Linked', href: '/x' }))).toMatch(/<h2[^>]*><a [^>]*href="\/x"[^>]*>Linked<\/a><\/h2>/)
   })
 
   it('stacks the icon above the title and hides the arrow unless asked', () => {
