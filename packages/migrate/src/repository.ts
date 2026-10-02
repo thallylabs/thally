@@ -27,7 +27,7 @@ import type { Dirent } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, extname, isAbsolute, posix, relative, resolve as resolvePath, sep } from 'node:path'
 
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
 
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent } from './components.js'
@@ -50,6 +50,7 @@ import {
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
+import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
 import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
 import { closeOpenFence, escapeFernLiteralBraces, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
@@ -85,6 +86,7 @@ import type {
   MigrationPage,
   MigrationPlatform,
   MigrationWarning,
+  RemoteApiSpec,
   RenderedMigrationFile,
 } from './types.js'
 
@@ -1251,26 +1253,6 @@ function exactReferenceKey(value: string): string {
     .replace(/\.(?:mdx?|rst|txt)$/i, '')
 }
 
-/**
- * Whether a frontmatter `openapi:` value ("GET /x", "specs/api.json GET /x")
- * names this spec. A bare operation resolves to the default spec; a prefixed
- * one to the spec whose path ends with the prefix, on a segment boundary.
- */
-function specRefMatches(ref: string, specPath: string, specFilename: string, isDefault: boolean): boolean {
-  const prefix = /^(?:(\S+)\s+)?(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|WEBHOOK)\s/i.exec(`${ref} `)?.[1]
-  if (!prefix) return isDefault
-  const wanted = prefix.replace(/^\/+/, '').toLowerCase()
-  // Whole path segments only: `pi/openapi.json` does not name `api/openapi.json`.
-  const lowerPath = specPath.toLowerCase()
-  return lowerPath === wanted || lowerPath.endsWith(`/${wanted}`) || specFilename.toLowerCase() === wanted
-}
-
-/** `GET /x` / `webhook name` normalised so two spellings of one operation compare equal. */
-function operationKey(operation: string): string {
-  const [first, ...rest] = operation.trim().split(/\s+/)
-  return `${first.toLowerCase()} ${rest.join(' ')}`
-}
-
 /** Every operation reference docs.json navigation names explicitly. */
 function navigationOperationRefs(config: Record<string, unknown> | null): Array<string> {
   const refs: Array<string> = []
@@ -1295,39 +1277,8 @@ function excludeWithheldOperations(
   withheldRefs: ReadonlyArray<string>,
   keptRefs: ReadonlyArray<string>,
 ): { content: Buffer; excluded: Array<string> } {
-  const keysFor = (refs: ReadonlyArray<string>): Set<string> => new Set(
-    refs.filter((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))
-      .map((ref) => splitOpenApiRef(ref)?.operation).filter((op): op is string => !!op).map(operationKey),
-  )
-  const kept = keysFor(keptRefs)
-  const gone = [...keysFor(withheldRefs)].filter((key) => !kept.has(key))
-  const untouched = { content: spec.content, excluded: [] as Array<string> }
-  if (gone.length === 0) return untouched
-  const text = spec.content.toString('utf8')
-  type Entries = Record<string, Record<string, unknown> | undefined>
-  let doc: { paths?: Entries; webhooks?: Entries; 'x-webhooks'?: Entries }
-  try { doc = parseYaml(text) } catch { return untouched }
-  if (!doc || typeof doc !== 'object') return untouched
-  const excluded: Array<string> = []
-  for (const key of gone) {
-    const [method, ...rest] = key.split(' ')
-    const name = rest.join(' ')
-    if (method === 'webhook') {
-      const entry = doc.webhooks?.[name] ?? doc['x-webhooks']?.[name]
-      if (entry && typeof entry === 'object') { entry['x-excluded'] = true; excluded.push(`WEBHOOK ${name}`) }
-      continue
-    }
-    const entry = doc.paths?.[name]
-    if (!entry || typeof entry !== 'object') continue
-    // A `$ref` entry may share its item with other operations: exclude it only when no kept ref names the path.
-    const target = typeof entry.$ref === 'string'
-      ? ([...kept].some((k) => k.slice(k.indexOf(' ') + 1) === name) ? undefined : entry)
-      : entry[method]
-    if (target && typeof target === 'object') { (target as Record<string, unknown>)['x-excluded'] = true; excluded.push(`${method.toUpperCase()} ${name}`) }
-  }
-  if (excluded.length === 0) return untouched
-  const out = text.trimStart().startsWith('{') ? `${JSON.stringify(doc, null, 2)}\n` : stringifyYaml(doc)
-  return { content: Buffer.from(out), excluded }
+  const { withheld, kept } = withheldOperationKeys(spec, withheldRefs, keptRefs)
+  return markExcluded(spec.content, withheld, kept)
 }
 
 const TOKEN_SEPARATORS = /[\s"'()<>[\]{}=,;:|\\/`*!?#&]+/
@@ -1466,7 +1417,7 @@ function resolveMintlifyApiSpecs(
   mintlifyConfig: Record<string, unknown> | null,
   files: Array<ScannedFile>,
   warnings: Array<MigrationWarning>,
-  remoteSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>,
+  remoteSpecs: Array<RemoteApiSpec>,
   /** Published pages' `openapi:` frontmatter: Mintlify renders a spec named only here, so it is migrated too. */
   pages: ReadonlyArray<{ openapi?: string }> = [],
 ): Array<ResolvedApiSpec> {
@@ -3194,7 +3145,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
-  const remoteApiSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }> = []
+  const remoteApiSpecs: Array<RemoteApiSpec> = []
   // Which pages reference which asset (by its normalized copy-destination
   // path), so the final asset-copy pass can prioritize referenced assets
   // over unreferenced ones when the budget is tight, and name the
@@ -4273,17 +4224,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   } else if (platform === 'mintlify') {
     const warnSharedSpec = (path: string, excluded: Array<string> = []): void => {
-      warnings.push({
-        code: 'gated-page',
-        message: excluded.length
-          ? `OpenAPI spec ${path} is shared with access-restricted pages and is published, but ${excluded.length} operation(s) documented only on those pages were withheld from it (${excluded.join(', ')}). Review the rest of the spec before publishing.`
-          : `OpenAPI spec ${path} is shared with access-restricted pages and is published; it may describe restricted endpoints. Review it before publishing.`,
-        source: path,
-      })
+      warnings.push({ code: 'gated-page', message: sharedSpecMessage(path, excluded), source: path })
     }
     // Operations docs.json lists explicitly stay public like those on published pages.
     const keptSpecRefs = [...publishedSpecRefs, ...navigationOperationRefs(mintlifyConfig)]
     const allSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs, pages)
+    // Remote specs are downloaded later: carry the operations to withhold from them.
+    for (const remote of remoteApiSpecs) {
+      const { withheld, kept } = withheldOperationKeys({ sourcePath: remote.url, filename: remote.url }, withheldSpecRefs, keptSpecRefs)
+      if (withheld.length > 0) { remote.withheldOperations = withheld; remote.keptOperations = kept }
+    }
     const withheldOperations = new Map<ResolvedApiSpec, Array<string>>()
     for (const spec of allSpecs) {
       const result = excludeWithheldOperations(spec, withheldSpecRefs, keptSpecRefs)

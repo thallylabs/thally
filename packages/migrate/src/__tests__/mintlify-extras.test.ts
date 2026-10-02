@@ -4,11 +4,13 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { parse as parseYaml } from 'yaml'
 
 import { migrateRepository, renderMigrationFiles } from '../index.js'
 import type { MigrationBundle } from '../index.js'
+import { hydrateRemoteApiSpecs } from '../remote-api.js'
+import type { MigrationFetcher } from '../types.js'
 
 function site(files: Record<string, string | Buffer>, extra: { maxSourceFiles?: number } = {}): MigrationBundle {
   const root = mkdtempSync(join(tmpdir(), 'thally-migrate-extras-'))
@@ -1045,6 +1047,38 @@ describe('operations documented only on access-restricted pages', () => {
     const out = parseYaml(text)
     expect(out.paths['/internal'].get['x-excluded']).toBe(true)
     expect(out.paths['/x'].get['x-excluded']).toBeUndefined()
+  })
+
+  describe('remote specs', () => {
+    const URL_ = 'https://specs.example.com/openapi.json'
+    const fetcherFor = (): MigrationFetcher => vi.fn(async (url) => ({ finalUrl: url, body: spec, contentType: 'application/json' }))
+
+    it('marks a gated-only operation x-excluded in a remote spec shared with a public page', async () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ api: { openapi: URL_ }, navigation: { pages: ['pub', 's'] } }),
+        'pub.mdx': page('Pub', `openapi: "${URL_} GET /x"\n`),
+        's.mdx': page('S', `groups: [admin]\nopenapi: "${URL_} GET /internal"\n`),
+      })
+      const fetcher = fetcherFor()
+      const result = await hydrateRemoteApiSpecs(bundle, fetcher)
+      const out = JSON.parse(Buffer.from(result.assets.find((asset) => asset.path.startsWith('openapi/'))!.content).toString('utf8'))
+      expect(out.paths['/internal'].get['x-excluded']).toBe(true)
+      expect(out.paths['/x'].get['x-excluded']).toBeUndefined()
+      expect(codes(result, 'gated-page').some((item) => /withheld from it \(GET \/internal\)/.test(item.message))).toBe(true)
+    })
+
+    it('never fetches a remote spec only a gated page names', async () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ navigation: { pages: ['pub', 's'] } }),
+        'pub.mdx': page('Pub'),
+        's.mdx': page('S', `groups: [admin]\nopenapi: "${URL_} GET /internal"\n`),
+      })
+      const fetcher = fetcherFor()
+      const result = await hydrateRemoteApiSpecs(bundle, fetcher)
+      expect(bundle.remoteApiSpecs).toBeUndefined()
+      expect(fetcher).not.toHaveBeenCalled()
+      expect(result.assets.some((asset) => asset.path.startsWith('openapi/'))).toBe(false)
+    })
   })
 })
 

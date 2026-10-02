@@ -178,6 +178,19 @@ export interface MigrationWarning {
   source?: string
 }
 
+/** A repository-configured remote OpenAPI spec, downloaded after the bundle is built. */
+export interface RemoteApiSpec {
+  url: string
+  tabLabel?: string
+  parentTab?: string
+  icon?: string
+  hidden?: boolean
+  /** Operation keys (`get /x`) only access-restricted pages document; marked `x-excluded` after download. */
+  withheldOperations?: Array<string>
+  /** Operation keys published pages or docs.json also name; keeps a shared `$ref` path item public. */
+  keptOperations?: Array<string>
+}
+
 export interface MigrationBundle {
   sourceUrl: string
   sourceKind: 'repository' | 'url'
@@ -185,7 +198,7 @@ export interface MigrationBundle {
   pages: Array<MigrationPage>
   assets: Array<MigrationAsset>
   /** Repository-configured remote specs awaiting a bounded network fetch by the host. */
-  remoteApiSpecs?: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>
+  remoteApiSpecs?: Array<RemoteApiSpec>
   /** Customer-owned component source and registry; paths are repository-relative. */
   componentFiles?: Array<RenderedMigrationFile>
   /** Access-restricted source pages, written outside every published path. */
