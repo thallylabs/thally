@@ -515,7 +515,8 @@ function rehypeParseCodeBlocks() {
   return (tree: Root) => {
     // @ts-expect-error -- unist-util-visit visitor types are stricter than needed
     visit(tree, 'element', (node: Element, _index: number | undefined, parent: Element | undefined) => {
-      if (!parent || node.tagName !== 'code') {
+      // Inline `code` inside a <p>/<td> is not a fence; only <pre><code> gets a language.
+      if (!parent || parent.tagName !== 'pre' || node.tagName !== 'code') {
         return
       }
 

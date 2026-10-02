@@ -40,6 +40,26 @@ function codeText(block: Element): Text {
   return ((block.children[0] as Element).children[0] as Text)
 }
 
+describe('code-fence parsing', () => {
+  it('does not stamp a language on the parent of inline code', () => {
+    const paragraph: Element = {
+      type: 'element',
+      tagName: 'p',
+      properties: {},
+      children: [{ type: 'element', tagName: 'code', properties: {}, children: [{ type: 'text', value: '/parse' }] }],
+    }
+    const fence: Element = {
+      type: 'element',
+      tagName: 'pre',
+      properties: {},
+      children: [{ type: 'element', tagName: 'code', properties: { className: ['language-js'] }, children: [{ type: 'text', value: 'x' }] }],
+    }
+    ;(rehypePlugins[0]() as (tree: Root) => void)({ type: 'root', children: [paragraph, fence] })
+    expect(paragraph.properties).toEqual({})
+    expect(fence.properties?.language).toBe('js')
+  })
+})
+
 describe('code-fence metadata', () => {
   it('does not display renderer presentation props as code titles', () => {
     expect(parseCodeFenceMeta('theme={"system"}')).toEqual({})
