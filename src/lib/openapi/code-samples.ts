@@ -94,7 +94,9 @@ const javascriptSample = ({ method, url, headers, body }: SampleRequest) => {
   ].join('\n')
 }
 
-const phpString = (value: string) => q(value).replace(/\$/g, '\\$')
+// PHP single-quoted strings interpolate nothing. Escape the only two special
+// characters so schema-controlled URLs, headers, and bodies stay literal.
+const phpString = (value: string) => `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
 
 const phpSample = ({ method, url, headers, body }: SampleRequest) => {
   const json = body ? parseJson(body) : undefined
