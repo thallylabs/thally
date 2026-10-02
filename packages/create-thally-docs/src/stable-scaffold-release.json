@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
-  "id": "2026-10-01.4f272434.177e20c9",
+  "id": "2026-10-02.644cbada.498675f5",
   "source": {
     "repository": "thallylabs/starter",
-    "commitSha": "4f2724342aadc6151fc2aa3dfdb8b7e169ee370c",
-    "treeSha": "93e8a046393c3aca94fb9616c8c317fb1a670bd9",
-    "archiveUrl": "https://codeload.github.com/thallylabs/starter/tar.gz/4f2724342aadc6151fc2aa3dfdb8b7e169ee370c",
+    "commitSha": "644cbada1c1651e43149875a31711b907dcf00ea",
+    "treeSha": "3486dd205040a82d0b78f824211807ba81a64aac",
+    "archiveUrl": "https://codeload.github.com/thallylabs/starter/tar.gz/644cbada1c1651e43149875a31711b907dcf00ea",
     "manifestPath": "starter-release.json",
-    "manifestSha256": "b312bbe6e7bb102c877b16c8a8d22fc803a0dfa7eff92243717b1171c7fb70fc"
+    "manifestSha256": "403e7ae7b642f35b383626dc3b7c3734f9b518483a032bbe52ec11884e5ff507"
   },
   "runtime": {
     "repository": "thallylabs/thally",
-    "commitSha": "177e20c9a6aab3fdea9971f25082b42bf662c7a1",
-    "treeSha": "be9afded1c3838af0c290a93a51241a2d865a3c7",
+    "commitSha": "498675f5a219c875ec2bb7915cb5420e5adb80c8",
+    "treeSha": "ba1d019a08c8ce86ec545dc21f94698af3d271a3",
     "contentSource": "assets",
     "identityContractVersion": 1
   },
