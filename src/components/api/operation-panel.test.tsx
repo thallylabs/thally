@@ -84,3 +84,39 @@ describe('OperationPanel field details', () => {
     expect(html).toContain('>deprecated<')
   })
 })
+
+describe('OperationPanel field descriptions', () => {
+  const spec = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    paths: {
+      '/x': {
+        post: {
+          summary: 'X',
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    proxy: { type: 'string', description: 'Use `basic` or **auto**, see [docs](https://example.com/p). <script>alert(1)</script>' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {},
+        },
+      },
+    },
+  }
+
+  it('renders descriptions as Markdown without injecting raw HTML', () => {
+    const html = renderToStaticMarkup(<OperationPanel operation={operationFrom(spec)} />)
+    expect(html).toContain('<code>basic</code>')
+    expect(html).toContain('<strong>auto</strong>')
+    expect(html).toContain('href="https://example.com/p"')
+    expect(html).not.toContain('<script>')
+    expect(html).not.toContain('`basic`')
+  })
+})

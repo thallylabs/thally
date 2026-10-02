@@ -84,7 +84,7 @@ export function OperationPanel({ operation, children }: OperationPanelProps) {
                       header={group.location === 'header'}
                       default={resolveDefault(param.schema)}
                     >
-                      {param.description ?? null}
+                      {param.description ? <Markdown>{param.description}</Markdown> : null}
                     </ParamField>
                   ))}
                 </div>
@@ -98,7 +98,7 @@ export function OperationPanel({ operation, children }: OperationPanelProps) {
           <section className="space-y-4">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold text-foreground">Request body</h2>
-              {operation.requestBody.description ? <p className="text-sm text-foreground/70">{operation.requestBody.description}</p> : null}
+              {operation.requestBody.description ? <Markdown className="text-sm text-foreground/70">{operation.requestBody.description}</Markdown> : null}
             </div>
             {operation.requestBody.contents.map((content) => (
               <div key={content.mediaType}>
@@ -184,7 +184,7 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
   if (!properties || typeof properties !== 'object') {
     return (
       <ParamField name="(body)" type={resolveSchemaType(flat)}>
-        {typeof flat.description === 'string' ? flat.description : null}
+        {typeof flat.description === 'string' ? <Markdown>{flat.description}</Markdown> : null}
       </ParamField>
     )
   }
@@ -212,7 +212,7 @@ function SchemaAsParamFields({ schema }: { schema?: Record<string, unknown> }) {
             default={defaultVal}
             body
           >
-            {description ?? null}
+            {description ? <Markdown>{description}</Markdown> : null}
             {enumValues ? (
               <p className="mt-1 text-xs text-foreground/50">
                 Allowed: {enumValues.join(', ')}
@@ -271,7 +271,7 @@ function ResponseTabs({ responses }: { responses: Array<NormalizedResponse> }) {
       {active ? (
         <div className="px-4 py-3">
           {active.description ? (
-            <p className="mb-3 text-sm text-foreground/60">{active.description}</p>
+            <Markdown className="mb-3 text-sm text-foreground/60">{active.description}</Markdown>
           ) : null}
           {active.contents.length ? (
             active.contents.map((content) => (
@@ -330,7 +330,7 @@ function SchemaAsResponseFields({ schema }: { schema?: Record<string, unknown> }
 
         return (
           <ResponseField key={name} name={name} type={type} required={isRequired} deprecated={flatProp.deprecated === true}>
-            {description ?? null}
+            {description ? <Markdown>{description}</Markdown> : null}
             {enumValues ? (
               <p className="mt-1 text-xs text-foreground/50">
                 Allowed: {enumValues.join(', ')}
