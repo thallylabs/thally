@@ -260,14 +260,14 @@ function normalizeParameters(
   }
 
   const deduped = new Map<string, RawObject>()
-  params.forEach((param) => {
-    if (typeof param.name !== 'string' || typeof param.in !== 'string') {
+  // Path-level params come first, so a later (operation-level) entry with the
+  // same name+in overrides them. `$ref` params point at components/parameters.
+  params.forEach((raw) => {
+    const param = typeof raw.$ref === 'string' ? resolveRef(raw.$ref) : raw
+    if (!param || typeof param.name !== 'string' || typeof param.in !== 'string') {
       return
     }
-    const key = `${param.in}:${param.name}`
-    if (!deduped.has(key)) {
-      deduped.set(key, param)
-    }
+    deduped.set(`${param.in}:${param.name}`, param)
   })
 
   deduped.forEach((param) => {

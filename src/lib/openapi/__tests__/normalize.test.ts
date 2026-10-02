@@ -536,3 +536,49 @@ describe('normalizeSpec pathological schemas', () => {
     expect(Date.now() - started).toBeLessThan(5000)
   })
 })
+
+describe('normalizeSpec parameter $ref resolution', () => {
+  const document = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    paths: {
+      '/things/{thingId}': {
+        parameters: [
+          { $ref: '#/components/parameters/ThingId' },
+          { name: 'shared', in: 'query', description: 'path level', schema: { type: 'string' } },
+        ],
+        get: {
+          responses: { '200': { description: 'ok' } },
+          parameters: [{ $ref: '#/components/parameters/Trace' }, { name: 'shared', in: 'query', description: 'operation level', schema: { type: 'string' } }],
+        },
+      },
+    },
+    webhooks: {
+      thingHook: {
+        post: {
+          responses: { '200': { description: 'ok' } },
+          parameters: [{ $ref: '#/components/parameters/Signature' }],
+        },
+      },
+    },
+    components: {
+      parameters: {
+        ThingId: { name: 'thingId', in: 'path', required: true, schema: { type: 'string' } },
+        Trace: { name: 'X-Trace', in: 'header', schema: { type: 'string' } },
+        Signature: { name: 'X-Signature', in: 'header', required: true, schema: { type: 'string' } },
+      },
+    },
+  }
+
+  it('resolves $ref parameters at path and operation level, operation overriding path by name+in', () => {
+    const normalized = normalizeSpec({ config: { ...baseConfig, source: { type: 'inline', document } }, document } as ResolvedSpec)
+    const get = normalized.operations.find((op) => !op.isWebhook)
+    expect(get?.parameters.path.map((p) => p.name)).toEqual(['thingId'])
+    expect(get?.parameters.header.map((p) => p.name)).toEqual(['X-Trace'])
+    expect(get?.parameters.query).toHaveLength(1)
+    expect(get?.parameters.query[0]?.description).toBe('operation level')
+    expect(get?.prefill.path).toHaveProperty('thingId')
+    const hook = normalized.operations.find((op) => op.isWebhook)
+    expect(hook?.parameters.header.map((p) => p.name)).toEqual(['X-Signature'])
+  })
+})
