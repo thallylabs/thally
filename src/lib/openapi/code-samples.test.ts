@@ -19,6 +19,15 @@ const get: SampleRequest = {
 }
 const del: SampleRequest = { method: 'DELETE', url: 'https://api.example.com/v2/monitor/m1', headers: { Authorization: 'Bearer YOUR_API_KEY' } }
 
+// Shell metacharacters, quotes, interpolation openers, newlines and control characters in every position a spec can reach.
+const HOSTILE = ['a;id', 'a|id', '(a)', 'a<b', 'a*', 'a!b', "a'b", 'a"b', 'a`id`b', 'a\nb', 'a\\b', 'a$(id)b', 'a${x}b', 'a#{x}b', 'a b', 'a\u0001b', '%s', '{$x}', '</script>', '"; system("id"); "', '~/x', '[a-z]?']
+const hostile: SampleRequest = {
+  method: 'POST',
+  url: `https://x.test/${HOSTILE.join('/')}?q=${HOSTILE.join('&')}`,
+  headers: { 'X-Hostile': HOSTILE.join(' '), 'Content-Type': 'application/json' },
+  body: JSON.stringify(Object.fromEntries(HOSTILE.map((value) => [value, value]))),
+}
+
 const bySource = (request: SampleRequest) => Object.fromEntries(buildCodeSamples(request).map((s) => [s.label, s.source]))
 
 const has = (cmd: string, args: Array<string> = ['--version']) => spawnSync(cmd, args, { stdio: 'ignore' }).status === 0
@@ -169,10 +178,10 @@ describe('buildCodeSamples', () => {
       response = http.request(request)
       puts response.read_body",
         "cURL": "curl --request POST \\
-        --url https://api.example.com/v2/scrape \\
+        --url 'https://api.example.com/v2/scrape' \\
         --header 'Authorization: Bearer <token>' \\
         --header 'Content-Type: application/json' \\
-        --data '{"url":"https://x.dev/it'"'"'s","formats":["markdown"],"onlyMainContent":true,"maxAge":null,"note":"cost $5 #{x}","location":{"country":"US"}}'",
+        --data '{"url":"https://x.dev/it'\\''s","formats":["markdown"],"onlyMainContent":true,"maxAge":null,"note":"cost $5 #{x}","location":{"country":"US"}}'",
       }
     `)
   })
@@ -361,13 +370,14 @@ describe('buildCodeSamples', () => {
       response = http.request(request)
       puts response.read_body",
         "cURL": "curl --request DELETE \\
-        --url https://api.example.com/v2/monitor/m1 \\
+        --url 'https://api.example.com/v2/monitor/m1' \\
         --header 'Authorization: Bearer <token>'",
       }
     `)
   })
 
   describe.each([
+    ['hostile', hostile],
     ['POST', post],
     ['GET', get],
     ['DELETE', del],
@@ -398,6 +408,34 @@ describe('buildCodeSamples', () => {
       const result = check('javac', (f) => ['-proc:none', '-d', tmpdir(), f], 'java', `class sample { void f() { ${samples.Java} } }`)
       const errors = (result.stderr.match(/error: .*/g) ?? []).filter((line) => !/cannot find symbol|does not exist/.test(line))
       expect(errors).toEqual([])
+    })
+  })
+
+  describe('cURL quoting', () => {
+    // A stand-in `curl` prints each argument NUL-terminated, so what the shell actually passes can be compared byte for byte.
+    const argsSeenBy = (command: string) => {
+      const run = spawnSync('sh', ['-c', `curl() { for a in "$@"; do printf '%s\\0' "$a"; done; }\n${command}`], { encoding: 'utf8', cwd: tmpdir() })
+      return { status: run.status, args: run.stdout.split('\0').slice(0, -1) }
+    }
+    it.skipIf(!has('sh', ['-c', 'true']))('passes every hostile URL, header and body through as one literal argument', () => {
+      const command = bySource(hostile).cURL
+      expect(spawnSync('sh', ['-n', '-c', command]).status).toBe(0)
+      const { status, args } = argsSeenBy(command)
+      expect(status).toBe(0)
+      expect(args).toEqual([
+        '--request', 'POST',
+        '--url', hostile.url,
+        '--header', `X-Hostile: ${hostile.headers['X-Hostile']}`,
+        '--header', 'Content-Type: application/json',
+        '--data', hostile.body,
+      ])
+    })
+    it.skipIf(!has('sh', ['-c', 'true']))('quotes each metacharacter on its own', () => {
+      for (const value of HOSTILE) {
+        const { status, args } = argsSeenBy(bySource({ method: 'GET', url: `https://x.test/${value}`, headers: {} }).cURL)
+        expect(status).toBe(0)
+        expect(args).toEqual(['--request', 'GET', '--url', `https://x.test/${value}`])
+      }
     })
   })
 

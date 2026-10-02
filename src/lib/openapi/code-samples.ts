@@ -22,21 +22,24 @@ export const SAMPLE_LANGUAGES = ['cURL', 'Python', 'JavaScript', 'PHP', 'Go', 'J
 
 const q = (value: string) => JSON.stringify(value)
 
+/** POSIX single-quote: nothing inside is expanded, globbed or split; `'` becomes `'\''`. */
+const sq = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
+
 export function buildCurlCommand(method: string, url: string, headers: Record<string, string>, body?: string, form?: Array<[string, string]>) {
   if (!url) {
     return []
   }
   const parts = [
-    `--url ${/[\s&?'"$`\\]/.test(url) ? `'${url.replace(/'/g, `'"'"'`)}'` : url}`,
+    `--url ${sq(url)}`,
     ...Object.entries(headers)
       .filter(([, value]) => Boolean(value))
-      .map(([key, value]) => `--header '${`${key}: ${value}`.replace(/'/g, `'"'"'`)}'`),
+      .map(([key, value]) => `--header ${sq(`${key}: ${value}`)}`),
   ]
   if (body) {
-    parts.push(`--data '${body.replace(/'/g, `'"'"'`)}'`)
+    parts.push(`--data ${sq(body)}`)
   }
   for (const [name, value] of form ?? []) {
-    parts.push(`--form '${`${name}=${value}`.replace(/'/g, `'"'"'`)}'`)
+    parts.push(`--form ${sq(`${name}=${value}`)}`)
   }
   return [`curl --request ${method.toUpperCase()}`, ...parts].map((line, index, all) => `${index ? '  ' : ''}${line}${index < all.length - 1 ? ' \\' : ''}`)
 }
