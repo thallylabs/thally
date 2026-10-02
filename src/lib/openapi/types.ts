@@ -117,6 +117,8 @@ export interface NormalizedOperation {
   requestBody?: NormalizedRequestBody
   responses: Array<NormalizedResponse>
   security: Array<Array<NormalizedSecurityRequirement>>
+  /** Authored `x-codeSamples` / `x-code-samples`; shown before the generated samples. */
+  codeSamples?: Array<{ label: string; source: string }>
   hidden?: boolean
   prefill: OperationPrefill
   /**

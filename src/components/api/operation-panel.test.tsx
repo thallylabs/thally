@@ -181,3 +181,13 @@ describe('OperationPanel $ref path parameter', () => {
     expect(html).not.toContain('%7Bid%7D')
   })
 })
+
+describe('OperationPanel code samples', () => {
+  it('offers a language dropdown with the seven live languages, cURL first', () => {
+    const html = renderToStaticMarkup(<OperationPanel operation={operationFrom(document)} />)
+    expect(html).toContain('aria-label="Select language"')
+    const options = [...html.matchAll(/<option[^>]*>([^<]+)<\/option>/g)].map((m) => m[1])
+    expect(options).toEqual(['cURL', 'Python', 'JavaScript', 'PHP', 'Go', 'Java', 'Ruby'])
+    expect(html).toContain('curl --request POST')
+  })
+})

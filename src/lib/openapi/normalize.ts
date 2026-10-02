@@ -208,6 +208,7 @@ function normalizeOperation(options: NormalizeOperationOptions): NormalizedOpera
     requestBody,
     responses,
     security,
+    codeSamples: normalizeCodeSamples(options.rawOperation['x-codeSamples'] ?? options.rawOperation['x-code-samples']),
     hidden: options.hidden,
     prefill: {
       path: parameterPrefill.path,
@@ -330,6 +331,16 @@ function buildBodyExample(content: NormalizedMediaType, resolveRef: (ref: string
     return first.value
   }
   return content.schema ? buildSchemaExample(content.schema, resolveRef, new Set<string>(), true) : undefined
+}
+
+// Authored `x-codeSamples` / `x-code-samples`: [{ lang, label?, source }].
+function normalizeCodeSamples(raw: unknown): Array<{ label: string; source: string }> {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((entry: RawObject) => {
+    const label = entry?.label ?? entry?.lang
+    const source = entry?.source
+    return typeof label === 'string' && label && typeof source === 'string' && source ? [{ label, source }] : []
+  })
 }
 
 function normalizeResponses(

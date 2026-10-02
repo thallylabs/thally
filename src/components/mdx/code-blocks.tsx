@@ -19,12 +19,12 @@ import {
   useState,
 } from 'react'
 import type { ComponentPropsWithoutRef, CSSProperties, ReactNode } from 'react'
-import { create } from 'zustand'
 
 import { useDocsCodeActions } from '@/components/docs/code-actions-provider'
 import { Icon } from '@/components/mdx/content-icon'
 import { Tag } from '@/components/ui/tag'
 import { Mermaid } from '@/components/mdx/mermaid'
+import { resolvePreferredLanguage, usePreferredLanguageStore } from '@/lib/preferred-language'
 
 const languageNames: Record<string, string> = {
   bash: 'Shell',
@@ -502,39 +502,6 @@ function CodeGroupPanels({
   }
 
   return <CodePanel {...props}>{children}</CodePanel>
-}
-
-const usePreferredLanguageStore = create<{
-  preferredLanguages: Array<string>
-  addPreferredLanguage: (language: string) => void
-}>()((set) => ({
-  preferredLanguages: [],
-  addPreferredLanguage: (language) =>
-    set((state) => ({
-      preferredLanguages: [
-        ...state.preferredLanguages.filter(
-          (preferredLanguage) => preferredLanguage !== language,
-        ),
-        language,
-      ],
-    })),
-}))
-
-function resolvePreferredLanguage(
-  availableLanguages: Array<string>,
-  preferredLanguages: Array<string>,
-) {
-  if (!availableLanguages.length) {
-    return undefined
-  }
-  const languageSet = new Set(availableLanguages)
-  for (let index = preferredLanguages.length - 1; index >= 0; index -= 1) {
-    const candidate = preferredLanguages[index]
-    if (languageSet.has(candidate)) {
-      return candidate
-    }
-  }
-  return availableLanguages[0]
 }
 
 function useTabGroupProps(availableLanguages: Array<string>) {

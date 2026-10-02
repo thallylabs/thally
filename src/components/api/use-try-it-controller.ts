@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from 'react'
 import type { NormalizedOperation } from '@/lib/openapi/types'
 
+export { buildCurlCommand } from '@/lib/openapi/code-samples'
+
 export const MANUAL_NO_SERVER = 'No server URL for this page. Set api.mdx.server in docs.json or use a full URL in the api frontmatter.'
 
 export interface TryItController {
@@ -26,7 +28,6 @@ export interface PreparedRequest {
   headers: Record<string, string>
   body?: string
   isServerConfigured: boolean
-  curlLines: Array<string>
 }
 
 export interface ResponsePayload {
@@ -75,14 +76,12 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
       body && mediaType && !Object.keys(headerParams).some((key) => key.toLowerCase() === 'content-type')
         ? { ...headerParams, 'Content-Type': mediaType }
         : headerParams
-    const curlLines = buildCurlCommand(operation.method, url, headers, body)
     return {
       url,
       method: operation.method,
       headers,
       body: canSendBody ? bodyValue : undefined,
       isServerConfigured,
-      curlLines,
     }
   }, [buildResolvedUrl, headerParams, operation.method, operation.requestBody?.contents, canSendBody, bodyValue, isServerConfigured])
 
@@ -152,20 +151,4 @@ export function useTryItController(operation: NormalizedOperation): TryItControl
     isSending,
     canSendBody,
   }
-}
-
-export function buildCurlCommand(method: string, url: string, headers: Record<string, string>, body?: string) {
-  if (!url) {
-    return []
-  }
-  const parts = [
-    `--url ${/[\s&?'"$`\\]/.test(url) ? `'${url.replace(/'/g, `'"'"'`)}'` : url}`,
-    ...Object.entries(headers)
-      .filter(([, value]) => Boolean(value))
-      .map(([key, value]) => `--header '${`${key}: ${value}`.replace(/'/g, `'"'"'`)}'`),
-  ]
-  if (body) {
-    parts.push(`--data '${body.replace(/'/g, `'"'"'`)}'`)
-  }
-  return [`curl --request ${method.toUpperCase()}`, ...parts].map((line, index, all) => `${index ? '  ' : ''}${line}${index < all.length - 1 ? ' \\' : ''}`)
 }

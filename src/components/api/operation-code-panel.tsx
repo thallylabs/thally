@@ -1,6 +1,8 @@
 import { CopyButton } from '@/components/api/copy-button'
 import type { TryItController } from '@/components/api/use-try-it-controller'
 import { ResponseBody } from '@/components/api/try-it-panel'
+import { buildCodeSamples } from '@/lib/openapi/code-samples'
+import { resolvePreferredLanguage, usePreferredLanguageStore } from '@/lib/preferred-language'
 import { cn } from '@/lib/utils'
 
 interface OperationCodePanelProps {
@@ -8,7 +10,11 @@ interface OperationCodePanelProps {
 }
 
 export function OperationCodePanel({ controller }: OperationCodePanelProps) {
-  const { preparedRequest, response } = controller
+  const { preparedRequest, response, operation } = controller
+  const { preferredLanguages, addPreferredLanguage } = usePreferredLanguageStore()
+  const samples = buildCodeSamples(preparedRequest, operation.codeSamples)
+  const language = resolvePreferredLanguage(samples.map((sample) => sample.label), preferredLanguages)
+  const sample = samples.find((candidate) => candidate.label === language)
 
   return (
     <div className="space-y-4">
@@ -18,18 +24,29 @@ export function OperationCodePanel({ controller }: OperationCodePanelProps) {
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-blue-400" />
             <span className="text-xs font-semibold uppercase tracking-wide text-foreground/60">Request</span>
-            <span className="text-[10px] uppercase tracking-widest text-foreground/40">cURL</span>
           </div>
-          <CopyButton
-            value={preparedRequest.curlLines.join('\n')}
-            disabled={!preparedRequest.isServerConfigured || !preparedRequest.curlLines.length}
-            className="flex items-center gap-1.5 rounded-[7px] px-2 py-1 text-xs text-foreground/60 transition hover:bg-muted hover:text-foreground disabled:opacity-40"
-          />
+          <div className="flex items-center gap-1">
+            {samples.length ? (
+              <select
+                aria-label="Select language"
+                value={language}
+                onChange={(event) => addPreferredLanguage(event.target.value)}
+                className="rounded-[7px] bg-transparent px-1 py-1 text-xs text-foreground/60 hover:text-foreground"
+              >
+                {samples.map((candidate) => (
+                  <option key={candidate.label} value={candidate.label}>{candidate.label}</option>
+                ))}
+              </select>
+            ) : null}
+            <CopyButton
+              value={sample?.source ?? ''}
+              disabled={!sample}
+              className="flex items-center gap-1.5 rounded-[7px] px-2 py-1 text-xs text-foreground/60 transition hover:bg-muted hover:text-foreground disabled:opacity-40"
+            />
+          </div>
         </div>
         <pre className="scrollbar-hide max-h-[280px] overflow-auto bg-transparent p-4 font-mono text-[0.82rem] leading-[1.65] text-foreground/80">
-          {preparedRequest.curlLines.length
-            ? preparedRequest.curlLines.join('\n')
-            : 'Configure a server URL to preview the generated curl command.'}
+          {sample ? sample.source : 'Configure a server URL to preview the generated code sample.'}
         </pre>
       </div>
 
