@@ -49,6 +49,9 @@ export function mdxToMarkdown(body: string, audience: ContentAudience = 'agents'
     .replace(/```[\s\S]*?```/g, stash) // fenced code blocks
     .replace(/(?<!`)`[^`\n]+`(?!`)/g, stash) // inline code
 
+  // A heading's `{/* #id */}` id comment is an MDX detail, not Markdown.
+  out = out.replace(/^( {0,3}#{1,6} .*?)[ \t]*\{\/\*\s*#\S+?\s*\*\/\}[ \t]*$/gm, '$1')
+
   // 2. Promote title-bearing components to headings (before the generic strip,
   //    or their titles would be discarded).
   out = out.replace(/<(?:Step|Tab|Accordion|Expandable)\b[^>]*>/g, (tag) => {

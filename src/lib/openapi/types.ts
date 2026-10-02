@@ -37,6 +37,12 @@ export interface ApiSpecConfig {
   defaultGroup?: string
   webhookGroup?: string
   operationOverrides?: Record<string, OperationOverride>
+  /**
+   * Bound to a hidden tab: pages whose `openapi:` frontmatter names the spec
+   * render its operations, but it gets no `/api/<id>/...` pages, search
+   * entries or sitemap URLs of its own.
+   */
+  pageOnly?: boolean
 }
 
 export interface ApiReferenceConfig {
@@ -93,6 +99,18 @@ export interface NormalizedSecurityRequirement {
   scopes: Array<string>
 }
 
+/** A credential the operation accepts, built from the spec's `securitySchemes`. */
+export interface NormalizedAuthScheme {
+  name: string
+  kind: 'bearer' | 'basic' | 'apiKey'
+  in: 'header' | 'query' | 'cookie'
+  /** Header, query or cookie name the credential travels in. */
+  paramName: string
+  description?: string
+  /** Token from docs.json `apiPlayground.credentials`, if configured; never a placeholder. */
+  prefill?: string
+}
+
 export interface NormalizedOperation {
   specId: string
   id: string
@@ -111,6 +129,9 @@ export interface NormalizedOperation {
   requestBody?: NormalizedRequestBody
   responses: Array<NormalizedResponse>
   security: Array<Array<NormalizedSecurityRequirement>>
+  authSchemes: Array<NormalizedAuthScheme>
+  /** Authored `x-codeSamples` / `x-code-samples`; shown before the generated samples. */
+  codeSamples?: Array<{ label: string; source: string }>
   hidden?: boolean
   prefill: OperationPrefill
   /**

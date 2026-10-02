@@ -194,7 +194,9 @@ function extractHeadingAnchors(content: string): Set<string> {
     if (heading) {
       // The runtime hashes rendered heading text. JSX badges and inline
       // anchors contribute their visible children, never their tag/props.
-      const base = slugify(renderedHeadingText(heading[1]))
+      // A trailing `{/* #id */}` is the id the runtime uses instead of the text's slug.
+      const explicit = /\{\/\*\s*#(\S+?)\s*\*\/\}$/.exec(heading[1])
+      const base = explicit?.[1] ?? slugify(renderedHeadingText(heading[1]))
       const occurrence = (occurrences.get(base) ?? 0) + 1
       occurrences.set(base, occurrence)
       anchors.add(occurrence === 1 ? base : `${base}-${occurrence}`)

@@ -32,4 +32,26 @@ describe('sidebar current page', () => {
     expect(html).toContain('href="/pnpr/configuration" aria-current="page"')
     expect(html).not.toContain('href="/pnpr" aria-current="page"')
   })
+
+  it('shows a page icon from frontmatter beside its sidebar label', () => {
+    const nodes = [
+      { type: 'page', item: { id: 'research', title: 'Research Index', href: '/research', icon: 'book-open' } },
+    ] as Array<NavigationNode>
+    const html = renderToStaticMarkup(<NavigationTree nodes={nodes} pathname="/" />)
+    expect(html).toContain('data-icon-name="book-open"')
+  })
+})
+
+describe('sidebar API method pills', () => {
+  it('prefixes operation pages with their HTTP method, abbreviating DELETE', () => {
+    const nodes = [
+      { type: 'page', item: { id: 'a', title: 'Scrape', href: '/scrape', method: 'POST' } },
+      { type: 'page', item: { id: 'b', title: 'Cancel Crawl', href: '/cancel', method: 'DELETE' } },
+      { type: 'page', item: { id: 'c', title: 'Errors', href: '/errors' } },
+    ] as Array<NavigationNode>
+    const html = renderToStaticMarkup(<NavigationTree nodes={nodes} pathname="/" />)
+    expect(html).toMatch(/>POST<\/span><span[^>]*>Scrape</)
+    expect(html).toMatch(/>DEL<\/span><span[^>]*>Cancel Crawl</)
+    expect(html.match(/font-mono/g)).toHaveLength(2)
+  })
 })

@@ -10,6 +10,7 @@ import { lookup } from 'node:dns/promises'
 import ipaddr from 'ipaddr.js'
 import { NextResponse, type NextRequest } from 'next/server'
 import { getApiOperationByKey } from '@/data/api-reference'
+import { getApiPlaygroundTimeoutMs } from '@/data/docs'
 import type { NormalizedOperation } from '@/lib/openapi/types'
 import { readBoundedJson } from '@/lib/http/bounded-json'
 
@@ -18,7 +19,6 @@ export const runtime = 'nodejs'
 const MAX_ENVELOPE_BYTES = 384 * 1024
 const MAX_UPSTREAM_BODY_BYTES = 256 * 1024
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
-const REQUEST_TIMEOUT_MS = 10_000
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
 const BLOCKED_HEADERS = new Set([
   'cf-connecting-ip',
@@ -65,10 +65,15 @@ interface TryItPayload {
   url?: unknown
   headers?: unknown
   body?: unknown
+  /** A binary (multipart) body, base64-encoded; used instead of `body`. */
+  bodyBase64?: unknown
 }
 
+// The relay carries the reader's API key and the API's answer: neither may be cached by a browser, CDN or proxy.
+const NO_STORE = { 'Cache-Control': 'no-store' }
+
 function jsonError(error: string, status: number) {
-  return NextResponse.json({ error }, { status })
+  return NextResponse.json({ error }, { status, headers: NO_STORE })
 }
 
 function escapeRegex(value: string): string {
@@ -145,7 +150,7 @@ function isCloudflareWorkerRuntime(): boolean {
 async function fetchPinnedToAddresses(
   target: URL,
   addresses: Array<ResolvedAddress>,
-  init: { method: string; headers: Record<string, string>; body?: string; signal: AbortSignal },
+  init: { method: string; headers: Record<string, string>; body?: string | Uint8Array; signal: AbortSignal },
 ): Promise<Response> {
   const transport = target.protocol === 'https:'
     ? await import('node:https')
@@ -286,6 +291,9 @@ export async function POST(request: NextRequest) {
   ) {
     return jsonError('Request body is too large', 413)
   }
+  if (payload.bodyBase64 !== undefined && typeof payload.bodyBase64 !== 'string') return jsonError('Invalid request body', 400)
+  const binaryBody = typeof payload.bodyBase64 === 'string' ? new Uint8Array(Buffer.from(payload.bodyBase64, 'base64')) : undefined
+  if (binaryBody && binaryBody.byteLength > MAX_UPSTREAM_BODY_BYTES) return jsonError('Request body is too large', 413)
 
   let target: URL
   try {
@@ -326,7 +334,7 @@ export async function POST(request: NextRequest) {
   if (!headers) return jsonError('Invalid request headers', 400)
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), getApiPlaygroundTimeoutMs())
   const startedAt = Date.now()
   try {
     // Cloudflare's `global_fetch_strictly_public` compatibility flag performs
@@ -338,10 +346,7 @@ export async function POST(request: NextRequest) {
     const requestInit = {
       method,
       headers,
-      body:
-        shouldIncludeBody(method) && typeof payload.body === 'string'
-          ? payload.body
-          : undefined,
+      body: !shouldIncludeBody(method) ? undefined : (binaryBody ?? (typeof payload.body === 'string' ? payload.body : undefined)),
       signal: controller.signal,
     }
     const response = isCloudflareWorkerRuntime()
@@ -358,7 +363,7 @@ export async function POST(request: NextRequest) {
       headers: Object.fromEntries(response.headers.entries()),
       body: textBody,
       duration: Date.now() - startedAt,
-    })
+    }, { headers: NO_STORE })
   } catch (error) {
     if (error instanceof Error && error.message === 'private_target') {
       return jsonError('Private or unsafe targets are not allowed', 403)

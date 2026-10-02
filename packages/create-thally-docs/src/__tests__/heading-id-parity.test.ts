@@ -30,13 +30,13 @@ async function brokenAnchorOutput(body: string, link: string): Promise<string> {
 describe('heading id parity between the migrator and thally check', () => {
   it.each(['1-add-firecrawl', '123', '429-responses', 'v1.2', 'a:b', 'café', '入门', '_x'])('resolves a link to the kept id %s', async (id) => {
     const body = normalizeMdx(`## Section {#${id}}\n\nContent.`, 'mintlify')
-    expect(body).toContain(`<a id="${id}"></a>`)
+    expect(body).toContain(`{/* #${id} */}`)
     expect(await brokenAnchorOutput(body, id)).not.toContain('Broken anchor')
   })
 
-  it.each(['a b', 'a"b', 'a<b', 'a&b'])('drops the rejected id %j so neither side resolves it', async (id) => {
+  it.each(['a b', 'a*/b'])('drops the rejected id %j so neither side resolves it', async (id) => {
     const body = normalizeMdx(`## Section {#${id}}\n\nContent.`, 'mintlify')
-    expect(body).not.toContain('<a id')
+    expect(body).not.toContain('#a')
     expect(await brokenAnchorOutput(body, 'nope')).toContain('Broken anchor')
   })
 })

@@ -7,7 +7,7 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, extname, relative } from 'node:path'
 
-import { navigationGateReason } from './mintlify-extras.js'
+import { navigationGateReason, playgroundDisplay } from './mintlify-extras.js'
 import { mintlifyLocalizedReference, pageIdFromReference, resolveWithin, trimEdgeSlashes } from './path.js'
 import type {
   MigrationDocsConfig,
@@ -145,37 +145,44 @@ export function addMintlifyHomepageRedirects(
   const homepage = config.tabs.filter((tab) => !tab.hidden)
     .map((tab) => firstPage([...(tab.pages ?? []), ...(tab.groups ?? [])]))
     .find(Boolean)
-  if (!homepage || homepage === 'introduction') return config
+  // Mintlify sends `/` to the first page even when that page is `introduction`, so the
+  // renderer's root alias for it is not served and links, canonicals and the sitemap agree on one URL.
+  if (!homepage) return config
   const redirects = [...(config.redirects ?? [])]
   const sources = new Set(redirects.map((redirect) => redirect.source.replace(/\/$/, '') || '/'))
   const roots = ['', ...(config.i18n?.locales ?? [])
     .filter((locale) => locale.code !== config.i18n?.defaultLocale)
+    .filter((locale) => homepage !== 'introduction' || pages.some((page) => page.locale === locale.code && page.navigationId === homepage))
     .map((locale) => locale.code)]
   for (const locale of roots) {
     const source = locale ? `/${locale}` : '/'
     if (sources.has(source)) continue
-    redirects.push({ source, destination: `${locale ? `/${locale}` : ''}/${homepage}`, permanent: false })
+    redirects.push({ source, destination: `${locale ? `/${locale}` : ''}/${homepage}`, permanent: true })
   }
   return { ...config, redirects }
 }
 
+/** Native names, as Mintlify's language picker shows them. */
 const LANGUAGE_LABELS: Record<string, string> = {
-  ar: 'Arabic',
-  de: 'German',
+  ar: 'العربية',
+  de: 'Deutsch',
   en: 'English',
-  es: 'Spanish',
-  fr: 'French',
-  hi: 'Hindi',
-  it: 'Italian',
-  ja: 'Japanese',
-  ko: 'Korean',
-  nl: 'Dutch',
-  pl: 'Polish',
-  pt: 'Portuguese',
-  ru: 'Russian',
-  tr: 'Turkish',
-  uk: 'Ukrainian',
-  zh: 'Chinese',
+  es: 'Español',
+  fr: 'Français',
+  hi: 'हिन्दी',
+  it: 'Italiano',
+  ja: '日本語',
+  ko: '한국어',
+  nl: 'Nederlands',
+  pl: 'Polski',
+  pt: 'Português',
+  'pt-BR': 'Português (BR)',
+  ru: 'Русский',
+  tr: 'Türkçe',
+  uk: 'Українська',
+  zh: '简体中文',
+  'zh-Hans': '简体中文',
+  'zh-Hant': '繁體中文',
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -795,10 +802,32 @@ function convertContainerToTabs(
 }
 
 function projectedTheme(value: unknown): MigrationDocsConfig['theme'] {
-  if (value === 'maple') return 'maple'
-  if (['aspen', 'luma', 'sequoia'].includes(String(value))) return 'sharp'
+  // Aspen rounds its sidebar highlight (12px) and search box like Maple, not like Sharp's 3px corners.
+  if (value === 'maple' || value === 'aspen') return 'maple'
+  if (['luma', 'sequoia'].includes(String(value))) return 'sharp'
   if (['almond', 'palm'].includes(String(value))) return 'minimal'
   return typeof value === 'string' ? 'default' : undefined
+}
+
+/**
+ * Mintlify `colors`: `primary` is the brand colour in light mode, `light` the
+ * one used in dark mode and `dark` the button fill. Three-digit hex is
+ * expanded because the renderer only accepts six digits.
+ */
+function projectedColors(value: unknown): MigrationDocsConfig['colors'] {
+  const colors = objectValue(value)
+  if (!colors) return undefined
+  const hex = (entry: unknown): string | undefined => {
+    const match = typeof entry === 'string' ? /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(entry.trim()) : null
+    if (!match) return undefined
+    const digits = match[1].length === 3 ? [...match[1]].map((digit) => digit + digit).join('') : match[1]
+    return `#${digits.toLowerCase()}`
+  }
+  const primary = hex(colors.primary)
+  const light = hex(colors.light) ?? primary
+  const dark = hex(colors.dark) ?? primary
+  if (!primary) return undefined
+  return { light: { accent: primary, primary: dark ?? primary }, dark: { accent: light ?? primary, primary: light ?? primary } }
 }
 
 function projectedNavbar(value: unknown): MigrationDocsConfig['navbar'] {
@@ -822,6 +851,7 @@ function projectedNavbar(value: unknown): MigrationDocsConfig['navbar'] {
           ? primaryValue.label
           : primaryValue.type === 'github' ? 'GitHub' : 'Get started',
         href: primaryHref,
+        ...(primaryValue.type === 'github' ? { type: 'github' as const } : {}),
       }
     : undefined
   return links.length > 0 || primary ? { ...(links.length > 0 ? { links } : {}), ...(primary ? { primary } : {}) } : undefined
@@ -934,10 +964,22 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
   const headingFont = projectedFont(objectValue(config.fonts)?.heading)
   const feedback = objectValue(config.feedback)
   const seo = objectValue(config.seo)
+  const contextualOptions = Array.isArray(objectValue(config.contextual)?.options) ? objectValue(config.contextual)!.options as Array<unknown> : []
+  const projectedContextual = contextualOptions.filter((option): option is string => typeof option === 'string' && ['copy', 'view', 'chatgpt', 'claude', 'perplexity'].includes(option))
+  const droppedContextual = contextualOptions.filter((option) => !projectedContextual.includes(option as string))
+  if (droppedContextual.length > 0) {
+    warnings.push({ code: 'unsupported-config', message: `contextual.options entries not supported by the page menu were dropped: ${droppedContextual.map((option) => typeof option === 'string' ? option : 'custom entry').join(', ')}.`, source: 'docs.json' })
+  }
+  const metatagEntries = Object.entries(objectValue(seo?.metatags) ?? {})
+    .filter((entry): entry is [string, string] => /^[\w:.-]+$/.test(entry[0]) && typeof entry[1] === 'string' && entry[1].length <= 1000)
+  const projectedMetatags = metatagEntries.length > 0 ? Object.fromEntries(metatagEntries) : undefined
   const iconLibrary = objectValue(config.icons)?.library
-  const projectedIconLibrary = ['lucide', 'fontawesome', 'tabler'].includes(String(iconLibrary))
-    ? String(iconLibrary) as 'lucide' | 'fontawesome' | 'tabler'
-    : undefined
+  // Mintlify's default icon library is Font Awesome when docs.json names none.
+  const projectedIconLibrary = iconLibrary === undefined
+    ? 'fontawesome'
+    : ['lucide', 'fontawesome', 'tabler'].includes(String(iconLibrary))
+      ? String(iconLibrary) as 'lucide' | 'fontawesome' | 'tabler'
+      : undefined
   const docsNavbar = projectedNavbar(config.navbar)
   const legacyRaw = legacyTopbarNavbar(config)
   const legacyNavbar = projectedNavbar(legacyRaw)
@@ -969,6 +1011,8 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
     : undefined
   return {
     ...(projectedTheme(config.theme) ? { theme: projectedTheme(config.theme) } : {}),
+    ...(projectedContextual.length > 0 ? { contextual: { options: projectedContextual } } : {}),
+    ...(projectedColors(config.colors) ? { colors: projectedColors(config.colors) } : {}),
     ...(projectedIconLibrary ? { icons: { library: projectedIconLibrary } } : {}),
     ...(bannerContent ? {
       banner: {
@@ -986,7 +1030,9 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
     ...(projectedNavigation ? { navbar: projectedNavigation } : {}),
     ...(projectedFooter(config.footer) ? { footer: projectedFooter(config.footer) } : {}),
     ...(bodyFont || headingFont ? { fonts: { ...(bodyFont ? { body: bodyFont } : {}), ...(headingFont ? { heading: headingFont } : {}) } } : {}),
-    ...(seo?.indexing === 'all' ? { seo: { indexing: 'all' } } : {}),
+    // Mintlify titles pages "<title> - <site name>" unless `og:title` overrides them,
+    // and its sitemap lists navigation pages only.
+    seo: { ...(seo?.indexing === 'all' ? { indexing: 'all' as const } : {}), titleSeparator: ' - ', sitemap: 'navigable', ...(projectedMetatags ? { metatags: projectedMetatags } : {}) },
     ...(typeof feedback?.thumbsRating === 'boolean' ? { feedback: { thumbsRating: feedback.thumbsRating } } : {}),
   }
 }
@@ -995,6 +1041,14 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
  * Mintlify's `api.mdx.server` / `api.mdx.auth` (defaults for manual `api:`
  * pages). Only well-formed values are kept; each dropped one is reported.
  */
+function projectedApi(config: Record<string, unknown>, warnings: Array<MigrationWarning>): Pick<MigrationDocsConfig, 'api'> {
+  const mdx = projectedApiMdx(config, warnings).api?.mdx
+  const raw = objectValue(objectValue(config.api)?.playground)?.display
+  const display = raw === undefined ? undefined : playgroundDisplay(raw, 'api.playground.display', (message) => warnings.push({ code: 'unsupported-config', message }))
+  if (!mdx && !display) return {}
+  return { api: { ...(mdx ? { mdx } : {}), ...(display ? { playground: { display } } : {}) } }
+}
+
 function projectedApiMdx(config: Record<string, unknown>, warnings: Array<MigrationWarning>): Pick<MigrationDocsConfig, 'api'> {
   const mdx = objectValue(objectValue(config.api)?.mdx)
   if (!mdx) return {}
@@ -1318,7 +1372,7 @@ export function projectMintlifyNavigation(
     if (!landing) return []
     const firstSegment = landing.split('/')[0]
     const prefix = firstSegment === label ? label : ''
-    return [{ label, prefix, href: `/${landing}`, ...(entry === defaultVersion ? { default: true } : {}) }]
+    return [{ label, prefix, href: `/${landing}`, ...(entry === defaultVersion ? { default: true } : {}), ...(entry.hidden === true ? { hidden: true } : {}) }]
   }) : []
   if (versions.length > 1) {
     tabs = annotateVersions(tabs)
@@ -1358,7 +1412,7 @@ export function projectMintlifyNavigation(
         } }
         : {}),
       ...projectedCompatibleConfig(config, warnings),
-      ...projectedApiMdx(config, warnings),
+      ...projectedApi(config, warnings),
       ...(i18n ? { i18n } : {}),
       ...(redirects.length > 0 ? { redirects } : {}),
     },

@@ -95,7 +95,8 @@ export function TableOfContents() {
   if (items.length === 0) return null
 
   return (
-    <aside className={cn('thally-docs-toc sticky top-[calc(var(--docs-header-height,60px)+22px)] max-h-[calc(100dvh-var(--docs-header-height,60px)-22px)] overflow-y-auto text-sm', layout.tocWidth)}>
+    // Mintlify's id: site scripts written for it append their own cards here.
+    <aside id="table-of-contents-content" className={cn('thally-docs-toc sticky top-[calc(var(--docs-header-height,60px)+22px)] max-h-[calc(100dvh-var(--docs-header-height,60px)-22px)] overflow-y-auto text-sm', layout.tocWidth)}>
       <p className="mb-0 text-sm font-medium leading-6 text-foreground">On this page</p>
       <ul className="border-l border-border">
         {items.map((item) => {

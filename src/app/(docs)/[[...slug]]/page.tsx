@@ -9,7 +9,9 @@ import { notFound } from 'next/navigation'
 import { ApiLayout } from '@/components/api/api-layout'
 import { ManualApiEndpoint } from '@/components/api/manual-api-endpoint'
 import { OperationPanel } from '@/components/api/operation-panel'
+import { resolvePlaygroundDisplay } from '@/lib/openapi/playground-display'
 import { DocHeader } from '@/components/docs/doc-header'
+import { DocPagination } from '@/components/docs/doc-pagination'
 import { DocLayout } from '@/components/docs/doc-layout'
 import { LocaleFallbackBanner } from '@/components/docs/locale-fallback-banner'
 import { LocaleStaleBanner } from '@/components/docs/locale-stale-banner'
@@ -17,7 +19,7 @@ import { LocalizedSidebarHydrator } from '@/components/layout/localized-sidebar-
 import { LocaleAvailabilityHydrator } from '@/components/layout/locale-availability'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { getApiOperationForFrontmatter } from '@/data/api-reference'
-import { ensureDocPublication, getDocEntries, isDocPublished, loadNavContext } from '@/data/docs'
+import { ensureDocPublication, getApiPlaygroundDisplay, getDocEntries, getSeoConfig, isDocPublished, loadNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { hasDocTranslation } from '@/lib/i18n/translation-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
@@ -32,6 +34,7 @@ import {
   getRepositoryI18nConfig,
 } from '@/lib/i18n/request'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
+import { pageFullTitle } from '@/lib/page-meta'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { getSiteUrl } from '@/lib/site-url'
@@ -100,9 +103,18 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     url: formatOgDisplayUrl(canonicalHref, siteUrl),
   })
   const isNoindex = doc.noindex || doc.hidden || !hasTranslation
+  const siteName = resolveBuildSiteConfig().name
+  const fullTitle = pageFullTitle({
+    title: doc.title,
+    ogTitle: doc.ogTitle,
+    siteName,
+    separator: getSeoConfig().titleSeparator,
+  })
+  const socialTitle = fullTitle ?? doc.title
+  const socialDescription = doc.ogDescription ?? doc.description
 
   return {
-    title: doc.title,
+    title: fullTitle ? { absolute: fullTitle } : doc.title,
     description: doc.description,
     ...(isNoindex
       ? { robots: { index: false, follow: !doc.noindex && !doc.hidden } }
@@ -115,15 +127,18 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       types: buildAgentAlternateLinks(canonicalHref, siteUrl),
     },
     openGraph: {
-      title: doc.title,
-      description: doc.description,
-      images: [{ url: ogImageUrl, width: 1200, height: 630 }],
+      title: socialTitle,
+      description: socialDescription,
+      url: `${siteUrl}${canonicalHref}`,
+      siteName,
+      type: 'website',
+      images: [doc.ogImage ? { url: doc.ogImage } : { url: ogImageUrl, width: 1200, height: 630 }],
     },
     twitter: {
       card: 'summary_large_image',
-      title: doc.title,
-      description: doc.description,
-      images: [ogImageUrl],
+      title: doc.twitterTitle ?? socialTitle,
+      description: doc.twitterDescription ?? socialDescription,
+      images: [doc.twitterImage ?? doc.ogImage ?? ogImageUrl],
     },
   }
 }
@@ -186,10 +201,32 @@ export default async function DocsPage({ params }: PageProps) {
     <LocalizedSidebarHydrator locale={route.locale} />
   ) : null
 
+  const playground = resolvePlaygroundDisplay(doc.playground, getApiPlaygroundDisplay())
   if (doc.openapi) {
     const operationNode = await getApiOperationForFrontmatter(doc.openapi)
-    if (!operationNode) notFound()
+    // A hidden or excluded operation is withheld on purpose (the build records
+    // it); one that cannot be resolved at all keeps the authored page, with a notice.
+    if (!operationNode && !isDocPublished(doc.id, route.isLocaleRoute ? route.locale : undefined)) notFound()
 
+    if (!operationNode) {
+      const Body = doc.component
+      return (
+        <>
+          {localeAvailability}
+          {localizedNavigation}
+          <JsonLdScript data={jsonLd} />
+          <DocLayout doc={doc} locale={contentLocale} navigation={nav}>
+            {localeNotice}
+            <p role="note" className="not-prose rounded-md border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
+              The API endpoint for this page could not be loaded, so only the page text is shown.
+            </p>
+            <Body />
+          </DocLayout>
+        </>
+      )
+    }
+
+    const Body = doc.component
     return (
       <>
         {localeAvailability}
@@ -198,11 +235,16 @@ export default async function DocsPage({ params }: PageProps) {
           <JsonLdScript data={jsonLd} />
           {localeNotice}
           <div className="not-prose">
-            <DocHeader doc={doc} />
+            <DocHeader doc={doc} eyebrow={nav.group} />
           </div>
           <ApiLayout>
-            <OperationPanel operation={operationNode.operation} />
+            <OperationPanel operation={operationNode.operation} showDescription={!doc.description} playground={playground} locale={contentLocale}>
+              <Body />
+            </OperationPanel>
           </ApiLayout>
+          <div className="not-prose">
+            <DocPagination prev={nav.prev} next={nav.next} />
+          </div>
         </div>
       </>
     )
@@ -217,7 +259,7 @@ export default async function DocsPage({ params }: PageProps) {
       <JsonLdScript data={jsonLd} />
       <DocLayout doc={doc} locale={contentLocale} navigation={nav}>
         {localeNotice}
-        {doc.manualApi ? <ManualApiEndpoint operation={doc.manualApi} /> : null}
+        {doc.manualApi ? <ManualApiEndpoint operation={doc.manualApi} playground={playground} locale={contentLocale} /> : null}
         <Content />
       </DocLayout>
     </>

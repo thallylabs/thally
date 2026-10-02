@@ -23,7 +23,36 @@ describe('standalone rich-content primitives', () => {
     )
     expect(markup).toContain('id="first"')
     expect(markup).toContain('Details')
-    expect(markup.match(/data-radix-collection-item/g)).toHaveLength(2)
+    expect(markup.match(/<summary/g)).toHaveLength(2)
+  })
+
+  it('renders an image-path icon on a Card as an img', () => {
+    const markup = renderToStaticMarkup(createElement(Card, { title: 'ChatGPT', icon: '/images/chatgpt.svg' }, 'x'))
+    expect(markup).toContain('<img src="/images/chatgpt.svg"')
+    expect(renderToStaticMarkup(createElement(Icon, { icon: 'https://cdn.example/a.png' }))).toContain('<img src="https://cdn.example/a.png"')
+  })
+
+  it('keeps collapsed accordion bodies and their headings in the server HTML', () => {
+    const markup = renderToStaticMarkup(
+      createElement(Accordion, { title: 'Closed' }, createElement('h3', { id: 'inside' }, 'Hidden heading'), 'Body text'),
+    )
+    expect(markup).toContain('<details')
+    expect(markup).not.toMatch(/<details[^>]* open/)
+    expect(markup).toContain('<h3 id="inside">Hidden heading</h3>')
+    expect(markup).toContain('Body text')
+  })
+
+  it('honours defaultOpen on a standalone accordion and inside a group', () => {
+    const standalone = renderToStaticMarkup(createElement(Accordion, { id: 'a', title: 'A', defaultOpen: true }, 'x'))
+    expect(standalone).toMatch(/<details[^>]* open/)
+    const grouped = renderToStaticMarkup(
+      createElement(AccordionGroup, null,
+        createElement(Accordion, { id: 'a', title: 'A', defaultOpen: true }, 'x'),
+        createElement(Accordion, { id: 'b', title: 'B' }, 'y'),
+      ),
+    )
+    expect(grouped.match(/<details[^>]* open/g)).toHaveLength(1)
+    expect(grouped).toMatch(/<details[^>]*id="a"[^>]* open|<details[^>]* open[^>]*id="a"/)
   })
 
   it('resolves unknown names through the configured icon library instead of a placeholder glyph', () => {
@@ -39,6 +68,15 @@ describe('standalone rich-content primitives', () => {
     // Names that cannot form a safe URL render nothing at all.
     expect(renderToStaticMarkup(createElement(Icon, { icon: 'not real!' }))).toBe('')
     expect(renderToStaticMarkup(createElement(Icon, { icon: '../etc' }))).toBe('')
+  })
+
+  it('maps Font Awesome Pro-only names to assets that exist instead of a blank mask', () => {
+    const browser = renderToStaticMarkup(createElement(Icon, { icon: 'browser' }))
+    expect(browser).toContain('--thally-icon-fontawesome:url(&quot;https://cdn.jsdelivr.net/npm/lucide-static@')
+    expect(browser).not.toContain('fontawesome-free@7.3.1/svgs/solid/browser.svg')
+    const read = renderToStaticMarkup(createElement(Icon, { icon: 'barcode-read' }))
+    expect(read).toContain('fontawesome-free@7.3.1/svgs/solid/barcode.svg')
+    expect(renderToStaticMarkup(createElement(Icon, { icon: 'code-change' }))).toContain('fontawesome-free@7.3.1/svgs/solid/code-compare.svg')
   })
 
   it('renders brand marks inline under every icon library', () => {
@@ -75,6 +113,20 @@ describe('standalone rich-content primitives', () => {
     expect(markup).toContain('stroke="#0ea5e9"')
     const unsafe = renderToStaticMarkup(createElement(Component, { title: 'Unsafe', href: 'javascript:alert(1)' }))
     expect(unsafe).not.toContain('href=')
+  })
+
+  it('never nests anchors when a linked card body contains a link', () => {
+    const markup = renderToStaticMarkup(createElement(Card, { title: 'Repo', href: '/repo' },
+      createElement('a', { href: 'https://github.com/x' }, 'GitHub Repo')))
+    expect(markup.match(/<a /g)).toHaveLength(2)
+    expect(markup).not.toMatch(/<a [^>]*>(?:(?!<\/a>)[\s\S])*<a /)
+    expect(markup).toContain('href="/repo"')
+    expect(markup).toContain('href="https://github.com/x"')
+  })
+
+  it('renders card titles as h2 headings', () => {
+    expect(renderToStaticMarkup(createElement(Card, { title: 'Plain' }))).toMatch(/<h2[^>]*>Plain<\/h2>/)
+    expect(renderToStaticMarkup(createElement(Card, { title: 'Linked', href: '/x' }))).toMatch(/<h2[^>]*><a [^>]*href="\/x"[^>]*>Linked<\/a><\/h2>/)
   })
 
   it('stacks the icon above the title and hides the arrow unless asked', () => {

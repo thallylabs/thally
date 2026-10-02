@@ -216,6 +216,59 @@ describe('config mapping', () => {
     expect(bundle.warnings.some((warning) => /topbarLinks entry without a valid name and url/.test(warning.message))).toBe(true)
   })
 
+  it('turns a styled navbar link into a button and keeps styles for markup a site script builds', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ ...nav, navbar: { links: [{ label: 'Docs', href: 'https://a.example/docs' }, { label: 'Sign Up', href: 'https://a.example/signin?x=1' }] } }),
+      'style.css': 'li.navbar-link a[href*="a.example/signin"] { background-color: #ff4d00; color: #fff; }\n#cta-widget { margin-top: 24px; }\n.cta-box { padding: 20px; }\n',
+      'cta.js': "const w = document.createElement('div'); w.id = 'cta-widget'; w.innerHTML = '<div class=\"cta-box\"></div>'\n",
+      ...intro,
+    })
+    expect(bundle.docsConfig.navbar?.links).toEqual([
+      { label: 'Docs', href: 'https://a.example/docs' },
+      { label: 'Sign Up', href: 'https://a.example/signin?x=1', button: { background: '#ff4d00', color: '#fff' } },
+    ])
+    const css = bundle.assets.filter((asset) => /style\.css$/.test(asset.path)).map((asset) => String(asset.content)).join('')
+    expect(css).toContain('#cta-widget')
+    expect(css).toContain('.cta-box')
+    expect(css).not.toContain('navbar-link')
+  })
+
+  it('keeps the contextual menu options Thally supports, in order, and warns about the rest', () => {
+    const bundle = site({ 'docs.json': JSON.stringify({ ...nav, contextual: { options: ['copy', 'view', 'chatgpt', 'cursor', 'claude'] } }), ...intro })
+    expect(bundle.docsConfig.contextual).toEqual({ options: ['copy', 'view', 'chatgpt', 'claude'] })
+    expect(bundle.warnings.some((warning) => /contextual\.options.*cursor/.test(warning.message))).toBe(true)
+  })
+
+  it('labels languages with their native names like the Mintlify picker', () => {
+    const lang = (language: string) => ({ language, pages: ['intro'] })
+    const bundle = site({ 'docs.json': JSON.stringify({ navigation: { languages: [lang('en'), lang('es'), lang('ja'), lang('zh'), lang('pt-BR')] } }), ...intro })
+    expect(bundle.docsConfig.i18n?.locales.map((locale) => locale.label)).toEqual(['English', 'Español', '日本語', '简体中文', 'Português (BR)'])
+  })
+
+  it('carries seo.metatags through as page meta tags', () => {
+    const bundle = site({ 'docs.json': JSON.stringify({ ...nav, seo: { metatags: { 'google-site-verification': 'abc123', 'bad name': 'x', count: 5 } } }), ...intro })
+    expect(bundle.docsConfig.seo?.metatags).toEqual({ 'google-site-verification': 'abc123' })
+  })
+
+  it('maps the rounded Aspen theme to Maple and keeps Sharp for the square ones', () => {
+    const theme = (name: string) => site({ 'docs.json': JSON.stringify({ ...nav, theme: name }), ...intro }).docsConfig.theme
+    expect([theme('aspen'), theme('maple'), theme('luma')]).toEqual(['maple', 'maple', 'sharp'])
+  })
+
+  it('redirects / to the introduction page like Mintlify does', () => {
+    const bundle = site({ 'docs.json': JSON.stringify({ navigation: { pages: ['introduction', 'guide'] } }), 'introduction.mdx': page('Intro'), 'guide.mdx': page('Guide') })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/', destination: '/introduction', permanent: true })
+  })
+
+  it('maps Mintlify colors to per-mode brand colors with six-digit hex', () => {
+    const bundle = site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: '#F60', light: '#fff', dark: '#000000' } }), ...intro })
+    expect(bundle.docsConfig.colors).toEqual({
+      light: { accent: '#ff6600', primary: '#000000' },
+      dark: { accent: '#ffffff', primary: '#ffffff' },
+    })
+    expect(site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: 'red' } }), ...intro }).docsConfig.colors).toBeUndefined()
+  })
+
   it('rejects script-bearing and control-character urls in legacy topbar entries', () => {
     const bundle = site({ 'mint.json': JSON.stringify({ ...nav,
       topbarLinks: [{ name: 'X', url: 'javascript:alert(1)' }, { name: 'Y', url: ' JaVaScRiPt:alert(1)' }, { name: 'Z', url: 'java\tscript:alert(1)' }, { name: 'D', url: 'data:text/html,x' }, { name: 'Ok', url: '/relative' }],
@@ -227,7 +280,7 @@ describe('config mapping', () => {
   it('maps a github topbarCtaButton like the docs.json github primary', () => {
     const legacy = site({ 'mint.json': JSON.stringify({ ...nav, topbarCtaButton: { type: 'github', url: 'https://github.com/a/b' } }), ...intro })
     const current = site({ 'docs.json': JSON.stringify({ ...nav, navbar: { primary: { type: 'github', href: 'https://github.com/a/b' } } }), ...intro })
-    expect(legacy.docsConfig.navbar).toEqual({ primary: { label: 'GitHub', href: 'https://github.com/a/b' } })
+    expect(legacy.docsConfig.navbar).toEqual({ primary: { label: 'GitHub', href: 'https://github.com/a/b', type: 'github' } })
     expect(legacy.docsConfig.navbar).toEqual(current.docsConfig.navbar)
   })
 
@@ -916,6 +969,38 @@ describe('OpenAPI specs referenced by gated pages', () => {
     })
     expect(specPaths(bundle)).toEqual(['openapi/openapi.json'])
     expect(codes(bundle, 'gated-page').some((item) => /shared with access-restricted pages/.test(item.message))).toBe(true)
+  })
+})
+
+describe('OpenAPI specs named only by page frontmatter', () => {
+  const spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { '/x': { get: { summary: 'SECRETSUMMARY' } } } })
+  const files = (extra: Record<string, string>) => ({
+    'docs.json': JSON.stringify({ navigation: { pages: ['pub', 's'] } }),
+    'api-reference/spec.json': spec,
+    ...extra,
+  })
+  const specPaths = (bundle: MigrationBundle) => bundle.assets.map((asset) => asset.path).filter((path) => path.endsWith('spec.json'))
+
+  it('migrates the spec of a published page and binds it to a hidden tab', () => {
+    const bundle = site(files({
+      'pub.mdx': page('Pub', 'openapi: "/api-reference/spec.json GET /x"\n'),
+      's.mdx': page('S'),
+    }))
+    expect(specPaths(bundle)).toEqual(['openapi/spec.json'])
+    expect(bundle.pages.find((entry) => entry.id === 'pub')?.openapi).toBe('openapi/spec.json GET /x')
+    expect(bundle.docsConfig.tabs.filter((tab) => tab.api)).toEqual([
+      expect.objectContaining({ hidden: true, api: { source: 'openapi/spec.json' } }),
+    ])
+    expect(codes(bundle, 'unsupported-config').some((item) => /not referenced from docs.json/.test(item.message))).toBe(false)
+  })
+
+  it('keeps a spec out of the published output when only a withheld page names it', () => {
+    const bundle = site(files({
+      'pub.mdx': page('Pub'),
+      's.mdx': page('S', 'groups: [admin]\nopenapi: "/api-reference/spec.json GET /x"\n'),
+    }))
+    expect(specPaths(bundle)).toEqual([])
+    expect(JSON.stringify(bundle.docsConfig)).not.toContain('spec.json')
   })
 })
 

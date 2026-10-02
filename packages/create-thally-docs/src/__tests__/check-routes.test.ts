@@ -89,6 +89,17 @@ describe('thally check reader routes', () => {
     expect(result.output).not.toContain('Broken anchor')
   })
 
+  it('resolves a link to the id a heading carries in a trailing {/* #id */} comment', async () => {
+    const result = await checkLinks([
+      '## Primeros pasos {/* #get-started */}',
+      '## Scrape + Interact {/* #scrape-+-interact */}',
+      '[Start](#get-started) [Plus](#scrape-+-interact) [Slug](#primeros-pasos)',
+    ].join('\n'))
+    expect(result.output).not.toContain('"#get-started"')
+    expect(result.output).not.toContain('"#scrape-+-interact"')
+    expect(result.output).toContain('"#primeros-pasos"')
+  })
+
   it('uses visible text for headings containing JSX badges and anchors', async () => {
     const result = await checkLinks([
       '## Initialize instance <Badge title="1 > 0">Enterprise</Badge>',

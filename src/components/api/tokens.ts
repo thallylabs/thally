@@ -60,3 +60,18 @@ export function getMethodToken(method: string) {
   }
 }
 
+export function statusColorClass(code: string) {
+  if (code.startsWith('2')) return 'text-green-600 dark:text-green-400'
+  if (code.startsWith('3')) return 'text-sky-600 dark:text-sky-400'
+  if (code.startsWith('4')) return 'text-amber-600 dark:text-amber-400'
+  if (code.startsWith('5')) return 'text-rose-600 dark:text-rose-400'
+  return 'text-foreground'
+}
+
+export function statusUnderlineClass(code: string) {
+  if (code.startsWith('2')) return 'bg-green-500'
+  if (code.startsWith('3')) return 'bg-sky-500'
+  if (code.startsWith('4')) return 'bg-amber-500'
+  if (code.startsWith('5')) return 'bg-rose-500'
+  return 'bg-accent'
+}

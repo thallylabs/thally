@@ -5,7 +5,7 @@ import { getContentIndex, loadContentIndex, type ContentIndex } from '@/lib/cont
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { listRuntimeSources, readRuntimeSource, runtimeSourceExists } from '@/lib/runtime-sources'
 import { getDocsJsonConfig, getDocsJsonConfigRevision } from '@/lib/docs-json-config'
-import { resolveIconLibrary, type IconLibrary } from '@/lib/icon-library'
+import { resolveIconLibrary, type IconLibrary, type IconStyle } from '@/lib/icon-library'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { SUPPORTED_LOCALE_OPTIONS } from '@/lib/i18n/config'
 import { pageApiMetadata } from '@/lib/openapi/page-api'
@@ -42,9 +42,18 @@ export interface DocEntry {
   manualTarget?: ManualApiTarget
   /** Synthetic operation for a manual `api:` page (header + Try It); see manual-operation.ts. */
   manualApi?: NormalizedOperation
+  /** Page-level `playground` frontmatter; see `resolvePlaygroundDisplay`. */
+  playground?: string
   noindex?: boolean
   hidden?: boolean
   mode?: DocPageMode
+  /** Social/SEO overrides migrated from `og:*` / `twitter:*` frontmatter. */
+  ogTitle?: string
+  ogDescription?: string
+  ogImage?: string
+  twitterTitle?: string
+  twitterDescription?: string
+  twitterImage?: string
 }
 
 
@@ -79,6 +88,8 @@ export interface DocsNavigationVersion {
   prefix: string
   href: string
   default?: boolean
+  /** Hidden from the version switcher; its pages stay reachable by URL. */
+  hidden?: boolean
 }
 
 export interface DocsNavigationShortcut {
@@ -103,6 +114,11 @@ export interface NavigationItem {
   title: string
   href: string
   badge?: string
+  /** HTTP method of the page's `openapi:` operation, shown as a pill in the sidebar. */
+  method?: string
+  /** Sidebar icon from page frontmatter (name, or an image path/URL). */
+  icon?: string
+  iconType?: IconStyle
   description?: string
   /** Authored group ancestry, used by breadcrumbs without flattening the visible sidebar. */
   groupPath?: Array<string>
@@ -185,11 +201,14 @@ export interface DocsJsonNavLink {
   label: string
   href: string
   type?: 'github'
+  /** Render the link as a filled button, for a source site that styled it that way. */
+  button?: { background: string; color?: string }
 }
 
 export interface DocsJsonNavbar {
   links?: Array<DocsJsonNavLink>
-  primary?: { label: string; href: string } | null
+  /** `type: 'github'` shows the repository name and its star count instead of a labelled button. */
+  primary?: { label: string; href: string; type?: 'github' } | null
   /** Public assets for a portable, source-owned logo fallback. */
   /** Explicit null keeps a source site's text-only wordmark. */
   logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string } | null
@@ -210,6 +229,12 @@ export interface DocsJsonFooter {
 export interface DocsJsonSeo {
   /** "navigable" (default) excludes hidden pages; "all" indexes them too */
   indexing?: 'navigable' | 'all'
+  /** Joins a page title and the site name in `<title>`; unset keeps the `title | site` template. */
+  titleSeparator?: string
+  /** "navigable" lists only pages shown in navigation in the sitemap, like Mintlify; default lists every indexable page. */
+  sitemap?: 'navigable'
+  /** Extra `<meta name content>` tags for every page, e.g. a search console verification token. */
+  metatags?: Record<string, string>
 }
 
 export interface DocsJsonScript {
@@ -251,6 +276,8 @@ interface DocsJsonConfig {
       server?: string | Array<string>
       auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string }
     }
+    /** Mintlify `api.playground.display`: interactive (default), simple, none or auth. */
+    playground?: { display?: string }
   }
   navigation?: {
     display?: 'tabs' | 'dropdown'
@@ -260,6 +287,10 @@ interface DocsJsonConfig {
   redirects?: Array<DocsJsonRedirect>
   banner?: DocsJsonBanner
   navbar?: DocsJsonNavbar
+  /** Page-menu entries (`copy`, `view`, `chatgpt`, `claude`, `perplexity`) in display order. */
+  contextual?: { options?: Array<string> }
+  /** Hex brand colours per mode (six digits); `primary` fills buttons, `accent` links and highlights. */
+  colors?: Partial<Record<'light' | 'dark', { primary?: string; accent?: string }>>
   /** Public favicon fallback when no managed or admin asset is configured. */
   favicon?: { light: string; dark?: string }
   footer?: DocsJsonFooter
@@ -313,6 +344,8 @@ interface DocsJsonConfig {
   /** Credentials applied to the API Try It playground from OpenAPI security scheme names. */
   apiPlayground?: {
     credentials?: Record<string, string>
+    /** How long the Try It relay waits for the API, in milliseconds. Default 60000, clamped to 1000-120000. */
+    timeoutMs?: number
   }
   /** Built-in analytics dashboard at /admin (requires THALLY_ADMIN_PASSWORD env). */
   admin?: {
@@ -382,6 +415,8 @@ interface FrontmatterData {
   title?: string
   /** Optional compact label used only in sidebar and previous/next navigation. */
   navTitle?: string
+  icon?: string
+  iconType?: IconStyle
   description?: string
   descriptionPlacement?: 'body'
   badge?: string
@@ -483,6 +518,11 @@ function slugifyId(value: string) {
     .replace(/\//g, '-')
 }
 
+/** The collection id a docs.json tab gets in the sidebar; hidden-tab API specs are keyed by it too. */
+export function tabCollectionId(tab: string) {
+  return slugifyId(tab) || tab.toLowerCase()
+}
+
 const KEYWORD_STOPWORDS = new Set([
   'the',
   'a',
@@ -525,10 +565,22 @@ function deriveKeywords(title: string, slug: Array<string>): Array<string> {
   return Array.from(words).slice(0, 12)
 }
 
+/**
+ * A migrated Mintlify site redirects its root to `/introduction`. Link that page
+ * by the URL it is served at instead of the redirecting alias, so no click costs a hop.
+ */
+function servedRootHref(href: string): string {
+  const root = href.replace(/\/$/, '') || '/'
+  const served = `${root === '/' ? '' : root}/introduction`
+  return docsConfig().redirects?.some((redirect) => (redirect.source.replace(/\/$/, '') || '/') === root && redirect.destination === served)
+    ? served
+    : href
+}
+
 function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: FrontmatterData): DocEntry {
   const fm = indexedFrontmatter ?? readFrontmatter(pageId)
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
-  const href = slug.length ? `/${slug.join('/')}` : '/'
+  const href = slug.length ? `/${slug.join('/')}` : servedRootHref('/')
   const title = fm.title ?? deriveTitleFromSlug(pageId)
   const api = pageApiMetadata(fm)
   return {
@@ -682,6 +734,20 @@ export function getNavigablePageIds(): Set<string> {
   return new Set(projectNavigationContract(docsConfig()).authoredPageIds.filter((id) => isDocPublished(id)))
 }
 
+/** Page IDs shown in visible navigation, so not hidden tabs, versions, groups or orphans. */
+export function getVisiblePageIds(): Set<string> {
+  return new Set(projectNavigationContract(docsConfig()).visiblePageIds.filter((id) => isDocPublished(id)))
+}
+
+/**
+ * Page IDs search may return on a versioned site: the visible (current) version's navigation.
+ * Older versions stay reachable by URL but must not outrank current pages. Null when the site has
+ * no versions, where every indexable page stays searchable.
+ */
+export function getCurrentVersionPageIds(): Set<string> | null {
+  return docsConfig().navigation?.versions?.length ? getVisiblePageIds() : null
+}
+
 // ---------------------------------------------------------------------------
 // Public query functions
 // ---------------------------------------------------------------------------
@@ -785,12 +851,16 @@ function resolveNavItem(
   const fm = readFrontmatter(pageId, locale)
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
   const baseHref = slug.length ? `/${slug.join('/')}` : '/'
-  const href = locale ? (baseHref === '/' ? `/${locale}` : `/${locale}${baseHref}`) : baseHref
+  const operation = pageApiMetadata(fm).openapi
+  const href = servedRootHref(locale ? (baseHref === '/' ? `/${locale}` : `/${locale}${baseHref}`) : baseHref)
   return {
     id: slugifyId(pageId) || 'introduction',
     title: fm.navTitle ?? fm.title ?? deriveTitleFromSlug(pageId),
     href,
     badge: fm.badge,
+    ...(operation ? { method: operation.webhook ? 'HOOK' : operation.method.toUpperCase() } : {}),
+    ...(typeof fm.icon === 'string' && fm.icon ? { icon: fm.icon } : {}),
+    ...(fm.iconType ? { iconType: fm.iconType } : {}),
     description: fm.description,
     ...(groupPath?.length ? { groupPath } : {}),
   }
@@ -856,7 +926,7 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
     // when their version is active or its entire route renders an empty shell.
     .filter((tab) => !tab.hidden || Boolean(tab.version && config.navigation?.versions?.some((version) => version.label === tab.version)))
     .map((tab) => {
-      const id = slugifyId(tab.tab) || tab.tab.toLowerCase()
+      const id = tabCollectionId(tab.tab)
       const groups = tab.groups ?? []
       const groupSections = groups.flatMap((group, index) => {
         const tree = buildNavigationGroup(group, [index], [], locale)
@@ -1035,8 +1105,8 @@ export interface NavContext {
 export function getNavContext(pageId: string, locale?: string): NavContext {
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
   const baseHref = slug.length ? `/${slug.join('/')}` : '/'
-  const href = locale && locale !== docsConfig().i18n?.defaultLocale
-    ? `/${locale}${baseHref === '/' ? '' : baseHref}` : baseHref
+  const href = servedRootHref(locale && locale !== docsConfig().i18n?.defaultLocale
+    ? `/${locale}${baseHref === '/' ? '' : baseHref}` : baseHref)
 
   const { prev, next } = getPrevNextLinks(href)
   const breadcrumb = getBreadcrumbs(href)
@@ -1089,6 +1159,20 @@ export function getApiMdxConfig(): ApiMdxConfig {
     apiMdxCache.set(config, cached)
   }
   return cached
+}
+
+/** Raw docs.json `api.playground.display`; resolve it with `resolvePlaygroundDisplay`. */
+export function getApiPlaygroundDisplay(): unknown {
+  return docsConfig().api?.playground?.display
+}
+
+export const TRY_IT_DEFAULT_TIMEOUT_MS = 60_000
+
+export function getApiPlaygroundTimeoutMs(): number {
+  const configured = docsConfig().apiPlayground?.timeoutMs
+  return typeof configured === 'number' && Number.isFinite(configured)
+    ? Math.min(120_000, Math.max(1_000, Math.round(configured)))
+    : TRY_IT_DEFAULT_TIMEOUT_MS
 }
 
 export function getApiPlaygroundCredentials(): Record<string, string> {
@@ -1234,6 +1318,16 @@ export function getNavigationShortcuts(): Array<DocsNavigationShortcut> {
       && (/^\/(?!\/)[^\s\\]*$/.test(item.href) || /^https?:\/\//i.test(item.href)
         || /^(?:mailto|tel):[^\s]+$/i.test(item.href))),
   )
+}
+
+/** docs.json `contextual.options`: which page-menu entries show, in order. Undefined keeps every entry. */
+export function getContextualOptions(): Array<string> | undefined {
+  return docsConfig().contextual?.options
+}
+
+/** Brand colours per mode; `/api/brand.css` from the managed dashboard still wins. */
+export function getBrandColors(): DocsJsonConfig['colors'] {
+  return docsConfig().colors
 }
 
 export function getSeoConfig(): DocsJsonSeo {

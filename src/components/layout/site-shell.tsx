@@ -11,7 +11,8 @@ import { layout, shell } from '@/config/layout'
 import type { SidebarCollection, DocsJsonNavbar, DocsJsonFooter, NavigationPresentation, DocsNavigationVersion, DocsNavigationShortcut } from '@/data/docs'
 import { useSidebarCollectionsStore } from './sidebar-store'
 import { usePathname } from 'next/navigation'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { localizeCollectionHrefs } from '@/components/layout/localize-collections'
 import { SiteNameProvider } from '@/components/layout/use-site-name'
 import type { SiteIdentity } from '@/lib/site-config'
 
@@ -125,7 +126,13 @@ export function SiteShell({
   const hydratedCollections = useSidebarCollectionsStore(
     (state) => state.collectionsByScope[scopeKey],
   )
-  const collections = hydratedCollections ?? initialCollections
+  const routeLocale = currentLocale
+  const isSecondaryLocale = Boolean(i18nConfig) && routeLocale !== i18nConfig?.defaultLocale
+  const localizedInitialCollections = useMemo(
+    () => (isSecondaryLocale ? localizeCollectionHrefs(initialCollections, routeLocale) : initialCollections),
+    [initialCollections, isSecondaryLocale, routeLocale],
+  )
+  const collections = hydratedCollections ?? localizedInitialCollections
   const routeOwningVersions = navigationVersions.filter((version) => collections.some((collection) =>
     collection.version === version.label && collectionContainsPath(collection, pathname, currentPath, localeRoot)))
   const activeVersion = navigationVersions.find((version) => version.prefix

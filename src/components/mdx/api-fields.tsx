@@ -10,6 +10,7 @@
 
 import { useId, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
+import { useApiLabels } from '@/components/api/api-locale'
 import { cn } from '@/lib/utils'
 import type { ReactNode } from 'react'
 
@@ -38,6 +39,7 @@ export function ResponseField({
   post = [],
   children,
 }: ResponseFieldProps) {
+  const t = useApiLabels()
   return (
     <section className="not-prose border-b border-border/70 py-5 last:border-0">
       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5">
@@ -51,13 +53,13 @@ export function ResponseField({
         )}
         {required && (
           <span className="text-[0.7rem] font-semibold text-rose-600 dark:text-rose-400">
-            required
+            {t('required')}
           </span>
         )}
-        {deprecated && <span className="text-[0.7rem] font-semibold text-amber-700 dark:text-amber-300">deprecated</span>}
+        {deprecated && <span className="text-[0.7rem] font-semibold text-amber-700 dark:text-amber-300">{t('deprecated')}</span>}
         {defaultValue !== undefined && (
           <span className="text-xs text-foreground/50">
-            default <code className="font-mono text-foreground/70">{defaultValue}</code>
+            {t('default')} <code className="font-mono text-foreground/70">{defaultValue}</code>
           </span>
         )}
       </div>
@@ -96,6 +98,7 @@ const locationStyles: Record<ParamLocation, string> = {
 }
 
 export function ParamField({ name, type, required, deprecated, body, query, path, header, default: defaultValue, placeholder, children }: ParamFieldProps) {
+  const t = useApiLabels()
   const location: ParamLocation = path ? 'path' : query ? 'query' : header ? 'header' : 'body'
   const locatedName = [path, query, header, body].find((value): value is string => typeof value === 'string' && value.length > 0)
   const fieldName = locatedName ?? name ?? 'parameter'
@@ -113,13 +116,13 @@ export function ParamField({ name, type, required, deprecated, body, query, path
         )}
         {required && (
           <span className="text-[0.7rem] font-semibold text-rose-600 dark:text-rose-400">
-            required
+            {t('required')}
           </span>
         )}
-        {deprecated && <span className="text-[0.7rem] font-semibold text-amber-700 dark:text-amber-300">deprecated</span>}
+        {deprecated && <span className="text-[0.7rem] font-semibold text-amber-700 dark:text-amber-300">{t('deprecated')}</span>}
         {defaultValue !== undefined && (
           <span className="text-xs text-foreground/50">
-            default: <code className="font-mono">{defaultValue}</code>
+            {t('default')}: <code className="font-mono">{defaultValue}</code>
           </span>
         )}
         {placeholder ? <span className="text-xs text-foreground/50">placeholder <code className="font-mono text-foreground/70">{placeholder}</code></span> : null}
@@ -141,7 +144,8 @@ interface ExpandableProps {
   children?: ReactNode
 }
 
-export function Expandable({ title = 'Show child attributes', defaultOpen = false, children }: ExpandableProps) {
+export function Expandable({ title, defaultOpen = false, children }: ExpandableProps) {
+  const t = useApiLabels()
   const [open, setOpen] = useState(defaultOpen)
   const contentId = useId()
   return (
@@ -154,7 +158,7 @@ export function Expandable({ title = 'Show child attributes', defaultOpen = fals
         className="group flex items-center gap-1.5 rounded-md py-1 text-xs font-medium text-accent transition-colors hover:text-accent/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         <ChevronRight className={cn('h-3.5 w-3.5 transition-transform duration-200', open && 'rotate-90')} aria-hidden="true" />
-        {title}
+        {title ?? t('showChildAttributes')}
       </button>
       <div
         id={contentId}

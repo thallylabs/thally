@@ -149,6 +149,12 @@ describe('Mintlify referenced directory landings', () => {
 })
 
 describe('Mintlify navigation projection', () => {
+  it('defaults icons to Font Awesome like Mintlify, unless the source names a library', () => {
+    const nav = { pages: ['introduction'] }
+    expect(projectMintlifyNavigation({ navigation: nav }).docsConfig.icons).toEqual({ library: 'fontawesome' })
+    expect(projectMintlifyNavigation({ navigation: nav, icons: { library: 'lucide' } }).docsConfig.icons).toEqual({ library: 'lucide' })
+  })
+
   it('preserves interleaved root pages and nested groups in authored order', () => {
     const result = projectMintlifyNavigation({
       navigation: {
@@ -272,6 +278,21 @@ describe('Mintlify navigation projection', () => {
     expect(result.docsConfig.tabs[1]?.href).toBeUndefined()
     expect(result.docsConfig.tabs[2]?.href).toBe('/v1')
     expect(result.docsConfig.tabs[3]?.href).toBeUndefined()
+  })
+
+  it('keeps a version hidden flag so the switcher can omit it', () => {
+    const result = projectMintlifyNavigation({
+      navigation: {
+        versions: [
+          { version: 'v2', default: true, tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['v2/introduction'] }] }, { tab: 'API', groups: [{ group: 'Ref', pages: ['v2/api'] }] }] },
+          { version: 'v1', hidden: true, tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['v1/introduction'] }] }, { tab: 'API', groups: [{ group: 'Ref', pages: ['v1/api'] }] }] },
+        ],
+      },
+    })
+    expect(result.docsConfig.navigation?.versions).toEqual([
+      { label: 'v2', prefix: 'v2', href: '/v2/introduction', default: true },
+      { label: 'v1', prefix: 'v1', href: '/v1/introduction', hidden: true },
+    ])
   })
 
   it('projects global language anchors as sidebar shortcuts', () => {

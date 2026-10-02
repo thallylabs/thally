@@ -126,7 +126,9 @@ function sizeStyle(size: number | string | undefined): CSSProperties | undefined
  * Render a named icon. Unknown names resolve through the configured library
  * and simply render nothing when the library has no such glyph.
  */
-export function Icon({ icon, src, iconType = 'outline', className, color, size, 'data-content-icon-tone': tone }: IconProps) {
+export function Icon({ icon, src: srcProp, iconType = 'outline', className, color, size, 'data-content-icon-tone': tone }: IconProps) {
+  // Mintlify accepts an image path or URL anywhere an icon name is expected.
+  const src = srcProp ?? (icon && /^(\/(?!\/)|https:\/\/)/i.test(icon) ? icon : undefined)
   if (src && safeIconSource(src)) {
     const resolvedSize = size ?? 20
     return (

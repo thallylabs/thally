@@ -393,6 +393,7 @@ export function buildManualOperation(input: BuildManualOperationInput): Normaliz
     parameters,
     responses: [],
     security: [],
+    authSchemes: [],
     prefill,
     manualPage: input.pageId,
     ...(input.locale ? { manualLocale: input.locale } : {}),

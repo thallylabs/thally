@@ -4,13 +4,30 @@
  */
 
 import type { ApiReferenceConfig, ApiSpecConfig } from '@/lib/openapi/types'
-import { getSidebarCollections } from '@/data/docs'
+import { getSidebarCollections, tabCollectionId } from '@/data/docs'
 import type { DocsJsonApiConfig } from '@/data/docs'
+import { getDocsJsonConfig } from '@/lib/docs-json-config'
 import { getSiteUrl } from '@/lib/site-url'
+
+/**
+ * Specs bound to hidden tabs. They never show in navigation, but a page whose
+ * `openapi:` frontmatter names one (Mintlify allows a spec referenced only
+ * from page frontmatter) resolves against them. Hidden tabs already served as
+ * a version's tabs are excluded: getSidebarCollections returns those.
+ */
+function hiddenApiCollections(visibleIds: Set<string>): Array<{ id: string; label: string; api: DocsJsonApiConfig; pageOnly?: boolean }> {
+  const tabs = getDocsJsonConfig<{ tabs?: Array<{ tab: string; displayLabel?: string; hidden?: boolean; api?: DocsJsonApiConfig }> }>().tabs ?? []
+  return tabs.flatMap((tab) => {
+    const id = tabCollectionId(tab.tab)
+    return tab.hidden && tab.api && !visibleIds.has(id) ? [{ id, label: tab.displayLabel ?? tab.tab, api: tab.api, pageOnly: true }] : []
+  })
+}
 
 function buildApiReferenceConfig(): ApiReferenceConfig {
   const collections = getSidebarCollections()
-  const apiCollections = collections.filter((c) => c.api)
+  const visibleApi = collections.filter((c) => c.api)
+  // Hidden-tab specs come after every visible one, so the visible first spec stays `default`.
+  const apiCollections = [...visibleApi, ...hiddenApiCollections(new Set(collections.map((c) => c.id)))]
 
   if (apiCollections.length === 0) {
     return { defaultSpecId: 'default', specs: [] }
@@ -24,11 +41,11 @@ function buildApiReferenceConfig(): ApiReferenceConfig {
   return {
     defaultSpecId: 'default',
     specs: apiCollections.map((collection, index) =>
-      buildSpecFromDocsJson(collection.api!, index === 0 ? 'default' : collection.id, index === 0 ? 'API Reference' : collection.label)),
+      buildSpecFromDocsJson(collection.api!, index === 0 ? 'default' : collection.id, index === 0 ? 'API Reference' : collection.label, 'pageOnly' in collection)),
   }
 }
 
-function buildSpecFromDocsJson(api: DocsJsonApiConfig, id: string, label: string): ApiSpecConfig {
+function buildSpecFromDocsJson(api: DocsJsonApiConfig, id: string, label: string, pageOnly = false): ApiSpecConfig {
   const isUrl = api.source.startsWith('http://') || api.source.startsWith('https://')
   return {
     id,
@@ -40,6 +57,7 @@ function buildSpecFromDocsJson(api: DocsJsonApiConfig, id: string, label: string
     defaultGroup: api.defaultGroup,
     webhookGroup: api.webhookGroup,
     operationOverrides: api.overrides,
+    ...(pageOnly ? { pageOnly: true } : {}),
   }
 }
 

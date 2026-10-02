@@ -3,7 +3,7 @@
 import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
-import { escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
+import { mintlifyHeadingSlug, escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -118,14 +118,14 @@ describe('normalizeMdx', () => {
 
   it('preserves an explicit heading anchor in a Mintlify page', () => {
     const output = normalizeMdx('## Install help {#smartscreen}', 'mintlify')
-    expect(output).toContain('<a id="smartscreen"></a>')
+    expect(output).toBe('## Install help {/* #smartscreen */}')
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
 
   it('preserves numeric-leading Mintlify heading anchors', () => {
     const output = normalizeMdx('## Responses 429 {#429-responses}\n\n### Add Firecrawl {#1-add-firecrawl}', 'mintlify')
-    expect(output).toContain('<a id="429-responses"></a>')
-    expect(output).toContain('<a id="1-add-firecrawl"></a>')
+    expect(output).toContain('## Responses 429 {/* #429-responses */}')
+    expect(output).toContain('### Add Firecrawl {/* #1-add-firecrawl */}')
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
 
@@ -587,7 +587,6 @@ describe("heading id preservation via normalizeMdx (an explicit `{#id}` anchor i
   })
 
   it('runs for every platform, not just docusaurus — the syntax means the same thing everywhere (e.g. live crewAI/Mintlify docs)', () => {
-    expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'mintlify')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
     expect(normalizeMdx('### Timeouts {#Notes-Timeouts}', 'fern')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
     expect(normalizeMdx('### Timeouts {#Notes-Timeouts}')).toBe('<a id="Notes-Timeouts"></a>\n### Timeouts')
   })
@@ -636,6 +635,89 @@ describe('multi-line renames (fenced/inline code masked, whole body rewritten)',
     // A comment-like fragment inside a fenced block must not be converted either.
     const fencedComment = '```html\n<!--\n  example comment\n-->\n```'
     expect(normalizeMdx(fencedComment)).toBe(fencedComment)
+  })
+})
+
+describe('Mintlify heading ids', () => {
+  // Pairs read from the ids docs.firecrawl.dev serves.
+  it.each([
+    ['Persistent Profiles with Scrape + Interact', 'persistent-profiles-with-scrape-+-interact'],
+    ['Team management & roles', 'team-management-&-roles'],
+    ['/scrape endpoint', '/scrape-endpoint'],
+    ['1. /agent Endpoint', '1-/agent-endpoint'],
+    ['Node.js (Playwright)', 'node-js-playwright'],
+    ['X (x.com) billing', 'x-x-com-billing'],
+    ['batch_scrape.started', 'batch_scrape-started'],
+    ['Day 2 - FIRE-1 Agent', 'day-2-fire-1-agent'],
+    ['Day 7 \u2013 Integration Day', 'day-7-\u2013-integration-day'],
+    ['Migration: /extract \u2192 /agent', 'migration-/extract-\u2192-/agent'],
+    ['Firecrawl search returns titles, and URLs \u2014 and more.', 'firecrawl-search-returns-titles-and-urls-\u2014-and-more'],
+    ['What\u2019s Not Included', 'what\u2019s-not-included'],
+    ['4. Done!', '4-done'],
+    ['What can Firecrawl do?', 'what-can-firecrawl-do'],
+    ['Introducing LLMs.txt Generator Endpoint (Alpha) \u{1F4C3}', 'introducing-llms-txt-generator-endpoint-alpha-'],
+  ])('slugs %j as %s', (text, id) => {
+    expect(mintlifyHeadingSlug(text)).toBe(id)
+  })
+
+  it('marks only the headings whose id differs from the one Thally would generate', () => {
+    const output = normalizeMdx([
+      '## Quick start',
+      '## Scrape + Interact',
+      '### Formats (`formats`)',
+      '## Team **roles** & [links](/x)',
+      '```md',
+      '## Not + a heading',
+      '```',
+    ].join('\n'), 'mintlify')
+    expect(output).toBe([
+      '## Quick start',
+      '## Scrape + Interact {/* #scrape-+-interact */}',
+      '### Formats (`formats`)',
+      '## Team **roles** & [links](/x) {/* #team-roles-&-links */}',
+      '```md',
+      '## Not + a heading',
+      '```',
+    ].join('\n'))
+    expect(normalizeMdx(output, 'mintlify')).toBe(output)
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('typesets straight quotes in heading text and ids as Mintlify does', () => {
+    const output = normalizeMdx([
+      "## What's Not Included",
+      '### Example: "Find the founders" and `it\'s`',
+      "## Les cl\u00e9s d'API {#api-keys}",
+    ].join('\n'), 'mintlify')
+    expect(output).toBe([
+      '## What\u2019s Not Included {/* #what\u2019s-not-included */}',
+      '### Example: \u201cFind the founders\u201d and `it\'s` {/* #example-\u201cfind-the-founders\u201d-and-its */}',
+      '## Les cl\u00e9s d\u2019API {/* #api-keys */}',
+    ].join('\n'))
+  })
+
+  it('leaves other platforms alone', () => {
+    expect(normalizeMdx('## Scrape + Interact', 'docusaurus')).toBe('## Scrape + Interact')
+  })
+})
+
+describe('Mintlify explicit heading ids stay on the heading', () => {
+  it('keeps a translated heading\'s English id as the heading id, not as a separate anchor', () => {
+    const output = normalizeMdx('## Primeros pasos {#get-started}\n\nTexto.', 'mintlify')
+    expect(output).toBe('## Primeros pasos {/* #get-started */}\n\nTexto.')
+    expect(output).not.toContain('<a id')
+  })
+
+  it('keeps the id on the heading when the page is normalized a second time', () => {
+    const once = normalizeMdx('## Primeros pasos {#get-started}', 'mintlify')
+    expect(normalizeMdx(once, 'mintlify')).toBe(once)
+  })
+
+  it('keeps ids with characters an HTML anchor would reject, and still compiles', () => {
+    const output = normalizeMdx('## Team {#team-management-&-roles}\n\n## Plus {#scrape-+-interact}', 'mintlify')
+    expect(output).toContain('## Team {/* #team-management-&-roles */}')
+    expect(output).toContain('## Plus {/* #scrape-+-interact */}')
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
 })
 

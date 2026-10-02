@@ -185,6 +185,27 @@ describe('linked source anchors', () => {
     expect(bundle.pages.find((page) => page.id === 'settings')?.body).toContain('<a id="api-params"></a>\n## APIParams')
   })
 
+  it('keeps a Mintlify page\'s explicit heading id on the heading when it also imports a component', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-heading-id-'))
+    mkdirSync(join(root, 'snippets'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['es/intro'] },
+    }))
+    writeFileSync(join(root, 'snippets/widget.jsx'), 'export const Widget = () => <div>Hi</div>\n')
+    mkdirSync(join(root, 'es'))
+    writeFileSync(join(root, 'es/intro.mdx'), [
+      '---', 'title: Intro', '---', '',
+      'import { Widget } from "/snippets/widget.jsx";', '',
+      '<Widget />', '',
+      '## Primeros pasos {#get-started}', '',
+      '[Ir](#get-started)',
+    ].join('\n'))
+    const body = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).pages.find((page) => page.id === 'es/intro')?.body
+    expect(body).toContain('## Primeros pasos {/* #get-started */}')
+    expect(body).not.toContain('<a id="get-started">')
+  })
+
   it('maps case-different fragments onto numbered ids of repeated headings', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-repeated-headings-'))
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
@@ -300,7 +321,7 @@ describe('Mintlify repository migration', () => {
       defaultLocale: 'en',
       locales: [
         { code: 'en', label: 'English' },
-        { code: 'es', label: 'Spanish' },
+        { code: 'es', label: 'Español' },
       ],
     })
     expect(bundle.docsConfig.tabs[0]).toMatchObject({
@@ -655,6 +676,7 @@ describe('Mintlify repository migration', () => {
       redirects: [
         { source: '/guides', destination: '/guides/introduction', permanent: false },
         { source: '/management', destination: '/management/runs', permanent: false },
+        { source: '/', destination: '/introduction', permanent: true },
       ],
     })
     expect(bundle.pages.map((page) => page.id)).toEqual([
@@ -883,7 +905,7 @@ describe('Mintlify repository migration', () => {
       prefixed: '---\ntitle: Prefixed\nopenapi: "specs/openapi-b.yaml GET /widgets/{id}"\n---\n',
       quoted: '---\ntitle: Quoted\nopenapi: "\'./specs/openapi-b.yaml\' get /widgets/{id}"\n---\n',
       abs: '---\ntitle: Abs\nopenapi: "/openapi-a.json POST /things"\n---\n',
-      unknown: '---\ntitle: Unknown\nopenapi: "stray.yaml GET /x"\n---\n',
+      unknown: '---\ntitle: Unknown\nopenapi: "missing.yaml GET /x"\n---\n',
       manual: '---\ntitle: Manual\napi: "POST https://httpbin.org/anything"\nauthMethod: Bearer\n---\n<ParamField body="a" type="string" />\n',
       bad: '---\ntitle: Bad\napi: [1, 2]\nauthMethod: oauth\n---\n',
     }
@@ -895,8 +917,8 @@ describe('Mintlify repository migration', () => {
       expect(openapi('prefixed')).toBe('openapi/openapi-b.yaml GET /widgets/{id}')
       expect(openapi('quoted')).toBe('openapi/openapi-b.yaml get /widgets/{id}')
       expect(openapi('abs')).toBe('openapi/openapi-a.json POST /things')
-      expect(openapi('unknown')).toBe('stray.yaml GET /x')
-      expect(bundle.warnings.some((w) => /"stray.yaml".*not migrated/.test(w.message))).toBe(true)
+      expect(openapi('unknown')).toBe('missing.yaml GET /x')
+      expect(bundle.warnings.some((w) => /"missing.yaml".*not migrated/.test(w.message))).toBe(true)
       expect(bundle.docsConfig.tabs.filter((tab) => tab.api).map((tab) => tab.api?.source)).toEqual(['openapi/openapi-a.json', 'openapi/openapi-b.yaml'])
     })
 
@@ -908,6 +930,27 @@ describe('Mintlify repository migration', () => {
       const rendered = renderMigrationFiles(bundle).find((file) => file.path.endsWith('manual.mdx'))
       expect(String(rendered?.content)).toContain('api: "POST https://httpbin.org/anything"')
       expect(String(rendered?.content)).toContain('authMethod: "bearer"')
+    })
+
+    it('maps api.playground.display and the page-level playground frontmatter', () => {
+      const bundle = apiFixture(
+        {
+          ...pages,
+          quiet: '---\ntitle: Quiet\nopenapi: "POST /things"\nplayground: none\n---\n',
+          gated: '---\ntitle: Gated\nopenapi: "POST /things"\nplayground: auth\n---\n',
+          odd: '---\ntitle: Odd\nopenapi: "POST /things"\nplayground: fancy\n---\n',
+        },
+        { ...twoSpecNav, api: { mdx: twoSpecNav.api.mdx, playground: { display: 'simple' } } },
+      )
+      expect(bundle.docsConfig.api).toEqual({ mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } }, playground: { display: 'simple' } })
+      const page = (id: string) => bundle.pages.find((candidate) => candidate.id === id)
+      expect(page('quiet')?.playground).toBe('none')
+      // No viewer sign-in exists here, so Mintlify's "auth" shows no playground rather than showing it to everyone.
+      expect(page('gated')?.playground).toBe('simple')
+      expect(page('odd')?.playground).toBeUndefined()
+      const rendered = renderMigrationFiles(bundle).find((file) => file.path.endsWith('quiet.mdx'))
+      expect(String(rendered?.content)).toContain('playground: "none"')
+      expect(bundle.warnings.map((w) => w.message).join('\n')).toContain('playground')
     })
 
     it('drops invalid api frontmatter and api.mdx values with warnings', () => {
@@ -1669,6 +1712,16 @@ describe('Mintlify repository migration', () => {
     expect(paths).toContain('images/referenced.png')
     expect(paths).toContain('images/unreferenced.png')
     expect(paths.indexOf('images/referenced.png')).toBeLessThan(paths.indexOf('images/unreferenced.png'))
+  })
+
+  it('resolves a page-relative image from the site root when the page folder lacks it', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'images', 'cloud.png'), 'cloud-bytes')
+    writeFileSync(join(root, 'en', 'introduction.mdx'), '---\ntitle: Relative\n---\n\n![Cloud](./images/cloud.png)')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.find((page) => page.id === 'introduction')?.body).toContain('](/images/cloud.png)')
   })
 
   it('migrates .wav, .ogg, and .m4a audio assets', () => {

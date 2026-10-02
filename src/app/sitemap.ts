@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next'
-import { loadDocEntries } from '@/data/docs'
+import { getSeoConfig, getVisiblePageIds, loadDocEntries } from '@/data/docs'
 import { getAllApiOperationNodes } from '@/data/api-reference'
 
 import { getRequestOrigin } from '@/lib/cloud-link/request'
@@ -11,15 +11,19 @@ import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = await getRequestOrigin()
-  const docEntries = (await loadDocEntries()).filter((doc) => !doc.hidden && !doc.noindex)
+  const allEntries = await loadDocEntries()
+  const visibleIds = getSeoConfig().sitemap === 'navigable' ? getVisiblePageIds() : null
+  const docEntries = allEntries.filter((doc) => !doc.hidden && !doc.noindex && (!visibleIds || visibleIds.has(doc.id)))
   const apiNodes = await getAllApiOperationNodes()
   const i18n = await getEffectiveI18nConfig()
 
   const docPages: MetadataRoute.Sitemap = (
     await Promise.all(
       docEntries.map(async (doc) => {
+        // A migrated Mintlify site redirects `/` to `/introduction`; list the page's own URL.
+        const href = visibleIds && doc.id === 'introduction' ? '/introduction' : doc.href
         const availableI18n = await getContentI18nConfig(doc.slug, i18n)
-        const languages = buildLocaleAlternates(baseUrl, doc.href, availableI18n)
+        const languages = buildLocaleAlternates(baseUrl, href, availableI18n)
         return Promise.all(availableI18n.locales.map(async (locale) => {
           const translation = locale.code === i18n.defaultLocale
             ? null
@@ -30,7 +34,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
             ? doc.lastUpdated
             : translation?.lastUpdated
           return {
-            url: `${baseUrl}${localizedPath(doc.href, locale.code, i18n.defaultLocale)}`,
+            url: `${baseUrl}${localizedPath(href, locale.code, i18n.defaultLocale)}`,
             changeFrequency: 'weekly' as const,
             priority: doc.href === '/' ? 1.0 : 0.7,
             alternates: { languages },
@@ -49,12 +53,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.6,
   }))
 
-  const staticPages: MetadataRoute.Sitemap = [
-    {
-      url: `${baseUrl}/changelog`,
-      changeFrequency: 'weekly',
-      priority: 0.5,
-    },
+  const staticPages: MetadataRoute.Sitemap = visibleIds ? [] : [
+    // /changelog is only served when the site has a changelog page.
+    ...(allEntries.some((doc) => doc.id === 'changelog')
+      ? [{ url: `${baseUrl}/changelog`, changeFrequency: 'weekly' as const, priority: 0.5 }]
+      : []),
     {
       url: `${baseUrl}/llms.txt`,
       changeFrequency: 'weekly',

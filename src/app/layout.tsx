@@ -8,9 +8,11 @@ import { Providers } from '@/app/providers'
 import { siteConfig } from '@/data/site'
 import {
   getBannerConfig,
+  getBrandColors,
   getContentIconTone,
   getCustomScriptsConfig,
   getFontsConfig,
+  getSeoConfig,
   getStylesheetsConfig,
   getIntegrationsConfig,
   getStructuralTheme,
@@ -131,6 +133,7 @@ export async function generateMetadata(): Promise<Metadata> {
       template: `%s | ${effectiveSite.name}`,
     },
     description: effectiveSite.description,
+    other: getSeoConfig().metatags,
     // Derived from the request-bound site config so a fork never inherits
     // the baseline's marketing keywords.
     keywords: [effectiveSite.name, `${effectiveSite.name} documentation`, 'docs'],
@@ -250,6 +253,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const structuralTheme = getStructuralTheme()
   const { appearance, background } = getBuildSiteAppearance()
   const hasBackground = Boolean(background.image || background.imageDark || background.decoration !== 'none')
+  const runtimeBrandCss = brandRuntimeCss({ colors: getBrandColors(), ...(hasBackground ? { background } : {}) })
   const contentIconTone = getContentIconTone()
   const iconLibrary = getBuildIconLibrary()
   const themeVars = THEME_VARS[structuralTheme] ?? ''
@@ -303,7 +307,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         )}
         {/* Brand palette (default) — a :root rule so /api/brand.css can override it */}
         <style>{`:root { ${brandCss} }`}</style>
-        {hasBackground && <style>{brandRuntimeCss({ background })}</style>}
+        {runtimeBrandCss && <style>{runtimeBrandCss}</style>}
         {/* CSS variable overrides for custom fonts */}
         {fontOverrides && <style>{`:root { ${fontOverrides} }`}</style>}
         {/* CSS variable overrides for structural theme (radius, sidebar, nav tabs) */}

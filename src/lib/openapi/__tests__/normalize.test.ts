@@ -536,3 +536,79 @@ describe('normalizeSpec pathological schemas', () => {
     expect(Date.now() - started).toBeLessThan(5000)
   })
 })
+
+describe('normalizeSpec parameter $ref resolution', () => {
+  const document = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    paths: {
+      '/things/{thingId}': {
+        parameters: [
+          { $ref: '#/components/parameters/ThingId' },
+          { name: 'shared', in: 'query', description: 'path level', schema: { type: 'string' } },
+        ],
+        get: {
+          responses: { '200': { description: 'ok' } },
+          parameters: [{ $ref: '#/components/parameters/Trace' }, { name: 'shared', in: 'query', description: 'operation level', schema: { type: 'string' } }],
+        },
+      },
+    },
+    webhooks: {
+      thingHook: {
+        post: {
+          responses: { '200': { description: 'ok' } },
+          parameters: [{ $ref: '#/components/parameters/Signature' }],
+        },
+      },
+    },
+    components: {
+      parameters: {
+        ThingId: { name: 'thingId', in: 'path', required: true, schema: { type: 'string' } },
+        Trace: { name: 'X-Trace', in: 'header', schema: { type: 'string' } },
+        Signature: { name: 'X-Signature', in: 'header', required: true, schema: { type: 'string' } },
+      },
+    },
+  }
+
+  it('resolves $ref parameters at path and operation level, operation overriding path by name+in', () => {
+    const normalized = normalizeSpec({ config: { ...baseConfig, source: { type: 'inline', document } }, document } as ResolvedSpec)
+    const get = normalized.operations.find((op) => !op.isWebhook)
+    expect(get?.parameters.path.map((p) => p.name)).toEqual(['thingId'])
+    expect(get?.parameters.header.map((p) => p.name)).toEqual(['X-Trace'])
+    expect(get?.parameters.query).toHaveLength(1)
+    expect(get?.parameters.query[0]?.description).toBe('operation level')
+    expect(get?.prefill.path).toHaveProperty('thingId')
+    const hook = normalized.operations.find((op) => op.isWebhook)
+    expect(hook?.parameters.header.map((p) => p.name)).toEqual(['X-Signature'])
+  })
+})
+
+describe('normalizeSpec request body sample', () => {
+  const body = (schema: unknown, extra: Record<string, unknown> = {}) => {
+    const document = {
+      openapi: '3.1.0',
+      info: { title: 'T', version: '1' },
+      paths: { '/x': { post: { responses: {}, requestBody: { content: { 'application/json': { schema, ...extra } } } } } },
+    }
+    const op = normalizeSpec({ config: { ...baseConfig, source: { type: 'inline', document } }, document } as ResolvedSpec).operations[0]
+    return JSON.parse(op.prefill.body ?? 'null')
+  }
+
+  it('uses spec values (examples, default, enum, const, first oneOf variant) instead of empty placeholders', () => {
+    expect(body({ type: 'object' }, { examples: { a: { value: { name: 'Blog' } } } })).toEqual({ name: 'Blog' })
+    expect(
+      body({
+        type: 'object',
+        properties: {
+          url: { type: 'string' },
+          kind: { const: 'crawl.page' },
+          mode: { type: 'string', enum: ['fast', 'slow'] },
+          wait: { type: 'integer', default: 5 },
+          min: { type: 'integer', minimum: 1 },
+          age: { type: 'integer' },
+          action: { oneOf: [{ type: 'object', properties: { type: { type: 'string', enum: ['wait'] } } }, { type: 'string' }] },
+        },
+      }),
+    ).toEqual({ url: '<string>', kind: 'crawl.page', mode: 'fast', wait: 5, min: 2, age: 123, action: { type: 'wait' } })
+  })
+})

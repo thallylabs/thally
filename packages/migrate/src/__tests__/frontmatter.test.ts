@@ -66,3 +66,17 @@ describe('parseMarkdownPage', () => {
     expect(page?.description).toContain('Body text.')
   })
 })
+
+describe('parseMarkdownPage description', () => {
+  const parse = (frontmatter: string) =>
+    parseMarkdownPage({ id: 'p', raw: `---\ntitle: P\n${frontmatter}---\n\nFirst paragraph of the body.\n`, source: 'p.mdx' })
+
+  it('derives a description from the body for ordinary pages', () => {
+    expect(parse('')?.description).toBe('First paragraph of the body.')
+  })
+
+  it('does not derive one from the body for an openapi page, but keeps an authored one', () => {
+    expect(parse('openapi: "openapi.json POST /scrape"\n')?.description).toBe('')
+    expect(parse('openapi: "openapi.json POST /scrape"\ndescription: Authored\n')?.description).toBe('Authored')
+  })
+})

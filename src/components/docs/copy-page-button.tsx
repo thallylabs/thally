@@ -16,6 +16,7 @@ function llmPrompt(absoluteMdUrl: string): string {
 }
 
 interface HandoffItem {
+  id: string
   label: string
   icon: ReactNode
   href: (mdUrl: string) => string
@@ -23,25 +24,31 @@ interface HandoffItem {
 
 const HANDOFFS: Array<HandoffItem> = [
   {
+    id: 'chatgpt',
     label: 'Open in ChatGPT',
     icon: <Sparkles className="h-3.5 w-3.5" />,
     href: (u) => `https://chatgpt.com/?q=${encodeURIComponent(llmPrompt(u))}`,
   },
   {
+    id: 'claude',
     label: 'Open in Claude',
     icon: <Sparkles className="h-3.5 w-3.5" />,
     href: (u) => `https://claude.ai/new?q=${encodeURIComponent(llmPrompt(u))}`,
   },
   {
+    id: 'perplexity',
     label: 'Open in Perplexity',
     icon: <Sparkles className="h-3.5 w-3.5" />,
     href: (u) => `https://www.perplexity.ai/search?q=${encodeURIComponent(llmPrompt(u))}`,
   },
 ]
 
+/** What the menu offers when docs.json has no `contextual.options`. */
+const DEFAULT_OPTIONS = ['copy', 'view', 'chatgpt', 'claude', 'perplexity']
+
 type CopyState = 'idle' | 'copied' | 'failed'
 
-export function CopyPageButton() {
+export function CopyPageButton({ options = DEFAULT_OPTIONS }: { options?: ReadonlyArray<string> }) {
   const pathname = usePathname()
   const [copyState, setCopyState] = useState<CopyState>('idle')
   const [open, setOpen] = useState(false)
@@ -98,7 +105,7 @@ export function CopyPageButton() {
 
   return (
     <div ref={containerRef} className="relative flex h-[34px] shrink-0 items-stretch rounded-[9px] border border-border">
-      <Button
+      {options.includes('copy') ? <Button
         variant="ghost"
         size="sm"
         onClick={handleCopy}
@@ -111,16 +118,17 @@ export function CopyPageButton() {
           <Copy className="h-3.5 w-3.5" />
         )}
         {copyState === 'copied' ? 'Copied!' : copyState === 'failed' ? "Couldn't copy" : 'Copy page'}
-      </Button>
+      </Button> : null}
       <Button
         variant="ghost"
         size="sm"
         onClick={() => setOpen((v) => !v)}
-        className="rounded-l-none border-l border-border/50 px-1.5 text-muted-foreground hover:text-foreground"
+        className={cn('px-1.5 text-muted-foreground hover:text-foreground', options.includes('copy') ? 'rounded-l-none border-l border-border/50' : 'gap-1.5 pl-2.5 text-xs')}
         aria-label="More page actions"
         aria-haspopup="menu"
         aria-expanded={open}
       >
+        {options.includes('copy') ? null : 'Page actions'}
         <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} />
       </Button>
 
@@ -129,30 +137,37 @@ export function CopyPageButton() {
           role="menu"
           className="absolute right-0 top-full z-50 mt-1.5 w-56 overflow-hidden rounded-xl border border-border bg-background p-1 shadow-lg"
         >
-          <a
-            href={markdownPath(pathname)}
-            target="_blank"
-            rel="noreferrer"
-            role="menuitem"
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-foreground/80 transition hover:bg-muted/60 hover:text-foreground"
-          >
-            <FileText className="h-3.5 w-3.5" /> View as Markdown
-          </a>
-          <div className="my-1 h-px bg-border/60" />
-          {HANDOFFS.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              role="menuitem"
-              onClick={() => handoff(item)}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs text-foreground/80 transition hover:bg-muted/60 hover:text-foreground"
-            >
-              {item.icon}
-              <span className="flex-1">{item.label}</span>
-              <ExternalLink className="h-3 w-3 text-foreground/40" />
-            </button>
-          ))}
+          {options.flatMap((id) => {
+            if (id === 'view') {
+              return [(
+                <a
+                  key={id}
+                  href={markdownPath(pathname)}
+                  target="_blank"
+                  rel="noreferrer"
+                  role="menuitem"
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-foreground/80 transition hover:bg-muted/60 hover:text-foreground"
+                >
+                  <FileText className="h-3.5 w-3.5" /> View as Markdown
+                </a>
+              )]
+            }
+            const item = HANDOFFS.find((entry) => entry.id === id)
+            return item ? [(
+              <button
+                key={id}
+                type="button"
+                role="menuitem"
+                onClick={() => handoff(item)}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs text-foreground/80 transition hover:bg-muted/60 hover:text-foreground"
+              >
+                {item.icon}
+                <span className="flex-1">{item.label}</span>
+                <ExternalLink className="h-3 w-3 text-foreground/40" />
+              </button>
+            )] : []
+          })}
         </div>
       ) : null}
     </div>

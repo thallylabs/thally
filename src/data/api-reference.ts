@@ -54,7 +54,8 @@ const getNormalizedSpec = cache(async (specId?: string): Promise<NormalizedSpec>
   return spec
 })
 
-export const getApiOperationNodes = cache(async (specId?: string): Promise<Array<ApiOperationNode>> => {
+/** Every operation of one spec, including a page-only spec's, for frontmatter and Try It lookups. */
+const getSpecOperationNodes = cache(async (specId?: string): Promise<Array<ApiOperationNode>> => {
   const spec = await getNormalizedSpec(specId)
   return spec.operations
     .filter((operation) => !operation.hidden)
@@ -68,10 +69,20 @@ export const getApiOperationNodes = cache(async (specId?: string): Promise<Array
     })
 })
 
+const isPageOnlySpec = (specId?: string) =>
+  apiReferenceConfig.specs.find((spec) => spec.id === resolveSpecId(specId))?.pageOnly === true
+
+/** Operations that get their own `/api/<spec>/...` page: none for a page-only spec. */
+export const getApiOperationNodes = cache(async (specId?: string): Promise<Array<ApiOperationNode>> =>
+  isPageOnlySpec(specId) ? [] : getSpecOperationNodes(specId))
+
 export const getAllApiOperationNodes = cache(async (): Promise<Array<ApiOperationNode>> => {
   const nodesPerSpec = await Promise.all(apiReferenceConfig.specs.map((spec) => getApiOperationNodes(spec.id)))
   return nodesPerSpec.flat()
 })
+
+const getEveryOperationNode = cache(async (): Promise<Array<ApiOperationNode>> =>
+  (await Promise.all(apiReferenceConfig.specs.map((spec) => getSpecOperationNodes(spec.id)))).flat())
 
 export async function getApiOperationBySlug(slugSegments?: Array<string>): Promise<ApiOperationNode | null> {
   if (!slugSegments?.length) {
@@ -103,17 +114,17 @@ export async function getApiOperationByKey(
   const key = buildOperationKey(normalizedMethod, path)
 
   if (specId) {
-    const nodes = await getApiOperationNodes(specId)
+    const nodes = await getSpecOperationNodes(specId)
     return nodes.find((node) => node.operation.key === key) ?? null
   }
 
-  const allNodes = await getAllApiOperationNodes()
+  const allNodes = await getEveryOperationNode()
   return allNodes.find((node) => node.operation.key === key) ?? null
 }
 
 export async function getApiWebhookByName(name: string, specId?: string): Promise<ApiOperationNode | null> {
   if (!name) return null
-  const nodes = specId ? await getApiOperationNodes(specId) : await getAllApiOperationNodes()
+  const nodes = specId ? await getSpecOperationNodes(specId) : await getEveryOperationNode()
   return nodes.find((node) => node.operation.isWebhook && node.operation.path === name) ?? null
 }
 

@@ -22,6 +22,7 @@ import {
   type MigrationWarning,
 } from '@thallylabs/migrate'
 
+import { pruneMissingSiteLinks } from '../customize.js'
 import { findPublicSpecs, shadowNote } from '../public-specs.js'
 import { scaffold } from '../scaffold.js'
 import { initGit, installDeps } from '../utils.js'
@@ -175,6 +176,7 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
       colors: bundle.site?.colors,
     })
     resetFreshMigrationContent(projectDir)
+    pruneMissingSiteLinks(projectDir, new Set(bundle.pages.map((page) => page.id)))
   } else if (!existsSync(projectDir)) {
     throw new Error(`Project directory "${projectDir}" does not exist. Use without --into to scaffold a new one.`)
   }

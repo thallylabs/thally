@@ -48,9 +48,9 @@ export interface MigrationBannerConfig {
 }
 
 export interface MigrationNavbarConfig {
-  links?: Array<{ label: string; href: string; type?: 'github' }>
+  links?: Array<{ label: string; href: string; type?: 'github'; button?: { background: string; color?: string } }>
   /** Explicit null suppresses the starter's sample call to action. */
-  primary?: { label: string; href: string } | null
+  primary?: { label: string; href: string; type?: 'github' } | null
   /** Local public assets used until an owner uploads a brand replacement. */
   /** Explicit null requests a text-only brand when the source has no logo. */
   logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string } | null
@@ -74,19 +74,21 @@ export interface MigrationDocsConfig {
   navigation?: {
     /** How sibling documentation collections are presented to readers. */
     display?: 'tabs' | 'dropdown'
-    versions?: Array<{ label: string; prefix: string; href: string; default?: boolean }>
+    versions?: Array<{ label: string; prefix: string; href: string; default?: boolean; hidden?: boolean }>
     shortcuts?: Array<{ label: string; href: string; icon?: string }>
   }
   theme?: 'default' | 'maple' | 'sharp' | 'minimal'
   appearance?: { default?: 'system' | 'light' | 'dark'; showToggle?: boolean }
   background?: { image?: string; imageDark?: string; decoration?: 'none' | 'grid' | 'gradient' }
   /** Icon set for content `icon` names; Mintlify's `icons.library` carries through. */
+  contextual?: { options?: Array<string> }
+  colors?: Partial<Record<'light' | 'dark', { primary?: string; accent?: string }>>
   icons?: { library?: 'lucide' | 'fontawesome' | 'tabler' }
   banner?: MigrationBannerConfig
   navbar?: MigrationNavbarConfig
   favicon?: { light: string; dark?: string }
   footer?: MigrationFooterConfig
-  seo?: { indexing?: 'navigable' | 'all' }
+  seo?: { indexing?: 'navigable' | 'all'; titleSeparator?: string; sitemap?: 'navigable'; metatags?: Record<string, string> }
   fonts?: {
     body?: { family: string; weight?: Array<string> }
     heading?: { family: string; weight?: Array<string> }
@@ -97,7 +99,11 @@ export interface MigrationDocsConfig {
   admin?: { enabled?: boolean }
   analytics?: { enabled?: boolean }
   /** Manual API pages: default server(s) and auth for `api:` frontmatter pages. */
-  api?: { mdx?: { server?: string | Array<string>; auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string } } }
+  api?: {
+    mdx?: { server?: string | Array<string>; auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string } }
+    /** Mintlify `api.playground.display`; `auth` is carried as `simple`. */
+    playground?: { display: 'interactive' | 'simple' | 'none' }
+  }
   /** Third-party analytics in Mintlify's `integrations` shape; validated again by the renderer. */
   integrations?: {
     ga4?: { measurementId: string }
@@ -122,6 +128,9 @@ export interface MigrationPage {
   locale?: string
   title: string
   navTitle?: string
+  /** Sidebar icon name or image URL from page frontmatter, with its optional style. */
+  icon?: string
+  iconType?: 'regular' | 'solid' | 'outline' | 'brands'
   description: string
   /** Keep SEO/search description without repeating it above Docusaurus body copy. */
   descriptionPlacement?: 'body'
@@ -130,12 +139,16 @@ export interface MigrationPage {
   mode?: 'default' | 'wide' | 'custom' | 'center' | 'home'
   hidden?: boolean
   noindex?: boolean
+  /** Social/SEO overrides from `og:*` and `twitter:*` frontmatter, keyed by the migrated frontmatter field. */
+  meta?: Partial<Record<'ogTitle' | 'ogDescription' | 'ogImage' | 'twitterTitle' | 'twitterDescription' | 'twitterImage', string>>
   /** OpenAPI operation key rendered by Thally instead of ordinary MDX. */
   openapi?: string
   /** Manual API page: `METHOD <url-or-path>`; rendered by Thally's playground. */
   api?: string
   /** Page-level playground auth override: bearer | basic | key | none. */
   authMethod?: string
+  /** Page-level `playground` override: interactive | simple | none (`auth` becomes `simple`). */
+  playground?: 'interactive' | 'simple' | 'none'
   body: string
   source: string
   /** Set when the page's frontmatter was invalid YAML; the page is kept with a best-effort salvage. */

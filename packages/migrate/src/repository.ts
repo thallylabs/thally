@@ -31,7 +31,7 @@ import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
 
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent } from './components.js'
-import { projectAuthoredStyles } from './source-styles.js'
+import { navbarLinkButtons, projectAuthoredStyles } from './source-styles.js'
 
 import {
   addDocusaurusTranslatedHeadingAliases,
@@ -1363,6 +1363,8 @@ interface ResolvedApiSpec {
   parentTab?: string
   icon?: string
   hidden?: boolean
+  /** Named only by published pages' `openapi:` frontmatter, never by docs.json: bound to a hidden tab so no navigation is generated. */
+  pageOnly?: boolean
   /** Repository-relative path the spec was read from, used only to disambiguate a basename collision across tabs. */
   sourcePath: string
   /** Mintlify's object-form `{ source, directory }` scoping directory, if any — the prefix its auto-generated operation pages live under. */
@@ -1400,12 +1402,25 @@ function resolveMintlifyApiSpecs(
   files: Array<ScannedFile>,
   warnings: Array<MigrationWarning>,
   remoteSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>,
+  /** Published pages' `openapi:` frontmatter: Mintlify renders a spec named only here, so it is migrated too. */
+  pages: ReadonlyArray<{ openapi?: string }> = [],
 ): Array<ResolvedApiSpec> {
   if (!mintlifyConfig) return []
-  const references = [
+  const references: Array<MintlifyApiSpecReference & { pageOnly?: boolean }> = [
     ...mintlifyTopLevelApiReferences(mintlifyConfig),
     ...mintlifyNavigationApiReferences(mintlifyConfig),
   ]
+  const specKey = (value: string): string => value.split(/[?#]/, 1)[0].replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/^\/+/, '')
+  const known = new Set(references.map((reference) => specKey(reference.value)))
+  for (const page of pages) {
+    const specRef = page.openapi ? splitOpenApiRef(page.openapi)?.specRef : undefined
+    // Remote refs are reported by rewriteMintlifyPageSpecRefs; a missing file is warned about there too.
+    if (!specRef || /^[a-z][a-z0-9+.-]*:/i.test(specRef)) continue
+    const key = specKey(specRef)
+    if (known.has(key) || !files.some((file) => file.relativePath === key)) continue
+    known.add(key)
+    references.push({ value: key, kind: 'openapi', tabLabel: `OpenAPI: ${key}`, hidden: true, pageOnly: true })
+  }
   const seen = new Set<string>()
   const specs: Array<ResolvedApiSpec> = []
   for (const reference of references) {
@@ -1455,6 +1470,7 @@ function resolveMintlifyApiSpecs(
       parentTab: reference.parentTab,
       icon: reference.icon,
       hidden: reference.hidden,
+      ...(reference.pageOnly ? { pageOnly: true } : {}),
       sourcePath: match.relativePath,
       directory: reference.directory,
     })
@@ -2231,11 +2247,12 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
       const tableCell = line.match(/^ {0,3}\|\s*([^|]+?)\s*\|/)
       if (tableCell && !/^[:\s-]+$/.test(tableCell[1])) tableCells.push({ index, text: tableCell[1] })
       const match = line.match(/^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
-      return match ? { index, text: match[1] } : null
+      return match ? { index, text: match[1].replace(/\s*\{\/\*\s*#\S+?\s*\*\/\}$/, '') } : null
     }).filter((entry): entry is { index: number; text: string } => entry !== null)
     const existing = new Set<string>()
     replaceOutsideCode(page.body, (text) => {
       for (const match of text.matchAll(/\bid=(?:"([^"]+)"|'([^']+)')/g)) existing.add(match[1] ?? match[2])
+      for (const match of text.matchAll(/\{\/\*\s*#(\S+?)\s*\*\/\}/g)) existing.add(match[1])
       return text
     })
     const candidateIndexes = new Map<string, Array<{ index: number; kind: 'heading' | 'table' }>>()
@@ -2421,9 +2438,16 @@ function repositoryAssetHref(
   }
   if (!ASSET_EXTENSIONS.has(extname(decodedPath).toLowerCase())) return null
   try {
-    const candidate = decodedPath.startsWith('/')
+    let candidate = decodedPath.startsWith('/')
       ? resolveWithin(siteRoot, decodedPath.replace(/^\/+/, ''))
       : resolveWithinRoot(dirname(currentFile), decodedPath, siteRoot)
+    // Authors of nested pages (e.g. v1/introduction) often write `./images/x.png`
+    // for a file that lives in the shared root images folder; use it when
+    // nothing exists beside the page.
+    if (!decodedPath.startsWith('/') && !existsSync(candidate)) {
+      const fromRoot = resolveWithin(siteRoot, decodedPath.replace(/^(?:\.\/)+/, ''))
+      if (existsSync(fromRoot)) candidate = fromRoot
+    }
     // Resolve every path component before accepting an asset. A repository
     // could contain a symlinked directory whose lexical path stays under
     // the docs root while its file contents live elsewhere on the host.
@@ -3452,7 +3476,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // before ANY MDX parse of this page is attempted — including
       // `componentMigrator.transform` below, whose own early parse would
       // otherwise choke on it and skip the page's import analysis entirely.
-      raw = normalizeExplicitHeadingIds(raw, (message) => warnings.push({ code: 'invalid-page', message, source: file.relativePath }))
+      raw = normalizeExplicitHeadingIds(
+        raw,
+        (message) => warnings.push({ code: 'invalid-page', message, source: file.relativePath }),
+        { headingMarkers: platform === 'mintlify' },
+      )
     }
     if (componentMigrator) {
       const warningsBeforeTransform = warnings.length
@@ -3781,6 +3809,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const hasRootStylesheet = Boolean(rootStylesheetPath && existsSync(rootStylesheetPath)
     && lstatSync(rootStylesheetPath).isFile() && !lstatSync(rootStylesheetPath).isSymbolicLink())
   let rootStyleProjection: ReturnType<typeof projectAuthoredStyles> | undefined
+  let rootNavbarButtons: ReturnType<typeof navbarLinkButtons> = []
   let rootStyleProblem: 'unsafe' | 'parse' | undefined
   if (hasRootStylesheet && rootStylesheetPath && lstatSync(rootStylesheetPath).size <= MAX_ASSET_BYTES) {
     const css = readFileSync(rootStylesheetPath, 'utf8')
@@ -3789,9 +3818,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (/@import\b|url\s*\(\s*['"]?\s*(?:javascript:|file:)/i.test(css)) rootStyleProblem = 'unsafe'
     else {
       try {
+        rootNavbarButtons = navbarLinkButtons(css)
         rootStyleProjection = projectAuthoredStyles(css, [
           ...pages.map((page) => page.body),
           ...(componentMigrator?.files() ?? []).map((file) => typeof file.content === 'string' ? file.content : ''),
+          // Site-wide scripts build markup of their own (a CTA card, say) that the stylesheet is meant for.
+          ...files.filter((file) => isMintlifyServedScriptOrStyle(file.relativePath) && extname(file.relativePath).toLowerCase() === '.js'
+            && lstatSync(file.absolutePath).size <= MAX_PAGE_BYTES).map((file) => readFileSync(file.absolutePath, 'utf8')),
         ])
       } catch {
         rootStyleProblem = 'parse'
@@ -3977,6 +4010,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // Invalid CSS is reported without breaking an otherwise valid site.
       warnings.push({ code: 'unsupported-config', message: 'Mintlify root style.css could not be parsed and was not imported.', source: 'style.css' })
     } else {
+      if (rootNavbarButtons.length > 0 && docsConfig.navbar?.links) {
+        docsConfig = {
+          ...docsConfig,
+          navbar: {
+            ...docsConfig.navbar,
+            links: docsConfig.navbar.links.map((link) => {
+              const rule = rootNavbarButtons.find((entry) => entry.exact ? link.href === entry.href : link.href.includes(entry.href))
+              return rule ? { ...link, button: { background: rule.background, ...(rule.color ? { color: rule.color } : {}) } } : link
+            }),
+          },
+        }
+      }
       if (rootStyleProjection.omittedSelectors > 0) warnings.push({
         code: 'unsupported-config',
         source: 'style.css',
@@ -4160,7 +4205,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         source: path,
       })
     }
-    const resolvedSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs)
+    const allSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs, pages)
+    const resolvedSpecs = allSpecs.filter((spec) => !spec.pageOnly)
+    const pageOnlySpecs = allSpecs.filter((spec) => spec.pageOnly)
     for (const spec of resolvedSpecs) {
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) {
         assets.push(specAsset(spec.filename, spec.content))
@@ -4195,6 +4242,17 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           if (withheldSpecRefs.some(matches)) warnSharedSpec(fallback.relativePath)
         }
       }
+    }
+    // Specs named only by published pages: copied (and bound to a hidden tab)
+    // so those pages render. A spec only withheld pages name never gets here,
+    // because `pages` holds the published pages alone.
+    for (const spec of pageOnlySpecs) {
+      if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) assets.push(specAsset(spec.filename, spec.content))
+      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath)
+    }
+    if (pageOnlySpecs.length > 0) {
+      docsConfig = injectOpenApiSpecs(docsConfig, pageOnlySpecs, warnings)
+      pageSpecs = [...pageSpecs, ...pageOnlySpecs]
     }
     rewriteMintlifyPageSpecRefs(pages, pageSpecs, new Set(remoteApiSpecs.map((spec) => spec.url)), warnings)
   }

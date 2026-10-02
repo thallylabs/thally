@@ -1,6 +1,6 @@
 'use client'
 
-import { Children, isValidElement, useState, type ReactNode } from 'react'
+import { Children, isValidElement, useId, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
@@ -31,6 +31,16 @@ export function Tabs({ children, className }: TabsProps) {
   )
 
   const [activeIndex, setActiveIndex] = useState(0)
+  const baseId = useId()
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (activeIndex + step + tabs.length) % tabs.length
+    if (!step && event.key !== 'Home' && event.key !== 'End') return
+    event.preventDefault()
+    setActiveIndex(next)
+    event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus()
+  }
 
   if (tabs.length === 0) {
     return <>{children}</>
@@ -39,7 +49,7 @@ export function Tabs({ children, className }: TabsProps) {
   return (
     <div className={cn('my-6', className)}>
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-border/40">
+      <div role="tablist" onKeyDown={onKeyDown} className="flex gap-1 border-b border-border/40">
         {tabs.map((tab, index) => {
           const title = isValidElement(tab)
             ? (tab.props as TabProps).title ?? `Tab ${index + 1}`
@@ -50,6 +60,11 @@ export function Tabs({ children, className }: TabsProps) {
             <button
               key={index}
               type="button"
+              role="tab"
+              id={`${baseId}-tab-${index}`}
+              aria-selected={isActive}
+              aria-controls={`${baseId}-panel-${index}`}
+              tabIndex={isActive ? 0 : -1}
               onClick={() => setActiveIndex(index)}
               className={cn(
                 'relative px-4 py-2 text-sm font-medium transition',
@@ -67,10 +82,19 @@ export function Tabs({ children, className }: TabsProps) {
         })}
       </div>
 
-      {/* Active panel */}
-      <div className="pt-4">
-        {tabs[activeIndex]}
-      </div>
+      {/* Every panel is rendered so inactive content stays in the server HTML. */}
+      {tabs.map((tab, index) => (
+        <div
+          key={index}
+          role="tabpanel"
+          id={`${baseId}-panel-${index}`}
+          aria-labelledby={`${baseId}-tab-${index}`}
+          hidden={index !== activeIndex}
+          className="pt-4"
+        >
+          {tab}
+        </div>
+      ))}
     </div>
   )
 }

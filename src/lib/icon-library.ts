@@ -48,6 +48,23 @@ export const FONT_AWESOME_BRAND_NAMES: ReadonlySet<string> = new Set([
   'tiktok', 'trello', 'twitch', 'unity', 'whatsapp', 'windows',
 ])
 
+/**
+ * Font Awesome Pro-only names (Mintlify's default set is Pro) mapped to the
+ * closest asset that exists. A value starting with `lucide:` is a Lucide name,
+ * anything else is a Font Awesome Free solid name. The Font Awesome library
+ * resolves these instead of requesting a Pro file that does not exist.
+ */
+export const FONT_AWESOME_PRO_FALLBACKS: Readonly<Record<string, string>> = {
+  'barcode-read': 'barcode', 'text-size': 'text-height', messages: 'comments', lobster: 'shrimp',
+  radar: 'lucide:radar', browser: 'lucide:app-window', 'brain-circuit': 'lucide:brain-circuit',
+  'spider-web': 'lucide:network', sparkles: 'lucide:sparkles', 'file-magnifying-glass': 'lucide:file-search',
+  'chart-mixed': 'lucide:chart-no-axes-combined', webhook: 'lucide:webhook', triangle: 'lucide:triangle',
+  'square-code': 'lucide:square-code', 'shield-check': 'lucide:shield-check',
+  'rectangle-terminal': 'lucide:square-terminal', 'messages-question': 'lucide:message-circle-question',
+  'message-bot': 'lucide:bot-message-square', books: 'lucide:library',
+  'code-change': 'code-compare',
+}
+
 function fontAwesomeStyle(style: IconStyle | undefined): 'solid' | 'regular' | 'brands' {
   if (style === 'regular') return 'regular'
   if (style === 'brands') return 'brands'
@@ -60,8 +77,12 @@ function fontAwesomeStyle(style: IconStyle | undefined): 'solid' | 'regular' | '
 export function iconLibraryAssetUrl(library: IconLibrary, name: string, style?: IconStyle): string {
   if (!ICON_NAME_PATTERN.test(name)) throw new Error(`Unsafe icon name: ${name}`)
   switch (library) {
-    case 'fontawesome':
+    case 'fontawesome': {
+      const fallback = FONT_AWESOME_PRO_FALLBACKS[name]
+      if (fallback?.startsWith('lucide:')) return iconLibraryAssetUrl('lucide', fallback.slice(7))
+      if (fallback) return iconLibraryAssetUrl('fontawesome', fallback, 'solid')
       return `${CDN_BASE}/@fortawesome/fontawesome-free@${FONT_AWESOME_VERSION}/svgs/${fontAwesomeStyle(style)}/${name}.svg`
+    }
     case 'tabler':
       return `${CDN_BASE}/@tabler/icons@${TABLER_ICONS_VERSION}/icons/${style === 'solid' ? 'filled' : 'outline'}/${name}.svg`
     default:

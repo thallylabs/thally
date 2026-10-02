@@ -28,8 +28,10 @@ export function VersionSwitcher({ versions: configured, activeLabel }: VersionSw
     }
   }, [open])
 
-  const versions = configured ?? siteConfig.versions
-  if (!versions || versions.length < 2) return null
+  const allVersions = configured ?? siteConfig.versions
+  const versions = allVersions?.filter((version) => !('hidden' in version && version.hidden))
+  // A site with several versions keeps the switcher even when hidden ones leave a single entry, as Mintlify does.
+  if (!allVersions || allVersions.length < 2 || !versions?.length) return null
 
   const current = versions.find((version) => version.label === activeLabel)
     ?? versions.find((version) => ('default' in version && version.default) || ('current' in version && version.current))

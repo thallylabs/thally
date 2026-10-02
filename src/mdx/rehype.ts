@@ -515,7 +515,8 @@ function rehypeParseCodeBlocks() {
   return (tree: Root) => {
     // @ts-expect-error -- unist-util-visit visitor types are stricter than needed
     visit(tree, 'element', (node: Element, _index: number | undefined, parent: Element | undefined) => {
-      if (!parent || node.tagName !== 'code') {
+      // Inline `code` inside a <p>/<td> is not a fence; only <pre><code> gets a language.
+      if (!parent || parent.tagName !== 'pre' || node.tagName !== 'code') {
         return
       }
 
@@ -651,6 +652,24 @@ function rehypeShiki() {
   }
 }
 
+const HEADING_ID_MARKER = /^\s*\/\*\s*#(\S+?)\s*\*\/\s*$/
+
+/**
+ * A heading may end with a JSX comment holding `#id` to keep an id its text
+ * would not slugify to (a migrated `{#id}`, or `+` and `&` in the heading).
+ * The comment is consumed here so only the id remains.
+ */
+function takeHeadingIdMarker(node: Element): string | undefined {
+  const values = node.children.map((child) => (child as { type: string }).type === 'mdxTextExpression'
+    ? HEADING_ID_MARKER.exec((child as unknown as { value: string }).value)?.[1] : undefined)
+  const index = values.findIndex((value) => value !== undefined)
+  if (index < 0) return undefined
+  node.children.splice(index, 1)
+  const before = node.children[index - 1]
+  if (before?.type === 'text') before.value = before.value.trimEnd()
+  return values[index]
+}
+
 /** Give repeated headings distinct, stable fragments in document order. */
 function rehypeUniqueHeadingIds() {
   return (tree: Root) => {
@@ -663,7 +682,7 @@ function rehypeUniqueHeadingIds() {
     visit(tree, 'element', (node: Element) => {
       if (!/^h[2-6]$/.test(node.tagName)) return
       const base = typeof node.properties?.id === 'string' && node.properties.id
-        ? node.properties.id : slugify(text(node))
+        ? node.properties.id : takeHeadingIdMarker(node) ?? slugify(text(node))
       if (!base) return
       let occurrence = (occurrences.get(base) ?? 0) + 1
       let id = occurrence === 1 ? base : `${base}-${occurrence}`

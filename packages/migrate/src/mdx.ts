@@ -10,6 +10,7 @@ import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 
 import { isThallyBuiltinComponent } from './builtin-components.js'
+import { playgroundDisplay } from './mintlify-extras.js'
 import { parseFrontmatter } from './frontmatter.js'
 import type { MigrationPage, MigrationPlatform } from './types.js'
 
@@ -180,7 +181,11 @@ const HTML_ID = /^[^\s"'<>`{}&]+$/u
  * An id that is not a valid HTML id is stripped (and reported through `warn`)
  * so the page still compiles. Frontmatter is left untouched.
  */
-export function normalizeExplicitHeadingIds(raw: string, warn?: (message: string) => void): string {
+export function normalizeExplicitHeadingIds(
+  raw: string,
+  warn?: (message: string) => void,
+  options: { headingMarkers?: boolean; keepIdComments?: boolean } = {},
+): string {
   const { front, body } = splitFrontmatterBlock(raw)
   return front + replaceOutsideCode(body, (segment) => segment.split('\n').map((line) => {
     if (!/^[ \t]{0,3}#{1,6}[ \t]+/.test(line)) return line
@@ -195,14 +200,20 @@ export function normalizeExplicitHeadingIds(raw: string, warn?: (message: string
         const heading = trimmed.slice(0, marker).trimEnd()
         // Braces in the "id" mean this is prose like `{#if} blocks {x}`, not one anchor.
         if (/[{}]/.test(id)) return line
+        // Mintlify keeps the authored id on the heading itself. The renderer
+        // reads `{/* #id */}`, so the id may hold any character React can put
+        // in an attribute; only whitespace and a comment terminator are unsafe.
+        const usable = options.headingMarkers ? id && !/\s/.test(id) && !id.includes('*/') : HTML_ID.test(id)
+        if (usable && options.headingMarkers) return `${heading} ${headingIdMarker(id)}`
         // Numeric starts are valid here; Mintlify uses ids such as 429-responses.
-        if (HTML_ID.test(id)) return `<a id="${id}"></a>\n${heading}`
+        if (usable) return `<a id="${id}"></a>\n${heading}`
         warn?.(`Heading anchor {#${id}} is not a valid HTML id and was removed from "${heading.replace(/^\s*#+\s*/, '')}".`)
         return heading
       }
     }
     // Docusaurus' heading plugin also accepts a trailing MDX comment.
-    if (trimmed.endsWith('*/}')) {
+    // (Mintlify output uses that same comment as its marker, so it stays.)
+    if (!options.headingMarkers && !options.keepIdComments && trimmed.endsWith('*/}')) {
       const marker = trimmed.lastIndexOf(' {/*')
       if (marker >= 0) {
         const comment = trimmed.slice(marker + 4, -3).trim()
@@ -214,6 +225,84 @@ export function normalizeExplicitHeadingIds(raw: string, warn?: (message: string
     }
     return line
   }).join('\n'))
+}
+
+/** The trailing comment that gives a heading an explicit id; read by the renderer, `thally check` and the content parser. */
+function headingIdMarker(id: string): string {
+  return `{/* #${id} */}`
+}
+
+/**
+ * The id Mintlify gives a heading with no explicit `{#id}`. Derived from the
+ * live ids of a Mintlify site: whitespace and `.` become `-`, and `+ & / _`,
+ * typographic quotes and dashes and arrows are kept, other punctuation and
+ * emoji are dropped. Repeats are numbered `-2`, `-3`, ... by the renderer.
+ */
+export function mintlifyHeadingSlug(text: string): string {
+  return text
+    .replace(/\u200b/g, '')
+    .normalize('NFC')
+    .trim()
+    .toLowerCase()
+    .replace(/[.\s]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '')
+    .replace(/[^\p{L}\p{M}\p{N}_\-+&/\u2019\u201c\u201d\u2014\u2013\u2192]/gu, '')
+}
+
+/** Thally's own heading slug (`slugify` in `@thallylabs/core`), used to tell which headings already match. */
+function thallyHeadingSlug(text: string): string {
+  return text.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '-').replace(/(^-|-$)/g, '')
+}
+
+/** Mintlify typesets straight quotes in heading text, and its ids keep the typographic characters. */
+function typesetQuotes(text: string): string {
+  return text.split(/(`[^`]*`|<[^>]*>|\]\([^)]*\))/).map((part, index) => {
+    if (index % 2) return part
+    return part
+      .replace(/(^|[\s([{\u2014\u2013])"/g, '$1\u201c').replace(/"/g, '\u201d')
+      .replace(/(^|[\s([{\u2014\u2013\u201c])'(?=\S)/g, '$1\u2018').replace(/'/g, '\u2019')
+  }).join('')
+}
+
+/** Visible text of a heading's inline Markdown. */
+function plainHeadingText(source: string): string {
+  return source
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/<\/?[A-Za-z][^>]*>/g, '')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/(\*\*|__|~~|\*)/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/\\([\\`*_{}[\]()#+.!&<>|~-])/g, '$1')
+}
+
+/**
+ * Give each Mintlify heading the id Mintlify serves, so in-page and cross-page
+ * `#anchor` links from the source still land. Only headings whose id differs
+ * from Thally's own slug get a marker, which leaves every other anchor alone.
+ * Straight quotes in heading text are typeset as Mintlify does.
+ */
+export function markMintlifyHeadings(body: string): string {
+  let fence: string | undefined
+  return body.split('\n').map((line) => {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)
+    if (marker) {
+      if (!fence) fence = marker[1]
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length
+        && /^\s*$/.test(line.slice(marker[0].length))) fence = undefined
+      return line
+    }
+    if (fence) return line
+    const heading = line.match(/^( {0,3}#{2,6}[ \t]+)(.+?)(?:[ \t]+#+)?[ \t]*$/)
+    if (!heading) return line
+    // An explicit `{#id}` is already a marker and wins over the computed id.
+    const explicit = heading[2].match(/^(.*?)([ \t]*\{\/\*[ \t]*#\S+[ \t]*\*\/\})$/)
+    const source = typesetQuotes(explicit ? explicit[1] : heading[2])
+    if (explicit) return `${heading[1]}${source}${explicit[2]}`
+    const text = plainHeadingText(source)
+    const id = mintlifyHeadingSlug(text)
+    return `${heading[1]}${source}${id && id !== thallyHeadingSlug(text) ? ` ${headingIdMarker(id)}` : ''}`
+  }).join('\n')
 }
 
 const GLOBAL_DOCUSARUS_COMPONENTS = new Set([
@@ -1777,7 +1866,12 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   // `normalizeExplicitHeadingIds` also covers Docusaurus' `{/* #id */}`
   // comment form.
   const sourceBody = runDocusaurus && unwrapMdxCodeBlocks ? unwrapDocusaurusMdxCodeBlocks(body) : body
-  let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(runFern ? normalizeFernFileTrees(normalizeFernCallouts(normalizeNestedCodeFences(sourceBody))) : normalizeNestedCodeFences(sourceBody)))
+  let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(
+    runFern ? normalizeFernFileTrees(normalizeFernCallouts(normalizeNestedCodeFences(sourceBody))) : normalizeNestedCodeFences(sourceBody),
+    undefined,
+    { headingMarkers: runMintlify },
+  ))
+  if (runMintlify) rewritten = markMintlifyHeadings(rewritten)
   if (runDocusaurus) {
     // Docusaurus resolves GitHub emoji names in Markdown text. Leaving the
     // shortcodes literal makes comparison tables unreadable after import; the
@@ -1938,6 +2032,15 @@ export function parseMarkdownPage(input: {
     : typeof parsed.data.navTitle === 'string' && parsed.data.navTitle.trim()
       ? parsed.data.navTitle.trim()
       : undefined
+  const icon = typeof parsed.data.icon === 'string' && parsed.data.icon.trim() ? parsed.data.icon.trim() : undefined
+  const iconType = icon && ['regular', 'solid', 'outline', 'brands'].includes(String(parsed.data.iconType))
+    ? parsed.data.iconType as MigrationPage['iconType']
+    : undefined
+  const meta: NonNullable<MigrationPage['meta']> = {}
+  for (const [source, field] of PAGE_META_FIELDS) {
+    const value = parsed.data[source]
+    if (typeof value === 'string' && value.trim()) meta[field] = value.trim()
+  }
   const badge = typeof parsed.data.tag === 'string' && parsed.data.tag.trim()
     ? parsed.data.tag.trim()
     : typeof parsed.data.badge === 'string' && parsed.data.badge.trim()
@@ -1953,13 +2056,18 @@ export function parseMarkdownPage(input: {
       : undefined
   const description = typeof parsed.data.description === 'string' && parsed.data.description.trim()
     ? parsed.data.description.trim()
-    : firstParagraph(body)
+    // An API reference page is described by its operation, not by its prose.
+    : typeof parsed.data.openapi === 'string' && parsed.data.openapi.trim()
+      ? ''
+      : firstParagraph(body)
   return {
     id: identity.id,
     navigationId: identity.navigationId,
     locale: identity.locale,
     title,
     navTitle,
+    icon,
+    iconType,
     description,
     ...(input.platform === 'docusaurus' || input.platform === 'fern'
       ? { descriptionPlacement: 'body' as const }
@@ -1969,6 +2077,7 @@ export function parseMarkdownPage(input: {
     mode,
     hidden: parsed.data.hidden === true ? true : undefined,
     noindex: parsed.data.noindex === true || parsed.data.noindex === 'true' ? true : undefined,
+    ...(Object.keys(meta).length > 0 ? { meta } : {}),
     openapi: typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined,
     ...apiFrontmatter(parsed.data, input.warn),
     body,
@@ -1977,14 +2086,27 @@ export function parseMarkdownPage(input: {
   }
 }
 
+const PAGE_META_FIELDS = [
+  ['og:title', 'ogTitle'],
+  ['og:description', 'ogDescription'],
+  ['og:image', 'ogImage'],
+  ['twitter:title', 'twitterTitle'],
+  ['twitter:description', 'twitterDescription'],
+  ['twitter:image', 'twitterImage'],
+] as const
+
 const AUTH_METHODS = new Set(['bearer', 'basic', 'key', 'none'])
 
 /** Carry manual-API frontmatter (`api`, `authMethod`) through; report what cannot be kept. */
 function apiFrontmatter(
   data: Record<string, unknown>,
   warn?: (message: string) => void,
-): Pick<MigrationPage, 'api' | 'authMethod'> {
-  const result: Pick<MigrationPage, 'api' | 'authMethod'> = {}
+): Pick<MigrationPage, 'api' | 'authMethod' | 'playground'> {
+  const result: Pick<MigrationPage, 'api' | 'authMethod' | 'playground'> = {}
+  if (data.playground !== undefined && data.playground !== null) {
+    const display = playgroundDisplay(data.playground, 'The page\'s "playground" frontmatter', warn)
+    if (display) result.playground = display
+  }
   if (data.api !== undefined && data.api !== null) {
     if (typeof data.api === 'string' && data.api.trim()) result.api = data.api.trim()
     else warn?.('The page\'s "api" frontmatter is not a "METHOD url-or-path" string and was dropped.')

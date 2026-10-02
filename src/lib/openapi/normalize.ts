@@ -5,6 +5,7 @@ import type {
   NormalizedParameter,
   NormalizedRequestBody,
   NormalizedResponse,
+  NormalizedAuthScheme,
   NormalizedSecurityRequirement,
   NormalizedServer,
   NormalizedSpec,
@@ -13,6 +14,7 @@ import type {
 } from '@/lib/openapi/types'
 import { getApiPlaygroundCredentials } from '@/data/docs'
 import { HTTP_METHODS, buildOperationKey, isExtensionSet } from '@/lib/openapi/operation-keys'
+import { buildSchemaExample } from '@/lib/openapi/schema-example'
 import { isObj, operationVisibility, viewPathEntry } from '@/lib/openapi/path-items'
 
 type RawObject = Record<string, unknown>
@@ -172,12 +174,7 @@ function normalizeOperation(options: NormalizeOperationOptions): NormalizedOpera
   const { body: requestBody, sample: requestBodySample } = normalizeRequestBody(options.rawOperation.requestBody, options.resolveRef, options.deepResolve)
   const responses = normalizeResponses(options.rawOperation.responses, options.resolveRef, options.deepResolve)
   const security = normalizeSecurity(options.rawOperation.security ?? options.documentSecurity)
-  const headerPrefill = applySecurityAuthPrefill(
-    security,
-    options.securitySchemes,
-    options.resolveRef,
-    { ...parameterPrefill.header },
-  )
+  const authSchemes = buildAuthSchemes(security, options.securitySchemes, options.resolveRef)
 
   const operationServers = normalizeServers(options.rawOperation.servers)
   const servers =
@@ -208,11 +205,13 @@ function normalizeOperation(options: NormalizeOperationOptions): NormalizedOpera
     requestBody,
     responses,
     security,
+    authSchemes,
+    codeSamples: normalizeCodeSamples(options.rawOperation['x-codeSamples'] ?? options.rawOperation['x-code-samples']),
     hidden: options.hidden,
     prefill: {
       path: parameterPrefill.path,
       query: parameterPrefill.query,
-      header: headerPrefill,
+      header: parameterPrefill.header,
       cookie: parameterPrefill.cookie,
       body: requestBodySample,
     },
@@ -260,14 +259,14 @@ function normalizeParameters(
   }
 
   const deduped = new Map<string, RawObject>()
-  params.forEach((param) => {
-    if (typeof param.name !== 'string' || typeof param.in !== 'string') {
+  // Path-level params come first, so a later (operation-level) entry with the
+  // same name+in overrides them. `$ref` params point at components/parameters.
+  params.forEach((raw) => {
+    const param = typeof raw.$ref === 'string' ? resolveRef(raw.$ref) : raw
+    if (!param || typeof param.name !== 'string' || typeof param.in !== 'string') {
       return
     }
-    const key = `${param.in}:${param.name}`
-    if (!deduped.has(key)) {
-      deduped.set(key, param)
-    }
+    deduped.set(`${param.in}:${param.name}`, param)
   })
 
   deduped.forEach((param) => {
@@ -307,7 +306,7 @@ function normalizeRequestBody(
     return { body: undefined, sample: undefined }
   }
   const primaryContent = contents[0]
-  const sampleValue = primaryContent?.schema ? buildSchemaExample(primaryContent.schema, resolveRef) : undefined
+  const sampleValue = primaryContent ? buildBodyExample(primaryContent, resolveRef) : undefined
   const sample = sampleValue !== undefined ? JSON.stringify(sampleValue, null, 2) : undefined
 
   return {
@@ -318,6 +317,28 @@ function normalizeRequestBody(
     },
     sample,
   }
+}
+
+// Request-body sample: the media type's own example(s) first, then the schema.
+function buildBodyExample(content: NormalizedMediaType, resolveRef: (ref: string) => RawObject | null): unknown {
+  if (content.example !== undefined) {
+    return content.example
+  }
+  const first = content.examples?.[0]
+  if (first && first.value !== undefined) {
+    return first.value
+  }
+  return content.schema ? buildSchemaExample(content.schema, resolveRef, new Set<string>(), true) : undefined
+}
+
+// Authored `x-codeSamples` / `x-code-samples`: [{ lang, label?, source }].
+function normalizeCodeSamples(raw: unknown): Array<{ label: string; source: string }> {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((entry: RawObject) => {
+    const label = entry?.label ?? entry?.lang
+    const source = entry?.source
+    return typeof label === 'string' && label && typeof source === 'string' && source ? [{ label, source }] : []
+  })
 }
 
 function normalizeResponses(
@@ -569,35 +590,33 @@ function resolveSecurityScheme(
   return scheme
 }
 
-function applySecurityAuthPrefill(
+/**
+ * The credentials the operation accepts, one per distinct scheme in its
+ * security requirements. A token is prefilled only from the site's own
+ * `apiPlayground.credentials`; there is never a placeholder key.
+ */
+function buildAuthSchemes(
   security: Array<Array<NormalizedSecurityRequirement>>,
   securitySchemes: Record<string, RawObject>,
   resolveRef: (ref: string) => RawObject | null,
-  headerPrefill: Record<string, string>,
-): Record<string, string> {
+): Array<NormalizedAuthScheme> {
   const credentials = getApiPlaygroundCredentials()
-  const result = { ...headerPrefill }
-
-  for (const requirementGroup of security) {
-    for (const requirement of requirementGroup) {
-      const scheme = resolveSecurityScheme(securitySchemes, requirement.name, resolveRef)
-      if (!scheme) continue
-
-      const configured = credentials[requirement.name]
-      const type = scheme.type as string | undefined
-
-      if (type === 'http' && scheme.scheme === 'bearer') {
-        const token = configured ?? 'YOUR_API_KEY'
-        result.Authorization = token.startsWith('Bearer ') ? token : `Bearer ${token}`
-      } else if (type === 'apiKey' && scheme.in === 'header' && typeof scheme.name === 'string') {
-        result[scheme.name as string] = configured ?? 'YOUR_API_KEY'
-      } else if (type === 'http' && scheme.scheme === 'basic') {
-        result.Authorization = configured ? `Basic ${configured}` : 'Basic YOUR_BASE64_CREDENTIALS'
-      }
+  const result: Array<NormalizedAuthScheme> = []
+  for (const requirement of security.flat()) {
+    if (result.some((entry) => entry.name === requirement.name)) continue
+    const scheme = resolveSecurityScheme(securitySchemes, requirement.name, resolveRef)
+    if (!scheme) continue
+    const configured = credentials[requirement.name]
+    const description = typeof scheme.description === 'string' ? scheme.description : undefined
+    const base = { name: requirement.name, description }
+    if (scheme.type === 'http' && scheme.scheme === 'bearer') {
+      result.push({ ...base, kind: 'bearer', in: 'header', paramName: 'Authorization', prefill: configured?.replace(/^Bearer /, '') })
+    } else if (scheme.type === 'http' && scheme.scheme === 'basic') {
+      result.push({ ...base, kind: 'basic', in: 'header', paramName: 'Authorization', prefill: configured?.replace(/^Basic /, '') })
+    } else if (scheme.type === 'apiKey' && typeof scheme.name === 'string' && (scheme.in === 'header' || scheme.in === 'query' || scheme.in === 'cookie')) {
+      result.push({ ...base, kind: 'apiKey', in: scheme.in, paramName: scheme.name, prefill: configured })
     }
-    break
   }
-
   return result
 }
 
@@ -683,64 +702,6 @@ function createSchemaResolver(document: RawObject) {
     }
     return current && typeof current === 'object' ? (current as RawObject) : null
   }
-}
-
-function buildSchemaExample(schema: RawObject | undefined, resolveRef: (ref: string) => RawObject | null, seen = new Set<string>()): unknown {
-  if (!schema) {
-    return undefined
-  }
-  if (schema.example !== undefined) {
-    return schema.example
-  }
-  if (schema.default !== undefined) {
-    return schema.default
-  }
-  if (Array.isArray(schema.enum) && schema.enum.length > 0) {
-    return schema.enum[0]
-  }
-  if (typeof schema.$ref === 'string') {
-    if (seen.has(schema.$ref)) {
-      return undefined
-    }
-    seen.add(schema.$ref)
-    const resolved = resolveRef(schema.$ref)
-    if (resolved) {
-      return buildSchemaExample(resolved, resolveRef, seen)
-    }
-  }
-  if (Array.isArray(schema.allOf)) {
-    return schema.allOf.reduce<unknown>((acc, fragment) => {
-      const sample = fragment && typeof fragment === 'object' ? buildSchemaExample(fragment as RawObject, resolveRef, new Set(seen)) : undefined
-      if (Array.isArray(acc) || Array.isArray(sample)) {
-        return sample ?? acc
-      }
-      if (typeof acc === 'object' && acc !== null && typeof sample === 'object' && sample !== null) {
-        return { ...(acc as RawObject), ...(sample as RawObject) }
-      }
-      return sample ?? acc
-    }, {})
-  }
-
-  const type = typeof schema.type === 'string' ? schema.type : undefined
-  if (type === 'object' || schema.properties) {
-    const properties = schema.properties && typeof schema.properties === 'object' ? (schema.properties as Record<string, RawObject>) : {}
-    const result: Record<string, unknown> = {}
-    Object.entries(properties).forEach(([key, value]) => {
-      result[key] = buildSchemaExample(value, resolveRef, new Set(seen)) ?? ''
-    })
-    return result
-  }
-  if (type === 'array' && schema.items && typeof schema.items === 'object') {
-    const sampleItem = buildSchemaExample(schema.items as RawObject, resolveRef, new Set(seen))
-    return sampleItem !== undefined ? [sampleItem] : []
-  }
-  if (type === 'boolean') {
-    return true
-  }
-  if (type === 'integer' || type === 'number') {
-    return 0
-  }
-  return ''
 }
 
 function buildParameterSampleValue(
