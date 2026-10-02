@@ -2,7 +2,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 
-const fixtures = vi.hoisted(() => ({ published: true }))
+const fixtures = vi.hoisted(() => ({ published: true, operation: null as unknown }))
 
 vi.mock('next/navigation', () => ({
   notFound: () => {
@@ -21,7 +21,7 @@ vi.mock('@/data/get-doc', () => ({
     openapi: { specId: 'default', specRef: 'openapi/missing.json', method: 'POST', path: '/scrape' },
   }),
 }))
-vi.mock('@/data/api-reference', () => ({ getApiOperationForFrontmatter: async () => null }))
+vi.mock('@/data/api-reference', () => ({ getApiOperationForFrontmatter: async () => fixtures.operation }))
 vi.mock('@/data/docs', () => ({
   ensureDocPublication: async () => undefined,
   getDocEntries: async () => [],
@@ -30,8 +30,8 @@ vi.mock('@/data/docs', () => ({
 }))
 vi.mock('@/components/docs/doc-layout', () => ({ DocLayout: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }))
 vi.mock('@/components/docs/doc-header', () => ({ DocHeader: () => null }))
-vi.mock('@/components/api/api-layout', () => ({ ApiLayout: () => null }))
-vi.mock('@/components/api/operation-panel', () => ({ OperationPanel: () => null }))
+vi.mock('@/components/api/api-layout', () => ({ ApiLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }))
+vi.mock('@/components/api/operation-panel', () => ({ OperationPanel: ({ children }: { children: React.ReactNode }) => <section>{children}</section> }))
 vi.mock('@/components/api/manual-api-endpoint', () => ({ ManualApiEndpoint: () => null }))
 vi.mock('@/components/seo/json-ld-script', () => ({ JsonLdScript: () => null }))
 vi.mock('@/components/layout/localized-sidebar-hydrator', () => ({ LocalizedSidebarHydrator: () => null }))
@@ -57,13 +57,22 @@ const render = async () => renderToStaticMarkup(await DocsPage({ params: Promise
 describe('docs page with an unresolved openapi spec', () => {
   it('renders the authored body with a notice', async () => {
     fixtures.published = true
+    fixtures.operation = null
     const html = await render()
     expect(html).toContain('Authored scrape body')
     expect(html).toContain('role="note"')
   })
 
+  it('renders the page body inside the operation panel when the operation resolves', async () => {
+    fixtures.operation = { operation: {} }
+    const html = await render()
+    expect(html).toContain('<section><p>Authored scrape body</p></section>')
+    expect(html).not.toContain('role="note"')
+  })
+
   it('still 404s a page the build withheld for a hidden operation', async () => {
     fixtures.published = false
+    fixtures.operation = null
     await expect(render()).rejects.toThrow('NEXT_NOT_FOUND')
   })
 })

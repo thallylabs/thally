@@ -223,6 +223,7 @@ export default async function DocsPage({ params }: PageProps) {
       )
     }
 
+    const Body = doc.component
     return (
       <>
         {localeAvailability}
@@ -234,7 +235,9 @@ export default async function DocsPage({ params }: PageProps) {
             <DocHeader doc={doc} />
           </div>
           <ApiLayout>
-            <OperationPanel operation={operationNode.operation} />
+            <OperationPanel operation={operationNode.operation}>
+              <Body />
+            </OperationPanel>
           </ApiLayout>
         </div>
       </>

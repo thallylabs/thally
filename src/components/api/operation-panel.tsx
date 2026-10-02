@@ -10,12 +10,15 @@ import type { NormalizedOperation, NormalizedParameter, NormalizedResponse } fro
 import { EndpointBar } from '@/components/api/endpoint-bar'
 import { cn } from '@/lib/utils'
 import Markdown from '@/components/mdx/markdown'
+import { Prose } from '@/components/mdx/prose'
 
 interface OperationPanelProps {
   operation: NormalizedOperation
+  /** The page's own MDX body, shown between the header and the schema. */
+  children?: React.ReactNode
 }
 
-export function OperationPanel({ operation }: OperationPanelProps) {
+export function OperationPanel({ operation, children }: OperationPanelProps) {
   const controller = useTryItController(operation)
   const [isDialogOpen, setDialogOpen] = useState(false)
 
@@ -50,6 +53,8 @@ export function OperationPanel({ operation }: OperationPanelProps) {
           </div>
           <EndpointBar operation={operation} onTryIt={() => setDialogOpen(true)} />
         </header>
+
+        {children ? <Prose>{children}</Prose> : null}
 
         {/* Servers */}
         {operation.servers.length ? (
