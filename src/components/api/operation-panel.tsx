@@ -16,9 +16,11 @@ interface OperationPanelProps {
   operation: NormalizedOperation
   /** The page's own MDX body, shown between the header and the schema. */
   children?: React.ReactNode
+  /** False when the page header already shows the page's authored description. */
+  showDescription?: boolean
 }
 
-export function OperationPanel({ operation, children }: OperationPanelProps) {
+export function OperationPanel({ operation, children, showDescription = true }: OperationPanelProps) {
   const controller = useTryItController(operation)
   const [isDialogOpen, setDialogOpen] = useState(false)
 
@@ -36,7 +38,7 @@ export function OperationPanel({ operation, children }: OperationPanelProps) {
         {/* Header */}
         <header className="space-y-6">
           <EndpointBar operation={operation} onTryIt={() => setDialogOpen(true)} />
-          {operation.description ? (
+          {!showDescription ? null : operation.description ? (
             <div className="prose prose-neutral dark:prose-invert max-w-none text-base text-foreground/70">
               <Markdown>{operation.description}</Markdown>
             </div>

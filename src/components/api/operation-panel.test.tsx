@@ -18,6 +18,11 @@ describe('OperationPanel header', () => {
     expect(html).not.toContain('<h1')
     expect(html.match(/Scrape a URL/g)).toHaveLength(1)
   })
+
+  it('omits its own description when the page header shows an authored one', () => {
+    const html = renderToStaticMarkup(<OperationPanel operation={operationFrom(document)} showDescription={false} />)
+    expect(html).not.toContain('Scrape a URL')
+  })
 })
 
 describe('OperationPanel webhook', () => {
