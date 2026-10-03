@@ -1,16 +1,28 @@
 import type { Config } from 'tailwindcss'
 import typography from '@tailwindcss/typography'
 
+const CLASS_WITH_WILDCARD_VAR = /[\w:-]+\[[^\]\s]*var\([^)\s]*\*[^)\s]*\)[^\]\s]*\]/g
+
 const config: Config = {
   darkMode: ['class'],
-  content: [
-    './src/app/**/*.{ts,tsx,mdx}',
-    './src/components/**/*.{ts,tsx,mdx}',
-    './src/content/**/*.{mdx,md}',
-    './src/data/**/*.{ts,tsx}',
-    './src/config/**/*.{ts,tsx}',
-    './mdx-components.tsx',
-  ],
+  content: {
+    files: [
+      './src/app/**/*.{ts,tsx,mdx}',
+      './src/components/**/*.{ts,tsx,mdx}',
+      './src/content/**/*.{mdx,md}',
+      './src/data/**/*.{ts,tsx}',
+      './src/config/**/*.{ts,tsx}',
+      './mdx-components.tsx',
+    ],
+    // Prose often shows a wildcard placeholder such as
+    // `text-[length:var(--text-*)]`. Tailwind turns it into a utility whose
+    // `var(--text-*)` is invalid CSS and fails the stylesheet build, so drop
+    // arbitrary values with a `*` inside `var()` before they are scanned.
+    transform: {
+      md: (content: string) => content.replace(CLASS_WITH_WILDCARD_VAR, ''),
+      mdx: (content: string) => content.replace(CLASS_WITH_WILDCARD_VAR, ''),
+    },
+  },
   theme: {
     extend: {
       fontFamily: {
