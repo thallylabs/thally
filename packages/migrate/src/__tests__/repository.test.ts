@@ -378,6 +378,23 @@ describe('Mintlify repository migration', () => {
     expect(page?.body).not.toContain('constants.mdx')
   })
 
+  it('inlines a self-contained function export imported from a snippet (`getTotalFeeString(...)` used in prose)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-fn-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const fee = (type, value) => {\n  if (type === 'a') return '5%';\n  return String(value);\n};\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport {\n  fee\n} from '/snippets/constants.mdx';\n\nFee {fee('a', null)}\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    expect(page?.body).toContain("export const fee = (type, value) => {")
+    expect(page?.body).not.toContain('constants.mdx')
+    expect(bundle.warnings.some((warning) => warning.message.includes('"fee"'))).toBe(false)
+  })
+
   it('warns when an imported snippet export cannot be inlined and the import is kept', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-unresolved-'))
     mkdirSync(join(root, 'snippets'), { recursive: true })
@@ -385,7 +402,7 @@ describe('Mintlify repository migration', () => {
       $schema: 'https://mintlify.com/docs.json',
       navigation: { pages: ['home'] },
     }))
-    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const compute = () => 1;\nexport const Dyn = makeThing();\n")
+    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const compute = () => outside + 1;\nexport const Dyn = makeThing();\n")
     writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { compute, Dyn } from '/snippets/constants.mdx';\n\n{compute()}\n")
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })

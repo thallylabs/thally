@@ -30,6 +30,7 @@ import { basename, dirname, extname, isAbsolute, posix, relative, resolve as res
 import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
 
+import { isSelfContainedFunction } from './inline-extraction.js'
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent, unresolvedRelativeModuleSpecifiers } from './components.js'
 import { navbarLinkButtons, projectAuthoredStyles } from './source-styles.js'
 
@@ -2111,6 +2112,8 @@ function staticNamedSnippetValues(source: string): Map<string, string> {
         values.set(declaration.name.text, expression.text)
       } else if (expression.kind === ts.SyntaxKind.TrueKeyword || expression.kind === ts.SyntaxKind.FalseKeyword) {
         values.set(declaration.name.text, expression.kind === ts.SyntaxKind.TrueKeyword ? 'true' : 'false')
+      } else if (/^[a-z_$]/.test(declaration.name.text) && (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) && isSelfContainedFunction(expression)) {
+        values.set(declaration.name.text, expression.getText(parsed))
       } else if ((ts.isObjectLiteralExpression(expression) || ts.isArrayLiteralExpression(expression)) && isStaticLiteral(expression)) {
         values.set(declaration.name.text, expression.getText(parsed))
       }
@@ -2738,7 +2741,7 @@ function inlineMdxSnippets(
           if (body === snippetSource) {
             warnings.push({
               code: 'skipped-file',
-              message: `Import of "${binding!.exported}" from ${sourcePath} could not be inlined (it is not a static value or a simple component), so the import was left in place and may not resolve at build time.`,
+              message: `Import of "${binding!.exported}" from ${sourcePath} could not be inlined (it is not a static value, a self-contained function or a simple component), so uses of it on this page may not resolve at build time.`,
               source,
             })
             return statement

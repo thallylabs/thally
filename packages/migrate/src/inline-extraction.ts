@@ -566,3 +566,9 @@ export function unboundTags(moduleSource: string, boundNames: ReadonlySet<string
   }
   return [...tags].sort()
 }
+
+/** True when a function expression only reaches its own parameters, locals and JS built-ins, so its source can be copied verbatim to another module. */
+export function isSelfContainedFunction(node: ts.Node): boolean {
+  const { refs, assigned, awaitOutsideAsync, dynamicImport } = collectRefs(node)
+  return assigned.length === 0 && !awaitOutsideAsync && !dynamicImport && refs.every((ref) => JS_GLOBALS.has(ref.name))
+}
