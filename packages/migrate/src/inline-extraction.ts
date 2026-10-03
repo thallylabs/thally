@@ -567,10 +567,40 @@ export function unboundTags(moduleSource: string, boundNames: ReadonlySet<string
   return [...tags].sort()
 }
 
-/** True when a function expression only reaches its own parameters, locals and JS built-ins, so its source can be copied verbatim to another module. */
+/**
+ * Globals a function may use when its source is copied into another module.
+ * Deliberately narrower than JS_GLOBALS: `Function`, `globalThis`, `Reflect`,
+ * `Proxy`, `fetch`, `console` and timers reach code execution or the network.
+ */
+const INLINE_SAFE_GLOBALS = new Set([
+  'undefined', 'NaN', 'Infinity', 'Math', 'JSON', 'String', 'Number', 'Boolean', 'Array', 'Date', 'Intl',
+  'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'encodeURIComponent', 'decodeURIComponent',
+])
+const FORBIDDEN_MEMBERS = new Set(['constructor', 'prototype'])
+
+/** True when no member access in the node can walk to `Function` (`x.constructor`, `x['constructor']`, `x[key]`, `__proto__`). */
+function hasOnlySafeMemberAccess(root: ts.Node): boolean {
+  const unsafeName = (name: string) => FORBIDDEN_MEMBERS.has(name) || name.startsWith('__')
+  let safe = true
+  function visit(node: ts.Node): void {
+    if (!safe) return
+    if (ts.isPropertyAccessExpression(node) && unsafeName(node.name.text)) safe = false
+    else if (ts.isElementAccessExpression(node)) {
+      const argument = node.argumentExpression
+      const literal = ts.isNumericLiteral(argument) || (ts.isStringLiteralLike(argument) && !unsafeName(argument.text))
+      if (!literal) safe = false
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(root)
+  return safe
+}
+
+/** True when a function expression only reaches its own parameters, locals and a small set of pure built-ins, so its source can be copied verbatim to another module. */
 export function isSelfContainedFunction(node: ts.Node): boolean {
   const { refs, assigned, awaitOutsideAsync, dynamicImport } = collectRefs(node)
-  return assigned.length === 0 && !awaitOutsideAsync && !dynamicImport && refs.every((ref) => JS_GLOBALS.has(ref.name))
+  return assigned.length === 0 && !awaitOutsideAsync && !dynamicImport && refs.every((ref) => INLINE_SAFE_GLOBALS.has(ref.name))
+    && hasOnlySafeMemberAccess(node)
 }
 
 /** Names a page's own ESM source (imports and top-level declarations) makes available to its expressions. */
