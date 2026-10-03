@@ -2652,6 +2652,9 @@ function inlineMdxSnippets(
           snippets.set(componentName, blocked)
           return ''
         }
+        // An upper-case primitive export (`API_KEY_REF`) matches the component
+        // pattern; leave it for the value-import pass that declares it.
+        if (namedComponent && staticNamedSnippetValues(readFileSync(candidate, 'utf8')).has(namedComponent)) return _statement
         const nested = inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
           candidate,

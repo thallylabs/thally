@@ -345,6 +345,22 @@ describe('Mintlify repository migration', () => {
     expect(page?.body).not.toContain('<Snippet')
   })
 
+  it('inlines an upper-case value export imported by a single-name import (`import { API_KEY_REF } from ...`) instead of dropping the binding', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-const-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const API_KEY_REF = '<KEY>';\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { API_KEY_REF } from '/snippets/constants.mdx';\n\nKey: {API_KEY_REF}\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    expect(page?.body).toContain('export const API_KEY_REF = "<KEY>";')
+    expect(page?.body).not.toContain("constants.mdx")
+  })
+
   it('hoists a component snippet as a real declaration instead of splicing its source into the usage tag', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-component-snippet-'))
     mkdirSync(join(root, 'snippets'), { recursive: true })
