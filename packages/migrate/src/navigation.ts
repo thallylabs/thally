@@ -475,6 +475,8 @@ interface ProjectionContext {
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
   gated: Array<MintlifyGatedReference>
+  /** Label of the nearest enclosing navigation group, for warnings. */
+  groupLabel?: string
   /** Set while walking below a restricted group or tab. */
   gateReason?: string
 }
@@ -607,16 +609,32 @@ function convertPageObject(
     )
     return null
   }
+  if (typeof object.sourceRef === 'string') {
+    const where = context.groupLabel ? `the "${context.groupLabel}" navigation group` : 'the navigation'
+    warnOnce(
+      context,
+      `source-ref:${context.groupLabel ?? ''}:${object.sourceRef}`,
+      `Navigation in ${where} mounts the docs of the repository ${object.sourceRef} (sourceRef). `
+        + 'Those pages were not migrated; copy them into this project manually.',
+    )
+    return null
+  }
   const pages = Array.isArray(object.pages) ? object.pages : []
   if ('group' in object || pages.length > 0) {
     const children: Array<string | MigrationNavigationGroup> = []
+    const outerGroupLabel = context.groupLabel
+    context.groupLabel = labelFor(object, 'Documentation')
     if (typeof object.root === 'string') {
       const root = registerReference(object.root, context)
       if (root) children.push(root)
     }
-    for (const page of pages) {
-      const converted = convertPage(page, context)
-      if (converted) children.push(converted)
+    try {
+      for (const page of pages) {
+        const converted = convertPage(page, context)
+        if (converted) children.push(converted)
+      }
+    } finally {
+      context.groupLabel = outerGroupLabel
     }
     if (children.length === 0) return null
     return {

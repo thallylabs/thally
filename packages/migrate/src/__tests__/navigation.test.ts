@@ -736,3 +736,25 @@ describe('Mintlify config size limit', () => {
     }
   })
 })
+
+describe('Mintlify sourceRef navigation nodes', () => {
+  it('warns once per sourceRef with the repository and the group it sat in', () => {
+    const result = projectMintlifyNavigation({
+      navigation: {
+        tabs: [{
+          tab: 'Docs',
+          groups: [
+            { group: 'SDKs', pages: ['sdks/overview', { sourceRef: 'OpenRouterTeam/typescript-sdk' }, { sourceRef: 'OpenRouterTeam/python-sdk' }] },
+            { group: 'Only remote', pages: [{ sourceRef: 'OpenRouterTeam/typescript-sdk' }] },
+          ],
+        }],
+      },
+    })
+    const messages = result.warnings.map((warning) => warning.message).filter((message) => message.includes('sourceRef') || message.includes('OpenRouterTeam/'))
+    expect(messages).toHaveLength(3)
+    expect(messages.some((message) => message.includes('OpenRouterTeam/typescript-sdk') && message.includes('"SDKs"'))).toBe(true)
+    expect(messages.some((message) => message.includes('OpenRouterTeam/python-sdk') && message.includes('"SDKs"'))).toBe(true)
+    expect(messages.some((message) => message.includes('OpenRouterTeam/typescript-sdk') && message.includes('"Only remote"'))).toBe(true)
+    expect(messages.every((message) => message.includes('not migrated') && message.includes('copy'))).toBe(true)
+  })
+})
