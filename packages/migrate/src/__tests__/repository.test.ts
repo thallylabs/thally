@@ -4526,5 +4526,20 @@ describe('Mintlify snippet inlining hardening', () => {
     }
     expect(snippetFixture(files, '<Card title="import(\'./lib/m\')">Text.</Card>').page).toBeDefined()
   })
+
+  it('does not inline a snippet whose frontmatter is invalid YAML, by import, value import, file tag or global alias', () => {
+    const bad = '---\ntitle: [unclosed\n---\nexport const KEY = "leaked-value";\n\n<b>leaked-component</b>\n'
+    const files = { 'snippets/my-box.mdx': bad }
+    for (const body of [
+      "import MyBox from '/snippets/my-box.mdx';\n\n<MyBox />",
+      "import { KEY } from '/snippets/my-box.mdx';\n\nV {KEY}",
+      '<Snippet file="my-box.mdx" />',
+      '<MyBox />',
+    ]) {
+      const { page, warnings } = snippetFixture(files, body)
+      expect(page?.body ?? '').not.toContain('leaked')
+      expect(warnings.some((warning) => warning.message.includes('frontmatter that could not be read') && warning.source === 'home.mdx')).toBe(true)
+    }
+  })
 })
 

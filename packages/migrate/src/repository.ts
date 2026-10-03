@@ -3375,6 +3375,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (gated) return { kind: inSnippetDirectory ? 'snippet-gated' : 'gated', reason: gated }
     const navigationGated = inSnippetDirectory ? undefined : mintlifyGatedRefs.get(normalizedReferenceKey(shown).toLowerCase())
     if (navigationGated) return { kind: 'gated', reason: navigationGated }
+    // Invalid YAML is salvaged line by line, so what a snippet declares cannot be trusted; same as oversized.
+    if (head !== undefined && parseFrontmatter(head).error) return { kind: 'unreadable', reason: 'frontmatter could not be parsed' }
     if (lstatSync(candidate).size > MAX_PAGE_BYTES) return { kind: 'oversized', reason: 'over 2 MB' }
     return head === undefined ? { kind: 'unreadable', reason: 'frontmatter not terminated in the bounded read' } : undefined
   }
