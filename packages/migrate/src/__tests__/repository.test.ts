@@ -361,6 +361,37 @@ describe('Mintlify repository migration', () => {
     expect(page?.body).not.toContain("constants.mdx")
   })
 
+  it('inlines a static object-literal export imported alongside primitive values (`PDFParserEngine.MistralOCR`) instead of leaving the whole import dangling', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-object-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const Engine = {\n  Mistral: 'mistral-ocr',\n  Native: 'native',\n};\nexport const COST = 2;\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport {\n  COST as PRICE,\n  Engine,\n} from '/snippets/constants.mdx';\n\nEngine: {Engine.Mistral} {PRICE}\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    expect(page?.body).toContain('export const PRICE = 2;')
+    expect(page?.body).toMatch(/export const Engine = \{[^}]*Mistral: 'mistral-ocr'/)
+    expect(page?.body).not.toContain('constants.mdx')
+  })
+
+  it('warns when an imported snippet export cannot be inlined and the import is kept', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-unresolved-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const compute = () => 1;\nexport const Dyn = makeThing();\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { compute, Dyn } from '/snippets/constants.mdx';\n\n{compute()}\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.warnings.some((warning) => warning.message.includes('"compute"') && warning.message.includes('could not be inlined'))).toBe(true)
+  })
+
   it('hoists a component snippet as a real declaration instead of splicing its source into the usage tag', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-component-snippet-'))
     mkdirSync(join(root, 'snippets'), { recursive: true })

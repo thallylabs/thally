@@ -2083,7 +2083,20 @@ function statefulSnippetDeclaration(source: string, componentName: string): stri
   return source.trim()
 }
 
-/** Read only primitive named exports; source MDX is parsed, never executed. */
+/** True for primitives and object/array literals built only from primitives (no calls, spreads, identifiers or computed keys). */
+function isStaticLiteral(expression: ts.Expression): boolean {
+  if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression) || ts.isNumericLiteral(expression)) return true
+  if (expression.kind === ts.SyntaxKind.TrueKeyword || expression.kind === ts.SyntaxKind.FalseKeyword || expression.kind === ts.SyntaxKind.NullKeyword) return true
+  if (ts.isArrayLiteralExpression(expression)) return expression.elements.every(isStaticLiteral)
+  if (ts.isObjectLiteralExpression(expression)) {
+    return expression.properties.every((property) => (
+      ts.isPropertyAssignment(property) && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) && isStaticLiteral(property.initializer)
+    ))
+  }
+  return false
+}
+
+/** Read only static named exports (primitives, plain object/array literals); source MDX is parsed, never executed. */
 function staticNamedSnippetValues(source: string): Map<string, string> {
   const values = new Map<string, string>()
   const parsed = ts.createSourceFile('snippet.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -2098,6 +2111,8 @@ function staticNamedSnippetValues(source: string): Map<string, string> {
         values.set(declaration.name.text, expression.text)
       } else if (expression.kind === ts.SyntaxKind.TrueKeyword || expression.kind === ts.SyntaxKind.FalseKeyword) {
         values.set(declaration.name.text, expression.kind === ts.SyntaxKind.TrueKeyword ? 'true' : 'false')
+      } else if ((ts.isObjectLiteralExpression(expression) || ts.isArrayLiteralExpression(expression)) && isStaticLiteral(expression)) {
+        values.set(declaration.name.text, expression.getText(parsed))
       }
     }
   }
@@ -2719,9 +2734,15 @@ function inlineMdxSnippets(
             declarations.push(`export const ${binding!.local} = ${value};`)
             continue
           }
-          if (!/^[A-Z]/.test(binding!.exported)) return statement
-          const body = snippetComponentBody(snippetSource, binding!.exported)
-          if (body === snippetSource) return statement
+          const body = /^[A-Z]/.test(binding!.exported) ? snippetComponentBody(snippetSource, binding!.exported) : snippetSource
+          if (body === snippetSource) {
+            warnings.push({
+              code: 'skipped-file',
+              message: `Import of "${binding!.exported}" from ${sourcePath} could not be inlined (it is not a static value or a simple component), so the import was left in place and may not resolve at build time.`,
+              source,
+            })
+            return statement
+          }
           components.push([binding!.local, body])
         }
         for (const [name, body] of components) snippets.set(name, body)
