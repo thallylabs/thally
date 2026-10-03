@@ -1447,4 +1447,26 @@ describe('removeUndefinedExpressions', () => {
     const body = 'export const NAME = "x"\n\n{NAME} {gone}'
     expect(run(body).out).toBe('export const NAME = "x"\n\n{NAME} ')
   })
+
+  it('keeps an identifier that is only the operand of typeof, which never throws', () => {
+    const body = "{typeof zzz === 'undefined' ? 'a' : 'b'}"
+    const { out, warnings } = run(body)
+    expect(out).toBe(body)
+    expect(warnings).toEqual([])
+    expect(run('{typeof zzz.a}').out).toBe('')
+  })
+
+  it('keeps the own name of a class expression or a function expression used inside it', () => {
+    const body = '{new (class Foo { m() { return Foo } })().m().name} {(function fact(n) { return n <= 1 ? 1 : n * fact(n - 1) })(3)}'
+    const { out, warnings } = run(body)
+    expect(out).toBe(body)
+    expect(warnings).toEqual([])
+  })
+
+  it('does not report `meta` for import.meta', () => {
+    const { warnings } = run('{import.meta.url} {gone}')
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('"gone"')
+    expect(warnings[0]).not.toContain('"meta"')
+  })
 })

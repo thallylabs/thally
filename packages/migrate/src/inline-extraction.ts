@@ -17,7 +17,7 @@ import { isThallyBuiltinComponent } from './builtin-components.js'
 
 export interface InlineDeclaration { start: number; end: number; source: string }
 
-type RefKind = 'tag' | 'member' | 'prop' | 'other'
+type RefKind = 'tag' | 'member' | 'prop' | 'typeof' | 'other'
 interface Ref { name: string; kind: RefKind }
 
 interface Unit {
@@ -161,7 +161,11 @@ function collectRefs(root: ts.Node): { refs: Array<Ref>; assigned: Array<string>
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) dynamicImport = true
     if (ts.isIdentifier(node)) {
       const parent = node.parent
-      const kind: RefKind = ts.isJsxExpression(parent) && parent.parent && ts.isJsxAttribute(parent.parent) ? 'prop' : 'other'
+      let operandOf = parent
+      while (ts.isParenthesizedExpression(operandOf)) operandOf = operandOf.parent
+      const kind: RefKind = ts.isTypeOfExpression(operandOf)
+        ? 'typeof'
+        : ts.isJsxExpression(parent) && parent.parent && ts.isJsxAttribute(parent.parent) ? 'prop' : 'other'
       push(node.text, kind, scopes)
       return
     }
@@ -207,10 +211,14 @@ function collectRefs(root: ts.Node): { refs: Array<Ref>; assigned: Array<string>
       return
     }
     if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
-      node.members.forEach((member) => walkNode(member, scopes, inAsync))
+      // A class expression's own name is bound inside the class only.
+      const inner = ts.isClassExpression(node) && node.name ? [...scopes, new Set([node.name.text])] : scopes
+      node.members.forEach((member) => walkNode(member, inner, inAsync))
       for (const clause of node.heritageClauses ?? []) for (const type of clause.types) walkNode(type.expression, scopes, inAsync)
       return
     }
+    // `import.meta` / `new.target` carry a keyword-like name, not a reference.
+    if (ts.isMetaProperty(node)) return
     if (ts.isPropertyDeclaration(node)) {
       if (node.initializer) walkNode(node.initializer, scopes, inAsync)
       return
@@ -625,6 +633,8 @@ export function pageScopeNames(esmSources: ReadonlyArray<string>): Set<string> {
 export function unresolvedExpressionNames(expression: string, pageNames: ReadonlySet<string>): Array<string> {
   const names = new Set<string>()
   for (const { name, kind } of expressionRefs(expression)) {
+    // `typeof missing` is safe at runtime; only a bare reference throws.
+    if (kind === 'typeof') continue
     if (!name || pageNames.has(name) || JS_GLOBALS.has(name) || BROWSER_IDENTIFIERS.has(name) || SERVER_ONLY_IDENTIFIERS.has(name)
       || name === 'props' || name === 'React') continue
     if ((kind === 'tag' || kind === 'member') && isThallyBuiltinComponent(name)) continue
