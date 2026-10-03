@@ -3,7 +3,7 @@
 import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
-import { mintlifyHeadingSlug, escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
+import { mintlifyHeadingSlug, escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, removeUndefinedExpressions, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -1389,5 +1389,62 @@ describe('normalizeHtmlComments', () => {
   it('leaves plain text with no comment unchanged', () => {
     const body = 'Just prose, no comments here.'
     expect(normalizeHtmlComments(body)).toBe(body)
+  })
+})
+
+describe('removeUndefinedExpressions', () => {
+  function run(body: string): { out: string; warnings: Array<string> } {
+    const warnings: Array<string> = []
+    return { out: removeUndefinedExpressions(body, (message) => warnings.push(message)), warnings }
+  }
+
+  it('removes an undefined text expression and warns once with the names', () => {
+    const { out, warnings } = run('Owned by exactly one of {backfill, MV}. Also {other}.')
+    expect(out).toBe('Owned by exactly one of . Also .')
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('"backfill"')
+    expect(warnings[0]).toContain('"MV"')
+    expect(warnings[0]).toContain('\\{ \\}')
+  })
+
+  it('removes an undefined flow expression and an undefined attribute expression', () => {
+    const { out, warnings } = run('{missing}\n\n<Card title="x" href={base} />')
+    expect(out).not.toContain('missing')
+    expect(out).toBe('\n\n<Card title="x"  />')
+    expect(warnings).toHaveLength(1)
+  })
+
+  it('keeps names the page exports or imports', () => {
+    const body = "import { z } from './z'\n\nexport const x = 1\n\nValue {x} and {z}."
+    const { out, warnings } = run(body)
+    expect(out).toBe(body)
+    expect(warnings).toEqual([])
+  })
+
+  it('keeps expression-local bindings and exported data', () => {
+    const body = "export const items = [1, 2]\n\n{items.map(x => x * 2)}\n\n{items.map(function (y) { return y })}"
+    expect(run(body).out).toBe(body)
+  })
+
+  it('keeps JS built-ins and props', () => {
+    const body = '{Math.max(1, 2)} and {new Date().getFullYear()} and {props.title}'
+    const { out, warnings } = run(body)
+    expect(out).toBe(body)
+    expect(warnings).toEqual([])
+  })
+
+  it('keeps comment-only expressions', () => {
+    const body = '{/* note */}\n\ntext {/* a */}'
+    expect(run(body).out).toBe(body)
+  })
+
+  it('does not touch code fences or inline code', () => {
+    const body = 'Use `{backfill}`.\n\n```js\nconst a = {backfill}\n```'
+    expect(run(body).out).toBe(body)
+  })
+
+  it('removes an undefined expression but keeps the inlined value', () => {
+    const body = 'export const NAME = "x"\n\n{NAME} {gone}'
+    expect(run(body).out).toBe('export const NAME = "x"\n\n{NAME} ')
   })
 })

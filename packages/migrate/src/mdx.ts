@@ -10,6 +10,7 @@ import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 
 import { isThallyBuiltinComponent } from './builtin-components.js'
+import { pageScopeNames, unresolvedExpressionNames } from './inline-extraction.js'
 import { playgroundDisplay } from './mintlify-extras.js'
 import { parseFrontmatter } from './frontmatter.js'
 import type { MigrationPage, MigrationPlatform } from './types.js'
@@ -1811,6 +1812,60 @@ function injectReactHookImports(body: string): string {
   return used.length > 0 ? `import { ${used.join(', ')} } from 'react'\n\n${body}` : body
 }
 
+/**
+ * An MDX expression that names something the page never defines throws a
+ * ReferenceError when the page renders and fails the build, while Mintlify
+ * renders it as nothing (`exactly one of {backfill, MV}.`). Match Mintlify:
+ * drop the expression, or the JSX attribute that carries it, and say so once.
+ */
+export function removeUndefinedExpressions(body: string, warn?: (message: string) => void): string {
+  if (!body.includes('{')) return body
+  interface ExpressionNode extends MdxOffsetNode {
+    attributes?: Array<{ type: string; value?: unknown; position?: MdxOffsetNode['position'] }>
+  }
+  let tree: ExpressionNode
+  try {
+    tree = descriptionParser.parse(body) as ExpressionNode
+  } catch {
+    return body
+  }
+  const esm: Array<string> = []
+  const collect = (node: ExpressionNode): void => {
+    if (node.type === 'mdxjsEsm' && node.value) esm.push(node.value)
+    for (const child of node.children ?? []) collect(child)
+  }
+  collect(tree)
+  const scope = pageScopeNames(esm)
+  const edits: Array<{ start: number; end: number }> = []
+  const removed = new Set<string>()
+  const check = (expression: string, position: MdxOffsetNode['position']): void => {
+    const names = unresolvedExpressionNames(expression, scope)
+    const start = position?.start.offset
+    const end = position?.end.offset
+    if (names.length === 0 || start === undefined || end === undefined) return
+    names.forEach((name) => removed.add(name))
+    edits.push({ start, end })
+  }
+  const visit = (node: ExpressionNode): void => {
+    if ((node.type === 'mdxFlowExpression' || node.type === 'mdxTextExpression') && node.value !== undefined) {
+      check(node.value, node.position)
+    }
+    for (const attribute of node.attributes ?? []) {
+      const value = attribute.value
+      if (attribute.type === 'mdxJsxExpressionAttribute' && typeof value === 'string') check(`{${value}}`, attribute.position)
+      else if (value && typeof value === 'object' && typeof (value as { value?: unknown }).value === 'string') {
+        check((value as { value: string }).value, attribute.position)
+      }
+    }
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(tree)
+  if (edits.length === 0) return body
+  warn?.(`Removed expressions that use ${[...removed].map((name) => `"${name}"`).join(', ')}, which ${removed.size === 1 ? 'is' : 'are'} not defined on this page. Mintlify renders them as empty; define the name or escape the braces as \\{ \\} to show the text.`)
+  return edits.sort((a, b) => b.start - a.start)
+    .reduce((text, edit) => text.slice(0, edit.start) + text.slice(edit.end), body)
+}
+
 /** Keep authored paragraph styling without emitting an invalid <p><p> tree. */
 function normalizeFlowParagraphContainers(body: string): string {
   if (!body.includes('<p')) return body
@@ -2018,7 +2073,7 @@ export function parseMarkdownPage(input: {
     ...(input.locale ? { locale: input.locale } : {}),
   }
   const identity = input.resolveIdentity?.(parsed.data, fallbackIdentity) ?? fallbackIdentity
-  let body = injectReactHookImports(normalizeMdx(parsed.content, input.platform)).trim()
+  let body = removeUndefinedExpressions(injectReactHookImports(normalizeMdx(parsed.content, input.platform)), input.warn).trim()
   const keywords = Array.isArray(parsed.data.keywords)
     ? parsed.data.keywords.filter((value): value is string => typeof value === 'string')
     : []

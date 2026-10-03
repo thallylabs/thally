@@ -572,3 +572,33 @@ export function isSelfContainedFunction(node: ts.Node): boolean {
   const { refs, assigned, awaitOutsideAsync, dynamicImport } = collectRefs(node)
   return assigned.length === 0 && !awaitOutsideAsync && !dynamicImport && refs.every((ref) => JS_GLOBALS.has(ref.name))
 }
+
+/** Names a page's own ESM source (imports and top-level declarations) makes available to its expressions. */
+export function pageScopeNames(esmSources: ReadonlyArray<string>): Set<string> {
+  const names = new Set<string>()
+  for (const source of esmSources) {
+    for (const statement of parse(source).statements) {
+      for (const local of importLocals(statement.getText())) names.add(local)
+      if (ts.isImportDeclaration(statement)) continue
+      const target = ts.isExportDeclaration(statement) || ts.isExportAssignment(statement) ? undefined : statement
+      if (target) for (const name of declaredNames(target).names) names.add(name)
+    }
+  }
+  return names
+}
+
+/**
+ * Free identifiers in an MDX expression that neither the page, the expression
+ * itself, a JS built-in nor the compiled-MDX scope (`props`) defines. Evaluating
+ * one throws a ReferenceError at render time.
+ */
+export function unresolvedExpressionNames(expression: string, pageNames: ReadonlySet<string>): Array<string> {
+  const names = new Set<string>()
+  for (const { name, kind } of expressionRefs(expression)) {
+    if (!name || pageNames.has(name) || JS_GLOBALS.has(name) || BROWSER_IDENTIFIERS.has(name) || SERVER_ONLY_IDENTIFIERS.has(name)
+      || name === 'props' || name === 'React') continue
+    if ((kind === 'tag' || kind === 'member') && isThallyBuiltinComponent(name)) continue
+    names.add(name)
+  }
+  return [...names]
+}
