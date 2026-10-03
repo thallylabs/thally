@@ -1253,13 +1253,17 @@ function exactReferenceKey(value: string): string {
     .replace(/\.(?:mdx?|rst|txt)$/i, '')
 }
 
-/** Every operation reference docs.json navigation names explicitly. */
+/** Operation references in navigation that is visible without source-side access. */
 function navigationOperationRefs(config: Record<string, unknown> | null): Array<string> {
   const refs: Array<string> = []
   const visit = (node: unknown): void => {
     if (typeof node === 'string') { if (splitOpenApiRef(node)) refs.push(node) }
     else if (Array.isArray(node)) node.forEach(visit)
-    else if (node && typeof node === 'object') Object.values(node).forEach(visit)
+    else if (node && typeof node === 'object') {
+      // A restricted container does not make any descendant operation public.
+      if (navigationGateReason(node as Record<string, unknown>)) return
+      Object.values(node).forEach(visit)
+    }
   }
   visit(config?.navigation)
   return refs

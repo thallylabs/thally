@@ -1035,6 +1035,24 @@ describe('operations documented only on access-restricted pages', () => {
     expect(out.paths['/internal'].get['x-excluded']).toBeUndefined()
   })
 
+  it('does not keep an operation listed only under restricted navigation', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({
+        api: { openapi: 'spec.json' },
+        navigation: { groups: [
+          { group: 'Public', pages: ['pub'] },
+          { group: 'Private', public: false, pages: ['s', 'GET /internal'] },
+        ] },
+      }),
+      'spec.json': spec,
+      'pub.mdx': page('Pub', 'openapi: "/spec.json GET /x"\n'),
+      's.mdx': page('S', 'groups: [admin]\nopenapi: "/spec.json GET /internal"\n'),
+    })
+    const out = specContent(bundle)
+    expect(out.paths['/internal'].get['x-excluded']).toBe(true)
+    expect(out.paths['/x'].get['x-excluded']).toBeUndefined()
+  })
+
   it('applies to a spec listed in docs.json and to YAML specs', () => {
     const yaml = 'openapi: 3.0.0\ninfo: {title: T, version: "1"}\npaths:\n  /x:\n    get: {summary: A}\n  /internal:\n    get: {summary: B}\n'
     const bundle = site({
