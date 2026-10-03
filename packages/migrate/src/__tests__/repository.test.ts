@@ -424,7 +424,7 @@ describe('Mintlify repository migration', () => {
     expect(page?.body).toContain('export const FEE = "5";')
     expect(page?.body).toContain('export const MISSING_LIMIT = undefined;')
     expect(page?.body).not.toContain('constants.mdx')
-    expect(bundle.warnings.some((warning) => warning.message.includes('"MISSING_LIMIT" is not exported'))).toBe(true)
+    expect(bundle.warnings.some((warning) => warning.message.includes('"MISSING_LIMIT" is not exported') && warning.source === 'home.mdx')).toBe(true)
   })
 
   it('hoists a component snippet as a real declaration instead of splicing its source into the usage tag', () => {

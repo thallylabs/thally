@@ -2746,7 +2746,7 @@ function inlineMdxSnippets(
       }
     },
   ))
-  withoutImports = replaceOutsideCodeAndMdxComments(withoutImports, (source) => source.replace(
+  withoutImports = replaceOutsideCodeAndMdxComments(withoutImports, (segment) => segment.replace(
     SNIPPET_VALUE_IMPORT_PATTERN,
     (statement: string, names: string, sourcePath: string) => {
       const bindings = names.split(',').map((name) => name.trim()).filter(Boolean).map((name) => {
