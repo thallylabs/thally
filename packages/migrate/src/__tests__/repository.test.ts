@@ -3,7 +3,7 @@
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -4443,5 +4443,32 @@ describe('cloneGitHubRepository retry', () => {
       targetDir,
     )).rejects.toThrow(/RPC failed/)
     expect(cloneOutcomes.queue).toHaveLength(0)
+  })
+})
+
+describe('Mintlify snippet inlining hardening', () => {
+  function snippetFixture(files: Record<string, string>, body: string, home = 'home') {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-hardening-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: [home] } }))
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, path)), { recursive: true })
+      writeFileSync(join(root, path), content)
+    }
+    writeFileSync(join(root, `${home}.mdx`), `---\ntitle: Home\n---\n\n${body}\n`)
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    return { root, page: bundle.pages.find((candidate) => candidate.id === home), warnings: bundle.warnings }
+  }
+
+  it('recognises a $-prefixed export and lists, and does not slow down on adversarial export lists', () => {
+    const { page, warnings } = snippetFixture({
+      'snippets/c.mdx': "import q from 'q';\nexport const $x = q.z;\nconst b = 1;\nexport { b };\n",
+    }, "import { $x, b } from '/snippets/c.mdx';\n\nV {$x} {b}")
+    expect(warnings.some((warning) => warning.message.includes('is not exported'))).toBe(false)
+    expect(page?.body).not.toContain('export const $x = undefined')
+    expect(page?.body).not.toContain('export const b = undefined')
+
+    const start = performance.now()
+    snippetFixture({ 'snippets/c.mdx': 'export { a, '.repeat(5000) }, "import { q } from '/snippets/c.mdx';\n\nV {q}")
+    expect(performance.now() - start).toBeLessThan(1000)
   })
 })

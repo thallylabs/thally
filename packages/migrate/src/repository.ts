@@ -2097,6 +2097,28 @@ function isStaticLiteral(expression: ts.Expression): boolean {
   return false
 }
 
+/** Names a snippet exports, from its parsed source: declarations and `export { a as b }` lists. */
+function snippetExportedNames(source: string): Set<string> {
+  const names = new Set<string>()
+  const addBinding = (name: ts.BindingName) => {
+    if (ts.isIdentifier(name)) names.add(name.text)
+    else for (const element of name.elements) if (!ts.isOmittedExpression(element)) addBinding(element.name)
+  }
+  const parsed = ts.createSourceFile('snippet.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  for (const statement of parsed.statements) {
+    if (ts.isExportDeclaration(statement)) {
+      if (statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+        for (const element of statement.exportClause.elements) names.add(element.name.text)
+      }
+      continue
+    }
+    if (!ts.getModifiers(statement as ts.HasModifiers)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) continue
+    if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) addBinding(declaration.name)
+    else if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) names.add(statement.name.text)
+  }
+  return names
+}
+
 /** Read only static named exports (primitives, plain object/array literals); source MDX is parsed, never executed. */
 function staticNamedSnippetValues(source: string): Map<string, string> {
   const values = new Map<string, string>()
@@ -2731,14 +2753,16 @@ function inlineMdxSnippets(
         const values = staticNamedSnippetValues(snippetSource)
         const declarations: Array<string> = []
         const components: Array<[string, string]> = []
+        let exportedNames: Set<string> | undefined
         for (const binding of bindings) {
           const value = values.get(binding!.exported)
           if (value !== undefined) {
             declarations.push(`export const ${binding!.local} = ${value};`)
             continue
           }
-          const exported = new RegExp(`\\bexport\\s+(?:async\\s+)?(?:const|let|var|function\\s*\\*?|class)\\s+${binding!.exported}\\b|\\bexport\\s*\\{[^}]*\\b${binding!.exported}\\b`)
-          if (!exported.test(snippetSource) && !(/^[A-Z]/.test(binding!.exported) && snippetComponentBody(snippetSource, binding!.exported) !== snippetSource)) {
+          exportedNames ??= snippetExportedNames(snippetSource)
+          const exported = exportedNames.has(binding!.exported)
+          if (!exported && !(/^[A-Z]/.test(binding!.exported) && snippetComponentBody(snippetSource, binding!.exported) !== snippetSource)) {
             // Mintlify binds a name its snippet does not export to undefined, which renders as nothing.
             warnings.push({
               code: 'skipped-file',
