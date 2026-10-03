@@ -188,7 +188,7 @@ function renderedHeadingText(source: string): string {
 
 function extractHeadingAnchors(content: string): Set<string> {
   const anchors = new Set<string>()
-  const occurrences = new Map<string, number>()
+  const headings: Array<{ base: string; explicit: boolean }> = []
   forEachNonFencedLine(content, (line) => {
     const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
     if (heading) {
@@ -196,10 +196,7 @@ function extractHeadingAnchors(content: string): Set<string> {
       // anchors contribute their visible children, never their tag/props.
       // A trailing `{/* #id */}` is the id the runtime uses instead of the text's slug.
       const explicit = /\{\/\*\s*#(\S+?)\s*\*\/\}$/.exec(heading[1])
-      const base = explicit?.[1] ?? slugify(renderedHeadingText(heading[1]))
-      const occurrence = (occurrences.get(base) ?? 0) + 1
-      occurrences.set(base, occurrence)
-      anchors.add(occurrence === 1 ? base : `${base}-${occurrence}`)
+      headings.push({ base: explicit?.[1] ?? slugify(renderedHeadingText(heading[1])), explicit: !!explicit })
     }
     for (const idMatch of line.matchAll(EXPLICIT_ID_ATTRIBUTE)) {
       const id = idMatch[1] ?? idMatch[2] ?? idMatch[3]
@@ -212,6 +209,25 @@ function extractHeadingAnchors(content: string): Set<string> {
       if (name) anchors.add(name)
     }
   })
+  // Same numbering as the runtime and the content parser: `foo`, `foo-2`, `foo-3`;
+  // an explicit id reserves its id, so generated ids skip it.
+  const reserved = new Set(headings.filter((heading) => heading.explicit).map((heading) => heading.base))
+  const used = new Set<string>()
+  const occurrences = new Map<string, number>()
+  for (const { base, explicit } of headings) {
+    let id = base
+    let n = 1
+    if (explicit) {
+      while (used.has(id)) id = `${base}-${++n}`
+    } else {
+      n = occurrences.get(base) ?? 0
+      do id = ++n === 1 ? base : `${base}-${n}`
+      while (used.has(id) || reserved.has(id))
+      occurrences.set(base, n)
+    }
+    used.add(id)
+    anchors.add(id)
+  }
   return anchors
 }
 
@@ -454,8 +470,13 @@ function validateOpenApi(projectDir: string, source: string, issues: LintIssue[]
     issues.push({ severity: 'error', message: 'OpenAPI spec is missing the "info" object', file: source })
   }
   const paths = s?.paths
+  // OpenAPI 3.1 only needs one of paths, webhooks or components (a webhook-only spec is valid).
+  const is31 = typeof s?.openapi === 'string' && s.openapi.startsWith('3.1')
+  const hasOtherRoot = (key: string): boolean => typeof s?.[key] === 'object' && s[key] !== null
   if (typeof paths !== 'object' || paths === null) {
-    issues.push({ severity: 'error', message: 'OpenAPI spec is missing the "paths" object', file: source })
+    if (!is31 || !(hasOtherRoot('webhooks') || hasOtherRoot('components'))) {
+      issues.push({ severity: 'error', message: is31 ? 'OpenAPI spec needs a "paths", "webhooks" or "components" object' : 'OpenAPI spec is missing the "paths" object', file: source })
+    }
   } else {
     const methods = new Set(['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'trace'])
     for (const [p, ops] of Object.entries(paths as Record<string, unknown>)) {

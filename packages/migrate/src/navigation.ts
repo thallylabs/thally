@@ -814,19 +814,28 @@ function projectedTheme(value: unknown): MigrationDocsConfig['theme'] {
  * one used in dark mode and `dark` the button fill. Three-digit hex is
  * expanded because the renderer only accepts six digits.
  */
-function projectedColors(value: unknown): MigrationDocsConfig['colors'] {
+function projectedColors(value: unknown, warnings: Array<MigrationWarning>): MigrationDocsConfig['colors'] {
   const colors = objectValue(value)
-  if (!colors) return undefined
-  const hex = (entry: unknown): string | undefined => {
+  if (!colors) {
+    if (value !== undefined) warnings.push({ code: 'unsupported-config', message: 'colors is not an object with a primary hex colour and was dropped.', source: 'docs.json' })
+    return undefined
+  }
+  const hex = (entry: unknown, key: string): string | undefined => {
     const match = typeof entry === 'string' ? /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(entry.trim()) : null
-    if (!match) return undefined
+    if (!match) {
+      if (entry !== undefined) warnings.push({ code: 'unsupported-config', message: `colors.${key} ${JSON.stringify(entry)} is not a 3- or 6-digit hex colour (for example #16a34a) and was dropped.`, source: 'docs.json' })
+      return undefined
+    }
     const digits = match[1].length === 3 ? [...match[1]].map((digit) => digit + digit).join('') : match[1]
     return `#${digits.toLowerCase()}`
   }
-  const primary = hex(colors.primary)
-  const light = hex(colors.light) ?? primary
-  const dark = hex(colors.dark) ?? primary
-  if (!primary) return undefined
+  const primary = hex(colors.primary, 'primary')
+  const light = hex(colors.light, 'light') ?? primary
+  const dark = hex(colors.dark, 'dark') ?? primary
+  if (!primary) {
+    if (colors.primary === undefined) warnings.push({ code: 'unsupported-config', message: 'colors has no primary hex colour, so none of its colours were migrated.', source: 'docs.json' })
+    return undefined
+  }
   return { light: { accent: primary, primary: dark ?? primary }, dark: { accent: light ?? primary, primary: light ?? primary } }
 }
 
@@ -970,9 +979,19 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
   if (droppedContextual.length > 0) {
     warnings.push({ code: 'unsupported-config', message: `contextual.options entries not supported by the page menu were dropped: ${droppedContextual.map((option) => typeof option === 'string' ? option : 'custom entry').join(', ')}.`, source: 'docs.json' })
   }
-  const metatagEntries = Object.entries(objectValue(seo?.metatags) ?? {})
-    .filter((entry): entry is [string, string] => /^[\w:.-]+$/.test(entry[0]) && typeof entry[1] === 'string' && entry[1].length <= 1000)
+  const rawMetatags = Object.entries(objectValue(seo?.metatags) ?? {})
+  // Same rules as the renderer's `validMetatags`: a plain name, a short string value, and no http-equiv directive.
+  const httpEquivNames = new Set(['refresh', 'set-cookie', 'location', 'content-security-policy', 'content-security-policy-report-only', 'content-type', 'default-style', 'x-ua-compatible'])
+  const validMetatag = (entry: [string, unknown]): entry is [string, string] => /^[\w:.-]+$/.test(entry[0])
+    && !entry[0].toLowerCase().startsWith('http-equiv') && !httpEquivNames.has(entry[0].toLowerCase())
+    && typeof entry[1] === 'string' && entry[1].length <= 1000 && ![...entry[1]].some((character) => character.charCodeAt(0) < 32)
+  const metatagEntries = rawMetatags.filter(validMetatag)
+  const droppedMetatags = rawMetatags.filter((entry) => !validMetatag(entry)).map(([key]) => key)
+  if (droppedMetatags.length > 0) {
+    warnings.push({ code: 'unsupported-config', message: `seo.metatags entries were dropped because the name is not a plain meta name, is an http-equiv directive, or the value is not a string of at most 1000 characters: ${droppedMetatags.join(', ')}.`, source: 'docs.json' })
+  }
   const projectedMetatags = metatagEntries.length > 0 ? Object.fromEntries(metatagEntries) : undefined
+  const projectedColorsValue = projectedColors(config.colors, warnings)
   const iconLibrary = objectValue(config.icons)?.library
   // Mintlify's default icon library is Font Awesome when docs.json names none.
   const projectedIconLibrary = iconLibrary === undefined
@@ -1012,7 +1031,7 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
   return {
     ...(projectedTheme(config.theme) ? { theme: projectedTheme(config.theme) } : {}),
     ...(projectedContextual.length > 0 ? { contextual: { options: projectedContextual } } : {}),
-    ...(projectedColors(config.colors) ? { colors: projectedColors(config.colors) } : {}),
+    ...(projectedColorsValue ? { colors: projectedColorsValue } : {}),
     ...(projectedIconLibrary ? { icons: { library: projectedIconLibrary } } : {}),
     ...(bannerContent ? {
       banner: {

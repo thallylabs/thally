@@ -29,11 +29,41 @@ function parseToTree(markdown: string): Root {
   }
 }
 
-function ensureUniqueId(base: string, seen: Map<string, number>): string {
+/**
+ * Heading ids, numbered `foo`, `foo-2`, `foo-3` exactly as the renderer and
+ * `thally check` do. An explicit `{/* #id *\/}` reserves its id for the whole
+ * page, so a generated id never takes it, wherever the heading sits.
+ */
+interface HeadingIds {
+  reserved: Set<string>
+  used: Set<string>
+  occurrences: Map<string, number>
+}
+
+function ensureUniqueId(base: string, explicit: boolean, ids: HeadingIds): string {
   const slug = base || 'section'
-  const count = seen.get(slug) ?? 0
-  seen.set(slug, count + 1)
-  return count === 0 ? slug : `${slug}-${count}`
+  let id = slug
+  let n = 1
+  if (explicit) {
+    while (ids.used.has(id)) id = `${slug}-${++n}`
+  } else {
+    n = ids.occurrences.get(slug) ?? 0
+    do id = ++n === 1 ? slug : `${slug}-${n}`
+    while (ids.used.has(id) || ids.reserved.has(id))
+    ids.occurrences.set(slug, n)
+  }
+  ids.used.add(id)
+  return id
+}
+
+function collectExplicitIds(nodes: ReadonlyArray<RootContent>, into: Set<string>) {
+  for (const node of nodes) {
+    if (node.type === 'heading') {
+      const { explicitId } = headingTextAndId(node)
+      if (explicitId) into.add(explicitId)
+    }
+    if ('children' in node) collectExplicitIds(node.children as Array<RootContent>, into)
+  }
 }
 
 function cleanText(value: string): string {
@@ -61,7 +91,7 @@ interface WalkState {
   sectionTextParts: Array<string>
   current: ContentSection
   stack: Array<{ depth: number; text: string }>
-  seen: Map<string, number>
+  ids: HeadingIds
   codeIndex: number
 }
 
@@ -87,7 +117,7 @@ function startSection(state: WalkState, depth: number, text: string, explicitId?
   const headingPath = [...state.stack.map((s) => s.text), text]
   state.stack.push({ depth, text })
 
-  const id = ensureUniqueId(explicitId ?? slugify(text), state.seen)
+  const id = ensureUniqueId(explicitId ?? slugify(text), explicitId !== undefined, state.ids)
   state.headings.push({ depth, text, id })
 
   const section: ContentSection = { id, title: text, depth, headingPath, text: '', code: [] }
@@ -203,10 +233,11 @@ export function parseMdxContent(markdown: string, audience: ContentAudience = 'a
     sectionTextParts: [],
     current: preamble,
     stack: [],
-    seen: new Map(),
+    ids: { reserved: new Set(), used: new Set(), occurrences: new Map() },
     codeIndex: 0,
   }
 
+  collectExplicitIds(tree.children, state.ids.reserved)
   walk(state, tree.children)
   // Flush the final section's text.
   state.current.text = cleanText(state.sectionTextParts.join(' '))

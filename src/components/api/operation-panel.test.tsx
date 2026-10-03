@@ -177,7 +177,7 @@ describe('OperationPanel $ref path parameter', () => {
     }
     const html = renderToStaticMarkup(<OperationPanel operation={operationFrom(spec)} />)
     expect(html).toContain('>id</code>')
-    expect(html).toContain('--url https://api.example.com/v2/monitor/{id}')
+    expect(html).toContain('--url &#x27;https://api.example.com/v2/monitor/{id}&#x27;')
     expect(html).not.toContain('%7Bid%7D')
   })
 })

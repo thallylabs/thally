@@ -18,7 +18,7 @@ import { LocaleStaleBanner } from '@/components/docs/locale-stale-banner'
 import { LocalizedSidebarHydrator } from '@/components/layout/localized-sidebar-hydrator'
 import { LocaleAvailabilityHydrator } from '@/components/layout/locale-availability'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
-import { getApiOperationForFrontmatter } from '@/data/api-reference'
+import { lookupApiOperationForFrontmatter } from '@/data/api-reference'
 import { ensureDocPublication, getApiPlaygroundDisplay, getDocEntries, getSeoConfig, isDocPublished, loadNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { hasDocTranslation } from '@/lib/i18n/translation-source'
@@ -203,10 +203,11 @@ export default async function DocsPage({ params }: PageProps) {
 
   const playground = resolvePlaygroundDisplay(doc.playground, getApiPlaygroundDisplay())
   if (doc.openapi) {
-    const operationNode = await getApiOperationForFrontmatter(doc.openapi)
-    // A hidden or excluded operation is withheld on purpose (the build records
-    // it); one that cannot be resolved at all keeps the authored page, with a notice.
-    if (!operationNode && !isDocPublished(doc.id, route.isLocaleRoute ? route.locale : undefined)) notFound()
+    const lookup = await lookupApiOperationForFrontmatter(doc.openapi)
+    // A hidden or excluded operation is withheld on purpose: 404 on every site.
+    // Only a reference that cannot be resolved at all keeps the authored page, with a notice.
+    if (lookup.node === null && lookup.reason === 'withheld') notFound()
+    const operationNode = lookup.node
 
     if (!operationNode) {
       const Body = doc.component

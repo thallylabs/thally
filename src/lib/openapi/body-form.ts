@@ -66,10 +66,12 @@ export function formPairs(value: unknown): Array<[string, string]> {
   })
 }
 
-/** An `application/x-www-form-urlencoded` body. */
+/** Encode an object as an `application/x-www-form-urlencoded` body. */
 export const encodeUrlencoded = (value: unknown) => new URLSearchParams(formPairs(value)).toString()
 
+/** Whether a media type is `multipart/*`. */
 export const isMultipart = (mediaType?: string) => Boolean(mediaType?.toLowerCase().startsWith('multipart/'))
+/** Whether a media type is `application/x-www-form-urlencoded`. */
 export const isUrlencoded = (mediaType?: string) => Boolean(mediaType?.toLowerCase().startsWith('application/x-www-form-urlencoded'))
 
 /** A schema the typed form can edit: an object (or a union of them) with a JSON-shaped body. */

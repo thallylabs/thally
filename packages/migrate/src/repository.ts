@@ -50,6 +50,7 @@ import {
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
+import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
 import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
 import { closeOpenFence, escapeFernLiteralBraces, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
@@ -85,6 +86,7 @@ import type {
   MigrationPage,
   MigrationPlatform,
   MigrationWarning,
+  RemoteApiSpec,
   RenderedMigrationFile,
 } from './types.js'
 
@@ -1251,18 +1253,36 @@ function exactReferenceKey(value: string): string {
     .replace(/\.(?:mdx?|rst|txt)$/i, '')
 }
 
+/** Operation references in navigation that is visible without source-side access. */
+function navigationOperationRefs(config: Record<string, unknown> | null): Array<string> {
+  const refs: Array<string> = []
+  const visit = (node: unknown): void => {
+    if (typeof node === 'string') { if (splitOpenApiRef(node)) refs.push(node) }
+    else if (Array.isArray(node)) node.forEach(visit)
+    else if (node && typeof node === 'object') {
+      // A restricted container does not make any descendant operation public.
+      if (navigationGateReason(node as Record<string, unknown>)) return
+      Object.values(node).forEach(visit)
+    }
+  }
+  visit(config?.navigation)
+  return refs
+}
+
 /**
- * Whether a frontmatter `openapi:` value ("GET /x", "specs/api.json GET /x")
- * names this spec. A bare operation resolves to the default spec; a prefixed
- * one to the spec whose path ends with the prefix, on a segment boundary.
+ * Fail closed: an operation named only by access-restricted pages must not be
+ * published with a spec that published pages or docs.json also use. Marks such
+ * operations `x-excluded` (the renderer's sanitizer then drops them from every
+ * published surface) and returns the new bytes and the operations withheld.
+ * `keptRefs` are the references that keep an operation public.
  */
-function specRefMatches(ref: string, specPath: string, specFilename: string, isDefault: boolean): boolean {
-  const prefix = /^(?:(\S+)\s+)?(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|WEBHOOK)\s/i.exec(`${ref} `)?.[1]
-  if (!prefix) return isDefault
-  const wanted = prefix.replace(/^\/+/, '').toLowerCase()
-  // Whole path segments only: `pi/openapi.json` does not name `api/openapi.json`.
-  const lowerPath = specPath.toLowerCase()
-  return lowerPath === wanted || lowerPath.endsWith(`/${wanted}`) || specFilename.toLowerCase() === wanted
+function excludeWithheldOperations(
+  spec: { sourcePath: string; filename: string; content: Buffer },
+  withheldRefs: ReadonlyArray<string>,
+  keptRefs: ReadonlyArray<string>,
+): { content: Buffer; excluded: Array<string> } {
+  const { withheld, kept } = withheldOperationKeys(spec, withheldRefs, keptRefs)
+  return markExcluded(spec.content, withheld, kept)
 }
 
 const TOKEN_SEPARATORS = /[\s"'()<>[\]{}=,;:|\\/`*!?#&]+/
@@ -1401,7 +1421,7 @@ function resolveMintlifyApiSpecs(
   mintlifyConfig: Record<string, unknown> | null,
   files: Array<ScannedFile>,
   warnings: Array<MigrationWarning>,
-  remoteSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>,
+  remoteSpecs: Array<RemoteApiSpec>,
   /** Published pages' `openapi:` frontmatter: Mintlify renders a spec named only here, so it is migrated too. */
   pages: ReadonlyArray<{ openapi?: string }> = [],
 ): Array<ResolvedApiSpec> {
@@ -1512,6 +1532,8 @@ function rewriteMintlifyPageSpecRefs(
   specs: Array<{ filename: string; sourcePath?: string }>,
   remoteUrls: Set<string>,
   warnings: Array<MigrationWarning>,
+  /** Why a spec path that matched no migrated spec is missing, e.g. a case mismatch, an ignored file or a symlink. */
+  explainMissing: (key: string) => string = () => 'no such file was found',
 ): void {
   for (const page of pages) {
     const ref = page.openapi ? splitOpenApiRef(page.openapi) : null
@@ -1530,7 +1552,7 @@ function rewriteMintlifyPageSpecRefs(
     if (match) {
       page.openapi = withSpecRef(ref, specAssetPath(match.filename))
     } else {
-      warnings.push({ code: 'unsupported-config', message: `Page "${page.id}" references the OpenAPI spec "${ref.specRef}", which is not referenced from docs.json and was not migrated; the page will not render an endpoint. Add the spec to a tab's api setting.`, source: page.source })
+      warnings.push({ code: 'unsupported-config', message: `Page "${page.id}" references the OpenAPI spec "${ref.specRef}", which was not migrated (${explainMissing(key)}); the page will not render an endpoint.`, source: page.source })
     }
   }
 }
@@ -2423,6 +2445,8 @@ function repositoryAssetHref(
   currentFile: string,
   siteRoot: string,
   onReferenced?: (normalizedPath: string, onDiskSpelling?: string) => void,
+  /** Called when a page-relative path missed beside the page and the site-root file of that name was used. */
+  onRootFallback?: (spelled: string, used: string) => void,
 ): string | null {
   const isBracketed = value.startsWith('<') && value.endsWith('>')
   const raw = isBracketed ? value.slice(1, -1) : value
@@ -2438,6 +2462,7 @@ function repositoryAssetHref(
   }
   if (!ASSET_EXTENSIONS.has(extname(decodedPath).toLowerCase())) return null
   try {
+    let usedRootFallback = false
     let candidate = decodedPath.startsWith('/')
       ? resolveWithin(siteRoot, decodedPath.replace(/^\/+/, ''))
       : resolveWithinRoot(dirname(currentFile), decodedPath, siteRoot)
@@ -2446,7 +2471,7 @@ function repositoryAssetHref(
     // nothing exists beside the page.
     if (!decodedPath.startsWith('/') && !existsSync(candidate)) {
       const fromRoot = resolveWithin(siteRoot, decodedPath.replace(/^(?:\.\/)+/, ''))
-      if (existsSync(fromRoot)) candidate = fromRoot
+      if (existsSync(fromRoot)) { candidate = fromRoot; usedRootFallback = true }
     }
     // Resolve every path component before accepting an asset. A repository
     // could contain a symlinked directory whose lexical path stays under
@@ -2467,6 +2492,7 @@ function repositoryAssetHref(
     const onDiskRelative = relative(realRoot, realpathSync.native(candidate)).replace(/\\/g, '/')
     const onDisk = onDiskRelative.toLowerCase() === siteRelative.toLowerCase() ? normalizeAssetPath(onDiskRelative) : null
     onReferenced?.(normalized, onDisk ?? undefined)
+    if (usedRootFallback) onRootFallback?.(decodedPath, normalized)
     const rewritten = `/${normalized}${suffix}`
     // Markdown destinations containing parentheses must stay angle-bracketed;
     // removing the wrapper makes CommonMark terminate the URL too early.
@@ -2501,6 +2527,7 @@ function rewriteRepositoryAssetLinks(
   currentFile: string,
   siteRoot: string,
   onReferenced?: (normalizedPath: string, onDiskSpelling?: string) => void,
+  onRootFallback?: (spelled: string, used: string) => void,
 ): string {
   return body
     .replace(/(!?\[[^\]]*\]\()(<[^>]+>|[^)\s]+)([^)]*\))/g, (
@@ -2509,7 +2536,7 @@ function rewriteRepositoryAssetLinks(
       destination: string,
       closing: string,
     ) => {
-      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced)
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback)
       return rewritten ? `${opening}${rewritten}${closing}` : original
     })
     .replace(/\b(src|img|image|href)=(['"])([^'"]+)\2/g, (
@@ -2518,7 +2545,7 @@ function rewriteRepositoryAssetLinks(
       quote: string,
       destination: string,
     ) => {
-      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced)
+      const rewritten = repositoryAssetHref(destination, currentFile, siteRoot, onReferenced, onRootFallback)
       return rewritten ? `${property}=${quote}${rewritten}${quote}` : original
     })
 }
@@ -3122,7 +3149,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
-  const remoteApiSpecs: Array<{ url: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }> = []
+  const remoteApiSpecs: Array<RemoteApiSpec> = []
   // Which pages reference which asset (by its normalized copy-destination
   // path), so the final asset-copy pass can prioritize referenced assets
   // over unreferenced ones when the budget is tight, and name the
@@ -3597,6 +3624,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // Counted as published only once the page is certain to be (below).
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath, onDiskSpelling) => {
         pageAssetReferences.push(publicAssetKey(onDiskSpelling ?? assetPath))
+      }, (spelled, used) => {
+        warnings.push({ code: 'unsupported-config', message: `"${spelled}" was not found beside this page; the file "${used}" in the site root was used instead and will be published.`, source: file.relativePath })
       })
     }
     if (platform === 'fern' && fernProjectRoot) {
@@ -4198,21 +4227,30 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
     }
   } else if (platform === 'mintlify') {
-    const warnSharedSpec = (path: string): void => {
-      warnings.push({
-        code: 'gated-page',
-        message: `OpenAPI spec ${path} is shared with access-restricted pages and is published; it may describe restricted endpoints. Review it before publishing.`,
-        source: path,
-      })
+    const warnSharedSpec = (path: string, excluded: Array<string> = []): void => {
+      warnings.push({ code: 'gated-page', message: sharedSpecMessage(path, excluded), source: path })
     }
+    // Operations docs.json lists explicitly stay public like those on published pages.
+    const keptSpecRefs = [...publishedSpecRefs, ...navigationOperationRefs(mintlifyConfig)]
     const allSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs, pages)
+    // Remote specs are downloaded later: carry the operations to withhold from them.
+    for (const remote of remoteApiSpecs) {
+      const { withheld, kept } = withheldOperationKeys({ sourcePath: remote.url, filename: remote.url }, withheldSpecRefs, keptSpecRefs)
+      if (withheld.length > 0) { remote.withheldOperations = withheld; remote.keptOperations = kept }
+    }
+    const withheldOperations = new Map<ResolvedApiSpec, Array<string>>()
+    for (const spec of allSpecs) {
+      const result = excludeWithheldOperations(spec, withheldSpecRefs, keptSpecRefs)
+      spec.content = result.content
+      withheldOperations.set(spec, result.excluded)
+    }
     const resolvedSpecs = allSpecs.filter((spec) => !spec.pageOnly)
     const pageOnlySpecs = allSpecs.filter((spec) => spec.pageOnly)
     for (const spec of resolvedSpecs) {
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) {
         assets.push(specAsset(spec.filename, spec.content))
       }
-      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath)
+      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
     }
     let pageSpecs: Array<{ filename: string; sourcePath?: string }> = resolvedSpecs
     if (resolvedSpecs.length > 0) {
@@ -4234,12 +4272,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(filename)}`, content: readFileSync(fallback.absolutePath) })
           withheldAssetCount++
         } else {
+          const pruned = excludeWithheldOperations({ sourcePath: fallback.relativePath, filename, content: readFileSync(fallback.absolutePath) }, withheldSpecRefs, keptSpecRefs)
           if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
-            assets.push(specAsset(filename, readFileSync(fallback.absolutePath)))
+            assets.push(specAsset(filename, pruned.content))
           }
           docsConfig = injectOpenApiSpecs(docsConfig, [{ filename }])
           pageSpecs = [{ filename, sourcePath: fallback.relativePath }]
-          if (withheldSpecRefs.some(matches)) warnSharedSpec(fallback.relativePath)
+          if (withheldSpecRefs.some(matches)) warnSharedSpec(fallback.relativePath, pruned.excluded)
         }
       }
     }
@@ -4248,13 +4287,20 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // because `pages` holds the published pages alone.
     for (const spec of pageOnlySpecs) {
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) assets.push(specAsset(spec.filename, spec.content))
-      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath)
+      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
     }
     if (pageOnlySpecs.length > 0) {
       docsConfig = injectOpenApiSpecs(docsConfig, pageOnlySpecs, warnings)
       pageSpecs = [...pageSpecs, ...pageOnlySpecs]
     }
-    rewriteMintlifyPageSpecRefs(pages, pageSpecs, new Set(remoteApiSpecs.map((spec) => spec.url)), warnings)
+    const explainMissingSpec = (key: string): string => {
+      const sameName = scannedFiles.find((file) => file.relativePath.toLowerCase() === key.toLowerCase())
+      if (sameName && sameName.relativePath !== key) return `paths are case-sensitive; the file is at "${sameName.relativePath}"`
+      if (sameName && mintignoreMatcher?.ignores(sameName.relativePath)) return 'the file is excluded by .mintignore'
+      try { if (lstatSync(resolvePath(repositoryDir, key)).isSymbolicLink()) return 'the file is a symbolic link, which is never followed' } catch { /* missing */ }
+      return sameName ? 'the file could not be read as an OpenAPI document' : `no file exists at "${key}"`
+    }
+    rewriteMintlifyPageSpecRefs(pages, pageSpecs, new Set(remoteApiSpecs.map((spec) => spec.url)), warnings, explainMissingSpec)
   }
   if (platform === 'mintlify') {
     const sources = new Set((docsConfig.redirects ?? []).map((redirect) => redirect.source))

@@ -16,9 +16,9 @@ export interface TryItController {
   headerParams: Record<string, string>
   bodyValue: string
   setBodyValue: (value: string) => void
-  /** Typed credential per security scheme name; never stored, only sent with this request. */
   /** Files chosen in the body form for binary fields, by field name. */
   setFile: (name: string, file: File | null) => void
+  /** Typed credential per security scheme name; never stored, only sent with this request. */
   authValues: Record<string, string>
   setAuthValue: (scheme: string, value: string) => void
   setParamValue: (group: 'path' | 'query' | 'header', key: string, value: string) => void

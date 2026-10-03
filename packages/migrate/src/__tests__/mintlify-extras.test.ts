@@ -1,13 +1,16 @@
 /** Access gating, site-wide CSS/JS/font assets, and legacy config mapping for Mintlify sources. */
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { parse as parseYaml } from 'yaml'
 
 import { migrateRepository, renderMigrationFiles } from '../index.js'
 import type { MigrationBundle } from '../index.js'
+import { hydrateRemoteApiSpecs } from '../remote-api.js'
+import type { MigrationFetcher } from '../types.js'
 
 function site(files: Record<string, string | Buffer>, extra: { maxSourceFiles?: number } = {}): MigrationBundle {
   const root = mkdtempSync(join(tmpdir(), 'thally-migrate-extras-'))
@@ -1001,6 +1004,199 @@ describe('OpenAPI specs named only by page frontmatter', () => {
     }))
     expect(specPaths(bundle)).toEqual([])
     expect(JSON.stringify(bundle.docsConfig)).not.toContain('spec.json')
+  })
+})
+
+describe('operations documented only on access-restricted pages', () => {
+  const spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { '/x': { get: { summary: 'PUBLICOP' } }, '/internal': { get: { summary: 'INTERNALSECRET' } } } })
+  const specContent = (bundle: MigrationBundle) => JSON.parse(String(bundle.assets.find((asset) => asset.path.endsWith('spec.json'))!.content))
+
+  it('marks an operation only a gated page names x-excluded in a page-only spec', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub', 's'] } }),
+      'spec.json': spec,
+      'pub.mdx': page('Pub', 'openapi: "/spec.json GET /x"\n'),
+      's.mdx': page('S', 'groups: [admin]\nopenapi: "/spec.json GET /internal"\n'),
+    })
+    const out = specContent(bundle)
+    expect(out.paths['/internal'].get['x-excluded']).toBe(true)
+    expect(out.paths['/x'].get['x-excluded']).toBeUndefined()
+    expect(codes(bundle, 'gated-page').some((item) => /withheld from it \(GET \/internal\)/.test(item.message))).toBe(true)
+  })
+
+  it('keeps an operation a published page or docs.json also names', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ api: { openapi: 'spec.json' }, navigation: { pages: ['pub', 's', 'GET /internal'] } }),
+      'spec.json': spec,
+      'pub.mdx': page('Pub', 'openapi: "/spec.json GET /x"\n'),
+      's.mdx': page('S', 'groups: [admin]\nopenapi: "/spec.json GET /internal"\n'),
+    })
+    const out = specContent(bundle)
+    expect(out.paths['/internal'].get['x-excluded']).toBeUndefined()
+  })
+
+  it('does not keep an operation listed only under restricted navigation', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({
+        api: { openapi: 'spec.json' },
+        navigation: { groups: [
+          { group: 'Public', pages: ['pub'] },
+          { group: 'Private', public: false, pages: ['s', 'GET /internal'] },
+        ] },
+      }),
+      'spec.json': spec,
+      'pub.mdx': page('Pub', 'openapi: "/spec.json GET /x"\n'),
+      's.mdx': page('S', 'groups: [admin]\nopenapi: "/spec.json GET /internal"\n'),
+    })
+    const out = specContent(bundle)
+    expect(out.paths['/internal'].get['x-excluded']).toBe(true)
+    expect(out.paths['/x'].get['x-excluded']).toBeUndefined()
+  })
+
+  it('applies to a spec listed in docs.json and to YAML specs', () => {
+    const yaml = 'openapi: 3.0.0\ninfo: {title: T, version: "1"}\npaths:\n  /x:\n    get: {summary: A}\n  /internal:\n    get: {summary: B}\n'
+    const bundle = site({
+      'docs.json': JSON.stringify({ api: { openapi: 'spec.yaml' }, navigation: { pages: ['pub', 's'] } }),
+      'spec.yaml': yaml,
+      'pub.mdx': page('Pub'),
+      's.mdx': page('S', 'groups: [admin]\nopenapi: "/spec.yaml GET /internal"\n'),
+    })
+    const text = String(bundle.assets.find((asset) => asset.path.endsWith('spec.yaml'))!.content)
+    const out = parseYaml(text)
+    expect(out.paths['/internal'].get['x-excluded']).toBe(true)
+    expect(out.paths['/x'].get['x-excluded']).toBeUndefined()
+  })
+
+  describe('remote specs', () => {
+    const URL_ = 'https://specs.example.com/openapi.json'
+    const fetcherFor = (): MigrationFetcher => vi.fn(async (url) => ({ finalUrl: url, body: spec, contentType: 'application/json' }))
+
+    it('marks a gated-only operation x-excluded in a remote spec shared with a public page', async () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ api: { openapi: URL_ }, navigation: { pages: ['pub', 's'] } }),
+        'pub.mdx': page('Pub', `openapi: "${URL_} GET /x"\n`),
+        's.mdx': page('S', `groups: [admin]\nopenapi: "${URL_} GET /internal"\n`),
+      })
+      const fetcher = fetcherFor()
+      const result = await hydrateRemoteApiSpecs(bundle, fetcher)
+      const out = JSON.parse(Buffer.from(result.assets.find((asset) => asset.path.startsWith('openapi/'))!.content).toString('utf8'))
+      expect(out.paths['/internal'].get['x-excluded']).toBe(true)
+      expect(out.paths['/x'].get['x-excluded']).toBeUndefined()
+      expect(codes(result, 'gated-page').some((item) => /withheld from it \(GET \/internal\)/.test(item.message))).toBe(true)
+    })
+
+    it('never fetches a remote spec only a gated page names', async () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ navigation: { pages: ['pub', 's'] } }),
+        'pub.mdx': page('Pub'),
+        's.mdx': page('S', `groups: [admin]\nopenapi: "${URL_} GET /internal"\n`),
+      })
+      const fetcher = fetcherFor()
+      const result = await hydrateRemoteApiSpecs(bundle, fetcher)
+      expect(bundle.remoteApiSpecs).toBeUndefined()
+      expect(fetcher).not.toHaveBeenCalled()
+      expect(result.assets.some((asset) => asset.path.startsWith('openapi/'))).toBe(false)
+    })
+  })
+})
+
+describe('playground display "auth"', () => {
+  it('says plainly that reader sign-in is unsupported and what to set instead', () => {
+    const bundle = site({ 'docs.json': JSON.stringify({ api: { playground: { display: 'auth' } }, navigation: { pages: ['a'] } }), 'a.mdx': page('A') })
+    const warning = codes(bundle, 'unsupported-config').find((item) => /"auth"/.test(item.message))
+    expect(warning?.message).toContain('requires reader sign-in, which Thally does not support')
+    expect(warning?.message).toContain('Set it to "interactive"')
+  })
+})
+
+describe('dropped colors and metatags are reported', () => {
+  const withConfig = (extra: Record<string, unknown>) => site({ 'docs.json': JSON.stringify({ navigation: { pages: ['a'] }, ...extra }), 'a.mdx': page('A') })
+  const messages = (bundle: MigrationBundle) => codes(bundle, 'unsupported-config').map((item) => item.message)
+
+  it('warns with the names of dropped seo.metatags entries and keeps the valid ones', () => {
+    const bundle = withConfig({ seo: { metatags: { good: 'yes', refresh: '0;url=https://x.test', 'http-equiv': 'refresh', obj: { a: 1 }, 'bad name': 'x', long: 'x'.repeat(1001) } } })
+    expect(bundle.docsConfig.seo?.metatags).toEqual({ good: 'yes' })
+    const warning = messages(bundle).find((message) => message.startsWith('seo.metatags entries were dropped'))!
+    for (const key of ['refresh', 'http-equiv', 'obj', 'bad name', 'long']) expect(warning).toContain(key)
+    expect(warning).not.toContain('good')
+  })
+
+  it('warns when a colour is not a hex value, and says which', () => {
+    const bundle = withConfig({ colors: { primary: '#16A34A', dark: 'hsl(140 70% 40%)' } })
+    expect(bundle.docsConfig.colors).toBeDefined()
+    expect(messages(bundle).some((message) => message.includes('colors.dark "hsl(140 70% 40%)" is not a 3- or 6-digit hex colour'))).toBe(true)
+    expect(messages(withConfig({ colors: { primary: 'green' } })).some((message) => message.includes('colors.primary "green"'))).toBe(true)
+  })
+
+  it('stays quiet for valid colours and metatags', () => {
+    const bundle = withConfig({ colors: { primary: '#16a34a' }, seo: { metatags: { good: 'yes' } } })
+    expect(messages(bundle).some((message) => /colors|metatags/.test(message))).toBe(false)
+  })
+})
+
+describe('page-relative image that falls back to the site root', () => {
+  const png = Buffer.from('PNGDATA')
+  const nested = (gatedBody: string) => site({
+    'docs.json': JSON.stringify({ navigation: { pages: ['v1/intro', 'secret'] } }),
+    'v1/intro.mdx': '---\ntitle: Intro\n---\n\n![x](./images/shared.png)\n',
+    'secret.mdx': `---\ntitle: Secret\ngroups: [admin]\n---\n\n${gatedBody}\n`,
+    'images/shared.png': png,
+  })
+
+  it('warns that the root file was used and published, naming the page', () => {
+    const bundle = nested('No image.')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('images/shared.png')
+    const warning = codes(bundle, 'unsupported-config').find((item) => /not found beside this page/.test(item.message))
+    expect(warning?.source).toBe('v1/intro.mdx')
+    expect(warning?.message).toContain('"./images/shared.png"')
+    expect(warning?.message).toContain('"images/shared.png" in the site root')
+  })
+
+  it('still publishes it when a gated page also uses the same file, because a published page spells it', () => {
+    const bundle = nested('![x](/images/shared.png)')
+    expect(bundle.assets.map((asset) => asset.path)).toContain('images/shared.png')
+    expect(codes(bundle, 'unsupported-config').some((item) => /not found beside this page/.test(item.message))).toBe(true)
+  })
+
+  it('does not warn when the image sits beside the page', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['v1/intro'] } }),
+      'v1/intro.mdx': '---\ntitle: Intro\n---\n\n![x](./images/own.png)\n',
+      'v1/images/own.png': png,
+    })
+    expect(codes(bundle, 'unsupported-config').some((item) => /not found beside this page/.test(item.message))).toBe(false)
+  })
+})
+
+describe('page spec references that cannot be migrated explain why', () => {
+  const spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { '/x': { get: { summary: 'S' } } } })
+  const missing = (bundle: MigrationBundle) => codes(bundle, 'unsupported-config').find((item) => /references the OpenAPI spec/.test(item.message))!.message
+  const nav = JSON.stringify({ navigation: { pages: ['pub'] } })
+
+  it('names a case mismatch', () => {
+    const message = missing(site({ 'docs.json': nav, 'api/spec.json': spec, 'pub.mdx': page('Pub', 'openapi: "/API/SPEC.json GET /x"\n') }))
+    expect(message).toContain('paths are case-sensitive; the file is at "api/spec.json"')
+    expect(message).not.toMatch(/api setting|not referenced from docs.json/)
+  })
+
+  it('names a .mintignore exclusion', () => {
+    const message = missing(site({ '.mintignore': 'private/\n', 'docs.json': nav, 'private/spec.json': spec, 'pub.mdx': page('Pub', 'openapi: "/private/spec.json GET /x"\n') }))
+    expect(message).toContain('excluded by .mintignore')
+  })
+
+  it('names a symbolic link', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-extras-'))
+    writeFileSync(join(root, 'docs.json'), nav)
+    writeFileSync(join(root, 'pub.mdx'), page('Pub', 'openapi: "/link.json GET /x"\n'))
+    const outside = mkdtempSync(join(tmpdir(), 'thally-migrate-outside-'))
+    writeFileSync(join(outside, 'real.json'), spec)
+    symlinkSync(join(outside, 'real.json'), join(root, 'link.json'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+    expect(missing(bundle)).toContain('symbolic link')
+  })
+
+  it('names a missing file', () => {
+    expect(missing(site({ 'docs.json': nav, 'pub.mdx': page('Pub', 'openapi: "/nope.json GET /x"\n') }))).toContain('no file exists at "nope.json"')
   })
 })
 

@@ -60,6 +60,7 @@ export function getMethodToken(method: string) {
   }
 }
 
+/** Text colour for an HTTP status code: green 2xx, sky 3xx, amber 4xx, rose 5xx. */
 export function statusColorClass(code: string) {
   if (code.startsWith('2')) return 'text-green-600 dark:text-green-400'
   if (code.startsWith('3')) return 'text-sky-600 dark:text-sky-400'
@@ -68,6 +69,7 @@ export function statusColorClass(code: string) {
   return 'text-foreground'
 }
 
+/** Underline colour for the active response-status tab, by status class. */
 export function statusUnderlineClass(code: string) {
   if (code.startsWith('2')) return 'bg-green-500'
   if (code.startsWith('3')) return 'bg-sky-500'

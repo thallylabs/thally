@@ -12,10 +12,10 @@ describe('buildCurlCommand', () => {
     )
     expect(lines).toEqual([
       'curl --request POST \\',
-      '  --url https://api.example.com/v2/scrape \\',
+      "  --url 'https://api.example.com/v2/scrape' \\",
       "  --header 'Authorization: Bearer <token>' \\",
       "  --header 'Content-Type: application/json' \\",
-      `  --data '{"name":"it'"'"'s"}'`,
+      `  --data '{"name":"it'\\''s"}'`,
     ])
     execFileSync('sh', ['-n'], { input: lines.join('\n') })
   })

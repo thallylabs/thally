@@ -80,3 +80,21 @@ By default, hidden pages are excluded from the AI search context. To include the
 | --- | --- |
 | `"navigable"` | Default. Excludes hidden pages from search and AI context. |
 | `"all"` | Includes all pages — including hidden ones — in search and AI context. |
+
+## Page titles, sitemap and extra meta tags
+
+Three optional `seo` keys in `docs.json` shape what search engines see:
+
+```json
+"seo": {
+  "titleSeparator": " - ",
+  "sitemap": "navigable",
+  "metatags": { "google-site-verification": "your-token" }
+}
+```
+
+| Key | Behavior |
+| --- | --- |
+| `titleSeparator` | Joins a page title and the site name in `<title>` (for example `Quickstart - Acme`). Unset keeps the default `title \| site` form. |
+| `sitemap` | `"navigable"` lists only pages shown in navigation, so orphan and hidden pages stay out of `sitemap.xml`, `llms.txt` and `ai.txt`. Unset lists every indexable page. |
+| `metatags` | Extra `<meta name content>` tags for every page, such as a search console verification token. Each name must be plain letters, digits or `_ : . -`, and each value a string of at most 1000 characters. `http-equiv` style names (`refresh`, `set-cookie`, `content-security-policy`, and similar) are ignored. |

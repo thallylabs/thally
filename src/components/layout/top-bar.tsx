@@ -17,6 +17,7 @@ import { useLocaleAvailability } from '@/components/layout/locale-availability'
 import type { I18nConfig } from '@/components/layout/site-shell'
 import { shell } from '@/config/layout'
 import { cn } from '@/lib/utils'
+import { safeCssColor } from '@/lib/css-color'
 import type { SiteLink } from '@/data/site'
 import { Logo } from '@/components/layout/logo'
 import { displaySiteName, useSiteName } from '@/components/layout/use-site-name'
@@ -180,7 +181,7 @@ export function TopBar({
             ? navbarLinks.map((link) => {
                 const isExternal = /^https?:\/\//.test(link.href)
                 return (
-                  <a key={link.href} href={link.href} target={isExternal ? '_blank' : undefined} rel={isExternal ? 'noreferrer' : undefined} aria-label={link.label} title={link.label} data-topbar-link style={link.button ? { backgroundColor: link.button.background, color: link.button.color ?? '#fff' } : undefined} className={cn('thally-docs-topbar-link inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-[10px] px-2 text-[0.86rem] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground', link.button && 'px-[15px] font-semibold hover:brightness-110')}>
+                  <a key={link.href} href={link.href} target={isExternal ? '_blank' : undefined} rel={isExternal ? 'noreferrer' : undefined} aria-label={link.label} title={link.label} data-topbar-link style={link.button ? { backgroundColor: safeCssColor(link.button.background), color: safeCssColor(link.button.color) ?? '#fff' } : undefined} className={cn('thally-docs-topbar-link inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-[10px] px-2 text-[0.86rem] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground', link.button && 'px-[15px] font-semibold hover:brightness-110')}>
                     {isExternal && !link.button ? <ExternalLink className="h-3.5 w-3.5" /> : null}
                     <span>{link.label}</span>
                   </a>

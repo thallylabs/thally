@@ -233,7 +233,7 @@ export interface DocsJsonSeo {
   titleSeparator?: string
   /** "navigable" lists only pages shown in navigation in the sitemap, like Mintlify; default lists every indexable page. */
   sitemap?: 'navigable'
-  /** Extra `<meta name content>` tags for every page, e.g. a search console verification token. */
+  /** Extra `<meta name content>` tags for every page, e.g. a search console verification token. Names and values are validated at render (`validMetatags`): plain names, string values of at most 1000 characters, no `http-equiv` directives. */
   metatags?: Record<string, string>
 }
 
@@ -1168,6 +1168,7 @@ export function getApiPlaygroundDisplay(): unknown {
 
 export const TRY_IT_DEFAULT_TIMEOUT_MS = 60_000
 
+/** How long the Try it relay waits for the API: `apiPlayground.timeoutMs` clamped to 1-120 s, else 60 s. */
 export function getApiPlaygroundTimeoutMs(): number {
   const configured = docsConfig().apiPlayground?.timeoutMs
   return typeof configured === 'number' && Number.isFinite(configured)
@@ -1175,6 +1176,7 @@ export function getApiPlaygroundTimeoutMs(): number {
     : TRY_IT_DEFAULT_TIMEOUT_MS
 }
 
+/** Credentials from `apiPlayground.credentials`, keyed by OpenAPI security scheme name. */
 export function getApiPlaygroundCredentials(): Record<string, string> {
   return docsConfig().apiPlayground?.credentials ?? {}
 }

@@ -207,7 +207,7 @@ export function normalizeExplicitHeadingIds(
         if (usable && options.headingMarkers) return `${heading} ${headingIdMarker(id)}`
         // Numeric starts are valid here; Mintlify uses ids such as 429-responses.
         if (usable) return `<a id="${id}"></a>\n${heading}`
-        warn?.(`Heading anchor {#${id}} is not a valid HTML id and was removed from "${heading.replace(/^\s*#+\s*/, '')}".`)
+        warn?.(`Heading anchor {#${id}} ${options.headingMarkers ? 'contains whitespace or "*/"' : 'is not a valid HTML id'} and was removed from "${heading.replace(/^\s*#+\s*/, '')}".`)
         return heading
       }
     }
@@ -268,6 +268,8 @@ function typesetQuotes(text: string): string {
 /** Visible text of a heading's inline Markdown. */
 function plainHeadingText(source: string): string {
   return source
+    // An authored MDX comment is not rendered, so Mintlify's id never sees it.
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/<\/?[A-Za-z][^>]*>/g, '')
     .replace(/`([^`]*)`/g, '$1')

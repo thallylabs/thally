@@ -683,6 +683,20 @@ describe('Mintlify heading ids', () => {
     expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
   })
 
+  it('ignores an authored MDX comment when computing the id, and never reads a non-# comment as one', () => {
+    const output = normalizeMdx(['## Foo {/* note */} bar', '## Plain {/* note */}', '## Both {/* a */} ones {/* #custom */}'].join('\n'), 'mintlify')
+    expect(output).toBe(['## Foo {/* note */} bar', '## Plain {/* note */}', '## Both {/* a */} ones {/* #custom */}'].join('\n'))
+    // Thally's own slug of the rendered text already is `foo-bar`, so no marker is needed (it used to be `foo-/-note-/-bar`).
+    expect(normalizeMdx(output, 'mintlify')).toBe(output)
+    expect(() => compileSync(output, { format: 'mdx' })).not.toThrow()
+  })
+
+  it('says what is wrong with an unusable heading anchor', () => {
+    const messages: Array<string> = []
+    normalizeExplicitHeadingIds('## T {#a*/b}', (message) => messages.push(message), { headingMarkers: true })
+    expect(messages).toEqual(['Heading anchor {#a*/b} contains whitespace or "*/" and was removed from "T".'])
+  })
+
   it('typesets straight quotes in heading text and ids as Mintlify does', () => {
     const output = normalizeMdx([
       "## What's Not Included",

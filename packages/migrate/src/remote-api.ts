@@ -12,6 +12,7 @@ import { parse as parseYaml } from 'yaml'
 
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { insertApiTab } from './navigation.js'
+import { markExcluded, sharedSpecMessage } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher } from './types.js'
 
 const MAX_SPEC_BYTES = 25_000_000
@@ -211,7 +212,11 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
     try {
       const url = validatedSpecUrl(reference.url)
       const extension = /\.ya?ml$/i.test(url.pathname) ? 'yaml' : 'json'
-      const body = await downloadSpec(reference.url, fetcher)
+      const downloaded = await downloadSpec(reference.url, fetcher)
+      // Fail closed: operations only access-restricted pages document are not published.
+      const pruned = markExcluded(downloaded, reference.withheldOperations ?? [], reference.keptOperations)
+      const body = pruned.content
+      if (reference.withheldOperations?.length) warnings.push({ code: 'gated-page', message: sharedSpecMessage(reference.url, pruned.excluded), source: reference.url })
       const operations = parseOpenApi(body, extension)
       const filename = `openapi-${createHash('sha256').update(reference.url).digest('hex').slice(0, 12)}.${extension}`
       assets.push({ path: `openapi/${filename}`, content: body, projectRelative: true })
