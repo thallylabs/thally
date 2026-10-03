@@ -4513,5 +4513,18 @@ describe('Mintlify snippet inlining hardening', () => {
       expect(bundle.warnings.some((warning) => warning.source === 'home.mdx' && /s\.mdx/.test(warning.message))).toBe(true)
     }
   })
+
+  it('excludes a page whose dynamic import() uses a relative module the migration does not ship', () => {
+    const files = { 'lib/m.ts': 'export const m = 1\n' }
+    for (const body of [
+      "export const load = () => import('./lib/m')\n\nText.",
+      "{import('./lib/m')}\n\nText.",
+      "<Card title={String(import('./lib/m'))}>Text.</Card>",
+    ]) {
+      // The only page is excluded, so the migration reports why and stops.
+      expect(() => snippetFixture(files, body)).toThrow(/imports "\.\/lib\/m"/)
+    }
+    expect(snippetFixture(files, '<Card title="import(\'./lib/m\')">Text.</Card>').page).toBeDefined()
+  })
 })
 

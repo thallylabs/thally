@@ -641,14 +641,40 @@ export function declarationsReferenceBrowserGlobal(body: string): boolean {
 export function unresolvedRelativeModuleSpecifiers(body: string): Array<string> {
   const tree = parser.parse(body) as MdxNode
   const specifiers = new Set<string>()
+  const add = (specifier: string): void => {
+    if (/^\.\.?\//.test(specifier) && !/\.mdx?$/i.test(specifier)) specifiers.add(specifier)
+  }
+  // A dynamic `import('./x')` anywhere in the source resolves the same way.
+  const addDynamicImports = (source: ts.SourceFile): void => {
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        const argument = node.arguments[0]
+        if (argument && ts.isStringLiteralLike(argument)) add(argument.text)
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(source)
+  }
   walk(tree, (node) => {
-    if (node.type !== 'mdxjsEsm' || node.value === undefined) return
-    for (const statement of sourceFile(node.value, 'inline.tsx').statements) {
-      if (!(ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement))) continue
-      const specifier = statement.moduleSpecifier
-      if (!specifier || !ts.isStringLiteral(specifier) || !/^\.\.?\//.test(specifier.text)) continue
-      if (/\.mdx?$/i.test(specifier.text)) continue
-      specifiers.add(specifier.text)
+    if (node.type === 'mdxjsEsm' && node.value !== undefined) {
+      const source = sourceFile(node.value, 'inline.tsx')
+      for (const statement of source.statements) {
+        if (!(ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement))) continue
+        const specifier = statement.moduleSpecifier
+        if (specifier && ts.isStringLiteral(specifier)) add(specifier.text)
+      }
+      addDynamicImports(source)
+      return
+    }
+    if ((node.type === 'mdxFlowExpression' || node.type === 'mdxTextExpression') && node.value !== undefined) {
+      addDynamicImports(sourceFile(`(${node.value})`, 'inline.tsx'))
+    }
+    for (const attribute of node.attributes ?? []) {
+      // A plain string attribute is text; only expression values are code.
+      const code = attribute.type === 'mdxJsxExpressionAttribute' && typeof attribute.value === 'string'
+        ? `{${attribute.value}}`
+        : typeof attribute.value === 'object' ? attribute.value?.value : undefined
+      if (code !== undefined) addDynamicImports(sourceFile(`(${code})`, 'inline.tsx'))
     }
   })
   return [...specifiers]
