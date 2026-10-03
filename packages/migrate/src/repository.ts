@@ -2440,6 +2440,17 @@ function resolveSnippetPath(
       : relative(repositoryRoot, resolvePath(dirname(currentFile), sourcePath)).replace(/\\/g, '/')
   const candidate = resolveWithin(repositoryRoot, repositoryRelative)
   resolveWithin(repositoryRoot, relative(repositoryRoot, candidate))
+  return withinRealRoot(candidate, repositoryRoot)
+}
+
+/** Throws when an existing path resolves, through a symlink, outside the repository; a path that does not exist is returned unchanged. */
+function withinRealRoot(candidate: string, repositoryRoot: string): string {
+  let real: string
+  try { real = realpathSync(candidate) } catch { return candidate }
+  const realRoot = realpathSync(repositoryRoot)
+  if (real !== realRoot && !real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) {
+    throw new Error(`Migration path escapes its root: ${candidate}`)
+  }
   return candidate
 }
 
@@ -2709,7 +2720,14 @@ function inlineMdxSnippets(
         if (declaration) preservedDeclarations.set(componentName, declaration)
         else snippets.set(componentName, snippetComponentBody(nested, componentName))
         return ''
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('escapes its root')) {
+          warnings.push({
+            code: 'skipped-file',
+            message: `Import of ${sourcePath} resolves outside the repository and was NOT inlined.`,
+            source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+          })
+        }
         // Disabled JSX examples may import a snippet that no longer exists.
         // An unused import is safe to drop without a missing-page warning.
         let hasLiveUsage = false
@@ -2785,7 +2803,14 @@ function inlineMdxSnippets(
         }
         for (const [name, body] of components) snippets.set(name, body)
         return declarations.join('\n')
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('escapes its root')) {
+          warnings.push({
+            code: 'skipped-file',
+            message: `Import of ${sourcePath} resolves outside the repository and was NOT inlined.`,
+            source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+          })
+        }
         return statement
       }
     },
@@ -2840,7 +2865,7 @@ function inlineMdxSnippets(
         // Mintlify's documented form is relative to `snippets/`; sites also write
         // the full `/snippets/x.mdx` (or a page-relative) path.
         const candidate = [
-          () => resolveWithin(siteRoot, `snippets/${filePath}`),
+          () => withinRealRoot(resolveWithin(siteRoot, `snippets/${filePath}`), repositoryRoot),
           () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
         ].map((resolveCandidate) => {
           try { return resolveCandidate() } catch { return undefined }

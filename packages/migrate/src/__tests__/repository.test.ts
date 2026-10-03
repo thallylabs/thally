@@ -4493,5 +4493,25 @@ describe('Mintlify snippet inlining hardening', () => {
       expect(warnings.some((warning) => warning.message.includes(`"${name}"`) && warning.message.includes('could not be inlined'))).toBe(true)
     }
   })
+
+  it('treats a symlinked snippets directory that points outside the repository as missing', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'thally-migrate-outside-'))
+    writeFileSync(join(outside, 's.mdx'), "export const SECRET = 'leaked-value';\nexport const Box = () => <b>leaked-component</b>;\n")
+    const imports = [
+      "import { SECRET } from '/snippets/s.mdx';\n\nV {SECRET}",
+      "import { Box } from '/snippets/s.mdx';\n\n<Box />",
+      '<Snippet file="s.mdx" />',
+    ]
+    for (const body of imports) {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-symlink-snippets-'))
+      symlinkSync(outside, join(root, 'snippets'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['home'] } }))
+      writeFileSync(join(root, 'home.mdx'), `---\ntitle: Home\n---\n\n${body}\n`)
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      const page = bundle.pages.find((candidate) => candidate.id === 'home')
+      expect(page?.body ?? '').not.toContain('leaked')
+      expect(bundle.warnings.some((warning) => warning.source === 'home.mdx' && /s\.mdx/.test(warning.message))).toBe(true)
+    }
+  })
 })
 
