@@ -1,5 +1,6 @@
 /** Every tab collection gets its own header row without duplicating navigation links. */
 
+import { readFileSync } from 'node:fs'
 import { createElement, type AnchorHTMLAttributes } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -97,5 +98,12 @@ describe('automatic header navigation rows', () => {
     />)
     expect(html).not.toContain('position:fixed')
     expect(html).toContain('color:rgb(1, 2, 3)')
+  })
+
+  it('keeps the label of a plain navbar link visible at narrow widths, like Mintlify text links', () => {
+    const html = markup(1)
+    expect(html).toMatch(/data-topbar-text[^>]*>.*<span>Action 0<\/span>/)
+    const css = readFileSync(new URL('../../styles/docs-handoff.css', import.meta.url), 'utf8')
+    expect(css).not.toMatch(/\.thally-docs-topbar-link span\s*\{/)
   })
 })
