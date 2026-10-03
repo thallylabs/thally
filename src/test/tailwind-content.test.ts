@@ -24,7 +24,7 @@ describe('tailwind content scanning of MDX prose', () => {
   })
 
   it('scans adversarial prose in linear time', async () => {
-    const content = config.content as { transform: { mdx: (c: string) => string } }
+    const content = config.content as unknown as { transform: { mdx: (c: string) => string } }
     for (const input of ['w[var(a*'.repeat(6250), 'a'.repeat(50000), 'a['.repeat(25000), 'a[var('.repeat(8000), '[a*)var('.repeat(6000)]) {
       const start = performance.now()
       content.transform.mdx(input)
