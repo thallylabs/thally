@@ -1,7 +1,53 @@
 import type { Config } from 'tailwindcss'
 import typography from '@tailwindcss/typography'
 
-const CLASS_WITH_WILDCARD_VAR = /[\w:-]+\[[^\]\s]*var\([^)\s]*\*[^)\s]*\)[^\]\s]*\]/g
+const isClassChar = (c: string | undefined) => c !== undefined && /[\w:-]/.test(c)
+
+// Removes `name[...var(...*...)...]` classes. A single pass with no regex
+// backtracking: prose can be adversarial, and the equivalent regex is
+// super-linear on inputs like `w[var(a*` repeated.
+function stripWildcardVarClasses(content: string): string {
+  const n = content.length
+  let out = ''
+  let last = 0
+  let i = 0
+  while (i < n) {
+    const open = content.indexOf('[', i)
+    if (open < 0) break
+    let stop = open + 1
+    while (stop < n && content[stop] !== ']' && !/\s/.test(content[stop])) stop++
+    i = stop + 1
+    if (stop >= n || content[stop] !== ']') continue
+    // First `var(` ... `*` ... `)` between the brackets.
+    let varAt = -1
+    let star = false
+    let found = -1
+    for (let q = open + 1; q < stop; q++) {
+      const c = content[q]
+      if (c === ')') {
+        if (varAt >= 0 && star) { found = varAt; break }
+        varAt = -1
+        star = false
+      } else if (varAt < 0 && content.startsWith('var(', q)) {
+        varAt = q
+        q += 3
+      } else if (c === '*' && varAt >= 0) {
+        star = true
+      }
+    }
+    if (found < 0) continue
+    let bracket = -1
+    for (let j = open; j < found; j++) {
+      if (content[j] === '[' && j > last && isClassChar(content[j - 1])) { bracket = j; break }
+    }
+    if (bracket < 0) continue
+    let start = bracket
+    while (start > last && isClassChar(content[start - 1])) start--
+    out += content.slice(last, start)
+    last = stop + 1
+  }
+  return out + content.slice(last)
+}
 
 const config: Config = {
   darkMode: ['class'],
@@ -19,8 +65,8 @@ const config: Config = {
     // `var(--text-*)` is invalid CSS and fails the stylesheet build, so drop
     // arbitrary values with a `*` inside `var()` before they are scanned.
     transform: {
-      md: (content: string) => content.replace(CLASS_WITH_WILDCARD_VAR, ''),
-      mdx: (content: string) => content.replace(CLASS_WITH_WILDCARD_VAR, ''),
+      md: (content: string) => stripWildcardVarClasses(content),
+      mdx: (content: string) => stripWildcardVarClasses(content),
     },
   },
   theme: {

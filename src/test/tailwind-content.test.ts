@@ -22,4 +22,14 @@ describe('tailwind content scanning of MDX prose', () => {
     expect(output).toContain('.w-\\[13px\\]')
     expect(output).toContain('var(--text-body)')
   })
+
+  it('scans adversarial prose in linear time', async () => {
+    const content = config.content as { transform: { mdx: (c: string) => string } }
+    for (const input of ['w[var(a*'.repeat(6250), 'a'.repeat(50000), 'a['.repeat(25000), 'a[var('.repeat(8000), '[a*)var('.repeat(6000)]) {
+      const start = performance.now()
+      content.transform.mdx(input)
+      expect(performance.now() - start).toBeLessThan(100)
+    }
+    expect(content.transform.mdx('x text-[length:var(--text-*)] y')).toBe('x  y')
+  })
 })
