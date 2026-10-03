@@ -2737,6 +2737,17 @@ function inlineMdxSnippets(
             declarations.push(`export const ${binding!.local} = ${value};`)
             continue
           }
+          const exported = new RegExp(`\\bexport\\s+(?:async\\s+)?(?:const|let|var|function\\s*\\*?|class)\\s+${binding!.exported}\\b|\\bexport\\s*\\{[^}]*\\b${binding!.exported}\\b`)
+          if (!exported.test(snippetSource) && !(/^[A-Z]/.test(binding!.exported) && snippetComponentBody(snippetSource, binding!.exported) !== snippetSource)) {
+            // Mintlify binds a name its snippet does not export to undefined, which renders as nothing.
+            warnings.push({
+              code: 'skipped-file',
+              message: `"${binding!.exported}" is not exported by ${sourcePath}. Mintlify renders it as empty, so it was bound to undefined; add the export to the snippet to show a value.`,
+              source,
+            })
+            declarations.push(`export const ${binding!.local} = undefined;`)
+            continue
+          }
           const body = /^[A-Z]/.test(binding!.exported) ? snippetComponentBody(snippetSource, binding!.exported) : snippetSource
           if (body === snippetSource) {
             warnings.push({

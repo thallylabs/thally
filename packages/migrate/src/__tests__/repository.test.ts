@@ -409,6 +409,24 @@ describe('Mintlify repository migration', () => {
     expect(bundle.warnings.some((warning) => warning.message.includes('"compute"') && warning.message.includes('could not be inlined'))).toBe(true)
   })
 
+  it('binds a name the snippet does not export to undefined and still inlines the others from the same import', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-missing-export-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const FEE = '5';\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport {\n  FEE,\n  MISSING_LIMIT,\n} from '/snippets/constants.mdx';\n\nFee {FEE}% limit {MISSING_LIMIT}.\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    expect(page?.body).toContain('export const FEE = "5";')
+    expect(page?.body).toContain('export const MISSING_LIMIT = undefined;')
+    expect(page?.body).not.toContain('constants.mdx')
+    expect(bundle.warnings.some((warning) => warning.message.includes('"MISSING_LIMIT" is not exported'))).toBe(true)
+  })
+
   it('hoists a component snippet as a real declaration instead of splicing its source into the usage tag', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-component-snippet-'))
     mkdirSync(join(root, 'snippets'), { recursive: true })
