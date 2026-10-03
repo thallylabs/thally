@@ -1194,6 +1194,30 @@ describe('Mintlify repository migration', () => {
     }))
   })
 
+  it('excludes a page that re-exports from a relative module the migration does not ship, but keeps relative snippet imports', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-relative-module-'))
+    mkdirSync(join(root, 'snippets'))
+    mkdirSync(join(root, 'legal'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['legal/terms', 'guide'] },
+    }))
+    writeFileSync(join(root, 'snippets/widget.jsx'), 'export const Widget = () => <div>Hi</div>\n')
+    writeFileSync(join(root, 'legal/metadata.ts'), 'export const metadata = { title: "Terms" }\n')
+    writeFileSync(join(root, 'legal/terms.mdx'), "---\ntitle: Terms\n---\n\nexport { metadata } from './metadata';\n\nTerms text.\n")
+    writeFileSync(join(root, 'guide.mdx'), "---\ntitle: Guide\n---\n\nimport { Widget } from './snippets/widget.jsx'\n\n<Widget />\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('legal/terms')
+    expect(bundle.pages.map((page) => page.id)).toContain('guide')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'skipped-file',
+      source: 'legal/terms.mdx',
+      message: expect.stringContaining('"./metadata"'),
+    }))
+  })
+
   it('keeps a page-local component declaration instead of forcing in a same-named global snippet', () => {
     const root = fixture()
     // Mintlify treats every /snippets/ file as an implicitly available global

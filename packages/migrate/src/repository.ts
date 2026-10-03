@@ -30,7 +30,7 @@ import { basename, dirname, extname, isAbsolute, posix, relative, resolve as res
 import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
 
-import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent } from './components.js'
+import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent, unresolvedRelativeModuleSpecifiers } from './components.js'
 import { navbarLinkButtons, projectAuthoredStyles } from './source-styles.js'
 
 import {
@@ -3673,6 +3673,17 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       warnings.push({
         code: 'skipped-file',
         message: `Page was excluded because it does not compile as MDX: ${mdxError}`,
+        source: file.relativePath,
+      })
+      continue
+    }
+    const unresolvedModules = unresolvedRelativeModuleSpecifiers(page.body)
+    if (unresolvedModules.length > 0) {
+      skipped++
+      warnings.push({
+        code: 'skipped-file',
+        message: `Page was excluded because it imports ${unresolvedModules.map((specifier) => `"${specifier}"`).join(', ')}, which is not copied by the migration `
+          + 'and would break the site build. Copy that file in manually or remove the import, then add the page back.',
         source: file.relativePath,
       })
       continue

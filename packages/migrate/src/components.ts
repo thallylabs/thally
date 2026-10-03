@@ -629,6 +629,31 @@ export function declarationsReferenceBrowserGlobal(body: string): boolean {
   return found
 }
 
+/**
+ * Relative code-module specifiers (`./metadata`, `../lib/x.js`) that a page's
+ * own top-level `import`/`export ... from` still names after migration. The
+ * migrator rewrites every component or data import it copies to an `@/mdx/
+ * migrated/...` path, so a relative one that survives points at a file that is
+ * never shipped beside the page (for example a Next.js app's `metadata.ts`)
+ * and fails the site build with "Module not found". `.md`/`.mdx` specifiers
+ * are left out: snippet imports are inlined or rewritten elsewhere.
+ */
+export function unresolvedRelativeModuleSpecifiers(body: string): Array<string> {
+  const tree = parser.parse(body) as MdxNode
+  const specifiers = new Set<string>()
+  walk(tree, (node) => {
+    if (node.type !== 'mdxjsEsm' || node.value === undefined) return
+    for (const statement of sourceFile(node.value, 'inline.tsx').statements) {
+      if (!(ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement))) continue
+      const specifier = statement.moduleSpecifier
+      if (!specifier || !ts.isStringLiteral(specifier) || !/^\.\.?\//.test(specifier.text)) continue
+      if (/\.mdx?$/i.test(specifier.text)) continue
+      specifiers.add(specifier.text)
+    }
+  })
+  return [...specifiers]
+}
+
 /** Create one bounded component graph and registry for a repository migration. */
 /**
  * `siteRoot` (a Mintlify/Docusaurus project root, when one was detected —
