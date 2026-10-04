@@ -1738,7 +1738,7 @@ function apiOperationLinkMap(
       // which leaf a given source actually used.
       const tagSegment = mintlifyOperationSlugSegment(operation.tag ?? 'default')
       const mintlifyTag = mintlifyUrlSlug(operation.tag ?? 'default')
-      const mintlifyLeaf = mintlifyUrlSlug(operation.summary ?? operation.operationId ?? `${operation.method} ${operation.path}`)
+      const mintlifyLeaf = mintlifyUrlSlug(operation.summary?.trim() || operation.operationId?.trim() || `${operation.method} ${operation.path}`)
       const canonical = `${source.prefix}/${mintlifyTag}/${mintlifyLeaf}`.replace(/^\/+|\/+$/g, '')
       if (mintlifyTag && mintlifyLeaf && !mintlifyPages.has(canonical)) mintlifyPages.set(canonical, thallyHref)
       if (mintlifyTag && mintlifyLeaf && !map.has(canonical.toLowerCase())) map.set(canonical.toLowerCase(), thallyHref)

@@ -1278,6 +1278,21 @@ describe('Mintlify repository migration', () => {
     ]))
   })
 
+  it('falls back to operationId, then method and path, when an operation summary is empty', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API', openapi: { source: 'e.yaml', directory: 'api' } }] },
+    }))
+    writeFileSync(join(root, 'e.yaml'), [
+      'openapi: 3.1.0', 'info: { title: E, version: "1.0" }', 'paths:',
+      '  /a:', '    get:', '      summary: ""', '      operationId: listThings', '      tags: [T]', '      responses: { "200": { description: ok } }',
+      '  /b:', '    get:', '      summary: "   "', '      tags: [T]', '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    const sources = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).docsConfig.redirects?.map((redirect) => redirect.source) ?? []
+    expect(sources).toContain('/api/t/listthings')
+    expect(sources).toContain('/api/t/get-b')
+  })
+
   it('caps generated Mintlify endpoint redirects and warns how many were not created', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
