@@ -1546,4 +1546,14 @@ describe('escapeUnmatchedClosingTags', () => {
     escapeUnmatchedClosingTags(src)
     expect(performance.now() - start).toBeLessThan(500)
   })
+
+  it('is linear on repeated unterminated brace or quote openers', () => {
+    for (const unit of ['<a {', '<a "']) {
+      for (const run of [(s: string) => escapeUnmatchedClosingTags(s), (s: string) => normalizeMdx(s.replaceAll('<a', '<Steps'), 'mintlify')]) {
+        const start = performance.now()
+        run(unit.repeat(100_000))
+        expect(performance.now() - start).toBeLessThan(200)
+      }
+    }
+  })
 })

@@ -1734,9 +1734,12 @@ function maskCodeRegions(body: string): string {
  * Read a JSX tag's attributes from `from` (just after the tag name) to its
  * closing `>`, ignoring any `>` inside quotes or `{...}` expressions. Linear.
  * Returns the index after `>` and whether the tag self-closes, or null when it
- * is not a well-formed tag (a bare `<`, or no end).
+ * is not a well-formed tag (a bare `<`, or no end). Returns UNTERMINATED when
+ * an open brace/quote runs to end of input: callers stop scanning, since every
+ * later opener would rescan the same tail (quadratic on `'<a {'.repeat(n)`).
  */
-function readTagEnd(text: string, from: number): { end: number; selfClosing: boolean; attributes: string } | null {
+const UNTERMINATED = 'unterminated'
+function readTagEnd(text: string, from: number): { end: number; selfClosing: boolean; attributes: string } | null | typeof UNTERMINATED {
   if (from < text.length && !/[\s/>]/.test(text[from])) return null
   let depth = 0
   let quote = ''
@@ -1759,7 +1762,7 @@ function readTagEnd(text: string, from: number): { end: number; selfClosing: boo
       }
     }
   }
-  return null
+  return quote || depth > 0 ? UNTERMINATED : null
 }
 
 /** Add `titleSize="p"` to every `<Steps>` opener (also `<Steps />`) that lacks one. */
@@ -1769,6 +1772,7 @@ function pinStepsTitleSize(body: string): string {
   for (const match of body.matchAll(/<Steps(?=[\s/>])/g)) {
     if (match.index < cursor) continue
     const tag = readTagEnd(body, match.index + match[0].length)
+    if (tag === UNTERMINATED) break
     if (!tag) continue
     const attributesEnd = tag.end - (tag.selfClosing ? 2 : 1)
     if (/\btitleSize\s*=/.test(tag.attributes)) continue
@@ -1794,6 +1798,7 @@ export function escapeUnmatchedClosingTags(body: string): { body: string; lines:
   for (let match = tagPattern.exec(masked); match; match = tagPattern.exec(masked)) {
     const [whole, escaped, closing, name] = match
     const tag = readTagEnd(masked, match.index + whole.length)
+    if (tag === UNTERMINATED) break
     if (!tag) continue
     tagPattern.lastIndex = tag.end
     if (escaped || tag.selfClosing) continue
