@@ -54,7 +54,7 @@ import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
 import { mainSiteLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
-import { cssBrandColors } from './css-colors.js'
+import { type BrandVars, brandColorsFromVars, cssBrandVars } from './css-colors.js'
 import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
 import { closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
@@ -4058,13 +4058,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let rootStyleProjection: ReturnType<typeof projectAuthoredStyles> | undefined
   let rootNavbarButtons: ReturnType<typeof navbarLinkButtons> = []
   let rootStyleProblem: 'unsafe' | 'parse' | undefined
-  let rootStyleColors: ReturnType<typeof cssBrandColors>
+  const styleVarSources: Array<{ source: string; vars: ReturnType<typeof cssBrandVars> }> = []
   if (hasRootStylesheet && rootStylesheetPath && lstatSync(rootStylesheetPath).size <= MAX_ASSET_BYTES) {
     const css = readFileSync(rootStylesheetPath, 'utf8')
     // An import may fetch arbitrary CSS; URL schemes that read local files or
     // execute script are not transferable into a public Thally stylesheet.
     // Colours are plain values, safe to read even when the sheet cannot be shipped.
-    rootStyleColors = cssBrandColors(css)
+    styleVarSources.push({ source: 'style.css', vars: cssBrandVars(css) })
     if (/@import\b|url\s*\(\s*['"]?\s*(?:javascript:|file:)/i.test(css)) rootStyleProblem = 'unsafe'
     else {
       try {
@@ -4290,15 +4290,28 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
 
   // The site's own `--primary*` variables win over docs.json `colors`, as they do
   // in Mintlify, which loads every `.css` file in the content directory.
-  const servedStyleColors = platform === 'mintlify'
-    ? files.filter((file) => isMintlifyServedScriptOrStyle(file.relativePath) && extname(file.relativePath).toLowerCase() === '.css'
-      && file.absolutePath !== rootStylesheetPath && !lstatSync(file.absolutePath).isSymbolicLink() && lstatSync(file.absolutePath).size <= MAX_ASSET_BYTES)
-      .map((file) => cssBrandColors(readFileSync(file.absolutePath, 'utf8')))
-    : []
-  const styleColors = [rootStyleColors, ...servedStyleColors].reduce<NonNullable<typeof rootStyleColors>>((merged, entry) => ({
-    ...(entry?.light || merged.light ? { light: { ...merged.light, ...entry?.light } } : {}),
-    ...(entry?.dark || merged.dark ? { dark: { ...merged.dark, ...entry?.dark } } : {}),
-  }), {})
+  if (platform === 'mintlify') {
+    for (const file of files) {
+      if (!isMintlifyServedScriptOrStyle(file.relativePath) || extname(file.relativePath).toLowerCase() !== '.css'
+        || file.absolutePath === rootStylesheetPath) continue
+      try {
+        if (lstatSync(file.absolutePath).isSymbolicLink() || lstatSync(file.absolutePath).size > MAX_ASSET_BYTES) continue
+        styleVarSources.push({ source: file.relativePath, vars: cssBrandVars(readFileSync(file.absolutePath, 'utf8')) })
+      } catch {
+        // Unreadable stylesheet: skip it, the migration continues without its colours.
+      }
+    }
+  }
+  // Merge per variable, so a later file setting only `--primary` keeps an
+  // earlier file's `--primary-dark`; then resolve once.
+  const mergedVars: { root: BrandVars; dark: BrandVars } = { root: {}, dark: {} }
+  const colourSources: Array<string> = []
+  for (const { source, vars } of styleVarSources) {
+    if (Object.keys(vars.root).length + Object.keys(vars.dark).length > 0) colourSources.push(source)
+    Object.assign(mergedVars.root, vars.root)
+    Object.assign(mergedVars.dark, vars.dark)
+  }
+  const styleColors = brandColorsFromVars(mergedVars) ?? {}
   if (styleColors.light || styleColors.dark) {
     docsConfig = {
       ...docsConfig,
@@ -4310,7 +4323,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     warnings.push({
       code: 'unsupported-config',
-      source: 'style.css',
+      source: colourSources.join(', '),
       message: 'Brand colours were taken from the --primary custom properties in the site stylesheets and override docs.json colors.',
     })
   }

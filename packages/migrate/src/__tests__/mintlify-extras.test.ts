@@ -299,6 +299,19 @@ describe('config mapping', () => {
     expect(site({ 'docs.json': JSON.stringify({ ...nav, colors }), 'theme/extra.css': '.dark{--primary:1 2 3}', ...intro }).docsConfig.colors?.dark).toEqual({ accent: '#010203', primary: '#010203' })
   })
 
+  it('merges stylesheet colours per variable and names every file they came from', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify(nav),
+      'style.css': ':root{--primary:#111111;--primary-dark:#222222}',
+      'theme/extra.css': ':root{--primary:#333333}',
+      ...intro,
+    })
+    expect(bundle.docsConfig.colors?.light).toEqual({ accent: '#333333', primary: '#222222' })
+    expect(bundle.warnings.find((warning) => /Brand colours were taken from/.test(warning.message))?.source).toBe('style.css, theme/extra.css')
+    const only = site({ 'docs.json': JSON.stringify(nav), 'theme/extra.css': ':root{--primary:#333333}', ...intro })
+    expect(only.warnings.find((warning) => /Brand colours were taken from/.test(warning.message))?.source).toBe('theme/extra.css')
+  })
+
   it('ignores malformed and at-rule-scoped stylesheet colours', () => {
     const colorsOf = (css: string) => site({ 'docs.json': JSON.stringify(nav), 'style.css': css, ...intro }).docsConfig.colors
     expect(colorsOf('.dark{--primary:300 255 0;--primary-light:nope}')).toBeUndefined()

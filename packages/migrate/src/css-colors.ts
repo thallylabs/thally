@@ -5,7 +5,7 @@ export interface CssBrandColors {
   dark?: { accent?: string; primary?: string }
 }
 
-type Vars = Partial<Record<'primary' | 'primary-light' | 'primary-dark', string>>
+export type BrandVars = Partial<Record<'primary' | 'primary-light' | 'primary-dark', string>>
 
 const channel = (value: string): number => Number(value)
 
@@ -37,14 +37,14 @@ function stripComments(css: string): string {
   return out + css.slice(index)
 }
 
-function declarations(body: string, into: Vars): void {
+function declarations(body: string, into: BrandVars): void {
   for (const declaration of body.split(';')) {
     const colon = declaration.indexOf(':')
     if (colon < 0) continue
     const name = declaration.slice(0, colon).trim().toLowerCase()
     if (name !== '--primary' && name !== '--primary-light' && name !== '--primary-dark') continue
     const hex = cssColorToHex(declaration.slice(colon + 1))
-    if (hex) into[name.slice(2) as keyof Vars] = hex
+    if (hex) into[name.slice(2) as keyof BrandVars] = hex
   }
 }
 
@@ -53,10 +53,10 @@ function declarations(body: string, into: Vars): void {
  * `:root`/`html` and `.dark` rules only; at-rules and other selectors are
  * skipped. One linear pass, so hostile input cannot backtrack.
  */
-export function cssBrandColors(css: string): CssBrandColors | undefined {
+export function cssBrandVars(css: string): { root: BrandVars; dark: BrandVars } {
   const source = stripComments(css)
-  const root: Vars = {}
-  const dark: Vars = {}
+  const root: BrandVars = {}
+  const dark: BrandVars = {}
   let index = 0
   while (index < source.length) {
     const open = source.indexOf('{', index)
@@ -80,6 +80,15 @@ export function cssBrandColors(css: string): CssBrandColors | undefined {
       if (target) declarations(source.slice(open + 1, close - 1), target)
     }
   }
+  return { root, dark }
+}
+
+export function cssBrandColors(css: string): CssBrandColors | undefined {
+  return brandColorsFromVars(cssBrandVars(css))
+}
+
+/** Resolve variables (merged per variable across files) into accent/button colours. */
+export function brandColorsFromVars({ root, dark }: { root: BrandVars; dark: BrandVars }): CssBrandColors | undefined {
   // Mintlify: `--primary` in light mode is the accent and `-dark` the button
   // fill; in dark mode `-light` is the accent and `-dark` falls back to it.
   const result: CssBrandColors = {}
