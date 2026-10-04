@@ -1293,6 +1293,24 @@ describe('Mintlify repository migration', () => {
     expect(sources).toContain('/api/t/get-b')
   })
 
+  it('keeps the first operation and warns when two operations in a tag share a Mintlify endpoint slug', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API', openapi: { source: 'd.yaml', directory: 'api' } }] },
+    }))
+    writeFileSync(join(root, 'd.yaml'), [
+      'openapi: 3.1.0', 'info: { title: D, version: "1.0" }', 'paths:',
+      '  /a:', '    get:', '      summary: Get thing', '      tags: [T]', '      responses: { "200": { description: ok } }',
+      '  /b:', '    get:', '      summary: Get thing', '      tags: [T]', '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.docsConfig.redirects?.filter((redirect) => redirect.source === '/api/t/get-thing')).toEqual([
+      { source: '/api/t/get-thing', destination: '/api/default/a/get' },
+    ])
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('shared by more than one operation')
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('/api/t/get-thing')
+  })
+
   it('caps generated Mintlify endpoint redirects and warns how many were not created', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

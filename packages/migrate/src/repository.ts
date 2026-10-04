@@ -1689,6 +1689,8 @@ interface ApiOperationLinkMaps {
   prefixLandings: Map<string, string>
   /** Canonical Mintlify endpoint URL (original case) -> Thally operation route, for redirects. */
   mintlifyPages: Map<string, string>
+  /** Mintlify endpoint URLs that two operations share; the first operation keeps the URL. */
+  duplicatePages: Array<string>
 }
 
 function apiOperationLinkMap(
@@ -1698,6 +1700,7 @@ function apiOperationLinkMap(
   const map = new Map<string, string>()
   const prefixLandings = new Map<string, string>()
   const mintlifyPages = new Map<string, string>()
+  const duplicatePages: Array<string> = []
   const apiTabs = docsConfig.tabs.filter((tab) => !tab.hidden && tab.api)
   apiTabs.forEach((tab, index) => {
     const source = sources.find((entry) => tab.api?.source === specAssetPath(entry.filename))
@@ -1740,7 +1743,10 @@ function apiOperationLinkMap(
       const mintlifyTag = mintlifyUrlSlug(operation.tag ?? 'default')
       const mintlifyLeaf = mintlifyUrlSlug(operation.summary?.trim() || operation.operationId?.trim() || `${operation.method} ${operation.path}`)
       const canonical = `${source.prefix}/${mintlifyTag}/${mintlifyLeaf}`.replace(/^\/+|\/+$/g, '')
-      if (mintlifyTag && mintlifyLeaf && !mintlifyPages.has(canonical)) mintlifyPages.set(canonical, thallyHref)
+      if (mintlifyTag && mintlifyLeaf) {
+        if (!mintlifyPages.has(canonical)) mintlifyPages.set(canonical, thallyHref)
+        else if (mintlifyPages.get(canonical) !== thallyHref && !duplicatePages.includes(canonical)) duplicatePages.push(canonical)
+      }
       if (mintlifyTag && mintlifyLeaf && !map.has(canonical.toLowerCase())) map.set(canonical.toLowerCase(), thallyHref)
       for (const leaf of leafCandidates) {
         if (!leaf) continue
@@ -1751,7 +1757,7 @@ function apiOperationLinkMap(
       }
     }
   })
-  return { operationLinks: map, prefixLandings, mintlifyPages }
+  return { operationLinks: map, prefixLandings, mintlifyPages, duplicatePages }
 }
 
 /** Rewrite API operation links in every page body, with one capped warning for links that matched no operation. */
@@ -4544,11 +4550,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           && !publishedSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))
       }
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
-      const { operationLinks, prefixLandings, mintlifyPages } = apiOperationLinkMap(
+      const { operationLinks, prefixLandings, mintlifyPages, duplicatePages } = apiOperationLinkMap(
         resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.directory })),
         docsConfig,
       )
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
+      if (duplicatePages.length > 0) {
+        const listed = duplicatePages.slice(0, 10).map((url) => `/${url}`).join(', ')
+        warnings.push({
+          code: 'unsupported-config',
+          message: `${duplicatePages.length} Mintlify endpoint URL${duplicatePages.length === 1 ? ' is' : 's are'} shared by more than one operation (same tag and summary), so only the first operation is redirected from each: ${listed}${duplicatePages.length > 10 ? ', ...' : ''}.`,
+        })
+      }
       // Mintlify's own endpoint URLs keep working: they have no page of their own here.
       const taken = new Set([...pages.map((page) => page.id), ...(docsConfig.redirects ?? []).map((redirect) => redirect.source.replace(/^\//, ''))])
       const candidates = [...mintlifyPages].filter(([source]) => !taken.has(source))
