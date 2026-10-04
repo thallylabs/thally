@@ -4050,11 +4050,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const css = readFileSync(rootStylesheetPath, 'utf8')
     // An import may fetch arbitrary CSS; URL schemes that read local files or
     // execute script are not transferable into a public Thally stylesheet.
+    // Colours are plain values, safe to read even when the sheet cannot be shipped.
+    rootStyleColors = cssBrandColors(css)
     if (/@import\b|url\s*\(\s*['"]?\s*(?:javascript:|file:)/i.test(css)) rootStyleProblem = 'unsafe'
     else {
       try {
         rootNavbarButtons = navbarLinkButtons(css)
-        rootStyleColors = cssBrandColors(css)
         rootStyleProjection = projectAuthoredStyles(css, [
           ...pages.map((page) => page.body),
           ...(componentMigrator?.files() ?? []).map((file) => typeof file.content === 'string' ? file.content : ''),
@@ -4258,22 +4259,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           },
         }
       }
-      // The site's own `--primary*` variables win over docs.json `colors`, as they do in Mintlify.
-      if (rootStyleColors) {
-        docsConfig = {
-          ...docsConfig,
-          colors: {
-            ...docsConfig.colors,
-            ...(rootStyleColors.light ? { light: { ...docsConfig.colors?.light, ...rootStyleColors.light } } : {}),
-            ...(rootStyleColors.dark ? { dark: { ...docsConfig.colors?.dark, ...rootStyleColors.dark } } : {}),
-          },
-        }
-        warnings.push({
-          code: 'unsupported-config',
-          source: 'style.css',
-          message: 'Brand colours were taken from the --primary custom properties in style.css and override docs.json colors.',
-        })
-      }
       if (rootStyleProjection.omittedSelectors > 0) warnings.push({
         code: 'unsupported-config',
         source: 'style.css',
@@ -4288,6 +4273,33 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         totalAssetBytes += content.length
       }
     }
+  }
+
+  // The site's own `--primary*` variables win over docs.json `colors`, as they do
+  // in Mintlify, which loads every `.css` file in the content directory.
+  const servedStyleColors = platform === 'mintlify'
+    ? files.filter((file) => isMintlifyServedScriptOrStyle(file.relativePath) && extname(file.relativePath).toLowerCase() === '.css'
+      && file.absolutePath !== rootStylesheetPath && !lstatSync(file.absolutePath).isSymbolicLink() && lstatSync(file.absolutePath).size <= MAX_ASSET_BYTES)
+      .map((file) => cssBrandColors(readFileSync(file.absolutePath, 'utf8')))
+    : []
+  const styleColors = [rootStyleColors, ...servedStyleColors].reduce<NonNullable<typeof rootStyleColors>>((merged, entry) => ({
+    ...(entry?.light || merged.light ? { light: { ...merged.light, ...entry?.light } } : {}),
+    ...(entry?.dark || merged.dark ? { dark: { ...merged.dark, ...entry?.dark } } : {}),
+  }), {})
+  if (styleColors.light || styleColors.dark) {
+    docsConfig = {
+      ...docsConfig,
+      colors: {
+        ...docsConfig.colors,
+        ...(styleColors.light ? { light: { ...docsConfig.colors?.light, ...styleColors.light } } : {}),
+        ...(styleColors.dark ? { dark: { ...docsConfig.colors?.dark, ...styleColors.dark } } : {}),
+      },
+    }
+    warnings.push({
+      code: 'unsupported-config',
+      source: 'style.css',
+      message: 'Brand colours were taken from the --primary custom properties in the site stylesheets and override docs.json colors.',
+    })
   }
 
   // Ranked discovery gives pages, snippets and assets separate budgets and

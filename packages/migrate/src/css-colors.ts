@@ -61,7 +61,9 @@ export function cssBrandColors(css: string): CssBrandColors | undefined {
   while (index < source.length) {
     const open = source.indexOf('{', index)
     if (open < 0) break
-    const prelude = (source.slice(index, open).split('}').pop() ?? '').trim()
+    let prelude = (source.slice(index, open).split('}').pop() ?? '').trim()
+    // `@import …;` and `@charset …;` statements have no block; they precede the next rule.
+    while (prelude.startsWith('@') && prelude.includes(';')) prelude = prelude.slice(prelude.indexOf(';') + 1).trim()
     let depth = 1
     let close = open + 1
     for (; close < source.length && depth > 0; close++) {

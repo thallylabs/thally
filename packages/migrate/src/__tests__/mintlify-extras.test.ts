@@ -292,6 +292,13 @@ describe('config mapping', () => {
     expect(withCss('p{color:red}').docsConfig.colors).toEqual({ light: { accent: '#16a34a', primary: '#111111' }, dark: { accent: '#ffffff', primary: '#ffffff' } })
   })
 
+  it('takes brand colours from a stylesheet that also holds an @import, and from other served .css files', () => {
+    const css = "@import url('https://fonts.googleapis.com/css2?family=Geist+Mono');\n.dark,\n[data-theme=\"dark\"],\nhtml.dark {\n  --primary: 200 255 0;\n  --primary-dark: 200 255 0;\n}"
+    const colors = { primary: '#7624f4' }
+    expect(site({ 'docs.json': JSON.stringify({ ...nav, colors }), 'style.css': css, ...intro }).docsConfig.colors?.dark).toEqual({ accent: '#c8ff00', primary: '#c8ff00' })
+    expect(site({ 'docs.json': JSON.stringify({ ...nav, colors }), 'theme/extra.css': '.dark{--primary:1 2 3}', ...intro }).docsConfig.colors?.dark).toEqual({ accent: '#010203', primary: '#010203' })
+  })
+
   it('ignores malformed and at-rule-scoped stylesheet colours', () => {
     const colorsOf = (css: string) => site({ 'docs.json': JSON.stringify(nav), 'style.css': css, ...intro }).docsConfig.colors
     expect(colorsOf('.dark{--primary:300 255 0;--primary-light:nope}')).toBeUndefined()
