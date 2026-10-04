@@ -1314,7 +1314,7 @@ describe('Mintlify repository migration', () => {
     writeFileSync(join(root, 'agent-context', 'notes.mdx'), '# Internal notes')
     writeFileSync(join(root, '.mintignore'), 'agent-context/\n')
     // Invalid MDX (an unmatched closing tag) must not abort the whole import.
-    writeFileSync(join(root, 'en', 'broken.mdx'), '---\ntitle: Broken\n---\n\n</NoOpenTag>')
+    writeFileSync(join(root, 'en', 'broken.mdx'), '---\ntitle: Broken\n---\n\n{unclosed')
 
     const bundle = migrateRepository({
       repositoryDir: root,

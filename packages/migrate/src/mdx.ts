@@ -1730,6 +1730,44 @@ function maskCodeRegions(body: string): string {
   }).join('\n')
 }
 
+/**
+ * Escape closing tags that have no matching real opener (outside code), e.g.
+ * a generator that wrote `\<Warning>` ... `</Warning>`: the escaped opener is
+ * literal text, so the bare closer is a compile error. Escaping the closer the
+ * same way keeps the page. Linear: one regex pass with a per-name open count.
+ * Returns the 1-based line numbers repaired; `body` is returned unchanged when
+ * there are none.
+ */
+export function escapeUnmatchedClosingTags(body: string): { body: string; lines: Array<number> } {
+  const masked = maskCodeRegions(body)
+  const tagPattern = /(\\?)<(\/?)([A-Za-z][\w.:-]*)(?:\s+[^<>]*?)?(\/?)>/g
+  const open = new Map<string, number>()
+  const edits: Array<number> = []
+  for (const match of masked.matchAll(tagPattern)) {
+    const [, escaped, closing, name, selfClosing] = match
+    if (escaped || selfClosing) continue
+    if (!closing) {
+      open.set(name, (open.get(name) ?? 0) + 1)
+    } else if (open.get(name)) {
+      open.set(name, open.get(name)! - 1)
+    } else {
+      edits.push(match.index!)
+    }
+  }
+  if (edits.length === 0) return { body, lines: [] }
+  let result = ''
+  let cursor = 0
+  const lines: Array<number> = []
+  let line = 1
+  for (const start of edits) {
+    result += `${body.slice(cursor, start)}\\`
+    for (let i = cursor; i < start; i++) if (body.charCodeAt(i) === 10) line++
+    lines.push(line)
+    cursor = start
+  }
+  return { body: result + body.slice(cursor), lines }
+}
+
 function isKnownComponentName(name: string, body: string): boolean {
   if (isThallyBuiltinComponent(name)) return true
   if (new RegExp(`^\\s*export\\s+(?:const|function|default\\s+function)\\s+${name}\\b`, 'm').test(body)) return true

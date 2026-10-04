@@ -56,7 +56,7 @@ import { parseFrontmatter } from './frontmatter.js'
 import { mainSiteLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
 import { cssBrandColors } from './css-colors.js'
 import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
-import { closeOpenFence, escapeFernLiteralBraces, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -3861,7 +3861,20 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         })
       })
     }
-    const mdxError = invalidMdxReason(page.body)
+    let mdxError = invalidMdxReason(page.body)
+    if (mdxError) {
+      // Fail closed: only keep a repair that actually compiles.
+      const repaired = escapeUnmatchedClosingTags(page.body)
+      if (repaired.lines.length > 0 && invalidMdxReason(repaired.body) === null) {
+        page.body = repaired.body
+        mdxError = null
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Escaped unmatched closing tag(s) on line ${repaired.lines.join(', ')} so the page compiles; they render as literal text.`,
+          source: file.relativePath,
+        })
+      }
+    }
     if (mdxError) {
       skipped++
       warnings.push({

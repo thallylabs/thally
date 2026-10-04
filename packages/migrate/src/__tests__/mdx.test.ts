@@ -3,7 +3,7 @@
 import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
-import { mintlifyHeadingSlug, escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, removeUndefinedExpressions, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
+import { mintlifyHeadingSlug, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, removeUndefinedExpressions, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -1484,5 +1484,46 @@ describe('removeUndefinedExpressions', () => {
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain('"gone"')
     expect(warnings[0]).not.toContain('"meta"')
+  })
+})
+
+describe('escapeUnmatchedClosingTags', () => {
+  const compiles = (src: string) => { compileSync(src, { outputFormat: 'program' }) }
+
+  it('repairs the real OpenRouter apikeys snippet (escaped opener, bare closer) and keeps its text', () => {
+    const real = [
+      '## update',
+      '',
+      'Update an existing API key. Authenticate with a [management key](/docs/guides/overview/auth/management-api-keys).',
+      '',
+      '\\<Warning>',
+      "You can't change `workspace_id` through the API. The request body accepts only the fields listed below, and unrecognized fields are ignored.",
+      '</Warning>',
+      '',
+      '### Example Usage: invalid_parameters',
+      '',
+    ].join('\n')
+    expect(() => compiles(real)).toThrow(/Unexpected closing slash/)
+    const out = escapeUnmatchedClosingTags(real)
+    expect(out.lines).toEqual([7])
+    expect(() => compiles(out.body)).not.toThrow()
+    expect(out.body).toContain("You can't change `workspace_id` through the API.")
+  })
+
+  it('leaves balanced and nested same-name tags untouched', () => {
+    const src = '<Note>\n<Note>\ninner\n</Note>\n</Note>\n'
+    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
+  })
+
+  it('ignores closers inside code fences and inline code', () => {
+    const src = '```html\n</Warning>\n```\n\nUse `</Warning>` here.\n'
+    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
+  })
+
+  it('is linear on adversarial input', () => {
+    const src = '<A '.repeat(50_000) + '</B>'.repeat(10_000) + '<A x'.repeat(10_000)
+    const start = performance.now()
+    escapeUnmatchedClosingTags(src)
+    expect(performance.now() - start).toBeLessThan(500)
   })
 })
