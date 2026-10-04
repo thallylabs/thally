@@ -105,6 +105,8 @@ export interface MigrationDocsConfig {
     mdx?: { server?: string | Array<string>; auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string } }
     /** Mintlify `api.playground.display`; `auth` is carried as `simple`. */
     playground?: { display: 'interactive' | 'simple' | 'none' }
+    /** `false` hides the visible "OpenAPI specification" line; Mintlify does not show it. */
+    specLink?: boolean
   }
   /** Third-party analytics in Mintlify's `integrations` shape; validated again by the renderer. */
   integrations?: {

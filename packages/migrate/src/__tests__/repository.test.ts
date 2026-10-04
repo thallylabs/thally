@@ -1063,7 +1063,7 @@ describe('Mintlify repository migration', () => {
       const bundle = apiFixture(pages, twoSpecNav)
       const manual = bundle.pages.find((page) => page.id === 'manual')
       expect(manual).toMatchObject({ api: 'POST https://httpbin.org/anything', authMethod: 'bearer' })
-      expect(bundle.docsConfig.api).toEqual({ mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } } })
+      expect(bundle.docsConfig.api).toEqual({ mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } }, specLink: false })
       const rendered = renderMigrationFiles(bundle).find((file) => file.path.endsWith('manual.mdx'))
       expect(String(rendered?.content)).toContain('api: "POST https://httpbin.org/anything"')
       expect(String(rendered?.content)).toContain('authMethod: "bearer"')
@@ -1079,7 +1079,7 @@ describe('Mintlify repository migration', () => {
         },
         { ...twoSpecNav, api: { mdx: twoSpecNav.api.mdx, playground: { display: 'simple' } } },
       )
-      expect(bundle.docsConfig.api).toEqual({ mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } }, playground: { display: 'simple' } })
+      expect(bundle.docsConfig.api).toEqual({ mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } }, playground: { display: 'simple' }, specLink: false })
       const page = (id: string) => bundle.pages.find((candidate) => candidate.id === id)
       expect(page('quiet')?.playground).toBe('none')
       // No viewer sign-in exists here, so Mintlify's "auth" shows no playground rather than showing it to everyone.
@@ -1098,7 +1098,7 @@ describe('Mintlify repository migration', () => {
       const bad = bundle.pages.find((page) => page.id === 'bad')
       expect(bad?.api).toBeUndefined()
       expect(bad?.authMethod).toBeUndefined()
-      expect(bundle.docsConfig.api).toEqual({ mdx: { server: ['https://ok.example.com'] } })
+      expect(bundle.docsConfig.api).toEqual({ mdx: { server: ['https://ok.example.com'] }, specLink: false })
       const messages = bundle.warnings.map((w) => w.message).join('\n')
       expect(messages).toContain('"api" frontmatter')
       expect(messages).toContain('authMethod')
@@ -2321,6 +2321,7 @@ describe('Docusaurus repository migration', () => {
     expect(body.indexOf('Before cards.')).toBeLessThan(body.indexOf('<CardGroup>'))
     expect(body.indexOf('<CardGroup>')).toBeLessThan(body.indexOf('After cards.'))
     expect(body).not.toContain('data-thally-doc-card-list')
+    expect(bundle.docsConfig.api?.specLink).toBeUndefined()
   })
 
   it('hoists index-only folders into authored sidebar order', () => {
@@ -3057,6 +3058,7 @@ describe('Fern repository migration', () => {
     expect(bundle.pages.find((page) => page.title === 'A Longer Page Title')?.navTitle).toBe('Overview')
     expect(bundle.pages.find((page) => page.title === 'Legacy page')?.hidden).toBe(true)
     expect(JSON.stringify(bundle.docsConfig.tabs)).not.toContain('legacy')
+    expect(bundle.docsConfig.api?.specLink).toBeUndefined()
   })
 
   it('preserves Fern announcements, external tabs, and logo suffixes', () => {

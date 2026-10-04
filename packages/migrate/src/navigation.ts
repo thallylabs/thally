@@ -1097,12 +1097,13 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
  * Mintlify's `api.mdx.server` / `api.mdx.auth` (defaults for manual `api:`
  * pages). Only well-formed values are kept; each dropped one is reported.
  */
-function projectedApi(config: Record<string, unknown>, warnings: Array<MigrationWarning>): Pick<MigrationDocsConfig, 'api'> {
+function projectedApi(config: Record<string, unknown>, warnings: Array<MigrationWarning>, hasApiTab: boolean): Pick<MigrationDocsConfig, 'api'> {
   const mdx = projectedApiMdx(config, warnings).api?.mdx
   const raw = objectValue(objectValue(config.api)?.playground)?.display
   const display = raw === undefined ? undefined : playgroundDisplay(raw, 'api.playground.display', (message) => warnings.push({ code: 'unsupported-config', message }))
-  if (!mdx && !display) return {}
-  return { api: { ...(mdx ? { mdx } : {}), ...(display ? { playground: { display } } : {}) } }
+  if (!mdx && !display && !hasApiTab) return {}
+  // Mintlify operation pages carry no "OpenAPI specification" line.
+  return { api: { ...(mdx ? { mdx } : {}), ...(display ? { playground: { display } } : {}), ...(hasApiTab ? { specLink: false } : {}) } }
 }
 
 function projectedApiMdx(config: Record<string, unknown>, warnings: Array<MigrationWarning>): Pick<MigrationDocsConfig, 'api'> {
@@ -1469,7 +1470,7 @@ export function projectMintlifyNavigation(
         } }
         : {}),
       ...projectedCompatibleConfig(config, warnings),
-      ...projectedApi(config, warnings),
+      ...projectedApi(config, warnings, tabs.some((tab) => tab.api)),
       ...(i18n ? { i18n } : {}),
       ...(redirects.length > 0 ? { redirects } : {}),
     },
