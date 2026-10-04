@@ -26,6 +26,16 @@ describe('Step title element', () => {
     expect(html).toMatch(/<p [^>]*>B<\/p>/)
   })
 
+  it('gives non-Step children no titleSize prop and lets a Step nested in a wrapper inherit', () => {
+    const html = renderToStaticMarkup(
+      <Steps titleSize="p"><p>plain</p><div><Step title="Nested" /></div></Steps>,
+    )
+    expect(html).not.toContain('titleSize')
+    expect(html).not.toContain('titlesize')
+    expect(html).toContain('<p>plain</p>')
+    expect(html).toMatch(/<p [^>]*>Nested<\/p>/)
+  })
+
   it('has no data-heading marker, so no title reaches the table of contents', () => {
     expect(renderToStaticMarkup(<Steps><Step title="One" /></Steps>)).not.toContain('data-heading')
   })

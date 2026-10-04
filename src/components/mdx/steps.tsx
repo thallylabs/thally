@@ -1,4 +1,6 @@
-import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react'
+'use client'
+
+import { createContext, useContext, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
@@ -15,19 +17,15 @@ interface StepsProps {
   titleSize?: StepTitleSize
 }
 
+const StepsTitleSizeContext = createContext<StepTitleSize | undefined>(undefined)
+
 export function Steps({ children, className, titleSize }: StepsProps) {
   return (
     <div
       className={cn('thally-steps relative', className)}
       style={{ counterReset: 'step 0' }}
     >
-      {titleSize
-        ? Children.map(children, (child) => (
-          isValidElement<StepProps>(child) && child.props.titleSize === undefined
-            ? cloneElement(child as ReactElement<StepProps>, { titleSize })
-            : child
-        ))
-        : children}
+      <StepsTitleSizeContext.Provider value={titleSize}>{children}</StepsTitleSizeContext.Provider>
     </div>
   )
 }
@@ -42,8 +40,9 @@ interface StepProps {
   children?: ReactNode
 }
 
-export function Step({ title, titleSize = 'h3', children }: StepProps) {
-  const Title = titleSize
+export function Step({ title, titleSize, children }: StepProps) {
+  const inherited = useContext(StepsTitleSizeContext)
+  const Title = titleSize ?? inherited ?? 'h3'
   return (
     <div
       className="thally-step relative grid grid-cols-[30px_minmax(0,1fr)] gap-x-5 pb-[34px] last:pb-0"
