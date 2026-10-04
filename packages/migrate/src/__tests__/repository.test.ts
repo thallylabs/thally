@@ -1311,6 +1311,22 @@ describe('Mintlify repository migration', () => {
     expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('/api/t/get-thing')
   })
 
+  it('redirects a bare Mintlify tag URL to the first operation of that tag and rewrites body links to it', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API', openapi: { source: 't.yaml', directory: 'api' } }, { tab: 'Docs', pages: ['index'] }] },
+    }))
+    writeFileSync(join(root, 'index.mdx'), '---\ntitle: Home\n---\n\nSee [BYOK](/api/byok).')
+    writeFileSync(join(root, 't.yaml'), [
+      'openapi: 3.1.0', 'info: { title: T, version: "1.0" }', 'paths:',
+      '  /byok:', '    get:', '      summary: List credentials', '      tags: [BYOK]', '      responses: { "200": { description: ok } }',
+      '    post:', '      summary: Create a credential', '      tags: [BYOK]', '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/api/byok', destination: '/api/default/byok/get' })
+    expect(bundle.pages.map((page) => page.body).join('\n')).toContain('(/api/default/byok/get)')
+  })
+
   it('counts endpoint redirects skipped because a page already owns the URL', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
@@ -1324,7 +1340,7 @@ describe('Mintlify repository migration', () => {
       '  /b:', '    get:', '      summary: Get two', '      tags: [T]', '      responses: { "200": { description: ok } }',
     ].join('\n'))
     const messages = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).warnings.map((warning) => warning.message).join('\n')
-    expect(messages).toContain('Created 1 of 2 Mintlify endpoint redirects; skipped 1: 1 because the URL already has a page or redirect')
+    expect(messages).toContain('Created 2 of 3 Mintlify endpoint redirects; skipped 1: 1 because the URL already has a page or redirect')
   })
 
   it('caps generated Mintlify endpoint redirects and warns how many were not created', () => {
@@ -1335,8 +1351,8 @@ describe('Mintlify repository migration', () => {
     const paths = Array.from({ length: 2_050 }, (_, index) => `  /op${index}:\n    get:\n      summary: Op ${index}\n      tags: [T]\n      responses: { "200": { description: ok } }`)
     writeFileSync(join(root, 'big.yaml'), ['openapi: 3.1.0', 'info: { title: Big, version: "1.0" }', 'paths:', ...paths].join('\n'))
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
-    expect(bundle.docsConfig.redirects?.filter((redirect) => redirect.source.startsWith('/api/t/'))).toHaveLength(2_000)
-    expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('Created 2000 of 2050 Mintlify endpoint redirects; skipped 50: 50 because a site is limited to 2000')
+    expect(bundle.docsConfig.redirects?.filter((redirect) => redirect.source.startsWith('/api/t'))).toHaveLength(2_000)
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('Created 2000 of 2051 Mintlify endpoint redirects; skipped 51: 51 because a site is limited to 2000')
   })
 
   it('drops a manual OpenAPI operation listing ("GET /path") with one warning instead of one missing-page warning per operation', () => {

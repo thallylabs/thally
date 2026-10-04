@@ -1748,6 +1748,10 @@ function apiOperationLinkMap(
         else if (mintlifyPages.get(canonical) !== thallyHref && !duplicatePages.includes(canonical)) duplicatePages.push(canonical)
       }
       if (mintlifyTag && mintlifyLeaf && !map.has(canonical.toLowerCase())) map.set(canonical.toLowerCase(), thallyHref)
+      // Mintlify redirects a bare tag URL to that tag's first operation.
+      const tagRoot = `${source.prefix}/${mintlifyTag}`.replace(/^\/+|\/+$/g, '')
+      if (mintlifyTag && !mintlifyPages.has(tagRoot)) mintlifyPages.set(tagRoot, thallyHref)
+      if (mintlifyTag && !map.has(tagRoot.toLowerCase())) map.set(tagRoot.toLowerCase(), thallyHref)
       for (const leaf of leafCandidates) {
         if (!leaf) continue
         const tagged = `${source.prefix}/${tagSegment}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
