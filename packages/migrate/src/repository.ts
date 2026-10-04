@@ -1491,7 +1491,7 @@ function resolveMintlifyApiSpecs(
     if (reference.directory) {
       warnings.push({
         code: 'unsupported-config',
-        message: `The OpenAPI spec "${reference.value}"${tabSuffix} was limited to pages under "${reference.directory}" in the source, but Thally's API reference always covers a whole tab, so it was migrated as the tab's full API reference. Links and URLs to "${reference.directory}/<tag>/<operation>" pages were redirected to the matching endpoints; check any other links to "${reference.directory}/..." manually.`,
+        message: `The OpenAPI spec "${reference.value}"${tabSuffix} was limited to pages under "${reference.directory}" in the source, but Thally's API reference always covers a whole tab, so it was migrated as the tab's full API reference. Links in page bodies and Mintlify endpoint URLs under "${reference.directory}/<tag>/<operation>" are redirected to the matching endpoints where one exists (a separate warning counts any endpoint redirects that were skipped); check any other links to "${reference.directory}/..." manually.`,
       })
     }
     specs.push({
@@ -4567,10 +4567,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const candidates = [...mintlifyPages].filter(([source]) => !taken.has(source))
       const endpointRedirects = candidates.slice(0, MAX_ENDPOINT_REDIRECTS)
         .map(([source, destination]) => ({ source: `/${source}`, destination }))
-      if (candidates.length > endpointRedirects.length) {
+      const alreadyTaken = mintlifyPages.size - candidates.length
+      const capped = candidates.length - endpointRedirects.length
+      if (alreadyTaken + capped > 0) {
+        const reasons = [
+          alreadyTaken > 0 ? `${alreadyTaken} because the URL already has a page or redirect` : '',
+          capped > 0 ? `${capped} because a site is limited to ${MAX_ENDPOINT_REDIRECTS} generated endpoint redirects` : '',
+        ].filter(Boolean).join(' and ')
         warnings.push({
           code: 'unsupported-config',
-          message: `Created ${endpointRedirects.length} of ${candidates.length} Mintlify endpoint redirects; the other ${candidates.length - endpointRedirects.length} were not created because a site is limited to ${MAX_ENDPOINT_REDIRECTS} generated endpoint redirects. Old links to those endpoint URLs will not redirect.`,
+          message: `Created ${endpointRedirects.length} of ${mintlifyPages.size} Mintlify endpoint redirects; skipped ${alreadyTaken + capped}: ${reasons}. Old links to skipped endpoint URLs will not redirect.`,
         })
       }
       if (endpointRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...endpointRedirects] }
