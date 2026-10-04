@@ -280,6 +280,8 @@ interface DocsJsonConfig {
     }
     /** Mintlify `api.playground.display`: interactive (default), simple, none or auth. */
     playground?: { display?: string }
+    /** Show the "OpenAPI specification: <url>" line above generated operations. Defaults to true; `false` hides it. */
+    specLink?: boolean
   }
   navigation?: {
     display?: 'tabs' | 'dropdown'
@@ -1166,6 +1168,11 @@ export function getApiMdxConfig(): ApiMdxConfig {
 /** Raw docs.json `api.playground.display`; resolve it with `resolvePlaygroundDisplay`. */
 export function getApiPlaygroundDisplay(): unknown {
   return docsConfig().api?.playground?.display
+}
+
+/** The visible spec link stays on unless docs.json sets `api.specLink: false`. */
+export function getApiSpecLinkVisible(): boolean {
+  return docsConfig().api?.specLink !== false
 }
 
 export const TRY_IT_DEFAULT_TIMEOUT_MS = 60_000

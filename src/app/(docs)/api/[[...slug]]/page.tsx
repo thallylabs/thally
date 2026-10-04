@@ -8,7 +8,7 @@ import { pageFullTitle } from '@/lib/page-meta'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { apiReferenceConfig, getOpenApiSpecUrl } from '@/config/api-reference'
 import { getAllApiOperationNodes, getApiOperationBySlug, getApiOperationNodes } from '@/data/api-reference'
-import { getApiPlaygroundDisplay, getBreadcrumbs, getSeoConfig, getDocEntries, loadDocEntries } from '@/data/docs'
+import { getApiPlaygroundDisplay, getApiSpecLinkVisible, getBreadcrumbs, getSeoConfig, getDocEntries, loadDocEntries } from '@/data/docs'
 import { isRemoteContentSource } from '@/lib/content-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { buildApiOperationJsonLd } from '@/lib/json-ld'
@@ -124,7 +124,7 @@ export default async function ApiReferencePage({ params }: PageProps) {
 
     return (
       <ApiLayout>
-        {specUrl ? (
+        {specUrl && getApiSpecLinkVisible() ? (
           <p className="text-sm text-foreground/60">
             OpenAPI specification:{' '}
             <a href={specUrl} className="underline decoration-border underline-offset-2 hover:text-foreground">

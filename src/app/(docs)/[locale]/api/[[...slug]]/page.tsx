@@ -11,7 +11,7 @@ import { getSiteUrl } from '@/lib/site-url'
 import { pageFullTitle } from '@/lib/page-meta'
 import { apiReferenceConfig, getOpenApiSpecUrl } from '@/config/api-reference'
 import { getAllApiOperationNodes, getApiOperationBySlug, getApiOperationNodes } from '@/data/api-reference'
-import { getApiPlaygroundDisplay, getBreadcrumbs, getSeoConfig, getDocEntries, loadDocEntries } from '@/data/docs'
+import { getApiPlaygroundDisplay, getApiSpecLinkVisible, getBreadcrumbs, getSeoConfig, getDocEntries, loadDocEntries } from '@/data/docs'
 import { getIndexableDocTranslation, hasDocTranslation } from '@/lib/i18n/translation-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { buildApiOperationJsonLd } from '@/lib/json-ld'
@@ -156,7 +156,7 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
   return (
     <div lang={i18n.defaultLocale} dir={localeDirection(i18n.defaultLocale)}>
       <ApiLayout>
-        {specUrl ? (
+        {specUrl && getApiSpecLinkVisible() ? (
           <p className="text-sm text-foreground/60">
             OpenAPI specification:{' '}
             <a href={specUrl} className="underline decoration-border underline-offset-2 hover:text-foreground">
