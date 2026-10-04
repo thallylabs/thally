@@ -88,6 +88,8 @@ const JS_GLOBALS = new Set([
   'console', 'fetch', 'URL', 'URLSearchParams', 'Headers', 'Request', 'Response', 'AbortController', 'AbortSignal',
   'TextEncoder', 'TextDecoder', 'atob', 'btoa', 'structuredClone', 'queueMicrotask', 'performance',
   'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+  'crypto', 'Blob', 'EventTarget', 'escape', 'unescape', 'eval', 'WebAssembly', 'Iterator', 'self', 'screen',
+  'FinalizationRegistry', 'DOMException', 'ReadableStream', 'WritableStream', 'TransformStream', 'MessageChannel', 'BroadcastChannel',
 ])
 const IMPLICIT_MODULE_NAMES = new Set(['React', 'MintlifyComponents'])
 

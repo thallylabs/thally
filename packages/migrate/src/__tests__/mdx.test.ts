@@ -1409,6 +1409,13 @@ describe('removeUndefinedExpressions', () => {
     expect(warnings[0]).toBe('Expressions that use "backfill", "MV", "other" were removed so the page builds: the names are not defined on this page. Define the names or escape the braces as \\{ \\} to show the text.')
   })
 
+  it('keeps expressions that use real runtime globals', () => {
+    const body = '{crypto.randomUUID()} {new Blob([])} {escape(x)} {eval("1")} {WebAssembly.validate} {Iterator} {self} {screen.width} {new EventTarget()} {unescape("a")}'
+    const { out, warnings } = run(body.replace(/x/g, '"x"'))
+    expect(warnings).toEqual([])
+    expect(out).toContain('crypto.randomUUID()')
+  })
+
   it('removes an undefined flow expression and an undefined attribute expression', () => {
     const { out, warnings } = run('{missing}\n\n<Card title="x" href={base} />')
     expect(out).not.toContain('missing')
