@@ -380,6 +380,38 @@ function walk(node: MdxNode, visitor: (node: MdxNode) => void): void {
   for (const child of node.children ?? []) walk(child, visitor)
 }
 
+const BROWSER_GLOBALS = new Set(['window', 'document', 'navigator', 'localStorage', 'sessionStorage', 'location', 'history', 'matchMedia',
+  'requestAnimationFrame', 'IntersectionObserver', 'ResizeObserver', 'MutationObserver', 'alert', 'confirm', 'prompt', 'self'])
+
+/**
+ * Whether a copied module must run on the client: it declares `'use client'`,
+ * calls a hook, attaches an event handler, touches a browser global, builds a
+ * context, extends a class, or imports anything besides React (a package or
+ * scaffold module may itself need the client). Relative imports are judged on
+ * their own copy. Anything else is a pure server module.
+ */
+function needsClientBoundary(source: ts.SourceFile): boolean {
+  let needed = false
+  const isHook = (name: string): boolean => /^use(?:[A-Z0-9]|$)/.test(name) || name === 'createContext'
+  function visitNode(node: ts.Node): void {
+    if (needed) return
+    if (ts.isExpressionStatement(node) && ts.isStringLiteral(node.expression) && node.expression.text === 'use client') needed = true
+    else if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      const specifier = node.moduleSpecifier.text
+      if (!specifier.startsWith('.') && !SHARED_IMPORTS.has(specifier)) needed = true
+    } else if (ts.isCallExpression(node)) {
+      const callee = ts.isPropertyAccessExpression(node.expression) ? node.expression.name.text : ts.isIdentifier(node.expression) ? node.expression.text : ''
+      if (isHook(callee) || node.expression.kind === ts.SyntaxKind.ImportKeyword) needed = true
+    } else if (ts.isJsxAttribute(node) && ts.isIdentifier(node.name) && /^on[A-Z]/.test(node.name.text)) needed = true
+    else if (ts.isIdentifier(node) && BROWSER_GLOBALS.has(node.text) && !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)
+      && !(ts.isPropertyAssignment(node.parent) && node.parent.name === node)) needed = true
+    else if (ts.isClassLike(node) && node.heritageClauses?.some((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword)) needed = true
+    ts.forEachChild(node, visitNode)
+  }
+  visitNode(source)
+  return needed
+}
+
 function implicitReactImports(source: ts.SourceFile): string {
   const bindings = new Set<string>()
   const references = new Set<string>()
@@ -949,8 +981,12 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         ts.forEachChild(node, inspect)
       }
       inspect(ast)
-      // Mark copied code as client-owned even when the source platform inferred
-      // its client boundary. Browser hooks must never run in MDX's server scope.
+      // Mark copied code as client-owned when it needs the browser (see
+      // `needsClientBoundary`); browser hooks must never run in MDX's server
+      // scope. A pure component stays a server module: as 'use client' it
+      // would only see its server-rendered children as opaque references,
+      // so a site component that walks `children` (a `{{KEY}}` template)
+      // could not read the code it wraps.
       // The source site never ran `next build`'s full `tsc --noEmit` type
       // check (Docusaurus/Mintlify/Fern don't gate their own build on it),
       // so loose types, `window.ethereum`-style ambient globals, and
@@ -966,7 +1002,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       // file. If the copied source starts with one, keep it first and
       // insert the prologue right after instead.
       const shebangMatch = /^#!.*\r?\n/.exec(replaced)
-      const prologue = "// @ts-nocheck\n'use client';\n\n"
+      const prologue = `// @ts-nocheck\n${needsClientBoundary(ast) ? "'use client';\n" : ''}\n`
       staged.set(destination, {
         path: destination,
         content: shebangMatch
