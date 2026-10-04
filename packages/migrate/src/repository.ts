@@ -2723,7 +2723,7 @@ function inlineMdxSnippets(
       } catch (error) {
         if (error instanceof Error && error.message.includes('escapes its root')) {
           warnings.push({
-            code: 'skipped-file',
+            code: 'unsupported-config',
             message: `Import of ${sourcePath} resolves outside the repository and was NOT inlined.`,
             source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
           })
@@ -2783,7 +2783,7 @@ function inlineMdxSnippets(
           if (!exported && !(/^[A-Z]/.test(binding!.exported) && snippetComponentBody(snippetSource, binding!.exported) !== snippetSource)) {
             // Mintlify binds a name its snippet does not export to undefined, which renders as nothing.
             warnings.push({
-              code: 'skipped-file',
+              code: 'unsupported-config',
               message: `"${binding!.exported}" is not exported by ${sourcePath}. Mintlify renders it as empty, so it was bound to undefined; add the export to the snippet to show a value.`,
               source,
             })
@@ -2793,7 +2793,7 @@ function inlineMdxSnippets(
           const body = /^[A-Z]/.test(binding!.exported) ? snippetComponentBody(snippetSource, binding!.exported) : snippetSource
           if (body === snippetSource) {
             warnings.push({
-              code: 'skipped-file',
+              code: 'unsupported-config',
               message: `Import of "${binding!.exported}" from ${sourcePath} could not be inlined (it is not a static value, a self-contained function or a simple component), so it was bound to undefined. Define "${binding!.exported}" in the page or replace its uses.`,
               source,
             })
@@ -2810,7 +2810,7 @@ function inlineMdxSnippets(
       } catch (error) {
         if (error instanceof Error && error.message.includes('escapes its root')) {
           warnings.push({
-            code: 'skipped-file',
+            code: 'unsupported-config',
             message: `Import of ${sourcePath} resolves outside the repository and was NOT inlined.`,
             source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
           })

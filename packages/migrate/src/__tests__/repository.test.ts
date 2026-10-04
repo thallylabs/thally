@@ -407,7 +407,7 @@ describe('Mintlify repository migration', () => {
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
     const page = bundle.pages.find((candidate) => candidate.id === 'home')
-    expect(bundle.warnings.some((warning) => warning.message.includes('"compute"') && warning.message.includes('could not be inlined') && warning.message.includes('Define "compute" in the page'))).toBe(true)
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({ code: 'unsupported-config', message: expect.stringContaining('Define "compute" in the page') }))
     expect(page?.body).toContain('export const compute = undefined;')
     expect(page?.body).toContain('export const FEE = "5";')
     expect(page?.body).not.toContain('constants.mdx')
@@ -428,7 +428,7 @@ describe('Mintlify repository migration', () => {
     expect(page?.body).toContain('export const FEE = "5";')
     expect(page?.body).toContain('export const MISSING_LIMIT = undefined;')
     expect(page?.body).not.toContain('constants.mdx')
-    expect(bundle.warnings.some((warning) => warning.message.includes('"MISSING_LIMIT" is not exported') && warning.source === 'home.mdx')).toBe(true)
+    expect(bundle.warnings.some((warning) => warning.message.includes('"MISSING_LIMIT" is not exported') && warning.source === 'home.mdx' && warning.code === 'unsupported-config')).toBe(true)
   })
 
   it('hoists a component snippet as a real declaration instead of splicing its source into the usage tag', () => {
@@ -4516,6 +4516,7 @@ describe('Mintlify snippet inlining hardening', () => {
       const page = bundle.pages.find((candidate) => candidate.id === 'home')
       expect(page?.body ?? '').not.toContain('leaked')
       expect(bundle.warnings.some((warning) => warning.source === 'home.mdx' && /s\.mdx/.test(warning.message))).toBe(true)
+      expect(bundle.warnings.some((warning) => warning.source === 'home.mdx' && warning.code === 'skipped-file')).toBe(false)
     }
   })
 
