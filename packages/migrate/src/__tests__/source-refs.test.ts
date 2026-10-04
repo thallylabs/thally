@@ -196,6 +196,12 @@ describe('migrateRepository with sourceRefs', () => {
     expect(bundle.warnings.some((warning) => /branding, colors and redirects were ignored/.test(warning.message))).toBe(true)
   })
 
+  it('redirects the mount root to the first page of the sub-site navigation', () => {
+    const imported = importSourceRef(MAPPING, sdkRepo())
+    const bundle = migrateRepository({ repositoryDir: mainRepo(), sourceUrl: 'https://github.com/example/docs', platform: 'mintlify', sourceRefs: [imported] })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/client-sdks/typescript', destination: '/client-sdks/typescript/overview', permanent: false })
+  })
+
   it('keeps the warning with the flag hint when the repository is not mapped', () => {
     const bundle = migrateRepository({ repositoryDir: mainRepo(), sourceUrl: 'https://github.com/example/docs', platform: 'mintlify' })
     expect(bundle.warnings.some((warning) => warning.message.includes('--source-ref Acme/ts-sdk=<path>'))).toBe(true)

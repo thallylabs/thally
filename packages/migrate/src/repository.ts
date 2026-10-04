@@ -4750,6 +4750,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     warnings.push({ code: 'unsupported-config', message: 'Only the pages and navigation of sourceRef repositories were imported; their branding, colors and redirects were ignored. Root-absolute links inside those pages were prefixed with their mount path unless they name a page of the main site.' })
   }
   docsConfig = pruneMissingNavigationPages(docsConfig, new Set([...pages, ...sourceRefPages].map((page) => page.navigationId)))
+  // Sub-site pages joined after the directory pass above, so a mount root
+  // (`/client-sdks/typescript`) needs its own redirect to the sub-site's first page, as on Mintlify.
+  if (platform === 'mintlify' && sourceRefPages.length > 0) docsConfig = addMintlifyDirectoryRedirects(docsConfig, [...pages, ...sourceRefPages])
   if (platform === 'docusaurus') addDocusaurusTranslatedHeadingAliases(pages)
   if (platform === 'fern' && fernProjectRoot) {
     const sourcePath = (page: MigrationPage): string | null => {
