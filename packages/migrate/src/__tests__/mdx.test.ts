@@ -1525,6 +1525,21 @@ describe('escapeUnmatchedClosingTags', () => {
     expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
   })
 
+  it('is linear on a long whitespace run inside an unfinished tag', () => {
+    const src = `<a${' '.repeat(80_000)}x`
+    const start = performance.now()
+    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
+    expect(performance.now() - start).toBeLessThan(200)
+  })
+
+  it('counts an opener whose brace attribute contains angle brackets', () => {
+    const src = '<Card icon={<Icon />}>\nbody\n</Card>\n</Card>\n'
+    const out = escapeUnmatchedClosingTags(src)
+    expect(out.lines).toEqual([4])
+    expect(out.body).toBe('<Card icon={<Icon />}>\nbody\n</Card>\n\\</Card>\n')
+    expect(escapeUnmatchedClosingTags('<Card icon={<Icon />}>\nbody\n</Card>\n')).toEqual({ body: '<Card icon={<Icon />}>\nbody\n</Card>\n', lines: [] })
+  })
+
   it('is linear on adversarial input', () => {
     const src = '<A '.repeat(50_000) + '</B>'.repeat(10_000) + '<A x'.repeat(10_000)
     const start = performance.now()

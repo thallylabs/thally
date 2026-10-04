@@ -1788,18 +1788,21 @@ function pinStepsTitleSize(body: string): string {
  */
 export function escapeUnmatchedClosingTags(body: string): { body: string; lines: Array<number> } {
   const masked = maskCodeRegions(body)
-  const tagPattern = /(\\?)<(\/?)([A-Za-z][\w.:-]*)(?:\s+[^<>]*?)?(\/?)>/g
+  const tagPattern = /(\\?)<(\/?)([A-Za-z][\w.:-]*)/g
   const open = new Map<string, number>()
   const edits: Array<number> = []
-  for (const match of masked.matchAll(tagPattern)) {
-    const [, escaped, closing, name, selfClosing] = match
-    if (escaped || selfClosing) continue
+  for (let match = tagPattern.exec(masked); match; match = tagPattern.exec(masked)) {
+    const [whole, escaped, closing, name] = match
+    const tag = readTagEnd(masked, match.index + whole.length)
+    if (!tag) continue
+    tagPattern.lastIndex = tag.end
+    if (escaped || tag.selfClosing) continue
     if (!closing) {
       open.set(name, (open.get(name) ?? 0) + 1)
     } else if (open.get(name)) {
       open.set(name, open.get(name)! - 1)
     } else {
-      edits.push(match.index!)
+      edits.push(match.index)
     }
   }
   if (edits.length === 0) return { body, lines: [] }
