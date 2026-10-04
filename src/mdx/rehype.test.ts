@@ -363,3 +363,13 @@ describe('code notation markers', () => {
     })
   })
 })
+
+describe('placeholder tokens', () => {
+  it('keeps a {{KEY}} placeholder in one highlighted token so children-walking templates can substitute it', async () => {
+    const block = codeBlock('payload = {\n    "model": "{{MODEL}}",\n    "n": {{N}}\n}', 'python')
+    await transformCodeBlocks([block])
+    const html = codeText(block).value
+    expect(html).toContain('>{{MODEL}}</span>')
+    expect(html).toContain('>{{N}}</span>')
+  })
+})

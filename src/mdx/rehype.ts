@@ -262,9 +262,35 @@ interface LineMarks {
  * Marked lines (1-based) get classes styled in globals.css. When a fence has
  * any focused line, every other line is dimmed.
  */
+/**
+ * Grammars split `{{KEY}}` across several tokens (`{{` · `KEY` · `}}`). Merge the
+ * tokens a placeholder spans into one, so the highlighted HTML keeps it
+ * contiguous and a component that rewrites `{{KEY}}` in its children (a site
+ * `Template`) can find it.
+ */
+function joinPlaceholderTokens(tokens: Array<ThemedToken>): Array<ThemedToken> {
+  const text = tokens.map((token) => token.content).join('')
+  if (!text.includes('{{')) return tokens
+  const placeholders = [...text.matchAll(/\{\{\w+\}\}/g)]
+  const out: Array<ThemedToken> = []
+  let offset = 0
+  let previous: RegExpMatchArray | undefined
+  for (const token of tokens) {
+    const start = offset
+    offset += token.content.length
+    const match = placeholders.find((found) => found.index < offset && found.index + found[0].length > start)
+    const last = out.at(-1)
+    if (match && match === previous && last) out[out.length - 1] = { ...last, content: last.content + token.content }
+    else out.push(token)
+    previous = match
+  }
+  return out
+}
+
 function tokensToHtml(lines: Array<Array<ThemedToken>>, marks: LineMarks): string {
   return lines
-    .map((line, index) => {
+    .map((tokens, index) => {
+      const line = joinPlaceholderTokens(tokens)
       const inner = line
         .map((token) => `<span style="color:${token.color ?? 'inherit'}">${escapeHtml(token.content)}</span>`)
         .join('')
