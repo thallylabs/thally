@@ -471,6 +471,50 @@ describe('Mintlify repository migration', () => {
     expect(String(client?.content)).toContain('export const Counter')
   })
 
+  describe('a snippet component used without an import', () => {
+    const project = (snippets: Record<string, string>, page = "---\ntitle: Home\n---\n\n<Template data={{ A: 'b' }}>Hello</Template>\n") => {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-unimported-'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['home'] } }))
+      for (const [path, content] of Object.entries(snippets)) {
+        mkdirSync(dirname(join(root, path)), { recursive: true })
+        writeFileSync(join(root, path), content)
+      }
+      writeFileSync(join(root, 'home.mdx'), page)
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      return { bundle, body: bundle.pages.find((candidate) => candidate.id === 'home')!.body, messages: bundle.warnings.map((warning) => warning.message) }
+    }
+    const template = 'export const Template = ({ children, data }) => <>{children}</>\n'
+
+    it('resolves the one snippet exporting that name, keeps its props and says the live site rendered it empty', () => {
+      const { body, messages, bundle } = project({ 'snippets/exports/Template.jsx': template })
+      expect(messages).toContain('<Template> is used without an import; it was resolved to snippets/exports/Template.jsx (the only snippet exporting that name). Mintlify renders unimported components as empty, so this page now shows content the live site does not.')
+      expect(messages.some((message) => message.includes('Unresolved MDX component <Template>'))).toBe(false)
+      expect(body).toContain('data=')
+      expect(body).not.toContain('<div>')
+      expect(bundle.componentFiles?.some((file) => file.path.endsWith('/Template.jsx'))).toBe(true)
+    })
+
+    it('keeps the plain fallback when two snippets export the same name', () => {
+      const { body, messages } = project({ 'snippets/a/Template.jsx': template, 'snippets/b/Template.jsx': template })
+      expect(messages.some((message) => message.includes('Unresolved MDX component <Template>'))).toBe(true)
+      expect(messages.some((message) => message.includes('used without an import'))).toBe(false)
+      expect(body).toContain('<div>')
+    })
+
+    it('keeps the plain fallback when no snippet exports the name', () => {
+      const { messages } = project({ 'snippets/exports/Other.jsx': 'export const Other = () => null\n' })
+      expect(messages.some((message) => message.includes('Unresolved MDX component <Template>'))).toBe(true)
+      expect(messages.some((message) => message.includes('used without an import'))).toBe(false)
+    })
+
+    it('keeps the plain fallback when the only matching snippet is access-restricted', () => {
+      const { body, messages } = project({ 'snippets/exports/Template.jsx': `---\ngroups: [admin]\n---\n${template}` })
+      expect(messages.some((message) => message.includes('used without an import'))).toBe(false)
+      expect(messages.some((message) => message.includes('Unresolved MDX component <Template>'))).toBe(true)
+      expect(body).not.toContain('data=')
+    })
+  })
+
   it('does not let a page-local component be shadowed by a same-named global snippet alias', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-alias-'))
     mkdirSync(join(root, 'snippets'), { recursive: true })

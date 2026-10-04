@@ -2491,6 +2491,73 @@ function globalSnippetAliases(
   return aliases
 }
 
+/** Every snippet file's exported component names (named, or a default export under the file's own name), keyed by name. Gated files count too, so ambiguity is never hidden. */
+function snippetExportIndex(files: Array<ScannedFile>): Map<string, Set<string>> {
+  const index = new Map<string, Set<string>>()
+  const add = (name: string, path: string) => { if (/^[A-Z][A-Za-z0-9_]*$/.test(name)) index.set(name, (index.get(name) ?? new Set()).add(path)) }
+  for (const file of files) {
+    const extension = extname(file.relativePath).toLowerCase()
+    if (!file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
+      || !['.jsx', '.tsx', '.js', '.ts', '.mdx'].includes(extension)) continue
+    let source: string
+    try {
+      if (lstatSync(file.absolutePath).size > MAX_PAGE_BYTES) continue
+      source = readFileSync(file.absolutePath, 'utf8')
+    } catch { continue }
+    for (const name of snippetExportedNames(source)) add(name, file.absolutePath)
+    if (extension !== '.mdx') {
+      const parsed = ts.createSourceFile('snippet.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+      const hasDefault = parsed.statements.some((statement) => (ts.isExportAssignment(statement) && !statement.isExportEquals)
+        || ts.getModifiers(statement as ts.HasModifiers)?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword))
+      if (hasDefault) add(basename(file.relativePath).replace(/\.[^.]+$/, ''), file.absolutePath)
+    }
+  }
+  return index
+}
+
+/**
+ * Mintlify renders an unimported component as empty, so a page can use one its
+ * snippets define without importing it. When exactly one snippet exports the
+ * name, prepend the import the author left out, so the ordinary import
+ * handling (size cap, gates, symlink containment) resolves it; any other
+ * outcome leaves the page for the plain-div fallback.
+ */
+function importUndeclaredSnippetComponents(
+  raw: string,
+  currentFile: string,
+  repositoryRoot: string,
+  siteRoot: string,
+  exportIndex: Map<string, Set<string>>,
+  aliases: Map<string, string>,
+  gate: InlineGate | undefined,
+  warnings: Array<MigrationWarning>,
+): string {
+  if (exportIndex.size === 0) return raw
+  const names = new Set<string>()
+  replaceUnknownComponents(raw, (name) => names.add(name))
+  const statements: Array<string> = []
+  for (const name of names) {
+    const matches = exportIndex.get(name)
+    if (matches?.size !== 1 || aliases.has(name)) continue
+    const [match] = matches
+    const specifier = '/' + relative(siteRoot, match).replace(/\\/g, '/')
+    try {
+      const candidate = resolveSnippetPath(specifier, currentFile, repositoryRoot, siteRoot)
+      if (candidate !== match || !lstatSync(candidate).isFile() || gate?.(candidate)) continue
+      const named = snippetExportedNames(readFileSync(candidate, 'utf8')).has(name)
+      statements.push(named ? `import { ${name} } from '${specifier}'` : `import ${name} from '${specifier}'`)
+      warnings.push({
+        code: 'unsupported-config',
+        message: `<${name}> is used without an import; it was resolved to ${specifier.slice(1)} (the only snippet exporting that name). Mintlify renders unimported components as empty, so this page now shows content the live site does not.`,
+        source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+      })
+    } catch { /* unreadable or outside the root: keep the fallback */ }
+  }
+  if (statements.length === 0) return raw
+  const prefix = raw.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)?.[0] ?? ''
+  return `${prefix}${statements.join('\n')}\n\n${raw.slice(prefix.length)}`
+}
+
 function repositoryAssetHref(
   value: string,
   currentFile: string,
@@ -3415,6 +3482,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // page budget but must remain available for implicit Mintlify aliases.
     ? globalSnippetAliases(files, repositoryDir, mintlifyProjectRoot)
     : new Map<string, string>()
+  const snippetExports = platform === 'mintlify' && mintlifyProjectRoot ? snippetExportIndex(files) : new Map<string, Set<string>>()
   // A restricted page the budget dropped is not published or saved, but the
   // assets it uses must still stay out of public/ (bounded scan, like the
   // oversized restricted pages).
@@ -3577,7 +3645,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const isDefaultLocale = !locale || locale === localeConfig?.defaultLocale
     const id = isDefaultLocale ? navigationId : `${locale}/${navigationId}`
     let raw = inlineMdxSnippets(
-      readFileSync(file.absolutePath, 'utf8'),
+      mintlifyProjectRoot
+        ? importUndeclaredSnippetComponents(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, mintlifyProjectRoot, snippetExports, snippetAliases, inlineGate, warnings)
+        : readFileSync(file.absolutePath, 'utf8'),
       file.absolutePath,
       repositoryDir,
       warnings,
