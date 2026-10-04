@@ -164,7 +164,7 @@ export interface RootLinkIndex {
  * path; `unresolved` collects targets found in neither place.
  */
 export function mainSiteLinkTarget(target: string, mountPath: string, index: RootLinkIndex, unresolved: Array<string>): string | undefined {
-  const [, base, tail] = /^([^?#]*)(.*)$/s.exec(target)!
+  const [, base, tail] = /^([^?#]*)([\s\S]*)$/.exec(target)!
   const key = base.replace(/^\/+|\/+$/g, '')
   if (!key) return undefined
   const has = (set: ReadonlySet<string>, id: string): boolean => set.has(id) || set.has(`${id}/index`)
