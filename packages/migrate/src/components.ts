@@ -644,12 +644,39 @@ export function unresolvedRelativeModuleSpecifiers(body: string): Array<string> 
   const add = (specifier: string): void => {
     if (/^\.\.?\//.test(specifier) && !/\.mdx?$/i.test(specifier)) specifiers.add(specifier)
   }
-  // A dynamic `import('./x')` anywhere in the source resolves the same way.
-  const addDynamicImports = (source: ts.SourceFile): void => {
+  walk(tree, (node) => {
+    if (node.type !== 'mdxjsEsm' || node.value === undefined) return
+    for (const statement of sourceFile(node.value, 'inline.tsx').statements) {
+      if (!(ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement))) continue
+      const specifier = statement.moduleSpecifier
+      if (specifier && ts.isStringLiteral(specifier)) add(specifier.text)
+    }
+  })
+  for (const { specifier } of dynamicImportLiterals(body, tree)) add(specifier)
+  return [...specifiers]
+}
+
+/**
+ * Every dynamic `import('<literal>')` in a page's ESM blocks, expressions and
+ * JSX expression attributes. `start`/`end` locate the string literal in `body`
+ * (so it can be rewritten in place) and are omitted when that location cannot
+ * be confirmed against the source text.
+ */
+function dynamicImportLiterals(body: string, tree: MdxNode): Array<{ specifier: string; start?: number; end?: number }> {
+  const found: Array<{ specifier: string; start?: number; end?: number }> = []
+  // `origin` is where `code` starts in `body`; `prefix` is any wrapper length
+  // added in front of it when it was parsed.
+  const scan = (code: string, origin: number | undefined, prefix: number): void => {
+    const source = sourceFile(prefix ? `(${code})` : code, 'inline.tsx')
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
         const argument = node.arguments[0]
-        if (argument && ts.isStringLiteralLike(argument)) add(argument.text)
+        if (argument && ts.isStringLiteralLike(argument)) {
+          const start = origin === undefined ? undefined : origin + argument.getStart(source) - prefix
+          const end = start === undefined ? undefined : start + argument.getWidth(source)
+          const confirmed = start !== undefined && end !== undefined && body.slice(start, end) === argument.getText(source)
+          found.push(confirmed ? { specifier: argument.text, start, end } : { specifier: argument.text })
+        }
       }
       ts.forEachChild(node, visit)
     }
@@ -657,27 +684,22 @@ export function unresolvedRelativeModuleSpecifiers(body: string): Array<string> 
   }
   walk(tree, (node) => {
     if (node.type === 'mdxjsEsm' && node.value !== undefined) {
-      const source = sourceFile(node.value, 'inline.tsx')
-      for (const statement of source.statements) {
-        if (!(ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement))) continue
-        const specifier = statement.moduleSpecifier
-        if (specifier && ts.isStringLiteral(specifier)) add(specifier.text)
-      }
-      addDynamicImports(source)
+      scan(node.value, node.position?.start.offset, 0)
       return
     }
     if ((node.type === 'mdxFlowExpression' || node.type === 'mdxTextExpression') && node.value !== undefined) {
-      addDynamicImports(sourceFile(`(${node.value})`, 'inline.tsx'))
+      scan(node.value, node.position?.start.offset === undefined ? undefined : node.position.start.offset + 1, 1)
     }
     for (const attribute of node.attributes ?? []) {
       // A plain string attribute is text; only expression values are code.
-      const code = attribute.type === 'mdxJsxExpressionAttribute' && typeof attribute.value === 'string'
-        ? `{${attribute.value}}`
-        : typeof attribute.value === 'object' ? attribute.value?.value : undefined
-      if (code !== undefined) addDynamicImports(sourceFile(`(${code})`, 'inline.tsx'))
+      if (attribute.type === 'mdxJsxExpressionAttribute' && typeof attribute.value === 'string') {
+        scan(attribute.value, attribute.position?.start.offset === undefined ? undefined : attribute.position.start.offset + 1, 1)
+      } else if (typeof attribute.value === 'object' && attribute.value?.value !== undefined) {
+        scan(attribute.value.value, attribute.position?.end.offset === undefined ? undefined : attribute.position.end.offset - 1 - attribute.value.value.length, 1)
+      }
     }
   })
-  return [...specifiers]
+  return found
 }
 
 /** Create one bounded component graph and registry for a repository migration. */
@@ -1278,9 +1300,28 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             // fall through to the ordinary handling below.
           }
         }
-        if (!bindings.length || (statement.importClause?.namedBindings && ts.isNamespaceImport(statement.importClause.namedBindings))) {
-          warn('Namespace or side-effect MDX imports require manual registration; the import was preserved.', currentFile)
-          hasUnsupportedImports = true
+        if (!statement.importClause) {
+          // Same treatment as a side-effect import of an npm package above:
+          // stylesheets and setup scripts have no effect on the migrated
+          // page, and leaving the import would reference a file that is not
+          // shipped beside it.
+          warn(`MDX side-effect import of ${JSON.stringify(rawSpecifier)} has no effect in the migrated site (stylesheets and setup scripts are not copied); the import was removed.`, currentFile)
+          edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+          continue
+        }
+        if (statement.importClause.namedBindings && ts.isNamespaceImport(statement.importClause.namedBindings)) {
+          // A namespace import cannot be registered as a JSX tag, but it can
+          // be imported for real from the copied file, like an expression-used
+          // named import. When the target cannot be copied the import is left
+          // alone and the page is excluded afterwards (repository.ts).
+          try {
+            const path = copyGraph(resolveDependency(specifier, currentFile))
+            const aliasSpecifier = portableSpecifier(`@/${path.replace(/^src\//, '').replace(/\\/g, '/')}`)
+            realPageImports.push(`import ${statement.importClause.getText(ast)} from ${JSON.stringify(aliasSpecifier)};`)
+            edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+          } catch {
+            hasUnsupportedImports = true
+          }
           continue
         }
         // Unlike the unavailable-npm-package case above, a local/relative
@@ -1731,7 +1772,26 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         : mdxComment(` Removed <${node.name}>: unsupported import '${specifier}' `)
       edits.push({ start, end, value })
     })
-    const rendered = applyReplacements(content, edits)
+    // Dynamic `import('./x')` of a file the migration copies points at the
+    // copied module instead. Located on the edited text, so the offsets
+    // never overlap the edits above; one that cannot be copied is left as
+    // written and the page is excluded afterwards (repository.ts).
+    const edited = applyReplacements(content, edits)
+    const dynamicEdits: Array<Replacement> = []
+    try {
+      for (const { specifier: rawDynamic, start, end } of dynamicImportLiterals(edited, parser.parse(edited) as MdxNode)) {
+        if (start === undefined || end === undefined || !/^\.\.?\//.test(rawDynamic) || /\.mdx?$/i.test(rawDynamic)) continue
+        try {
+          const path = copyGraph(resolveDependency(rawDynamic, currentFile))
+          dynamicEdits.push({ start, end, value: JSON.stringify(portableSpecifier(`@/${path.replace(/^src\//, '').replace(/\\/g, '/')}`)) })
+        } catch {
+          // Not shipped: reported by the caller's exclusion check.
+        }
+      }
+    } catch {
+      // The edited text does not parse; the caller reports it.
+    }
+    const rendered = applyReplacements(edited, dynamicEdits)
     // Inserted after all offset-based edits (it has no position in the
     // original source) so it lands once, at the very top of the body.
     const pageStatements = [...new Set([...realPageImports, ...serverPageDeclarations])]

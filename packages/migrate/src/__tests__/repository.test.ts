@@ -4517,14 +4517,72 @@ describe('Mintlify snippet inlining hardening', () => {
   it('excludes a page whose dynamic import() uses a relative module the migration does not ship', () => {
     const files = { 'lib/m.ts': 'export const m = 1\n' }
     for (const body of [
-      "export const load = () => import('./lib/m')\n\nText.",
-      "{import('./lib/m')}\n\nText.",
-      "<Card title={String(import('./lib/m'))}>Text.</Card>",
+      "export const load = () => import('./lib/missing')\n\nText.",
+      "{import('./lib/missing')}\n\nText.",
+      "<Card title={String(import('./lib/missing'))}>Text.</Card>",
     ]) {
       // The only page is excluded, so the migration reports why and stops.
-      expect(() => snippetFixture(files, body)).toThrow(/imports "\.\/lib\/m"/)
+      expect(() => snippetFixture(files, body)).toThrow(/imports "\.\/lib\/missing"/)
     }
     expect(snippetFixture(files, '<Card title="import(\'./lib/m\')">Text.</Card>').page).toBeDefined()
+  })
+
+  describe('relative imports of files the migration ships', () => {
+    const shipped = {
+      'comp.jsx': 'export default function Comp() { return <b>x</b> }\nexport const Named = () => <i>n</i>\n',
+      'lib/m.ts': 'export const m = 1\n',
+      'styles.css': 'a { color: red }\n',
+      'setup.js': 'globalThis.ready = true\n',
+    }
+    function keptPage(body: string, files: Record<string, string> = shipped) {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-relative-kept-'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['home', 'other'] } }))
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(root, path)), { recursive: true })
+        writeFileSync(join(root, path), content)
+      }
+      writeFileSync(join(root, 'home.mdx'), `---\ntitle: Home\n---\n\n${body}\n`)
+      writeFileSync(join(root, 'other.mdx'), '---\ntitle: Other\n---\n\nHi\n')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      return { page: bundle.pages.find((candidate) => candidate.id === 'home'), warnings: bundle.warnings.filter((warning) => warning.source === 'home.mdx') }
+    }
+
+    it('strips a relative side-effect import with a warning and keeps the page', () => {
+      for (const specifier of ['./styles.css', './setup.js', './missing.js']) {
+        const { page, warnings } = keptPage(`import '${specifier}'\n\nText.`)
+        expect(page?.body).not.toContain(specifier)
+        expect(warnings).toContainEqual(expect.objectContaining({ code: 'unsupported-config', message: expect.stringContaining(`side-effect import of "${specifier}"`) }))
+        expect(warnings.some((warning) => warning.code === 'skipped-file' || /was preserved/.test(warning.message))).toBe(false)
+      }
+    })
+
+    it('rewrites a namespace import and a dynamic import of a shipped file to the migrated path', () => {
+      const ns = keptPage("import * as X from './comp.jsx'\n\n<X.Named />")
+      expect(ns.page?.body).toMatch(/import \* as X from "@\/mdx\/migrated\//)
+      expect(ns.page?.body).not.toContain('./comp.jsx')
+      for (const body of [
+        "export const load = () => import('./lib/m')\n\nText.",
+        "{import('./comp.jsx')}\n\nText.",
+        "<Card title={String(import('./lib/m'))}>Text.</Card>",
+      ]) {
+        const { page, warnings } = keptPage(body)
+        expect(page?.body).toMatch(/import\("@\/mdx\/migrated\//)
+        expect(page?.body).not.toMatch(/import\('\.\//)
+        expect(warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+      }
+    })
+
+    it('excludes a namespace import of a file that is not shipped with a single warning', () => {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-relative-ns-'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['home', 'other'] } }))
+      writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport * as M from './metadata'\n\nText.\n")
+      writeFileSync(join(root, 'other.mdx'), '---\ntitle: Other\n---\n\nHi\n')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['other'])
+      const messages = bundle.warnings.filter((warning) => warning.source === 'home.mdx').map((warning) => warning.message)
+      expect(messages.some((message) => /Page was excluded/.test(message))).toBe(true)
+      expect(messages.some((message) => /was preserved/.test(message))).toBe(false)
+    })
   })
 
   it('does not inline a snippet whose frontmatter is invalid YAML, by import, value import, file tag or global alias', () => {
