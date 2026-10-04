@@ -162,7 +162,7 @@ export function importSourceRef(mapping: SourceRefMapping, repositoryDir: string
     platform: 'mintlify',
   })
   const prefix = (message: string): string => `[${mapping.repo}] ${message}`
-  const warnings: Array<MigrationWarning> = bundle.warnings.slice(0, MAX_FORWARDED_WARNINGS).map((warning) => ({ ...warning, message: prefix(warning.message) }))
+  const warnings: Array<MigrationWarning> = bundle.warnings.filter((warning) => !/dashboard access settings/i.test(warning.message)).slice(0, MAX_FORWARDED_WARNINGS).map((warning) => ({ ...warning, message: prefix(warning.message) }))
   if (bundle.warnings.length > MAX_FORWARDED_WARNINGS) {
     warnings.push({ code: 'unsupported-config', message: prefix(`${bundle.warnings.length - MAX_FORWARDED_WARNINGS} more migration warnings were omitted.`) })
   }
