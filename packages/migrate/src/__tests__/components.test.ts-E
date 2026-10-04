@@ -1184,7 +1184,7 @@ describe('propsTargetExtractedClientComponent', () => {
   })
 
   it('is false when the tag is neither extracted nor a confirmed client built-in, even with a matching prop', () => {
-    const body = '<Card RenderComponent={CustomBlock} />'
+    const body = '<Steps RenderComponent={CustomBlock} />'
     expect(propsTargetExtractedClientComponent(body, new Set(['CustomBlock']))).toBe(false)
   })
 
@@ -1209,7 +1209,7 @@ describe('propsTargetExtractedClientComponent', () => {
   })
 
   it('is false for an inline arrow function on a tag that is neither extracted nor a confirmed client built-in', () => {
-    const body = '<Card onToggle={() => console.log(1)}>x</Card>'
+    const body = '<Steps onToggle={() => console.log(1)}>x</Steps>'
     expect(propsTargetExtractedClientComponent(body, new Set())).toBe(false)
   })
 
@@ -1243,7 +1243,7 @@ describe('propsTargetExtractedClientComponent', () => {
 
 describe('hasAnyFunctionValuedProp', () => {
   it('is true for an inline function prop even on an unconfirmed tag (the broader, unconfirmed signal)', () => {
-    const body = '<Card onToggle={() => console.log(1)}>x</Card>'
+    const body = '<Steps onToggle={() => console.log(1)}>x</Steps>'
     expect(hasAnyFunctionValuedProp(body, new Set())).toBe(true)
   })
 

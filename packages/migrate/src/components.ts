@@ -554,6 +554,7 @@ export const CLIENT_BUILTIN_COMPONENT_TAGS: ReadonlySet<string> = new Set([
   'CodeGroup', 'CodeBlock',
   'Badge', 'Tooltip',
   'Tabs', 'Tab',
+  'Steps', 'Step',
   'RequestExample', 'ResponseExample', 'InlineRequestExample', 'InlineResponseExample',
   'Tree', 'FileTree', 'Folder', 'File',
   'Mermaid',

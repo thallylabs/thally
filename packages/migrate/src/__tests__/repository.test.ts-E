@@ -1560,8 +1560,8 @@ describe('Mintlify repository migration', () => {
 
   it('keeps (but warns on) a page that passes a function to a built-in this migration cannot confirm is a client component', () => {
     const root = fixture()
-    // `Card` is a Thally runtime built-in that renders entirely on the
-    // server (`src/components/mdx/content-cards.tsx` has no 'use client'), and it is
+    // `Steps` is a Thally runtime built-in that renders entirely on the
+    // server (`src/components/mdx/steps.tsx` has no 'use client'), and it is
     // not something this migration copied or extracted either — neither
     // `EXTRACTED_CLIENT_COMPONENT_TAG` nor `CLIENT_BUILTIN_COMPONENT_TAGS`
     // matches it, so exclusion (a last resort) does not apply; the page is
@@ -1574,7 +1574,7 @@ describe('Mintlify repository migration', () => {
       '',
       'export const CustomBlock = ({ children }) => <div>{children}</div>;',
       '',
-      '<Card title="x" RenderComponent={CustomBlock}>Body</Card>',
+      '<Steps title="x" RenderComponent={CustomBlock}>Body</Steps>',
     ].join('\n'))
 
     const bundle = migrateRepository({
@@ -1630,7 +1630,7 @@ describe('Mintlify repository migration', () => {
   it('keeps a page where a string const feeds a client built-in while a function feeds an unconfirmed one, on the same page', () => {
     // Reviewer's exact input: `diagram` (a plain string) is not a function at
     // all, so `Mermaid chart={diagram}` never enters the check; `Demo` (a
-    // real function) targets `Card`, which is not a confirmed client
+    // real function) targets `Steps`, which is not a confirmed client
     // boundary, so the page is kept with a warning, not excluded.
     const root = fixture()
     writeFileSync(join(root, 'en', 'value-and-function.mdx'), [
@@ -1641,7 +1641,7 @@ describe('Mintlify repository migration', () => {
       'export const Demo = ({ children }) => <div>{children}</div>;',
       "export const diagram = 'graph TD; A-->B';",
       '',
-      '<Card render={Demo}>x</Card>',
+      '<Steps render={Demo}>x</Steps>',
       '',
       '<Mermaid chart={diagram} />',
     ].join('\n'))
