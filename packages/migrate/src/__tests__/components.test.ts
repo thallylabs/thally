@@ -784,6 +784,42 @@ describe('repository component migration', () => {
     for (const name of ['Hook', 'Handler', 'Browser', 'Ctx', 'Declared']) expect(content(name)).toContain("'use client';")
   })
 
+  it('keeps a client boundary for every interactive or browser-bound pattern, and only a plain children-walker stays a server module', () => {
+    const client: Record<string, string> = {
+      ReactState: 'import React from "react"\nexport const ReactState = () => { const [n] = React.useState(0); return <p>{n}</p> }',
+      ReactEffect: 'import React from "react"\nexport const ReactEffect = () => { React.useEffect(() => {}, []); return null }',
+      Ctx2: 'import { useContext } from "react"\nexport const Ctx2 = () => { useContext(null); return null }',
+      Forward: 'import { forwardRef } from "react"\nexport const Forward = forwardRef((p, ref) => <div ref={ref} />)',
+      ForwardNoHandler: 'import React from "react"\nexport const ForwardNoHandler = React.forwardRef((p, r) => null)',
+      Klass: 'import React from "react"\nexport class Klass extends React.Component { render() { this.setState({}); return null } }',
+      Nav: 'export const Nav = () => <p>{navigator.userAgent}</p>',
+      Loc: 'export const Loc = () => <p>{location.href}</p>',
+      Media: 'export const Media = () => <p>{String(matchMedia("(min-width: 1px)").matches)}</p>',
+      Obs: 'export const Obs = () => { new IntersectionObserver(() => {}); return null }',
+      Raf: 'export const Raf = () => { requestAnimationFrame(() => {}); return null }',
+      Timeout: 'export const Timeout = () => { setTimeout(() => {}, 1); return null }',
+      Interval: 'export const Interval = () => { setInterval(() => {}, 1); return null }',
+      Passthrough: 'export const Passthrough = (props) => <button onClick={props.onClick}>x</button>',
+      Spread: 'export const Spread = (props) => <div {...props} />',
+      Handler2: 'export const Handler2 = ({ onClick }) => <p>{typeof onClick}</p>',
+      Listener: 'export const Listener = ({ node }) => { node.addEventListener("x", () => {}); return null }',
+      HookAlias: 'import React from "react"\nconst h = React.useState\nexport const HookAlias = () => <p>{String(h)}</p>',
+    }
+    const pure: Record<string, string> = {
+      PureDefault: 'import React from "react"\nexport const PureDefault = ({ children }) => <div>{React.Children.map(children, (c) => c)}</div>',
+      PureSpreadComponent: 'import React from "react"\nconst Inner = ({ children }) => <>{children}</>\nexport const PureSpreadComponent = (props) => <Inner {...props} />',
+    }
+    const files: Record<string, string> = {}
+    const names = [...Object.keys(client), ...Object.keys(pure)]
+    for (const [name, source] of Object.entries({ ...client, ...pure })) files[`src/${name}.jsx`] = source
+    const root = fixture(files)
+    const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+    migrator.transform([...names.map((name) => `import { ${name} } from './src/${name}.jsx'`), '', ...names.map((name) => `<${name} />`)].join('\n'), join(root, 'index.mdx'))
+    const content = (name: string) => String(migrator.files().find((file) => file.path.endsWith(`/${name}.jsx`))!.content)
+    for (const name of Object.keys(client)) expect(content(name), name).toContain("'use client';")
+    for (const name of Object.keys(pure)) expect(content(name), name).not.toContain('use client')
+  })
+
   it('keeps a leading shebang on line 1 instead of burying it under the @ts-nocheck prologue', () => {
     const root = fixture({
       'src/Script.tsx': '#!/usr/bin/env node\nexport default function Script() { return null; }',

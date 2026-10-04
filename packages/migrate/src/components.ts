@@ -381,7 +381,8 @@ function walk(node: MdxNode, visitor: (node: MdxNode) => void): void {
 }
 
 const BROWSER_GLOBALS = new Set(['window', 'document', 'navigator', 'localStorage', 'sessionStorage', 'location', 'history', 'matchMedia',
-  'requestAnimationFrame', 'IntersectionObserver', 'ResizeObserver', 'MutationObserver', 'alert', 'confirm', 'prompt', 'self'])
+  'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'IntersectionObserver', 'ResizeObserver', 'MutationObserver', 'alert', 'confirm', 'prompt', 'self',
+  'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'addEventListener', 'removeEventListener', 'getComputedStyle', 'XMLHttpRequest', 'WebSocket'])
 
 /**
  * Whether a copied module must run on the client: it declares `'use client'`,
@@ -401,8 +402,12 @@ function needsClientBoundary(source: ts.SourceFile): boolean {
       if (!specifier.startsWith('.') && !SHARED_IMPORTS.has(specifier)) needed = true
     } else if (ts.isCallExpression(node)) {
       const callee = ts.isPropertyAccessExpression(node.expression) ? node.expression.name.text : ts.isIdentifier(node.expression) ? node.expression.text : ''
-      if (isHook(callee) || node.expression.kind === ts.SyntaxKind.ImportKeyword) needed = true
-    } else if (ts.isJsxAttribute(node) && ts.isIdentifier(node.name) && /^on[A-Z]/.test(node.name.text)) needed = true
+      if (isHook(callee) || callee === 'forwardRef' || callee === 'addEventListener' || callee === 'removeEventListener' || node.expression.kind === ts.SyntaxKind.ImportKeyword) needed = true
+    } else if (ts.isJsxAttribute(node) && ts.isIdentifier(node.name) && (/^on[A-Z]/.test(node.name.text) || node.name.text === 'ref')) needed = true
+    // Spread props can carry handlers into a DOM element; fail closed.
+    else if (ts.isJsxSpreadAttribute(node) && (ts.isJsxOpeningLikeElement(node.parent.parent)) && ts.isIdentifier(node.parent.parent.tagName) && /^[a-z]/.test(node.parent.parent.tagName.text)) needed = true
+    // A handler prop read or destructured, or a hook referenced without being called (`const h = React.useState`).
+    else if (ts.isIdentifier(node) && (isHook(node.text) || /^on[A-Z]/.test(node.text)) && !ts.isJsxAttribute(node.parent)) needed = true
     else if (ts.isIdentifier(node) && BROWSER_GLOBALS.has(node.text) && !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)
       && !(ts.isPropertyAssignment(node.parent) && node.parent.name === node)) needed = true
     else if (ts.isClassLike(node) && node.heritageClauses?.some((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword)) needed = true
