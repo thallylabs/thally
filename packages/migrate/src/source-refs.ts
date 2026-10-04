@@ -23,6 +23,12 @@ export const SOURCE_REF_MAX_REPOSITORY_KB = 200_000
 const DOCS_JSON_MAX_BYTES = 1_000_000
 const MAX_FORWARDED_WARNINGS = 50
 
+/** Strip C0 control characters (except newline and tab) and escape sequences, so a hostile file name cannot rewrite the terminal. */
+export function stripControlCharacters(text: string): string {
+  // eslint-disable-next-line no-control-regex -- the point is to remove these
+  return text.replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|.)?/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
+}
+
 const REPO_PATTERN = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
 const MOUNT_PATTERN = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/
 
@@ -144,10 +150,14 @@ function sanitizeAndMeasure(root: string): { removedLinks: number; error?: strin
 
 /** Prefix every root-absolute link/image/asset target in a page body with the mount path. */
 export function prefixRootLinks(body: string, mountPath: string): string {
-  const fix = (target: string): string => `/${mountPath}${target}`
+  const mounted = `/${mountPath}`
+  // A link already under the mount path is left alone: prefixing it again would break it.
+  const alreadyMounted = (target: string): boolean => target === mounted || ['/', '?', '#'].some((next) => target.startsWith(mounted + next))
+  const fix = (target: string): string => alreadyMounted(target) ? target : `${mounted}${target}`
   return replaceOutsideCodeAndComments(body, (text) => text
     .replace(/(\]\(<?)(\/(?!\/)[^\s)>]*)/g, (_match, before: string, target: string) => `${before}${fix(target)}`)
     .replace(/(\b(?:href|src|to|poster)=(['"]))(\/(?!\/)[^'"\n]*)\2/g, (_match, before: string, quote: string, target: string) => `${before}${fix(target)}${quote}`)
+    .replace(/(\b(?:href|src|to|poster)=\{\s*(['"]))(\/(?!\/)[^'"\n]*)\2(\s*\})/g, (_match, before: string, quote: string, target: string, after: string) => `${before}${fix(target)}${quote}${after}`)
     .replace(/^(\[[^\]\n]+\]:[ \t]*<?)(\/(?!\/)\S*)/gm, (_match, before: string, target: string) => `${before}${fix(target)}`))
 }
 
@@ -212,7 +222,7 @@ export function importSourceRef(mapping: SourceRefMapping, repositoryDir: string
     platform: 'mintlify',
   })
   const prefix = (message: string): string => `[${mapping.repo}] ${message}`
-  const warnings: Array<MigrationWarning> = bundle.warnings.filter((warning) => !/dashboard access settings/i.test(warning.message)).slice(0, MAX_FORWARDED_WARNINGS).map((warning) => ({ ...warning, message: prefix(withheldNotSaved(warning.message)) }))
+  const warnings: Array<MigrationWarning> = bundle.warnings.filter((warning) => !/dashboard access settings/i.test(warning.message)).slice(0, MAX_FORWARDED_WARNINGS).map((warning) => ({ ...warning, message: prefix(stripControlCharacters(withheldNotSaved(warning.message))), ...(warning.source ? { source: stripControlCharacters(warning.source) } : {}) }))
   if (bundle.warnings.length > MAX_FORWARDED_WARNINGS) {
     warnings.push({ code: 'unsupported-config', message: prefix(`${bundle.warnings.length - MAX_FORWARDED_WARNINGS} more migration warnings were omitted.`) })
   }

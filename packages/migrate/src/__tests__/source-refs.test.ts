@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import { importSourceRef, migrateRepository, parseSourceRefFlags } from '../index.js'
-import { prefixRootLinks, SOURCE_REF_MAX_FILES, SOURCE_REF_MAX_REPOSITORY_KB, sourceRefOversizeReason, withheldNotSaved } from '../source-refs.js'
+import { prefixRootLinks, SOURCE_REF_MAX_FILES, stripControlCharacters, SOURCE_REF_MAX_REPOSITORY_KB, sourceRefOversizeReason, withheldNotSaved } from '../source-refs.js'
 import type { MigrationFetcher } from '../types.js'
 
 function write(root: string, files: Record<string, string>): string {
@@ -103,6 +103,28 @@ describe('prefixRootLinks', () => {
       '`[code](/inline)`',
       '```\n[code](/fenced)\n```',
     ].join('\n'))
+  })
+})
+
+describe('prefixRootLinks edge cases', () => {
+  it('does not prefix a link that is already under the mount path', () => {
+    const body = '[a](/m/n/x) [b](/m/n) [c](/m/n#h) [d](/m/nx) <a href="/m/n/y">y</a> <a href={"/m/n/z"}>z</a>'
+    expect(prefixRootLinks(body, 'm/n')).toBe('[a](/m/n/x) [b](/m/n) [c](/m/n#h) [d](/m/n/m/nx) <a href="/m/n/y">y</a> <a href={"/m/n/z"}>z</a>')
+  })
+
+  it('prefixes string literals inside JSX attribute expressions', () => {
+    expect(prefixRootLinks('<a href={"/x"}>x</a> <img src={\'/y.png\'} /> <a href={ "/z" }>z</a> <a href={cond ? "/a" : "/b"}>q</a> <a href={"https://e.com"}>e</a>', 'm'))
+      .toBe('<a href={"/m/x"}>x</a> <img src={\'/m/y.png\'} /> <a href={ "/m/z" }>z</a> <a href={cond ? "/a" : "/b"}>q</a> <a href={"https://e.com"}>e</a>')
+  })
+})
+
+describe('forwarded warning text', () => {
+  it('strips control characters and escape sequences from sub-repository file names', () => {
+    expect(stripControlCharacters('bad\x1b[31mred\x1b[0m\x07name\x00.mdx\tkept\nkept')).toBe('badredname.mdx\tkept\nkept')
+    const repo = sdkRepo({ 'docs/we\x1b[31mird.mdx': '---\ntitle: W\n---\n<Unknown />' })
+    const result = importSourceRef(MAPPING, repo)
+    expect(result.warnings.some((warning) => (warning.message + (warning.source ?? '')).includes('weird'))).toBe(true)
+    expect(result.warnings.every((warning) => !/[\x00-\x08\x0b-\x1f\x7f]/.test(warning.message + (warning.source ?? '')))).toBe(true)
   })
 })
 
