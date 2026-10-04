@@ -1405,6 +1405,8 @@ describe('removeUndefinedExpressions', () => {
     expect(warnings[0]).toContain('"backfill"')
     expect(warnings[0]).toContain('"MV"')
     expect(warnings[0]).toContain('\\{ \\}')
+    // Applies to every source platform, so it never names one.
+    expect(warnings[0]).toBe('Expressions that use "backfill", "MV", "other" were removed so the page builds: the names are not defined on this page. Define the names or escape the braces as \\{ \\} to show the text.')
   })
 
   it('removes an undefined flow expression and an undefined attribute expression', () => {

@@ -1861,7 +1861,7 @@ export function removeUndefinedExpressions(body: string, warn?: (message: string
   }
   visit(tree)
   if (edits.length === 0) return body
-  warn?.(`Removed expressions that use ${[...removed].map((name) => `"${name}"`).join(', ')}, which ${removed.size === 1 ? 'is' : 'are'} not defined on this page. Mintlify renders them as empty; define the name or escape the braces as \\{ \\} to show the text.`)
+  warn?.(`Expressions that use ${[...removed].map((name) => `"${name}"`).join(', ')} were removed so the page builds: ${removed.size === 1 ? 'the name is' : 'the names are'} not defined on this page. Define ${removed.size === 1 ? 'the name' : 'the names'} or escape the braces as \\{ \\} to show the text.`)
   return edits.sort((a, b) => b.start - a.start)
     .reduce((text, edit) => text.slice(0, edit.start) + text.slice(edit.end), body)
 }
