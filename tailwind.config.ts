@@ -3,7 +3,7 @@ import typography from '@tailwindcss/typography'
 
 const isClassChar = (c: string | undefined) => c !== undefined && /[\w:-]/.test(c)
 
-// Removes `name[...var(...*...)...]` classes. A single pass with no regex
+// Removes `name[...var(...*...)...]` classes whose variable name contains `*`. A single pass with no regex
 // backtracking: prose can be adversarial, and the equivalent regex is
 // super-linear on inputs like `w[var(a*` repeated.
 function stripWildcardVarClasses(content: string): string {
@@ -21,6 +21,7 @@ function stripWildcardVarClasses(content: string): string {
     // First `var(` ... `*` ... `)` between the brackets.
     let varAt = -1
     let star = false
+    let inName = false
     let found = -1
     for (let q = open + 1; q < stop; q++) {
       const c = content[q]
@@ -28,10 +29,16 @@ function stripWildcardVarClasses(content: string): string {
         if (varAt >= 0 && star) { found = varAt; break }
         varAt = -1
         star = false
+        inName = false
       } else if (varAt < 0 && content.startsWith('var(', q)) {
         varAt = q
+        inName = true
         q += 3
-      } else if (c === '*' && varAt >= 0) {
+      } else if (c === ',') {
+        inName = false
+      } else if (c === '*' && inName) {
+        // Only a `*` in the variable name is a placeholder; one in a
+        // fallback such as `calc(1*2)` is valid CSS.
         star = true
       }
     }
