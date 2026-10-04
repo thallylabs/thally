@@ -40,9 +40,12 @@ interface StepProps {
   children?: ReactNode
 }
 
+function StepTitle({ as: Title, children }: { as: StepTitleSize; children: ReactNode }) {
+  return <Title className="font-heading text-[1.02rem] font-semibold tracking-[-0.012em] text-foreground">{children}</Title>
+}
+
 export function Step({ title, titleSize, children }: StepProps) {
   const inherited = useContext(StepsTitleSizeContext)
-  const Title = titleSize ?? inherited ?? 'h3'
   return (
     <div
       className="thally-step relative grid grid-cols-[30px_minmax(0,1fr)] gap-x-5 pb-[34px] last:pb-0"
@@ -56,7 +59,7 @@ export function Step({ title, titleSize, children }: StepProps) {
 
       {/* Step content */}
       <div className="min-w-0 pt-1">
-        <Title className="font-heading text-[1.02rem] font-semibold tracking-[-0.012em] text-foreground">{title}</Title>
+        <StepTitle as={titleSize ?? inherited ?? 'h3'}>{title}</StepTitle>
         {children ? (
           <div className="prose prose-sm dark:prose-invert mt-2 max-w-none text-foreground/80">
             {children}
