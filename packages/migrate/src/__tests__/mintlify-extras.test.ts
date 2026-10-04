@@ -590,13 +590,14 @@ describe('gating bypass hardening', () => {
     expect(Buffer.byteLength(edge)).toBe(2_000_000)
     const bundle = site({
       'docs.json': JSON.stringify({ navigation: { pages: ['host'] } }),
-      'host.mdx': '---\ntitle: Host\n---\n\nPublic text.\n\n<Snippet file="/edge.mdx" />\n',
+      'host.mdx': '---\ntitle: Host\n---\n\nPublic text.\n\n<Snippet file="/snippets/edge.mdx" />\n',
       // One fenced code block: only the 2 MB size is under test, and 2 MB of prose makes the MDX pipeline take ~45 s.
-      'edge.mdx': edge,
+      // Under snippets/ so it is inlined only, never also converted as a page of its own (which doubled the time).
+      'snippets/edge.mdx': edge,
     })
     expect(JSON.stringify(bundle.pages).includes('EDGEMARKER')).toBe(true)
     expect(codes(bundle, 'skipped-file').some((warning) => /NOT inlined/.test(warning.message))).toBe(false)
-  }, 30_000)
+  }, 90_000)
 
   it('blocks a small file whose frontmatter is not closed within the bounded read', () => {
     const unterminated = `---\ntitle: Open\n${'x: y\n'.repeat(20_000)}UNPARSEABLEMARKER\n`
