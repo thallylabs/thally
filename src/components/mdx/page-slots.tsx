@@ -17,7 +17,7 @@ import {
   useState,
 } from 'react'
 import { usePathname } from 'next/navigation'
-import { isChangelogPath, parseTagsParam, tagsByCount, validSelectedTags } from '@/lib/update-filters'
+import { isChangelogPath, matchesSelectedTags, parseTagsParam, tagsByCount, validSelectedTags } from '@/lib/update-filters'
 
 interface ViewOption {
   title: string
@@ -37,6 +37,9 @@ interface PageSlotsValue {
   /** Changelog `<Update tags>` usage counts, and the tags the reader filtered by. */
   tagCounts: Record<string, number>
   selectedTags: Array<string>
+  /** Registered Update entries, and how many the current filter shows. */
+  updateTotal: number
+  updateShown: number
   registerTags: (tags: ReadonlyArray<string>) => () => void
   toggleTag: (tag: string) => void
   clearTags: () => void
@@ -82,6 +85,9 @@ export function PageSlotsProvider({ children }: { children: ReactNode }) {
     setEntries((current) => [...current, tags])
     return () => setEntries((current) => current.filter((entry) => entry !== tags))
   }, [])
+
+  const updateTotal = entries.length
+  const updateShown = useMemo(() => entries.filter((tags) => matchesSelectedTags(tags, selectedTags)).length, [entries, selectedTags])
 
   const toggleTag = useCallback((tag: string) => {
     setSelectedTags((current) => {
@@ -130,10 +136,12 @@ export function PageSlotsProvider({ children }: { children: ReactNode }) {
     registerView,
     tagCounts,
     selectedTags,
+    updateTotal,
+    updateShown,
     registerTags,
     toggleTag,
     clearTags,
-  }), [activeView, clearTags, panelCount, panelTarget, registerPanel, registerTags, registerView, selectedTags, setActiveView, tagCounts, toggleTag, views])
+  }), [activeView, clearTags, panelCount, panelTarget, registerPanel, registerTags, registerView, selectedTags, setActiveView, tagCounts, toggleTag, updateShown, updateTotal, views])
 
   return <PageSlotsContext.Provider value={value}>{children}</PageSlotsContext.Provider>
 }
@@ -170,7 +178,7 @@ export function PagePanelSlot({
 
 /** Right-rail tag chips for a changelog; chips toggle, any selected tag shows an entry. */
 function UpdateFilterPanel() {
-  const { tagCounts, selectedTags, toggleTag, clearTags } = usePageSlots()
+  const { tagCounts, selectedTags, toggleTag, clearTags, updateShown, updateTotal } = usePageSlots()
   return (
     <div className="space-y-4 text-sm" id="changelog-filters">
       <div className="flex items-center justify-between">
@@ -181,7 +189,8 @@ function UpdateFilterPanel() {
           </button>
         ) : null}
       </div>
-      <div className="flex flex-wrap gap-2">
+      <p className="sr-only" role="status" aria-live="polite">Showing {updateShown} of {updateTotal} updates</p>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter updates by tag">
         {tagsByCount(tagCounts).map((tag) => {
           const pressed = selectedTags.includes(tag)
           return (

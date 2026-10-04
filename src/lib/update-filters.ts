@@ -31,3 +31,10 @@ export function parseTagsParam(search: string): string[] {
 export function isChangelogPath(pathname: string | null): boolean {
   return /(^|\/)changelog\/?$/i.test(pathname ?? '')
 }
+
+/** True when the URL hash targets this entry while a filter hides it, so the filter should be cleared. */
+export function shouldRevealForHash(hash: string, id: string | undefined, hidden: boolean): boolean {
+  if (!id || !hidden || !hash) return false
+  const raw = hash.replace(/^#/, '')
+  try { return decodeURIComponent(raw) === id } catch { return raw === id }
+}

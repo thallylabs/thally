@@ -4,7 +4,7 @@
 
 import { type ReactNode, useEffect } from 'react'
 import { usePageSlotsOptional } from '@/components/mdx/page-slots'
-import { matchesSelectedTags } from '@/lib/update-filters'
+import { matchesSelectedTags, shouldRevealForHash } from '@/lib/update-filters'
 
 interface UpdateArticleProps {
   id?: string
@@ -24,7 +24,22 @@ export function UpdateArticle({ id, className, tags, children }: UpdateArticlePr
     return registerTags(key ? key.split('\u0000') : [])
   }, [registerTags, key])
 
+  const clearTags = slots?.clearTags
   const hidden = slots ? !matchesSelectedTags(tags, slots.selectedTags) : false
+
+  // A link to an Update the filter hides (on load or via hashchange) clears the filter and scrolls to it.
+  useEffect(() => {
+    if (!clearTags) return
+    const reveal = () => {
+      if (!shouldRevealForHash(window.location.hash, id, hidden)) return
+      clearTags()
+      requestAnimationFrame(() => document.getElementById(id as string)?.scrollIntoView())
+    }
+    reveal()
+    window.addEventListener('hashchange', reveal)
+    return () => window.removeEventListener('hashchange', reveal)
+  }, [clearTags, hidden, id])
+
   return (
     <article id={id} className={className} hidden={hidden}>
       {children}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isChangelogPath, matchesSelectedTags, parseTagsParam, tagsByCount, validSelectedTags } from './update-filters'
+import { isChangelogPath, matchesSelectedTags, parseTagsParam, shouldRevealForHash, tagsByCount, validSelectedTags } from './update-filters'
 
 describe('update tag filters', () => {
   it('shows every entry when nothing is selected', () => {
@@ -18,7 +18,8 @@ describe('update tag filters', () => {
   })
 
   it('parses the tags URL parameter', () => {
-    expect(parseTagsParam('?tags=Schemas,BYOK')).toEqual(['Schemas', 'BYOK'])
+    // legacy comma form yields the whole value plus its parts; unmatched candidates are dropped by validSelectedTags
+    expect(parseTagsParam('?tags=Schemas,BYOK')).toEqual(['Schemas,BYOK', 'Schemas', 'BYOK'])
     expect(parseTagsParam('')).toEqual([])
     expect(parseTagsParam('?tags=Schemas&tags=BYOK')).toEqual(['Schemas', 'BYOK'])
     // a tag containing a comma survives the repeated-param round trip
@@ -40,5 +41,14 @@ describe('update tag filters', () => {
     expect(validSelectedTags(['gone', 'A', 'B'], counts)).toEqual(['A'])
     expect(matchesSelectedTags([], validSelectedTags(['gone'], counts))).toBe(true)
     expect(matchesSelectedTags([], validSelectedTags(['A'], counts))).toBe(false)
+  })
+
+  it('reveals only a hidden entry targeted by the hash', () => {
+    expect(shouldRevealForHash('#may-2025', 'may-2025', true)).toBe(true)
+    expect(shouldRevealForHash('#may-2025', 'may-2025', false)).toBe(false)
+    expect(shouldRevealForHash('#other', 'may-2025', true)).toBe(false)
+    expect(shouldRevealForHash('#caf%C3%A9', 'café', true)).toBe(true)
+    expect(shouldRevealForHash('#%E0%A4', '%E0%A4', true)).toBe(true)
+    expect(shouldRevealForHash('', undefined, true)).toBe(false)
   })
 })
