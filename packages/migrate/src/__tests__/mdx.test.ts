@@ -72,6 +72,13 @@ describe('migration description fallback', () => {
 })
 
 describe('normalizeMdx', () => {
+  it('pins Mintlify step titles to plain text unless the source sets titleSize', () => {
+    expect(normalizeMdx('<Steps>\n<Step title="A">x</Step>\n</Steps>', 'mintlify')).toContain('<Steps titleSize="p">')
+    expect(normalizeMdx('<Steps className="x">\n</Steps>', 'mintlify')).toContain('<Steps className="x" titleSize="p">')
+    expect(normalizeMdx('<Steps titleSize="h3">\n</Steps>', 'mintlify')).toBe('<Steps titleSize="h3">\n</Steps>')
+    for (const platform of ['fern', 'docusaurus'] as const) expect(normalizeMdx('<Steps>\n</Steps>', platform)).not.toContain('titleSize')
+  })
+
   it('projects a static Docusaurus useBaseUrl require without changing code samples', () => {
     const body = "<a href={require('@docusaurus/useBaseUrl').default('showcase')}>Showcase</a>\n\n```jsx\n<a href={require('@docusaurus/useBaseUrl').default('showcase')} />\n```"
     const output = normalizeMdx(body, 'docusaurus')

@@ -2013,6 +2013,11 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
         // needed) matches.
         .replace(/<Column(\s[^>]*)?>/g, '<div$1>')
         .replace(/<\/Column>/g, '</div>')
+        // Mintlify renders step titles as plain text unless `titleSize` says
+        // otherwise; Thally's default is an `<h3>`, so pin the source's default.
+        .replace(/<Steps(\s[^>]*)?>/g, (tag: string, attributes = '') => (
+          /\btitleSize\s*=/.test(attributes) ? tag : `<Steps${attributes} titleSize="p">`
+        ))
     }
     if (runFern) {
       result = result

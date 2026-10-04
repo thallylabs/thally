@@ -1,22 +1,33 @@
-import type { ReactNode } from 'react'
+import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
 // <Steps> — wrapper that resets the CSS counter
 // ---------------------------------------------------------------------------
 
+/** Element a step title renders as. Only `h2`/`h3`/`h4` are headings; `p` is plain text (Mintlify's default). */
+export type StepTitleSize = 'p' | 'h2' | 'h3' | 'h4'
+
 interface StepsProps {
   children: ReactNode
   className?: string
+  /** Default title element for every step; a step's own `titleSize` wins. */
+  titleSize?: StepTitleSize
 }
 
-export function Steps({ children, className }: StepsProps) {
+export function Steps({ children, className, titleSize }: StepsProps) {
   return (
     <div
       className={cn('thally-steps relative', className)}
       style={{ counterReset: 'step 0' }}
     >
-      {children}
+      {titleSize
+        ? Children.map(children, (child) => (
+          isValidElement<StepProps>(child) && child.props.titleSize === undefined
+            ? cloneElement(child as ReactElement<StepProps>, { titleSize })
+            : child
+        ))
+        : children}
     </div>
   )
 }
@@ -27,10 +38,12 @@ export function Steps({ children, className }: StepsProps) {
 
 interface StepProps {
   title: string
+  titleSize?: StepTitleSize
   children?: ReactNode
 }
 
-export function Step({ title, children }: StepProps) {
+export function Step({ title, titleSize = 'h3', children }: StepProps) {
+  const Title = titleSize
   return (
     <div
       className="thally-step relative grid grid-cols-[30px_minmax(0,1fr)] gap-x-5 pb-[34px] last:pb-0"
@@ -44,7 +57,7 @@ export function Step({ title, children }: StepProps) {
 
       {/* Step content */}
       <div className="min-w-0 pt-1">
-        <h3 className="font-heading text-[1.02rem] font-semibold tracking-[-0.012em] text-foreground">{title}</h3>
+        <Title className="font-heading text-[1.02rem] font-semibold tracking-[-0.012em] text-foreground">{title}</Title>
         {children ? (
           <div className="prose prose-sm dark:prose-invert mt-2 max-w-none text-foreground/80">
             {children}
