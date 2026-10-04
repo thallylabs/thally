@@ -25,7 +25,6 @@ const MAX_FORWARDED_WARNINGS = 50
 
 /** Strip C0 control characters (except newline and tab) and escape sequences, so a hostile file name cannot rewrite the terminal. */
 export function stripControlCharacters(text: string): string {
-  // eslint-disable-next-line no-control-regex -- the point is to remove these
   return text.replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|.)?/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
 }
 
