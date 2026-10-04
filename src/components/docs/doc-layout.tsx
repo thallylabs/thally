@@ -1,7 +1,7 @@
 /** Documentation page shell and its configurable reader feedback surfaces. */
 
 import type { DocEntry, NavContext } from '@/data/docs'
-import { getBreadcrumbs, getNavCategory, getPrevNextLinks, getFeedbackConfig } from '@/data/docs'
+import { getBreadcrumbs, getBreadcrumbsEnabled, getNavCategory, getPrevNextLinks, getFeedbackConfig } from '@/data/docs'
 import { DocBreadcrumbs } from '@/components/docs/doc-breadcrumbs'
 import { DocHeader } from '@/components/docs/doc-header'
 import { DocPagination } from '@/components/docs/doc-pagination'
@@ -37,6 +37,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayou
   // cacheable; live settings changes take effect with the next atomic release.
   const cloud = getManagedSiteConfigSnapshot()
   const contentControls = getBuildContentControls()
+  const showBreadcrumbs = contentControls.showBreadcrumbs && getBreadcrumbsEnabled()
   const effectiveSite = resolveBuildSiteConfig()
   const cloudFeedback = cloud?.siteConfig.portable.feedback
   const hasThumbsRating = cloud ? Boolean(cloudFeedback?.thumbsRating) : true
@@ -111,7 +112,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayou
       <article className="thally-docs-article mx-auto w-full max-w-2xl" lang={locale} dir={localeDirection(locale)}>
         <ContentStack>
           <div className="not-prose space-y-4">
-            {contentControls.showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
+            {showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
             <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
           </div>
           <Prose className="flex-auto w-full">{children}</Prose>
@@ -131,7 +132,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayou
       <article className="thally-docs-article flex-1" lang={locale} dir={localeDirection(locale)}>
         <ContentStack>
           <div className="not-prose space-y-4">
-            {contentControls.showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
+            {showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
             <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
           </div>
           <Prose className="flex-auto w-full">{children}</Prose>
@@ -151,7 +152,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayou
       <article className="thally-docs-article flex-1" lang={locale} dir={localeDirection(locale)}>
         <ContentStack>
           <div className="not-prose space-y-4">
-            {contentControls.showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
+            {showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
             <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
           </div>
           <Prose className="flex-auto w-full">{children}</Prose>

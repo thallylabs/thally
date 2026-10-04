@@ -1064,6 +1064,8 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
     ? { ...(navbarLinks.length > 0 ? { links: navbarLinks } : {}), ...(navbar?.primary ? { primary: navbar.primary } : {}) }
     : undefined
   return {
+    // Mintlify pages show a group eyebrow above the title and no breadcrumb trail.
+    breadcrumbs: false,
     ...(projectedTheme(config.theme) ? { theme: projectedTheme(config.theme) } : {}),
     ...(projectedContextual.length > 0 ? { contextual: { options: projectedContextual } } : {}),
     ...(projectedColorsValue ? { colors: projectedColorsValue } : {}),

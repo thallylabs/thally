@@ -17,6 +17,7 @@ import {
   getNavigationShortcuts,
   getSidebarCollections,
   getStructuralTheme,
+  getBreadcrumbsEnabled,
   getStylesheetsConfig,
 } from '@/data/docs'
 
@@ -75,6 +76,15 @@ describe('release-bound docs.json', () => {
     vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], stylesheets: { href: '/style.css' } }))
     resetDocsJsonConfigForTests()
     expect(getStylesheetsConfig()).toEqual([])
+  })
+
+  it('keeps breadcrumbs unless docs.json sets breadcrumbs to false', () => {
+    resetDocsJsonConfigForTests()
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [] }))
+    expect(getBreadcrumbsEnabled()).toBe(true)
+    vi.stubEnv('THALLY_DOCS_CONFIG', JSON.stringify({ tabs: [], breadcrumbs: false }))
+    resetDocsJsonConfigForTests()
+    expect(getBreadcrumbsEnabled()).toBe(false)
   })
 
   it('uses accent content icons unless a site explicitly selects neutral icons', () => {

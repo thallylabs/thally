@@ -70,6 +70,8 @@ export interface MigrationDocsConfig {
   markdown?: { enabled?: boolean }
   /** Local site-authored CSS projected from a source docs site, served from public/. */
   stylesheets?: Array<string>
+  /** `false` hides the breadcrumb trail; Mintlify pages show only a group eyebrow. */
+  breadcrumbs?: boolean
   tabs: Array<MigrationNavigationTab>
   navigation?: {
     /** How sibling documentation collections are presented to readers. */

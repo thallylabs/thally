@@ -272,6 +272,10 @@ describe('config mapping', () => {
     expect(site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: 'red' } }), ...intro }).docsConfig.colors).toBeUndefined()
   })
 
+  it('hides the breadcrumb trail because Mintlify pages show only a group eyebrow', () => {
+    expect(site({ 'docs.json': JSON.stringify(nav), ...intro }).docsConfig.breadcrumbs).toBe(false)
+  })
+
   it('takes brand colours from the stylesheet custom properties over docs.json', () => {
     const colors = { primary: '#16a34a', light: '#ffffff', dark: '#111111' }
     const withCss = (css: string) => site({ 'docs.json': JSON.stringify({ ...nav, colors }), 'style.css': css, ...intro })

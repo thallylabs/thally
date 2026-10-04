@@ -270,6 +270,8 @@ interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
   /** Local, customer-owned stylesheets served from public/. */
   stylesheets?: Array<string>
+  /** Page breadcrumb trail above each title. Defaults to true; `false` hides it. */
+  breadcrumbs?: boolean
   /** Manual API pages (`api:` frontmatter): default server(s) and auth for the playground. */
   api?: {
     mdx?: {
@@ -1285,6 +1287,11 @@ export function getIntegrationsConfig(): unknown {
 
 export function getCustomScriptsConfig(): Array<DocsJsonScript> {
   return docsConfig().customScripts ?? []
+}
+
+/** Breadcrumbs stay on unless docs.json sets `breadcrumbs: false`. */
+export function getBreadcrumbsEnabled(): boolean {
+  return docsConfig().breadcrumbs !== false
 }
 
 /** Only local CSS files may be injected into the document head. */
