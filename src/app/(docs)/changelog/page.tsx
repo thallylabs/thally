@@ -1,7 +1,9 @@
 import { notFound } from 'next/navigation'
 import { DocLayout } from '@/components/docs/doc-layout'
-import { getBreadcrumbs } from '@/data/docs'
+import { getBreadcrumbs, getSeoConfig } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
+import { pageFullTitle } from '@/lib/page-meta'
+import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { getSiteUrl } from '@/lib/site-url'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
 
@@ -16,8 +18,15 @@ export async function generateMetadata() {
     url: formatOgDisplayUrl(doc.href, siteUrl),
   })
 
-  return {
+  const fullTitle = pageFullTitle({
     title: doc.title,
+    ogTitle: doc.ogTitle,
+    siteName: resolveBuildSiteConfig().name,
+    separator: getSeoConfig().titleSeparator,
+  })
+
+  return {
+    title: fullTitle ? { absolute: fullTitle } : doc.title,
     description: doc.description,
     alternates: { canonical: `${siteUrl}${doc.href}` },
     openGraph: {
