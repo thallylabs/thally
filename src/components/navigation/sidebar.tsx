@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import type { NavigationNode, NavigationPresentation, NavigationSection, SidebarCollection, DocsNavigationShortcut } from '@/data/docs'
 import { Icon } from '@/components/mdx/rich-content'
@@ -7,6 +8,7 @@ import { layout, typography } from '@/config/layout'
 import { cn } from '@/lib/utils'
 import { NavigationTree } from '@/components/navigation/navigation-tree'
 import { CollectionSelector } from '@/components/navigation/collection-selector'
+import { revealActiveLink } from '@/components/navigation/reveal-active-link'
 
 interface SidebarProps {
   sections: Array<NavigationSection>
@@ -32,6 +34,8 @@ export function Sidebar({
   className,
 }: SidebarProps) {
   const pathname = usePathname()
+  const navRef = useRef<HTMLElement>(null)
+  useEffect(() => revealActiveLink(navRef.current), [pathname, activeCollectionId])
   const shouldShowSelector = navigationPresentation.display === 'dropdown'
     && collections.length >= 2
     && Boolean(activeCollectionId && onCollectionChange)
@@ -54,7 +58,7 @@ export function Sidebar({
             <p className="line-clamp-1 px-2 text-sm font-semibold leading-6 text-foreground">{title}</p>
           ) : null}
         </div>
-        <nav className="scrollbar-hide mt-2.5 min-h-0 flex-1 space-y-8 overflow-y-auto overscroll-y-contain pb-5">
+        <nav ref={navRef} className="scrollbar-hide mt-2.5 min-h-0 flex-1 space-y-8 overflow-y-auto overscroll-y-contain pb-5">
           {shortcuts.length > 0 ? (
             <div className="space-y-px border-b border-border/60 pb-4">
               {shortcuts.map((shortcut) => (
