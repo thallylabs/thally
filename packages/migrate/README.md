@@ -171,6 +171,44 @@ from Fern MDX pages (`../../components/...`, resolved against the Fern
 project root) are migrated the same way Mintlify and Docusaurus components
 are — see "Mintlify compatibility" below.
 
+## Mintlify `sourceRef` repositories
+
+A Mintlify navigation node `{"sourceRef": "owner/repo"}` mounts the docs of another
+repository. Mintlify does not document where that mount lives, so it cannot be
+derived from `docs.json`; supply it with a repeatable flag:
+
+```bash
+create-thally-docs migrate https://github.com/OpenRouterTeam/docs my-docs \
+  --source-ref OpenRouterTeam/typescript-sdk=client-sdks/typescript
+```
+
+Without a mapping the node is skipped with a warning that names the flag.
+
+- The repository must be on github.com. Its docs root is the directory holding a
+  Mintlify `docs.json` (`docs/` first, then the repository root); without one the
+  mapping is skipped with a warning.
+- Every `.md`/`.mdx` file under that root is imported (orphans included) through the
+  same pipeline as the main site, under `<mount-path>/...`. Assets are copied under
+  `public/<mount-path>/...`. The node is replaced by the referenced `docs.json`
+  navigation with page paths prefixed by the mount path; tabs become groups, and the
+  parent group keeps its label and icon.
+- Root-absolute links inside those pages (`/models/x`, `/images/x.png`) are prefixed
+  with the mount path (sub-site semantics: Mintlify's behavior here is not
+  documented, so this is an assumption). Relative links work as-is.
+- Only pages and navigation are imported. Branding, colors, redirects, OpenAPI specs,
+  custom components and access-restricted pages of the referenced repository are
+  ignored (one warning says so).
+- Safety limits per referenced repository, fixed constants: 5,000 files and 50 MB under
+  the docs root. Over a limit the whole repository is refused, never imported
+  partially. Symlinks and dot-directories are removed before import, and a docs
+  directory that resolves outside the clone is refused. `repo` must match
+  `owner/repo`; the mount path must be a relative lowercase slug path (no `..`, no
+  leading slash), must not collide with an existing page or directory of the main
+  site, and mappings must not overlap.
+- A mapping that matches no `sourceRef` in the navigation is reported and imports
+  nothing. `migration-report.json` lists each imported repository with its page count
+  under `sourceRefs`.
+
 ## Mintlify compatibility
 
 Repository imports preserve named/default local JSX and TSX components and

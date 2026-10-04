@@ -10,6 +10,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 
 import {
   cloneGitHubRepository,
+  importSourceRef,
   hydrateRemoteApiSpecs,
   migrateRepository,
   migrateUrl,
@@ -20,6 +21,8 @@ import {
   type MigrationFetcher,
   type MigrationPlatform,
   type MigrationWarning,
+  type SourceRefImport,
+  type SourceRefMapping,
 } from '@thallylabs/migrate'
 
 import { pruneMissingSiteLinks } from '../customize.js'
@@ -45,6 +48,8 @@ export interface MigrateOptions {
   fetcher?: MigrationFetcher
   /** Explicitly opt out of content/build gates; the report remains unverified. */
   skipValidation?: boolean
+  /** Mintlify `sourceRef` repositories to import, from `--source-ref owner/repo=<path>`. */
+  sourceRefs?: Array<SourceRefMapping>
 }
 
 export interface MigrateResult {
@@ -105,9 +110,30 @@ function resetFreshMigrationContent(projectDir: string): void {
   }
 }
 
+/** Clone each mapped sourceRef repository (github.com only) and prepare it as a sub-site; a failed clone is a warning, not a crash. */
+async function fetchSourceRefs(mappings: ReadonlyArray<SourceRefMapping>, warnings: Array<MigrationWarning>): Promise<Array<SourceRefImport>> {
+  const imports: Array<SourceRefImport> = []
+  for (const mapping of mappings) {
+    const source = parseGitHubRepositoryUrl(`https://github.com/${mapping.repo}`)
+    const root = mkdtempSync(join(tmpdir(), 'thally-source-ref-'))
+    console.log(`  📦 Cloning sourceRef ${mapping.repo}...`)
+    try {
+      const cloneDir = join(root, 'repository')
+      await cloneGitHubRepository(source, cloneDir, warnings)
+      imports.push(importSourceRef(mapping, cloneDir))
+    } catch (error) {
+      warnings.push({ code: 'fetch-failed', message: `sourceRef ${mapping.repo} was not imported: ${error instanceof Error ? error.message : String(error)}` })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+  return imports
+}
+
 async function discoverMigration(options: MigrateOptions): Promise<MigrationBundle> {
   const url = new URL(options.sourceUrl)
   if (url.hostname.toLowerCase() !== 'github.com') {
+    if (options.sourceRefs?.length) console.warn('  ⚠  --source-ref applies only to GitHub repository sources and was ignored.')
     console.log(`  🌐 Discovering public docs at ${url.origin}${url.pathname}...`)
     return migrateUrl({
       sourceUrl: options.sourceUrl,
@@ -125,7 +151,9 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
   try {
     const cloneWarnings: Array<MigrationWarning> = []
     await cloneGitHubRepository(source, cloneDir, cloneWarnings)
+    const sourceRefs = await fetchSourceRefs(options.sourceRefs ?? [], cloneWarnings)
     const bundle = migrateRepository({
+      sourceRefs,
       repositoryDir: cloneDir,
       sourceUrl: options.sourceUrl,
       docsDir: options.docsDir ?? (source.docsDir || undefined),
@@ -260,6 +288,7 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     pages: bundle.pages.length,
     assets: bundle.assets.length,
     components: bundle.componentFiles?.length ?? 0,
+    sourceRefs: bundle.sourceRefs ?? [],
     quarantined: quarantinedPages,
     quarantinedAssets: (bundle.quarantinedFiles?.length ?? 0) - quarantinedPages,
     droppedGatedPages: bundle.droppedGatedPages ?? 0,
