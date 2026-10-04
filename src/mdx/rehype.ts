@@ -275,10 +275,12 @@ function joinPlaceholderTokens(tokens: Array<ThemedToken>): Array<ThemedToken> {
   const out: Array<ThemedToken> = []
   let offset = 0
   let previous: RegExpMatchArray | undefined
+  let next = 0 // placeholders are ordered and disjoint, so one moving index replaces a search per token
   for (const token of tokens) {
     const start = offset
     offset += token.content.length
-    const match = placeholders.find((found) => found.index < offset && found.index + found[0].length > start)
+    while (next < placeholders.length && placeholders[next].index + placeholders[next][0].length <= start) next++
+    const match = next < placeholders.length && placeholders[next].index < offset ? placeholders[next] : undefined
     const last = out.at(-1)
     if (match && match === previous && last) out[out.length - 1] = { ...last, content: last.content + token.content }
     else out.push(token)
