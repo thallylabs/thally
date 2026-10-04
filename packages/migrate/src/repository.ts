@@ -54,6 +54,7 @@ import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
 import { sourceRefMountCollides, type SourceRefImport } from './source-refs.js'
+import { cssBrandColors } from './css-colors.js'
 import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
 import { closeOpenFence, escapeFernLiteralBraces, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
@@ -4039,6 +4040,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let rootStyleProjection: ReturnType<typeof projectAuthoredStyles> | undefined
   let rootNavbarButtons: ReturnType<typeof navbarLinkButtons> = []
   let rootStyleProblem: 'unsafe' | 'parse' | undefined
+  let rootStyleColors: ReturnType<typeof cssBrandColors>
   if (hasRootStylesheet && rootStylesheetPath && lstatSync(rootStylesheetPath).size <= MAX_ASSET_BYTES) {
     const css = readFileSync(rootStylesheetPath, 'utf8')
     // An import may fetch arbitrary CSS; URL schemes that read local files or
@@ -4047,6 +4049,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     else {
       try {
         rootNavbarButtons = navbarLinkButtons(css)
+        rootStyleColors = cssBrandColors(css)
         rootStyleProjection = projectAuthoredStyles(css, [
           ...pages.map((page) => page.body),
           ...(componentMigrator?.files() ?? []).map((file) => typeof file.content === 'string' ? file.content : ''),
@@ -4249,6 +4252,22 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
             }),
           },
         }
+      }
+      // The site's own `--primary*` variables win over docs.json `colors`, as they do in Mintlify.
+      if (rootStyleColors) {
+        docsConfig = {
+          ...docsConfig,
+          colors: {
+            ...docsConfig.colors,
+            ...(rootStyleColors.light ? { light: { ...docsConfig.colors?.light, ...rootStyleColors.light } } : {}),
+            ...(rootStyleColors.dark ? { dark: { ...docsConfig.colors?.dark, ...rootStyleColors.dark } } : {}),
+          },
+        }
+        warnings.push({
+          code: 'unsupported-config',
+          source: 'style.css',
+          message: 'Brand colours were taken from the --primary custom properties in style.css and override docs.json colors.',
+        })
       }
       if (rootStyleProjection.omittedSelectors > 0) warnings.push({
         code: 'unsupported-config',

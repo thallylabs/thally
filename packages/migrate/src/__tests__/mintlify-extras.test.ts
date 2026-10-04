@@ -272,6 +272,28 @@ describe('config mapping', () => {
     expect(site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: 'red' } }), ...intro }).docsConfig.colors).toBeUndefined()
   })
 
+  it('takes brand colours from the stylesheet custom properties over docs.json', () => {
+    const colors = { primary: '#16a34a', light: '#ffffff', dark: '#111111' }
+    const withCss = (css: string) => site({ 'docs.json': JSON.stringify({ ...nav, colors }), 'style.css': css, ...intro })
+    const bundle = withCss('.dark{--primary:200 255 0;--primary-light:200 255 0;--primary-dark:200 255 0}')
+    expect(bundle.docsConfig.colors).toEqual({
+      light: { accent: '#16a34a', primary: '#111111' },
+      dark: { accent: '#c8ff00', primary: '#c8ff00' },
+    })
+    expect(bundle.warnings.some((warning) => /Brand colours were taken from the --primary custom properties/.test(warning.message))).toBe(true)
+    expect(withCss(':root{--primary:#0af}html.dark{--primary:rgb(1, 2, 3)}').docsConfig.colors).toEqual({
+      light: { accent: '#00aaff', primary: '#00aaff' },
+      dark: { accent: '#010203', primary: '#010203' },
+    })
+    expect(withCss('p{color:red}').docsConfig.colors).toEqual({ light: { accent: '#16a34a', primary: '#111111' }, dark: { accent: '#ffffff', primary: '#ffffff' } })
+  })
+
+  it('ignores malformed and at-rule-scoped stylesheet colours', () => {
+    const colorsOf = (css: string) => site({ 'docs.json': JSON.stringify(nav), 'style.css': css, ...intro }).docsConfig.colors
+    expect(colorsOf('.dark{--primary:300 255 0;--primary-light:nope}')).toBeUndefined()
+    expect(colorsOf('@media (min-width:1px){.dark{--primary:1 2 3}}.x .dark{--primary:1 2 3}')).toBeUndefined()
+  })
+
   it('rejects script-bearing and control-character urls in legacy topbar entries', () => {
     const bundle = site({ 'mint.json': JSON.stringify({ ...nav,
       topbarLinks: [{ name: 'X', url: 'javascript:alert(1)' }, { name: 'Y', url: ' JaVaScRiPt:alert(1)' }, { name: 'Z', url: 'java\tscript:alert(1)' }, { name: 'D', url: 'data:text/html,x' }, { name: 'Ok', url: '/relative' }],
