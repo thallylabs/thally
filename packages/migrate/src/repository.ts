@@ -2794,10 +2794,14 @@ function inlineMdxSnippets(
           if (body === snippetSource) {
             warnings.push({
               code: 'skipped-file',
-              message: `Import of "${binding!.exported}" from ${sourcePath} could not be inlined (it is not a static value, a self-contained function or a simple component), so uses of it on this page may not resolve at build time.`,
+              message: `Import of "${binding!.exported}" from ${sourcePath} could not be inlined (it is not a static value, a self-contained function or a simple component), so it was bound to undefined. Define "${binding!.exported}" in the page or replace its uses.`,
               source,
             })
-            return statement
+            // Keeping the import would be stripped later and leave the other
+            // names of the same import undefined too.
+            if (/^[A-Z]/.test(binding!.exported)) snippets.set(binding!.local, mdxComment(` Removed <${binding!.local}>: could not be inlined `))
+            declarations.push(`export const ${binding!.local} = undefined;`)
+            continue
           }
           components.push([binding!.local, body])
         }

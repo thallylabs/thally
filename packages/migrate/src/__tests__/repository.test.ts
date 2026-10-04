@@ -395,18 +395,22 @@ describe('Mintlify repository migration', () => {
     expect(bundle.warnings.some((warning) => warning.message.includes('"fee"'))).toBe(false)
   })
 
-  it('warns when an imported snippet export cannot be inlined and the import is kept', () => {
+  it('binds an export that cannot be inlined to undefined with a warning and still inlines the others from the same import', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-unresolved-'))
     mkdirSync(join(root, 'snippets'), { recursive: true })
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
       $schema: 'https://mintlify.com/docs.json',
       navigation: { pages: ['home'] },
     }))
-    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const compute = () => outside + 1;\nexport const Dyn = makeThing();\n")
-    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { compute, Dyn } from '/snippets/constants.mdx';\n\n{compute()}\n")
+    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const compute = () => outside + 1;\nexport const FEE = '5';\nexport const Dyn = makeThing();\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { compute, FEE, Dyn } from '/snippets/constants.mdx';\n\n{compute()} {FEE}\n")
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
-    expect(bundle.warnings.some((warning) => warning.message.includes('"compute"') && warning.message.includes('could not be inlined'))).toBe(true)
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    expect(bundle.warnings.some((warning) => warning.message.includes('"compute"') && warning.message.includes('could not be inlined') && warning.message.includes('Define "compute" in the page'))).toBe(true)
+    expect(page?.body).toContain('export const compute = undefined;')
+    expect(page?.body).toContain('export const FEE = "5";')
+    expect(page?.body).not.toContain('constants.mdx')
   })
 
   it('binds a name the snippet does not export to undefined and still inlines the others from the same import', () => {
@@ -4464,8 +4468,9 @@ describe('Mintlify snippet inlining hardening', () => {
       'snippets/c.mdx': "import q from 'q';\nexport const $x = q.z;\nconst b = 1;\nexport { b };\n",
     }, "import { $x, b } from '/snippets/c.mdx';\n\nV {$x} {b}")
     expect(warnings.some((warning) => warning.message.includes('is not exported'))).toBe(false)
-    expect(page?.body).not.toContain('export const $x = undefined')
-    expect(page?.body).not.toContain('export const b = undefined')
+    // Both are real exports, so they are reported as not inlinable (they read
+    // an import), never as missing.
+    expect(warnings.filter((warning) => warning.message.includes('could not be inlined')).map((warning) => warning.message.match(/"([^"]+)"/)?.[1]).sort()).toEqual(['$x', 'b'])
 
     const start = performance.now()
     snippetFixture({ 'snippets/c.mdx': 'export { a, '.repeat(5000) }, "import { q } from '/snippets/c.mdx';\n\nV {q}")
@@ -4488,7 +4493,7 @@ describe('Mintlify snippet inlining hardening', () => {
     expect(safe.page?.body).toContain('export const fee = ')
     for (const name of ['viaFunction', 'viaGlobal', 'viaFetch', 'viaCtor', 'viaKey']) {
       const { page, warnings } = snippetFixture(files, `import { ${name} } from '/snippets/c.mdx';\n\n{${name}()}`)
-      expect(page?.body).not.toContain(`export const ${name} =`)
+      expect(page?.body).toContain(`export const ${name} = undefined;`)
       expect(page?.body).not.toContain('return process')
       expect(warnings.some((warning) => warning.message.includes(`"${name}"`) && warning.message.includes('could not be inlined'))).toBe(true)
     }
