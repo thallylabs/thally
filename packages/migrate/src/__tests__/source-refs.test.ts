@@ -34,9 +34,9 @@ function sdkRepo(extra: Record<string, string> = {}): string {
 function mainRepo(extra: Record<string, string> = {}): string {
   return write(tmp(), {
     'docs.json': JSON.stringify({
-      navigation: { tabs: [{ tab: 'SDKs', groups: [{ group: 'TypeScript SDK', icon: 'code', expanded: false, pages: [{ sourceRef: 'Acme/ts-sdk' }] }, { group: 'Intro', pages: ['index'] }] }] },
+      navigation: { tabs: [{ tab: 'SDKs', groups: [{ group: 'TypeScript SDK', icon: 'code', expanded: false, pages: [{ sourceRef: 'Acme/ts-sdk' }] }, { group: 'Intro', pages: ['introduction'] }] }] },
     }),
-    'index.mdx': '---\ntitle: Home\n---\nHome.',
+    'introduction.mdx': '---\ntitle: Home\n---\nHome.',
     ...extra,
   })
 }
@@ -149,7 +149,7 @@ describe('migrateRepository with sourceRefs', () => {
     expect(group.icon).toBe('code')
     expect(group.pages).toEqual(['client-sdks/typescript/overview', { group: 'Chat', pages: ['client-sdks/typescript/sdks/chat/README'] }])
     const ids = bundle.pages.map((page) => page.id)
-    expect(ids).toContain('index')
+    expect(ids).toContain('introduction')
     expect(ids).toContain('client-sdks/typescript/models/orphan')
     expect(bundle.assets.map((asset) => asset.path)).toContain('client-sdks/typescript/images/logo.png')
     expect(bundle.sourceRefs).toEqual([{ ...MAPPING, pages: 3 }])
@@ -182,9 +182,9 @@ describe('migrateRepository with sourceRefs', () => {
 
   it('does not overwrite a main page that shares an imported page id', () => {
     const imported = importSourceRef(MAPPING, sdkRepo())
-    const clash = { ...imported, pages: [...imported.pages, { ...imported.pages[0], id: 'index', navigationId: 'index' }] }
+    const clash = { ...imported, pages: [...imported.pages, { ...imported.pages[0], id: 'introduction', navigationId: 'introduction' }] }
     const bundle = migrateRepository({ repositoryDir: mainRepo(), sourceUrl: 'https://github.com/example/docs', platform: 'mintlify', sourceRefs: [clash] })
-    expect(bundle.pages.filter((page) => page.id === 'index')).toHaveLength(1)
-    expect(bundle.warnings.some((warning) => warning.code === 'collision' && warning.message.includes('"index"'))).toBe(true)
+    expect(bundle.pages.filter((page) => page.id === 'introduction')).toHaveLength(1)
+    expect(bundle.warnings.some((warning) => warning.code === 'collision' && warning.message.includes('"introduction"'))).toBe(true)
   })
 })
