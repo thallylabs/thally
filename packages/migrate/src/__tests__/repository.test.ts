@@ -1126,7 +1126,7 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Documentation')
-    expect(apiTab?.api).toEqual({ source: 'openapi/openapi.yaml', navigation: false })
+    expect(apiTab?.api).toEqual({ source: 'openapi/openapi.yaml' })
     expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/openapi.yaml')
     expect(bundle.warnings.some((warning) =>
       warning.message.includes('qstash/api-reference') && warning.message.includes('covers a whole tab'))).toBe(true)
@@ -1228,6 +1228,54 @@ describe('Mintlify repository migration', () => {
     // the operation's route is path+method based, never the summary.
     expect(guide?.body).toContain('[publish](/api/default/v2/publish/destination/post)')
     expect(guide?.body).not.toContain('/qstash/api-reference/messages/publish-a-message')
+  })
+
+  it('keeps generated endpoint navigation for a `directory` spec beside authored groups and redirects Mintlify endpoint URLs', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [{
+          tab: 'API Reference',
+          groups: [{ group: 'API Guides', pages: ['guide'] }],
+          openapi: { source: 'openapi/openapi.yaml', directory: 'api/api-reference' },
+        }],
+      },
+    }))
+    mkdirSync(join(root, 'openapi'), { recursive: true })
+    writeFileSync(join(root, 'openapi', 'openapi.yaml'), [
+      'openapi: 3.1.0',
+      'info: { title: Svc, version: "1.0" }',
+      'paths:',
+      '  /interns/{id}/access:',
+      '    get:',
+      '      summary: Get an intern\'s daemon access',
+      '      tags: [alpha.decisions]',
+      '      responses: { "200": { description: ok } }',
+      '  /generation:',
+      '    get:',
+      '      summary: Get request & usage metadata for a generation',
+      '      tags: [Generations]',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    writeFileSync(join(root, 'guide.mdx'), [
+      '---',
+      'title: Guide',
+      '---',
+      '',
+      'See [access](/api/api-reference/alphadecisions/get-an-interns-daemon-access).',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'API Reference')
+    expect(apiTab?.groups).toEqual([{ group: 'API Guides', pages: ['guide'] }])
+    expect(apiTab?.api).toEqual({ source: 'openapi/openapi.yaml' })
+    expect(bundle.pages.find((page) => page.id === 'guide')?.body)
+      .toContain('[access](/api/default/interns/id/access/get)')
+    expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([
+      { source: '/api/api-reference/alphadecisions/get-an-interns-daemon-access', destination: '/api/default/interns/id/access/get' },
+      { source: '/api/api-reference/generations/get-request-&-usage-metadata-for-a-generation', destination: '/api/default/generation/get' },
+    ]))
   })
 
   it('drops a manual OpenAPI operation listing ("GET /path") with one warning instead of one missing-page warning per operation', () => {

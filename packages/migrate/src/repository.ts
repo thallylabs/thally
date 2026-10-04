@@ -1396,6 +1396,8 @@ interface ResolvedApiSpec {
   sourcePath: string
   /** Mintlify's object-form `{ source, directory }` scoping directory, if any — the prefix its auto-generated operation pages live under. */
   directory?: string
+  /** Mintlify generates this spec's endpoint pages (no published page names its operations itself), so Thally should list them in the sidebar too. */
+  generatedNavigation?: boolean
 }
 
 function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): Array<MintlifyApiSpecReference> {
@@ -1487,7 +1489,7 @@ function resolveMintlifyApiSpecs(
     if (reference.directory) {
       warnings.push({
         code: 'unsupported-config',
-        message: `The OpenAPI spec "${reference.value}"${tabSuffix} was limited to pages under "${reference.directory}" in the source, but Thally's API reference always covers a whole tab, so it was migrated as the tab's full API reference. Update any links to "${reference.directory}/..." pages manually.`,
+        message: `The OpenAPI spec "${reference.value}"${tabSuffix} was limited to pages under "${reference.directory}" in the source, but Thally's API reference always covers a whole tab, so it was migrated as the tab's full API reference. Links and URLs to "${reference.directory}/<tag>/<operation>" pages were redirected to the matching endpoints; check any other links to "${reference.directory}/..." manually.`,
       })
     }
     specs.push({
@@ -1574,6 +1576,16 @@ const FERN_CRUD_METHOD_NAMES: Record<string, string> = {
 }
 
 /** Kebab-case a label the way Mintlify slugs its auto-generated OpenAPI operation pages (tag folder, operation leaf). */
+/**
+ * Mintlify's URL slug for a tag or operation title, as served by live sites
+ * (149/149 of an OpenAPI site's endpoint URLs): lower-cased, punctuation
+ * dropped rather than hyphenated ("alpha.decisions" -> "alphadecisions",
+ * "intern's" -> "interns"), "&" kept, whitespace -> "-".
+ */
+export function mintlifyUrlSlug(value: string): string {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}_\s&-]/gu, '').trim().replace(/\s+/g, '-').replace(/-+/g, '-')
+}
+
 function mintlifyOperationSlugSegment(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 }
@@ -1673,6 +1685,8 @@ interface ApiOperationLinkMaps {
    * this prefix that didn't match any known operation.
    */
   prefixLandings: Map<string, string>
+  /** Canonical Mintlify endpoint URL (original case) -> Thally operation route, for redirects. */
+  mintlifyPages: Map<string, string>
 }
 
 function apiOperationLinkMap(
@@ -1681,6 +1695,7 @@ function apiOperationLinkMap(
 ): ApiOperationLinkMaps {
   const map = new Map<string, string>()
   const prefixLandings = new Map<string, string>()
+  const mintlifyPages = new Map<string, string>()
   const apiTabs = docsConfig.tabs.filter((tab) => !tab.hidden && tab.api)
   apiTabs.forEach((tab, index) => {
     const source = sources.find((entry) => tab.api?.source === specAssetPath(entry.filename))
@@ -1720,6 +1735,11 @@ function apiOperationLinkMap(
       // of them in practice) and avoids guessing which convention and
       // which leaf a given source actually used.
       const tagSegment = mintlifyOperationSlugSegment(operation.tag ?? 'default')
+      const mintlifyTag = mintlifyUrlSlug(operation.tag ?? 'default')
+      const mintlifyLeaf = mintlifyUrlSlug(operation.summary ?? operation.operationId ?? `${operation.method} ${operation.path}`)
+      const canonical = `${source.prefix}/${mintlifyTag}/${mintlifyLeaf}`.replace(/^\/+|\/+$/g, '')
+      if (mintlifyTag && mintlifyLeaf && !mintlifyPages.has(canonical)) mintlifyPages.set(canonical, thallyHref)
+      if (mintlifyTag && mintlifyLeaf && !map.has(canonical.toLowerCase())) map.set(canonical.toLowerCase(), thallyHref)
       for (const leaf of leafCandidates) {
         if (!leaf) continue
         const tagged = `${source.prefix}/${tagSegment}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
@@ -1729,7 +1749,7 @@ function apiOperationLinkMap(
       }
     }
   })
-  return { operationLinks: map, prefixLandings }
+  return { operationLinks: map, prefixLandings, mintlifyPages }
 }
 
 /** Rewrite API operation links in every page body, with one capped warning for links that matched no operation. */
@@ -2994,7 +3014,7 @@ function inlineMdxSnippets(
  */
 function injectOpenApiSpecs(
   config: MigrationDocsConfig,
-  specs: Array<{ filename: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>,
+  specs: Array<{ filename: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean; generatedNavigation?: boolean }>,
   warnings?: Array<MigrationWarning>,
 ): MigrationDocsConfig {
   const tabs = config.tabs.map((tab) => ({ ...tab }))
@@ -3016,8 +3036,10 @@ function injectOpenApiSpecs(
       apiTab.api = {
         source: specAssetPath(spec.filename),
         // An API-only tab needs generated endpoint navigation; an authored
-        // page tab keeps its own groups alongside the bound spec.
-        ...((apiTab.groups?.length || apiTab.pages?.length) ? { navigation: false } : {}),
+        // page tab keeps its own groups alongside the bound spec, unless
+        // Mintlify generated the endpoint pages (the renderer appends the
+        // endpoint groups after the authored ones).
+        ...((apiTab.groups?.length || apiTab.pages?.length) && !spec.generatedNavigation ? { navigation: false } : {}),
       }
     } else {
       insertApiTab(tabs, {
@@ -4515,12 +4537,21 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     let pageSpecs: Array<{ filename: string; sourcePath?: string }> = resolvedSpecs
     if (resolvedSpecs.length > 0) {
+      for (const spec of resolvedSpecs) {
+        spec.generatedNavigation = Boolean(spec.directory)
+          && !publishedSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))
+      }
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
-      const { operationLinks, prefixLandings } = apiOperationLinkMap(
+      const { operationLinks, prefixLandings, mintlifyPages } = apiOperationLinkMap(
         resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.directory })),
         docsConfig,
       )
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
+      // Mintlify's own endpoint URLs keep working: they have no page of their own here.
+      const taken = new Set([...pages.map((page) => page.id), ...(docsConfig.redirects ?? []).map((redirect) => redirect.source.replace(/^\//, ''))])
+      const endpointRedirects = [...mintlifyPages].filter(([source]) => !taken.has(source))
+        .map(([source, destination]) => ({ source: `/${source}`, destination }))
+      if (endpointRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...endpointRedirects] }
     } else {
       // No docs.json-configured spec at all: fall back to a naive repo scan,
       // matching every other platform's baseline behavior.
