@@ -17,7 +17,7 @@ import {
   useState,
 } from 'react'
 import { usePathname } from 'next/navigation'
-import { isChangelogPath, parseTagsParam, tagsByCount } from '@/lib/update-filters'
+import { isChangelogPath, parseTagsParam, tagsByCount, validSelectedTags } from '@/lib/update-filters'
 
 interface ViewOption {
   title: string
@@ -62,8 +62,15 @@ export function PageSlotsProvider({ children }: { children: ReactNode }) {
   const [views, setViews] = useState<Array<ViewOption>>([])
   const [activeView, setActiveViewState] = useState<string>()
 
-  const [tagCounts, setTagCounts] = useState<Record<string, number>>({})
-  const [selectedTags, setSelectedTags] = useState<Array<string>>([])
+  const [entries, setEntries] = useState<Array<ReadonlyArray<string>>>([])
+  const [rawSelectedTags, setSelectedTags] = useState<Array<string>>([])
+  const tagCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const tags of entries) for (const tag of tags) counts[tag] = (counts[tag] ?? 0) + 1
+    return counts
+  }, [entries])
+  // Selected tags no Update carries (a stale shared link) are ignored rather than hiding everything.
+  const selectedTags = useMemo(() => validSelectedTags(rawSelectedTags, tagCounts), [rawSelectedTags, tagCounts])
 
   // Read the shared filter after hydration so server and client markup match.
   useEffect(() => {
@@ -72,16 +79,8 @@ export function PageSlotsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const registerTags = useCallback((tags: ReadonlyArray<string>) => {
-    setTagCounts((current) => {
-      const next = { ...current }
-      for (const tag of tags) next[tag] = (next[tag] ?? 0) + 1
-      return next
-    })
-    return () => setTagCounts((current) => {
-      const next = { ...current }
-      for (const tag of tags) next[tag] = (next[tag] ?? 0) - 1
-      return next
-    })
+    setEntries((current) => [...current, tags])
+    return () => setEntries((current) => current.filter((entry) => entry !== tags))
   }, [])
 
   const toggleTag = useCallback((tag: string) => {

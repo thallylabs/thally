@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isChangelogPath, matchesSelectedTags, parseTagsParam, tagsByCount } from './update-filters'
+import { isChangelogPath, matchesSelectedTags, parseTagsParam, tagsByCount, validSelectedTags } from './update-filters'
 
 describe('update tag filters', () => {
   it('shows every entry when nothing is selected', () => {
@@ -27,5 +27,13 @@ describe('update tag filters', () => {
     expect(isChangelogPath('/changelog/')).toBe(true)
     expect(isChangelogPath('/docs/guides/changelog-tips')).toBe(false)
     expect(isChangelogPath(null)).toBe(false)
+  })
+
+  it('ignores stale selected tags so nothing is hidden when none are valid', () => {
+    const counts = { A: 2, B: 0 }
+    expect(validSelectedTags(['gone'], counts)).toEqual([])
+    expect(validSelectedTags(['gone', 'A', 'B'], counts)).toEqual(['A'])
+    expect(matchesSelectedTags([], validSelectedTags(['gone'], counts))).toBe(true)
+    expect(matchesSelectedTags([], validSelectedTags(['A'], counts))).toBe(false)
   })
 })

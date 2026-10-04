@@ -5,6 +5,11 @@ export function matchesSelectedTags(entryTags: readonly string[], selected: read
   return selected.length === 0 || entryTags.some((tag) => selected.includes(tag))
 }
 
+/** Keep only selected tags that some registered entry carries, so a stale URL tag cannot hide everything. */
+export function validSelectedTags(selected: readonly string[], counts: Readonly<Record<string, number>>): string[] {
+  return selected.filter((tag) => (counts[tag] ?? 0) > 0)
+}
+
 /** Tags ordered by how many entries use them (most first); ties keep first-seen order. */
 export function tagsByCount(counts: Readonly<Record<string, number>>): string[] {
   return Object.keys(counts).filter((tag) => counts[tag] > 0).sort((a, b) => counts[b] - counts[a])

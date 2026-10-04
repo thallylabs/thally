@@ -18,9 +18,10 @@ export function UpdateArticle({ id, className, tags, children }: UpdateArticlePr
   const registerTags = slots?.registerTags
   const key = tags.join('\u0000')
 
+  // Untagged entries register too, so they hide only while a valid filter is active.
   useEffect(() => {
-    if (!registerTags || !key) return
-    return registerTags(key.split('\u0000'))
+    if (!registerTags) return
+    return registerTags(key ? key.split('\u0000') : [])
   }, [registerTags, key])
 
   const hidden = slots ? !matchesSelectedTags(tags, slots.selectedTags) : false
