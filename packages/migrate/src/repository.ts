@@ -2116,7 +2116,10 @@ function snippetExportedNames(source: string): Set<string> {
       }
       continue
     }
-    if (!ts.getModifiers(statement as ts.HasModifiers)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) continue
+    const modifiers = ts.getModifiers(statement as ts.HasModifiers)
+    if (!modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) continue
+    // `export default function Foo` binds the default export, not a named `Foo`.
+    if (modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword)) continue
     if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) addBinding(declaration.name)
     else if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) names.add(statement.name.text)
   }

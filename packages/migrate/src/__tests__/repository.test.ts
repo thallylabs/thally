@@ -494,6 +494,13 @@ describe('Mintlify repository migration', () => {
       expect(bundle.componentFiles?.some((file) => file.path.endsWith('/Template.jsx'))).toBe(true)
     })
 
+    it('imports a default-exported component as a default import, never as a named one that would be undefined', () => {
+      const { bundle } = project({ 'snippets/Foo.jsx': 'export default function Foo() { return <b>x</b> }\n' }, '---\ntitle: Home\n---\n\n<Foo />\n')
+      const registry = String(bundle.componentFiles?.find((file) => file.path === 'src/mdx/custom-components.tsx')?.content)
+      expect(registry).toMatch(/import \{ default as Migrated[0-9a-f]+ \} from/)
+      expect(registry).not.toMatch(/import \{ Foo as/)
+    })
+
     it('keeps the plain fallback when two snippets export the same name', () => {
       const { body, messages } = project({ 'snippets/a/Template.jsx': template, 'snippets/b/Template.jsx': template })
       expect(messages.some((message) => message.includes('Unresolved MDX component <Template>'))).toBe(true)
