@@ -12,7 +12,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import { replaceOutsideCodeAndComments } from './mdx.js'
 import { migrateRepository } from './repository.js'
-import type { MigrationAsset, MigrationDocsConfig, MigrationNavigationGroup, MigrationPage, MigrationWarning } from './types.js'
+import type { MigrationAsset, MigrationDocsConfig, MigrationNavigationGroup, MigrationPage, MigrationWarning, RenderedMigrationFile } from './types.js'
 
 /** Per referenced repository: files and bytes under its docs root. Constants on purpose, not configurable. */
 export const SOURCE_REF_MAX_FILES = 5_000
@@ -34,6 +34,8 @@ export interface SourceRefImport extends SourceRefMapping {
   assets: Array<MigrationAsset>
   /** Navigation entries with every page id already prefixed by the mount path. */
   navigation: Array<string | MigrationNavigationGroup>
+  /** Custom component files (and registry) the mounted pages' `<MigratedXXXX/>` tags need; merged into the main bundle. */
+  componentFiles?: Array<RenderedMigrationFile>
   /** Why the import is empty (or partial), plus forwarded pipeline warnings. */
   warnings: Array<MigrationWarning>
 }
@@ -170,7 +172,6 @@ export function importSourceRef(mapping: SourceRefMapping, repositoryDir: string
   const dropped = [
     bundle.remoteApiSpecs?.length ? 'remote OpenAPI specs' : '',
     bundle.assets.some((asset) => asset.projectRelative) ? 'local OpenAPI specs' : '',
-    bundle.componentFiles?.length ? 'custom components' : '',
     bundle.quarantinedFiles?.length || bundle.droppedGatedPages ? 'access-restricted pages' : '',
   ].filter(Boolean)
   if (dropped.length > 0) warnings.push({ code: 'unsupported-config', message: prefix(`Not imported: ${dropped.join(', ')}.`) })
@@ -185,7 +186,7 @@ export function importSourceRef(mapping: SourceRefMapping, repositoryDir: string
   const openApiPages = bundle.pages.length - pages.length
   if (openApiPages > 0) warnings.push({ code: 'skipped-file', message: prefix(`${openApiPages} page(s) bound to an OpenAPI operation were skipped.`) })
   const assets = bundle.assets.filter((asset) => !asset.projectRelative).map((asset) => ({ ...asset, path: mounted(asset.path) }))
-  return { ...mapping, pages, assets, navigation: prefixNavigation(flattenTabs(bundle.docsConfig), mapping.mountPath), warnings }
+  return { ...mapping, pages, assets, ...(bundle.componentFiles?.length ? { componentFiles: bundle.componentFiles } : {}), navigation: prefixNavigation(flattenTabs(bundle.docsConfig), mapping.mountPath), warnings }
 }
 
 /** True when the main site already owns the mount path (a directory or a same-named page file). */

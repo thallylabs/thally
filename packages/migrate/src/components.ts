@@ -6,7 +6,7 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, readFileSync } from 'node:fs'
-import { basename, dirname, extname, relative, resolve } from 'node:path'
+import { basename, dirname, extname, posix, relative, resolve } from 'node:path'
 import postcss from 'postcss'
 import selectorParser from 'postcss-selector-parser'
 import remarkMdx from 'remark-mdx'
@@ -787,6 +787,8 @@ function neutralizeUnresolvableImportsWithoutAst(content: string, currentFile: s
 export function createComponentMigrator(siteRoot: string, confinementRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
   transform: (raw: string, currentFile: string) => string
   files: () => Array<RenderedMigrationFile>
+  /** Merge the component files of another migrated bundle (a sourceRef sub-site) into this one. */
+  adopt: (incoming: ReadonlyArray<RenderedMigrationFile>) => void
 } {
   const root = resolve(siteRoot)
   const confined = resolve(confinementRoot)
@@ -1886,7 +1888,23 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       ].join('\n'),
     }]
   }
-  return { transform, files }
+  // Rendered registry lines look like `import { Imported as MigratedAbc } from "./migrated/<id>/x"`.
+  const REGISTRY_IMPORT = /^import \{ (\w+) as (Migrated[0-9a-f]+) \} from "(\.\/[^"]+)"$/gm
+  function adopt(incoming: ReadonlyArray<RenderedMigrationFile>): void {
+    for (const file of incoming) {
+      if (file.path !== 'src/mdx/custom-components.tsx') {
+        if (!copied.has(file.path)) copied.set(file.path, file)
+        continue
+      }
+      if (typeof file.content !== 'string') continue
+      for (const [, imported, name, specifier] of file.content.matchAll(REGISTRY_IMPORT)) {
+        const base = posix.join('src/mdx', specifier)
+        const path = [...copied.keys()].find((candidate) => candidate.replace(/\.tsx?$/, '') === base) ?? base
+        registrations.set(name, { path, imported })
+      }
+    }
+  }
+  return { transform, files, adopt }
 }
 
 /** Preserve an authored component registry while adding an isolated import map. */

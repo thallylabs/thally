@@ -4701,6 +4701,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     const knownAssets = new Set(assets.map((asset) => asset.path))
     for (const asset of ref.assets) if (!knownAssets.has(asset.path)) sourceRefAssets.push(asset)
+    // Pages keep their `<MigratedXXXX/>` tags, so the sub-site's component
+    // files and registry entries must ship with them (hash ids avoid clashes).
+    if (ref.componentFiles?.length && componentMigrator) componentMigrator.adopt(ref.componentFiles)
     importedSourceRefs.push({ repo: ref.repo, mountPath: ref.mountPath, pages: count })
   }
   if (importedSourceRefs.length > 0) {

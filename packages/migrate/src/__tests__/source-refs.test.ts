@@ -188,3 +188,31 @@ describe('migrateRepository with sourceRefs', () => {
     expect(bundle.warnings.some((warning) => warning.code === 'collision' && warning.message.includes('"introduction"'))).toBe(true)
   })
 })
+
+describe('sourceRef custom components', () => {
+  it('bundles the sub-repository components with the main ones so every Migrated tag is registered', () => {
+    const foo = (label: string): string => `export const Foo = () => <button onClick={() => 1}>${label}</button>\n`
+    const sub = write(tmp(), {
+      'docs.json': JSON.stringify({ navigation: { pages: ['intro'] } }),
+      'intro.mdx': 'import { Foo } from "/snippets/Foo.jsx"\n\n<Foo />\n',
+      'snippets/Foo.jsx': foo('sub'),
+    })
+    const main = mainRepo({
+      'docs.json': JSON.stringify({ navigation: { pages: ['introduction', { sourceRef: 'Acme/ts-sdk' }] } }),
+      'introduction.mdx': 'import { Foo } from "/snippets/Foo.jsx"\n\n<Foo />\n',
+      'snippets/Foo.jsx': foo('main'),
+    })
+    const imported = importSourceRef(MAPPING, sub)
+    const bundle = migrateRepository({ repositoryDir: main, sourceUrl: 'https://github.com/example/docs', platform: 'mintlify', sourceRefs: [imported] })
+    const files = bundle.componentFiles ?? []
+    const registry = String(files.find((file) => file.path === 'src/mdx/custom-components.tsx')?.content)
+    const tags = bundle.pages.flatMap((page) => page.body.match(/<Migrated[0-9a-f]+/g) ?? []).map((tag) => tag.slice(1))
+    expect(bundle.pages.map((page) => page.id)).toContain('client-sdks/typescript/intro')
+    expect(new Set(tags).size).toBe(2)
+    for (const tag of tags) expect(registry).toContain(`  ${tag},`)
+    for (const [, specifier] of registry.matchAll(/^import \{ \w+ as Migrated[0-9a-f]+ \} from "\.\/([^"]+)"$/gm)) {
+      expect(files.some((file) => file.path.replace(/\.tsx?$/, '') === `src/mdx/${specifier}`)).toBe(true)
+    }
+    expect(bundle.warnings.some((warning) => /Not imported:.*custom components/.test(warning.message))).toBe(false)
+  })
+})
