@@ -12,9 +12,11 @@ import {
   useCallback,
   useContext,
   useEffect,
+  startTransition,
   useMemo,
   useState,
 } from 'react'
+import { parseTagsParam, tagsByCount } from '@/lib/update-filters'
 
 interface ViewOption {
   title: string
@@ -31,15 +33,68 @@ interface PageSlotsValue {
   activeView?: string
   setActiveView: (title: string) => void
   registerView: (view: ViewOption) => () => void
+  /** Changelog `<Update tags>` usage counts, and the tags the reader filtered by. */
+  tagCounts: Record<string, number>
+  selectedTags: Array<string>
+  registerTags: (tags: ReadonlyArray<string>) => () => void
+  toggleTag: (tag: string) => void
+  clearTags: () => void
 }
 
 const PageSlotsContext = createContext<PageSlotsValue | null>(null)
+
+/** Like `usePageSlots`, but null outside a provider so standalone renders still work. */
+export function usePageSlotsOptional(): PageSlotsValue | null {
+  return useContext(PageSlotsContext)
+}
+
+function writeTagsParam(tags: ReadonlyArray<string>) {
+  const url = new URL(window.location.href)
+  if (tags.length) url.searchParams.set('tags', tags.join(','))
+  else url.searchParams.delete('tags')
+  window.history.replaceState(window.history.state, '', url.pathname + url.search.replace(/%2C/g, ',') + url.hash)
+}
 
 export function PageSlotsProvider({ children }: { children: ReactNode }) {
   const [panelTarget, setPanelTarget] = useState<HTMLElement | null>(null)
   const [panelCount, setPanelCount] = useState(0)
   const [views, setViews] = useState<Array<ViewOption>>([])
   const [activeView, setActiveViewState] = useState<string>()
+
+  const [tagCounts, setTagCounts] = useState<Record<string, number>>({})
+  const [selectedTags, setSelectedTags] = useState<Array<string>>([])
+
+  // Read the shared filter after hydration so server and client markup match.
+  useEffect(() => {
+    const fromUrl = parseTagsParam(window.location.search)
+    if (fromUrl.length) startTransition(() => setSelectedTags(fromUrl))
+  }, [])
+
+  const registerTags = useCallback((tags: ReadonlyArray<string>) => {
+    setTagCounts((current) => {
+      const next = { ...current }
+      for (const tag of tags) next[tag] = (next[tag] ?? 0) + 1
+      return next
+    })
+    return () => setTagCounts((current) => {
+      const next = { ...current }
+      for (const tag of tags) next[tag] = (next[tag] ?? 0) - 1
+      return next
+    })
+  }, [])
+
+  const toggleTag = useCallback((tag: string) => {
+    setSelectedTags((current) => {
+      const next = current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]
+      writeTagsParam(next)
+      return next
+    })
+  }, [])
+
+  const clearTags = useCallback(() => {
+    setSelectedTags([])
+    writeTagsParam([])
+  }, [])
 
   const registerPanel = useCallback(() => {
     setPanelCount((count) => count + 1)
@@ -73,7 +128,12 @@ export function PageSlotsProvider({ children }: { children: ReactNode }) {
     activeView,
     setActiveView,
     registerView,
-  }), [activeView, panelCount, panelTarget, registerPanel, registerView, setActiveView, views])
+    tagCounts,
+    selectedTags,
+    registerTags,
+    toggleTag,
+    clearTags,
+  }), [activeView, clearTags, panelCount, panelTarget, registerPanel, registerTags, registerView, selectedTags, setActiveView, tagCounts, toggleTag, views])
 
   return <PageSlotsContext.Provider value={value}>{children}</PageSlotsContext.Provider>
 }
@@ -93,11 +153,46 @@ export function PagePanelSlot({
   fallback: ReactNode
   footer?: ReactNode
 }) {
-  const { panelCount, setPanelTarget } = usePageSlots()
+  const { panelCount, setPanelTarget, tagCounts } = usePageSlots()
+  // A changelog with tagged updates swaps the table of contents for its filters.
+  const hasTags = tagsByCount(tagCounts).length > 0
   return (
     <div className="sticky top-[82px] max-h-[calc(100dvh-82px)] overflow-y-auto">
-      <div ref={setPanelTarget}>{panelCount === 0 ? fallback : null}</div>
+      <div ref={setPanelTarget}>{panelCount === 0 ? (hasTags ? <UpdateFilterPanel /> : fallback) : null}</div>
       {footer}
+    </div>
+  )
+}
+
+/** Right-rail tag chips for a changelog; chips toggle, any selected tag shows an entry. */
+function UpdateFilterPanel() {
+  const { tagCounts, selectedTags, toggleTag, clearTags } = usePageSlots()
+  return (
+    <div className="space-y-4 text-sm" id="changelog-filters">
+      <div className="flex items-center justify-between">
+        <span className="font-medium text-foreground/80">Filters</span>
+        {selectedTags.length ? (
+          <button type="button" onClick={clearTags} className="rounded-full px-3 text-sm font-medium text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+            Clear
+          </button>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {tagsByCount(tagCounts).map((tag) => {
+          const pressed = selectedTags.includes(tag)
+          return (
+            <button
+              key={tag}
+              type="button"
+              aria-pressed={pressed}
+              onClick={() => toggleTag(tag)}
+              className={`rounded-full px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${pressed ? 'bg-accent text-accent-foreground' : 'bg-muted text-foreground/70 hover:bg-muted/70'}`}
+            >
+              {tag}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }

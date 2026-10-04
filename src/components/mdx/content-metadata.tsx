@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { Link as LinkIcon } from 'lucide-react'
+import { UpdateArticle } from '@/components/mdx/update-article'
 import { Badge } from '@/components/mdx/content-inline'
 import { cn } from '@/lib/utils'
 export { Color } from '@/components/mdx/color'
@@ -27,7 +28,7 @@ export function Update({ label, date, id, title, description, tags, children, cl
   const normalizedTags = typeof tags === 'string' ? tags.split(',').map((tag) => tag.trim()).filter(Boolean) : tags
 
   return (
-    <article id={anchorId} className={cn('not-prose group/update relative my-0 border-l border-border pb-10 pl-7 last:pb-0', className)}>
+    <UpdateArticle id={anchorId} className={cn('not-prose group/update relative my-0 border-l border-border pb-10 pl-7 last:pb-0', className)} tags={normalizedTags ?? []}>
       <span className="absolute -left-[5px] top-2 h-2.5 w-2.5 rounded-full border-2 border-background bg-accent ring-1 ring-border" aria-hidden="true" />
       {(label || date || title || normalizedTags?.length) ? (
         <header className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -40,6 +41,6 @@ export function Update({ label, date, id, title, description, tags, children, cl
         </header>
       ) : null}
       <div className="prose prose-sm text-foreground/80 dark:prose-invert">{children}</div>
-    </article>
+    </UpdateArticle>
   )
 }
