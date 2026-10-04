@@ -214,8 +214,8 @@ same-length nested fence is widened so the inner fence no longer closes it, and
 a bare placeholder tag in prose (`<Feature> requires a plan`) that would stop
 the page compiling is escaped as text rather than losing the page.
 The Mintlify `search-bar-entry` click trigger is mapped to Thally's search
-shortcut. Markdown mixed inside interactive JSX, computed imports, and
-namespace imports are reported for manual review; unsupported source is
+shortcut. Markdown mixed inside interactive JSX and computed imports are
+reported for manual review; unsupported source is
 preserved, not replaced with empty stubs. An external package's JSX usage is
 dropped and replaced with a safe fallback (with a warning); if that package's
 binding is instead referenced outside JSX (an expression, a prop, or an
@@ -237,6 +237,30 @@ Next) and copied into any extracted client module. A source site's own
 passes a page-authored function into a client component needs the client
 wrapper described above; unsupported callback shapes retain their content
 with a warning. An unconfirmed target is warned for review.
+Other relative imports of a copied file are handled the same way: a namespace
+import (`import * as X from './comp.jsx'`) and a dynamic `import('./comp.jsx')`
+point at the copied module, and a relative side-effect import
+(`import './styles.css'`) is removed with a warning, like one from an npm
+package. A page is excluded only when the relative target is not copied (for
+example a Next.js `./metadata` module, or an `export ... from` re-export), with
+a single warning naming it. An MDX expression that names an identifier the page
+never defines (`{missing}`) is removed with a warning, since it would throw at
+render; define the name or escape the braces as `\{ \}` to keep the text.
+A value import from a local snippet (`import { FEE, fee } from
+'/snippets/c.mdx'`) is inlined when each name is a static value (string,
+number, boolean, `null`, or an object/array of those) or a self-contained
+function. Inlined functions may only use pure built-ins (`Math`, `JSON`,
+`String`, `Number`, `Boolean`, `Array`, `Date`, `Intl`, `parseInt`,
+`parseFloat`, `isNaN`, `isFinite`, `encodeURIComponent` and
+`decodeURIComponent`) and may not reach
+`Function`, constructors, `globalThis`, `fetch` or other globals; anything else
+is not inlined. A name the snippet does not export, or one that cannot be
+inlined, is bound to `undefined` (as Mintlify does for a missing export) with a
+warning, while the other names of the same import are still inlined. A snippet
+import that resolves outside the repository through a symlink is refused, and a
+snippet whose frontmatter cannot be read is not inlined (left as a comment with
+a warning). Mintlify `sourceRef` navigation nodes have no Thally equivalent and
+are reported rather than migrated.
 File paths cannot escape the repository checkout; symlinks and oversized
 graphs are rejected. This is compatibility analysis, **not a code sandbox**:
 imported JavaScript executes when the developer builds or runs the resulting
