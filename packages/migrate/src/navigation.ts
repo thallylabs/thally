@@ -42,6 +42,12 @@ export interface MintlifyNavigationResult {
 export interface MintlifyProjectionOptions {
   /** Public URL migrations may expose page hrefs including the docs mount path. */
   pathPrefix?: string
+  /**
+   * Resolves a `sourceRef` repository (`owner/repo`) to the navigation entries
+   * of its imported docs, already prefixed with their mount path. Returns null
+   * when the repository was not mapped with `--source-ref`.
+   */
+  resolveSourceRef?: (repo: string) => Array<string | MigrationNavigationGroup> | null
 }
 
 /** Preserve Mintlify's implicit `/section` route for section landing pages. */
@@ -470,6 +476,7 @@ interface ProjectionContext {
   locale?: string
   defaultPageIds?: ReadonlySet<string>
   pathPrefix?: string
+  resolveSourceRef?: MintlifyProjectionOptions['resolveSourceRef']
   references: Array<MintlifyPageReference>
   seenReferences: Set<string>
   warnings: Array<MigrationWarning>
@@ -610,12 +617,16 @@ function convertPageObject(
     return null
   }
   if (typeof object.sourceRef === 'string') {
+    const imported = context.resolveSourceRef?.(object.sourceRef)
+    // Directly inside a group the entries are spliced into it (see below);
+    // anywhere else they get a group named after the repository.
+    if (imported) return { group: object.sourceRef.split('/').pop() ?? object.sourceRef, pages: imported }
     const where = context.groupLabel ? `the "${context.groupLabel}" navigation group` : 'the navigation'
     warnOnce(
       context,
       `source-ref:${context.groupLabel ?? ''}:${object.sourceRef}`,
       `Navigation in ${where} mounts the docs of the repository ${object.sourceRef} (sourceRef). `
-        + 'Those pages were not migrated; copy them into this project manually.',
+        + `Those pages were not migrated; pass --source-ref ${object.sourceRef}=<path> to import them.`,
     )
     return null
   }
@@ -630,6 +641,12 @@ function convertPageObject(
     }
     try {
       for (const page of pages) {
+        const sourceRef = objectValue(page)?.sourceRef
+        const imported = typeof sourceRef === 'string' ? context.resolveSourceRef?.(sourceRef) : null
+        if (imported) {
+          children.push(...imported)
+          continue
+        }
         const converted = convertPage(page, context)
         if (converted) children.push(converted)
       }
@@ -1316,6 +1333,7 @@ export function projectMintlifyNavigation(
         locale,
         defaultPageIds,
         pathPrefix: options.pathPrefix,
+        resolveSourceRef: options.resolveSourceRef,
         references,
         seenReferences,
         warnings,
@@ -1337,7 +1355,7 @@ export function projectMintlifyNavigation(
     }
     if (Object.keys(localizedNavigation).length > 0) i18n.navigation = localizedNavigation
   } else {
-    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, gated, pathPrefix: options.pathPrefix }
+    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, gated, pathPrefix: options.pathPrefix, resolveSourceRef: options.resolveSourceRef }
     tabs = convertContainerToTabs(navigation, context, 'Documentation', projectionTrace)
     if (tabs.length === 0 && Array.isArray(config.navigation)) {
       const children = convertNavigationValues(config.navigation, context)

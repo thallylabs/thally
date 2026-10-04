@@ -755,6 +755,31 @@ describe('Mintlify sourceRef navigation nodes', () => {
     expect(messages.some((message) => message.includes('OpenRouterTeam/typescript-sdk') && message.includes('"SDKs"'))).toBe(true)
     expect(messages.some((message) => message.includes('OpenRouterTeam/python-sdk') && message.includes('"SDKs"'))).toBe(true)
     expect(messages.some((message) => message.includes('OpenRouterTeam/typescript-sdk') && message.includes('"Only remote"'))).toBe(true)
-    expect(messages.every((message) => message.includes('not migrated') && message.includes('copy'))).toBe(true)
+    expect(messages.every((message) => message.includes('not migrated') && message.includes('--source-ref OpenRouterTeam/'))).toBe(true)
   })
+
+  it('splices the resolved navigation into the parent group and keeps its label and icon', () => {
+    const resolved: Array<string> = []
+    const result = projectMintlifyNavigation({
+      navigation: {
+        tabs: [{
+          tab: 'SDKs',
+          groups: [{ group: 'TypeScript SDK', icon: 'code', expanded: false, pages: [{ sourceRef: 'OpenRouterTeam/typescript-sdk' }] }],
+        }],
+      },
+    }, {
+      resolveSourceRef: (repo) => {
+        resolved.push(repo)
+        return ['client-sdks/typescript/overview', { group: 'Chat', pages: ['client-sdks/typescript/sdks/chat/README'] }]
+      },
+    })
+    expect(resolved).toEqual(['OpenRouterTeam/typescript-sdk'])
+    expect(result.warnings.filter((warning) => warning.message.includes('sourceRef'))).toHaveLength(0)
+    expect(result.docsConfig.tabs[0].groups).toEqual([{
+      group: 'TypeScript SDK',
+      icon: 'code',
+      pages: ['client-sdks/typescript/overview', { group: 'Chat', pages: ['client-sdks/typescript/sdks/chat/README'] }],
+    }])
+  })
+
 })
