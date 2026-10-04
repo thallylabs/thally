@@ -195,16 +195,26 @@ Without a mapping the node is skipped with a warning that names the flag.
 - Root-absolute links inside those pages (`/models/x`, `/images/x.png`) are prefixed
   with the mount path (sub-site semantics: Mintlify's behavior here is not
   documented, so this is an assumption). Relative links work as-is.
-- Only pages and navigation are imported. Branding, colors, redirects, OpenAPI specs,
-  custom components and access-restricted pages of the referenced repository are
-  ignored (one warning says so).
+- Pages, navigation, assets and the referenced repository's custom components are
+  imported. Its components are bundled with the main site's under `src/mdx/migrated/`
+  and registered in `src/mdx/custom-components.tsx`; their content-hashed names cannot
+  clash with the main site's. Branding, colors, redirects, OpenAPI specs and
+  access-restricted pages of the referenced repository are ignored (one warning says
+  so). Access-restricted pages and the files only they use are withheld from the site
+  and are not saved anywhere (the main site saves its own under `migration-quarantine/`;
+  a referenced repository's are discarded), so recover them from that repository if
+  needed.
 - Safety limits per referenced repository, fixed constants: 5,000 files and 50 MB under
   the docs root. Over a limit the whole repository is refused, never imported
   partially. Symlinks and dot-directories are removed before import, and a docs
-  directory that resolves outside the clone is refused. `repo` must match
-  `owner/repo`; the mount path must be a relative lowercase slug path (no `..`, no
-  leading slash), must not collide with an existing page or directory of the main
-  site, and mappings must not overlap.
+  directory that resolves outside the clone is refused. A repository GitHub reports as
+  larger than 200 MB is refused before cloning (if the GitHub API is unreachable the
+  clone proceeds and the limits above still apply), its submodules are not fetched,
+  and a `docs.json` over 1 MB is ignored. `repo` must match `owner/repo`; the mount
+  path must be a relative lowercase slug path (no `..`, no leading slash), must not
+  start with a name the site itself uses (`api`, `admin`, `_next`, `public`,
+  `llms.txt`, `sitemap.xml`, ...), must not collide with an existing page or directory
+  of the main site, and mappings must not overlap.
 - A mapping that matches no `sourceRef` in the navigation is reported and imports
   nothing. `migration-report.json` lists each imported repository with its page count
   under `sourceRefs`.
