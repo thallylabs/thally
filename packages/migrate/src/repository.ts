@@ -4625,6 +4625,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       return sameName ? 'the file could not be read as an OpenAPI document' : `no file exists at "${key}"`
     }
     rewriteMintlifyPageSpecRefs(pages, pageSpecs, new Set(remoteApiSpecs.map((spec) => spec.url)), warnings, explainMissingSpec)
+    // Mintlify operation pages carry no "OpenAPI specification" line.
+    if (docsConfig.tabs.some((tab) => tab.api)) docsConfig = { ...docsConfig, api: { ...docsConfig.api, specLink: false } }
   }
   if (platform === 'mintlify') {
     const sources = new Set((docsConfig.redirects ?? []).map((redirect) => redirect.source))
