@@ -5,6 +5,6 @@ export function revealActiveLink(nav: HTMLElement | null): void {
   const area = nav.getBoundingClientRect()
   const box = link.getBoundingClientRect()
   if (box.top >= area.top && box.bottom <= area.bottom) return
-  // Instant jump: no animation to suppress for reduced-motion readers and none on first load.
-  link.scrollIntoView({ block: 'center', behavior: 'instant' })
+  // Centre the link by moving only the sidebar: scrollIntoView would also scroll every ancestor, the page itself included.
+  nav.scrollTop += (box.top - area.top) - (area.height - box.height) / 2
 }
