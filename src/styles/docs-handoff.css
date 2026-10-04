@@ -888,7 +888,7 @@ html[data-icon-library='tabler'] .thally-icon[data-icon-source='lucide'] > .thal
     display: none;
   }
 
-  /* Plain text links (Mintlify navbar.links) keep their label; only the icon-led repo link collapses. */
+  /* navbar.links entries (text links and buttons) keep their label; only the icon-led repo link collapses. */
   .thally-docs-topbar-link:not([data-topbar-text]) span {
     display: none;
   }

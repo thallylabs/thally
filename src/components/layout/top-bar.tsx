@@ -157,7 +157,7 @@ export function TopBar({
         {i18nConfig && i18nConfig.locales.length >= 2 ? (
           <LocaleSwitcher locales={i18nConfig.locales} availableLocales={availableLocales ?? [i18nConfig.defaultLocale]} currentLocale={currentLocale ?? i18nConfig.defaultLocale} currentPath={currentPath ?? '/'} defaultLocale={i18nConfig.defaultLocale} />
         ) : null}
-        <div className="thally-docs-actions ml-auto flex shrink-0 items-center gap-2">
+        <div className="thally-docs-actions ml-auto flex min-w-0 items-center gap-2">
           <div className="thally-docs-search shrink-0">
             <CommandSearch locale={currentLocale} />
           </div>
@@ -178,15 +178,15 @@ export function TopBar({
           ) : null}
           {githubPrimary ? <GithubRepoLink href={githubPrimary.href} label={githubPrimary.label} /> : null}
           {navbarConfig?.links
-            ? navbarLinks.map((link) => {
+            ? <div className="thally-docs-navlinks flex min-w-0 items-center gap-2 overflow-hidden">{navbarLinks.map((link) => {
                 const isExternal = /^https?:\/\//.test(link.href)
                 return (
-                  <a key={link.href} href={link.href} target={isExternal ? '_blank' : undefined} rel={isExternal ? 'noreferrer' : undefined} aria-label={link.label} title={link.label} data-topbar-link data-topbar-text={link.button ? undefined : ''} style={link.button ? { backgroundColor: safeCssColor(link.button.background), color: safeCssColor(link.button.color) ?? '#fff' } : undefined} className={cn('thally-docs-topbar-link inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-[10px] px-2 text-[0.86rem] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground', link.button && 'px-[15px] font-semibold hover:brightness-110')}>
+                  <a key={link.href} href={link.href} target={isExternal ? '_blank' : undefined} rel={isExternal ? 'noreferrer' : undefined} aria-label={link.label} title={link.label} data-topbar-link data-topbar-text="" style={link.button ? { backgroundColor: safeCssColor(link.button.background), color: safeCssColor(link.button.color) ?? '#fff' } : undefined} className={cn('thally-docs-topbar-link inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-[10px] px-2 text-[0.86rem] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground', link.button && 'px-[15px] font-semibold hover:brightness-110')}>
                     {isExternal && !link.button ? <ExternalLink className="h-3.5 w-3.5" /> : null}
                     <span>{link.label}</span>
                   </a>
                 )
-              })
+              })}</div>
             : supportLink ? (
                 <IntentPrefetchLink href={supportLink.href} className="thally-docs-topbar-link hidden whitespace-nowrap text-[0.86rem] font-medium text-foreground/70 hover:text-foreground sm:inline-flex">{supportLink.label}</IntentPrefetchLink>
               ) : null}
