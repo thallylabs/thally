@@ -161,6 +161,22 @@ function flattenTabs(config: MigrationDocsConfig): Array<string | MigrationNavig
   })
 }
 
+/**
+ * A sub-repository's quarantined files are discarded, so its warnings must not
+ * claim they were saved. Rewrites each quarantine wording the pipeline uses.
+ */
+export function withheldNotSaved(message: string): string {
+  return message
+    .replace(/ and saved under migration-quarantine\/ \(local only[^)]*\)/g, ' (not saved)')
+    .replace(/ and saved under migration-quarantine\/assets\//g, ' (not saved)')
+    .replace(/, so it was NOT published and was not saved under migration-quarantine\/;/g, ', so it was NOT published and is not saved;')
+    .replace(/, so it was not copied to migration-quarantine\/;/g, ', so it is not saved;')
+    .replace(/The original is saved at migration-quarantine\/[^;]*;/g, 'It is withheld from the site (not saved);')
+    .replace(/; review migration-quarantine\/assets\/ and copy any that published pages need\./g, '; they are withheld from the site (not saved).')
+    .replace(/Copy any that published pages need from migration-quarantine\/assets\/ into public\/ by hand\./g, 'They are withheld from the site (not saved); recover any that published pages need from the referenced repository.')
+    .replace(/migration-quarantine\/\S*/g, 'withheld from the site (not saved)')
+}
+
 function empty(mapping: SourceRefMapping, message: string): SourceRefImport {
   return { ...mapping, pages: [], assets: [], navigation: [], warnings: [{ code: 'skipped-file', message: `sourceRef ${mapping.repo} was not imported: ${message}` }] }
 }
@@ -186,7 +202,7 @@ export function importSourceRef(mapping: SourceRefMapping, repositoryDir: string
     platform: 'mintlify',
   })
   const prefix = (message: string): string => `[${mapping.repo}] ${message}`
-  const warnings: Array<MigrationWarning> = bundle.warnings.filter((warning) => !/dashboard access settings/i.test(warning.message)).slice(0, MAX_FORWARDED_WARNINGS).map((warning) => ({ ...warning, message: prefix(warning.message) }))
+  const warnings: Array<MigrationWarning> = bundle.warnings.filter((warning) => !/dashboard access settings/i.test(warning.message)).slice(0, MAX_FORWARDED_WARNINGS).map((warning) => ({ ...warning, message: prefix(withheldNotSaved(warning.message)) }))
   if (bundle.warnings.length > MAX_FORWARDED_WARNINGS) {
     warnings.push({ code: 'unsupported-config', message: prefix(`${bundle.warnings.length - MAX_FORWARDED_WARNINGS} more migration warnings were omitted.`) })
   }

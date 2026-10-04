@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import { importSourceRef, migrateRepository, parseSourceRefFlags } from '../index.js'
-import { prefixRootLinks, SOURCE_REF_MAX_FILES, SOURCE_REF_MAX_REPOSITORY_KB, sourceRefOversizeReason } from '../source-refs.js'
+import { prefixRootLinks, SOURCE_REF_MAX_FILES, SOURCE_REF_MAX_REPOSITORY_KB, sourceRefOversizeReason, withheldNotSaved } from '../source-refs.js'
 import type { MigrationFetcher } from '../types.js'
 
 function write(root: string, files: Record<string, string>): string {
@@ -215,6 +215,36 @@ describe('sourceRef custom components', () => {
       expect(files.some((file) => file.path.replace(/\.tsx?$/, '') === `src/mdx/${specifier}`)).toBe(true)
     }
     expect(bundle.warnings.some((warning) => /Not imported:.*custom components/.test(warning.message))).toBe(false)
+  })
+})
+
+describe('sourceRef quarantine wording', () => {
+  it('never claims a withheld sub-repository file was saved', () => {
+    const repo = write(tmp(), {
+      'docs.json': JSON.stringify({ navigation: { pages: ['intro', 'secret'] } }),
+      'intro.mdx': '---\ntitle: I\n---\nhi ![](/images/pub.png)',
+      'secret.mdx': '---\ntitle: S\ngroups: [admin]\n---\nSECRET ![](/images/priv.png)',
+      'images/pub.png': 'x',
+      'images/priv.png': 'y',
+      'images/orphan.png': 'z',
+    })
+    const result = importSourceRef(MAPPING, repo)
+    const messages = result.warnings.map((warning) => warning.message)
+    expect(messages.some((message) => /access-restricted page\(s\) were withheld from the published site \(not saved\)/.test(message))).toBe(true)
+    expect(messages.filter((message) => message.includes('migration-quarantine'))).toEqual([])
+    expect(messages.some((message) => /saved under|is saved at/.test(message))).toBe(false)
+  })
+
+  it.each([
+    ['Access-restricted on the source site (groups), so it was NOT published. The original is saved at migration-quarantine/a.mdx; links will break.', /It is withheld from the site \(not saved\); links will break/],
+    ['Access-restricted page (x) was dropped by the file limit, so it was NOT published and was not saved under migration-quarantine/; recover it.', /is not saved; recover it/],
+    ['Access-restricted page (x) could not be read, so it was not copied to migration-quarantine/; recover it.', /is not saved; recover it/],
+    ['Copy any that published pages need from migration-quarantine/assets/ into public/ by hand.', /not saved/],
+    ['2 unreferenced asset(s) were kept out of public/ because x; review migration-quarantine/assets/ and copy any that published pages need. Z', /not saved\)\. Z/],
+  ])('rewrites %s', (message, expected) => {
+    const rewritten = withheldNotSaved(message)
+    expect(rewritten).not.toContain('migration-quarantine')
+    expect(rewritten).toMatch(expected)
   })
 })
 
