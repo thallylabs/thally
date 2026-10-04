@@ -890,6 +890,8 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // registered component or consume the successful-copy budget.
     const staged = new Map<string, RenderedMigrationFile>()
     const stagedWarnings: Array<{ path: string; omitted: number }> = []
+    /** Code modules awaiting their final prologue: client-ness is settled over the whole graph (see below). */
+    const modules = new Map<string, { local: boolean; dependencies: Array<string>; render: (client: boolean) => string }>()
     let stagedBytes = 0
     /** Stage a small fixed-content shim module (see `DOCUSAURUS_THEME_SHIMS`) once, reused across every component that imports it. */
     function stageShim(filename: string, content: string): string {
@@ -936,6 +938,13 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       if (ast.statements.some((statement) => ts.isExpressionStatement(statement)
         && ts.isStringLiteral(statement.expression) && statement.expression.text === 'use server')) throw new Error('server-only component modules require manual migration')
       const edits: Array<Replacement> = []
+      const dependencies: Array<string> = []
+      // Our own prologue re-adds the directive, so drop the source's to avoid a duplicate.
+      for (const statement of ast.statements) {
+        if (ts.isExpressionStatement(statement) && ts.isStringLiteral(statement.expression) && statement.expression.text === 'use client') {
+          edits.push({ start: statement.getStart(ast), end: statement.end, value: '' })
+        }
+      }
       function dependency(literal: ts.StringLiteralLike, importDeclaration?: ts.ImportDeclaration): void {
         const specifier = literal.text
         if (SHARED_IMPORTS.has(specifier) || isScaffoldProvidedImport(specifier)) return
@@ -961,6 +970,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         const shim = DOCUSAURUS_THEME_SHIMS[specifier]
         if (shim) {
           const shimPath = stageShim(shim.filename, shim.content)
+          dependencies.push(shimPath)
           const nextPath = relative(dirname(destination), shimPath).replace(/\\/g, '/')
           edits.push({ start: literal.getStart(ast), end: literal.end, value: JSON.stringify(portableSpecifier(nextPath.startsWith('.') ? nextPath : `./${nextPath}`)) })
           return
@@ -972,6 +982,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         }
         const target = resolveDependency(specifier, path)
         visit(target)
+        dependencies.push(outputPath(target))
         const nextPath = relative(dirname(destination), outputPath(target)).replace(/\\/g, '/')
         edits.push({ start: literal.getStart(ast), end: literal.end, value: JSON.stringify(portableSpecifier(nextPath.startsWith('.') ? nextPath : `./${nextPath}`)) })
       }
@@ -1009,15 +1020,35 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       // file. If the copied source starts with one, keep it first and
       // insert the prologue right after instead.
       const shebangMatch = /^#!.*\r?\n/.exec(replaced)
-      const prologue = `// @ts-nocheck\n${needsClientBoundary(ast) ? "'use client';\n" : ''}\n`
-      staged.set(destination, {
-        path: destination,
-        content: shebangMatch
-          ? shebangMatch[0] + prologue + implicitReactImports(ast) + '\n' + replaced.slice(shebangMatch[0].length)
-          : prologue + implicitReactImports(ast) + '\n' + replaced,
+      modules.set(destination, {
+        local: needsClientBoundary(ast),
+        dependencies,
+        render: (client) => {
+          const prologue = `// @ts-nocheck\n${client ? "'use client';\n" : ''}\n`
+          return shebangMatch
+            ? shebangMatch[0] + prologue + implicitReactImports(ast) + '\n' + replaced.slice(shebangMatch[0].length)
+            : prologue + implicitReactImports(ast) + '\n' + replaced
+        },
       })
     }
     visit(entry)
+    // A client module's importers must be client modules too: a server module
+    // calling a function exported by a client module fails at render ("Attempted
+    // to call fmt() from the server"). Settle that to a fixpoint over the graph;
+    // a module imported from an earlier graph is judged by its emitted directive.
+    const clientModules = new Set([...modules].filter(([, module]) => module.local).map(([path]) => path))
+    const isClient = (path: string): boolean => clientModules.has(path)
+      || (!modules.has(path) && /^\s*(?:\/\/[^\n]*\n\s*)*['"]use client['"]/.test(String((copied.get(path) ?? staged.get(path))?.content ?? '')))
+    for (let changed = true; changed;) {
+      changed = false
+      for (const [path, module] of modules) {
+        if (!clientModules.has(path) && module.dependencies.some(isClient)) {
+          clientModules.add(path)
+          changed = true
+        }
+      }
+    }
+    for (const [path, module] of modules) staged.set(path, { path, content: module.render(clientModules.has(path)) })
     for (const [path, file] of staged) copied.set(path, file)
     for (const { path, omitted } of stagedWarnings) {
       warn(`Site-authored CSS module ${relative(root, path).replace(/\\/g, '/')} has ${omitted} global-only selector branch(es) that cannot be copied into Thally CSS Modules; those styles were omitted.`, path)

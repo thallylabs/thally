@@ -820,6 +820,26 @@ describe('repository component migration', () => {
     for (const name of Object.keys(pure)) expect(content(name), name).not.toContain('use client')
   })
 
+  it('makes every module that imports a client module a client module, and leaves a pure Template untouched', () => {
+    const root = fixture({
+      'src/util.js': 'export const fmt = (key) => localStorage.getItem(key)\n',
+      'src/Foo.jsx': 'import { fmt } from "./util.js"\nexport const Foo = () => <p>{fmt("a")}</p>\n',
+      'src/Outer.jsx': 'import { Foo } from "./Foo.jsx"\nexport const Outer = () => <Foo />\n',
+      'src/theme.js': 'import { useState } from "react"\nexport default function theme() { return useState("a")[0] }\n',
+      'src/Themed.jsx': 'import theme from "./theme.js"\nexport const Themed = () => <p>{theme()}</p>\n',
+      'src/Directive.jsx': "'use client'\nexport const Directive = () => <p>x</p>\n",
+      'src/Template.jsx': 'export const Template = ({ children }) => <>{children}</>\n',
+      'src/Wrapper.jsx': 'import { Template } from "./Template.jsx"\nexport const Wrapper = ({ children }) => <Template>{children}</Template>\n',
+    })
+    const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+    const names = ['Outer', 'Themed', 'Directive', 'Wrapper']
+    migrator.transform([...names.map((name) => `import { ${name} } from './src/${name}.jsx'`), '', ...names.map((name) => `<${name} />`)].join('\n'), join(root, 'index.mdx'))
+    const content = (name: string) => String(migrator.files().find((file) => file.path.endsWith(`/${name}.${name === 'util' || name === 'theme' ? 'js' : 'jsx'}`))!.content)
+    for (const name of ['util', 'Foo', 'Outer', 'theme', 'Themed']) expect(content(name), name).toContain("'use client';")
+    for (const name of ['Template', 'Wrapper']) expect(content(name), name).not.toContain('use client')
+    expect(content('Directive').match(/use client/g)).toHaveLength(1)
+  })
+
   it('keeps a leading shebang on line 1 instead of burying it under the @ts-nocheck prologue', () => {
     const root = fixture({
       'src/Script.tsx': '#!/usr/bin/env node\nexport default function Script() { return null; }',
