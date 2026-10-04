@@ -126,7 +126,7 @@ export default async function ApiReferencePage({ params }: PageProps) {
           </p>
         ) : null}
         <JsonLdScript data={jsonLd} />
-        <OperationPanel operation={node.operation} playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
+        <OperationPanel operation={node.operation} showTitle playground={resolvePlaygroundDisplay(undefined, getApiPlaygroundDisplay())} />
       </ApiLayout>
     )
   }
