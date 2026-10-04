@@ -2503,8 +2503,8 @@ function snippetExportIndex(files: Array<ScannedFile>): Map<string, Set<string>>
     try {
       if (lstatSync(file.absolutePath).size > MAX_PAGE_BYTES) continue
       source = readFileSync(file.absolutePath, 'utf8')
-    } catch { continue }
-    for (const name of snippetExportedNames(source)) add(name, file.absolutePath)
+      for (const name of snippetExportedNames(source)) add(name, file.absolutePath)
+    } catch { continue } // unreadable or unparseable (a pathological file can overflow the parser): not a candidate
     if (extension !== '.mdx') {
       const parsed = ts.createSourceFile('snippet.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
       const hasDefault = parsed.statements.some((statement) => (ts.isExportAssignment(statement) && !statement.isExportEquals)
