@@ -49,6 +49,9 @@ describe('fully readable collection tabs', () => {
     const [withIcon, plain] = html.split('</a>')
     expect(withIcon).toMatch(/<svg[\s\S]*<span title="Docs">Docs<\/span>/)
     expect(plain).not.toContain('<svg')
+    // Logical margin, so the gap sits on the correct side in right-to-left layouts.
+    expect(withIcon).toMatch(/class="[^"]*\bme-1\.5\b/)
+    expect(withIcon).not.toContain('mr-1.5')
   })
 
   it('keeps an empty collection list safe for CSS division', () => {

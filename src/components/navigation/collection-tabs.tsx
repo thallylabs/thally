@@ -36,7 +36,7 @@ export function CollectionTabs({ collections, activeCollectionId, onCollectionCh
         // them. A narrow desktop wraps whole links instead of losing words.
         const label = (
           <>
-            {collection.icon ? <Icon icon={collection.icon} className="mr-1.5 h-4 w-4 shrink-0 self-center" /> : null}
+            {collection.icon ? <Icon icon={collection.icon} className="me-1.5 h-4 w-4 shrink-0 self-center" /> : null}
             <span title={collection.label}>{collection.label}</span>
           </>
         )
