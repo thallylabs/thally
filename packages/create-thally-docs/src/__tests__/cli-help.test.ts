@@ -31,6 +31,15 @@ describe('migrate --source-ref', () => {
   })
 })
 
+describe('migrate --source-ref without a value', () => {
+  it.each([[['--source-ref']], [['--source-ref', '--yes']]])('fails clearly for %j', (extra) => {
+    const result = runCli('migrate', 'https://github.com/example/docs', ...extra)
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('--source-ref needs a value')
+  })
+})
+
 describe('create-thally-docs help', () => {
   it.each(['--version', '-v', '-V', 'version'])('prints the package version for %s', (argument) => {
     const result = runCli(argument)

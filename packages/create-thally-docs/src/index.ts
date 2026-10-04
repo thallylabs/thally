@@ -241,9 +241,14 @@ async function runMigrateCommand(): Promise<void> {
   console.log(`  Platform: ${platform ?? 'auto-detect'}`)
   console.log('')
 
-  const sourceRefValues = args.flatMap((arg, index) => arg === '--source-ref' && index + 1 < args.length ? [args[index + 1]] : [])
   let sourceRefs: Array<SourceRefMapping>
   try {
+    const sourceRefValues = args.flatMap((arg, index) => {
+      if (arg !== '--source-ref') return []
+      const value = args[index + 1]
+      if (value === undefined || value.startsWith('-')) throw new Error('--source-ref needs a value such as owner/repo=client-sdks/typescript.')
+      return [value]
+    })
     sourceRefs = parseSourceRefFlags(sourceRefValues)
   } catch (err) {
     console.error(`\n  ❌ ${err instanceof Error ? err.message : err}`)

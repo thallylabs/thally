@@ -26,6 +26,12 @@ const MAX_FORWARDED_WARNINGS = 50
 const REPO_PATTERN = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
 const MOUNT_PATTERN = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/
 
+/** First mount segments the site already serves (src/app routes, scaffold public/ folders, root files); a mount there would shadow or be shadowed. */
+const RESERVED_MOUNT_SEGMENTS: ReadonlySet<string> = new Set([
+  'api', 'admin', 'access', 'changelog', '_next', '_thally', 'public', 'static', 'brand', 'fonts', 'images',
+  'llms.txt', 'llms-full.txt', 'ai.txt', 'robots.txt', 'sitemap.xml', 'sitemap.ts', 'openapi.json', 'openapi.yaml', 'skill.md', 'icon.png', 'favicon.ico',
+])
+
 export interface SourceRefMapping {
   /** `owner/repo`, exactly as written in the source navigation. */
   repo: string
@@ -51,11 +57,15 @@ export function parseSourceRefFlags(values: ReadonlyArray<string>): Array<Source
     const separator = value.indexOf('=')
     const repo = separator < 0 ? value : value.slice(0, separator)
     const mountPath = separator < 0 ? '' : value.slice(separator + 1)
-    if (!REPO_PATTERN.test(repo) || repo.includes('..')) {
+    if (!REPO_PATTERN.test(repo) || repo.includes('..') || repo.split('/')[1] === '.' || repo.endsWith('.git')) {
       throw new Error(`--source-ref "${value}": the repository must look like owner/repo.`)
     }
     if (!MOUNT_PATTERN.test(mountPath) || mountPath.split('/').some((segment) => segment === '.' || segment === '..' || segment.startsWith('.'))) {
       throw new Error(`--source-ref "${value}": the mount path must be a relative lowercase slug path such as client-sdks/typescript (no leading slash, no "..").`)
+    }
+    const reserved = mountPath.split('/')[0]
+    if (RESERVED_MOUNT_SEGMENTS.has(reserved)) {
+      throw new Error(`--source-ref "${value}": "${reserved}" is used by the site itself; choose another mount path.`)
     }
     for (const earlier of mappings) {
       if (earlier.repo.toLowerCase() === repo.toLowerCase()) throw new Error(`--source-ref: ${repo} is mapped twice.`)

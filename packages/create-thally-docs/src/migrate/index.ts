@@ -115,15 +115,12 @@ function resetFreshMigrationContent(projectDir: string): void {
 async function fetchSourceRefs(mappings: ReadonlyArray<SourceRefMapping>, warnings: Array<MigrationWarning>): Promise<Array<SourceRefImport>> {
   const imports: Array<SourceRefImport> = []
   for (const mapping of mappings) {
-    const source = parseGitHubRepositoryUrl(`https://github.com/${mapping.repo}`)
-    const tooLarge = await sourceRefOversizeReason(mapping.repo)
-    if (tooLarge) {
-      warnings.push({ code: 'fetch-failed', message: `sourceRef ${mapping.repo} was not imported: ${tooLarge}` })
-      continue
-    }
     const root = mkdtempSync(join(tmpdir(), 'thally-source-ref-'))
-    console.log(`  📦 Cloning sourceRef ${mapping.repo}...`)
     try {
+      const source = parseGitHubRepositoryUrl(`https://github.com/${mapping.repo}`)
+      const tooLarge = await sourceRefOversizeReason(mapping.repo)
+      if (tooLarge) throw new Error(tooLarge)
+      console.log(`  📦 Cloning sourceRef ${mapping.repo}...`)
       const cloneDir = join(root, 'repository')
       await cloneGitHubRepository(source, cloneDir, warnings, { skipSubmodules: true })
       imports.push(importSourceRef(mapping, cloneDir))
