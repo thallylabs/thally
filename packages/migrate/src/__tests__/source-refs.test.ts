@@ -135,7 +135,8 @@ describe('importSourceRef', () => {
     expect(ids).toEqual(['client-sdks/typescript/models/orphan', 'client-sdks/typescript/overview', 'client-sdks/typescript/sdks/chat/README'])
     expect(imported.assets.map((asset) => asset.path)).toContain('client-sdks/typescript/images/logo.png')
     expect(imported.navigation).toEqual(['client-sdks/typescript/overview', { group: 'Chat', pages: ['client-sdks/typescript/sdks/chat/README'] }])
-    const overview = imported.pages.find((page) => page.id.endsWith('/overview'))!
+    const bundle = migrateRepository({ repositoryDir: mainRepo(), sourceUrl: 'https://github.com/example/docs', platform: 'mintlify', sourceRefs: [imported] })
+    const overview = bundle.pages.find((page) => page.id.endsWith('/overview'))!
     expect(overview.body).toContain('[chat](/client-sdks/typescript/sdks/chat/README)')
     expect(overview.body).toContain('![logo](/client-sdks/typescript/images/logo.png)')
     expect(overview.body).toContain('[code](/sdks/keep)')
@@ -306,5 +307,42 @@ describe('sourceRef repository size limits', () => {
     const result = importSourceRef(MAPPING, write(tmp(), { 'docs/docs.json': huge, 'docs/overview.mdx': '# hi' }))
     expect(result.pages).toEqual([])
     expect(result.warnings[0].message).toMatch(/no Mintlify docs\.json/)
+  })
+})
+
+describe('sourceRef links that name main-site pages', () => {
+  // OpenRouter's SDK READMEs link `/docs/guides/...` (the live site serves its docs under /docs).
+  const sdk = (): string => write(tmp(), {
+    'docs/docs.json': JSON.stringify({ navigation: { pages: ['sdks/analytics/README'] } }),
+    'docs/sdks/analytics/README.md': [
+      '[Management key](/docs/guides/overview/auth/management-api-keys) required.',
+      '[Auth](/docs/api-reference/authentication/) and [anchor](/guides/overview/auth/management-api-keys#top)',
+      '[own](/sdks/analytics/README) [dup](/overview/auth) [gone](/docs/nowhere/at-all)',
+      '[keys](/docs/guides/overview/auth/management-api-keys?x=1)',
+    ].join('\n'),
+    'docs/overview/auth.md': '# Own overview',
+  })
+  const main = (): string => write(tmp(), {
+    'docs.json': JSON.stringify({
+      navigation: { pages: ['introduction', 'guides/overview/auth/management-api-keys', 'overview/auth', 'api_reference/authentication', { sourceRef: 'Acme/go-sdk' }] },
+      redirects: [{ source: '/api-reference/authentication', destination: '/api_reference/authentication' }],
+    }),
+    'introduction.mdx': '---\ntitle: Home\n---\nHome.',
+    'guides/overview/auth/management-api-keys.mdx': '---\ntitle: Keys\n---\nKeys.',
+    'overview/auth.mdx': '---\ntitle: Main overview\n---\nMain.',
+    'api_reference/authentication.mdx': '---\ntitle: Auth\n---\nAuth.',
+  })
+
+  it('resolves base-path, redirected and exact main links, prefers the sub-site page, and reports the rest once', () => {
+    const imported = importSourceRef({ repo: 'Acme/go-sdk', mountPath: 'client-sdks/go' }, sdk())
+    const bundle = migrateRepository({ repositoryDir: main(), sourceUrl: 'https://github.com/example/docs', platform: 'mintlify', sourceRefs: [imported] })
+    const body = bundle.pages.find((page) => page.id === 'client-sdks/go/sdks/analytics/README')!.body
+    expect(body).toContain('[Management key](/guides/overview/auth/management-api-keys) required.')
+    expect(body).toContain('[Auth](/api-reference/authentication/) and [anchor](/guides/overview/auth/management-api-keys#top)')
+    expect(body).toContain('[own](/client-sdks/go/sdks/analytics/README) [dup](/client-sdks/go/overview/auth) [gone](/client-sdks/go/docs/nowhere/at-all)')
+    expect(body).toContain('[keys](/guides/overview/auth/management-api-keys?x=1)')
+    const warnings = bundle.warnings.filter((warning) => /match no page in the sub-site or the main site/.test(warning.message))
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toContain('/docs/nowhere/at-all')
   })
 })

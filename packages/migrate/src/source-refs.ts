@@ -147,12 +147,47 @@ function sanitizeAndMeasure(root: string): { removedLinks: number; error?: strin
   return { removedLinks }
 }
 
-/** Prefix every root-absolute link/image/asset target in a page body with the mount path. */
-export function prefixRootLinks(body: string, mountPath: string): string {
+/** Page ids, asset paths and redirect sources (no leading slash) used to tell sub-site targets from main-site ones. */
+export interface RootLinkIndex {
+  /** Mounted paths of every imported sub-site page and asset. */
+  sub: ReadonlySet<string>
+  /** Main-site page ids, asset paths and redirect sources. */
+  main: ReadonlySet<string>
+  /** First path segments of the published site (navigation and redirects). */
+  sections: ReadonlySet<string>
+}
+
+/**
+ * A root-absolute link in a sub-site page is resolved against the live site, so
+ * it can name a main-site page, optionally behind the site's base path (`/docs/…`).
+ * Returns the main-site target, or undefined to keep the link under the mount
+ * path; `unresolved` collects targets found in neither place.
+ */
+export function mainSiteLinkTarget(target: string, mountPath: string, index: RootLinkIndex, unresolved: Array<string>): string | undefined {
+  const [, base, tail] = /^([^?#]*)(.*)$/s.exec(target)!
+  const key = base.replace(/^\/+|\/+$/g, '')
+  if (!key) return undefined
+  const has = (set: ReadonlySet<string>, id: string): boolean => set.has(id) || set.has(`${id}/index`)
+  if (has(index.sub, `${mountPath}/${key}`)) return undefined
+  const found = (id: string): string => `/${id}${base.endsWith('/') ? '/' : ''}${tail}`
+  if (has(index.main, key)) return found(key)
+  // A base path (`/docs`) is a first segment that is not a section of the main site itself.
+  const slash = key.indexOf('/')
+  if (slash > 0) {
+    const first = key.slice(0, slash)
+    const rest = key.slice(slash + 1)
+    if (has(index.main, rest) && !index.sections.has(first)) return found(rest)
+  }
+  unresolved.push(target)
+  return undefined
+}
+
+/** Prefix every root-absolute link/image/asset target in a page body with the mount path, unless `resolve` places it elsewhere. */
+export function prefixRootLinks(body: string, mountPath: string, resolve?: (target: string) => string | undefined): string {
   const mounted = `/${mountPath}`
   // A link already under the mount path is left alone: prefixing it again would break it.
   const alreadyMounted = (target: string): boolean => target === mounted || ['/', '?', '#'].some((next) => target.startsWith(mounted + next))
-  const fix = (target: string): string => alreadyMounted(target) ? target : `${mounted}${target}`
+  const fix = (target: string): string => alreadyMounted(target) ? target : resolve?.(target) ?? `${mounted}${target}`
   return replaceOutsideCodeAndComments(body, (text) => text
     .replace(/(\]\(<?)(\/(?!\/)[^\s)>]*)/g, (_match, before: string, target: string) => `${before}${fix(target)}`)
     .replace(/(\b(?:href|src|to|poster)=(['"]))(\/(?!\/)[^'"\n]*)\2/g, (_match, before: string, quote: string, target: string) => `${before}${fix(target)}${quote}`)
@@ -234,11 +269,11 @@ export function importSourceRef(mapping: SourceRefMapping, repositoryDir: string
   if (dropped.length > 0) warnings.push({ code: 'unsupported-config', message: prefix(`Not imported: ${dropped.join(', ')}.`) })
 
   const mounted = (id: string): string => `${mapping.mountPath}/${id}`
+  // Bodies keep their root-absolute links; the main migration prefixes them once it knows the main site's pages.
   const pages = bundle.pages.filter((page) => !page.openapi).map((page) => ({
     ...page,
     id: mounted(page.id),
     navigationId: mounted(page.navigationId),
-    body: prefixRootLinks(page.body, mapping.mountPath),
   }))
   const openApiPages = bundle.pages.length - pages.length
   if (openApiPages > 0) warnings.push({ code: 'skipped-file', message: prefix(`${openApiPages} page(s) bound to an OpenAPI operation were skipped.`) })

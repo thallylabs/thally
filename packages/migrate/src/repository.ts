@@ -53,7 +53,7 @@ import { projectFernNavigation, readFernConfig } from './fern.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
-import { sourceRefMountCollides, type SourceRefImport } from './source-refs.js'
+import { mainSiteLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
 import { cssBrandColors } from './css-colors.js'
 import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
 import { closeOpenFence, escapeFernLiteralBraces, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
@@ -4700,6 +4700,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
   const importedSourceRefs: Array<{ repo: string; mountPath: string; pages: number }> = []
+  const navigationPageIds = (nodes: Array<string | MigrationNavigationGroup>): Array<string> => nodes.flatMap((node) => typeof node === 'string' ? [node] : navigationPageIds(node.pages))
+  // Targets a sub-site's root-absolute link can name: its own pages and assets, or the main site's pages, assets and redirects.
+  const rootLinkIndex = (): RootLinkIndex => {
+    const ids = (entries: Iterable<string>): Set<string> => new Set([...entries].map((entry) => entry.replace(/^\/+/, '')))
+    const main = ids([...pages.map((page) => page.id), ...assets.map((asset) => asset.path), ...(docsConfig.redirects ?? []).map((redirect) => redirect.source)])
+    return {
+      main,
+      // Orphan pages (a repo's own `docs/` folder, say) are not sections of the published site; navigation and redirects are.
+      sections: new Set([...navigationPageIds([...docsConfig.tabs.flatMap((tab) => [...(tab.pages ?? []), ...(tab.groups ?? [])])]), ...(docsConfig.redirects ?? []).map((redirect) => redirect.source)].map((id) => id.replace(/^\/+/, '').split('/', 1)[0])),
+      sub: ids([...activeSourceRefs.flatMap((candidate) => [...candidate.pages.map((page) => page.id), ...candidate.assets.map((asset) => asset.path)])]),
+    }
+  }
   for (const ref of activeSourceRefs) {
     if (!usedSourceRefs.has(ref)) {
       warnings.push({ code: 'unsupported-config', message: `--source-ref ${ref.repo}=${ref.mountPath} matched no sourceRef in the navigation; nothing was imported for it.` })
@@ -4708,7 +4720,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     warnings.push(...ref.warnings)
     const taken = new Set(pages.map((page) => page.id))
     let count = 0
-    for (const page of ref.pages) {
+    const unresolvedLinks: Array<string> = []
+    const linkIndex = rootLinkIndex()
+    const resolveLink = (target: string): string | undefined => mainSiteLinkTarget(target, ref.mountPath, linkIndex, unresolvedLinks)
+    for (const sourcePage of ref.pages) {
+      const page = { ...sourcePage, body: prefixRootLinks(sourcePage.body, ref.mountPath, resolveLink) }
       if (taken.has(page.id)) {
         warnings.push({ code: 'collision', message: `sourceRef ${ref.repo} page "${page.id}" already exists in this site and was skipped.` })
         continue
@@ -4722,9 +4738,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // files and registry entries must ship with them (hash ids avoid clashes).
     if (ref.componentFiles?.length && componentMigrator) componentMigrator.adopt(ref.componentFiles)
     importedSourceRefs.push({ repo: ref.repo, mountPath: ref.mountPath, pages: count })
+    const unresolved = [...new Set(unresolvedLinks)]
+    if (unresolved.length > 0) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `[${ref.repo}] ${unresolved.length} root-absolute link target${unresolved.length === 1 ? '' : 's'} match no page in the sub-site or the main site and were kept under "${ref.mountPath}": ${unresolved.slice(0, 10).map((target) => stripControlCharacters(target)).join(', ')}${unresolved.length > 10 ? ', …' : ''}.`,
+      })
+    }
   }
   if (importedSourceRefs.length > 0) {
-    warnings.push({ code: 'unsupported-config', message: 'Only the pages and navigation of sourceRef repositories were imported; their branding, colors and redirects were ignored. Root-absolute links inside those pages were prefixed with their mount path.' })
+    warnings.push({ code: 'unsupported-config', message: 'Only the pages and navigation of sourceRef repositories were imported; their branding, colors and redirects were ignored. Root-absolute links inside those pages were prefixed with their mount path unless they name a page of the main site.' })
   }
   docsConfig = pruneMissingNavigationPages(docsConfig, new Set([...pages, ...sourceRefPages].map((page) => page.navigationId)))
   if (platform === 'docusaurus') addDocusaurusTranslatedHeadingAliases(pages)
