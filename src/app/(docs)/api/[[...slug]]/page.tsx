@@ -4,10 +4,11 @@ import { ApiLayout } from '@/components/api/api-layout'
 import { OperationPanel } from '@/components/api/operation-panel'
 import { resolvePlaygroundDisplay } from '@/lib/openapi/playground-display'
 import { getSiteUrl } from '@/lib/site-url'
+import { pageFullTitle } from '@/lib/page-meta'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { apiReferenceConfig, getOpenApiSpecUrl } from '@/config/api-reference'
 import { getAllApiOperationNodes, getApiOperationBySlug, getApiOperationNodes } from '@/data/api-reference'
-import { getApiPlaygroundDisplay, getBreadcrumbs, getDocEntries, loadDocEntries } from '@/data/docs'
+import { getApiPlaygroundDisplay, getBreadcrumbs, getSeoConfig, getDocEntries, loadDocEntries } from '@/data/docs'
 import { isRemoteContentSource } from '@/lib/content-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { buildApiOperationJsonLd } from '@/lib/json-ld'
@@ -50,8 +51,14 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       url: formatOgDisplayUrl(node.href, siteUrl),
     })
 
-    return {
+    const fullTitle = pageFullTitle({
       title,
+      siteName: resolveBuildSiteConfig().name,
+      separator: getSeoConfig().titleSeparator,
+    })
+
+    return {
+      title: fullTitle ? { absolute: fullTitle } : title,
       description,
       alternates: {
         canonical: `${siteUrl}${node.href}`,

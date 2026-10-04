@@ -8,9 +8,10 @@ import { OperationPanel } from '@/components/api/operation-panel'
 import { resolvePlaygroundDisplay } from '@/lib/openapi/playground-display'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { getSiteUrl } from '@/lib/site-url'
+import { pageFullTitle } from '@/lib/page-meta'
 import { apiReferenceConfig, getOpenApiSpecUrl } from '@/config/api-reference'
 import { getAllApiOperationNodes, getApiOperationBySlug, getApiOperationNodes } from '@/data/api-reference'
-import { getApiPlaygroundDisplay, getBreadcrumbs, getDocEntries, loadDocEntries } from '@/data/docs'
+import { getApiPlaygroundDisplay, getBreadcrumbs, getSeoConfig, getDocEntries, loadDocEntries } from '@/data/docs'
 import { getIndexableDocTranslation, hasDocTranslation } from '@/lib/i18n/translation-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
 import { buildApiOperationJsonLd } from '@/lib/json-ld'
@@ -71,8 +72,14 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     url: formatOgDisplayUrl(node.href, siteUrl),
   })
 
-  return {
+  const fullTitle = pageFullTitle({
     title,
+    siteName: resolveBuildSiteConfig().name,
+    separator: getSeoConfig().titleSeparator,
+  })
+
+  return {
+    title: fullTitle ? { absolute: fullTitle } : title,
     description,
     robots: { index: false, follow: true },
     alternates: {
