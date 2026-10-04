@@ -77,6 +77,11 @@ describe('normalizeMdx', () => {
     expect(normalizeMdx('<Steps className="x">\n</Steps>', 'mintlify')).toContain('<Steps className="x" titleSize="p">')
     expect(normalizeMdx('<Steps titleSize="h3">\n</Steps>', 'mintlify')).toBe('<Steps titleSize="h3">\n</Steps>')
     for (const platform of ['fern', 'docusaurus'] as const) expect(normalizeMdx('<Steps>\n</Steps>', platform)).not.toContain('titleSize')
+    expect(normalizeMdx('<Steps />', 'mintlify')).toBe('<Steps titleSize="p" />')
+    expect(normalizeMdx('<Steps className="x"/>', 'mintlify')).toBe('<Steps className="x" titleSize="p" />')
+    expect(normalizeMdx('<Steps />', 'mintlify')).not.toContain('/ titleSize')
+    expect(normalizeMdx('<Steps className={a > b}>\n</Steps>', 'mintlify')).toContain('<Steps className={a > b} titleSize="p">')
+    expect(normalizeMdx('<Steps titleSize="h2" />', 'mintlify')).toBe('<Steps titleSize="h2" />')
   })
 
   it('projects a static Docusaurus useBaseUrl require without changing code samples', () => {

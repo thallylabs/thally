@@ -1731,6 +1731,54 @@ function maskCodeRegions(body: string): string {
 }
 
 /**
+ * Read a JSX tag's attributes from `from` (just after the tag name) to its
+ * closing `>`, ignoring any `>` inside quotes or `{...}` expressions. Linear.
+ * Returns the index after `>` and whether the tag self-closes, or null when it
+ * is not a well-formed tag (a bare `<`, or no end).
+ */
+function readTagEnd(text: string, from: number): { end: number; selfClosing: boolean; attributes: string } | null {
+  if (from < text.length && !/[\s/>]/.test(text[from])) return null
+  let depth = 0
+  let quote = ''
+  for (let i = from; i < text.length; i++) {
+    const char = text[i]
+    if (quote) {
+      if (char === '\\' && depth > 0) i++
+      else if (char === quote) quote = ''
+    } else if (char === '"' || char === "'" || (char === '`' && depth > 0)) {
+      quote = char
+    } else if (char === '{') {
+      depth++
+    } else if (char === '}') {
+      depth = Math.max(0, depth - 1)
+    } else if (depth === 0) {
+      if (char === '<') return null
+      if (char === '>') {
+        const selfClosing = text[i - 1] === '/' && i > from
+        return { end: i + 1, selfClosing, attributes: text.slice(from, selfClosing ? i - 1 : i) }
+      }
+    }
+  }
+  return null
+}
+
+/** Add `titleSize="p"` to every `<Steps>` opener (also `<Steps />`) that lacks one. */
+function pinStepsTitleSize(body: string): string {
+  let result = ''
+  let cursor = 0
+  for (const match of body.matchAll(/<Steps(?=[\s/>])/g)) {
+    if (match.index < cursor) continue
+    const tag = readTagEnd(body, match.index + match[0].length)
+    if (!tag) continue
+    const attributesEnd = tag.end - (tag.selfClosing ? 2 : 1)
+    if (/\btitleSize\s*=/.test(tag.attributes)) continue
+    result += `${body.slice(cursor, attributesEnd).trimEnd()} titleSize="p"${tag.selfClosing ? ' /' : ''}>`
+    cursor = tag.end
+  }
+  return result + body.slice(cursor)
+}
+
+/**
  * Escape closing tags that have no matching real opener (outside code), e.g.
  * a generator that wrote `\<Warning>` ... `</Warning>`: the escaped opener is
  * literal text, so the bare closer is a compile error. Escaping the closer the
@@ -2051,11 +2099,9 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
         // needed) matches.
         .replace(/<Column(\s[^>]*)?>/g, '<div$1>')
         .replace(/<\/Column>/g, '</div>')
-        // Mintlify renders step titles as plain text unless `titleSize` says
-        // otherwise; Thally's default is an `<h3>`, so pin the source's default.
-        .replace(/<Steps(\s[^>]*)?>/g, (tag: string, attributes = '') => (
-          /\btitleSize\s*=/.test(attributes) ? tag : `<Steps${attributes} titleSize="p">`
-        ))
+      // Mintlify renders step titles as plain text unless `titleSize` says
+      // otherwise; Thally's default is an `<h3>`, so pin the source's default.
+      result = pinStepsTitleSize(result)
     }
     if (runFern) {
       result = result
