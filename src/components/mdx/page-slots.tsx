@@ -51,9 +51,9 @@ export function usePageSlotsOptional(): PageSlotsValue | null {
 
 function writeTagsParam(tags: ReadonlyArray<string>) {
   const url = new URL(window.location.href)
-  if (tags.length) url.searchParams.set('tags', tags.join(','))
-  else url.searchParams.delete('tags')
-  window.history.replaceState(window.history.state, '', url.pathname + url.search.replace(/%2C/g, ',') + url.hash)
+  url.searchParams.delete('tags')
+  for (const tag of tags) url.searchParams.append('tags', tag)
+  window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash)
 }
 
 export function PageSlotsProvider({ children }: { children: ReactNode }) {

@@ -15,10 +15,16 @@ export function tagsByCount(counts: Readonly<Record<string, number>>): string[] 
   return Object.keys(counts).filter((tag) => counts[tag] > 0).sort((a, b) => counts[b] - counts[a])
 }
 
-/** Parse the `?tags=A,B` URL parameter. */
+/** Parse `?tags=`: repeated params, plus the legacy comma-joined `?tags=A,B` form (each value is kept whole as well as split). */
 export function parseTagsParam(search: string): string[] {
-  const value = new URLSearchParams(search).get('tags')
-  return value ? value.split(',').map((tag) => tag.trim()).filter(Boolean) : []
+  const out: string[] = []
+  for (const value of new URLSearchParams(search).getAll('tags')) {
+    for (const tag of [value, ...(value.includes(',') ? value.split(',') : [])]) {
+      const trimmed = tag.trim()
+      if (trimmed && !out.includes(trimmed)) out.push(trimmed)
+    }
+  }
+  return out
 }
 
 /** Only a changelog route swaps its table of contents for the filters; other pages keep both. */

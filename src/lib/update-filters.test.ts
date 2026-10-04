@@ -20,6 +20,11 @@ describe('update tag filters', () => {
   it('parses the tags URL parameter', () => {
     expect(parseTagsParam('?tags=Schemas,BYOK')).toEqual(['Schemas', 'BYOK'])
     expect(parseTagsParam('')).toEqual([])
+    expect(parseTagsParam('?tags=Schemas&tags=BYOK')).toEqual(['Schemas', 'BYOK'])
+    // a tag containing a comma survives the repeated-param round trip
+    const url = new URL('https://x.test/c')
+    for (const tag of ['Models, pricing', 'BYOK']) url.searchParams.append('tags', tag)
+    expect(parseTagsParam(url.search)).toEqual(expect.arrayContaining(['Models, pricing', 'BYOK']))
   })
 
   it('swaps the table of contents for filters only on the changelog route', () => {
