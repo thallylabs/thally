@@ -2503,6 +2503,7 @@ function snippetExportIndex(files: Array<ScannedFile>): Map<string, Set<string>>
     try {
       if (lstatSync(file.absolutePath).size > MAX_PAGE_BYTES) continue
       source = readFileSync(file.absolutePath, 'utf8')
+      if (!/\bexport\b/.test(source)) continue // nothing to parse: a large prose snippet must not cost a TypeScript parse
       for (const name of snippetExportedNames(source)) add(name, file.absolutePath)
     } catch { continue } // unreadable or unparseable (a pathological file can overflow the parser): not a candidate
     if (extension !== '.mdx') {
