@@ -1278,6 +1278,18 @@ describe('Mintlify repository migration', () => {
     ]))
   })
 
+  it('caps generated Mintlify endpoint redirects and warns how many were not created', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API', openapi: { source: 'big.yaml', directory: 'api' } }] },
+    }))
+    const paths = Array.from({ length: 2_050 }, (_, index) => `  /op${index}:\n    get:\n      summary: Op ${index}\n      tags: [T]\n      responses: { "200": { description: ok } }`)
+    writeFileSync(join(root, 'big.yaml'), ['openapi: 3.1.0', 'info: { title: Big, version: "1.0" }', 'paths:', ...paths].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.docsConfig.redirects?.filter((redirect) => redirect.source.startsWith('/api/t/'))).toHaveLength(2_000)
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('Created 2000 of 2050 Mintlify endpoint redirects; the other 50 were not created')
+  })
+
   it('drops a manual OpenAPI operation listing ("GET /path") with one warning instead of one missing-page warning per operation', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

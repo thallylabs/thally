@@ -101,6 +101,8 @@ const FRONTMATTER_HEAD_BYTES = 65_536
 const MAX_WITHHELD_SCAN_BYTES = MAX_PAGE_BYTES * 8
 /** Per-page warnings for restricted pages the file budget dropped; the rest are counted in one more. */
 const MAX_DROPPED_GATED_WARNINGS = 20
+/** Per-site cap on generated Mintlify endpoint redirects, so a huge spec cannot flood the redirect table. */
+const MAX_ENDPOINT_REDIRECTS = 2_000
 const MAX_ASSET_BYTES = 25_000_000
 // A referenced screenshot or animation is part of the page, not a spare
 // repository asset. Allow a larger individual file while retaining a firm
@@ -4549,8 +4551,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
       // Mintlify's own endpoint URLs keep working: they have no page of their own here.
       const taken = new Set([...pages.map((page) => page.id), ...(docsConfig.redirects ?? []).map((redirect) => redirect.source.replace(/^\//, ''))])
-      const endpointRedirects = [...mintlifyPages].filter(([source]) => !taken.has(source))
+      const candidates = [...mintlifyPages].filter(([source]) => !taken.has(source))
+      const endpointRedirects = candidates.slice(0, MAX_ENDPOINT_REDIRECTS)
         .map(([source, destination]) => ({ source: `/${source}`, destination }))
+      if (candidates.length > endpointRedirects.length) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Created ${endpointRedirects.length} of ${candidates.length} Mintlify endpoint redirects; the other ${candidates.length - endpointRedirects.length} were not created because a site is limited to ${MAX_ENDPOINT_REDIRECTS} generated endpoint redirects. Old links to those endpoint URLs will not redirect.`,
+        })
+      }
       if (endpointRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...endpointRedirects] }
     } else {
       // No docs.json-configured spec at all: fall back to a naive repo scan,
