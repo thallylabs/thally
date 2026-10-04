@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { Element, Root, Text } from 'hast'
 
+import { codeInnerHtml } from './__tests__/test-html'
 import {
   applyCodeNotation,
   measureHighlightableCode,
@@ -125,19 +126,18 @@ describe('code-fence metadata', () => {
     expect(budget).toMatchObject({ scheduledBlocks: 4, scheduledBytes: 256 * 1024 })
   })
 
-  it('escapes oversized plaintext before it reaches grouped code HTML rendering', async () => {
+  it('leaves oversized plaintext as a raw text node (React escapes it)', async () => {
     const payload = '<img src=x onerror=alert(1)>' + 'a'.repeat(64 * 1024)
     const block = codeBlock(payload)
     await transformCodeBlocks([block])
-    expect(codeText(block).value).toContain('&lt;img src=x onerror=alert(1)&gt;')
-    expect(codeText(block).value).not.toContain('<img')
+    expect(codeText(block).value).toBe(payload)
   })
 
-  it('escapes fences beyond the per-page block budget', async () => {
+  it('leaves fences beyond the per-page block budget as raw text', async () => {
     const blocks = Array.from({ length: 64 }, () => codeBlock('const ok = true'))
     const overflow = codeBlock('<img src=x onerror=alert(1)>')
     await transformCodeBlocks([...blocks, overflow])
-    expect(codeText(overflow).value).toBe('&lt;img src=x onerror=alert(1)&gt;')
+    expect(codeText(overflow).value).toBe('<img src=x onerror=alert(1)>')
   })
 
   it('preserves Mermaid source for the strict diagram renderer', async () => {
@@ -318,14 +318,14 @@ describe('code notation markers', () => {
     const block = codeBlock('const a = 1\nconst b = 2', 'typescript')
     await transformCodeBlocks([block])
     expect(block.properties?.code).toBe('const a = 1\nconst b = 2')
-    expect(codeText(block).value).not.toContain('class=')
+    expect(codeInnerHtml(block)).not.toContain('class=')
   })
 
   it('strips markers from rendered HTML and copied code, and adds line classes', async () => {
     const block = codeBlock('const a = 1 // [!code ++]\nconst b = 2 // [!code --]\nconst c = 3', 'typescript')
     await transformCodeBlocks([block])
     expect(block.properties?.code).toBe('const a = 1\nconst b = 2\nconst c = 3')
-    const html = codeText(block).value
+    const html = codeInnerHtml(block)
     expect(html).not.toContain('[!code')
     expect(html).toContain('thally-line-add')
     expect(html).toContain('thally-line-remove')
@@ -335,7 +335,7 @@ describe('code notation markers', () => {
     const block = codeBlock('one\ntwo // [!code focus]\nthree', 'txt')
     block.properties = { ...block.properties, focusLines: '3' }
     await transformCodeBlocks([block])
-    const spans = codeText(block).value.split('\n')
+    const spans = codeInnerHtml(block).split('\n')
     expect(spans[0]).toContain('thally-line-dim')
     expect(spans[1]).not.toContain('thally-line-dim')
     expect(spans[2]).not.toContain('thally-line-dim')
@@ -368,7 +368,7 @@ describe('placeholder tokens', () => {
   it('keeps a {{KEY}} placeholder in one highlighted token so children-walking templates can substitute it', async () => {
     const block = codeBlock('payload = {\n    "model": "{{MODEL}}",\n    "n": {{N}}\n}', 'python')
     await transformCodeBlocks([block])
-    const html = codeText(block).value
+    const html = codeInnerHtml(block)
     expect(html).toContain('>{{MODEL}}</span>')
     expect(html).toContain('>{{N}}</span>')
   })

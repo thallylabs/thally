@@ -6,7 +6,7 @@
  * bounded Worker upload contract. Unsupported fences remain readable text.
  */
 
-import type { Element, Root } from 'hast'
+import type { Element, ElementContent, Root } from 'hast'
 import {
   createJavaScriptRegexEngine,
   defaultJavaScriptRegexConstructor,
@@ -235,18 +235,6 @@ function resolveLanguage(highlighter: HighlighterCore, language: string): string
     : FALLBACK_LANGUAGE
 }
 
-const HTML_ESCAPES: Record<string, string> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#39;',
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => HTML_ESCAPES[char])
-}
-
 /** 1-based line numbers carrying presentation state inside one fence. */
 interface LineMarks {
   highlight: Set<number>
@@ -289,23 +277,29 @@ function joinPlaceholderTokens(tokens: Array<ThemedToken>): Array<ThemedToken> {
   return out
 }
 
-function tokensToHtml(lines: Array<Array<ThemedToken>>, marks: LineMarks): string {
-  return lines
-    .map((tokens, index) => {
-      const line = joinPlaceholderTokens(tokens)
-      const inner = line
-        .map((token) => `<span style="color:${token.color ?? 'inherit'}">${escapeHtml(token.content)}</span>`)
-        .join('')
-      const n = index + 1
-      const classes: Array<string> = []
-      if (marks.highlight.has(n)) classes.push('thally-line-highlight')
-      if (marks.add.has(n)) classes.push('thally-line-add')
-      if (marks.remove.has(n)) classes.push('thally-line-remove')
-      if (marks.focus.size > 0 && !marks.focus.has(n)) classes.push('thally-line-dim')
-      const attr = classes.length ? ` class="${classes.join(' ')}"` : ''
-      return `<span${attr}>${inner}</span>`
+function tokensToHast(lines: Array<Array<ThemedToken>>, marks: LineMarks): Array<ElementContent> {
+  const out: Array<ElementContent> = []
+  lines.forEach((tokens, index) => {
+    const n = index + 1
+    const className: Array<string> = []
+    if (marks.highlight.has(n)) className.push('thally-line-highlight')
+    if (marks.add.has(n)) className.push('thally-line-add')
+    if (marks.remove.has(n)) className.push('thally-line-remove')
+    if (marks.focus.size > 0 && !marks.focus.has(n)) className.push('thally-line-dim')
+    if (index > 0) out.push({ type: 'text', value: '\n' })
+    out.push({
+      type: 'element',
+      tagName: 'span',
+      properties: className.length ? { className } : {},
+      children: joinPlaceholderTokens(tokens).map((token) => ({
+        type: 'element',
+        tagName: 'span',
+        properties: { style: `color:${token.color ?? 'inherit'}` },
+        children: [{ type: 'text', value: token.content }],
+      })),
     })
-    .join('\n')
+  })
+  return out
 }
 
 // Trailing notation comment: `// [!code ++]`, `# [!code --:3]`,
@@ -590,7 +584,7 @@ function rehypeShiki() {
       node: Element
       code: string
       language: string
-      textNode: { value: string }
+      codeNode: Element
       notation: ReturnType<typeof applyCodeNotation>
     }> = []
     const budget: SyntaxHighlightBudget = {
@@ -635,14 +629,10 @@ function rehypeShiki() {
       if (language === 'mermaid') return
 
       if (!scheduleSyntaxHighlight(code, budget)) {
-        // Grouped code is rendered from trusted Shiki HTML. Preserve that
-        // contract for the plaintext fallback by escaping authored markup
-        // before it reaches the same HTML sink.
-        textNode.value = escapeHtml(code)
         return
       }
 
-      targets.push({ node, code, language, textNode, notation })
+      targets.push({ node, code, language, codeNode: codeNode as Element, notation })
     })
 
     if (targets.length === 0) return
@@ -669,7 +659,9 @@ function rehypeShiki() {
         add: target.notation?.marks.add ?? new Set(),
         remove: target.notation?.marks.remove ?? new Set(),
       }
-      target.textNode.value = tokensToHtml(lines, marks)
+      // Real elements, not an HTML string: text stays escaped, and a component
+      // that rewrites string children (a site `Template`) cannot inject markup.
+      target.codeNode.children = tokensToHast(lines, marks)
       // Lets `expandable` fences start expanded when a mark sits below the fold.
       const lastMarked = Math.max(
         0,
