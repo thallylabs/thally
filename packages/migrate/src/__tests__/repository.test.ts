@@ -1289,7 +1289,6 @@ describe('Mintlify repository migration', () => {
       navigation: { pages: ['legal/terms', 'guide'] },
     }))
     writeFileSync(join(root, 'snippets/widget.jsx'), 'export const Widget = () => <div>Hi</div>\n')
-    writeFileSync(join(root, 'legal/metadata.ts'), 'export const metadata = { title: "Terms" }\n')
     writeFileSync(join(root, 'legal/terms.mdx'), "---\ntitle: Terms\n---\n\nexport { metadata } from './metadata';\n\nTerms text.\n")
     writeFileSync(join(root, 'guide.mdx'), "---\ntitle: Guide\n---\n\nimport { Widget } from './snippets/widget.jsx'\n\n<Widget />\n")
 
@@ -4576,6 +4575,28 @@ describe('Mintlify snippet inlining hardening', () => {
         expect(page?.body).not.toMatch(/import\('\.\//)
         expect(warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
       }
+    })
+
+    it('rewrites a re-export from a shipped file to the migrated path and keeps the page', () => {
+      for (const body of [
+        "export { Named } from './comp.jsx'\n\nText.",
+        "export * from './lib/m'\n\nText.",
+        "export { default as Comp } from './comp.jsx'\n\nText.",
+      ]) {
+        const { page, warnings } = keptPage(body)
+        expect(page?.body).toMatch(/export (\{[^}]*\}|\*) from "@\/mdx\/migrated\//)
+        expect(page?.body).not.toMatch(/from '\.\//)
+        expect(warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+      }
+    })
+
+    it('excludes a page that re-exports from a file that is not shipped', () => {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-relative-reexport-'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['home', 'other'] } }))
+      writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nexport { metadata } from './metadata'\n\nText.\n")
+      writeFileSync(join(root, 'other.mdx'), '---\ntitle: Other\n---\n\nHi\n')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['other'])
     })
 
     it('excludes a namespace import of a file that is not shipped with a single warning', () => {

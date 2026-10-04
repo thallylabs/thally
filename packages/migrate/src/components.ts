@@ -1153,6 +1153,25 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       const ast = sourceFile(node.value, 'inline.tsx')
       for (const statement of ast.statements) {
         if (!ts.isImportDeclaration(statement)) {
+          // `export ... from './x'` of a file the migration copies points at
+          // the copied module; one that cannot be copied falls through and the
+          // page is excluded afterwards (repository.ts).
+          const reexport = ts.isExportDeclaration(statement) && statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)
+            && /^\.\.?\//.test(statement.moduleSpecifier.text) && !/\.mdx?$/i.test(statement.moduleSpecifier.text)
+            ? statement.moduleSpecifier : undefined
+          if (reexport) {
+            try {
+              const path = copyGraph(resolveDependency(reexport.text, currentFile))
+              edits.push({
+                start: node.position.start.offset + reexport.getStart(ast),
+                end: node.position.start.offset + reexport.end,
+                value: JSON.stringify(portableSpecifier(`@/${path.replace(/^src\//, '').replace(/\\/g, '/')}`)),
+              })
+              continue
+            } catch {
+              // Not shipped: handled below.
+            }
+          }
           let unsupportedDependency = ts.isExportDeclaration(statement) && !!statement.moduleSpecifier
           function inspect(node: ts.Node): void {
             if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword
