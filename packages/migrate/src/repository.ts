@@ -919,11 +919,13 @@ export async function cloneGitHubRepository(
   source: GitHubRepositorySource,
   targetDir: string,
   warnings?: Array<MigrationWarning>,
+  /** Untrusted referenced repositories: never follow their `.gitmodules` to further remotes. */
+  options: { skipSubmodules?: boolean } = {},
 ): Promise<void> {
   for (let attempt = 1; attempt <= CLONE_RETRY_ATTEMPTS; attempt++) {
     try {
       await cloneOnce(source, targetDir)
-      await initSubmodules(targetDir, warnings ?? [])
+      if (!options.skipSubmodules) await initSubmodules(targetDir, warnings ?? [])
       return
     } catch (error) {
       const retryable = error instanceof Error && RETRYABLE_CLONE_ERROR.test(error.message)

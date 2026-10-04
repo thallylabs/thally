@@ -12,11 +12,15 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import { replaceOutsideCodeAndComments } from './mdx.js'
 import { migrateRepository } from './repository.js'
-import type { MigrationAsset, MigrationDocsConfig, MigrationNavigationGroup, MigrationPage, MigrationWarning, RenderedMigrationFile } from './types.js'
+import type { MigrationAsset, MigrationDocsConfig, MigrationFetcher, MigrationNavigationGroup, MigrationPage, MigrationWarning, RenderedMigrationFile } from './types.js'
+import { defaultMigrationFetcher } from './url.js'
 
 /** Per referenced repository: files and bytes under its docs root. Constants on purpose, not configurable. */
 export const SOURCE_REF_MAX_FILES = 5_000
 export const SOURCE_REF_MAX_BYTES = 50_000_000
+/** GitHub reports repository size in KB; a larger repository is refused before it is cloned. */
+export const SOURCE_REF_MAX_REPOSITORY_KB = 200_000
+const DOCS_JSON_MAX_BYTES = 1_000_000
 const MAX_FORWARDED_WARNINGS = 50
 
 const REPO_PATTERN = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
@@ -64,12 +68,30 @@ export function parseSourceRefFlags(values: ReadonlyArray<string>): Array<Source
   return mappings
 }
 
+/**
+ * Why a referenced repository is too large to clone, or null when it is small
+ * enough or its size is unknown (GitHub API unreachable, rate-limited or
+ * private): an unknown size proceeds, and the post-clone caps still apply.
+ */
+export async function sourceRefOversizeReason(repo: string, fetcher: MigrationFetcher = defaultMigrationFetcher): Promise<string | null> {
+  try {
+    const response = await fetcher(new URL(`https://api.github.com/repos/${repo}`), { accept: 'application/vnd.github+json' })
+    const size: unknown = (JSON.parse(response.body) as { size?: unknown }).size
+    if (typeof size === 'number' && size > SOURCE_REF_MAX_REPOSITORY_KB) {
+      return `GitHub reports it as ${Math.round(size / 1000)} MB, over the ${SOURCE_REF_MAX_REPOSITORY_KB / 1000} MB limit for a referenced repository.`
+    }
+  } catch {
+    // Size unknown: clone anyway.
+  }
+  return null
+}
+
 /** The directory holding a Mintlify docs.json: `docs/` first, then the repository root. */
 export function findSourceRefDocsRoot(repositoryDir: string): string | null {
   for (const directory of [join(repositoryDir, 'docs'), repositoryDir]) {
     try {
       const config = join(directory, 'docs.json')
-      if (lstatSync(directory).isSymbolicLink() || !lstatSync(config).isFile()) continue
+      if (lstatSync(directory).isSymbolicLink() || !lstatSync(config).isFile() || lstatSync(config).size > DOCS_JSON_MAX_BYTES) continue
       const parsed: unknown = JSON.parse(readFileSync(config, 'utf8'))
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'navigation' in parsed) return directory
     } catch {

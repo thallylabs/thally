@@ -2,10 +2,11 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { importSourceRef, migrateRepository, parseSourceRefFlags } from '../index.js'
-import { prefixRootLinks, SOURCE_REF_MAX_FILES } from '../source-refs.js'
+import { prefixRootLinks, SOURCE_REF_MAX_FILES, SOURCE_REF_MAX_REPOSITORY_KB, sourceRefOversizeReason } from '../source-refs.js'
+import type { MigrationFetcher } from '../types.js'
 
 function write(root: string, files: Record<string, string>): string {
   for (const [path, content] of Object.entries(files)) {
@@ -214,5 +215,30 @@ describe('sourceRef custom components', () => {
       expect(files.some((file) => file.path.replace(/\.tsx?$/, '') === `src/mdx/${specifier}`)).toBe(true)
     }
     expect(bundle.warnings.some((warning) => /Not imported:.*custom components/.test(warning.message))).toBe(false)
+  })
+})
+
+describe('sourceRef repository size limits', () => {
+  const sizeFetcher = (body: string): MigrationFetcher => async (url) => ({ finalUrl: url, body, contentType: 'application/json' })
+
+  it('refuses a repository GitHub reports as over the cap, naming the sizes', async () => {
+    const reason = await sourceRefOversizeReason('Acme/ts-sdk', sizeFetcher(JSON.stringify({ size: SOURCE_REF_MAX_REPOSITORY_KB + 1 })))
+    expect(reason).toMatch(/200 MB limit/)
+  })
+
+  it('proceeds when the repository is small, the size is missing, or the API is unavailable', async () => {
+    expect(await sourceRefOversizeReason('Acme/ts-sdk', sizeFetcher(JSON.stringify({ size: 1000 })))).toBeNull()
+    expect(await sourceRefOversizeReason('Acme/ts-sdk', sizeFetcher('{}'))).toBeNull()
+    expect(await sourceRefOversizeReason('Acme/ts-sdk', sizeFetcher('not json'))).toBeNull()
+    const failing = vi.fn().mockRejectedValue(new Error('rate limited'))
+    expect(await sourceRefOversizeReason('Acme/ts-sdk', failing)).toBeNull()
+    expect(String(failing.mock.calls[0][0])).toBe('https://api.github.com/repos/Acme/ts-sdk')
+  })
+
+  it('ignores a docs.json over 1 MB instead of parsing it', () => {
+    const huge = JSON.stringify({ navigation: { pages: ['overview'] }, padding: 'x'.repeat(1_100_000) })
+    const result = importSourceRef(MAPPING, write(tmp(), { 'docs/docs.json': huge, 'docs/overview.mdx': '# hi' }))
+    expect(result.pages).toEqual([])
+    expect(result.warnings[0].message).toMatch(/no Mintlify docs\.json/)
   })
 })

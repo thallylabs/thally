@@ -9,7 +9,7 @@ export {
   parseGitHubRepositoryUrl,
 } from './repository.js'
 export { addMintlifyDirectoryRedirects, buildNavigationFromPages, projectMintlifyNavigation, pruneMissingNavigationPages, readMintlifyConfig } from './navigation.js'
-export { importSourceRef, parseSourceRefFlags, SOURCE_REF_MAX_BYTES, SOURCE_REF_MAX_FILES } from './source-refs.js'
+export { importSourceRef, parseSourceRefFlags, SOURCE_REF_MAX_BYTES, SOURCE_REF_MAX_FILES, SOURCE_REF_MAX_REPOSITORY_KB, sourceRefOversizeReason } from './source-refs.js'
 export type { SourceRefImport, SourceRefMapping } from './source-refs.js'
 export { projectFernNavigation, readFernConfig } from './fern.js'
 export { normalizeMdx, parseMarkdownPage } from './mdx.js'
