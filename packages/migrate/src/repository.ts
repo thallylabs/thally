@@ -53,6 +53,7 @@ import { projectFernNavigation, readFernConfig } from './fern.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
+import { sourceRefMountCollides, type SourceRefImport } from './source-refs.js'
 import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
 import { closeOpenFence, escapeFernLiteralBraces, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
@@ -207,6 +208,8 @@ export interface RepositoryMigrationOptions {
   maxSourceFiles?: number
   /** @internal Redirects are global config, read once, not per plugin instance. */
   docusaurusSkipRedirects?: boolean
+  /** Mintlify `sourceRef` repositories already fetched and prepared by `importSourceRef`. */
+  sourceRefs?: ReadonlyArray<SourceRefImport>
 }
 
 interface DocusaurusPluginRoot {
@@ -3117,6 +3120,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const fernNavTitles = new Map<string, string>()
   const fernHiddenIds = new Set<string>()
 
+  const activeSourceRefs: Array<SourceRefImport> = []
+  const usedSourceRefs = new Set<SourceRefImport>()
+  for (const ref of options.sourceRefs ?? []) {
+    if (platform !== 'mintlify') {
+      warnings.push({ code: 'unsupported-config', message: `--source-ref ${ref.repo}=${ref.mountPath} applies only to Mintlify sources and was ignored.` })
+    } else if (sourceRefMountCollides(mintlifyProjectRoot ?? repositoryDir, ref.mountPath)) {
+      warnings.push({ code: 'collision', message: `sourceRef ${ref.repo} was not imported: the mount path "${ref.mountPath}" already exists in this site.` })
+    } else {
+      activeSourceRefs.push(ref)
+    }
+  }
+
   if (platform === 'mintlify') {
     try {
       const config = readMintlifyConfig(mintlifyProjectRoot ?? repositoryDir)
@@ -3124,7 +3139,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         mintlifyConfig = config
         defaultVersionPrefixes = mintlifyDefaultVersionPrefixes(config)
         allVersionPrefixes = mintlifyAllVersionPrefixes(config)
-        const projected = projectMintlifyNavigation(config)
+        const projected = projectMintlifyNavigation(config, {
+          resolveSourceRef: (repo) => {
+            const ref = activeSourceRefs.find((candidate) => candidate.repo.toLowerCase() === repo.toLowerCase())
+            if (!ref) return null
+            usedSourceRefs.add(ref)
+            return ref.navigation
+          },
+        })
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
         for (const gated of projected.gatedReferences) {
@@ -3308,6 +3330,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
+  const sourceRefPages: Array<MigrationPage> = []
+  const sourceRefAssets: Array<MigrationAsset> = []
   const remoteApiSpecs: Array<RemoteApiSpec> = []
   // Which pages reference which asset (by its normalized copy-destination
   // path), so the final asset-copy pass can prioritize referenced assets
@@ -4639,7 +4663,31 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }).join('\n\n---\n\n')
     }
   }
-  docsConfig = pruneMissingNavigationPages(docsConfig, new Set(pages.map((page) => page.navigationId)))
+  const importedSourceRefs: Array<{ repo: string; mountPath: string; pages: number }> = []
+  for (const ref of activeSourceRefs) {
+    if (!usedSourceRefs.has(ref)) {
+      warnings.push({ code: 'unsupported-config', message: `--source-ref ${ref.repo}=${ref.mountPath} matched no sourceRef in the navigation; nothing was imported for it.` })
+      continue
+    }
+    warnings.push(...ref.warnings)
+    const taken = new Set(pages.map((page) => page.id))
+    let count = 0
+    for (const page of ref.pages) {
+      if (taken.has(page.id)) {
+        warnings.push({ code: 'collision', message: `sourceRef ${ref.repo} page "${page.id}" already exists in this site and was skipped.` })
+        continue
+      }
+      sourceRefPages.push(page)
+      count++
+    }
+    const knownAssets = new Set(assets.map((asset) => asset.path))
+    for (const asset of ref.assets) if (!knownAssets.has(asset.path)) sourceRefAssets.push(asset)
+    importedSourceRefs.push({ repo: ref.repo, mountPath: ref.mountPath, pages: count })
+  }
+  if (importedSourceRefs.length > 0) {
+    warnings.push({ code: 'unsupported-config', message: 'Only the pages and navigation of sourceRef repositories were imported; their branding, colors and redirects were ignored. Root-absolute links inside those pages were prefixed with their mount path.' })
+  }
+  docsConfig = pruneMissingNavigationPages(docsConfig, new Set([...pages, ...sourceRefPages].map((page) => page.navigationId)))
   if (platform === 'docusaurus') addDocusaurusTranslatedHeadingAliases(pages)
   if (platform === 'fern' && fernProjectRoot) {
     const sourcePath = (page: MigrationPage): string | null => {
@@ -4936,12 +4984,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     code: 'unsupported-config',
     message: 'Fern supplied a logo through its global theme without a local asset; add a logo path to docs.json after import.',
   })
+  pages.push(...sourceRefPages)
+  assets.push(...sourceRefAssets)
   return {
     sourceUrl: options.sourceUrl,
     sourceKind: 'repository',
     platform,
     pages,
     assets,
+    ...(importedSourceRefs.length > 0 ? { sourceRefs: importedSourceRefs } : {}),
     ...(remoteApiSpecs.length > 0 ? { remoteApiSpecs } : {}),
     ...(componentMigrator ? { componentFiles: componentMigrator.files() } : {}),
     ...(quarantinedFiles.length > 0 ? { quarantinedFiles } : {}),

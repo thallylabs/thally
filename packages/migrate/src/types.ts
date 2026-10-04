@@ -205,6 +205,8 @@ export interface MigrationBundle {
   quarantinedFiles?: Array<RenderedMigrationFile>
   /** Access-restricted pages the file limit dropped: neither published nor saved in quarantinedFiles. */
   droppedGatedPages?: number
+  /** Mintlify `sourceRef` repositories imported under a mount path, with their page counts. */
+  sourceRefs?: Array<{ repo: string; mountPath: string; pages: number }>
   docsConfig: MigrationDocsConfig
   site?: {
     name?: string
