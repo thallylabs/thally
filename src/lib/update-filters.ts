@@ -15,3 +15,8 @@ export function parseTagsParam(search: string): string[] {
   const value = new URLSearchParams(search).get('tags')
   return value ? value.split(',').map((tag) => tag.trim()).filter(Boolean) : []
 }
+
+/** Only a changelog route swaps its table of contents for the filters; other pages keep both. */
+export function isChangelogPath(pathname: string | null): boolean {
+  return /(^|\/)changelog\/?$/i.test(pathname ?? '')
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchesSelectedTags, parseTagsParam, tagsByCount } from './update-filters'
+import { isChangelogPath, matchesSelectedTags, parseTagsParam, tagsByCount } from './update-filters'
 
 describe('update tag filters', () => {
   it('shows every entry when nothing is selected', () => {
@@ -20,5 +20,12 @@ describe('update tag filters', () => {
   it('parses the tags URL parameter', () => {
     expect(parseTagsParam('?tags=Schemas,BYOK')).toEqual(['Schemas', 'BYOK'])
     expect(parseTagsParam('')).toEqual([])
+  })
+
+  it('swaps the table of contents for filters only on the changelog route', () => {
+    expect(isChangelogPath('/docs/changelog')).toBe(true)
+    expect(isChangelogPath('/changelog/')).toBe(true)
+    expect(isChangelogPath('/docs/guides/changelog-tips')).toBe(false)
+    expect(isChangelogPath(null)).toBe(false)
   })
 })

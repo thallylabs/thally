@@ -16,7 +16,8 @@ import {
   useMemo,
   useState,
 } from 'react'
-import { parseTagsParam, tagsByCount } from '@/lib/update-filters'
+import { usePathname } from 'next/navigation'
+import { isChangelogPath, parseTagsParam, tagsByCount } from '@/lib/update-filters'
 
 interface ViewOption {
   title: string
@@ -154,11 +155,15 @@ export function PagePanelSlot({
   footer?: ReactNode
 }) {
   const { panelCount, setPanelTarget, tagCounts } = usePageSlots()
-  // A changelog with tagged updates swaps the table of contents for its filters.
+  // Mintlify's changelog swaps the table of contents for its filters; any other page
+  // with tagged updates keeps its table of contents beneath the filters.
   const hasTags = tagsByCount(tagCounts).length > 0
+  const changelog = isChangelogPath(usePathname())
   return (
     <div className="sticky top-[82px] max-h-[calc(100dvh-82px)] overflow-y-auto">
-      <div ref={setPanelTarget}>{panelCount === 0 ? (hasTags ? <UpdateFilterPanel /> : fallback) : null}</div>
+      <div ref={setPanelTarget}>
+        {panelCount === 0 ? (hasTags ? (changelog ? <UpdateFilterPanel /> : <><UpdateFilterPanel />{fallback}</>) : fallback) : null}
+      </div>
       {footer}
     </div>
   )
