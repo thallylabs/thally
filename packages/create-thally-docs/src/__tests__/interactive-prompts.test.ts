@@ -38,13 +38,24 @@ describe('setup prompt adapter', () => {
 
   it('converts text defaults and validation without accepting invalid sources', async () => {
     mocks.rich.text.mockResolvedValue('https://github.com/acme/docs')
-    await input({ message: '  Repository:', default: '', validate: (value) => value.includes('github.com') ? true : 'Use GitHub' })
+    await input({ message: '  Repository:', default: '', validate: (value) => {
+      try {
+        const url = new URL(value)
+        return url.protocol === 'https:' && url.hostname === 'github.com' ? true : 'Use GitHub'
+      } catch {
+        return 'Use GitHub'
+      }
+    } })
     const options = mocks.rich.text.mock.calls[0][0]
     expect(options.initialValue).toBe('')
     expect(options.defaultValue).toBe('')
     expect(options.message).toBe('Repository:')
     expect(options.validate('https://github.com/acme/docs')).toBeUndefined()
     expect(options.validate('https://example.com')).toBe('Use GitHub')
+    for (const source of [
+      'https://github.com.evil.test/docs', 'https://evil.test/github.com',
+      'https://github.com@evil.test/docs', 'http://github.com/acme/docs', 'not a URL',
+    ]) expect(options.validate(source)).toBe('Use GitHub')
   })
 
   it('keeps automatic detection as an undefined answer and confirm opt-in false', async () => {

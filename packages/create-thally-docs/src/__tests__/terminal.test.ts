@@ -1,6 +1,6 @@
 /** Terminal decoration must never corrupt CI transcripts or conceal source warnings. */
 import { describe, expect, it, vi } from 'vitest'
-import { createTerminal, PRODUCT_TAGLINE, terminal, terminalText, acquireTerminalAccent } from '../terminal.js'
+import { createTerminal, PRODUCT_TAGLINE, terminal, terminalText, acquireTerminalAccent, formatHelp } from '../terminal.js'
 
 function screen(isTTY = false, env: NodeJS.ProcessEnv = {}, argv: Array<string> = [], columns = 40) {
   const lines: Array<string> = []
@@ -14,6 +14,21 @@ function screen(isTTY = false, env: NodeJS.ProcessEnv = {}, argv: Array<string> 
 }
 
 describe('terminal transcript', () => {
+  it('highlights help headings while preserving indentation and long non-heading lines', () => {
+    const help = `Usage: thally\n\n  Commands:\n${' '.repeat(100_000)}content\nOptions:\n`
+    const rich = vi.spyOn(terminal, 'isRich', 'get').mockReturnValue(true)
+    try {
+      const output = formatHelp(help)
+      expect(terminalText(output)).toBe(help)
+      expect(output).toContain('  \x1b[')
+      expect(output).toMatch(/mCommands:\x1b\[0m/)
+      expect(output).toMatch(/mOptions:\x1b\[0m/)
+      expect(output).toContain(`${' '.repeat(100_000)}content\n`)
+      rich.mockReturnValue(false)
+      expect(formatHelp(help)).toBe(help)
+    } finally { rich.mockRestore() }
+  })
+
   it.each([false, true])('keeps long preview commands intact in rich=%s output', (isTTY) => {
     const view = screen(isTTY)
     const command = `cd '/tmp/${'long-path/'.repeat(15)}docs' && npm run dev`

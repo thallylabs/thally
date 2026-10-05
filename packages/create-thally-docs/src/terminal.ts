@@ -252,5 +252,12 @@ export const terminal = createTerminal()
 /** Highlight help headings only on capable terminals; preserve plain help bytes otherwise. */
 export function formatHelp(text: string): string {
   if (!terminal.isRich) return text
-  return text.replace(/^(\s*)([^\n]+:)$/gm, `$1\x1b[${oliveCode(process.env)}m$2\x1b[0m`)
+  // Scan each line once: overlapping whitespace regex groups can backtrack on long input.
+  const accent = `\x1b[${oliveCode(process.env)}m`
+  return text.split('\n').map((line) => {
+    const heading = line.trimStart()
+    if (heading.length < 2 || !heading.endsWith(':')) return line
+    const indentation = line.slice(0, line.length - heading.length)
+    return `${indentation}${accent}${heading}\x1b[0m`
+  }).join('\n')
 }
