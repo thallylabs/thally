@@ -6,7 +6,7 @@
  * structure that a rendered website may no longer expose.
  */
 
-import { confirm, input, select } from '@inquirer/prompts'
+import { confirm, input, select } from './interactive-prompts.js'
 import { basename, resolve } from 'node:path'
 
 import {

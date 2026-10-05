@@ -9,7 +9,6 @@
 import { Readable, Transform, pipeline } from 'node:stream'
 import { promisify } from 'node:util'
 import {
-  cpSync,
   lstatSync,
   mkdtempSync,
   readdirSync,
@@ -20,6 +19,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { cp } from 'node:fs/promises'
 import { extract, type ReadEntry } from 'tar'
 
 import {
@@ -27,6 +27,7 @@ import {
   type ScaffoldRelease,
 } from './release.js'
 import { readStarterReleaseManifest } from './starter-sync.js'
+import { terminal } from './terminal.js'
 
 const pipelineAsync = promisify(pipeline)
 
@@ -155,10 +156,18 @@ export async function downloadStarter(
   options: DownloadStarterOptions = {},
 ): Promise<void> {
   if (options.announce !== false) {
-    console.log('')
-    console.log(`  ⏳ Creating ${siteName?.trim() || 'your docs site'}...`)
+    await terminal.step(
+      `Downloading starter for ${siteName?.trim() || 'your docs site'}`,
+      () => extractStarter(targetDir, release),
+      'Starter downloaded',
+    )
+    return
   }
+  await extractStarter(targetDir, release)
+}
 
+/** Extract atomically so failed downloads cannot leave a partial project. */
+async function extractStarter(targetDir: string, release: ScaffoldRelease): Promise<void> {
   const targetEntry = lstatSync(targetDir)
   if (!targetEntry.isDirectory() || targetEntry.isSymbolicLink()) {
     throw new Error('The Thally starter target must be a regular directory.')
@@ -213,7 +222,7 @@ export async function downloadStarter(
     )
     try {
       for (const entry of readdirSync(stagingDir)) {
-        cpSync(join(stagingDir, entry), join(deliveryDir, entry), {
+        await cp(join(stagingDir, entry), join(deliveryDir, entry), {
           recursive: true,
           errorOnExist: true,
         })

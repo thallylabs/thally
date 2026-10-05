@@ -39,6 +39,13 @@ vi.mock('@thallylabs/migrate', async (importOriginal) => {
   }
 })
 
+// These materialization fixtures exercise main-thread policy; worker parity and
+// isolation are covered separately with the actual compiled worker entry.
+vi.mock('../migration-work.js', async () => {
+  const engine = await import('@thallylabs/migrate')
+  return { convertRepository: engine.migrateRepository, renderFiles: engine.renderMigrationFiles }
+})
+
 import { migrateDocs } from '../migrate/index.js'
 
 describe('gated page migration output', () => {
