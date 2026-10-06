@@ -59,7 +59,14 @@ function writeTagsParam(tags: ReadonlyArray<string>) {
   window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash)
 }
 
-export function PageSlotsProvider({ children }: { children: ReactNode }) {
+const NO_TAGS: Array<string> = []
+
+/**
+ * `urlFilters` lets a shared `?tags=` link filter Update entries. Pass it only
+ * for a layout that renders the filter controls, otherwise hidden entries
+ * could not be restored; it defaults off so content shows unless opted in.
+ */
+export function PageSlotsProvider({ children, urlFilters = false }: { children: ReactNode; urlFilters?: boolean }) {
   const [panelTarget, setPanelTarget] = useState<HTMLElement | null>(null)
   const [panelCount, setPanelCount] = useState(0)
   const [views, setViews] = useState<Array<ViewOption>>([])
@@ -76,15 +83,16 @@ export function PageSlotsProvider({ children }: { children: ReactNode }) {
   // Selected tags no Update carries (a stale shared link) are ignored rather than hiding everything.
   // Until the reader changes the filter, the shared URL is resolved against the registered tags, so a tag that contains a comma is not split.
   const selectedTags = useMemo(
-    () => validSelectedTags(rawSelectedTags ?? parseTagsParam(urlSearch, tagCounts), tagCounts),
-    [rawSelectedTags, tagCounts, urlSearch],
+    () => urlFilters ? validSelectedTags(rawSelectedTags ?? parseTagsParam(urlSearch, tagCounts), tagCounts) : NO_TAGS,
+    [rawSelectedTags, tagCounts, urlFilters, urlSearch],
   )
 
   // Read the shared filter after hydration so server and client markup match.
   useEffect(() => {
+    if (!urlFilters) return
     const search = window.location.search
     if (search) startTransition(() => setUrlSearch(search))
-  }, [])
+  }, [urlFilters])
 
   const registerTags = useCallback((tags: ReadonlyArray<string>) => {
     setEntries((current) => [...current, tags])

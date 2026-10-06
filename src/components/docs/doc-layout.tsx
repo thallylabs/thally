@@ -175,10 +175,13 @@ function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayou
   )
 }
 
+/** Layouts that render the update filter controls; any other layout ignores `?tags=`. */
+const MODES_WITH_UPDATE_FILTERS = new Set(['default', 'wide', 'center'])
+
 /** Render a documentation page with page-scoped MDX coordination. */
 export function DocLayout(props: DocLayoutProps) {
   return (
-    <PageSlotsProvider>
+    <PageSlotsProvider urlFilters={MODES_WITH_UPDATE_FILTERS.has(props.doc.mode ?? 'default')}>
       <DocLayoutContent {...props} />
     </PageSlotsProvider>
   )
