@@ -487,27 +487,35 @@ interface ProjectionContext {
   gatedSourceRefs: Array<string>
   /** `sourceRef` nodes found under any restricted container, whichever container kind holds them. */
   gatedNodes: Map<object, string>
+  /** Set when the navigation nests deeper than the access sweeps can follow; every mount and page is then withheld. */
+  limits: { tooDeep: boolean }
   /** Label of the nearest enclosing navigation group, for warnings. */
   groupLabel?: string
   /** Set while walking below a restricted group or tab. */
   gateReason?: string
 }
 
+/** How deep the access sweeps follow the navigation; anything deeper is withheld rather than guessed at. */
+const SWEEP_DEPTH_LIMIT = 256
+
 /**
  * Container-agnostic sweep for `sourceRef` mounts under a restricted node of any kind, so a container
  * the projection does not special-case can never publish a mount. Runs before conversion.
  */
-function collectGatedSourceRefs(node: unknown, gate: string | undefined, out: Map<object, string>, depth = 0): void {
-  if (depth > 256) return
+function collectGatedSourceRefs(node: unknown, gate: string | undefined, out: Map<object, string>, limits: { tooDeep: boolean }, depth = 0): void {
+  if (depth > SWEEP_DEPTH_LIMIT) {
+    limits.tooDeep = true
+    return
+  }
   if (Array.isArray(node)) {
-    for (const item of node) collectGatedSourceRefs(item, gate, out, depth + 1)
+    for (const item of node) collectGatedSourceRefs(item, gate, out, limits, depth + 1)
     return
   }
   const object = objectValue(node)
   if (!object) return
   const reason = gate ?? navigationGateReason(object)
   if (reason && typeof object.sourceRef === 'string') out.set(object, reason)
-  for (const value of Object.values(object)) collectGatedSourceRefs(value, reason, out, depth + 1)
+  for (const value of Object.values(object)) collectGatedSourceRefs(value, reason, out, limits, depth + 1)
 }
 
 /**
@@ -522,7 +530,7 @@ function collectGatedReferences(
   out: Array<MintlifyGatedReference>,
   depth = 0,
 ): void {
-  if (depth > 32) return
+  if (depth > SWEEP_DEPTH_LIMIT) return
   if (Array.isArray(node)) {
     for (const item of node) collectGatedReferences(item, gate, pathPrefix, out, depth + 1)
     return
@@ -564,8 +572,9 @@ function containerPresentation(value: Record<string, unknown>): {
 }
 
 function registerReference(value: string, context: ProjectionContext): string | null {
-  if (context.gateReason) {
-    if (normalizePageRef(value, context.pathPrefix)) context.gated.push({ ref: value, reason: context.gateReason })
+  const withheld = context.gateReason ?? (context.limits.tooDeep ? 'its navigation is too deeply nested to check access rules' : undefined)
+  if (withheld) {
+    if (normalizePageRef(value, context.pathPrefix)) context.gated.push({ ref: value, reason: withheld })
     return null
   }
   const localizedValue = context.locale
@@ -652,7 +661,7 @@ function convertPageObject(
     return null
   }
   if (typeof object.sourceRef === 'string') {
-    if (context.gateReason || context.gatedNodes.has(object)) return gatedSourceRef(object.sourceRef, context)
+    if (context.gateReason || context.gatedNodes.has(object) || context.limits.tooDeep) return gatedSourceRef(object.sourceRef, context)
     const imported = context.resolveSourceRef?.(object.sourceRef)
     // Directly inside a group the entries are spliced into it (see below);
     // anywhere else they get a group named after the repository.
@@ -680,7 +689,7 @@ function convertPageObject(
         const pageObject = objectValue(page)
         const sourceRef = pageObject?.sourceRef
         // A restricted mount (its own rules or an enclosing container's) falls through to convertPage, which withholds it.
-        const imported = typeof sourceRef === 'string' && !context.gateReason && !navigationGateReason(pageObject!) && !context.gatedNodes.has(pageObject!)
+        const imported = typeof sourceRef === 'string' && !context.gateReason && !navigationGateReason(pageObject!) && !context.gatedNodes.has(pageObject!) && !context.limits.tooDeep
           ? context.resolveSourceRef?.(sourceRef)
           : null
         if (imported) {
@@ -1336,7 +1345,14 @@ export function projectMintlifyNavigation(
   const gatedSourceRefs: Array<string> = []
   const gatedNodes = new Map<object, string>()
   const navigation = objectValue(config.navigation) ?? config
-  collectGatedSourceRefs(navigation, undefined, gatedNodes)
+  const limits = { tooDeep: false }
+  collectGatedSourceRefs(navigation, undefined, gatedNodes, limits)
+  if (limits.tooDeep) {
+    warnings.push({
+      code: 'unsupported-config',
+      message: 'The navigation is too deeply nested to check its access rules, so no pages or sourceRef mounts were published from it. Flatten the navigation nesting in docs.json.',
+    })
+  }
   const languages = Array.isArray(navigation.languages)
     ? navigation.languages.flatMap((value): Array<Record<string, unknown>> => {
         const language = objectValue(value)
@@ -1386,6 +1402,7 @@ export function projectMintlifyNavigation(
         gated,
         gatedSourceRefs,
         gatedNodes,
+        limits,
       }
       const languageTabs = convertContainerToTabs(
         language,
@@ -1402,7 +1419,7 @@ export function projectMintlifyNavigation(
     }
     if (Object.keys(localizedNavigation).length > 0) i18n.navigation = localizedNavigation
   } else {
-    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, gated, gatedSourceRefs, gatedNodes, pathPrefix: options.pathPrefix, resolveSourceRef: options.resolveSourceRef }
+    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, gated, gatedSourceRefs, gatedNodes, limits, pathPrefix: options.pathPrefix, resolveSourceRef: options.resolveSourceRef }
     tabs = convertContainerToTabs(navigation, context, 'Documentation', projectionTrace)
     if (tabs.length === 0 && Array.isArray(config.navigation)) {
       const children = convertNavigationValues(config.navigation, context)

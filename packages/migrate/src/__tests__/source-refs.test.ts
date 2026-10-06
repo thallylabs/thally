@@ -525,3 +525,56 @@ describe('sourceRef mounts under every kind of restricted container', () => {
     })
   })
 })
+
+describe('navigation too deep to check access rules', () => {
+  const nest = (levels: number, leaf: unknown, gate: Record<string, unknown> = {}): unknown => {
+    let node: unknown = leaf
+    for (let level = 0; level < levels; level++) node = { group: `g${level}`, ...(level === levels - 1 ? gate : {}), pages: [node] }
+    return node
+  }
+  const run = (pages: unknown, extra: Record<string, string> = {}) => migrateRepository({
+    repositoryDir: mainRepo({ 'docs.json': JSON.stringify({ navigation: { pages: ['introduction', pages] } }), 'deep-page.mdx': '---\ntitle: Deep\n---\nDeep.', ...extra }),
+    sourceUrl: 'https://github.com/example/docs',
+    platform: 'mintlify',
+    sourceRefs: [importSourceRef(MAPPING, sdkRepo())],
+  })
+  const mounted = (bundle: ReturnType<typeof run>): boolean => bundle.pages.some((page) => page.id.startsWith('client-sdks/typescript/'))
+  const tooDeep = (bundle: ReturnType<typeof run>): boolean => bundle.warnings.some((warning) => /too deeply nested/.test(warning.message))
+
+  it('withholds a sourceRef nested past the limit under a restricted group, with a warning', () => {
+    const bundle = run(nest(200, { sourceRef: 'Acme/ts-sdk' }, { public: false }))
+    expect(mounted(bundle)).toBe(false)
+    expect(tooDeep(bundle)).toBe(true)
+    expect(bundle.warnings.some((warning) => /Acme\/ts-sdk.*restricted container/.test(warning.message))).toBe(true)
+  })
+
+  it('also withholds an unrestricted sourceRef nested past the limit', () => {
+    const bundle = run(nest(200, { sourceRef: 'Acme/ts-sdk' }))
+    expect(mounted(bundle)).toBe(false)
+    expect(tooDeep(bundle)).toBe(true)
+  })
+
+  it('mounts a moderately deep sourceRef', () => {
+    const bundle = run(nest(20, { sourceRef: 'Acme/ts-sdk' }))
+    expect(mounted(bundle)).toBe(true)
+    expect(tooDeep(bundle)).toBe(false)
+  })
+
+  const menu = (inner: unknown) => ({ tab: 'T', menu: [{ item: 'M', public: false, pages: [inner] }] })
+  const runMenu = (inner: unknown) => migrateRepository({
+    repositoryDir: mainRepo({ 'docs.json': JSON.stringify({ navigation: { tabs: [menu(inner), { tab: 'D', pages: ['introduction'] }] } }), 'deep-page.mdx': '---\ntitle: Deep\n---\nDeep.' }),
+    sourceUrl: 'https://github.com/example/docs',
+    platform: 'mintlify',
+  })
+
+  it('withholds a page nested past 32 levels under a restricted menu item', () => {
+    const bundle = runMenu(nest(20, 'deep-page'))
+    expect(bundle.pages.some((page) => page.id === 'deep-page')).toBe(false)
+    expect(JSON.stringify(bundle.docsConfig)).not.toContain('deep-page')
+  })
+
+  it('withholds every page when the navigation is nested past the limit', () => {
+    // nothing is publishable, so the migration refuses outright and says why
+    expect(() => runMenu(nest(200, 'deep-page'))).toThrow(/too deeply nested/)
+  })
+})
