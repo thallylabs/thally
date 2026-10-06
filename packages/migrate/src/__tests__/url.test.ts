@@ -267,7 +267,7 @@ describe('public URL migration', () => {
     expect(bundle.pages[0].body).not.toContain('# Product Documentation')
     expect(bundle.pages[0].body).not.toContain('onClick')
     expect(bundle.pages[0].body).not.toContain('window.analytics')
-    expect(bundle.pages[0].body).toContain('<Steps>')
+    expect(bundle.pages[0].body).toContain('<Steps titleSize="p">')
     expect(bundle.pages[0].body).toContain('<CardGroup cols={2}>')
     expect(bundle.pages[0].body).toContain('href="/api-reference/introduction"')
     expect(bundle.pages[0].body).toContain('| Feature | Status |')

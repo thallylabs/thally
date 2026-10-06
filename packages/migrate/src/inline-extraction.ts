@@ -17,7 +17,7 @@ import { isThallyBuiltinComponent } from './builtin-components.js'
 
 export interface InlineDeclaration { start: number; end: number; source: string }
 
-type RefKind = 'tag' | 'member' | 'prop' | 'other'
+type RefKind = 'tag' | 'member' | 'prop' | 'typeof' | 'other'
 interface Ref { name: string; kind: RefKind }
 
 interface Unit {
@@ -88,6 +88,8 @@ const JS_GLOBALS = new Set([
   'console', 'fetch', 'URL', 'URLSearchParams', 'Headers', 'Request', 'Response', 'AbortController', 'AbortSignal',
   'TextEncoder', 'TextDecoder', 'atob', 'btoa', 'structuredClone', 'queueMicrotask', 'performance',
   'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+  'crypto', 'Blob', 'EventTarget', 'escape', 'unescape', 'eval', 'WebAssembly', 'Iterator', 'self', 'screen',
+  'FinalizationRegistry', 'DOMException', 'ReadableStream', 'WritableStream', 'TransformStream', 'MessageChannel', 'BroadcastChannel',
 ])
 const IMPLICIT_MODULE_NAMES = new Set(['React', 'MintlifyComponents'])
 
@@ -161,7 +163,11 @@ function collectRefs(root: ts.Node): { refs: Array<Ref>; assigned: Array<string>
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) dynamicImport = true
     if (ts.isIdentifier(node)) {
       const parent = node.parent
-      const kind: RefKind = ts.isJsxExpression(parent) && parent.parent && ts.isJsxAttribute(parent.parent) ? 'prop' : 'other'
+      let operandOf = parent
+      while (ts.isParenthesizedExpression(operandOf)) operandOf = operandOf.parent
+      const kind: RefKind = ts.isTypeOfExpression(operandOf)
+        ? 'typeof'
+        : ts.isJsxExpression(parent) && parent.parent && ts.isJsxAttribute(parent.parent) ? 'prop' : 'other'
       push(node.text, kind, scopes)
       return
     }
@@ -207,10 +213,14 @@ function collectRefs(root: ts.Node): { refs: Array<Ref>; assigned: Array<string>
       return
     }
     if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
-      node.members.forEach((member) => walkNode(member, scopes, inAsync))
+      // A class expression's own name is bound inside the class only.
+      const inner = ts.isClassExpression(node) && node.name ? [...scopes, new Set([node.name.text])] : scopes
+      node.members.forEach((member) => walkNode(member, inner, inAsync))
       for (const clause of node.heritageClauses ?? []) for (const type of clause.types) walkNode(type.expression, scopes, inAsync)
       return
     }
+    // `import.meta` / `new.target` carry a keyword-like name, not a reference.
+    if (ts.isMetaProperty(node)) return
     if (ts.isPropertyDeclaration(node)) {
       if (node.initializer) walkNode(node.initializer, scopes, inAsync)
       return
@@ -565,4 +575,105 @@ export function unboundTags(moduleSource: string, boundNames: ReadonlySet<string
     }
   }
   return [...tags].sort()
+}
+
+/**
+ * Globals a function may use when its source is copied into another module.
+ * Deliberately narrower than JS_GLOBALS: `Function`, `globalThis`, `Reflect`,
+ * `Proxy`, `fetch`, `console` and timers reach code execution or the network.
+ */
+const INLINE_SAFE_GLOBALS = new Set([
+  'undefined', 'NaN', 'Infinity', 'Math', 'JSON', 'String', 'Number', 'Boolean', 'Array', 'Date', 'Intl',
+  'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'encodeURIComponent', 'decodeURIComponent',
+])
+const FORBIDDEN_MEMBERS = new Set(['constructor', 'prototype'])
+
+/** True when a node sits where an object literal acts as a destructuring target (`({ a: x } = y)`, `[{ a: x }] = y`, `for ({ a: x } of y)`). */
+function isAssignmentTarget(node: ts.Node): boolean {
+  let child = node
+  for (let parent = node.parent; parent; child = parent, parent = parent.parent) {
+    if (ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken) return parent.left === child
+    if ((ts.isForOfStatement(parent) || ts.isForInStatement(parent)) && parent.initializer === child) return true
+    if (!(ts.isPropertyAssignment(parent) || ts.isShorthandPropertyAssignment(parent) || ts.isArrayLiteralExpression(parent)
+      || ts.isSpreadAssignment(parent) || ts.isSpreadElement(parent) || ts.isParenthesizedExpression(parent) || ts.isObjectLiteralExpression(parent))) return false
+  }
+  return false
+}
+
+/**
+ * True when no member access in the node can walk to `Function`: `x.constructor`, `x['constructor']`, `x[key]`,
+ * `__proto__`, and the same keys read through destructuring (`const { constructor: C } = String`, `({ [key]: C } = x)`).
+ */
+function hasOnlySafeMemberAccess(root: ts.Node): boolean {
+  const unsafeName = (name: string) => FORBIDDEN_MEMBERS.has(name) || name.startsWith('__')
+  /** A property key is safe when it is a plain name or a static string/number that is not forbidden; any other computed key is not. */
+  const safeKey = (name: ts.PropertyName | undefined, computedAllowed: boolean): boolean => {
+    if (!name) return true
+    if (ts.isComputedPropertyName(name)) {
+      const expression = name.expression
+      if (ts.isStringLiteralLike(expression)) return !unsafeName(expression.text)
+      return ts.isNumericLiteral(expression) || computedAllowed
+    }
+    return !unsafeName(name.text)
+  }
+  let safe = true
+  function visit(node: ts.Node): void {
+    if (!safe) return
+    if (ts.isPropertyAccessExpression(node) && unsafeName(node.name.text)) safe = false
+    else if (ts.isElementAccessExpression(node)) {
+      const argument = node.argumentExpression
+      const literal = ts.isNumericLiteral(argument) || (ts.isStringLiteralLike(argument) && !unsafeName(argument.text))
+      if (!literal) safe = false
+    } else if (ts.isBindingElement(node)) {
+      // `{ constructor }` has no propertyName; the bound identifier is the key.
+      if (ts.isObjectBindingPattern(node.parent) && !safeKey(node.propertyName ?? (ts.isIdentifier(node.name) ? node.name : undefined), false)) safe = false
+    } else if (ts.isObjectLiteralExpression(node)) {
+      const target = isAssignmentTarget(node)
+      for (const property of node.properties) {
+        if ((ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) && !safeKey(property.name, !target)) safe = false
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(root)
+  return safe
+}
+
+/** True when a function expression only reaches its own parameters, locals and a small set of pure built-ins, so its source can be copied verbatim to another module. */
+export function isSelfContainedFunction(node: ts.Node): boolean {
+  const { refs, assigned, awaitOutsideAsync, dynamicImport } = collectRefs(node)
+  return assigned.length === 0 && !awaitOutsideAsync && !dynamicImport && refs.every((ref) => INLINE_SAFE_GLOBALS.has(ref.name))
+    && hasOnlySafeMemberAccess(node)
+}
+
+/** Names a page's own ESM source (imports and top-level declarations) makes available to its expressions. */
+export function pageScopeNames(esmSources: ReadonlyArray<string>): Set<string> {
+  const names = new Set<string>()
+  for (const source of esmSources) {
+    for (const statement of parse(source).statements) {
+      for (const local of importLocals(statement.getText())) names.add(local)
+      if (ts.isImportDeclaration(statement)) continue
+      const target = ts.isExportDeclaration(statement) || ts.isExportAssignment(statement) ? undefined : statement
+      if (target) for (const name of declaredNames(target).names) names.add(name)
+    }
+  }
+  return names
+}
+
+/**
+ * Free identifiers in an MDX expression that neither the page, the expression
+ * itself, a JS built-in nor the compiled-MDX scope (`props`) defines. Evaluating
+ * one throws a ReferenceError at render time.
+ */
+export function unresolvedExpressionNames(expression: string, pageNames: ReadonlySet<string>): Array<string> {
+  const names = new Set<string>()
+  for (const { name, kind } of expressionRefs(expression)) {
+    // `typeof missing` is safe at runtime; only a bare reference throws.
+    if (kind === 'typeof') continue
+    if (!name || pageNames.has(name) || JS_GLOBALS.has(name) || BROWSER_IDENTIFIERS.has(name) || SERVER_ONLY_IDENTIFIERS.has(name)
+      || name === 'props' || name === 'React') continue
+    if ((kind === 'tag' || kind === 'member') && isThallyBuiltinComponent(name)) continue
+    names.add(name)
+  }
+  return [...names]
 }

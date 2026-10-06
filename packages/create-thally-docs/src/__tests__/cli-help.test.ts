@@ -18,6 +18,28 @@ function runCli(...args: Array<string>) {
   })
 }
 
+describe('migrate --source-ref', () => {
+  it('lists the flag in migrate help', () => {
+    expect(runCli('migrate', '--help').stdout).toContain('--source-ref <owner/repo>=<path>')
+  })
+
+  it.each(['A/b=../x', 'A/b=/abs', 'A/b=a/../b', 'noequals'])('rejects %s before any network access', (value) => {
+    const result = runCli('migrate', 'https://github.com/example/docs', '--source-ref', value, '--yes')
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('--source-ref')
+  })
+})
+
+describe('migrate --source-ref without a value', () => {
+  it.each([[['--source-ref']], [['--source-ref', '--yes']]])('fails clearly for %j', (extra) => {
+    const result = runCli('migrate', 'https://github.com/example/docs', ...extra)
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('--source-ref needs a value')
+  })
+})
+
 describe('create-thally-docs help', () => {
   it.each(['--version', '-v', '-V', 'version'])('prints the package version for %s', (argument) => {
     const result = runCli(argument)

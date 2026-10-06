@@ -6,7 +6,7 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, readFileSync } from 'node:fs'
-import { basename, dirname, extname, relative, resolve } from 'node:path'
+import { basename, dirname, extname, posix, relative, resolve } from 'node:path'
 import postcss from 'postcss'
 import selectorParser from 'postcss-selector-parser'
 import remarkMdx from 'remark-mdx'
@@ -380,6 +380,43 @@ function walk(node: MdxNode, visitor: (node: MdxNode) => void): void {
   for (const child of node.children ?? []) walk(child, visitor)
 }
 
+const BROWSER_GLOBALS = new Set(['window', 'document', 'navigator', 'localStorage', 'sessionStorage', 'location', 'history', 'matchMedia',
+  'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'IntersectionObserver', 'ResizeObserver', 'MutationObserver', 'alert', 'confirm', 'prompt', 'self',
+  'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'addEventListener', 'removeEventListener', 'getComputedStyle', 'XMLHttpRequest', 'WebSocket'])
+
+/**
+ * Whether a copied module must run on the client: it declares `'use client'`,
+ * calls a hook, attaches an event handler, touches a browser global, builds a
+ * context, extends a class, or imports anything besides React (a package or
+ * scaffold module may itself need the client). Relative imports are judged on
+ * their own copy. Anything else is a pure server module.
+ */
+function needsClientBoundary(source: ts.SourceFile): boolean {
+  let needed = false
+  const isHook = (name: string): boolean => /^use(?:[A-Z0-9]|$)/.test(name) || name === 'createContext'
+  function visitNode(node: ts.Node): void {
+    if (needed) return
+    if (ts.isExpressionStatement(node) && ts.isStringLiteral(node.expression) && node.expression.text === 'use client') needed = true
+    else if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      const specifier = node.moduleSpecifier.text
+      if (!specifier.startsWith('.') && !SHARED_IMPORTS.has(specifier)) needed = true
+    } else if (ts.isCallExpression(node)) {
+      const callee = ts.isPropertyAccessExpression(node.expression) ? node.expression.name.text : ts.isIdentifier(node.expression) ? node.expression.text : ''
+      if (isHook(callee) || callee === 'forwardRef' || callee === 'addEventListener' || callee === 'removeEventListener' || node.expression.kind === ts.SyntaxKind.ImportKeyword) needed = true
+    } else if (ts.isJsxAttribute(node) && ts.isIdentifier(node.name) && (/^on[A-Z]/.test(node.name.text) || node.name.text === 'ref')) needed = true
+    // Spread props can carry handlers into a DOM element; fail closed.
+    else if (ts.isJsxSpreadAttribute(node) && (ts.isJsxOpeningLikeElement(node.parent.parent)) && ts.isIdentifier(node.parent.parent.tagName) && /^[a-z]/.test(node.parent.parent.tagName.text)) needed = true
+    // A handler prop read or destructured, or a hook referenced without being called (`const h = React.useState`).
+    else if (ts.isIdentifier(node) && (isHook(node.text) || /^on[A-Z]/.test(node.text)) && !ts.isJsxAttribute(node.parent)) needed = true
+    else if (ts.isIdentifier(node) && BROWSER_GLOBALS.has(node.text) && !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)
+      && !(ts.isPropertyAssignment(node.parent) && node.parent.name === node)) needed = true
+    else if (ts.isClassLike(node) && node.heritageClauses?.some((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword)) needed = true
+    ts.forEachChild(node, visitNode)
+  }
+  visitNode(source)
+  return needed
+}
+
 function implicitReactImports(source: ts.SourceFile): string {
   const bindings = new Set<string>()
   const references = new Set<string>()
@@ -517,6 +554,7 @@ export const CLIENT_BUILTIN_COMPONENT_TAGS: ReadonlySet<string> = new Set([
   'CodeGroup', 'CodeBlock',
   'Badge', 'Tooltip',
   'Tabs', 'Tab',
+  'Steps', 'Step',
   'RequestExample', 'ResponseExample', 'InlineRequestExample', 'InlineResponseExample',
   'Tree', 'FileTree', 'Folder', 'File',
   'Mermaid',
@@ -629,6 +667,79 @@ export function declarationsReferenceBrowserGlobal(body: string): boolean {
   return found
 }
 
+/**
+ * Relative code-module specifiers (`./metadata`, `../lib/x.js`) that a page's
+ * own top-level `import`/`export ... from` still names after migration. The
+ * migrator rewrites every component or data import it copies to an `@/mdx/
+ * migrated/...` path, so a relative one that survives points at a file that is
+ * never shipped beside the page (for example a Next.js app's `metadata.ts`)
+ * and fails the site build with "Module not found". `.md`/`.mdx` specifiers
+ * are left out: snippet imports are inlined or rewritten elsewhere.
+ */
+export function unresolvedRelativeModuleSpecifiers(body: string): Array<string> {
+  const tree = parser.parse(body) as MdxNode
+  const specifiers = new Set<string>()
+  const add = (specifier: string): void => {
+    if (/^\.\.?\//.test(specifier) && !/\.mdx?$/i.test(specifier)) specifiers.add(specifier)
+  }
+  walk(tree, (node) => {
+    if (node.type !== 'mdxjsEsm' || node.value === undefined) return
+    for (const statement of sourceFile(node.value, 'inline.tsx').statements) {
+      if (!(ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement))) continue
+      const specifier = statement.moduleSpecifier
+      if (specifier && ts.isStringLiteral(specifier)) add(specifier.text)
+    }
+  })
+  for (const { specifier } of dynamicImportLiterals(body, tree)) add(specifier)
+  return [...specifiers]
+}
+
+/**
+ * Every dynamic `import('<literal>')` in a page's ESM blocks, expressions and
+ * JSX expression attributes. `start`/`end` locate the string literal in `body`
+ * (so it can be rewritten in place) and are omitted when that location cannot
+ * be confirmed against the source text.
+ */
+function dynamicImportLiterals(body: string, tree: MdxNode): Array<{ specifier: string; start?: number; end?: number }> {
+  const found: Array<{ specifier: string; start?: number; end?: number }> = []
+  // `origin` is where `code` starts in `body`; `prefix` is any wrapper length
+  // added in front of it when it was parsed.
+  const scan = (code: string, origin: number | undefined, prefix: number): void => {
+    const source = sourceFile(prefix ? `(${code})` : code, 'inline.tsx')
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        const argument = node.arguments[0]
+        if (argument && ts.isStringLiteralLike(argument)) {
+          const start = origin === undefined ? undefined : origin + argument.getStart(source) - prefix
+          const end = start === undefined ? undefined : start + argument.getWidth(source)
+          const confirmed = start !== undefined && end !== undefined && body.slice(start, end) === argument.getText(source)
+          found.push(confirmed ? { specifier: argument.text, start, end } : { specifier: argument.text })
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(source)
+  }
+  walk(tree, (node) => {
+    if (node.type === 'mdxjsEsm' && node.value !== undefined) {
+      scan(node.value, node.position?.start.offset, 0)
+      return
+    }
+    if ((node.type === 'mdxFlowExpression' || node.type === 'mdxTextExpression') && node.value !== undefined) {
+      scan(node.value, node.position?.start.offset === undefined ? undefined : node.position.start.offset + 1, 1)
+    }
+    for (const attribute of node.attributes ?? []) {
+      // A plain string attribute is text; only expression values are code.
+      if (attribute.type === 'mdxJsxExpressionAttribute' && typeof attribute.value === 'string') {
+        scan(attribute.value, attribute.position?.start.offset === undefined ? undefined : attribute.position.start.offset + 1, 1)
+      } else if (typeof attribute.value === 'object' && attribute.value?.value !== undefined) {
+        scan(attribute.value.value, attribute.position?.end.offset === undefined ? undefined : attribute.position.end.offset - 1 - attribute.value.value.length, 1)
+      }
+    }
+  })
+  return found
+}
+
 /** Create one bounded component graph and registry for a repository migration. */
 /**
  * `siteRoot` (a Mintlify/Docusaurus project root, when one was detected —
@@ -677,6 +788,8 @@ function neutralizeUnresolvableImportsWithoutAst(content: string, currentFile: s
 export function createComponentMigrator(siteRoot: string, confinementRoot: string, warnings: Array<MigrationWarning>, sourceIdentity: string): {
   transform: (raw: string, currentFile: string) => string
   files: () => Array<RenderedMigrationFile>
+  /** Merge the component files of another migrated bundle (a sourceRef sub-site) into this one. */
+  adopt: (incoming: ReadonlyArray<RenderedMigrationFile>) => void
 } {
   const root = resolve(siteRoot)
   const confined = resolve(confinementRoot)
@@ -778,6 +891,8 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
     // registered component or consume the successful-copy budget.
     const staged = new Map<string, RenderedMigrationFile>()
     const stagedWarnings: Array<{ path: string; omitted: number }> = []
+    /** Code modules awaiting their final prologue: client-ness is settled over the whole graph (see below). */
+    const modules = new Map<string, { local: boolean; dependencies: Array<string>; render: (client: boolean) => string }>()
     let stagedBytes = 0
     /** Stage a small fixed-content shim module (see `DOCUSAURUS_THEME_SHIMS`) once, reused across every component that imports it. */
     function stageShim(filename: string, content: string): string {
@@ -824,6 +939,13 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       if (ast.statements.some((statement) => ts.isExpressionStatement(statement)
         && ts.isStringLiteral(statement.expression) && statement.expression.text === 'use server')) throw new Error('server-only component modules require manual migration')
       const edits: Array<Replacement> = []
+      const dependencies: Array<string> = []
+      // Our own prologue re-adds the directive, so drop the source's to avoid a duplicate.
+      for (const statement of ast.statements) {
+        if (ts.isExpressionStatement(statement) && ts.isStringLiteral(statement.expression) && statement.expression.text === 'use client') {
+          edits.push({ start: statement.getStart(ast), end: statement.end, value: '' })
+        }
+      }
       function dependency(literal: ts.StringLiteralLike, importDeclaration?: ts.ImportDeclaration): void {
         const specifier = literal.text
         if (SHARED_IMPORTS.has(specifier) || isScaffoldProvidedImport(specifier)) return
@@ -849,6 +971,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         const shim = DOCUSAURUS_THEME_SHIMS[specifier]
         if (shim) {
           const shimPath = stageShim(shim.filename, shim.content)
+          dependencies.push(shimPath)
           const nextPath = relative(dirname(destination), shimPath).replace(/\\/g, '/')
           edits.push({ start: literal.getStart(ast), end: literal.end, value: JSON.stringify(portableSpecifier(nextPath.startsWith('.') ? nextPath : `./${nextPath}`)) })
           return
@@ -860,6 +983,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         }
         const target = resolveDependency(specifier, path)
         visit(target)
+        dependencies.push(outputPath(target))
         const nextPath = relative(dirname(destination), outputPath(target)).replace(/\\/g, '/')
         edits.push({ start: literal.getStart(ast), end: literal.end, value: JSON.stringify(portableSpecifier(nextPath.startsWith('.') ? nextPath : `./${nextPath}`)) })
       }
@@ -876,8 +1000,12 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         ts.forEachChild(node, inspect)
       }
       inspect(ast)
-      // Mark copied code as client-owned even when the source platform inferred
-      // its client boundary. Browser hooks must never run in MDX's server scope.
+      // Mark copied code as client-owned when it needs the browser (see
+      // `needsClientBoundary`); browser hooks must never run in MDX's server
+      // scope. A pure component stays a server module: as 'use client' it
+      // would only see its server-rendered children as opaque references,
+      // so a site component that walks `children` (a `{{KEY}}` template)
+      // could not read the code it wraps.
       // The source site never ran `next build`'s full `tsc --noEmit` type
       // check (Docusaurus/Mintlify/Fern don't gate their own build on it),
       // so loose types, `window.ethereum`-style ambient globals, and
@@ -893,15 +1021,35 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       // file. If the copied source starts with one, keep it first and
       // insert the prologue right after instead.
       const shebangMatch = /^#!.*\r?\n/.exec(replaced)
-      const prologue = "// @ts-nocheck\n'use client';\n\n"
-      staged.set(destination, {
-        path: destination,
-        content: shebangMatch
-          ? shebangMatch[0] + prologue + implicitReactImports(ast) + '\n' + replaced.slice(shebangMatch[0].length)
-          : prologue + implicitReactImports(ast) + '\n' + replaced,
+      modules.set(destination, {
+        local: needsClientBoundary(ast),
+        dependencies,
+        render: (client) => {
+          const prologue = `// @ts-nocheck\n${client ? "'use client';\n" : ''}\n`
+          return shebangMatch
+            ? shebangMatch[0] + prologue + implicitReactImports(ast) + '\n' + replaced.slice(shebangMatch[0].length)
+            : prologue + implicitReactImports(ast) + '\n' + replaced
+        },
       })
     }
     visit(entry)
+    // A client module's importers must be client modules too: a server module
+    // calling a function exported by a client module fails at render ("Attempted
+    // to call fmt() from the server"). Settle that to a fixpoint over the graph;
+    // a module imported from an earlier graph is judged by its emitted directive.
+    const clientModules = new Set([...modules].filter(([, module]) => module.local).map(([path]) => path))
+    const isClient = (path: string): boolean => clientModules.has(path)
+      || (!modules.has(path) && /^\s*(?:\/\/[^\n]*\n\s*)*['"]use client['"]/.test(String((copied.get(path) ?? staged.get(path))?.content ?? '')))
+    for (let changed = true; changed;) {
+      changed = false
+      for (const [path, module] of modules) {
+        if (!clientModules.has(path) && module.dependencies.some(isClient)) {
+          clientModules.add(path)
+          changed = true
+        }
+      }
+    }
+    for (const [path, module] of modules) staged.set(path, { path, content: module.render(clientModules.has(path)) })
     for (const [path, file] of staged) copied.set(path, file)
     for (const { path, omitted } of stagedWarnings) {
       warn(`Site-authored CSS module ${relative(root, path).replace(/\\/g, '/')} has ${omitted} global-only selector branch(es) that cannot be copied into Thally CSS Modules; those styles were omitted.`, path)
@@ -1080,6 +1228,25 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       const ast = sourceFile(node.value, 'inline.tsx')
       for (const statement of ast.statements) {
         if (!ts.isImportDeclaration(statement)) {
+          // `export ... from './x'` of a file the migration copies points at
+          // the copied module; one that cannot be copied falls through and the
+          // page is excluded afterwards (repository.ts).
+          const reexport = ts.isExportDeclaration(statement) && statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)
+            && /^\.\.?\//.test(statement.moduleSpecifier.text) && !/\.mdx?$/i.test(statement.moduleSpecifier.text)
+            ? statement.moduleSpecifier : undefined
+          if (reexport) {
+            try {
+              const path = copyGraph(resolveDependency(reexport.text, currentFile))
+              edits.push({
+                start: node.position.start.offset + reexport.getStart(ast),
+                end: node.position.start.offset + reexport.end,
+                value: JSON.stringify(portableSpecifier(`@/${path.replace(/^src\//, '').replace(/\\/g, '/')}`)),
+              })
+              continue
+            } catch {
+              // Not shipped: handled below.
+            }
+          }
           let unsupportedDependency = ts.isExportDeclaration(statement) && !!statement.moduleSpecifier
           function inspect(node: ts.Node): void {
             if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword
@@ -1227,9 +1394,28 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
             // fall through to the ordinary handling below.
           }
         }
-        if (!bindings.length || (statement.importClause?.namedBindings && ts.isNamespaceImport(statement.importClause.namedBindings))) {
-          warn('Namespace or side-effect MDX imports require manual registration; the import was preserved.', currentFile)
-          hasUnsupportedImports = true
+        if (!statement.importClause) {
+          // Same treatment as a side-effect import of an npm package above:
+          // stylesheets and setup scripts have no effect on the migrated
+          // page, and leaving the import would reference a file that is not
+          // shipped beside it.
+          warn(`MDX side-effect import of ${JSON.stringify(rawSpecifier)} has no effect in the migrated site (stylesheets and setup scripts are not copied); the import was removed.`, currentFile)
+          edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+          continue
+        }
+        if (statement.importClause.namedBindings && ts.isNamespaceImport(statement.importClause.namedBindings)) {
+          // A namespace import cannot be registered as a JSX tag, but it can
+          // be imported for real from the copied file, like an expression-used
+          // named import. When the target cannot be copied the import is left
+          // alone and the page is excluded afterwards (repository.ts).
+          try {
+            const path = copyGraph(resolveDependency(specifier, currentFile))
+            const aliasSpecifier = portableSpecifier(`@/${path.replace(/^src\//, '').replace(/\\/g, '/')}`)
+            realPageImports.push(`import ${statement.importClause.getText(ast)} from ${JSON.stringify(aliasSpecifier)};`)
+            edits.push({ start: node.position.start.offset + statement.getStart(ast), end: node.position.start.offset + statement.end, value: '' })
+          } catch {
+            hasUnsupportedImports = true
+          }
           continue
         }
         // Unlike the unavailable-npm-package case above, a local/relative
@@ -1680,7 +1866,26 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         : mdxComment(` Removed <${node.name}>: unsupported import '${specifier}' `)
       edits.push({ start, end, value })
     })
-    const rendered = applyReplacements(content, edits)
+    // Dynamic `import('./x')` of a file the migration copies points at the
+    // copied module instead. Located on the edited text, so the offsets
+    // never overlap the edits above; one that cannot be copied is left as
+    // written and the page is excluded afterwards (repository.ts).
+    const edited = applyReplacements(content, edits)
+    const dynamicEdits: Array<Replacement> = []
+    try {
+      for (const { specifier: rawDynamic, start, end } of dynamicImportLiterals(edited, parser.parse(edited) as MdxNode)) {
+        if (start === undefined || end === undefined || !/^\.\.?\//.test(rawDynamic) || /\.mdx?$/i.test(rawDynamic)) continue
+        try {
+          const path = copyGraph(resolveDependency(rawDynamic, currentFile))
+          dynamicEdits.push({ start, end, value: JSON.stringify(portableSpecifier(`@/${path.replace(/^src\//, '').replace(/\\/g, '/')}`)) })
+        } catch {
+          // Not shipped: reported by the caller's exclusion check.
+        }
+      }
+    } catch {
+      // The edited text does not parse; the caller reports it.
+    }
+    const rendered = applyReplacements(edited, dynamicEdits)
     // Inserted after all offset-based edits (it has no position in the
     // original source) so it lands once, at the very top of the body.
     const pageStatements = [...new Set([...realPageImports, ...serverPageDeclarations])]
@@ -1715,7 +1920,23 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
       ].join('\n'),
     }]
   }
-  return { transform, files }
+  // Rendered registry lines look like `import { Imported as MigratedAbc } from "./migrated/<id>/x"`.
+  const REGISTRY_IMPORT = /^import \{ (\w+) as (Migrated[0-9a-f]+) \} from "(\.\/[^"]+)"$/gm
+  function adopt(incoming: ReadonlyArray<RenderedMigrationFile>): void {
+    for (const file of incoming) {
+      if (file.path !== 'src/mdx/custom-components.tsx') {
+        if (!copied.has(file.path)) copied.set(file.path, file)
+        continue
+      }
+      if (typeof file.content !== 'string') continue
+      for (const [, imported, name, specifier] of file.content.matchAll(REGISTRY_IMPORT)) {
+        const base = posix.join('src/mdx', specifier)
+        const path = [...copied.keys()].find((candidate) => candidate.replace(/\.tsx?$/, '') === base) ?? base
+        registrations.set(name, { path, imported })
+      }
+    }
+  }
+  return { transform, files, adopt }
 }
 
 /** Preserve an authored component registry while adding an isolated import map. */

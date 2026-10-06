@@ -11,6 +11,7 @@ import { Accordion, AccordionGroup } from '@/components/mdx/accordion'
 import { Card, CardGroup, Tile } from '@/components/mdx/content-cards'
 import { Icon } from '@/components/mdx/content-icon'
 import { Badge, Tooltip } from '@/components/mdx/content-inline'
+import { PageSlotsProvider } from '@/components/mdx/page-slots'
 import { Color, Update } from '@/components/mdx/content-metadata'
 
 describe('standalone rich-content primitives', () => {
@@ -209,6 +210,15 @@ describe('standalone rich-content primitives', () => {
     expect(compound).toContain('Danger')
     const themed = renderToStaticMarkup(createElement(Color.Item, { name: 'Accent', light: '#7AA600', dark: '#B8EC36' }))
     expect(themed).toContain('light #7AA600, dark #B8EC36')
+  })
+
+  it('keeps tagged updates visible inside a page until a tag filter is selected', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PageSlotsProvider, null, createElement(Update, { label: 'Version 3', tags: ['API', 'BYOK'] }, 'Released.')),
+    )
+    expect(markup).toContain('id="version-3"')
+    expect(markup).not.toContain('hidden=""')
+    expect(markup).toContain('BYOK')
   })
 
   it('renders updates as linkable timeline entries with semantic dates and tags', () => {
