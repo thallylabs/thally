@@ -3,7 +3,7 @@
 import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
-import { mintlifyHeadingSlug, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, removeUndefinedExpressions, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
+import { mintlifyHeadingSlug, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, removeUndefinedExpressions, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -1554,6 +1554,26 @@ describe('escapeUnmatchedClosingTags', () => {
         run(unit.repeat(100_000))
         expect(performance.now() - start).toBeLessThan(200)
       }
+    }
+  })
+})
+
+describe('replaceOutsideCodeAndComments', () => {
+  const upper = (text: string): string => text.toUpperCase()
+
+  it('leaves closed comments alone and transforms the rest', () => {
+    expect(replaceOutsideCodeAndComments('a {/* b */} c { /* d */ } e {/* f */ x} g {/* h */}', upper))
+      .toBe('A {/* b */} C { /* d */ } E {/* f */ x} g {/* h */}')
+    // an opener whose first `*/` is not followed by `}` runs on to the next closing `*/ }`
+    expect(replaceOutsideCodeAndComments('a {/* b */ x} c {/* d */} e', upper)).toBe('A {/* b */ x} c {/* d */} E')
+    expect(replaceOutsideCodeAndComments('a {/* open', upper)).toBe('A {/* OPEN')
+  })
+
+  it('stays linear on many unclosed or unmatched comment openers', () => {
+    for (const body of ['{/*'.repeat(50_000), '{/*'.repeat(50_000) + '*/ x'.repeat(50_000), `${'{/*'.repeat(50_000)}*/ }`]) {
+      const started = Date.now()
+      replaceOutsideCodeAndComments(body, upper)
+      expect(Date.now() - started).toBeLessThan(500)
     }
   })
 })

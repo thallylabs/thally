@@ -1045,7 +1045,34 @@ export function mdxComment(text: string): string {
  * so a rewrite cannot nest (and thereby corrupt) a comment inside another one.
  */
 export function replaceOutsideCodeAndComments(body: string, transform: (whole: string) => string): string {
-  return replaceOutsideCode(body, (masked) => masked.split(/(\{\s*\/\*[\s\S]*?\*\/\s*\})/).map((part, index) => index % 2 ? part : transform(part)).join(''))
+  return replaceOutsideCode(body, (masked) => {
+    // Equivalent to splitting on /\{\s*\/\*[\s\S]*?\*\/\s*\}/ but linear: each `*/` that is followed by `\s*}` is
+    // found once, and every opener takes the first such end after its own `/*`.
+    const ends: Array<number> = []
+    const closer = /\*\/\s*\}/y
+    for (let at = masked.indexOf('*/'); at !== -1; at = masked.indexOf('*/', at + 1)) {
+      closer.lastIndex = at
+      if (closer.test(masked)) ends.push(at)
+    }
+    const opener = /\{\s*\/\*/y
+    const out: Array<string> = []
+    let last = 0
+    let next = 0
+    for (let start = masked.indexOf('{'); start !== -1; start = masked.indexOf('{', start + 1)) {
+      opener.lastIndex = start
+      if (!opener.test(masked)) continue
+      while (next < ends.length && ends[next] < opener.lastIndex) next++
+      if (next === ends.length) break
+      const end = /\*\/\s*\}/y
+      end.lastIndex = ends[next]
+      end.test(masked)
+      out.push(transform(masked.slice(last, start)), masked.slice(start, end.lastIndex))
+      last = end.lastIndex
+      start = last - 1
+    }
+    out.push(transform(masked.slice(last)))
+    return out.join('')
+  })
 }
 
 /**
