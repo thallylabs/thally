@@ -352,3 +352,53 @@ describe('sourceRef links that name main-site pages', () => {
     expect(warnings[0].message).toContain('/docs/nowhere/at-all')
   })
 })
+
+describe('sourceRef mounts under restricted navigation', () => {
+  const gate = { public: false }
+  type Form = 'direct' | 'nested'
+  const docsJson = (form: Form, container: Record<string, unknown>, node: Record<string, unknown>): string => JSON.stringify({
+    navigation: form === 'direct'
+      ? { pages: ['introduction', { group: 'SDK', ...container, pages: [{ sourceRef: 'Acme/ts-sdk', ...node }] }] }
+      : { tabs: [{ tab: 'SDKs', ...container, pages: [{ sourceRef: 'Acme/ts-sdk', ...node }] }, { tab: 'Docs', pages: ['introduction'] }] },
+  })
+  const sub = (): string => sdkRepo({
+    'docs/overview.mdx': 'import { Foo } from "/snippets/Foo.jsx"\n\n---\ntitle: Overview\n---\n![logo](/images/logo.png)\n\n<Foo />\n',
+    'docs/snippets/Foo.jsx': 'export const Foo = () => <button onClick={() => 1}>subonlymarker</button>\n',
+  })
+  const run = (form: Form, container: Record<string, unknown>, node: Record<string, unknown>) => {
+    const main = mainRepo({ 'docs.json': docsJson(form, container, node) })
+    const imported = importSourceRef(MAPPING, sub())
+    return migrateRepository({ repositoryDir: main, sourceUrl: 'https://github.com/example/docs', platform: 'mintlify', sourceRefs: [imported] })
+  }
+  const mounted = (bundle: ReturnType<typeof run>): boolean => bundle.pages.some((page) => page.id.startsWith('client-sdks/typescript/'))
+
+  it.each(['direct', 'nested'] as const)('mounts the %s form when nothing restricts it', (form) => {
+    const bundle = run(form, {}, {})
+    expect(mounted(bundle)).toBe(true)
+    expect(bundle.assets.map((asset) => asset.path)).toContain('client-sdks/typescript/images/logo.png')
+    expect(bundle.sourceRefs).toEqual([{ ...MAPPING, pages: 3 }])
+    expect(JSON.stringify(bundle.componentFiles)).toContain('subonlymarker')
+  })
+
+  it.each([
+    ['direct', 'the enclosing container', gate, {}],
+    ['direct', 'the node itself', {}, gate],
+    ['direct', 'both', gate, gate],
+    ['nested', 'the enclosing container', gate, {}],
+    ['nested', 'the node itself', {}, gate],
+    ['nested', 'both', gate, gate],
+    ['direct', 'a group list on the container', { groups: ['admin'] }, {}],
+    ['direct', 'a group list on the node', {}, { groups: ['admin'] }],
+  ] as const)('withholds the %s form restricted on %s', (form, _where, container, node) => {
+    const bundle = run(form, container, node)
+    expect(mounted(bundle)).toBe(false)
+    expect(bundle.assets.some((asset) => asset.path.startsWith('client-sdks/typescript/'))).toBe(false)
+    expect(JSON.stringify(bundle.componentFiles ?? [])).not.toContain('subonlymarker')
+    expect(JSON.stringify(bundle.docsConfig)).not.toContain('client-sdks/typescript')
+    expect(bundle.sourceRefs).toBeUndefined()
+    const messages = bundle.warnings.map((warning) => warning.message)
+    expect(messages.filter((message) => /Acme\/ts-sdk.*restricted container.*not imported/.test(message))).toHaveLength(1)
+    expect(messages.some((message) => /matched no sourceRef/.test(message))).toBe(false)
+    expect(JSON.stringify(bundle.pages.map((page) => page.body))).not.toContain('subonlymarker')
+  })
+})

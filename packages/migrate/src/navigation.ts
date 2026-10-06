@@ -36,6 +36,8 @@ export interface MintlifyNavigationResult {
   pageReferences: Array<MintlifyPageReference>
   /** Pages under a restricted container; withheld from `docsConfig` and `pageReferences`. */
   gatedReferences: Array<MintlifyGatedReference>
+  /** `sourceRef` mounts under a restricted container; never resolved, so nothing of theirs is imported. */
+  gatedSourceRefs: Array<string>
   warnings: Array<MigrationWarning>
 }
 
@@ -482,6 +484,7 @@ interface ProjectionContext {
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
   gated: Array<MintlifyGatedReference>
+  gatedSourceRefs: Array<string>
   /** Label of the nearest enclosing navigation group, for warnings. */
   groupLabel?: string
   /** Set while walking below a restricted group or tab. */
@@ -599,6 +602,18 @@ function convertPage(
   }
 }
 
+/** A `sourceRef` mount under a restricted container is never resolved, so its pages, images and components stay out of the output. */
+function gatedSourceRef(repo: string, context: ProjectionContext): null {
+  if (!context.gatedSourceRefs.includes(repo)) context.gatedSourceRefs.push(repo)
+  warnOnce(
+    context,
+    `source-ref-gated:${repo}`,
+    `Navigation mounts the docs of the repository ${repo} (sourceRef) inside a restricted container (${context.gateReason}), `
+      + 'so its pages, images and components were not imported and the mount was left out of the navigation.',
+  )
+  return null
+}
+
 function convertPageObject(
   object: Record<string, unknown>,
   context: ProjectionContext,
@@ -617,6 +632,7 @@ function convertPageObject(
     return null
   }
   if (typeof object.sourceRef === 'string') {
+    if (context.gateReason) return gatedSourceRef(object.sourceRef, context)
     const imported = context.resolveSourceRef?.(object.sourceRef)
     // Directly inside a group the entries are spliced into it (see below);
     // anywhere else they get a group named after the repository.
@@ -641,8 +657,12 @@ function convertPageObject(
     }
     try {
       for (const page of pages) {
-        const sourceRef = objectValue(page)?.sourceRef
-        const imported = typeof sourceRef === 'string' ? context.resolveSourceRef?.(sourceRef) : null
+        const pageObject = objectValue(page)
+        const sourceRef = pageObject?.sourceRef
+        // A restricted mount (its own rules or an enclosing container's) falls through to convertPage, which withholds it.
+        const imported = typeof sourceRef === 'string' && !context.gateReason && !navigationGateReason(pageObject!)
+          ? context.resolveSourceRef?.(sourceRef)
+          : null
         if (imported) {
           children.push(...imported)
           continue
@@ -1293,6 +1313,7 @@ export function projectMintlifyNavigation(
   const seenReferences = new Set<string>()
   const warningKeys = new Set<string>()
   const gated: Array<MintlifyGatedReference> = []
+  const gatedSourceRefs: Array<string> = []
   const navigation = objectValue(config.navigation) ?? config
   const languages = Array.isArray(navigation.languages)
     ? navigation.languages.flatMap((value): Array<Record<string, unknown>> => {
@@ -1341,6 +1362,7 @@ export function projectMintlifyNavigation(
         warnings,
         warningKeys,
         gated,
+        gatedSourceRefs,
       }
       const languageTabs = convertContainerToTabs(
         language,
@@ -1357,7 +1379,7 @@ export function projectMintlifyNavigation(
     }
     if (Object.keys(localizedNavigation).length > 0) i18n.navigation = localizedNavigation
   } else {
-    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, gated, pathPrefix: options.pathPrefix, resolveSourceRef: options.resolveSourceRef }
+    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, gated, gatedSourceRefs, pathPrefix: options.pathPrefix, resolveSourceRef: options.resolveSourceRef }
     tabs = convertContainerToTabs(navigation, context, 'Documentation', projectionTrace)
     if (tabs.length === 0 && Array.isArray(config.navigation)) {
       const children = convertNavigationValues(config.navigation, context)
@@ -1475,6 +1497,7 @@ export function projectMintlifyNavigation(
     },
     pageReferences: references,
     gatedReferences: gated,
+    gatedSourceRefs,
     warnings,
   }
 }

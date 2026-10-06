@@ -3162,6 +3162,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
 
   const activeSourceRefs: Array<SourceRefImport> = []
   const usedSourceRefs = new Set<SourceRefImport>()
+  const gatedSourceRepos = new Set<string>()
   for (const ref of options.sourceRefs ?? []) {
     if (platform !== 'mintlify') {
       warnings.push({ code: 'unsupported-config', message: `--source-ref ${ref.repo}=${ref.mountPath} applies only to Mintlify sources and was ignored.` })
@@ -3189,6 +3190,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         })
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
+        for (const repo of projected.gatedSourceRefs) gatedSourceRepos.add(repo.toLowerCase())
         for (const gated of projected.gatedReferences) {
           const gatedKey = normalizedReferenceKey(gated.ref).toLowerCase()
           if (!mintlifyGatedRefs.has(gatedKey)) mintlifyGatedRefs.set(gatedKey, gated.reason)
@@ -4805,6 +4807,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
   for (const ref of activeSourceRefs) {
     if (!usedSourceRefs.has(ref)) {
+      // A restricted mount already got its own warning; nothing of it is imported.
+      if (gatedSourceRepos.has(ref.repo.toLowerCase())) continue
       warnings.push({ code: 'unsupported-config', message: `--source-ref ${ref.repo}=${ref.mountPath} matched no sourceRef in the navigation; nothing was imported for it.` })
       continue
     }
