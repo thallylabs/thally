@@ -15,7 +15,7 @@ import { getManagedSiteConfigSnapshot } from '@/lib/cloud-link/client'
 import { getBuildContentControls } from '@/lib/cloud-link/content-controls'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { localeDirection } from '@/lib/i18n/config'
-import { PagePanelSlot, PageSlotsProvider } from '@/components/mdx/page-slots'
+import { InlineUpdateFilters, PagePanelSlot, PageSlotsProvider } from '@/components/mdx/page-slots'
 
 interface DocLayoutProps {
   doc: DocEntry
@@ -115,6 +115,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayou
             {showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
             <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
           </div>
+          <InlineUpdateFilters railVisible={false} />
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
             {feedback}
@@ -135,6 +136,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayou
             {showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
             <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
           </div>
+          <InlineUpdateFilters railVisible={false} />
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
             {feedback}
@@ -155,6 +157,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayou
             {showBreadcrumbs ? <DocBreadcrumbs items={breadcrumbs} /> : null}
             <DocHeader doc={doc} eyebrow={eyebrow} showCopyPage={contentControls.showCopyPage} />
           </div>
+          <InlineUpdateFilters railVisible={true} />
           <Prose className="flex-auto w-full">{children}</Prose>
           <div className="not-prose space-y-6">
             {feedback}

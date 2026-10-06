@@ -179,15 +179,32 @@ export function PagePanelSlot({
   )
 }
 
-/** Right-rail tag chips for a changelog; chips toggle, any selected tag shows an entry. */
-function UpdateFilterPanel() {
-  const { tagCounts, selectedTags, toggleTag, clearTags, updateShown, updateTotal } = usePageSlots()
+/** Tag chips for a changelog; chips toggle, any selected tag shows an entry. `idPrefix` keeps ids unique when two copies render. */
+export function UpdateFilterControls({
+  tagCounts,
+  selectedTags,
+  updateShown,
+  updateTotal,
+  onToggle,
+  onClear,
+  className = '',
+  idPrefix = 'changelog',
+}: {
+  tagCounts: Record<string, number>
+  selectedTags: ReadonlyArray<string>
+  updateShown: number
+  updateTotal: number
+  onToggle: (tag: string) => void
+  onClear: () => void
+  className?: string
+  idPrefix?: string
+}) {
   return (
-    <div className="space-y-4 text-sm" id="changelog-filters">
+    <div className={`space-y-4 text-sm ${className}`} id={`${idPrefix}-filters`}>
       <div className="flex items-center justify-between">
         <span className="font-medium text-foreground/80">Filters</span>
         {selectedTags.length ? (
-          <button type="button" onClick={clearTags} className="rounded-full px-3 text-sm font-medium text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          <button type="button" onClick={onClear} className="rounded-full px-3 text-sm font-medium text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             Clear
           </button>
         ) : null}
@@ -201,7 +218,7 @@ function UpdateFilterPanel() {
               key={tag}
               type="button"
               aria-pressed={pressed}
-              onClick={() => toggleTag(tag)}
+              onClick={() => onToggle(tag)}
               className={`rounded-full px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${pressed ? 'bg-accent text-accent-foreground' : 'bg-muted text-foreground/70 hover:bg-muted/70'}`}
             >
               {tag}
@@ -210,5 +227,34 @@ function UpdateFilterPanel() {
         })}
       </div>
     </div>
+  )
+}
+
+/** Right-rail copy of the filters. */
+function UpdateFilterPanel() {
+  const { tagCounts, selectedTags, toggleTag, clearTags, updateShown, updateTotal } = usePageSlots()
+  return <UpdateFilterControls tagCounts={tagCounts} selectedTags={selectedTags} updateShown={updateShown} updateTotal={updateTotal} onToggle={toggleTag} onClear={clearTags} />
+}
+
+/**
+ * In-article copy of the filters for layouts where the detail column does not carry them: below xl,
+ * without a detail column, or when a Panel replaces the rail content. Without it a shared `?tags=` link
+ * hides updates with no visible way to see them again.
+ */
+export function InlineUpdateFilters({ railVisible }: { railVisible: boolean }) {
+  const { tagCounts, selectedTags, toggleTag, clearTags, updateShown, updateTotal, panelCount } = usePageSlots()
+  if (tagsByCount(tagCounts).length === 0) return null
+  const railShowsFilters = railVisible && panelCount === 0
+  return (
+    <UpdateFilterControls
+      className={railShowsFilters ? 'not-prose xl:hidden' : 'not-prose'}
+      idPrefix="changelog-inline"
+      tagCounts={tagCounts}
+      selectedTags={selectedTags}
+      updateShown={updateShown}
+      updateTotal={updateTotal}
+      onToggle={toggleTag}
+      onClear={clearTags}
+    />
   )
 }
