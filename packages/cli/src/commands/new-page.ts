@@ -1,5 +1,8 @@
+/** Create a content page and register it in customer-owned navigation. */
+
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { terminal } from 'create-thally-docs/terminal'
 import type { ParsedArgs } from '../router.js'
 
 interface DocsJsonGroup {
@@ -26,23 +29,24 @@ function deriveTitle(pageId: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+/** Create a page while preserving the existing navigation registration behavior. */
 export function runNewPage(args: ParsedArgs, cwd = process.cwd()): number {
   const pageId = args.positionals[0]
   if (!pageId) {
-    process.stderr.write('\n  Usage: thally new <page-id> [--title "..."] [--description "..."]\n\n')
+    terminal.error('Usage: thally new <page-id> [--title "..."] [--description "..."]')
     return 1
   }
 
   const docsJsonPath = path.join(cwd, 'docs.json')
   if (!existsSync(docsJsonPath)) {
-    process.stderr.write('\n  Not a Thally project: docs.json not found.\n\n')
+    terminal.error('Not a Thally project: docs.json not found.')
     return 1
   }
 
   const normalized = pageId.replace(/\.mdx$/, '').replace(/^\/+/, '')
   const filePath = path.join(cwd, 'src', 'content', `${normalized}.mdx`)
   if (existsSync(filePath)) {
-    process.stderr.write(`\n  Page already exists: src/content/${normalized}.mdx\n\n`)
+    terminal.error(`Page already exists: src/content/${normalized}.mdx`)
     return 1
   }
 
@@ -85,11 +89,8 @@ export function runNewPage(args: ParsedArgs, cwd = process.cwd()): number {
     // leave registered = false; file is still created
   }
 
-  process.stdout.write(`\n  Created src/content/${normalized}.mdx\n`)
-  process.stdout.write(
-    registered
-      ? '  Registered in docs.json navigation.\n\n'
-      : '  Note: add it to docs.json navigation manually.\n\n',
-  )
+  terminal.success(`Created src/content/${normalized}.mdx`)
+  if (registered) terminal.info('Added to docs.json navigation.')
+  else terminal.warn('Add this page to docs.json navigation to make it discoverable.')
   return 0
 }
