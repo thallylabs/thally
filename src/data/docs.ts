@@ -12,6 +12,18 @@ import { pageApiMetadata } from '@/lib/openapi/page-api'
 import type { OpenApiFrontmatterRef } from '@/lib/openapi/page-frontmatter'
 import type { ManualApiTarget } from '@/lib/openapi/manual-operation'
 import { UNPUBLISHED_PAGES_FILE } from '@/lib/openapi/publication'
+import { getReaderAuthConfig } from '@/lib/reader-auth/config'
+import {
+  ANONYMOUS_READER,
+  OPEN_PAGE_ACCESS,
+  canReaderAccessPage,
+  mergePageAccess,
+  parsePageAccess,
+  readerVisibilityKey,
+  referencedGroups,
+  type PageAccess,
+  type ReaderContext,
+} from '@/lib/reader-auth/access'
 
 
 // ---------------------------------------------------------------------------
@@ -46,6 +58,11 @@ export interface DocEntry {
   playground?: string
   noindex?: boolean
   hidden?: boolean
+  /**
+   * Reader access from `groups` / `public` frontmatter. Every listing in this
+   * module filters on it; see `@/lib/reader-auth/access` for the semantics.
+   */
+  access?: PageAccess
   mode?: DocPageMode
   /** Social/SEO overrides migrated from `og:*` / `twitter:*` frontmatter. */
   ogTitle?: string
@@ -430,6 +447,10 @@ interface FrontmatterData {
   hidden?: boolean
   noindex?: boolean
   mode?: DocPageMode
+  /** Reader access: groups allowed to read the page (any-of). */
+  groups?: unknown
+  /** Reader access: `true` opens the page to everyone, `false` requires sign-in. */
+  public?: unknown
 }
 
 const frontmatterCache = new Map<string, FrontmatterData>()
@@ -600,6 +621,7 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
     verifiedVersion: fm.verifiedVersion,
     noindex: fm.noindex,
     hidden: fm.hidden,
+    access: parsePageAccess(fm as Record<string, unknown>),
     ...(api.openapi ? { openapi: api.openapi } : {}),
     ...(api.manual ? { manualTarget: api.manual } : {}),
   }
@@ -752,8 +774,89 @@ export function getCurrentVersionPageIds(): Set<string> | null {
 // Public query functions
 // ---------------------------------------------------------------------------
 
-export function getDocEntries(): Array<DocEntry> {
-  return getAllDocEntries()
+// ---------------------------------------------------------------------------
+// Reader visibility
+//
+// The caches in this module hold every PUBLISHED page regardless of reader;
+// visibility is applied when results leave the module. Every exported
+// enumerator therefore takes an optional reader and defaults to the anonymous
+// reader, so a caller that knows nothing about reader auth (search, embeddings,
+// MCP, llms-full, sitemap, static params) can only ever see public pages.
+// ---------------------------------------------------------------------------
+
+/** Whether `reader` may see a listed entry. */
+export function isDocEntryVisibleTo(entry: Pick<DocEntry, 'access'>, reader: ReaderContext = ANONYMOUS_READER): boolean {
+  return canReaderAccessPage(entry.access ?? OPEN_PAGE_ACCESS, reader, getReaderAuthConfig())
+}
+
+const MAX_VISIBILITY_VIEWS = 64
+const visibleEntriesCache = new WeakMap<Array<DocEntry>, Map<string, Array<DocEntry>>>()
+
+/** Filter (and memoize per published list and visibility key) the entries a reader may see. */
+function visibleEntries(entries: Array<DocEntry>, reader: ReaderContext): Array<DocEntry> {
+  const key = readerVisibilityKey(reader, getReaderAuthConfig())
+  let views = visibleEntriesCache.get(entries)
+  if (!views) {
+    views = new Map()
+    visibleEntriesCache.set(entries, views)
+  }
+  const cached = views.get(key)
+  if (cached) return cached
+  const filtered = entries.filter((entry) => isDocEntryVisibleTo(entry, reader))
+  if (views.size >= MAX_VISIBILITY_VIEWS) views.clear()
+  views.set(key, filtered)
+  return filtered
+}
+
+/**
+ * Combined access of the file(s) a route serves for `pageId`: the primary
+ * page and, on a secondary-locale route, its translation. The most
+ * restrictive declaration wins, so a translation that forgets `groups` never
+ * opens a restricted page.
+ */
+export function getPageAccess(pageId: string, locale?: string): PageAccess {
+  const primary = parsePageAccess(readFrontmatter(pageId) as Record<string, unknown>)
+  if (!locale || locale === (getI18nConfig()?.defaultLocale ?? 'en')) return primary
+  return mergePageAccess(primary, parsePageAccess(readFrontmatter(pageId, locale) as Record<string, unknown>))
+}
+
+/** Async managed-release twin of {@link getPageAccess}. */
+export async function loadPageAccess(pageId: string, locale?: string): Promise<PageAccess> {
+  await ensureDocPublication()
+  const index = await loadContentIndex()
+  if (index) hydrateContentIndex(index)
+  return getPageAccess(pageId, locale)
+}
+
+/** Whether `reader` may see the page `pageId` (optionally on a locale route). */
+export async function canReaderViewPage(pageId: string, reader: ReaderContext = ANONYMOUS_READER, locale?: string): Promise<boolean> {
+  return canReaderAccessPage(await loadPageAccess(pageId, locale), reader, getReaderAuthConfig())
+}
+
+const referencedGroupsCache = new WeakMap<Array<DocEntry>, ReadonlySet<string>>()
+
+/**
+ * Every group named by any published page's access rules, translations
+ * included. Sign-in keeps only these groups in the reader session.
+ */
+export async function loadReferencedReaderGroups(): Promise<ReadonlySet<string>> {
+  const entries = await loadPublishedDocEntries()
+  const cached = referencedGroupsCache.get(entries)
+  if (cached) return cached
+  const secondaryLocales = (getI18nConfig()?.locales ?? [])
+    .map((locale) => locale.code)
+    .filter((code) => code !== (getI18nConfig()?.defaultLocale ?? 'en'))
+  const groups = referencedGroups(entries.flatMap((entry) => [
+    entry.access ?? OPEN_PAGE_ACCESS,
+    ...secondaryLocales.map((locale) => getPageAccess(entry.id, locale)),
+  ]))
+  referencedGroupsCache.set(entries, groups)
+  return groups
+}
+
+/** Published pages `reader` may see (anonymous by default). */
+export function getDocEntries(reader: ReaderContext = ANONYMOUS_READER): Array<DocEntry> {
+  return visibleEntries(getAllDocEntries(), reader)
 }
 
 let loadedEntriesPromise: Promise<Array<DocEntry>> | null = null
@@ -793,13 +896,18 @@ function indexedFrontmatter(index: ContentIndex, pageId: string): FrontmatterDat
  * The synchronous API remains unchanged for local/build consumers; managed
  * routes use this async twin when the index is too large for a text binding.
  */
-export async function loadDocEntries(): Promise<Array<DocEntry>> {
+export async function loadDocEntries(reader: ReaderContext = ANONYMOUS_READER): Promise<Array<DocEntry>> {
+  return visibleEntries(await loadPublishedDocEntries(), reader)
+}
+
+/** Every published entry, before reader visibility. Never returned to callers. */
+async function loadPublishedDocEntries(): Promise<Array<DocEntry>> {
   await ensureDocPublication()
   docsConfig()
   if (loadedEntriesPromise) return loadedEntriesPromise
   loadedEntriesPromise = (async () => {
     const index = await loadContentIndex()
-    if (!index) return getDocEntries()
+    if (!index) return getAllDocEntries()
     hydrateContentIndex(index)
     const seen = new Set<string>()
     const ids: Array<string> = []
@@ -819,7 +927,7 @@ export function getDocEntryBySlug(slugPath: string): DocEntry | null
 export function getDocEntryBySlug(languageCode: string, slugPath: string): DocEntry | null
 export function getDocEntryBySlug(first: string, second?: string): DocEntry | null {
   const slugPath = second !== undefined ? second : first
-  const entries = getAllDocEntries()
+  const entries = getDocEntries()
   return entries.find((doc) => doc.slug.join('/') === slugPath) ?? null
 }
 
@@ -830,7 +938,7 @@ export async function loadDocEntryBySlug(first: string, second?: string): Promis
 }
 
 export function getSearchableDocs(): Array<SearchableDoc> {
-  return getAllDocEntries().map((doc) => ({
+  return getDocEntries().map((doc) => ({
     id: doc.id,
     title: doc.title,
     description: doc.description,
@@ -866,16 +974,20 @@ function resolveNavItem(
   }
 }
 
+/** Decides whether a navigation page reference is shown to the current reader. */
+type PageVisibility = (pageId: string, locale?: string) => boolean
+
 function buildNavigationGroup(
   group: DocsJsonNavigationGroup,
   indexPath: Array<number>,
   ancestors: Array<string> = [],
-  locale?: string,
+  locale: string | undefined,
+  isVisible: PageVisibility,
 ): NavigationGroup | null {
   if (group.hidden) return null
 
   const groupPath = [...ancestors, group.group].filter(Boolean)
-  const nodes = buildNavigationNodes(group.pages, indexPath, groupPath, locale)
+  const nodes = buildNavigationNodes(group.pages, indexPath, groupPath, locale, isVisible)
   if (nodes.length === 0) return null
 
   return {
@@ -890,7 +1002,8 @@ function buildNavigationNodes(
   pages: Array<string | DocsJsonNavigationGroup>,
   indexPath: Array<number>,
   ancestors: Array<string>,
-  locale?: string,
+  locale: string | undefined,
+  isVisible: PageVisibility,
 ): Array<NavigationNode> {
   return pages.flatMap<NavigationNode>((page, index) => {
     if (typeof page === 'string') {
@@ -898,9 +1011,11 @@ function buildNavigationNodes(
       // direct link but explicitly hidden from the rendered sidebar.
       if (readFrontmatter(page, locale).hidden) return []
       if (!isDocPublished(page, locale)) return []
+      // A page the reader may not open must not leak its title either.
+      if (!isVisible(page, locale)) return []
       return [{ type: 'page', item: resolveNavItem(page, locale, ancestors) }]
     }
-    const child = buildNavigationGroup(page, [...indexPath, index], ancestors, locale)
+    const child = buildNavigationGroup(page, [...indexPath, index], ancestors, locale, isVisible)
     return child ? [{ type: 'group', group: child }] : []
   })
 }
@@ -913,12 +1028,19 @@ function collectNavigationItems(nodes: Array<NavigationNode>): Array<NavigationI
 
 const sidebarCollectionsCache = new Map<string, Array<SidebarCollection>>()
 
-export function getSidebarCollections(locale?: string): Array<SidebarCollection> {
+/**
+ * Sidebar collections as `reader` sees them (anonymous by default): pages the
+ * reader may not open are omitted, and groups left empty disappear.
+ */
+export function getSidebarCollections(locale?: string, reader: ReaderContext = ANONYMOUS_READER): Array<SidebarCollection> {
   const config = docsConfig()
-  const cacheKey = locale ?? '__default__'
+  const policy = getReaderAuthConfig()
+  const cacheKey = `${locale ?? '__default__'}\u0001${readerVisibilityKey(reader, policy)}`
   if (sidebarCollectionsCache.has(cacheKey)) {
     return sidebarCollectionsCache.get(cacheKey)!
   }
+  const isVisible: PageVisibility = (pageId, pageLocale) =>
+    canReaderAccessPage(getPageAccess(pageId, pageLocale), reader, policy)
 
   const collections = ((locale ? config.i18n?.navigation?.[locale] : undefined) ?? config.tabs)
     // Mintlify marks non-default versions hidden in the combined navigation.
@@ -929,7 +1051,7 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
       const id = tabCollectionId(tab.tab)
       const groups = tab.groups ?? []
       const groupSections = groups.flatMap((group, index) => {
-        const tree = buildNavigationGroup(group, [index], [], locale)
+        const tree = buildNavigationGroup(group, [index], [], locale, isVisible)
         if (!tree) return []
         return [{
           id: tree.id,
@@ -940,7 +1062,7 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
         }]
       })
       const rootNodes = tab.pages
-        ? buildNavigationNodes(tab.pages, [groups.length], [], locale)
+        ? buildNavigationNodes(tab.pages, [groups.length], [], locale, isVisible)
         : []
       const sections = [
         ...(rootNodes.length > 0 ? [{
@@ -964,6 +1086,8 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
       }
     })
 
+  // Distinct group sets are few in practice; the bound only stops a pathological set of tokens growing the map.
+  if (sidebarCollectionsCache.size >= MAX_VISIBILITY_VIEWS * 4) sidebarCollectionsCache.clear()
   sidebarCollectionsCache.set(cacheKey, collections)
   return collections
 }
@@ -972,11 +1096,11 @@ export function getSidebarCollections(locale?: string): Array<SidebarCollection>
  * Request-time navigation backed by the release index asset when the index is
  * too large for a Worker text binding.
  */
-export async function loadSidebarCollections(locale?: string): Promise<Array<SidebarCollection>> {
+export async function loadSidebarCollections(locale?: string, reader: ReaderContext = ANONYMOUS_READER): Promise<Array<SidebarCollection>> {
   await ensureDocPublication()
   const index = await loadContentIndex()
   if (index) hydrateContentIndex(index)
-  return getSidebarCollections(locale)
+  return getSidebarCollections(locale, reader)
 }
 
 // ---------------------------------------------------------------------------
@@ -998,11 +1122,11 @@ function navigationLocaleForHref(href: string): string | undefined {
     : undefined
 }
 
-export function getPrevNextLinks(currentHref: string): {
+export function getPrevNextLinks(currentHref: string, reader: ReaderContext = ANONYMOUS_READER): {
   prev: PrevNextLink | null
   next: PrevNextLink | null
 } {
-  const collections = getSidebarCollections(navigationLocaleForHref(currentHref))
+  const collections = getSidebarCollections(navigationLocaleForHref(currentHref), reader)
   const flatPages: Array<{ title: string; href: string }> = []
 
   for (const collection of collections) {
@@ -1040,8 +1164,8 @@ function navigationGroupParts(section: NavigationSection, item: NavigationItem):
   return section.id?.startsWith('nav-root-') ? [] : [section.title]
 }
 
-export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
-  const collections = getSidebarCollections(navigationLocaleForHref(currentHref))
+export function getBreadcrumbs(currentHref: string, reader: ReaderContext = ANONYMOUS_READER): Array<BreadcrumbItem> {
+  const collections = getSidebarCollections(navigationLocaleForHref(currentHref), reader)
 
   for (const collection of collections) {
     for (const section of collection.sections) {
@@ -1077,8 +1201,8 @@ export function getBreadcrumbs(currentHref: string): Array<BreadcrumbItem> {
  * guarantees the eyebrow is identical in every locale. Returns null for pages
  * that sit outside any navigation group (e.g. direct-link tabs).
  */
-export function getNavCategory(currentHref: string): string | null {
-  for (const collection of getSidebarCollections(navigationLocaleForHref(currentHref))) {
+export function getNavCategory(currentHref: string, reader: ReaderContext = ANONYMOUS_READER): string | null {
+  for (const collection of getSidebarCollections(navigationLocaleForHref(currentHref), reader)) {
     for (const section of collection.sections) {
       const item = section.items.find((candidate) => candidate.href === currentHref)
       if (item) {
@@ -1102,17 +1226,17 @@ export interface NavContext {
   breadcrumb: Array<BreadcrumbItem>
 }
 
-export function getNavContext(pageId: string, locale?: string): NavContext {
+export function getNavContext(pageId: string, locale?: string, reader: ReaderContext = ANONYMOUS_READER): NavContext {
   const slug = pageId === 'introduction' ? [] : pageId.split('/').filter(Boolean)
   const baseHref = slug.length ? `/${slug.join('/')}` : '/'
   const href = servedRootHref(locale && locale !== docsConfig().i18n?.defaultLocale
     ? `/${locale}${baseHref === '/' ? '' : baseHref}` : baseHref)
 
-  const { prev, next } = getPrevNextLinks(href)
-  const breadcrumb = getBreadcrumbs(href)
+  const { prev, next } = getPrevNextLinks(href, reader)
+  const breadcrumb = getBreadcrumbs(href, reader)
 
   // Find which tab and group this page belongs to
-  const collections = getSidebarCollections(locale)
+  const collections = getSidebarCollections(locale, reader)
   let tabName = ''
   let groupName = ''
 
@@ -1132,11 +1256,11 @@ export function getNavContext(pageId: string, locale?: string): NavContext {
 }
 
 /** Async managed-release twin of {@link getNavContext}. */
-export async function loadNavContext(pageId: string, locale?: string): Promise<NavContext> {
+export async function loadNavContext(pageId: string, locale?: string, reader: ReaderContext = ANONYMOUS_READER): Promise<NavContext> {
   await ensureDocPublication()
   const index = await loadContentIndex()
   if (index) hydrateContentIndex(index)
-  return getNavContext(pageId, locale)
+  return getNavContext(pageId, locale, reader)
 }
 
 export function getAiConfig(): {

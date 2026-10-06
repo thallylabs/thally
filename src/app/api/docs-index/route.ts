@@ -5,6 +5,10 @@ import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 import { localizedPath } from '@/lib/i18n/config'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { problemResponse } from '@/lib/http/problem'
+import { getReaderAuthConfig } from '@/lib/reader-auth/config'
+import { canReaderAccessUnmarkedContent } from '@/lib/reader-auth/access'
+import { getReaderContextFromRequest } from '@/lib/reader-auth/context'
+import { contentCacheControl } from '@/lib/reader-auth/cache'
 
 export async function GET(request: NextRequest) {
   const baseUrl = request.nextUrl.origin
@@ -21,9 +25,11 @@ export async function GET(request: NextRequest) {
     })
   }
   const locale = requestedLocale ?? i18n.defaultLocale
-  const entries = await loadDocEntries()
-  const collections = await loadSidebarCollections()
-  const apiNodes = await getAllApiOperationNodes()
+  // The index lists exactly what this reader may open (anonymous by default).
+  const reader = await getReaderContextFromRequest(request)
+  const entries = await loadDocEntries(reader)
+  const collections = await loadSidebarCollections(undefined, reader)
+  const apiNodes = canReaderAccessUnmarkedContent(reader, getReaderAuthConfig()) ? await getAllApiOperationNodes() : []
 
   // Build a lookup: href → { tab, group }
   const hrefToNav = new Map<string, { tab: string; group: string }>()
@@ -101,7 +107,7 @@ export async function GET(request: NextRequest) {
     },
     {
       headers: {
-        'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+        'Cache-Control': contentCacheControl('public, s-maxage=3600, stale-while-revalidate=86400'),
         'Access-Control-Allow-Origin': '*',
       },
     },

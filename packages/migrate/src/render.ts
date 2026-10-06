@@ -27,6 +27,10 @@ function renderPage(bundle: MigrationBundle, page: MigrationBundle['pages'][numb
     page.mode ? `mode: ${yamlString(page.mode)}` : null,
     page.hidden ? 'hidden: true' : null,
     page.noindex ? 'noindex: true' : null,
+    // Group names must match identity-provider claims exactly, so they are
+    // quoted as-is rather than whitespace-collapsed like display strings.
+    page.groups?.length ? `groups: [${page.groups.map((group) => JSON.stringify(group)).join(', ')}]` : null,
+    page.public !== undefined ? `public: ${page.public ? 'true' : 'false'}` : null,
     ...Object.entries(page.meta ?? {}).map(([field, value]) => `${field}: ${yamlString(value)}`),
     page.openapi ? `openapi: ${yamlString(page.openapi)}` : null,
     page.api ? `api: ${yamlString(page.api)}` : null,

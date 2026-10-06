@@ -176,7 +176,8 @@
           "icon": "wrench",
           "pages": [
             "guides/deploying",
-            "guides/admin-dashboard"
+            "guides/admin-dashboard",
+            "guides/authenticated-docs"
           ]
         },
         {

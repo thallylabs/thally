@@ -192,6 +192,10 @@ cp .env.example .env.local
 | `THALLY_DOCS_CONFIG` | Optional managed-hosting snapshot of `docs.json`, used to publish presentation and navigation settings without recompiling the Worker. Self-hosted sites should leave this unset and edit `docs.json` |
 | `THALLY_ADMIN_PASSWORD` / `THALLY_ADMIN_SECRET` | Optional break-glass admin password plus its required high-entropy production session-signing secret |
 | `THALLY_ACCESS_PASSWORD` / `THALLY_ACCESS_SECRET` | Optional docs-access password plus its required high-entropy production session-signing secret; the access secret may fall back to `THALLY_ADMIN_SECRET` |
+| `THALLY_READER_SESSION_SECRET` | Reader-auth session-signing secret (32+ chars, distinct from admin/access secrets); required in production when docs.json `auth.mode` is `jwt` or `oidc` |
+| `THALLY_READER_JWT_SECRET` / `THALLY_READER_JWT_PUBLIC_KEY` / `THALLY_READER_JWKS_URL` | JWT handoff verification key — exactly one: HS256 shared secret, SPKI PEM (RS256/PS256/ES256/EdDSA), or JWKS URL |
+| `THALLY_READER_OIDC_ISSUER` / `THALLY_READER_OIDC_CLIENT_ID` / `THALLY_READER_OIDC_CLIENT_SECRET` | Reader sign-in with your OpenID Connect provider (`auth.mode: "oidc"`) |
+| `THALLY_READER_TOKEN_KEYS` | Optional `kid:secret` list for read-only, group-scoped agent/MCP bearer tokens (`npm run reader-token`) |
 | `ANTHROPIC_API_KEY` | Owner key for AI chat — lifts trial limits entirely |
 | `THALLY_TRIAL_ANTHROPIC_KEY` | Optional shared key powering the out-of-the-box trial chat (strict per-IP limits + a global daily cap) |
 | `THALLY_TRIAL_RATE_PER_MIN` / `THALLY_TRIAL_RATE_PER_DAY` / `THALLY_TRIAL_DAILY_LIMIT` / `THALLY_CHAT_RATE_PER_MIN` | Optional chat rate-limit overrides |

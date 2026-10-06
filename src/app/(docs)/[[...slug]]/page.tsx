@@ -19,7 +19,7 @@ import { LocalizedSidebarHydrator } from '@/components/layout/localized-sidebar-
 import { LocaleAvailabilityHydrator } from '@/components/layout/locale-availability'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { lookupApiOperationForFrontmatter } from '@/data/api-reference'
-import { ensureDocPublication, getApiPlaygroundDisplay, getDocEntries, getSeoConfig, isDocPublished, loadNavContext } from '@/data/docs'
+import { canReaderViewPage, ensureDocPublication, getApiPlaygroundDisplay, getDocEntries, getSeoConfig, isDocPublished, loadNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { hasDocTranslation } from '@/lib/i18n/translation-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
@@ -38,6 +38,9 @@ import { pageFullTitle } from '@/lib/page-meta'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { getSiteUrl } from '@/lib/site-url'
+import { isReaderAuthActive } from '@/lib/reader-auth/config'
+import { getReaderContext } from '@/lib/reader-auth/context'
+import { denyDocumentAccess } from '@/lib/reader-auth/page-gate'
 
 interface PageProps {
   params: Promise<{ slug?: Array<string> }>
@@ -48,8 +51,12 @@ export async function generateStaticParams() {
   // can establish its request boundary. An empty params array would select
   // on-demand SSG and reject live policy headers at runtime. The dynamic
   // bailout prevents repository content from being baked into managed pages.
-  if (isRemoteContentSource()) return [{ slug: [] }]
+  // Reader auth uses the same boundary: every page then varies by reader
+  // (content and sidebar), so none may be prerendered into shared HTML. The
+  // root render reads the reader cookie, which marks the route dynamic.
+  if (isRemoteContentSource() || isReaderAuthActive()) return [{ slug: [] }]
 
+  // Anonymous view only: restricted pages are never prerendered.
   const docs = getDocEntries()
   const i18n = getRepositoryI18nConfig()
   const defaultLocaleParams = docs.map((doc) => ({ slug: doc.slug }))
@@ -86,6 +93,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   // The page 404s when its documented operation is hidden or excluded; give it no title, canonical or social preview.
   await ensureDocPublication()
   if (!isDocPublished(doc.id, route.isLocaleRoute ? route.locale : undefined)) return {}
+  // A page this reader may not see gets no title, description or preview image.
+  const reader = await getReaderContext()
+  if (!(await canReaderViewPage(doc.id, reader, route.isLocaleRoute ? route.locale : undefined))) return {}
 
   const siteUrl = getSiteUrl()
   const primaryHref = docPathFromSlug(doc.slug)
@@ -95,7 +105,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const hasTranslation = !route.isLocaleRoute || !doc.isFallback
   const canonicalHref = hasTranslation ? requestedHref : primaryHref
   const availableI18n = await getContentI18nConfig(route.docSlug, buildI18n)
-  const nav = await loadNavContext(doc.id, route.isLocaleRoute ? route.locale : undefined)
+  const nav = await loadNavContext(doc.id, route.isLocaleRoute ? route.locale : undefined, reader)
   const ogImageUrl = buildOgImageUrl({
     title: doc.title,
     description: doc.description,
@@ -147,11 +157,18 @@ export default async function DocsPage({ params }: PageProps) {
   const routeParams = await params
   const i18n = await getEffectiveI18nConfig()
   const route = resolveDocRoute(routeParams.slug, i18n)
+  // Read before resolving the page so a missing and a restricted page take
+  // the same path (and so reader-auth sites always render per request).
+  const reader = await getReaderContext()
+  const requestedPath = `/${(routeParams.slug ?? []).join('/')}`
   const doc = await getDocFromParams(
     route.docSlug,
     route.isLocaleRoute ? route.locale : undefined,
   )
-  if (!doc) notFound()
+  if (!doc) denyDocumentAccess(reader, requestedPath)
+  if (!(await canReaderViewPage(doc.id, reader, route.isLocaleRoute ? route.locale : undefined))) {
+    denyDocumentAccess(reader, requestedPath)
+  }
 
   const siteUrl = getSiteUrl()
   const effectiveSite = resolveBuildSiteConfig()
@@ -172,7 +189,7 @@ export default async function DocsPage({ params }: PageProps) {
       ? localizedPath(primaryHref, route.locale, i18n.defaultLocale)
       : primaryHref
   const nav = await localizeDocNavigation(
-    await loadNavContext(doc.id, route.isLocaleRoute ? route.locale : undefined),
+    await loadNavContext(doc.id, route.isLocaleRoute ? route.locale : undefined, reader),
     route.isLocaleRoute ? route.locale : i18n.defaultLocale,
     i18n.defaultLocale,
   )

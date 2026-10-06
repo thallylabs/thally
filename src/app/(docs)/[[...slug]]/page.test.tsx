@@ -27,6 +27,7 @@ vi.mock('@/data/docs', () => ({
   getApiPlaygroundDisplay: () => undefined,
   getDocEntries: async () => [],
   isDocPublished: () => true,
+  canReaderViewPage: async () => true,
   loadNavContext: async () => ({ breadcrumb: [], prev: { title: 'Previous page', href: '/prev' }, next: null }),
 }))
 vi.mock('@/components/docs/doc-layout', () => ({ DocLayout: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }))

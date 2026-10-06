@@ -1,11 +1,16 @@
 import { NextResponse } from 'next/server'
-import { ensureDocPublication, isDocPublished } from '@/data/docs'
+import { canReaderViewPage, ensureDocPublication, isDocPublished } from '@/data/docs'
 import path from 'node:path'
 import { stripInternalFrontmatter } from '@/lib/provenance'
 import { getContentSource } from '@/lib/content-source'
 import { getCloudSiteConfig } from '@/lib/cloud-link/client'
 import { isMarkdownPagesEnabled } from '@/lib/markdown-pages'
 import { mdxToMarkdown } from '@thallylabs/core/markdown'
+import { parseFrontmatter } from '@/lib/frontmatter'
+import { getReaderAuthConfig } from '@/lib/reader-auth/config'
+import { canReaderAccessPage, parsePageAccess } from '@/lib/reader-auth/access'
+import { getReaderContextFromRequest } from '@/lib/reader-auth/context'
+import { contentCacheControl } from '@/lib/reader-auth/cache'
 
 const localDocsRoot = 'src/content'
 
@@ -29,7 +34,13 @@ export async function GET(
   // The HTML page 404s when its documented OpenAPI operation is hidden or
   // excluded; its Markdown mirror must not publish it either.
   await ensureDocPublication()
-  if (!isDocPublished(slugPath.replace(/\/index$/, '') || 'introduction')) {
+  const pageId = slugPath.replace(/\/index$/, '') || 'introduction'
+  if (!isDocPublished(pageId)) {
+    return new NextResponse('Not Found', { status: 404 })
+  }
+  // Reader access: a restricted page answers exactly like a missing one.
+  const reader = await getReaderContextFromRequest(request)
+  if (!(await canReaderViewPage(pageId, reader))) {
     return new NextResponse('Not Found', { status: 404 })
   }
 
@@ -46,6 +57,18 @@ export async function GET(
     if (!filePath.startsWith(rootPrefix)) continue
     const file = await source.read(filePath)
     if (file) {
+      // The file actually served may differ from the indexed page (a bare
+      // `.md` file, say); its own access frontmatter must allow the reader too.
+      let fileAccess
+      try {
+        fileAccess = parsePageAccess(parseFrontmatter(file.content).data)
+      } catch {
+        // Unparseable frontmatter cannot prove the page is open: fail closed.
+        fileAccess = { groupSets: [], isMalformed: true }
+      }
+      if (!canReaderAccessPage(fileAccess, reader, getReaderAuthConfig())) {
+        return new NextResponse('Not Found', { status: 404 })
+      }
       // Strip internal provenance frontmatter so it never ships publicly, then
       // clean the MDX body to real Markdown (JSX components → Markdown) while
       // preserving the public frontmatter block.
@@ -56,7 +79,7 @@ export async function GET(
         status: 200,
         headers: {
           'Content-Type': 'text/markdown; charset=utf-8',
-          'Cache-Control': 'public, max-age=300',
+          'Cache-Control': contentCacheControl('public, max-age=300'),
         },
       })
     }

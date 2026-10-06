@@ -7,7 +7,8 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, extname, relative } from 'node:path'
 
-import { navigationGateReason, playgroundDisplay } from './mintlify-extras.js'
+import { descendNavigationAccess, hasNavigationRules, navigationAccess, OPEN_NAVIGATION_ACCESS, playgroundDisplay } from './mintlify-extras.js'
+import type { NavigationAccess } from './mintlify-extras.js'
 import { mintlifyLocalizedReference, pageIdFromReference, resolveWithin, trimEdgeSlashes } from './path.js'
 import type {
   MigrationDocsConfig,
@@ -25,17 +26,25 @@ interface MintlifyPageReference {
 
 const MAX_MINTLIFY_CONFIG_BYTES = 20_000_000
 
-/** A page listed under an access-restricted navigation container. */
-export interface MintlifyGatedReference {
+/**
+ * One appearance of a page reference in navigation, with the access rules of
+ * every container above it. Thally reads access only from page frontmatter,
+ * so these are pushed down into the frontmatter of the pages they cover.
+ */
+export interface MintlifyReferenceAccess {
   ref: string
-  reason: string
+  access: NavigationAccess
 }
 
 export interface MintlifyNavigationResult {
   docsConfig: MigrationDocsConfig
   pageReferences: Array<MintlifyPageReference>
-  /** Pages under a restricted container; withheld from `docsConfig` and `pageReferences`. */
-  gatedReferences: Array<MintlifyGatedReference>
+  /**
+   * Access imposed by navigation containers, one entry per appearance of a
+   * page (open appearances included, so a page listed in several places can
+   * be given the strictest rule). Restricted pages stay in `docsConfig`.
+   */
+  referenceAccess: Array<MintlifyReferenceAccess>
   warnings: Array<MigrationWarning>
 }
 
@@ -474,38 +483,53 @@ interface ProjectionContext {
   seenReferences: Set<string>
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
-  gated: Array<MintlifyGatedReference>
-  /** Set while walking below a restricted group or tab. */
-  gateReason?: string
+  appearances: Array<MintlifyReferenceAccess>
+  /** Access accumulated from the containers above the node being walked. */
+  access: NavigationAccess
 }
 
 /**
- * Container-agnostic sweep for pages under a restricted node. The projection
- * only walks container kinds it understands; a page under any other one (a
- * tab's `menu` items, say) would otherwise fall through as an ungated orphan.
+ * Container-agnostic sweep for pages under a node that sets access rules. The
+ * projection only walks container kinds it understands; a page under any
+ * other one (a tab's `menu` items, say) would otherwise migrate without the
+ * rules of the container that restricted it. Open appearances are left to the
+ * projection, so a stray `href` elsewhere in the config never counts as one.
  */
-function collectGatedReferences(
+function collectReferenceAccess(
   node: unknown,
-  gate: string | undefined,
+  access: NavigationAccess,
   pathPrefix: string | undefined,
-  out: Array<MintlifyGatedReference>,
+  out: Array<MintlifyReferenceAccess>,
   depth = 0,
 ): void {
   if (depth > 32) return
   if (Array.isArray(node)) {
-    for (const item of node) collectGatedReferences(item, gate, pathPrefix, out, depth + 1)
+    for (const item of node) collectReferenceAccess(item, access, pathPrefix, out, depth + 1)
     return
   }
   const object = objectValue(node)
   if (!object) return
-  const reason = gate ?? navigationGateReason(object)
-  if (reason) {
-    const refs = [object.page, object.root, ...(Array.isArray(object.pages) ? object.pages : [])]
+  const nested = descendNavigationAccess(access, navigationAccess(object))
+  if (hasNavigationRules(nested)) {
+    // `href` names a page too (`{ href: '/secret' }` under a group); external
+    // links never normalize to a page reference.
+    const refs = [object.page, object.root, object.href, ...(Array.isArray(object.pages) ? object.pages : [])]
     for (const ref of refs) {
-      if (typeof ref === 'string' && normalizePageRef(ref, pathPrefix)) out.push({ ref, reason })
+      if (typeof ref === 'string' && normalizePageRef(ref, pathPrefix)) out.push({ ref, access: nested })
     }
   }
-  for (const value of Object.values(object)) collectGatedReferences(value, reason, pathPrefix, out, depth + 1)
+  for (const value of Object.values(object)) collectReferenceAccess(value, nested, pathPrefix, out, depth + 1)
+}
+
+/** Walk `walk` one container deeper, restoring the outer access afterwards. */
+function withContainerAccess<T>(object: Record<string, unknown>, context: ProjectionContext, walk: () => T): T {
+  const outer = context.access
+  context.access = descendNavigationAccess(outer, navigationAccess(object))
+  try {
+    return walk()
+  } finally {
+    context.access = outer
+  }
 }
 
 function warnOnce(context: ProjectionContext, key: string, message: string): void {
@@ -533,10 +557,9 @@ function containerPresentation(value: Record<string, unknown>): {
 }
 
 function registerReference(value: string, context: ProjectionContext): string | null {
-  if (context.gateReason) {
-    if (normalizePageRef(value, context.pathPrefix)) context.gated.push({ ref: value, reason: context.gateReason })
-    return null
-  }
+  // Every appearance is recorded, open ones included: a page listed under a
+  // restricted and an open container gets the strictest rule, never the open one.
+  if (normalizePageRef(value, context.pathPrefix)) context.appearances.push({ ref: value, access: context.access })
   const localizedValue = context.locale
     ? mintlifyLocalizedReference(value, context.locale, context.defaultPageIds)
     : value
@@ -580,14 +603,7 @@ function convertPage(
   }
   const object = objectValue(value)
   if (!object) return null
-  const outerGate = context.gateReason
-  const gate = navigationGateReason(object)
-  if (gate && !outerGate) context.gateReason = gate
-  try {
-    return convertPageObject(object, context)
-  } finally {
-    context.gateReason = outerGate
-  }
+  return withContainerAccess(object, context, () => convertPageObject(object, context))
 }
 
 function convertPageObject(
@@ -599,7 +615,6 @@ function convertPageObject(
   if (href && !object.pages && !object.groups) {
     const page = registerReference(href, context)
     if (page) return page
-    if (context.gateReason) return null
     warnOnce(
       context,
       'external-page-link',
@@ -736,15 +751,7 @@ function convertContainerToTabs(
           ...(object.hidden === true ? { hidden: true } : {}),
         }]
       }
-      const outerGate = context.gateReason
-      const gate = navigationGateReason(object)
-      if (gate && !outerGate) context.gateReason = gate
-      let nested: Array<MigrationNavigationTab>
-      try {
-        nested = convertContainerToTabs(object, context, tab, trace, depth + 1)
-      } finally {
-        context.gateReason = outerGate
-      }
+      const nested = withContainerAccess(object, context, () => convertContainerToTabs(object, context, tab, trace, depth + 1))
       if (nested.length > 0) {
         if (nested.length === 1) {
           return [{
@@ -1255,8 +1262,11 @@ export function projectMintlifyNavigation(
   const references: Array<MintlifyPageReference> = []
   const seenReferences = new Set<string>()
   const warningKeys = new Set<string>()
-  const gated: Array<MintlifyGatedReference> = []
+  const appearances: Array<MintlifyReferenceAccess> = []
   const navigation = objectValue(config.navigation) ?? config
+  // Rules on the navigation root itself (and on a language, below) cover
+  // every page under it, as the container-agnostic sweep sees them too.
+  const rootAccess = descendNavigationAccess(OPEN_NAVIGATION_ACCESS, navigationAccess(navigation))
   const languages = Array.isArray(navigation.languages)
     ? navigation.languages.flatMap((value): Array<Record<string, unknown>> => {
         const language = objectValue(value)
@@ -1302,7 +1312,8 @@ export function projectMintlifyNavigation(
         seenReferences,
         warnings,
         warningKeys,
-        gated,
+        appearances,
+        access: descendNavigationAccess(rootAccess, navigationAccess(language)),
       }
       const languageTabs = convertContainerToTabs(
         language,
@@ -1319,7 +1330,7 @@ export function projectMintlifyNavigation(
     }
     if (Object.keys(localizedNavigation).length > 0) i18n.navigation = localizedNavigation
   } else {
-    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, gated, pathPrefix: options.pathPrefix }
+    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, appearances, access: rootAccess, pathPrefix: options.pathPrefix }
     tabs = convertContainerToTabs(navigation, context, 'Documentation', projectionTrace)
     if (tabs.length === 0 && Array.isArray(config.navigation)) {
       const children = convertNavigationValues(config.navigation, context)
@@ -1419,7 +1430,7 @@ export function projectMintlifyNavigation(
         }]
       })
     : []
-  collectGatedReferences(navigation, undefined, options.pathPrefix, gated)
+  collectReferenceAccess(navigation, OPEN_NAVIGATION_ACCESS, options.pathPrefix, appearances)
   return {
     docsConfig: {
       tabs,
@@ -1436,7 +1447,7 @@ export function projectMintlifyNavigation(
       ...(redirects.length > 0 ? { redirects } : {}),
     },
     pageReferences: references,
-    gatedReferences: gated,
+    referenceAccess: appearances,
     warnings,
   }
 }

@@ -6,6 +6,10 @@ import { resolveDocumentationAccessMode } from '@/lib/openapi/documentation-acce
 import { problemResponse } from '@/lib/http/problem'
 import { resolveSiteConfig } from '@/lib/site-config'
 import type { OpenAPIDocument } from '@/lib/openapi/types'
+import { getReaderAuthConfig } from '@/lib/reader-auth/config'
+import { canReaderAccessUnmarkedContent } from '@/lib/reader-auth/access'
+import { getReaderContextFromRequest } from '@/lib/reader-auth/context'
+import { contentCacheControl } from '@/lib/reader-auth/cache'
 
 function getDefaultSpecConfig() {
   if (apiReferenceConfig.specs.length === 0) {
@@ -17,6 +21,20 @@ function getDefaultSpecConfig() {
 
 export async function GET(request: NextRequest) {
   const specConfig = getDefaultSpecConfig()
+  // The customer's API description is site content without page frontmatter:
+  // it follows the site default visibility, and a reader who may not see it
+  // gets the same 404 as a site without a specification.
+  if (specConfig && !canReaderAccessUnmarkedContent(await getReaderContextFromRequest(request), getReaderAuthConfig())) {
+    return problemResponse({
+      status: 404,
+      code: 'not_found',
+      title: 'Not found',
+      detail: 'No OpenAPI specification is available.',
+      resolution: 'Sign in to the documentation site, or present a reader token, and retry.',
+      instance: request.nextUrl.pathname,
+      headers: { 'Cache-Control': 'private, no-store' },
+    })
+  }
   if (!specConfig) {
     const [site, accessMode] = await Promise.all([
       resolveSiteConfig(request.nextUrl.origin),
@@ -28,7 +46,7 @@ export async function GET(request: NextRequest) {
       }),
       {
         headers: {
-          'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+          'Cache-Control': contentCacheControl('public, s-maxage=3600, stale-while-revalidate=86400'),
         },
       },
     )
@@ -50,7 +68,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json(document, {
     headers: {
-      'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+      'Cache-Control': contentCacheControl('public, s-maxage=3600, stale-while-revalidate=86400'),
     },
   })
 }

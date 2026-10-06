@@ -260,30 +260,43 @@ generic unknown-component fallback.
 
 ### Access-restricted pages
 
-A gated Mintlify page must never migrate as public. A page is withheld when its
-frontmatter sets a non-empty `groups` (list or string) or `public: false`
-(also `"false"`, `no`, `off`, `0`; empty `groups` restricts nothing), or when it sits
-under a navigation group or tab that sets `groups` (a list of strings) or
-`public: false`. `public: true` alone is not gating. Withheld pages are not
-written to `src/content` and are removed from navigation (emptied groups and
-tabs included), whether or not navigation lists them. The original file is
-written unchanged to `migration-quarantine/<original path>` at the project
-root, which no runtime content reader, search index, or `llms` output walks;
-`create-thally-docs` also adds it to the project's `.gitignore` (appended once,
-existing entries kept) so it is never committed or pushed. A public page that
-imports a withheld page as a component does not inline it (a `gated-page`
-warning names the importer). Invalid frontmatter fails the run rather than
-importing the page. Each page gets a
-`gated-page` warning, plus a summary; `create-thally-docs` prints these last
-under an "ACCESS-RESTRICTED CONTENT" heading and the report records them and a
-`quarantined` count. Links from other pages to a withheld page are left as
-authored and will fail `thally check`; images and other assets used only by
-gated pages are still copied to `public/`. Mintlify's site-wide authentication mode lives in its
-dashboard and cannot be read from a repository, so when any page sets
+Restricted Mintlify pages migrate as real pages with normalized access
+frontmatter that the Thally runtime enforces (see `/guides/authenticated-docs`):
+
+- Frontmatter `groups` becomes a list of trimmed group names (`groups: admin`
+  and `groups: "a, b"` become lists); `public` becomes a boolean (`"false"`,
+  `no`, `off`, `0` are `false`; `true`/`"true"` is `true`). Empty `groups`
+  restricts nothing.
+- Rules on navigation containers (a group, tab, version, dropdown, anchor,
+  language, or `menu` item) are pushed down into the frontmatter of every page
+  below them, because the runtime reads access only from pages: container
+  `groups` (a list of strings) and `public: false` restrict, and Mintlify's
+  group-level `public: true` opens pages that name no groups of their own.
+  Pages stay in navigation where they were.
+- Rules combine to the strictest: nested and page group lists intersect,
+  `public: false` anywhere wins, and a page listed under both an open and a
+  restricted container gets the restricted rule.
+
+A page whose rules cannot be carried over safely fails closed instead: a
+malformed value (`public: maybe`, `groups: [1]`), group lists that share no
+group, or frontmatter that declares `groups`/`public` but cannot be parsed or
+read. Such a page is not written to `src/content`, is removed from navigation,
+and its original is written unchanged to `migration-quarantine/<original path>`
+at the project root, which no runtime reader walks; `create-thally-docs` adds
+that folder to `.gitignore`. Each quarantined page gets a `gated-page` warning.
+
+What a restricted page uses must not leak through surfaces that are not access
+controlled: it is never inlined into another page (a `gated-page` warning names
+the importer), images and other assets used only by restricted pages are not
+copied to `public/` (they are saved under `migration-quarantine/assets/`), and
+OpenAPI operations documented only on restricted pages are withheld from the
+published spec. One `gated-page` summary counts the restricted pages and notes
+that Thally hides them from everyone until reader authentication is configured
+in `docs.json` `auth`; no `auth` block is generated, because Mintlify's
+dashboard settings cannot be read from a repository. When any page sets
 `public: true` (which implies the source site required sign-in for everything
-else) one `gated-page` warning says Thally will publish every imported page.
-Restricted-container `groups` and `public: false` are honored fail-closed even
-though Mintlify documents only `"public": true` on a group.
+else), one more `gated-page` warning says every unrestricted page will be
+public until `auth` is configured.
 
 ### Site-wide scripts, styles, fonts, and settings
 

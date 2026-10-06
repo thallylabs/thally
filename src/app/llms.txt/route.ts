@@ -1,13 +1,19 @@
 import { loadSidebarCollections, loadDocEntries } from '@/data/docs'
 import { siteUrlMismatch } from '@/lib/site-url'
 import { resolveSiteConfig } from '@/lib/site-config'
+import { getReaderAuthConfig } from '@/lib/reader-auth/config'
+import { canReaderAccessUnmarkedContent } from '@/lib/reader-auth/access'
+import { getReaderContextFromRequest } from '@/lib/reader-auth/context'
+import { contentCacheControl } from '@/lib/reader-auth/cache'
 
 export async function GET(request: Request) {
   const baseUrl = new URL(request.url).origin
   const effectiveSite = await resolveSiteConfig(baseUrl)
-  const entries = await loadDocEntries()
+  // The index lists exactly what this reader may open (anonymous by default).
+  const reader = await getReaderContextFromRequest(request)
+  const entries = await loadDocEntries(reader)
   const entriesByHref = new Map(entries.map((entry) => [entry.href, entry]))
-  const collections = await loadSidebarCollections()
+  const collections = await loadSidebarCollections(undefined, reader)
 
   const lines: Array<string> = []
 
@@ -90,7 +96,9 @@ export async function GET(request: Request) {
   }
 
   // Optional: API reference mention
-  const apiCollection = collections.find((c) => c.api)
+  const apiCollection = canReaderAccessUnmarkedContent(reader, getReaderAuthConfig())
+    ? collections.find((c) => c.api)
+    : undefined
   if (apiCollection) {
     if (!emittedCollections.has(apiCollection.id)) {
       lines.push(`## ${apiCollection.label}`)
@@ -109,7 +117,7 @@ export async function GET(request: Request) {
   return new Response(body, {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+      'Cache-Control': contentCacheControl('public, max-age=3600, s-maxage=3600'),
       ...(mismatch ? { 'X-Thally-Site-Url-Warning': mismatch } : {}),
     },
   })

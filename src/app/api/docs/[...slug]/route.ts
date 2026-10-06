@@ -1,5 +1,5 @@
 import { type NextRequest } from 'next/server'
-import { getDocEntries, loadDocEntries, loadNavContext } from '@/data/docs'
+import { canReaderViewPage, getDocEntries, loadDocEntries, loadNavContext } from '@/data/docs'
 import { hasDocTranslation } from '@/lib/i18n/translation-source'
 import { mdxToMarkdown } from '@thallylabs/core/markdown'
 import { loadContentDocument } from '@/lib/content'
@@ -12,6 +12,8 @@ import { localizeDocNavigation } from '@/lib/i18n/navigation'
 import { localizedPath } from '@/lib/i18n/config'
 import { docApiJson } from '@/lib/openapi/page-api'
 import { servedSpecPathForFrontmatter } from '@/data/api-reference'
+import { getReaderContextFromRequest } from '@/lib/reader-auth/context'
+import { contentCacheControl } from '@/lib/reader-auth/cache'
 
 /** Nearest valid pages for a missing slug, so a 404'd agent can self-correct. */
 function suggestSlugs(
@@ -70,9 +72,15 @@ export async function GET(
   const wantsJson = format === 'json'
   const wantsLdJson = format === 'ldjson'
 
-  // Find matching doc entry
-  const entries = await loadDocEntries()
-  const entry = entries.find((e) => e.slug.join('/') === slugPath || e.id === slugPath)
+  // Find matching doc entry among the pages this reader may see. A page the
+  // reader may not open is indistinguishable from a missing one: same 404,
+  // and suggestions are drawn only from visible pages.
+  const reader = await getReaderContextFromRequest(request)
+  const entries = await loadDocEntries(reader)
+  const match = entries.find((e) => e.slug.join('/') === slugPath || e.id === slugPath)
+  const entry = match && await canReaderViewPage(match.id, reader, route.isLocaleRoute ? route.locale : undefined)
+    ? match
+    : undefined
 
   if (!entry) {
     const suggestions = suggestSlugs(slugPath, entries)
@@ -133,7 +141,7 @@ export async function GET(
   const canonicalHref = localizedPath(entry.href, route.locale, i18n.defaultLocale)
   const canonicalUrl = `${baseUrl}${canonicalHref}`
   const locale = route.locale
-  const nav = await localizeDocNavigation(await loadNavContext(entry.id, locale), locale, i18n.defaultLocale)
+  const nav = await localizeDocNavigation(await loadNavContext(entry.id, locale, reader), locale, i18n.defaultLocale)
   const title = typeof frontmatter.title === 'string' ? frontmatter.title : entry.title
   const description = typeof frontmatter.description === 'string' ? frontmatter.description : entry.description
   const keywords = Array.isArray(frontmatter.keywords) && frontmatter.keywords.every((item) => typeof item === 'string')
@@ -154,7 +162,7 @@ export async function GET(
   })
 
   const commonHeaders: Record<string, string> = {
-    'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+    'Cache-Control': contentCacheControl('public, s-maxage=3600, stale-while-revalidate=86400'),
     Vary: 'Accept, X-Thally-Format',
     Link: `<${canonicalHref}>; rel="canonical", <${canonicalHref}?format=json>; rel="alternate"; type="application/json", <${canonicalHref}?format=ldjson>; rel="alternate"; type="application/ld+json"`,
   }

@@ -29,10 +29,10 @@ vi.mock('@thallylabs/migrate', async (importOriginal) => {
     writeFileSync(join(directory, 'docs.json'), JSON.stringify({ navigation: { pages: ['intro', 'private'] } }))
     writeFileSync(join(directory, 'intro.mdx'), '---\ntitle: Intro\n---\n\nHello\n')
     if (fixture.oversized) {
-      writeFileSync(join(directory, 'private.mdx'), `---\ntitle: Private\ngroups: [admin]\n---\n\n${'x'.repeat(2_100_000)}\n`)
+      writeFileSync(join(directory, 'private.mdx'), `---\ntitle: Private\npublic: maybe\n---\n\n${'x'.repeat(2_100_000)}\n`)
       return
     }
-    writeFileSync(join(directory, 'private.mdx'), `---\ntitle: Private\n${fixture.gated ? 'groups: [admin]\n' : ''}---\n\nSecret\n\n![p](/img/p.png)\n`)
+    writeFileSync(join(directory, 'private.mdx'), `---\ntitle: Private\n${fixture.gated ? 'public: maybe\n' : ''}---\n\nSecret\n\n![p](/img/p.png)\n`)
     mkdirSync(join(directory, 'img'), { recursive: true })
     writeFileSync(join(directory, 'img/p.png'), 'PNG')
   },

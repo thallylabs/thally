@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { notFound, redirect } from 'next/navigation'
+import { redirect } from 'next/navigation'
 import { ApiLayout } from '@/components/api/api-layout'
 import { OperationPanel } from '@/components/api/operation-panel'
 import { resolvePlaygroundDisplay } from '@/lib/openapi/playground-display'
@@ -14,6 +14,9 @@ import { buildApiOperationJsonLd } from '@/lib/json-ld'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 import DocsPage, { generateMetadata as generateDocsMetadata } from '@/app/(docs)/[[...slug]]/page'
+import { isReaderAuthActive } from '@/lib/reader-auth/config'
+import { getReaderContext } from '@/lib/reader-auth/context'
+import { canReaderSeeUnmarkedContent, denyDocumentAccess } from '@/lib/reader-auth/page-gate'
 
 interface PageProps {
   params: Promise<{ slug?: Array<string> }>
@@ -22,7 +25,8 @@ interface PageProps {
 export async function generateStaticParams() {
   // Visit the optional catch-all root so the shell can mark assets builds
   // dynamic; returning no params incorrectly selects on-demand SSG.
-  if (isRemoteContentSource()) return [{ slug: [] }]
+  // Reader-auth sites render per request (see the document route).
+  if (isRemoteContentSource() || isReaderAuthActive()) return [{ slug: [] }]
   const apiNodes = await getAllApiOperationNodes()
   const apiParams = apiNodes.map((node) => ({ slug: node.slug }))
 
@@ -41,6 +45,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const node = await getApiOperationBySlug(resolved.slug)
   const specUrl = node ? getOpenApiSpecUrl(siteUrl, node.operation.specId) : null
   if (node) {
+    // Generated operations carry no frontmatter: they follow the site default.
+    if (!canReaderSeeUnmarkedContent(await getReaderContext())) return {}
     const title = node.operation.title
     const description = node.operation.description ?? `${node.operation.method} ${node.operation.path}`
     const ogImageUrl = buildOgImageUrl({
@@ -81,27 +87,29 @@ export default async function ApiReferencePage({ params }: PageProps) {
   const resolved = await params
   const siteUrl = getSiteUrl()
   const effectiveSite = resolveBuildSiteConfig()
+  const reader = await getReaderContext()
 
   // No slug — redirect to the first MDX page in the API group if one exists,
   // otherwise fall through to the first OpenAPI operation.
   if (!resolved.slug?.length) {
-    const firstMdx = (await loadDocEntries()).find(
+    const firstMdx = (await loadDocEntries(reader)).find(
       (doc) => doc.slug[0] === 'api' && doc.slug.length > 1,
     )
     if (firstMdx) {
       redirect(firstMdx.href)
     }
-    const defaultNodes = await getApiOperationNodes(apiReferenceConfig.defaultSpecId)
+    const defaultNodes = canReaderSeeUnmarkedContent(reader) ? await getApiOperationNodes(apiReferenceConfig.defaultSpecId) : []
     if (defaultNodes.length > 0) {
       redirect(defaultNodes[0].href)
     }
-    notFound()
+    denyDocumentAccess(reader, '/api')
   }
 
   // OpenAPI operation match
   const node = await getApiOperationBySlug(resolved.slug)
   const specUrl = node ? getOpenApiSpecUrl(siteUrl, node.operation.specId) : null
   if (node) {
+    if (!canReaderSeeUnmarkedContent(reader)) denyDocumentAccess(reader, `/api/${resolved.slug.join('/')}`)
     const pageUrl = `${siteUrl}${node.href}`
     const jsonLd = buildApiOperationJsonLd({
       siteUrl,

@@ -9,6 +9,7 @@ vi.mock('@/data/docs', () => ({
     { id: 'introduction', slug: [], href: '/', hidden: false, noindex: false },
     { id: 'orphan', slug: ['orphan'], href: '/orphan', hidden: false, noindex: false },
   ],
+  canReaderViewPage: async () => true,
   getSeoConfig: () => ({ sitemap: docs.sitemap }),
   getVisiblePageIds: () => new Set(['guide', 'introduction']),
 }))

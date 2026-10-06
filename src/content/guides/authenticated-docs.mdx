@@ -1,0 +1,229 @@
+---
+title: Authenticated docs
+navTitle: Authenticated docs
+description: Sign readers in with your own app or identity provider and gate pages by group with signed JWTs or OpenID Connect.
+keywords: [authentication, private docs, jwt, oidc, sso, groups, access control, gated pages]
+---
+
+Thally can restrict who reads which pages. Readers sign in through **your**
+product (a signed JWT handoff) or **your** identity provider (OpenID Connect),
+and pages opt in to restrictions with `public` and `groups` frontmatter. Every
+surface — HTML pages, client-side navigation, `.md` mirrors, `/api/docs/*`,
+indexes, search, sitemaps, `llms.txt`, and the MCP server — applies the same
+rule, so a restricted page never leaks through a side door.
+
+If you only need one shared password for the whole site, use the simpler
+[docs-access password](/guides/admin-dashboard#protecting-the-docs-for-visitors)
+instead.
+
+## How access is decided
+
+| Page frontmatter | Who can read it |
+| --- | --- |
+| `public: true` | Everyone, including anonymous readers and agents. |
+| `groups: [beta, partners]` | Signed-in readers in **at least one** listed group. `groups` wins over `public: true`. |
+| `public: false` | Any signed-in reader. |
+| _(neither)_ | The site default: `auth.default` — `private` unless you set `"public"`. |
+
+```mdx
+---
+title: Beta roadmap
+groups: [beta]
+---
+```
+
+A page a reader may not open behaves exactly like a page that does not exist:
+it returns `404`, it is missing from navigation, previous/next links,
+breadcrumbs, indexes and search, and its title never appears in metadata. On a
+private-by-default site, anonymous readers are sent to sign in — for missing
+and restricted paths alike — so the response never confirms a page exists.
+
+<Warning title="Restrictions without sign-in fail closed">
+If `docs.json` has no `auth` block (or uses `password` mode), nobody can prove
+group membership, so pages with `groups` or `public: false` are hidden from
+**everyone**. A malformed value such as `public: maybe` hides the page too.
+</Warning>
+
+Generated API reference pages and the served OpenAPI document have no page
+frontmatter, so they follow the site default. Translations inherit the most
+restrictive rule of the translated file and its primary page — repeat access
+frontmatter in translations for clarity.
+
+## Configure `docs.json`
+
+```json docs.json
+{
+  "auth": {
+    "mode": "jwt",
+    "default": "public",
+    "loginUrl": "https://app.example.com/docs-login",
+    "logoutUrl": "https://app.example.com/logout",
+    "session": { "maxAgeSeconds": 28800 },
+    "jwt": {
+      "issuer": "https://app.example.com",
+      "audience": "https://docs.example.com",
+      "algorithms": ["EdDSA"],
+      "groupsClaim": "groups",
+      "maxTokenAgeSeconds": 300,
+      "clockSkewSeconds": 30
+    },
+    "tokens": { "revoked": [] }
+  }
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `mode` | — | `password` (existing shared password), `jwt`, or `oidc`. Any other value fails closed: only `public: true` pages are served. |
+| `default` | `private` | Visibility of pages without `public`/`groups`. |
+| `loginUrl` | — | JWT mode: where anonymous readers are sent, with `?redirect=/requested/path`. HTTPS only. |
+| `logoutUrl` | — | Optional page to visit after `/api/reader/logout`. |
+| `session.maxAgeSeconds` | `28800` (8 h) | Longest reader session; capped at 30 days. |
+| `jwt.issuer` / `jwt.audience` | — | Enforced `iss` / `aud`. Without `audience`, the token must name your site origin in `aud` (or carry a matching `host` claim). |
+| `jwt.jwksUrl` | — | Public JWKS endpoint, as an alternative to a PEM key. |
+| `jwt.algorithms` | all of `RS256 PS256 ES256 EdDSA` | Allowed asymmetric algorithms. `none` and HS\* are never accepted here. |
+| `jwt.groupsClaim` / `oidc.groupsClaim` | `groups` | Claim holding the reader's groups: an exact key (e.g. `https://example.com/groups`) or a dotted path (`app.roles`). |
+| `jwt.maxTokenAgeSeconds` | `300` | Oldest accepted handoff token (`iat`), capped at 600. |
+| `oidc.issuer`, `oidc.clientId`, `oidc.scopes` | scopes: `openid email profile` | OpenID Connect provider settings. |
+| `tokens.revoked` | `[]` | Agent token ids or key ids to reject. |
+
+Secrets never go in `docs.json`. Set them as server-side environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `THALLY_READER_SESSION_SECRET` | Signs reader sessions. 32+ random characters, different from your admin secrets. Required in production. |
+| `THALLY_READER_JWT_SECRET` | HS256 shared secret (32+ characters) — **or** |
+| `THALLY_READER_JWT_PUBLIC_KEY` | SPKI PEM public key — **or** |
+| `THALLY_READER_JWKS_URL` | JWKS URL. Configure exactly one of the three. |
+| `THALLY_READER_OIDC_ISSUER`, `THALLY_READER_OIDC_CLIENT_ID`, `THALLY_READER_OIDC_CLIENT_SECRET` | OIDC client; override the `docs.json` values. |
+| `THALLY_READER_TOKEN_KEYS` | `kid:secret` pairs for agent tokens (see below). |
+
+Set `THALLY_SITE_URL` to your public origin in production: token audiences are
+checked against it, never against the request's `Host` header. Without it (and
+without `auth.jwt.audience`), production rejects every handoff token.
+
+## Option 1: JWT handoff from your app
+
+Your product already knows who the user is. When a signed-in user opens the
+docs, mint a short-lived JWT and send the browser to Thally:
+
+<Steps>
+<Step title="Point anonymous readers at your app">
+Set `auth.loginUrl`. Thally sends readers to
+`https://app.example.com/docs-login?redirect=/guides/beta-roadmap`.
+</Step>
+<Step title="Sign a short-lived token">
+Include `exp` and `iat`, bind it to the docs site with `aud`, and list the
+reader's groups.
+</Step>
+<Step title="Hand it to the docs">
+Redirect to `https://docs.example.com/login/jwt-callback?redirect=/guides/beta-roadmap#<jwt>`.
+The token travels in the URL fragment, which browsers never send to servers
+or in `Referer` headers. Thally verifies it, sets its own session cookie, and
+opens the requested page.
+</Step>
+</Steps>
+
+```ts Node.js (jose)
+import { SignJWT, importPKCS8 } from 'jose'
+
+const privateKey = await importPKCS8(process.env.DOCS_JWT_PRIVATE_KEY!, 'EdDSA')
+
+export async function docsLoginRedirect(user: { id: string; groups: string[] }, redirect = '/') {
+  const token = await new SignJWT({ groups: user.groups })
+    .setProtectedHeader({ alg: 'EdDSA' })
+    .setSubject(user.id)
+    .setIssuer('https://app.example.com')
+    .setAudience('https://docs.example.com')
+    .setIssuedAt()
+    .setExpirationTime('60s') // the handoff only; the docs session is separate
+    .setJti(crypto.randomUUID())
+    .sign(privateKey)
+  const path = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/'
+  return `https://docs.example.com/login/jwt-callback?redirect=${encodeURIComponent(path)}#${token}`
+}
+```
+
+Generate an Ed25519 key pair with
+`openssl genpkey -algorithm ed25519 -out docs-jwt.pem` and
+`openssl pkey -in docs-jwt.pem -pubout`, then set the public half as
+`THALLY_READER_JWT_PUBLIC_KEY`.
+
+Other accepted forms: an auto-submitting form `POST`ed to `/api/reader/jwt`
+with `token` and `redirect` fields (allowed from your docs origin or your
+`loginUrl` origin only), or `GET /api/reader/jwt?token=…&redirect=…` for
+simple integrations — prefer the fragment or `POST`, since query strings can
+appear in proxy logs.
+
+The session lasts `auth.session.maxAgeSeconds`. A Mintlify-style `expiresAt`
+claim (seconds since the epoch) can shorten it, never extend it.
+
+## Option 2: OpenID Connect
+
+```json docs.json
+{
+  "auth": {
+    "mode": "oidc",
+    "default": "private",
+    "oidc": {
+      "issuer": "https://login.example.com",
+      "clientId": "docs-site",
+      "scopes": ["openid", "profile", "groups"],
+      "groupsClaim": "groups"
+    }
+  }
+}
+```
+
+Register `https://docs.example.com/api/reader/oidc/callback` as the redirect
+URI and set `THALLY_READER_OIDC_CLIENT_SECRET` (omit it for a public client
+using PKCE only). Thally runs the authorization-code flow with PKCE, `state`,
+and `nonce`, verifies the ID token against the issuer's discovery document and
+JWKS, and reads groups from `groupsClaim` in the ID token. Configure your IdP to
+include that claim in ID tokens.
+
+Reader sign-in is separate from [admin sign-in](/guides/admin-dashboard): it
+uses different cookies, secrets, and token types, so neither can be used for
+the other.
+
+## Tokens for agents and MCP clients
+
+Agents cannot complete a browser sign-in, so give them a read-only,
+group-scoped bearer token:
+
+```bash
+THALLY_READER_TOKEN_KEYS="k1:$(openssl rand -hex 32)"   # set in your host, too
+npm run reader-token -- --label ci-agent --groups beta --days 30
+```
+
+In a scaffolded site without the `reader-token` npm script, run
+`npx tsx scripts/mint-reader-token.ts` with the same arguments.
+
+Agents send it as `Authorization: Bearer thrt_…` to page URLs, `/api/docs/*`,
+the `.md` mirrors, `/llms.txt`, and `/api/docs-index`. Tokens only read; they
+never create a browser session and never reach the admin dashboard. Revoke one
+by adding its token id to `auth.tokens.revoked`, revoke every token from a key
+by adding the key id, or rotate by putting a new key first in
+`THALLY_READER_TOKEN_KEYS` and removing the old one.
+
+## Security notes
+
+- Responses are `private, no-store` on reader-auth sites, and pages render per
+  request; nothing reader-specific is prerendered or stored in a shared cache.
+  Expect higher origin load than a fully static public site.
+- Handoff tokens must be short-lived (`maxTokenAgeSeconds`, default 5 minutes)
+  and are single-use per server instance when they carry a `jti`.
+- The reader cookie is HttpOnly, SameSite=Lax, and `Secure` with the `__Host-`
+  prefix in production.
+- Return paths are same-origin only; anything else falls back to `/`.
+- Sessions keep only the groups your pages reference, so readers who belong
+  to hundreds of directory groups still fit in a cookie. A group you start
+  referencing applies from each reader's next sign-in.
+- `/login/jwt-callback` strips the token from the address bar before analytics
+  or `afterInteractive` scripts run. A custom script you mark
+  `beforeInteractive` runs earlier; do not let it record the URL fragment.
+- Files under `public/` are served without any access check. Keep images used
+  only by restricted pages out of `public/` if they are sensitive.
+- Search, AI answers, `llms-full.txt`, the sitemap, and the MCP tools currently
+  index **public pages only**, so restricted content never enters a shared
+  index.
