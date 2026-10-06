@@ -127,10 +127,14 @@ export async function generateMetadata(): Promise<Metadata> {
   const effectiveSite = resolveBuildSiteConfig()
   const siteUrl = getSiteUrl()
   const defaultOgImage = buildOgImageUrl({})
+  // A site name that already ends in "Documentation" must not be doubled.
+  const defaultTitle = /documentation$/i.test(effectiveSite.name.trim())
+    ? effectiveSite.name
+    : `${effectiveSite.name} Documentation`
   return {
     metadataBase: new URL(siteUrl),
     title: {
-      default: `${effectiveSite.name} Documentation`,
+      default: defaultTitle,
       template: `%s | ${effectiveSite.name}`,
     },
     description: effectiveSite.description,
@@ -152,7 +156,7 @@ export async function generateMetadata(): Promise<Metadata> {
       shortcut: '/api/brand/favicon',
     },
     openGraph: {
-      title: `${effectiveSite.name} Documentation`,
+      title: defaultTitle,
       description: effectiveSite.description,
       url: siteUrl,
       siteName: effectiveSite.name,
@@ -160,7 +164,7 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     twitter: {
       card: 'summary_large_image',
-      title: `${effectiveSite.name} Documentation`,
+      title: defaultTitle,
       description: effectiveSite.description,
       images: [defaultOgImage],
     },

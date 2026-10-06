@@ -2,6 +2,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
 const fixtures = vi.hoisted(() => ({
+  specLinkVisible: true,
+  node: null as null | object,
   renderDoc: vi.fn<(props: { params: Promise<{ slug: string[] }> }) => Promise<null>>(async () => null),
   metadata: vi.fn<(props: { params: Promise<{ slug: string[] }> }) => Promise<{ title: string }>>(
     async () => ({ title: 'Guide français' }),
@@ -13,7 +15,7 @@ vi.mock('@/app/(docs)/[[...slug]]/page', () => ({
   generateMetadata: fixtures.metadata,
 }))
 vi.mock('@/data/api-reference', () => ({
-  getApiOperationBySlug: vi.fn(async () => null),
+  getApiOperationBySlug: vi.fn(async () => fixtures.node),
   getAllApiOperationNodes: vi.fn(async () => []),
   getApiOperationNodes: vi.fn(async () => []),
 }))
@@ -21,8 +23,16 @@ vi.mock('@/lib/i18n/request', () => ({
   getEffectiveI18nConfig: async () => ({ defaultLocale: 'en', locales: [{ code: 'en' }, { code: 'fr' }] }),
   getRepositoryI18nConfig: () => ({ defaultLocale: 'en', locales: [{ code: 'en' }] }),
 }))
+vi.mock('@/data/docs', () => ({
+  getApiPlaygroundDisplay: () => undefined,
+  getApiSpecLinkVisible: () => fixtures.specLinkVisible,
+  getBreadcrumbs: () => [],
+  getDocEntries: () => [],
+  loadDocEntries: async () => [],
+  getSeoConfig: () => ({ titleSeparator: ' - ' }),
+}))
 vi.mock('@/lib/site-url', () => ({ getSiteUrl: () => 'https://docs.example.test' }))
-vi.mock('@/config/api-reference', () => ({ apiReferenceConfig: { defaultSpecId: 'default' }, getOpenApiSpecUrl: () => null }))
+vi.mock('@/config/api-reference', () => ({ apiReferenceConfig: { defaultSpecId: 'default' }, getOpenApiSpecUrl: () => 'https://docs.example.test/openapi.json' }))
 vi.mock('@/lib/site-config', () => ({ resolveBuildSiteConfig: () => ({ name: 'Docs' }) }))
 
 import LocaleApiReferencePage, { generateMetadata } from './page'
@@ -38,5 +48,18 @@ describe('localized API MDX routing', () => {
     })
     expect(await fixtures.renderDoc.mock.calls[0]![0].params).toEqual({ slug: ['fr', 'api', 'overview'] })
     expect(await fixtures.metadata.mock.calls[0]![0].params).toEqual({ slug: ['fr', 'api', 'overview'] })
+  })
+
+  it('shows the visible spec link by default and hides it with api.specLink false', async () => {
+    fixtures.node = {
+      href: '/api/default/analytics/query/post',
+      operation: { title: 'Query', method: 'POST', path: '/analytics/query', specId: 'default' },
+    }
+    const params = Promise.resolve({ locale: 'fr', slug: ['default', 'analytics', 'query', 'post'] })
+    fixtures.specLinkVisible = true
+    expect(JSON.stringify(await LocaleApiReferencePage({ params }))).toContain('OpenAPI specification:')
+    fixtures.specLinkVisible = false
+    expect(JSON.stringify(await LocaleApiReferencePage({ params }))).not.toContain('OpenAPI specification:')
+    fixtures.node = null
   })
 })

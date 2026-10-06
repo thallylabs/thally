@@ -882,7 +882,7 @@ function extractEmbeddedOpenApi(content: string): {
   }
 }
 
-function markdownPage(document: MigrationFetchResponse, id: string, platform: MigrationPlatform): {
+function markdownPage(document: MigrationFetchResponse, id: string, platform: MigrationPlatform, warn?: (message: string) => void): {
   page: MigrationPage | null
   openApiFragment?: EmbeddedOpenApiFragment
 } {
@@ -921,7 +921,7 @@ function markdownPage(document: MigrationFetchResponse, id: string, platform: Mi
     // The crawler knows the source platform (detected or caller-provided)
     // before it ever parses a page; an omitted platform would otherwise
     // apply every platform's textual renames to content of unknown origin.
-    page: parseMarkdownPage({ id, raw, source: document.finalUrl.toString(), platform }),
+    page: parseMarkdownPage({ id, raw, source: document.finalUrl.toString(), platform, ...(warn ? { warn } : {}) }),
     openApiFragment: embeddedOpenApi.fragment,
   }
 }
@@ -1751,11 +1751,13 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
         ? storageIdForDocusaurusRoute(navigationId)
         : navigationId
       if (/(?:markdown|text\/plain)/i.test(document.contentType) || /\.mdx?$/i.test(document.finalUrl.pathname)) {
-        const markdown = markdownPage(document, id, platform)
+        const pageWarnings: Array<string> = []
+        const markdown = markdownPage(document, id, platform, (message) => pageWarnings.push(message))
         if (markdown.page) markdown.page.navigationId = navigationId
         return {
           candidate,
           page: markdown.page,
+          pageWarnings,
           openApiFragment: markdown.openApiFragment,
           links: markdownLinks(document.body),
           base: document.finalUrl,
@@ -1783,6 +1785,9 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
       if (result.page && sourceIdentity && !seenSources.has(sourceIdentity)
         && !seenIds.has(result.page.id) && pages.length < maxPages) {
         pages.push(result.page)
+        if ('pageWarnings' in result && result.pageWarnings) {
+          for (const message of result.pageWarnings) warnings.push({ code: 'unsupported-config', message, source: result.page.source })
+        }
         if ('openApiFragment' in result && result.openApiFragment) {
           openApiFragments.push(result.openApiFragment)
         }

@@ -10,6 +10,7 @@ import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 
 import { isThallyBuiltinComponent } from './builtin-components.js'
+import { pageScopeNames, unresolvedExpressionNames } from './inline-extraction.js'
 import { playgroundDisplay } from './mintlify-extras.js'
 import { parseFrontmatter } from './frontmatter.js'
 import type { MigrationPage, MigrationPlatform } from './types.js'
@@ -1044,7 +1045,34 @@ export function mdxComment(text: string): string {
  * so a rewrite cannot nest (and thereby corrupt) a comment inside another one.
  */
 export function replaceOutsideCodeAndComments(body: string, transform: (whole: string) => string): string {
-  return replaceOutsideCode(body, (masked) => masked.split(/(\{\s*\/\*[\s\S]*?\*\/\s*\})/).map((part, index) => index % 2 ? part : transform(part)).join(''))
+  return replaceOutsideCode(body, (masked) => {
+    // Equivalent to splitting on /\{\s*\/\*[\s\S]*?\*\/\s*\}/ but linear: each `*/` that is followed by `\s*}` is
+    // found once, and every opener takes the first such end after its own `/*`.
+    const ends: Array<number> = []
+    const closer = /\*\/\s*\}/y
+    for (let at = masked.indexOf('*/'); at !== -1; at = masked.indexOf('*/', at + 1)) {
+      closer.lastIndex = at
+      if (closer.test(masked)) ends.push(at)
+    }
+    const opener = /\{\s*\/\*/y
+    const out: Array<string> = []
+    let last = 0
+    let next = 0
+    for (let start = masked.indexOf('{'); start !== -1; start = masked.indexOf('{', start + 1)) {
+      opener.lastIndex = start
+      if (!opener.test(masked)) continue
+      while (next < ends.length && ends[next] < opener.lastIndex) next++
+      if (next === ends.length) break
+      const end = /\*\/\s*\}/y
+      end.lastIndex = ends[next]
+      end.test(masked)
+      out.push(transform(masked.slice(last, start)), masked.slice(start, end.lastIndex))
+      last = end.lastIndex
+      start = last - 1
+    }
+    out.push(transform(masked.slice(last)))
+    return out.join('')
+  })
 }
 
 /**
@@ -1729,6 +1757,100 @@ function maskCodeRegions(body: string): string {
   }).join('\n')
 }
 
+/**
+ * Read a JSX tag's attributes from `from` (just after the tag name) to its
+ * closing `>`, ignoring any `>` inside quotes or `{...}` expressions. Linear.
+ * Returns the index after `>` and whether the tag self-closes, or null when it
+ * is not a well-formed tag (a bare `<`, or no end). Returns UNTERMINATED when
+ * an open brace/quote runs to end of input: callers stop scanning, since every
+ * later opener would rescan the same tail (quadratic on `'<a {'.repeat(n)`).
+ */
+const UNTERMINATED = 'unterminated'
+function readTagEnd(text: string, from: number): { end: number; selfClosing: boolean; attributes: string } | null | typeof UNTERMINATED {
+  if (from < text.length && !/[\s/>]/.test(text[from])) return null
+  let depth = 0
+  let quote = ''
+  for (let i = from; i < text.length; i++) {
+    const char = text[i]
+    if (quote) {
+      if (char === '\\' && depth > 0) i++
+      else if (char === quote) quote = ''
+    } else if (char === '"' || char === "'" || (char === '`' && depth > 0)) {
+      quote = char
+    } else if (char === '{') {
+      depth++
+    } else if (char === '}') {
+      depth = Math.max(0, depth - 1)
+    } else if (depth === 0) {
+      if (char === '<') return null
+      if (char === '>') {
+        const selfClosing = text[i - 1] === '/' && i > from
+        return { end: i + 1, selfClosing, attributes: text.slice(from, selfClosing ? i - 1 : i) }
+      }
+    }
+  }
+  return quote || depth > 0 ? UNTERMINATED : null
+}
+
+/** Add `titleSize="p"` to every `<Steps>` opener (also `<Steps />`) that lacks one. */
+function pinStepsTitleSize(body: string): string {
+  let result = ''
+  let cursor = 0
+  for (const match of body.matchAll(/<Steps(?=[\s/>])/g)) {
+    if (match.index < cursor) continue
+    const tag = readTagEnd(body, match.index + match[0].length)
+    if (tag === UNTERMINATED) break
+    if (!tag) continue
+    const attributesEnd = tag.end - (tag.selfClosing ? 2 : 1)
+    if (/\btitleSize\s*=/.test(tag.attributes)) continue
+    result += `${body.slice(cursor, attributesEnd).trimEnd()} titleSize="p"${tag.selfClosing ? ' /' : ''}>`
+    cursor = tag.end
+  }
+  return result + body.slice(cursor)
+}
+
+/**
+ * Escape closing tags that have no matching real opener (outside code), e.g.
+ * a generator that wrote `\<Warning>` ... `</Warning>`: the escaped opener is
+ * literal text, so the bare closer is a compile error. Escaping the closer the
+ * same way keeps the page. Linear: one regex pass with a per-name open count.
+ * Returns the 1-based line numbers repaired; `body` is returned unchanged when
+ * there are none.
+ */
+export function escapeUnmatchedClosingTags(body: string): { body: string; lines: Array<number> } {
+  const masked = maskCodeRegions(body)
+  const tagPattern = /(\\?)<(\/?)([A-Za-z][\w.:-]*)/g
+  const open = new Map<string, number>()
+  const edits: Array<number> = []
+  for (let match = tagPattern.exec(masked); match; match = tagPattern.exec(masked)) {
+    const [whole, escaped, closing, name] = match
+    const tag = readTagEnd(masked, match.index + whole.length)
+    if (tag === UNTERMINATED) break
+    if (!tag) continue
+    tagPattern.lastIndex = tag.end
+    if (escaped || tag.selfClosing) continue
+    if (!closing) {
+      open.set(name, (open.get(name) ?? 0) + 1)
+    } else if (open.get(name)) {
+      open.set(name, open.get(name)! - 1)
+    } else {
+      edits.push(match.index)
+    }
+  }
+  if (edits.length === 0) return { body, lines: [] }
+  let result = ''
+  let cursor = 0
+  const lines: Array<number> = []
+  let line = 1
+  for (const start of edits) {
+    result += `${body.slice(cursor, start)}\\`
+    for (let i = cursor; i < start; i++) if (body.charCodeAt(i) === 10) line++
+    lines.push(line)
+    cursor = start
+  }
+  return { body: result + body.slice(cursor), lines }
+}
+
 function isKnownComponentName(name: string, body: string): boolean {
   if (isThallyBuiltinComponent(name)) return true
   if (new RegExp(`^\\s*export\\s+(?:const|function|default\\s+function)\\s+${name}\\b`, 'm').test(body)) return true
@@ -1809,6 +1931,60 @@ function injectReactHookImports(body: string): string {
     && !new RegExp(`import\\s*\\{[^}]*\\b${hook}\\b[^}]*\\}\\s*from\\s*['"]react['"]`).test(body)
   ))
   return used.length > 0 ? `import { ${used.join(', ')} } from 'react'\n\n${body}` : body
+}
+
+/**
+ * An MDX expression that names something the page never defines throws a
+ * ReferenceError when the page renders and fails the build, while Mintlify
+ * renders it as nothing (`exactly one of {backfill, MV}.`). Match Mintlify:
+ * drop the expression, or the JSX attribute that carries it, and say so once.
+ */
+export function removeUndefinedExpressions(body: string, warn?: (message: string) => void): string {
+  if (!body.includes('{')) return body
+  interface ExpressionNode extends MdxOffsetNode {
+    attributes?: Array<{ type: string; value?: unknown; position?: MdxOffsetNode['position'] }>
+  }
+  let tree: ExpressionNode
+  try {
+    tree = descriptionParser.parse(body) as ExpressionNode
+  } catch {
+    return body
+  }
+  const esm: Array<string> = []
+  const collect = (node: ExpressionNode): void => {
+    if (node.type === 'mdxjsEsm' && node.value) esm.push(node.value)
+    for (const child of node.children ?? []) collect(child)
+  }
+  collect(tree)
+  const scope = pageScopeNames(esm)
+  const edits: Array<{ start: number; end: number }> = []
+  const removed = new Set<string>()
+  const check = (expression: string, position: MdxOffsetNode['position']): void => {
+    const names = unresolvedExpressionNames(expression, scope)
+    const start = position?.start.offset
+    const end = position?.end.offset
+    if (names.length === 0 || start === undefined || end === undefined) return
+    names.forEach((name) => removed.add(name))
+    edits.push({ start, end })
+  }
+  const visit = (node: ExpressionNode): void => {
+    if ((node.type === 'mdxFlowExpression' || node.type === 'mdxTextExpression') && node.value !== undefined) {
+      check(node.value, node.position)
+    }
+    for (const attribute of node.attributes ?? []) {
+      const value = attribute.value
+      if (attribute.type === 'mdxJsxExpressionAttribute' && typeof value === 'string') check(`{${value}}`, attribute.position)
+      else if (value && typeof value === 'object' && typeof (value as { value?: unknown }).value === 'string') {
+        check((value as { value: string }).value, attribute.position)
+      }
+    }
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(tree)
+  if (edits.length === 0) return body
+  warn?.(`Expressions that use ${[...removed].map((name) => `"${name}"`).join(', ')} were removed so the page builds: ${removed.size === 1 ? 'the name is' : 'the names are'} not defined on this page. Define ${removed.size === 1 ? 'the name' : 'the names'} or escape the braces as \\{ \\} to show the text.`)
+  return edits.sort((a, b) => b.start - a.start)
+    .reduce((text, edit) => text.slice(0, edit.start) + text.slice(edit.end), body)
 }
 
 /** Keep authored paragraph styling without emitting an invalid <p><p> tree. */
@@ -1958,6 +2134,9 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
         // needed) matches.
         .replace(/<Column(\s[^>]*)?>/g, '<div$1>')
         .replace(/<\/Column>/g, '</div>')
+      // Mintlify renders step titles as plain text unless `titleSize` says
+      // otherwise; Thally's default is an `<h3>`, so pin the source's default.
+      result = pinStepsTitleSize(result)
     }
     if (runFern) {
       result = result
@@ -2018,7 +2197,7 @@ export function parseMarkdownPage(input: {
     ...(input.locale ? { locale: input.locale } : {}),
   }
   const identity = input.resolveIdentity?.(parsed.data, fallbackIdentity) ?? fallbackIdentity
-  let body = injectReactHookImports(normalizeMdx(parsed.content, input.platform)).trim()
+  let body = removeUndefinedExpressions(injectReactHookImports(normalizeMdx(parsed.content, input.platform)), input.warn).trim()
   const keywords = Array.isArray(parsed.data.keywords)
     ? parsed.data.keywords.filter((value): value is string => typeof value === 'string')
     : []

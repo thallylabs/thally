@@ -7,10 +7,11 @@
  * compiled fallback at request time).
  */
 
-import { createElement, type ComponentType, type ReactNode } from 'react'
+import { Children, cloneElement, createElement, isValidElement, type ComponentType, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { interpretMDX } from '@/lib/mdx-interpret'
+import { Code, Pre } from '@/components/mdx/code-blocks'
 
 function render(node: ReactNode): string {
   return renderToStaticMarkup(createElement(function Wrapper() {
@@ -238,5 +239,49 @@ describe('interpretMDX', () => {
       components: {},
     })
     expect(render(content)).toContain('styled')
+  })
+})
+
+/** Mirrors a site `Template`: rewrites `{{KEY}}` in every string child, recursively. */
+function substitute(node: ReactNode, value: string): ReactNode {
+  if (typeof node === 'string') return node.replaceAll('{{KEY}}', value)
+  if (!isValidElement(node)) return node
+  const el = node as ReactElement<{ children?: ReactNode }>
+  return cloneElement(el, undefined, ...Children.map(el.props.children, (c) => substitute(c, value)) ?? [])
+}
+
+function Template({ value, children }: { value: string; children?: ReactNode }) {
+  return createElement('div', null, substitute(children, value))
+}
+
+const fence = '<Template>\n\n```bash\ncurl -H "Authorization: Bearer {{KEY}}"\n```\n\n</Template>'
+
+async function renderFence(value: string, source = fence): Promise<string> {
+  const Tpl = (props: Record<string, unknown>) => createElement(Template, { ...props, value } as never)
+  const { content } = await interpretMDX({ source, components: { Template: Tpl, pre: Pre, code: Code } as never })
+  return render(content)
+}
+
+describe('highlighted code is real elements', () => {
+  it('a component substituting <X> into a fence shows it as text, not an element', async () => {
+    const html = await renderFence('<OPENROUTER_API_KEY>')
+    expect(html).toContain('Bearer &lt;OPENROUTER_API_KEY&gt;')
+    expect(html).not.toMatch(/<openrouter_api_key/i)
+  })
+
+  it('renders a hostile substituted string as text', async () => {
+    const html = await renderFence('<img src=x onerror=alert(1)>')
+    expect(html).not.toContain('<img')
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
+  })
+
+  it('keeps token spans and line classes for normal code', async () => {
+    const { content } = await interpretMDX({
+      source: '```ts\nconst a = 1 // [!code ++]\nconst b = 2\n```',
+      components: { pre: Pre, code: Code } as never,
+    })
+    const html = render(content)
+    expect(html).toMatch(/<span class="thally-line-add"><span style="color:[^"]+">const<\/span>/)
+    expect(html).toMatch(/<\/span>\n<span><span style=/)
   })
 })
