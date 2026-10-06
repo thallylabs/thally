@@ -7,9 +7,10 @@
  *    that page POSTs it here as JSON.
  * 2. `POST /api/reader/jwt` as a form (`token`, `redirect`) from the
  *    customer's app — an auto-submitting form keeps the token out of URLs.
- * 3. `GET /api/reader/jwt?token=<jwt>&redirect=/path` — supported for
- *    simple integrations. The token is verified, then a 303 strips it from the
- *    address bar; responses are `no-store` with `Referrer-Policy: no-referrer`.
+ * 3. `GET /api/reader/jwt?token=<jwt>&redirect=/path` — only when
+ *    `auth.jwt.allowQueryToken` is true. The token is verified, then a 303
+ *    strips it from the address bar; responses are `no-store` with
+ *    `Referrer-Policy: no-referrer`. The token still reaches access logs.
  *
  * Login CSRF: a cross-site POST is accepted only from this site's origin or
  * the configured login URL's origin. Tokens are short-lived, bound to this
@@ -51,6 +52,9 @@ function isAllowedPostOrigin(request: NextRequest): boolean {
 }
 
 export async function GET(request: NextRequest): Promise<Response> {
+  // Query-string tokens reach access logs and turn login CSRF into a plain
+  // link, so this form is opt-in (`auth.jwt.allowQueryToken`).
+  if (!getReaderAuthConfig().jwt.allowQueryToken) return readerAuthFailure(request, 404, 'reader_query_token_disabled')
   return exchange(request, request.nextUrl.searchParams.get('token'), request.nextUrl.searchParams.get('redirect'))
 }
 

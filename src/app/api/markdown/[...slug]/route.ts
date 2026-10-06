@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { canReaderViewPage, ensureDocPublication, isDocPublished } from '@/data/docs'
+import { canReaderViewPage, ensureDocPublication, isDocPublished, isLocaleDirectory } from '@/data/docs'
 import path from 'node:path'
 import { stripInternalFrontmatter } from '@/lib/provenance'
 import { getContentSource } from '@/lib/content-source'
@@ -42,6 +42,14 @@ export async function GET(
   const reader = await getReaderContextFromRequest(request)
   if (!(await canReaderViewPage(pageId, reader))) {
     return new NextResponse('Not Found', { status: 404 })
+  }
+  // `/fr/guide.md` serves the translation file directly; the primary page's
+  // rules apply too, so a translation that omits `groups` opens nothing.
+  if (slug.length > 1 && isLocaleDirectory(slug[0])) {
+    const primaryId = slug.slice(1).join('/').replace(/\/index$/, '') || 'introduction'
+    if (!(await canReaderViewPage(primaryId, reader, slug[0]))) {
+      return new NextResponse('Not Found', { status: 404 })
+    }
   }
 
   const rootPrefix = `${localDocsRoot}/`

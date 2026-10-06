@@ -44,8 +44,18 @@ vi.mock('@/lib/content-index', () => ({ getContentIndex: () => null, loadContent
 vi.mock('@/data/get-doc', () => ({
   getDocFromParams: async (slug?: Array<string>) => {
     const id = (slug ?? []).join('/')
+    // An alternate spelling of a route that resolves the secret FILE under
+    // the open page's id: access must come from the resolved file.
+    if (id === 'guides/alias') {
+      return {
+        id: 'guides/open', title: 'Secret roadmap', description: '', slug: ['guides', 'alias'], href: '/guides/alias', keywords: [], lastUpdated: '',
+        component: () => <p>{MARKER}</p>,
+        access: { groupSets: [['beta']], isMalformed: false },
+      }
+    }
     if (!['guides/open', 'guides/secret'].includes(id)) return null
     return {
+      access: id === 'guides/secret' ? { groupSets: [['beta']], isMalformed: false } : { groupSets: [], isMalformed: false },
       id,
       title: id === 'guides/secret' ? 'Secret roadmap' : 'Open guide',
       description: '',
@@ -110,6 +120,11 @@ describe('document route under reader auth', () => {
     await expect(render(['guides', 'secret'])).rejects.toThrow('NEXT_NOT_FOUND')
     await expect(render(['guides', 'missing'])).rejects.toThrow('NEXT_NOT_FOUND')
     expect(await generateMetadata(params(['guides', 'secret']))).toEqual({})
+  })
+
+  it('judges a document by the file it resolved, not by an id that looks open', async () => {
+    await expect(render(['guides', 'alias'])).rejects.toThrow('NEXT_NOT_FOUND')
+    expect(await generateMetadata(params(['guides', 'alias']))).toEqual({})
   })
 
   it('renders the restricted page and its metadata for a reader in the group', async () => {

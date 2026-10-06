@@ -195,6 +195,7 @@ cp .env.example .env.local
 | `THALLY_READER_SESSION_SECRET` | Reader-auth session-signing secret (32+ chars, distinct from admin/access secrets); required in production when docs.json `auth.mode` is `jwt` or `oidc` |
 | `THALLY_READER_JWT_SECRET` / `THALLY_READER_JWT_PUBLIC_KEY` / `THALLY_READER_JWKS_URL` | JWT handoff verification key — exactly one: HS256 shared secret, SPKI PEM (RS256/PS256/ES256/EdDSA), or JWKS URL |
 | `THALLY_READER_OIDC_ISSUER` / `THALLY_READER_OIDC_CLIENT_ID` / `THALLY_READER_OIDC_CLIENT_SECRET` | Reader sign-in with your OpenID Connect provider (`auth.mode: "oidc"`) |
+| `THALLY_READER_ALLOW_DEV_SESSION_KEY` | Set to `1` to sign reader sessions with a public development key, honored only outside production and only for requests to `localhost` |
 | `THALLY_READER_TOKEN_KEYS` | Optional `kid:secret` list for read-only, group-scoped agent/MCP bearer tokens (`npm run reader-token`) |
 | `ANTHROPIC_API_KEY` | Owner key for AI chat — lifts trial limits entirely |
 | `THALLY_TRIAL_ANTHROPIC_KEY` | Optional shared key powering the out-of-the-box trial chat (strict per-IP limits + a global daily cap) |

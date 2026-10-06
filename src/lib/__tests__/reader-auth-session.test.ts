@@ -78,6 +78,31 @@ describe('reader sessions', () => {
     expect(await signReaderSession({ groups: [] }, config)).toBeNull()
   })
 
+  it('rejects sessions from an older epoch and sessions of a revoked subject', async () => {
+    const token = (await signReaderSession({ subject: 'u-7', groups: ['beta'] }, config))!.token
+    expect(await verifyReaderSession(token, config)).not.toBeNull()
+    const bumped = parseReaderAuthConfig({ mode: 'jwt', default: 'public', session: { epoch: 1 } })
+    expect(await verifyReaderSession(token, bumped)).toBeNull()
+    const revoked = parseReaderAuthConfig({ mode: 'jwt', default: 'public', tokens: { revoked: ['u-7'] } })
+    expect(await verifyReaderSession(token, revoked)).toBeNull()
+    const current = (await signReaderSession({ subject: 'u-8', groups: [] }, bumped))!.token
+    expect(await verifyReaderSession(current, bumped)).not.toBeNull()
+  })
+
+  it('uses the public development key only with an explicit opt-in on a loopback host', async () => {
+    vi.stubEnv('THALLY_READER_SESSION_SECRET', '')
+    vi.stubEnv('NODE_ENV', 'development')
+    expect(await signReaderSession({ groups: [] }, config, 'localhost:3040')).toBeNull()
+    vi.stubEnv('THALLY_READER_ALLOW_DEV_SESSION_KEY', '1')
+    const local = await signReaderSession({ groups: [] }, config, 'localhost:3040')
+    expect(local).not.toBeNull()
+    expect(await signReaderSession({ groups: [] }, config, 'staging.example.com')).toBeNull()
+    expect(await verifyReaderSession(local!.token, config, 'staging.example.com')).toBeNull()
+    expect(await verifyReaderSession(local!.token, config, '127.0.0.1:3040')).not.toBeNull()
+    vi.stubEnv('NODE_ENV', 'production')
+    expect(await signReaderSession({ groups: [] }, config, 'localhost')).toBeNull()
+  })
+
   it('has no production fallback key', async () => {
     vi.stubEnv('NODE_ENV', 'production')
     vi.stubEnv('THALLY_READER_SESSION_SECRET', '')

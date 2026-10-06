@@ -18,7 +18,7 @@ import {
   registerContentDocumentSource,
   registerDocEntriesSource,
 } from '@thallylabs/core/registry'
-import { getDocEntries, getCurrentVersionPageIds, loadDocEntries } from '@/data/docs'
+import { canReaderViewPage, getDocEntries, getCurrentVersionPageIds, loadDocEntries } from '@/data/docs'
 import { getContentDocument, loadContentDocument } from '@/lib/content/document'
 import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 import { localizedPath } from '@/lib/i18n/config'
@@ -41,6 +41,9 @@ registerAsyncDocEntriesSource(async (locale) => {
   if (!i18n.locales.some((item) => item.code === locale)) return []
   const translated = await Promise.all(entries.map(async (entry) => {
     if (!isSearchable(entry, currentVersionIds)) return null
+    // The corpus is shared by every searcher, so it is the anonymous view: a
+    // translation that restricts its page further than the primary is left out.
+    if (!(await canReaderViewPage(entry.id, undefined, locale))) return null
     const metadata = await getIndexableDocTranslation(entry.slug, locale)
     if (!metadata) return null
     return {

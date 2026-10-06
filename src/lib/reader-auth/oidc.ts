@@ -37,6 +37,7 @@ export interface ReaderOidcSettings {
   clientSecret?: string
   scopes: Array<string>
   groupsClaim: string
+  groupsDelimiter?: string
 }
 
 /** Resolve OIDC settings; env values override docs.json. Null when incomplete. */
@@ -52,6 +53,7 @@ export function getReaderOidcSettings(config: ReaderAuthConfig = getReaderAuthCo
     clientSecret: readReaderEnv(READER_AUTH_ENV.oidcClientSecret),
     scopes,
     groupsClaim: config.oidc.groupsClaim,
+    groupsDelimiter: config.oidc.groupsDelimiter,
   }
 }
 
@@ -136,8 +138,8 @@ export interface ReaderOidcFlow {
   returnPath: string
 }
 
-async function signFlow(flow: ReaderOidcFlow): Promise<string | null> {
-  const key = getReaderSessionKey()
+async function signFlow(flow: ReaderOidcFlow, requestHost?: string | null): Promise<string | null> {
+  const key = getReaderSessionKey(requestHost)
   if (!key) return null
   return new SignJWT({ ...flow })
     .setProtectedHeader({ alg: 'HS256', typ: FLOW_TYPE })
@@ -149,8 +151,8 @@ async function signFlow(flow: ReaderOidcFlow): Promise<string | null> {
 }
 
 /** Verify the flow cookie; null when absent, expired, or forged. */
-export async function verifyReaderOidcFlow(token: string | undefined): Promise<ReaderOidcFlow | null> {
-  const key = getReaderSessionKey()
+export async function verifyReaderOidcFlow(token: string | undefined, requestHost?: string | null): Promise<ReaderOidcFlow | null> {
+  const key = getReaderSessionKey(requestHost)
   if (!key || !token || token.length > 4096) return null
   try {
     const { payload } = await jwtVerify(token, key, {
@@ -188,6 +190,7 @@ export async function startReaderOidcFlow(
   settings: ReaderOidcSettings,
   redirectUri: string,
   returnPath: string,
+  requestHost?: string | null,
 ): Promise<{ url: string; flowCookie: string } | null> {
   const discovery = await discover(settings.issuer)
   const flow: ReaderOidcFlow = {
@@ -196,7 +199,7 @@ export async function startReaderOidcFlow(
     codeVerifier: randomToken(48),
     returnPath,
   }
-  const flowCookie = await signFlow(flow)
+  const flowCookie = await signFlow(flow, requestHost)
   if (!flowCookie) return null
   const challenge = createHash('sha256').update(flow.codeVerifier).digest('base64url')
   const params = new URLSearchParams({
@@ -257,7 +260,7 @@ export async function completeReaderOidcFlow(
   // With several audiences, the token must have been issued to this client.
   if (Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== settings.clientId) throw new Error('azp mismatch')
 
-  const groups = normalizeGroupsClaim(readClaim(payload as Record<string, unknown>, settings.groupsClaim))
+  const groups = normalizeGroupsClaim(readClaim(payload as Record<string, unknown>, settings.groupsClaim), settings.groupsDelimiter)
   if (!groups) throw new Error('invalid groups claim')
   return { subject: String(payload.sub).slice(0, 256), groups }
 }

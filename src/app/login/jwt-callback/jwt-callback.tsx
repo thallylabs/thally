@@ -32,7 +32,7 @@ export function JwtCallback() {
       if (!response.ok) throw new Error('rejected')
       const body = (await response.json()) as { redirect?: unknown }
       // The server already validated this as a same-origin path.
-      const destination = typeof body.redirect === 'string' && body.redirect.startsWith('/') && !body.redirect.startsWith('//') ? body.redirect : '/'
+      const destination = typeof body.redirect === 'string' && /^\/(?![\/\\])/.test(body.redirect) ? body.redirect : '/'
       window.location.replace(destination)
     }
     exchange().catch(() => setHasFailed(true))

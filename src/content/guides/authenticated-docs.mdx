@@ -85,7 +85,11 @@ frontmatter in translations for clarity.
 | `jwt.groupsClaim` / `oidc.groupsClaim` | `groups` | Claim holding the reader's groups: an exact key (e.g. `https://example.com/groups`) or a dotted path (`app.roles`). |
 | `jwt.maxTokenAgeSeconds` | `300` | Oldest accepted handoff token (`iat`), capped at 600. |
 | `oidc.issuer`, `oidc.clientId`, `oidc.scopes` | scopes: `openid email profile` | OpenID Connect provider settings. |
-| `tokens.revoked` | `[]` | Agent token ids or key ids to reject. |
+| `jwt.allowQueryToken` | `false` | Accept `GET /api/reader/jwt?token=…` (see below). |
+| `jwt.requireJti` | `false` | Require a unique `jti` on every handoff token. |
+| `jwt.groupsDelimiter` / `oidc.groupsDelimiter` | — | Splits a string-valued groups claim (e.g. `" "`). Without it, a string claim is one group. |
+| `session.epoch` | `0` | Increase to sign every reader out. |
+| `tokens.revoked` | `[]` | Agent token ids, key ids, or reader subjects (`sub`) to reject. |
 
 Secrets never go in `docs.json`. Set them as server-side environment variables:
 
@@ -97,6 +101,7 @@ Secrets never go in `docs.json`. Set them as server-side environment variables:
 | `THALLY_READER_JWKS_URL` | JWKS URL. Configure exactly one of the three. |
 | `THALLY_READER_OIDC_ISSUER`, `THALLY_READER_OIDC_CLIENT_ID`, `THALLY_READER_OIDC_CLIENT_SECRET` | OIDC client; override the `docs.json` values. |
 | `THALLY_READER_TOKEN_KEYS` | `kid:secret` pairs for agent tokens (see below). |
+| `THALLY_READER_ALLOW_DEV_SESSION_KEY` | Set to `1` to use a public development key on `localhost` only, instead of a session secret. Ignored in production. |
 
 Set `THALLY_SITE_URL` to your public origin in production: token audiences are
 checked against it, never against the request's `Host` header. Without it (and
@@ -139,7 +144,12 @@ export async function docsLoginRedirect(user: { id: string; groups: string[] }, 
     .setExpirationTime('60s') // the handoff only; the docs session is separate
     .setJti(crypto.randomUUID())
     .sign(privateKey)
-  const path = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/'
+  // Normalize before checking: `/.//evil.com` normalizes to `//evil.com`.
+  const docs = 'https://docs.example.com'
+  const target = new URL(redirect, docs)
+  const path = target.origin === docs && !/^\/[\/\\]/.test(target.pathname)
+    ? target.pathname + target.search + target.hash
+    : '/'
   return `https://docs.example.com/login/jwt-callback?redirect=${encodeURIComponent(path)}#${token}`
 }
 ```
@@ -149,11 +159,18 @@ Generate an Ed25519 key pair with
 `openssl pkey -in docs-jwt.pem -pubout`, then set the public half as
 `THALLY_READER_JWT_PUBLIC_KEY`.
 
-Other accepted forms: an auto-submitting form `POST`ed to `/api/reader/jwt`
+Another accepted form is an auto-submitting form `POST`ed to `/api/reader/jwt`
 with `token` and `redirect` fields (allowed from your docs origin or your
-`loginUrl` origin only), or `GET /api/reader/jwt?token=…&redirect=…` for
-simple integrations — prefer the fragment or `POST`, since query strings can
-appear in proxy logs.
+`loginUrl` origin only). `GET /api/reader/jwt?token=…&redirect=…` is accepted
+only with `"allowQueryToken": true` in `auth.jwt`: query strings land in proxy
+and access logs, and a plain link becomes enough to sign someone into another
+account (login CSRF). Prefer the fragment or `POST`.
+
+Set `"requireJti": true` in `auth.jwt` and give every token a unique `jti` to
+make tokens single-use. It is off by default because Mintlify-style signers
+often omit `jti`. The replay store is per server instance, so on a
+multi-instance deployment a token can still be replayed once per instance
+within its short lifetime.
 
 The session lasts `auth.session.maxAgeSeconds`. A Mintlify-style `expiresAt`
 claim (seconds since the epoch) can shorten it, never extend it.

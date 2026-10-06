@@ -1,7 +1,7 @@
 import { DocLayout } from '@/components/docs/doc-layout'
-import { canReaderViewPage, getBreadcrumbs } from '@/data/docs'
+import { getBreadcrumbs } from '@/data/docs'
 import { getReaderContext } from '@/lib/reader-auth/context'
-import { denyDocumentAccess } from '@/lib/reader-auth/page-gate'
+import { canReaderViewResolvedDoc, denyDocumentAccess } from '@/lib/reader-auth/page-gate'
 import { getDocFromParams } from '@/data/get-doc'
 import { getSiteUrl } from '@/lib/site-url'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
@@ -9,7 +9,7 @@ import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/o
 export async function generateMetadata() {
   const doc = await getDocFromParams(['changelog'])
   if (!doc) return {}
-  if (!(await canReaderViewPage(doc.id, await getReaderContext()))) return {}
+  if (!(await canReaderViewResolvedDoc(doc, await getReaderContext()))) return {}
   const siteUrl = getSiteUrl()
   const ogImageUrl = buildOgImageUrl({
     title: doc.title,
@@ -39,7 +39,7 @@ export async function generateMetadata() {
 export default async function ChangelogPage() {
   const reader = await getReaderContext()
   const doc = await getDocFromParams(['changelog'])
-  if (!doc || !(await canReaderViewPage(doc.id, reader))) denyDocumentAccess(reader, '/changelog')
+  if (!doc || !(await canReaderViewResolvedDoc(doc, reader))) denyDocumentAccess(reader, '/changelog')
 
   const Content = doc.component
   return (

@@ -18,8 +18,10 @@
  * `auth.jwt.maxTokenAgeSeconds`, and be bound to this site: by `aud` (the
  * configured audience, or the site origin by default) or, for Mintlify
  * compatibility, a `host` claim equal to the site host. `iss` is enforced when
- * configured. `jti` values are remembered until expiry to refuse replays
- * (best-effort, per instance).
+ * configured. `jti` values are remembered until expiry to refuse replays;
+ * the store is per server instance, so a token can be replayed once on each
+ * instance within its short lifetime. `auth.jwt.requireJti` makes `jti`
+ * mandatory.
  */
 
 import 'server-only'
@@ -198,9 +200,10 @@ export async function verifyHandoffToken(
   if ((payload.iat ?? 0) > now + config.jwt.clockSkewSeconds) return { isValid: false, reason: 'invalid_token' }
   if (!config.jwt.audience && !siteBinding(payload, siteOrigins)) return { isValid: false, reason: 'invalid_token' }
 
-  const groups = normalizeGroupsClaim(readClaim(payload as Record<string, unknown>, config.jwt.groupsClaim))
+  const groups = normalizeGroupsClaim(readClaim(payload as Record<string, unknown>, config.jwt.groupsClaim), config.jwt.groupsDelimiter)
   if (!groups) return { isValid: false, reason: 'invalid_token' }
 
+  if (config.jwt.requireJti && !(typeof payload.jti === 'string' && payload.jti)) return { isValid: false, reason: 'invalid_token' }
   if (typeof payload.jti === 'string' && payload.jti) {
     if (!rememberTokenId(payload.jti, (payload.exp ?? now) + config.jwt.clockSkewSeconds)) return { isValid: false, reason: 'replayed' }
   }

@@ -1,6 +1,6 @@
 import { type NextRequest } from 'next/server'
 import { getAllApiOperationNodes } from '@/data/api-reference'
-import { loadSidebarCollections, loadDocEntries } from '@/data/docs'
+import { canReaderViewPage, loadSidebarCollections, loadDocEntries } from '@/data/docs'
 import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 import { localizedPath } from '@/lib/i18n/config'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
@@ -52,6 +52,8 @@ export async function GET(request: NextRequest) {
         ? null
         : await getIndexableDocTranslation(e.slug, locale)
       if (locale !== i18n.defaultLocale && !translated) return null
+      // A translation may restrict its page further than the primary file.
+      if (locale !== i18n.defaultLocale && !(await canReaderViewPage(e.id, reader, locale))) return null
       const nav = hrefToNav.get(e.href)
       return {
         type: 'doc' as const,

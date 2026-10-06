@@ -5,7 +5,7 @@ import { NextRequest } from 'next/server'
 import { SignJWT } from 'jose'
 
 const config = vi.hoisted(() => ({
-  auth: { mode: 'jwt', default: 'public', loginUrl: 'https://app.example.com/login' },
+  auth: { mode: 'jwt', default: 'public', loginUrl: 'https://app.example.com/login', jwt: { allowQueryToken: true } as Record<string, unknown> },
   tabs: [],
 }))
 vi.mock('@/lib/docs-json-config', () => ({ getDocsJsonConfig: () => config, getDocsJsonConfigRevision: () => 1 }))
@@ -32,6 +32,25 @@ const token = (audience = SITE, groups: Array<string> = ['beta']) => new SignJWT
   .sign(new TextEncoder().encode(SECRET))
 
 describe('/api/reader/jwt', () => {
+  it('refuses query-string tokens unless allowQueryToken is set', async () => {
+    config.auth.jwt = {}
+    const { resetReaderAuthConfigForTests } = await import('@/lib/reader-auth/config')
+    resetReaderAuthConfigForTests()
+    try {
+      const response = await GET(new NextRequest(`${SITE}/api/reader/jwt?token=${await token()}`))
+      expect(response.status).toBe(404)
+      expect(response.headers.get('set-cookie')).toBeNull()
+    } finally {
+      config.auth.jwt = { allowQueryToken: true }
+      resetReaderAuthConfigForTests()
+    }
+  })
+
+  it('never redirects to a path that normalizes to another origin (/.//evil)', async () => {
+    const response = await GET(new NextRequest(`${SITE}/api/reader/jwt?token=${await token()}&redirect=${encodeURIComponent('/.//evil.example.com')}`))
+    expect(response.headers.get('location')).toBe(`${SITE}/`)
+  })
+
   it('sets an HttpOnly, SameSite=Lax session and redirects to a same-origin path without caching or referrers', async () => {
     const response = await GET(new NextRequest(`${SITE}/api/reader/jwt?token=${await token()}&redirect=/guides/beta`))
     expect(response.status).toBe(303)

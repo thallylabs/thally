@@ -13,6 +13,9 @@ import { getApiOperationByKey } from '@/data/api-reference'
 import { getApiPlaygroundTimeoutMs } from '@/data/docs'
 import type { NormalizedOperation } from '@/lib/openapi/types'
 import { readBoundedJson } from '@/lib/http/bounded-json'
+import { getReaderAuthConfig } from '@/lib/reader-auth/config'
+import { canReaderAccessUnmarkedContent } from '@/lib/reader-auth/access'
+import { getReaderContextFromRequest } from '@/lib/reader-auth/context'
 
 export const runtime = 'nodejs'
 
@@ -310,7 +313,15 @@ export async function POST(request: NextRequest) {
   }
 
   let operation: { operation: NormalizedOperation } | null
+  // The playground may only proxy operations the reader is allowed to read
+  // about: a manual page's own access rules, or the site default for spec
+  // operations. A denied operation answers like an undeclared one.
+  const reader = await getReaderContextFromRequest(request)
   if (typeof payload.page === 'string') {
+    const { canReaderViewPage } = await import('@/data/docs')
+    if (!(await canReaderViewPage(payload.page, reader, typeof payload.locale === 'string' ? payload.locale : undefined))) {
+      return jsonError('Target does not match a published OpenAPI operation', 403)
+    }
     const { getManualApiOperation } = await import('@/data/manual-api')
     // The locale selects which translated file the page is re-read from; the
     // lookup refuses any locale the site does not configure.
@@ -321,7 +332,9 @@ export async function POST(request: NextRequest) {
       ? { operation: manual }
       : null
   } else {
-    operation = await getApiOperationByKey(method, operationPath, specId)
+    operation = canReaderAccessUnmarkedContent(reader, getReaderAuthConfig())
+      ? await getApiOperationByKey(method, operationPath, specId)
+      : null
   }
   if (
     !operation ||

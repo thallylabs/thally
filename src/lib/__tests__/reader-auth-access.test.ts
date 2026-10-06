@@ -99,7 +99,10 @@ describe('group claims', () => {
   it('accepts lists and delimited strings and rejects malformed claims outright', () => {
     expect(normalizeGroupsClaim(undefined)).toEqual([])
     expect(normalizeGroupsClaim(['a', 'a', ' b '])).toEqual(['a', 'b'])
-    expect(normalizeGroupsClaim('a b,c')).toEqual(['a', 'b', 'c'])
+    // A string claim is one group unless a delimiter is configured.
+    expect(normalizeGroupsClaim('a b,c')).toEqual(['a b,c'])
+    expect(normalizeGroupsClaim('a b c', ' ')).toEqual(['a', 'b', 'c'])
+    expect(normalizeGroupsClaim('Platform Team')).toEqual(['Platform Team'])
     expect(normalizeGroupsClaim(['a', 1])).toBeNull()
     expect(normalizeGroupsClaim({})).toBeNull()
     // Directory users often hold hundreds of groups; only absurd claims are refused.
@@ -155,5 +158,20 @@ describe('parseReaderAuthConfig', () => {
     expect(config.loginUrl).toBeUndefined()
     expect(config.logoutUrl).toBeUndefined()
     expect(parseReaderAuthConfig({ mode: 'jwt', loginUrl: 'https://app.example.com/login' }).loginUrl).toBe('https://app.example.com/login')
+  })
+})
+
+describe('unparseable frontmatter marker', () => {
+  it('treats a content index entry flagged as unparseable as malformed (served to nobody)', () => {
+    const access = parsePageAccess({ __thallyFrontmatterError: true })
+    expect(access.isMalformed).toBe(true)
+    expect(canReaderAccessPage(access, beta, publicSite)).toBe(false)
+  })
+})
+
+describe('get-doc module', () => {
+  it('is not a Server Action module (no unauthenticated action endpoint)', async () => {
+    const { readFileSync } = await import('node:fs')
+    expect(readFileSync('src/data/get-doc.ts', 'utf8')).not.toMatch(/^\s*['"]use server['"]/m)
   })
 })

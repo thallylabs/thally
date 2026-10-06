@@ -15,6 +15,13 @@ vi.mock('@/lib/content-source', () => ({
   getContentSource: () => ({ read: mocks.read }),
 }))
 
+// These fixtures exist only in the mocked content source; page-level reader
+// access is covered by src/data/reader-access-surfaces.test.ts.
+vi.mock('@/data/docs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/data/docs')>()),
+  canReaderViewPage: async () => true,
+}))
+
 import { GET } from './route'
 
 function request(path: string): Request {

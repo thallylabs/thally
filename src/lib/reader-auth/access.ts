@@ -56,6 +56,15 @@ export const ANONYMOUS_READER: ReaderContext = Object.freeze({
 
 export const OPEN_PAGE_ACCESS: PageAccess = Object.freeze({ groupSets: [], isMalformed: false })
 
+/** Access for a page whose rules cannot be read: served to nobody. */
+export const MALFORMED_PAGE_ACCESS: PageAccess = Object.freeze({ groupSets: [], isMalformed: true })
+
+/**
+ * Marker a content index stores in place of frontmatter it could not parse.
+ * Without it, an unparseable file indexed as `data: {}` would read as open.
+ */
+export const FRONTMATTER_ERROR_MARKER = '__thallyFrontmatterError'
+
 const PUBLIC_FALSE_STRINGS = new Set(['false', 'no', 'off', '0'])
 // Opening a page needs an unambiguous `true`; anything vaguer stays closed.
 const PUBLIC_TRUE_STRINGS = new Set(['true'])
@@ -92,6 +101,7 @@ function parseGroups(value: unknown): { groups: Array<string>; isMalformed: bool
 /** Read `groups` / `public` from a parsed frontmatter object. */
 export function parsePageAccess(frontmatter: Record<string, unknown> | null | undefined): PageAccess {
   if (!frontmatter) return OPEN_PAGE_ACCESS
+  if (frontmatter[FRONTMATTER_ERROR_MARKER] === true) return MALFORMED_PAGE_ACCESS
   const groups = parseGroups(frontmatter.groups)
   const visibility = parsePublic(frontmatter.public)
   return {
@@ -147,12 +157,14 @@ export function canReaderAccessUnmarkedContent(reader: ReaderContext, policy: Re
 /**
  * Normalize a verified token's group claim. Non-string members make the
  * whole claim invalid (returns null) rather than being silently dropped, so a
- * signer bug is visible instead of granting a partial set.
+ * signer bug is visible instead of granting a partial set. A string claim is
+ * one group unless the site configures a delimiter: group names may contain
+ * spaces or commas, and guessing a split could grant a group nobody holds.
  */
 export function normalizeGroupsClaim(value: unknown, delimiter?: string): Array<string> | null {
   if (value === undefined || value === null) return []
   let list: Array<unknown>
-  if (typeof value === 'string') list = delimiter ? value.split(delimiter) : value.split(/[\s,]+/)
+  if (typeof value === 'string') list = delimiter ? value.split(delimiter) : [value]
   else if (Array.isArray(value)) list = value
   else return null
   if (list.some((group) => typeof group !== 'string')) return null

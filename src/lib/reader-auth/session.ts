@@ -66,12 +66,24 @@ function foreignSecrets(): Array<string> {
   ].map((value) => value?.trim()).filter((value): value is string => Boolean(value))
 }
 
+/** Loopback hosts, where the public development key may be used. */
+export function isLoopbackHost(host: string | null | undefined): boolean {
+  if (!host) return false
+  const hostname = host.trim().toLowerCase().replace(/:\d+$/, '')
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname.endsWith('.localhost')
+}
+
+const DEV_SESSION_KEY_OPT_IN = ['THALLY_READER_ALLOW_DEV_SESSION_KEY', 'DOX_READER_ALLOW_DEV_SESSION_KEY']
+
 /**
  * The reader-session signing key, or null when reader sessions cannot be
- * issued safely. Production requires a dedicated ≥32-character secret; local
- * development gets a fixed key so previews work without setup.
+ * issued safely. A dedicated ≥32-character secret is required everywhere,
+ * except that local previews may opt in to a fixed, PUBLIC development key
+ * with THALLY_READER_ALLOW_DEV_SESSION_KEY=1 — honored only outside
+ * production and only for requests addressed to a loopback host, so a
+ * forgotten opt-in on a reachable staging server cannot mint sessions.
  */
-export function getReaderSessionKey(): Uint8Array | null {
+export function getReaderSessionKey(requestHost?: string | null): Uint8Array | null {
   const configured = readReaderEnv(READER_AUTH_ENV.sessionSecret)
   if (configured) {
     if (configured.length < MIN_SECRET_LENGTH) return null
@@ -84,8 +96,12 @@ export function getReaderSessionKey(): Uint8Array | null {
     }
     return new TextEncoder().encode(configured)
   }
-  // The development key is public source code; it must never sign production sessions.
-  return process.env.NODE_ENV === 'production' ? null : new TextEncoder().encode('thally-dev-reader-session-key-not-secret')
+  // The development key is public source code; it must never sign a session
+  // a non-local client could present.
+  const isOptedIn = DEV_SESSION_KEY_OPT_IN.some((name) => process.env[name]?.trim() === '1')
+  return process.env.NODE_ENV !== 'production' && isOptedIn && isLoopbackHost(requestHost)
+    ? new TextEncoder().encode('thally-dev-reader-session-key-not-secret')
+    : null
 }
 
 /** Verified identity carried by a reader session. */
@@ -103,8 +119,9 @@ export interface ReaderSessionClaims {
 export async function signReaderSession(
   claims: { subject?: string; groups: ReadonlyArray<string>; expiresAt?: number },
   config: ReaderAuthConfig = getReaderAuthConfig(),
+  requestHost?: string | null,
 ): Promise<{ token: string; maxAgeSeconds: number } | null> {
-  const key = getReaderSessionKey()
+  const key = getReaderSessionKey(requestHost)
   if (!key) return null
   const now = Math.floor(Date.now() / 1000)
   const ceiling = now + config.sessionMaxAgeSeconds
@@ -114,7 +131,7 @@ export async function signReaderSession(
   const groups = normalized
     .filter((group) => group.length <= READER_AUTH_LIMITS.maxGroupLength)
     .slice(0, READER_AUTH_LIMITS.maxGroups)
-  const token = await new SignJWT({ groups })
+  const token = await new SignJWT({ groups, epoch: config.sessionEpoch })
     .setProtectedHeader({ alg: 'HS256', typ: SESSION_TYPE })
     .setIssuer(ISSUER)
     .setAudience(SESSION_AUDIENCE)
@@ -125,9 +142,17 @@ export async function signReaderSession(
   return { token, maxAgeSeconds: expiresAt - now }
 }
 
-/** Verify a reader session cookie; null on any failure. */
-export async function verifyReaderSession(token: string | undefined | null): Promise<ReaderContext | null> {
-  const key = getReaderSessionKey()
+/**
+ * Verify a reader session cookie; null on any failure. Sessions from an older
+ * `auth.session.epoch`, or whose subject is listed in `auth.tokens.revoked`,
+ * are rejected.
+ */
+export async function verifyReaderSession(
+  token: string | undefined | null,
+  config: ReaderAuthConfig = getReaderAuthConfig(),
+  requestHost?: string | null,
+): Promise<ReaderContext | null> {
+  const key = getReaderSessionKey(requestHost)
   if (!key || !token || token.length > 4096) return null
   try {
     const { payload } = await jwtVerify(token, key, {
@@ -138,6 +163,8 @@ export async function verifyReaderSession(token: string | undefined | null): Pro
       requiredClaims: ['exp', 'iat', 'sub'],
       clockTolerance: SESSION_CLOCK_TOLERANCE_SECONDS,
     })
+    if ((typeof payload.epoch === 'number' ? payload.epoch : 0) !== config.sessionEpoch) return null
+    if (payload.sub && config.revokedTokens.has(payload.sub)) return null
     const groups = normalizeGroupsClaim(payload.groups)
     if (!groups) return null
     return { isAuthenticated: true, groups, subject: payload.sub, source: 'session' }
@@ -242,6 +269,7 @@ export async function verifyAgentToken(
     })
     if (payload.scope !== AGENT_TOKEN_SCOPE) return null
     if (!payload.jti || config.revokedTokens.has(payload.jti)) return null
+    if (payload.sub && config.revokedTokens.has(payload.sub)) return null
     if ((payload.exp ?? 0) - (payload.iat ?? 0) > READER_AUTH_LIMITS.maxAgentTokenSeconds) return null
     const groups = normalizeGroupsClaim(payload.groups)
     if (!groups) return null

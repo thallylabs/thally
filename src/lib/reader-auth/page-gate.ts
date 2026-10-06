@@ -15,8 +15,15 @@ import 'server-only'
 
 import { notFound, redirect } from 'next/navigation'
 import { resolveSafeReturnPath } from '@/lib/safe-return-path'
+import { canReaderViewPage } from '@/data/docs'
 import { getReaderAuthConfig } from './config'
-import { canReaderAccessUnmarkedContent, type ReaderContext } from './access'
+import {
+  MALFORMED_PAGE_ACCESS,
+  canReaderAccessPage,
+  canReaderAccessUnmarkedContent,
+  type PageAccess,
+  type ReaderContext,
+} from './access'
 
 /** Same-origin route that starts the configured sign-in flow. */
 export const READER_LOGIN_ROUTE = '/api/reader/login'
@@ -40,6 +47,21 @@ export function denyDocumentAccess(reader: ReaderContext, requestedPath: string)
     redirect(readerLoginPath(requestedPath))
   }
   notFound()
+}
+
+/**
+ * Whether the reader may see a resolved document. Both the rules of the
+ * exact file(s) the route resolved (`doc.access`, set by `getDocFromParams`)
+ * and those keyed by the page id must allow it; a document without resolved
+ * access is never shown.
+ */
+export async function canReaderViewResolvedDoc(
+  doc: { id: string; access?: PageAccess },
+  reader: ReaderContext,
+  locale?: string,
+): Promise<boolean> {
+  if (!canReaderAccessPage(doc.access ?? MALFORMED_PAGE_ACCESS, reader, getReaderAuthConfig())) return false
+  return canReaderViewPage(doc.id, reader, locale)
 }
 
 /**

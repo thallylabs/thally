@@ -2,15 +2,14 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { getDocFromParams } from '@/data/get-doc'
 import { DocLayout } from '@/components/docs/doc-layout'
-import { canReaderViewPage } from '@/data/docs'
 import { getReaderContext } from '@/lib/reader-auth/context'
-import { shouldOfferReaderSignIn } from '@/lib/reader-auth/page-gate'
+import { canReaderViewResolvedDoc, shouldOfferReaderSignIn } from '@/lib/reader-auth/page-gate'
 
 export default async function DocsNotFound() {
   const reader = await getReaderContext()
   // Allow projects to define a custom 404 page at src/content/404.mdx
   const custom = await getDocFromParams(['404'])
-  if (custom && (await canReaderViewPage(custom.id, reader))) {
+  if (custom && (await canReaderViewResolvedDoc(custom, reader))) {
     const Content = custom.component
     return (
       <DocLayout doc={custom}>

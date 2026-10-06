@@ -121,6 +121,18 @@ describe('verifyHandoffToken with a public key', () => {
     expect(await verify(claims({ groups: undefined, app: { roles: ['r'] } }), jwtConfig({ groupsClaim: 'app.roles' }))).toMatchObject({ groups: ['r'] })
   })
 
+  it('requires a jti when requireJti is set', async () => {
+    const config = jwtConfig({ requireJti: true })
+    expect((await verifyHandoffToken(await signAsym('RS256', claims()), [SITE], config)).isValid).toBe(false)
+    expect((await verifyHandoffToken(await signAsym('RS256', claims({ jti: 'j-1' })), [SITE], config)).isValid).toBe(true)
+  })
+
+  it('splits a string groups claim only with a configured delimiter', async () => {
+    const asString = claims({ groups: 'beta staff' })
+    expect(await verifyHandoffToken(await signAsym('RS256', asString), [SITE], jwtConfig())).toMatchObject({ groups: ['beta staff'] })
+    expect(await verifyHandoffToken(await signAsym('RS256', asString), [SITE], jwtConfig({ groupsDelimiter: ' ' }))).toMatchObject({ groups: ['beta', 'staff'] })
+  })
+
   it('refuses to replay a token id', async () => {
     const token = await signAsym('RS256', claims({ jti: 'once' }))
     expect((await verifyHandoffToken(token, [SITE], jwtConfig())).isValid).toBe(true)

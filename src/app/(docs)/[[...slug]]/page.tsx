@@ -19,7 +19,7 @@ import { LocalizedSidebarHydrator } from '@/components/layout/localized-sidebar-
 import { LocaleAvailabilityHydrator } from '@/components/layout/locale-availability'
 import { JsonLdScript } from '@/components/seo/json-ld-script'
 import { lookupApiOperationForFrontmatter } from '@/data/api-reference'
-import { canReaderViewPage, ensureDocPublication, getApiPlaygroundDisplay, getDocEntries, getSeoConfig, isDocPublished, loadNavContext } from '@/data/docs'
+import { ensureDocPublication, getApiPlaygroundDisplay, getDocEntries, getSeoConfig, isDocPublished, loadNavContext } from '@/data/docs'
 import { getDocFromParams } from '@/data/get-doc'
 import { hasDocTranslation } from '@/lib/i18n/translation-source'
 import { buildAgentAlternateLinks } from '@/lib/agent-discovery'
@@ -40,7 +40,7 @@ import { resolveBuildSiteConfig } from '@/lib/site-config'
 import { getSiteUrl } from '@/lib/site-url'
 import { isReaderAuthActive } from '@/lib/reader-auth/config'
 import { getReaderContext } from '@/lib/reader-auth/context'
-import { denyDocumentAccess } from '@/lib/reader-auth/page-gate'
+import { canReaderViewResolvedDoc, denyDocumentAccess } from '@/lib/reader-auth/page-gate'
 
 interface PageProps {
   params: Promise<{ slug?: Array<string> }>
@@ -95,7 +95,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!isDocPublished(doc.id, route.isLocaleRoute ? route.locale : undefined)) return {}
   // A page this reader may not see gets no title, description or preview image.
   const reader = await getReaderContext()
-  if (!(await canReaderViewPage(doc.id, reader, route.isLocaleRoute ? route.locale : undefined))) return {}
+  if (!(await canReaderViewResolvedDoc(doc, reader, route.isLocaleRoute ? route.locale : undefined))) return {}
 
   const siteUrl = getSiteUrl()
   const primaryHref = docPathFromSlug(doc.slug)
@@ -166,7 +166,7 @@ export default async function DocsPage({ params }: PageProps) {
     route.isLocaleRoute ? route.locale : undefined,
   )
   if (!doc) denyDocumentAccess(reader, requestedPath)
-  if (!(await canReaderViewPage(doc.id, reader, route.isLocaleRoute ? route.locale : undefined))) {
+  if (!(await canReaderViewResolvedDoc(doc, reader, route.isLocaleRoute ? route.locale : undefined))) {
     denyDocumentAccess(reader, requestedPath)
   }
 

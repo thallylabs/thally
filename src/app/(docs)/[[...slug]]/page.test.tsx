@@ -19,6 +19,7 @@ vi.mock('@/data/get-doc', () => ({
     lastUpdated: '2026-01-01',
     component: () => <p>Authored scrape body</p>,
     openapi: { specId: 'default', specRef: 'openapi/missing.json', method: 'POST', path: '/scrape' },
+    access: { groupSets: [], isMalformed: false },
   }),
 }))
 vi.mock('@/data/api-reference', () => ({ lookupApiOperationForFrontmatter: async () => fixtures.lookup }))

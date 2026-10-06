@@ -74,6 +74,19 @@ export interface ReaderJwtConfig {
   algorithms: Array<AsymmetricJwtAlgorithm>
   /** Claim holding the reader's groups; an exact key or a dotted path. */
   groupsClaim: string
+  /** Splits a string-valued groups claim; without it a string is one group. */
+  groupsDelimiter?: string
+  /**
+   * Accept `GET /api/reader/jwt?token=…`. Off by default: query strings reach
+   * access logs and make login CSRF a plain link. Fragment and POST handoffs
+   * are always accepted.
+   */
+  allowQueryToken: boolean
+  /**
+   * Require a `jti` so each token is single-use (per server instance). Off by
+   * default for Mintlify compatibility; recommended on.
+   */
+  requireJti: boolean
   /** Maximum accepted `exp − iat` of the handoff token. */
   maxTokenAgeSeconds: number
   clockSkewSeconds: number
@@ -85,6 +98,8 @@ export interface ReaderOidcConfig {
   scopes: Array<string>
   /** ID-token claim holding the reader's groups; an exact key or a dotted path. */
   groupsClaim: string
+  /** Splits a string-valued groups claim; without it a string is one group. */
+  groupsDelimiter?: string
 }
 
 export interface ReaderAuthConfig {
@@ -99,9 +114,11 @@ export interface ReaderAuthConfig {
   /** Optional customer page to visit after a reader signs out. */
   logoutUrl?: string
   sessionMaxAgeSeconds: number
+  /** Bump to invalidate every reader session issued before. */
+  sessionEpoch: number
   jwt: ReaderJwtConfig
   oidc: ReaderOidcConfig
-  /** Agent-token ids (`jti`) or signing key ids (`kid`) that must be rejected. */
+  /** Agent-token ids (`jti`), signing key ids (`kid`), or reader subjects (`sub`) to reject. */
   revokedTokens: ReadonlySet<string>
 }
 
@@ -132,7 +149,7 @@ interface RawAuthBlock {
   default?: unknown
   loginUrl?: unknown
   logoutUrl?: unknown
-  session?: { maxAgeSeconds?: unknown }
+  session?: { maxAgeSeconds?: unknown; epoch?: unknown }
   jwt?: Record<string, unknown>
   oidc?: Record<string, unknown>
   tokens?: { revoked?: unknown }
@@ -163,6 +180,11 @@ export function isAllowedEndpointUrl(value: string | undefined): value is string
   } catch {
     return false
   }
+}
+
+/** A delimiter is any non-empty string up to 8 characters (" " and "," are typical). */
+function delimiter(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 && value.length <= 8 ? value : undefined
 }
 
 function stringList(value: unknown): Array<string> {
@@ -215,12 +237,16 @@ export function parseReaderAuthConfig(rawAuth: unknown): ReaderAuthConfig {
       60,
       READER_AUTH_LIMITS.maxSessionSeconds,
     ),
+    sessionEpoch: boundedInteger(objectOrNull(block?.session)?.epoch, 0, 0, Number.MAX_SAFE_INTEGER),
     jwt: {
       issuer: optionalString(jwt.issuer),
       audience: optionalString(jwt.audience),
       jwksUrl: optionalString(jwt.jwksUrl),
       algorithms: parseAlgorithms(jwt.algorithms),
       groupsClaim: optionalString(jwt.groupsClaim) ?? 'groups',
+      groupsDelimiter: delimiter(jwt.groupsDelimiter),
+      allowQueryToken: jwt.allowQueryToken === true,
+      requireJti: jwt.requireJti === true,
       maxTokenAgeSeconds: boundedInteger(
         jwt.maxTokenAgeSeconds,
         READER_AUTH_LIMITS.defaultHandoffTokenSeconds,
@@ -239,6 +265,7 @@ export function parseReaderAuthConfig(rawAuth: unknown): ReaderAuthConfig {
       clientId: optionalString(oidc.clientId),
       scopes: stringList(oidc.scopes).length ? stringList(oidc.scopes) : ['openid', 'email', 'profile'],
       groupsClaim: optionalString(oidc.groupsClaim) ?? 'groups',
+      groupsDelimiter: delimiter(oidc.groupsDelimiter),
     },
     revokedTokens: new Set(stringList(objectOrNull(block?.tokens)?.revoked)),
   }

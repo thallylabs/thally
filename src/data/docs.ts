@@ -15,6 +15,8 @@ import { UNPUBLISHED_PAGES_FILE } from '@/lib/openapi/publication'
 import { getReaderAuthConfig } from '@/lib/reader-auth/config'
 import {
   ANONYMOUS_READER,
+  FRONTMATTER_ERROR_MARKER,
+  MALFORMED_PAGE_ACCESS,
   OPEN_PAGE_ACCESS,
   canReaderAccessPage,
   mergePageAccess,
@@ -455,6 +457,13 @@ interface FrontmatterData {
 
 const frontmatterCache = new Map<string, FrontmatterData>()
 
+/**
+ * Returned (by identity) when no file backs a page id. Callers that only need
+ * display metadata treat it as empty; access checks treat it as closed, so a
+ * route that resolves a file this lookup cannot see never defaults to open.
+ */
+const MISSING_FRONTMATTER: FrontmatterData = Object.freeze({}) as FrontmatterData
+
 function docsConfig(): DocsJsonConfig {
   const config = getDocsJsonConfig<DocsJsonConfig>()
   const revision = getDocsJsonConfigRevision()
@@ -500,21 +509,28 @@ function readFrontmatter(pageId: string, locale?: string): FrontmatterData {
         return entry.data as FrontmatterData
       }
     }
-    frontmatterCache.set(cacheKey, {})
-    return {}
+    frontmatterCache.set(cacheKey, MISSING_FRONTMATTER)
+    return MISSING_FRONTMATTER
   }
 
   for (const filePath of candidates) {
     if (runtimeSourceExists(filePath)) {
       const raw = readRuntimeSource(filePath)
-      const { data } = parseFrontmatter(raw)
-      frontmatterCache.set(cacheKey, data as FrontmatterData)
-      return data as FrontmatterData
+      let data: FrontmatterData
+      try {
+        data = parseFrontmatter(raw).data as FrontmatterData
+      } catch {
+        // Unparseable frontmatter cannot prove a page is open; the marker
+        // makes its access malformed (served to nobody).
+        data = { [FRONTMATTER_ERROR_MARKER]: true } as FrontmatterData
+      }
+      frontmatterCache.set(cacheKey, data)
+      return data
     }
   }
 
-  frontmatterCache.set(cacheKey, {})
-  return {}
+  frontmatterCache.set(cacheKey, MISSING_FRONTMATTER)
+  return MISSING_FRONTMATTER
 }
 
 // ---------------------------------------------------------------------------
@@ -717,6 +733,11 @@ function localeDirectoryCodes(): Set<string> {
   ])
 }
 
+/** Whether a first path segment names a locale content directory (`src/content/<code>/`). */
+export function isLocaleDirectory(segment: string): boolean {
+  return localeDirectoryCodes().has(segment.toLowerCase())
+}
+
 /** Every page that has an .mdx file under src/content (default locale only). */
 function getAllContentPageIds(): Array<string> {
   const localeCodes = localeDirectoryCodes()
@@ -815,9 +836,14 @@ function visibleEntries(entries: Array<DocEntry>, reader: ReaderContext): Array<
  * opens a restricted page.
  */
 export function getPageAccess(pageId: string, locale?: string): PageAccess {
-  const primary = parsePageAccess(readFrontmatter(pageId) as Record<string, unknown>)
+  const primaryData = readFrontmatter(pageId)
+  // No file for this id: fail closed rather than open.
+  if (primaryData === MISSING_FRONTMATTER) return MALFORMED_PAGE_ACCESS
+  const primary = parsePageAccess(primaryData as Record<string, unknown>)
   if (!locale || locale === (getI18nConfig()?.defaultLocale ?? 'en')) return primary
-  return mergePageAccess(primary, parsePageAccess(readFrontmatter(pageId, locale) as Record<string, unknown>))
+  const localizedData = readFrontmatter(pageId, locale)
+  if (localizedData === MISSING_FRONTMATTER) return MALFORMED_PAGE_ACCESS
+  return mergePageAccess(primary, parsePageAccess(localizedData as Record<string, unknown>))
 }
 
 /** Async managed-release twin of {@link getPageAccess}. */
@@ -1039,7 +1065,11 @@ export function getSidebarCollections(locale?: string, reader: ReaderContext = A
   if (sidebarCollectionsCache.has(cacheKey)) {
     return sidebarCollectionsCache.get(cacheKey)!
   }
+  // A navigation reference with no backing file reveals only its slug-derived
+  // title, so it keeps its existing (broken-link) entry; any file that exists
+  // is judged by its rules.
   const isVisible: PageVisibility = (pageId, pageLocale) =>
+    readFrontmatter(pageId) === MISSING_FRONTMATTER ||
     canReaderAccessPage(getPageAccess(pageId, pageLocale), reader, policy)
 
   const collections = ((locale ? config.i18n?.navigation?.[locale] : undefined) ?? config.tabs)
