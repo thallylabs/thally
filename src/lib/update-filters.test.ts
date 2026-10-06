@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isChangelogPath, matchesSelectedTags, parseTagsParam, shouldRevealForHash, tagsByCount, validSelectedTags } from './update-filters'
+import { isChangelogPath, normalizeTags, matchesSelectedTags, parseTagsParam, shouldRevealForHash, tagsByCount, validSelectedTags } from './update-filters'
 
 describe('update tag filters', () => {
   it('shows every entry when nothing is selected', () => {
@@ -59,5 +59,14 @@ describe('update tag filters', () => {
     expect(shouldRevealForHash('#caf%C3%A9', 'café', true)).toBe(true)
     expect(shouldRevealForHash('#%E0%A4', '%E0%A4', true)).toBe(true)
     expect(shouldRevealForHash('', undefined, true)).toBe(false)
+  })
+
+  it('registers tags trimmed, so every registered tag survives a URL round trip', () => {
+    expect(normalizeTags(' a, b ,,c')).toEqual(['a', 'b', 'c'])
+    expect(normalizeTags([' x ', '', 'y'])).toEqual(['x', 'y'])
+    expect(normalizeTags(undefined)).toEqual([])
+    const [tag] = normalizeTags([' x '])
+    const search = new URL('https://x.test/c?' + new URLSearchParams([['tags', tag]])).search
+    expect(parseTagsParam(search, { [tag]: 1 })).toEqual(['x'])
   })
 })

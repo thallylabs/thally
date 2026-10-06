@@ -10,6 +10,12 @@ export function validSelectedTags(selected: readonly string[], counts: Readonly<
   return selected.filter((tag) => (counts[tag] ?? 0) > 0)
 }
 
+/** The tags an `<Update tags>` prop registers: a comma string or an array, each trimmed, so they match what `parseTagsParam` restores. */
+export function normalizeTags(tags: readonly string[] | string | undefined): string[] {
+  const list = typeof tags === 'string' ? tags.split(',') : tags ?? []
+  return list.filter((tag): tag is string => typeof tag === 'string').map((tag) => tag.trim()).filter(Boolean)
+}
+
 /** Tags ordered by how many entries use them (most first); ties keep first-seen order. */
 export function tagsByCount(counts: Readonly<Record<string, number>>): string[] {
   return Object.keys(counts).filter((tag) => counts[tag] > 0).sort((a, b) => counts[b] - counts[a])
