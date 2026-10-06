@@ -171,6 +171,54 @@ from Fern MDX pages (`../../components/...`, resolved against the Fern
 project root) are migrated the same way Mintlify and Docusaurus components
 are — see "Mintlify compatibility" below.
 
+## Mintlify `sourceRef` repositories
+
+A Mintlify navigation node `{"sourceRef": "owner/repo"}` mounts the docs of another
+repository. Mintlify does not document where that mount lives, so it cannot be
+derived from `docs.json`; supply it with a repeatable flag:
+
+```bash
+create-thally-docs migrate https://github.com/OpenRouterTeam/docs my-docs \
+  --source-ref OpenRouterTeam/typescript-sdk=client-sdks/typescript
+```
+
+Without a mapping the node is skipped with a warning that names the flag.
+
+- The repository must be on github.com. Its docs root is the directory holding a
+  Mintlify `docs.json` (`docs/` first, then the repository root); without one the
+  mapping is skipped with a warning.
+- Every `.md`/`.mdx` file under that root is imported (orphans included) through the
+  same pipeline as the main site, under `<mount-path>/...`. Assets are copied under
+  `public/<mount-path>/...`. The node is replaced by the referenced `docs.json`
+  navigation with page paths prefixed by the mount path; tabs become groups, and the
+  parent group keeps its label and icon.
+- Root-absolute links inside those pages (`/models/x`, `/images/x.png`) are prefixed
+  with the mount path (sub-site semantics: Mintlify's behavior here is not
+  documented, so this is an assumption). Relative links work as-is.
+- Pages, navigation, assets and the referenced repository's custom components are
+  imported. Its components are bundled with the main site's under `src/mdx/migrated/`
+  and registered in `src/mdx/custom-components.tsx`; their content-hashed names cannot
+  clash with the main site's. Branding, colors, redirects, OpenAPI specs and
+  access-restricted pages of the referenced repository are ignored (one warning says
+  so). Access-restricted pages and the files only they use are withheld from the site
+  and are not saved anywhere (the main site saves its own under `migration-quarantine/`;
+  a referenced repository's are discarded), so recover them from that repository if
+  needed.
+- Safety limits per referenced repository, fixed constants: 5,000 files and 50 MB under
+  the docs root. Over a limit the whole repository is refused, never imported
+  partially. Symlinks and dot-directories are removed before import, and a docs
+  directory that resolves outside the clone is refused. A repository GitHub reports as
+  larger than 200 MB is refused before cloning (if the GitHub API is unreachable the
+  clone proceeds and the limits above still apply), its submodules are not fetched,
+  and a `docs.json` over 1 MB is ignored. `repo` must match `owner/repo`; the mount
+  path must be a relative lowercase slug path (no `..`, no leading slash), must not
+  start with a name the site itself uses (`api`, `admin`, `_next`, `public`,
+  `llms.txt`, `sitemap.xml`, ...), must not collide with an existing page or directory
+  of the main site, and mappings must not overlap.
+- A mapping that matches no `sourceRef` in the navigation is reported and imports
+  nothing. `migration-report.json` lists each imported repository with its page count
+  under `sourceRefs`.
+
 ## Mintlify compatibility
 
 Repository imports preserve named/default local JSX and TSX components and
@@ -214,8 +262,8 @@ same-length nested fence is widened so the inner fence no longer closes it, and
 a bare placeholder tag in prose (`<Feature> requires a plan`) that would stop
 the page compiling is escaped as text rather than losing the page.
 The Mintlify `search-bar-entry` click trigger is mapped to Thally's search
-shortcut. Markdown mixed inside interactive JSX, computed imports, and
-namespace imports are reported for manual review; unsupported source is
+shortcut. Markdown mixed inside interactive JSX and computed imports are
+reported for manual review; unsupported source is
 preserved, not replaced with empty stubs. An external package's JSX usage is
 dropped and replaced with a safe fallback (with a warning); if that package's
 binding is instead referenced outside JSX (an expression, a prop, or an
@@ -237,6 +285,30 @@ Next) and copied into any extracted client module. A source site's own
 passes a page-authored function into a client component needs the client
 wrapper described above; unsupported callback shapes retain their content
 with a warning. An unconfirmed target is warned for review.
+Other relative imports of a copied file are handled the same way: a namespace
+import (`import * as X from './comp.jsx'`) and a dynamic `import('./comp.jsx')`
+point at the copied module, and a relative side-effect import
+(`import './styles.css'`) is removed with a warning, like one from an npm
+package. A page is excluded only when the relative target is not copied (for
+example a Next.js `./metadata` module, or an `export ... from` re-export), with
+a single warning naming it. An MDX expression that names an identifier the page
+never defines (`{missing}`) is removed with a warning, since it would throw at
+render; define the name or escape the braces as `\{ \}` to keep the text.
+A value import from a local snippet (`import { FEE, fee } from
+'/snippets/c.mdx'`) is inlined when each name is a static value (string,
+number, boolean, `null`, or an object/array of those) or a self-contained
+function. Inlined functions may only use pure built-ins (`Math`, `JSON`,
+`String`, `Number`, `Boolean`, `Array`, `Date`, `Intl`, `parseInt`,
+`parseFloat`, `isNaN`, `isFinite`, `encodeURIComponent` and
+`decodeURIComponent`) and may not reach
+`Function`, constructors, `globalThis`, `fetch` or other globals; anything else
+is not inlined. A name the snippet does not export, or one that cannot be
+inlined, is bound to `undefined` (as Mintlify does for a missing export) with a
+warning, while the other names of the same import are still inlined. A snippet
+import that resolves outside the repository through a symlink is refused, and a
+snippet whose frontmatter cannot be read is not inlined (left as a comment with
+a warning). Mintlify `sourceRef` navigation nodes have no Thally equivalent and
+are reported rather than migrated.
 File paths cannot escape the repository checkout; symlinks and oversized
 graphs are rejected. This is compatibility analysis, **not a code sandbox**:
 imported JavaScript executes when the developer builds or runs the resulting

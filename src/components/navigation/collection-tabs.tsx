@@ -4,6 +4,7 @@
 
 import type { CSSProperties } from 'react'
 import type { SidebarCollection } from '@/data/docs'
+import { Icon } from '@/components/mdx/rich-content'
 import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
 import { cn } from '@/lib/utils'
 
@@ -33,7 +34,12 @@ export function CollectionTabs({ collections, activeCollectionId, onCollectionCh
         }
         // Labels are navigation, not expendable decoration: never ellipsize
         // them. A narrow desktop wraps whole links instead of losing words.
-        const label = <span title={collection.label}>{collection.label}</span>
+        const label = (
+          <>
+            {collection.icon ? <Icon icon={collection.icon} className="me-1.5 h-4 w-4 shrink-0 self-center" /> : null}
+            <span title={collection.label}>{collection.label}</span>
+          </>
+        )
         const onClick = () => onCollectionChange(collection.id)
         return destination
           ? /^https?:\/\//.test(destination)

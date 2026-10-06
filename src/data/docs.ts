@@ -289,6 +289,8 @@ interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
   /** Local, customer-owned stylesheets served from public/. */
   stylesheets?: Array<string>
+  /** Page breadcrumb trail above each title. Defaults to true; `false` hides it. */
+  breadcrumbs?: boolean
   /** Manual API pages (`api:` frontmatter): default server(s) and auth for the playground. */
   api?: {
     mdx?: {
@@ -297,6 +299,8 @@ interface DocsJsonConfig {
     }
     /** Mintlify `api.playground.display`: interactive (default), simple, none or auth. */
     playground?: { display?: string }
+    /** Show the "OpenAPI specification: <url>" line above generated operations. Defaults to true; `false` hides it. */
+    specLink?: boolean
   }
   navigation?: {
     display?: 'tabs' | 'dropdown'
@@ -1323,6 +1327,11 @@ export function getApiPlaygroundDisplay(): unknown {
   return docsConfig().api?.playground?.display
 }
 
+/** The visible spec link stays on unless docs.json sets `api.specLink: false`. */
+export function getApiSpecLinkVisible(): boolean {
+  return docsConfig().api?.specLink !== false
+}
+
 export const TRY_IT_DEFAULT_TIMEOUT_MS = 60_000
 
 /** How long the Try it relay waits for the API: `apiPlayground.timeoutMs` clamped to 1-120 s, else 60 s. */
@@ -1442,6 +1451,11 @@ export function getIntegrationsConfig(): unknown {
 
 export function getCustomScriptsConfig(): Array<DocsJsonScript> {
   return docsConfig().customScripts ?? []
+}
+
+/** Breadcrumbs stay on unless docs.json sets `breadcrumbs: false`. */
+export function getBreadcrumbsEnabled(): boolean {
+  return docsConfig().breadcrumbs !== false
 }
 
 /** Only local CSS files may be injected into the document head. */

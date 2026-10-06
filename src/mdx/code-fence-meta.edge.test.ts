@@ -1,8 +1,9 @@
 /** Hostile-input tests for code-fence metadata and `[!code ...]` notation. */
 
 import { describe, expect, it } from 'vitest'
-import type { Element, Root, Text } from 'hast'
+import type { Element, Root } from 'hast'
 
+import { codeInnerHtml } from './__tests__/test-html'
 import { applyCodeNotation, parseCodeFenceMeta, rehypePlugins } from './rehype'
 
 function codeBlock(value: string, language = 'txt'): Element {
@@ -19,7 +20,7 @@ async function render(value: string, language = 'typescript', props: Record<stri
   block.properties = { ...block.properties, ...props } as Element['properties']
   const transform = rehypePlugins[1]() as (tree: Root) => Promise<void>
   await transform({ type: 'root', children: [block] })
-  const html = ((block.children[0] as Element).children[0] as Text).value
+  const html = codeInnerHtml(block)
   return { code: block.properties?.code as string, html }
 }
 
