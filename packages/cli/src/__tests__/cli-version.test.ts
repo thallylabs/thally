@@ -18,6 +18,18 @@ function runCli(...args: Array<string>) {
 }
 
 describe('thally version', () => {
+  it('opens a short welcome without the command reference when run without arguments', () => {
+    const result = runCli()
+
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain('THALLY')
+    expect(result.stdout).toContain('thally init my-docs')
+    expect(result.stdout).toContain('thally --help for all commands')
+    expect(result.stdout).not.toContain('Usage: thally')
+    expect(result.stdout).not.toContain('Keep knowledge current:')
+    expect(result.stderr).toBe('')
+  })
+
   it.each(['--version', '-v', '-V', 'version'])('prints the package version for %s', (argument) => {
     const result = runCli(argument)
 
@@ -32,6 +44,9 @@ describe('thally version', () => {
     expect(result.status).toBe(0)
     expect(result.stdout).toContain('Usage: thally <command> [options]')
     expect(result.stderr).toBe('')
+    expect(result.stdout).toContain(`thally v${packageMetadata.version}`)
+    expect(result.stdout).toContain('Product knowledge, kept in step with your code.')
+    expect(result.stdout).not.toContain('\u001b[')
   })
 
   it('preserves unknown-command behavior', () => {

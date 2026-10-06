@@ -1,9 +1,41 @@
 # `thally` CLI
 
-Use one CLI to scaffold, write, check, migrate, and publish Thally docs. You
-author **content + config** while Thally keeps the Next.js runtime out of your
-way. The same toolchain can trace a product change into documentation work your
-team reviews before it publishes.
+Product knowledge, kept in step with your code.
+
+Create a docs site, write and publish content, and prepare updates from product
+changes for your team to review.
+
+```bash
+npx @thallylabs/cli init my-docs --yes
+cd my-docs
+npm install
+npx thally dev
+```
+
+## Terminal output
+
+Interactive terminals show the THALLY wordmark, task headings, and live progress.
+Running `thally` opens a short welcome; `thally --help` shows the command reference.
+The wordmark adapts to narrow terminals. Output automatically
+uses plain text in CI, when output is not a TTY, with `TERM=dumb`, or when
+`NO_COLOR` is set. `thally --version` prints only the installed version; MCP
+stdio and machine-readable check output keep their protocol format.
+
+Setup and migration end with an olive next-action panel and one copyable
+preview command, including `npm install` when needed.
+
+Scaffolding and migration keep subprocess logs quiet in interactive terminals.
+Pass `--verbose` to show installation and build logs as they happen:
+
+```bash
+thally init my-docs --yes --install --verbose
+thally migrate https://github.com/your-org/your-docs --platform auto --verbose
+```
+
+Long-running steps show their current activity and elapsed time. Plain logs report an elapsed heartbeat every 15 seconds. Conversion, rendering, and content validation run off the terminal thread so progress keeps updating during larger imports.
+
+Failures always show diagnostics, including without `--verbose`; quiet output retains the last 64 KiB. Non-interactive
+runs retain subprocess output for scripts and CI.
 
 ## The model
 
@@ -23,19 +55,21 @@ customer-owned paths during upgrades.
 
 ## Commands
 
-| Command                                     | What it does                                                   |
-| ------------------------------------------- | -------------------------------------------------------------- |
-| `thally init [dir]`                         | Scaffold a new Thally project                                  |
-| `thally dev`                                | Run the docs site locally (agent endpoints live)               |
-| `thally build`                              | Build the production site                                      |
-| `thally start`                              | Serve the built production site                                |
-| `thally deploy [--prod]`                    | Build and deploy to a live URL, print agent endpoints          |
-| `thally check [--agents] [--fix]`           | Lint content + Agent Readiness Score                           |
-| `thally new <page-id> [--title]`            | Create a page and register it in `docs.json`                   |
-| `thally migrate <github-or-docs-url> [dir]` | Migrate a docs repository or public docs site                  |
-| `thally translate --locale <code>`          | Translate content into a locale                                |
-| `thally starter update [--apply]`           | Plan or explicitly apply an immutable three-way runtime update |
-| `thally mcp`                                | Start the Model Context Protocol server (stdio)                |
+| Command | What it does |
+| --- | --- |
+| `thally init [dir] [--verbose]` | Create a new documentation site |
+| `thally new <page-id> [--title "..."]` | Create a page and add it to navigation |
+| `thally migrate <github-or-docs-url> [dir] [--verbose]` | Import an existing documentation site |
+| `thally translate --locale <code>` | Translate content into a locale |
+| `thally dev` | Preview your site locally |
+| `thally build` | Build the production site |
+| `thally start` | Serve the built production site |
+| `thally deploy [--prod] [--cloudflare]` | Build and publish through Vercel or Cloudflare |
+| `thally check [--agents] [--fix]` | Check content and agent readiness |
+| `thally starter update [--apply]` | Review or apply a site runtime update |
+| `thally agent "<instruction>"` | Draft updates from product changes for review |
+| `thally track <add\|list\|test\|setup>` | Turn merged product PRs into docs PRs |
+| `thally mcp` | Start the Model Context Protocol server (stdio) |
 
 `thally migrate` writes a `migration-report.json` with content and production
 build check statuses. Failed checks return a nonzero status while retaining imported
@@ -49,7 +83,7 @@ own or trust. `--skip-validation` also skips dependency installation.
 the Mintlify or Docusaurus adapter. Non-interactive callers can pass
 `--platform mintlify`, `--platform docusaurus`, or `--platform auto`.
 
-Run `thally` with no arguments for the full help.
+Run `thally --help` for the full command reference.
 
 `thally starter update` is a dry run by default. It compares the previously
 recorded scaffold, the promoted target scaffold, and the current project. It

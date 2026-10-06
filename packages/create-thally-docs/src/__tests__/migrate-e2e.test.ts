@@ -18,7 +18,15 @@ vi.mock('../scaffold.js', () => ({ scaffold: scaffoldMock }))
 vi.mock('../utils.js', () => ({ installDeps: installDepsMock, initGit: initGitMock }))
 vi.mock('../migrate/validate.js', () => ({ validateMigration: validateMigrationMock }))
 
+// These materialization fixtures exercise main-thread policy; worker parity and
+// isolation are covered separately with the actual compiled worker entry.
+vi.mock('../migration-work.js', async () => {
+  const engine = await import('@thallylabs/migrate')
+  return { convertRepository: engine.migrateRepository, renderFiles: engine.renderMigrationFiles }
+})
+
 import { migrateDocs } from '../migrate/index.js'
+import { terminal } from '../terminal.js'
 
 describe('CLI migration flow', () => {
   beforeEach(() => {
@@ -103,8 +111,11 @@ describe('CLI migration flow', () => {
     { yes: true, skipValidation: false, failsInstallation: true },
     { yes: true, skipValidation: true, failsInstallation: false },
   ])('retains fresh imports and reports with yes=$yes, skip=$skipValidation, install failure=$failsInstallation', async ({ yes, skipValidation, failsInstallation }) => {
+    const success = vi.spyOn(terminal, 'success')
     if (failsInstallation) {
-      installDepsMock.mockImplementationOnce(() => { throw new Error('Registry unavailable') })
+      // Installation now runs asynchronously; a rejection must still retain the
+      // import and mark build validation as failed in the durable report.
+      installDepsMock.mockRejectedValueOnce(new Error('Registry unavailable'))
       validateMigrationMock.mockResolvedValueOnce({ content: 'passed', build: 'failed', messages: ['Dependency installation failed'] })
     }
     if (skipValidation) {
@@ -161,6 +172,12 @@ describe('CLI migration flow', () => {
     else expect(installDepsMock).toHaveBeenCalledWith(projectDir)
     expect(validateMigrationMock).toHaveBeenCalledWith(projectDir, skipValidation, failsInstallation)
     expect(JSON.parse(readFileSync(result.reportPath, 'utf8')).validation.build).toBe(skipValidation ? 'skipped' : failsInstallation ? 'failed' : 'passed')
+    if (skipValidation || failsInstallation) {
+      expect(success).not.toHaveBeenCalledWith(expect.stringContaining('Content and production build passed'))
+    } else {
+      expect(success).toHaveBeenCalledWith(expect.stringContaining('Content and production build passed'))
+    }
+    success.mockRestore()
     expect(initGitMock).toHaveBeenCalledWith(projectDir)
     expect(scaffoldMock).toHaveBeenCalledWith(expect.objectContaining({ repoUrl: '' }))
   })

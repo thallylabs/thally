@@ -23,6 +23,13 @@ describe('parseArgs', () => {
     expect(args.rest).toEqual(['--port', '4000'])
   })
 
+  it.each(['init', 'migrate'])('preserves verbose and delegate flags for %s', (command) => {
+    const rest = ['my-docs', '--verbose', '--install', '--yes']
+    const args = parseArgs([command, ...rest])
+    expect(args.rest).toEqual(rest)
+    expect(args.hasFlag('--verbose')).toBe(true)
+  })
+
   it('handles no args', () => {
     const args = parseArgs([])
     expect(args.command).toBeUndefined()
@@ -36,10 +43,13 @@ describe('helpText', () => {
     for (const command of COMMANDS) {
       expect(text).toContain(command.name)
     }
-    expect(text).toContain(
-      'keep customer-facing knowledge in sync with product changes',
-    )
-    expect(text).toContain('prepare reviewable updates')
-    expect(text).toContain('hidden runtime')
+    expect(text).toContain('Product knowledge, kept in step with your code.')
+    expect(text).toContain('Create and write')
+    expect(text).toContain('Preview and publish')
+    expect(text).toContain('Keep knowledge current')
+    expect(text).toContain('--verbose')
+    expect(text).not.toContain('Next.js')
+    expect(text).not.toContain('hidden runtime')
+    expect(text).not.toContain('command-specific usage')
   })
 })

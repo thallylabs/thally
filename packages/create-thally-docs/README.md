@@ -29,6 +29,30 @@ Dependency installation is deliberately opt-in so the scaffold finishes in
 seconds. Pass `--install` to run it immediately, or `--no-install` to skip the
 interactive question explicitly.
 
+## Terminal output
+
+Interactive terminals show the THALLY wordmark, task headings, and live progress.
+The wordmark adapts to narrow terminals. Output automatically
+uses plain text in CI, when output is not a TTY, with `TERM=dumb`, or when
+`NO_COLOR` is set.
+
+Setup and migration end with a highlighted next-action panel. The preview
+command is one copyable line, including `npm install` when needed.
+
+Scaffolding and migration keep subprocess logs quiet in interactive terminals.
+Add `--verbose` to see installation and build logs as they happen:
+
+```bash
+npx create-thally-docs my-docs --yes --install --verbose
+npx create-thally-docs migrate https://github.com/your-org/your-docs --platform auto --verbose
+```
+
+Long-running steps show their current activity and elapsed time. Plain logs report an elapsed heartbeat every 15 seconds. Conversion, rendering, and content validation run off the terminal thread so progress keeps updating during larger imports.
+
+Failures always show diagnostics, including without `--verbose`; quiet output retains the last 64 KiB. Non-interactive
+runs retain subprocess output for scripts and CI. These options also work with
+`thally init` and `thally migrate`.
+
 ## What you get
 
 - **MDX content** in `src/content/`, navigation in `docs.json`
