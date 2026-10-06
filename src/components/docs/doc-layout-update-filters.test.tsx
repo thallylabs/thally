@@ -1,10 +1,11 @@
 /** A shared `?tags=` link must only filter where the layout renders the controls to undo it. */
 
 // @vitest-environment node
-import { createElement, act } from 'react'
+import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // domino is a transitive DOM implementation (turndown); the repo has no jsdom/happy-dom.
+// @ts-expect-error its typings are not a module
 import domino from '@mixmark-io/domino'
 import type { DocEntry } from '@/data/docs'
 
@@ -32,10 +33,12 @@ vi.mock('@/lib/site-config', () => ({ resolveBuildSiteConfig: () => ({ repoUrl: 
 import { DocLayout } from '@/components/docs/doc-layout'
 import { UpdateArticle } from '@/components/mdx/update-article'
 
-const updates = () => [
-  createElement(UpdateArticle, { key: 'a', id: 'api', className: 'u', tags: ['API'] }, 'API update'),
-  createElement(UpdateArticle, { key: 'b', id: 'sdk', className: 'u', tags: ['SDK'] }, 'SDK update'),
-]
+const updates = () => (
+  <>
+    <UpdateArticle id="api" className="u" tags={['API']}>API update</UpdateArticle>
+    <UpdateArticle id="sdk" className="u" tags={['SDK']}>SDK update</UpdateArticle>
+  </>
+)
 
 let container: HTMLElement
 let root: Root
@@ -59,7 +62,7 @@ afterEach(() => {
 
 async function render(mode: DocEntry['mode']): Promise<{ hidden: number; visible: number; chips: number; clear: boolean }> {
   const doc = { id: 'changelog', href: '/changelog', mode } as DocEntry
-  await act(async () => { root.render(createElement(DocLayout, { doc }, updates())) })
+  await act(async () => { root.render(<DocLayout doc={doc}>{updates()}</DocLayout>) })
   const all = (selector: string) => Array.from({ length: container.querySelectorAll(selector).length }, (_, i) => container.querySelectorAll(selector)[i] as HTMLElement)
   const articles = all('article.u')
   return {
