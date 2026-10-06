@@ -79,8 +79,8 @@ Commands:
 
 Scaffold options:
   -y, --yes       Accept defaults and skip interactive prompts
-  --install       Install project dependencies after scaffolding
-  --no-install    Skip dependency installation without prompting
+  --install       Install project dependencies (the default)
+  --no-install    Skip dependency installation
   --verbose       Show detailed installation and Git output
   -h, --help      Show this help
   -v, -V, --version  Show the installed version
@@ -112,7 +112,7 @@ Usage:
 Options:
   --fix       Add orphan pages to navigation when possible
   --ci        Use CI-oriented validation behavior
-  --external  Check external links
+  --external  Also check external links (public hosts only; warnings, never errors)
   --drift     Check documentation provenance and freshness
   -h, --help  Show this help
 `,
@@ -290,11 +290,15 @@ async function runScaffoldCommand(): Promise<void> {
     brandPreset: answers.brandPreset,
     repoUrl: answers.repoUrl,
     doInstall: answers.doInstall,
+    continueOnInstallFailure: true,
     i18nLocales: answers.i18nLocales,
     trackRepos: answers.trackRepos,
   })
 
-  success(result.projectDir, answers.projectName, answers.doInstall)
+  success(result.projectDir, answers.projectName, result.dependenciesInstalled)
+  // Installation was requested but failed: the project exists, but automation
+  // must not mistake it for a ready-to-run checkout.
+  if (answers.doInstall && !result.dependenciesInstalled) process.exitCode = 1
 }
 
 async function runCheckCommand(): Promise<void> {

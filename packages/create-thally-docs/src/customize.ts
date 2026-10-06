@@ -6,7 +6,7 @@
  * only the small set of fields an owner answers during creation.
  */
 
-import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 export interface StarterLocale {
@@ -317,12 +317,27 @@ export function updateCloudflareRuntimeName(
   writeFileSync(configPath, updated, 'utf8')
 }
 
+const SITE_URL_ASSIGNMENT = /^([ \t]*)((?:THALLY|DOX|NEXT_PUBLIC)_SITE_URL[ \t]*=[ \t]*["']?(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?:[:/][^\r\n]*)?)$/gm
+
+/**
+ * Comment out loopback site-URL assignments in a local environment file.
+ *
+ * The runtime already defaults to the local URL in development. An explicit
+ * `localhost` value is harmful instead: Next.js loads `.env.local` during
+ * production builds too, so a build or deploy from this checkout would bake
+ * dead `localhost` links into llms.txt, sitemap.xml, and JSON-LD.
+ */
+export function disableLoopbackSiteUrl(source: string): string {
+  return source.replace(SITE_URL_ASSIGNMENT, '$1# $2')
+}
+
 /** Copy the canonical environment guide to the ignored local filename. */
 export function updateEnvExample(targetDir: string): void {
   const envFile = join(targetDir, '.env.example')
   if (!existsSync(envFile)) return
   const envLocal = join(targetDir, '.env.local')
-  if (!existsSync(envLocal)) cpSync(envFile, envLocal)
+  if (existsSync(envLocal)) return
+  writeFileSync(envLocal, disableLoopbackSiteUrl(readFileSync(envFile, 'utf8')), 'utf8')
 }
 
 /** Apply the complete, intentionally narrow owner-personalization contract. */

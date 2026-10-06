@@ -27,6 +27,7 @@ import {
   validateStarterArchiveEntry,
 } from '../download.js'
 import {
+  disableLoopbackSiteUrl,
   personalizeStarter,
   updateEnvExample,
   pruneMissingSiteLinks,
@@ -352,6 +353,23 @@ describe('starter owner personalization', () => {
     expect(
       readFileSync(join(directory, 'src', 'lib', 'runtime.ts'), 'utf8'),
     ).toBe(runtimeBefore)
+  })
+
+  it('never copies a loopback site URL into .env.local', () => {
+    const directory = temporaryDirectory('thally-starter-env-')
+    writeFileSync(
+      join(directory, '.env.example'),
+      '# Site URL\nTHALLY_SITE_URL=http://localhost:3040\nNEXT_PUBLIC_SITE_URL="http://127.0.0.1:3000/"\n# ANTHROPIC_API_KEY=\n',
+    )
+    updateEnvExample(directory)
+    expect(readFileSync(join(directory, '.env.local'), 'utf8')).toBe(
+      '# Site URL\n# THALLY_SITE_URL=http://localhost:3040\n# NEXT_PUBLIC_SITE_URL="http://127.0.0.1:3000/"\n# ANTHROPIC_API_KEY=\n',
+    )
+  })
+
+  it('keeps public site URLs and look-alike hosts untouched', () => {
+    const source = 'THALLY_SITE_URL=https://docs.example.com\nTHALLY_SITE_URL=https://localhost.example.com\n'
+    expect(disableLoopbackSiteUrl(source)).toBe(source)
   })
 
   it('removes starter repository links when the owner has no repository yet', () => {

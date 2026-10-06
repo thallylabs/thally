@@ -20,11 +20,31 @@ Before deploying, set the `THALLY_SITE_URL` environment variable to your product
 THALLY_SITE_URL=https://docs.yourproduct.com
 ```
 
+If you leave it unset, Thally uses the URL your host publishes:
+
+| Host | Variable used (first match wins) | Available |
+| --- | --- | --- |
+| Vercel | `VERCEL_PROJECT_PRODUCTION_URL`, then `VERCEL_URL` | Build and runtime |
+| Netlify | `URL`, then `DEPLOY_PRIME_URL` | Build time only |
+| Cloudflare Pages | `CF_PAGES_URL` (per deployment) | Build time only |
+| Render | `RENDER_EXTERNAL_URL` | Runtime only |
+
+On Vercel this covers every page and endpoint on the first deploy. On the
+other hosts it covers only the pages rendered while the variable exists, so set
+`THALLY_SITE_URL` explicitly there for complete coverage. `llms.txt` and
+`robots.txt` always use the origin of the incoming request. Cloudflare Workers
+publish no URL variable, so set `THALLY_SITE_URL` as a Worker variable, and set
+it whenever you serve the docs from a custom domain your host does not report.
+A `localhost` value never overrides a host-published URL, and local development
+defaults to `http://localhost:3040`.
+If the resolved URL does not match the origin a request arrives on, the server
+logs a warning naming the host it used.
+
 Depending on which features you use, you may also want to set:
 
 | Variable | Enables |
 | --- | --- |
-| `THALLY_SITE_URL` | OpenGraph metadata and canonical URLs (recommended for every deploy) |
+| `THALLY_SITE_URL` | OpenGraph metadata, canonical URLs, and agent endpoints (detected automatically on Vercel; set it explicitly on other hosts, custom domains, and Cloudflare Workers) |
 | `THALLY_CLOUD_SITE_TOKEN` | Connects this deployment to its Thally Cloud site (server-only) |
 | `THALLY_CLOUD_URL` | Overrides the Thally Cloud URL this site connects to (defaults to `https://app.thally.io`) |
 | `THALLY_CLOUD_SITE_CONFIG` | Managed-hosting settings snapshot injected automatically by Thally Cloud; do not set this yourself |
@@ -53,7 +73,7 @@ Sites connect to `https://app.thally.io` unless `THALLY_CLOUD_URL` overrides it.
 The token never enters browser JavaScript, and Thally Cloud does not need access to your hosting provider's environment variables.
 
 <Note title="Thally Cloud services">
-  AI chat answers, [Track](/guides/ai-features#free-vs-thally-cloud), and traffic analytics are Thally Cloud services. They carry their own variables (for example `ANTHROPIC_API_KEY` and `THALLY_ANALYTICS_DB_URL`) that light up when a deployment connects Thally Cloud; in the free, self-hosted template their admin panels stay locked and none are needed to ship your docs.
+  AI chat answers, [Track](/guides/ai-features#free-vs-thally-cloud), and traffic analytics are Thally Cloud services. They light up when a deployment is linked to Thally Cloud with `THALLY_CLOUD_SITE_TOKEN`; the self-hosted runtime has no local chat backend and reads no model key for chat. In the free, self-hosted template their admin panels stay locked and none are needed to ship your docs.
 </Note>
 
 ## Durable admin storage
@@ -186,4 +206,4 @@ Once deployed, Thally automatically serves:
 - **`/changelog/rss.xml`** — RSS feed for changelog updates
 - **Dynamic OG images** — every page gets a branded social preview image via `/api/og`
 
-All of these use `THALLY_SITE_URL` to generate absolute URLs, so make sure it's set before deploying.
+All of these use `THALLY_SITE_URL` (or the host-published URL described above) to generate absolute URLs.

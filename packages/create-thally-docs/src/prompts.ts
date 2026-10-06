@@ -153,6 +153,15 @@ function parseRepoSpec(spec: string): { owner: string; repo: string } | null {
   return null
 }
 
+/**
+ * Collect the owner choices for a new project.
+ *
+ * Only questions whose answer the owner is likely to care about up front are
+ * asked; everything else gets a sensible default that is easy to change later
+ * (description and brand palette live in `src/data/site.ts`). Dependencies are
+ * installed by default so the next command can start the preview; pass
+ * `--no-install` (installPreference = false) to skip it.
+ */
 export async function gatherAnswers(
   dirArg: string | undefined,
   useDefaults: boolean,
@@ -184,26 +193,10 @@ export async function gatherAnswers(
         default: defaultName,
       })
 
-  // 3. Description
-  const defaultDesc = `Documentation for ${projectName}.`
-  const description = useDefaults
-    ? defaultDesc
-    : await input({
-        message: '  Description:',
-        default: defaultDesc,
-      })
-
-  // 4. Brand preset
-  const brandPreset = useDefaults
-    ? 'primary'
-    : await select({
-        message: '  Brand preset:',
-        choices: [
-          { name: 'primary', value: 'primary' },
-          { name: 'secondary', value: 'secondary' },
-        ],
-        default: 'primary',
-      })
+  // 3. Description and 4. brand preset are not asked: both are one-line edits
+  // in src/data/site.ts, and the preset names say nothing about the result.
+  const description = `Documentation for ${projectName}.`
+  const brandPreset = 'primary'
 
   // 5. GitHub repo (optional)
   const repoUrl = useDefaults
@@ -236,14 +229,13 @@ export async function gatherAnswers(
     }
   }
 
-  // 7. Install deps?
-  let doInstall = installPreference ?? false
+  // 7. Install deps? Yes by default, so the preview command works right away.
+  let doInstall = installPreference ?? true
   if (!useDefaults && installPreference === undefined) {
-    const shouldInstall = await input({
-      message: '  Install dependencies now? (y/N):',
-      default: 'N',
+    doInstall = await confirm({
+      message: '  Install dependencies now?',
+      default: true,
     })
-    doInstall = shouldInstall.trim().toLowerCase().startsWith('y')
   }
 
   // 8. English is the source locale. Owners can opt into any additional
