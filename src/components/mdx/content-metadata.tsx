@@ -4,6 +4,8 @@ import type { ReactNode } from 'react'
 import { Link as LinkIcon } from 'lucide-react'
 import { Badge } from '@/components/mdx/content-inline'
 import { cn } from '@/lib/utils'
+// Shared with the changelog feeds and MCP `list_changes`, so feed links land on this entry.
+import { updateAnchorId } from '@thallylabs/core/slugify'
 export { Color } from '@/components/mdx/color'
 
 export interface UpdateProps {
@@ -17,13 +19,9 @@ export interface UpdateProps {
   className?: string
 }
 
-function normalizeId(value: string): string {
-  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-}
-
 /** Render a linkable release entry on a continuous visual timeline. */
 export function Update({ label, date, id, title, description, tags, children, className }: UpdateProps) {
-  const anchorId = id ?? (label ? normalizeId(label) : undefined)
+  const anchorId = updateAnchorId({ id, label, date })
   const normalizedTags = typeof tags === 'string' ? tags.split(',').map((tag) => tag.trim()).filter(Boolean) : tags
 
   return (

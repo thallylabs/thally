@@ -101,11 +101,13 @@ export function mcpServerCard(
           documentation: `${origin}/auth.md`,
         }
       : { type: 'none' },
-    capabilities: { tools: { listChanged: false } },
+    capabilities: { tools: { listChanged: false }, resources: { subscribe: false, listChanged: false } },
     tools: toolMetadata.map((tool) => ({
       name: tool.name,
+      title: tool.title,
       description: tool.description,
       inputSchema: tool.inputSchema,
+      annotations: tool.annotations,
     })),
     documentation: `${origin}/auth.md`,
   })

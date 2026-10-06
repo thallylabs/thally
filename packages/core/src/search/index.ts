@@ -8,3 +8,8 @@ export {
   getClientSearchCorpus,
 } from './corpus.js'
 export type { SearchRecord } from './corpus.js'
+export { searchSections, getSectionCorpus } from './sections.js'
+export type { SectionHit, SearchSectionsOptions } from './sections.js'
+export { registerSupplementalSearchRecordsSource } from './supplemental.js'
+export type { SupplementalSearchRecord, SearchRecordType } from './supplemental.js'
+export type { SearchRecordSection } from './corpus.js'

@@ -23,6 +23,7 @@ const surfaces: Record<string, string> = {
   'src/app/api/markdown/[...slug]/route.ts': '.md mirror and /api/markdown',
   'src/app/skill.md/route.ts': 'skill.md manifest',
   'src/lib/mcp/site-tools.ts': 'MCP list_pages / read_page',
+  'src/lib/changelog.ts': 'changelog feeds and MCP list_changes',
   'src/lib/search/register-doc-source.ts': 'search index',
   'src/app/(docs)/layout.tsx': 'sidebar navigation',
   'src/app/(docs)/api/layout.tsx': 'API sidebar navigation',

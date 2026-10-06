@@ -272,6 +272,15 @@ Semantic-search https://docs.example.com for "rotating API keys"
 | `limit` | No | Max results (default: `8`) |
 | `mode` | No | `hybrid` (default) or `fulltext` |
 
+When the site uses a hosted embedding provider, hybrid queries to `/api/search`
+are limited per client (`THALLY_SEARCH_HYBRID_RATE_PER_MIN`, default 20 per
+minute). Over the limit the site answers with full-text results and reports
+`mode: "fulltext"`.
+
+To attach a deployed site's own read-only tools — section search, API
+operations, and the changelog — connect its `/api/mcp` endpoint directly; see
+[Connect a deployed site](/guides/mcp-overview#connect-a-deployed-site).
+
 ---
 
 #### `agent_readiness`

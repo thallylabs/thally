@@ -5,6 +5,7 @@ import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 import { localizedPath } from '@/lib/i18n/config'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { problemResponse } from '@/lib/http/problem'
+import { findChangelogPages } from '@/lib/changelog'
 
 export async function GET(request: NextRequest) {
   const baseUrl = request.nextUrl.origin
@@ -24,6 +25,7 @@ export async function GET(request: NextRequest) {
   const entries = await loadDocEntries()
   const collections = await loadSidebarCollections()
   const apiNodes = await getAllApiOperationNodes()
+  const hasChangelog = (await findChangelogPages()).length > 0
 
   // Build a lookup: href → { tab, group }
   const hrefToNav = new Map<string, { tab: string; group: string }>()
@@ -96,6 +98,9 @@ export async function GET(request: NextRequest) {
         openapi: `${baseUrl}/openapi.yaml`,
         robots: `${baseUrl}/robots.txt`,
         sitemap: `${baseUrl}/sitemap.xml`,
+        ...(hasChangelog
+          ? { changelog_json_feed: `${baseUrl}/changelog/feed.json`, changelog_rss: `${baseUrl}/changelog/rss.xml` }
+          : {}),
       },
       pages,
     },

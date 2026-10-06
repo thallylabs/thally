@@ -141,10 +141,34 @@ claude mcp add --transport http product-docs https://docs.example.com/api/mcp
 
 </Tabs>
 
-The deployed endpoint exposes `search_docs`, `read_page`, `list_pages`, and
-`agent_readiness`. It cannot edit the site. Site owners can disable it from the
-admin dashboard, and public tool calls default to a per-IP limit of 60 per
-minute.
+The deployed endpoint is read-only and exposes these tools:
+
+| Tool | Returns |
+|---|---|
+| `search_docs` | Ranked pages and API operations, each with its URL, best-matching section link, and a snippet |
+| `search_sections` | The sections that best answer a query, with heading path, deep link, and section text |
+| `read_page` | One page as Markdown, by page ID or URL path |
+| `list_pages` | Every indexable page with its ID, title, and URL |
+| `list_api_operations` | API reference operations, filtered by keyword or tag |
+| `get_api_operation` | One operation's parameters, request and response schemas, authentication, and a cURL example |
+| `list_changes` | Changelog entries, newest first; pass `since` (an ISO date) for recent changes only |
+| `agent_readiness` | The site's Agent Readiness Score |
+
+Every tool returns structured JSON (`structuredContent`, described by the tool's
+`outputSchema`) alongside readable text, and is annotated as read-only and
+idempotent. `search_docs`, `search_sections`, `read_page`, `list_pages`, and
+`list_changes` accept an optional `locale` on translated sites.
+
+Pages are also MCP resources at `docs://pages/{page-id}`, and API operations at
+`docs://api/{operation-id}`. Every agent surface reads the same projection:
+`read_page`, the `.md` page URLs, and `/llms-full.txt` return identical
+Markdown, and pages marked `hidden` or `noindex` are left out of listings and
+search exactly as they are left out of site search.
+
+The endpoint supports MCP protocol versions 2024-11-05 through 2025-11-25.
+Site owners can disable it from the admin dashboard. Tool calls and resource
+reads are limited per client to 60 per minute by default
+(`THALLY_MCP_RATE_PER_MIN`).
 
 <AgentPrompt
   title="Copy a complete prompt to research deployed documentation"
@@ -153,7 +177,7 @@ minute.
 
 Use the connected read-only Thally MCP server for PRODUCT_DOCS_URL to answer this question: QUESTION. You are done when the answer is concise, supported by the deployed documentation, linked to the exact source pages, and explicit about anything the site does not establish.
 
-Confirm that the MCP server belongs to PRODUCT_DOCS_URL. Start with list_pages when the information architecture is unfamiliar, then use search_docs with the reader's wording, product terminology, and likely synonyms. Read the most relevant pages in full before answering. Follow prerequisite and reference links when a claim depends on them, but do not browse unrelated sections to manufacture certainty.
+Confirm that the MCP server belongs to PRODUCT_DOCS_URL. Start with list_pages when the information architecture is unfamiliar, then use search_sections or search_docs with the reader's wording, product terminology, and likely synonyms. Read the most relevant pages in full before answering. Use get_api_operation for exact API parameters and list_changes when the question concerns recent changes. Follow prerequisite and reference links when a claim depends on them, but do not browse unrelated sections to manufacture certainty.
 
 For each material claim, cite the exact page URL returned by the tools. Separate direct documentation facts from your inference and label the inference. When pages conflict, report both, prefer the more specific or recently updated source only when the metadata supports that choice, and identify the contradiction. If the documentation does not answer part of the question, state what is missing and suggest the page or product owner that could resolve it.
 

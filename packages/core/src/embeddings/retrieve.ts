@@ -108,6 +108,25 @@ export function rankChunks(
 }
 
 /**
+ * Rank plain (un-embedded) chunks by BM25 alone. Used where a query must never
+ * trigger an embedding call — e.g. section search on a public, anonymous
+ * endpoint — and for corpora that have no persisted vectors (translations).
+ * The lexical index is memoized per chunk array, so callers should pass the
+ * same array instance across queries.
+ */
+export function rankLexicalChunks(
+  query: string,
+  chunks: ReadonlyArray<Chunk>,
+  options: RankOptions = {},
+): Array<RetrievalResult> {
+  const lexicalScores = scoreLexical(getLexicalIndex(chunks), lexicalQueryTerms(query, options.context))
+  const scored = chunks
+    .map((chunk, position) => ({ chunk, score: lexicalScores[position] }))
+    .sort((a, b) => b.score - a.score)
+  return selectWithinBudget(scored, options)
+}
+
+/**
  * Rank an index's chunks for a question. With no query vector the ranking is
  * BM25 alone; with one, BM25 and cosine rankings are fused by reciprocal rank.
  * Fused scores are normalized to [0, 1]: a chunk ranked first by both lists

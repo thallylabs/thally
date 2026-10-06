@@ -13,6 +13,7 @@
  * richer entries satisfy the resolver contract directly.
  */
 import {
+  registerSupplementalSearchRecordsSource,
   registerAsyncContentDocumentSource,
   registerAsyncDocEntriesSource,
   registerContentDocumentSource,
@@ -24,8 +25,17 @@ import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
 import { localizedPath } from '@/lib/i18n/config'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 
-/** On a versioned site, older versions (v1, v0) stay reachable by URL but never outrank the current docs in search. */
-const isSearchable = (entry: { id: string; noindex?: boolean; hidden?: boolean }, currentVersionIds: Set<string> | null) =>
+/**
+ * The one listing rule for agent and search surfaces: search, MCP
+ * `list_pages`/resources, `llms-full.txt` and the docs index all enumerate
+ * pages through the async resolver registered below, so `hidden` and
+ * `noindex` pages never appear in one listing but not another. Hidden and
+ * noindex pages stay readable by explicit id/URL, like their HTML pages.
+ *
+ * On a versioned site, older versions (v1, v0) stay reachable by URL but never
+ * outrank the current docs.
+ */
+export const isSearchable = (entry: { id: string; noindex?: boolean; hidden?: boolean }, currentVersionIds: Set<string> | null) =>
   !entry.noindex && !entry.hidden && (!currentVersionIds || currentVersionIds.has(entry.id))
 
 registerDocEntriesSource(() => {
@@ -54,3 +64,14 @@ registerAsyncDocEntriesSource(async (locale) => {
   return translated.filter((entry): entry is NonNullable<typeof entry> => entry !== null)
 })
 registerAsyncContentDocumentSource((pageId, locale) => loadContentDocument(pageId, locale))
+
+// Generated API-reference operations have no MDX document, so they join the
+// index as supplemental records. Loaded lazily so importing the search engine
+// does not pull the OpenAPI normalizer into bundles that never search. Only
+// the default locale: operation pages are not translated (docs-index agrees).
+registerSupplementalSearchRecordsSource(async (locale) => {
+  const i18n = await getEffectiveI18nConfig()
+  if (locale && locale !== i18n.defaultLocale) return []
+  const { getApiOperationSearchIndex } = await import('@/data/api-reference')
+  return getApiOperationSearchIndex()
+})
