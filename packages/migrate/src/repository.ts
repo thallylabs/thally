@@ -197,6 +197,8 @@ export interface RepositoryMigrationOptions {
   sourceUrl: string
   docsDir?: string
   platform?: MigrationPlatform
+  /** @internal Mount path of a sourceRef import; keeps its component files separate from any other copy of the same source. */
+  componentNamespace?: string
   /** @internal Prefix used by additional Docusaurus docs-plugin instances. */
   docusaurusRoutePrefix?: string
   /** @internal Prevent recursive discovery while importing one plugin root. */
@@ -3066,7 +3068,7 @@ function injectOpenApiSpecs(
 }
 
 /** Identify component ownership independently of checkout paths and URL syntax. */
-function componentSourceIdentity(sourceUrl: string, repositoryDir: string, siteRoot: string): string {
+function componentSourceIdentity(sourceUrl: string, repositoryDir: string, siteRoot: string, namespace?: string): string {
   const url = new URL(sourceUrl)
   // A GitHub tree URL and the repository root identify the same source. Branch
   // changes should update its components, while separate monorepo sites must
@@ -3076,7 +3078,8 @@ function componentSourceIdentity(sourceUrl: string, repositoryDir: string, siteR
   const repository = url.hostname.toLowerCase() === 'github.com'
     ? `https://github.com/${url.pathname.split('/').filter(Boolean).slice(0, 2).join('/').replace(/\.git$/i, '').toLowerCase()}`
     : `${url.origin}${trimTrailingSlashes(url.pathname)}`
-  return JSON.stringify([repository, relative(repositoryDir, siteRoot).replace(/\\/g, '/')])
+  const docsRoot = relative(repositoryDir, siteRoot).replace(/\\/g, '/')
+  return JSON.stringify(namespace ? [repository, docsRoot, namespace] : [repository, docsRoot])
 }
 
 /** Import an already-available repository directory into a canonical bundle. */
@@ -3128,7 +3131,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // boundary for those.
   const componentRoot = mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir
   const componentMigrator = platform === 'mintlify' || platform === 'docusaurus' || platform === 'fern'
-    ? createComponentMigrator(componentRoot, repositoryDir, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
+    ? createComponentMigrator(componentRoot, repositoryDir, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot, options.componentNamespace))
     : undefined
   let docsConfig: MigrationDocsConfig = { tabs: [] }
   // Literal leading path segments (e.g. "v1.15.22") that identify a

@@ -257,6 +257,7 @@ export function importSourceRef(mapping: SourceRefMapping, repositoryDir: string
     sourceUrl: `https://github.com/${mapping.repo}`,
     docsDir: '',
     platform: 'mintlify',
+    componentNamespace: mapping.mountPath,
   })
   const prefix = (message: string): string => `[${mapping.repo}] ${message}`
   const warnings: Array<MigrationWarning> = bundle.warnings.filter((warning) => !/dashboard access settings/i.test(warning.message)).slice(0, MAX_FORWARDED_WARNINGS).map((warning) => ({ ...warning, message: prefix(stripControlCharacters(withheldNotSaved(warning.message))), ...(warning.source ? { source: stripControlCharacters(warning.source) } : {}) }))

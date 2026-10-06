@@ -304,6 +304,35 @@ describe('sourceRef component links', () => {
   })
 })
 
+describe('sourceRef components shared with the main site', () => {
+  const shared = 'export const Link = () => <a href="/intro" onClick={() => 1}>go</a>\n'
+  const page = 'import { Link } from "/snippets/Link.jsx"\n\n---\ntitle: P\n---\n\n<Link />\n'
+
+  it('keeps an identical component per site, each with its own URLs', () => {
+    const sub = write(tmp(), {
+      'docs.json': JSON.stringify({ navigation: { pages: ['intro', 'p'] } }),
+      'intro.mdx': '---\ntitle: Intro\n---\nIntro.',
+      'p.mdx': page,
+      'snippets/Link.jsx': shared,
+    })
+    const main = mainRepo({
+      'docs.json': JSON.stringify({ navigation: { pages: ['introduction', 'p', { sourceRef: 'Acme/ts-sdk' }] } }),
+      'p.mdx': page,
+      'snippets/Link.jsx': shared,
+    })
+    const bundle = migrateRepository({ repositoryDir: main, sourceUrl: 'https://github.com/Acme/ts-sdk', platform: 'mintlify', sourceRefs: [importSourceRef(MAPPING, sub)] })
+    const files = bundle.componentFiles ?? []
+    const registry = String(files.find((file) => file.path === 'src/mdx/custom-components.tsx')?.content)
+    const tagOf = (id: string): string => bundle.pages.find((candidate) => candidate.id === id)!.body.match(/<(Migrated[0-9a-f]+)/)![1]
+    const sourceOf = (tag: string): string => {
+      const specifier = registry.match(new RegExp(`as ${tag} \\} from "\\./([^"]+)"`))![1]
+      return String(files.find((file) => file.path === `src/mdx/${specifier}`)!.content)
+    }
+    expect(sourceOf(tagOf('p'))).toContain('href="/intro"')
+    expect(sourceOf(tagOf('client-sdks/typescript/p'))).toContain('href="/client-sdks/typescript/intro"')
+  })
+})
+
 describe('sourceRef quarantine wording', () => {
   it('never claims a withheld sub-repository file was saved', () => {
     const repo = write(tmp(), {
