@@ -66,19 +66,24 @@ export function PageSlotsProvider({ children }: { children: ReactNode }) {
   const [activeView, setActiveViewState] = useState<string>()
 
   const [entries, setEntries] = useState<Array<ReadonlyArray<string>>>([])
-  const [rawSelectedTags, setSelectedTags] = useState<Array<string>>([])
+  const [rawSelectedTags, setSelectedTags] = useState<Array<string> | null>(null)
+  const [urlSearch, setUrlSearch] = useState('')
   const tagCounts = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const tags of entries) for (const tag of tags) counts[tag] = (counts[tag] ?? 0) + 1
     return counts
   }, [entries])
   // Selected tags no Update carries (a stale shared link) are ignored rather than hiding everything.
-  const selectedTags = useMemo(() => validSelectedTags(rawSelectedTags, tagCounts), [rawSelectedTags, tagCounts])
+  // Until the reader changes the filter, the shared URL is resolved against the registered tags, so a tag that contains a comma is not split.
+  const selectedTags = useMemo(
+    () => validSelectedTags(rawSelectedTags ?? parseTagsParam(urlSearch, tagCounts), tagCounts),
+    [rawSelectedTags, tagCounts, urlSearch],
+  )
 
   // Read the shared filter after hydration so server and client markup match.
   useEffect(() => {
-    const fromUrl = parseTagsParam(window.location.search)
-    if (fromUrl.length) startTransition(() => setSelectedTags(fromUrl))
+    const search = window.location.search
+    if (search) startTransition(() => setUrlSearch(search))
   }, [])
 
   const registerTags = useCallback((tags: ReadonlyArray<string>) => {
@@ -90,12 +95,10 @@ export function PageSlotsProvider({ children }: { children: ReactNode }) {
   const updateShown = useMemo(() => entries.filter((tags) => matchesSelectedTags(tags, selectedTags)).length, [entries, selectedTags])
 
   const toggleTag = useCallback((tag: string) => {
-    setSelectedTags((current) => {
-      const next = current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]
-      writeTagsParam(next)
-      return next
-    })
-  }, [])
+    const next = selectedTags.includes(tag) ? selectedTags.filter((item) => item !== tag) : [...selectedTags, tag]
+    setSelectedTags(next)
+    writeTagsParam(next)
+  }, [selectedTags])
 
   const clearTags = useCallback(() => {
     setSelectedTags([])

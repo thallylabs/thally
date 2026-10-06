@@ -15,11 +15,16 @@ export function tagsByCount(counts: Readonly<Record<string, number>>): string[] 
   return Object.keys(counts).filter((tag) => counts[tag] > 0).sort((a, b) => counts[b] - counts[a])
 }
 
-/** Parse `?tags=`: repeated params, plus the legacy comma-joined `?tags=A,B` form (each value is kept whole as well as split). */
-export function parseTagsParam(search: string): string[] {
+/**
+ * Parse `?tags=`: repeated params, plus the legacy comma-joined `?tags=A,B` form. With `counts`, a value
+ * that is itself a registered tag is kept whole and never split; without, both readings are returned.
+ */
+export function parseTagsParam(search: string, counts?: Readonly<Record<string, number>>): string[] {
   const out: string[] = []
   for (const value of new URLSearchParams(search).getAll('tags')) {
-    for (const tag of [value, ...(value.includes(',') ? value.split(',') : [])]) {
+    const exact = counts ? (counts[value] ?? 0) > 0 : false
+    const split = value.includes(',') && !exact ? value.split(',') : []
+    for (const tag of counts ? (split.length ? split : [value]) : [value, ...split]) {
       const trimmed = tag.trim()
       if (trimmed && !out.includes(trimmed)) out.push(trimmed)
     }

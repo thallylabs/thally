@@ -25,7 +25,16 @@ describe('update tag filters', () => {
     // a tag containing a comma survives the repeated-param round trip
     const url = new URL('https://x.test/c')
     for (const tag of ['Models, pricing', 'BYOK']) url.searchParams.append('tags', tag)
-    expect(parseTagsParam(url.search)).toEqual(expect.arrayContaining(['Models, pricing', 'BYOK']))
+    expect(parseTagsParam(url.search, { 'Models, pricing': 1, BYOK: 1 })).toEqual(['Models, pricing', 'BYOK'])
+  })
+
+  it('prefers an exact registered tag over the legacy comma split', () => {
+    const search = new URL('https://x.test/c?' + new URLSearchParams([['tags', 'Models, pricing']])).search
+    // both the comma tag and its parts exist: only the exact tag is restored
+    expect(parseTagsParam(search, { 'Models, pricing': 1, Models: 2, pricing: 1 })).toEqual(['Models, pricing'])
+    // no exact tag registered: fall back to the legacy split
+    expect(parseTagsParam(search, { Models: 2, pricing: 1 })).toEqual(['Models', 'pricing'])
+    expect(parseTagsParam('?tags=Schemas,BYOK', { Schemas: 1, BYOK: 1 })).toEqual(['Schemas', 'BYOK'])
   })
 
   it('swaps the table of contents for filters only on the changelog route', () => {
