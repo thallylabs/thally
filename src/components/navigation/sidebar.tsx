@@ -1,5 +1,7 @@
 'use client'
 
+/** Desktop page navigation without collection headings that duplicate tabs. */
+
 import { usePathname } from 'next/navigation'
 import type { NavigationNode, NavigationPresentation, NavigationSection, SidebarCollection, DocsNavigationShortcut } from '@/data/docs'
 import { Icon } from '@/components/mdx/rich-content'
@@ -20,6 +22,7 @@ interface SidebarProps {
   className?: string
 }
 
+/** Render page groups without repeating the active collection's tab label. */
 export function Sidebar({
   sections,
   title,
@@ -35,6 +38,12 @@ export function Sidebar({
   const shouldShowSelector = navigationPresentation.display === 'dropdown'
     && collections.length >= 2
     && Boolean(activeCollectionId && onCollectionChange)
+  // A single-collection dropdown has neither tabs nor a usable switcher, so
+  // retain its title as the reader's collection context.
+  const shouldShowTitle = navigationPresentation.display === 'dropdown'
+    && !shouldShowSelector
+    && shortcuts.length === 0
+  const hasCollectionHeader = shouldShowSelector || shouldShowTitle
 
   return (
     <aside
@@ -43,18 +52,21 @@ export function Sidebar({
       {/* Stay in the shell's flow so optional site banners reserve their own
           space above the brand, then pin the navigation once they scroll away. */}
       <div className={cn('sticky top-[var(--docs-header-height,60px)] flex h-[calc(100dvh-var(--docs-header-height,60px))] flex-col', layout.sidebarWidth, layout.sidebarPadding)}>
-        <div className="shrink-0 px-1 pt-1">
-          {shouldShowSelector ? (
-            <CollectionSelector
-              collections={collections}
-              activeCollectionId={activeCollectionId!}
-              onCollectionChange={onCollectionChange!}
-            />
-          ) : shortcuts.length === 0 ? (
-            <p className="line-clamp-1 px-2 text-sm font-semibold leading-6 text-foreground">{title}</p>
-          ) : null}
-        </div>
-        <nav className="scrollbar-hide mt-2.5 min-h-0 flex-1 space-y-8 overflow-y-auto overscroll-y-contain pb-5">
+        {/* Dropdown navigation needs collection context; tabs already supply it. */}
+        {hasCollectionHeader ? (
+          <div className="shrink-0 px-1 pt-1">
+            {shouldShowSelector ? (
+              <CollectionSelector
+                collections={collections}
+                activeCollectionId={activeCollectionId!}
+                onCollectionChange={onCollectionChange!}
+              />
+            ) : (
+              <p className="line-clamp-1 px-2 text-sm font-semibold leading-6 text-foreground">{title}</p>
+            )}
+          </div>
+        ) : null}
+        <nav className={cn('scrollbar-hide min-h-0 flex-1 space-y-8 overflow-y-auto overscroll-y-contain pb-5', hasCollectionHeader && 'mt-2.5')}>
           {shortcuts.length > 0 ? (
             <div className="space-y-px border-b border-border/60 pb-4">
               {shortcuts.map((shortcut) => (
@@ -73,8 +85,7 @@ export function Sidebar({
               ?? section.items.map((item) => ({ type: 'page' as const, item }))
             return (
               <div key={section.id ?? `${section.title}-${index}`} className="thally-docs-sidebar-group space-y-2.5">
-                {/* A group named after its tab would repeat the label directly
-                    beneath the tab heading; the items stand on their own. */}
+                {/* Keep distinct group headings, but avoid repeating the collection label. */}
                 {section.title !== title ? (
                   <p className={cn(typography.meta, 'flex items-center gap-2 px-2 text-sm font-semibold normal-case leading-6 tracking-normal text-foreground')}>
                     {showGroupIcons && section.icon ? (
