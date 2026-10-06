@@ -184,6 +184,7 @@
           "icon": "message",
           "pages": [
             "guides/ai-features",
+            "guides/agent-readiness",
             "guides/mcp-server"
           ]
         }
