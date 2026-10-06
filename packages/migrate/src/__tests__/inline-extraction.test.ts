@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import ts from 'typescript'
 import { createComponentMigrator } from '../components.js'
+import { isSelfContainedFunction } from '../inline-extraction.js'
 import type { MigrationWarning } from '../types.js'
 
 const roots: Array<string> = []
@@ -295,5 +297,42 @@ describe('a dependency that cannot move safely keeps the whole component in plac
     expect(new Set(modules.map((file) => file.path)).size).toBe(2)
     expect(modules.map((file) => String(file.content)).join('').match(/<em>one<\/em>/g)).toHaveLength(1)
     expect(modules.map((file) => String(file.content)).join('').match(/<em>two<\/em>/g)).toHaveLength(1)
+  })
+})
+
+describe('isSelfContainedFunction destructuring', () => {
+  const check = (source: string) => {
+    const sf = ts.createSourceFile('x.tsx', `const f = ${source}`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const statement = sf.statements[0] as ts.VariableStatement
+    return isSelfContainedFunction(statement.declarationList.declarations[0].initializer as ts.Node)
+  }
+
+  it('accepts plain destructuring', () => {
+    expect(check('({ a, b: { c } }) => a + c')).toBe(true)
+    expect(check('() => { const { length: n } = "abc"; const [x] = [1]; return n + x }')).toBe(true)
+    expect(check('(items) => { const { ["a"]: a } = items; return a }')).toBe(true)
+    expect(check('() => ({ constructorName: 1, [`k`]: 2 })')).toBe(true)
+  })
+
+  it.each([
+    ['declaration', '() => { const { constructor: C } = String; return C("return 123")() }'],
+    ['shorthand', '() => { const { constructor } = String; return constructor("return 1")() }'],
+    ['string key', '() => { const { "constructor": C } = String; return C("return 1")() }'],
+    ['computed string key', '() => { const { ["constructor"]: C } = String; return C("return 1")() }'],
+    ['computed template key', '() => { const { [`constructor`]: C } = String; return C("return 1")() }'],
+    ['computed dynamic key', '(k) => { const { [k]: C } = String; return C }'],
+    ['computed concatenated key', '() => { const { ["con" + "structor"]: C } = String; return C }'],
+    ['proto key', '() => { const { __proto__: P } = String; return P }'],
+    ['prototype key', '() => { const { prototype: P } = String; return P }'],
+    ['nested pattern', '() => { const { a: { constructor: C } } = { a: String }; return C }'],
+    ['parameter pattern', '({ constructor: C } = String) => C("return 1")()'],
+    ['nested parameter pattern', '({ a: [{ constructor: C }] }) => C'],
+    ['assignment pattern', '() => { let C; ({ constructor: C } = String); return C }'],
+    ['assignment shorthand', '() => { let constructor; ({ constructor } = String); return constructor }'],
+    ['assignment dynamic key', '(k) => { let C; ({ [k]: C } = String); return C }'],
+    ['nested assignment dynamic key', '(k) => { let C; [{ [k]: C }] = [String]; return C }'],
+    ['for-of target', '() => { let C; for ({ constructor: C } of [String]) return C }'],
+  ])('rejects %s', (_name, source) => {
+    expect(check(source)).toBe(false)
   })
 })

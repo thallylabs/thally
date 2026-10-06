@@ -24,13 +24,15 @@ interface OperationPanelProps {
   children?: React.ReactNode
   /** False when the page header already shows the page's authored description. */
   showDescription?: boolean
+  /** Renders the operation title as the page h1 (spec-only pages have no MDX header). */
+  showTitle?: boolean
   /** Mintlify `playground` display; `simple` has no Try it, `none` hides the endpoint bar too. */
   playground?: PlaygroundDisplay
   /** Locale of the page, for the panel's own labels. */
   locale?: string
 }
 
-export function OperationPanel({ operation, children, showDescription = true, playground = 'interactive', locale }: OperationPanelProps) {
+export function OperationPanel({ operation, children, showDescription = true, showTitle = false, playground = 'interactive', locale }: OperationPanelProps) {
   const t = (key: ApiLabelKey, n?: number) => apiLabel(locale, key, n)
   const controller = useTryItController(operation)
   const interactive = playground === 'interactive' && !operation.isWebhook
@@ -48,23 +50,31 @@ export function OperationPanel({ operation, children, showDescription = true, pl
     { title: t('cookieParameters'), location: 'cookie' as const, parameters: operation.parameters.cookie },
   ].filter((group) => group.parameters.length > 0)
 
+  const description = !showDescription ? null : operation.description ? (
+    <div className="prose prose-neutral dark:prose-invert max-w-none text-base text-foreground/70">
+      <Markdown>{operation.description}</Markdown>
+    </div>
+  ) : (
+    <p className="text-base text-foreground/70">
+      This endpoint handles {operation.method} requests for <code className="font-mono text-sm">{operation.path}</code>.
+      Review the request parameters and response schema below.
+    </p>
+  )
+
   return (
     <ApiLocaleProvider value={locale}>
     <div className="grid gap-12 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="space-y-10">
         {/* Header */}
         <header className="space-y-6">
+          {showTitle ? (
+            <h1 className="break-words font-heading text-4xl font-semibold leading-10 tracking-[-0.025em] text-foreground">
+              {operation.title}
+            </h1>
+          ) : null}
+          {showTitle ? description : null}
           <EndpointBar operation={operation} display={playground} onTryIt={() => setDialogOpen(true)} />
-          {!showDescription ? null : operation.description ? (
-            <div className="prose prose-neutral dark:prose-invert max-w-none text-base text-foreground/70">
-              <Markdown>{operation.description}</Markdown>
-            </div>
-          ) : (
-            <p className="text-base text-foreground/70">
-              This endpoint handles {operation.method} requests for <code className="font-mono text-sm">{operation.path}</code>.
-              Review the request parameters and response schema below.
-            </p>
-          )}
+          {showTitle ? null : description}
         </header>
 
         {children ? <Prose>{children}</Prose> : null}

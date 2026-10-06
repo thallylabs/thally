@@ -41,6 +41,19 @@ describe('fully readable collection tabs', () => {
     expect(html).toContain('&lt;Custom&gt;')
   })
 
+  it('renders a collection icon before its label and omits it when unset', () => {
+    const html = render([
+      { id: '0', label: 'Docs', href: '/docs', icon: 'book', sections: [] },
+      { id: '1', label: 'Plain', href: '/plain', sections: [] },
+    ])
+    const [withIcon, plain] = html.split('</a>')
+    expect(withIcon).toMatch(/<svg[\s\S]*<span title="Docs">Docs<\/span>/)
+    expect(plain).not.toContain('<svg')
+    // Logical margin, so the gap sits on the correct side in right-to-left layouts.
+    expect(withIcon).toMatch(/class="[^"]*\bme-1\.5\b/)
+    expect(withIcon).not.toContain('mr-1.5')
+  })
+
   it('keeps an empty collection list safe for CSS division', () => {
     expect(render([])).toContain('--collection-count:1')
   })

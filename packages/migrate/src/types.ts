@@ -70,6 +70,8 @@ export interface MigrationDocsConfig {
   markdown?: { enabled?: boolean }
   /** Local site-authored CSS projected from a source docs site, served from public/. */
   stylesheets?: Array<string>
+  /** `false` hides the breadcrumb trail; Mintlify pages show only a group eyebrow. */
+  breadcrumbs?: boolean
   tabs: Array<MigrationNavigationTab>
   navigation?: {
     /** How sibling documentation collections are presented to readers. */
@@ -103,6 +105,8 @@ export interface MigrationDocsConfig {
     mdx?: { server?: string | Array<string>; auth?: { method?: 'bearer' | 'basic' | 'key'; name?: string } }
     /** Mintlify `api.playground.display`; `auth` is carried as `simple`. */
     playground?: { display: 'interactive' | 'simple' | 'none' }
+    /** `false` hides the visible "OpenAPI specification" line; Mintlify does not show it. */
+    specLink?: boolean
   }
   /** Third-party analytics in Mintlify's `integrations` shape; validated again by the renderer. */
   integrations?: {
@@ -205,6 +209,8 @@ export interface MigrationBundle {
   quarantinedFiles?: Array<RenderedMigrationFile>
   /** Access-restricted pages the file limit dropped: neither published nor saved in quarantinedFiles. */
   droppedGatedPages?: number
+  /** Mintlify `sourceRef` repositories imported under a mount path, with their page counts. */
+  sourceRefs?: Array<{ repo: string; mountPath: string; pages: number }>
   docsConfig: MigrationDocsConfig
   site?: {
     name?: string

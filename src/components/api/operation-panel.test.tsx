@@ -25,6 +25,15 @@ describe('OperationPanel header', () => {
   })
 })
 
+describe('OperationPanel title', () => {
+  it('renders exactly one h1 with the operation title above the endpoint bar when showTitle is set', () => {
+    const html = renderToStaticMarkup(<OperationPanel operation={operationFrom(document)} showTitle />)
+    expect(html.match(/<h1/g)).toHaveLength(1)
+    expect(html).toMatch(/<h1[^>]*>Scrape a URL<\/h1>/)
+    expect(html.indexOf('<h1')).toBeLessThan(html.indexOf('/scrape'))
+  })
+})
+
 describe('OperationPanel webhook', () => {
   const hook = {
     openapi: '3.1.0',

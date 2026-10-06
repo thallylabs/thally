@@ -98,4 +98,26 @@ describe('automatic header navigation rows', () => {
     expect(html).not.toContain('position:fixed')
     expect(html).toContain('color:rgb(1, 2, 3)')
   })
+
+  it('marks every navbar link, buttons included, so its label stays visible at narrow widths', () => {
+    const html = renderToStaticMarkup(<TopBar
+      collections={[]}
+      activeCollectionId="0"
+      onCollectionChange={() => {}}
+      activeSections={[]}
+      navigationPresentation={{ display: 'tabs' }}
+      navbarConfig={{
+        primary: { label: 'GitHub', href: 'https://github.com/acme/widgets', type: 'github' },
+        links: [{ label: 'Docs', href: '/docs' }, { label: 'Sign Up', href: 'https://acme.dev/signin', button: { background: '#ff4d00' } }],
+      }}
+      siteLinks={[]}
+    />)
+    const links = [...html.matchAll(/<a [^>]*data-topbar-link[^>]*>/g)].map((match) => match[0])
+    // The repository link collapses to its icon; both navbar.links entries keep their label.
+    expect(links).toHaveLength(3)
+    expect(links.filter((link) => link.includes('data-topbar-text'))).toHaveLength(2)
+    expect(links.find((link) => link.includes('github.com'))).not.toContain('data-topbar-text')
+    // Many links shrink inside their own container instead of overflowing the header.
+    expect(html).toMatch(/class="[^"]*thally-docs-navlinks[^"]*min-w-0[^"]*overflow-hidden/)
+  })
 })
