@@ -469,8 +469,59 @@ describe('sourceRef mounts under restricted navigation', () => {
     expect(JSON.stringify(bundle.docsConfig)).not.toContain('client-sdks/typescript')
     expect(bundle.sourceRefs).toBeUndefined()
     const messages = bundle.warnings.map((warning) => warning.message)
-    expect(messages.filter((message) => /Acme\/ts-sdk.*restricted container.*not imported/.test(message))).toHaveLength(1)
+    expect(messages.filter((message) => /Acme\/ts-sdk.*restricted container\..*left out of the navigation.*make the container public/.test(message))).toHaveLength(1)
     expect(messages.some((message) => /matched no sourceRef/.test(message))).toBe(false)
     expect(JSON.stringify(bundle.pages.map((page) => page.body))).not.toContain('subonlymarker')
+  })
+})
+
+describe('sourceRef mounts under every kind of restricted container', () => {
+  const mount = { sourceRef: 'Acme/ts-sdk' }
+  const pub = ['introduction']
+  type Build = (gate: Record<string, unknown>, leaf: unknown) => Record<string, unknown>
+  const kinds: Record<string, Build> = {
+    group: (gate, leaf) => ({ pages: [...pub, { group: 'G', ...gate, pages: [leaf] }] }),
+    'nested group': (gate, leaf) => ({ pages: [...pub, { group: 'O', ...gate, pages: [{ group: 'I', pages: [leaf] }] }] }),
+    tab: (gate, leaf) => ({ tabs: [{ tab: 'T', ...gate, pages: [leaf] }, { tab: 'D', pages: pub }] }),
+    anchor: (gate, leaf) => ({ anchors: [{ anchor: 'A', ...gate, pages: [leaf] }, { anchor: 'B', pages: pub }] }),
+    dropdown: (gate, leaf) => ({ dropdowns: [{ dropdown: 'A', ...gate, pages: [leaf] }, { dropdown: 'B', pages: pub }] }),
+    product: (gate, leaf) => ({ products: [{ product: 'p', ...gate, pages: [leaf] }, { product: 'q', pages: pub }] }),
+    productGroup: (gate, leaf) => ({ productGroups: [{ group: 'PG', ...gate, products: [{ product: 'p', pages: [leaf] }] }, { group: 'PH', products: [{ product: 'q', pages: pub }] }] }),
+    version: (gate, leaf) => ({ versions: [{ version: 'v1', ...gate, pages: [leaf] }, { version: 'v2', pages: pub }] }),
+    language: (gate, leaf) => ({ languages: [{ language: 'en', default: true, pages: pub }, { language: 'fr', ...gate, pages: [leaf] }] }),
+    'language with tabs': (gate, leaf) => ({ languages: [{ language: 'en', default: true, pages: pub }, { language: 'fr', ...gate, tabs: [{ tab: 'T', pages: [leaf] }] }] }),
+    'tab menu item': (gate, leaf) => ({ tabs: [{ tab: 'T', menu: [{ item: 'M', ...gate, pages: [leaf] }] }, { tab: 'D', pages: pub }] }),
+    root: (gate, leaf) => ({ ...gate, pages: [leaf] }),
+  }
+  const gates: Array<[string, Record<string, unknown>]> = [['public: false', { public: false }], ['groups', { groups: ['admin'] }]]
+  const leaves: Array<[string, unknown]> = [['bare node', mount], ['wrapped in a group', { group: 'W', pages: [mount] }]]
+  const run = (navigation: Record<string, unknown>) => migrateRepository({
+    repositoryDir: mainRepo({ 'docs.json': JSON.stringify({ navigation }) }),
+    sourceUrl: 'https://github.com/example/docs',
+    platform: 'mintlify',
+    sourceRefs: [importSourceRef(MAPPING, sdkRepo({
+      'docs/overview.mdx': 'import { Foo } from "/snippets/Foo.jsx"\n\n---\ntitle: Overview\n---\n![logo](/images/logo.png)\n\n<Foo />\n',
+      'docs/snippets/Foo.jsx': 'export const Foo = () => <button onClick={() => 1}>subonlymarker</button>\n',
+    }))],
+  })
+
+  describe.each(Object.keys(kinds))('%s', (kind) => {
+    it.each(leaves)('mounts when unrestricted (%s)', (_name, leaf) => {
+      const bundle = run(kinds[kind]({}, leaf))
+      expect(bundle.pages.some((page) => page.id.startsWith('client-sdks/typescript/'))).toBe(true)
+      expect(bundle.assets.map((asset) => asset.path)).toContain('client-sdks/typescript/images/logo.png')
+    })
+
+    describe.each(gates)('restricted by %s', (_gateName, gate) => {
+      it.each(leaves)('withholds the mount (%s)', (_name, leaf) => {
+        const bundle = run(kinds[kind](gate, leaf))
+        expect(bundle.pages.some((page) => page.id.startsWith('client-sdks/typescript/'))).toBe(false)
+        expect(bundle.assets.some((asset) => asset.path.startsWith('client-sdks/typescript/'))).toBe(false)
+        expect(JSON.stringify(bundle.componentFiles ?? [])).not.toContain('subonlymarker')
+        expect(JSON.stringify(bundle.docsConfig)).not.toContain('client-sdks/typescript')
+        expect(bundle.sourceRefs).toBeUndefined()
+        expect(bundle.warnings.some((warning) => /Acme\/ts-sdk/.test(warning.message) && /restricted/.test(warning.message))).toBe(true)
+      })
+    })
   })
 })

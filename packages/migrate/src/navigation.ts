@@ -485,10 +485,29 @@ interface ProjectionContext {
   warningKeys: Set<string>
   gated: Array<MintlifyGatedReference>
   gatedSourceRefs: Array<string>
+  /** `sourceRef` nodes found under any restricted container, whichever container kind holds them. */
+  gatedNodes: Map<object, string>
   /** Label of the nearest enclosing navigation group, for warnings. */
   groupLabel?: string
   /** Set while walking below a restricted group or tab. */
   gateReason?: string
+}
+
+/**
+ * Container-agnostic sweep for `sourceRef` mounts under a restricted node of any kind, so a container
+ * the projection does not special-case can never publish a mount. Runs before conversion.
+ */
+function collectGatedSourceRefs(node: unknown, gate: string | undefined, out: Map<object, string>, depth = 0): void {
+  if (depth > 256) return
+  if (Array.isArray(node)) {
+    for (const item of node) collectGatedSourceRefs(item, gate, out, depth + 1)
+    return
+  }
+  const object = objectValue(node)
+  if (!object) return
+  const reason = gate ?? navigationGateReason(object)
+  if (reason && typeof object.sourceRef === 'string') out.set(object, reason)
+  for (const value of Object.values(object)) collectGatedSourceRefs(value, reason, out, depth + 1)
 }
 
 /**
@@ -608,8 +627,9 @@ function gatedSourceRef(repo: string, context: ProjectionContext): null {
   warnOnce(
     context,
     `source-ref-gated:${repo}`,
-    `Navigation mounts the docs of the repository ${repo} (sourceRef) inside a restricted container (${context.gateReason}), `
-      + 'so its pages, images and components were not imported and the mount was left out of the navigation.',
+    `Navigation mounts the docs of the repository ${repo} (sourceRef) inside a restricted container. `
+      + 'This restricted mount was left out of the navigation. To publish it, make the container public in docs.json, '
+      + 'or mount the repository under a public section.',
   )
   return null
 }
@@ -632,7 +652,7 @@ function convertPageObject(
     return null
   }
   if (typeof object.sourceRef === 'string') {
-    if (context.gateReason) return gatedSourceRef(object.sourceRef, context)
+    if (context.gateReason || context.gatedNodes.has(object)) return gatedSourceRef(object.sourceRef, context)
     const imported = context.resolveSourceRef?.(object.sourceRef)
     // Directly inside a group the entries are spliced into it (see below);
     // anywhere else they get a group named after the repository.
@@ -660,7 +680,7 @@ function convertPageObject(
         const pageObject = objectValue(page)
         const sourceRef = pageObject?.sourceRef
         // A restricted mount (its own rules or an enclosing container's) falls through to convertPage, which withholds it.
-        const imported = typeof sourceRef === 'string' && !context.gateReason && !navigationGateReason(pageObject!)
+        const imported = typeof sourceRef === 'string' && !context.gateReason && !navigationGateReason(pageObject!) && !context.gatedNodes.has(pageObject!)
           ? context.resolveSourceRef?.(sourceRef)
           : null
         if (imported) {
@@ -1314,7 +1334,9 @@ export function projectMintlifyNavigation(
   const warningKeys = new Set<string>()
   const gated: Array<MintlifyGatedReference> = []
   const gatedSourceRefs: Array<string> = []
+  const gatedNodes = new Map<object, string>()
   const navigation = objectValue(config.navigation) ?? config
+  collectGatedSourceRefs(navigation, undefined, gatedNodes)
   const languages = Array.isArray(navigation.languages)
     ? navigation.languages.flatMap((value): Array<Record<string, unknown>> => {
         const language = objectValue(value)
@@ -1363,6 +1385,7 @@ export function projectMintlifyNavigation(
         warningKeys,
         gated,
         gatedSourceRefs,
+        gatedNodes,
       }
       const languageTabs = convertContainerToTabs(
         language,
@@ -1379,7 +1402,7 @@ export function projectMintlifyNavigation(
     }
     if (Object.keys(localizedNavigation).length > 0) i18n.navigation = localizedNavigation
   } else {
-    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, gated, gatedSourceRefs, pathPrefix: options.pathPrefix, resolveSourceRef: options.resolveSourceRef }
+    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, gated, gatedSourceRefs, gatedNodes, pathPrefix: options.pathPrefix, resolveSourceRef: options.resolveSourceRef }
     tabs = convertContainerToTabs(navigation, context, 'Documentation', projectionTrace)
     if (tabs.length === 0 && Array.isArray(config.navigation)) {
       const children = convertNavigationValues(config.navigation, context)
