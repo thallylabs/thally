@@ -182,17 +182,20 @@ export function mainSiteLinkTarget(target: string, mountPath: string, index: Roo
   return undefined
 }
 
-/** Prefix every root-absolute link/image/asset target in a page body with the mount path, unless `resolve` places it elsewhere. */
-export function prefixRootLinks(body: string, mountPath: string, resolve?: (target: string) => string | undefined): string {
+/**
+ * Prefix every root-absolute link/image/asset target in a page body with the mount path, unless `resolve` places it elsewhere.
+ * Component source passes `markdown: false` so code that merely resembles a Markdown link is left alone.
+ */
+export function prefixRootLinks(body: string, mountPath: string, resolve?: (target: string) => string | undefined, markdown = true): string {
   const mounted = `/${mountPath}`
   // A link already under the mount path is left alone: prefixing it again would break it.
   const alreadyMounted = (target: string): boolean => target === mounted || ['/', '?', '#'].some((next) => target.startsWith(mounted + next))
   const fix = (target: string): string => alreadyMounted(target) ? target : resolve?.(target) ?? `${mounted}${target}`
   return replaceOutsideCodeAndComments(body, (text) => text
-    .replace(/(\]\(<?)(\/(?!\/)[^\s)>]*)/g, (_match, before: string, target: string) => `${before}${fix(target)}`)
+    .replace(markdown ? /(\]\(<?)(\/(?!\/)[^\s)>]*)/g : /(?!)/g, (_match, before: string, target: string) => `${before}${fix(target)}`)
     .replace(/(\b(?:href|src|to|poster)=(['"]))(\/(?!\/)[^'"\n]*)\2/g, (_match, before: string, quote: string, target: string) => `${before}${fix(target)}${quote}`)
     .replace(/(\b(?:href|src|to|poster)=\{\s*(['"]))(\/(?!\/)[^'"\n]*)\2(\s*\})/g, (_match, before: string, quote: string, target: string, after: string) => `${before}${fix(target)}${quote}${after}`)
-    .replace(/^(\[[^\]\n]+\]:[ \t]*<?)(\/(?!\/)\S*)/gm, (_match, before: string, target: string) => `${before}${fix(target)}`))
+    .replace(markdown ? /^(\[[^\]\n]+\]:[ \t]*<?)(\/(?!\/)\S*)/gm : /(?!)/g, (_match, before: string, target: string) => `${before}${fix(target)}`))
 }
 
 function prefixNavigation(

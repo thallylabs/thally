@@ -261,6 +261,49 @@ describe('sourceRef custom components', () => {
   })
 })
 
+describe('sourceRef component links', () => {
+  const component = [
+    'export const Nav = () => (',
+    '  <nav onClick={() => 1}>',
+    '    <a href="/overview">overview</a>',
+    '    <a href={"/overview#top"}>top</a>',
+    '    <img src="/images/logo.png" alt="" />',
+    '    <a href="/introduction">main site</a>',
+    '    <a href="/client-sdks/typescript/overview">already mounted</a>',
+    '    <a href="https://example.com/overview">external</a>',
+    '    <a href="//cdn.example.com/x">protocol relative</a>',
+    '    <a href="#anchor">anchor</a>',
+    '    <a href="mailto:a@b.co">mail</a>',
+    '    <button onClick={() => items[0](/re/)}>code</button>',
+    '  </nav>',
+    ')',
+    '',
+  ].join('\n')
+
+  it('prefixes root-absolute links and images in mounted component files like page bodies', () => {
+    const sub = write(tmp(), {
+      'docs.json': JSON.stringify({ navigation: { pages: ['overview'] } }),
+      'overview.mdx': 'import { Nav } from "/snippets/Nav.jsx"\n\n---\ntitle: Overview\n---\n\n<Nav />\n',
+      'snippets/Nav.jsx': component,
+      'images/logo.png': 'png',
+    })
+    const main = mainRepo({ 'docs.json': JSON.stringify({ navigation: { pages: ['introduction', { sourceRef: 'Acme/ts-sdk' }] } }) })
+    const bundle = migrateRepository({ repositoryDir: main, sourceUrl: 'https://github.com/example/docs', platform: 'mintlify', sourceRefs: [importSourceRef(MAPPING, sub)] })
+    const source = (bundle.componentFiles ?? []).map((file) => String(file.content)).find((content) => content.includes('main site'))!
+    expect(source).toContain('href="/client-sdks/typescript/overview"')
+    expect(source).toContain('href={"/client-sdks/typescript/overview#top"}')
+    expect(source).toContain('src="/client-sdks/typescript/images/logo.png"')
+    expect(source).toContain('href="/introduction"')
+    expect(source).toContain('href="https://example.com/overview"')
+    expect(source).toContain('href="//cdn.example.com/x"')
+    expect(source).toContain('href="#anchor"')
+    expect(source).toContain('href="mailto:a@b.co"')
+    expect(source).not.toContain('/client-sdks/typescript/client-sdks')
+    // code that merely looks like a Markdown link is left alone
+    expect(source).toContain('items[0](/re/)')
+  })
+})
+
 describe('sourceRef quarantine wording', () => {
   it('never claims a withheld sub-repository file was saved', () => {
     const repo = write(tmp(), {

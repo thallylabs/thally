@@ -4831,7 +4831,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     for (const asset of ref.assets) if (!knownAssets.has(asset.path)) sourceRefAssets.push(asset)
     // Pages keep their `<MigratedXXXX/>` tags, so the sub-site's component
     // files and registry entries must ship with them (hash ids avoid clashes).
-    if (ref.componentFiles?.length && componentMigrator) componentMigrator.adopt(ref.componentFiles)
+    // Their root-absolute links and images get the same mount prefix as the page bodies.
+    if (ref.componentFiles?.length && componentMigrator) {
+      componentMigrator.adopt(ref.componentFiles.map((file) => typeof file.content === 'string' && /\.(?:[cm]?[jt]sx?|mdx)$/.test(file.path) && file.path !== 'src/mdx/custom-components.tsx'
+        ? { ...file, content: prefixRootLinks(file.content, ref.mountPath, resolveLink, false) }
+        : file))
+    }
     importedSourceRefs.push({ repo: ref.repo, mountPath: ref.mountPath, pages: count })
     const unresolved = [...new Set(unresolvedLinks)]
     if (unresolved.length > 0) {
