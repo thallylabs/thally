@@ -588,9 +588,34 @@ const INLINE_SAFE_GLOBALS = new Set([
 ])
 const FORBIDDEN_MEMBERS = new Set(['constructor', 'prototype'])
 
-/** True when no member access in the node can walk to `Function` (`x.constructor`, `x['constructor']`, `x[key]`, `__proto__`). */
+/** True when a node sits where an object literal acts as a destructuring target (`({ a: x } = y)`, `[{ a: x }] = y`, `for ({ a: x } of y)`). */
+function isAssignmentTarget(node: ts.Node): boolean {
+  let child = node
+  for (let parent = node.parent; parent; child = parent, parent = parent.parent) {
+    if (ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken) return parent.left === child
+    if ((ts.isForOfStatement(parent) || ts.isForInStatement(parent)) && parent.initializer === child) return true
+    if (!(ts.isPropertyAssignment(parent) || ts.isShorthandPropertyAssignment(parent) || ts.isArrayLiteralExpression(parent)
+      || ts.isSpreadAssignment(parent) || ts.isSpreadElement(parent) || ts.isParenthesizedExpression(parent) || ts.isObjectLiteralExpression(parent))) return false
+  }
+  return false
+}
+
+/**
+ * True when no member access in the node can walk to `Function`: `x.constructor`, `x['constructor']`, `x[key]`,
+ * `__proto__`, and the same keys read through destructuring (`const { constructor: C } = String`, `({ [key]: C } = x)`).
+ */
 function hasOnlySafeMemberAccess(root: ts.Node): boolean {
   const unsafeName = (name: string) => FORBIDDEN_MEMBERS.has(name) || name.startsWith('__')
+  /** A property key is safe when it is a plain name or a static string/number that is not forbidden; any other computed key is not. */
+  const safeKey = (name: ts.PropertyName | undefined, computedAllowed: boolean): boolean => {
+    if (!name) return true
+    if (ts.isComputedPropertyName(name)) {
+      const expression = name.expression
+      if (ts.isStringLiteralLike(expression)) return !unsafeName(expression.text)
+      return ts.isNumericLiteral(expression) || computedAllowed
+    }
+    return !unsafeName(name.text)
+  }
   let safe = true
   function visit(node: ts.Node): void {
     if (!safe) return
@@ -599,6 +624,14 @@ function hasOnlySafeMemberAccess(root: ts.Node): boolean {
       const argument = node.argumentExpression
       const literal = ts.isNumericLiteral(argument) || (ts.isStringLiteralLike(argument) && !unsafeName(argument.text))
       if (!literal) safe = false
+    } else if (ts.isBindingElement(node)) {
+      // `{ constructor }` has no propertyName; the bound identifier is the key.
+      if (ts.isObjectBindingPattern(node.parent) && !safeKey(node.propertyName ?? (ts.isIdentifier(node.name) ? node.name : undefined), false)) safe = false
+    } else if (ts.isObjectLiteralExpression(node)) {
+      const target = isAssignmentTarget(node)
+      for (const property of node.properties) {
+        if ((ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) && !safeKey(property.name, !target)) safe = false
+      }
     }
     ts.forEachChild(node, visit)
   }
