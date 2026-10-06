@@ -101,7 +101,7 @@ Secrets never go in `docs.json`. Set them as server-side environment variables:
 | `THALLY_READER_JWKS_URL` | JWKS URL. Configure exactly one of the three. |
 | `THALLY_READER_OIDC_ISSUER`, `THALLY_READER_OIDC_CLIENT_ID`, `THALLY_READER_OIDC_CLIENT_SECRET` | OIDC client; override the `docs.json` values. |
 | `THALLY_READER_TOKEN_KEYS` | `kid:secret` pairs for agent tokens (see below). |
-| `THALLY_READER_ALLOW_DEV_SESSION_KEY` | Set to `1` to use a public development key on `localhost` only, instead of a session secret. Ignored in production. |
+| `THALLY_READER_ALLOW_DEV_SESSION_KEY` | Local previews only: `1` signs sessions with a **public** development key instead of a secret (ignored in production). Anyone who can reach the server can then forge a session with any groups, so never set it on a server others can reach. |
 
 Set `THALLY_SITE_URL` to your public origin in production: token audiences are
 checked against it, never against the request's `Host` header. Without it (and

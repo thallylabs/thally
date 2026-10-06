@@ -16,7 +16,7 @@ const config = vi.hoisted(() => ({
   auth: { mode: 'jwt', default: 'public' },
   markdown: { enabled: true },
   i18n: { defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }, { code: 'fr', label: 'Français' }] },
-  tabs: [{ tab: 'Docs', groups: [{ group: 'Guides', pages: ['guides/open', 'guides/secret'] }] }],
+  tabs: [{ tab: 'Docs', groups: [{ group: 'Guides', pages: ['guides/open', 'guides/secret', 'guides/only-fr', 'guides/nowhere'] }] }],
 }))
 
 vi.mock('@/lib/docs-json-config', () => ({ getDocsJsonConfig: () => config, getDocsJsonConfigRevision: () => 1 }))
@@ -51,6 +51,8 @@ beforeAll(async () => {
     'src/content/guides/secret.mdx': `---\ntitle: Secret roadmap\ngroups: [beta]\n---\n${MARKER} en-secret\n`,
     // The translation forgets `groups`: the primary's restriction still applies.
     'src/content/fr/guides/secret.mdx': `---\ntitle: Feuille de route\n---\n${MARKER} fr-secret\n`,
+    // A translation with no primary page: its title must not reach the sidebar.
+    'src/content/fr/guides/only-fr.mdx': '---\ntitle: Seulement en français\ngroups: [beta]\n---\nTexte\n',
   }
   const { mintAgentToken } = await import('@/lib/reader-auth/session')
   betaToken = (await mintAgentToken({ label: 'ci', groups: ['beta'], expiresInSeconds: 3600 })).token
@@ -95,6 +97,20 @@ describe('localized reader access', () => {
     const response = await GET(anonymous('/api/docs/fr/guides/open?format=json'), { params: Promise.resolve({ slug: ['fr', 'guides', 'open'] }) })
     expect(response.status).toBe(404)
     expect(await response.text()).not.toContain(MARKER)
+  })
+})
+
+describe('localized sidebar', () => {
+  it('hides a page whose translation alone restricts it, and a translation without a primary page', async () => {
+    const { getSidebarCollections } = await import('@/data/docs')
+    const { resolveReader } = await import('@/lib/reader-auth/context')
+    const anonymous = JSON.stringify(getSidebarCollections('fr'))
+    expect(anonymous).not.toContain('Guide restreint')
+    expect(anonymous).not.toContain('Seulement en français')
+    // A reference with no file at all keeps its slug-derived broken-link entry.
+    expect(anonymous).toContain('/fr/guides/nowhere')
+    const beta = await resolveReader(`Bearer ${betaToken}`, null)
+    expect(JSON.stringify(getSidebarCollections('fr', beta))).toContain('Guide restreint')
   })
 })
 

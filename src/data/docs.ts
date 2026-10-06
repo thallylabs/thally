@@ -1065,11 +1065,14 @@ export function getSidebarCollections(locale?: string, reader: ReaderContext = A
   if (sidebarCollectionsCache.has(cacheKey)) {
     return sidebarCollectionsCache.get(cacheKey)!
   }
-  // A navigation reference with no backing file reveals only its slug-derived
-  // title, so it keeps its existing (broken-link) entry; any file that exists
-  // is judged by its rules.
+  // A navigation reference with NO backing file at all (neither the primary
+  // nor the locale's translation) reveals only its slug-derived title, so it
+  // keeps its existing broken-link entry. If any file exists, its title could
+  // be shown, so the access rules decide (a translation without its primary
+  // page is closed).
   const isVisible: PageVisibility = (pageId, pageLocale) =>
-    readFrontmatter(pageId) === MISSING_FRONTMATTER ||
+    (readFrontmatter(pageId) === MISSING_FRONTMATTER &&
+      (!pageLocale || readFrontmatter(pageId, pageLocale) === MISSING_FRONTMATTER)) ||
     canReaderAccessPage(getPageAccess(pageId, pageLocale), reader, policy)
 
   const collections = ((locale ? config.i18n?.navigation?.[locale] : undefined) ?? config.tabs)

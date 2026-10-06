@@ -31,12 +31,11 @@ export async function resolveReader(
   authorization: string | null | undefined,
   sessionCookie: string | null | undefined,
   config: ReaderAuthConfig = getReaderAuthConfig(),
-  requestHost?: string | null,
 ): Promise<ReaderContext> {
   if (!config.isEnabled) return ANONYMOUS_READER
   const bearer = bearerFromAuthorization(authorization)
   if (bearer) return (await verifyAgentToken(bearer, config)) ?? ANONYMOUS_READER
-  return (await verifyReaderSession(sessionCookie, config, requestHost)) ?? ANONYMOUS_READER
+  return (await verifyReaderSession(sessionCookie, config)) ?? ANONYMOUS_READER
 }
 
 /**
@@ -54,7 +53,7 @@ export async function getReaderContextFromRequest(request: Request): Promise<Rea
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${cookieName}=`))
     ?.slice(cookieName.length + 1)
-  return resolveReader(request.headers.get('authorization'), sessionCookie, config, new URL(request.url).host)
+  return resolveReader(request.headers.get('authorization'), sessionCookie, config)
 }
 
 /**
@@ -65,5 +64,5 @@ export const getReaderContext = cache(async (): Promise<ReaderContext> => {
   const config = getReaderAuthConfig()
   if (!isReaderAuthActive(config)) return ANONYMOUS_READER
   const [cookieStore, headerStore] = await Promise.all([cookies(), headers()])
-  return resolveReader(headerStore.get('authorization'), cookieStore.get(readerSessionCookieName())?.value, config, headerStore.get('host'))
+  return resolveReader(headerStore.get('authorization'), cookieStore.get(readerSessionCookieName())?.value, config)
 })

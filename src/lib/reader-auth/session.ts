@@ -66,24 +66,19 @@ function foreignSecrets(): Array<string> {
   ].map((value) => value?.trim()).filter((value): value is string => Boolean(value))
 }
 
-/** Loopback hosts, where the public development key may be used. */
-export function isLoopbackHost(host: string | null | undefined): boolean {
-  if (!host) return false
-  const hostname = host.trim().toLowerCase().replace(/:\d+$/, '')
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname.endsWith('.localhost')
-}
-
 const DEV_SESSION_KEY_OPT_IN = ['THALLY_READER_ALLOW_DEV_SESSION_KEY', 'DOX_READER_ALLOW_DEV_SESSION_KEY']
 
 /**
  * The reader-session signing key, or null when reader sessions cannot be
- * issued safely. A dedicated ≥32-character secret is required everywhere,
- * except that local previews may opt in to a fixed, PUBLIC development key
- * with THALLY_READER_ALLOW_DEV_SESSION_KEY=1 — honored only outside
- * production and only for requests addressed to a loopback host, so a
- * forgotten opt-in on a reachable staging server cannot mint sessions.
+ * issued safely. A dedicated ≥32-character secret is required, except that
+ * a local preview may opt in to a fixed development key with
+ * THALLY_READER_ALLOW_DEV_SESSION_KEY=1 (ignored when NODE_ENV is
+ * `production`). That key is PUBLIC source code: with the opt-in set, anyone
+ * who can reach the server can forge a session with any groups. The request's
+ * Host header cannot limit this (clients choose it), so the opt-in must never
+ * be set on a server reachable by anyone else.
  */
-export function getReaderSessionKey(requestHost?: string | null): Uint8Array | null {
+export function getReaderSessionKey(): Uint8Array | null {
   const configured = readReaderEnv(READER_AUTH_ENV.sessionSecret)
   if (configured) {
     if (configured.length < MIN_SECRET_LENGTH) return null
@@ -96,10 +91,8 @@ export function getReaderSessionKey(requestHost?: string | null): Uint8Array | n
     }
     return new TextEncoder().encode(configured)
   }
-  // The development key is public source code; it must never sign a session
-  // a non-local client could present.
   const isOptedIn = DEV_SESSION_KEY_OPT_IN.some((name) => process.env[name]?.trim() === '1')
-  return process.env.NODE_ENV !== 'production' && isOptedIn && isLoopbackHost(requestHost)
+  return process.env.NODE_ENV !== 'production' && isOptedIn
     ? new TextEncoder().encode('thally-dev-reader-session-key-not-secret')
     : null
 }
@@ -119,9 +112,8 @@ export interface ReaderSessionClaims {
 export async function signReaderSession(
   claims: { subject?: string; groups: ReadonlyArray<string>; expiresAt?: number },
   config: ReaderAuthConfig = getReaderAuthConfig(),
-  requestHost?: string | null,
 ): Promise<{ token: string; maxAgeSeconds: number } | null> {
-  const key = getReaderSessionKey(requestHost)
+  const key = getReaderSessionKey()
   if (!key) return null
   const now = Math.floor(Date.now() / 1000)
   const ceiling = now + config.sessionMaxAgeSeconds
@@ -150,9 +142,8 @@ export async function signReaderSession(
 export async function verifyReaderSession(
   token: string | undefined | null,
   config: ReaderAuthConfig = getReaderAuthConfig(),
-  requestHost?: string | null,
 ): Promise<ReaderContext | null> {
-  const key = getReaderSessionKey(requestHost)
+  const key = getReaderSessionKey()
   if (!key || !token || token.length > 4096) return null
   try {
     const { payload } = await jwtVerify(token, key, {

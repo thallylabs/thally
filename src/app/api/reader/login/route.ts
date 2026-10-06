@@ -34,7 +34,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   if (!settings) return readerAuthFailure(request, 503, 'reader_oidc_not_configured')
   let started: Awaited<ReturnType<typeof startReaderOidcFlow>>
   try {
-    started = await startReaderOidcFlow(settings, `${readerCallbackOrigin(request)}${READER_OIDC_CALLBACK_PATH}`, returnPath, request.nextUrl.host)
+    started = await startReaderOidcFlow(settings, `${readerCallbackOrigin(request)}${READER_OIDC_CALLBACK_PATH}`, returnPath)
   } catch {
     return readerAuthFailure(request, 502, 'reader_oidc_discovery_failed')
   }

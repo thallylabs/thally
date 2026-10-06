@@ -89,18 +89,25 @@ describe('reader sessions', () => {
     expect(await verifyReaderSession(current, bumped)).not.toBeNull()
   })
 
-  it('uses the public development key only with an explicit opt-in on a loopback host', async () => {
+  it('uses the public development key only with an explicit opt-in outside production, whatever the Host', async () => {
     vi.stubEnv('THALLY_READER_SESSION_SECRET', '')
     vi.stubEnv('NODE_ENV', 'development')
-    expect(await signReaderSession({ groups: [] }, config, 'localhost:3040')).toBeNull()
+    expect(await signReaderSession({ groups: [] }, config)).toBeNull()
     vi.stubEnv('THALLY_READER_ALLOW_DEV_SESSION_KEY', '1')
-    const local = await signReaderSession({ groups: [] }, config, 'localhost:3040')
-    expect(local).not.toBeNull()
-    expect(await signReaderSession({ groups: [] }, config, 'staging.example.com')).toBeNull()
-    expect(await verifyReaderSession(local!.token, config, 'staging.example.com')).toBeNull()
-    expect(await verifyReaderSession(local!.token, config, '127.0.0.1:3040')).not.toBeNull()
+    const dev = await signReaderSession({ groups: [] }, config)
+    expect(dev).not.toBeNull()
+    expect(await verifyReaderSession(dev!.token, config)).not.toBeNull()
+    // Production ignores the opt-in entirely, including for already-issued dev sessions.
     vi.stubEnv('NODE_ENV', 'production')
-    expect(await signReaderSession({ groups: [] }, config, 'localhost')).toBeNull()
+    expect(await signReaderSession({ groups: [] }, config)).toBeNull()
+    expect(await verifyReaderSession(dev!.token, config)).toBeNull()
+  })
+
+  it('never lets a client-chosen Host header unlock the development key', async () => {
+    const { readFileSync } = await import('node:fs')
+    const sources = ['src/lib/reader-auth/session.ts', 'src/lib/reader-auth/context.ts', 'src/lib/reader-auth/oidc.ts']
+      .map((file) => readFileSync(file, 'utf8')).join('\n')
+    expect(sources).not.toMatch(/requestHost|isLoopbackHost|get\('host'\)/)
   })
 
   it('has no production fallback key', async () => {

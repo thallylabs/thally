@@ -41,7 +41,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   const params = request.nextUrl.searchParams
   const code = params.get('code')
   const state = params.get('state')
-  const flow = await verifyReaderOidcFlow(request.cookies.get(READER_OIDC_FLOW_COOKIE)?.value, request.nextUrl.host)
+  const flow = await verifyReaderOidcFlow(request.cookies.get(READER_OIDC_FLOW_COOKIE)?.value)
   if (!flow || !state || !safeEqual(state, flow.state)) return clearFlow(readerAuthFailure(request, 403, 'reader_oidc_state_mismatch'))
   // The provider reported an error (user cancelled, consent denied, …).
   if (!code || params.has('error')) return clearFlow(readerAuthFailure(request, 401, 'reader_oidc_denied'))

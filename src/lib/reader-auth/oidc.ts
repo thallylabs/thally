@@ -138,8 +138,8 @@ export interface ReaderOidcFlow {
   returnPath: string
 }
 
-async function signFlow(flow: ReaderOidcFlow, requestHost?: string | null): Promise<string | null> {
-  const key = getReaderSessionKey(requestHost)
+async function signFlow(flow: ReaderOidcFlow): Promise<string | null> {
+  const key = getReaderSessionKey()
   if (!key) return null
   return new SignJWT({ ...flow })
     .setProtectedHeader({ alg: 'HS256', typ: FLOW_TYPE })
@@ -151,8 +151,8 @@ async function signFlow(flow: ReaderOidcFlow, requestHost?: string | null): Prom
 }
 
 /** Verify the flow cookie; null when absent, expired, or forged. */
-export async function verifyReaderOidcFlow(token: string | undefined, requestHost?: string | null): Promise<ReaderOidcFlow | null> {
-  const key = getReaderSessionKey(requestHost)
+export async function verifyReaderOidcFlow(token: string | undefined): Promise<ReaderOidcFlow | null> {
+  const key = getReaderSessionKey()
   if (!key || !token || token.length > 4096) return null
   try {
     const { payload } = await jwtVerify(token, key, {
@@ -190,7 +190,6 @@ export async function startReaderOidcFlow(
   settings: ReaderOidcSettings,
   redirectUri: string,
   returnPath: string,
-  requestHost?: string | null,
 ): Promise<{ url: string; flowCookie: string } | null> {
   const discovery = await discover(settings.issuer)
   const flow: ReaderOidcFlow = {
@@ -199,7 +198,7 @@ export async function startReaderOidcFlow(
     codeVerifier: randomToken(48),
     returnPath,
   }
-  const flowCookie = await signFlow(flow, requestHost)
+  const flowCookie = await signFlow(flow)
   if (!flowCookie) return null
   const challenge = createHash('sha256').update(flow.codeVerifier).digest('base64url')
   const params = new URLSearchParams({

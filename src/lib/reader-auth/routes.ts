@@ -100,7 +100,7 @@ export async function completeReaderSignIn(
 ): Promise<Response | null> {
   const referenced = await loadReferencedReaderGroups()
   const groups = identity.groups.filter((group) => referenced.has(group))
-  const session = await signReaderSession({ ...identity, groups }, getReaderAuthConfig(), request.nextUrl.host)
+  const session = await signReaderSession({ ...identity, groups }, getReaderAuthConfig())
   if (!session) return null
   // Browsers silently drop oversized cookies, which would loop the reader
   // through sign-in; refuse clearly instead.
