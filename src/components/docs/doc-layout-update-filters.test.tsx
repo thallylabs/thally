@@ -1,12 +1,9 @@
 /** A shared `?tags=` link must only filter where the layout renders the controls to undo it. */
 
-// @vitest-environment node
+// @vitest-environment happy-dom
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-// domino is a transitive DOM implementation (turndown); the repo has no jsdom/happy-dom.
-// @ts-expect-error its typings are not a module
-import domino from '@mixmark-io/domino'
 import type { DocEntry } from '@/data/docs'
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/changelog' }))
@@ -44,15 +41,10 @@ let container: HTMLElement
 let root: Root
 
 beforeEach(() => {
-  const window = domino.createWindow('<!doctype html><body><div id="root"></div></body>', 'http://localhost/changelog?tags=API')
-  Object.assign(globalThis, {
-    window,
-    document: window.document,
-    requestAnimationFrame: () => 0,
-    CustomEvent: window.CustomEvent,
-    IS_REACT_ACT_ENVIRONMENT: true,
-  })
-  container = window.document.getElementById('root') as HTMLElement
+  window.history.replaceState(null, '', '/changelog?tags=API')
+  document.body.innerHTML = '<div id="root"></div>'
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+  container = document.getElementById('root') as HTMLElement
   root = createRoot(container)
 })
 
@@ -63,7 +55,7 @@ afterEach(() => {
 async function render(mode: DocEntry['mode']): Promise<{ hidden: number; visible: number; chips: number; clear: boolean }> {
   const doc = { id: 'changelog', href: '/changelog', mode } as DocEntry
   await act(async () => { root.render(<DocLayout doc={doc}>{updates()}</DocLayout>) })
-  const all = (selector: string) => Array.from({ length: container.querySelectorAll(selector).length }, (_, i) => container.querySelectorAll(selector)[i] as HTMLElement)
+  const all = (selector: string) => Array.from(container.querySelectorAll<HTMLElement>(selector))
   const articles = all('article.u')
   return {
     hidden: articles.filter((el) => el.hidden).length,
