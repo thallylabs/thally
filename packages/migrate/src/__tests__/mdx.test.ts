@@ -3,7 +3,7 @@
 import { compileSync } from '@mdx-js/mdx'
 import { describe, expect, it } from 'vitest'
 
-import { mintlifyHeadingSlug, escapeFernLiteralBraces, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
+import { mintlifyHeadingSlug, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, hasClientBoundaryFunctionProp, normalizeHtmlComments, normalizeMdx, parseMarkdownPage, removeUndefinedExpressions, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from '../mdx.js'
 
 describe('maskCode placeholder safety (via normalizeMdx)', () => {
   it('strips a literal NUL from the source so it cannot collide with a placeholder marker', () => {
@@ -72,6 +72,18 @@ describe('migration description fallback', () => {
 })
 
 describe('normalizeMdx', () => {
+  it('pins Mintlify step titles to plain text unless the source sets titleSize', () => {
+    expect(normalizeMdx('<Steps>\n<Step title="A">x</Step>\n</Steps>', 'mintlify')).toContain('<Steps titleSize="p">')
+    expect(normalizeMdx('<Steps className="x">\n</Steps>', 'mintlify')).toContain('<Steps className="x" titleSize="p">')
+    expect(normalizeMdx('<Steps titleSize="h3">\n</Steps>', 'mintlify')).toBe('<Steps titleSize="h3">\n</Steps>')
+    for (const platform of ['fern', 'docusaurus'] as const) expect(normalizeMdx('<Steps>\n</Steps>', platform)).not.toContain('titleSize')
+    expect(normalizeMdx('<Steps />', 'mintlify')).toBe('<Steps titleSize="p" />')
+    expect(normalizeMdx('<Steps className="x"/>', 'mintlify')).toBe('<Steps className="x" titleSize="p" />')
+    expect(normalizeMdx('<Steps />', 'mintlify')).not.toContain('/ titleSize')
+    expect(normalizeMdx('<Steps className={a > b}>\n</Steps>', 'mintlify')).toContain('<Steps className={a > b} titleSize="p">')
+    expect(normalizeMdx('<Steps titleSize="h2" />', 'mintlify')).toBe('<Steps titleSize="h2" />')
+  })
+
   it('projects a static Docusaurus useBaseUrl require without changing code samples', () => {
     const body = "<a href={require('@docusaurus/useBaseUrl').default('showcase')}>Showcase</a>\n\n```jsx\n<a href={require('@docusaurus/useBaseUrl').default('showcase')} />\n```"
     const output = normalizeMdx(body, 'docusaurus')
@@ -1389,5 +1401,179 @@ describe('normalizeHtmlComments', () => {
   it('leaves plain text with no comment unchanged', () => {
     const body = 'Just prose, no comments here.'
     expect(normalizeHtmlComments(body)).toBe(body)
+  })
+})
+
+describe('removeUndefinedExpressions', () => {
+  function run(body: string): { out: string; warnings: Array<string> } {
+    const warnings: Array<string> = []
+    return { out: removeUndefinedExpressions(body, (message) => warnings.push(message)), warnings }
+  }
+
+  it('removes an undefined text expression and warns once with the names', () => {
+    const { out, warnings } = run('Owned by exactly one of {backfill, MV}. Also {other}.')
+    expect(out).toBe('Owned by exactly one of . Also .')
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('"backfill"')
+    expect(warnings[0]).toContain('"MV"')
+    expect(warnings[0]).toContain('\\{ \\}')
+    // Applies to every source platform, so it never names one.
+    expect(warnings[0]).toBe('Expressions that use "backfill", "MV", "other" were removed so the page builds: the names are not defined on this page. Define the names or escape the braces as \\{ \\} to show the text.')
+  })
+
+  it('keeps expressions that use real runtime globals', () => {
+    const body = '{crypto.randomUUID()} {new Blob([])} {escape(x)} {eval("1")} {WebAssembly.validate} {Iterator} {self} {screen.width} {new EventTarget()} {unescape("a")}'
+    const { out, warnings } = run(body.replace(/x/g, '"x"'))
+    expect(warnings).toEqual([])
+    expect(out).toContain('crypto.randomUUID()')
+  })
+
+  it('removes an undefined flow expression and an undefined attribute expression', () => {
+    const { out, warnings } = run('{missing}\n\n<Card title="x" href={base} />')
+    expect(out).not.toContain('missing')
+    expect(out).toBe('\n\n<Card title="x"  />')
+    expect(warnings).toHaveLength(1)
+  })
+
+  it('keeps names the page exports or imports', () => {
+    const body = "import { z } from './z'\n\nexport const x = 1\n\nValue {x} and {z}."
+    const { out, warnings } = run(body)
+    expect(out).toBe(body)
+    expect(warnings).toEqual([])
+  })
+
+  it('keeps expression-local bindings and exported data', () => {
+    const body = "export const items = [1, 2]\n\n{items.map(x => x * 2)}\n\n{items.map(function (y) { return y })}"
+    expect(run(body).out).toBe(body)
+  })
+
+  it('keeps JS built-ins and props', () => {
+    const body = '{Math.max(1, 2)} and {new Date().getFullYear()} and {props.title}'
+    const { out, warnings } = run(body)
+    expect(out).toBe(body)
+    expect(warnings).toEqual([])
+  })
+
+  it('keeps comment-only expressions', () => {
+    const body = '{/* note */}\n\ntext {/* a */}'
+    expect(run(body).out).toBe(body)
+  })
+
+  it('does not touch code fences or inline code', () => {
+    const body = 'Use `{backfill}`.\n\n```js\nconst a = {backfill}\n```'
+    expect(run(body).out).toBe(body)
+  })
+
+  it('removes an undefined expression but keeps the inlined value', () => {
+    const body = 'export const NAME = "x"\n\n{NAME} {gone}'
+    expect(run(body).out).toBe('export const NAME = "x"\n\n{NAME} ')
+  })
+
+  it('keeps an identifier that is only the operand of typeof, which never throws', () => {
+    const body = "{typeof zzz === 'undefined' ? 'a' : 'b'}"
+    const { out, warnings } = run(body)
+    expect(out).toBe(body)
+    expect(warnings).toEqual([])
+    expect(run('{typeof zzz.a}').out).toBe('')
+  })
+
+  it('keeps the own name of a class expression or a function expression used inside it', () => {
+    const body = '{new (class Foo { m() { return Foo } })().m().name} {(function fact(n) { return n <= 1 ? 1 : n * fact(n - 1) })(3)}'
+    const { out, warnings } = run(body)
+    expect(out).toBe(body)
+    expect(warnings).toEqual([])
+  })
+
+  it('does not report `meta` for import.meta', () => {
+    const { warnings } = run('{import.meta.url} {gone}')
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('"gone"')
+    expect(warnings[0]).not.toContain('"meta"')
+  })
+})
+
+describe('escapeUnmatchedClosingTags', () => {
+  const compiles = (src: string) => { compileSync(src, { outputFormat: 'program' }) }
+
+  it('repairs the real OpenRouter apikeys snippet (escaped opener, bare closer) and keeps its text', () => {
+    const real = [
+      '## update',
+      '',
+      'Update an existing API key. Authenticate with a [management key](/docs/guides/overview/auth/management-api-keys).',
+      '',
+      '\\<Warning>',
+      "You can't change `workspace_id` through the API. The request body accepts only the fields listed below, and unrecognized fields are ignored.",
+      '</Warning>',
+      '',
+      '### Example Usage: invalid_parameters',
+      '',
+    ].join('\n')
+    expect(() => compiles(real)).toThrow(/Unexpected closing slash/)
+    const out = escapeUnmatchedClosingTags(real)
+    expect(out.lines).toEqual([7])
+    expect(() => compiles(out.body)).not.toThrow()
+    expect(out.body).toContain("You can't change `workspace_id` through the API.")
+  })
+
+  it('leaves balanced and nested same-name tags untouched', () => {
+    const src = '<Note>\n<Note>\ninner\n</Note>\n</Note>\n'
+    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
+  })
+
+  it('ignores closers inside code fences and inline code', () => {
+    const src = '```html\n</Warning>\n```\n\nUse `</Warning>` here.\n'
+    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
+  })
+
+  it('is linear on a long whitespace run inside an unfinished tag', () => {
+    const src = `<a${' '.repeat(80_000)}x`
+    const start = performance.now()
+    expect(escapeUnmatchedClosingTags(src)).toEqual({ body: src, lines: [] })
+    expect(performance.now() - start).toBeLessThan(200)
+  })
+
+  it('counts an opener whose brace attribute contains angle brackets', () => {
+    const src = '<Card icon={<Icon />}>\nbody\n</Card>\n</Card>\n'
+    const out = escapeUnmatchedClosingTags(src)
+    expect(out.lines).toEqual([4])
+    expect(out.body).toBe('<Card icon={<Icon />}>\nbody\n</Card>\n\\</Card>\n')
+    expect(escapeUnmatchedClosingTags('<Card icon={<Icon />}>\nbody\n</Card>\n')).toEqual({ body: '<Card icon={<Icon />}>\nbody\n</Card>\n', lines: [] })
+  })
+
+  it('is linear on adversarial input', () => {
+    const src = '<A '.repeat(50_000) + '</B>'.repeat(10_000) + '<A x'.repeat(10_000)
+    const start = performance.now()
+    escapeUnmatchedClosingTags(src)
+    expect(performance.now() - start).toBeLessThan(500)
+  })
+
+  it('is linear on repeated unterminated brace or quote openers', () => {
+    for (const unit of ['<a {', '<a "']) {
+      for (const run of [(s: string) => escapeUnmatchedClosingTags(s), (s: string) => normalizeMdx(s.replaceAll('<a', '<Steps'), 'mintlify')]) {
+        const start = performance.now()
+        run(unit.repeat(100_000))
+        expect(performance.now() - start).toBeLessThan(200)
+      }
+    }
+  })
+})
+
+describe('replaceOutsideCodeAndComments', () => {
+  const upper = (text: string): string => text.toUpperCase()
+
+  it('leaves closed comments alone and transforms the rest', () => {
+    expect(replaceOutsideCodeAndComments('a {/* b */} c { /* d */ } e {/* f */ x} g {/* h */}', upper))
+      .toBe('A {/* b */} C { /* d */ } E {/* f */ x} g {/* h */}')
+    // an opener whose first `*/` is not followed by `}` runs on to the next closing `*/ }`
+    expect(replaceOutsideCodeAndComments('a {/* b */ x} c {/* d */} e', upper)).toBe('A {/* b */ x} c {/* d */} E')
+    expect(replaceOutsideCodeAndComments('a {/* open', upper)).toBe('A {/* OPEN')
+  })
+
+  it('stays linear on many unclosed or unmatched comment openers', () => {
+    for (const body of ['{/*'.repeat(50_000), '{/*'.repeat(50_000) + '*/ x'.repeat(50_000), `${'{/*'.repeat(50_000)}*/ }`]) {
+      const started = Date.now()
+      replaceOutsideCodeAndComments(body, upper)
+      expect(Date.now() - started).toBeLessThan(500)
+    }
   })
 })

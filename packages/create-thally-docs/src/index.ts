@@ -10,7 +10,7 @@ import {
   resolveAutoDetectedMigrationSource,
 } from './prompts.js'
 import { scaffold } from './scaffold.js'
-import { parseGitHubRepositoryUrl } from '@thallylabs/migrate'
+import { parseGitHubRepositoryUrl, parseSourceRefFlags, type SourceRefMapping } from '@thallylabs/migrate'
 import { migrateDocs } from './migrate/index.js'
 import { runCheck } from './check.js'
 import { runTranslateCommand } from './translate.js'
@@ -35,6 +35,7 @@ const valueFlags = new Set([
   '--model',
   '--pages',
   '--platform',
+  '--source-ref',
 ])
 
 const commandFlags = {
@@ -49,6 +50,7 @@ const commandFlags = {
     '--max-pages',
     '--platform',
     '--skip-validation',
+    '--source-ref',
     '--verbose',
     '--yes',
     '-y',
@@ -99,6 +101,8 @@ Options:
   --docs-dir <path>    Override the detected documentation directory
   --max-pages <count>  Limit a public URL crawl to 1-1000 pages
   --platform <name>    Use mintlify, docusaurus, fern, or auto
+  --source-ref <owner/repo>=<path>
+                       Import a Mintlify sourceRef repository under <path> (repeatable)
   --skip-validation   Import only; explicitly skip content and build verification
   --verbose           Show detailed installation, build, and Git output
   --api-key <key>      Anthropic API key for non-Markdown conversion
@@ -238,6 +242,20 @@ async function runMigrateCommand(): Promise<void> {
   if (docsDir) terminal.detail('Docs dir', docsDir)
   terminal.detail('Platform', platform ?? 'auto-detect')
 
+  let sourceRefs: Array<SourceRefMapping>
+  try {
+    const sourceRefValues = args.flatMap((arg, index) => {
+      if (arg !== '--source-ref') return []
+      const value = args[index + 1]
+      if (value === undefined || value.startsWith('-')) throw new Error('--source-ref needs a value such as owner/repo=client-sdks/typescript.')
+      return [value]
+    })
+    sourceRefs = parseSourceRefFlags(sourceRefValues)
+  } catch (err) {
+    console.error(`\n  ❌ ${err instanceof Error ? err.message : err}`)
+    process.exit(1)
+  }
+
   const result = await migrateDocs({
     sourceUrl,
     projectDir,
@@ -249,6 +267,7 @@ async function runMigrateCommand(): Promise<void> {
     platform,
     yes,
     skipValidation: flags.includes('--skip-validation'),
+    sourceRefs,
   })
   terminal.section('Migration summary', [
     `${result.pagesWritten} pages · ${result.assetsWritten} assets · ${result.platform}`,

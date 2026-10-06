@@ -765,6 +765,81 @@ describe('repository component migration', () => {
     expect(String(copied.content)).toMatch(/^\/\/ @ts-nocheck\n'use client';/)
   })
 
+  it('leaves a pure copied component a server module so it can read and rewrite the children it is given (a children-walking template), while anything interactive stays client', () => {
+    const root = fixture({
+      'src/Template.jsx': 'export const Template = ({ children, data }) => { const walk = (n) => typeof n === "string" ? n.replace(/\\{\\{(\\w+)\\}\\}/g, (_, k) => data[k]) : n; return <>{walk(children)}</> }',
+      'src/Hook.jsx': 'export const Hook = () => { const [n] = useState(0); return <p>{n}</p> }',
+      'src/Handler.jsx': 'export const Handler = () => <button onClick={() => 1}>x</button>',
+      'src/Browser.jsx': 'export const Browser = () => <p>{window.innerWidth}</p>',
+      'src/Ctx.jsx': 'import { createContext } from "react"\nexport const C = createContext(1)\nexport const Ctx = () => null',
+      'src/Declared.jsx': "'use client'\nexport const Declared = () => <p>x</p>",
+    })
+    const warnings: Array<MigrationWarning> = []
+    const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+    migrator.transform(["import { Template } from './src/Template.jsx'", "import { Hook } from './src/Hook.jsx'", "import { Handler } from './src/Handler.jsx'",
+      "import { Browser } from './src/Browser.jsx'", "import { Ctx } from './src/Ctx.jsx'", "import { Declared } from './src/Declared.jsx'",
+      '', '<Template data={{ A: "b" }}>{{A}}</Template>', '', '<Hook />', '', '<Handler />', '', '<Browser />', '', '<Ctx />', '', '<Declared />'].join('\n'), join(root, 'index.mdx'))
+    const content = (name: string) => String(migrator.files().find((file) => file.path.endsWith(`/${name}.jsx`))!.content)
+    expect(content('Template')).not.toContain('use client')
+    for (const name of ['Hook', 'Handler', 'Browser', 'Ctx', 'Declared']) expect(content(name)).toContain("'use client';")
+  })
+
+  it('keeps a client boundary for every interactive or browser-bound pattern, and only a plain children-walker stays a server module', () => {
+    const client: Record<string, string> = {
+      ReactState: 'import React from "react"\nexport const ReactState = () => { const [n] = React.useState(0); return <p>{n}</p> }',
+      ReactEffect: 'import React from "react"\nexport const ReactEffect = () => { React.useEffect(() => {}, []); return null }',
+      Ctx2: 'import { useContext } from "react"\nexport const Ctx2 = () => { useContext(null); return null }',
+      Forward: 'import { forwardRef } from "react"\nexport const Forward = forwardRef((p, ref) => <div ref={ref} />)',
+      ForwardNoHandler: 'import React from "react"\nexport const ForwardNoHandler = React.forwardRef((p, r) => null)',
+      Klass: 'import React from "react"\nexport class Klass extends React.Component { render() { this.setState({}); return null } }',
+      Nav: 'export const Nav = () => <p>{navigator.userAgent}</p>',
+      Loc: 'export const Loc = () => <p>{location.href}</p>',
+      Media: 'export const Media = () => <p>{String(matchMedia("(min-width: 1px)").matches)}</p>',
+      Obs: 'export const Obs = () => { new IntersectionObserver(() => {}); return null }',
+      Raf: 'export const Raf = () => { requestAnimationFrame(() => {}); return null }',
+      Timeout: 'export const Timeout = () => { setTimeout(() => {}, 1); return null }',
+      Interval: 'export const Interval = () => { setInterval(() => {}, 1); return null }',
+      Passthrough: 'export const Passthrough = (props) => <button onClick={props.onClick}>x</button>',
+      Spread: 'export const Spread = (props) => <div {...props} />',
+      Handler2: 'export const Handler2 = ({ onClick }) => <p>{typeof onClick}</p>',
+      Listener: 'export const Listener = ({ node }) => { node.addEventListener("x", () => {}); return null }',
+      HookAlias: 'import React from "react"\nconst h = React.useState\nexport const HookAlias = () => <p>{String(h)}</p>',
+    }
+    const pure: Record<string, string> = {
+      PureDefault: 'import React from "react"\nexport const PureDefault = ({ children }) => <div>{React.Children.map(children, (c) => c)}</div>',
+      PureSpreadComponent: 'import React from "react"\nconst Inner = ({ children }) => <>{children}</>\nexport const PureSpreadComponent = (props) => <Inner {...props} />',
+    }
+    const files: Record<string, string> = {}
+    const names = [...Object.keys(client), ...Object.keys(pure)]
+    for (const [name, source] of Object.entries({ ...client, ...pure })) files[`src/${name}.jsx`] = source
+    const root = fixture(files)
+    const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+    migrator.transform([...names.map((name) => `import { ${name} } from './src/${name}.jsx'`), '', ...names.map((name) => `<${name} />`)].join('\n'), join(root, 'index.mdx'))
+    const content = (name: string) => String(migrator.files().find((file) => file.path.endsWith(`/${name}.jsx`))!.content)
+    for (const name of Object.keys(client)) expect(content(name), name).toContain("'use client';")
+    for (const name of Object.keys(pure)) expect(content(name), name).not.toContain('use client')
+  })
+
+  it('makes every module that imports a client module a client module, and leaves a pure Template untouched', () => {
+    const root = fixture({
+      'src/util.js': 'export const fmt = (key) => localStorage.getItem(key)\n',
+      'src/Foo.jsx': 'import { fmt } from "./util.js"\nexport const Foo = () => <p>{fmt("a")}</p>\n',
+      'src/Outer.jsx': 'import { Foo } from "./Foo.jsx"\nexport const Outer = () => <Foo />\n',
+      'src/theme.js': 'import { useState } from "react"\nexport default function theme() { return useState("a")[0] }\n',
+      'src/Themed.jsx': 'import theme from "./theme.js"\nexport const Themed = () => <p>{theme()}</p>\n',
+      'src/Directive.jsx': "'use client'\nexport const Directive = () => <p>x</p>\n",
+      'src/Template.jsx': 'export const Template = ({ children }) => <>{children}</>\n',
+      'src/Wrapper.jsx': 'import { Template } from "./Template.jsx"\nexport const Wrapper = ({ children }) => <Template>{children}</Template>\n',
+    })
+    const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+    const names = ['Outer', 'Themed', 'Directive', 'Wrapper']
+    migrator.transform([...names.map((name) => `import { ${name} } from './src/${name}.jsx'`), '', ...names.map((name) => `<${name} />`)].join('\n'), join(root, 'index.mdx'))
+    const content = (name: string) => String(migrator.files().find((file) => file.path.endsWith(`/${name}.${name === 'util' || name === 'theme' ? 'js' : 'jsx'}`))!.content)
+    for (const name of ['util', 'Foo', 'Outer', 'theme', 'Themed']) expect(content(name), name).toContain("'use client';")
+    for (const name of ['Template', 'Wrapper']) expect(content(name), name).not.toContain('use client')
+    expect(content('Directive').match(/use client/g)).toHaveLength(1)
+  })
+
   it('keeps a leading shebang on line 1 instead of burying it under the @ts-nocheck prologue', () => {
     const root = fixture({
       'src/Script.tsx': '#!/usr/bin/env node\nexport default function Script() { return null; }',
@@ -775,7 +850,7 @@ describe('repository component migration', () => {
     const copied = migrator.files().find((file) => file.path.endsWith('/Script.tsx'))!
     const content = String(copied.content)
     expect(content.split('\n')[0]).toBe('#!/usr/bin/env node')
-    expect(content).toMatch(/^#!\/usr\/bin\/env node\n\/\/ @ts-nocheck\n'use client';/)
+    expect(content).toMatch(/^#!\/usr\/bin\/env node\n\/\/ @ts-nocheck\n/)
   })
 
   it('copies a component that imports @docusaurus/Link, mapping it to next/link and to= to href=', () => {
@@ -1109,7 +1184,7 @@ describe('propsTargetExtractedClientComponent', () => {
   })
 
   it('is false when the tag is neither extracted nor a confirmed client built-in, even with a matching prop', () => {
-    const body = '<Steps RenderComponent={CustomBlock} />'
+    const body = '<Card RenderComponent={CustomBlock} />'
     expect(propsTargetExtractedClientComponent(body, new Set(['CustomBlock']))).toBe(false)
   })
 
@@ -1134,7 +1209,7 @@ describe('propsTargetExtractedClientComponent', () => {
   })
 
   it('is false for an inline arrow function on a tag that is neither extracted nor a confirmed client built-in', () => {
-    const body = '<Steps onToggle={() => console.log(1)}>x</Steps>'
+    const body = '<Card onToggle={() => console.log(1)}>x</Card>'
     expect(propsTargetExtractedClientComponent(body, new Set())).toBe(false)
   })
 
@@ -1168,7 +1243,7 @@ describe('propsTargetExtractedClientComponent', () => {
 
 describe('hasAnyFunctionValuedProp', () => {
   it('is true for an inline function prop even on an unconfirmed tag (the broader, unconfirmed signal)', () => {
-    const body = '<Steps onToggle={() => console.log(1)}>x</Steps>'
+    const body = '<Card onToggle={() => console.log(1)}>x</Card>'
     expect(hasAnyFunctionValuedProp(body, new Set())).toBe(true)
   })
 

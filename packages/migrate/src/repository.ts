@@ -30,7 +30,8 @@ import { basename, dirname, extname, isAbsolute, posix, relative, resolve as res
 import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
 
-import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent } from './components.js'
+import { isSelfContainedFunction } from './inline-extraction.js'
+import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent, unresolvedRelativeModuleSpecifiers } from './components.js'
 import { navbarLinkButtons, projectAuthoredStyles } from './source-styles.js'
 
 import {
@@ -52,8 +53,10 @@ import { projectFernNavigation, readFernConfig } from './fern.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
+import { mainSiteLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
+import { type BrandVars, brandColorsFromVars, cssBrandVars } from './css-colors.js'
 import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
-import { closeOpenFence, escapeFernLiteralBraces, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -98,6 +101,8 @@ const FRONTMATTER_HEAD_BYTES = 65_536
 const MAX_WITHHELD_SCAN_BYTES = MAX_PAGE_BYTES * 8
 /** Per-page warnings for restricted pages the file budget dropped; the rest are counted in one more. */
 const MAX_DROPPED_GATED_WARNINGS = 20
+/** Per-site cap on generated Mintlify endpoint redirects, so a huge spec cannot flood the redirect table. */
+const MAX_ENDPOINT_REDIRECTS = 2_000
 const MAX_ASSET_BYTES = 25_000_000
 // A referenced screenshot or animation is part of the page, not a spare
 // repository asset. Allow a larger individual file while retaining a firm
@@ -192,6 +197,8 @@ export interface RepositoryMigrationOptions {
   sourceUrl: string
   docsDir?: string
   platform?: MigrationPlatform
+  /** @internal Mount path of a sourceRef import; keeps its component files separate from any other copy of the same source. */
+  componentNamespace?: string
   /** @internal Prefix used by additional Docusaurus docs-plugin instances. */
   docusaurusRoutePrefix?: string
   /** @internal Prevent recursive discovery while importing one plugin root. */
@@ -206,6 +213,8 @@ export interface RepositoryMigrationOptions {
   maxSourceFiles?: number
   /** @internal Redirects are global config, read once, not per plugin instance. */
   docusaurusSkipRedirects?: boolean
+  /** Mintlify `sourceRef` repositories already fetched and prepared by `importSourceRef`. */
+  sourceRefs?: ReadonlyArray<SourceRefImport>
 }
 
 interface DocusaurusPluginRoot {
@@ -914,11 +923,13 @@ export async function cloneGitHubRepository(
   source: GitHubRepositorySource,
   targetDir: string,
   warnings?: Array<MigrationWarning>,
+  /** Untrusted referenced repositories: never follow their `.gitmodules` to further remotes. */
+  options: { skipSubmodules?: boolean } = {},
 ): Promise<void> {
   for (let attempt = 1; attempt <= CLONE_RETRY_ATTEMPTS; attempt++) {
     try {
       await cloneOnce(source, targetDir)
-      await initSubmodules(targetDir, warnings ?? [])
+      if (!options.skipSubmodules) await initSubmodules(targetDir, warnings ?? [])
       return
     } catch (error) {
       const retryable = error instanceof Error && RETRYABLE_CLONE_ERROR.test(error.message)
@@ -1389,6 +1400,8 @@ interface ResolvedApiSpec {
   sourcePath: string
   /** Mintlify's object-form `{ source, directory }` scoping directory, if any — the prefix its auto-generated operation pages live under. */
   directory?: string
+  /** Mintlify generates this spec's endpoint pages (no published page names its operations itself), so Thally should list them in the sidebar too. */
+  generatedNavigation?: boolean
 }
 
 function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): Array<MintlifyApiSpecReference> {
@@ -1480,7 +1493,7 @@ function resolveMintlifyApiSpecs(
     if (reference.directory) {
       warnings.push({
         code: 'unsupported-config',
-        message: `The OpenAPI spec "${reference.value}"${tabSuffix} was limited to pages under "${reference.directory}" in the source, but Thally's API reference always covers a whole tab, so it was migrated as the tab's full API reference. Update any links to "${reference.directory}/..." pages manually.`,
+        message: `The OpenAPI spec "${reference.value}"${tabSuffix} was limited to pages under "${reference.directory}" in the source, but Thally's API reference always covers a whole tab, so it was migrated as the tab's full API reference. Links in page bodies and Mintlify endpoint URLs under "${reference.directory}/<tag>/<operation>" are redirected to the matching endpoints where one exists (a separate warning counts any endpoint redirects that were skipped); check any other links to "${reference.directory}/..." manually.`,
       })
     }
     specs.push({
@@ -1567,6 +1580,16 @@ const FERN_CRUD_METHOD_NAMES: Record<string, string> = {
 }
 
 /** Kebab-case a label the way Mintlify slugs its auto-generated OpenAPI operation pages (tag folder, operation leaf). */
+/**
+ * Mintlify's URL slug for a tag or operation title, as served by live sites
+ * (149/149 of an OpenAPI site's endpoint URLs): lower-cased, punctuation
+ * dropped rather than hyphenated ("alpha.decisions" -> "alphadecisions",
+ * "intern's" -> "interns"), "&" kept, whitespace -> "-".
+ */
+export function mintlifyUrlSlug(value: string): string {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}_\s&-]/gu, '').trim().replace(/\s+/g, '-').replace(/-+/g, '-')
+}
+
 function mintlifyOperationSlugSegment(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 }
@@ -1666,6 +1689,10 @@ interface ApiOperationLinkMaps {
    * this prefix that didn't match any known operation.
    */
   prefixLandings: Map<string, string>
+  /** Canonical Mintlify endpoint URL (original case) -> Thally operation route, for redirects. */
+  mintlifyPages: Map<string, string>
+  /** Mintlify endpoint URLs that two operations share; the first operation keeps the URL. */
+  duplicatePages: Array<string>
 }
 
 function apiOperationLinkMap(
@@ -1674,6 +1701,8 @@ function apiOperationLinkMap(
 ): ApiOperationLinkMaps {
   const map = new Map<string, string>()
   const prefixLandings = new Map<string, string>()
+  const mintlifyPages = new Map<string, string>()
+  const duplicatePages: Array<string> = []
   const apiTabs = docsConfig.tabs.filter((tab) => !tab.hidden && tab.api)
   apiTabs.forEach((tab, index) => {
     const source = sources.find((entry) => tab.api?.source === specAssetPath(entry.filename))
@@ -1713,6 +1742,18 @@ function apiOperationLinkMap(
       // of them in practice) and avoids guessing which convention and
       // which leaf a given source actually used.
       const tagSegment = mintlifyOperationSlugSegment(operation.tag ?? 'default')
+      const mintlifyTag = mintlifyUrlSlug(operation.tag ?? 'default')
+      const mintlifyLeaf = mintlifyUrlSlug(operation.summary?.trim() || operation.operationId?.trim() || `${operation.method} ${operation.path}`)
+      const canonical = `${source.prefix}/${mintlifyTag}/${mintlifyLeaf}`.replace(/^\/+|\/+$/g, '')
+      if (mintlifyTag && mintlifyLeaf) {
+        if (!mintlifyPages.has(canonical)) mintlifyPages.set(canonical, thallyHref)
+        else if (mintlifyPages.get(canonical) !== thallyHref && !duplicatePages.includes(canonical)) duplicatePages.push(canonical)
+      }
+      if (mintlifyTag && mintlifyLeaf && !map.has(canonical.toLowerCase())) map.set(canonical.toLowerCase(), thallyHref)
+      // Mintlify redirects a bare tag URL to that tag's first operation.
+      const tagRoot = `${source.prefix}/${mintlifyTag}`.replace(/^\/+|\/+$/g, '')
+      if (mintlifyTag && !mintlifyPages.has(tagRoot)) mintlifyPages.set(tagRoot, thallyHref)
+      if (mintlifyTag && !map.has(tagRoot.toLowerCase())) map.set(tagRoot.toLowerCase(), thallyHref)
       for (const leaf of leafCandidates) {
         if (!leaf) continue
         const tagged = `${source.prefix}/${tagSegment}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
@@ -1722,7 +1763,7 @@ function apiOperationLinkMap(
       }
     }
   })
-  return { operationLinks: map, prefixLandings }
+  return { operationLinks: map, prefixLandings, mintlifyPages, duplicatePages }
 }
 
 /** Rewrite API operation links in every page body, with one capped warning for links that matched no operation. */
@@ -2083,7 +2124,45 @@ function statefulSnippetDeclaration(source: string, componentName: string): stri
   return source.trim()
 }
 
-/** Read only primitive named exports; source MDX is parsed, never executed. */
+/** True for primitives and object/array literals built only from primitives (no calls, spreads, identifiers or computed keys). */
+function isStaticLiteral(expression: ts.Expression): boolean {
+  if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression) || ts.isNumericLiteral(expression)) return true
+  if (expression.kind === ts.SyntaxKind.TrueKeyword || expression.kind === ts.SyntaxKind.FalseKeyword || expression.kind === ts.SyntaxKind.NullKeyword) return true
+  if (ts.isArrayLiteralExpression(expression)) return expression.elements.every(isStaticLiteral)
+  if (ts.isObjectLiteralExpression(expression)) {
+    return expression.properties.every((property) => (
+      ts.isPropertyAssignment(property) && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) && isStaticLiteral(property.initializer)
+    ))
+  }
+  return false
+}
+
+/** Names a snippet exports, from its parsed source: declarations and `export { a as b }` lists. */
+function snippetExportedNames(source: string): Set<string> {
+  const names = new Set<string>()
+  const addBinding = (name: ts.BindingName) => {
+    if (ts.isIdentifier(name)) names.add(name.text)
+    else for (const element of name.elements) if (!ts.isOmittedExpression(element)) addBinding(element.name)
+  }
+  const parsed = ts.createSourceFile('snippet.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  for (const statement of parsed.statements) {
+    if (ts.isExportDeclaration(statement)) {
+      if (statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+        for (const element of statement.exportClause.elements) names.add(element.name.text)
+      }
+      continue
+    }
+    const modifiers = ts.getModifiers(statement as ts.HasModifiers)
+    if (!modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) continue
+    // `export default function Foo` binds the default export, not a named `Foo`.
+    if (modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword)) continue
+    if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) addBinding(declaration.name)
+    else if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) names.add(statement.name.text)
+  }
+  return names
+}
+
+/** Read only static named exports (primitives, plain object/array literals); source MDX is parsed, never executed. */
 function staticNamedSnippetValues(source: string): Map<string, string> {
   const values = new Map<string, string>()
   const parsed = ts.createSourceFile('snippet.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -2098,6 +2177,10 @@ function staticNamedSnippetValues(source: string): Map<string, string> {
         values.set(declaration.name.text, expression.text)
       } else if (expression.kind === ts.SyntaxKind.TrueKeyword || expression.kind === ts.SyntaxKind.FalseKeyword) {
         values.set(declaration.name.text, expression.kind === ts.SyntaxKind.TrueKeyword ? 'true' : 'false')
+      } else if (/^[a-z_$]/.test(declaration.name.text) && (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) && isSelfContainedFunction(expression)) {
+        values.set(declaration.name.text, expression.getText(parsed))
+      } else if ((ts.isObjectLiteralExpression(expression) || ts.isArrayLiteralExpression(expression)) && isStaticLiteral(expression)) {
+        values.set(declaration.name.text, expression.getText(parsed))
       }
     }
   }
@@ -2400,6 +2483,17 @@ function resolveSnippetPath(
       : relative(repositoryRoot, resolvePath(dirname(currentFile), sourcePath)).replace(/\\/g, '/')
   const candidate = resolveWithin(repositoryRoot, repositoryRelative)
   resolveWithin(repositoryRoot, relative(repositoryRoot, candidate))
+  return withinRealRoot(candidate, repositoryRoot)
+}
+
+/** Throws when an existing path resolves, through a symlink, outside the repository; a path that does not exist is returned unchanged. */
+function withinRealRoot(candidate: string, repositoryRoot: string): string {
+  let real: string
+  try { real = realpathSync(candidate) } catch { return candidate }
+  const realRoot = realpathSync(repositoryRoot)
+  if (real !== realRoot && !real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) {
+    throw new Error(`Migration path escapes its root: ${candidate}`)
+  }
   return candidate
 }
 
@@ -2438,6 +2532,74 @@ function globalSnippetAliases(
     }
   }
   return aliases
+}
+
+/** Every snippet file's exported component names (named, or a default export under the file's own name), keyed by name. Gated files count too, so ambiguity is never hidden. */
+function snippetExportIndex(files: Array<ScannedFile>): Map<string, Set<string>> {
+  const index = new Map<string, Set<string>>()
+  const add = (name: string, path: string) => { if (/^[A-Z][A-Za-z0-9_]*$/.test(name)) index.set(name, (index.get(name) ?? new Set()).add(path)) }
+  for (const file of files) {
+    const extension = extname(file.relativePath).toLowerCase()
+    if (!file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
+      || !['.jsx', '.tsx', '.js', '.ts', '.mdx'].includes(extension)) continue
+    let source: string
+    try {
+      if (lstatSync(file.absolutePath).size > MAX_PAGE_BYTES) continue
+      source = readFileSync(file.absolutePath, 'utf8')
+      if (!/\bexport\b/.test(source)) continue // nothing to parse: a large prose snippet must not cost a TypeScript parse
+      for (const name of snippetExportedNames(source)) add(name, file.absolutePath)
+    } catch { continue } // unreadable or unparseable (a pathological file can overflow the parser): not a candidate
+    if (extension !== '.mdx') {
+      const parsed = ts.createSourceFile('snippet.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+      const hasDefault = parsed.statements.some((statement) => (ts.isExportAssignment(statement) && !statement.isExportEquals)
+        || ts.getModifiers(statement as ts.HasModifiers)?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword))
+      if (hasDefault) add(basename(file.relativePath).replace(/\.[^.]+$/, ''), file.absolutePath)
+    }
+  }
+  return index
+}
+
+/**
+ * Mintlify renders an unimported component as empty, so a page can use one its
+ * snippets define without importing it. When exactly one snippet exports the
+ * name, prepend the import the author left out, so the ordinary import
+ * handling (size cap, gates, symlink containment) resolves it; any other
+ * outcome leaves the page for the plain-div fallback.
+ */
+function importUndeclaredSnippetComponents(
+  raw: string,
+  currentFile: string,
+  repositoryRoot: string,
+  siteRoot: string,
+  exportIndex: Map<string, Set<string>>,
+  aliases: Map<string, string>,
+  gate: InlineGate | undefined,
+  warnings: Array<MigrationWarning>,
+): string {
+  if (exportIndex.size === 0) return raw
+  const names = new Set<string>()
+  replaceUnknownComponents(raw, (name) => names.add(name))
+  const statements: Array<string> = []
+  for (const name of names) {
+    const matches = exportIndex.get(name)
+    if (matches?.size !== 1 || aliases.has(name)) continue
+    const [match] = matches
+    const specifier = '/' + relative(siteRoot, match).replace(/\\/g, '/')
+    try {
+      const candidate = resolveSnippetPath(specifier, currentFile, repositoryRoot, siteRoot)
+      if (candidate !== match || !lstatSync(candidate).isFile() || gate?.(candidate)) continue
+      const named = snippetExportedNames(readFileSync(candidate, 'utf8')).has(name)
+      statements.push(named ? `import { ${name} } from '${specifier}'` : `import ${name} from '${specifier}'`)
+      warnings.push({
+        code: 'unsupported-config',
+        message: `<${name}> is used without an import; it was resolved to ${specifier.slice(1)} (the only snippet exporting that name). Mintlify renders unimported components as empty, so this page now shows content the live site does not.`,
+        source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+      })
+    } catch { /* unreadable or outside the root: keep the fallback */ }
+  }
+  if (statements.length === 0) return raw
+  const prefix = raw.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)?.[0] ?? ''
+  return `${prefix}${statements.join('\n')}\n\n${raw.slice(prefix.length)}`
 }
 
 function repositoryAssetHref(
@@ -2652,6 +2814,9 @@ function inlineMdxSnippets(
           snippets.set(componentName, blocked)
           return ''
         }
+        // An upper-case primitive export (`API_KEY_REF`) matches the component
+        // pattern; leave it for the value-import pass that declares it.
+        if (namedComponent && staticNamedSnippetValues(readFileSync(candidate, 'utf8')).has(namedComponent)) return _statement
         const nested = inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
           candidate,
@@ -2666,7 +2831,14 @@ function inlineMdxSnippets(
         if (declaration) preservedDeclarations.set(componentName, declaration)
         else snippets.set(componentName, snippetComponentBody(nested, componentName))
         return ''
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('escapes its root')) {
+          warnings.push({
+            code: 'unsupported-config',
+            message: `Import of ${sourcePath} resolves outside the repository and was NOT inlined.`,
+            source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+          })
+        }
         // Disabled JSX examples may import a snippet that no longer exists.
         // An unused import is safe to drop without a missing-page warning.
         let hasLiveUsage = false
@@ -2685,7 +2857,7 @@ function inlineMdxSnippets(
       }
     },
   ))
-  withoutImports = replaceOutsideCodeAndMdxComments(withoutImports, (source) => source.replace(
+  withoutImports = replaceOutsideCodeAndMdxComments(withoutImports, (segment) => segment.replace(
     SNIPPET_VALUE_IMPORT_PATTERN,
     (statement: string, names: string, sourcePath: string) => {
       const bindings = names.split(',').map((name) => name.trim()).filter(Boolean).map((name) => {
@@ -2710,20 +2882,50 @@ function inlineMdxSnippets(
         const values = staticNamedSnippetValues(snippetSource)
         const declarations: Array<string> = []
         const components: Array<[string, string]> = []
+        let exportedNames: Set<string> | undefined
         for (const binding of bindings) {
           const value = values.get(binding!.exported)
           if (value !== undefined) {
             declarations.push(`export const ${binding!.local} = ${value};`)
             continue
           }
-          if (!/^[A-Z]/.test(binding!.exported)) return statement
-          const body = snippetComponentBody(snippetSource, binding!.exported)
-          if (body === snippetSource) return statement
+          exportedNames ??= snippetExportedNames(snippetSource)
+          const exported = exportedNames.has(binding!.exported)
+          if (!exported && !(/^[A-Z]/.test(binding!.exported) && snippetComponentBody(snippetSource, binding!.exported) !== snippetSource)) {
+            // Mintlify binds a name its snippet does not export to undefined, which renders as nothing.
+            warnings.push({
+              code: 'unsupported-config',
+              message: `"${binding!.exported}" is not exported by ${sourcePath}. Mintlify renders it as empty, so it was bound to undefined; add the export to the snippet to show a value.`,
+              source,
+            })
+            declarations.push(`export const ${binding!.local} = undefined;`)
+            continue
+          }
+          const body = /^[A-Z]/.test(binding!.exported) ? snippetComponentBody(snippetSource, binding!.exported) : snippetSource
+          if (body === snippetSource) {
+            warnings.push({
+              code: 'unsupported-config',
+              message: `Import of "${binding!.exported}" from ${sourcePath} could not be inlined (it is not a static value, a self-contained function or a simple component), so it was bound to undefined. Define "${binding!.exported}" in the page or replace its uses.`,
+              source,
+            })
+            // Keeping the import would be stripped later and leave the other
+            // names of the same import undefined too.
+            if (/^[A-Z]/.test(binding!.exported)) snippets.set(binding!.local, mdxComment(` Removed <${binding!.local}>: could not be inlined `))
+            declarations.push(`export const ${binding!.local} = undefined;`)
+            continue
+          }
           components.push([binding!.local, body])
         }
         for (const [name, body] of components) snippets.set(name, body)
         return declarations.join('\n')
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('escapes its root')) {
+          warnings.push({
+            code: 'unsupported-config',
+            message: `Import of ${sourcePath} resolves outside the repository and was NOT inlined.`,
+            source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
+          })
+        }
         return statement
       }
     },
@@ -2778,7 +2980,7 @@ function inlineMdxSnippets(
         // Mintlify's documented form is relative to `snippets/`; sites also write
         // the full `/snippets/x.mdx` (or a page-relative) path.
         const candidate = [
-          () => resolveWithin(siteRoot, `snippets/${filePath}`),
+          () => withinRealRoot(resolveWithin(siteRoot, `snippets/${filePath}`), repositoryRoot),
           () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
         ].map((resolveCandidate) => {
           try { return resolveCandidate() } catch { return undefined }
@@ -2826,7 +3028,7 @@ function inlineMdxSnippets(
  */
 function injectOpenApiSpecs(
   config: MigrationDocsConfig,
-  specs: Array<{ filename: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean }>,
+  specs: Array<{ filename: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean; generatedNavigation?: boolean }>,
   warnings?: Array<MigrationWarning>,
 ): MigrationDocsConfig {
   const tabs = config.tabs.map((tab) => ({ ...tab }))
@@ -2848,8 +3050,10 @@ function injectOpenApiSpecs(
       apiTab.api = {
         source: specAssetPath(spec.filename),
         // An API-only tab needs generated endpoint navigation; an authored
-        // page tab keeps its own groups alongside the bound spec.
-        ...((apiTab.groups?.length || apiTab.pages?.length) ? { navigation: false } : {}),
+        // page tab keeps its own groups alongside the bound spec, unless
+        // Mintlify generated the endpoint pages (the renderer appends the
+        // endpoint groups after the authored ones).
+        ...((apiTab.groups?.length || apiTab.pages?.length) && !spec.generatedNavigation ? { navigation: false } : {}),
       }
     } else {
       insertApiTab(tabs, {
@@ -2864,7 +3068,7 @@ function injectOpenApiSpecs(
 }
 
 /** Identify component ownership independently of checkout paths and URL syntax. */
-function componentSourceIdentity(sourceUrl: string, repositoryDir: string, siteRoot: string): string {
+function componentSourceIdentity(sourceUrl: string, repositoryDir: string, siteRoot: string, namespace?: string): string {
   const url = new URL(sourceUrl)
   // A GitHub tree URL and the repository root identify the same source. Branch
   // changes should update its components, while separate monorepo sites must
@@ -2874,7 +3078,8 @@ function componentSourceIdentity(sourceUrl: string, repositoryDir: string, siteR
   const repository = url.hostname.toLowerCase() === 'github.com'
     ? `https://github.com/${url.pathname.split('/').filter(Boolean).slice(0, 2).join('/').replace(/\.git$/i, '').toLowerCase()}`
     : `${url.origin}${trimTrailingSlashes(url.pathname)}`
-  return JSON.stringify([repository, relative(repositoryDir, siteRoot).replace(/\\/g, '/')])
+  const docsRoot = relative(repositoryDir, siteRoot).replace(/\\/g, '/')
+  return JSON.stringify(namespace ? [repository, docsRoot, namespace] : [repository, docsRoot])
 }
 
 /** Import an already-available repository directory into a canonical bundle. */
@@ -2926,7 +3131,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // boundary for those.
   const componentRoot = mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir
   const componentMigrator = platform === 'mintlify' || platform === 'docusaurus' || platform === 'fern'
-    ? createComponentMigrator(componentRoot, repositoryDir, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot))
+    ? createComponentMigrator(componentRoot, repositoryDir, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot, options.componentNamespace))
     : undefined
   let docsConfig: MigrationDocsConfig = { tabs: [] }
   // Literal leading path segments (e.g. "v1.15.22") that identify a
@@ -2958,6 +3163,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const fernNavTitles = new Map<string, string>()
   const fernHiddenIds = new Set<string>()
 
+  const activeSourceRefs: Array<SourceRefImport> = []
+  const usedSourceRefs = new Set<SourceRefImport>()
+  const gatedSourceRepos = new Set<string>()
+  for (const ref of options.sourceRefs ?? []) {
+    if (platform !== 'mintlify') {
+      warnings.push({ code: 'unsupported-config', message: `--source-ref ${ref.repo}=${ref.mountPath} applies only to Mintlify sources and was ignored.` })
+    } else if (sourceRefMountCollides(mintlifyProjectRoot ?? repositoryDir, ref.mountPath)) {
+      warnings.push({ code: 'collision', message: `sourceRef ${ref.repo} was not imported: the mount path "${ref.mountPath}" already exists in this site.` })
+    } else {
+      activeSourceRefs.push(ref)
+    }
+  }
+
   if (platform === 'mintlify') {
     try {
       const config = readMintlifyConfig(mintlifyProjectRoot ?? repositoryDir)
@@ -2965,9 +3183,17 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         mintlifyConfig = config
         defaultVersionPrefixes = mintlifyDefaultVersionPrefixes(config)
         allVersionPrefixes = mintlifyAllVersionPrefixes(config)
-        const projected = projectMintlifyNavigation(config)
+        const projected = projectMintlifyNavigation(config, {
+          resolveSourceRef: (repo) => {
+            const ref = activeSourceRefs.find((candidate) => candidate.repo.toLowerCase() === repo.toLowerCase())
+            if (!ref) return null
+            usedSourceRefs.add(ref)
+            return ref.navigation
+          },
+        })
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
+        for (const repo of projected.gatedSourceRefs) gatedSourceRepos.add(repo.toLowerCase())
         for (const gated of projected.gatedReferences) {
           const gatedKey = normalizedReferenceKey(gated.ref).toLowerCase()
           if (!mintlifyGatedRefs.has(gatedKey)) mintlifyGatedRefs.set(gatedKey, gated.reason)
@@ -3149,6 +3375,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
   const pages: Array<MigrationPage> = []
   const assets: Array<MigrationAsset> = []
+  const sourceRefPages: Array<MigrationPage> = []
+  const sourceRefAssets: Array<MigrationAsset> = []
   const remoteApiSpecs: Array<RemoteApiSpec> = []
   // Which pages reference which asset (by its normalized copy-destination
   // path), so the final asset-copy pass can prioritize referenced assets
@@ -3288,6 +3516,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (gated) return { kind: inSnippetDirectory ? 'snippet-gated' : 'gated', reason: gated }
     const navigationGated = inSnippetDirectory ? undefined : mintlifyGatedRefs.get(normalizedReferenceKey(shown).toLowerCase())
     if (navigationGated) return { kind: 'gated', reason: navigationGated }
+    // Invalid YAML is salvaged line by line, so what a snippet declares cannot be trusted; same as oversized.
+    if (head !== undefined && parseFrontmatter(head).error) return { kind: 'unreadable', reason: 'frontmatter could not be parsed' }
     if (lstatSync(candidate).size > MAX_PAGE_BYTES) return { kind: 'oversized', reason: 'over 2 MB' }
     return head === undefined ? { kind: 'unreadable', reason: 'frontmatter not terminated in the bounded read' } : undefined
   }
@@ -3322,6 +3552,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // page budget but must remain available for implicit Mintlify aliases.
     ? globalSnippetAliases(files, repositoryDir, mintlifyProjectRoot)
     : new Map<string, string>()
+  const snippetExports = platform === 'mintlify' && mintlifyProjectRoot ? snippetExportIndex(files) : new Map<string, Set<string>>()
   // A restricted page the budget dropped is not published or saved, but the
   // assets it uses must still stay out of public/ (bounded scan, like the
   // oversized restricted pages).
@@ -3484,7 +3715,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const isDefaultLocale = !locale || locale === localeConfig?.defaultLocale
     const id = isDefaultLocale ? navigationId : `${locale}/${navigationId}`
     let raw = inlineMdxSnippets(
-      readFileSync(file.absolutePath, 'utf8'),
+      mintlifyProjectRoot
+        ? importUndeclaredSnippetComponents(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, mintlifyProjectRoot, snippetExports, snippetAliases, inlineGate, warnings)
+        : readFileSync(file.absolutePath, 'utf8'),
       file.absolutePath,
       repositoryDir,
       warnings,
@@ -3667,12 +3900,36 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         })
       })
     }
-    const mdxError = invalidMdxReason(page.body)
+    let mdxError = invalidMdxReason(page.body)
+    if (mdxError) {
+      // Fail closed: only keep a repair that actually compiles.
+      const repaired = escapeUnmatchedClosingTags(page.body)
+      if (repaired.lines.length > 0 && invalidMdxReason(repaired.body) === null) {
+        page.body = repaired.body
+        mdxError = null
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Escaped unmatched closing tag(s) on line ${repaired.lines.join(', ')} so the page compiles; they render as literal text.`,
+          source: file.relativePath,
+        })
+      }
+    }
     if (mdxError) {
       skipped++
       warnings.push({
         code: 'skipped-file',
         message: `Page was excluded because it does not compile as MDX: ${mdxError}`,
+        source: file.relativePath,
+      })
+      continue
+    }
+    const unresolvedModules = unresolvedRelativeModuleSpecifiers(page.body)
+    if (unresolvedModules.length > 0) {
+      skipped++
+      warnings.push({
+        code: 'skipped-file',
+        message: `Page was excluded because it imports ${unresolvedModules.map((specifier) => `"${specifier}"`).join(', ')}, which is not copied by the migration `
+          + 'and would break the site build. Copy that file in manually or remove the import, then add the page back.',
         source: file.relativePath,
       })
       continue
@@ -3840,10 +4097,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let rootStyleProjection: ReturnType<typeof projectAuthoredStyles> | undefined
   let rootNavbarButtons: ReturnType<typeof navbarLinkButtons> = []
   let rootStyleProblem: 'unsafe' | 'parse' | undefined
+  const styleVarSources: Array<{ source: string; vars: ReturnType<typeof cssBrandVars> }> = []
   if (hasRootStylesheet && rootStylesheetPath && lstatSync(rootStylesheetPath).size <= MAX_ASSET_BYTES) {
     const css = readFileSync(rootStylesheetPath, 'utf8')
     // An import may fetch arbitrary CSS; URL schemes that read local files or
     // execute script are not transferable into a public Thally stylesheet.
+    // Colours are plain values, safe to read even when the sheet cannot be shipped.
+    styleVarSources.push({ source: 'style.css', vars: cssBrandVars(css) })
     if (/@import\b|url\s*\(\s*['"]?\s*(?:javascript:|file:)/i.test(css)) rootStyleProblem = 'unsafe'
     else {
       try {
@@ -4067,6 +4327,46 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
 
+  // The site's own `--primary*` variables win over docs.json `colors`, as they do
+  // in Mintlify, which loads every `.css` file in the content directory.
+  if (platform === 'mintlify') {
+    for (const file of files) {
+      if (!isMintlifyServedScriptOrStyle(file.relativePath) || extname(file.relativePath).toLowerCase() !== '.css'
+        || file.absolutePath === rootStylesheetPath) continue
+      try {
+        if (lstatSync(file.absolutePath).isSymbolicLink() || lstatSync(file.absolutePath).size > MAX_ASSET_BYTES) continue
+        styleVarSources.push({ source: file.relativePath, vars: cssBrandVars(readFileSync(file.absolutePath, 'utf8')) })
+      } catch {
+        // Unreadable stylesheet: skip it, the migration continues without its colours.
+      }
+    }
+  }
+  // Merge per variable, so a later file setting only `--primary` keeps an
+  // earlier file's `--primary-dark`; then resolve once.
+  const mergedVars: { root: BrandVars; dark: BrandVars } = { root: {}, dark: {} }
+  const colourSources: Array<string> = []
+  for (const { source, vars } of styleVarSources) {
+    if (Object.keys(vars.root).length + Object.keys(vars.dark).length > 0) colourSources.push(source)
+    Object.assign(mergedVars.root, vars.root)
+    Object.assign(mergedVars.dark, vars.dark)
+  }
+  const styleColors = brandColorsFromVars(mergedVars) ?? {}
+  if (styleColors.light || styleColors.dark) {
+    docsConfig = {
+      ...docsConfig,
+      colors: {
+        ...docsConfig.colors,
+        ...(styleColors.light ? { light: { ...docsConfig.colors?.light, ...styleColors.light } } : {}),
+        ...(styleColors.dark ? { dark: { ...docsConfig.colors?.dark, ...styleColors.dark } } : {}),
+      },
+    }
+    warnings.push({
+      code: 'unsupported-config',
+      source: colourSources.join(', '),
+      message: 'Brand colours were taken from the --primary custom properties in the site stylesheets and override docs.json colors.',
+    })
+  }
+
   // Ranked discovery gives pages, snippets and assets separate budgets and
   // reports dropped groups itself. A total across those groups is not evidence
   // that the scan stopped early. Only the unranked walk uses this fallback.
@@ -4254,12 +4554,41 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     let pageSpecs: Array<{ filename: string; sourcePath?: string }> = resolvedSpecs
     if (resolvedSpecs.length > 0) {
+      for (const spec of resolvedSpecs) {
+        spec.generatedNavigation = Boolean(spec.directory)
+          && !publishedSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))
+      }
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
-      const { operationLinks, prefixLandings } = apiOperationLinkMap(
+      const { operationLinks, prefixLandings, mintlifyPages, duplicatePages } = apiOperationLinkMap(
         resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.directory })),
         docsConfig,
       )
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
+      if (duplicatePages.length > 0) {
+        const listed = duplicatePages.slice(0, 10).map((url) => `/${url}`).join(', ')
+        warnings.push({
+          code: 'unsupported-config',
+          message: `${duplicatePages.length} Mintlify endpoint URL${duplicatePages.length === 1 ? ' is' : 's are'} shared by more than one operation (same tag and summary), so only the first operation is redirected from each: ${listed}${duplicatePages.length > 10 ? ', ...' : ''}.`,
+        })
+      }
+      // Mintlify's own endpoint URLs keep working: they have no page of their own here.
+      const taken = new Set([...pages.map((page) => page.id), ...(docsConfig.redirects ?? []).map((redirect) => redirect.source.replace(/^\//, ''))])
+      const candidates = [...mintlifyPages].filter(([source]) => !taken.has(source))
+      const endpointRedirects = candidates.slice(0, MAX_ENDPOINT_REDIRECTS)
+        .map(([source, destination]) => ({ source: `/${source}`, destination }))
+      const alreadyTaken = mintlifyPages.size - candidates.length
+      const capped = candidates.length - endpointRedirects.length
+      if (alreadyTaken + capped > 0) {
+        const reasons = [
+          alreadyTaken > 0 ? `${alreadyTaken} because the URL already has a page or redirect` : '',
+          capped > 0 ? `${capped} because a site is limited to ${MAX_ENDPOINT_REDIRECTS} generated endpoint redirects` : '',
+        ].filter(Boolean).join(' and ')
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Created ${endpointRedirects.length} of ${mintlifyPages.size} Mintlify endpoint redirects; skipped ${alreadyTaken + capped}: ${reasons}. Old links to skipped endpoint URLs will not redirect.`,
+        })
+      }
+      if (endpointRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...endpointRedirects] }
     } else {
       // No docs.json-configured spec at all: fall back to a naive repo scan,
       // matching every other platform's baseline behavior.
@@ -4301,6 +4630,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       return sameName ? 'the file could not be read as an OpenAPI document' : `no file exists at "${key}"`
     }
     rewriteMintlifyPageSpecRefs(pages, pageSpecs, new Set(remoteApiSpecs.map((spec) => spec.url)), warnings, explainMissingSpec)
+    // Mintlify operation pages carry no "OpenAPI specification" line.
+    if (docsConfig.tabs.some((tab) => tab.api)) docsConfig = { ...docsConfig, api: { ...docsConfig.api, specLink: false } }
   }
   if (platform === 'mintlify') {
     const sources = new Set((docsConfig.redirects ?? []).map((redirect) => redirect.source))
@@ -4464,7 +4795,67 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }).join('\n\n---\n\n')
     }
   }
-  docsConfig = pruneMissingNavigationPages(docsConfig, new Set(pages.map((page) => page.navigationId)))
+  const importedSourceRefs: Array<{ repo: string; mountPath: string; pages: number }> = []
+  const navigationPageIds = (nodes: Array<string | MigrationNavigationGroup>): Array<string> => nodes.flatMap((node) => typeof node === 'string' ? [node] : navigationPageIds(node.pages))
+  // Targets a sub-site's root-absolute link can name: its own pages and assets, or the main site's pages, assets and redirects.
+  const rootLinkIndex = (): RootLinkIndex => {
+    const ids = (entries: Iterable<string>): Set<string> => new Set([...entries].map((entry) => entry.replace(/^\/+/, '')))
+    const main = ids([...pages.map((page) => page.id), ...assets.map((asset) => asset.path), ...(docsConfig.redirects ?? []).map((redirect) => redirect.source)])
+    return {
+      main,
+      // Orphan pages (a repo's own `docs/` folder, say) are not sections of the published site; navigation and redirects are.
+      sections: new Set([...navigationPageIds([...docsConfig.tabs.flatMap((tab) => [...(tab.pages ?? []), ...(tab.groups ?? [])])]), ...(docsConfig.redirects ?? []).map((redirect) => redirect.source)].map((id) => id.replace(/^\/+/, '').split('/', 1)[0])),
+      sub: ids([...activeSourceRefs.flatMap((candidate) => [...candidate.pages.map((page) => page.id), ...candidate.assets.map((asset) => asset.path)])]),
+    }
+  }
+  for (const ref of activeSourceRefs) {
+    if (!usedSourceRefs.has(ref)) {
+      // A restricted mount already got its own warning; nothing of it is imported.
+      if (gatedSourceRepos.has(ref.repo.toLowerCase())) continue
+      warnings.push({ code: 'unsupported-config', message: `--source-ref ${ref.repo}=${ref.mountPath} matched no sourceRef in the navigation; nothing was imported for it.` })
+      continue
+    }
+    warnings.push(...ref.warnings)
+    const taken = new Set(pages.map((page) => page.id))
+    let count = 0
+    const unresolvedLinks: Array<string> = []
+    const linkIndex = rootLinkIndex()
+    const resolveLink = (target: string): string | undefined => mainSiteLinkTarget(target, ref.mountPath, linkIndex, unresolvedLinks)
+    for (const sourcePage of ref.pages) {
+      const page = { ...sourcePage, body: prefixRootLinks(sourcePage.body, ref.mountPath, resolveLink) }
+      if (taken.has(page.id)) {
+        warnings.push({ code: 'collision', message: `sourceRef ${ref.repo} page "${page.id}" already exists in this site and was skipped.` })
+        continue
+      }
+      sourceRefPages.push(page)
+      count++
+    }
+    const knownAssets = new Set(assets.map((asset) => asset.path))
+    for (const asset of ref.assets) if (!knownAssets.has(asset.path)) sourceRefAssets.push(asset)
+    // Pages keep their `<MigratedXXXX/>` tags, so the sub-site's component
+    // files and registry entries must ship with them (hash ids avoid clashes).
+    // Their root-absolute links and images get the same mount prefix as the page bodies.
+    if (ref.componentFiles?.length && componentMigrator) {
+      componentMigrator.adopt(ref.componentFiles.map((file) => typeof file.content === 'string' && /\.(?:[cm]?[jt]sx?|mdx)$/.test(file.path) && file.path !== 'src/mdx/custom-components.tsx'
+        ? { ...file, content: prefixRootLinks(file.content, ref.mountPath, resolveLink, false) }
+        : file))
+    }
+    importedSourceRefs.push({ repo: ref.repo, mountPath: ref.mountPath, pages: count })
+    const unresolved = [...new Set(unresolvedLinks)]
+    if (unresolved.length > 0) {
+      warnings.push({
+        code: 'unsupported-config',
+        message: `[${ref.repo}] ${unresolved.length} root-absolute link target${unresolved.length === 1 ? '' : 's'} match no page in the sub-site or the main site and were kept under "${ref.mountPath}": ${unresolved.slice(0, 10).map((target) => stripControlCharacters(target)).join(', ')}${unresolved.length > 10 ? ', …' : ''}.`,
+      })
+    }
+  }
+  if (importedSourceRefs.length > 0) {
+    warnings.push({ code: 'unsupported-config', message: 'Only the pages and navigation of sourceRef repositories were imported; their branding, colors and redirects were ignored. Root-absolute links inside those pages were prefixed with their mount path unless they name a page of the main site.' })
+  }
+  docsConfig = pruneMissingNavigationPages(docsConfig, new Set([...pages, ...sourceRefPages].map((page) => page.navigationId)))
+  // Sub-site pages joined after the directory pass above, so a mount root
+  // (`/client-sdks/typescript`) needs its own redirect to the sub-site's first page, as on Mintlify.
+  if (platform === 'mintlify' && sourceRefPages.length > 0) docsConfig = addMintlifyDirectoryRedirects(docsConfig, [...pages, ...sourceRefPages])
   if (platform === 'docusaurus') addDocusaurusTranslatedHeadingAliases(pages)
   if (platform === 'fern' && fernProjectRoot) {
     const sourcePath = (page: MigrationPage): string | null => {
@@ -4761,12 +5152,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     code: 'unsupported-config',
     message: 'Fern supplied a logo through its global theme without a local asset; add a logo path to docs.json after import.',
   })
+  pages.push(...sourceRefPages)
+  assets.push(...sourceRefAssets)
   return {
     sourceUrl: options.sourceUrl,
     sourceKind: 'repository',
     platform,
     pages,
     assets,
+    ...(importedSourceRefs.length > 0 ? { sourceRefs: importedSourceRefs } : {}),
     ...(remoteApiSpecs.length > 0 ? { remoteApiSpecs } : {}),
     ...(componentMigrator ? { componentFiles: componentMigrator.files() } : {}),
     ...(quarantinedFiles.length > 0 ? { quarantinedFiles } : {}),

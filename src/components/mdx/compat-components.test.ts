@@ -3,7 +3,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { PagePanelSlot, PageSlotsProvider } from '@/components/mdx/page-slots'
+import { InlineUpdateFilters, PagePanelSlot, PageSlotsProvider, UpdateFilterControls } from '@/components/mdx/page-slots'
 import { Panel, InlinePanel } from '@/components/mdx/panel'
 import { RequestExample, ResponseExample } from '@/components/mdx/examples'
 import { Prompt, TerminalInput, TerminalOutput } from '@/components/mdx/prompt'
@@ -75,5 +75,35 @@ describe('semantic compatibility components', () => {
     expect(views).toContain('npm install')
     expect(views).toContain('pip install')
     expect(unsafeEmbed).toBe('')
+  })
+})
+
+describe('changelog filter controls', () => {
+  const props = {
+    tagCounts: { API: 2, Models: 1 },
+    selectedTags: ['API'],
+    updateShown: 2,
+    updateTotal: 3,
+    onToggle: () => {},
+    onClear: () => {},
+  }
+
+  it('shows chips, the pressed state, and a clear button while a filter is active', () => {
+    const html = renderToStaticMarkup(createElement(UpdateFilterControls, props))
+    expect(html).toContain('aria-pressed="true"')
+    expect(html).toContain('aria-pressed="false"')
+    expect(html).toContain('Clear')
+    expect(html).toContain('Showing 2 of 3 updates')
+  })
+
+  it('omits the clear button when nothing is selected', () => {
+    expect(renderToStaticMarkup(createElement(UpdateFilterControls, { ...props, selectedTags: [] }))).not.toContain('Clear')
+  })
+
+  it('renders the inline copy only when the detail column does not carry the filters', () => {
+    const render = (railVisible: boolean) => renderToStaticMarkup(createElement(PageSlotsProvider, null, createElement(InlineUpdateFilters, { railVisible })))
+    // no tagged updates registered on the server: nothing to show either way
+    expect(render(true)).toBe('')
+    expect(render(false)).toBe('')
   })
 })
