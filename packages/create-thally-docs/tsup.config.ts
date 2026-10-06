@@ -3,6 +3,8 @@ import { defineConfig } from 'tsup'
 export default defineConfig({
   entry: [
     'src/index.ts',
+    'src/terminal.ts',
+    'src/migration-worker.ts',
     'src/scaffold.ts',
     'src/customize.ts',
     'src/release.ts',

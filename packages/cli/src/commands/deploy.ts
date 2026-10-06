@@ -1,3 +1,6 @@
+/** Build and publish through provider adapters, preserving their live output. */
+
+import { terminal } from 'create-thally-docs/terminal'
 import type { ParsedArgs } from '../router.js'
 import { projectScripts, run, runFramework } from '../process.js'
 
@@ -44,7 +47,7 @@ async function confirmAgentReadiness(): Promise<void> {
   const scripts = projectScripts()
   if (!scripts['check:agents']) return
 
-  process.stdout.write('\n  Checking Agent Readiness before deploy...\n')
+  terminal.info('Checking agent readiness before deploy…')
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   await run(npm, ['run', 'check:agents'])
 }
@@ -57,7 +60,7 @@ async function confirmAgentReadiness(): Promise<void> {
 export async function runDeploy(args: ParsedArgs): Promise<number> {
   const adapter = selectAdapter(args)
 
-  process.stdout.write('\n  Building production site...\n')
+  terminal.info('Building production site…')
   const buildExit = await adapter.build()
   if (buildExit !== 0) return buildExit
 
@@ -65,25 +68,25 @@ export async function runDeploy(args: ParsedArgs): Promise<number> {
 
   const prod = args.hasFlag('--prod', '--production')
 
-  process.stdout.write(`\n  Deploying with ${adapter.label}...\n`)
+  terminal.info(`Deploying with ${adapter.label}…`)
   const deployExit = await adapter.deploy(prod)
 
   if (deployExit !== 0) {
-    process.stdout.write(
-      '\n  Deploy did not complete. To deploy manually:\n' +
-        '    • Vercel:     npx vercel deploy --prod\n' +
-        '    • Cloudflare: npm run deploy:cloudflare\n\n',
-    )
+    terminal.error(`Deployment with ${adapter.label} did not complete.`)
+    terminal.section('Deploy manually', [
+      'Vercel: npx vercel deploy --prod',
+      'Cloudflare: npm run deploy:cloudflare',
+    ])
     return deployExit
   }
 
   const base = SITE_URL_HINT ?? '<your-url>'
-  process.stdout.write(
-    `\n  Deployed via ${adapter.label}. Your docs now answer agents at:\n` +
-      `    • ${base}/llms.txt\n` +
-      `    • ${base}/ai.txt\n` +
-      `    • ${base}/api/docs-index\n` +
-      `    • ${base}/api/agent-readiness\n\n`,
-  )
+  terminal.success(`Deployed with ${adapter.label}.`)
+  terminal.section('Agent endpoints', [
+    `${base}/llms.txt`,
+    `${base}/ai.txt`,
+    `${base}/api/docs-index`,
+    `${base}/api/agent-readiness`,
+  ])
   return 0
 }

@@ -1,6 +1,7 @@
 /** Entry point for the public Thally command-line interface. */
 
 import { createRequire } from 'node:module'
+import { formatHelp, terminal } from 'create-thally-docs/terminal'
 import { helpText, parseArgs } from './router.js'
 import { isThallyProject, runFramework, runPackageBin } from './process.js'
 import { runNewPage } from './commands/new-page.js'
@@ -25,7 +26,7 @@ if (major < 18) {
 
 function requireProject(): void {
   if (!isThallyProject()) {
-    process.stderr.write('\n  Not a Thally project (no docs.json here). Run "thally init" to scaffold one.\n\n')
+    terminal.error('Not a Thally project (no docs.json here). Run "thally init" to scaffold one.')
     process.exit(1)
   }
 }
@@ -39,9 +40,27 @@ async function main(): Promise<number> {
     return 0
   }
 
-  if (!args.command || args.command === 'help') {
-    process.stdout.write(helpText())
+  if (argv.length === 0) {
+    terminal.intro('Welcome', packageMetadata.version)
+    terminal.section('Get started', [
+      'thally init my-docs',
+      'thally migrate <source-url> my-docs',
+      'thally --help for all commands',
+    ])
     return 0
+  }
+
+  if (!args.command || args.command === 'help') {
+    process.stdout.write(formatHelp(helpText(packageMetadata.version)))
+    return 0
+  }
+
+  // Scaffold and migration delegates own their presentation. Protocol and
+  // machine-readable commands must never receive a decorative preamble.
+  if (['dev', 'build', 'start', 'deploy', 'new'].includes(args.command)
+    && !args.hasFlag('--json', '--machine', '--ci', '--help', '-h')
+    && !process.env.CI) {
+    terminal.intro(args.command, packageMetadata.version)
   }
 
   switch (args.command) {
@@ -96,8 +115,8 @@ async function main(): Promise<number> {
       return runStarterCommand(args)
 
     default:
-      process.stderr.write(`\n  Unknown command: ${args.command}\n`)
-      process.stdout.write(helpText())
+      terminal.error(`Unknown command: ${args.command}`)
+      process.stdout.write(formatHelp(helpText(packageMetadata.version)))
       return 1
   }
 }
@@ -105,6 +124,6 @@ async function main(): Promise<number> {
 main()
   .then((code) => process.exit(code))
   .catch((err: unknown) => {
-    process.stderr.write(`\n  Error: ${err instanceof Error ? err.message : String(err)}\n`)
+    terminal.error(err instanceof Error ? err.message : String(err))
     process.exit(1)
   })

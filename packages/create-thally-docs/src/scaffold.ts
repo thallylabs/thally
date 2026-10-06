@@ -1,3 +1,8 @@
+/**
+ * Create a customer-owned project from the immutable starter release. Progress
+ * wraps each operation without changing the starter contents or owner fields.
+ */
+
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { downloadStarter } from './download.js'
@@ -7,6 +12,7 @@ import {
   updateEnvExample,
 } from './customize.js'
 import { slugify, installDeps, initGit } from './utils.js'
+import { terminal } from './terminal.js'
 
 export {
   STARTER_ARCHIVE_ROOT,
@@ -35,6 +41,7 @@ export interface ScaffoldResult {
   projectDir: string
 }
 
+/** Download, personalize, and optionally install a new documentation project. */
 export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult> {
   const {
     projectDir,
@@ -62,44 +69,46 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
   const slug = slugify(projectName)
 
   // 1. Extract the complete tree from the exact promoted starter commit.
-  await downloadStarter(targetDir, projectName)
+  await terminal.step('Downloading starter', () =>
+    downloadStarter(targetDir, projectName, undefined, { announce: false }),
+    'Starter downloaded',
+  )
 
   // 2. Change only the documented owner fields. Runtime code, authored pages,
   // navigation, dependencies, CI, and repository policy stay exactly as the
   // immutable starter release shipped them.
-  personalizeStarter(targetDir, {
-    projectName,
-    packageName: slug,
-    description,
-    brandPreset,
-    repoUrl,
-    enableAiChat,
-    i18nLocales,
-    colors,
-  })
+  await terminal.step('Configuring project', () => {
+    personalizeStarter(targetDir, {
+      projectName,
+      packageName: slug,
+      description,
+      brandPreset,
+      repoUrl,
+      enableAiChat,
+      i18nLocales,
+      colors,
+    })
 
-  // 2a. Thally Track is opt-in — first drop the starter's tracking block so a
-  // new site never inherits thallylabs/thally, THEN write the user's repos if they
-  // opted in during setup. (Order matters: reset, then apply their choice.)
-  resetTrackingConfig(targetDir)
+    // Track is opt-in: remove starter repositories before applying owner choices.
+    resetTrackingConfig(targetDir)
+    if (trackRepos?.length) writeTrackingConfig(targetDir, trackRepos)
+    updateEnvExample(targetDir)
+  }, 'Project configured')
+
   if (trackRepos?.length) {
-    writeTrackingConfig(targetDir, trackRepos)
     const list = trackRepos.map((r) => `${r.owner}/${r.repo}`).join(', ')
-    console.log(`  ✓ Thally Track enabled — watching ${list} (branch main, all files; refine in docs.json).`)
-    console.log('    To finish wiring it: `thally track setup` (pick a trigger) + `thally agent init`,')
-    console.log('    then add your ANTHROPIC_API_KEY. See /guides/thally-track.')
+    terminal.info(`Thally Track enabled — watching ${list} (branch main, all files; refine in docs.json).`)
+    terminal.info('To finish wiring it: `thally track setup` (pick a trigger) + `thally agent init`,')
+    terminal.info('then add your ANTHROPIC_API_KEY. See /guides/thally-track.')
   }
-
-  // 3. Copy .env.example → .env.local
-  updateEnvExample(targetDir)
 
   // 4. Install dependencies
   if (doInstall) {
-    installDeps(targetDir)
+    await installDeps(targetDir)
   }
 
   // 5. Initialize git
-  initGit(targetDir)
+  await initGit(targetDir)
 
   return { projectDir: targetDir }
 }

@@ -3,7 +3,7 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
-import { logo, success, slugify } from './utils.js'
+import { logo, success, slugify, previewCommand } from './utils.js'
 import {
   gatherAnswers,
   gatherMigrationPlatform,
@@ -14,6 +14,7 @@ import { parseGitHubRepositoryUrl, parseSourceRefFlags, type SourceRefMapping } 
 import { migrateDocs } from './migrate/index.js'
 import { runCheck } from './check.js'
 import { runTranslateCommand } from './translate.js'
+import { formatHelp, terminal } from './terminal.js'
 
 // Both src/ and dist/ sit one level below the package root, so the published
 // package metadata is the single source of truth for version discovery.
@@ -38,7 +39,7 @@ const valueFlags = new Set([
 ])
 
 const commandFlags = {
-  scaffold: new Set(['--help', '-h', '--yes', '-y', '--install', '--no-install']),
+  scaffold: new Set(['--help', '-h', '--yes', '-y', '--install', '--no-install', '--verbose']),
   migrate: new Set([
     '--help',
     '-h',
@@ -50,6 +51,7 @@ const commandFlags = {
     '--platform',
     '--skip-validation',
     '--source-ref',
+    '--verbose',
     '--yes',
     '-y',
   ]),
@@ -81,6 +83,7 @@ Scaffold options:
   -y, --yes       Accept defaults and skip interactive prompts
   --install       Install project dependencies after scaffolding
   --no-install    Skip dependency installation without prompting
+  --verbose       Show detailed installation and Git output
   -h, --help      Show this help
   -v, -V, --version  Show the installed version
 
@@ -101,6 +104,7 @@ Options:
   --source-ref <owner/repo>=<path>
                        Import a Mintlify sourceRef repository under <path> (repeatable)
   --skip-validation   Import only; explicitly skip content and build verification
+  --verbose           Show detailed installation, build, and Git output
   --api-key <key>      Anthropic API key for non-Markdown conversion
   -y, --yes            Skip interactive prompts
   -h, --help           Show this help
@@ -162,7 +166,7 @@ function resolveCommand(subcommand: string | undefined): keyof typeof commandFla
 
 /** Print help before command execution so informational calls never open prompts. */
 function printHelp(command: keyof typeof commandFlags): void {
-  console.log(command === 'scaffold' ? mainHelp : commandHelp[command])
+  console.log(formatHelp(command === 'scaffold' ? mainHelp : commandHelp[command]))
 }
 
 /** Reject unsupported options instead of silently falling through to a command. */
@@ -196,10 +200,11 @@ async function runMigrateCommand(): Promise<void> {
   const branch = getFlagValue('--branch')
   const docsDir = getFlagValue('--docs-dir')
   const yes = flags.includes('--yes') || flags.includes('-y')
+  terminal.intro('migrate', packageMetadata.version, 'Bring your docs to Thally. Built for people and AI tools.')
   const platformFlag = getFlagValue('--platform')
   const platform = await gatherMigrationPlatform(platformFlag, yes)
   if (platform === undefined) {
-    const shouldPromptForSource = platformFlag === undefined && !yes
+    const shouldPromptForSource = platformFlag === undefined && !yes && Boolean(process.stdin.isTTY)
     sourceUrl = await resolveAutoDetectedMigrationSource(sourceUrl, shouldPromptForSource)
     source = new URL(sourceUrl)
   }
@@ -231,15 +236,11 @@ async function runMigrateCommand(): Promise<void> {
     console.error('\n  ❌ --max-pages must be an integer between 1 and 1000.')
     process.exit(1)
   }
-  logo()
-  console.log('  🚀 Thally Migrate')
-  console.log('')
-  console.log(`  Source:  ${sourceUrl}`)
-  console.log(`  Target:  ${projectDir}`)
-  if (branch) console.log(`  Branch:  ${branch}`)
-  if (docsDir) console.log(`  Docs dir: ${docsDir}`)
-  console.log(`  Platform: ${platform ?? 'auto-detect'}`)
-  console.log('')
+  terminal.detail('Source', `${source.origin}${source.pathname}`)
+  terminal.detail('Output', projectDir)
+  if (branch) terminal.detail('Branch', branch)
+  if (docsDir) terminal.detail('Docs dir', docsDir)
+  terminal.detail('Platform', platform ?? 'auto-detect')
 
   let sourceRefs: Array<SourceRefMapping>
   try {
@@ -268,19 +269,21 @@ async function runMigrateCommand(): Promise<void> {
     skipValidation: flags.includes('--skip-validation'),
     sourceRefs,
   })
-  // Scaffold Git output can span hundreds of files, so repeat the only path
-  // readers need after all install, validation, and commit logs have ended.
-  console.log('')
-  console.log(`  Migrated docs: ${result.projectDir}`)
-  const quotedDir = process.platform === 'win32'
-    ? `"${result.projectDir.replace(/"/g, '""')}"`
-    : `'${result.projectDir.replace(/'/g, "'\\''")}'`
-  console.log(`  To preview: cd ${quotedDir} && npm run dev`)
+  terminal.section('Migration summary', [
+    `${result.pagesWritten} pages · ${result.assetsWritten} assets · ${result.platform}`,
+    `Content: ${result.validation.content} · Build: ${result.validation.build}`,
+    `${result.warnings.length} migration warning(s)`,
+  ])
+  terminal.detail('Output', result.projectDir)
+  terminal.detail('Report', result.reportPath)
+  const isVerified = result.validation.content === 'passed' && result.validation.build === 'passed'
+  terminal.outro(isVerified ? 'Migration verified. Review any warnings before publishing.' : 'Import saved. Validation is incomplete; review the migration report.')
+  terminal.nextAction('Preview locally', previewCommand(result.projectDir, !existsSync(resolve(result.projectDir, 'node_modules'))))
   if (result.validation.content === 'failed' || result.validation.build === 'failed') process.exitCode = 1
 }
 
 async function runScaffoldCommand(): Promise<void> {
-  const useDefaults = flags.includes('--yes') || flags.includes('-y')
+  const useDefaults = flags.includes('--yes') || flags.includes('-y') || !process.stdin.isTTY
   const installPreference = flags.includes('--install')
     ? true
     : flags.includes('--no-install')
@@ -340,9 +343,7 @@ async function runTranslateSubcommand(): Promise<void> {
   const yes = flags.includes('--yes') || flags.includes('-y')
   const projectDir = resolve(positional[1] ?? '.')
 
-  logo()
-  console.log('  🌐 Thally Translate')
-  console.log('')
+  terminal.intro('translate', packageMetadata.version, 'Make your docs available in another language.')
 
   await runTranslateCommand(locale, pages, force, apiKey, model, yes, projectDir)
 }
@@ -370,12 +371,12 @@ async function main(): Promise<void> {
   } else if (subcommand === 'translate') {
     await runTranslateSubcommand()
   } else {
-    logo()
+    logo(packageMetadata.version)
     await runScaffoldCommand()
   }
 }
 
 main().catch((err: Error) => {
-  console.error('\n  ❌ Error:', err.message)
-  process.exit(1)
+  terminal.error(err.message)
+  process.exit((err as Error & { exitCode?: number }).exitCode ?? 1)
 })

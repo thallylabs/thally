@@ -1,3 +1,7 @@
+/** CLI argument parsing and public help; raw arguments remain intact for delegates. */
+
+import { PRODUCT_TAGLINE } from 'create-thally-docs/terminal'
+
 export interface ParsedArgs {
   command: string | undefined
   /** Positional args after the command. */
@@ -18,21 +22,22 @@ export interface CommandInfo {
 // The single coherent command surface. The user authors content + config; the
 // framework (Next.js) is a hidden runtime invoked by these commands.
 export const COMMANDS: Array<CommandInfo> = [
-  { name: 'init', summary: 'Scaffold a new Thally project (alias for create-thally-docs)', usage: 'thally init [dir] [--yes]' },
-  { name: 'dev', summary: 'Run the docs site locally (agent endpoints live)', usage: 'thally dev [-- <framework args>]' },
+  { name: 'init', summary: 'Create a new documentation site', usage: 'thally init [dir] [--yes] [--verbose]' },
+  { name: 'dev', summary: 'Preview your site locally', usage: 'thally dev [-- <framework args>]' },
   { name: 'build', summary: 'Build the production site', usage: 'thally build' },
   { name: 'start', summary: 'Serve the built production site', usage: 'thally start' },
   { name: 'deploy', summary: 'Build and deploy to a live URL', usage: 'thally deploy [--prod] [--cloudflare]' },
-  { name: 'check', summary: 'Lint content + Agent Readiness Score', usage: 'thally check [--agents] [--fix] [--ci] [--drift]' },
-  { name: 'new', summary: 'Create a new page and register it in docs.json', usage: 'thally new <page-id> [--title "..."]' },
-  { name: 'migrate', summary: 'Migrate a docs repository or public site', usage: 'thally migrate <github-or-docs-url> [dir] [--platform <mintlify|docusaurus|auto>]' },
+  { name: 'check', summary: 'Check content and agent readiness', usage: 'thally check [--agents] [--fix] [--ci] [--drift]' },
+  { name: 'new', summary: 'Create a page and add it to navigation', usage: 'thally new <page-id> [--title "..."]' },
+  { name: 'migrate', summary: 'Migrate a docs repository or public site', usage: 'thally migrate <github-or-docs-url> [dir] [--platform <mintlify|docusaurus|auto>] [--verbose]' },
   { name: 'translate', summary: 'Translate content into a locale', usage: 'thally translate --locale <code>' },
   { name: 'mcp', summary: 'Start the Model Context Protocol server (stdio)', usage: 'thally mcp' },
-  { name: 'agent', summary: 'Draft docs from a task (PR, diff, or instruction) as a reviewed PR', usage: 'thally agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--context-file <path>] [--dry-run] [--pr]' },
-  { name: 'track', summary: 'Track product repos — their merged PRs become docs PRs', usage: 'thally track <add|list|test|setup> [owner/repo] [--branch <base>] [--paths <globs>] [--pr <n>]' },
-  { name: 'starter', summary: 'Review or apply an immutable starter runtime update', usage: 'thally starter update [--apply]' },
+  { name: 'agent', summary: 'Draft updates from product changes for review', usage: 'thally agent "<instruction>" [--diff <ref>] [--from-pr <url>] [--context-file <path>] [--dry-run] [--pr]' },
+  { name: 'track', summary: 'Turn merged product PRs into docs PRs', usage: 'thally track <add|list|test|setup> [owner/repo] [--branch <base>] [--paths <globs>] [--pr <n>]' },
+  { name: 'starter', summary: 'Review or apply a site runtime update', usage: 'thally starter update [--apply]' },
 ]
 
+/** Parse command arguments without changing the raw passthrough sequence. */
 export function parseArgs(argv: Array<string>): ParsedArgs {
   const command = argv[0] && !argv[0].startsWith('-') ? argv[0] : undefined
   const rest = command ? argv.slice(1) : argv.slice()
@@ -68,24 +73,37 @@ export function parseArgs(argv: Array<string>): ParsedArgs {
   }
 }
 
-export function helpText(): string {
-  const lines: Array<string> = []
-  lines.push('')
-  lines.push('  thally — keep customer-facing knowledge in sync with product changes')
-  lines.push('')
-  lines.push('  Connect product evidence, prepare reviewable updates, and publish one trusted source.')
-  lines.push('  You author src/content/, docs.json, site.ts, custom MDX, snippets/, and public assets.')
-  lines.push('  The framework (Next.js) is a hidden runtime — you never touch src/app/.')
-  lines.push('')
-  lines.push('  Usage: thally <command> [options]')
-  lines.push('')
-  lines.push('  Commands:')
-  const pad = Math.max(...COMMANDS.map((c) => c.name.length))
-  for (const command of COMMANDS) {
-    lines.push(`    ${command.name.padEnd(pad)}  ${command.summary}`)
+/** Build plain help; terminal styling is applied only at the output boundary. */
+export function helpText(version?: string): string {
+  const groups = [
+    { title: 'Create and write', commands: ['init', 'new', 'migrate', 'translate'] },
+    { title: 'Preview and publish', commands: ['dev', 'build', 'start', 'deploy', 'check', 'starter'] },
+    { title: 'Keep knowledge current', commands: ['agent', 'track', 'mcp'] },
+  ]
+  const lines = [
+    '',
+    `  thally${version ? ` v${version}` : ''}`,
+    `  ${PRODUCT_TAGLINE}`,
+    '',
+    '  Usage: thally <command> [options]',
+    '',
+  ]
+  const pad = Math.max(...COMMANDS.map((command) => command.name.length))
+  for (const group of groups) {
+    lines.push(`  ${group.title}:`)
+    for (const name of group.commands) {
+      const command = COMMANDS.find((candidate) => candidate.name === name)!
+      lines.push(`    ${command.name.padEnd(pad)}  ${command.summary}`)
+    }
+    lines.push('')
   }
+  lines.push('  Options:')
+  lines.push('    --help       Show help')
+  lines.push('    --version    Print the installed version')
+  lines.push('    --verbose    Show subprocess logs for init and migrate')
   lines.push('')
-  lines.push('  Run "thally <command> --help" for command-specific usage.')
+  lines.push('  Start a site:  thally init my-docs')
+  lines.push('  Add a page:    thally new guides/getting-started')
   lines.push('')
   return lines.join('\n')
 }

@@ -25,6 +25,12 @@ vi.mock('@thallylabs/migrate', async (importOriginal) => ({
   },
 }))
 
+// Worker parity is covered in migration-work.test.ts; run conversion in-process here.
+vi.mock('../migration-work.js', async () => {
+  const engine = await import('@thallylabs/migrate')
+  return { convertRepository: engine.migrateRepository, renderFiles: engine.renderMigrationFiles }
+})
+
 import { migrateDocs } from '../migrate/index.js'
 
 async function run(): Promise<{ warnings: Array<string>; pages: number }> {

@@ -33,6 +33,8 @@ export interface CheckOptions {
   drift?: boolean
   /** Optional structured diagnostics sink used by migration reports. */
   onIssues?: (issues: Array<LintIssue>) => void
+  /** Migration's terminal renderer owns diagnostics when running an inline step. */
+  silent?: boolean
 }
 
 /** Run a git command in the project, returning success + trimmed stdout. */
@@ -497,7 +499,8 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   const { fix, ci } = options
 
   if (!existsSync(join(projectDir, 'docs.json'))) {
-    console.error(`\n  ❌ Not a Thally project: docs.json not found in ${projectDir}\n`)
+    if (!options.silent) console.error(`\n  ❌ Not a Thally project: docs.json not found in ${projectDir}\n`)
+    else options.onIssues?.([{ severity: 'error', message: `docs.json not found in ${projectDir}` }])
     return 1
   }
 
@@ -689,6 +692,8 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   const errors = issues.filter((i) => i.severity === 'error')
   options.onIssues?.(issues)
   const warnings = issues.filter((i) => i.severity === 'warning')
+
+  if (options.silent) return errors.length > 0 ? 1 : 0
 
   if (ci) {
     // GitHub Actions annotations (::error / ::warning), then a compact summary.

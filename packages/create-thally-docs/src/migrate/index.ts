@@ -6,16 +6,15 @@
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { setImmediate } from 'node:timers/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import {
   cloneGitHubRepository,
   importSourceRef,
   hydrateRemoteApiSpecs,
-  migrateRepository,
   migrateUrl,
   parseGitHubRepositoryUrl,
-  renderMigrationFiles,
   sourceRefOversizeReason,
   type MigrationBundle,
   type MigrationDocsConfig,
@@ -30,6 +29,8 @@ import { pruneMissingSiteLinks } from '../customize.js'
 import { findPublicSpecs, shadowNote } from '../public-specs.js'
 import { scaffold } from '../scaffold.js'
 import { initGit, installDeps } from '../utils.js'
+import { terminal } from '../terminal.js'
+import { convertRepository, discoverUrl, renderFiles } from '../migration-work.js'
 import { validateMigration, type MigrationValidation } from './validate.js'
 
 export interface MigrateOptions {
@@ -120,7 +121,6 @@ async function fetchSourceRefs(mappings: ReadonlyArray<SourceRefMapping>, warnin
       const source = parseGitHubRepositoryUrl(`https://github.com/${mapping.repo}`)
       const tooLarge = await sourceRefOversizeReason(mapping.repo)
       if (tooLarge) throw new Error(tooLarge)
-      console.log(`  📦 Cloning sourceRef ${mapping.repo}...`)
       const cloneDir = join(root, 'repository')
       await cloneGitHubRepository(source, cloneDir, warnings, { skipSubmodules: true })
       imports.push(importSourceRef(mapping, cloneDir))
@@ -136,33 +136,39 @@ async function fetchSourceRefs(mappings: ReadonlyArray<SourceRefMapping>, warnin
 async function discoverMigration(options: MigrateOptions): Promise<MigrationBundle> {
   const url = new URL(options.sourceUrl)
   if (url.hostname.toLowerCase() !== 'github.com') {
-    if (options.sourceRefs?.length) console.warn('  ⚠  --source-ref applies only to GitHub repository sources and was ignored.')
-    console.log(`  🌐 Discovering public docs at ${url.origin}${url.pathname}...`)
-    return migrateUrl({
-      sourceUrl: options.sourceUrl,
-      platform: options.platform,
-      maxPages: options.maxPages,
-      fetcher: options.fetcher,
-    })
+    if (options.sourceRefs?.length) terminal.warn('--source-ref applies only to GitHub repository sources and was ignored.')
+    return terminal.step('Discovering public documentation', () => {
+      const discovery = {
+        sourceUrl: options.sourceUrl,
+        platform: options.platform,
+        maxPages: options.maxPages,
+      }
+      // Host callbacks cannot cross a worker boundary. Normal CLI discovery has
+      // no callback, so conversion and per-page normalization can stay off-thread.
+      return options.fetcher
+        ? migrateUrl({ ...discovery, fetcher: options.fetcher })
+        : discoverUrl(discovery)
+    }, 'Public documentation discovered')
   }
 
   const source = parseGitHubRepositoryUrl(options.sourceUrl)
   if (options.branch) source.branch = options.branch
   const temporaryRoot = mkdtempSync(join(tmpdir(), 'thally-migrate-'))
   const cloneDir = join(temporaryRoot, 'repository')
-  console.log(`  📦 Cloning ${source.owner}/${source.repo}...`)
   try {
     const cloneWarnings: Array<MigrationWarning> = []
-    await cloneGitHubRepository(source, cloneDir, cloneWarnings)
-    const sourceRefs = await fetchSourceRefs(options.sourceRefs ?? [], cloneWarnings)
-    const bundle = migrateRepository({
+    await terminal.step(`Cloning ${source.owner}/${source.repo}`, () => cloneGitHubRepository(source, cloneDir, cloneWarnings), 'Source repository cloned')
+    const sourceRefs = options.sourceRefs?.length
+      ? await terminal.step('Importing sourceRef repositories', () => fetchSourceRefs(options.sourceRefs ?? [], cloneWarnings), 'sourceRef repositories imported')
+      : []
+    const bundle = await terminal.step('Converting repository documentation', () => convertRepository({
       sourceRefs,
       repositoryDir: cloneDir,
       sourceUrl: options.sourceUrl,
       docsDir: options.docsDir ?? (source.docsDir || undefined),
       platform: options.platform,
-    })
-    const hydrated = await hydrateRemoteApiSpecs(bundle, options.fetcher)
+    }), 'Repository documentation converted')
+    const hydrated = await terminal.step('Loading remote API specifications', () => hydrateRemoteApiSpecs(bundle, options.fetcher), 'Remote API specifications loaded')
     return cloneWarnings.length > 0 ? { ...hydrated, warnings: [...cloneWarnings, ...hydrated.warnings] } : hydrated
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true })
@@ -194,7 +200,7 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
   const bundle = await discoverMigration(options)
 
   if (!options.into) {
-    console.log(`\n  🏗  Scaffolding new project at ${projectDir}...`)
+    terminal.detail('Project', projectDir)
     await scaffold({
       projectDir,
       projectName: options.projectName ?? bundle.site?.name ?? 'My Docs',
@@ -233,53 +239,62 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     if (stale) bundle.warnings.unshift(stale)
   }
 
-  const rendered = renderMigrationFiles(bundle, {
-    existingConfig: options.into ? readExistingConfig(projectDir) : undefined,
-    existingComponentRegistry: existsSync(projectPath(projectDir, 'src/mdx/custom-components.tsx'))
-      ? readFileSync(projectPath(projectDir, 'src/mdx/custom-components.tsx'), 'utf8')
-      : undefined,
-  })
-  for (const file of rendered) {
-    const destination = projectPath(projectDir, file.path)
-    mkdirSync(dirname(destination), { recursive: true })
-    writeFileSync(destination, file.content)
-  }
+  const rendered = await terminal.step('Rendering documentation', () => renderFiles(bundle, {
+      existingConfig: options.into ? readExistingConfig(projectDir) : undefined,
+      existingComponentRegistry: existsSync(projectPath(projectDir, 'src/mdx/custom-components.tsx'))
+        ? readFileSync(projectPath(projectDir, 'src/mdx/custom-components.tsx'), 'utf8')
+        : undefined,
+  }), 'Documentation rendered')
+  await terminal.step('Writing documentation', async (update) => {
+    let written = 0
+    for (const file of rendered) {
+      const destination = projectPath(projectDir, file.path)
+      mkdirSync(dirname(destination), { recursive: true })
+      writeFileSync(destination, file.content)
+      written += 1
+      if (written % 32 === 0) {
+        update(`Writing documentation (${written}/${rendered.length} files)`)
+        await setImmediate()
+      }
+    }
 
-  if (bundle.quarantinedFiles?.length) ignoreQuarantineDirectory(projectDir)
+    if (bundle.quarantinedFiles?.length) ignoreQuarantineDirectory(projectDir)
+  }, `Imported ${bundle.pages.length} pages and ${bundle.assets.length} assets from ${bundle.platform}`)
 
   const format = (warning: MigrationWarning): string => `${warning.message}${warning.source ? ` (${warning.source})` : ''}`
-  for (const warning of bundle.warnings.filter((item) => item.code !== 'gated-page')) console.warn(`  ⚠  ${format(warning)}`)
+  for (const warning of bundle.warnings.filter((item) => item.code !== 'gated-page')) terminal.warn(format(warning))
   // Access-restricted content is a security matter: keep it together, last,
   // and unmistakable so it is not lost among compatibility notes.
   const gatedWarnings = bundle.warnings.filter((item) => item.code === 'gated-page')
   if (gatedWarnings.length > 0) {
-    console.warn('\n  🔒 ACCESS-RESTRICTED CONTENT — review before publishing')
-    for (const warning of gatedWarnings) console.warn(`  🔒 ${format(warning)}`)
+    terminal.warn('ACCESS-RESTRICTED CONTENT — review before publishing')
+    for (const warning of gatedWarnings) terminal.warn(format(warning))
     if (bundle.droppedGatedPages) {
-      console.warn(`  🔒 ${bundle.droppedGatedPages} access-restricted page(s) were dropped by the file limit: not published and not saved under migration-quarantine/; recover them from the source repository.`)
+      terminal.warn(`${bundle.droppedGatedPages} access-restricted page(s) were dropped by the file limit: not published and not saved under migration-quarantine/; recover them from the source repository.`)
     }
     // Quarantined assets may include files the gated pages needed; the dashboard
     // settings are not in the repository. Say both once, only for gated sites.
     if (bundle.quarantinedFiles?.length || gatedWarnings.some((warning) => !/dashboard access settings/i.test(warning.message))) {
-      console.warn('  🔒 Before publishing, review migration-quarantine/assets/ and the dashboard access settings of the source site.')
+      terminal.warn('Before publishing, review migration-quarantine/assets/ and the dashboard access settings of the source site.')
     }
   }
-  console.log(`  ✓ Imported ${bundle.pages.length} pages and ${bundle.assets.length} assets from ${bundle.platform}.`)
 
   let installationFailed = false
   // Migration is a developer build workflow for owner-selected project code.
   // Disclose execution without adding another confirmation to that workflow.
-  if (!options.skipValidation) console.log('  Migration validation runs project code locally, including imported MDX and components.')
+  if (!options.skipValidation) terminal.info('Migration validation runs project code locally, including imported MDX and components.')
   if (!options.into && !options.skipValidation) {
     try {
-      installDeps(projectDir)
-    } catch {
+      await installDeps(projectDir)
+    } catch (error) {
+      const exitCode = (error as Error & { exitCode?: number }).exitCode
+      if (exitCode === 130 || exitCode === 143) throw error
       // Imported files and static diagnostics remain useful when a registry or
       // lifecycle step fails. Always produce the same machine-readable report.
       installationFailed = true
     }
   }
-  console.log('\n  Validating imported documentation...')
+  terminal.info('Validating imported documentation...')
   const validation = await validateMigration(projectDir, options.skipValidation, installationFailed)
   // Quarantine holds withheld pages and the assets only they use; count them apart.
   const quarantinedPages = (bundle.quarantinedFiles ?? []).filter((file) => /\.mdx?$/i.test(file.path)).length
@@ -298,14 +313,14 @@ export async function migrateDocs(options: MigrateOptions): Promise<MigrateResul
     warnings: bundle.warnings,
     validation,
   }, null, 2)}\n`)
-  for (const message of validation.messages) console.warn(`  ⚠  ${message}`)
-  console.log(`  Migration report: ${reportPath}`)
+  for (const message of validation.messages) terminal.warn(message)
+  terminal.detail('Migration report', reportPath)
   if (validation.content === 'passed' && validation.build === 'passed') {
-    console.log(`  ✓ Content and production build passed.${bundle.warnings.length ? ' Review the migration warnings for compatibility limitations.' : ''}`)
+    terminal.success(`Content and production build passed.${bundle.warnings.length ? ' Review the migration warnings for compatibility limitations.' : ''}`)
   } else {
-    console.warn('  Import retained, but validation is incomplete. Do not publish without reviewing the report.')
+    terminal.warn('Import retained, but validation is incomplete. Do not publish without reviewing the report.')
   }
-  if (!options.into) initGit(projectDir)
+  if (!options.into) await initGit(projectDir)
   return {
     pagesWritten: bundle.pages.length,
     assetsWritten: bundle.assets.length,
