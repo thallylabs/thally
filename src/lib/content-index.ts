@@ -54,6 +54,11 @@ const INDEXED_PREFIXES = ['src/content/', 'snippets/'] as const
 
 let resolved: ContentIndex | null | undefined
 let assetIndexPromise: Promise<ContentIndex | null> | null = null
+/** Failed ASSETS index loads back off instead of being cached for the isolate's lifetime. */
+const INDEX_RETRY_MIN_MS = 5_000
+const INDEX_RETRY_MAX_MS = 5 * 60_000
+let indexRetryAt = 0
+let indexRetryDelayMs = INDEX_RETRY_MIN_MS
 
 function parseContentIndex(raw: string): ContentIndex | null {
   try {
@@ -115,27 +120,41 @@ export function getContentIndex(): ContentIndex | null {
  * Load the release content index, using the text binding when it fits and the
  * immutable ASSETS copy for larger sites. Failures return null so callers can
  * retain their compiled/self-hosted fallback instead of taking the site down.
+ *
+ * Only a successfully parsed index is cached for the isolate's lifetime. A
+ * missing, non-OK, malformed, or failed load is retried on a bounded
+ * exponential schedule (5 s doubling to 5 min), so one transient failure
+ * cannot pin an isolate to the no-index path, and an absent index (local
+ * assets builds) costs at most one fetch per backoff window.
  */
 export function loadContentIndex(): Promise<ContentIndex | null> {
   const inline = getContentIndex()
   if (inline) return Promise.resolve(inline)
   if (assetIndexPromise) return assetIndexPromise
+  if (Date.now() < indexRetryAt) return Promise.resolve(null)
   const fetchAsset = getContentAssetFetcher()
   if (!fetchAsset) return Promise.resolve(null)
+  const fail = (): null => {
+    assetIndexPromise = null
+    indexRetryAt = Date.now() + indexRetryDelayMs
+    indexRetryDelayMs = Math.min(indexRetryDelayMs * 2, INDEX_RETRY_MAX_MS)
+    return null
+  }
   assetIndexPromise = (async () => {
     try {
       const response = await fetchAsset(CONTENT_INDEX_ASSET_PATH)
-      if (!response.ok) return null
+      if (!response.ok) return fail()
       const parsed = parseContentIndex(await response.text())
+      if (!parsed) return fail()
       // The synchronous readers that build navigation and page metadata run
       // after the request entry point has awaited this loader. Seed their
       // cache with the same immutable release index so they never fall back
       // to slug-derived labels merely because the index exceeded a binding.
-      if (parsed) resolved = parsed
+      resolved = parsed
+      indexRetryDelayMs = INDEX_RETRY_MIN_MS
       return parsed
     } catch {
-      assetIndexPromise = null
-      return null
+      return fail()
     }
   })()
   return assetIndexPromise
@@ -150,4 +169,6 @@ export function isIndexedContentPath(projectPath: string): boolean {
 export function resetContentIndexForTests(): void {
   resolved = undefined
   assetIndexPromise = null
+  indexRetryAt = 0
+  indexRetryDelayMs = INDEX_RETRY_MIN_MS
 }
