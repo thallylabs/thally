@@ -33,10 +33,12 @@ export function slugifySegment(value: string, preserveCase = false): string {
     // literal slug input instead of letting one file abort the whole import.
   }
   const normalized = preserveCase ? decoded : decoded.toLowerCase()
-  return normalized
+  const slug = normalized
     .replace(/\.(?:html?|mdx?)$/i, '')
     .replace(SAFE_SEGMENT, '-')
     .replace(/(^-|-$)/g, '')
+  // A dot segment (also spelled `%2e%2e`) must never reach a page id or file path.
+  return slug === '.' || slug === '..' ? '' : slug
 }
 
 /**

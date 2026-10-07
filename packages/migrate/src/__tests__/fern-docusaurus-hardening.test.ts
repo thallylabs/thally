@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { migrateRepository, renderMigrationFiles } from '../index.js'
+import { pageIdFromReference } from '../path.js'
 
 function docusaurusSite(files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'thally-harden-docusaurus-'))
@@ -27,5 +28,12 @@ describe('Docusaurus route identity', () => {
     const bundle = migrateDocusaurus({ 'docs/a.md': `---\nslug: ${slug}\n---\n# A\n`, 'docs/b.md': '# B\n' })
     for (const page of bundle.pages) expect(page.navigationId.split('/')).not.toContain('..')
     for (const file of renderMigrationFiles(bundle)) expect(file.path.split('/')).not.toContain('..')
+  })
+})
+
+describe('shared page identity', () => {
+  it('drops percent-encoded dot segments from a page reference', () => {
+    expect(pageIdFromReference('%2e%2e/%2e%2e/x.md')).toBe('x')
+    expect(pageIdFromReference('docs/%2E/x.md')).toBe('docs/x')
   })
 })
