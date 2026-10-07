@@ -6,6 +6,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { readDocusaurusSiteSettings } from '../docusaurus.js'
 import { migrateRepository, renderMigrationFiles } from '../index.js'
 import { pageIdFromReference } from '../path.js'
 
@@ -35,5 +36,14 @@ describe('shared page identity', () => {
   it('drops percent-encoded dot segments from a page reference', () => {
     expect(pageIdFromReference('%2e%2e/%2e%2e/x.md')).toBe('x')
     expect(pageIdFromReference('docs/%2E/x.md')).toBe('docs/x')
+  })
+})
+
+describe('Docusaurus config parsing', () => {
+  it('reads a config padded with 50k blank lines in linear time', () => {
+    const root = docusaurusSite({ 'docusaurus.config.js': `${'\n'.repeat(50_000)}module.exports = {\n  title: 'Acme',\n}\n` })
+    const started = Date.now()
+    expect(readDocusaurusSiteSettings(root).name).toBe('Acme')
+    expect(Date.now() - started).toBeLessThan(2_000)
   })
 })

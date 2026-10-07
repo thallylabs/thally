@@ -894,9 +894,15 @@ export interface DocusaurusSiteSettings {
 function propertyStart(source: string, name: string): number {
   // Only property positions count. A bare word in a comment or a value must
   // never become executable configuration during repository migration.
-  const pattern = new RegExp(`(?:^|[,{\\n])\\s*["']?${name}["']?\\s*:\\s*`, 'm')
-  const match = pattern.exec(source)
-  return match ? match.index + match[0].length : -1
+  // The lead-in is checked by scanning back from each hit: a `\s*` right
+  // after a line-start alternation is quadratic on long runs of blank lines.
+  const pattern = new RegExp(`["']?${name}["']?\\s*:\\s*`, 'g')
+  for (let match = pattern.exec(source); match; match = pattern.exec(source)) {
+    let before = match.index - 1
+    while (before >= 0 && (source[before] === ' ' || source[before] === '\t')) before--
+    if (before < 0 || '\r\n,{'.includes(source[before])) return match.index + match[0].length
+  }
+  return -1
 }
 
 function staticStringBindings(source: string): Map<string, string> {
