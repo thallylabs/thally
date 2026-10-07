@@ -157,8 +157,7 @@ const SNIPPET_IMPORT_PATTERN = /\bimport\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-
 const DOCUSAURUS_GENERATED_EXPORTS: Record<string, string | undefined> = Object.assign(Object.create(null) as Record<string, string>, {
   toc: '[]', frontMatter: '{}', metadata: '{}', assets: '{}', contentTitle: 'undefined',
 })
-// Only same-line whitespace is consumed after the path: the replacement is an `export` block, which ends at a blank line.
-const SNIPPET_VALUE_IMPORT_PATTERN = /\bimport\s*\{([^{}]+)\}\s*from\s+['"]([^'"]+\.mdx?)['"][ \t]*;?/g
+const SNIPPET_VALUE_IMPORT_PATTERN = /\bimport\s*\{([^{}]+)\}\s*from\s+['"]([^'"]+\.mdx?)['"]\s*;?/g
 
 /**
  * Mintlify's `<Snippet file="path.mdx" />` tag form: unlike the import form
@@ -2834,6 +2833,15 @@ function locallyDeclaredNames(raw: string): Set<string> {
   return names
 }
 
+/**
+ * The `export` lines that replace a value import. They end at a blank line, so when
+ * the import was followed by a line break, one is kept: the next line must not join the block.
+ */
+function exportBlock(declarations: Array<string>, statement: string, sourcePath: string): string {
+  const code = declarations.join('\n')
+  return code && statement.slice(statement.lastIndexOf(sourcePath)).includes('\n') ? `${code}\n\n` : code
+}
+
 function inlineMdxSnippets(
   raw: string,
   currentFile: string,
@@ -2844,6 +2852,8 @@ function inlineMdxSnippets(
   globalAliases: Map<string, string> = new Map(),
   /** Refuses access-restricted (Mintlify only), oversized or unclassifiable files. */
   gate?: InlineGate,
+  /** Platform-specific import handling: Docusaurus generated exports, Fern `<Markdown src>` includes. */
+  platform?: MigrationPlatform,
 ): string {
   if (depth >= 8) return raw
   // Hoisting page imports must see indented JSX code examples as fenced code.
@@ -2907,6 +2917,7 @@ function inlineMdxSnippets(
           siteRoot,
           globalAliases,
           gate,
+          platform,
         )
         const declaration = statefulSnippetDeclaration(nested, componentName)
         if (declaration) preservedDeclarations.set(componentName, declaration)
@@ -2957,7 +2968,7 @@ function inlineMdxSnippets(
             if (/^[A-Z]/.test(binding!.exported)) snippets.set(binding!.local, blocked)
             else declarations.push(`export const ${binding!.local} = undefined;`)
           }
-          return declarations.join('\n')
+          return exportBlock(declarations, statement, sourcePath)
         }
         const snippetSource = readFileSync(candidate, 'utf8')
         const values = staticNamedSnippetValues(snippetSource)
@@ -2974,7 +2985,7 @@ function inlineMdxSnippets(
           const exported = exportedNames.has(binding!.exported)
           // Docusaurus generates these on every MDX document. Thally has none, and
           // pages spread or index them, so each gets an empty value of its own type.
-          const generated = exported ? undefined : DOCUSAURUS_GENERATED_EXPORTS[binding!.exported]
+          const generated = exported || platform !== 'docusaurus' ? undefined : DOCUSAURUS_GENERATED_EXPORTS[binding!.exported]
           if (generated) {
             declarations.push(`export const ${binding!.local} = ${generated};`)
             continue
@@ -3005,7 +3016,7 @@ function inlineMdxSnippets(
           components.push([binding!.local, body])
         }
         for (const [name, body] of components) snippets.set(name, body)
-        return declarations.join('\n')
+        return exportBlock(declarations, statement, sourcePath)
       } catch (error) {
         if (error instanceof Error && error.message.includes('escapes its root')) {
           warnings.push({
@@ -3045,6 +3056,7 @@ function inlineMdxSnippets(
       siteRoot,
       globalAliases,
       gate,
+      platform,
     )
     const declaration = statefulSnippetDeclaration(nested, componentName)
     if (declaration) preservedDeclarations.set(componentName, declaration)
@@ -3085,6 +3097,7 @@ function inlineMdxSnippets(
           siteRoot,
           globalAliases,
           gate,
+          platform,
         )), source, offset, offset + tag.length)
       } catch {
         warnings.push({
@@ -3860,6 +3873,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir,
       snippetAliases,
       inlineGate,
+      platform,
     )
     // Counted as published only once the page is certain to be (below).
     const publishedText = trackPublishedRefs ? raw : undefined

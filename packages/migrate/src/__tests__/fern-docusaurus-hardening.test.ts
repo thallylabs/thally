@@ -948,3 +948,30 @@ describe('JSX tag scanning stays linear and quote aware', () => {
     expect(roles('```mdx\n<If roles={["admin"]}>Docs</If>\n```')).toEqual(['Mixed', 'Open'])
   })
 })
+
+describe('Mintlify partial imports', () => {
+  function mintlify(index: string, files: Record<string, string> = {}) {
+    const root = mkdtempSync(join(tmpdir(), 'thally-harden-mintlify-'))
+    for (const [path, content] of Object.entries({
+      'docs.json': JSON.stringify({ name: 'x', navigation: { pages: ['index'] } }),
+      'index.mdx': `---\ntitle: I\n---\n${index}`,
+      'snippets/v.mdx': 'hi\n',
+      ...files,
+    })) {
+      mkdirSync(join(root, path, '..'), { recursive: true })
+      writeFileSync(join(root, path), content)
+    }
+    return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+  }
+
+  it('keeps binding an unexported name to undefined with its warning', () => {
+    const bundle = mintlify('import { metadata } from "/snippets/v.mdx"\n\n# T\n\nM: {metadata}\n')
+    expect(bundle.pages[0].body).toMatch(/metadata\s*=\s*undefined/)
+    expect(bundle.warnings.some((warning) => warning.message.includes('"metadata" is not exported'))).toBe(true)
+  })
+
+  it('keeps a heading that directly follows a value import out of the export block', () => {
+    const bundle = mintlify('import { v } from "/snippets/v.mdx"\n# Title\n\nValue {v}\n', { 'snippets/v.mdx': 'export const v = "VAL"\n' })
+    expect(bundle.pages[0].body).toMatch(/export const v = "VAL";\s*\n\n# Title/)
+  })
+})
