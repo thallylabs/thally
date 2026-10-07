@@ -688,3 +688,63 @@ describe('symlinked intermediate directories', () => {
     expect(JSON.stringify(result.docsConfig.tabs)).not.toContain('Leaked label')
   })
 })
+
+describe('Fern <If roles> content', () => {
+  const nav = 'navigation:\n  - page: Open\n    path: open.mdx\n  - page: Mixed\n    path: mixed.mdx\n'
+
+  function site(mixed: string, extra: Record<string, string> = {}) {
+    const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-if-'))
+    mkdirSync(join(root, 'fern', 'assets'), { recursive: true })
+    writeFileSync(join(root, 'fern', 'fern.config.json'), '{}')
+    writeFileSync(join(root, 'fern', 'docs.yml'), nav)
+    writeFileSync(join(root, 'fern', 'open.mdx'), '# Open\n\n![o](/assets/open.png)\n')
+    writeFileSync(join(root, 'fern', 'mixed.mdx'), mixed)
+    for (const name of ['open', 'secret']) writeFileSync(join(root, 'fern', 'assets', `${name}.png`), PNG)
+    for (const [path, content] of Object.entries(extra)) {
+      mkdirSync(join(root, 'fern', path, '..'), { recursive: true })
+      writeFileSync(join(root, 'fern', path), content)
+    }
+    return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' })
+  }
+
+  it.each([
+    ['inline roles', '# Mixed\n\n<If roles={["admin"]}>Internal</If>\n'],
+    ['multi-line props', '# Mixed\n\n<If\n  products={["a"]}\n  roles={["admin", "staff"]}\n>\nInternal\n</If>\n'],
+    ['viewers prop', '# Mixed\n\n<If viewers="admin">Internal</If>\n'],
+  ])('quarantines a page with %s and names it in a warning', (_name, mixed) => {
+    const bundle = site(mixed)
+    expect(bundle.pages.map((page) => page.title)).toEqual(['Open'])
+    expect(quarantinedPaths(bundle)).toContain('migration-quarantine/mixed.mdx')
+    expect(bundle.warnings.some((warning) => warning.code === 'gated-page' && warning.source === 'mixed.mdx')).toBe(true)
+  })
+
+  it('keeps an asset used only inside the If block out of public/', () => {
+    const bundle = site('# Mixed\n\n<If roles={["admin"]}>\n![s](/assets/secret.png)\n</If>\n')
+    expect(bundle.assets.some((asset) => asset.path.endsWith('secret.png'))).toBe(false)
+    expect(bundle.assets.some((asset) => asset.path.endsWith('open.png'))).toBe(true)
+  })
+
+  it('withholds a partial with <If roles> from the public page that includes it', () => {
+    const bundle = site('# Mixed\n\n<Markdown src="/snippets/part.mdx" />\n', { 'snippets/part.mdx': '<If roles={["admin"]}>PARTIAL-SECRET</If>\n' })
+    const body = bundle.pages.find((page) => page.title === 'Mixed')?.body ?? ''
+    expect(body).not.toContain('PARTIAL-SECRET')
+  })
+
+  it('keeps a page public when <If roles> only appears in a code fence or inline code', () => {
+    const bundle = site('# Mixed\n\n```mdx\n<If roles={["admin"]}>Docs example</If>\n```\n\nUse `<If roles={["a"]}>` like this.\n')
+    expect(bundle.pages.map((page) => page.title).sort()).toEqual(['Mixed', 'Open'])
+    expect(quarantinedPaths(bundle)).toEqual([])
+  })
+
+  it('keeps a page public when <If> has no roles or viewers', () => {
+    const bundle = site('# Mixed\n\n<If products={["a"]} versions={["v1"]}>Shown</If>\n')
+    expect(bundle.pages.map((page) => page.title).sort()).toEqual(['Mixed', 'Open'])
+  })
+
+  it('scans 50k characters of unterminated <If tags in linear time', () => {
+    const started = Date.now()
+    const bundle = site(`# Mixed\n\n${'<If a="1" '.repeat(5_500)}\n`)
+    expect(bundle.pages.map((page) => page.title)).toContain('Open')
+    expect(Date.now() - started).toBeLessThan(3_000)
+  })
+})

@@ -2056,6 +2056,18 @@ function docusaurusDraftReason(data: Record<string, unknown>): string | undefine
   return 'frontmatter `draft` marks it as a draft Docusaurus does not publish'
 }
 
+/** `<If roles=...>` (or `viewers`) in a Fern page body, outside code: content Fern shows only to some roles. */
+const FERN_IF_ROLES = /<If\b(?:[^<>{]|\{(?:[^{}]|\{[^{}]*\})*\})*\b(?:roles|viewers)\s*=/
+
+function fernIfRolesReason(raw: string): string | undefined {
+  let found = false
+  replaceOutsideCode(raw, (segment) => {
+    if (FERN_IF_ROLES.test(segment)) found = true
+    return segment
+  })
+  return found ? 'it contains `<If roles>` content that Fern shows only to some roles' : undefined
+}
+
 /** Fern role-based access: frontmatter `viewers` (any non-empty value) or a truthy `authed`. */
 function fernViewersReason(data: Record<string, unknown>): string | undefined {
   const viewers = data.viewers
@@ -3533,13 +3545,22 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // Pages that were never classified (dropped by the budget, or beyond the walk
   // cap) could be restricted: assets no published page names by exact path stay
   // out of public/ on such a site, as on one with known restricted pages.
+  // Pages over the page cap are never published, so only smaller ones are read for role-restricted content.
+  const fernBodyReason = (file: ScannedFile): string | undefined => {
+    if (platform !== 'fern') return undefined
+    try {
+      return lstatSync(file.absolutePath).size > MAX_PAGE_BYTES ? undefined : fernIfRolesReason(readFileSync(file.absolutePath, 'utf8'))
+    } catch {
+      return 'it could not be read to check for role-restricted content'
+    }
+  }
   if (platform === 'docusaurus' || platform === 'fern') {
     // Fail closed here too: a draft (Docusaurus) or role-restricted (Fern) page is quarantined, never published.
     for (const file of scannedFiles) {
       if (!isDocFile(file)) continue
       const reason = fernRestrictedPaths.has(file.absolutePath)
         ? 'docs.yml `viewers` restricts it to signed-in roles'
-        : classifyPageGate(file).reason
+        : classifyPageGate(file).reason ?? fernBodyReason(file)
       if (!reason) continue
       gateByPath.set(file.absolutePath, { reason, publicTrue: false })
       withheldPaths.add(file.absolutePath)
