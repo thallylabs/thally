@@ -115,6 +115,12 @@ Docusaurus `mdx-code-block` wrappers are opened as live MDX when the resulting
 page compiles and its special fences contain no module declarations. Pages
 whose fragments still need Docusaurus theme imports or remark plugins remain
 fenced and are retained.
+Directories and files whose names start with `_`, and `__tests__` directories,
+are skipped, as Docusaurus does not treat them as documents. Pages with `unlisted`
+set stay routable but are left out of navigation. Partial imports of `toc`,
+`frontMatter`, `metadata` and `assets` are bound to values the page can use
+instead of failing. `<Admonition>` becomes a callout like the colon fence, and
+`<ThemedImage>` keeps its light image.
 
 Fern repositories are located by their `fern/docs.yml` + `fern/fern.config.json`
 pair. `docs.yml` is parsed as bounded YAML—never executed—and preserves tabs,
@@ -129,6 +135,8 @@ Internal links are adjusted for the site's domain path, selected version, and
 source-file routes. Links to sections not imported into Thally stay on the
 published Fern site and produce a migration warning, so the generated site can
 build while the remaining content is moved separately.
+`<Markdown src="...">` includes are inlined from the referenced file when it is
+inside the repository.
 Every `api:` section's OpenAPI document is resolved from its own
 `generators.yml` (`api.specs[].openapi`, or the legacy `api:` string) and
 imported into its own tab — a docs.yml with several API sections (e.g. a REST
@@ -332,6 +340,18 @@ generic unknown-component fallback.
 
 ### Access-restricted pages
 
+Fern and Docusaurus are gated the same way (withheld pages are quarantined and
+removed from navigation, and their assets are handled as described below), using
+each platform's own signals. Fern: frontmatter `viewers` (any non-empty value) or
+`authed`, `<If roles>` or `<If viewers>` content in a page, and `viewers` in
+`docs.yml` on pages, sections, tabs, products, versions and api nodes; the specs of
+a restricted api node are withheld too. Docusaurus: a `draft` page, where any value
+other than unset, `false` or `"false"` counts as a draft; the check is skipped for
+files under `_` directories and `__tests__`, which Docusaurus does not publish as
+documents. On every platform a page over 2 MB is not inlined, OpenAPI spec
+reads are capped at 50 MB, and a path that resolves outside the repository through a
+symlink is refused.
+
 A gated Mintlify page must never migrate as public. A page is withheld when its
 frontmatter sets a non-empty `groups` (list or string) or `public: false`
 (also `"false"`, `no`, `off`, `0`; empty `groups` restricts nothing), or when it sits
@@ -349,8 +369,13 @@ importing the page. Each page gets a
 `gated-page` warning, plus a summary; `create-thally-docs` prints these last
 under an "ACCESS-RESTRICTED CONTENT" heading and the report records them and a
 `quarantined` count. Links from other pages to a withheld page are left as
-authored and will fail `thally check`; images and other assets used only by
-gated pages are still copied to `public/`. Mintlify's site-wide authentication mode lives in its
+authored and will fail `thally check`. Assets are copied to `public/` only when a
+published page, the site configuration, copied styles or a migrated component names
+them by their exact normalized path. On a site that withholds anything, an asset
+nothing published names that way, one named only by a bare file name or in a different
+letter case, one built at runtime, and one that shares its public path with another
+file are saved under `migration-quarantine/assets/` instead, with a warning listing
+them so they can be copied back by hand. Mintlify's site-wide authentication mode lives in its
 dashboard and cannot be read from a repository, so when any page sets
 `public: true` (which implies the source site required sign-in for everything
 else) one `gated-page` warning says Thally will publish every imported page.
