@@ -4,9 +4,10 @@ import remarkGfm from 'remark-gfm'
 import remarkMdx from 'remark-mdx'
 import { toString as mdastToString } from 'mdast-util-to-string'
 import type { Root, RootContent } from 'mdast'
-import { slugify } from '../slugify.js'
+import { slugify, updateAnchorId } from '../slugify.js'
 import type {
   ContentCodeBlock,
+  ContentUpdate,
   ContentHeading,
   ContentLink,
   ContentSection,
@@ -83,6 +84,9 @@ const BLOCK_TYPES = new Set([
 ])
 
 interface WalkState {
+  /** Audience-projected source the tree was parsed from; entry bodies are sliced from it. */
+  source: string
+  updates: Array<ContentUpdate>
   headings: Array<ContentHeading>
   codeBlocks: Array<ContentCodeBlock>
   links: Array<ContentLink>
@@ -162,8 +166,83 @@ function jsxProseAttributes(node: RootContent): Array<string> {
   return values
 }
 
+type JsxElement = Extract<RootContent, { type: 'mdxJsxFlowElement' | 'mdxJsxTextElement' }>
+
+/** Minimal ESTree shape for reading literal array props such as `tags={["a", "b"]}`. */
+interface EstreeNode {
+  type: string
+  expression?: EstreeNode
+  elements?: Array<EstreeNode | null>
+  value?: unknown
+  body?: Array<EstreeNode>
+}
+
+function jsxAttribute(node: JsxElement, name: string) {
+  return node.attributes.find((attribute) => attribute.type === 'mdxJsxAttribute' && attribute.name === name)
+}
+
+function stringAttribute(node: JsxElement, name: string): string | undefined {
+  const attribute = jsxAttribute(node, name)
+  if (attribute?.type !== 'mdxJsxAttribute' || typeof attribute.value !== 'string') return undefined
+  return attribute.value.trim() || undefined
+}
+
+/**
+ * Tags as authored: a comma string (`tags="a, b"`) or an array of string
+ * literals (`tags={["a", "b"]}`). The expression is read from its parsed
+ * ESTree, never evaluated; anything that is not a literal string is ignored.
+ */
+function tagsAttribute(node: JsxElement): Array<string> {
+  const attribute = jsxAttribute(node, 'tags')
+  if (attribute?.type !== 'mdxJsxAttribute' || attribute.value == null) return []
+  if (typeof attribute.value === 'string') {
+    return attribute.value.split(',').map((tag) => tag.trim()).filter(Boolean)
+  }
+  const program = (attribute.value.data as { estree?: EstreeNode } | undefined)?.estree
+  const expression = program?.body?.[0]?.expression
+  if (expression?.type !== 'ArrayExpression') return []
+  return (expression.elements ?? []).flatMap((element) =>
+    element?.type === 'Literal' && typeof element.value === 'string' && element.value.trim()
+      ? [element.value.trim()]
+      : [])
+}
+
+/**
+ * The source text of an element's children, from the start of the first
+ * child's line, with the common indentation removed — authors indent the body
+ * of `<Update>`, and Markdown would read that indentation as nesting.
+ */
+function childrenSource(source: string, node: JsxElement): string {
+  const first = node.children[0]?.position?.start.offset
+  const last = node.children[node.children.length - 1]?.position?.end.offset
+  if (first === undefined || last === undefined) return ''
+  const lineStart = source.lastIndexOf('\n', first - 1) + 1
+  const lines = source.slice(lineStart, last).split('\n')
+  const indent = Math.min(...lines.filter((line) => line.trim()).map((line) => /^[ \t]*/.exec(line)![0].length))
+  return lines.map((line) => line.slice(Number.isFinite(indent) ? indent : 0)).join('\n')
+}
+
+function recordUpdate(state: WalkState, node: JsxElement) {
+  const label = stringAttribute(node, 'label') ?? ''
+  const date = stringAttribute(node, 'date')
+  state.updates.push({
+    id: updateAnchorId({ id: stringAttribute(node, 'id'), label, date }) ?? '',
+    label,
+    ...(stringAttribute(node, 'title') ? { title: stringAttribute(node, 'title') } : {}),
+    ...(date ? { date } : {}),
+    ...(stringAttribute(node, 'description') ? { description: stringAttribute(node, 'description') } : {}),
+    tags: tagsAttribute(node),
+    markdown: mdxToMarkdown(childrenSource(state.source, node), 'all'),
+    text: cleanText(mdastToString({ type: 'root', children: node.children } as Root)),
+  })
+}
+
 function walk(state: WalkState, nodes: Array<RootContent>) {
   for (const node of nodes) {
+    if ((node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') && node.name === 'Update') {
+      recordUpdate(state, node)
+      // fall through: the entry's prose still belongs to the page text and sections
+    }
     if (node.type === 'heading') {
       const { text, explicitId } = headingTextAndId(node)
       startSection(state, node.depth, text, explicitId)
@@ -226,6 +305,8 @@ export function parseMdxContent(markdown: string, audience: ContentAudience = 'a
 
   const preamble: ContentSection = { id: '', title: '', depth: 0, headingPath: [], text: '', code: [] }
   const state: WalkState = {
+    source: projectedMarkdown,
+    updates: [],
     headings: [],
     codeBlocks: [],
     links: [],
@@ -256,5 +337,6 @@ export function parseMdxContent(markdown: string, audience: ContentAudience = 'a
     links: state.links,
     text: cleanText(state.textParts.join(' ')),
     markdown: mdxToMarkdown(projectedMarkdown, 'all'),
+    updates: state.updates,
   }
 }

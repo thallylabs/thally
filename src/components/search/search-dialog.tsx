@@ -15,10 +15,15 @@ import {
 } from '@/components/ui/command'
 
 interface SearchResult {
+  type?: 'page' | 'api_operation'
   page_id: string
   title: string
   description: string
   url: string
+  /** Deep link to the best-matching section, when the match sits under a heading. */
+  section_url?: string
+  method?: string
+  path?: string
   snippet?: string
 }
 
@@ -113,7 +118,7 @@ export function SearchDialog({ open, onOpenChange, locale }: SearchDialogProps) 
       trackSearch({ query: normalized, clickedSlug: result.page_id })
       lastTrackedRef.current = normalized
     }
-    router.push(toLocalHref(result.url))
+    router.push(toLocalHref(result.section_url ?? result.url))
     onOpenChange(false)
   }
 
@@ -143,7 +148,10 @@ export function SearchDialog({ open, onOpenChange, locale }: SearchDialogProps) 
                   onSelect={() => handleSelect(result)}
                 >
                   <div className="flex min-w-0 flex-col">
-                    <span className="text-sm font-medium">{result.title}</span>
+                    <span className="text-sm font-medium">
+                      {result.method ? <span className="mr-2 font-mono text-xs uppercase text-foreground/60">{result.method}</span> : null}
+                      {result.title}
+                    </span>
                     <span className="truncate text-xs text-foreground/60">
                       {result.description || result.snippet}
                     </span>

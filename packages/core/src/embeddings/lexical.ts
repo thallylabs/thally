@@ -17,6 +17,7 @@
  */
 
 import { STOPWORDS } from './provider.js'
+import { isLatinToken, isMeaningfulToken, wordTokens } from './tokenize.js'
 import type { Chunk } from './types.js'
 
 // Standard BM25 constants. k1 saturates repeated terms quickly (docs pages
@@ -36,7 +37,7 @@ const CONTEXT_TERM_WEIGHT = 0.5
 
 // Question scaffolding that the embedding stoplist keeps (it predates this
 // ranker and its vectors are cached by provider id, so it cannot change).
-const QUERY_STOPWORDS = new Set([
+export const QUERY_STOPWORDS: ReadonlySet<string> = new Set([
   'i', 'me', 'should', 'would', 'could', 'about', 'any', 'some', 'also', 'just',
   'need', 'want', 'way', 'there', 'please', 'possible',
 ])
@@ -56,14 +57,16 @@ export function stemTerm(term: string): string {
   return term
 }
 
-/** Tokenize, drop function words, and stem: the one pipeline for index and query. */
+/**
+ * Tokenize (Unicode-aware, see `./tokenize`), drop function words, and stem
+ * Latin terms: the one pipeline for index and query.
+ */
 export function lexicalTerms(text: string, extraStopwords?: ReadonlySet<string>): Array<string> {
-  const matches = text.toLowerCase().match(/[a-z0-9]+/g)
-  if (!matches) return []
   const terms: Array<string> = []
-  for (const token of matches) {
-    if (token.length < 2 || STOPWORDS.has(token) || extraStopwords?.has(token)) continue
-    terms.push(stemTerm(token))
+  for (const token of wordTokens(text)) {
+    if (!isMeaningfulToken(token) || STOPWORDS.has(token) || extraStopwords?.has(token)) continue
+    // The S-stemmer encodes English plural rules; other scripts pass through.
+    terms.push(isLatinToken(token) ? stemTerm(token) : token)
   }
   return terms
 }

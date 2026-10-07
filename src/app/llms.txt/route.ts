@@ -1,6 +1,7 @@
 import { loadSidebarCollections, loadDocEntries } from '@/data/docs'
 import { siteUrlMismatch } from '@/lib/site-url'
 import { resolveSiteConfig } from '@/lib/site-config'
+import { findChangelogPages } from '@/lib/changelog'
 
 export async function GET(request: Request) {
   const baseUrl = new URL(request.url).origin
@@ -8,6 +9,7 @@ export async function GET(request: Request) {
   const entries = await loadDocEntries()
   const entriesByHref = new Map(entries.map((entry) => [entry.href, entry]))
   const collections = await loadSidebarCollections()
+  const hasChangelog = (await findChangelogPages()).length > 0
 
   const lines: Array<string> = []
 
@@ -39,10 +41,14 @@ export async function GET(request: Request) {
   lines.push(`- Agent guidance (editing these docs): ${baseUrl}/AGENTS.md`)
   lines.push(`- MCP server (attach docs as native tools): ${baseUrl}/api/mcp`)
   lines.push(`- Agent readiness: ${baseUrl}/api/agent-readiness`)
+  if (hasChangelog) {
+    lines.push(`- Changelog feed (JSON Feed): ${baseUrl}/changelog/feed.json`)
+    lines.push(`- Changelog feed (RSS): ${baseUrl}/changelog/rss.xml`)
+  }
   lines.push('')
   lines.push('### Recommended workflow')
   lines.push('')
-  lines.push('1. Use this index, the search API, or `search_docs` before choosing a page.')
+  lines.push('1. Use this index, the search API, or `search_sections` / `search_docs` before choosing a page.')
   lines.push('2. Read the smallest set of relevant pages and follow their prerequisite links.')
   lines.push('3. Treat the published docs as the source of truth. Label inferences and say when evidence is missing.')
   lines.push('4. Cite the canonical human page URLs, not only API endpoints.')

@@ -132,8 +132,8 @@ export function buildDocumentationApiOpenApi(
               name: 'mode',
               in: 'query',
               required: false,
-              description: 'Search ranking mode.',
-              schema: { type: 'string', enum: ['hybrid', 'fulltext'], default: 'hybrid' },
+              description: 'Search ranking mode. `hybrid` adds vector similarity and is metered per client when the site uses a hosted embedding provider; over the limit it degrades to `fulltext`.',
+              schema: { type: 'string', enum: ['hybrid', 'fulltext'], default: 'fulltext' },
             },
           ],
           responses: {

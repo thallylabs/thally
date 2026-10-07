@@ -21,6 +21,7 @@ describe('isMachineEndpoint', () => {
       '/openapi.json',
       '/openapi.yaml',
       '/changelog/rss.xml',
+      '/changelog/feed.json',
       '/icon',
       '/images/diagram.png',
     ]
@@ -55,6 +56,7 @@ describe('docs-access endpoint classification', () => {
     '/openapi.json',
     '/openapi.yaml',
     '/changelog/rss.xml',
+    '/changelog/feed.json',
     '/guides/private.md',
     '/api/docs-index',
     '/api/docs/guides/private',

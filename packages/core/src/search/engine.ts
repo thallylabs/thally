@@ -2,21 +2,33 @@
 
 import { create, insertMultiple, search } from '@orama/orama'
 import type { AnyOrama, Tokenizer } from '@orama/orama'
-import { buildSearchCorpusAsync } from './corpus.js'
-import type { SearchRecord } from './corpus.js'
+import { buildSearchCorpusAsync, resetSearchCorpora } from './corpus.js'
+import { resetSectionCorpora } from './sections.js'
+import type { SearchRecord, SearchRecordSection } from './corpus.js'
+import type { SearchRecordType } from './supplemental.js'
 import { getEmbeddingIndex } from '../embeddings/index-store.js'
-import { getEmbeddingProvider } from '../embeddings/provider.js'
+import { getEmbeddingProvider, STOPWORDS } from '../embeddings/provider.js'
+import { QUERY_STOPWORDS } from '../embeddings/lexical.js'
 import type { EmbeddingVector } from '../embeddings/types.js'
 
 export type SearchMode = 'fulltext' | 'hybrid'
 
 export interface SearchHit {
+  /** Page id, or the supplemental record id (an API operation's slug path). */
   pageId: string
+  type: SearchRecordType
   title: string
   description: string
   href: string
   score: number
   snippet: string
+  /** Heading id of the best-matching section, when the match sits under a heading. */
+  anchor?: string
+  /** Text of that heading. */
+  heading?: string
+  /** HTTP method and path template, for API operations. */
+  method?: string
+  path?: string
 }
 
 interface IndexedRecord extends SearchRecord {
@@ -64,7 +76,11 @@ async function pageEmbeddings(records: Array<SearchRecord>, dimensions: number, 
     }
   }
 
-  const missing = records.filter((record) => !map.has(record.pageId))
+  // Supplemental records (API operations) are never embedded here: with a
+  // hosted provider that would be a billed call per operation on every cold
+  // start (and can exceed the provider's batch size on large specs). They keep
+  // a zero vector and rank on their text (title, path, parameter names).
+  const missing = records.filter((record) => !map.has(record.pageId) && (record.type ?? 'page') === 'page')
   if (missing.length) {
     const provider = getEmbeddingProvider()
     const vectors = await provider.embed(
@@ -110,12 +126,16 @@ async function buildEngine(locale?: string, includeEmbeddings = true): Promise<S
       body: 'string',
       keywords: 'string',
       href: 'string',
+      type: 'string',
       embedding: `vector[${dimensions}]`,
     },
   }) as AnyOrama
 
+  // Fields outside the schema (sections, method, path) ride along in Orama's
+  // document store unindexed, so hits can carry them back.
   const indexed: Array<IndexedRecord> = records.map((record) => ({
     ...record,
+    type: record.type ?? 'page',
     embedding: embeddings.get(record.pageId) ?? new Array<number>(dimensions).fill(0),
   }))
 
@@ -134,11 +154,21 @@ export function getSearchEngine(locale?: string, includeEmbeddings = true): Prom
 
 export function resetSearchEngine() {
   enginePromises.clear()
+  resetSearchCorpora()
+  resetSectionCorpora()
 }
 
-function buildSnippet(body: string, query: string): string {
+/** Lowercased query words with surrounding punctuation removed ("navigation?" → "navigation"). */
+function queryTerms(query: string): Array<string> {
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((term) => term.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
+    .filter((term) => term.length >= 2)
+}
+
+function buildSnippet(body: string, terms: Array<string>): string {
   if (!body) return ''
-  const terms = query.toLowerCase().split(/\s+/).filter((term) => term.length >= 2)
   const lower = body.toLowerCase()
   let at = -1
   for (const term of terms) {
@@ -148,10 +178,60 @@ function buildSnippet(body: string, query: string): string {
       break
     }
   }
-  if (at === -1) return `${body.slice(0, 160).trim()}…`
+  if (at === -1) return `${body.slice(0, 160).trim()}${body.length > 160 ? '…' : ''}`
   const start = Math.max(0, at - 60)
   const end = Math.min(body.length, at + 120)
   return `${start > 0 ? '…' : ''}${body.slice(start, end).trim()}${end < body.length ? '…' : ''}`
+}
+
+/**
+ * The section that best explains a page hit: the most query-term occurrences,
+ * with a heading match counting extra. Ranking stays page-level; this only
+ * picks where to point the reader and what to quote.
+ */
+function bestSection(sections: Array<SearchRecordSection> | undefined, terms: Array<string>): SearchRecordSection | null {
+  if (!sections?.length || terms.length === 0) return null
+  let best: SearchRecordSection | null = null
+  let bestScore = 0
+  for (const section of sections) {
+    const title = section.title.toLowerCase()
+    const text = section.text.toLowerCase()
+    let score = 0
+    for (const term of terms) {
+      if (title.includes(term)) score += 3
+      let from = text.indexOf(term)
+      while (from !== -1 && score < 50) {
+        score += 1
+        from = text.indexOf(term, from + term.length)
+      }
+    }
+    if (score > bestScore) {
+      best = section
+      bestScore = score
+    }
+  }
+  return best
+}
+
+/**
+ * The words of a query that carry meaning for full-text ranking. Orama scores
+ * every term, so a question ("How do I add a page to the sidebar
+ * navigation?") was ranked mostly on "how", "do", "a", "to" and "the" — words
+ * on every page — and the page about sidebar navigation fell out of the top
+ * five. Dropping the same function words the retrieval ranker drops fixes
+ * that. When nothing survives (a query of only stopwords), the raw query is
+ * kept so the search still returns something.
+ */
+export function fullTextQuery(query: string): string {
+  // Filter whole whitespace-separated words and pass survivors through
+  // verbatim: Orama tokenized the index with its own ICU tokenizer, which
+  // keeps identifiers such as `THALLY_EMBEDDING_PROVIDER` or `foo.bar` whole,
+  // so re-tokenizing them here would stop them matching.
+  const meaningful = query.split(/\s+/).filter((word) => {
+    const bare = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').toLowerCase()
+    return bare.length > 0 && !STOPWORDS.has(bare) && !QUERY_STOPWORDS.has(bare)
+  })
+  return meaningful.length ? meaningful.join(' ') : query
 }
 
 export async function searchDocs(
@@ -166,7 +246,7 @@ export async function searchDocs(
   const engine = await getSearchEngine(options.locale, mode === 'hybrid')
 
   const searchParams: Record<string, unknown> = {
-    term: trimmed,
+    term: fullTextQuery(trimmed),
     properties: ['title', 'description', 'headings', 'body', 'keywords'],
     boost: { title: 3, headings: 2, description: 1.5, keywords: 1.5 },
     tolerance: 1,
@@ -185,15 +265,21 @@ export async function searchDocs(
 
   const results = await search(engine.db, searchParams as never)
 
-  return results.hits.map((hit) => {
+  const terms = queryTerms(fullTextQuery(trimmed))
+  return results.hits.map((hit): SearchHit => {
     const doc = hit.document as unknown as SearchRecord
+    const section = bestSection(doc.sections, terms)
     return {
       pageId: doc.pageId,
+      type: doc.type ?? 'page',
       title: doc.title,
       description: doc.description,
       href: doc.href,
       score: hit.score,
-      snippet: buildSnippet(doc.body, trimmed),
+      snippet: buildSnippet(section?.text || doc.body || doc.description, terms),
+      ...(section?.id ? { anchor: section.id, heading: section.title } : {}),
+      ...(doc.method ? { method: doc.method } : {}),
+      ...(doc.path ? { path: doc.path } : {}),
     }
   })
 }

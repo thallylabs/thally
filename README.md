@@ -50,7 +50,7 @@ no-change result is valid. Nothing publishes without human approval.
 - **Hybrid search** — instant client-side command palette plus a server-side full-text + vector `/api/search`
 - **Retrieval-grounded AI chat** — Q&A with retrieval over your docs and inline citations, available when the site is linked to Thally Cloud; the widget stays hidden otherwise
 - **Agent endpoints** — `/llms.txt`, `/ai.txt`, `/api/docs-index`, `/api/docs/{slug}`, and an **Agent Readiness Score** at `/api/agent-readiness`
-- **Remote MCP server** — every deployed site is an MCP endpoint at `/api/mcp`; attach with `claude mcp add --transport http <site>/api/mcp`
+- **Remote MCP server** — every deployed site is an MCP endpoint at `/api/mcp` with read-only tools (`search_docs`, `search_sections`, `read_page`, `list_pages`, `list_api_operations`, `get_api_operation`, `list_changes`, `agent_readiness`) and pages as resources; attach with `claude mcp add --transport http <site>/api/mcp`
 - **Docs agent** — `thally agent "…"` (or `@thally` on a product PR) drafts docs as a **reviewed pull request**, self-checked with `thally check`; it never merges
 - **Provenance & drift** — machine-legible `lastVerified` dates + `thally check --drift` to catch pages stale against the code they document
 - **Team accounts & roles** — Google/Microsoft OIDC sign-in + Owner/Editor/Viewer from a git-committed roster in `docs.json` (no database, no per-seat)
@@ -198,6 +198,8 @@ cp .env.example .env.local
 | `THALLY_ADMIN_PASSWORD` / `THALLY_ADMIN_SECRET` | Optional break-glass admin password plus its required high-entropy production session-signing secret |
 | `THALLY_ACCESS_PASSWORD` / `THALLY_ACCESS_SECRET` | Optional docs-access password plus its required high-entropy production session-signing secret; the access secret may fall back to `THALLY_ADMIN_SECRET` |
 | `ANTHROPIC_API_KEY` | Optional — used by local tooling only (`thally agent`, `thally translate`, and non-Markdown conversion in `thally migrate`). The site's AI chat is served by Thally Cloud and reads no model key |
+| `THALLY_MCP_RATE_PER_MIN` | Optional per-client limit on remote MCP tool calls and resource reads (default `60`; `0` disables) |
+| `THALLY_SEARCH_HYBRID_RATE_PER_MIN` | Optional per-client limit on `/api/search?mode=hybrid` when a hosted embedding provider is configured (default `20`); over the limit, full-text results are served |
 | `THALLY_REPO_URL` | Optional — the docs repo Thally Track dispatches to. Defaults to `siteConfig.repoUrl`; set it when `site.ts` keeps the template default (`repoUrl: ''`) but Track should still target your repo |
 | `THALLY_TRACK_WEBHOOK_SECRET` | Optional — enables the manual Thally Track webhook (`/api/track/webhook`); merged/preview PRs in tracked repos become docs-agent PRs. Not needed when you Connect a GitHub App |
 | `THALLY_GITHUB_TOKEN` | Optional — fine-grained PAT that reads tracked product-repo PRs, relays Track dispatches, and authenticates the admin Docs-tasks queue |

@@ -29,7 +29,7 @@ export {
 export type { DocEntrySummary } from './doc-source.js'
 
 // Slug helper (shared with the app's src/lib/utils re-export).
-export { slugify } from './slugify.js'
+export { slugify, updateAnchorId } from './slugify.js'
 
 // Content pipeline.
 export {
@@ -51,6 +51,7 @@ export type {
   ContentCodeBlock,
   ContentLink,
   ContentSection,
+  ContentUpdate,
   ParsedContent,
 } from './content/index.js'
 
@@ -66,7 +67,11 @@ export {
   buildSearchCorpusAsync,
   getClientSearchCorpus,
 } from './search/corpus.js'
-export type { SearchRecord } from './search/corpus.js'
+export type { SearchRecord, SearchRecordSection } from './search/corpus.js'
+export { searchSections, getSectionCorpus } from './search/sections.js'
+export type { SectionHit, SearchSectionsOptions } from './search/sections.js'
+export { registerSupplementalSearchRecordsSource } from './search/supplemental.js'
+export type { SupplementalSearchRecord, SearchRecordType } from './search/supplemental.js'
 
 // Embeddings.
 export {
@@ -82,6 +87,8 @@ export {
   getRelevantChunks,
   rankChunks,
   rankIndexedChunks,
+  rankLexicalChunks,
+  wordTokens,
 } from './embeddings/index.js'
 export type {
   PageSource,

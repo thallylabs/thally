@@ -16,5 +16,6 @@ export type {
   ContentCodeBlock,
   ContentLink,
   ContentSection,
+  ContentUpdate,
   ParsedContent,
 } from './content/types.js'

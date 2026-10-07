@@ -59,11 +59,14 @@ GET /llms.txt
 
 ### `/llms-full.txt`
 
-The complete content of every documentation page in a single plain-text file, stripped of JSX and ready for LLM context windows.
+The complete content of every indexable documentation page in a single file, followed by a compact summary of every API operation. Pages use the same Markdown as each page's `.md` URL and the MCP `read_page` tool: components become plain Markdown, and content inside `<Visibility for="humans">` is left out. Pages marked `hidden` or `noindex` are omitted, as they are from search.
 
 ```http Request
 GET /llms-full.txt
+GET /llms-full.txt?locale=es
 ```
+
+`?locale=` returns only the pages translated into that language. The `X-Thally-Approx-Tokens` response header estimates the file's size in tokens, so an agent can decide whether to load it whole or use search instead.
 
 ---
 

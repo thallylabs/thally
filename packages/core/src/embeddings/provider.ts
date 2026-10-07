@@ -1,4 +1,5 @@
 import type { EmbeddingProvider, EmbeddingVector } from './types.js'
+import { isMeaningfulToken, wordTokens } from './tokenize.js'
 
 // 384 dims caused frequent bucket collisions between unrelated words (e.g.
 // "work" and "component"), letting spurious matches outrank true ones. 4096
@@ -26,10 +27,10 @@ function fnv1a(input: string, seed = 0x811c9dc5): number {
   return hash >>> 0
 }
 
+// Unicode-aware (see `./tokenize`): non-Latin locales hash real words instead
+// of collapsing to an all-zero vector.
 function tokenize(text: string): Array<string> {
-  const matches = text.toLowerCase().match(/[a-z0-9]+/g)
-  if (!matches) return []
-  return matches.filter((token) => token.length >= 2 && !STOPWORDS.has(token))
+  return wordTokens(text).filter((token) => isMeaningfulToken(token) && !STOPWORDS.has(token))
 }
 
 function l2normalize(vector: EmbeddingVector): EmbeddingVector {
@@ -56,9 +57,10 @@ export function embedLocal(text: string, dimensions = LOCAL_DIMENSIONS): Embeddi
 }
 
 export const localHashProvider: EmbeddingProvider = {
-  // v2: 4096 dims + stopword filtering. The id doubles as the embedding-cache
-  // key, so bumping it discards vectors from the incompatible v1 space.
-  id: 'local-hash-v2',
+  // v2: 4096 dims + stopword filtering. v3: Unicode-aware tokenization. The
+  // id doubles as the embedding-cache key, so bumping it discards vectors
+  // from an incompatible earlier space.
+  id: 'local-hash-v3',
   dimensions: LOCAL_DIMENSIONS,
   async embed(texts) {
     return texts.map((text) => embedLocal(text, LOCAL_DIMENSIONS))
