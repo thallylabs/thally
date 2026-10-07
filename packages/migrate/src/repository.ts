@@ -79,6 +79,7 @@ import {
   resolveWithin,
   resolveWithinRoot,
   trimEdgeSlashes,
+  isPathEscapeError,
   trimTrailingSlashes,
   withinRealRoot,
 } from './path.js'
@@ -1981,7 +1982,7 @@ function findFernConfiguredOpenApi(
       } catch {
         warnings.push({
           code: 'unsupported-config',
-          message: `The OpenAPI spec path "${specPath}" in ${relative(repositoryDir, generatorsPath).replace(/\\/g, '/')} is outside the repository and was skipped.`,
+          message: `Skipped the OpenAPI spec "${specPath}" listed in ${relative(repositoryDir, generatorsPath).replace(/\\/g, '/')} because it points outside the repository (symlink or ..).`,
         })
       }
     }
@@ -3382,7 +3383,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     } catch (error) {
       warnings.push({
         code: 'unsupported-config',
-        message: `Docusaurus sidebar could not be read safely: ${error instanceof Error ? error.message : String(error)} Generated navigation will be used.`,
+        message: isPathEscapeError(error)
+          ? 'Skipped the sidebar file because it points outside the repository (symlink or ..). Navigation was generated from the docs folder instead.'
+          : `Docusaurus sidebar could not be read safely: ${error instanceof Error ? error.message : String(error)} Generated navigation will be used.`,
       })
     }
   }

@@ -144,3 +144,8 @@ export function withinRealRoot(candidate: string, repositoryRoot: string): strin
   }
   return candidate
 }
+
+/** Whether `error` came from a path that leaves its root or is absolute, as thrown by the helpers above. */
+export function isPathEscapeError(error: unknown): boolean {
+  return error instanceof Error && /escapes its root|Unsafe migration path/.test(error.message)
+}

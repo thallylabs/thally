@@ -3380,7 +3380,7 @@ describe('Fern repository migration', () => {
     const config = { versions: [{ version: 'v1', path: '../../outside.yml', default: true }] }
     const projected = projectFernNavigation({ config, fernRoot, repositoryRoot: root })
     expect(projected.warnings.some((warning) =>
-      warning.message.includes('could not be read') && warning.message.includes('escapes its root'))).toBe(true)
+      warning.message.includes('Skipped the Fern version file') && warning.message.includes('points outside the repository'))).toBe(true)
   })
 
   it('imports every product from a `products:` docs.yml as its own top-level, route-prefixed tab', () => {

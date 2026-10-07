@@ -11,7 +11,7 @@ import { load } from 'cheerio'
 import { parse as parseYaml } from 'yaml'
 
 import { isRedirectPathSafe, translateRedirectWildcards } from './navigation.js'
-import { resolveWithin, resolveWithinRoot, withinRealRoot } from './path.js'
+import { isPathEscapeError, resolveWithin, resolveWithinRoot, withinRealRoot } from './path.js'
 import type {
   MigrationDocsConfig,
   MigrationNavigationGroup,
@@ -268,7 +268,7 @@ function registerPageAt(rawPath: string, base: string, context: WalkContext, nav
     )
     sourcePath = relative(context.fernRoot, absolute).replace(/\\/g, '/')
   } catch {
-    warnOnce(context, `fern-unsafe-page-${rawPath}`, `Fern page path "${rawPath}" escapes the repository and was skipped.`)
+    warnOnce(context, `fern-unsafe-page-${rawPath}`, `Skipped the Fern page "${rawPath}" because it points outside the repository (symlink or ..).`)
     return ''
   }
   const navigationId = uniqueNavigationId(base || 'introduction', context)
@@ -310,7 +310,7 @@ function registerFolder(
       context.repositoryRoot,
     ), context.repositoryRoot)
   } catch {
-    warnOnce(context, `fern-unsafe-folder-${rawPath}`, `Fern folder "${rawPath}" escapes the repository and was skipped.`)
+    warnOnce(context, `fern-unsafe-folder-${rawPath}`, `Skipped the Fern folder "${rawPath}" because it points outside the repository (symlink or ..). None of its pages were imported.`)
     return null
   }
   if (!existsSync(folder) || !lstatSync(folder).isDirectory()) {
@@ -588,7 +588,9 @@ function resolveVersionedNavigation(
     warnOnce(
       context,
       'fern-version-read-failed',
-      `Fern version file "${chosen.path}" could not be read (${error instanceof Error ? error.message : String(error)}) and was skipped.`,
+      isPathEscapeError(error)
+        ? `Skipped the Fern version file "${chosen.path}" because it points outside the repository (symlink or ..).`
+        : `Fern version file "${chosen.path}" could not be read (${error instanceof Error ? error.message : String(error)}) and was skipped.`,
     )
     return config
   }
@@ -749,7 +751,7 @@ function projectFernProducts(
     try {
       productPath = withinRealRoot(resolveWithin(fernRoot, rawPath), context.repositoryRoot)
     } catch {
-      warnOnce(context, `fern-product-unsafe-${rawPath}`, `Fern product "${label}" path "${rawPath}" is unsafe and was skipped.`)
+      warnOnce(context, `fern-product-unsafe-${rawPath}`, `Skipped the Fern product "${label}" because "${rawPath}" points outside the repository (symlink or ..).`)
       return []
     }
     if (!existsSync(productPath) || !lstatSync(productPath).isFile()) {

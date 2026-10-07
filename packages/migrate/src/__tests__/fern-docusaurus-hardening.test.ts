@@ -987,3 +987,37 @@ describe('Fern Markdown include wording', () => {
     expect(bundle.warnings.map((warning) => warning.message)).toContain('Included file /snippets/missing.mdx could not be found, so it was left out of the page.')
   })
 })
+
+describe('symlink and escape warnings', () => {
+  it('words a sidebar symlink escape plainly, without a path or jargon', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'thally-harden-outside-'))
+    writeFileSync(join(outside, 'sidebar.js'), "module.exports = { leaked: ['x'] }\n")
+    const root = docusaurusSite({
+      'docusaurus.config.js': "module.exports = { presets: [['classic', { docs: { sidebarPath: './link/sidebar.js' } }]] }\n",
+      'docs/a.md': '# A\n',
+    })
+    symlinkSync(outside, join(root, 'link'))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+    const message = bundle.warnings.map((warning) => warning.message).find((text) => text.includes('sidebar')) ?? ''
+    expect(message).toBe('Skipped the sidebar file because it points outside the repository (symlink or ..). Navigation was generated from the docs folder instead.')
+  })
+
+  it('words Fern folder, version and product escapes plainly', () => {
+    const external = mkdtempSync(join(tmpdir(), 'thally-harden-outside-'))
+    mkdirSync(join(external, 'inner'))
+    for (const name of ['v.yml', 'p.yml']) writeFileSync(join(external, name), 'navigation: []\n')
+    const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-'))
+    const fern = join(root, 'fern')
+    mkdirSync(fern)
+    symlinkSync(external, join(fern, 'link'))
+    const messages = [
+      ...projectFernNavigation({ config: { navigation: [{ folder: 'link/inner' }] }, fernRoot: fern, repositoryRoot: root }).warnings,
+      ...projectFernNavigation({ config: { versions: [{ path: 'link/v.yml', slug: 'v' }] }, fernRoot: fern, repositoryRoot: root }).warnings,
+      ...projectFernNavigation({ config: { products: [{ 'display-name': 'P', path: 'link/p.yml' }] }, fernRoot: fern, repositoryRoot: root }).warnings,
+    ].map((warning) => warning.message).join('\n')
+    expect(messages).toContain('Skipped the Fern folder "link/inner" because it points outside the repository')
+    expect(messages).toContain('Skipped the Fern version file "link/v.yml" because it points outside the repository')
+    expect(messages).toContain('Skipped the Fern product "P" because "link/p.yml" points outside the repository')
+    expect(messages).not.toMatch(/escapes its root|\/(?:private|var|tmp)\//)
+  })
+})
