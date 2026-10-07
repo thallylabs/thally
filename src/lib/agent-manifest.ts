@@ -1,6 +1,8 @@
 import { getDocEntries } from '@/data/docs'
 import { getSiteUrl } from '@/lib/site-url'
 import type { SiteIdentity } from '@/lib/site-config'
+import { toolMetadata } from '@/lib/mcp/tool-metadata'
+import { isChangelogPageId } from '@/lib/changelog'
 
 /**
  * `skill.md` — a Claude-skill-shaped manifest that tells an agent what this
@@ -32,6 +34,9 @@ export function buildSkillManifest(identity: SiteIdentity, base = getSiteUrl()):
   lines.push(`- Any page as JSON / JSON-LD / Markdown: ${base}/api/docs/{slug}`)
   lines.push(`- Search: ${base}/api/search?q={query}`)
   lines.push(`- Structured index (JSON): ${base}/api/docs-index`)
+  if (entries.some((entry) => isChangelogPageId(entry.id) && !entry.noindex)) {
+    lines.push(`- Changelog: ${base}/changelog/feed.json (JSON Feed) or ${base}/changelog/rss.xml (RSS)`)
+  }
   lines.push(`- MCP server (attach as native tools over HTTP): ${base}/api/mcp`)
   lines.push(`- Agent readiness report: ${base}/api/agent-readiness`)
   // A configured customer spec is served when present; otherwise this URL
@@ -39,10 +44,9 @@ export function buildSkillManifest(identity: SiteIdentity, base = getSiteUrl()):
   lines.push(`- OpenAPI description: ${base}/openapi.yaml`)
   lines.push('')
   lines.push('## Remote MCP tools')
-  lines.push('- `search_docs` — find relevant pages before reading deeply')
-  lines.push('- `read_page` — read one published page by ID')
-  lines.push('- `list_pages` — inspect the published information architecture')
-  lines.push('- `agent_readiness` — check whether the site is easy for agents to use')
+  // Derived from the MCP tool metadata, so this list cannot drift from tools/list.
+  for (const tool of toolMetadata) lines.push(`- \`${tool.name}\` — ${tool.summary}`)
+  lines.push('- Pages are also MCP resources: `docs://pages/{page-id}`')
   lines.push('')
   lines.push('## Pages')
   for (const entry of entries) {

@@ -226,6 +226,7 @@ export function withheldNotSaved(message: string): string {
   return message
     .replace(/ and saved under migration-quarantine\/ \(local only[^)]*\)/g, ' (not saved)')
     .replace(/ and saved under migration-quarantine\/assets\//g, ' (not saved)')
+    .replace(/; they are saved under migration-quarantine\/assets\/\. Copy them into public\/ manually if they may be public, or/g, '; they are withheld from the site (not saved). Recover any that may be public from the referenced repository, or')
     .replace(/, so it was NOT published and was not saved under migration-quarantine\/;/g, ', so it was NOT published and is not saved;')
     .replace(/, so it was not copied to migration-quarantine\/;/g, ', so it is not saved;')
     .replace(/The original is saved at migration-quarantine\/[^;]*;/g, 'It is withheld from the site (not saved);')

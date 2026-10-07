@@ -3,6 +3,8 @@
 import { SidebarCollectionsHydrator } from '@/components/layout/sidebar-hydrator'
 import { withApiNavigation } from '@/data/api-reference'
 import { loadSidebarCollections } from '@/data/docs'
+import { getReaderContext } from '@/lib/reader-auth/context'
+import { canReaderSeeUnmarkedContent } from '@/lib/reader-auth/page-gate'
 
 interface LocalizedSidebarHydratorProps {
   locale: string
@@ -12,7 +14,11 @@ interface LocalizedSidebarHydratorProps {
 export async function LocalizedSidebarHydrator({
   locale,
 }: LocalizedSidebarHydratorProps) {
-  const sidebarCollections = await withApiNavigation(await loadSidebarCollections(locale), `/${locale}`)
+  const reader = await getReaderContext()
+  const readerCollections = await loadSidebarCollections(locale, reader)
+  const sidebarCollections = canReaderSeeUnmarkedContent(reader)
+    ? await withApiNavigation(readerCollections, `/${locale}`)
+    : readerCollections
   const collections = sidebarCollections.map((collection) => {
     // Keep collection destinations source-owned. Inventing a locale-root href
     // for Overview makes its prefix match every page in every other collection.

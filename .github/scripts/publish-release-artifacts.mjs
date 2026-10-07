@@ -33,8 +33,12 @@ async function sha512Integrity(path) {
   return `sha512-${createHash('sha512').update(bytes).digest('base64')}`
 }
 
-/** npm can acknowledge a publish before its metadata reaches every registry reader. */
-export const REGISTRY_SETTLE_ATTEMPTS = 18
+/**
+ * npm can acknowledge a publish before its metadata reaches every registry reader.
+ * Allow 590 seconds of capped backoff: asynchronous processing can exceed five
+ * minutes, but a missing version must still fail within a bounded release window.
+ */
+export const REGISTRY_SETTLE_ATTEMPTS = 33
 
 /** Retry only absent metadata; malformed or unrelated registry failures remain fatal. */
 export async function registryMetadata(spec, attempts, {

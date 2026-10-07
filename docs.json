@@ -176,7 +176,8 @@
           "icon": "wrench",
           "pages": [
             "guides/deploying",
-            "guides/admin-dashboard"
+            "guides/admin-dashboard",
+            "guides/authenticated-docs"
           ]
         },
         {
@@ -184,6 +185,7 @@
           "icon": "message",
           "pages": [
             "guides/ai-features",
+            "guides/agent-readiness",
             "guides/mcp-server"
           ]
         }

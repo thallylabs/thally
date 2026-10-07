@@ -110,6 +110,9 @@ export async function findDocSource(
   if (
     /[\\\0]/.test(slugPath) ||
     slugPath.split('/').some((segment) => segment === '.' || segment === '..') ||
+    // A route names a page, never a file: `/guide.mdx` must not resolve to
+    // `guide.mdx` under a second identity that per-page rules do not key on.
+    /\.mdx?$/i.test(slugPath) ||
     (locale !== undefined && !/^[A-Za-z0-9-]+$/.test(locale))
   ) return null
   const normalized = slugPath || 'introduction'
@@ -118,9 +121,7 @@ export async function findDocSource(
   const isDefault = !locale || locale === defaultLocale
 
   if (isDefault) {
-    const candidates = normalized.endsWith('.mdx')
-      ? [normalized]
-      : [`${normalized}.mdx`, `${normalized}/index.mdx`]
+    const candidates = [`${normalized}.mdx`, `${normalized}/index.mdx`]
 
     for (const candidate of candidates) {
       const filePath = projectJoin(localDocsRoot, candidate)
@@ -132,19 +133,15 @@ export async function findDocSource(
   }
 
   // Secondary locale: try translated file first, then fall back to primary
-  const localeCandidates = normalized.endsWith('.mdx')
-    ? [projectJoin(localDocsRoot, locale, normalized)]
-    : [
-        projectJoin(localDocsRoot, locale, `${normalized}.mdx`),
-        projectJoin(localDocsRoot, locale, `${normalized}/index.mdx`),
-      ]
+  const localeCandidates = [
+    projectJoin(localDocsRoot, locale, `${normalized}.mdx`),
+    projectJoin(localDocsRoot, locale, `${normalized}/index.mdx`),
+  ]
 
-  const primaryCandidates = normalized.endsWith('.mdx')
-    ? [projectJoin(localDocsRoot, normalized)]
-    : [
-        projectJoin(localDocsRoot, `${normalized}.mdx`),
-        projectJoin(localDocsRoot, `${normalized}/index.mdx`),
-      ]
+  const primaryCandidates = [
+    projectJoin(localDocsRoot, `${normalized}.mdx`),
+    projectJoin(localDocsRoot, `${normalized}/index.mdx`),
+  ]
 
   // A translated file alone must not keep a deleted or renamed source page
   // indexable. The source path is the current document identity.

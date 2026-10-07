@@ -59,13 +59,27 @@ function isSafeEmbedSource(src: string): boolean {
   return (src.startsWith('/') && !src.startsWith('//') && !src.includes('\\')) || /^https:\/\//i.test(src)
 }
 
+/**
+ * Sandbox flags for an embed. `allow-scripts` together with
+ * `allow-same-origin` lets a same-origin document remove its own sandbox, so
+ * a relative source (served from this docs origin, e.g. an SVG in `public/`)
+ * runs scripts in an opaque origin instead. Cross-origin embeds keep their
+ * own origin so hosted players and sandboxes can use their storage; that
+ * origin is theirs, never this site's.
+ */
+export function embedSandbox(src: string): string {
+  return src.startsWith('/')
+    ? 'allow-scripts allow-forms allow-popups'
+    : 'allow-scripts allow-same-origin allow-forms allow-popups'
+}
+
 /** Legacy sandboxed iframe. Prefer View for conditional content. */
 export function Embed({ src, height = 500, title = 'Live preview' }: EmbedProps) {
   if (!isSafeEmbedSource(src)) return null
   const resolvedHeight = typeof height === 'number' ? `${height}px` : height
   return (
     <div className="not-prose my-6 overflow-hidden rounded-2xl border border-border/40 bg-muted/20">
-      <iframe src={src} title={title} style={{ height: resolvedHeight }} className="w-full border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" loading="lazy" />
+      <iframe src={src} title={title} style={{ height: resolvedHeight }} className="w-full border-0" sandbox={embedSandbox(src)} loading="lazy" />
     </div>
   )
 }

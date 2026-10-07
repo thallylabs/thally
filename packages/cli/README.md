@@ -8,9 +8,14 @@ changes for your team to review.
 ```bash
 npx @thallylabs/cli init my-docs --yes
 cd my-docs
-npm install
 npx thally dev
 ```
+
+`init` installs dependencies by default (`--no-install` skips it), and new
+sites include `@thallylabs/cli` as a dev dependency, so `npx thally` runs the
+project's own CLI. Once the preview is ready, `thally dev` prints the local
+`llms.txt` and `/api/mcp` endpoints and a `claude mcp add --transport http`
+command for connecting Claude Code.
 
 ## Terminal output
 
@@ -28,7 +33,7 @@ Scaffolding and migration keep subprocess logs quiet in interactive terminals.
 Pass `--verbose` to show installation and build logs as they happen:
 
 ```bash
-thally init my-docs --yes --install --verbose
+thally init my-docs --yes --verbose
 thally migrate https://github.com/your-org/your-docs --platform auto --verbose
 ```
 
@@ -57,15 +62,15 @@ customer-owned paths during upgrades.
 
 | Command | What it does |
 | --- | --- |
-| `thally init [dir] [--verbose]` | Create a new documentation site |
+| `thally init [dir] [--yes] [--no-install] [--verbose]` | Create a new documentation site |
 | `thally new <page-id> [--title "..."]` | Create a page and add it to navigation |
-| `thally migrate <github-or-docs-url> [dir] [--verbose]` | Import an existing documentation site |
+| `thally migrate <github-or-docs-url> [dir] [--platform <mintlify\|docusaurus\|fern\|auto>] [--verbose]` | Import an existing documentation site |
 | `thally translate --locale <code>` | Translate content into a locale |
-| `thally dev` | Preview your site locally |
+| `thally dev [-- <server options>]` | Preview your site locally and print its agent endpoints |
 | `thally build` | Build the production site |
 | `thally start` | Serve the built production site |
 | `thally deploy [--prod] [--cloudflare]` | Build and publish through Vercel or Cloudflare |
-| `thally check [--agents] [--fix]` | Check content and agent readiness |
+| `thally check [dir] [--agents] [--fix] [--ci] [--drift] [--external]` | Check content and agent readiness; `--external` also checks links to public hosts (warnings only) |
 | `thally starter update [--apply]` | Review or apply a site runtime update |
 | `thally agent "<instruction>"` | Draft updates from product changes for review |
 | `thally track <add\|list\|test\|setup>` | Turn merged product PRs into docs PRs |
@@ -80,10 +85,18 @@ project code locally, including imported MDX and components, so use sources you
 own or trust. `--skip-validation` also skips dependency installation.
 
 `thally migrate` asks which platform currently hosts the docs and dispatches to
-the Mintlify or Docusaurus adapter. Non-interactive callers can pass
-`--platform mintlify`, `--platform docusaurus`, or `--platform auto`.
+the Mintlify, Docusaurus, or Fern adapter. Non-interactive callers can pass
+`--platform mintlify`, `--platform docusaurus`, `--platform fern`, or
+`--platform auto`.
 
-Run `thally --help` for the full command reference.
+Run `thally --help` for the full command reference and `thally <command> --help`
+for a command's options; help never runs the command. Unknown options are
+rejected. Options for the underlying dev server or build go after `--`, for
+example `thally dev -- --port 4000`.
+
+`thally deploy` prints the deployed URL reported by Vercel or Wrangler (or your
+configured `THALLY_SITE_URL`) and the result of the Agent Readiness Score; a low
+score is reported but does not stop the deploy.
 
 `thally starter update` is a dry run by default. It compares the previously
 recorded scaffold, the promoted target scaffold, and the current project. It

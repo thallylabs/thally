@@ -4,7 +4,8 @@
  * remain visible. Creation never changes the starter's authored runtime.
  */
 import { execFileSync, execSync, spawn } from 'node:child_process'
-import { resolve } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { terminal } from './terminal.js'
 
 /** Convert a display name into a portable package identifier. */
@@ -136,9 +137,36 @@ export function quoteDirectory(directory: string): string {
     : `'${absolute.replace(/'/g, "'\\''")}'`
 }
 
+/** True when the project declares the `thally` CLI as a dependency. */
+function declaresThallyCli(directory: string): boolean {
+  try {
+    const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, unknown>
+      devDependencies?: Record<string, unknown>
+    }
+    return Boolean(manifest.devDependencies?.['@thallylabs/cli'] ?? manifest.dependencies?.['@thallylabs/cli'])
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The command that starts the local preview. `npx thally dev` is used only
+ * when the project's own `thally` binary is (or is about to be) installed: no
+ * package named `thally` exists on npm, so `npx thally` must never fall back
+ * to a registry lookup. Otherwise the project's `dev` script is used.
+ */
+export function devCommand(directory: string, needsInstall = false): string {
+  const binary = join(directory, 'node_modules', '.bin', 'thally')
+  const hasLocalCli = needsInstall
+    ? declaresThallyCli(directory)
+    : existsSync(binary) || existsSync(`${binary}.cmd`)
+  return hasLocalCli ? 'npx thally dev' : 'npm run dev'
+}
+
 /** One copyable command; installation is included when setup skipped it. */
 export function previewCommand(directory: string, needsInstall = false): string {
-  return `cd ${quoteDirectory(directory)} && ${needsInstall ? 'npm install && ' : ''}npm run dev`
+  return `cd ${quoteDirectory(directory)} && ${needsInstall ? 'npm install && ' : ''}${devCommand(directory, needsInstall)}`
 }
 
 /** Introduce project creation with the shared wordmark and task presentation. */

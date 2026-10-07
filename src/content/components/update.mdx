@@ -3,8 +3,10 @@ title: "Update"
 description: "Publish anchored changelog entries with dates, descriptions, and tags."
 ---
 
-`<Update>` creates a linkable entry in a changelog timeline. The component is
-also compatible with Thally’s generated changelog RSS feed.
+`<Update>` creates a linkable entry in a changelog timeline. On a changelog
+page (a page whose ID is `changelog`, starts with `changelog/`, or ends with
+`/changelog`), every entry is also published to the changelog feeds and to
+agents.
 
 ## Example
 
@@ -40,3 +42,21 @@ also compatible with Thally’s generated changelog RSS feed.
 | `description` | `string` | Short summary under the entry heading |
 | `tags` | `string[]` | Filterable category labels |
 | `id` | `string` | Optional explicit anchor |
+
+## Feeds and agents
+
+Thally reads the `<Update>` entries on the changelog page and publishes them,
+newest first, in three forms:
+
+| Surface | URL |
+|---|---|
+| RSS 2.0 | `/changelog/rss.xml` |
+| JSON Feed 1.1 | `/changelog/feed.json` |
+| MCP tool | `list_changes` on `/api/mcp`, with an optional `since` date |
+
+Each item links to the entry's anchor on the page. Use ISO dates such as
+`2026-08-21` (or written dates such as `August 21, 2026`) so feed readers and
+the `since` filter can order entries; other text, such as `Spring 2026`, is
+shown as written but left undated. Content inside `<Visibility for="humans">`
+is omitted from feeds, as it is from every machine-readable projection.
+

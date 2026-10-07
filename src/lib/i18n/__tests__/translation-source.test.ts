@@ -55,4 +55,19 @@ describe('findDocSource containment', () => {
       for (const path of touched) expect(path).toMatch(/^src\/content\/[^\\\0]*$/)
     }
   })
+
+  // A route names a page, never a file: `/secret.mdx` must not resolve
+  // `secret.mdx` under an id that per-page access rules do not key on.
+  it.each(['secret.mdx', 'secret.MDX', 'secret.md', 'guide/index.mdx', 'fr/secret.mdx'])('refuses the file-suffixed slug %s', async (slug) => {
+    for (const locale of [undefined, 'fr']) {
+      const { source, touched } = recordingSource([...files, 'src/content/guide/index.mdx', 'src/content/fr/secret.mdx'])
+      expect(await findDocSource(source, slug, locale)).toBeNull()
+      expect(touched).toEqual([])
+    }
+  })
+
+  it('never resolves a percent-encoded suffix to a file', async () => {
+    const { source } = recordingSource(files)
+    expect(await findDocSource(source, 'secret%2Emdx')).toBeNull()
+  })
 })

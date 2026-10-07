@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next'
-import { getSeoConfig, getVisiblePageIds, loadDocEntries } from '@/data/docs'
+import { canReaderViewPage, getSeoConfig, getVisiblePageIds, loadDocEntries } from '@/data/docs'
 import { getAllApiOperationNodes } from '@/data/api-reference'
 
 import { getRequestOrigin } from '@/lib/cloud-link/request'
@@ -8,13 +8,19 @@ import { getContentI18nConfig } from '@/lib/i18n/content'
 import { buildLocaleAlternates } from '@/lib/i18n/metadata'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { getIndexableDocTranslation } from '@/lib/i18n/translation-source'
+import { getReaderAuthConfig } from '@/lib/reader-auth/config'
+import { canReaderAccessUnmarkedContent, ANONYMOUS_READER } from '@/lib/reader-auth/access'
 
+/**
+ * Crawlers are anonymous: the sitemap is always the anonymous reader's view,
+ * whoever requests it, so a restricted page is never announced.
+ */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = await getRequestOrigin()
-  const allEntries = await loadDocEntries()
+  const allEntries = await loadDocEntries(ANONYMOUS_READER)
   const visibleIds = getSeoConfig().sitemap === 'navigable' ? getVisiblePageIds() : null
   const docEntries = allEntries.filter((doc) => !doc.hidden && !doc.noindex && (!visibleIds || visibleIds.has(doc.id)))
-  const apiNodes = await getAllApiOperationNodes()
+  const apiNodes = canReaderAccessUnmarkedContent(ANONYMOUS_READER, getReaderAuthConfig()) ? await getAllApiOperationNodes() : []
   const i18n = await getEffectiveI18nConfig()
 
   const docPages: MetadataRoute.Sitemap = (
@@ -22,7 +28,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       docEntries.map(async (doc) => {
         // A migrated Mintlify site redirects `/` to `/introduction`; list the page's own URL.
         const href = visibleIds && doc.id === 'introduction' ? '/introduction' : doc.href
-        const availableI18n = await getContentI18nConfig(doc.slug, i18n)
+        const contentI18n = await getContentI18nConfig(doc.slug, i18n)
+        // A translation may restrict a page further than its primary file.
+        const openLocales = await Promise.all(contentI18n.locales.map(async (locale) =>
+          locale.code === i18n.defaultLocale || await canReaderViewPage(doc.id, ANONYMOUS_READER, locale.code)))
+        const availableI18n = { ...contentI18n, locales: contentI18n.locales.filter((_, index) => openLocales[index]) }
         const languages = buildLocaleAlternates(baseUrl, href, availableI18n)
         return Promise.all(availableI18n.locales.map(async (locale) => {
           const translation = locale.code === i18n.defaultLocale

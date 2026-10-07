@@ -19,6 +19,7 @@ vi.mock('@/data/api-reference', () => ({
 vi.mock('@/data/docs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/data/docs')>()),
   getApiPlaygroundTimeoutMs: vi.fn(() => 60_000),
+  canReaderViewPage: vi.fn(async () => true),
 }))
 
 vi.mock('@/data/manual-api', () => ({
@@ -385,6 +386,15 @@ describe('POST /api/try-it for manual api pages', () => {
     expect((await POST(request(manualPayload({ url: 'https://httpbin.org/other' })))).status).toBe(403)
     expect((await POST(request(manualPayload({ method: 'DELETE' })))).status).toBe(403)
     expect((await POST(request(manualPayload({ operationPath: '/other' })))).status).toBe(403)
+  })
+
+  it('refuses to proxy for a page the reader may not open, before reading it', async () => {
+    const { canReaderViewPage } = await import('@/data/docs')
+    vi.mocked(canReaderViewPage).mockResolvedValueOnce(false)
+    vi.mocked(getManualApiOperation).mockResolvedValue(manual() as never)
+    const response = await POST(request(manualPayload()))
+    expect(response.status).toBe(403)
+    expect(getManualApiOperation).not.toHaveBeenCalled()
   })
 
   it('refuses unknown pages and never falls back to spec operations', async () => {

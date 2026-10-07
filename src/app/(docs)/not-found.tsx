@@ -2,11 +2,14 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { getDocFromParams } from '@/data/get-doc'
 import { DocLayout } from '@/components/docs/doc-layout'
+import { getReaderContext } from '@/lib/reader-auth/context'
+import { canReaderViewResolvedDoc, shouldOfferReaderSignIn } from '@/lib/reader-auth/page-gate'
 
 export default async function DocsNotFound() {
+  const reader = await getReaderContext()
   // Allow projects to define a custom 404 page at src/content/404.mdx
   const custom = await getDocFromParams(['404'])
-  if (custom) {
+  if (custom && (await canReaderViewResolvedDoc(custom, reader))) {
     const Content = custom.component
     return (
       <DocLayout doc={custom}>
@@ -22,10 +25,18 @@ export default async function DocsNotFound() {
       <p className="mt-2 text-sm text-foreground/70">
         The document you asked for does not exist in this workspace yet. Try heading back to the docs home.
       </p>
-      <div className="mt-6">
+      <div className="mt-6 flex flex-wrap justify-center gap-3">
         <Button asChild>
           <Link href="/">Back to docs</Link>
         </Button>
+        {/* Shown on every 404 for anonymous readers, so it reveals nothing about the path. */}
+        {shouldOfferReaderSignIn(reader) ? (
+          <Button asChild variant="outline">
+            {/* A plain anchor: the sign-in route redirects off-site, which client navigation cannot follow. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a href="/api/reader/login">Sign in for more</a>
+          </Button>
+        ) : null}
       </div>
     </div>
   )

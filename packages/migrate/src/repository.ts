@@ -55,7 +55,18 @@ import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys 
 import { parseFrontmatter } from './frontmatter.js'
 import { mainSiteLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
 import { type BrandVars, brandColorsFromVars, cssBrandVars } from './css-colors.js'
-import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
+import {
+  frontmatterAccess,
+  isMintlifyServedScriptOrStyle,
+  isNavigationRestricted,
+  isRestrictedAccess,
+  mergeNavigationAppearances,
+  mintlifyAppearance,
+  mintlifyFontSources,
+  navigationGateReason,
+  resolvePageAccess,
+} from './mintlify-extras.js'
+import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
 import { closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
@@ -138,7 +149,7 @@ const IGNORED_DIRECTORIES = new Set([
 function isIgnoredContentDirectory(name: string): boolean {
   return name.startsWith('.') || name === 'node_modules'
 }
-/** Project-root directory for withheld access-restricted pages; never read by the runtime. */
+/** Project-root directory for withheld restricted pages and assets; never read by the runtime. */
 const QUARANTINE_DIRECTORY = 'migration-quarantine'
 const ASSET_DIRECTORIES = new Set(['assets', 'images', 'img', 'media', 'public', 'static'])
 const ASSET_EXTENSIONS = new Set([
@@ -2047,28 +2058,66 @@ function readFrontmatterHead(path: string): string | undefined {
 interface InlineVerdict { kind: 'gated' | 'draft' | 'snippet-gated' | 'oversized' | 'unreadable'; reason: string }
 type InlineGate = (candidate: string) => InlineVerdict | undefined
 
+/**
+ * How one Mintlify page migrates. `reason` marks restricted content: it is
+ * never inlined into another page, and the assets and API operations only it
+ * uses stay off public surfaces (public/ and the spec are not access
+ * controlled). `quarantineReason` additionally keeps the page out of the
+ * content directory, because its rules cannot be carried over safely.
+ */
+interface PageGate {
+  reason?: string
+  quarantineReason?: string
+  /** Normalized access frontmatter written on the migrated page. */
+  access?: ResolvedPageAccess
+  openapi?: string
+}
+
+/** Why a page's own frontmatter restricts it (for inline warnings). */
+function ownRestrictionReason(access: MintlifyAccess): string {
+  return access.problem ?? (access.groups?.length ? 'frontmatter `groups`' : 'frontmatter `public: false`')
+}
+
 /** The real on-disk spelling of a path, so a case-variant import cannot dodge a path lookup on a case-insensitive filesystem. */
 function canonicalPath(path: string): string {
   try { return realpathSync.native(path) } catch { return path }
 }
 
 /**
- * The gate verdict from a page's raw (or frontmatter-head) text. Invalid YAML is
- * salvaged line by line, which can drop the very line that restricts access, so
- * it withholds rather than guesses. Key casing (`Groups:`) and TOML frontmatter
- * are deliberately not treated as gates: Mintlify ignores them too.
+ * A page's own access rules from its raw (or frontmatter-head) text. Invalid
+ * YAML is salvaged line by line, which can drop or misread the very line that
+ * restricts access, so it fails closed rather than guesses. Key casing
+ * (`Groups:`) and TOML frontmatter are deliberately not read: Mintlify ignores
+ * them too.
  */
-function pageHeadGateReason(raw: string, platform: MigrationPlatform = 'mintlify'): { reason?: string; publicTrue: boolean; openapi?: string } {
+function pageHeadAccess(raw: string): { access: MintlifyAccess; openapi?: string } {
   const parsed = parseFrontmatter(raw)
-  const gateKeys = platform === 'docusaurus' ? /^draft\s*:/m : platform === 'fern' ? /^(viewers|authed)\s*:/m : /^(groups|public)\s*:/m
+  const unreadable = parsed.error && /^(groups|public)\s*:/m.test(raw.slice(0, raw.length - parsed.content.length))
+  const openapi = typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined
+  const access = unreadable
+    ? { problem: 'frontmatter could not be parsed and declares `groups` or `public`' }
+    : frontmatterAccess(parsed.data)
+  return { access, openapi }
+}
+
+/** Short description of why a migrated page is restricted, for warnings. */
+function describeRestriction(access: ResolvedPageAccess): string {
+  return access.groups?.length ? `restricted to groups ${access.groups.join(', ')}` : '`public: false`'
+}
+
+/**
+ * Fern and Docusaurus pages the runtime cannot gate: Thally has no mapping for
+ * Docusaurus `draft` or Fern `viewers` / `authed`, so these quarantine (fail closed).
+ */
+function pageHeadGateReason(raw: string, platform: MigrationPlatform): { reason?: string; openapi?: string } {
+  const parsed = parseFrontmatter(raw)
+  const gateKeys = platform === 'docusaurus' ? /^draft\s*:/m : /^(viewers|authed)\s*:/m
   const unreadable = parsed.error && gateKeys.test(raw.slice(0, raw.length - parsed.content.length))
     ? 'frontmatter could not be parsed and declares an access or draft setting'
     : undefined
   const openapi = typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined
-  const reason = platform === 'docusaurus' ? docusaurusDraftReason(parsed.data)
-    : platform === 'fern' ? fernViewersReason(parsed.data)
-      : frontmatterGateReason(parsed.data)
-  return { reason: reason ?? unreadable, publicTrue: isPublicTrue(parsed.data.public), openapi }
+  const reason = platform === 'docusaurus' ? docusaurusDraftReason(parsed.data) : fernViewersReason(parsed.data)
+  return { reason: reason ?? unreadable, openapi }
 }
 
 /** Docusaurus leaves `draft: true` pages out of production builds. Anything but an explicit false is withheld. */
@@ -3269,8 +3318,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const referenceOrder = new Map<string, number>()
   let docusaurusSidebars: DocusaurusSidebars | null = null
   let mintlifyConfig: Record<string, unknown> | null = null
-  /** Pages under a restricted Mintlify navigation container, keyed like page references. */
-  const mintlifyGatedRefs = new Map<string, string>()
+  /** Access each navigation appearance of a Mintlify page imposes, keyed like page references. */
+  const mintlifyNavigationAccess = new Map<string, Array<NavigationAccess>>()
   let fernRawConfig: Record<string, unknown> | null = null
   let fernBasePath = ''
   let fernVersionPath = ''
@@ -3318,9 +3367,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
         for (const repo of projected.gatedSourceRefs) gatedSourceRepos.add(repo.toLowerCase())
-        for (const gated of projected.gatedReferences) {
-          const gatedKey = normalizedReferenceKey(gated.ref).toLowerCase()
-          if (!mintlifyGatedRefs.has(gatedKey)) mintlifyGatedRefs.set(gatedKey, gated.reason)
+        for (const appearance of projected.referenceAccess) {
+          const accessKey = normalizedReferenceKey(appearance.ref).toLowerCase()
+          const known = mintlifyNavigationAccess.get(accessKey)
+          if (known) known.push(appearance.access)
+          else mintlifyNavigationAccess.set(accessKey, [appearance.access])
         }
         for (const [index, reference] of projected.pageReferences.entries()) {
           const key = normalizedReferenceKey(reference.ref)
@@ -3520,6 +3571,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const docusaurusDocCardRoutes = new Set<string>()
   const seenPageIds = new Set<string>()
   const quarantinedFiles: Array<RenderedMigrationFile> = []
+  /** Pages migrated with `groups` / `public: false`; never a source of public assets or specs. */
+  const restrictedPages = new Set<MigrationPage>()
   // Assets that withheld pages use (their own and via inlined snippets), and
   // the raw text of everything published (page source with snippets inlined,
   // frontmatter included, plus copied CSS/JS and migrated components), which
@@ -3533,21 +3586,23 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const publishedLoose = new Set<string>()
   const withholdAsset = (assetPath: string, onDiskSpelling?: string): void => { withheldAssetPaths.add(publicAssetKey(onDiskSpelling ?? assetPath)) }
   let sawPublicTrue = false
-  // Gate verdicts are computed up front so a page that imports an
-  // access-restricted page as a component can never inline its content.
-  const gateByPath = new Map<string, { reason?: string; publicTrue: boolean }>()
+  // Access verdicts are computed up front so a page that imports a
+  // restricted page as a component can never inline its content.
+  const gateByPath = new Map<string, PageGate>()
   // Frontmatter `openapi:` references, split by whether the page is withheld.
   const withheldSpecRefs: Array<string> = []
   const publishedSpecRefs: Array<string> = []
   const withheldPaths = new Set<string>()
-  // The gate verdict of one Mintlify page: a bounded read of its frontmatter
-  // head, then the navigation gate. Unreadable means withheld.
+  // The access verdict of one Mintlify page: a bounded read of its frontmatter
+  // head, combined with every navigation container listing it. Unreadable
+  // or contradictory rules fail closed (quarantined).
   const isDocFile = (file: ScannedFile): boolean => ['.md', '.mdx'].includes(extname(file.relativePath).toLowerCase())
   const isGateCandidate = (file: ScannedFile): boolean => isDocFile(file)
     && !file.relativePath.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
-  const classifyPageGate = (file: ScannedFile): { reason?: string; publicTrue: boolean; openapi?: string } => {
-    let head: { reason?: string; publicTrue: boolean; openapi?: string } = { publicTrue: false }
-    let unreadableGate: string | undefined
+  const navigationAccessFor = (relativePath: string): NavigationAccess =>
+    mergeNavigationAppearances(mintlifyNavigationAccess.get(normalizedReferenceKey(relativePath).toLowerCase()) ?? [])
+  const classifyPageGate = (file: ScannedFile): PageGate => {
+    let head: { access: MintlifyAccess; openapi?: string } | { reason?: string; openapi?: string }
     try {
       // Pages above the size cap are never imported, but another page can
       // still inline them, so they are classified from their frontmatter.
@@ -3556,12 +3611,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const size = lstatSync(file.absolutePath).size
       const raw = readFrontmatterHead(file.absolutePath) ?? (size > MAX_PAGE_BYTES ? undefined : readFileSync(file.absolutePath, 'utf8'))
       if (raw === undefined) throw new Error('frontmatter is not terminated within the bounded read')
-      head = pageHeadGateReason(raw, platform)
+      head = platform === 'mintlify' ? pageHeadAccess(raw) : pageHeadGateReason(raw, platform)
     } catch {
-      unreadableGate = 'frontmatter could not be read'
+      head = platform === 'mintlify' ? { access: { problem: 'frontmatter could not be read' } } : { reason: 'frontmatter could not be read' }
     }
-    const reason = head.reason ?? unreadableGate ?? mintlifyGatedRefs.get(normalizedReferenceKey(file.relativePath).toLowerCase())
-    return { reason, publicTrue: head.publicTrue, openapi: head.openapi }
+    // Fern and Docusaurus rules have no runtime mapping: a hit is quarantined, never migrated.
+    if (!('access' in head)) return head.reason ? { reason: head.reason, quarantineReason: head.reason, openapi: head.openapi } : { openapi: head.openapi }
+    const verdict = resolvePageAccess(head.access, navigationAccessFor(file.relativePath))
+    if (verdict.problem) return { reason: verdict.problem, quarantineReason: verdict.problem, openapi: head.openapi }
+    const access = verdict.access ?? {}
+    return { ...(isRestrictedAccess(access) ? { reason: describeRestriction(access) } : {}), access, openapi: head.openapi }
   }
   // Pages the file budget dropped, or a walk that hit its cap, are not
   // published, but their gate still decides what is withheld: classified here
@@ -3584,7 +3643,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }
       if (!isGateCandidate(file)) continue
       const verdict = classifyPageGate(file)
-      gateByPath.set(file.absolutePath, { reason: verdict.reason, publicTrue: verdict.publicTrue })
+      gateByPath.set(file.absolutePath, verdict)
       if (verdict.openapi) (verdict.reason ? withheldSpecRefs : publishedSpecRefs).push(verdict.openapi)
       if (verdict.reason) withheldPaths.add(file.absolutePath)
     }
@@ -3657,7 +3716,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     for (const file of new Set([...scannedFiles, ...files])) {
       const reason = nonMintlifyGateReason(file)
       if (!reason) continue
-      gateByPath.set(file.absolutePath, { reason, publicTrue: false })
+      gateByPath.set(file.absolutePath, { reason, quarantineReason: reason })
       withheldPaths.add(file.absolutePath)
     }
   }
@@ -3681,10 +3740,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const inSnippetDirectory = shown.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
     let head: string | undefined
     try { head = readFrontmatterHead(candidate) } catch { return { kind: 'unreadable', reason: 'could not be read' } }
-    const gated = head === undefined ? undefined : pageHeadGateReason(head, platform).reason
-    if (gated) return { kind: inSnippetDirectory ? 'snippet-gated' : 'gated', reason: gated }
-    const navigationGated = inSnippetDirectory ? undefined : mintlifyGatedRefs.get(normalizedReferenceKey(shown).toLowerCase())
-    if (navigationGated) return { kind: 'gated', reason: navigationGated }
+    const own = head === undefined ? undefined : pageHeadAccess(head).access
+    if (own && isRestrictedAccess(own)) return { kind: inSnippetDirectory ? 'snippet-gated' : 'gated', reason: ownRestrictionReason(own) }
+    if (!inSnippetDirectory) {
+      const navigation = navigationAccessFor(shown)
+      if (isNavigationRestricted(navigation)) return { kind: 'gated', reason: navigation.problem ?? 'its navigation container restricts it' }
+    }
     // Invalid YAML is salvaged line by line, so what a snippet declares cannot be trusted; same as oversized.
     if (head !== undefined && parseFrontmatter(head).error) return { kind: 'unreadable', reason: 'frontmatter could not be parsed' }
     if (lstatSync(candidate).size > MAX_PAGE_BYTES) return { kind: 'oversized', reason: 'over 2 MB' }
@@ -3829,14 +3890,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       continue
     }
     const key = normalizedReferenceKey(file.relativePath)
+    // Restricted Mintlify pages migrate with `groups` / `public: false`
+    // frontmatter the runtime enforces, but what they use must not leak through
+    // surfaces that are not access controlled (public/, specs, other pages).
+    // Fern and Docusaurus have no runtime mapping, so their gated pages are
+    // quarantined outright (the gate sets quarantineReason).
+    let pageGate: PageGate | undefined
     {
-      // Access-restricted pages must never migrate as public. Certain signals
-      // only: frontmatter `groups` / `public: false`, or a restricted
-      // navigation container. The original file is kept outside every
-      // published path so nothing is lost.
-      const gate = gateByPath.get(file.absolutePath)
-      if (gate?.publicTrue) sawPublicTrue = true
-      const gateReason = gate?.reason
+      pageGate = gateByPath.get(file.absolutePath)
+      if (pageGate?.access?.isPublic === true) sawPublicTrue = true
+      // Rules that cannot be carried over safely (malformed values, group
+      // lists that share no group, unreadable frontmatter) fail closed: the
+      // original file is kept outside every published path so nothing is lost.
+      const gateReason = pageGate?.quarantineReason
       if (gateReason) {
         skipped++
         if (file.relativePath.split('/').some((segment) => segment === '..')) {
@@ -3864,12 +3930,32 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         }
         warnings.push({
           code: 'gated-page',
-          message: `${gateReason === DOCUSAURUS_DRAFT_REASON ? 'This is a draft page that Docusaurus does not publish, so it was NOT published' : `Access-restricted on the source site (${gateReason}), so it was NOT published`}. The original is saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}; links from other pages to it will break.`,
+          message: gateReason === DOCUSAURUS_DRAFT_REASON
+            ? `This is a draft page that Docusaurus does not publish, so it was NOT published. The original is saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}; links from other pages to it will break.`
+            : platform === 'mintlify'
+              ? `Access-restricted on the source site, but its access rules could not be migrated safely (${gateReason}), so it was NOT published. Fix the rules in the original, saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}, and move it into src/content/; until then links from other pages to it will break.`
+              : `Access-restricted on the source site (${gateReason}), so it was NOT published. The original is saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}; links from other pages to it will break.`,
           source: file.relativePath,
         })
         continue
       }
+      if (pageGate?.reason && mintlifyProjectRoot) {
+        // Raw text, frontmatter and inlined snippets included, so an image
+        // named only in a restricted page's metadata stays private too.
+        try {
+          rewriteRepositoryAssetLinks(
+            inlineMdxSnippets(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, [], 0, mintlifyProjectRoot, snippetAliases, inlineGate),
+            file.absolutePath,
+            mintlifyProjectRoot,
+            withholdAsset,
+          )
+        } catch {
+          // Unscannable: its assets stay out of public/ unless a published page
+          // names them by exact path; the page itself is read again below.
+        }
+      }
     }
+    const isRestrictedPage = Boolean(pageGate?.reason)
     const referenced = exactReferenceMap.get(exactReferenceKey(file.relativePath)) ?? referenceMap.get(key)
     let locale = referenced?.locale
     let navigationId = referenced?.navigationId ?? pageIdFromReference(file.relativePath, platform === 'mintlify')
@@ -3902,8 +3988,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       inlineGate,
       platform,
     )
-    // Counted as published only once the page is certain to be (below).
-    const publishedText = trackPublishedRefs ? raw : undefined
+    // Counted as published only once the page is certain to be (below). A
+    // restricted page's text never makes an asset public.
+    const publishedText = trackPublishedRefs && !isRestrictedPage ? raw : undefined
     const pageAssetReferences: Array<string> = []
     if (platform === 'fern' || platform === 'mintlify' || platform === 'docusaurus') {
       // A heading's `{#custom-id}` anchor (`## Title {#custom-id}`) crashes
@@ -4032,7 +4119,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (platform === 'mintlify' && mintlifyProjectRoot) {
       // Counted as published only once the page is certain to be (below).
       page.body = rewriteRepositoryAssetLinks(page.body, file.absolutePath, mintlifyProjectRoot, (assetPath, onDiskSpelling) => {
-        pageAssetReferences.push(publicAssetKey(onDiskSpelling ?? assetPath))
+        if (isRestrictedPage) withholdAsset(assetPath, onDiskSpelling)
+        else pageAssetReferences.push(publicAssetKey(onDiskSpelling ?? assetPath))
       }, (spelled, used) => {
         warnings.push({ code: 'unsupported-config', message: `"${spelled}" was not found beside this page; the file "${used}" in the site root was used instead and will be published.`, source: file.relativePath })
       })
@@ -4155,7 +4243,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       continue
     }
     seenPageIds.add(page.id)
+    if (pageGate?.access?.groups) page.groups = pageGate.access.groups
+    if (pageGate?.access?.isPublic !== undefined) page.public = pageGate.access.isPublic
     pages.push(page)
+    if (isRestrictedPage) restrictedPages.add(page)
     for (const assetPath of pageAssetReferences) addAssetReference(assetPath, file.relativePath)
     if (publishedText !== undefined) addPathReferences(publishedText, posix.dirname(file.relativePath).replace(/^\.$/, ''), publishedExact, publishedLoose, docusaurusPaths(posix.join(docusaurusDocsPrefix, posix.dirname(file.relativePath))))
     // MDX normalization removes DocCardList because Thally has no matching
@@ -4286,7 +4377,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       try {
         rootNavbarButtons = navbarLinkButtons(css)
         rootStyleProjection = projectAuthoredStyles(css, [
-          ...pages.map((page) => page.body),
+          // Restricted pages' markup must not keep a rule (and the image its
+          // url() names) public; rules only they use are dropped.
+          ...pages.filter((page) => !restrictedPages.has(page)).map((page) => page.body),
           ...(componentMigrator?.files() ?? []).map((file) => typeof file.content === 'string' ? file.content : ''),
           // Site-wide scripts build markup of their own (a CTA card, say) that the stylesheet is meant for.
           ...files.filter((file) => isMintlifyServedScriptOrStyle(file.relativePath) && extname(file.relativePath).toLowerCase() === '.js'
@@ -4729,7 +4822,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     // Operations docs.json lists explicitly stay public like those on published pages.
     const keptSpecRefs = [...publishedSpecRefs, ...navigationOperationRefs(mintlifyConfig)]
-    const allSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs, pages)
+    // A spec only restricted pages name is not migrated (the spec is public).
+    const allSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs, pages.filter((page) => !restrictedPages.has(page)))
     // Remote specs are downloaded later: carry the operations to withhold from them.
     for (const remote of remoteApiSpecs) {
       const { withheld, kept } = withheldOperationKeys({ sourcePath: remote.url, filename: remote.url }, withheldSpecRefs, keptSpecRefs)
@@ -4809,9 +4903,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         }
       }
     }
-    // Specs named only by published pages: copied (and bound to a hidden tab)
-    // so those pages render. A spec only withheld pages name never gets here,
-    // because `pages` holds the published pages alone.
+    // Specs named only by unrestricted pages: copied (and bound to a hidden
+    // tab) so those pages render. A spec only restricted pages name never gets
+    // here, because restricted pages were left out of `allSpecs` above.
     for (const spec of pageOnlySpecs) {
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) assets.push(specAsset(spec.filename, spec.content))
       if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
@@ -5316,9 +5410,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // Mintlify serves a Markdown mirror of every page by default. The mirror
     // route reads only src/content, the same files the HTML routes serve.
     docsConfig = { ...docsConfig, markdown: { enabled: true } }
+    if (restrictedPages.size > 0) {
+      const apiNote = [...restrictedPages].some((page) => page.openapi)
+        ? ' API operations documented only on restricted pages were withheld from the published OpenAPI spec (specs are not access-controlled), so those pages do not render their endpoint until you restore the operation.'
+        : ''
+      warnings.push({
+        code: 'gated-page',
+        message: `${restrictedPages.size} page(s) are restricted with \`groups\`/\`public: false\`. Thally hides them from everyone until you configure reader authentication in docs.json \`auth\` (see /guides/authenticated-docs).${apiNote}`,
+      })
+    }
     if (quarantinedPageCount > 0 || withheldAssetCount > 0 || unreferencedAssetCount > 0) {
       const assetNote = withheldAssetCount > 0
-        ? `${withheldAssetCount} file(s) used only by access-restricted pages were kept out of public/ and saved under ${QUARANTINE_DIRECTORY}/assets/. `
+        ? `${withheldAssetCount} file(s) used only by access-restricted pages were not copied to public/, because public/ is not access-controlled; they are saved under ${QUARANTINE_DIRECTORY}/assets/. Copy them into public/ manually if they may be public, or the restricted pages will show them broken. `
         : ''
       const unreferencedReason = [
         ...(hasWithheldContent ? ['this site has access-restricted content'] : []),
@@ -5330,7 +5433,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       warnings.push({
         code: 'gated-page',
         message: (quarantinedPageCount > 0
-          ? `${quarantinedPageCount} access-restricted page(s) were withheld from the published site and saved under ${QUARANTINE_DIRECTORY}/ (local only: git-ignored, never served or deployed). `
+          ? `${quarantinedPageCount} access-restricted page(s) whose access rules could not be migrated safely were withheld from the published site and saved under ${QUARANTINE_DIRECTORY}/ (local only: git-ignored, never served or deployed). `
           : '')
           + assetNote
           + unreferencedNote
@@ -5342,7 +5445,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     warnings.push({
       code: 'gated-page',
       message: (sawPublicTrue ? 'Some pages set `public: true`, which means the source site used Mintlify authentication and every page WITHOUT it was private. ' : '')
-        + 'Access control set in the Mintlify dashboard is not visible in the repository. Check the source site\'s dashboard access settings before publishing: Thally will publish ALL imported pages publicly. '
+        + 'Access control set in the Mintlify dashboard is not visible in the repository. Check the source site\'s dashboard access settings before publishing: until docs.json `auth` is configured, Thally publishes every imported page that has no `groups` or `public: false` to everyone. '
         + 'Confirm nothing here was meant to stay private before deploying.',
     })
   }

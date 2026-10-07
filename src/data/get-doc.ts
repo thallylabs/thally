@@ -1,5 +1,3 @@
-'use server'
-
 /** Load authored MDX while keeping route identity independent of display metadata. */
 
 import { createElement, type ComponentType, type ReactNode } from 'react'
@@ -19,6 +17,7 @@ import { getContentSource, type ContentSource } from '@/lib/content-source'
 import { docPathFromSlug } from '@/lib/i18n/doc-route'
 import { parseFrontmatter } from '@/lib/frontmatter'
 import { findDocSource } from '@/lib/i18n/translation-source'
+import { MALFORMED_PAGE_ACCESS, mergePageAccess, parsePageAccess, type PageAccess } from '@/lib/reader-auth/access'
 
 interface DocFrontmatter {
   title?: string
@@ -83,6 +82,26 @@ export async function getDocFromParams(slugSegments?: Array<string>, locale?: st
   return pending
 }
 
+/**
+ * Reader access of the exact file(s) a route renders: the resolved file and,
+ * for a translation, its primary page. Derived from the files themselves, not
+ * from a page id, so no alternate spelling of a route can reach a restricted
+ * file without its rules. Unreadable frontmatter fails closed.
+ */
+async function resolvedFileAccess(source: ContentSource, filePaths: Array<string>): Promise<PageAccess> {
+  const accesses: Array<PageAccess> = []
+  for (const filePath of filePaths) {
+    const file = await source.read(filePath)
+    if (!file) return MALFORMED_PAGE_ACCESS
+    try {
+      accesses.push(parsePageAccess(parseFrontmatter(file.content).data))
+    } catch {
+      return MALFORMED_PAGE_ACCESS
+    }
+  }
+  return mergePageAccess(...accesses)
+}
+
 async function loadDocFromSource(
   slugSegments: Array<string>,
   locale?: string,
@@ -93,7 +112,9 @@ async function loadDocFromSource(
   if (!candidate) {
     return null
   }
-  const document = await compileDocEntry(source, candidate.filePath, slugSegments, candidate.isFallback, candidate.isStale, locale, candidate.sourcePath)
+  const compiled = await compileDocEntry(source, candidate.filePath, slugSegments, candidate.isFallback, candidate.isStale, locale, candidate.sourcePath)
+  const files = candidate.sourcePath && candidate.sourcePath !== candidate.filePath ? [candidate.filePath, candidate.sourcePath] : [candidate.filePath]
+  const document = compiled ? { ...compiled, access: await resolvedFileAccess(source, files) } : null
   if (!document || !candidate.sourcePath || candidate.isFallback) return document
   const sourceFile = await source.read(candidate.sourcePath)
   if (!sourceFile) return null

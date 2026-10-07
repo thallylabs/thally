@@ -345,7 +345,10 @@ describe('sourceRef quarantine wording', () => {
     })
     const result = importSourceRef(MAPPING, repo)
     const messages = result.warnings.map((warning) => warning.message)
-    expect(messages.some((message) => /access-restricted page\(s\) were withheld from the published site \(not saved\)/.test(message))).toBe(true)
+    // The restricted page imports with its rule; the image only it uses stays out of public/.
+    expect(result.pages.find((page) => page.id === 'client-sdks/typescript/secret')?.groups).toEqual(['admin'])
+    expect(result.assets.some((asset) => asset.path.includes('priv.png'))).toBe(false)
+    expect(messages.some((message) => /page\(s\) are restricted with `groups`/.test(message))).toBe(true)
     expect(messages.filter((message) => message.includes('migration-quarantine'))).toEqual([])
     expect(messages.some((message) => /saved under|is saved at/.test(message))).toBe(false)
   })
@@ -567,10 +570,10 @@ describe('navigation too deep to check access rules', () => {
     platform: 'mintlify',
   })
 
-  it('withholds a page nested past 32 levels under a restricted menu item', () => {
+  it('carries a restricted menu item\'s rule to a page nested 20 levels below it', () => {
     const bundle = runMenu(nest(20, 'deep-page'))
-    expect(bundle.pages.some((page) => page.id === 'deep-page')).toBe(false)
-    expect(JSON.stringify(bundle.docsConfig)).not.toContain('deep-page')
+    // Restricted pages migrate with access frontmatter the runtime enforces; never as open pages.
+    expect(bundle.pages.find((page) => page.id === 'deep-page')?.public).toBe(false)
   })
 
   it('withholds every page when the navigation is nested past the limit', () => {

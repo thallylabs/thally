@@ -2,6 +2,19 @@
 
 import { getContentDocument, loadContentDocument } from '../content/index.js'
 import { resolveDocEntries, resolveDocEntriesAsync } from '../doc-source.js'
+import type { ContentSection } from '../content/types.js'
+import { resolveSupplementalSearchRecords, type SearchRecordType } from './supplemental.js'
+
+/**
+ * A heading-bounded slice kept beside a record so a hit can point at the
+ * section that matched (`href#anchor`). Not indexed: ranking stays page-level.
+ */
+export interface SearchRecordSection {
+  /** Heading id; '' for the page preamble. */
+  id: string
+  title: string
+  text: string
+}
 
 export interface SearchRecord {
   id: string
@@ -12,6 +25,22 @@ export interface SearchRecord {
   body: string
   keywords: string
   href: string
+  /** Absent on records built before typed records existed; treat as `page`. */
+  type?: SearchRecordType
+  sections?: Array<SearchRecordSection>
+  method?: string
+  path?: string
+}
+
+/** Section bodies are kept whole up to this size; enough to locate a match. */
+const SECTION_TEXT_LIMIT = 2000
+
+function recordSections(sections: Array<ContentSection> | undefined): Array<SearchRecordSection> {
+  return (sections ?? []).map((section) => ({
+    id: section.id,
+    title: section.title,
+    text: section.text.slice(0, SECTION_TEXT_LIMIT),
+  }))
 }
 
 const BODY_LIMIT = 4000
@@ -52,10 +81,31 @@ async function buildRecordsAsync(bodyLimit: number, locale?: string): Promise<Ar
         body: document.content.text.slice(0, bodyLimit),
         keywords: entry.keywords.join(' '),
         href: entry.href,
+        type: 'page',
+        sections: recordSections(document.content.sections),
       }
     }),
   )
-  return records.filter((record): record is SearchRecord => record !== null)
+  const pages = records.filter((record): record is SearchRecord => record !== null)
+  const pageIds = new Set(pages.map((record) => record.id))
+  // Generated records (API operations) join the same index, so one query ranks
+  // pages and operations together. A page id always wins a collision.
+  const supplemental = (await resolveSupplementalSearchRecords(locale))
+    .filter((record) => !pageIds.has(record.id))
+    .map((record): SearchRecord => ({
+      id: record.id,
+      pageId: record.id,
+      title: record.title,
+      description: record.description,
+      headings: '',
+      body: (record.body ?? '').slice(0, bodyLimit),
+      keywords: record.keywords.join(' '),
+      href: record.href,
+      type: record.type,
+      ...(record.method ? { method: record.method } : {}),
+      ...(record.path ? { path: record.path } : {}),
+    }))
+  return [...pages, ...supplemental]
 }
 
 let serverCorpus: Array<SearchRecord> | null = null
@@ -84,4 +134,9 @@ let clientCorpus: Array<SearchRecord> | null = null
 export function getClientSearchCorpus(): Array<SearchRecord> {
   if (!clientCorpus) clientCorpus = buildRecords(CLIENT_BODY_LIMIT)
   return clientCorpus
+}
+
+/** Drop the memoized request-time corpora (used by `resetSearchEngine`). */
+export function resetSearchCorpora() {
+  asyncServerCorpora.clear()
 }

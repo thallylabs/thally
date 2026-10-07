@@ -64,6 +64,14 @@ export function mdxToMarkdown(body: string, audience: ContentAudience = 'agents'
     const href = getAttr(tag, 'href')
     return `\n#### ${href ? `[${title}](${href})` : title}\n`
   })
+  // A changelog entry's label and date live only in props; without this the
+  // Markdown changelog would be an undifferentiated run of bullet lists.
+  out = out.replace(/<Update\b[^>]*>/g, (tag) => {
+    const heading = [getAttr(tag, 'title') ?? getAttr(tag, 'label'), getAttr(tag, 'date')].filter(Boolean).join(' — ')
+    const description = getAttr(tag, 'description')
+    if (!heading) return description ? `\n${description}\n` : ''
+    return `\n### ${heading}\n${description ? `\n${description}\n` : ''}`
+  })
   out = out.replace(/<(?:GitHub|Github)\b[^>]*\/?\s*>/g, (tag) => {
     const repo = getAttr(tag, 'repo')
     if (!repo || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,99})$/.test(repo)) return ''

@@ -4,6 +4,7 @@ const published = vi.hoisted(() => new Set(['visible']))
 vi.mock('@/data/docs', () => ({
   ensureDocPublication: async () => undefined,
   isDocPublished: (id: string) => published.has(id),
+  canReaderViewPage: async () => true,
 }))
 vi.mock('@/lib/cloud-link/client', () => ({ getCloudSiteConfig: async () => null }))
 vi.mock('@/lib/markdown-pages', () => ({ isMarkdownPagesEnabled: () => true }))

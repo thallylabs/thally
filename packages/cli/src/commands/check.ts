@@ -1,3 +1,5 @@
+/** `thally check`: content lint via create-thally-docs, plus the optional readiness score. */
+
 import type { ParsedArgs } from '../router.js'
 import { projectScripts, run, runPackageBin } from '../process.js'
 
@@ -6,7 +8,7 @@ import { projectScripts, run, runPackageBin } from '../process.js'
  * --agents — run the Agent Readiness Score from the same project script.
  */
 export async function runCheck(args: ParsedArgs): Promise<number> {
-  const contentArgs = ['check', '.']
+  const contentArgs = ['check', args.positionals[0] ?? '.']
   if (args.hasFlag('--fix')) contentArgs.push('--fix')
   if (args.hasFlag('--ci')) contentArgs.push('--ci')
   if (args.hasFlag('--external')) contentArgs.push('--external')
