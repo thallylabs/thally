@@ -1325,7 +1325,10 @@ function publicAssetKey(repoRelative: string): string {
  * lowercased key of every exact one, for a letter-case mismatch) and never
  * makes anything public. Linear, no backtracking.
  */
-function addPathReferences(text: string, baseDir: string | undefined, exact: Set<string>, loose: Set<string>, staticRoot = false): void {
+/** Docusaurus: where a page's links resolve against the site root (`siteBase`) and where the docs folder sits in it. */
+interface DocusaurusPathContext { siteBase: string; docsPrefix: string }
+
+function addPathReferences(text: string, baseDir: string | undefined, exact: Set<string>, loose: Set<string>, docusaurus?: DocusaurusPathContext): void {
   for (const word of text.split(PATH_SEPARATORS)) {
     let token = word.replace(/\.+$/, '')
     if (!/\.[a-z0-9]{2,5}$/i.test(token) || token.startsWith('//')) continue
@@ -1336,11 +1339,23 @@ function addPathReferences(text: string, baseDir: string | undefined, exact: Set
       loose.add(token.toLowerCase())
       continue
     }
+    if (docusaurus && !token.startsWith('/')) {
+      // `@site/...` and `../../static/...` name files from the site root, not the docs folder.
+      const fromSite = normalizeAssetPath(posix.normalize(token.startsWith('@site/') ? token.slice('@site/'.length) : posix.join(docusaurus.siteBase, token)))
+      const docsFolder = docusaurus.docsPrefix ? `${docusaurus.docsPrefix}/` : ''
+      const siteKey = fromSite?.startsWith('static/') ? fromSite.slice('static/'.length)
+        : fromSite && docsFolder && fromSite.startsWith(docsFolder) ? fromSite.slice(docsFolder.length) : undefined
+      if (siteKey) {
+        exact.add(siteKey)
+        loose.add(siteKey.toLowerCase())
+      }
+      if (token.startsWith('@site/')) continue
+    }
     if (!token.startsWith('/') && baseDir === undefined) continue
     const resolved = normalizeAssetPath(posix.normalize(token.startsWith('/') ? token.slice(1) : posix.join(baseDir ?? '', token)))
     if (!resolved) continue
     // Docusaurus serves `static/x` at `/x`, as `public/` is elsewhere.
-    const key = staticRoot && resolved.startsWith('static/') ? resolved.slice('static/'.length) : publicAssetKey(resolved)
+    const key = docusaurus && resolved.startsWith('static/') ? resolved.slice('static/'.length) : publicAssetKey(resolved)
     exact.add(key)
     loose.add(key.toLowerCase())
   }
@@ -3650,6 +3665,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const pagesNotClassified = droppedPageCount > 0 || scanTruncated
   const hasWithheldContent = withheldPaths.size > 0 || withheldDocFiles.length > 0
   const trackPublishedRefs = hasWithheldContent || pagesNotClassified
+  // Docusaurus: the docs folder's place in the site, so `@site/...` and `../../static/...` links resolve from the site root.
+  const docusaurusDocsPrefix = platform === 'docusaurus' ? relative(docusaurusProjectRoot ?? repositoryDir, contentRoot).replace(/\\/g, '/') : ''
+  const docusaurusPaths = (siteBase: string): DocusaurusPathContext | undefined => (
+    platform === 'docusaurus' ? { siteBase: posix.normalize(siteBase).replace(/^\.$/, ''), docsPrefix: docusaurusDocsPrefix } : undefined)
   // Mintlify only. The pre-pass covers only files inside the file budget, so a
   // candidate it never saw (dropped by the budget, in a snippet directory, under
   // a case-variant path) is classified on demand: frontmatter gates, navigation
@@ -4138,7 +4157,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     seenPageIds.add(page.id)
     pages.push(page)
     for (const assetPath of pageAssetReferences) addAssetReference(assetPath, file.relativePath)
-    if (publishedText !== undefined) addPathReferences(publishedText, posix.dirname(file.relativePath).replace(/^\.$/, ''), publishedExact, publishedLoose, platform === 'docusaurus')
+    if (publishedText !== undefined) addPathReferences(publishedText, posix.dirname(file.relativePath).replace(/^\.$/, ''), publishedExact, publishedLoose, docusaurusPaths(posix.join(docusaurusDocsPrefix, posix.dirname(file.relativePath))))
     // MDX normalization removes DocCardList because Thally has no matching
     // component. Remember its authored route so the resolved sidebar can
     // supply the cards once every page and category has been discovered.
@@ -4341,7 +4360,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         value && typeof value === 'object' && !Array.isArray(value) && navigationGateReason(value as Record<string, unknown>) ? undefined : value))
       // Branding the migrated config will name: Fern's docs.yml (logo, favicon, ...) and Docusaurus' static site settings.
       : JSON.stringify([docsConfig, fernRawConfig ?? null, docusaurusProjectRoot ? readDocusaurusSiteSettings(docusaurusProjectRoot) : null])
-    addPathReferences(publishedConfig, '', publishedExact, publishedLoose, platform === 'docusaurus')
+    addPathReferences(publishedConfig, '', publishedExact, publishedLoose, docusaurusPaths(''))
   }
   for (const file of componentMigrator?.files() ?? []) {
     if (!trackPublishedRefs || typeof file.content !== 'string') continue
