@@ -20,7 +20,13 @@ import type {
   MigrationWarning,
 } from './types.js'
 
-const MAX_CONFIG_BYTES = 20_000_000
+const MAX_CONFIG_BYTES = 1_000_000
+/**
+ * Each candidate assignment, `docs:` key or `fbContent(` call is matched to its
+ * closing brace by a scan to the end of the source in the worst case, so the
+ * number tried is bounded. Real configs have a handful.
+ */
+const MAX_STATIC_CANDIDATES = 200
 const CATEGORY_FILENAMES = ['_category_.json', '_category_.yml', '_category_.yaml']
 const SIDEBAR_FILENAMES = [
   'sidebars.json',
@@ -437,7 +443,7 @@ export function readDocusaurusSiteOrigin(repositoryRoot: string): string | undef
 
 function readBoundedText(path: string): string {
   if (lstatSync(path).size > MAX_CONFIG_BYTES) {
-    throw new Error('The Docusaurus sidebar config is larger than 20 MB and could not be imported.')
+    throw new Error('The Docusaurus sidebar config is larger than 1 MB and could not be imported.')
   }
   return readFileSync(path, 'utf8')
 }
@@ -504,10 +510,11 @@ function parseStaticSidebarModule(source: string): Record<string, unknown> {
   const assignmentPatterns = [
     /\bmodule\.exports\s*=\s*/g,
     /\bexport\s+default\s*/g,
-    /\b(?:const|let|var)\s+[A-Za-z_$][\w$]*(?:\s*:\s*[^=;]+)?\s*=\s*/g,
+    /\b(?:const|let|var)\s+[A-Za-z_$][\w$]*(?:\s*:\s*[^=;]{1,200})?\s*=\s*/g,
   ]
   const candidates = assignmentPatterns.flatMap((pattern) => [...normalizedSource.matchAll(pattern)])
     .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))
+    .slice(0, MAX_STATIC_CANDIDATES)
 
   for (const candidate of candidates) {
     const literal = matchingObjectLiteral(normalizedSource, (candidate.index ?? 0) + candidate[0].length)
@@ -547,7 +554,7 @@ function replaceExternalFbContent(source: string): string {
   const marker = '...fbContent('
   let result = source
   let searchFrom = 0
-  while (true) {
+  for (let attempts = 0; attempts < MAX_STATIC_CANDIDATES; attempts++) {
     const start = result.indexOf(marker, searchFrom)
     if (start < 0) return result.replace(/,\s*,/g, ',')
     const objectStart = result.indexOf('{', start + marker.length)
@@ -577,6 +584,7 @@ function replaceExternalFbContent(source: string): string {
     result = `${result.slice(0, start)}${replacement}${result.slice(replaceEnd)}`
     searchFrom = start + replacement.length
   }
+  return result.replace(/,\s*,/g, ',')
 }
 
 function matchingArrayLiteral(source: string, start: number): string | null {
@@ -609,7 +617,7 @@ function configuredSidebarPath(repositoryRoot: string): string | null {
     // A site can register other docs plugins before the classic preset. Their
     // sidebarPath belongs to a different content root (Docusaurus registers
     // its community plugin before the main docs preset, for example).
-    for (const docs of source.matchAll(/\bdocs\s*:\s*/g)) {
+    for (const docs of [...source.matchAll(/\bdocs\s*:\s*/g)].slice(0, MAX_STATIC_CANDIDATES)) {
       const object = matchingObjectLiteral(source, (docs.index ?? 0) + docs[0].length)
       const candidate = object && staticStringField(object, 'sidebarPath')?.replace(/^\.\//, '')
       if (candidate) {
@@ -995,7 +1003,7 @@ export function readDocusaurusSiteSettings(repositoryRoot: string): DocusaurusSi
   const source = readBoundedText(configPath)
   const bindings = staticStringBindings(source)
   const presets = staticArrayField(source, 'presets')
-  const classicDocs = presets && [...presets.matchAll(/["']?docs["']?\s*:\s*/g)]
+  const classicDocs = presets && [...presets.matchAll(/["']?docs["']?\s*:\s*/g)].slice(0, MAX_STATIC_CANDIDATES)
     .map((match) => matchingObjectLiteral(presets, (match.index ?? 0) + match[0].length))
     .find((object): object is string => Boolean(object))
   const docsRouteBasePath = classicDocs && staticStringField(classicDocs, 'routeBasePath') || 'docs'

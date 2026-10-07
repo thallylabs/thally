@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { readDocusaurusRedirects, readDocusaurusSiteSettings } from '../docusaurus.js'
+import { readDocusaurusRedirects, readDocusaurusSidebars, readDocusaurusSiteSettings } from '../docusaurus.js'
 import { migrateRepository, renderMigrationFiles } from '../index.js'
 import { pageIdFromReference } from '../path.js'
 
@@ -430,5 +430,29 @@ describe('Fern viewers on products and versions', () => {
     // Its only page is restricted, so nothing is left to publish.
     expect(() => migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' }))
       .toThrow(/migration-quarantine\/beta\.mdx/)
+  })
+})
+
+describe('Docusaurus config parsing stays linear on repeated openers', () => {
+  const hostile: Record<string, string> = {
+    'const a:': 'const a: '.repeat(6_000),
+    'const a = {': 'const a = {'.repeat(5_000),
+    'export default {': 'export default {'.repeat(3_300),
+    'docs: {': 'docs: {'.repeat(8_000),
+    '...fbContent({': '...fbContent({'.repeat(3_800),
+  }
+  for (const [name, source] of Object.entries(hostile)) {
+    it(`reads 50k characters of "${name}" quickly`, () => {
+      const root = docusaurusSite({ 'docusaurus.config.js': source, 'sidebars.js': source })
+      const started = Date.now()
+      try { readDocusaurusSidebars(root) } catch { /* unparseable is expected */ }
+      readDocusaurusSiteSettings(root)
+      expect(Date.now() - started).toBeLessThan(400)
+    })
+  }
+
+  it('rejects a Docusaurus config over 1 MB', () => {
+    const root = docusaurusSite({ 'sidebars.js': `module.exports = { docs: [] } // ${'x'.repeat(1_100_000)}` })
+    expect(() => readDocusaurusSidebars(root)).toThrow(/1 MB/)
   })
 })
