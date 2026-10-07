@@ -18,7 +18,7 @@ vi.mock('@/components/mdx/page-slots', () => ({
   usePageSlots: () => viewSlots,
 }))
 
-import { View } from '@/components/mdx/view'
+import { Embed, View } from '@/components/mdx/view'
 
 describe('View', () => {
   beforeEach(() => {
@@ -39,5 +39,25 @@ describe('View', () => {
     expect(pythonMarkup).toContain('aria-label="Content view"')
     expect(pythonMarkup).toContain('Node.js')
     expect(pythonMarkup).toContain('Python')
+  })
+})
+
+describe('Embed', () => {
+  it('runs same-origin embeds in an opaque origin', () => {
+    const markup = renderToStaticMarkup(createElement(Embed, { src: '/images/diagram.svg' }))
+
+    expect(markup).toContain('sandbox="allow-scripts allow-forms allow-popups"')
+    expect(markup).not.toContain('allow-same-origin')
+  })
+
+  it('keeps the embed origin for cross-origin sources', () => {
+    const markup = renderToStaticMarkup(createElement(Embed, { src: 'https://codesandbox.io/embed/demo' }))
+
+    expect(markup).toContain('allow-same-origin')
+  })
+
+  it('refuses protocol-relative and non-https sources', () => {
+    expect(renderToStaticMarkup(createElement(Embed, { src: '//evil.example/x' }))).toBe('')
+    expect(renderToStaticMarkup(createElement(Embed, { src: 'javascript:alert(1)' }))).toBe('')
   })
 })

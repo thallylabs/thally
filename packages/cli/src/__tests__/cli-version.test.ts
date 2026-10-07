@@ -56,4 +56,17 @@ describe('thally version', () => {
     expect(result.stderr).toContain('Unknown command: unknown')
     expect(result.stdout).toContain('Usage: thally <command> [options]')
   })
+
+  it.each(['deploy', 'build', 'mcp'])('prints "%s --help" without running the command', (command) => {
+    const result = runCli(command, '--help')
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain(`Usage: thally ${command}`)
+    expect(result.stderr).not.toContain('Not a Thally project')
+  })
+
+  it('rejects unknown command options before checking for a project', () => {
+    const result = runCli('deploy', '--prdo')
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('Unknown option "--prdo" for "thally deploy"')
+  })
 })

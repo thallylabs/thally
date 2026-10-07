@@ -16,6 +16,7 @@ import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-s
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { slugify } from '@thallylabs/core/slugify'
 import { validateIntegrations } from '@thallylabs/migrate'
+import { checkExternalLinks, type ExternalLinkCheckOptions, type ExternalLinkReference } from './external-links.js'
 
 export interface LintIssue {
   severity: 'error' | 'warning'
@@ -27,8 +28,10 @@ export interface LintIssue {
 export interface CheckOptions {
   fix: boolean
   ci: boolean
-  /** Also HEAD-check external links (network). Off by default for deterministic CI. */
+  /** Also HEAD-check external links on public hosts (network). Off by default for deterministic CI. */
   external?: boolean
+  /** Test seam for the external-link checker's resolver, requester, and limits. */
+  externalLinkOptions?: ExternalLinkCheckOptions
   /** Flag pages whose `sources` changed since their `verifiedCommit` (needs git history). */
   drift?: boolean
   /** Optional structured diagnostics sink used by migration reports. */
@@ -631,10 +634,15 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
   }
 
   // Broken internal link + anchor detection (after all valid paths are known).
+  const externalLinks: Array<ExternalLinkReference> = []
   for (const { file, anchors, links, offset } of linksByFile) {
     for (const { target, line: contentLine } of links) {
       const line = contentLine + offset
-      if (/^(https?:|mailto:|tel:)/i.test(target)) continue // external — skipped unless --external
+      if (/^(https?:|mailto:|tel:)/i.test(target)) {
+        // External — collected here and network-checked only with --external.
+        if (/^https?:/i.test(target)) externalLinks.push({ url: target, file, line })
+        continue
+      }
       if (target.startsWith('#')) {
         const anchor = target.slice(1)
         if (anchor && !anchors.has(decodedFragment(anchor))) {
@@ -688,6 +696,10 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
   checkPublicSpecs(projectDir, config.tabs, issues)
   checkUnpublishedOperationPages(projectDir, config.tabs, operationPages, issues)
+
+  if (options.external && externalLinks.length > 0) {
+    issues.push(...await checkExternalLinks(externalLinks, options.externalLinkOptions))
+  }
 
   const errors = issues.filter((i) => i.severity === 'error')
   options.onIssues?.(issues)

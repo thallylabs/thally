@@ -53,6 +53,7 @@ describe('parseMdxContent', () => {
     expect(parsed.codeBlocks[0]).toMatchObject({ language: 'bash', title: 'Install', index: 0 })
     expect(parsed.codeBlocks[0].source).toBe('npm install thally')
     expect(parsed.codeBlocks[1]).toMatchObject({ language: 'ts', index: 1 })
+    expect(parsed.codeBlocks.every((block) => block.hasLanguageTag)).toBe(true)
   })
 
   it('extracts prose text without fenced code', () => {
@@ -191,5 +192,15 @@ describe('duplicate heading ids', () => {
     const result = ids('## A {/* #x */}\n\n## B {/* #x */}\n\n## X\n')
     expect(result).toEqual(['x', 'x-2', 'x-3'])
     expect(new Set(result).size).toBe(result.length)
+  })
+})
+
+describe('code fence language tags', () => {
+  it('distinguishes an untagged fence from an explicit text fence', () => {
+    const { codeBlocks } = parseMdxContent('```\nplain\n```\n\n```text\nexplicit\n```\n')
+    expect(codeBlocks.map((block) => [block.language, block.hasLanguageTag])).toEqual([
+      ['text', false],
+      ['text', true],
+    ])
   })
 })

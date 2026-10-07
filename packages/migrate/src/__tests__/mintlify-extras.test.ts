@@ -34,20 +34,6 @@ function navPages(bundle: MigrationBundle): Array<string> {
   for (const tab of bundle.docsConfig.tabs) { visit(tab.pages); visit(tab.groups) }
   return out
 }
-function emptyGroups(bundle: MigrationBundle): number {
-  let empty = 0
-  const visit = (nodes: Array<unknown> = []): void => {
-    for (const node of nodes) {
-      if (typeof node === 'string') continue
-      const group = node as { pages: Array<unknown> }
-      if (group.pages.length === 0) empty++
-      visit(group.pages)
-    }
-  }
-  for (const tab of bundle.docsConfig.tabs) { visit(tab.pages); visit(tab.groups) }
-  return empty
-}
-
 describe('gated pages', () => {
   const base = {
     'docs.json': JSON.stringify({ navigation: { groups: [
@@ -63,33 +49,32 @@ describe('gated pages', () => {
     'open.mdx': page('Open'),
   }
 
-  it('withholds gated pages from content and navigation and quarantines the original', () => {
+  it('migrates restricted pages with normalized access frontmatter and keeps them in navigation', () => {
     const bundle = site(base)
-    expect(bundle.pages.map((entry) => entry.id).sort()).toEqual(['intro', 'open'])
-    expect(navPages(bundle).sort()).toEqual(['intro', 'open'])
-    expect(emptyGroups(bundle)).toBe(0)
-    const quarantined = bundle.quarantinedFiles ?? []
-    expect(quarantined.map((file) => file.path).sort()).toEqual([
-      'migration-quarantine/hidden-false.mdx',
-      'migration-quarantine/only-secret.mdx',
-      'migration-quarantine/secret-list.mdx',
-      'migration-quarantine/secret-string.mdx',
-      'migration-quarantine/string-false.mdx',
-    ])
-    expect(Buffer.from(quarantined.find((file) => file.path.endsWith('secret-list.mdx'))!.content as Uint8Array).toString()).toBe(page('Secret list', 'groups: [admin, staff]\n'))
-    const rendered = renderMigrationFiles(bundle).map((file) => file.path)
-    expect(rendered).toContain('migration-quarantine/secret-list.mdx')
-    expect(rendered.filter((path) => path.startsWith('src/content/')).sort()).toEqual(['src/content/intro.mdx', 'src/content/open.mdx'])
-    expect(rendered.some((path) => path.startsWith('public/') && path.includes('secret'))).toBe(false)
+    expect(bundle.pages.map((entry) => entry.id).sort()).toEqual(['hidden-false', 'intro', 'only-secret', 'open', 'secret-list', 'secret-string', 'string-false'])
+    expect(navPages(bundle).sort()).toEqual(['hidden-false', 'intro', 'only-secret', 'open', 'secret-list', 'secret-string', 'string-false'])
+    expect(bundle.quarantinedFiles).toBeUndefined()
+    const byId = (id: string) => bundle.pages.find((entry) => entry.id === id)!
+    expect(byId('secret-list').groups).toEqual(['admin', 'staff'])
+    expect(byId('secret-string').groups).toEqual(['admin'])
+    expect(byId('hidden-false').public).toBe(false)
+    expect(byId('string-false').public).toBe(false)
+    expect(byId('intro').groups).toBeUndefined()
+    expect(byId('intro').public).toBeUndefined()
+    const rendered = renderMigrationFiles(bundle)
+    const secret = rendered.find((file) => file.path === 'src/content/secret-list.mdx')!
+    const frontmatter = parseYaml(String(secret.content).split('---')[1]) as Record<string, unknown>
+    expect(frontmatter.groups).toEqual(['admin', 'staff'])
+    expect(parseYaml(String(rendered.find((file) => file.path === 'src/content/string-false.mdx')!.content).split('---')[1])).toMatchObject({ public: false })
   })
 
-  it('emits one gated-page warning per page plus a summary, mentioning broken links', () => {
+  it('emits one summary warning that restricted pages stay hidden until reader auth is configured', () => {
     const bundle = site(base)
     const warnings = codes(bundle, 'gated-page')
-    const perPage = warnings.filter((warning) => warning.source)
-    expect(perPage).toHaveLength(5)
-    expect(perPage.find((warning) => warning.source === 'secret-list.mdx')!.message).toMatch(/groups.*NOT published.*migration-quarantine\/secret-list\.mdx.*links.*break/s)
-    expect(warnings.filter((warning) => !warning.source && /5 access-restricted/.test(warning.message))).toHaveLength(1)
+    expect(warnings.filter((warning) => warning.source)).toHaveLength(0)
+    const summary = warnings.filter((warning) => /5 page\(s\) are restricted/.test(warning.message))
+    expect(summary).toHaveLength(1)
+    expect(summary[0].message).toMatch(/docs\.json `auth`.*authenticated-docs/s)
   })
 
   it('treats empty or missing groups and public: true as non-gating', () => {
@@ -105,34 +90,58 @@ describe('gated pages', () => {
     expect(bundle.docsConfig.tabs.length).toBeGreaterThan(0)
   })
 
-  it('gates every page under a navigation container with groups or public: false', () => {
+  it('pushes navigation container rules down into page frontmatter', () => {
     const bundle = site({
       'docs.json': JSON.stringify({ navigation: { tabs: [
         { tab: 'Docs', groups: [
           { group: 'Members', groups: ['member'], pages: ['m1', 'm2'] },
           { group: 'Off', public: false, pages: ['off1'] },
-          { group: 'Open', public: true, pages: ['open'] },
+          { group: 'Open', public: true, pages: ['open', 'own-groups'] },
         ] },
         { tab: 'Staff', groups: ['staff'], pages: ['s1'] },
       ] } }),
       'm1.mdx': page('M1'), 'm2.mdx': page('M2'), 'off1.mdx': page('Off1'), 'open.mdx': page('Open'), 's1.mdx': page('S1'),
+      'own-groups.mdx': page('Own', 'groups: [beta]\n'),
     })
-    expect(bundle.pages.map((entry) => entry.id)).toEqual(['open'])
-    expect(navPages(bundle)).toEqual(['open'])
-    expect(bundle.docsConfig.tabs.map((tab) => tab.tab)).toEqual(['Docs'])
-    expect((bundle.quarantinedFiles ?? []).map((file) => file.path).sort()).toEqual([
-      'migration-quarantine/m1.mdx', 'migration-quarantine/m2.mdx', 'migration-quarantine/off1.mdx', 'migration-quarantine/s1.mdx',
-    ])
-    expect(codes(bundle, 'gated-page').find((warning) => warning.source === 'm1.mdx')!.message).toMatch(/navigation container/)
+    const byId = (id: string) => bundle.pages.find((entry) => entry.id === id)!
+    expect(bundle.pages.map((entry) => entry.id).sort()).toEqual(['m1', 'm2', 'off1', 'open', 'own-groups', 's1'])
+    expect(navPages(bundle).sort()).toEqual(['m1', 'm2', 'off1', 'open', 'own-groups', 's1'])
+    expect(bundle.docsConfig.tabs.map((tab) => tab.tab)).toEqual(['Docs', 'Staff'])
+    expect(byId('m1').groups).toEqual(['member'])
+    expect(byId('off1').public).toBe(false)
+    expect(byId('s1').groups).toEqual(['staff'])
+    // Mintlify's group-level `public: true` opens pages that name no groups of their own.
+    expect(byId('open').public).toBe(true)
+    expect(byId('own-groups').groups).toEqual(['beta'])
+    expect(byId('own-groups').public).toBeUndefined()
+    expect(bundle.quarantinedFiles).toBeUndefined()
   })
 
-  it('keeps a nested quarantined path and leaves ordinary pages untouched', () => {
+  it('intersects page and container groups and quarantines when they share none', () => {
     const bundle = site({
-      'docs.json': JSON.stringify({ navigation: { pages: ['guides/a', 'guides/b'] } }),
-      'guides/a.mdx': page('A', 'groups: [x]\n'),
-      'guides/b.mdx': page('B'),
+      'docs.json': JSON.stringify({ navigation: { groups: [
+        { group: 'Team', groups: ['beta', 'staff'], pages: ['shared', 'disjoint'] },
+        { group: 'Outer', groups: ['a', 'b'], pages: [{ group: 'Inner', groups: ['b', 'c'], pages: ['nested'] }] },
+      ] } }),
+      'shared.mdx': page('Shared', 'groups: [staff, other]\n'),
+      'disjoint.mdx': page('Disjoint', 'groups: [other]\n'),
+      'nested.mdx': page('Nested'),
     })
-    expect(bundle.quarantinedFiles!.map((file) => file.path)).toEqual(['migration-quarantine/guides/a.mdx'])
+    expect(bundle.pages.find((entry) => entry.id === 'shared')!.groups).toEqual(['staff'])
+    expect(bundle.pages.find((entry) => entry.id === 'nested')!.groups).toEqual(['b'])
+    expect(bundle.pages.some((entry) => entry.id === 'disjoint')).toBe(false)
+    expect((bundle.quarantinedFiles ?? []).map((file) => file.path)).toEqual(['migration-quarantine/disjoint.mdx'])
+    expect(codes(bundle, 'gated-page').find((warning) => warning.source === 'disjoint.mdx')!.message).toMatch(/share no group.*NOT published/s)
+  })
+
+  it('quarantines a page whose access values are malformed', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['guides/a', 'guides/b', 'guides/c'] } }),
+      'guides/a.mdx': page('A', 'public: maybe\n'),
+      'guides/b.mdx': page('B'),
+      'guides/c.mdx': page('C', 'groups: [1, 2]\n'),
+    })
+    expect(bundle.quarantinedFiles!.map((file) => file.path).sort()).toEqual(['migration-quarantine/guides/a.mdx', 'migration-quarantine/guides/c.mdx'])
     expect(bundle.pages.map((entry) => entry.body.trim())).toEqual(['Body of B.'])
   })
 
@@ -144,7 +153,7 @@ describe('gated pages', () => {
     })
     const siteWide = codes(bundle, 'gated-page')
     expect(siteWide).toHaveLength(1)
-    expect(siteWide[0].message).toMatch(/authentication.*ALL imported pages publicly/s)
+    expect(siteWide[0].message).toMatch(/authentication.*until docs\.json `auth` is configured/s)
     expect(bundle.pages).toHaveLength(2)
     expect(codes(site({ 'docs.json': '{"navigation":{"pages":["a"]}}', 'a.mdx': page('A') }), 'gated-page').every((warning) => !/public: true/.test(warning.message))).toBe(true)
   })
@@ -375,7 +384,7 @@ describe('config mapping', () => {
 })
 
 describe('gating bypass hardening', () => {
-  it('treats public: no / off / 0 as private, like false', () => {
+  it('treats public: no / off / 0 as private, like false, and quarantines an ambiguous yes', () => {
     const bundle = site({
       'docs.json': JSON.stringify({ navigation: { pages: ['a', 'b', 'c', 'd', 'e'] } }),
       'a.mdx': page('A', 'public: no\n'),
@@ -384,11 +393,12 @@ describe('gating bypass hardening', () => {
       'd.mdx': page('D', 'public: False\n'),
       'e.mdx': page('E', 'public: yes\n'),
     })
-    expect(bundle.pages.map((entry) => entry.id)).toEqual(['e'])
-    expect(bundle.quarantinedFiles).toHaveLength(4)
+    expect(bundle.pages.map((entry) => [entry.id, entry.public])).toEqual([['a', false], ['b', false], ['c', false], ['d', false]])
+    // The runtime withholds `public: yes` from everyone; the migration must not publish it either.
+    expect((bundle.quarantinedFiles ?? []).map((file) => file.path)).toEqual(['migration-quarantine/e.mdx'])
   })
 
-  it('quarantines gated pages that are orphans or extension variants, and gates a page listed in a restricted and an open group', () => {
+  it('restricts orphans and extension variants, and gives a page listed in a restricted and an open group the restricted rule', () => {
     for (const groups of [
       [{ group: 'Open', pages: ['intro', 'shared'] }, { group: 'Priv', groups: ['staff'], pages: ['shared'] }],
       [{ group: 'Priv', groups: ['staff'], pages: ['shared'] }, { group: 'Open', pages: ['intro', 'shared'] }],
@@ -400,11 +410,14 @@ describe('gating bypass hardening', () => {
         'orphan.md': page('Orphan', 'groups: [x]\n'),
         'orphan2.mdx': page('Orphan2', 'public: false\n'),
       })
-      expect(bundle.pages.map((entry) => entry.id)).toEqual(['intro'])
-      expect(navPages(bundle)).toEqual(['intro'])
-      expect((bundle.quarantinedFiles ?? []).map((file) => file.path).sort()).toEqual([
-        'migration-quarantine/orphan.md', 'migration-quarantine/orphan2.mdx', 'migration-quarantine/shared.mdx',
-      ])
+      const byId = (id: string) => bundle.pages.find((entry) => entry.id === id)!
+      expect(bundle.pages.map((entry) => entry.id).sort()).toEqual(['intro', 'orphan', 'orphan2', 'shared'])
+      expect(byId('shared').groups).toEqual(['staff'])
+      expect(byId('orphan').groups).toEqual(['x'])
+      expect(byId('orphan2').public).toBe(false)
+      expect(byId('intro').groups).toBeUndefined()
+      expect(new Set(navPages(bundle))).toEqual(new Set(['intro', 'shared']))
+      expect(bundle.quarantinedFiles).toBeUndefined()
     }
   })
 
@@ -416,8 +429,12 @@ describe('gating bypass hardening', () => {
       ] } }),
       'm1.mdx': page('M1'), 'm2.mdx': page('M2'), 'open.mdx': page('Open'),
     })
-    expect(bundle.pages.map((entry) => entry.id)).toEqual(['open'])
-    expect((bundle.quarantinedFiles ?? []).map((file) => file.path).sort()).toEqual(['migration-quarantine/m1.mdx', 'migration-quarantine/m2.mdx'])
+    const byId = (id: string) => bundle.pages.find((entry) => entry.id === id)!
+    expect(bundle.pages.map((entry) => entry.id).sort()).toEqual(['m1', 'm2', 'open'])
+    expect(byId('m1').public).toBe(false)
+    expect(byId('m2').groups).toEqual(['staff'])
+    expect(byId('open').groups).toBeUndefined()
+    expect(bundle.quarantinedFiles).toBeUndefined()
   })
 
   it('gates pages under restricted versions, dropdowns and anchors, and inside languages', () => {
@@ -431,10 +448,13 @@ describe('gating bypass hardening', () => {
       ] } }),
       'd1.mdx': page('D1'), 'open.mdx': page('Open'), 'v2.mdx': page('V2'), 'fr/p.mdx': page('P'), 'fr/open.mdx': page('FrOpen'),
     })
-    expect((bundle.quarantinedFiles ?? []).map((file) => file.path).sort()).toEqual([
-      'migration-quarantine/d1.mdx', 'migration-quarantine/fr/p.mdx', 'migration-quarantine/v2.mdx',
-    ])
-    expect(JSON.stringify(bundle.docsConfig)).not.toMatch(/"d1"|"v2"|fr\/p"/)
+    const byId = (id: string) => bundle.pages.find((entry) => entry.id === id)
+    expect(byId('d1')?.groups).toEqual(['staff'])
+    expect(byId('v2')?.public).toBe(false)
+    expect(bundle.pages.find((entry) => entry.body.includes('Body of P.'))?.public).toBe(false)
+    expect(byId('open')?.groups).toBeUndefined()
+    expect(byId('open')?.public).toBeUndefined()
+    expect(bundle.quarantinedFiles).toBeUndefined()
   })
 
   it('never inlines an access-restricted page imported as a component into a public page', () => {
@@ -443,9 +463,11 @@ describe('gating bypass hardening', () => {
       'host.mdx': '---\ntitle: Host\n---\n\nimport Secret from "/private.mdx"\n\nPublic text.\n\n<Secret />\n',
       'private.mdx': page('Private', 'groups: [x]\n').replace('Body of Private.', 'TOPSECRET'),
     })
-    expect(JSON.stringify(bundle.pages)).not.toContain('TOPSECRET')
-    expect(bundle.pages[0].body).toContain('Public text.')
-    expect((bundle.quarantinedFiles ?? []).map((file) => file.path)).toEqual(['migration-quarantine/private.mdx'])
+    const host = bundle.pages.find((entry) => entry.id === 'host')!
+    expect(host.body).not.toContain('TOPSECRET')
+    expect(host.body).toContain('Public text.')
+    // The restricted page itself migrates with its rule; only inlining is refused.
+    expect(bundle.pages.find((entry) => entry.id === 'private')!.groups).toEqual(['x'])
     expect(codes(bundle, 'gated-page').some((warning) => warning.source === 'host.mdx' && /NOT inlined/.test(warning.message))).toBe(true)
   })
 
@@ -457,9 +479,11 @@ describe('gating bypass hardening', () => {
     ...extra,
   })
   const expectSnippetWithheld = (bundle: MigrationBundle, source: string) => {
-    expect(JSON.stringify(bundle.pages)).not.toContain('TOPSECRET')
-    expect(bundle.pages.find((entry) => entry.id === 'host')!.body).toContain('Public text.')
-    expect((bundle.quarantinedFiles ?? []).map((file) => file.path)).toEqual(['migration-quarantine/private.mdx'])
+    const host = bundle.pages.find((entry) => entry.id === 'host')!
+    expect(host.body).not.toContain('TOPSECRET')
+    expect(host.body).toContain('Public text.')
+    expect(bundle.pages.filter((entry) => entry.id !== 'private' && JSON.stringify(entry).includes('TOPSECRET'))).toEqual([])
+    expect(bundle.pages.find((entry) => entry.id === 'private')?.groups).toEqual(['admin'])
     const gated = codes(bundle, 'gated-page').filter((warning) => /Snippet file=/.test(warning.message))
     expect(gated).toHaveLength(1)
     expect(gated[0].source).toBe(source)
@@ -658,7 +682,8 @@ describe('gating bypass hardening', () => {
   it('says in the summary that the quarantine folder is local only and git-ignored', () => {
     const bundle = site({
       'docs.json': JSON.stringify({ navigation: { pages: ['a', 'b'] } }),
-      'a.mdx': page('A', 'groups: [x]\n'),
+      // Only rules that cannot be migrated safely are quarantined now.
+      'a.mdx': page('A', 'public: maybe\n'),
       'b.mdx': page('B'),
     })
     const summary = codes(bundle, 'gated-page').find((warning) => !warning.source && /1 access-restricted/.test(warning.message))!
@@ -857,7 +882,7 @@ describe('assets used only by oversized withheld pages', () => {
   })
 
   it('emits one summary warning with the withheld asset count when only an oversized gated page exists', () => {
-    const summaries = codes(build(2_000_001), 'gated-page').filter((item) => /kept out of public\//.test(item.message))
+    const summaries = codes(build(2_000_001), 'gated-page').filter((item) => /not copied to public\//.test(item.message))
     expect(summaries).toHaveLength(1)
     expect(/1 file\(s\) used only by access-restricted pages/.test(summaries[0].message)).toBe(true)
   })
@@ -894,7 +919,9 @@ describe('fail-closed inlining of gated and unclassified files', () => {
       'index.mdx': "---\ntitle: I\n---\n\nimport Sec from '/S.mdx'\n\n<Sec/>\n",
       's.mdx': secretBody(),
     })
-    expect(bodies(bundle)).not.toContain('TOPSECRET')
+    // Only the restricted page itself (migrated with its `groups`) may carry its text.
+    expect(bundle.pages.filter((entry) => !entry.groups).map((entry) => entry.body).join('\n')).not.toContain('TOPSECRET')
+    expect(bundle.pages.filter((entry) => !entry.groups)).toHaveLength(1)
   })
 
   it('still inlines a Docusaurus partial that starts with a thematic break', () => {
@@ -941,7 +968,8 @@ describe('fail-closed inlining of gated and unclassified files', () => {
       's.mdx': page('S'),
       'pub.mdx': page('Pub'),
     })
-    expect((bundle.quarantinedFiles ?? []).map((file) => file.path)).toEqual(['migration-quarantine/s.mdx'])
+    expect(bundle.pages.find((entry) => entry.id.toLowerCase() === 's')!.groups).toEqual(['admin'])
+    expect(bundle.pages.find((entry) => entry.id === 'pub')!.groups).toBeUndefined()
   })
 
   it('gates a navigation container whose groups array mixes strings and objects', () => {

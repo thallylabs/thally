@@ -29,6 +29,12 @@ export interface ScaffoldOptions {
   brandPreset: string
   repoUrl: string
   doInstall: boolean
+  /**
+   * Report a failed install and still finish the project (Git setup included)
+   * instead of throwing. Interactive creation opts in; library callers keep
+   * the historical fail-fast contract.
+   */
+  continueOnInstallFailure?: boolean
   enableAiChat?: boolean
   i18nLocales?: Array<{ code: string; label: string }>
   /** Repos to pre-register for Thally Track (opt-in). Empty/undefined = Track off. */
@@ -39,6 +45,8 @@ export interface ScaffoldOptions {
 
 export interface ScaffoldResult {
   projectDir: string
+  /** False when installation was skipped or failed; the project is still usable. */
+  dependenciesInstalled: boolean
 }
 
 /** Download, personalize, and optionally install a new documentation project. */
@@ -50,6 +58,7 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
     brandPreset,
     repoUrl,
     doInstall,
+    continueOnInstallFailure = false,
     enableAiChat = true,
     i18nLocales,
     trackRepos,
@@ -102,13 +111,23 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
     terminal.info('then add your ANTHROPIC_API_KEY. See /guides/thally-track.')
   }
 
-  // 4. Install dependencies
+  // 4. Install dependencies. When the caller opts in, a failed install
+  // (offline, registry outage) does not leave a half-initialized project: it
+  // is reported, Git setup still runs, and the caller prints the recovery.
+  let dependenciesInstalled = false
   if (doInstall) {
-    await installDeps(targetDir)
+    try {
+      await installDeps(targetDir)
+      dependenciesInstalled = true
+    } catch (error) {
+      const exitCode = (error as { exitCode?: number }).exitCode
+      if (!continueOnInstallFailure || exitCode === 130 || exitCode === 143) throw error
+      terminal.warn('Dependency installation failed. The project was created; run "npm install" in it to finish.')
+    }
   }
 
   // 5. Initialize git
   await initGit(targetDir)
 
-  return { projectDir: targetDir }
+  return { projectDir: targetDir, dependenciesInstalled }
 }

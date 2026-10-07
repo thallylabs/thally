@@ -53,6 +53,6 @@ export async function handleCreateProject(input: CreateProjectInput): Promise<st
     '  • docs.json          — navigation, AI chat config',
     '  • src/content/*.mdx  — your documentation',
     '',
-    ...(input.enableAiChat !== false ? ['🤖 AI chat is enabled. Set ANTHROPIC_API_KEY in .env.local.'] : []),
+    ...(input.enableAiChat !== false ? ['🤖 AI chat is on in docs.json; answers are served once the site is linked to Thally Cloud (THALLY_CLOUD_SITE_TOKEN).'] : []),
   ].join('\n')
 }

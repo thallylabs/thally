@@ -3,11 +3,40 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { Check, GitPullRequest } from 'lucide-react'
-import type { AgentReadinessReport, SubscoreResult } from '@/lib/agent-readiness/types'
+import type { AgentReadinessReport, ReadinessStatus, SubscoreResult } from '@/lib/agent-readiness/types'
 
 type ReadinessResponse = AgentReadinessReport & {
   schema_version: string
   as_of: string
+}
+
+/**
+ * Checks the docs-agent fix pipeline knows how to repair. The dispatch
+ * contract predates methodology v2, so newer checks show their fix hint
+ * without offering a pull request until the pipeline learns them.
+ */
+const PR_FIXABLE_CHECKS: ReadonlySet<string> = new Set([
+  'structured_data',
+  'metadata',
+  'discovery',
+  'content_quality',
+  'machine_readability',
+  'openapi',
+])
+
+const STATUS_CHIPS: Record<ReadinessStatus, { label: string; tone: string }> = {
+  pass: { label: 'Pass', tone: 'success' },
+  warn: { label: 'Warn', tone: 'warn' },
+  fail: { label: 'Fail', tone: 'danger' },
+  skip: { label: 'N/A', tone: 'neutral' },
+}
+
+/** v1 reports carry no status; derive one so older deployments still render. */
+function statusOf(sub: SubscoreResult): ReadinessStatus {
+  if (sub.status) return sub.status
+  if (!sub.available) return 'skip'
+  if (sub.score >= 1) return 'pass'
+  return sub.score >= 0.5 ? 'warn' : 'fail'
 }
 
 type DispatchState =
@@ -34,6 +63,10 @@ function SubscoreRow({
   const pct = Math.round(sub.score * 100)
   const hasOffenders = sub.offenders.length > 0
   const isSending = dispatch.status === 'loading'
+  const status = statusOf(sub)
+  const chip = STATUS_CHIPS[status]
+  const canSendPr = PR_FIXABLE_CHECKS.has(sub.id)
+  const hiddenCount = (sub.affectedCount ?? sub.offenders.length) - sub.offenders.length
 
   return (
     <>
@@ -41,6 +74,7 @@ function SubscoreRow({
         <td className="ds-readiness-check">
           <div className="ds-readiness-check-main">
             <span className="ds-readiness-check-label">{sub.label}</span>
+            <span className={`ds-chip ds-chip--${chip.tone}`}>{chip.label}</span>
             {fixIndex != null ? (
               <>
                 <button
@@ -51,19 +85,26 @@ function SubscoreRow({
                 >
                   Fix {fixIndex}
                 </button>
-                <button
-                  type="button"
-                  className="ds-btn ds-btn--secondary ds-btn--sm ds-focusable ds-readiness-send-pr"
-                  onClick={onSendPr}
-                  disabled={isSending}
-                >
-                  <GitPullRequest className="h-3.5 w-3.5" aria-hidden />
-                  {isSending ? 'Sending…' : 'Send PR'}
-                </button>
+                {canSendPr ? (
+                  <button
+                    type="button"
+                    className="ds-btn ds-btn--secondary ds-btn--sm ds-focusable ds-readiness-send-pr"
+                    onClick={onSendPr}
+                    disabled={isSending}
+                  >
+                    <GitPullRequest className="h-3.5 w-3.5" aria-hidden />
+                    {isSending ? 'Sending…' : 'Send PR'}
+                  </button>
+                ) : null}
               </>
             ) : null}
           </div>
           <p className="ds-readiness-check-detail">{sub.detail}</p>
+          {open && sub.fixHint && status !== 'pass' && status !== 'skip' ? (
+            <p className="ds-readiness-check-detail">
+              <strong>How to fix:</strong> {sub.fixHint}
+            </p>
+          ) : null}
           {dispatch.status === 'success' ? (
             <p className="ds-readiness-dispatch ds-readiness-dispatch--ok">{dispatch.message}</p>
           ) : null}
@@ -83,11 +124,11 @@ function SubscoreRow({
         </td>
         <td className="ds-readiness-coverage">
           <div className="ds-readiness-bar" aria-hidden>
-            <div className="ds-readiness-bar-fill" style={{ width: `${pct}%` }} />
+            <div className="ds-readiness-bar-fill" style={{ width: `${sub.available ? pct : 0}%` }} />
           </div>
         </td>
-        <td className="ds-readiness-weight">{Math.round(sub.weight * 100)}%</td>
-        <td className="ds-readiness-score">{pct}</td>
+        <td className="ds-readiness-weight">{sub.available ? `${Math.round(sub.weight * 100)}%` : '—'}</td>
+        <td className="ds-readiness-score">{sub.available ? pct : '—'}</td>
       </tr>
       {open && hasOffenders ? (
         <tr className="ds-readiness-offenders-row">
@@ -95,12 +136,21 @@ function SubscoreRow({
             <ul className="ds-readiness-offenders">
               {sub.offenders.map((offender) => (
                 <li key={offender.pageId}>
-                  <a href={offender.href} target="_blank" rel="noreferrer" title={offender.href}>
-                    {offender.href}
-                  </a>
+                  {offender.href.startsWith('/') && !offender.href.startsWith('//') ? (
+                    <a href={offender.href} target="_blank" rel="noreferrer" title={offender.href}>
+                      {offender.href}
+                    </a>
+                  ) : (
+                    <code>{offender.href}</code>
+                  )}
                   <span>{offender.reason}</span>
                 </li>
               ))}
+              {hiddenCount > 0 ? (
+                <li>
+                  <span>…and {hiddenCount} more</span>
+                </li>
+              ) : null}
             </ul>
           </td>
         </tr>
@@ -140,7 +190,7 @@ export function AgentReadinessPanel() {
     if (!report) return map
     let n = 1
     for (const sub of report.subscores) {
-      if (sub.offenders.length > 0) {
+      if (sub.available && sub.offenders.length > 0) {
         map.set(sub.id, n)
         n += 1
       }
@@ -196,7 +246,7 @@ export function AgentReadinessPanel() {
         <div className="ds-eyebrow ds-readiness-eyebrow">Agent readiness</div>
         <h1 className="ds-readiness-title">Readiness report</h1>
         <p className="ds-readiness-desc">
-          How well your docs serve AI agents — structured data, metadata, discovery, and machine-readability.
+          How well agents can use your docs — findable pages, chunkable sections, working links, tagged code, and API examples.
         </p>
       </header>
 
@@ -222,6 +272,7 @@ export function AgentReadinessPanel() {
                 </span>
                 <span className="ds-readiness-pages">
                   across {report.totalPages} page{report.totalPages === 1 ? '' : 's'}
+                  {report.version ? ` · methodology v${report.version}` : ''}
                 </span>
               </div>
             </div>

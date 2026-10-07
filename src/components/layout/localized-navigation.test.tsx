@@ -93,7 +93,7 @@ describe('localized collection selection', () => {
 
   it('keeps Guides selected after the localized snapshot arrives', async () => {
     const hydration = await LocalizedSidebarHydrator({ locale: 'zh-Hans' })
-    expect(mocks.loadCollections).toHaveBeenCalledWith('zh-Hans')
+    expect(mocks.loadCollections).toHaveBeenCalledWith('zh-Hans', expect.objectContaining({ isAuthenticated: false }))
     expect(hydration.props.collections.find((collection: SidebarCollection) => collection.id === 'overview')?.href).toBeUndefined()
     mocks.snapshots['locale:zh-Hans'] = hydration.props.collections
     const markup = shellMarkup()

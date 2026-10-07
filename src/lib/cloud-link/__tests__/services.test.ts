@@ -20,6 +20,7 @@ vi.mock('@thallylabs/core/registry', () => ({
   registerAsyncDocEntriesSource: vi.fn(),
   registerContentDocumentSource: vi.fn(),
   registerDocEntriesSource: vi.fn(),
+  registerSupplementalSearchRecordsSource: vi.fn(),
 }))
 
 import {

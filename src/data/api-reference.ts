@@ -6,6 +6,7 @@ import type { NavigationSection, SidebarCollection } from '@/data/docs'
 import type { NormalizedOperation, NormalizedSpec } from '@/lib/openapi/types'
 import { findSpecForRef, type OpenApiFrontmatterRef } from '@/lib/openapi/page-frontmatter'
 import { pageReferenceState } from '@/lib/openapi/publication'
+import type { SupplementalSearchRecord } from '@thallylabs/core/search'
 
 export interface ApiNavigationItem {
   id: string
@@ -259,15 +260,33 @@ export async function withApiNavigation(
   )
 }
 
-export async function getApiOperationSearchIndex() {
+/**
+ * Search records for every published operation, registered with the search
+ * engine as supplemental records (see `src/lib/search/register-doc-source`),
+ * so ⌘K, `/api/search` and MCP `search_docs` rank operations beside pages.
+ * The id is the operation's slug path — the same id docs-index and MCP use.
+ */
+export async function getApiOperationSearchIndex(): Promise<Array<SupplementalSearchRecord>> {
   const nodes = await getAllApiOperationNodes()
-  return nodes.map((node) => ({
-    id: node.operation.id,
-    title: node.operation.title,
-    description: node.operation.description ?? `${node.operation.method} ${node.operation.path}`,
-    href: node.href,
-    keywords: node.operation.tags,
-  }))
+  return nodes.map((node) => {
+    const { operation } = node
+    const parameterNames = (['path', 'query', 'header', 'cookie'] as const)
+      .flatMap((location) => operation.parameters[location].map((param) => param.name))
+    return {
+      id: node.slug.join('/'),
+      type: 'api_operation' as const,
+      title: operation.title,
+      description: operation.description ?? `${operation.method} ${operation.path}`,
+      href: node.href,
+      keywords: operation.tags,
+      // The path, group and parameter names are searchable. The HTTP method is
+      // not: with fuzzy matching, "GET"/"PUT" on every operation would match
+      // ordinary question words ("set", "but") and crowd out pages.
+      body: [operation.path, operation.group, ...parameterNames].filter(Boolean).join(' '),
+      method: operation.method,
+      path: operation.path,
+    }
+  })
 }
 
 function sortNavigationGroups(groups: Array<ApiNavigationGroup>, spec: NormalizedSpec) {

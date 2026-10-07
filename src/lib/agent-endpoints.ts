@@ -24,6 +24,7 @@ export function isMachineEndpoint(pathname: string): boolean {
     '/openapi.json',
     '/openapi.yaml',
     '/changelog/rss.xml',
+    '/changelog/feed.json',
     '/icon',
   ])
   if (exact.has(pathname)) return true
@@ -93,6 +94,7 @@ export function isContentBearingAgentEndpoint(pathname: string): boolean {
     '/openapi.json',
     '/openapi.yaml',
     '/changelog/rss.xml',
+    '/changelog/feed.json',
   ]).has(pathname)
 }
 
@@ -109,6 +111,7 @@ export function isAgentDiscoveryEndpoint(pathname: string): boolean {
       '/openapi.json',
       '/openapi.yaml',
       '/changelog/rss.xml',
+      '/changelog/feed.json',
       '/api/docs-index',
     ]).has(pathname)
   )

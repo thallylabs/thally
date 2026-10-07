@@ -59,11 +59,14 @@ GET /llms.txt
 
 ### `/llms-full.txt`
 
-The complete content of every documentation page in a single plain-text file, stripped of JSX and ready for LLM context windows.
+The complete content of every indexable documentation page in a single file, followed by a compact summary of every API operation. Pages use the same Markdown as each page's `.md` URL and the MCP `read_page` tool: components become plain Markdown, and content inside `<Visibility for="humans">` is left out. Pages marked `hidden` or `noindex` are omitted, as they are from search.
 
 ```http Request
 GET /llms-full.txt
+GET /llms-full.txt?locale=es
 ```
+
+`?locale=` returns only the pages translated into that language. The `X-Thally-Approx-Tokens` response header estimates the file's size in tokens, so an agent can decide whether to load it whole or use search instead.
 
 ---
 
@@ -284,7 +287,7 @@ A human visiting the same URLs never notices any of this. The HTML is identical 
 
 ## Agent Readiness Score
 
-Thally grades how well your docs serve AI agents with a deterministic 0–100 score. It's computed from the content graph — structured data, metadata, discovery files, machine readability, OpenAPI coverage, and content quality — with an optional analytics-derived signal when agent traffic data is available.
+Thally grades how well AI agents can use your docs with a deterministic 0–100 score. It checks whether agents can find the right page, fit it in context, follow its links, read its code, and call its API. Optional golden questions measure retrieval directly.
 
 ```bash
 # JSON report
@@ -294,7 +297,7 @@ GET /api/agent-readiness
 thally check --agents --min 80
 ```
 
-The report includes weighted subscores and the specific pages dragging each one down, so the fix is always concrete. MCP clients can fetch the same report for any deployed site with the `agent_readiness` tool.
+Every check names the pages that pull it down and the fix that raises it. MCP clients can fetch the same report for any deployed site with the `agent_readiness` tool. See [Agent Readiness Score](/guides/agent-readiness) for the checks, weights, and golden-question setup.
 
 ---
 

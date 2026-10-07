@@ -10,9 +10,14 @@ endpoint. Self-host it or connect the site to Thally Cloud.
 ```bash
 npx create-thally-docs my-docs
 cd my-docs
-npm install
 npm run dev
 ```
+
+`create-thally-docs` installs dependencies by default (pass `--no-install` to
+skip) and prints the exact preview command. Sites that include the `thally`
+CLI as a dev dependency can also run `npx thally dev`, which prints the local
+`llms.txt` and MCP endpoints plus a `claude mcp add` command once the server is
+ready.
 
 Or clone the dedicated starter directly:
 
@@ -43,9 +48,9 @@ no-change result is valid. Nothing publishes without human approval.
 - **Auto-generated API reference** — drop in an OpenAPI spec and get interactive docs with a "Try It" console
 - **Sidebar & tabs** — configured from a single `docs.json` file
 - **Hybrid search** — instant client-side command palette plus a server-side full-text + vector `/api/search`
-- **Retrieval-grounded AI chat** — Claude-powered Q&A with RAG retrieval and inline citations; works out of the box on a rate-limited trial key, then on your own `ANTHROPIC_API_KEY`
+- **Retrieval-grounded AI chat** — Q&A with retrieval over your docs and inline citations, available when the site is linked to Thally Cloud; the widget stays hidden otherwise
 - **Agent endpoints** — `/llms.txt`, `/ai.txt`, `/api/docs-index`, `/api/docs/{slug}`, and an **Agent Readiness Score** at `/api/agent-readiness`
-- **Remote MCP server** — every deployed site is an MCP endpoint at `/api/mcp`; attach with `claude mcp add --transport http <site>/api/mcp`
+- **Remote MCP server** — every deployed site is an MCP endpoint at `/api/mcp` with read-only tools (`search_docs`, `search_sections`, `read_page`, `list_pages`, `list_api_operations`, `get_api_operation`, `list_changes`, `agent_readiness`) and pages as resources; attach with `claude mcp add --transport http <site>/api/mcp`
 - **Docs agent** — `thally agent "…"` (or `@thally` on a product PR) drafts docs as a **reviewed pull request**, self-checked with `thally check`; it never merges
 - **Provenance & drift** — machine-legible `lastVerified` dates + `thally check --drift` to catch pages stale against the code they document
 - **Team accounts & roles** — Google/Microsoft OIDC sign-in + Owner/Editor/Viewer from a git-committed roster in `docs.json` (no database, no per-seat)
@@ -184,7 +189,7 @@ cp .env.example .env.local
 
 | Variable | Purpose |
 |---|---|
-| `THALLY_SITE_URL` | Production URL for OpenGraph metadata, canonical URLs, and agent endpoints (legacy `NEXT_PUBLIC_SITE_URL` still honored) |
+| `THALLY_SITE_URL` | Public origin for OpenGraph, canonical URLs, JSON-LD, and agent manifests (legacy `DOX_SITE_URL` / `NEXT_PUBLIC_SITE_URL` still honored). When unset, the host-published URL is used: Vercel `VERCEL_PROJECT_PRODUCTION_URL`/`VERCEL_URL` (build and runtime), Netlify `URL`/`DEPLOY_PRIME_URL` and Cloudflare Pages `CF_PAGES_URL` (build time only), Render `RENDER_EXTERNAL_URL` (runtime only); `http://localhost:3040` in local development. A `localhost` value never overrides a host-published URL. Set it explicitly outside Vercel for complete coverage, and for custom domains and Cloudflare Workers |
 | `THALLY_CLOUD_SITE_TOKEN` | Optional server-only credential from Thally Cloud. The deployed site exchanges it automatically on its next visit; never prefix it with `NEXT_PUBLIC_` |
 | `THALLY_CLOUD_URL` | Optional Thally Cloud base URL. Defaults to `https://app.thally.io` |
 | `THALLY_CLOUD_SITE_CONFIG` | Managed-hosting release snapshot injected by Thally Cloud. Self-hosted sites should leave this unset and use `THALLY_CLOUD_SITE_TOKEN` |
@@ -192,9 +197,14 @@ cp .env.example .env.local
 | `THALLY_DOCS_CONFIG` | Optional managed-hosting snapshot of `docs.json`, used to publish presentation and navigation settings without recompiling the Worker. Self-hosted sites should leave this unset and edit `docs.json` |
 | `THALLY_ADMIN_PASSWORD` / `THALLY_ADMIN_SECRET` | Optional break-glass admin password plus its required high-entropy production session-signing secret |
 | `THALLY_ACCESS_PASSWORD` / `THALLY_ACCESS_SECRET` | Optional docs-access password plus its required high-entropy production session-signing secret; the access secret may fall back to `THALLY_ADMIN_SECRET` |
-| `ANTHROPIC_API_KEY` | Owner key for AI chat — lifts trial limits entirely |
-| `THALLY_TRIAL_ANTHROPIC_KEY` | Optional shared key powering the out-of-the-box trial chat (strict per-IP limits + a global daily cap) |
-| `THALLY_TRIAL_RATE_PER_MIN` / `THALLY_TRIAL_RATE_PER_DAY` / `THALLY_TRIAL_DAILY_LIMIT` / `THALLY_CHAT_RATE_PER_MIN` | Optional chat rate-limit overrides |
+| `THALLY_READER_SESSION_SECRET` | Reader-auth session-signing secret (32+ chars, distinct from admin/access secrets); required in production when docs.json `auth.mode` is `jwt` or `oidc` |
+| `THALLY_READER_JWT_SECRET` / `THALLY_READER_JWT_PUBLIC_KEY` / `THALLY_READER_JWKS_URL` | JWT handoff verification key — exactly one: HS256 shared secret, SPKI PEM (RS256/PS256/ES256/EdDSA), or JWKS URL |
+| `THALLY_READER_OIDC_ISSUER` / `THALLY_READER_OIDC_CLIENT_ID` / `THALLY_READER_OIDC_CLIENT_SECRET` | Reader sign-in with your OpenID Connect provider (`auth.mode: "oidc"`) |
+| `THALLY_READER_ALLOW_DEV_SESSION_KEY` | Local previews only: `1` signs reader sessions with a PUBLIC development key (ignored in production). Anyone who can reach the server can then forge sessions — never set it on a reachable server |
+| `THALLY_READER_TOKEN_KEYS` | Optional `kid:secret` list for read-only, group-scoped agent/MCP bearer tokens (`npm run reader-token`) |
+| `ANTHROPIC_API_KEY` | Optional — used by local tooling only (`thally agent`, `thally translate`, and non-Markdown conversion in `thally migrate`). The site's AI chat is served by Thally Cloud and reads no model key |
+| `THALLY_MCP_RATE_PER_MIN` | Optional per-client limit on remote MCP tool calls and resource reads (default `60`; `0` disables) |
+| `THALLY_SEARCH_HYBRID_RATE_PER_MIN` | Optional per-client limit on `/api/search?mode=hybrid` when a hosted embedding provider is configured (default `20`); over the limit, full-text results are served |
 | `THALLY_REPO_URL` | Optional — the docs repo Thally Track dispatches to. Defaults to `siteConfig.repoUrl`; set it when `site.ts` keeps the template default (`repoUrl: ''`) but Track should still target your repo |
 | `THALLY_TRACK_WEBHOOK_SECRET` | Optional — enables the manual Thally Track webhook (`/api/track/webhook`); merged/preview PRs in tracked repos become docs-agent PRs. Not needed when you Connect a GitHub App |
 | `THALLY_GITHUB_TOKEN` | Optional — fine-grained PAT that reads tracked product-repo PRs, relays Track dispatches, and authenticates the admin Docs-tasks queue |

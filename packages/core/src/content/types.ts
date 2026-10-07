@@ -12,7 +12,14 @@ export interface ContentTocItem {
 }
 
 export interface ContentCodeBlock {
+  /** Authored fence language, or `'text'` when the fence declares none. */
   language: string
+  /**
+   * Whether the fence declared a language. `language` falls back to `'text'`,
+   * so this is the only way to tell an untagged fence from an explicit `text`
+   * one. Optional so code blocks built by older engines remain valid.
+   */
+  hasLanguageTag?: boolean
   source: string
   title?: string
   index: number
@@ -40,6 +47,28 @@ export interface ContentSection {
 }
 
 /**
+ * One `<Update>` changelog entry, extracted from the same parse as the rest
+ * of the content graph. Feeds (RSS, JSON Feed) and MCP `list_changes` are
+ * projections of this record; there is no second changelog parser.
+ */
+export interface ContentUpdate {
+  /** Anchor id the rendered entry carries (see `updateAnchorId`); '' when the entry has none. */
+  id: string
+  /** The `label` prop (often a version or release name). */
+  label: string
+  /** The `title` prop when authored as a plain string. */
+  title?: string
+  /** The `date` prop exactly as authored (not necessarily ISO). */
+  date?: string
+  description?: string
+  tags: Array<string>
+  /** Entry body as clean Markdown (audience-projected, JSX stripped). */
+  markdown: string
+  /** Entry body as plain prose. */
+  text: string
+}
+
+/**
  * The typed content graph for a single document, derived from a single MDX
  * parse. Every downstream representation (rendered HTML, structured JSON,
  * JSON-LD, Markdown, embedding chunks) is a projection of this object.
@@ -54,4 +83,9 @@ export interface ParsedContent {
   text: string
   /** Cleaned markdown body (frontmatter and known JSX wrappers stripped). */
   markdown: string
+  /**
+   * `<Update>` changelog entries in source order. Optional so hosts that build
+   * a `ParsedContent` by hand keep compiling; the parser always sets it.
+   */
+  updates?: Array<ContentUpdate>
 }

@@ -103,3 +103,54 @@ describe('runtime content index', () => {
     expect(getContentIndex()).toBe(first)
   })
 })
+
+describe('ASSETS content index loading', () => {
+  afterEach(async () => {
+    const { setContentAssetFetcher } = await import('@/lib/content-source/runtime')
+    setContentAssetFetcher(null)
+    resetContentIndexForTests()
+    vi.useRealTimers()
+  })
+
+  it('does not cache a failed or non-OK load for the isolate; it retries after a bounded backoff', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-07T00:00:00Z'))
+    const { setContentAssetFetcher } = await import('@/lib/content-source/runtime')
+    const { loadContentIndex } = await import('../content-index')
+    const responses = [new Response('nope', { status: 503 }), new Response(VALID_INDEX)]
+    const fetcher = vi.fn(async () => responses.shift() ?? new Response('gone', { status: 500 }))
+    setContentAssetFetcher(fetcher)
+
+    expect(await loadContentIndex()).toBeNull()
+    // Inside the backoff window no new fetch is made.
+    expect(await loadContentIndex()).toBeNull()
+    expect(fetcher).toHaveBeenCalledTimes(1)
+
+    vi.setSystemTime(new Date('2026-10-07T00:00:06Z'))
+    const loaded = await loadContentIndex()
+    expect(loaded?.pages['src/content/live-page.mdx']).toBeDefined()
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    // A successful load is then kept.
+    await loadContentIndex()
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('backs off exponentially while the index keeps failing, capped', async () => {
+    vi.useFakeTimers()
+    let now = Date.parse('2026-10-07T00:00:00Z')
+    vi.setSystemTime(now)
+    const { setContentAssetFetcher } = await import('@/lib/content-source/runtime')
+    const { loadContentIndex } = await import('../content-index')
+    const fetcher = vi.fn(async () => new Response('not json', { status: 200 }))
+    setContentAssetFetcher(fetcher)
+    for (const waitMs of [5_000, 10_000, 20_000]) {
+      await loadContentIndex()
+      now += waitMs - 1
+      vi.setSystemTime(now)
+      await loadContentIndex()
+      now += 1
+      vi.setSystemTime(now)
+    }
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+})
