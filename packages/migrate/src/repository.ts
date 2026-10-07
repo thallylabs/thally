@@ -3217,6 +3217,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let fernBasePath = ''
   let fernVersionPath = ''
   let fernApiSections: Array<FernApiSection> = []
+  let fernRestrictedApiSections: Array<FernApiSection> = []
   // sourcePaths of Fern descriptors that resolve outside fern/ (from a
   // `versions:` file living in a sibling directory) — resolved directly,
   // below, since the ordinary fern/-rooted scan can't reach them.
@@ -3293,6 +3294,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
         fernApiSections = projected.apiSections
+        fernRestrictedApiSections = projected.restrictedApiSections
         fernChangelogIndexes = projected.changelogIndexes
         for (const [index, descriptor] of projected.descriptors.entries()) {
           fernReferencedPaths.add(descriptor.sourcePath)
@@ -4568,7 +4570,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // whatever tab `injectOpenApiSpecs` picks for an unbound spec.
     const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string; routeSegments?: Array<string> }> = fernApiSections.length > 0
       ? fernApiSections
-      : [{ nameExplicit: false }]
+      // Every `api:` node is restricted: none may fall back to a repository-wide spec scan.
+      : fernRestrictedApiSections.length > 0 ? [] : [{ nameExplicit: false }]
     const resolvedSpecs: Array<{ filename: string; tabLabel?: string; content: Buffer; routeSegments: Array<string> }> = []
     // Two different multi-API specs commonly share a basename (Paradex's
     // prod_rest and testnet_rest both resolve to their own
@@ -4625,6 +4628,22 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         message: checked.length
           ? `No OpenAPI/AsyncAPI spec could be found for the "${section.name}" API. Checked: ${checked.join(', ')}. Point generators.yml at a spec file that exists.`
           : `No OpenAPI/AsyncAPI spec could be found for the "${section.name}" API, because its api-name is not a valid folder name. Add the spec manually.`,
+      })
+    }
+    // An `api:` node under a restricted node publishes nothing. Its spec is saved
+    // under the quarantine folder instead, unless a public node uses the same file.
+    const publicSpecFiles = new Set(specFilenameSources.values())
+    for (const section of fernRestrictedApiSections) {
+      const spec = findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, section.name, section.nameExplicit, warnings).spec
+        ?? (!section.nameExplicit ? findOpenApi(files) : null)
+      if (!spec || publicSpecFiles.has(spec.absolutePath)) continue
+      const content = readSpecFile(spec.absolutePath, spec.relativePath, warnings)
+      if (!content) continue
+      quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(basename(spec.relativePath))}`, content })
+      warnings.push({
+        code: 'gated-page',
+        message: `The "${section.name ?? 'API'}" API reference is limited to signed-in roles in Fern, so it was NOT published. Its spec was saved at ${QUARANTINE_DIRECTORY}/assets/${specAssetPath(basename(spec.relativePath))}.`,
+        source: spec.relativePath,
       })
     }
     if (resolvedSpecs.length > 0) {

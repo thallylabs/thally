@@ -863,3 +863,48 @@ describe('Docusaurus draft partials and wording', () => {
     expect(bundle.pages.map((page) => page.body).join('')).not.toContain('DRAFT TEXT')
   })
 })
+
+describe('Fern api nodes under restricted nodes', () => {
+  const spec = 'openapi: 3.0.0\ninfo: {title: Secret API, version: "1"}\npaths:\n  /secret:\n    get:\n      summary: SECRETOP\n      responses: {"200": {description: ok}}\n'
+  const base = { 'fern.config.json': '{"organization":"a","version":"0.1.0"}', 'p.mdx': '# P', 'openapi/openapi.yml': spec, 'generators.yml': 'api:\n  specs:\n    - openapi: openapi/openapi.yml\n' }
+
+  function api(docsYml: string, extra: Record<string, string> = {}) {
+    const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-api-'))
+    for (const [path, content] of Object.entries({ ...base, 'docs.yml': docsYml, ...extra })) {
+      mkdirSync(join(root, 'fern', path, '..'), { recursive: true })
+      writeFileSync(join(root, 'fern', path), content)
+    }
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' })
+    const published = renderMigrationFiles(bundle).filter((file) => !file.path.startsWith('migration-quarantine/') && Buffer.from(file.content).toString().includes('SECRETOP'))
+    return { bundle, published: published.map((file) => file.path) }
+  }
+
+  it.each([
+    ['an api node with viewers', 'navigation:\n  - page: P\n    path: p.mdx\n  - api: API Reference\n    viewers: [admin]\n'],
+    ['an api node inside a restricted section', 'navigation:\n  - page: P\n    path: p.mdx\n  - section: Staff\n    viewers: [admin]\n    contents:\n      - api: API Reference\n'],
+    ['an api node inside a restricted tab', 'tabs:\n  docs:\n    display-name: Docs\n  ref:\n    display-name: Ref\nnavigation:\n  - tab: docs\n    layout:\n      - page: P\n        path: p.mdx\n  - tab: ref\n    viewers: [admin]\n    layout:\n      - api: API Reference\n'],
+  ])('does not publish the spec of %s', (_name, docsYml) => {
+    const { bundle, published } = api(docsYml)
+    expect(published).toEqual([])
+    expect(quarantinedPaths(bundle)).toContain('migration-quarantine/assets/openapi/openapi.yml')
+    expect(bundle.warnings.some((warning) => warning.message.includes('NOT published') && warning.message.includes('API'))).toBe(true)
+  })
+
+  it('keeps a spec public when a public api node uses the same file', () => {
+    const { bundle, published } = api('navigation:\n  - page: P\n    path: p.mdx\n  - api: Public API\n  - api: Staff API\n    viewers: [admin]\n')
+    expect(published).toContain('openapi/openapi.yml')
+    expect(quarantinedPaths(bundle)).not.toContain('migration-quarantine/assets/openapi/openapi.yml')
+  })
+})
+
+describe('Fern page listed under public and restricted nodes', () => {
+  it('fails closed and warns', () => {
+    const bundle = fernSite(
+      'navigation:\n  - page: Shared\n    path: shared.mdx\n  - section: Staff\n    viewers: [staff]\n    contents:\n      - page: Shared again\n        path: shared.mdx\n      - page: Own\n        path: own.mdx\n  - page: Open\n    path: open.mdx\n',
+      { 'shared.mdx': '# Shared\n', 'own.mdx': '# Own\n', 'open.mdx': '# Open\n' },
+    )
+    expect(bundle.pages.map((page) => page.title)).toEqual(['Open'])
+    expect(quarantinedPaths(bundle)).toContain('migration-quarantine/shared.mdx')
+    expect(bundle.warnings.some((warning) => warning.code === 'gated-page' && warning.source === 'shared.mdx')).toBe(true)
+  })
+})

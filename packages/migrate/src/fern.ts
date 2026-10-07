@@ -85,6 +85,8 @@ export interface FernNavigationResult {
   warnings: Array<MigrationWarning>
   /** Every `api:` node found in navigation, in document order. A repo can declare several (e.g. a REST and a WebSocket API in separate tabs). */
   apiSections: Array<FernApiSection>
+  /** `api:` nodes under a restricted node; their specs must not be published. */
+  restrictedApiSections: Array<FernApiSection>
   /** Fern changelog tabs render their entries as a feed at the bare route. */
   changelogIndexes: Array<{ route: string; entries: Array<string> }>
 }
@@ -129,6 +131,8 @@ interface WalkContext {
   seenNavigationIds: Set<string>
   /** Every `api:` node seen so far, in document order; `tabLabel` is filled in once its owning tab finishes walking. */
   apiSections: Array<FernApiSection>
+  /** `api:` nodes under a node that sets `viewers`: never published, and their specs stay out of public/. */
+  restrictedApiSections: Array<FernApiSection>
   changelogIndexes: Array<{ route: string; entries: Array<string> }>
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
@@ -374,9 +378,19 @@ function isRestrictedNode(object: Record<string, unknown>): boolean {
     && !(typeof authed === 'string' && ['', 'false'].includes(authed.trim().toLowerCase()))
 }
 
-/** Mark every page registered since `before` as restricted; the caller leaves them out of navigation. */
-function markRestricted(context: WalkContext, before: number): void {
-  for (const descriptor of context.descriptors.slice(before)) descriptor.restricted = true
+interface RestrictionMark { descriptors: number; apis: number }
+
+function restrictionMark(context: WalkContext): RestrictionMark {
+  return { descriptors: context.descriptors.length, apis: context.apiSections.length }
+}
+
+/**
+ * Mark every page and `api:` node registered since `mark` as restricted; the
+ * caller leaves them out of navigation. Their specs are kept out of public/.
+ */
+function markRestricted(context: WalkContext, mark: RestrictionMark): void {
+  for (const descriptor of context.descriptors.slice(mark.descriptors)) descriptor.restricted = true
+  context.restrictedApiSections.push(...context.apiSections.splice(mark.apis))
 }
 
 /** A `section`/`page`/`link`/`api`/`changelog` node from `layout` or `contents`. */
@@ -388,7 +402,7 @@ function convertNode(
   const object = objectValue(node)
   if (!object) return null
   if (isRestrictedNode(object)) {
-    const before = context.descriptors.length
+    const before = restrictionMark(context)
     convertNodeContents({ ...object, viewers: undefined, authed: undefined }, parentSegments, context)
     markRestricted(context, before)
     return null
@@ -594,10 +608,16 @@ function buildTabsFromConfig(
   fallbackTabLabel: string,
   context: WalkContext,
 ): Array<MigrationNavigationTab> {
-  const before = context.descriptors.length
-  const tabs = buildUnrestrictedTabs(rawConfig, configDir, fernRoot, routePrefix, fallbackTabLabel, context)
-  if (!context.versionRestricted) return tabs
-  context.versionRestricted = false
+  const before = restrictionMark(context)
+  let tabs: Array<MigrationNavigationTab>
+  let restricted: boolean
+  try {
+    tabs = buildUnrestrictedTabs(rawConfig, configDir, fernRoot, routePrefix, fallbackTabLabel, context)
+    restricted = context.versionRestricted === true
+  } finally {
+    context.versionRestricted = false
+  }
+  if (!restricted) return tabs
   markRestricted(context, before)
   return []
 }
@@ -627,7 +647,7 @@ function buildUnrestrictedTabs(
       const segments = [...routePrefix, ...(tabSegment ? [tabSegment] : [])]
       const layout = Array.isArray(entry.layout) ? entry.layout : []
       const sectionsBefore = context.apiSections.length
-      const descriptorsBefore = context.descriptors.length
+      const descriptorsBefore = restrictionMark(context)
       const groups = groupsFromConverted(convertNodes(layout, segments, context))
       if (isRestrictedNode(entry) || isRestrictedNode(meta)) {
         markRestricted(context, descriptorsBefore)
@@ -752,7 +772,7 @@ function projectFernProducts(
     const routeSegment = segmentFor(product, label, context)
     const priorPrefix = context.pathPrefix
     context.pathPrefix = relative(fernRoot, productDir).replace(/\\/g, '/')
-    const before = context.descriptors.length
+    const before = restrictionMark(context)
     try {
       const tabs = buildTabsFromConfig(
         productConfig,
@@ -790,6 +810,7 @@ export function projectFernNavigation(input: {
     descriptors: [],
     seenNavigationIds: new Set(),
     apiSections: [],
+    restrictedApiSections: [],
     changelogIndexes: [],
     warnings: [],
     warningKeys: new Set(),
@@ -960,6 +981,7 @@ export function projectFernNavigation(input: {
     descriptors: context.descriptors,
     warnings: context.warnings,
     apiSections: disambiguatedApiSections,
+    restrictedApiSections: context.restrictedApiSections,
     changelogIndexes: context.changelogIndexes,
   }
 }
