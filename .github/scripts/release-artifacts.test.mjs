@@ -72,7 +72,7 @@ test('compares tar payloads independent of gzip compression level', () => {
   assert.equal(tarPayloadSha256(fast), tarPayloadSha256(compact))
 })
 
-test('waits beyond twelve absent registry reads after an acknowledged publish', async () => {
+test('waits beyond the former eighteen-read registry settlement window', async () => {
   let reads = 0
   const delays = []
   const metadata = {
@@ -82,18 +82,37 @@ test('waits beyond twelve absent registry reads after an acknowledged publish', 
   const settled = await registryMetadata('example@1.0.0', REGISTRY_SETTLE_ATTEMPTS, {
     runCommand: () => {
       reads += 1
-      return reads === 13
+      return reads === 20
         ? { status: 0, stdout: JSON.stringify(metadata) }
         : { status: 1, stderr: 'npm error code E404' }
     },
     sleep: async (delayMs) => { delays.push(delayMs) },
   })
 
-  assert.equal(REGISTRY_SETTLE_ATTEMPTS, 18)
-  assert.equal(reads, 13)
-  assert.equal(delays.length, 12)
+  assert.equal(REGISTRY_SETTLE_ATTEMPTS, 33)
+  assert.equal(reads, 20)
+  assert.equal(delays.length, 19)
   assert.equal(Math.max(...delays), 20_000)
   assert.deepEqual(settled, metadata)
+})
+
+test('stops waiting when registry metadata remains absent throughout the settlement window', async () => {
+  let reads = 0
+  const delays = []
+  const settled = await registryMetadata('example@1.0.0', REGISTRY_SETTLE_ATTEMPTS, {
+    runCommand: () => {
+      reads += 1
+      return { status: 1, stderr: 'npm error code E404' }
+    },
+    sleep: async (delayMs) => { delays.push(delayMs) },
+  })
+
+  assert.equal(settled, null)
+  assert.equal(reads, 33)
+  assert.equal(delays.length, 32)
+  assert.deepEqual(delays.slice(0, 4), [2_000, 4_000, 8_000, 16_000])
+  assert.ok(delays.slice(4).every((delay) => delay === 20_000))
+  assert.equal(delays.reduce((total, delay) => total + delay, 0), 590_000)
 })
 
 test('does not retry unrelated registry failures', async () => {
@@ -137,6 +156,40 @@ test('publishes after one absent preflight lookup, then verifies registry settle
   })
   assert.equal(views, 2)
   assert.equal(publishes, 1)
+})
+
+test('rejects delayed registry metadata with the wrong integrity after one acknowledged publish', async () => {
+  const { manifestPath, planHash } = await writeReleaseFixture()
+  const metadata = {
+    integrity: `sha512-${'a'.repeat(86)}==`,
+    tarball: 'https://registry.npmjs.org/@thallylabs/cli/-/cli-1.2.3.tgz',
+  }
+  let views = 0
+  let publishes = 0
+  const delays = []
+  await assert.rejects(publishReleaseArtifacts(manifestPath, planHash, {
+    runCommand: (command, args) => {
+      if (command === 'tar') return spawnSync(command, args, { encoding: 'utf8' })
+      if (command === 'npm' && args[0] === 'view') {
+        views += 1
+        // One preflight read plus twenty settlement reads: visibility arrives
+        // after the old window, but waiting never relaxes the byte-integrity gate.
+        return views === 21
+          ? { status: 0, stdout: JSON.stringify(metadata) }
+          : { status: 1, stderr: 'npm error code E404' }
+      }
+      if (command === 'npm' && args[0] === 'publish') {
+        publishes += 1
+        return { status: 0 }
+      }
+      throw new Error(`Unexpected command: ${command} ${args.join(' ')}`)
+    },
+    sleep: async (delayMs) => { delays.push(delayMs) },
+  }), /did not settle with the expected integrity/)
+
+  assert.equal(views, 21)
+  assert.equal(publishes, 1)
+  assert.equal(delays.length, 19)
 })
 
 test('an already-published identical version remains an idempotent retry', async () => {
