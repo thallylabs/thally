@@ -13,12 +13,13 @@
  *
  * Listing follows the search visibility rule (no hidden/noindex pages), and
  * reading resolves only KNOWN published entries — a URI is never turned into
- * a filesystem path.
+ * a filesystem path. Both take the request's reader (anonymous when omitted):
+ * a page or operation the reader may not open is neither listed nor readable.
  */
 
-import { getAllApiOperationNodes } from '@/data/api-reference'
 import { apiOperationId, apiOperationMarkdown, describeApiOperation } from '@/lib/openapi/operation-projection'
-import { listAgentPages, readAgentPage, resolveLocaleArg } from '@/lib/mcp/site-tools'
+import { listAgentPages, loadVisibleApiOperationNodes, readAgentPage, resolveLocaleArg } from '@/lib/mcp/site-tools'
+import { ANONYMOUS_READER, type ReaderContext } from '@/lib/reader-auth/access'
 
 export const PAGE_URI_PREFIX = 'docs://pages/'
 export const API_URI_PREFIX = 'docs://api/'
@@ -97,9 +98,12 @@ function decodeCursor(cursor: unknown): number {
 }
 
 /** One page of `resources/list`: indexable documentation pages in navigation order. */
-export async function listResources(cursor: unknown): Promise<{ resources: Array<McpResource>; nextCursor?: string }> {
+export async function listResources(
+  cursor: unknown,
+  reader: ReaderContext = ANONYMOUS_READER,
+): Promise<{ resources: Array<McpResource>; nextCursor?: string }> {
   const offset = decodeCursor(cursor)
-  const pages = await listAgentPages()
+  const pages = await listAgentPages(undefined, reader)
   const slice = pages.slice(offset, offset + RESOURCE_PAGE_SIZE)
   const resources = slice.map((entry) => ({
     uri: `${PAGE_URI_PREFIX}${encodeId(entry.id)}`,
@@ -113,16 +117,20 @@ export async function listResources(cursor: unknown): Promise<{ resources: Array
 }
 
 /** Read one resource, or null when the URI names nothing published. */
-export async function readResource(uri: unknown, origin: string): Promise<McpResourceContents | null> {
+export async function readResource(
+  uri: unknown,
+  origin: string,
+  reader: ReaderContext = ANONYMOUS_READER,
+): Promise<McpResourceContents | null> {
   if (typeof uri !== 'string' || !uri) throw invalidParams('Provide a resource "uri".')
   if (uri.startsWith(PAGE_URI_PREFIX)) {
     const locale = await resolveLocaleArg({})
-    const page = await readAgentPage(decodeId(uri.slice(PAGE_URI_PREFIX.length)), locale, origin)
+    const page = await readAgentPage(decodeId(uri.slice(PAGE_URI_PREFIX.length)), locale, origin, reader)
     return page ? { uri, mimeType: 'text/markdown', text: page.markdown } : null
   }
   if (uri.startsWith(API_URI_PREFIX)) {
     const id = decodeId(uri.slice(API_URI_PREFIX.length))
-    const node = (await getAllApiOperationNodes()).find((candidate) => apiOperationId(candidate) === id)
+    const node = (await loadVisibleApiOperationNodes(reader)).find((candidate) => apiOperationId(candidate) === id)
     return node ? { uri, mimeType: 'text/markdown', text: apiOperationMarkdown(describeApiOperation(node, origin)) } : null
   }
   return null

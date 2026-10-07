@@ -7,6 +7,8 @@ import { resolveSiteConfig } from '@/lib/site-config'
 import { agentServerName } from '@/lib/agent-identity'
 import { BODY_TOO_LARGE_ERROR, readBoundedJson } from '@/lib/http/bounded-json'
 import { consumePublicQuota, readRateLimitEnv } from '@/lib/http/public-rate-limit'
+import { getReaderContextFromRequest } from '@/lib/reader-auth/context'
+import type { ReaderContext } from '@/lib/reader-auth/access'
 
 export const runtime = 'nodejs'
 
@@ -15,6 +17,9 @@ export const runtime = 'nodejs'
  * client attaches with `claude mcp add --transport http https://<site>/api/mcp`
  * and gets the site's docs as native tools and resources. Read-only and public
  * (subject to the docs-access gate in middleware on password-protected sites).
+ * On reader-auth sites a `Bearer thrt_…` agent token (or reader session)
+ * widens page, API and changelog tools to what that reader may open; search
+ * stays anonymous. Without one, every tool sees the anonymous view.
  *
  * Implemented as plain JSON-RPC 2.0 (no SDK — the app carries none, and the
  * SDK's server transport keeps per-session state this stateless route avoids).
@@ -77,7 +82,14 @@ function errorResponse(status: number, code: number, message: string, headers?: 
   return Response.json(rpcError(null, code, message), { status, headers })
 }
 
-async function callTool(id: unknown, params: Record<string, unknown>, origin: string) {
+/** Per-request state every handler needs. */
+interface RequestScope {
+  siteName: string
+  origin: string
+  reader: ReaderContext
+}
+
+async function callTool(id: unknown, params: Record<string, unknown>, { origin, reader }: RequestScope) {
   const name = typeof params.name === 'string' ? params.name : ''
   const tool = getSiteTool(name)
   if (!tool) return rpcError(id, -32602, `Unknown tool: ${name || '(none)'}`)
@@ -85,7 +97,7 @@ async function callTool(id: unknown, params: Record<string, unknown>, origin: st
     return rpcError(id, -32602, 'Tool "arguments" must be an object.')
   }
   try {
-    const { text, structured } = await tool.handler((params.arguments as Record<string, unknown>) ?? {}, { origin })
+    const { text, structured } = await tool.handler((params.arguments as Record<string, unknown>) ?? {}, { origin, reader })
     return rpcResult(id, { content: [{ type: 'text', text }], structuredContent: structured, isError: false })
   } catch (err) {
     if (isToolInputError(err)) {
@@ -97,7 +109,8 @@ async function callTool(id: unknown, params: Record<string, unknown>, origin: st
   }
 }
 
-async function handleRequest(id: unknown, method: string, params: Record<string, unknown>, siteName: string, origin: string) {
+async function handleRequest(id: unknown, method: string, params: Record<string, unknown>, scope: RequestScope) {
+  const { siteName, origin, reader } = scope
   switch (method) {
     case 'initialize': {
       const requested = params.protocolVersion
@@ -127,16 +140,16 @@ async function handleRequest(id: unknown, method: string, params: Record<string,
       })
 
     case 'tools/call':
-      return callTool(id, params, origin)
+      return callTool(id, params, scope)
 
     case 'resources/list':
-      return rpcResult(id, await listResources(params.cursor))
+      return rpcResult(id, await listResources(params.cursor, reader))
 
     case 'resources/templates/list':
       return rpcResult(id, { resourceTemplates })
 
     case 'resources/read': {
-      const contents = await readResource(params.uri, origin)
+      const contents = await readResource(params.uri, origin, reader)
       if (!contents) return rpcError(id, -32002, 'Resource not found', { uri: params.uri })
       return rpcResult(id, { contents: [contents] })
     }
@@ -150,7 +163,7 @@ async function handleRequest(id: unknown, method: string, params: Record<string,
  * Handle one JSON-RPC message. Returns null for notifications (no `id`) and
  * for client responses, which this stateless server never solicits.
  */
-async function handleMessage(msg: unknown, siteName: string, origin: string): Promise<object | null> {
+async function handleMessage(msg: unknown, scope: RequestScope): Promise<object | null> {
   if (!isRecord(msg)) return rpcError(null, -32600, 'Invalid Request')
   const { id, method, params } = msg as JsonRpcMessage
   const isNotification = !('id' in msg)
@@ -162,7 +175,7 @@ async function handleMessage(msg: unknown, siteName: string, origin: string): Pr
   if (isNotification) return null
   if (params !== undefined && !isRecord(params)) return rpcError(id, -32602, 'Invalid params')
   try {
-    return await handleRequest(id, method, (params as Record<string, unknown>) ?? {}, siteName, origin)
+    return await handleRequest(id, method, (params as Record<string, unknown>) ?? {}, scope)
   } catch (err) {
     const code = rpcErrorCode(err)
     if (code !== undefined && err instanceof Error) return rpcError(id, code, err.message)
@@ -238,9 +251,12 @@ export async function POST(request: NextRequest) {
 
   const origin = request.nextUrl.origin
   const effectiveSite = await resolveSiteConfig(origin)
+  // Anonymous unless reader auth is active and a valid token/session is presented.
+  const reader = await getReaderContextFromRequest(request)
+  const scope: RequestScope = { siteName: effectiveSite.name, origin, reader }
   const responses: Array<object> = []
   for (const msg of messages) {
-    const res = await handleMessage(msg, effectiveSite.name, origin)
+    const res = await handleMessage(msg, scope)
     if (res) responses.push(res)
   }
 

@@ -21,6 +21,7 @@ import {
   getI18nConfig,
   getNavigablePageIds,
   getRedirectsConfig,
+  isDocEntryVisibleTo,
   loadDocEntries,
 } from '@/data/docs'
 import { getDocsJsonConfig } from '@/lib/docs-json-config'
@@ -162,11 +163,13 @@ function jsonLdIssues(entry: DocEntry, siteUrl: string): PageFact['jsonLdIssues'
  * output (API route, MCP tool) and counts as publicly searchable. Pages it
  * rejects are still scored, but only counted, never listed.
  *
- * Extend this when new visibility controls ship — e.g. reader-auth gated
- * pages (`public: false` or `groups` frontmatter) must return false here.
+ * Reader-auth gated pages (`public: false`, `groups`, or a private site
+ * default) are judged for the anonymous reader: readiness is a public report,
+ * so a page an anonymous visitor cannot open is never named. Extend this when
+ * new visibility controls ship.
  */
-export function isPubliclyListedPage(entry: Pick<DocEntry, 'hidden' | 'noindex'>): boolean {
-  return !entry.hidden && !entry.noindex
+export function isPubliclyListedPage(entry: Pick<DocEntry, 'hidden' | 'noindex' | 'access'>): boolean {
+  return !entry.hidden && !entry.noindex && isDocEntryVisibleTo(entry)
 }
 
 /**

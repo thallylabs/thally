@@ -12,6 +12,10 @@
  *   `changelog/`, or ends with `/changelog` (e.g. `product/changelog`).
  *   `noindex` pages are skipped — a feed is an indexing surface — but `hidden`
  *   pages count: changelogs are often linked from the navbar, not the sidebar.
+ * - **Reader access.** Only pages the reader may open contribute entries; a
+ *   localized changelog also needs the reader to pass the translation's own
+ *   rules. Feeds and discovery links are anonymous projections (cacheable and
+ *   public); MCP `list_changes` passes the request's reader.
  * - **Audience.** Entry bodies use the agent projection, exactly like the
  *   `.md` mirror and MCP `read_page`: `<Visibility for="humans">` / `<Human>`
  *   content never reaches a feed.
@@ -22,9 +26,11 @@
  * - **Order.** Dated entries newest first, then undated ones in source order.
  */
 
-import { loadDocEntries, type DocEntry } from '@/data/docs'
+import { canReaderViewPage, loadDocEntries, type DocEntry } from '@/data/docs'
+import { ANONYMOUS_READER, type ReaderContext } from '@/lib/reader-auth/access'
 import { loadContentDocument } from '@/lib/content'
 import { localizedPath } from '@/lib/i18n/config'
+import { hasDocTranslation } from '@/lib/i18n/translation-source'
 
 export interface ChangelogEntry {
   /** Unique, stable id: the entry's absolute URL with its anchor. */
@@ -61,9 +67,9 @@ export function isChangelogPageId(pageId: string): boolean {
   return pageId === 'changelog' || pageId.startsWith('changelog/') || pageId.endsWith('/changelog')
 }
 
-/** Published, indexable changelog pages in navigation order. */
-export async function findChangelogPages(): Promise<Array<DocEntry>> {
-  return (await loadDocEntries()).filter((entry) => isChangelogPageId(entry.id) && !entry.noindex)
+/** Published, indexable changelog pages `reader` may open (anonymous by default), in navigation order. */
+export async function findChangelogPages(reader: ReaderContext = ANONYMOUS_READER): Promise<Array<DocEntry>> {
+  return (await loadDocEntries(reader)).filter((entry) => isChangelogPageId(entry.id) && !entry.noindex)
 }
 
 const MONTH = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\.?'
@@ -99,10 +105,24 @@ export function absolutizeMarkdownLinks(markdown: string, origin: string): strin
  * A translated changelog page is used when one exists; otherwise the source
  * page, matching what the localized route renders.
  */
-export async function loadChangelog(options: { origin: string; locale?: string; defaultLocale?: string }): Promise<Changelog> {
-  const { origin, locale, defaultLocale } = options
-  const pages = await findChangelogPages()
+export async function loadChangelog(options: {
+  origin: string
+  locale?: string
+  defaultLocale?: string
+  /** Whose view to project; anonymous when omitted (the feeds). */
+  reader?: ReaderContext
+}): Promise<Changelog> {
+  const { origin, locale, defaultLocale, reader = ANONYMOUS_READER } = options
   const isLocalized = Boolean(locale && defaultLocale && locale !== defaultLocale)
+  const visible = await findChangelogPages(reader)
+  // A translation may restrict its page further than the primary file. Pages
+  // without a translation fall back to the (already checked) source page.
+  const isAllowedTranslation = async (page: DocEntry) =>
+    !(await hasDocTranslation(page.slug, locale!)) || canReaderViewPage(page.id, reader, locale)
+  const pages = isLocalized
+    ? (await Promise.all(visible.map(async (page) => (await isAllowedTranslation(page)) ? page : null)))
+        .filter((page): page is DocEntry => page !== null)
+    : visible
   const pageHref = (entry: DocEntry) => isLocalized ? localizedPath(entry.href, locale!, defaultLocale!) : entry.href
 
   const dated: Array<ChangelogEntry> = []

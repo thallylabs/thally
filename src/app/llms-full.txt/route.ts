@@ -1,13 +1,15 @@
 import { type NextRequest } from 'next/server'
 import { estimateTokens } from '@thallylabs/core/embeddings'
-import { getAllApiOperationNodes, type ApiOperationNode } from '@/data/api-reference'
+import { type ApiOperationNode } from '@/data/api-reference'
 import { loadDocEntries, loadSidebarCollections } from '@/data/docs'
 import { loadContentDocument } from '@/lib/content'
 import { problemResponse } from '@/lib/http/problem'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
-import { listAgentPages } from '@/lib/mcp/site-tools'
+import { listAgentPages, loadVisibleApiOperationNodes } from '@/lib/mcp/site-tools'
 import { apiOperationMarkdown, describeApiOperation } from '@/lib/openapi/operation-projection'
 import { resolveRequestSiteConfig } from '@/lib/site-config'
+import { getReaderContextFromRequest } from '@/lib/reader-auth/context'
+import { contentCacheControl } from '@/lib/reader-auth/cache'
 
 /**
  * `llms-full.txt` — the whole documentation corpus as one Markdown file.
@@ -24,6 +26,11 @@ import { resolveRequestSiteConfig } from '@/lib/site-config'
  *   sidebar.
  * - API operations: the compact operation projection MCP resources use,
  *   after the pages (default locale only; operations are not translated).
+ *
+ * - Reader access: the corpus is the request reader's view (anonymous unless
+ *   reader auth is active and a token/session is presented), so restricted
+ *   pages and — on a private-by-default site — API operations appear only for
+ *   readers allowed to open them; such responses are never shared-cached.
  *
  * `?locale=<code>` returns a translated corpus containing only translated
  * pages. `X-Thally-Approx-Tokens` estimates the body size (~4 chars/token)
@@ -50,12 +57,15 @@ export async function GET(request: NextRequest) {
   const locale = requestedLocale ?? i18n.defaultLocale
   const engineLocale = locale === i18n.defaultLocale ? undefined : locale
 
+  const reader = await getReaderContextFromRequest(request)
   const [entries, listable, collections, apiNodes] = await Promise.all([
-    loadDocEntries(),
-    listAgentPages(engineLocale),
-    loadSidebarCollections(),
+    loadDocEntries(reader),
+    listAgentPages(engineLocale, reader),
+    loadSidebarCollections(undefined, reader),
     // An unreachable remote spec must not take the page corpus down with it.
-    engineLocale ? Promise.resolve([] as Array<ApiOperationNode>) : getAllApiOperationNodes().catch(() => [] as Array<ApiOperationNode>),
+    engineLocale
+      ? Promise.resolve([] as Array<ApiOperationNode>)
+      : loadVisibleApiOperationNodes(reader).catch(() => [] as Array<ApiOperationNode>),
   ])
 
   // Sidebar items carry default-locale hrefs; map them back to page ids, then
@@ -145,7 +155,7 @@ export async function GET(request: NextRequest) {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
       'Content-Language': locale,
-      'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+      'Cache-Control': contentCacheControl('public, max-age=3600, s-maxage=3600'),
       'X-Thally-Approx-Tokens': String(estimateTokens(body)),
     },
   })

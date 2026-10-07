@@ -1,6 +1,7 @@
 /** Regression coverage for readiness facts over embedded and managed content. */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { PageAccess } from '@/lib/reader-auth/access'
 
 const mocks = vi.hoisted(() => ({
   getContentDocument: vi.fn(),
@@ -17,15 +18,22 @@ vi.mock('@/lib/content', () => ({
   loadContentDocument: mocks.loadContentDocument,
 }))
 
-vi.mock('@/data/docs', () => ({
-  getDocEntries: mocks.getDocEntries,
-  loadDocEntries: mocks.loadDocEntries,
-  getNavigablePageIds: () => new Set(['quickstart', 'guides/links']),
-  getBreadcrumbs: () => [{ label: 'Guides', href: '/quickstart' }, { label: 'Page' }],
-  getCurrentVersionPageIds: () => null,
-  getI18nConfig: () => ({ defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }, { code: 'es', label: 'Español' }] }),
-  getRedirectsConfig: () => [{ source: '/old/:slug*', destination: '/quickstart' }],
-}))
+vi.mock('@/data/docs', async () => {
+  const access = await import('@/lib/reader-auth/access')
+  const readerConfig = await import('@/lib/reader-auth/config')
+  return {
+    getDocEntries: mocks.getDocEntries,
+    loadDocEntries: mocks.loadDocEntries,
+    getNavigablePageIds: () => new Set(['quickstart', 'guides/links']),
+    getBreadcrumbs: () => [{ label: 'Guides', href: '/quickstart' }, { label: 'Page' }],
+    getCurrentVersionPageIds: () => null,
+    getI18nConfig: () => ({ defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }, { code: 'es', label: 'Español' }] }),
+    getRedirectsConfig: () => [{ source: '/old/:slug*', destination: '/quickstart' }],
+    // The real predicate, judged against the mocked docs.json `auth` block.
+    isDocEntryVisibleTo: (entry: { access?: PageAccess }) =>
+      access.canReaderAccessPage(entry.access ?? access.OPEN_PAGE_ACCESS, access.ANONYMOUS_READER, readerConfig.getReaderAuthConfig()),
+  }
+})
 
 vi.mock('@/lib/docs-json-config', () => ({ getDocsJsonConfig: mocks.docsConfig }))
 vi.mock('@/config/api-reference', () => ({ apiReferenceConfig: mocks.apiReferenceConfig }))
@@ -306,5 +314,32 @@ describe('isPubliclyListedPage', () => {
       drafts: true,
       old: true,
     })
+  })
+  it('withholds reader-auth gated pages: readiness is judged for the anonymous reader', async () => {
+    const { resetReaderAuthConfigForTests } = await import('@/lib/reader-auth/config')
+    const gated: PageAccess = { groupSets: [['beta']], isMalformed: false }
+    const signedInOnly: PageAccess = { groupSets: [], isPublic: false, isMalformed: false }
+    try {
+      // No `auth` block: a `groups` page is closed to everyone.
+      resetReaderAuthConfigForTests()
+      expect(isPubliclyListedPage({ access: gated })).toBe(false)
+      expect(isPubliclyListedPage({ access: { groupSets: [], isMalformed: false } })).toBe(true)
+
+      mocks.docsConfig.mockReturnValue({ tabs: [], auth: { mode: 'jwt', default: 'public' } })
+      resetReaderAuthConfigForTests()
+      expect(isPubliclyListedPage({ access: gated })).toBe(false)
+      expect(isPubliclyListedPage({ access: signedInOnly })).toBe(false)
+      expect(isPubliclyListedPage({})).toBe(true)
+
+      mocks.getDocEntries.mockReturnValue([entry('quickstart'), entry('beta', { access: gated })])
+      mocks.getContentDocument.mockReturnValue(RUNTIME_DOCUMENT)
+      expect(Object.fromEntries(gatherPageFacts().map((fact) => [fact.pageId, fact.unlisted]))).toEqual({
+        quickstart: false,
+        beta: true,
+      })
+    } finally {
+      mocks.docsConfig.mockReturnValue({ tabs: [] })
+      resetReaderAuthConfigForTests()
+    }
   })
 })

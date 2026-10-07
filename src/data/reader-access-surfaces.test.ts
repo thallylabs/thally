@@ -4,10 +4,10 @@
  * `guides/secret` is restricted to the `beta` group and `guides/staff` to any
  * signed-in reader. Each surface must omit both for an anonymous reader (and
  * answer a direct request exactly like a missing page), and serve the secret
- * page to a reader holding a `beta` agent token or session. Surfaces that do
- * not yet take a reader (search corpus, MCP tools, llms-full.txt, sitemap)
- * must stay anonymous-only: that is the fail-closed default of the shared
- * loaders in `@/data/docs`.
+ * page to a reader holding a `beta` agent token or session. MCP page tools and
+ * resources and `llms-full.txt` take the request's reader; shared surfaces
+ * (search corpus, sitemap) stay anonymous-only: that is the fail-closed
+ * default of the shared loaders in `@/data/docs`.
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -153,7 +153,7 @@ describe('reader-aware projections', () => {
   })
 })
 
-describe('anonymous-only projections (fail closed until they take a reader)', () => {
+describe('anonymous-only projections (shared, so never reader-specific)', () => {
   it('the search corpus never contains a restricted page', async () => {
     await import('@/lib/search/register-doc-source')
     const { resolveDocEntries, resolveDocEntriesAsync } = await import('@thallylabs/core/registry')
@@ -163,23 +163,63 @@ describe('anonymous-only projections (fail closed until they take a reader)', ()
     expect(ids(await resolveDocEntriesAsync())).not.toContain('guides/staff')
   })
 
-  it('MCP list_pages and read_page never expose a restricted page', async () => {
+  it('MCP search_docs stays anonymous even for a signed-in reader', async () => {
     const { getSiteTool } = await import('@/lib/mcp/site-tools')
-    const listed = await getSiteTool('list_pages')!.handler({})
-    expect(listed).toContain('guides/open')
-    expect(listed).not.toContain('guides/secret')
-    const read = await getSiteTool('read_page')!.handler({ pageId: 'guides/secret' })
-    expect(read).not.toContain(MARKER)
+    const { resolveReader } = await import('@/lib/reader-auth/context')
+    const beta = await resolveReader(`Bearer ${betaToken}`, null)
+    const result = await getSiteTool('search_docs')!.handler({ query: 'Secret roadmap' }, { origin: 'https://docs.example.com', reader: beta })
+    expect(JSON.stringify(result)).not.toContain('guides/secret')
+  })
+})
+
+describe('reader-aware agent projections (MCP, llms-full.txt)', () => {
+  const origin = 'https://docs.example.com'
+
+  it('MCP list_pages and read_page expose a restricted page only to an allowed reader', async () => {
+    const { getSiteTool } = await import('@/lib/mcp/site-tools')
+    const { resolveReader } = await import('@/lib/reader-auth/context')
+    const beta = await resolveReader(`Bearer ${betaToken}`, null)
+
+    const anonymousList = JSON.stringify(await getSiteTool('list_pages')!.handler({}, { origin }))
+    expect(anonymousList).toContain('guides/open')
+    expect(anonymousList).not.toContain('guides/secret')
+    expect(anonymousList).not.toContain('guides/staff')
+    const betaList = JSON.stringify(await getSiteTool('list_pages')!.handler({}, { origin, reader: beta }))
+    expect(betaList).toContain('guides/secret')
+    expect(betaList).toContain('guides/staff')
+
+    // Denied reads look exactly like a missing page.
+    await expect(getSiteTool('read_page')!.handler({ pageId: 'guides/secret' }, { origin })).rejects.toThrow(/No page found/)
+    const read = await getSiteTool('read_page')!.handler({ pageId: 'guides/secret' }, { origin, reader: beta })
+    expect(read.text).toContain(MARKER)
   })
 
-  it('llms-full.txt never includes restricted content', async () => {
+  it('MCP resources honor the reader for listing and reading', async () => {
+    const { listResources, readResource } = await import('@/lib/mcp/site-resources')
+    const { resolveReader } = await import('@/lib/reader-auth/context')
+    const beta = await resolveReader(`Bearer ${betaToken}`, null)
+    expect(JSON.stringify(await listResources(undefined))).not.toContain('guides/secret')
+    expect(JSON.stringify(await listResources(undefined, beta))).toContain('docs://pages/guides/secret')
+    expect(await readResource('docs://pages/guides/secret', origin)).toBeNull()
+    expect((await readResource('docs://pages/guides/secret', origin, beta))?.text).toContain(MARKER)
+  })
+
+  it('llms-full.txt includes restricted content only for an allowed reader, never shared-cached', async () => {
     const { GET } = await import('@/app/llms-full.txt/route')
-    const body = await (await GET(withToken('/llms-full.txt'))).text()
-    expect(body).toContain('Open body')
-    expect(body).not.toContain(MARKER)
-    expect(body).not.toContain(STAFF_MARKER)
-  })
+    const anon = await GET(anonymous('/llms-full.txt'))
+    const anonBody = await anon.text()
+    expect(anonBody).toContain('Open body')
+    expect(anonBody).not.toContain(MARKER)
+    expect(anonBody).not.toContain(STAFF_MARKER)
+    expect(anon.headers.get('Cache-Control')).toBe('private, no-store')
 
+    const allowed = await (await GET(withToken('/llms-full.txt'))).text()
+    expect(allowed).toContain(MARKER)
+    expect(allowed).toContain(STAFF_MARKER)
+  })
+})
+
+describe('crawler and build surfaces', () => {
   it('the sitemap only announces pages an anonymous crawler may open', async () => {
     const { default: sitemap } = await import('@/app/sitemap')
     const urls = (await sitemap()).map((entry) => entry.url)

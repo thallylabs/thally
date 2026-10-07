@@ -1,7 +1,7 @@
-import { resolveDocEntriesAsync } from '@thallylabs/core/registry'
 import { searchDocs, searchSections } from '@/lib/search/engine'
+import { loadListedDocEntries } from '@/lib/search/register-doc-source'
 import { loadContentDocument } from '@/lib/content'
-import { loadDocEntries } from '@/data/docs'
+import { canReaderViewPage, loadDocEntries } from '@/data/docs'
 import { getAllApiOperationNodes } from '@/data/api-reference'
 import { computePublishedAgentReadiness } from '@/lib/agent-readiness'
 import { filterChangesSince, loadChangelog, parseChangelogDate } from '@/lib/changelog'
@@ -15,6 +15,8 @@ import {
   type ApiOperationDetail,
 } from '@/lib/openapi/operation-projection'
 import { toolMetadata, type McpToolMetadata } from '@/lib/mcp/tool-metadata'
+import { getReaderAuthConfig } from '@/lib/reader-auth/config'
+import { ANONYMOUS_READER, canReaderAccessUnmarkedContent, type ReaderContext } from '@/lib/reader-auth/access'
 
 /**
  * The tools the remote MCP endpoint exposes to any attached agent. Unlike
@@ -33,11 +35,18 @@ import { toolMetadata, type McpToolMetadata } from '@/lib/mcp/tool-metadata'
  * hidden/noindex rules match search exactly), pages through the structured
  * content document (the same Markdown as `.md` mirrors), operations through
  * `operation-projection`, changes through `@/lib/changelog`.
+ *
+ * Reader access: page listings, page reads, API operations and changes take
+ * the request's reader (`McpToolContext.reader`, anonymous when absent), so a
+ * signed-in agent sees exactly the pages it may open and nothing more. Search
+ * stays anonymous: its corpus is shared by every caller.
  */
 
 export interface McpToolContext {
   /** Request origin; every URL a tool returns is absolute against it. */
   origin: string
+  /** The verified reader behind the request. Omitted means anonymous (fail closed). */
+  reader?: ReaderContext
 }
 
 export interface McpToolResult {
@@ -105,31 +114,50 @@ export async function resolveLocaleArg(args: Record<string, unknown>): Promise<R
 }
 
 /**
- * Indexable pages for a locale — the exact list search ranks over (hidden,
- * noindex and older-version pages excluded; translations only where a
- * translated page exists). Shared with `resources/list`.
+ * Indexable pages for a locale as `reader` sees them — the listing rule search
+ * ranks over (hidden, noindex and older-version pages excluded; translations
+ * only where a translated page exists), applied to the pages the reader may
+ * open. Anonymous by default, which is exactly the search corpus. Shared with
+ * `resources/list` and `llms-full.txt`.
  */
-export async function listAgentPages(locale?: string) {
-  return resolveDocEntriesAsync(locale)
+export async function listAgentPages(locale?: string, reader: ReaderContext = ANONYMOUS_READER) {
+  return loadListedDocEntries(locale, reader)
+}
+
+/** Whether `reader` may see generated API operations (content without page frontmatter). */
+export function canReaderSeeApiOperations(reader: ReaderContext = ANONYMOUS_READER): boolean {
+  return canReaderAccessUnmarkedContent(reader, getReaderAuthConfig())
+}
+
+/** Published API operations visible to `reader`: none when the site default hides unmarked content. */
+export async function loadVisibleApiOperationNodes(reader: ReaderContext = ANONYMOUS_READER) {
+  return canReaderSeeApiOperations(reader) ? getAllApiOperationNodes() : []
 }
 
 /**
  * Resolve a page id or URL path to a KNOWN published entry. Never pass the raw
  * argument to the content resolver: it path-joins under `src/content`, so a
  * "../" would escape and read arbitrary .mdx files on the public endpoint.
- * Hidden and noindex pages resolve here, as their `.md` mirrors do.
+ * Hidden and noindex pages resolve here, as their `.md` mirrors do; pages the
+ * reader may not open do not resolve at all (answered like a missing page).
  */
-export async function findPublishedEntry(raw: string) {
+export async function findPublishedEntry(raw: string, reader: ReaderContext = ANONYMOUS_READER) {
   const normalized = raw.trim().replace(/^\/+|\/+$/g, '').replace(/\.md$/, '')
   // The root page has an empty slug, so "/" resolves to it.
-  return (await loadDocEntries()).find((entry) => entry.id === normalized || entry.slug.join('/') === normalized)
+  return (await loadDocEntries(reader)).find((entry) => entry.id === normalized || entry.slug.join('/') === normalized)
 }
 
-/** The agent Markdown projection of one published page, localized when a translation exists. */
-export async function readAgentPage(pageId: string, locale: ResolvedLocale, origin: string) {
-  const entry = await findPublishedEntry(pageId)
+/**
+ * The agent Markdown projection of one published page, localized when a
+ * translation exists. Null when the page does not exist or `reader` may not
+ * open it — including a translation that restricts its page further than the
+ * primary file.
+ */
+export async function readAgentPage(pageId: string, locale: ResolvedLocale, origin: string, reader: ReaderContext = ANONYMOUS_READER) {
+  const entry = await findPublishedEntry(pageId, reader)
   if (!entry) return null
   const isTranslated = Boolean(locale.engineLocale && await hasDocTranslation(entry.slug, locale.engineLocale))
+  if (isTranslated && !(await canReaderViewPage(entry.id, reader, locale.engineLocale))) return null
   const document = await loadContentDocument(entry.id, isTranslated ? locale.engineLocale : undefined)
   if (!document) return null
   const servedLocale = isTranslated ? locale.code : locale.defaultLocale
@@ -150,12 +178,12 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`
 }
 
-async function findOperation(args: Record<string, unknown>) {
+async function findOperation(args: Record<string, unknown>, reader: ReaderContext) {
   const operationId = optionalString(args, 'operationId')?.replace(/^\/+|\/+$/g, '')
   const method = optionalString(args, 'method')?.toUpperCase()
   const path = optionalString(args, 'path')
   if (!operationId && !(method && path)) throw toolInputError('Provide "operationId", or both "method" and "path".')
-  const nodes = await getAllApiOperationNodes()
+  const nodes = await loadVisibleApiOperationNodes(reader)
   if (operationId) {
     // Also accept the page path ("api/default/users/post"); an exact id wins,
     // since a spec may itself be named "api".
@@ -231,16 +259,16 @@ const handlers: Record<string, McpTool['handler']> = {
           .join('\n\n---\n\n')
     return { text, structured: { query, locale: locale.code, results } }
   },
-  read_page: async (args, { origin }) => {
+  read_page: async (args, { origin, reader }) => {
     const pageId = requiredString(args, 'pageId')
     const locale = await resolveLocaleArg(args)
-    const page = await readAgentPage(pageId, locale, origin)
+    const page = await readAgentPage(pageId, locale, origin, reader)
     if (!page) throw toolInputError(`No page found for "${pageId}". Call list_pages to see valid page IDs.`)
     return { text: page.markdown, structured: page }
   },
-  list_pages: async (args, { origin }) => {
+  list_pages: async (args, { origin, reader }) => {
     const locale = await resolveLocaleArg(args)
-    const pages = (await listAgentPages(locale.engineLocale)).map((entry) => ({
+    const pages = (await listAgentPages(locale.engineLocale, reader)).map((entry) => ({
       page_id: entry.id,
       title: entry.title,
       description: entry.description,
@@ -251,11 +279,11 @@ const handlers: Record<string, McpTool['handler']> = {
       : pages.map((page) => `- ${page.page_id} — ${page.title} (${page.url})`).join('\n')
     return { text, structured: { locale: locale.code, total: pages.length, pages } }
   },
-  list_api_operations: async (args, { origin }) => {
+  list_api_operations: async (args, { origin, reader }) => {
     const query = optionalString(args, 'query')?.toLowerCase()
     const tag = optionalString(args, 'tag')?.toLowerCase()
     const limit = boundedLimit(args, 50, 200)
-    const matching = (await getAllApiOperationNodes())
+    const matching = (await loadVisibleApiOperationNodes(reader))
       .map((node) => summarizeApiOperation(node, origin))
       .filter((operation) => !tag || operation.tags.some((candidate) => candidate.toLowerCase() === tag))
       .filter((operation) => !query || [operation.method, operation.path, operation.title, operation.description, operation.group]
@@ -269,18 +297,18 @@ const handlers: Record<string, McpTool['handler']> = {
         ].join('\n')
     return { text, structured: { total: matching.length, operations } }
   },
-  get_api_operation: async (args, { origin }) => {
-    const node = await findOperation(args)
+  get_api_operation: async (args, { origin, reader }) => {
+    const node = await findOperation(args, reader ?? ANONYMOUS_READER)
     if (!node) throw toolInputError('No published API operation matches. Call list_api_operations to see valid ids.')
     const detail = describeApiOperation(node, origin)
     return { text: operationText(detail), structured: detail as unknown as Record<string, unknown> }
   },
-  list_changes: async (args, { origin }) => {
+  list_changes: async (args, { origin, reader }) => {
     const since = optionalString(args, 'since')
     if (since && !parseChangelogDate(since)) throw toolInputError(`"since" must be an ISO date such as "2026-01-31"; got "${since}".`)
     const limit = boundedLimit(args, 20, 100)
     const locale = await resolveLocaleArg(args)
-    const changelog = await loadChangelog({ origin, locale: locale.engineLocale, defaultLocale: locale.defaultLocale })
+    const changelog = await loadChangelog({ origin, locale: locale.engineLocale, defaultLocale: locale.defaultLocale, reader })
     const matching = filterChangesSince(changelog.entries, since)
     const entries = matching.slice(0, limit).map((entry) => ({
       id: entry.id,
