@@ -11,7 +11,7 @@ import JSON5 from 'json5'
 import { parse as parseYaml } from 'yaml'
 
 import type { MarkdownPageIdentity } from './mdx.js'
-import { isRedirectPathSafe } from './navigation.js'
+import { isRedirectPathSafe, translateRedirectWildcards } from './navigation.js'
 import { pageIdFromReference, resolveWithin, slugifySegment } from './path.js'
 import type {
   MigrationDocsConfig,
@@ -661,7 +661,10 @@ function namedExportObjectLiteralText(source: string, name: string): string | nu
  * ... }` method in the same object literal, which is not valid JSON5 and
  * would otherwise fail the whole object and lose the `redirects` array too.
  */
-function redirectEntriesFromObjectLiteralText(objectLiteral: string): Array<{ source: string; destination: string }> {
+function redirectEntriesFromObjectLiteralText(
+  objectLiteral: string,
+  warnings: Array<MigrationWarning>,
+): Array<{ source: string; destination: string }> {
   const match = /\bredirects\s*:\s*/.exec(objectLiteral)
   if (!match) return []
   const arrayStart = objectLiteral.indexOf('[', match.index + match[0].length)
@@ -683,7 +686,12 @@ function redirectEntriesFromObjectLiteralText(objectLiteral: string): Array<{ so
     for (const from of froms) {
       if (typeof from !== 'string') continue
       if (!isRedirectPathSafe(from, entry.to)) continue
-      entries.push({ source: from, destination: entry.to })
+      const translated = translateRedirectWildcards(from, entry.to)
+      if (!translated) {
+        warnings.push({ code: 'unsupported-config', message: `Redirect from ${from} uses a wildcard Next.js cannot express and was dropped.` })
+        continue
+      }
+      entries.push(translated)
     }
   }
   return entries
@@ -719,7 +727,7 @@ export function readDocusaurusRedirects(
   warnAboutCreateRedirects(configSource)
   // Case 1: the plugin's options object is written inline.
   const inlineLiteral = matchingObjectLiteral(configSource, pluginMatch.index + pluginMatch[0].length)
-  if (inlineLiteral) return redirectEntriesFromObjectLiteralText(inlineLiteral)
+  if (inlineLiteral) return redirectEntriesFromObjectLiteralText(inlineLiteral, warnings)
   // Case 2: the options are an identifier imported from another module.
   const identifier = afterPlugin.match(/^([A-Za-z_$][\w$]*)/)?.[1]
   if (!identifier) return []
@@ -739,7 +747,7 @@ export function readDocusaurusRedirects(
   const moduleSource = readBoundedText(resolvedPath)
   warnAboutCreateRedirects(moduleSource)
   const literal = namedExportObjectLiteralText(moduleSource, identifier)
-  return literal ? redirectEntriesFromObjectLiteralText(literal) : []
+  return literal ? redirectEntriesFromObjectLiteralText(literal, warnings) : []
 }
 
 function readCategoryMetadata(contentRoot: string, directory: string): CategoryMetadata {
