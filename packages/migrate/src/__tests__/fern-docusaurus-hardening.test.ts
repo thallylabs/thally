@@ -543,3 +543,23 @@ describe('Docusaurus Admonition component', () => {
     expect(body).not.toContain('Admonition')
   })
 })
+
+describe('Docusaurus ThemedImage component', () => {
+  it('degrades <ThemedImage> to its light image', () => {
+    const bundle = migrateDocusaurus({
+      'docs/a.mdx': [
+        "import ThemedImage from '@theme/ThemedImage'",
+        "import useBaseUrl from '@docusaurus/useBaseUrl'",
+        '',
+        '<ThemedImage alt="Logo" sources={{ light: useBaseUrl(\'/img/l.png\'), dark: useBaseUrl(\'/img/d.png\') }} />',
+        '',
+        '<ThemedImage\n  alt="Plain"\n  sources={{\n    light: "/img/p-light.png",\n    dark: "/img/p-dark.png",\n  }}\n/>',
+        '',
+      ].join('\n'),
+    })
+    const body = bundle.pages[0].body
+    expect(body).toContain('<img src="/img/l.png" alt="Logo" />')
+    expect(body).toContain('<img src="/img/p-light.png" alt="Plain" />')
+    expect(body).not.toContain('ThemedImage')
+  })
+})

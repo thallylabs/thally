@@ -98,6 +98,19 @@ function normalizeDocusaurusAdmonitionTags(segment: string): string {
 }
 
 /**
+ * Thally has no light/dark image component, so `<ThemedImage sources={{ light, dark }}>`
+ * keeps its light image (a literal path, or `useBaseUrl('...')` of one).
+ */
+function normalizeDocusaurusThemedImages(segment: string): string {
+  return segment.replace(/<ThemedImage\b([^<]*?)\/>/g, (original: string, attributes: string) => {
+    const light = attributes.match(/\blight\s*:\s*(?:useBaseUrl\(\s*)?(?:"([^"]+)"|'([^']+)')/)?.slice(1).find(Boolean)
+    if (!light) return original
+    const alt = attributes.match(/\balt=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find((value) => value !== undefined)
+    return `<img src="${light.replace(/"/g, '&quot;')}"${alt === undefined ? '' : ` alt="${alt.replace(/"/g, '&quot;')}"`} />`
+  })
+}
+
+/**
  * Convert Docusaurus' colon-fence admonitions without interpreting code-fence
  * contents. Longer delimiters support nested admonitions in the same way as
  * the source renderer.
@@ -2089,7 +2102,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
         return `${attribute}="/${path.replace(/^\.\//, '').replace(/^\/+/, '')}"`
       },
     ))
-    rewritten = replaceOutsideCode(rewritten, normalizeDocusaurusAdmonitionTags)
+    rewritten = replaceOutsideCode(rewritten, (segment) => normalizeDocusaurusThemedImages(normalizeDocusaurusAdmonitionTags(segment)))
     // Docusaurus injects these theme components globally. Thally also
     // exposes its equivalents globally, so source-only imports must not survive.
     rewritten = normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(removeGlobalDocusaurusImports(rewritten)))
