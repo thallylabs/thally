@@ -12,7 +12,7 @@ import { parse as parseYaml } from 'yaml'
 
 import type { MarkdownPageIdentity } from './mdx.js'
 import { isRedirectPathSafe, translateRedirectWildcards } from './navigation.js'
-import { pageIdFromReference, resolveWithin, slugifySegment } from './path.js'
+import { pageIdFromReference, resolveWithin, slugifySegment, withinRealRoot } from './path.js'
 import type {
   MigrationDocsConfig,
   MigrationNavigationGroup,
@@ -751,7 +751,7 @@ export function readDocusaurusRedirects(
   let resolvedPath: string | undefined
   try {
     resolvedPath = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs']
-      .map((extension) => resolveWithin(repositoryRoot, `${modulePath.replace(/^\.\//, '')}${extension}`))
+      .map((extension) => withinRealRoot(resolveWithin(repositoryRoot, `${modulePath.replace(/^\.\//, '')}${extension}`), repositoryRoot))
       .find((candidate) => existsSync(candidate) && lstatSync(candidate).isFile())
   } catch {
     return []
@@ -880,7 +880,7 @@ export function readDocusaurusThemeColor(repositoryRoot: string): { light?: stri
   if (!cssRelativePath) return undefined
   let cssPath: string
   try {
-    cssPath = resolveWithin(repositoryRoot, cssRelativePath.replace(/^\.\//, ''))
+    cssPath = withinRealRoot(resolveWithin(repositoryRoot, cssRelativePath.replace(/^\.\//, '')), repositoryRoot)
   } catch {
     return undefined
   }

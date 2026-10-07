@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { readDocusaurusRedirects, readDocusaurusSidebars, readDocusaurusSiteSettings } from '../docusaurus.js'
+import { readDocusaurusRedirects, readDocusaurusSidebars, readDocusaurusSiteSettings, readDocusaurusThemeColor } from '../docusaurus.js'
 import { migrateRepository, renderMigrationFiles } from '../index.js'
 import { pageIdFromReference } from '../path.js'
 
@@ -469,5 +469,27 @@ describe('Docusaurus identifiers containing $', () => {
       'redirects.js': "export const $opts = { redirects: [{ from: '/a', to: '/b' }] }\nexport default $opts\n",
     })
     expect(readDocusaurusRedirects(root, [])).toEqual([{ source: '/a', destination: '/b' }])
+  })
+})
+
+describe('Docusaurus files reached through a symlinked directory', () => {
+  function outsideDirectory(files: Record<string, string>): string {
+    const outside = mkdtempSync(join(tmpdir(), 'thally-harden-outside-'))
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(outside, name), content)
+    return outside
+  }
+
+  it('does not read a redirects module outside the repository', () => {
+    const outside = outsideDirectory({ 'redirects.js': "export const opts = { redirects: [{ from: '/a', to: '/b' }] }\n" })
+    const root = docusaurusSite({ 'docusaurus.config.js': "import { opts } from './ext/redirects.js'\nmodule.exports = { plugins: [['@docusaurus/plugin-client-redirects', opts]] }\n" })
+    symlinkSync(outside, join(root, 'ext'))
+    expect(readDocusaurusRedirects(root, [])).toEqual([])
+  })
+
+  it('does not read a customCss file outside the repository', () => {
+    const outside = outsideDirectory({ 'custom.css': ':root { --ifm-color-primary: #123456; }\n' })
+    const root = docusaurusSite({ 'docusaurus.config.js': "module.exports = { presets: [['classic', { theme: { customCss: './ext/custom.css' } }]] }\n" })
+    symlinkSync(outside, join(root, 'ext'))
+    expect(readDocusaurusThemeColor(root)).toBeUndefined()
   })
 })

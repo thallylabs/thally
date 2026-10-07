@@ -1,5 +1,6 @@
 /** Safe path normalization used before reading or writing migrated content. */
 
+import { realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 
 const SAFE_SEGMENT = /[^a-z0-9._-]+/gi
@@ -131,4 +132,15 @@ export function normalizeAssetPath(value: string): string | null {
   const segments = normalized.split('/').filter(Boolean)
   if (segments.some((segment) => segment === '.' || segment === '..')) return null
   return segments.join('/')
+}
+
+/** Throws when an existing path resolves, through a symlink, outside the repository; a path that does not exist is returned unchanged. */
+export function withinRealRoot(candidate: string, repositoryRoot: string): string {
+  let real: string
+  try { real = realpathSync(candidate) } catch { return candidate }
+  const realRoot = realpathSync(repositoryRoot)
+  if (real !== realRoot && !real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) {
+    throw new Error(`Migration path escapes its root: ${candidate}`)
+  }
+  return candidate
 }

@@ -80,6 +80,7 @@ import {
   resolveWithinRoot,
   trimEdgeSlashes,
   trimTrailingSlashes,
+  withinRealRoot,
 } from './path.js'
 import type {
   MigrationAsset,
@@ -2510,17 +2511,6 @@ function resolveSnippetPath(
   const candidate = resolveWithin(repositoryRoot, repositoryRelative)
   resolveWithin(repositoryRoot, relative(repositoryRoot, candidate))
   return withinRealRoot(candidate, repositoryRoot)
-}
-
-/** Throws when an existing path resolves, through a symlink, outside the repository; a path that does not exist is returned unchanged. */
-function withinRealRoot(candidate: string, repositoryRoot: string): string {
-  let real: string
-  try { real = realpathSync(candidate) } catch { return candidate }
-  const realRoot = realpathSync(repositoryRoot)
-  if (real !== realRoot && !real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) {
-    throw new Error(`Migration path escapes its root: ${candidate}`)
-  }
-  return candidate
 }
 
 function globalSnippetAliases(
