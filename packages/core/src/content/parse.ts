@@ -128,6 +128,7 @@ function startSection(state: WalkState, depth: number, text: string, explicitId?
 function recordCode(state: WalkState, node: { lang?: string | null; meta?: string | null; value: string }) {
   const block: ContentCodeBlock = {
     language: node.lang || 'text',
+    hasLanguageTag: Boolean(node.lang),
     title: node.meta?.trim() || undefined,
     source: node.value.trimEnd(),
     index: state.codeIndex++,

@@ -1,0 +1,86 @@
+---
+title: Agent Readiness Score
+navTitle: Agent readiness
+description: How Thally scores the way AI agents find, read, and use your docs, which checks make up the score, and how to raise it.
+keywords: [agent readiness, score, llms.txt, golden questions, openapi examples, ci]
+---
+
+The Agent Readiness Score is a 0–100 grade for how well AI agents can use your documentation. It measures what an agent actually runs into. Can it find the right page? Does the page fit in its context window? Do the links work? Is the code labeled? Does the API have examples it can copy?
+
+The score is deterministic. The same release always produces the same report, with no network calls and no model involved. Every deduction names the pages that caused it and the fix that removes it.
+
+## Run it
+
+```bash
+# In your project — fails below the threshold, so it works as a CI gate
+thally check --agents --min 80
+
+# The same report from a deployed site
+curl https://docs.example.com/api/agent-readiness
+```
+
+The admin dashboard, the `agent_readiness` MCP tool, and `thally check --agents` all read from the same scorer.
+
+## Checks and weights
+
+Each check has a stable id, a weight, a score from 0 to 1, a status (`pass`, `warn`, `fail`, or `skip`), a summary, a fix hint, and up to 50 affected pages.
+
+| Check | Id | Weight | What it measures |
+| --- | --- | --- | --- |
+| Description quality | `metadata` | 12% | Every page has a unique description of 50–300 characters that doesn't just repeat the title. Agents use descriptions to choose which page to fetch. |
+| Internal links and anchors | `internal_links` | 12% | Root-relative links point at a published page, and `#anchors` point at a heading or `id` on that page. A dead page fails the page. A missing anchor is a warning. |
+| Chunkable structure | `heading_structure` | 12% | Long pages have headings, no section is over about 1,000 tokens, and heading levels don't skip (for example `##` straight to `####`). Retrieval works on heading-bounded sections. |
+| Code language tags | `code_language_tags` | 10% | The share of code fences that declare a language. Use `text` for plain output. |
+| OpenAPI examples | `openapi_examples` | 10% | Every published operation has an example for its request body and for at least one 2xx response. |
+| Structured data validity | `structured_data` | 8% | The JSON-LD each page emits is valid schema.org: an absolute URL, a headline of 110 characters or fewer, an ISO 8601 `dateModified`, and well-formed breadcrumbs. |
+| Page size budget | `page_size` | 8% | Pages stay under about 10,000 tokens. Over 25,000 tokens fails, because many agent tools truncate pages that long. |
+| Verification freshness | `freshness` | 7% | Pages with a `lastVerified` date were checked within 180 days. 180–365 days is a warning, and older is a failure. |
+| Substantive content | `content_quality` | 6% | A page has at least 200 characters of prose or code. |
+| OpenAPI coverage | `openapi` | 5% | Every API page is bound to an operation, through `openapi:` or `api:` frontmatter. |
+| Discovery health | `discovery` | 5% | Pages are in navigation, so they appear in `llms.txt` and `/api/docs-index`. |
+| Machine readability | `machine_readability` | 5% | Each page resolves as JSON, Markdown, and JSON-LD. |
+| Golden-question retrieval | `retrieval_eval` | 15% | Optional. The hit@k of your golden questions against the site's search index. |
+| Observed agent success | `agent_success` | 15% | Optional. Included only when an analytics provider supplies agent traffic data. |
+
+Token counts are approximate, at about four characters per token, the same estimate the retrieval chunker uses.
+
+## How the total is computed
+
+The total is a weighted average of the checks that apply to your site, rounded to a whole number. A check that doesn't apply is reported as `skip` and leaves the weighting entirely. That covers a site with no OpenAPI spec, no code blocks, no golden questions, or no `lastVerified` dates. Adopting a feature therefore never costs points just by making a check apply. In particular, `freshness` scores only the pages that declare `lastVerified`. Verifying one more page can only help.
+
+Grades follow the score: A is 90 and above, B 80–89, C 70–79, D 60–69, and F below 60.
+
+## Golden questions
+
+Golden questions show whether the search agents use actually finds the right page. Add them to `docs.json`:
+
+```json docs.json
+{
+  "readiness": {
+    "topK": 5,
+    "goldenQuestions": [
+      { "question": "How do I rotate an API key?", "expect": ["/guides/api-keys"] },
+      { "question": "Which regions are supported?", "expect": ["guides/regions", "/reference/limits"] }
+    ]
+  }
+}
+```
+
+- `expect` takes page paths or page ids. A question is a hit when any expected page appears in the top `topK` results. `topK` defaults to 5, with a maximum of 10.
+- The check runs locally against the site's full-text search index. It is deterministic and needs no network.
+- Thally reads at most 50 questions, each up to 300 characters, with five expected pages per question. On Thally Cloud, the published `docs.json` must stay under 5 KB, so keep hosted lists short.
+- A question that expects only pages excluded from search, such as `noindex` or `hidden` pages, is reported as a configuration problem and is not scored.
+- The report is public on a public site, and missed questions appear in it. Don't put anything in a golden question that you wouldn't publish.
+
+## The report format
+
+`GET /api/agent-readiness` returns `schema_version: "2"` and `version: 2`. It keeps the v1 top-level fields: `score`, `grade`, `totalPages`, and `subscores`. Each subscore keeps `id`, `label`, `weight`, `score`, `available`, `detail`, and `offenders`, and adds `status`, `fixHint`, and `affectedCount`. `offenders` lists at most 50 entries, and `affectedCount` holds the full total. The published report never names `hidden` or `noindex` pages. They still count toward the score and `affectedCount`, and `thally check --agents` lists them on your machine.
+
+The report reads every page, so each server process computes it at most once every five minutes. Responses are shared-cacheable for the same window. The endpoint takes no parameters, and a request with a query string is redirected to the bare path.
+
+## Raise your score
+
+1. Run `thally check --agents` and start with the `fail` checks. They carry the most weight per page.
+2. Follow each check's fix hint on the listed pages.
+3. Add golden questions for the tasks your users ask about most. Then rewrite the titles, descriptions, and headings of any pages they miss.
+4. Gate pull requests on the score with `thally check --agents --min 80` in CI.

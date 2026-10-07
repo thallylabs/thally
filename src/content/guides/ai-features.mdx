@@ -284,7 +284,7 @@ A human visiting the same URLs never notices any of this. The HTML is identical 
 
 ## Agent Readiness Score
 
-Thally grades how well your docs serve AI agents with a deterministic 0–100 score. It's computed from the content graph — structured data, metadata, discovery files, machine readability, OpenAPI coverage, and content quality — with an optional analytics-derived signal when agent traffic data is available.
+Thally grades how well AI agents can use your docs with a deterministic 0–100 score. It checks whether agents can find the right page, fit it in context, follow its links, read its code, and call its API. Optional golden questions measure retrieval directly.
 
 ```bash
 # JSON report
@@ -294,7 +294,7 @@ GET /api/agent-readiness
 thally check --agents --min 80
 ```
 
-The report includes weighted subscores and the specific pages dragging each one down, so the fix is always concrete. MCP clients can fetch the same report for any deployed site with the `agent_readiness` tool.
+Every check names the pages that pull it down and the fix that raises it. MCP clients can fetch the same report for any deployed site with the `agent_readiness` tool. See [Agent Readiness Score](/guides/agent-readiness) for the checks, weights, and golden-question setup.
 
 ---
 

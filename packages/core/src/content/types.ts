@@ -12,7 +12,14 @@ export interface ContentTocItem {
 }
 
 export interface ContentCodeBlock {
+  /** Authored fence language, or `'text'` when the fence declares none. */
   language: string
+  /**
+   * Whether the fence declared a language. `language` falls back to `'text'`,
+   * so this is the only way to tell an untagged fence from an explicit `text`
+   * one. Optional so code blocks built by older engines remain valid.
+   */
+  hasLanguageTag?: boolean
   source: string
   title?: string
   index: number
