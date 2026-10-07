@@ -251,3 +251,155 @@ describe('Fern Markdown snippets', () => {
     expect(bundle.warnings.map((warning) => warning.message).join(' ')).toContain('too large to inline')
   })
 })
+
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==', 'base64')
+
+function bundlePaths(bundle: ReturnType<typeof migrateRepository>): { assets: Array<string>; quarantined: Array<string> } {
+  return {
+    assets: bundle.assets.map((asset) => asset.path),
+    quarantined: (bundle.quarantinedFiles ?? []).map((file) => file.path),
+  }
+}
+
+type RefStyle = 'markdown' | 'img' | 'import' | 'require' | 'partial'
+
+/** The body of a page (and a partial, when needed) that references `/img/<name>.png` in one style. */
+function referencing(style: RefStyle, name: string, platform: 'docusaurus' | 'fern'): { body: string; partial?: string } {
+  const url = platform === 'docusaurus' ? `/img/${name}.png` : `/assets/${name}.png`
+  const site = platform === 'docusaurus' ? `@site/static/img/${name}.png` : `../assets/${name}.png`
+  switch (style) {
+    case 'markdown': return { body: `![alt](${url})\n` }
+    case 'img': return { body: `<img src="${url}" alt="alt" />\n` }
+    case 'import': return { body: `import pic from '${site}'\n\n<img src={pic} alt="alt" />\n` }
+    case 'require': return { body: `<img src={require('${site}').default} alt="alt" />\n` }
+    case 'partial': return { body: "import Part from './_part.mdx'\n\n<Part />\n", partial: `![alt](${url})\n` }
+  }
+}
+
+const STYLES: Array<RefStyle> = ['markdown', 'img', 'import', 'require', 'partial']
+const SHARING = ['gated-only', 'shared'] as const
+
+describe('assets used by quarantined pages', () => {
+  const docusaurusKinds: Array<[string, string]> = [['draft', 'draft: true'], ['draft-string', 'draft: "yes"']]
+  for (const [kind, frontmatter] of docusaurusKinds) {
+    for (const style of STYLES) {
+      for (const sharing of SHARING) {
+        it(`docusaurus ${kind} / ${style} / ${sharing}`, () => {
+          const gated = referencing(style, 'secret', 'docusaurus')
+          const publicPage = sharing === 'shared' ? referencing('markdown', 'secret', 'docusaurus') : referencing('markdown', 'open', 'docusaurus')
+          const files: Record<string, string> = {
+            'docs/gated.mdx': `---\n${frontmatter}\n---\n${gated.body}`,
+            'docs/public.mdx': `# Public\n\n${publicPage.body}`,
+          }
+          if (gated.partial) files['docs/_part.mdx'] = gated.partial
+          const root = docusaurusSite(files)
+          mkdirSync(join(root, 'static', 'img'), { recursive: true })
+          for (const name of ['secret', 'open', 'unused']) writeFileSync(join(root, 'static', 'img', `${name}.png`), PNG)
+          const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+          const { assets, quarantined } = bundlePaths(bundle)
+          expect(bundle.pages.map((page) => page.navigationId)).toEqual(['public'])
+          expect(assets.includes('img/secret.png')).toBe(sharing === 'shared')
+          if (sharing === 'gated-only') {
+            expect(assets).toContain('img/open.png')
+            expect(quarantined).toContain('migration-quarantine/assets/img/secret.png')
+          }
+          // Ambiguity quarantines: an asset no published page names is not public on a site with withheld pages.
+          expect(assets).not.toContain('img/unused.png')
+        })
+      }
+    }
+  }
+
+  const fernKinds: Array<[string, string]> = [['viewers', 'viewers: [admin]'], ['authed', 'authed: true']]
+  for (const [kind, frontmatter] of fernKinds) {
+    for (const style of STYLES) {
+      for (const sharing of SHARING) {
+        it(`fern ${kind} / ${style} / ${sharing}`, () => {
+          const gated = referencing(style, 'secret', 'fern')
+          const publicPage = sharing === 'shared' ? referencing('markdown', 'secret', 'fern') : referencing('markdown', 'open', 'fern')
+          const nav = 'navigation:\n  - page: Gated\n    path: gated.mdx\n  - page: Public\n    path: public.mdx\n'
+          const pages: Record<string, string> = {
+            'gated.mdx': `---\n${frontmatter}\n---\n${gated.body}`,
+            'public.mdx': `# Public\n\n${publicPage.body}`,
+          }
+          if (gated.partial) pages['_part.mdx'] = gated.partial
+          const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-assets-'))
+          mkdirSync(join(root, 'fern', 'assets'), { recursive: true })
+          writeFileSync(join(root, 'fern', 'fern.config.json'), '{}')
+          writeFileSync(join(root, 'fern', 'docs.yml'), nav)
+          for (const [path, content] of Object.entries(pages)) writeFileSync(join(root, 'fern', path), content)
+          for (const name of ['secret', 'open', 'unused']) writeFileSync(join(root, 'fern', 'assets', `${name}.png`), PNG)
+          const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' })
+          const { assets, quarantined } = bundlePaths(bundle)
+          expect(bundle.pages.map((page) => page.title)).toEqual(['Public'])
+          expect(assets.some((path) => path.endsWith('secret.png'))).toBe(sharing === 'shared')
+          if (sharing === 'gated-only') {
+            expect(assets.some((path) => path.endsWith('open.png'))).toBe(true)
+            expect(quarantined.some((path) => path.endsWith('assets/secret.png'))).toBe(true)
+          }
+        })
+      }
+    }
+  }
+})
+
+describe('assets: exact path matching and unclassifiable pages', () => {
+  function site(publicBody: string, gatedFrontmatter = 'draft: true', gatedBody = '![a](/img/secret.png)\n') {
+    const root = docusaurusSite({
+      'docs/gated.md': `---\n${gatedFrontmatter}\n---\n${gatedBody}`,
+      'docs/public.md': `# Public\n\n${publicBody}`,
+    })
+    mkdirSync(join(root, 'static', 'img', 'other'), { recursive: true })
+    writeFileSync(join(root, 'static', 'img', 'secret.png'), PNG)
+    writeFileSync(join(root, 'static', 'img', 'other', 'secret.png'), PNG)
+    return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+  }
+
+  it('keeps a shared asset public only on an exact path match', () => {
+    const bundle = site('![b](/img/other/secret.png)\n')
+    expect(bundle.assets.map((asset) => asset.path)).toEqual(['img/other/secret.png'])
+    expect(bundlePaths(bundle).quarantined).toContain('migration-quarantine/assets/img/secret.png')
+  })
+
+  it('does not treat a bare file name in public text as a reference', () => {
+    const bundle = site('The file secret.png is mentioned here.\n')
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('img/secret.png')
+  })
+
+  it('quarantines the assets of a page whose frontmatter cannot be read', () => {
+    const unreadable = `---\ndraft: true\n${'x: y\n'.repeat(1)}`.padEnd(2_100_000, 'z')
+    const bundle = site('![b](/img/other/secret.png)\n', 'draft: true', '')
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('img/secret.png')
+    const root = docusaurusSite({ 'docs/gated.md': `${unreadable}\n![a](/img/secret.png)`, 'docs/public.md': '# Public\n' })
+    mkdirSync(join(root, 'static', 'img'), { recursive: true })
+    writeFileSync(join(root, 'static', 'img', 'secret.png'), PNG)
+    const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+    expect(result.pages.map((page) => page.navigationId)).toEqual(['public'])
+    expect(result.assets.map((asset) => asset.path)).not.toContain('img/secret.png')
+  })
+
+  it('keeps assets of a gated page dropped by the file budget out of public/', () => {
+    const root = docusaurusSite({
+      'docs/a-public.md': '# Public\n\n![b](/img/open.png)\n',
+      'docs/z-gated.md': '---\ndraft: true\n---\n![a](/img/secret.png)\n',
+    })
+    mkdirSync(join(root, 'static', 'img'), { recursive: true })
+    for (const name of ['open', 'secret']) writeFileSync(join(root, 'static', 'img', `${name}.png`), PNG)
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus', maxSourceFiles: 2 })
+    expect(bundle.assets.map((asset) => asset.path)).not.toContain('img/secret.png')
+  })
+
+  it('fern: <Markdown src> partial used by a restricted page withholds its assets', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-assets-'))
+    mkdirSync(join(root, 'fern', 'assets'), { recursive: true })
+    mkdirSync(join(root, 'fern', 'snippets'))
+    writeFileSync(join(root, 'fern', 'fern.config.json'), '{}')
+    writeFileSync(join(root, 'fern', 'docs.yml'), 'navigation:\n  - page: Gated\n    path: gated.mdx\n  - page: Public\n    path: public.mdx\n')
+    writeFileSync(join(root, 'fern', 'gated.mdx'), '---\nviewers: [admin]\n---\n<Markdown src="/snippets/part.mdx" />\n')
+    writeFileSync(join(root, 'fern', 'snippets', 'part.mdx'), '![a](/assets/secret.png)\n')
+    writeFileSync(join(root, 'fern', 'public.mdx'), '# Public\n')
+    writeFileSync(join(root, 'fern', 'assets', 'secret.png'), PNG)
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' })
+    expect(bundle.assets.some((asset) => asset.path.endsWith('secret.png'))).toBe(false)
+  })
+})

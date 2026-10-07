@@ -1317,7 +1317,7 @@ function publicAssetKey(repoRelative: string): string {
  * lowercased key of every exact one, for a letter-case mismatch) and never
  * makes anything public. Linear, no backtracking.
  */
-function addPathReferences(text: string, baseDir: string | undefined, exact: Set<string>, loose: Set<string>): void {
+function addPathReferences(text: string, baseDir: string | undefined, exact: Set<string>, loose: Set<string>, staticRoot = false): void {
   for (const word of text.split(PATH_SEPARATORS)) {
     let token = word.replace(/\.+$/, '')
     if (!/\.[a-z0-9]{2,5}$/i.test(token) || token.startsWith('//')) continue
@@ -1331,7 +1331,8 @@ function addPathReferences(text: string, baseDir: string | undefined, exact: Set
     if (!token.startsWith('/') && baseDir === undefined) continue
     const resolved = normalizeAssetPath(posix.normalize(token.startsWith('/') ? token.slice(1) : posix.join(baseDir ?? '', token)))
     if (!resolved) continue
-    const key = publicAssetKey(resolved)
+    // Docusaurus serves `static/x` at `/x`, as `public/` is elsewhere.
+    const key = staticRoot && resolved.startsWith('static/') ? resolved.slice('static/'.length) : publicAssetKey(resolved)
     exact.add(key)
     loose.add(key.toLowerCase())
   }
@@ -3526,17 +3527,20 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // out of public/ on such a site, as on one with known restricted pages.
   if (platform === 'docusaurus' || platform === 'fern') {
     // Fail closed here too: a draft (Docusaurus) or role-restricted (Fern) page is quarantined, never published.
-    for (const file of files) {
+    for (const file of scannedFiles) {
       if (!isDocFile(file)) continue
       const reason = fernRestrictedPaths.has(file.absolutePath)
         ? 'docs.yml `viewers` restricts it to signed-in roles'
         : classifyPageGate(file).reason
-      if (reason) gateByPath.set(file.absolutePath, { reason, publicTrue: false })
+      if (!reason) continue
+      gateByPath.set(file.absolutePath, { reason, publicTrue: false })
+      withheldPaths.add(file.absolutePath)
     }
   }
-  const pagesNotClassified = droppedPageCount > 0 || (platform === 'mintlify' && scanTruncated)
+  // Fern and Docusaurus classify every scanned document, so only a truncated walk leaves pages unseen.
+  const pagesNotClassified = droppedPageCount > 0 || scanTruncated
   const hasWithheldContent = withheldPaths.size > 0 || withheldDocFiles.length > 0
-  const trackPublishedRefs = platform === 'mintlify' && (hasWithheldContent || pagesNotClassified)
+  const trackPublishedRefs = hasWithheldContent || pagesNotClassified
   // Mintlify only. The pre-pass covers only files inside the file budget, so a
   // candidate it never saw (dropped by the budget, in a snippet directory, under
   // a case-variant path) is classified on demand: frontmatter gates, navigation
@@ -4022,7 +4026,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     seenPageIds.add(page.id)
     pages.push(page)
     for (const assetPath of pageAssetReferences) addAssetReference(assetPath, file.relativePath)
-    if (publishedText !== undefined) addPathReferences(publishedText, posix.dirname(file.relativePath).replace(/^\.$/, ''), publishedExact, publishedLoose)
+    if (publishedText !== undefined) addPathReferences(publishedText, posix.dirname(file.relativePath).replace(/^\.$/, ''), publishedExact, publishedLoose, platform === 'docusaurus')
     // MDX normalization removes DocCardList because Thally has no matching
     // component. Remember its authored route so the resolved sidebar can
     // supply the cards once every page and category has been discovered.
@@ -4219,9 +4223,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // concatenation) and references from remote content.
   // A restricted navigation container (and everything under it) publishes nothing.
   if (trackPublishedRefs) {
-    const publishedConfig = JSON.stringify(mintlifyConfig ?? {}, (_key, value: unknown) => (
-      value && typeof value === 'object' && !Array.isArray(value) && navigationGateReason(value as Record<string, unknown>) ? undefined : value))
-    addPathReferences(publishedConfig, '', publishedExact, publishedLoose)
+    const publishedConfig = platform === 'mintlify'
+      ? JSON.stringify(mintlifyConfig ?? {}, (_key, value: unknown) => (
+        value && typeof value === 'object' && !Array.isArray(value) && navigationGateReason(value as Record<string, unknown>) ? undefined : value))
+      // Branding the migrated config will name: Fern's docs.yml (logo, favicon, ...) and Docusaurus' static site settings.
+      : JSON.stringify([docsConfig, fernRawConfig ?? null, docusaurusProjectRoot ? readDocusaurusSiteSettings(docusaurusProjectRoot) : null])
+    addPathReferences(publishedConfig, '', publishedExact, publishedLoose, platform === 'docusaurus')
   }
   for (const file of componentMigrator?.files() ?? []) {
     if (!trackPublishedRefs || typeof file.content !== 'string') continue
@@ -4232,7 +4239,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const failClosedAssets = trackPublishedRefs
   const isPublicReachable = (assetPath: string): boolean => referencedAssetPaths.has(assetPath) || publishedExact.has(assetPath)
   const isQuarantinedAsset = (assetPath: string): boolean => (withheldAssetPaths.has(assetPath) || (failClosedAssets && !siteAssetPaths.has(assetPath)))
-    && platform === 'mintlify'
     && !(isPublicReachable(assetPath) && !(failClosedAssets && (destinationCounts.get(assetPath) ?? 0) > 1))
   let withheldAssetCount = 0
   let unreferencedAssetCount = 0
