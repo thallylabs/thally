@@ -78,6 +78,26 @@ function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'War
 }
 
 /**
+ * `<Admonition type="tip" title="X">` is the JSX spelling of a colon-fence
+ * admonition and maps to the same callouts. Attribute values may be
+ * `{expressions}`, so braces are matched up to two levels deep.
+ */
+function normalizeDocusaurusAdmonitionTags(segment: string): string {
+  const open: Array<string> = []
+  return segment.replace(
+    /<Admonition\b((?:[^>{]|\{(?:[^{}]|\{[^{}]*\})*\})*)>|<\/Admonition>/g,
+    (_match: string, attributes: string | undefined) => {
+      if (attributes === undefined) return `\n</${open.pop() ?? 'Note'}>`
+      const type = attributes.match(/\btype=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)?.toLowerCase() ?? 'note'
+      const title = attributes.match(/\btitle=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)?.trim()
+      const tag = docusaurusAdmonitionTag(type)
+      open.push(tag)
+      return title ? `<${tag}>\n**${title}**\n` : `<${tag}>\n`
+    },
+  )
+}
+
+/**
  * Convert Docusaurus' colon-fence admonitions without interpreting code-fence
  * contents. Longer delimiters support nested admonitions in the same way as
  * the source renderer.
@@ -2069,6 +2089,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
         return `${attribute}="/${path.replace(/^\.\//, '').replace(/^\/+/, '')}"`
       },
     ))
+    rewritten = replaceOutsideCode(rewritten, normalizeDocusaurusAdmonitionTags)
     // Docusaurus injects these theme components globally. Thally also
     // exposes its equivalents globally, so source-only imports must not survive.
     rewritten = normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(removeGlobalDocusaurusImports(rewritten)))

@@ -515,3 +515,31 @@ describe('Docusaurus unlisted pages', () => {
     expect(JSON.stringify(bundle.docsConfig.tabs)).not.toContain('folder/unl')
   })
 })
+
+describe('Docusaurus Admonition component', () => {
+  it('maps <Admonition> to the same callouts as the colon fence', () => {
+    const bundle = migrateDocusaurus({
+      'docs/a.mdx': [
+        "import Admonition from '@theme/Admonition'",
+        '',
+        '<Admonition type="danger" title="Careful">Do not.</Admonition>',
+        '',
+        '<Admonition type="caution">',
+        '',
+        'Outer',
+        '',
+        '<Admonition type="info" title=\'Inner\'>Nested</Admonition>',
+        '',
+        '</Admonition>',
+        '',
+        '<Admonition>Default</Admonition>',
+        '',
+      ].join('\n'),
+    })
+    const body = bundle.pages[0].body
+    expect(body).toContain('<Error>\n**Careful**\nDo not.\n</Error>')
+    expect(body).toMatch(/<Warning>\s*Outer\s*<Info>\n\*\*Inner\*\*\nNested\n<\/Info>\s*<\/Warning>/)
+    expect(body).toContain('<Note>\nDefault\n</Note>')
+    expect(body).not.toContain('Admonition')
+  })
+})
