@@ -456,3 +456,18 @@ describe('Docusaurus config parsing stays linear on repeated openers', () => {
     expect(() => readDocusaurusSidebars(root)).toThrow(/1 MB/)
   })
 })
+
+describe('Docusaurus identifiers containing $', () => {
+  it('substitutes a sidebar binding named with $', () => {
+    const root = docusaurusSite({ 'sidebars.js': "const $cat = { type: 'category', label: 'L', items: ['a'] }\nmodule.exports = { main: $cat }\n" })
+    expect(readDocusaurusSidebars(root)?.config).toEqual({ main: { type: 'category', label: 'L', items: ['a'] } })
+  })
+
+  it('finds redirect options imported under a $ name', () => {
+    const root = docusaurusSite({
+      'docusaurus.config.js': "import $opts from './redirects.js'\nmodule.exports = { plugins: [['@docusaurus/plugin-client-redirects', $opts]] }\n",
+      'redirects.js': "export const $opts = { redirects: [{ from: '/a', to: '/b' }] }\nexport default $opts\n",
+    })
+    expect(readDocusaurusRedirects(root, [])).toEqual([{ source: '/a', destination: '/b' }])
+  })
+})

@@ -75,6 +75,11 @@ interface CategoryMetadata {
   link?: unknown
 }
 
+/** Identifiers may contain `$`, which is an anchor in a regular expression. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -522,7 +527,7 @@ function parseStaticSidebarModule(source: string): Record<string, unknown> {
     try {
       const substituted = [...bindings].reduce(
         (value, [name, binding]) => value.replace(
-          new RegExp(`(:\\s*)${name}\\b`, 'g'),
+          new RegExp(`(:\\s*)${escapeRegExp(name)}(?![\\w$])`, 'g'),
           (_match, prefix: string) => `${prefix}${JSON.stringify(binding)}`,
         ),
         literal,
@@ -657,7 +662,7 @@ export function readDocusaurusSidebars(repositoryRoot: string, versionedSidebarP
 
 function namedExportObjectLiteralText(source: string, name: string): string | null {
   const normalizedSource = replaceExternalFbContent(source)
-  const match = new RegExp(`\\bexport\\s+(?:const|let|var)\\s+${name}\\b(?:\\s*:\\s*[^=;]+)?\\s*=\\s*`).exec(normalizedSource)
+  const match = new RegExp(`\\bexport\\s+(?:const|let|var)\\s+${escapeRegExp(name)}(?![\\w$])(?:\\s*:\\s*[^=;]{1,200})?\\s*=\\s*`).exec(normalizedSource)
   if (!match) return null
   return matchingObjectLiteral(normalizedSource, match.index + match[0].length)
 }
@@ -739,8 +744,8 @@ export function readDocusaurusRedirects(
   // Case 2: the options are an identifier imported from another module.
   const identifier = afterPlugin.match(/^([A-Za-z_$][\w$]*)/)?.[1]
   if (!identifier) return []
-  const importMatch = new RegExp(`import\\s*\\{[^}]*\\b${identifier}\\b[^}]*\\}\\s*from\\s*(['"])([^'"]+)\\1`).exec(configSource)
-    ?? new RegExp(`import\\s+${identifier}\\s+from\\s*(['"])([^'"]+)\\1`).exec(configSource)
+  const importMatch = new RegExp(`import\\s*\\{[^}]*(?<![\\w$])${escapeRegExp(identifier)}(?![\\w$])[^}]*\\}\\s*from\\s*(['"])([^'"]+)\\1`).exec(configSource)
+    ?? new RegExp(`import\\s+${escapeRegExp(identifier)}\\s+from\\s*(['"])([^'"]+)\\1`).exec(configSource)
   const modulePath = importMatch?.[2]
   if (!modulePath || !modulePath.startsWith('.')) return []
   let resolvedPath: string | undefined
