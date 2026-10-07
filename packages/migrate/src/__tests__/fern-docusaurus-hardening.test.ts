@@ -68,3 +68,27 @@ describe('Docusaurus redirects', () => {
     expect(readDocusaurusRedirects(root, [])).toEqual([])
   })
 })
+
+describe('inlined partial size cap', () => {
+  const huge = `${'Lorem ipsum dolor sit amet. '.repeat(80_000)}\n`
+
+  it('does not inline a Docusaurus partial over 2 MB', () => {
+    expect(huge.length).toBeGreaterThan(2_000_000)
+    const bundle = migrateDocusaurus({
+      'docs/a.mdx': "import Big from './_big.mdx'\n\n# A\n\n<Big />\n",
+      'docs/_big.mdx': huge,
+    })
+    const page = bundle.pages.find((entry) => entry.navigationId === 'a')
+    expect(page?.body.length).toBeLessThan(100_000)
+    expect(bundle.warnings.map((warning) => warning.message).join(' ')).toContain('too large to inline')
+  })
+
+  it('does not inline a Docusaurus markdown document import over 2 MB', () => {
+    const bundle = migrateDocusaurus({
+      'docs/a.mdx': "import Big from './big.md'\n\n# A\n\n<Big />\n",
+      'docs/big.md': huge,
+    })
+    const page = bundle.pages.find((entry) => entry.navigationId === 'a')
+    expect(page?.body.length).toBeLessThan(100_000)
+  })
+})

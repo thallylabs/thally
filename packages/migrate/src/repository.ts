@@ -2765,7 +2765,7 @@ function inlineMdxSnippets(
   depth = 0,
   siteRoot = repositoryRoot,
   globalAliases: Map<string, string> = new Map(),
-  /** Mintlify only: refuses access-restricted, oversized or unclassifiable files. Fern and Docusaurus pass none. */
+  /** Refuses access-restricted (Mintlify only), oversized or unclassifiable files. */
   gate?: InlineGate,
 ): string {
   if (depth >= 8) return raw
@@ -3531,7 +3531,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         }
         return verdict ?? undefined
       }
-    : undefined
+    // Fern and Docusaurus have no access rules to enforce, but an inlined file still has the page size cap.
+    : (candidate) => lstatSync(candidate).size > MAX_PAGE_BYTES ? { kind: 'oversized', reason: 'over 2 MB' } : undefined
   /** docs.yml-derived navigationId -> final id, when a page's frontmatter `slug` overrides it. */
   const fernIdRenames = new Map<string, string>()
   let skipped = 0
