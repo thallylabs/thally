@@ -3187,6 +3187,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const fernSourceLinkAliases = new Map<string, string>()
   const fernNavTitles = new Map<string, string>()
   const fernHiddenIds = new Set<string>()
+  const fernRestrictedPaths = new Set<string>()
 
   const activeSourceRefs: Array<SourceRefImport> = []
   const usedSourceRefs = new Set<SourceRefImport>()
@@ -3260,6 +3261,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
             fernNavTitles.set(descriptor.navigationId, descriptor.navTitle)
           }
           if (descriptor.hidden) fernHiddenIds.add(descriptor.navigationId)
+          if (descriptor.restricted) fernRestrictedPaths.add(resolvePath(fernProjectRoot, descriptor.sourcePath))
           // Fern pages often link by their source directory while a section
           // title changes the published route (for example tts-vendors to
           // tts-vendor-settings). Resolve only unambiguous, tab-prefixed
@@ -3526,7 +3528,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // Fail closed here too: a draft (Docusaurus) or role-restricted (Fern) page is quarantined, never published.
     for (const file of files) {
       if (!isDocFile(file)) continue
-      const reason = classifyPageGate(file).reason
+      const reason = fernRestrictedPaths.has(file.absolutePath)
+        ? 'docs.yml `viewers` restricts it to signed-in roles'
+        : classifyPageGate(file).reason
       if (reason) gateByPath.set(file.absolutePath, { reason, publicTrue: false })
     }
   }

@@ -127,3 +127,45 @@ describe('Docusaurus draft pages', () => {
     expect(bundle.pages.map((page) => page.body).join('\n')).not.toContain('TOP-SECRET-LAUNCH-DATE')
   })
 })
+
+function fernSite(docsYml: string, pages: Record<string, string>) {
+  const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-'))
+  mkdirSync(join(root, 'fern'))
+  writeFileSync(join(root, 'fern', 'fern.config.json'), '{}')
+  writeFileSync(join(root, 'fern', 'docs.yml'), docsYml)
+  for (const [path, content] of Object.entries(pages)) {
+    mkdirSync(join(root, 'fern', path, '..'), { recursive: true })
+    writeFileSync(join(root, 'fern', path), content)
+  }
+  return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' })
+}
+
+describe('Fern role-restricted pages', () => {
+  const nav = (extra = ''): string => `navigation:\n  - section: Guides\n${extra}    contents:\n      - page: Open\n        path: open.mdx\n      - page: Internal\n        path: internal.mdx\n`
+
+  it('quarantines a page whose frontmatter sets viewers', () => {
+    const bundle = fernSite(nav(), { 'open.mdx': '# Open\n', 'internal.mdx': '---\nviewers: [admin]\n---\n# Internal\n' })
+    expect(bundle.pages.map((page) => page.title)).toEqual(['Open'])
+    expect(quarantinedPaths(bundle)).toEqual(['migration-quarantine/internal.mdx'])
+    expect(JSON.stringify(bundle.docsConfig.tabs)).not.toContain('internal')
+  })
+
+  it('quarantines every page under a docs.yml section that sets viewers', () => {
+    const bundle = fernSite(
+      'navigation:\n  - section: Open\n    contents:\n      - page: Open\n        path: open.mdx\n  - section: Staff\n    viewers: [staff]\n    contents:\n      - page: Internal\n        path: internal.mdx\n',
+      { 'open.mdx': '# Open\n', 'internal.mdx': '# Internal\n' },
+    )
+    expect(bundle.pages.map((page) => page.title)).toEqual(['Open'])
+    expect(quarantinedPaths(bundle)).toEqual(['migration-quarantine/internal.mdx'])
+    expect(JSON.stringify(bundle.docsConfig.tabs)).not.toContain('Staff')
+  })
+
+  it('quarantines a docs.yml page that sets viewers', () => {
+    const bundle = fernSite(
+      'navigation:\n  - page: Open\n    path: open.mdx\n  - page: Internal\n    path: internal.mdx\n    viewers: [staff]\n',
+      { 'open.mdx': '# Open\n', 'internal.mdx': '# Internal\n' },
+    )
+    expect(bundle.pages.map((page) => page.title)).toEqual(['Open'])
+    expect(quarantinedPaths(bundle)).toEqual(['migration-quarantine/internal.mdx'])
+  })
+})

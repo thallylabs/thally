@@ -56,6 +56,8 @@ export interface FernPageDescriptor {
   navTitle?: string
   /** Keep routable pages excluded by Fern's `hidden` navigation flag. */
   hidden?: boolean
+  /** Listed under a docs.yml node that sets `viewers` or `authed`: Fern shows it only to signed-in roles. */
+  restricted?: boolean
 }
 
 /** One `api:` navigation node, resolved to the name/tab Thally needs to bind its spec. */
@@ -359,6 +361,22 @@ function registerPage(
   return registerPageAt(object.path, base, context, label, object.hidden === true) || null
 }
 
+/** Fern role-based access: any non-empty `viewers`, or a truthy `authed`, on a navigation node. Ambiguity counts as restricted. */
+function isRestrictedNode(object: Record<string, unknown>): boolean {
+  const viewers = object.viewers
+  if (Array.isArray(viewers) ? viewers.length > 0
+    : typeof viewers === 'string' ? viewers.trim() !== ''
+      : viewers !== undefined && viewers !== null && viewers !== false) return true
+  const authed = object.authed
+  return authed !== undefined && authed !== null && authed !== false
+    && !(typeof authed === 'string' && ['', 'false'].includes(authed.trim().toLowerCase()))
+}
+
+/** Mark every page registered since `before` as restricted; the caller leaves them out of navigation. */
+function markRestricted(context: WalkContext, before: number): void {
+  for (const descriptor of context.descriptors.slice(before)) descriptor.restricted = true
+}
+
 /** A `section`/`page`/`link`/`api`/`changelog` node from `layout` or `contents`. */
 function convertNode(
   node: unknown,
@@ -367,6 +385,20 @@ function convertNode(
 ): string | MigrationNavigationGroup | null {
   const object = objectValue(node)
   if (!object) return null
+  if (isRestrictedNode(object)) {
+    const before = context.descriptors.length
+    convertNodeContents({ ...object, viewers: undefined, authed: undefined }, parentSegments, context)
+    markRestricted(context, before)
+    return null
+  }
+  return convertNodeContents(object, parentSegments, context)
+}
+
+function convertNodeContents(
+  object: Record<string, unknown>,
+  parentSegments: Array<string>,
+  context: WalkContext,
+): string | MigrationNavigationGroup | null {
 
   if (typeof object.page === 'string') {
     const page = registerPage(object, parentSegments, context)
@@ -575,7 +607,12 @@ function buildTabsFromConfig(
       const segments = [...routePrefix, ...(tabSegment ? [tabSegment] : [])]
       const layout = Array.isArray(entry.layout) ? entry.layout : []
       const sectionsBefore = context.apiSections.length
+      const descriptorsBefore = context.descriptors.length
       const groups = groupsFromConverted(convertNodes(layout, segments, context))
+      if (isRestrictedNode(entry) || isRestrictedNode(meta)) {
+        markRestricted(context, descriptorsBefore)
+        return []
+      }
       for (let index = sectionsBefore; index < context.apiSections.length; index += 1) {
         context.apiSections[index].tabLabel ??= label
       }
