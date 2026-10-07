@@ -78,23 +78,80 @@ function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'War
 }
 
 /**
+ * Scans the opening tag of `<name` at `start` to its closing `>`, skipping
+ * quoted values and `{expressions}` (strings and any brace depth) so a `>` inside
+ * them does not end the tag. The scan also stops at the next `<name` opener, so
+ * a run of unterminated openers is scanned once in total, not once per opener.
+ * `attributes` is what was scanned, whether or not the tag closed.
+ */
+export function scanJsxOpeningTag(source: string, start: number, name: string): { attributes: string; end: number | null } {
+  const opener = `<${name}`
+  let quote: string | null = null
+  let depth = 0
+  let braceQuote: string | null = null
+  const attributesStart = start + opener.length
+  for (let index = attributesStart; index < source.length; index++) {
+    const char = source[index]
+    if (char === '<' && source.startsWith(opener, index) && !/[\w$.-]/.test(source[index + opener.length] ?? '')) {
+      return { attributes: source.slice(attributesStart, index), end: null }
+    }
+    if (braceQuote) {
+      if (char === '\\') index++
+      else if (char === braceQuote) braceQuote = null
+    } else if (depth > 0) {
+      if (char === '"' || char === "'" || char === '`') braceQuote = char
+      else if (char === '{') depth++
+      else if (char === '}') depth--
+    } else if (quote) {
+      if (char === quote) quote = null
+    } else if (char === '"' || char === "'") quote = char
+    else if (char === '{') depth++
+    else if (char === '>') return { attributes: source.slice(attributesStart, index), end: index }
+  }
+  return { attributes: source.slice(attributesStart), end: null }
+}
+
+/**
  * `<Admonition type="tip" title="X">` is the JSX spelling of a colon-fence
- * admonition and maps to the same callouts. Attribute values may be
- * `{expressions}`, so braces are matched up to two levels deep.
+ * admonition and maps to the same callouts.
  */
 function normalizeDocusaurusAdmonitionTags(segment: string): string {
   const open: Array<string> = []
-  return segment.replace(
-    /<Admonition\b((?:[^>{]|\{(?:[^{}]|\{[^{}]*\})*\})*)>|<\/Admonition>/g,
-    (_match: string, attributes: string | undefined) => {
-      if (attributes === undefined) return `\n</${open.pop() ?? 'Note'}>`
-      const type = attributes.match(/\btype=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)?.toLowerCase() ?? 'note'
-      const title = attributes.match(/\btitle=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)?.trim()
-      const tag = docusaurusAdmonitionTag(type)
-      open.push(tag)
-      return title ? `<${tag}>\n**${title}**\n` : `<${tag}>\n`
-    },
-  )
+  const marker = /<\/Admonition>|<Admonition(?![\w$.-])/g
+  let output = ''
+  let cursor = 0
+  for (let match = marker.exec(segment); match; match = marker.exec(segment)) {
+    if (match[0] === '</Admonition>') {
+      output += `${segment.slice(cursor, match.index)}\n</${open.pop() ?? 'Note'}>`
+      cursor = marker.lastIndex
+      continue
+    }
+    const tag = scanJsxOpeningTag(segment, match.index, 'Admonition')
+    if (tag.end === null) continue
+    const type = tag.attributes.match(/\btype=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)?.toLowerCase() ?? 'note'
+    const title = tag.attributes.match(/\btitle=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)?.trim()
+    const callout = docusaurusAdmonitionTag(type)
+    open.push(callout)
+    output += `${segment.slice(cursor, match.index)}${title ? `<${callout}>\n**${title}**\n` : `<${callout}>\n`}`
+    cursor = tag.end + 1
+    marker.lastIndex = cursor
+  }
+  return output + segment.slice(cursor)
+}
+
+/** `<Link to=...>` becomes `<a href=...>`; a tag that never closes is left as written. */
+function normalizeDocusaurusLinkTags(segment: string): string {
+  const marker = /<Link(?![\w$.-])/g
+  let output = ''
+  let cursor = 0
+  for (let match = marker.exec(segment); match; match = marker.exec(segment)) {
+    const tag = scanJsxOpeningTag(segment, match.index, 'Link')
+    if (tag.end === null) continue
+    output += `${segment.slice(cursor, match.index)}<a${tag.attributes.replace(/(^|\s)to=/, '$1href=')}>`
+    cursor = tag.end + 1
+    marker.lastIndex = cursor
+  }
+  return (output + segment.slice(cursor)).replace(/<\/Link>/g, '</a>')
 }
 
 /**
@@ -2137,22 +2194,17 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
         // A TabItem outside any <Tabs>...</Tabs> pair (malformed source)
         // never reaches normalizeDocusaurusTabs' block match above; fall
         // back to its own label/value so it still renders as a Tab.
-        .replace(/<TabItem\b([^>]*)>/g, (_match, attributes: string) => {
+        .replace(/<TabItem\b([^<>]*)>/g, (_match, attributes: string) => {
           const title = attributes.match(/\blabel=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
             ?? attributes.match(/\bvalue=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
             ?? 'Tab'
           return `<Tab title="${title.replace(/"/g, '&quot;')}">`
         })
         .replace(/<\/TabItem>/g, '</Tab>')
-        // Attribute values may be `{expressions}` (which can contain `>`), so
-        // braces are matched, up to two levels deep, instead of `[^>]*`.
-        .replace(/<Link\b((?:[^>{]|\{(?:[^{}]|\{[^{}]*\})*\})*)>/g, (_match, attributes: string) => (
-          `<a${attributes.replace(/(^|\s)to=/, '$1href=')}>`
-        ))
-        .replace(/<\/Link>/g, '</a>')
+      result = normalizeDocusaurusLinkTags(result)
         // The repository adapter expands DocCardList from the resolved
         // sidebar after page discovery. Its source tag has no runtime peer.
-        .replace(/<(?:DocCardList|TOCInline)\b[^>]*\/>/g, '')
+        .replace(/<(?:DocCardList|TOCInline)\b[^<>]*\/>/g, '')
     }
     if (runMintlify) {
       result = normalizeMintlifyUpdateLabels(result)

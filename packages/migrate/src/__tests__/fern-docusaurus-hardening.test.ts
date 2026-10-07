@@ -908,3 +908,43 @@ describe('Fern page listed under public and restricted nodes', () => {
     expect(bundle.warnings.some((warning) => warning.code === 'gated-page' && warning.source === 'shared.mdx')).toBe(true)
   })
 })
+
+describe('JSX tag scanning stays linear and quote aware', () => {
+  const repeated = (unit: string): string => unit.repeat(Math.ceil(100_000 / unit.length))
+
+  it.each([
+    ['<Admonition ', '<Admonition '],
+    ['<Admonition {a{b ', '<Admonition {a{b '],
+    ['<Link ', '<Link '],
+    ['<Link {a{b ', '<Link {a{b '],
+  ])('converts a Docusaurus page of 100k characters of %s quickly', (_name, unit) => {
+    const started = Date.now()
+    migrateDocusaurus({ 'docs/a.mdx': `# A\n\n${repeated(unit)}\n`, 'docs/b.md': '# B\n' })
+    // The page may be excluded for not compiling; only the time matters here.
+    expect(Date.now() - started).toBeLessThan(2_000)
+  })
+
+  it.each(['<If ', '<If {a{b ', '<If x="'])('scans a Fern page of 100k characters of %s quickly', (unit) => {
+    const started = Date.now()
+    fernSite('navigation:\n  - page: A\n    path: a.mdx\n  - page: O\n    path: o.mdx\n', { 'a.mdx': `# A\n\n${repeated(unit)}\n`, 'o.mdx': '# O\n' })
+    expect(Date.now() - started).toBeLessThan(2_000)
+  })
+
+  const roles = (body: string) => {
+    const bundle = fernSite('navigation:\n  - page: Open\n    path: open.mdx\n  - page: Mixed\n    path: mixed.mdx\n', { 'open.mdx': '# Open\n', 'mixed.mdx': `# Mixed\n\n${body}\n` })
+    return bundle.pages.map((page) => page.title).sort()
+  }
+
+  it.each([
+    ['a quoted > before roles', '<If x="a>b" roles={["admin"]}>Internal</If>'],
+    ['braces nested three deep', '<If a={{ b: { c: { d: 1 } } }} roles={["admin"]}>Internal</If>'],
+    ['a backtick info string that is not a fence', '```js `x`\n<If roles={["admin"]}>Internal</If>\n```'],
+    ['an arrow function in braces', '<If a={(x) => x > 1} roles={["admin"]}>Internal</If>'],
+  ])('quarantines %s', (_name, body) => {
+    expect(roles(body)).toEqual(['Open'])
+  })
+
+  it('keeps a real code fence public', () => {
+    expect(roles('```mdx\n<If roles={["admin"]}>Docs</If>\n```')).toEqual(['Mixed', 'Open'])
+  })
+})

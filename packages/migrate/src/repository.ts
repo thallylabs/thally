@@ -56,7 +56,7 @@ import { parseFrontmatter } from './frontmatter.js'
 import { mainSiteLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
 import { type BrandVars, brandColorsFromVars, cssBrandVars } from './css-colors.js'
 import { frontmatterGateReason, isMintlifyServedScriptOrStyle, navigationGateReason, isPublicTrue, mintlifyAppearance, mintlifyFontSources } from './mintlify-extras.js'
-import { closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -2063,16 +2063,40 @@ function docusaurusDraftReason(data: Record<string, unknown>): string | undefine
   return DOCUSAURUS_DRAFT_REASON
 }
 
-/** `<If roles=...>` (or `viewers`) in a Fern page body, outside code: content Fern shows only to some roles. */
-const FERN_IF_ROLES = /<If\b(?:[^<>{]|\{(?:[^{}]|\{[^{}]*\})*\})*\b(?:roles|viewers)\s*=/
+/** Blank out fenced code blocks (a backtick fence's info string cannot contain a backtick, as in CommonMark). */
+function withoutFencedCode(raw: string): string {
+  let fence: { char: string; length: number } | null = null
+  return raw.split('\n').map((line) => {
+    if (fence) {
+      const closing = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)
+      if (closing && closing[1][0] === fence.char && closing[1].length >= fence.length) fence = null
+      return ''
+    }
+    const opening = /^ {0,3}(`{3,}|~{3,})([^\r]*)$/.exec(line)
+    if (opening && !(opening[1][0] === '`' && opening[2].includes('`'))) {
+      fence = { char: opening[1][0], length: opening[1].length }
+      return ''
+    }
+    return line
+  }).join('\n')
+}
 
+/**
+ * `<If roles=...>` (or `viewers`) in a Fern page body, outside code: content Fern
+ * shows only to some roles. Each tag is scanned to its real end (quotes and
+ * braces respected); a tag that never closes is judged by what was scanned.
+ */
 function fernIfRolesReason(raw: string): string | undefined {
-  let found = false
-  replaceOutsideCode(raw, (segment) => {
-    if (FERN_IF_ROLES.test(segment)) found = true
-    return segment
-  })
-  return found ? 'it contains `<If roles>` content that Fern shows only to some roles' : undefined
+  const text = withoutFencedCode(raw).replace(/(`{1,3})[^`\n]*\1/g, '')
+  const marker = /<If(?![\w$.-])/g
+  for (let match = marker.exec(text); match; match = marker.exec(text)) {
+    const tag = scanJsxOpeningTag(text, match.index, 'If')
+    if (/(?:^|[\s{}"'])(?:roles|viewers)\s*=/.test(tag.attributes)) {
+      return 'it contains `<If roles>` content that Fern shows only to some roles'
+    }
+    if (tag.end !== null) marker.lastIndex = tag.end + 1
+  }
+  return undefined
 }
 
 /** Fern role-based access: frontmatter `viewers` (any non-empty value) or a truthy `authed`. */
