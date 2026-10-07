@@ -6,8 +6,8 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { readDocusaurusRedirects, readDocusaurusSidebars, readDocusaurusSiteSettings, readDocusaurusThemeColor } from '../docusaurus.js'
-import { migrateRepository, renderMigrationFiles } from '../index.js'
+import { projectDocusaurusNavigation, readDocusaurusRedirects, readDocusaurusSidebars, readDocusaurusSiteSettings, readDocusaurusThemeColor } from '../docusaurus.js'
+import { migrateRepository, projectFernNavigation, renderMigrationFiles } from '../index.js'
 import { pageIdFromReference } from '../path.js'
 
 function docusaurusSite(files: Record<string, string>): string {
@@ -620,5 +620,71 @@ describe('OpenAPI spec size cap', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
     expect(bundle.assets.some((asset) => asset.path.startsWith('openapi/'))).toBe(false)
     expect(bundle.warnings.some((warning) => warning.message.includes('50 MB') && warning.message.includes('big.yaml'))).toBe(true)
+  })
+})
+
+describe('symlinked intermediate directories', () => {
+  function outside(files: Record<string, string>): string {
+    const directory = mkdtempSync(join(tmpdir(), 'thally-harden-outside-'))
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(directory, name), content)
+    return directory
+  }
+  function fernRoot(docsYml: string): { root: string; fern: string } {
+    const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-'))
+    const fern = join(root, 'fern')
+    mkdirSync(fern)
+    writeFileSync(join(fern, 'docs.yml'), docsYml)
+    return { root, fern }
+  }
+
+  it('fern: a folder reached through a symlinked directory is not expanded', () => {
+    const external = outside({ 'leak.mdx': '# Leak\n' })
+    const { root, fern } = fernRoot('navigation:\n  - folder: link/inner\n')
+    mkdirSync(join(external, 'inner'))
+    writeFileSync(join(external, 'inner', 'leak.mdx'), '# Leak\n')
+    symlinkSync(external, join(fern, 'link'))
+    const result = projectFernNavigation({ config: { navigation: [{ folder: 'link/inner' }] }, fernRoot: fern, repositoryRoot: root })
+    expect(result.descriptors).toEqual([])
+  })
+
+  it('fern: a versions file reached through a symlinked directory is not read', () => {
+    const external = outside({ 'v.yml': 'navigation:\n  - page: Leak\n    path: leak.mdx\n' })
+    const { root, fern } = fernRoot('versions:\n  - path: link/v.yml\n    slug: v\n')
+    symlinkSync(external, join(fern, 'link'))
+    const result = projectFernNavigation({ config: { versions: [{ path: 'link/v.yml', slug: 'v' }] }, fernRoot: fern, repositoryRoot: root })
+    expect(result.descriptors).toEqual([])
+  })
+
+  it('fern: a product file reached through a symlinked directory is not read', () => {
+    const external = outside({ 'p.yml': 'navigation:\n  - page: Leak\n    path: leak.mdx\n' })
+    const { root, fern } = fernRoot('products: []\n')
+    symlinkSync(external, join(fern, 'link'))
+    const result = projectFernNavigation({ config: { products: [{ 'display-name': 'P', path: 'link/p.yml' }] }, fernRoot: fern, repositoryRoot: root })
+    expect(result.descriptors).toEqual([])
+  })
+
+  it('docusaurus: a sidebarPath reached through a symlinked directory is not used', () => {
+    const external = outside({ 'sidebar.js': "module.exports = { leaked: ['x'] }\n" })
+    const root = docusaurusSite({
+      'docusaurus.config.js': "module.exports = { presets: [['classic', { docs: { sidebarPath: './link/sidebar.js' } }]] }\n",
+      'sidebars.js': "module.exports = { fallback: ['y'] }\n",
+    })
+    symlinkSync(external, join(root, 'link'))
+    let config: unknown
+    try { config = readDocusaurusSidebars(root)?.config } catch { config = undefined }
+    expect(config).not.toEqual({ leaked: ['x'] })
+  })
+
+  it('docusaurus: category metadata reached through a symlinked directory is not read', () => {
+    const external = outside({ '_category_.json': '{"label":"Leaked label"}' })
+    const root = docusaurusSite({ 'docs/own.md': '# Own\n' })
+    symlinkSync(external, join(root, 'docs', 'linked'))
+    const result = projectDocusaurusNavigation({
+      sidebars: null,
+      descriptors: [{ sourcePath: 'linked/page.md', docId: 'linked/page', navigationId: 'linked/page', title: 'Page' }],
+      contentRoot: join(root, 'docs'),
+      sourceUrl: 'https://example.com',
+    })
+    expect(JSON.stringify(result.docsConfig.tabs)).not.toContain('Leaked label')
   })
 })

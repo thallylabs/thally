@@ -11,7 +11,7 @@ import { load } from 'cheerio'
 import { parse as parseYaml } from 'yaml'
 
 import { isRedirectPathSafe, translateRedirectWildcards } from './navigation.js'
-import { resolveWithin, resolveWithinRoot } from './path.js'
+import { resolveWithin, resolveWithinRoot, withinRealRoot } from './path.js'
 import type {
   MigrationDocsConfig,
   MigrationNavigationGroup,
@@ -300,11 +300,11 @@ function registerFolder(
   const rawPath = String(object.folder).trim()
   let folder: string
   try {
-    folder = resolveWithinRoot(
+    folder = withinRealRoot(resolveWithinRoot(
       context.pathPrefix ? resolveWithinRoot(context.fernRoot, context.pathPrefix, context.repositoryRoot) : context.fernRoot,
       rawPath,
       context.repositoryRoot,
-    )
+    ), context.repositoryRoot)
   } catch {
     warnOnce(context, `fern-unsafe-folder-${rawPath}`, `Fern folder "${rawPath}" escapes the repository and was skipped.`)
     return null
@@ -565,6 +565,7 @@ function resolveVersionedNavigation(
       warnOnce(context, 'fern-version-not-file', `Fern version file "${chosen.path}" is not a regular file and was skipped.`)
       return config
     }
+    withinRealRoot(versionPath, context.repositoryRoot)
     const versionConfig = objectValue(readBoundedYaml(versionPath))
     if (!versionConfig) return config
     context.pathPrefix = relative(fernRoot, dirname(versionPath)).replace(/\\/g, '/')
@@ -726,7 +727,7 @@ function projectFernProducts(
       : 'Product'
     let productPath: string
     try {
-      productPath = resolveWithin(fernRoot, rawPath)
+      productPath = withinRealRoot(resolveWithin(fernRoot, rawPath), context.repositoryRoot)
     } catch {
       warnOnce(context, `fern-product-unsafe-${rawPath}`, `Fern product "${label}" path "${rawPath}" is unsafe and was skipped.`)
       return []

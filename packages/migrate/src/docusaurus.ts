@@ -632,14 +632,14 @@ function configuredSidebarPath(repositoryRoot: string): string | null {
       const object = matchingObjectLiteral(source, (docs.index ?? 0) + docs[0].length)
       const candidate = object && staticStringField(object, 'sidebarPath')?.replace(/^\.\//, '')
       if (candidate) {
-        const resolved = resolveWithin(repositoryRoot, candidate)
+        const resolved = withinRealRoot(resolveWithin(repositoryRoot, candidate), repositoryRoot)
         if (existsSync(resolved) && lstatSync(resolved).isFile()) return candidate
       }
     }
     const match = source.match(/\bsidebarPath\s*:\s*(?:require\.resolve\(\s*)?(['"])([^'"]+)\1/)
     if (!match) continue
     const candidate = match[2].replace(/^\.\//, '')
-    const resolved = resolveWithin(repositoryRoot, candidate)
+    const resolved = withinRealRoot(resolveWithin(repositoryRoot, candidate), repositoryRoot)
     if (existsSync(resolved) && lstatSync(resolved).isFile()) return candidate
   }
   return null
@@ -653,11 +653,11 @@ export function readDocusaurusSidebars(repositoryRoot: string, versionedSidebarP
   const sourcePath = [configured, ...(versionedSidebarPath ? [] : SIDEBAR_FILENAMES)]
     .filter((value): value is string => Boolean(value))
     .find((candidate) => {
-      const path = resolveWithin(repositoryRoot, candidate)
+      const path = withinRealRoot(resolveWithin(repositoryRoot, candidate), repositoryRoot)
       return existsSync(path) && lstatSync(path).isFile()
     })
   if (!sourcePath) return null
-  const absolutePath = resolveWithin(repositoryRoot, sourcePath)
+  const absolutePath = withinRealRoot(resolveWithin(repositoryRoot, sourcePath), repositoryRoot)
   const source = readBoundedText(absolutePath)
   const parsed = extname(sourcePath).toLowerCase() === '.json'
     ? objectValue(JSON5.parse(source))
@@ -772,6 +772,7 @@ export function readDocusaurusRedirects(
 function readCategoryMetadata(contentRoot: string, directory: string): CategoryMetadata {
   for (const filename of CATEGORY_FILENAMES) {
     const path = resolveWithin(contentRoot, posix.join(directory, filename))
+    try { withinRealRoot(path, contentRoot) } catch { continue }
     if (!existsSync(path) || !lstatSync(path).isFile()) continue
     try {
       const raw = readBoundedText(path)
