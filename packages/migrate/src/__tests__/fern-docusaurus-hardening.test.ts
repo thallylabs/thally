@@ -169,3 +169,16 @@ describe('Fern role-restricted pages', () => {
     expect(quarantinedPaths(bundle)).toEqual(['migration-quarantine/internal.mdx'])
   })
 })
+
+describe('Docusaurus excluded documents', () => {
+  it('does not publish files under an underscore directory', () => {
+    const bundle = migrateDocusaurus({
+      'docs/guide.mdx': "import Note from './_partials/note.mdx'\n\n# Guide\n\n<Note />\n",
+      'docs/_partials/note.mdx': 'Shared note.\n',
+      'docs/sub/_shared/deep.md': '# Deep partial\n',
+      'docs/__tests__/spec.md': '# Spec\n',
+    })
+    expect(bundle.pages.map((page) => page.navigationId)).toEqual(['guide'])
+    expect(bundle.pages[0].body).toContain('Shared note.')
+  })
+})

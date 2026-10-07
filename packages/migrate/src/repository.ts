@@ -3654,7 +3654,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     const sourceSegments = file.relativePath.split('/')
     if (sourceSegments.some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
-      || (platform === 'docusaurus' && basename(file.relativePath).startsWith('_'))) {
+      || (platform === 'docusaurus' && sourceSegments.some((segment) => segment.startsWith('_')))) {
       skipped++
       continue
     }
