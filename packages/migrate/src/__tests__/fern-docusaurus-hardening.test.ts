@@ -803,3 +803,63 @@ describe('Docusaurus partial toc and metadata imports', () => {
     expect(result).toMatch(/custom\s*=\s*undefined/)
   })
 })
+
+describe('Fern pages outside the fern directory', () => {
+  function externalSite(files: Record<string, string>) {
+    const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-ext-'))
+    for (const [path, content] of Object.entries({
+      'fern/fern.config.json': '{"organization":"a","version":"0.1.0"}',
+      'fern/docs.yml': 'versions:\n  - display-name: v1\n    path: ../docs/v1.yml\n    slug: v1\n',
+      ...files,
+    })) {
+      mkdirSync(join(root, path, '..'), { recursive: true })
+      writeFileSync(join(root, path), content)
+    }
+    return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' })
+  }
+
+  it('gates frontmatter viewers, If roles, node viewers and their assets', () => {
+    const bundle = externalSite({
+      'docs/v1.yml': 'navigation:\n  - page: Pub\n    path: pages/pub.mdx\n  - page: FM\n    path: pages/fm.mdx\n  - page: If\n    path: pages/if.mdx\n  - page: V\n    viewers: [a]\n    path: pages/v.mdx\n',
+      'docs/pages/pub.mdx': '# Pub\n',
+      'docs/pages/fm.mdx': '---\nviewers: [a]\n---\n# FM\n![](../img/x.png)',
+      'docs/pages/if.mdx': '# If\n<If roles={["a"]}>secret</If>',
+      'docs/pages/v.mdx': '# V\nsecret',
+      'docs/img/x.png': 'x',
+    })
+    expect(bundle.pages.map((page) => page.title)).toEqual(['Pub'])
+    expect(bundle.warnings.filter((warning) => warning.code === 'gated-page' && warning.source).map((warning) => warning.source).sort())
+      .toEqual(['../docs/pages/fm.mdx', '../docs/pages/if.mdx', '../docs/pages/v.mdx'])
+    expect(bundle.assets.some((asset) => asset.path.endsWith('x.png'))).toBe(false)
+  })
+
+  it('does not inline a restricted partial that lives outside the fern directory', () => {
+    const bundle = externalSite({
+      'docs/v1.yml': 'navigation:\n  - page: Pub\n    path: pages/pub.mdx\n',
+      'docs/pages/pub.mdx': '# Pub\n\n<Markdown src="../snippets/part.mdx" />\n',
+      'docs/snippets/part.mdx': '---\nviewers: [a]\n---\nPARTIAL-SECRET\n',
+    })
+    expect(bundle.pages.map((page) => page.body).join('')).not.toContain('PARTIAL-SECRET')
+  })
+})
+
+describe('Docusaurus draft partials and wording', () => {
+  it('keeps the content of an underscore partial whose frontmatter says draft', () => {
+    const bundle = migrateDocusaurus({
+      'docs/a.md': 'import P from "./_p.md"\n\n# A\n\n<P />\n',
+      'docs/_p.md': '---\ndraft: true\n---\nPARTIAL TEXT\n',
+    })
+    expect(bundle.pages[0].body).toContain('PARTIAL TEXT')
+  })
+
+  it('calls a draft page a draft, not access-restricted, in warnings and partial imports', () => {
+    const bundle = migrateDocusaurus({
+      'docs/a.md': 'import D from "./draft.md"\n\n# A\n\n<D />\n',
+      'docs/draft.md': '---\ndraft: true\n---\nDRAFT TEXT\n',
+    })
+    const messages = bundle.warnings.map((warning) => warning.message)
+    expect(messages.some((message) => message.includes('draft page that Docusaurus does not publish'))).toBe(true)
+    expect(messages.join('\n')).not.toMatch(/access-restricted/i)
+    expect(bundle.pages.map((page) => page.body).join('')).not.toContain('DRAFT TEXT')
+  })
+})

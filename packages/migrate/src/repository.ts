@@ -2027,7 +2027,7 @@ function readFrontmatterHead(path: string): string | undefined {
  * access rules Mintlify does not enforce on snippets, `oversized` and
  * `unreadable` are files that cannot be classified safely.
  */
-interface InlineVerdict { kind: 'gated' | 'snippet-gated' | 'oversized' | 'unreadable'; reason: string }
+interface InlineVerdict { kind: 'gated' | 'draft' | 'snippet-gated' | 'oversized' | 'unreadable'; reason: string }
 type InlineGate = (candidate: string) => InlineVerdict | undefined
 
 /** The real on-disk spelling of a path, so a case-variant import cannot dodge a path lookup on a case-insensitive filesystem. */
@@ -2055,10 +2055,12 @@ function pageHeadGateReason(raw: string, platform: MigrationPlatform = 'mintlify
 }
 
 /** Docusaurus leaves `draft: true` pages out of production builds. Anything but an explicit false is withheld. */
+const DOCUSAURUS_DRAFT_REASON = 'frontmatter `draft` marks it as a draft Docusaurus does not publish'
+
 function docusaurusDraftReason(data: Record<string, unknown>): string | undefined {
   const draft = data.draft
   if (draft === undefined || draft === false || (typeof draft === 'string' && draft.trim().toLowerCase() === 'false')) return undefined
-  return 'frontmatter `draft` marks it as a draft Docusaurus does not publish'
+  return DOCUSAURUS_DRAFT_REASON
 }
 
 /** `<If roles=...>` (or `viewers`) in a Fern page body, outside code: content Fern shows only to some roles. */
@@ -2838,6 +2840,10 @@ function inlineMdxSnippets(
       warnings.push({ code: 'gated-page', message: `${label} is access-restricted and was NOT inlined; it was left as a comment.`, source })
       return `{/* Access-restricted content withheld: ${shown} */}`
     }
+    if (verdict.kind === 'draft') {
+      warnings.push({ code: 'gated-page', message: `${label} is a draft page that Docusaurus does not publish, so it was not inlined; it was left as a comment.`, source })
+      return `{/* Draft content not inlined: ${shown} */}`
+    }
     if (verdict.kind === 'snippet-gated') {
       warnings.push({
         code: 'gated-page',
@@ -3566,13 +3572,28 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       return 'it could not be read to check for role-restricted content'
     }
   }
+  // Fern and Docusaurus: why a document must not be published or inlined, or undefined. Cached per real path.
+  const gateReasonCache = new Map<string, string | null>()
+  const nonMintlifyGateReason = (file: ScannedFile): string | undefined => {
+    if (!isDocFile(file)) return undefined
+    const key = canonicalPath(file.absolutePath)
+    let reason = gateReasonCache.get(key)
+    if (reason === undefined) {
+      // Docusaurus never treats `_` files and directories as documents, so a `draft` there means nothing.
+      reason = platform === 'docusaurus' && file.relativePath.split('/').some((segment) => segment.startsWith('_'))
+        ? null
+        : (fernRestrictedPaths.has(file.absolutePath)
+          ? 'docs.yml `viewers` restricts it to signed-in roles'
+          : classifyPageGate(file).reason ?? fernBodyReason(file)) ?? null
+      gateReasonCache.set(key, reason)
+    }
+    return reason ?? undefined
+  }
   if (platform === 'docusaurus' || platform === 'fern') {
     // Fail closed here too: a draft (Docusaurus) or role-restricted (Fern) page is quarantined, never published.
-    for (const file of scannedFiles) {
-      if (!isDocFile(file)) continue
-      const reason = fernRestrictedPaths.has(file.absolutePath)
-        ? 'docs.yml `viewers` restricts it to signed-in roles'
-        : classifyPageGate(file).reason ?? fernBodyReason(file)
+    // `files` can hold pages the scan never saw (a Fern versions file outside fern/), so both lists are classified.
+    for (const file of new Set([...scannedFiles, ...files])) {
+      const reason = nonMintlifyGateReason(file)
       if (!reason) continue
       gateByPath.set(file.absolutePath, { reason, publicTrue: false })
       withheldPaths.add(file.absolutePath)
@@ -3615,7 +3636,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }
     // Fern and Docusaurus have no access rules to enforce, but an inlined file still has the page size cap.
     : (candidate) => {
-        if (gateByPath.get(candidate)?.reason) return { kind: 'gated', reason: 'access-restricted' }
+        // A file the pre-pass never saw is classified now; a miss is never treated as public.
+        const reason = nonMintlifyGateReason({ absolutePath: candidate, relativePath: relative(contentRoot, candidate).replace(/\\/g, '/') })
+        if (reason) return { kind: reason === DOCUSAURUS_DRAFT_REASON ? 'draft' : 'gated', reason }
         return lstatSync(candidate).size > MAX_PAGE_BYTES ? { kind: 'oversized', reason: 'over 2 MB' } : undefined
       }
   /** docs.yml-derived navigationId -> final id, when a page's frontmatter `slug` overrides it. */
@@ -3775,7 +3798,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         }
         warnings.push({
           code: 'gated-page',
-          message: `Access-restricted on the source site (${gateReason}), so it was NOT published. The original is saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}; links from other pages to it will break.`,
+          message: `${gateReason === DOCUSAURUS_DRAFT_REASON ? 'This is a draft page that Docusaurus does not publish, so it was NOT published' : `Access-restricted on the source site (${gateReason}), so it was NOT published`}. The original is saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}; links from other pages to it will break.`,
           source: file.relativePath,
         })
         continue
