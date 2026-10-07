@@ -833,13 +833,26 @@ function visibleEntries(entries: Array<DocEntry>, reader: ReaderContext): Array<
   return filtered
 }
 
+/** Page ids name files below src/content; anything that could leave it is never a page. */
+function isSafePageId(pageId: string, locale?: string): boolean {
+  if (locale !== undefined && !/^[A-Za-z0-9-]+$/.test(locale)) return false
+  return pageId.length > 0 && !/[\\\0]/.test(pageId)
+    && pageId.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
+}
+
 /**
  * Combined access of the file(s) a route serves for `pageId`: the primary
  * page and, on a secondary-locale route, its translation. The most
  * restrictive declaration wins, so a translation that forgets `groups` never
  * opens a restricted page.
+ *
+ * Synchronous: it answers from the content index or the compiled sources. A
+ * page those do not carry is treated as nonexistent (closed). Request-time
+ * checks use {@link loadPageAccess}, which distinguishes "does not exist" from
+ * "index unavailable".
  */
 export function getPageAccess(pageId: string, locale?: string): PageAccess {
+  if (!isSafePageId(pageId, locale)) return MALFORMED_PAGE_ACCESS
   const primaryData = readFrontmatter(pageId)
   // No file for this id: fail closed rather than open.
   if (primaryData === MISSING_FRONTMATTER) return MALFORMED_PAGE_ACCESS
@@ -850,11 +863,63 @@ export function getPageAccess(pageId: string, locale?: string): PageAccess {
   return mergePageAccess(primary, parsePageAccess(localizedData as Record<string, unknown>))
 }
 
-/** Async managed-release twin of {@link getPageAccess}. */
+/** Parse one file's access frontmatter; unreadable frontmatter is malformed (closed). */
+function accessFromSource(raw: string): PageAccess {
+  try {
+    return parsePageAccess(parseFrontmatter(raw).data)
+  } catch {
+    return MALFORMED_PAGE_ACCESS
+  }
+}
+
+/**
+ * Access read from the active ContentSource — the same files page bodies are
+ * rendered from. Used when an assets release has no content index (local
+ * `THALLY_CONTENT_SOURCE=assets` builds, or an index that failed to load):
+ * the compiled maps are empty there, so "not in the index" would otherwise
+ * read as "page does not exist" and deny every page. A file the content
+ * source cannot read either is still denied.
+ */
+async function loadPageAccessFromContentSource(pageId: string, locale?: string): Promise<PageAccess> {
+  const { getContentSource } = await import('@/lib/content-source')
+  const source = getContentSource()
+  const readFirst = async (paths: Array<string>) => {
+    for (const filePath of paths) {
+      const file = await source.read(filePath)
+      if (file) return String(file.content)
+    }
+    return null
+  }
+  const primary = await readFirst([`${CONTENT_ROOT}/${pageId}.mdx`, `${CONTENT_ROOT}/${pageId}/index.mdx`])
+  if (primary === null) return MALFORMED_PAGE_ACCESS
+  const primaryAccess = accessFromSource(primary)
+  if (!locale || locale === (getI18nConfig()?.defaultLocale ?? 'en')) return primaryAccess
+  const translation = await readFirst([`${CONTENT_ROOT}/${locale}/${pageId}.mdx`, `${CONTENT_ROOT}/${locale}/${pageId}/index.mdx`])
+  // Like readFrontmatter, a missing translation means the route renders the primary page.
+  return translation === null ? primaryAccess : mergePageAccess(primaryAccess, accessFromSource(translation))
+}
+
+/**
+ * Request-time access for `pageId`, in three cases:
+ * - a content index is available: it is authoritative (a page missing from it
+ *   does not exist → closed; malformed or marked-unparseable frontmatter →
+ *   closed);
+ * - no index, compiled sources (self-hosted): they are authoritative;
+ * - no index under the assets source: read the page's own files from the
+ *   content source the body is rendered from, closing only if that fails.
+ */
 export async function loadPageAccess(pageId: string, locale?: string): Promise<PageAccess> {
+  if (!isSafePageId(pageId, locale)) return MALFORMED_PAGE_ACCESS
   await ensureDocPublication()
   const index = await loadContentIndex()
-  if (index) hydrateContentIndex(index)
+  if (index) {
+    hydrateContentIndex(index)
+    return getPageAccess(pageId, locale)
+  }
+  // Same test as `isRemoteContentSource`, inline so this module stays free of the content-source providers.
+  if (process.env.THALLY_CONTENT_SOURCE?.trim().toLowerCase() === 'assets') {
+    return loadPageAccessFromContentSource(pageId, locale)
+  }
   return getPageAccess(pageId, locale)
 }
 
