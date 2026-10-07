@@ -115,7 +115,7 @@ export function scanJsxOpeningTag(source: string, start: number, name: string): 
  * `<Admonition type="tip" title="X">` is the JSX spelling of a colon-fence
  * admonition and maps to the same callouts.
  */
-function normalizeDocusaurusAdmonitionTags(segment: string): string {
+export function normalizeDocusaurusAdmonitionTags(segment: string): string {
   const open: Array<string> = []
   const marker = /<\/Admonition>|<Admonition(?![\w$.-])/g
   let output = ''
@@ -140,7 +140,7 @@ function normalizeDocusaurusAdmonitionTags(segment: string): string {
 }
 
 /** `<Link to=...>` becomes `<a href=...>`; a tag that never closes is left as written. */
-function normalizeDocusaurusLinkTags(segment: string): string {
+export function normalizeDocusaurusLinkTags(segment: string): string {
   const marker = /<Link(?![\w$.-])/g
   let output = ''
   let cursor = 0

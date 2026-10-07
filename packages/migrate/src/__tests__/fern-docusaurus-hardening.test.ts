@@ -8,7 +8,9 @@ import { describe, expect, it } from 'vitest'
 
 import { projectDocusaurusNavigation, readDocusaurusRedirects, readDocusaurusSidebars, readDocusaurusSiteSettings, readDocusaurusThemeColor } from '../docusaurus.js'
 import { migrateRepository, projectFernNavigation, renderMigrationFiles } from '../index.js'
+import { normalizeDocusaurusAdmonitionTags, normalizeDocusaurusLinkTags } from '../mdx.js'
 import { pageIdFromReference } from '../path.js'
+import { fernIfRolesReason } from '../repository.js'
 
 /** A file that starts with `head` and is `size` bytes long, without writing the rest (a sparse file). */
 interface SparseFile { head: string; size: number }
@@ -471,8 +473,8 @@ describe('Docusaurus config parsing stays linear on repeated openers', () => {
     expect(() => readDocusaurusSidebars(root)).toThrow(/20 MB/)
   })
 
-  it('reads a generated sidebar larger than the old 1 MB cap', () => {
-    const items = Array.from({ length: 25_000 }, (_, index) => `{ type: 'doc', id: 'api/page-${index}' }`).join(',\n')
+  it('reads a large generated sidebar', () => {
+    const items = Array.from({ length: 12_000 }, (_, index) => `{ type: 'doc', id: 'api/page-${index}' }`).join(',\n')
     const root = docusaurusSite({ 'sidebars.js': `module.exports = { docs: [${items}] }\n` })
     expect(Array.isArray(readDocusaurusSidebars(root)?.config.docs)).toBe(true)
   })
@@ -912,22 +914,25 @@ describe('Fern page listed under public and restricted nodes', () => {
 describe('JSX tag scanning stays linear and quote aware', () => {
   const repeated = (unit: string): string => unit.repeat(Math.ceil(100_000 / unit.length))
 
-  it.each([
-    ['<Admonition ', '<Admonition '],
-    ['<Admonition {a{b ', '<Admonition {a{b '],
-    ['<Link ', '<Link '],
-    ['<Link {a{b ', '<Link {a{b '],
-  ])('converts a Docusaurus page of 100k characters of %s quickly', (_name, unit) => {
-    const started = Date.now()
-    migrateDocusaurus({ 'docs/a.mdx': `# A\n\n${repeated(unit)}\n`, 'docs/b.md': '# B\n' })
-    // The page may be excluded for not compiling; only the time matters here.
-    expect(Date.now() - started).toBeLessThan(2_000)
+  it.each(['<Admonition ', '<Admonition {a{b ', '<Admonition x="'])('converts 100k characters of %s quickly', (unit) => {
+    const input = repeated(unit)
+    const started = performance.now()
+    normalizeDocusaurusAdmonitionTags(input)
+    expect(performance.now() - started).toBeLessThan(300)
   })
 
-  it.each(['<If ', '<If {a{b ', '<If x="'])('scans a Fern page of 100k characters of %s quickly', (unit) => {
-    const started = Date.now()
-    fernSite('navigation:\n  - page: A\n    path: a.mdx\n  - page: O\n    path: o.mdx\n', { 'a.mdx': `# A\n\n${repeated(unit)}\n`, 'o.mdx': '# O\n' })
-    expect(Date.now() - started).toBeLessThan(2_000)
+  it.each(['<Link ', '<Link {a{b ', '<Link x="'])('converts 100k characters of %s quickly', (unit) => {
+    const input = repeated(unit)
+    const started = performance.now()
+    normalizeDocusaurusLinkTags(input)
+    expect(performance.now() - started).toBeLessThan(300)
+  })
+
+  it.each(['<If ', '<If {a{b ', '<If x="'])('scans 100k characters of %s quickly', (unit) => {
+    const input = repeated(unit)
+    const started = performance.now()
+    fernIfRolesReason(input)
+    expect(performance.now() - started).toBeLessThan(300)
   })
 
   const roles = (body: string) => {

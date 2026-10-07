@@ -2103,7 +2103,7 @@ function withoutFencedCode(raw: string): string {
  * shows only to some roles. Each tag is scanned to its real end (quotes and
  * braces respected); a tag that never closes is judged by what was scanned.
  */
-function fernIfRolesReason(raw: string): string | undefined {
+export function fernIfRolesReason(raw: string): string | undefined {
   const text = withoutFencedCode(raw).replace(/(`{1,3})[^`\n]*\1/g, '')
   const marker = /<If(?![\w$.-])/g
   for (let match = marker.exec(text); match; match = marker.exec(text)) {
