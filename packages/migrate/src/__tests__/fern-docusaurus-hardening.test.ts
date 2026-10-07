@@ -182,3 +182,16 @@ describe('Docusaurus excluded documents', () => {
     expect(bundle.pages[0].body).toContain('Shared note.')
   })
 })
+
+describe('Docusaurus Link component', () => {
+  it('turns Link tags with an expression or href into matching anchors', () => {
+    const bundle = migrateDocusaurus({
+      'docs/a.mdx': "export const base = '/docs/y'\n\nSee <Link to={base}>one</Link>, <Link href=\"/z\">two</Link> and <Link to=\"/w\">three</Link>.\n",
+    })
+    const body = bundle.pages[0].body
+    expect(body).toContain('<a href={base}>one</a>')
+    expect(body).toContain('<a href="/z">two</a>')
+    expect(body).toContain('<a href="/w">three</a>')
+    expect(body).not.toMatch(/&lt;|<Link/)
+  })
+})

@@ -2110,8 +2110,10 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
           return `<Tab title="${title.replace(/"/g, '&quot;')}">`
         })
         .replace(/<\/TabItem>/g, '</Tab>')
-        .replace(/<Link\b([^>]*)\bto=(?:"([^"]*)"|'([^']*)')([^>]*)>/g, (_match, before: string, doubleQuoted: string, singleQuoted: string, after: string) => (
-          `<a${before}href="${doubleQuoted ?? singleQuoted}"${after}>`
+        // Attribute values may be `{expressions}` (which can contain `>`), so
+        // braces are matched, up to two levels deep, instead of `[^>]*`.
+        .replace(/<Link\b((?:[^>{]|\{(?:[^{}]|\{[^{}]*\})*\})*)>/g, (_match, attributes: string) => (
+          `<a${attributes.replace(/(^|\s)to=/, '$1href=')}>`
         ))
         .replace(/<\/Link>/g, '</a>')
         // The repository adapter expands DocCardList from the resolved
