@@ -41,6 +41,8 @@ export interface DocusaurusPageDescriptor {
   docId: string
   navigationId: string
   sidebarPosition?: number
+  /** Frontmatter `unlisted`: the page is served but never shown in a sidebar. */
+  unlisted?: boolean
   title: string
 }
 
@@ -192,8 +194,15 @@ export function resolveDocusaurusPageIdentity(
       docId,
       navigationId,
       ...(position === undefined ? {} : { sidebarPosition: position }),
+      ...(isUnlisted(frontmatter.unlisted) ? { unlisted: true } : {}),
     },
   }
+}
+
+/** Anything but an explicit false counts as unlisted; hiding a page from navigation is the safe reading. */
+function isUnlisted(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== false
+    && !(typeof value === 'string' && ['', 'false'].includes(value.trim().toLowerCase()))
 }
 
 function sourceReferenceKey(value: string): string {
@@ -1215,8 +1224,19 @@ export function projectDocusaurusNavigation(input: {
     }]
   })
 
+  // Unlisted pages stay routable, but no sidebar shows them, listed or not.
+  const unlisted = new Set(input.descriptors.filter((page) => page.unlisted).map((page) => page.navigationId))
+  const withoutUnlisted = (items: Array<string | MigrationNavigationGroup>): Array<string | MigrationNavigationGroup> =>
+    items.flatMap((item): Array<string | MigrationNavigationGroup> => {
+      if (typeof item === 'string') return unlisted.has(item) ? [] : [item]
+      const pages = withoutUnlisted(item.pages)
+      return pages.length > 0 ? [{ ...item, pages }] : []
+    })
+  if (unlisted.size > 0) {
+    for (const tab of tabs) tab.pages = withoutUnlisted(tab.pages)
+  }
   const unreferenced = input.descriptors
-    .filter((page) => !context.referencedNavigationIds.has(page.navigationId))
+    .filter((page) => !unlisted.has(page.navigationId) && !context.referencedNavigationIds.has(page.navigationId))
     .sort(descriptorSort)
     .map((page) => page.navigationId)
   if (unreferenced.length > 0) {

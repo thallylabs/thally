@@ -4045,6 +4045,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }
     }
     if (docusaurusDescriptor) {
+      if (docusaurusDescriptor.unlisted) page.hidden = true
       docusaurusDescriptors.push({ ...docusaurusDescriptor, title: page.title })
     }
   }
