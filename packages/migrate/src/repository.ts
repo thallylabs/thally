@@ -153,7 +153,12 @@ const SNIPPET_DIRECTORIES = new Set(['snippets', '_snippets', 'partials', '_part
 // import (`import { default as Name } from '...'`), and a plain named import
 // (`import { Name } from '...'`) — Mintlify snippets can export either way.
 const SNIPPET_IMPORT_PATTERN = /\bimport\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?/g
-const SNIPPET_VALUE_IMPORT_PATTERN = /\bimport\s*\{([^{}]+)\}\s*from\s+['"]([^'"]+\.mdx?)['"]\s*;?/g
+/** Empty stand-ins for the exports Docusaurus adds to every MDX document (its own TOC feeds are not used). */
+const DOCUSAURUS_GENERATED_EXPORTS: Record<string, string | undefined> = Object.assign(Object.create(null) as Record<string, string>, {
+  toc: '[]', frontMatter: '{}', metadata: '{}', assets: '{}', contentTitle: 'undefined',
+})
+// Only same-line whitespace is consumed after the path: the replacement is an `export` block, which ends at a blank line.
+const SNIPPET_VALUE_IMPORT_PATTERN = /\bimport\s*\{([^{}]+)\}\s*from\s+['"]([^'"]+\.mdx?)['"][ \t]*;?/g
 
 /**
  * Mintlify's `<Snippet file="path.mdx" />` tag form: unlike the import form
@@ -2937,6 +2942,13 @@ function inlineMdxSnippets(
           }
           exportedNames ??= snippetExportedNames(snippetSource)
           const exported = exportedNames.has(binding!.exported)
+          // Docusaurus generates these on every MDX document. Thally has none, and
+          // pages spread or index them, so each gets an empty value of its own type.
+          const generated = exported ? undefined : DOCUSAURUS_GENERATED_EXPORTS[binding!.exported]
+          if (generated) {
+            declarations.push(`export const ${binding!.local} = ${generated};`)
+            continue
+          }
           if (!exported && !(/^[A-Z]/.test(binding!.exported) && snippetComponentBody(snippetSource, binding!.exported) !== snippetSource)) {
             // Mintlify binds a name its snippet does not export to undefined, which renders as nothing.
             warnings.push({

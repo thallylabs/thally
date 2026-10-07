@@ -748,3 +748,43 @@ describe('Fern <If roles> content', () => {
     expect(Date.now() - started).toBeLessThan(3_000)
   })
 })
+
+describe('Docusaurus partial toc and metadata imports', () => {
+  const page = (source: string): string => `---\ntitle: Views\n---\n\n${source}\n`
+
+  function body(source: string): string {
+    const bundle = migrateDocusaurus({
+      'docs/views.mdx': page(source),
+      'docs/partials/_views.mdx': '## Partial heading\n',
+      'docs/partials/_other.mdx': '## Other heading\n',
+    })
+    return bundle.pages.find((entry) => entry.navigationId === 'views')?.body ?? ''
+  }
+
+  it('does not leave an undefined toc spread (cypress shape)', () => {
+    const result = body("import { toc as viewsToc } from '@site/docs/partials/_views.mdx'\n\nexport const toc = [\n  ...viewsToc,\n  { value: 'See also', id: 'See-also', level: 2 },\n]\n\n# Views\n")
+    expect(result).not.toMatch(/=\s*undefined/)
+    expect(result).toContain('export const viewsToc = [];')
+  })
+
+  it('handles a multi-line toc merging two partials', () => {
+    const result = body("import { toc as viewsToc } from './partials/_views.mdx'\nimport { toc as otherToc } from './partials/_other.mdx'\n\nexport const toc = [\n  ...viewsToc,\n  ...otherToc\n]\n\n# Views\n")
+    expect(result).not.toMatch(/=\s*undefined/)
+    expect(result).toContain('export const otherToc = [];')
+  })
+
+  it('gives a toc used in JSX an array to work with', () => {
+    const result = body("import { toc as viewsToc } from './partials/_views.mdx'\n\n# Views\n\n{viewsToc.map((item) => <span key={item.id}>{item.value}</span>)}\n")
+    expect(result).not.toMatch(/viewsToc\s*=\s*undefined/)
+  })
+
+  it('binds frontMatter and assets to objects so member access cannot crash', () => {
+    const result = body("import { frontMatter, assets } from './partials/_views.mdx'\n\n# Views\n\n{frontMatter.title}{assets.x}\n")
+    expect(result).not.toMatch(/(?:frontMatter|assets)\s*=\s*undefined/)
+  })
+
+  it('still reports an unknown named import as undefined', () => {
+    const result = body("import { custom } from './partials/_views.mdx'\n\n# Views\n\n{String(custom)}\n")
+    expect(result).toMatch(/custom\s*=\s*undefined/)
+  })
+})
