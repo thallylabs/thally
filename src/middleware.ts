@@ -23,6 +23,7 @@ import { getCloudAccessConfigEdge, getManagedSiteIdEdge } from '@/lib/cloud-link
 import { isMarkdownPagesEnabled } from '@/lib/markdown-pages'
 import { createDailyVisitorKey, externalReferrerDomain } from '@/lib/analytics/identity'
 import { problemResponse } from '@/lib/http/problem'
+import { isReaderAuthActive } from '@/lib/reader-auth/config'
 
 // Static API paths are known without importing the Node-only content graph.
 // Paths outside this set may still be author-owned API-reference pages, so
@@ -94,9 +95,10 @@ function shouldTrackPath(pathname: string): boolean {
   if (pathname.startsWith('/admin') || pathname.startsWith('/_next')) {
     return false
   }
-  // Access gate, the generated icon, and static image assets.
+  // Access gate, reader sign-in handoff, the generated icon, and static image assets.
   if (
     pathname === '/access' ||
+    pathname === '/login/jwt-callback' ||
     pathname === '/icon' ||
     pathname.endsWith('.ico') ||
     pathname.endsWith('.png') ||
@@ -264,6 +266,23 @@ function isManagedContentProjectionPath(pathname: string): boolean {
   )
 }
 
+/**
+ * Under reader auth every content representation may differ by reader
+ * (page body, sidebar, indexes), so none may enter a shared cache. Only
+ * framework assets and brand assets stay cacheable; they never carry content.
+ * Unlike the password gate this adds headers only: per-page decisions need
+ * frontmatter, which the edge runtime cannot read, so enforcement itself lives
+ * in the node routes.
+ */
+function variesByReader(pathname: string): boolean {
+  return (
+    !pathname.startsWith('/_next') &&
+    !pathname.startsWith('/brand/') &&
+    !pathname.startsWith('/api/brand') &&
+    pathname !== '/icon'
+  )
+}
+
 /** Prevent every intermediary from retaining a password-gated representation. */
 function applyPrivateNoStore(response: NextResponse, isProtected: boolean): NextResponse {
   if (!isProtected) return response
@@ -336,11 +355,14 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   }
   const cloudAccess = await getCloudAccessConfigEdge(request.nextUrl.origin)
   const docsAccessEnabled = isDocsAccessEnabledEdge() || cloudAccess?.access?.mode === 'password'
+  // Reader auth (jwt/oidc, or a fail-closed misconfigured `auth` block) makes
+  // responses reader-specific: never shared-cacheable, never CDN-tagged.
+  const readerAuthActive = isReaderAuthActive()
 
   // Affirmative check for CDN cacheability: the access config must be present
   // AND public. `cloudAccess == null` (self-host, or a failed/timed-out grant
   // exchange) means "unknown", and unknown never enters a shared cache.
-  const contentCachePublic = !isDocsAccessEnabledEdge() && cloudAccess?.access?.mode === 'public'
+  const contentCachePublic = !isDocsAccessEnabledEdge() && !readerAuthActive && cloudAccess?.access?.mode === 'public'
   const requiresDocsAccess =
     docsAccessEnabled &&
     !pathname.startsWith('/admin') &&
@@ -352,6 +374,8 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     !pathname.startsWith('/brand/') &&
     !pathname.startsWith('/api/brand') &&
     pathname !== '/access' &&
+    !pathname.startsWith('/api/reader/') &&
+    pathname !== '/login/jwt-callback' &&
     !pathname.startsWith('/_next') &&
     !isPublicAgentEndpoint(pathname)
 
@@ -361,6 +385,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   // by forgetting its own requireCapability check.
   const isAdminPage = pathname.startsWith('/admin') && pathname !== '/admin/login'
   const isAdminApi = pathname.startsWith('/api/admin') && !pathname.startsWith('/api/admin/auth')
+  const isPrivateResponse = requiresDocsAccess || (readerAuthActive && variesByReader(pathname))
   if ((isAdminPage || isAdminApi) && isAdminEnabledEdge()) {
     // Coarse, edge-safe check only: a valid break-glass password session OR a
     // valid signed OIDC identity cookie. The live role lookup happens in node.
@@ -444,7 +469,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     // URL-distinct (.md) — safe to fully CDN-cache.
     return applyPrivateNoStore(
       applyManagedContentCacheHeaders(NextResponse.rewrite(url), pathname, contentCachePublic),
-      requiresDocsAccess,
+      isPrivateResponse,
     )
   }
 
@@ -467,7 +492,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
       pathname,
       contentCachePublic,
       { cdnCacheable: false },
-    ), requiresDocsAccess)
+    ), isPrivateResponse)
   }
 
   // Advertise the llms.txt discovery endpoint on HTML doc-page responses, so
@@ -487,7 +512,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     response.headers.append('Link', '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"')
     response.headers.set('X-Llms-Txt', `${request.nextUrl.origin}/llms.txt`)
   }
-  if (isCacheableDocsPage(request, pathname, docsAccessEnabled)) {
+  if (isCacheableDocsPage(request, pathname, docsAccessEnabled || readerAuthActive)) {
     // Middleware makes otherwise-static docs dynamic to Netlify. Documents are
     // immutable within an atomic deploy, so retain browser revalidation while
     // serving full page loads from the CDN.
@@ -504,7 +529,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     applyManagedContentCacheHeaders(response, pathname, contentCachePublic, {
       cdnCacheable: isManagedContentProjectionPath(pathname),
     }),
-    requiresDocsAccess,
+    isPrivateResponse,
   )
 }
 

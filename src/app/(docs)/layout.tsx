@@ -9,6 +9,8 @@ import { withApiNavigation } from '@/data/api-reference'
 import { DocsCodeActionsProvider } from '@/components/docs/code-actions-provider'
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig, siteIdentity } from '@/lib/site-config'
+import { getReaderContext } from '@/lib/reader-auth/context'
+import { canReaderSeeUnmarkedContent } from '@/lib/reader-auth/page-gate'
 
 interface DocsLayoutProps {
   children: React.ReactNode
@@ -18,7 +20,14 @@ interface DocsLayoutProps {
 export default async function DocsLayout({ children }: DocsLayoutProps) {
   const showPoweredBy = await shouldShowPoweredBy()
   const contentControls = getBuildContentControls()
-  const collections = await withApiNavigation(await loadSidebarCollections())
+  // Navigation is filtered per reader: restricted page titles never reach
+  // readers who cannot open them. API-reference navigation has no page
+  // frontmatter, so it follows the site default visibility.
+  const reader = await getReaderContext()
+  const readerCollections = await loadSidebarCollections(undefined, reader)
+  const collections = canReaderSeeUnmarkedContent(reader)
+    ? await withApiNavigation(readerCollections)
+    : readerCollections
   const aiConfig = getAiConfig()
   const i18nConfig = await getEffectiveI18nConfig()
   const navbarConfig = getNavbarConfig()

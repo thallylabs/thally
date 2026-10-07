@@ -197,6 +197,11 @@ cp .env.example .env.local
 | `THALLY_DOCS_CONFIG` | Optional managed-hosting snapshot of `docs.json`, used to publish presentation and navigation settings without recompiling the Worker. Self-hosted sites should leave this unset and edit `docs.json` |
 | `THALLY_ADMIN_PASSWORD` / `THALLY_ADMIN_SECRET` | Optional break-glass admin password plus its required high-entropy production session-signing secret |
 | `THALLY_ACCESS_PASSWORD` / `THALLY_ACCESS_SECRET` | Optional docs-access password plus its required high-entropy production session-signing secret; the access secret may fall back to `THALLY_ADMIN_SECRET` |
+| `THALLY_READER_SESSION_SECRET` | Reader-auth session-signing secret (32+ chars, distinct from admin/access secrets); required in production when docs.json `auth.mode` is `jwt` or `oidc` |
+| `THALLY_READER_JWT_SECRET` / `THALLY_READER_JWT_PUBLIC_KEY` / `THALLY_READER_JWKS_URL` | JWT handoff verification key — exactly one: HS256 shared secret, SPKI PEM (RS256/PS256/ES256/EdDSA), or JWKS URL |
+| `THALLY_READER_OIDC_ISSUER` / `THALLY_READER_OIDC_CLIENT_ID` / `THALLY_READER_OIDC_CLIENT_SECRET` | Reader sign-in with your OpenID Connect provider (`auth.mode: "oidc"`) |
+| `THALLY_READER_ALLOW_DEV_SESSION_KEY` | Local previews only: `1` signs reader sessions with a PUBLIC development key (ignored in production). Anyone who can reach the server can then forge sessions — never set it on a reachable server |
+| `THALLY_READER_TOKEN_KEYS` | Optional `kid:secret` list for read-only, group-scoped agent/MCP bearer tokens (`npm run reader-token`) |
 | `ANTHROPIC_API_KEY` | Optional — used by local tooling only (`thally agent`, `thally translate`, and non-Markdown conversion in `thally migrate`). The site's AI chat is served by Thally Cloud and reads no model key |
 | `THALLY_MCP_RATE_PER_MIN` | Optional per-client limit on remote MCP tool calls and resource reads (default `60`; `0` disables) |
 | `THALLY_SEARCH_HYBRID_RATE_PER_MIN` | Optional per-client limit on `/api/search?mode=hybrid` when a hosted embedding provider is configured (default `20`); over the limit, full-text results are served |

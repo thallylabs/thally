@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/data/docs', () => ({
   getDocEntries: () => [],
+  canReaderViewPage: async () => true,
   loadDocEntries: async () => [{
     id: 'guide', slug: ['guide'], href: '/guide',
     title: 'Guide', description: 'Source description', keywords: ['source'],

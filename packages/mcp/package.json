@@ -38,7 +38,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.0",
     "@modelcontextprotocol/sdk": "^1.15.0",
-    "@thallylabs/core": "0.2.11",
+    "@thallylabs/core": "0.2.12",
     "create-thally-docs": "0.10.82",
     "p-limit": "^6.1.0",
     "yaml": "^2.8.2",

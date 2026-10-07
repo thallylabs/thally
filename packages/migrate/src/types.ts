@@ -143,6 +143,13 @@ export interface MigrationPage {
   mode?: 'default' | 'wide' | 'custom' | 'center' | 'home'
   hidden?: boolean
   noindex?: boolean
+  /**
+   * Reader access groups (frontmatter `groups`): trimmed, non-empty names the
+   * runtime matches exactly. The page needs a signed-in reader in one of them.
+   */
+  groups?: Array<string>
+  /** Frontmatter `public`: `true` opens the page to anyone, `false` needs any signed-in reader. */
+  public?: boolean
   /** Social/SEO overrides from `og:*` and `twitter:*` frontmatter, keyed by the migrated frontmatter field. */
   meta?: Partial<Record<'ogTitle' | 'ogDescription' | 'ogImage' | 'twitterTitle' | 'twitterDescription' | 'twitterImage', string>>
   /** OpenAPI operation key rendered by Thally instead of ordinary MDX. */
@@ -176,7 +183,7 @@ export interface MigrationWarning {
     | 'limit-reached'
     | 'fetch-failed'
     | 'skipped-file'
-    /** Access-restricted source page withheld from the published site (or a site-wide auth risk). */
+    /** Access-restricted source content: migrated with access rules, withheld (quarantined), or a site-wide auth risk. */
     | 'gated-page'
   message: string
   source?: string
@@ -205,7 +212,11 @@ export interface MigrationBundle {
   remoteApiSpecs?: Array<RemoteApiSpec>
   /** Customer-owned component source and registry; paths are repository-relative. */
   componentFiles?: Array<RenderedMigrationFile>
-  /** Access-restricted source pages, written outside every published path. */
+  /**
+   * Restricted content that cannot be published safely (pages whose access
+   * rules are malformed or contradictory, and assets used only by restricted
+   * pages), written outside every published path.
+   */
   quarantinedFiles?: Array<RenderedMigrationFile>
   /** Access-restricted pages the file limit dropped: neither published nor saved in quarantinedFiles. */
   droppedGatedPages?: number

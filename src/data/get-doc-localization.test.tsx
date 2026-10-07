@@ -104,4 +104,28 @@ describe('translated document eligibility', () => {
     })
     expect(await getDocFromParams(['human-guide'], 'fr')).toMatchObject({ isStale: false })
   })
+
+  it('derives reader access from the files it resolved, translation and primary together', async () => {
+    fixture.files.set(primaryPath, { content: '---\ntitle: Guide\ngroups: [beta]\n---\nSource content', modifiedAtMs: 100 })
+    fixture.files.set(translationPath, { content: '---\ntitle: Guide français\n---\nTexte', modifiedAtMs: 200 })
+    // A fresh module: earlier cases cached this route's document.
+    vi.resetModules()
+    const { getDocFromParams: freshGetDoc } = await import('./get-doc')
+    const translated = await freshGetDoc(['guide'], 'fr')
+    // The translation omits `groups`; the primary's restriction still applies.
+    expect(translated?.access).toEqual({ groupSets: [['beta']], isMalformed: false })
+  })
+
+  it('never resolves a file-suffixed route to its file', async () => {
+    fixture.files.set('src/content/locked.mdx', { content: '---\ntitle: Locked\ngroups: [beta]\n---\nTOPSECRET', modifiedAtMs: 100 })
+    expect(await getDocFromParams(['locked.mdx'])).toBeNull()
+    expect(await getDocFromParams(['locked.MD'])).toBeNull()
+  })
+
+  it('fails closed when the resolved frontmatter cannot be parsed', async () => {
+    fixture.files.set('src/content/broken.mdx', { content: '---\ntitle: [unclosed\n---\nBody', modifiedAtMs: 100 })
+    const doc = await getDocFromParams(['broken']).catch(() => null)
+    // Either the page fails to load, or it loads with access nobody satisfies.
+    expect(doc === null || doc.access?.isMalformed === true).toBe(true)
+  })
 })

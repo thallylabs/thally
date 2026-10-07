@@ -19,6 +19,7 @@ vi.mock('@/data/get-doc', () => ({
     lastUpdated: '2026-01-01',
     component: () => <p>Authored scrape body</p>,
     openapi: { specId: 'default', specRef: 'openapi/missing.json', method: 'POST', path: '/scrape' },
+    access: { groupSets: [], isMalformed: false },
   }),
 }))
 vi.mock('@/data/api-reference', () => ({ lookupApiOperationForFrontmatter: async () => fixtures.lookup }))
@@ -27,6 +28,7 @@ vi.mock('@/data/docs', () => ({
   getApiPlaygroundDisplay: () => undefined,
   getDocEntries: async () => [],
   isDocPublished: () => true,
+  canReaderViewPage: async () => true,
   loadNavContext: async () => ({ breadcrumb: [], prev: { title: 'Previous page', href: '/prev' }, next: null }),
 }))
 vi.mock('@/components/docs/doc-layout', () => ({ DocLayout: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }))

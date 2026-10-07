@@ -20,6 +20,8 @@ vi.mock('@thallylabs/core/registry', () => ({
   registerContentDocumentSource: vi.fn(),
 }))
 vi.mock('@/data/docs', () => ({
+  // Translation-level reader access is covered in src/data/reader-access-locales.test.ts.
+  canReaderViewPage: async () => true,
   getDocEntries: () => [],
   getCurrentVersionPageIds: () => new Set(['guide', 'draft']),
   loadDocEntries: async () => [

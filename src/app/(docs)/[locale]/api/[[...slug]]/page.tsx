@@ -23,6 +23,9 @@ import {
 } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
 import DocsPage, { generateMetadata as generateDocsMetadata } from '@/app/(docs)/[[...slug]]/page'
+import { isReaderAuthActive } from '@/lib/reader-auth/config'
+import { getReaderContext } from '@/lib/reader-auth/context'
+import { canReaderSeeUnmarkedContent, denyDocumentAccess } from '@/lib/reader-auth/page-gate'
 
 interface PageProps {
   params: Promise<{ locale: string; slug?: Array<string> }>
@@ -38,7 +41,8 @@ export async function generateStaticParams() {
   // Always visit one well-formed locale root to establish the shell's request
   // boundary. A default-only scaffold has no localized pages yet; enumerating
   // its locales/specs would return [] and freeze the route into on-demand SSG.
-  if (isRemoteContentSource()) return [{ locale: i18n.defaultLocale, slug: [] }]
+  // Reader-auth sites render per request (see the document route).
+  if (isRemoteContentSource() || isReaderAuthActive()) return [{ locale: i18n.defaultLocale, slug: [] }]
   const secondaryLocales = i18n.locales.filter((l) => l.code !== i18n.defaultLocale)
   const nodes = await getAllApiOperationNodes()
   const docs = getDocEntries().filter((doc) => doc.slug[0] === 'api' && doc.slug.length > 1)
@@ -63,6 +67,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!node) {
     return generateDocsMetadata({ params: Promise.resolve({ slug: [resolved.locale, 'api', ...(resolved.slug ?? [])] }) })
   }
+  if (!canReaderSeeUnmarkedContent(await getReaderContext())) return {}
   const title = node.operation.title
   const description = node.operation.description ?? `${node.operation.method} ${node.operation.path}`
   const ogImageUrl = buildOgImageUrl({
@@ -110,13 +115,14 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
   const siteUrl = getSiteUrl()
   const i18n = await getEffectiveI18nConfig()
   const effectiveSite = resolveBuildSiteConfig()
+  const reader = await getReaderContext()
 
   if (!isValidSecondaryLocale(resolved.locale, i18n)) {
     notFound()
   }
 
   if (!resolved.slug?.length) {
-    const mdxCandidates = (await loadDocEntries()).filter(
+    const mdxCandidates = (await loadDocEntries(reader)).filter(
       (doc) => doc.slug[0] === 'api' && doc.slug.length > 1,
     )
     const availableMdx = await Promise.all(mdxCandidates.map(async (doc) =>
@@ -124,11 +130,11 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
     ))
     const firstMdx = availableMdx.find((doc) => doc !== null)
     if (firstMdx) redirect(`/${resolved.locale}${firstMdx.href}`)
-    const defaultNodes = await getApiOperationNodes(apiReferenceConfig.defaultSpecId)
+    const defaultNodes = canReaderSeeUnmarkedContent(reader) ? await getApiOperationNodes(apiReferenceConfig.defaultSpecId) : []
     if (defaultNodes.length > 0) {
       redirect(`/${resolved.locale}${defaultNodes[0].href}`)
     }
-    notFound()
+    denyDocumentAccess(reader, `/${resolved.locale}/api`)
   }
 
   const node = await getApiOperationBySlug(resolved.slug)
@@ -139,6 +145,7 @@ export default async function LocaleApiReferencePage({ params }: PageProps) {
     return DocsPage({ params: Promise.resolve({ slug: [resolved.locale, 'api', ...resolved.slug] }) })
   }
 
+  if (!canReaderSeeUnmarkedContent(reader)) denyDocumentAccess(reader, `/${resolved.locale}/api/${resolved.slug.join('/')}`)
   const pageUrl = `${siteUrl}${node.href}`
   const jsonLd = buildApiOperationJsonLd({
     siteUrl,

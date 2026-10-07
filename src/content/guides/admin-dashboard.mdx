@@ -137,6 +137,12 @@ Team access above is about the **admin dashboard**. To gate the public docs them
 
 This is independent of the admin team: a visitor password protects reading the docs; the team roster protects managing them.
 
+A shared password is all-or-nothing. To sign readers in through your own
+product or identity provider and restrict individual pages by group, use
+[authenticated docs](/guides/authenticated-docs) (`auth.mode` `jwt` or `oidc`
+in `docs.json`) instead. Pages marked with `groups` or `public: false` stay
+hidden from everyone until reader authentication is configured.
+
 Self-hosted production sites also need `THALLY_ACCESS_SECRET`, generated with
 `openssl rand -hex 32`. If it is absent, the runtime uses `THALLY_ADMIN_SECRET`;
 it never uses the visitor password as a signing key. Configure the secret before

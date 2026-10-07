@@ -65,6 +65,7 @@ export const FRAMEWORK_SYNC_ELIGIBLE = Object.freeze([
   "scripts/lib/**",
   "scripts/check-cloudflare-worker-size.mts",
   "scripts/smoke-cloudflare.mts",
+  "scripts/mint-reader-token.ts",
 ]);
 
 // These tests intentionally inspect the public monorepo and its independently
