@@ -92,3 +92,38 @@ describe('inlined partial size cap', () => {
     expect(page?.body.length).toBeLessThan(100_000)
   })
 })
+
+function quarantinedPaths(bundle: ReturnType<typeof migrateRepository>): Array<string> {
+  return (bundle.quarantinedFiles ?? []).map((file) => file.path).sort()
+}
+
+describe('Docusaurus draft pages', () => {
+  it.each(['true', '"true"', 'yes', '1'])('quarantines a page with draft: %s and keeps draft: false public', (value) => {
+    const bundle = migrateDocusaurus({
+      'docs/live.md': '---\ndraft: false\n---\n# Live\n',
+      'docs/unreleased.md': `---\ndraft: ${value}\n---\n# Unreleased\n`,
+      'docs/plain.md': '# Plain\n',
+    })
+    expect(bundle.pages.map((page) => page.navigationId).sort()).toEqual(['live', 'plain'])
+    expect(JSON.stringify(bundle.docsConfig.tabs)).not.toContain('unreleased')
+    expect(quarantinedPaths(bundle)).toEqual(['migration-quarantine/unreleased.md'])
+    expect(bundle.warnings.some((warning) => warning.code === 'gated-page' && warning.source === 'unreleased.md')).toBe(true)
+  })
+
+  it('quarantines a draft whose frontmatter is invalid YAML', () => {
+    const bundle = migrateDocusaurus({
+      'docs/unreleased.md': '---\ntitle: "unterminated\ndraft: true\n---\n# Unreleased\n',
+      'docs/plain.md': '# Plain\n',
+    })
+    expect(bundle.pages.map((page) => page.navigationId)).toEqual(['plain'])
+    expect(quarantinedPaths(bundle)).toEqual(['migration-quarantine/unreleased.md'])
+  })
+
+  it('does not inline a draft page that a published page imports', () => {
+    const bundle = migrateDocusaurus({
+      'docs/live.mdx': "import Secret from './unreleased.md'\n\n# Live\n\n<Secret />\n",
+      'docs/unreleased.md': '---\ndraft: true\n---\nTOP-SECRET-LAUNCH-DATE\n',
+    })
+    expect(bundle.pages.map((page) => page.body).join('\n')).not.toContain('TOP-SECRET-LAUNCH-DATE')
+  })
+})

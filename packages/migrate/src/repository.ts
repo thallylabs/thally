@@ -2016,13 +2016,38 @@ function canonicalPath(path: string): string {
  * it withholds rather than guesses. Key casing (`Groups:`) and TOML frontmatter
  * are deliberately not treated as gates: Mintlify ignores them too.
  */
-function pageHeadGateReason(raw: string): { reason?: string; publicTrue: boolean; openapi?: string } {
+function pageHeadGateReason(raw: string, platform: MigrationPlatform = 'mintlify'): { reason?: string; publicTrue: boolean; openapi?: string } {
   const parsed = parseFrontmatter(raw)
-  const unreadable = parsed.error && /^(groups|public)\s*:/m.test(raw.slice(0, raw.length - parsed.content.length))
-    ? 'frontmatter could not be parsed and declares `groups` or `public`'
+  const gateKeys = platform === 'docusaurus' ? /^draft\s*:/m : platform === 'fern' ? /^(viewers|authed)\s*:/m : /^(groups|public)\s*:/m
+  const unreadable = parsed.error && gateKeys.test(raw.slice(0, raw.length - parsed.content.length))
+    ? 'frontmatter could not be parsed and declares an access or draft setting'
     : undefined
   const openapi = typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined
-  return { reason: frontmatterGateReason(parsed.data) ?? unreadable, publicTrue: isPublicTrue(parsed.data.public), openapi }
+  const reason = platform === 'docusaurus' ? docusaurusDraftReason(parsed.data)
+    : platform === 'fern' ? fernViewersReason(parsed.data)
+      : frontmatterGateReason(parsed.data)
+  return { reason: reason ?? unreadable, publicTrue: isPublicTrue(parsed.data.public), openapi }
+}
+
+/** Docusaurus leaves `draft: true` pages out of production builds. Anything but an explicit false is withheld. */
+function docusaurusDraftReason(data: Record<string, unknown>): string | undefined {
+  const draft = data.draft
+  if (draft === undefined || draft === false || (typeof draft === 'string' && draft.trim().toLowerCase() === 'false')) return undefined
+  return 'frontmatter `draft` marks it as a draft Docusaurus does not publish'
+}
+
+/** Fern role-based access: frontmatter `viewers` (any non-empty value) or a truthy `authed`. */
+function fernViewersReason(data: Record<string, unknown>): string | undefined {
+  const viewers = data.viewers
+  const hasViewers = Array.isArray(viewers) ? viewers.length > 0
+    : typeof viewers === 'string' ? viewers.trim() !== ''
+      : viewers !== undefined && viewers !== null && viewers !== false
+  if (hasViewers) return 'frontmatter `viewers` restricts it to signed-in roles'
+  const authed = data.authed
+  if (authed !== undefined && authed !== null && authed !== false && !(typeof authed === 'string' && ['', 'false'].includes(authed.trim().toLowerCase()))) {
+    return 'frontmatter `authed` requires sign-in'
+  }
+  return undefined
 }
 
 function withoutFrontmatter(value: string): string {
@@ -3428,7 +3453,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const size = lstatSync(file.absolutePath).size
       const raw = readFrontmatterHead(file.absolutePath) ?? (size > MAX_PAGE_BYTES ? undefined : readFileSync(file.absolutePath, 'utf8'))
       if (raw === undefined) throw new Error('frontmatter is not terminated within the bounded read')
-      head = pageHeadGateReason(raw)
+      head = pageHeadGateReason(raw, platform)
     } catch {
       unreadableGate = 'frontmatter could not be read'
     }
@@ -3497,6 +3522,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // Pages that were never classified (dropped by the budget, or beyond the walk
   // cap) could be restricted: assets no published page names by exact path stay
   // out of public/ on such a site, as on one with known restricted pages.
+  if (platform === 'docusaurus' || platform === 'fern') {
+    // Fail closed here too: a draft (Docusaurus) or role-restricted (Fern) page is quarantined, never published.
+    for (const file of files) {
+      if (!isDocFile(file)) continue
+      const reason = classifyPageGate(file).reason
+      if (reason) gateByPath.set(file.absolutePath, { reason, publicTrue: false })
+    }
+  }
   const pagesNotClassified = droppedPageCount > 0 || (platform === 'mintlify' && scanTruncated)
   const hasWithheldContent = withheldPaths.size > 0 || withheldDocFiles.length > 0
   const trackPublishedRefs = platform === 'mintlify' && (hasWithheldContent || pagesNotClassified)
@@ -3512,7 +3545,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const inSnippetDirectory = shown.split('/').some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
     let head: string | undefined
     try { head = readFrontmatterHead(candidate) } catch { return { kind: 'unreadable', reason: 'could not be read' } }
-    const gated = head === undefined ? undefined : pageHeadGateReason(head).reason
+    const gated = head === undefined ? undefined : pageHeadGateReason(head, platform).reason
     if (gated) return { kind: inSnippetDirectory ? 'snippet-gated' : 'gated', reason: gated }
     const navigationGated = inSnippetDirectory ? undefined : mintlifyGatedRefs.get(normalizedReferenceKey(shown).toLowerCase())
     if (navigationGated) return { kind: 'gated', reason: navigationGated }
@@ -3532,7 +3565,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         return verdict ?? undefined
       }
     // Fern and Docusaurus have no access rules to enforce, but an inlined file still has the page size cap.
-    : (candidate) => lstatSync(candidate).size > MAX_PAGE_BYTES ? { kind: 'oversized', reason: 'over 2 MB' } : undefined
+    : (candidate) => {
+        if (gateByPath.get(candidate)?.reason) return { kind: 'gated', reason: 'access-restricted' }
+        return lstatSync(candidate).size > MAX_PAGE_BYTES ? { kind: 'oversized', reason: 'over 2 MB' } : undefined
+      }
   /** docs.yml-derived navigationId -> final id, when a page's frontmatter `slug` overrides it. */
   const fernIdRenames = new Map<string, string>()
   let skipped = 0
@@ -3655,7 +3691,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       continue
     }
     const key = normalizedReferenceKey(file.relativePath)
-    if (platform === 'mintlify') {
+    {
       // Access-restricted pages must never migrate as public. Certain signals
       // only: frontmatter `groups` / `public: false`, or a restricted
       // navigation container. The original file is kept outside every
