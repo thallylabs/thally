@@ -20,13 +20,7 @@ import type {
   MigrationWarning,
 } from './types.js'
 
-const MAX_CONFIG_BYTES = 1_000_000
-/**
- * Each candidate assignment, `docs:` key or `fbContent(` call is matched to its
- * closing brace by a scan to the end of the source in the worst case, so the
- * number tried is bounded. Real configs have a handful.
- */
-const MAX_STATIC_CANDIDATES = 200
+const MAX_CONFIG_BYTES = 20_000_000
 const CATEGORY_FILENAMES = ['_category_.json', '_category_.yml', '_category_.yaml']
 const SIDEBAR_FILENAMES = [
   'sidebars.json',
@@ -457,20 +451,23 @@ export function readDocusaurusSiteOrigin(repositoryRoot: string): string | undef
 
 function readBoundedText(path: string): string {
   if (lstatSync(path).size > MAX_CONFIG_BYTES) {
-    throw new Error('The Docusaurus sidebar config is larger than 1 MB and could not be imported.')
+    throw new Error('The Docusaurus sidebar config is larger than 20 MB and could not be imported.')
   }
   return readFileSync(path, 'utf8')
 }
 
-function matchingObjectLiteral(source: string, start: number): string | null {
-  let depth = 0
+/**
+ * Index of the `}` closing each `{`, found in one pass over `source` that
+ * skips strings and comments. Looking a literal up is then constant time, so
+ * trying many candidates in one file stays linear.
+ */
+function braceTable(source: string): Map<number, number> {
+  const table = new Map<number, number>()
+  const open: Array<number> = []
   let quote: string | null = null
-  let isEscaped = false
   let lineComment = false
   let blockComment = false
-  let objectStart = -1
-
-  for (let index = start; index < source.length; index++) {
+  for (let index = 0; index < source.length; index++) {
     const char = source[index]
     const next = source[index + 1]
     if (lineComment) {
@@ -478,43 +475,42 @@ function matchingObjectLiteral(source: string, start: number): string | null {
       continue
     }
     if (blockComment) {
-      if (char === '*' && next === '/') {
-        blockComment = false
-        index++
-      }
+      if (char === '*' && next === '/') { blockComment = false; index++ }
       continue
     }
     if (quote) {
-      if (isEscaped) isEscaped = false
-      else if (char === '\\') isEscaped = true
+      if (char === '\\') index++
       else if (char === quote) quote = null
       continue
     }
-    if (char === '/' && next === '/') {
-      lineComment = true
-      index++
-      continue
-    }
-    if (char === '/' && next === '*') {
-      blockComment = true
-      index++
-      continue
-    }
-    if (char === '"' || char === "'" || char === '`') {
-      quote = char
-      continue
-    }
-    if (char === '{') {
-      if (objectStart < 0) objectStart = index
-      depth++
-    } else if (char === '}' && objectStart >= 0) {
-      depth--
-      if (depth === 0) return source.slice(objectStart, index + 1)
-    } else if (objectStart < 0 && !/\s/.test(char)) {
-      return null
-    }
+    if (char === '/' && next === '/') { lineComment = true; index++; continue }
+    if (char === '/' && next === '*') { blockComment = true; index++; continue }
+    if (char === '"' || char === "'" || char === '`') { quote = char; continue }
+    if (char === '{') open.push(index)
+    else if (char === '}' && open.length > 0) table.set(open.pop()!, index)
   }
-  return null
+  return table
+}
+
+let lastBraceSource: string | undefined
+let lastBraceTable = new Map<number, number>()
+
+/** The object literal starting at `start` (after whitespace and comments), or null when none starts there or it never closes. */
+function matchingObjectLiteral(source: string, start: number): string | null {
+  let index = start
+  while (index < source.length) {
+    if (/\s/.test(source[index])) index++
+    else if (source.startsWith('//', index)) { const end = source.indexOf('\n', index); index = end < 0 ? source.length : end + 1 }
+    else if (source.startsWith('/*', index)) { const end = source.indexOf('*/', index + 2); index = end < 0 ? source.length : end + 2 }
+    else break
+  }
+  if (source[index] !== '{') return null
+  if (lastBraceSource !== source) {
+    lastBraceSource = source
+    lastBraceTable = braceTable(source)
+  }
+  const end = lastBraceTable.get(index)
+  return end === undefined ? null : source.slice(index, end + 1)
 }
 
 function parseStaticSidebarModule(source: string): Record<string, unknown> {
@@ -524,11 +520,10 @@ function parseStaticSidebarModule(source: string): Record<string, unknown> {
   const assignmentPatterns = [
     /\bmodule\.exports\s*=\s*/g,
     /\bexport\s+default\s*/g,
-    /\b(?:const|let|var)\s+[A-Za-z_$][\w$]*(?:\s*:\s*[^=;]{1,200})?\s*=\s*/g,
+    /\b(?:const|let|var)\s+[A-Za-z_$][\w$]*(?:\s*:\s*(?:(?!\b(?:const|let|var)\b)[^=;])+)?\s*=\s*/g,
   ]
   const candidates = assignmentPatterns.flatMap((pattern) => [...normalizedSource.matchAll(pattern)])
     .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))
-    .slice(0, MAX_STATIC_CANDIDATES)
 
   for (const candidate of candidates) {
     const literal = matchingObjectLiteral(normalizedSource, (candidate.index ?? 0) + candidate[0].length)
@@ -566,21 +561,21 @@ function parseStaticSidebarModule(source: string): Record<string, unknown> {
 
 function replaceExternalFbContent(source: string): string {
   const marker = '...fbContent('
-  let result = source
+  let output = ''
+  let cursor = 0
   let searchFrom = 0
-  for (let attempts = 0; attempts < MAX_STATIC_CANDIDATES; attempts++) {
-    const start = result.indexOf(marker, searchFrom)
-    if (start < 0) return result.replace(/,\s*,/g, ',')
-    const objectStart = result.indexOf('{', start + marker.length)
-    if (objectStart < 0) return result
-    const objectLiteral = matchingObjectLiteral(result, objectStart)
+  while (true) {
+    const start = source.indexOf(marker, searchFrom)
+    if (start < 0) return `${output}${source.slice(cursor)}`.replace(/,\s*,/g, ',')
+    const objectStart = source.indexOf('{', start + marker.length)
+    if (objectStart < 0) return `${output}${source.slice(cursor)}`
+    const objectLiteral = matchingObjectLiteral(source, objectStart)
     if (!objectLiteral) {
       searchFrom = start + marker.length
       continue
     }
-    const objectEnd = objectStart + objectLiteral.length
-    const close = result.indexOf(')', objectEnd)
-    if (close < 0) return result
+    const close = source.indexOf(')', objectStart + objectLiteral.length)
+    if (close < 0) return `${output}${source.slice(cursor)}`
     const externalMatch = /\bexternal\s*:\s*/g.exec(objectLiteral)
     let replacement = ''
     if (externalMatch) {
@@ -592,13 +587,15 @@ function replaceExternalFbContent(source: string): string {
     }
     let replaceEnd = close + 1
     if (!replacement) {
-      const trailingComma = result.slice(replaceEnd).match(/^\s*,/)
-      if (trailingComma) replaceEnd += trailingComma[0].length
+      const trailingComma = /\s*,/y
+      trailingComma.lastIndex = replaceEnd
+      const found = trailingComma.exec(source)
+      if (found) replaceEnd += found[0].length
     }
-    result = `${result.slice(0, start)}${replacement}${result.slice(replaceEnd)}`
-    searchFrom = start + replacement.length
+    output += `${source.slice(cursor, start)}${replacement}`
+    cursor = replaceEnd
+    searchFrom = replaceEnd
   }
-  return result.replace(/,\s*,/g, ',')
 }
 
 function matchingArrayLiteral(source: string, start: number): string | null {
@@ -631,7 +628,7 @@ function configuredSidebarPath(repositoryRoot: string): string | null {
     // A site can register other docs plugins before the classic preset. Their
     // sidebarPath belongs to a different content root (Docusaurus registers
     // its community plugin before the main docs preset, for example).
-    for (const docs of [...source.matchAll(/\bdocs\s*:\s*/g)].slice(0, MAX_STATIC_CANDIDATES)) {
+    for (const docs of source.matchAll(/\bdocs\s*:\s*/g)) {
       const object = matchingObjectLiteral(source, (docs.index ?? 0) + docs[0].length)
       const candidate = object && staticStringField(object, 'sidebarPath')?.replace(/^\.\//, '')
       if (candidate) {
@@ -671,7 +668,7 @@ export function readDocusaurusSidebars(repositoryRoot: string, versionedSidebarP
 
 function namedExportObjectLiteralText(source: string, name: string): string | null {
   const normalizedSource = replaceExternalFbContent(source)
-  const match = new RegExp(`\\bexport\\s+(?:const|let|var)\\s+${escapeRegExp(name)}(?![\\w$])(?:\\s*:\\s*[^=;]{1,200})?\\s*=\\s*`).exec(normalizedSource)
+  const match = new RegExp(`\\bexport\\s+(?:const|let|var)\\s+${escapeRegExp(name)}(?![\\w$])(?:\\s*:\\s*(?:(?!\\b(?:const|let|var)\\b)[^=;])+)?\\s*=\\s*`).exec(normalizedSource)
   if (!match) return null
   return matchingObjectLiteral(normalizedSource, match.index + match[0].length)
 }
@@ -1017,7 +1014,7 @@ export function readDocusaurusSiteSettings(repositoryRoot: string): DocusaurusSi
   const source = readBoundedText(configPath)
   const bindings = staticStringBindings(source)
   const presets = staticArrayField(source, 'presets')
-  const classicDocs = presets && [...presets.matchAll(/["']?docs["']?\s*:\s*/g)].slice(0, MAX_STATIC_CANDIDATES)
+  const classicDocs = presets && [...presets.matchAll(/["']?docs["']?\s*:\s*/g)]
     .map((match) => matchingObjectLiteral(presets, (match.index ?? 0) + match[0].length))
     .find((object): object is string => Boolean(object))
   const docsRouteBasePath = classicDocs && staticStringField(classicDocs, 'routeBasePath') || 'docs'

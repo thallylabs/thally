@@ -451,9 +451,39 @@ describe('Docusaurus config parsing stays linear on repeated openers', () => {
     })
   }
 
-  it('rejects a Docusaurus config over 1 MB', () => {
-    const root = docusaurusSite({ 'sidebars.js': `module.exports = { docs: [] } // ${'x'.repeat(1_100_000)}` })
-    expect(() => readDocusaurusSidebars(root)).toThrow(/1 MB/)
+  it('rejects a Docusaurus config over 20 MB', () => {
+    const root = docusaurusSite({ 'sidebars.js': `module.exports = { docs: [] } // ${'x'.repeat(20_100_000)}` })
+    expect(() => readDocusaurusSidebars(root)).toThrow(/20 MB/)
+  })
+
+  it('reads a large generated sidebar of several MB', () => {
+    const items = Array.from({ length: 40_000 }, (_, index) => `{ type: 'doc', id: 'api/page-${index}' }`).join(',\n')
+    const root = docusaurusSite({ 'sidebars.js': `module.exports = { docs: [${items}] }\n` })
+    expect(Array.isArray(readDocusaurusSidebars(root)?.config.docs)).toBe(true)
+  })
+
+  it('still resolves the real export after more than 200 assignments', () => {
+    const bindings = Array.from({ length: 300 }, (_, index) => `const helper${index} = { value: ${index} }`).join('\n')
+    const root = docusaurusSite({ 'sidebars.js': `${bindings}\nmodule.exports = { main: ['intro'] }\n` })
+    expect(readDocusaurusSidebars(root)?.config).toEqual({ main: ['intro'] })
+  })
+
+  it('still finds the sidebarPath after more than 200 docs: keys', () => {
+    const plugins = Array.from({ length: 300 }, (_, index) => `['content-docs', { id: 'p${index}', docs: { sidebarPath: './missing${index}.js' } }]`).join(',\n')
+    const root = docusaurusSite({
+      'docusaurus.config.js': `module.exports = { plugins: [${plugins}], presets: [['classic', { docs: { sidebarPath: './custom-sidebar.js' } }]] }\n`,
+      'custom-sidebar.js': "module.exports = { custom: ['x'] }\n",
+      'sidebars.js': "module.exports = { fallback: ['y'] }\n",
+    })
+    expect(readDocusaurusSidebars(root)?.sourcePath).toBe('custom-sidebar.js')
+  })
+
+  it('still expands every fbContent call after more than 200', () => {
+    const calls = Array.from({ length: 300 }, () => "...fbContent({ external: ['ext'] })").join(',\n')
+    const root = docusaurusSite({ 'sidebars.js': `module.exports = { docs: [${calls}, 'intro'] }\n` })
+    const docs = readDocusaurusSidebars(root)?.config.docs as Array<string>
+    expect(docs).toHaveLength(301)
+    expect(docs.at(-1)).toBe('intro')
   })
 })
 
