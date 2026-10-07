@@ -147,6 +147,8 @@ interface WalkContext {
    */
   pathPrefix: string
   hiddenInherited?: boolean
+  /** Set while resolving a default version whose entry sets `viewers`. */
+  versionRestricted?: boolean
   /**
    * The navigation id that actually owns a page's content, keyed by
    * `sourcePath` — the first nav location a file is registered at. A file
@@ -545,6 +547,7 @@ function resolveVersionedNavigation(
     return version ? [version] : []
   })
   const chosen = versions.find((version) => version.default === true) ?? versions[0]
+  if (chosen && isRestrictedNode(chosen)) context.versionRestricted = true
   const skipped = versions.filter((version) => version !== chosen)
     .map((version) => (typeof version.version === 'string' ? version.version : undefined))
     .filter((name): name is string => Boolean(name))
@@ -583,6 +586,22 @@ function resolveVersionedNavigation(
  * and version-resolution handling.
  */
 function buildTabsFromConfig(
+  rawConfig: Record<string, unknown>,
+  configDir: string,
+  fernRoot: string,
+  routePrefix: Array<string>,
+  fallbackTabLabel: string,
+  context: WalkContext,
+): Array<MigrationNavigationTab> {
+  const before = context.descriptors.length
+  const tabs = buildUnrestrictedTabs(rawConfig, configDir, fernRoot, routePrefix, fallbackTabLabel, context)
+  if (!context.versionRestricted) return tabs
+  context.versionRestricted = false
+  markRestricted(context, before)
+  return []
+}
+
+function buildUnrestrictedTabs(
   rawConfig: Record<string, unknown>,
   configDir: string,
   fernRoot: string,
@@ -732,8 +751,9 @@ function projectFernProducts(
     const routeSegment = segmentFor(product, label, context)
     const priorPrefix = context.pathPrefix
     context.pathPrefix = relative(fernRoot, productDir).replace(/\\/g, '/')
+    const before = context.descriptors.length
     try {
-      return buildTabsFromConfig(
+      const tabs = buildTabsFromConfig(
         productConfig,
         productDir,
         fernRoot,
@@ -741,6 +761,9 @@ function projectFernProducts(
         label,
         context,
       )
+      if (!isRestrictedNode(product)) return tabs
+      markRestricted(context, before)
+      return []
     } finally {
       context.pathPrefix = priorPrefix
     }

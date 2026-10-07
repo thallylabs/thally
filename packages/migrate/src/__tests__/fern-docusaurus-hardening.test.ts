@@ -403,3 +403,32 @@ describe('assets: exact path matching and unclassifiable pages', () => {
     expect(bundle.assets.some((asset) => asset.path.endsWith('secret.png'))).toBe(false)
   })
 })
+
+describe('Fern viewers on products and versions', () => {
+  it('quarantines every page of a product that sets viewers', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-'))
+    mkdirSync(join(root, 'fern', 'products', 'staff'), { recursive: true })
+    mkdirSync(join(root, 'fern', 'products', 'open'), { recursive: true })
+    writeFileSync(join(root, 'fern', 'fern.config.json'), '{}')
+    writeFileSync(join(root, 'fern', 'docs.yml'), 'products:\n  - display-name: Open\n    path: ./products/open/open.yml\n  - display-name: Staff\n    path: ./products/staff/staff.yml\n    viewers: [staff]\n')
+    writeFileSync(join(root, 'fern', 'products', 'open', 'open.yml'), 'navigation:\n  - page: Open page\n    path: ./open.mdx\n')
+    writeFileSync(join(root, 'fern', 'products', 'open', 'open.mdx'), '# Open page\n')
+    writeFileSync(join(root, 'fern', 'products', 'staff', 'staff.yml'), 'navigation:\n  - page: Staff page\n    path: ./staff.mdx\n')
+    writeFileSync(join(root, 'fern', 'products', 'staff', 'staff.mdx'), '# Staff page\n')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' })
+    expect(bundle.pages.map((page) => page.title)).toEqual(['Open page'])
+    expect(quarantinedPaths(bundle)).toEqual(['migration-quarantine/products/staff/staff.mdx'])
+  })
+
+  it('quarantines the pages of a default version that sets viewers', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-'))
+    mkdirSync(join(root, 'fern', 'versions'), { recursive: true })
+    writeFileSync(join(root, 'fern', 'fern.config.json'), '{}')
+    writeFileSync(join(root, 'fern', 'docs.yml'), 'versions:\n  - display-name: Beta\n    path: versions/beta.yml\n    slug: beta\n    default: true\n    viewers: [beta-users]\n')
+    writeFileSync(join(root, 'fern', 'versions', 'beta.yml'), 'navigation:\n  - page: Beta page\n    path: ../beta.mdx\n')
+    writeFileSync(join(root, 'fern', 'beta.mdx'), '# Beta page\n')
+    // Its only page is restricted, so nothing is left to publish.
+    expect(() => migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' }))
+      .toThrow(/migration-quarantine\/beta\.mdx/)
+  })
+})
