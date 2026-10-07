@@ -164,11 +164,13 @@ const SNIPPET_VALUE_IMPORT_PATTERN = /\bimport\s*\{([^{}]+)\}\s*from\s+['"]([^'"
  * above, this never needs a matching `import` statement — `file` is a path
  * relative to the project's `snippets/` directory (Mintlify's own
  * convention; see `resolveSnippetPath`'s sibling below for the actual
- * lookup). Fern's `<Markdown src="..." />` include is matched the same way. Both self-closing and paired spellings are matched; a paired
+ * lookup). Both self-closing and paired spellings are matched; a paired
  * tag's own children (if any) are always discarded in favor of the
  * resolved snippet's real content, matching Mintlify's own renderer.
  */
-const SNIPPET_TAG_PATTERN = /<(?:Snippet\s+file|Markdown\s+src)=(?:"([^"]+)"|'([^']+)')\s*(?:\/>|>[\s\S]*?<\/(?:Snippet|Markdown)>)/g
+const SNIPPET_TAG_PATTERN = /<Snippet\s+file=(?:"([^"]+)"|'([^']+)')\s*(?:\/>|>[\s\S]*?<\/Snippet>)/g
+/** Fern's `<Markdown src="..." />` include. Only Fern treats it as a file include. */
+const FERN_MARKDOWN_TAG_PATTERN = /<Markdown\s+src=(?:"([^"]+)"|'([^']+)')\s*(?:\/>|>[\s\S]*?<\/Markdown>)/g
 const MINTIGNORE_FILENAME = '.mintignore'
 interface IgnoreMatcher {
   add(patterns: string): IgnoreMatcher
@@ -3074,7 +3076,8 @@ function inlineMdxSnippets(
           return isolateFences(closeOpenCodeFence(interpolateSnippet(snippet, attributes, children)), source, offset, offset + tag.length)
         })
     }
-    return segment.replace(SNIPPET_TAG_PATTERN, (tag: string, doubleQuoted: string | undefined, singleQuoted: string | undefined, offset: number, source: string) => {
+    const tagLabel = (filePath: string): string => platform === 'fern' ? `Included file ${filePath}` : `Snippet file="${filePath}"`
+    return segment.replace(platform === 'fern' ? FERN_MARKDOWN_TAG_PATTERN : SNIPPET_TAG_PATTERN, (tag: string, doubleQuoted: string | undefined, singleQuoted: string | undefined, offset: number, source: string) => {
       const filePath = (doubleQuoted ?? singleQuoted)!
       try {
         // Mintlify's documented form is relative to `snippets/`; sites also write
@@ -3086,7 +3089,7 @@ function inlineMdxSnippets(
           try { return resolveCandidate() } catch { return undefined }
         }).find((path) => path !== undefined && existsSync(path) && lstatSync(path).isFile())
         if (!candidate) throw new Error('file not found')
-        const blocked = blockInline(candidate, filePath, `Snippet file="${filePath}"`)
+        const blocked = blockInline(candidate, filePath, tagLabel(filePath))
         if (blocked) return blocked
         return isolateFences(closeOpenCodeFence(inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
@@ -3102,7 +3105,9 @@ function inlineMdxSnippets(
       } catch {
         warnings.push({
           code: 'missing-page',
-          message: `Snippet file="${filePath}" could not be resolved and was left as a comment.`,
+          message: platform === 'fern'
+            ? `${tagLabel(filePath)} could not be found, so it was left out of the page.`
+            : `${tagLabel(filePath)} could not be resolved and was left as a comment.`,
           source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
         })
         return mdxComment(` Missing snippet: ${filePath} `)

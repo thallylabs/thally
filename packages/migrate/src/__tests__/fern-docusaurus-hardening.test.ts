@@ -974,4 +974,16 @@ describe('Mintlify partial imports', () => {
     const bundle = mintlify('import { v } from "/snippets/v.mdx"\n# Title\n\nValue {v}\n', { 'snippets/v.mdx': 'export const v = "VAL"\n' })
     expect(bundle.pages[0].body).toMatch(/export const v = "VAL";\s*\n\n# Title/)
   })
+  it('keeps the children of a Mintlify <Markdown src> tag and does not treat it as a snippet', () => {
+    const bundle = mintlify('# T\n\n<Markdown src="local.md">child text</Markdown>\n')
+    expect(bundle.pages[0].body).toContain('child text')
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).not.toMatch(/Snippet/)
+  })
+})
+
+describe('Fern Markdown include wording', () => {
+  it('names a missing include plainly', () => {
+    const bundle = fernSite('navigation:\n  - page: In\n    path: in.mdx\n', { 'in.mdx': '# In\n\n<Markdown src="/snippets/missing.mdx" />\n' })
+    expect(bundle.warnings.map((warning) => warning.message)).toContain('Included file /snippets/missing.mdx could not be found, so it was left out of the page.')
+  })
 })
