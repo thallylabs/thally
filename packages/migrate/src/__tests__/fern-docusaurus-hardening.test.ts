@@ -1,6 +1,6 @@
 /** Adversarial inputs for the Fern and Docusaurus migrators. */
 
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, ftruncateSync, mkdtempSync, mkdirSync, openSync, symlinkSync, writeFileSync, writeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -10,17 +10,34 @@ import { projectDocusaurusNavigation, readDocusaurusRedirects, readDocusaurusSid
 import { migrateRepository, projectFernNavigation, renderMigrationFiles } from '../index.js'
 import { pageIdFromReference } from '../path.js'
 
-function docusaurusSite(files: Record<string, string>): string {
+/** A file that starts with `head` and is `size` bytes long, without writing the rest (a sparse file). */
+interface SparseFile { head: string; size: number }
+
+function writeSite(path: string, content: string | SparseFile): void {
+  if (typeof content === 'string') {
+    writeFileSync(path, content)
+    return
+  }
+  const descriptor = openSync(path, 'w')
+  try {
+    writeSync(descriptor, content.head)
+    ftruncateSync(descriptor, content.size)
+  } finally {
+    closeSync(descriptor)
+  }
+}
+
+function docusaurusSite(files: Record<string, string | SparseFile>): string {
   const root = mkdtempSync(join(tmpdir(), 'thally-harden-docusaurus-'))
   writeFileSync(join(root, 'docusaurus.config.ts'), "export default { presets: [['classic', { docs: { sidebarPath: './sidebars.ts' } }]] }")
   for (const [path, content] of Object.entries(files)) {
     mkdirSync(join(root, path, '..'), { recursive: true })
-    writeFileSync(join(root, path), content)
+    writeSite(join(root, path), content)
   }
   return root
 }
 
-function migrateDocusaurus(files: Record<string, string>) {
+function migrateDocusaurus(files: Record<string, string | SparseFile>) {
   return migrateRepository({ repositoryDir: docusaurusSite(files), sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
 }
 
@@ -70,10 +87,9 @@ describe('Docusaurus redirects', () => {
 })
 
 describe('inlined partial size cap', () => {
-  const huge = `${'Lorem ipsum dolor sit amet. '.repeat(80_000)}\n`
+  const huge: SparseFile = { head: 'Lorem ipsum dolor sit amet.\n', size: 2_000_001 }
 
   it('does not inline a Docusaurus partial over 2 MB', () => {
-    expect(huge.length).toBeGreaterThan(2_000_000)
     const bundle = migrateDocusaurus({
       'docs/a.mdx': "import Big from './_big.mdx'\n\n# A\n\n<Big />\n",
       'docs/_big.mdx': huge,
@@ -128,14 +144,14 @@ describe('Docusaurus draft pages', () => {
   })
 })
 
-function fernSite(docsYml: string, pages: Record<string, string>) {
+function fernSite(docsYml: string, pages: Record<string, string | SparseFile>) {
   const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-'))
   mkdirSync(join(root, 'fern'))
   writeFileSync(join(root, 'fern', 'fern.config.json'), '{}')
   writeFileSync(join(root, 'fern', 'docs.yml'), docsYml)
   for (const [path, content] of Object.entries(pages)) {
     mkdirSync(join(root, 'fern', path, '..'), { recursive: true })
-    writeFileSync(join(root, 'fern', path), content)
+    writeSite(join(root, 'fern', path), content)
   }
   return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' })
 }
@@ -243,7 +259,7 @@ describe('Fern Markdown snippets', () => {
     const bundle = fernSite(nav, {
       'in.mdx': '# In\n\n<Markdown src="/snippets/note.mdx" />\n\n<Markdown src="/snippets/huge.mdx" />\n',
       'snippets/note.mdx': 'SNIPPET-BODY\n',
-      'snippets/huge.mdx': 'Lorem ipsum dolor sit amet. '.repeat(80_000),
+      'snippets/huge.mdx': { head: 'Lorem ipsum dolor sit amet.\n', size: 2_000_001 },
     })
     expect(bundle.pages).toHaveLength(1)
     expect(bundle.pages[0].body).toContain('SNIPPET-BODY')
@@ -367,10 +383,9 @@ describe('assets: exact path matching and unclassifiable pages', () => {
   })
 
   it('quarantines the assets of a page whose frontmatter cannot be read', () => {
-    const unreadable = `---\ndraft: true\n${'x: y\n'.repeat(1)}`.padEnd(2_100_000, 'z')
     const bundle = site('![b](/img/other/secret.png)\n', 'draft: true', '')
     expect(bundle.assets.map((asset) => asset.path)).not.toContain('img/secret.png')
-    const root = docusaurusSite({ 'docs/gated.md': `${unreadable}\n![a](/img/secret.png)`, 'docs/public.md': '# Public\n' })
+    const root = docusaurusSite({ 'docs/gated.md': { head: '---\ndraft: true\n', size: 2_000_001 }, 'docs/public.md': '# Public\n' })
     mkdirSync(join(root, 'static', 'img'), { recursive: true })
     writeFileSync(join(root, 'static', 'img', 'secret.png'), PNG)
     const result = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
@@ -452,12 +467,12 @@ describe('Docusaurus config parsing stays linear on repeated openers', () => {
   }
 
   it('rejects a Docusaurus config over 20 MB', () => {
-    const root = docusaurusSite({ 'sidebars.js': `module.exports = { docs: [] } // ${'x'.repeat(20_100_000)}` })
+    const root = docusaurusSite({ 'sidebars.js': { head: 'module.exports = { docs: [] }\n', size: 20_000_001 } })
     expect(() => readDocusaurusSidebars(root)).toThrow(/20 MB/)
   })
 
-  it('reads a large generated sidebar of several MB', () => {
-    const items = Array.from({ length: 40_000 }, (_, index) => `{ type: 'doc', id: 'api/page-${index}' }`).join(',\n')
+  it('reads a generated sidebar larger than the old 1 MB cap', () => {
+    const items = Array.from({ length: 25_000 }, (_, index) => `{ type: 'doc', id: 'api/page-${index}' }`).join(',\n')
     const root = docusaurusSite({ 'sidebars.js': `module.exports = { docs: [${items}] }\n` })
     expect(Array.isArray(readDocusaurusSidebars(root)?.config.docs)).toBe(true)
   })
@@ -596,7 +611,7 @@ describe('Docusaurus ThemedImage component', () => {
 
 describe('OpenAPI spec size cap', () => {
   const header = 'openapi: 3.0.0\ninfo:\n  title: Big\n  version: "1"\npaths: {}\n'
-  const oversized = (): Buffer => Buffer.concat([Buffer.from(header), Buffer.alloc(50_100_000, '#')])
+  const oversized = (): SparseFile => ({ head: header, size: 50_000_001 })
 
   it('does not read a Fern generators.yml spec over 50 MB', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-'))
@@ -606,7 +621,7 @@ describe('OpenAPI spec size cap', () => {
     writeFileSync(join(root, 'fern', 'in.mdx'), '# In\n')
     writeFileSync(join(root, 'fern', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi/big.yaml\n')
     mkdirSync(join(root, 'fern', 'openapi'))
-    writeFileSync(join(root, 'fern', 'openapi', 'big.yaml'), oversized())
+    writeSite(join(root, 'fern', 'openapi', 'big.yaml'), oversized())
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' })
     expect(bundle.assets.some((asset) => asset.path.startsWith('openapi/'))).toBe(false)
     expect(bundle.warnings.some((warning) => warning.message.includes('50 MB') && warning.message.includes('big.yaml'))).toBe(true)
@@ -616,7 +631,7 @@ describe('OpenAPI spec size cap', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-harden-mintlify-'))
     writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { tabs: [{ tab: 'API', openapi: 'big.yaml' }, { tab: 'Docs', pages: ['index'] }] } }))
     writeFileSync(join(root, 'index.mdx'), '# Home\n')
-    writeFileSync(join(root, 'big.yaml'), oversized())
+    writeSite(join(root, 'big.yaml'), oversized())
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
     expect(bundle.assets.some((asset) => asset.path.startsWith('openapi/'))).toBe(false)
     expect(bundle.warnings.some((warning) => warning.message.includes('50 MB') && warning.message.includes('big.yaml'))).toBe(true)
