@@ -98,10 +98,12 @@ function docusaurusSlugifySegment(value: string): string {
   } catch {
     // Malformed escapes remain literal input and are normalized safely below.
   }
-  return decoded
+  const slug = decoded
     .replace(/\.(?:html?|mdx?)$/i, '')
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/(^-|-$)/g, '')
+  // A dot segment (also spelled `%2e%2e`) must never reach a page id or file path.
+  return slug === '.' || slug === '..' ? '' : slug
 }
 
 function docusaurusRouteId(value: string): string | null {
