@@ -1379,6 +1379,22 @@ function classifyApiSpec(path: string): 'openapi' | 'asyncapi' | 'unknown' {
  */
 const SPEC_DIRECTORY = 'openapi'
 
+/** Real OpenAPI documents exceed the 2 MB page limit, so specs get their own, larger cap. */
+const MAX_SPEC_BYTES = 50_000_000
+
+/** Reads an OpenAPI spec for every platform; one over the cap is skipped with a warning. */
+function readSpecFile(absolutePath: string, relativePath: string, warnings: Array<MigrationWarning>): Buffer | undefined {
+  if (lstatSync(absolutePath).size > MAX_SPEC_BYTES) {
+    warnings.push({
+      code: 'skipped-file',
+      message: `The OpenAPI spec "${relativePath}" is larger than ${MAX_SPEC_BYTES / 1_000_000} MB and was not migrated; split it or reduce its size.`,
+      source: relativePath,
+    })
+    return undefined
+  }
+  return readFileSync(absolutePath)
+}
+
 function specAssetPath(filename: string): string {
   return `${SPEC_DIRECTORY}/${filename}`
 }
@@ -1498,9 +1514,11 @@ function resolveMintlifyApiSpecs(
         message: `The OpenAPI spec "${reference.value}"${tabSuffix} was limited to pages under "${reference.directory}" in the source, but Thally's API reference always covers a whole tab, so it was migrated as the tab's full API reference. Links in page bodies and Mintlify endpoint URLs under "${reference.directory}/<tag>/<operation>" are redirected to the matching endpoints where one exists (a separate warning counts any endpoint redirects that were skipped); check any other links to "${reference.directory}/..." manually.`,
       })
     }
+    const content = readSpecFile(match.absolutePath, match.relativePath, warnings)
+    if (!content) continue
     specs.push({
       filename: basename(match.relativePath),
-      content: readFileSync(match.absolutePath),
+      content,
       tabLabel: reference.tabLabel,
       parentTab: reference.parentTab,
       icon: reference.icon,
@@ -4514,7 +4532,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           filename = `${prefix}${filename}`
         }
         specFilenameSources.set(filename, spec.absolutePath)
-        const specContent = readFileSync(spec.absolutePath)
+        const specContent = readSpecFile(spec.absolutePath, spec.relativePath, warnings)
+        if (!specContent) continue
         if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
           assets.push(specAsset(filename, specContent))
         }
@@ -4631,15 +4650,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // No docs.json-configured spec at all: fall back to a naive repo scan,
       // matching every other platform's baseline behavior.
       const fallback = findOpenApi(files)
-      if (fallback) {
+      const fallbackContent = fallback ? readSpecFile(fallback.absolutePath, fallback.relativePath, warnings) : undefined
+      if (fallback && fallbackContent) {
         const filename = basename(fallback.relativePath)
         const matches = (ref: string): boolean => specRefMatches(ref, fallback.relativePath, filename, true)
         if (withheldSpecRefs.some(matches) && !publishedSpecRefs.some(matches)) {
           // Only restricted pages name this spec, and docs.json does not list it.
-          quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(filename)}`, content: readFileSync(fallback.absolutePath) })
+          quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(filename)}`, content: fallbackContent })
           withheldAssetCount++
         } else {
-          const pruned = excludeWithheldOperations({ sourcePath: fallback.relativePath, filename, content: readFileSync(fallback.absolutePath) }, withheldSpecRefs, keptSpecRefs)
+          const pruned = excludeWithheldOperations({ sourcePath: fallback.relativePath, filename, content: fallbackContent }, withheldSpecRefs, keptSpecRefs)
           if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
             assets.push(specAsset(filename, pruned.content))
           }

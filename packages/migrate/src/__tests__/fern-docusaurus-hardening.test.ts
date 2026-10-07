@@ -563,3 +563,32 @@ describe('Docusaurus ThemedImage component', () => {
     expect(body).not.toContain('ThemedImage')
   })
 })
+
+describe('OpenAPI spec size cap', () => {
+  const header = 'openapi: 3.0.0\ninfo:\n  title: Big\n  version: "1"\npaths: {}\n'
+  const oversized = (): Buffer => Buffer.concat([Buffer.from(header), Buffer.alloc(50_100_000, '#')])
+
+  it('does not read a Fern generators.yml spec over 50 MB', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-harden-fern-'))
+    mkdirSync(join(root, 'fern'))
+    writeFileSync(join(root, 'fern', 'fern.config.json'), '{}')
+    writeFileSync(join(root, 'fern', 'docs.yml'), 'navigation:\n  - page: In\n    path: in.mdx\n  - api: API Reference\n')
+    writeFileSync(join(root, 'fern', 'in.mdx'), '# In\n')
+    writeFileSync(join(root, 'fern', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi/big.yaml\n')
+    mkdirSync(join(root, 'fern', 'openapi'))
+    writeFileSync(join(root, 'fern', 'openapi', 'big.yaml'), oversized())
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' })
+    expect(bundle.assets.some((asset) => asset.path.startsWith('openapi/'))).toBe(false)
+    expect(bundle.warnings.some((warning) => warning.message.includes('50 MB') && warning.message.includes('big.yaml'))).toBe(true)
+  })
+
+  it('does not read a Mintlify docs.json spec over 50 MB', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-harden-mintlify-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { tabs: [{ tab: 'API', openapi: 'big.yaml' }, { tab: 'Docs', pages: ['index'] }] } }))
+    writeFileSync(join(root, 'index.mdx'), '# Home\n')
+    writeFileSync(join(root, 'big.yaml'), oversized())
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+    expect(bundle.assets.some((asset) => asset.path.startsWith('openapi/'))).toBe(false)
+    expect(bundle.warnings.some((warning) => warning.message.includes('50 MB') && warning.message.includes('big.yaml'))).toBe(true)
+  })
+})
