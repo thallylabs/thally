@@ -159,11 +159,11 @@ const SNIPPET_VALUE_IMPORT_PATTERN = /\bimport\s*\{([^{}]+)\}\s*from\s+['"]([^'"
  * above, this never needs a matching `import` statement — `file` is a path
  * relative to the project's `snippets/` directory (Mintlify's own
  * convention; see `resolveSnippetPath`'s sibling below for the actual
- * lookup). Both self-closing and paired spellings are matched; a paired
+ * lookup). Fern's `<Markdown src="..." />` include is matched the same way. Both self-closing and paired spellings are matched; a paired
  * tag's own children (if any) are always discarded in favor of the
  * resolved snippet's real content, matching Mintlify's own renderer.
  */
-const SNIPPET_TAG_PATTERN = /<Snippet\s+file=(?:"([^"]+)"|'([^']+)')\s*(?:\/>|>[\s\S]*?<\/Snippet>)/g
+const SNIPPET_TAG_PATTERN = /<(?:Snippet\s+file|Markdown\s+src)=(?:"([^"]+)"|'([^']+)')\s*(?:\/>|>[\s\S]*?<\/(?:Snippet|Markdown)>)/g
 const MINTIGNORE_FILENAME = '.mintignore'
 interface IgnoreMatcher {
   add(patterns: string): IgnoreMatcher

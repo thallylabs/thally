@@ -236,3 +236,18 @@ describe('Fern files reached through a symlink', () => {
     expect(bundle.warnings.some((warning) => warning.message.includes('ext/openapi.yaml'))).toBe(true)
   })
 })
+
+describe('Fern Markdown snippets', () => {
+  it('inlines <Markdown src> and applies the size cap', () => {
+    const nav = 'navigation:\n  - page: In\n    path: in.mdx\n'
+    const bundle = fernSite(nav, {
+      'in.mdx': '# In\n\n<Markdown src="/snippets/note.mdx" />\n\n<Markdown src="/snippets/huge.mdx" />\n',
+      'snippets/note.mdx': 'SNIPPET-BODY\n',
+      'snippets/huge.mdx': 'Lorem ipsum dolor sit amet. '.repeat(80_000),
+    })
+    expect(bundle.pages).toHaveLength(1)
+    expect(bundle.pages[0].body).toContain('SNIPPET-BODY')
+    expect(bundle.pages[0].body.length).toBeLessThan(100_000)
+    expect(bundle.warnings.map((warning) => warning.message).join(' ')).toContain('too large to inline')
+  })
+})
