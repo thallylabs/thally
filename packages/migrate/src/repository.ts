@@ -1943,7 +1943,7 @@ function findFernConfiguredOpenApi(
       // `../../../cohere-openapi.yaml`). The security boundary is still the
       // whole repository checkout, never anything above it.
       try {
-        const absolute = resolveWithinRoot(dir, specPath, repositoryDir)
+        const absolute = withinRealRoot(resolveWithinRoot(dir, specPath, repositoryDir), repositoryDir)
         if (!existsSync(absolute) || !lstatSync(absolute).isFile()) continue
         const kind = classifyApiSpec(absolute)
         if (kind === 'asyncapi') {
