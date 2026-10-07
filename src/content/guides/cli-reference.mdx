@@ -17,19 +17,21 @@ npx thally
 | Command | What it does |
 | --- | --- |
 | `thally init [dir]` | Create a project with `create-thally-docs`. |
-| `thally dev` | Start the local documentation server. |
+| `thally dev [-- OPTIONS]` | Start the local documentation server and print its agent endpoints. |
 | `thally build` | Build the production site. |
 | `thally start` | Serve a completed production build. |
 | `thally deploy [--prod] [--cloudflare]` | Build and deploy with Vercel or Cloudflare Workers. |
-| `thally check [--agents] [--fix] [--ci] [--external] [--drift]` | Validate content and optional agent-readiness checks. |
+| `thally check [dir] [--agents] [--fix] [--ci] [--external] [--drift]` | Validate content and optional agent-readiness checks. |
 | `thally new PAGE_ID` | Create an MDX page and register it in `docs.json`. |
-| `thally migrate SOURCE [dir]` | Import a documentation repository or public site. |
+| `thally migrate SOURCE [dir] [--platform mintlify\|docusaurus\|fern\|auto]` | Import a documentation repository or public site. |
 | `thally translate --locale LOCALE` | Generate or refresh a translated content tree. |
 | `thally mcp` | Start the local MCP server over standard input/output. |
 | `thally agent "INSTRUCTION"` | Draft a documentation change for review. |
 | `thally track add`, `list`, `test`, or `setup` | Connect product-repository changes to documentation work. |
 
-Run `npx thally` with no command to see the current command list.
+Run `npx thally --help` to see the current command list, and
+`npx thally COMMAND --help` for a command's options. Help never runs the
+command, and unknown options are rejected with a pointer to that help.
 
 ### Preview and build
 
@@ -39,8 +41,13 @@ npx thally build
 npx thally start
 ```
 
-`dev` starts the project server. `build` creates the production output, and
-`start` serves an existing production build.
+`dev` starts the project server. Once it is ready, it prints the local
+`llms.txt`, `/api/mcp`, and Agent Readiness URLs plus a
+`claude mcp add --transport http` command for connecting Claude Code to the
+preview. `build` creates the production output, and `start` serves an existing
+production build. Options for the underlying server go after `--`, for example
+`npx thally dev -- --port 4000`. These commands stop with an `npm install`
+reminder when the project's dependencies are missing.
 
 ### Add and check content
 
@@ -55,7 +62,10 @@ npx thally check
 `new` creates the MDX file and registers it in the last group of the first
 content tab. `check` validates the project. Add `--ci` for GitHub annotations,
 `--external` to check external links, `--drift` to evaluate provenance, or
-`--agents` to include the Agent Readiness Score.
+`--agents` to include the Agent Readiness Score. `--external` sends bounded
+`HEAD` requests (eight at a time, eight-second timeout, at most 300 unique
+URLs) only to hosts that resolve to public addresses, and reports broken links
+as warnings that never fail the check.
 
 ### Deploy
 
@@ -64,8 +74,12 @@ npx thally deploy --prod          # Vercel
 npx thally deploy --cloudflare    # Cloudflare Workers
 ```
 
-The deploy command builds the provider-specific artifact before it publishes.
-See [Deploying](/guides/deploying) for host configuration and durable storage.
+The deploy command builds the provider-specific artifact and runs the Agent
+Readiness Score before it publishes. It then prints the deployed URL reported by
+Vercel or Wrangler (falling back to `THALLY_SITE_URL`) with its agent endpoints,
+and reports the readiness result; a low score is shown but does not stop the
+deploy. See [Deploying](/guides/deploying) for host configuration and durable
+storage.
 
 ## Scaffold with create-thally-docs
 
@@ -87,11 +101,14 @@ npx create-thally-docs my-docs
 
 The CLI walks through an interactive setup:
 
-- **Project name** — displayed in the header and metadata
-- **Description** — used for SEO and OpenGraph tags
-- **Brand preset** — `primary` (green) or `secondary` (purple)
-- **GitHub repo URL** — auto-wires Support and GitHub links
-- **Install dependencies now** — optional; skip it for a seconds-fast scaffold, then run `npm install` when you are ready
+- **Project directory** and **project name** — displayed in the header and metadata
+- **GitHub repo URL** — optional; auto-wires Support and GitHub links
+- **Thally Track** — optional; keep docs in sync with product pull requests
+- **Install dependencies now** — yes by default, so the preview command works right away
+- **Additional languages** — optional
+
+The description and brand palette default sensibly and are one-line edits in
+`src/data/site.ts`.
 
 Skip all prompts and accept defaults with `--yes`:
 
@@ -104,8 +121,8 @@ npx create-thally-docs my-docs --yes
 | Flag | Description |
 |------|-------------|
 | `--yes`, `-y` | Accept all defaults, skip interactive prompts |
-| `--install` | Install project dependencies after scaffolding |
-| `--no-install` | Skip dependency installation without prompting |
+| `--install` | Install project dependencies (the default) |
+| `--no-install` | Skip dependency installation |
 
 ---
 
@@ -119,9 +136,9 @@ npx create-thally-docs migrate <github-or-docs-url> [output-dir] [options]
 
 For repositories, Thally reads Markdown, MDX, navigation, local snippets, assets, locales, redirects, and OpenAPI files. For live Mintlify sites, it first recovers the structured configuration embedded in the rendered application, then fetches page content from Markdown endpoints. Other live sites use `llms.txt`, path-scoped sitemaps, and navigation links before falling back to HTML conversion.
 
-**Supported source platforms:** Mintlify, Docusaurus, GitBook, Nextra, VitePress, Starlight, and any repo with plain Markdown files.
+**Supported source platforms:** Mintlify, Docusaurus, Fern, GitBook, Nextra, VitePress, Starlight, and any repo with plain Markdown files.
 
-Interactive runs ask which platform currently hosts the docs. Selecting Mintlify keeps the existing Mintlify projection; selecting Docusaurus uses its sidebar, route, syntax, and asset adapter. Choose automatic detection for another platform.
+Interactive runs ask which platform currently hosts the docs. Selecting Mintlify keeps the existing Mintlify projection; selecting Docusaurus uses its sidebar, route, syntax, and asset adapter; selecting Fern uses the Fern adapter. Choose automatic detection for another platform.
 
 When automatic detection receives a live website URL, the CLI first recommends migrating its source GitHub repository. Repository migrations retain authored navigation, assets, OpenAPI files, and component structure that may not be recoverable from rendered HTML. If you continue with the live URL, you must accept that the result may need manual alignment; use the Thally MCP afterward to refine the generated project when needed.
 
@@ -246,6 +263,9 @@ The CLI exits with code `1` if any errors are found, `0` if the project is clean
 | Flag | Description |
 |------|-------------|
 | `--fix` | Auto-add orphan pages to the last group of the first content tab |
+| `--ci` | Print GitHub annotations and a compact summary |
+| `--drift` | Flag pages whose `sources` changed since `verifiedCommit` |
+| `--external` | Also check external links on public hosts (bounded; warnings only) |
 
 ---
 

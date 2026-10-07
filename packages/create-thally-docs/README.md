@@ -10,9 +10,13 @@ agent discovery files.
 ```bash
 npx create-thally-docs my-docs
 cd my-docs
-npm install
 npm run dev
 ```
+
+Sites created from a starter that includes the `thally` CLI
+(`@thallylabs/cli`) as a dev dependency can run `npx thally dev` instead, which
+also prints the local `llms.txt` and MCP endpoints once the server is ready.
+The completion message prints the right command for the project you created.
 
 The dev server starts at [http://localhost:3040](http://localhost:3040) and
 automatically uses the next available port when needed. A freshly scaffolded
@@ -25,9 +29,14 @@ Run non-interactively with smart defaults:
 npx create-thally-docs my-docs --yes
 ```
 
-Dependency installation is deliberately opt-in so the scaffold finishes in
-seconds. Pass `--install` to run it immediately, or `--no-install` to skip the
-interactive question explicitly.
+Dependencies are installed by default, so the preview command works right
+away. Pass `--no-install` to skip installation (for example in CI or when you
+use another package manager). The interactive setup asks only for the project
+directory, name, an optional GitHub repository, Thally Track, installation,
+and extra languages; the description and brand palette are one-line edits in
+`src/data/site.ts`. The generated `.env.local` never pins a `localhost` site
+URL, so a build from this checkout cannot bake local links into `llms.txt` or
+the sitemap.
 
 ## Terminal output
 
@@ -43,7 +52,7 @@ Scaffolding and migration keep subprocess logs quiet in interactive terminals.
 Add `--verbose` to see installation and build logs as they happen:
 
 ```bash
-npx create-thally-docs my-docs --yes --install --verbose
+npx create-thally-docs my-docs --yes --verbose
 npx create-thally-docs migrate https://github.com/your-org/your-docs --platform auto --verbose
 ```
 
@@ -57,7 +66,7 @@ runs retain subprocess output for scripts and CI. These options also work with
 
 - **MDX content** in `src/content/`, navigation in `docs.json`
 - **Agent endpoints** — `/llms.txt`, `/ai.txt`, `/api/docs-index`, `/api/agent-readiness`
-- **Hybrid search**, **retrieval-grounded AI chat**, and an **admin analytics** dashboard
+- **Hybrid search**, an **admin analytics** dashboard, and **retrieval-grounded AI chat** when the site is linked to Thally Cloud
 - **Starter content** with keywords and structured pages, ready to edit
 
 ## Other commands
@@ -66,15 +75,16 @@ runs retain subprocess output for scripts and CI. These options also work with
 | --- | --- |
 | `create-thally-docs <dir>` | Scaffold a new project |
 | `create-thally-docs migrate <github-or-docs-url> [dir]` | Import a docs repository or public docs site through the shared migration engine |
-| `create-thally-docs check [dir] [--fix]` | Lint content for orphan pages and missing frontmatter |
+| `create-thally-docs check [dir] [--fix] [--ci] [--drift] [--external]` | Lint content for broken links, orphan pages, and missing frontmatter; `--external` also checks links to public hosts (bounded, warnings only) |
 | `create-thally-docs translate --locale <code>` | Translate content into another locale |
 
-Interactive migrations ask whether the source is Mintlify, Docusaurus, or
+Interactive migrations ask whether the source is Mintlify, Docusaurus, Fern, or
 another auto-detected platform. When automatic detection receives a live
 website URL, the CLI recommends its source GitHub repository and requires
 confirmation before continuing with the less precise website crawl. For
 scripts and CI, pass
-`--platform mintlify`, `--platform docusaurus`, or `--platform auto`; `--yes`
+`--platform mintlify`, `--platform docusaurus`, `--platform fern`, or
+`--platform auto`; `--yes`
 keeps backward-compatible auto-detection when no platform flag is supplied.
 Explicit `--platform auto` and `--yes` runs print the live-site limitation
 without introducing an interactive prompt. Running `migrate` without
