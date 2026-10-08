@@ -2158,6 +2158,7 @@ export function fernIfRolesReason(raw: string): string | undefined {
   const marker = /<If(?![\w$.-])/g
   for (let match = marker.exec(text); match; match = marker.exec(text)) {
     const tag = scanJsxOpeningTag(text, match.index, 'If')
+    marker.lastIndex = tag.next
     // Comments may precede a JSX spread; unresolved ellipses fail closed.
     if (tag.attributes.includes('...')) {
       return 'it contains `<If>` spread props whose access rules cannot be resolved safely'
@@ -2169,7 +2170,6 @@ export function fernIfRolesReason(raw: string): string | undefined {
     if (/(?:^|[\s{}"'])(?:roles|viewers)\s*=/.test(tag.attributes)) {
       return 'it contains `<If roles>` content that Fern shows only to some roles'
     }
-    if (tag.end !== null) marker.lastIndex = tag.end + 1
   }
   return undefined
 }
@@ -2194,9 +2194,21 @@ function withoutFrontmatter(value: string): string {
 
 function staticSnippetProperties(attributes: string): Map<string, string> {
   const properties = new Map<string, string>()
-  const matcher = /\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*"([^"]*)"\s*\}|\{\s*'([^']*)'\s*\})/g
-  for (const match of attributes.matchAll(matcher)) {
-    properties.set(match[1], match[2] ?? match[3] ?? match[4] ?? match[5] ?? '')
+  let tree: ts.SourceFile
+  try {
+    tree = ts.createSourceFile('snippet.tsx', `const snippet = <Snippet ${attributes.replace(/\/\s*$/, '')} />`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  } catch { return properties }
+  const statement = tree.statements[0]
+  if (!statement || !ts.isVariableStatement(statement)) return properties
+  const element = statement.declarationList.declarations[0]?.initializer
+  if (!element || !ts.isJsxSelfClosingElement(element)) return properties
+  for (const attribute of element.attributes.properties) {
+    if (!ts.isJsxAttribute(attribute) || !ts.isIdentifier(attribute.name)) continue
+    const value = attribute.initializer
+    if (value && ts.isStringLiteral(value)) properties.set(attribute.name.text, value.text)
+    else if (value && ts.isJsxExpression(value) && value.expression && ts.isStringLiteralLike(value.expression)) {
+      properties.set(attribute.name.text, value.expression.text)
+    }
   }
   return properties
 }
@@ -3046,10 +3058,11 @@ function inlineMdxSnippets(
     let cursor = 0
     for (let match = marker.exec(segment); match; match = marker.exec(segment)) {
       const opening = scanJsxOpeningTag(segment, match.index, 'Code')
-      if (opening.end === null) break
+      marker.lastIndex = opening.next
+      if (opening.end === null) continue
       if (segment[opening.end - 1] !== '/') continue
-      const attribute = (name: string): string | undefined => opening.attributes
-        .match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`))?.slice(1).find((value) => value !== undefined)
+      const properties = staticSnippetProperties(opening.attributes)
+      const attribute = (name: string): string | undefined => properties.get(name)
       const filePath = attribute('src')
       if (!filePath) continue
       const end = opening.end + 1
@@ -3086,7 +3099,6 @@ function inlineMdxSnippets(
       }
       output += segment.slice(cursor, match.index) + replacement
       cursor = end
-      marker.lastIndex = end
     }
     return output + segment.slice(cursor)
   })

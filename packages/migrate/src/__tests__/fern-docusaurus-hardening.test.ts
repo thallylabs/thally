@@ -111,10 +111,30 @@ describe('Fern navigation recursion', () => {
 })
 
 describe('Fern file-backed code examples', () => {
+  it('does not treat src text inside a quoted title as a file attribute', () => {
+    const bundle = fernSite('navigation:\n  - page: Guide\n    path: guide.mdx\n', {
+      'guide.mdx': '# Guide\n\nVisible introduction.\n\n<Code title=\'example src="secret.py"\' />\n',
+      'secret.py': 'SHOULD-NOT-BE-INLINED\n',
+    })
+    expect(bundle.pages[0].body).not.toContain('SHOULD-NOT-BE-INLINED')
+    const quotedTag = '<Code title="<Code example" />'
+    expect(mdx.scanJsxOpeningTag(quotedTag, 0, 'Code').end).toBe(quotedTag.length - 1)
+  })
+
+  it('recovers at the next independent opening after a malformed Code tag', () => {
+    const scan = vi.spyOn(mdx, 'scanJsxOpeningTag')
+    try {
+      fernSite('navigation:\n  - page: Guide\n    path: guide.mdx\n  - page: Safe\n    path: safe.mdx\n', {
+        'safe.mdx': '# Safe\n\nBody.', 'guide.mdx': '# Guide\n\n<Code broken\n<Code src="missing" />',
+      })
+      expect(scan.mock.calls.filter((call) => call[2] === 'Code')).toHaveLength(2)
+    } finally { scan.mockRestore() }
+  })
+
   it('scans an unterminated suffix only once rather than rescanning every Code marker', () => {
     const scan = vi.spyOn(mdx, 'scanJsxOpeningTag')
     try {
-      fernSite('navigation:\n  - page: Guide\n    path: guide.mdx\n  - page: Safe\n    path: safe.mdx\n', { 'safe.mdx': '# Safe\n\nBody.', 'guide.mdx': '# Guide\n\n' + '<Code src="missing"\n'.repeat(20) })
+      fernSite('navigation:\n  - page: Guide\n    path: guide.mdx\n  - page: Safe\n    path: safe.mdx\n', { 'safe.mdx': '# Safe\n\nBody.', 'guide.mdx': '# Guide\n\n<Code title="' + '<Code '.repeat(20) })
       expect(scan.mock.calls.filter((call) => call[2] === 'Code')).toHaveLength(1)
     } finally { scan.mockRestore() }
   })

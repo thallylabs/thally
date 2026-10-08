@@ -82,9 +82,9 @@ function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'War
  * quoted values and `{expressions}` (strings and any brace depth) so a `>` inside
  * them does not end the tag. The scan also stops at the next `<name` opener, so
  * a run of unterminated openers is scanned once in total, not once per opener.
- * `attributes` is what was scanned, whether or not the tag closed.
+ * `attributes` is what was scanned; `next` advances callers past that span.
  */
-export function scanJsxOpeningTag(source: string, start: number, name: string): { attributes: string; end: number | null } {
+export function scanJsxOpeningTag(source: string, start: number, name: string): { attributes: string; end: number | null; next: number } {
   const opener = `<${name}`
   let quote: string | null = null
   let depth = 0
@@ -94,8 +94,9 @@ export function scanJsxOpeningTag(source: string, start: number, name: string): 
   const attributesStart = start + opener.length
   for (let index = attributesStart; index < source.length; index++) {
     const char = source[index]
-    if (char === '<' && source.startsWith(opener, index) && !/[\w$.-]/.test(source[index + opener.length] ?? '')) {
-      return { attributes: source.slice(attributesStart, index), end: null }
+    if (char === '<' && !quote && !braceQuote && depth === 0 && !lineComment && !blockComment
+      && source.startsWith(opener, index) && !/[\w$.-]/.test(source[index + opener.length] ?? '')) {
+      return { attributes: source.slice(attributesStart, index), end: null, next: index }
     }
     if (lineComment) {
       if (char === '\n' || char === '\r') lineComment = false
@@ -114,9 +115,9 @@ export function scanJsxOpeningTag(source: string, start: number, name: string): 
       if (char === quote) quote = null
     } else if (char === '"' || char === "'") quote = char
     else if (char === '{') depth++
-    else if (char === '>') return { attributes: source.slice(attributesStart, index), end: index }
+    else if (char === '>') return { attributes: source.slice(attributesStart, index), end: index, next: index + 1 }
   }
-  return { attributes: source.slice(attributesStart), end: null }
+  return { attributes: source.slice(attributesStart), end: null, next: source.length }
 }
 
 /**
@@ -135,6 +136,7 @@ export function normalizeDocusaurusAdmonitionTags(segment: string): string {
       continue
     }
     const tag = scanJsxOpeningTag(segment, match.index, 'Admonition')
+    marker.lastIndex = tag.next
     if (tag.end === null) continue
     const type = tag.attributes.match(/\btype=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)?.toLowerCase() ?? 'note'
     const title = tag.attributes.match(/\btitle=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)?.trim()
@@ -154,6 +156,7 @@ export function normalizeDocusaurusLinkTags(segment: string): string {
   let cursor = 0
   for (let match = marker.exec(segment); match; match = marker.exec(segment)) {
     const tag = scanJsxOpeningTag(segment, match.index, 'Link')
+    marker.lastIndex = tag.next
     if (tag.end === null) continue
     output += `${segment.slice(cursor, match.index)}<a${tag.attributes.replace(/(^|\s)to=/, '$1href=')}>`
     cursor = tag.end + 1
