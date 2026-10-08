@@ -827,7 +827,7 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
   function expandCandidates(candidate: string): Array<string> {
     const candidates = [candidate]
     if (!extname(candidate)) {
-      candidates.push(...['.tsx', '.jsx', '.ts', '.js', '.mjs', '.json'].map((extension) => candidate + extension))
+      candidates.push(...['.tsx', '.jsx', '.ts', '.js', '.mjs', '.json', '.d.ts'].map((extension) => candidate + extension))
       candidates.push(...['index.tsx', 'index.jsx', 'index.ts', 'index.js'].map((name) => resolve(candidate, name)))
     } else if (extname(candidate) === '.js') {
       candidates.push(candidate.slice(0, -3) + '.ts', candidate.slice(0, -3) + '.tsx')
@@ -938,7 +938,8 @@ export function createComponentMigrator(siteRoot: string, confinementRoot: strin
         return
       }
       const text = content.toString('utf8')
-      const syntax = ts.transpileModule(text, { fileName: path, reportDiagnostics: true,
+      // transpileModule cannot emit declaration files; parse their syntax as TS.
+      const syntax = ts.transpileModule(text, { fileName: path.replace(/\.d\.ts$/, '.ts'), reportDiagnostics: true,
         compilerOptions: { jsx: ts.JsxEmit.Preserve, target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext } })
       if (syntax.diagnostics?.some((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)) throw new Error('component source contains unsupported JavaScript or TypeScript syntax')
       const ast = sourceFile(text, path)

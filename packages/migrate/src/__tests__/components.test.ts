@@ -26,6 +26,18 @@ function fixture(files: Record<string, string>): string {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('repository component migration', () => {
+  it('resolves extensionless declaration dependencies used by typed components', () => {
+    const root = fixture({
+      'docusaurus.config.js': 'module.exports = {}',
+      'docs/index.mdx': "import Picture from '@site/src/Picture'\n\n<Picture src='/photo.svg' />",
+      'src/Picture.tsx': "import { Props } from './types'\nexport default function Picture({src}: Props) { return <img src={src} /> }",
+      'src/types.d.ts': 'export interface Props { src: string }',
+    })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs', platform: 'docusaurus' })
+    expect(bundle.componentFiles.some((file) => file.path.endsWith('/Picture.tsx'))).toBe(true)
+    expect(bundle.warnings).toEqual([])
+  })
+
   it('copies site-authored Docusaurus components rather than claiming they are platform widgets', () => {
     const root = fixture({
       'website/docusaurus.config.js': 'module.exports = {}',

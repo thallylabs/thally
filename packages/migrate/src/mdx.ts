@@ -461,6 +461,45 @@ interface MdxOffsetNode {
   position?: { start: { offset?: number }; end: { offset?: number } }
 }
 
+/** Bind static partial invocation props inside expressions, preserving literals and code examples. */
+export function bindSnippetProps(body: string, properties: ReadonlyMap<string, string>): string {
+  if (!body.includes('props') || properties.size === 0) return body
+  let tree: unknown
+  try { tree = descriptionParser.parse(body) } catch { return body }
+  const edits: Array<{ start: number; end: number; value: string }> = []
+  const inspectExpression = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    const node = value as acorn.AnyNode
+    if (node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression' || node.type === 'FunctionDeclaration') {
+      const names = new Set<string>()
+      node.params.forEach((param) => collectPatternNames(param, names))
+      if (names.has('props')) return
+    }
+    if (node.type === 'MemberExpression' && node.object.type === 'Identifier' && node.object.name === 'props') {
+      const key = !node.computed && node.property.type === 'Identifier' ? node.property.name
+        : node.computed && node.property.type === 'Literal' && typeof node.property.value === 'string' ? node.property.value : undefined
+      const replacement = key === undefined ? undefined : properties.get(key)
+      if (replacement !== undefined && body.slice(node.start, node.end).startsWith('props')) {
+        edits.push({ start: node.start, end: node.end, value: JSON.stringify(replacement) })
+        return
+      }
+    }
+    for (const child of Object.values(value)) {
+      if (Array.isArray(child)) child.forEach(inspectExpression)
+      else if (child && typeof child === 'object') inspectExpression(child)
+    }
+  }
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    const node = value as MdxOffsetNode & { attributes?: Array<{ value?: unknown }> }
+    if (node.data?.estree) inspectExpression(node.data.estree)
+    for (const attribute of node.attributes ?? []) visit(attribute.value)
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(tree)
+  return edits.sort((a, b) => b.start - a.start).reduce((text, edit) => text.slice(0, edit.start) + edit.value + text.slice(edit.end), body)
+}
+
 /** Use a page's leading H1 as its title without rendering it twice. */
 function leadingPageHeading(body: string): { title: string; start: number; end: number } | undefined {
   try {

@@ -31,6 +31,7 @@ import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
 
 import { isSelfContainedFunction, pageScopeNames } from './inline-extraction.js'
+import { isThallyBuiltinComponent } from './builtin-components.js'
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent, unresolvedRelativeModuleSpecifiers } from './components.js'
 import { navbarLinkButtons, projectAuthoredStyles } from './source-styles.js'
 
@@ -67,7 +68,7 @@ import {
   resolvePageAccess,
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
-import { closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -2204,6 +2205,7 @@ function interpolateSnippet(snippet: string, attributes: string, children?: stri
   const properties = staticSnippetProperties(attributes)
   if (children !== undefined) properties.set('children', children.trim())
   if (properties.size === 0) return snippet
+  snippet = bindSnippetProps(snippet, properties)
   const isJsxSnippet = /<[A-Za-z][A-Za-z0-9]*/.test(snippet)
   let fence = ''
   return snippet.split('\n').map((line) => {
@@ -2680,6 +2682,12 @@ function docusaurusGlobalImports(siteRoot: string, repositoryRoot: string, warni
           if (!/^[A-Z][\w$]*$/.test(name) || !ts.isIdentifier(local)) continue
           const binding = bindings.get(local.text)
           if (!binding) continue
+          // Implicit global aliases must not disable widgets already mapped
+          // by the platform adapter. Explicit page imports still take precedence.
+          if (isThallyBuiltinComponent(name)) {
+            warnings.push({ code: 'unsupported-config', message: `Global ${name} override uses the native widget mapping; review the source override for custom styling.`, source: `src/theme/${filename}` })
+            continue
+          }
           registrations.set(name, binding.imported === 'default'
             ? `import ${name} from ${JSON.stringify(binding.source)};`
             : `import { ${binding.imported} as ${name} } from ${JSON.stringify(binding.source)};`)

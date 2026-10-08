@@ -150,6 +150,34 @@ describe('Fern file-backed code examples', () => {
 })
 
 describe('Docusaurus global MDX registry', () => {
+  it('keeps native widgets available when global overrides require unsupported dependencies', () => {
+    const bundle = migrateDocusaurus({
+      'src/theme/MDXComponents.js': "import Icon from '@site/src/Icon'\nexport default { Icon }",
+      'src/Icon.jsx': "import External from 'unavailable-icon-package'\nexport default External",
+      'docs/a.mdx': 'export const label = <Icon name="book" />;\n\n# A\n\n{label}',
+    })
+    expect(bundle.pages.map((page) => page.title)).toContain('A')
+    expect(bundle.warnings.some((warning) => warning.message.includes('native widget'))).toBe(true)
+  })
+
+  it('binds invocation props inside computed expressions without sharing them across pages', () => {
+    const bundle = migrateDocusaurus({
+      'src/theme/MDXComponents.js': "import Shared from '@site/docs/_shared.mdx'\nexport default { Shared }",
+      'docs/_shared.mdx': 'export const copy = { first: {name: "FIRST"}, second: {name: "SECOND"} };\n\nexport const literal = "props.product";\n\nexport const own = (props) => props.product;\n\n<span title={props.product}>Title</span>\n\n{copy[props.product].name}\n\n{props.product === "first" ? <p>First</p> : <p>Second</p>}\n\n```js\nprops.product\n```\n',
+      'docs/a.mdx': '# A\n\n<Shared product="first" />',
+      'docs/b.mdx': '# B\n\n<Shared product="second" />',
+    })
+    const a = bundle.pages.find((page) => page.title === 'A')!.body
+    const b = bundle.pages.find((page) => page.title === 'B')!.body
+    expect(a).toContain('copy["first"].name')
+    expect(b).toContain('copy["second"].name')
+    expect(a).toContain('title={"first"}')
+    expect(a).toContain('literal = "props.product"')
+    expect(a).toContain('(props) => props.product')
+    expect(a).toContain('```js\nprops.product\n```')
+    expect(() => compileSync(a)).not.toThrow()
+  })
+
   it('resolves used static bindings through the existing component and partial pipeline', () => {
     const bundle = migrateDocusaurus({
       'src/theme/MDXComponents.js': "import Picture from '../picture'\nimport Note from '@site/docs/_note.mdx'\nexport default { DocsImage: Picture, GlobalNote: Note }\n",
