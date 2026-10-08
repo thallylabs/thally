@@ -2311,7 +2311,8 @@ export function parseMarkdownPage(input: {
       ? parsed.data.navTitle.trim()
       : undefined
   const icon = typeof parsed.data.icon === 'string' && parsed.data.icon.trim() ? parsed.data.icon.trim() : undefined
-  const iconType = icon && ['regular', 'solid', 'outline', 'brands'].includes(String(parsed.data.iconType))
+  const iconType = icon && typeof parsed.data.iconType === 'string'
+    && ['regular', 'solid', 'outline', 'brands'].includes(parsed.data.iconType)
     ? parsed.data.iconType as MigrationPage['iconType']
     : undefined
   const meta: NonNullable<MigrationPage['meta']> = {}
@@ -2392,7 +2393,7 @@ function apiFrontmatter(
   if (data.authMethod !== undefined && data.authMethod !== null) {
     const method = typeof data.authMethod === 'string' ? data.authMethod.trim().toLowerCase() : ''
     if (AUTH_METHODS.has(method)) result.authMethod = method
-    else warn?.(`The page's "authMethod" frontmatter ${JSON.stringify(data.authMethod)} is not one of bearer, basic, key, none and was dropped.`)
+    else warn?.('The page\'s "authMethod" frontmatter is not one of bearer, basic, key, none and was dropped.')
   }
   return result
 }

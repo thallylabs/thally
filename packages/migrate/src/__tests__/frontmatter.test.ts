@@ -39,6 +39,36 @@ describe('parseFrontmatter', () => {
 })
 
 describe('parseMarkdownPage', () => {
+  it.each(['mintlify', 'fern', 'docusaurus'] as const)('reports cyclic metadata safely for %s', (platform) => {
+    const warnings: string[] = []
+    const page = parseMarkdownPage({
+      id: 'cyclic', platform, source: 'cyclic.mdx', warn: (message) => warnings.push(message),
+      raw: '---\nauthMethod: &loop [*loop]\nplayground: *loop\n---\nBody.',
+    })
+    expect(page?.authMethod).toBeUndefined()
+    expect(page?.playground).toBeUndefined()
+    expect(warnings).toHaveLength(2)
+    expect(warnings.join(' ')).toContain('authMethod')
+    expect(warnings.join(' ')).toContain('playground')
+  })
+
+  it.each(['mintlify', 'fern', 'docusaurus'] as const)('drops non-string icon variants for %s', (platform) => {
+    for (const value of ['{toString: null}', '[solid]', 'null', '42', 'true']) {
+      const page = parseMarkdownPage({
+        id: 'typed', platform, source: 'typed.mdx',
+        raw: `---\nicon: book\niconType: ${value}\n---\nBody.`,
+      })
+      expect(page?.icon).toBe('book')
+      expect(page?.iconType).toBeUndefined()
+    }
+    for (const value of ['regular', 'solid', 'outline', 'brands']) {
+      expect(parseMarkdownPage({
+        id: 'typed', platform, source: 'typed.mdx',
+        raw: `---\nicon: book\niconType: ${value}\n---\nBody.`,
+      })?.iconType).toBe(value)
+    }
+  })
+
   it('does not execute javascript frontmatter in scraped pages', () => {
     const marker = '__migrate_page_frontmatter_probe__'
     const globals = globalThis as unknown as Record<string, unknown>

@@ -317,6 +317,6 @@ export function playgroundDisplay(value: unknown, where: string, warn?: (message
     warn?.(`${where} "auth" requires reader sign-in, which Thally does not support. Migrated as "simple" (no Try it). Set it to "interactive" to allow everyone.`)
     return 'simple'
   }
-  warn?.(`${where} ${JSON.stringify(value)} is not one of interactive, simple, none, auth and was dropped.`)
+  warn?.(`${where} is not one of interactive, simple, none, auth and was dropped.`)
   return undefined
 }

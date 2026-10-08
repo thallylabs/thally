@@ -1,16 +1,113 @@
 /** Adversarial inputs for the Fern and Docusaurus migrators. */
 
-import { closeSync, ftruncateSync, mkdtempSync, mkdirSync, openSync, symlinkSync, writeFileSync, writeSync } from 'node:fs'
+import { closeSync, ftruncateSync, mkdtempSync, mkdirSync, openSync, rmSync, symlinkSync, writeFileSync, writeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
+import { compileSync } from '@mdx-js/mdx'
 
 import { projectDocusaurusNavigation, readDocusaurusRedirects, readDocusaurusSidebars, readDocusaurusSiteSettings, readDocusaurusThemeColor } from '../docusaurus.js'
 import { migrateRepository, projectFernNavigation, renderMigrationFiles } from '../index.js'
 import { normalizeDocusaurusAdmonitionTags, normalizeDocusaurusLinkTags, normalizeMdx } from '../mdx.js'
 import { pageIdFromReference } from '../path.js'
 import { fernIfRolesReason } from '../repository.js'
+import { parseFrontmatter } from '../frontmatter.js'
+
+describe('overlapping parser limits and page isolation', () => {
+  it.each(['mintlify', 'fern', 'docusaurus'] as const)('bounds complex input and isolates repeated %s migrations', (platform) => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-overlap-'))
+    const outside = mkdtempSync(join(tmpdir(), 'thally-overlap-outside-'))
+    try {
+      const contentRoot = platform === 'fern' ? join(root, 'fern') : platform === 'docusaurus' ? join(root, 'docs') : root
+      mkdirSync(contentRoot, { recursive: true })
+      if (platform === 'fern') writeFileSync(join(contentRoot, 'fern.config.json'), '{}')
+      const configure = (name: string) => {
+        if (platform === 'mintlify') writeFileSync(join(root, 'docs.json'), JSON.stringify({ name, navigation: { groups: [{ group: name, pages: ['a', 'b', 'bad', 'large', 'oversized'] }] } }))
+        if (platform === 'docusaurus') writeFileSync(join(root, 'docusaurus.config.js'), `module.exports = { title: '${name}', presets: [['classic', { docs: {} }]] }`)
+        if (platform === 'fern') writeFileSync(join(contentRoot, 'docs.yml'), `title: ${name}\nnavigation:\n${['a', 'b', 'bad', 'large', 'oversized'].map((id) => `  - page: ${id}\n    path: ${id}.mdx\n`).join('')}`)
+      }
+      configure('First')
+      writeFileSync(join(outside, 'secret.md'), '# OUTSIDE-CONTENT')
+      symlinkSync(outside, join(contentRoot, 'external'))
+      symlinkSync(contentRoot, join(contentRoot, 'cycle'))
+      symlinkSync(join(contentRoot, 'missing'), join(contentRoot, 'broken'))
+      mkdirSync(join(contentRoot, '_partials'))
+      writeSite(join(contentRoot, '_partials', 'huge.mdx'), { head: 'HUGE-INCLUDE', size: 2_000_001 })
+      for (const id of ['a', 'b']) {
+        writeFileSync(join(contentRoot, `${id}.mdx`), `---\ntitle: ${id}\nicon: book\niconType: {toString: null}\nkeywords: [safe, 42, null, {nested: true}]\n---\n\nexport const value = '${id}-ONLY';\n\nexport const Widget = () => { const [count] = useState(0); return <span>{value}{count}</span>; };\n\n<Widget />\n\n{value}\n\n![${id}](/${id}.svg)\n`)
+        writeFileSync(join(root, `${id}.svg`), `<svg><title>${id}-ASSET</title></svg>`)
+      }
+      // One page combines nesting, malformed JSX, an oversized include and
+      // escaping symlinks; malformed content must never abort sibling pages.
+      writeFileSync(join(contentRoot, 'bad.mdx'), `import Huge from './_partials/huge.mdx'\nimport Outside from './external/secret.md'\n\n${'<Note>\n'.repeat(64)}<Huge />\n<Outside />\n${'<Link to={"unterminated"\n'.repeat(200)}${'</Note>\n'.repeat(64)}`)
+      writeFileSync(join(contentRoot, 'large.mdx'), `# Large\n\n${'<Note>\n'.repeat(64)}\n\`\`\`txt\n${'x'.repeat(1_800_000)}\n\`\`\`\n\n${'</Note>\n'.repeat(64)}`)
+      writeSite(join(contentRoot, 'oversized.mdx'), { head: '# Oversized', size: 50_000_001 })
+      const start = Date.now()
+      const first = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform })
+      expect(Date.now() - start).toBeLessThan(15_000)
+      expect(first.pages.some((page) => page.title === 'Large')).toBe(true)
+      expect(first.pages.some((page) => page.title === 'Oversized')).toBe(false)
+      expect(JSON.stringify(first)).not.toContain('OUTSIDE-CONTENT')
+      for (const id of ['a', 'b']) {
+        const page = first.pages.find((page) => page.title === id)!
+        expect(page).toBeDefined()
+        expect(page.iconType).toBeUndefined()
+        expect(page.keywords).toEqual(['safe'])
+        expect(page.body).toContain(`/${id}.svg`)
+        const componentFile = first.componentFiles?.find((file) => String(file.content).includes(`${id}-ONLY`))
+        expect(componentFile).toBeDefined()
+        expect(String(componentFile!.content)).not.toContain(`${id === 'a' ? 'b' : 'a'}-ONLY`)
+      }
+      for (const file of renderMigrationFiles(first).filter((file) => file.path.startsWith('src/content/') && file.path.endsWith('.mdx'))) {
+        expect(typeof file.content).toBe('string')
+        expect(() => compileSync(parseFrontmatter(file.content as string).content)).not.toThrow()
+      }
+      configure('Second')
+      const second = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform })
+      expect(second.site?.name).toBe('Second')
+      expect(first.site?.name).toBe('First')
+      expect(second.componentFiles).toEqual(first.componentFiles)
+      expect(second.assets).toEqual(first.assets)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
+  }, 60_000)
+})
+
+describe('Fern navigation recursion', () => {
+  it('skips cyclic sections and retains public siblings', () => {
+    const loop: Record<string, unknown> = { section: 'Loop' }
+    loop.contents = [loop]
+    const result = projectFernNavigation({
+      fernRoot: tmpdir(),
+      config: { navigation: [loop, { page: 'Safe', path: 'safe.md' }] },
+    })
+    expect(result.descriptors.map((page) => page.sourcePath)).toContain('safe.md')
+    expect(result.warnings.some((warning) => warning.message.includes('cyclic'))).toBe(true)
+  })
+
+  it('bounds deep sections and repeated alias expansion', () => {
+    let deep: Record<string, unknown> = { page: 'Leaf', path: 'leaf.md' }
+    for (let index = 0; index < 1_000; index++) deep = { section: 'Deep', contents: [deep] }
+    const result = projectFernNavigation({ fernRoot: tmpdir(), config: { navigation: [deep] } })
+    expect(result.warnings.some((warning) => warning.message.includes('depth'))).toBe(true)
+    let repeated: Record<string, unknown> = { section: 'Empty', contents: [] }
+    for (let index = 0; index < 20; index++) repeated = { section: 'Repeated', contents: [repeated, repeated] }
+    const expanded = projectFernNavigation({ fernRoot: tmpdir(), config: { navigation: [repeated] } })
+    expect(expanded.warnings.some((warning) => warning.message.includes('budget'))).toBe(true)
+  })
+
+  it('allows an acyclic node shared by separate sections', () => {
+    const shared = { page: 'Leaf', path: 'leaf.md' }
+    const result = projectFernNavigation({ fernRoot: tmpdir(), config: { navigation: [
+      { section: 'First', contents: [shared] }, { section: 'Second', contents: [shared] },
+    ] } })
+    expect(result.descriptors.map((page) => page.navigationId)).toEqual(['first/leaf', 'second/leaf'])
+    expect(result.warnings.some((warning) => /cyclic|depth|budget/.test(warning.message))).toBe(false)
+  })
+})
 
 /** A file that starts with `head` and is `size` bytes long, without writing the rest (a sparse file). */
 interface SparseFile { head: string; size: number }

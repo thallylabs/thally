@@ -125,6 +125,8 @@ export function readFernConfig(fernRoot: string): { config: Record<string, unkno
 }
 
 interface WalkContext {
+  /** Shared across scoped context copies; bound alias expansion and recursion. */
+  navigationWalk: { active: Set<Record<string, unknown>>; visits: number }
   fernRoot: string
   repositoryRoot: string
   descriptors: Array<FernPageDescriptor>
@@ -401,13 +403,27 @@ function convertNode(
 ): string | MigrationNavigationGroup | null {
   const object = objectValue(node)
   if (!object) return null
-  if (isRestrictedNode(object)) {
-    const before = restrictionMark(context)
-    convertNodeContents({ ...object, viewers: undefined, authed: undefined }, parentSegments, context)
-    markRestricted(context, before)
+  const walk = context.navigationWalk
+  const reason = walk.active.has(object) ? 'cyclic section'
+    : walk.active.size >= 64 ? 'section depth exceeds 64'
+      : walk.visits >= 5_000 ? 'node budget exceeds 5000' : undefined
+  if (reason) {
+    warnOnce(context, `navigation-${reason}`, `Fern navigation was skipped: ${reason}.`)
     return null
   }
-  return convertNodeContents(object, parentSegments, context)
+  walk.visits++
+  walk.active.add(object)
+  try {
+    if (isRestrictedNode(object)) {
+      const before = restrictionMark(context)
+      convertNodeContents({ ...object, viewers: undefined, authed: undefined }, parentSegments, context)
+      markRestricted(context, before)
+      return null
+    }
+    return convertNodeContents(object, parentSegments, context)
+  } finally {
+    walk.active.delete(object)
+  }
 }
 
 function convertNodeContents(
@@ -807,6 +823,7 @@ export function projectFernNavigation(input: {
   repositoryRoot?: string
 }): FernNavigationResult {
   const context: WalkContext = {
+    navigationWalk: { active: new Set(), visits: 0 },
     fernRoot: input.fernRoot,
     repositoryRoot: input.repositoryRoot ?? input.fernRoot,
     descriptors: [],
