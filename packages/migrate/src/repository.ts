@@ -30,7 +30,7 @@ import { basename, dirname, extname, isAbsolute, posix, relative, resolve as res
 import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
 
-import { isSelfContainedFunction } from './inline-extraction.js'
+import { isSelfContainedFunction, pageScopeNames } from './inline-extraction.js'
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent, unresolvedRelativeModuleSpecifiers } from './components.js'
 import { navbarLinkButtons, projectAuthoredStyles } from './source-styles.js'
 
@@ -2648,6 +2648,67 @@ function resolveSnippetPath(
   return withinRealRoot(candidate, repositoryRoot)
 }
 
+/** Static Docusaurus registry entries become ordinary page imports; never evaluate the registry module. */
+function docusaurusGlobalImports(siteRoot: string, repositoryRoot: string, warnings: Array<MigrationWarning>): Map<string, string> {
+  const registrations = new Map<string, string>()
+  for (const filename of ['MDXComponents.js', 'MDXComponents.jsx', 'MDXComponents.ts', 'MDXComponents.tsx', 'MDXComponents/index.js', 'MDXComponents/index.tsx']) {
+    try {
+      const path = withinRealRoot(resolveWithin(siteRoot, `src/theme/${filename}`), repositoryRoot)
+      if (!existsSync(path) || !lstatSync(path).isFile()) continue
+      if (lstatSync(path).size > MAX_PAGE_BYTES) throw new Error('registry exceeds the 2 MB limit')
+      const tree = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+      const bindings = new Map<string, { source: string; imported: string }>()
+      for (const statement of tree.statements) {
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || statement.importClause?.isTypeOnly) continue
+        let source = statement.moduleSpecifier.text
+        if (source.startsWith('.')) source = `@site/${posix.normalize(posix.join('src/theme', posix.dirname(filename), source))}`
+        if (!source.startsWith('@site/') && !source.startsWith('/')) continue
+        const clause = statement.importClause
+        if (clause?.name) bindings.set(clause.name.text, { source, imported: 'default' })
+        if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+          for (const binding of clause.namedBindings.elements) {
+            if (!binding.isTypeOnly) bindings.set(binding.name.text, { source, imported: binding.propertyName?.text ?? binding.name.text })
+          }
+        }
+      }
+      for (const statement of tree.statements) {
+        if (!ts.isExportAssignment(statement) || statement.isExportEquals || !ts.isObjectLiteralExpression(statement.expression)) continue
+        for (const property of statement.expression.properties) {
+          if (!ts.isShorthandPropertyAssignment(property) && !ts.isPropertyAssignment(property)) continue
+          const name = property.name.getText(tree).replace(/^['"]|['"]$/g, '')
+          const local = ts.isShorthandPropertyAssignment(property) ? property.name : property.initializer
+          if (!/^[A-Z][\w$]*$/.test(name) || !ts.isIdentifier(local)) continue
+          const binding = bindings.get(local.text)
+          if (!binding) continue
+          registrations.set(name, binding.imported === 'default'
+            ? `import ${name} from ${JSON.stringify(binding.source)};`
+            : `import { ${binding.imported} as ${name} } from ${JSON.stringify(binding.source)};`)
+        }
+      }
+      return registrations
+    } catch (error) {
+      warnings.push({ code: 'unsupported-config', message: `Docusaurus MDX registry was not imported: ${error instanceof Error ? error.message : 'unreadable file'}.`, source: `src/theme/${filename}` })
+    }
+  }
+  return registrations
+}
+
+/** Page-local imports/declarations override globals; fenced examples never acquire imports. */
+function injectDocusaurusGlobalImports(raw: string, imports: ReadonlyMap<string, string>): string {
+  if (imports.size === 0) return raw
+  const parsed = parseFrontmatter(raw)
+  const declared = pageScopeNames([parsed.content])
+  const used = new Set<string>()
+  replaceOutsideCodeAndComments(parsed.content, (segment) => {
+    for (const match of segment.matchAll(/<([A-Z][\w$]*)(?=[\s/>])/g)) {
+      if (imports.has(match[1]) && !declared.has(match[1])) used.add(match[1])
+    }
+    return segment
+  })
+  const prefix = raw.slice(0, raw.length - parsed.content.length)
+  return used.size === 0 ? raw : `${prefix}${[...used].map((name) => imports.get(name)).join('\n')}\n\n${parsed.content}`
+}
+
 function globalSnippetAliases(
   files: Array<ScannedFile>,
   repositoryRoot: string,
@@ -2968,6 +3029,58 @@ function inlineMdxSnippets(
     })
     return `{/* ${verdict.kind === 'oversized' ? 'Oversized' : 'Unreadable'} content not inlined: ${shown} */}`
   }
+  // Fern renders file-backed Code tags as literal examples, not components.
+  // Resolve against the page, keep list indentation, and never parse the
+  // included source as MDX or let its backticks close the generated fence.
+  if (platform === 'fern') raw = replaceOutsideCodeAndComments(raw, (segment) => {
+    const marker = /<Code(?![\w$.-])/g
+    let output = ''
+    let cursor = 0
+    for (let match = marker.exec(segment); match; match = marker.exec(segment)) {
+      const opening = scanJsxOpeningTag(segment, match.index, 'Code')
+      if (opening.end === null || segment[opening.end - 1] !== '/') continue
+      const attribute = (name: string): string | undefined => opening.attributes
+        .match(new RegExp(`(?:^|\\s)${name}=(?:"([^"]*)"|'([^']*)')`))?.slice(1).find((value) => value !== undefined)
+      const filePath = attribute('src')
+      if (!filePath) continue
+      const end = opening.end + 1
+      let replacement: string
+      try {
+        const candidate = resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot)
+        if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
+        if (lstatSync(candidate).size > MAX_PAGE_BYTES) throw new Error('file exceeds the 2 MB inline limit')
+        const blocked = blockInline(candidate, filePath, `Code source ${filePath}`)
+        if (blocked) replacement = blocked
+        else {
+          let code = readFileSync(candidate, 'utf8').replace(/\r\n/g, '\n')
+          const lines = attribute('lines')
+          if (lines !== undefined) {
+            const range = /^(\d+)(?:-(\d+))?$/.exec(lines)
+            const first = Number(range?.[1])
+            const last = Number(range?.[2] ?? range?.[1])
+            if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || first < 1 || last < first) throw new Error('invalid line range')
+            code = code.split('\n').slice(first - 1, last).join('\n')
+          }
+          const language = attribute('language') ?? 'text'
+          if (!/^[\w+-]+$/.test(language)) throw new Error('invalid language')
+          const title = attribute('title')?.replace(/[\r\n`]/g, ' ')
+          let fenceLength = 3
+          for (const run of code.matchAll(/`+/g)) fenceLength = Math.max(fenceLength, run[0].length + 1)
+          const fence = '`'.repeat(fenceLength)
+          const before = segment.slice(segment.lastIndexOf('\n', match.index - 1) + 1, match.index)
+          const indent = /^[ \t]*$/.test(before) ? before : ''
+          replacement = isolateFences(`${fence}${language}${title ? ` ${title}` : ''}\n${code.replace(/\n$/, '')}\n${fence}`.split('\n').join(`\n${indent}`), segment, match.index, end)
+        }
+      } catch (error) {
+        warnings.push({ code: 'skipped-file', message: `Code source ${filePath} was not inlined: ${error instanceof Error ? error.message : 'unreadable file'}.`, source })
+        replacement = mdxComment(` Code source not inlined: ${filePath} `)
+      }
+      output += segment.slice(cursor, match.index) + replacement
+      cursor = end
+      marker.lastIndex = end
+    }
+    return output + segment.slice(cursor)
+  })
   let withoutImports = replaceOutsideCodeAndMdxComments(raw, (source) => source.replace(
     SNIPPET_IMPORT_PATTERN,
     (_statement, namedComponent: string | undefined, defaultComponent: string | undefined, sourcePath: string) => {
@@ -3312,6 +3425,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const componentMigrator = platform === 'mintlify' || platform === 'docusaurus' || platform === 'fern'
     ? createComponentMigrator(componentRoot, repositoryDir, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot, options.componentNamespace))
     : undefined
+  const globalDocusaurusImports = platform === 'docusaurus'
+    ? docusaurusGlobalImports(componentRoot, repositoryDir, warnings) : new Map<string, string>()
   let docsConfig: MigrationDocsConfig = { tabs: [] }
   // Literal leading path segments (e.g. "v1.15.22") that identify a
   // Mintlify `versions` container's default version — see
@@ -3987,7 +4102,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     let raw = inlineMdxSnippets(
       mintlifyProjectRoot
         ? importUndeclaredSnippetComponents(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, mintlifyProjectRoot, snippetExports, snippetAliases, inlineGate, warnings)
-        : readFileSync(file.absolutePath, 'utf8'),
+        : injectDocusaurusGlobalImports(readFileSync(file.absolutePath, 'utf8'), globalDocusaurusImports),
       file.absolutePath,
       repositoryDir,
       warnings,

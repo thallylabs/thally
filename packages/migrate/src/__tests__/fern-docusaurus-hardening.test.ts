@@ -109,6 +109,66 @@ describe('Fern navigation recursion', () => {
   })
 })
 
+describe('Fern file-backed code examples', () => {
+  it('preserves language, title, line selections and list indentation', () => {
+    const bundle = fernSite('navigation:\n  - page: Guide\n    path: guide.mdx\n', {
+      'guide.mdx': '# Guide\n\n1. Example.\n\n    <Code src="examples/demo.py" language="python" title="demo.py" lines="2-3" />\n\n```mdx\n<Code src="missing" />\n```\n',
+      'examples/demo.py': 'omit = 0\nfirst = 1\nsecond = 2\nomit = 3\n',
+    })
+    const body = bundle.pages[0].body
+    expect(body).toContain('```python demo.py')
+    expect(body).toContain('first = 1\n    second = 2')
+    expect(body).not.toContain('omit =')
+    expect(body).toContain('<Code src="missing" />')
+    expect(() => compileSync(body)).not.toThrow()
+  })
+
+  it('bounds reads, confines symlinks, and safely fences code containing backticks', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-code-'))
+    const outside = mkdtempSync(join(tmpdir(), 'thally-code-outside-'))
+    try {
+      mkdirSync(join(root, 'fern'))
+      writeFileSync(join(root, 'fern', 'fern.config.json'), '{}')
+      writeFileSync(join(root, 'fern', 'docs.yml'), 'navigation:\n  - page: Guide\n    path: guide.mdx\n')
+      writeFileSync(join(root, 'fern', 'guide.mdx'), '# Guide\n\n<Code src="safe.txt" language="text" />\n\n<Code src="large.txt" />\n\n<Code src="escape.txt" />\n\n<Code src="missing.txt" />\n')
+      writeFileSync(join(root, 'fern', 'safe.txt'), '```\n<Widget />\n```\n')
+      writeSite(join(root, 'fern', 'large.txt'), { head: 'TOO-LARGE', size: 2_000_001 })
+      writeFileSync(join(outside, 'escape.txt'), 'OUTSIDE-SECRET')
+      symlinkSync(join(outside, 'escape.txt'), join(root, 'fern', 'escape.txt'))
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'fern' })
+      expect(bundle.pages[0].body).toContain('````text')
+      expect(bundle.pages[0].body).toContain('<Widget />')
+      expect(bundle.pages[0].body).not.toContain('OUTSIDE-SECRET')
+      expect(bundle.pages[0].body).not.toContain('TOO-LARGE')
+      expect(bundle.warnings.filter((warning) => /large.txt|escape.txt|missing.txt/.test(warning.message))).toHaveLength(3)
+      expect(() => compileSync(bundle.pages[0].body)).not.toThrow()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Docusaurus global MDX registry', () => {
+  it('resolves used static bindings through the existing component and partial pipeline', () => {
+    const bundle = migrateDocusaurus({
+      'src/theme/MDXComponents.js': "import Picture from '../picture'\nimport Note from '@site/docs/_note.mdx'\nexport default { DocsImage: Picture, GlobalNote: Note }\n",
+      'src/picture.jsx': 'export default function Picture({src}) { return <img src={src} alt="global image" /> }\n',
+      'docs/_note.mdx': 'GLOBAL-PARTIAL-CONTENT\n',
+      'docs/a.mdx': '# A\n\n<DocsImage src="/a.svg" />\n\n<GlobalNote />\n',
+      'docs/b.mdx': 'export const GlobalNote = () => <span>LOCAL-ONLY</span>;\n\n# B\n\n<GlobalNote />\n',
+      'docs/c.mdx': '# C\n\n```mdx\n<GlobalNote />\n```\n',
+      'static/a.svg': '<svg />',
+    })
+    expect(bundle.pages.find((page) => page.title === 'A')?.body).toContain('GLOBAL-PARTIAL-CONTENT')
+    expect(bundle.pages.find((page) => page.title === 'B')?.body).not.toContain('GLOBAL-PARTIAL-CONTENT')
+    expect(bundle.pages.find((page) => page.title === 'C')?.body).not.toContain('GLOBAL-PARTIAL-CONTENT')
+    expect(bundle.warnings.filter((warning) => /picture|DocsImage/.test(warning.message))).toEqual([])
+    expect(bundle.componentFiles?.some((file) => String(file.content).includes('global image'))).toBe(true)
+    expect(bundle.warnings.some((warning) => /Unresolved.*DocsImage|Unresolved.*GlobalNote/.test(warning.message))).toBe(false)
+  })
+})
+
 /** A file that starts with `head` and is `size` bytes long, without writing the rest (a sparse file). */
 interface SparseFile { head: string; size: number }
 

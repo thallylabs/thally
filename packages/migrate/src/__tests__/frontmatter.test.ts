@@ -39,6 +39,16 @@ describe('parseFrontmatter', () => {
 })
 
 describe('parseMarkdownPage', () => {
+  it('separates Docusaurus display heading and sidebar label from the metadata title', () => {
+    const page = parseMarkdownPage({ id: 'guide', platform: 'docusaurus', source: 'guide.mdx',
+      raw: '---\ntitle: Long SEO title\nsidebar_label: Short sidebar label\n---\n\n# Display title\n\nBody.',
+    })
+    expect(page?.title).toBe('Long SEO title')
+    expect(page?.headingTitle).toBe('Display title')
+    expect(page?.navTitle).toBe('Short sidebar label')
+    expect(page?.body).not.toContain('# Display title')
+  })
+
   it.each(['mintlify', 'fern', 'docusaurus'] as const)('reports cyclic metadata safely for %s', (platform) => {
     const warnings: string[] = []
     const page = parseMarkdownPage({

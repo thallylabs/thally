@@ -131,6 +131,8 @@ export interface MigrationPage {
   navigationId: string
   locale?: string
   title: string
+  /** Authored display H1 when the source uses a different metadata title. */
+  headingTitle?: string
   navTitle?: string
   /** Sidebar icon name or image URL from page frontmatter, with its optional style. */
   icon?: string

@@ -72,6 +72,12 @@ export function normalizeIndentedFences(content: string): string {
       }
       const match = line.match(/^([ \t]{4,})(`{3,}|~{3,})/)
       if (match) {
+        // A fence under a Markdown list is already valid. Moving it left
+        // ends the list item and detaches its example from the numbered step.
+        if (listIndent !== undefined && match[1].length > listIndent) {
+          ordinaryFence = match[2]
+          return line
+        }
         active = { indent: match[1], marker: match[2] }
         return line.slice(match[1].length)
       }

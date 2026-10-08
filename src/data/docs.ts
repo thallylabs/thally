@@ -37,6 +37,8 @@ export type DocPageMode = 'default' | 'wide' | 'custom' | 'center' | 'home'
 export interface DocEntry {
   id: string
   title: string
+  /** Visible H1; title remains the metadata/search title. */
+  headingTitle?: string
   description: string
   descriptionPlacement?: 'body'
   slug: Array<string>
@@ -436,6 +438,7 @@ let observedDocsConfigRevision = -1
 
 interface FrontmatterData {
   title?: string
+  headingTitle?: string
   /** Optional compact label used only in sidebar and previous/next navigation. */
   navTitle?: string
   icon?: string
@@ -627,6 +630,7 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
   return {
     id: pageId,
     title,
+    headingTitle: typeof fm.headingTitle === 'string' && fm.headingTitle.trim() ? fm.headingTitle.trim() : undefined,
     description: fm.description ?? '',
     descriptionPlacement: fm.descriptionPlacement === 'body' ? 'body' : undefined,
     slug,

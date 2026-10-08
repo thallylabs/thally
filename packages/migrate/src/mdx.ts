@@ -2302,11 +2302,13 @@ export function parseMarkdownPage(input: {
   const title = typeof parsed.data.title === 'string' && parsed.data.title.trim()
     ? parsed.data.title.trim()
     : heading?.title ?? titleFromId(identity.navigationId)
-  if (heading && heading.title === title) {
+  const headingTitle = input.platform === 'docusaurus' && heading && heading.title !== title ? heading.title : undefined
+  if (heading && (heading.title === title || headingTitle)) {
     body = `${body.slice(0, heading.start)}${body.slice(heading.end)}`.trim()
   }
-  const navTitle = typeof parsed.data.sidebarTitle === 'string' && parsed.data.sidebarTitle.trim()
-    ? parsed.data.sidebarTitle.trim()
+  const sidebarTitle = input.platform === 'docusaurus' ? parsed.data.sidebar_label : parsed.data.sidebarTitle
+  const navTitle = typeof sidebarTitle === 'string' && sidebarTitle.trim()
+    ? sidebarTitle.trim()
     : typeof parsed.data.navTitle === 'string' && parsed.data.navTitle.trim()
       ? parsed.data.navTitle.trim()
       : undefined
@@ -2344,6 +2346,7 @@ export function parseMarkdownPage(input: {
     navigationId: identity.navigationId,
     locale: identity.locale,
     title,
+    ...(headingTitle ? { headingTitle } : {}),
     navTitle,
     icon,
     iconType,
