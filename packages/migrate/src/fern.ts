@@ -261,11 +261,11 @@ function uniqueNavigationId(base: string, context: WalkContext): string {
 function registerPageAt(rawPath: string, base: string, context: WalkContext, navTitle?: string, hidden = false): string {
   let sourcePath: string
   try {
-    const absolute = resolveWithinRoot(
+    const absolute = withinRealRoot(resolveWithinRoot(
       context.pathPrefix ? resolveWithinRoot(context.fernRoot, context.pathPrefix, context.repositoryRoot) : context.fernRoot,
       rawPath.trim(),
       context.repositoryRoot,
-    )
+    ), context.repositoryRoot)
     sourcePath = relative(context.fernRoot, absolute).replace(/\\/g, '/')
   } catch {
     warnOnce(context, `fern-unsafe-page-${rawPath}`, `Skipped the Fern page "${rawPath}" because it points outside the repository (symlink or ..).`)

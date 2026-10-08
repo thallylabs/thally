@@ -89,17 +89,25 @@ export function scanJsxOpeningTag(source: string, start: number, name: string): 
   let quote: string | null = null
   let depth = 0
   let braceQuote: string | null = null
+  let lineComment = false
+  let blockComment = false
   const attributesStart = start + opener.length
   for (let index = attributesStart; index < source.length; index++) {
     const char = source[index]
     if (char === '<' && source.startsWith(opener, index) && !/[\w$.-]/.test(source[index + opener.length] ?? '')) {
       return { attributes: source.slice(attributesStart, index), end: null }
     }
-    if (braceQuote) {
+    if (lineComment) {
+      if (char === '\n' || char === '\r') lineComment = false
+    } else if (blockComment) {
+      if (char === '*' && source[index + 1] === '/') { blockComment = false; index++ }
+    } else if (braceQuote) {
       if (char === '\\') index++
       else if (char === braceQuote) braceQuote = null
     } else if (depth > 0) {
-      if (char === '"' || char === "'" || char === '`') braceQuote = char
+      if (char === '/' && source[index + 1] === '/') { lineComment = true; index++ }
+      else if (char === '/' && source[index + 1] === '*') { blockComment = true; index++ }
+      else if (char === '"' || char === "'" || char === '`') braceQuote = char
       else if (char === '{') depth++
       else if (char === '}') depth--
     } else if (quote) {
@@ -2134,11 +2142,12 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   // `normalizeExplicitHeadingIds` also covers Docusaurus' `{/* #id */}`
   // comment form.
   const sourceBody = runDocusaurus && unwrapMdxCodeBlocks ? unwrapDocusaurusMdxCodeBlocks(body) : body
-  let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(
+  let rewritten = normalizeExplicitHeadingIds(
     runFern ? normalizeFernFileTrees(normalizeFernCallouts(normalizeNestedCodeFences(sourceBody))) : normalizeNestedCodeFences(sourceBody),
     undefined,
     { headingMarkers: runMintlify },
-  ))
+  )
+  if (runDocusaurus) rewritten = normalizeDocusaurusAdmonitions(rewritten)
   if (runMintlify) rewritten = markMintlifyHeadings(rewritten)
   if (runDocusaurus) {
     // Docusaurus resolves GitHub emoji names in Markdown text. Leaving the

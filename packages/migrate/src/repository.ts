@@ -2157,6 +2157,14 @@ export function fernIfRolesReason(raw: string): string | undefined {
   const marker = /<If(?![\w$.-])/g
   for (let match = marker.exec(text); match; match = marker.exec(text)) {
     const tag = scanJsxOpeningTag(text, match.index, 'If')
+    // Comments may precede a JSX spread; unresolved ellipses fail closed.
+    if (tag.attributes.includes('...')) {
+      return 'it contains `<If>` spread props whose access rules cannot be resolved safely'
+    }
+    // ponytail: the lexical scan cannot prove regex/template boundaries; use an expression parser before allowing these props.
+    if (tag.attributes.includes('{') && /[/`]/.test(tag.attributes)) {
+      return 'it contains `<If>` expression props whose access rules cannot be resolved safely'
+    }
     if (/(?:^|[\s{}"'])(?:roles|viewers)\s*=/.test(tag.attributes)) {
       return 'it contains `<If roles>` content that Fern shows only to some roles'
     }
@@ -3411,7 +3419,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
             fernNavTitles.set(descriptor.navigationId, descriptor.navTitle)
           }
           if (descriptor.hidden) fernHiddenIds.add(descriptor.navigationId)
-          if (descriptor.restricted) fernRestrictedPaths.add(resolvePath(fernProjectRoot, descriptor.sourcePath))
+          if (descriptor.restricted) fernRestrictedPaths.add(canonicalPath(resolvePath(fernProjectRoot, descriptor.sourcePath)))
           // Fern pages often link by their source directory while a section
           // title changes the published route (for example tts-vendors to
           // tts-vendor-settings). Resolve only unambiguous, tab-prefixed
@@ -3540,7 +3548,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     for (const sourcePath of fernExternalSourcePaths) {
       if (discovered.has(sourcePath)) continue
       try {
-        const absolutePath = resolveWithinRoot(fernProjectRoot, sourcePath, repositoryDir)
+        const absolutePath = withinRealRoot(resolveWithinRoot(fernProjectRoot, sourcePath, repositoryDir), repositoryDir)
         if (existsSync(absolutePath) && lstatSync(absolutePath).isFile()) {
           files.push({ absolutePath, relativePath: sourcePath })
           discovered.add(sourcePath)
@@ -3703,7 +3711,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // Docusaurus never treats `_` files and directories as documents, so a `draft` there means nothing.
       reason = platform === 'docusaurus' && file.relativePath.split('/').some((segment) => segment.startsWith('_'))
         ? null
-        : (fernRestrictedPaths.has(file.absolutePath)
+        : (fernRestrictedPaths.has(key)
           ? 'docs.yml `viewers` restricts it to signed-in roles'
           : classifyPageGate(file).reason ?? fernBodyReason(file)) ?? null
       gateReasonCache.set(key, reason)
@@ -3720,8 +3728,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       withheldPaths.add(file.absolutePath)
     }
   }
-  // Fern and Docusaurus classify every scanned document, so only a truncated walk leaves pages unseen.
+  // Oversized bodies can contain access rules that the bounded classifier never reads.
   const pagesNotClassified = droppedPageCount > 0 || scanTruncated
+    || files.some((file) => isDocFile(file) && lstatSync(file.absolutePath).size > MAX_PAGE_BYTES)
   const hasWithheldContent = withheldPaths.size > 0 || withheldDocFiles.length > 0
   const trackPublishedRefs = hasWithheldContent || pagesNotClassified
   // Docusaurus: the docs folder's place in the site, so `@site/...` and `../../static/...` links resolve from the site root.
@@ -4344,6 +4353,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     : []
   interface AssetCandidate { file: ScannedFile; assetPath: string; size: number }
   const assetCandidates: Array<AssetCandidate> = []
+  const seenAssetSources = new Map<string, Set<string>>()
   // Mintlify serves every `.css`/`.js` file in its content directory
   // site-wide, plus any font file named by docs.json `fonts.source`.
   const mintlifyFonts = platform === 'mintlify' ? mintlifyFontSources(mintlifyConfig) : []
@@ -4413,6 +4423,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         ? file.relativePath.slice('static/'.length)
         : file.relativePath)
     if (!assetPath) continue
+    const sourceKey = canonicalPath(file.absolutePath)
+    const destinations = seenAssetSources.get(sourceKey) ?? new Set<string>()
+    if (destinations.has(assetPath)) continue
+    destinations.add(assetPath)
+    seenAssetSources.set(sourceKey, destinations)
     if (siteKind) {
       siteAssetPaths.set(assetPath, siteKind)
       if (siteKind === 'font') fontAssetByRelative.set(file.relativePath, assetPath)
@@ -4452,7 +4467,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       ? JSON.stringify(mintlifyConfig ?? {}, (_key, value: unknown) => (
         value && typeof value === 'object' && !Array.isArray(value) && navigationGateReason(value as Record<string, unknown>) ? undefined : value))
       // Branding the migrated config will name: Fern's docs.yml (logo, favicon, ...) and Docusaurus' static site settings.
-      : JSON.stringify([docsConfig, fernRawConfig ?? null, docusaurusProjectRoot ? readDocusaurusSiteSettings(docusaurusProjectRoot) : null])
+      : JSON.stringify([docsConfig, fernRawConfig ?? null, docusaurusProjectRoot ? readDocusaurusSiteSettings(docusaurusProjectRoot) : null], (_key, value: unknown) => (
+        platform === 'fern' && value && typeof value === 'object' && !Array.isArray(value)
+          && fernViewersReason(value as Record<string, unknown>) ? undefined : value))
     addPathReferences(publishedConfig, '', publishedExact, publishedLoose, docusaurusPaths(''))
   }
   for (const file of componentMigrator?.files() ?? []) {
