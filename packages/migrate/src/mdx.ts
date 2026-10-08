@@ -502,9 +502,11 @@ export function bindSnippetProps(body: string, properties: ReadonlyMap<string, s
 
 /** Use a page's leading H1 as its title without rendering it twice. */
 function leadingPageHeading(body: string): { title: string; start: number; end: number } | undefined {
+  if (!/^ {0,3}(?:#(?:[ \t]|$)|=+[ \t\r]*$)/m.test(body)) return undefined
   try {
     const root = descriptionParser.parse(body) as MdxOffsetNode
-    const first = root.children?.find((node) => node.type !== 'mdxjsEsm' && node.type !== 'html')
+    const first = root.children?.find((node) => node.type !== 'mdxjsEsm' && node.type !== 'html'
+      && !(node.type === 'mdxFlowExpression' && node.data?.estree?.body.length === 0))
     if (first?.type !== 'heading' || first.depth !== 1) return undefined
     const text = (node: MdxOffsetNode): string => node.type === 'mdxTextExpression' || node.type === 'mdxFlowExpression'
       ? ''
@@ -516,6 +518,14 @@ function leadingPageHeading(body: string): { title: string; start: number; end: 
   } catch {
     return undefined
   }
+}
+
+/** Recheck after component fallbacks, which can expose a page's leading H1. */
+export function resolvePageDisplayHeading(page: Pick<MigrationPage, 'title' | 'body' | 'headingTitle'>, platform?: MigrationPlatform): void {
+  const heading = leadingPageHeading(page.body)
+  if (!heading || (heading.title !== page.title && platform !== 'docusaurus')) return
+  if (heading.title !== page.title) page.headingTitle = heading.title
+  page.body = `${page.body.slice(0, heading.start)}${page.body.slice(heading.end)}`.trim()
 }
 
 /** Recursively collects every name a binding pattern introduces (`{a, b: {c}}`, `[p, ...rest]`, `x = 1`). */
@@ -2333,7 +2343,7 @@ export function parseMarkdownPage(input: {
     ...(input.locale ? { locale: input.locale } : {}),
   }
   const identity = input.resolveIdentity?.(parsed.data, fallbackIdentity) ?? fallbackIdentity
-  let body = removeUndefinedExpressions(injectReactHookImports(normalizeMdx(parsed.content, input.platform)), input.warn).trim()
+  const body = removeUndefinedExpressions(injectReactHookImports(normalizeMdx(parsed.content, input.platform)), input.warn).trim()
   const keywords = Array.isArray(parsed.data.keywords)
     ? parsed.data.keywords.filter((value): value is string => typeof value === 'string')
     : []
@@ -2341,10 +2351,6 @@ export function parseMarkdownPage(input: {
   const title = typeof parsed.data.title === 'string' && parsed.data.title.trim()
     ? parsed.data.title.trim()
     : heading?.title ?? titleFromId(identity.navigationId)
-  const headingTitle = input.platform === 'docusaurus' && heading && heading.title !== title ? heading.title : undefined
-  if (heading && (heading.title === title || headingTitle)) {
-    body = `${body.slice(0, heading.start)}${body.slice(heading.end)}`.trim()
-  }
   const sidebarTitle = input.platform === 'docusaurus' ? parsed.data.sidebar_label : parsed.data.sidebarTitle
   const navTitle = typeof sidebarTitle === 'string' && sidebarTitle.trim()
     ? sidebarTitle.trim()
@@ -2380,12 +2386,11 @@ export function parseMarkdownPage(input: {
     : typeof parsed.data.openapi === 'string' && parsed.data.openapi.trim()
       ? ''
       : firstParagraph(body)
-  return {
+  const page: MigrationPage = {
     id: identity.id,
     navigationId: identity.navigationId,
     locale: identity.locale,
     title,
-    ...(headingTitle ? { headingTitle } : {}),
     navTitle,
     icon,
     iconType,
@@ -2405,6 +2410,8 @@ export function parseMarkdownPage(input: {
     source: input.source,
     ...(parsed.error ? { frontmatterError: parsed.error } : {}),
   }
+  resolvePageDisplayHeading(page, input.platform)
+  return page
 }
 
 const PAGE_META_FIELDS = [

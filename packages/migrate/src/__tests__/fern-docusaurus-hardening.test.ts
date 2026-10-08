@@ -4,7 +4,8 @@ import { closeSync, ftruncateSync, mkdtempSync, mkdirSync, openSync, rmSync, sym
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import * as mdx from '../mdx.js'
 import { compileSync } from '@mdx-js/mdx'
 
 import { projectDocusaurusNavigation, readDocusaurusRedirects, readDocusaurusSidebars, readDocusaurusSiteSettings, readDocusaurusThemeColor } from '../docusaurus.js'
@@ -110,9 +111,17 @@ describe('Fern navigation recursion', () => {
 })
 
 describe('Fern file-backed code examples', () => {
+  it('scans an unterminated suffix only once rather than rescanning every Code marker', () => {
+    const scan = vi.spyOn(mdx, 'scanJsxOpeningTag')
+    try {
+      fernSite('navigation:\n  - page: Guide\n    path: guide.mdx\n  - page: Safe\n    path: safe.mdx\n', { 'safe.mdx': '# Safe\n\nBody.', 'guide.mdx': '# Guide\n\n' + '<Code src="missing"\n'.repeat(20) })
+      expect(scan.mock.calls.filter((call) => call[2] === 'Code')).toHaveLength(1)
+    } finally { scan.mockRestore() }
+  })
+
   it('preserves language, title, line selections and list indentation', () => {
     const bundle = fernSite('navigation:\n  - page: Guide\n    path: guide.mdx\n', {
-      'guide.mdx': '# Guide\n\n1. Example.\n\n    <Code src="examples/demo.py" language="python" title="demo.py" lines="2-3" />\n\n```mdx\n<Code src="missing" />\n```\n',
+      'guide.mdx': '# Guide\n\n1. Example.\n\n    <Code src = "examples/demo.py" language = "python" title = "demo.py" lines = "2-3" />\n\n```mdx\n<Code src="missing" />\n```\n',
       'examples/demo.py': 'omit = 0\nfirst = 1\nsecond = 2\nomit = 3\n',
     })
     const body = bundle.pages[0].body
@@ -150,6 +159,12 @@ describe('Fern file-backed code examples', () => {
 })
 
 describe('Docusaurus global MDX registry', () => {
+  it('extracts display headings after unsupported leading widgets are removed', () => {
+    const bundle = migrateDocusaurus({ 'docs/a.mdx': '---\ntitle: SEO title\n---\n\n<Missing />\n\n# Display title\n\nBody.' })
+    expect(bundle.pages[0].headingTitle).toBe('Display title')
+    expect(bundle.pages[0].body).not.toContain('# Display title')
+  })
+
   it('keeps native widgets available when global overrides require unsupported dependencies', () => {
     const bundle = migrateDocusaurus({
       'src/theme/MDXComponents.js': "import Icon from '@site/src/Icon'\nexport default { Icon }",

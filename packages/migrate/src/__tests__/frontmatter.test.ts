@@ -39,9 +39,9 @@ describe('parseFrontmatter', () => {
 })
 
 describe('parseMarkdownPage', () => {
-  it('separates Docusaurus display heading and sidebar label from the metadata title', () => {
+  it.each(['', '{/* Removed unsupported component */}\n\n'])('separates Docusaurus display heading and sidebar label from the metadata title after %s', (prefix) => {
     const page = parseMarkdownPage({ id: 'guide', platform: 'docusaurus', source: 'guide.mdx',
-      raw: '---\ntitle: Long SEO title\nsidebar_label: Short sidebar label\n---\n\n# Display title\n\nBody.',
+      raw: `---\ntitle: Long SEO title\nsidebar_label: Short sidebar label\n---\n\n${prefix}# Display title\n\nBody.`,
     })
     expect(page?.title).toBe('Long SEO title')
     expect(page?.headingTitle).toBe('Display title')

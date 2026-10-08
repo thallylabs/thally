@@ -68,7 +68,7 @@ import {
   resolvePageAccess,
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
-import { bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { resolvePageDisplayHeading, bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -3046,9 +3046,10 @@ function inlineMdxSnippets(
     let cursor = 0
     for (let match = marker.exec(segment); match; match = marker.exec(segment)) {
       const opening = scanJsxOpeningTag(segment, match.index, 'Code')
-      if (opening.end === null || segment[opening.end - 1] !== '/') continue
+      if (opening.end === null) break
+      if (segment[opening.end - 1] !== '/') continue
       const attribute = (name: string): string | undefined => opening.attributes
-        .match(new RegExp(`(?:^|\\s)${name}=(?:"([^"]*)"|'([^']*)')`))?.slice(1).find((value) => value !== undefined)
+        .match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`))?.slice(1).find((value) => value !== undefined)
       const filePath = attribute('src')
       if (!filePath) continue
       const end = opening.end + 1
@@ -4296,6 +4297,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         })
       })
     }
+    if (platform === 'docusaurus') resolvePageDisplayHeading(page, platform)
     let mdxError = invalidMdxReason(page.body)
     if (mdxError) {
       // Fail closed: only keep a repair that actually compiles.
