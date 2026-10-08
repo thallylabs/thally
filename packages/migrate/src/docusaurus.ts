@@ -4,9 +4,12 @@
  * never imports, evaluates, or executes JavaScript/TypeScript configuration.
  */
 
-import { existsSync, lstatSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { extname, posix } from 'node:path'
 
+import postcss from 'postcss'
+import { cssColorToHex } from './css-colors.js'
+import { announcementMarkdown } from './fern.js'
 import JSON5 from 'json5'
 import { parse as parseYaml } from 'yaml'
 
@@ -610,6 +613,18 @@ function matchingArrayLiteral(source: string, start: number): string | null {
       else if (character === quote) quote = ''
       continue
     }
+    if (source.startsWith('//', index)) {
+      const end = source.indexOf('\n', index + 2)
+      if (end < 0) return null
+      index = end
+      continue
+    }
+    if (source.startsWith('/*', index)) {
+      const end = source.indexOf('*/', index + 2)
+      if (end < 0) return null
+      index = end + 1
+      continue
+    }
     if (character === '"' || character === "'" || character === '`') {
       quote = character
       continue
@@ -917,6 +932,7 @@ export interface DocusaurusSiteSettings {
   navbarLinks: Array<{ label: string; href?: string; docId?: string; sidebarId?: string; docsPluginId?: string }>
   footerLinks: NonNullable<MigrationDocsConfig['footer']>['links']
   copyright?: string
+  banner?: MigrationDocsConfig['banner']
 }
 
 function propertyStart(source: string, name: string): number {
@@ -1065,7 +1081,13 @@ export function readDocusaurusSiteSettings(repositoryRoot: string): DocusaurusSi
       ?? footer.slice(propertyStart(footer, 'copyright')).match(/^`([^`]+)`/)?.[1]
         ?.replace(/\$\{new Date\(\)\.getFullYear\(\)\}/g, '{year}')
     : undefined
+  const announcementStart = theme ? propertyStart(theme, 'announcementBar') : -1
+  const announcement = announcementStart < 0 ? null : matchingObjectLiteral(theme!, announcementStart)
+  const announcementContent = announcement && staticStringField(announcement, 'content')
+    || announcement?.slice(propertyStart(announcement, 'content')).match(/^`([^`]+)`/)?.[1]
+  const bannerContent = announcementContent ? announcementMarkdown(announcementContent) : ''
   return {
+    ...(bannerContent ? { banner: { content: bannerContent, dismissible: !/isCloseable\s*:\s*false/.test(announcement!), ...(staticStringField(announcement!, 'id') ? { id: staticStringField(announcement!, 'id') } : {}) } } : {}),
     name: staticStringField(source, 'title'),
     description: staticStringField(source, 'tagline'),
     ...(navbar && staticStringField(navbar, 'title') ? { navbarTitle: staticStringField(navbar, 'title') } : {}),
@@ -1247,4 +1269,147 @@ export function projectDocusaurusNavigation(input: {
     referencedNavigationIds: context.referencedNavigationIds,
     warnings,
   }
+}
+
+
+/** Project bounded native CSS tokens; compiled output resolves Sass/Tailwind values without executing source config. */
+export function readDocusaurusPresentation(repositoryRoot: string): { css: string; headingFont?: string; colors?: { light?: string; dark?: string }; unresolved: boolean } | undefined {
+  const configPath = findDocusaurusConfigPath(repositoryRoot)
+  if (!configPath) return undefined
+  const config = readBoundedText(configPath)
+  const relative = config.match(/\bcustomCss\s*:\s*(?:\[\s*)?(?:require\.resolve\(\s*)?(['"])([^'"]+)\1/)?.[2]
+  if (!relative) return undefined
+  let css: string
+  try {
+    const path = withinRealRoot(resolveWithin(repositoryRoot, relative), repositoryRoot)
+    if (!lstatSync(path).isFile()) return undefined
+    css = readBoundedText(path)
+    if (/\btheme\(/.test(css) || /\.s[ac]ss$/.test(relative)) {
+      const candidateDirectory = resolveWithin(repositoryRoot, 'build/assets/css')
+      if (existsSync(candidateDirectory)) {
+        const directory = withinRealRoot(candidateDirectory, repositoryRoot)
+        const compiled = readdirSync(directory).filter((name) => /^styles[.\w-]*\.css$/.test(name)).sort().slice(0, 8)
+        let totalBytes = 0
+        css = compiled.map((name) => {
+          const path = withinRealRoot(resolveWithin(directory, name), repositoryRoot)
+          const stat = lstatSync(path)
+          if (!stat.isFile()) return ''
+          totalBytes += stat.size
+          if (totalBytes > MAX_CONFIG_BYTES) throw new Error('Compiled theme exceeds the config size limit.')
+          return readBoundedText(path)
+        }).join('\n') || css
+      }
+    }
+  } catch { return undefined }
+  const modes = { light: new Map<string, string>(), dark: new Map<string, string>() }
+  const banners = { light: new Map<string, string>(), dark: new Map<string, string>() }
+  try {
+    postcss.parse(css).walkRules((rule) => {
+      if (rule.parent?.type !== 'root') return
+      for (const selector of rule.selector.split(',')) {
+        const key = selector.trim()
+        const target = key === ':root' || key === 'html' || /^(?:html)?\[data-theme=['"]?light['"]?\]$/.test(key) ? modes.light
+          : /^(?:html)?\[data-theme=['"]?dark['"]?\]$/.test(key) || key === '.dark' ? modes.dark : undefined
+        if (target) rule.walkDecls((decl) => { if (decl.prop.startsWith('--ifm-')) target.set(decl.prop, decl.value) })
+        const banner = key === '.theme-announcement-bar' ? banners.light
+          : /^(?:html)?\[data-theme=['"]?dark['"]?\] \.theme-announcement-bar$/.test(key) ? banners.dark : undefined
+        if (banner) rule.walkDecls((decl) => { banner.set(decl.prop, decl.value) })
+      }
+    })
+  } catch { return undefined }
+  const value = (name: string, mode: 'light' | 'dark', active = new Set<string>()): string | undefined => {
+    if (active.has(name) || active.size >= 16) return undefined
+    active.add(name)
+    const raw = modes[mode].get(name) ?? modes.light.get(name)
+    const reference = raw && /^var\((--[\w-]+)\)$/.exec(raw.trim())?.[1]
+    return reference ? value(reference, mode, active) : raw
+  }
+  const color = (name: string, mode: 'light' | 'dark') => {
+    const raw = value(name, mode)
+    return raw ? cssColorToHex(raw) : undefined
+  }
+  const mapped = { '--docs-bg': '--ifm-background-color', '--docs-ink': '--ifm-font-color-base', '--docs-ink-2': '--ifm-font-color-base', '--docs-accent': '--ifm-link-color' }
+  const declarations = (mode: 'light' | 'dark') => Object.entries(mapped).flatMap(([target, source]) => { const hex = color(source, mode); return hex ? [`${target}:${hex}`] : [] }).join(';')
+  const heading = value('--ifm-heading-font-family', 'light')?.trim()
+  const headingFont = heading && /^[\w -]{1,80}$/.test(heading) ? heading : undefined
+  const dimension = (name: string, fallback: string) => { const raw = value(name, 'light'); return raw && /^\d+(?:\.\d+)?(?:px|rem)$/.test(raw) ? raw : fallback }
+  const bodyFont = value('--ifm-font-family-base', 'light')
+  const safeBodyFont = bodyFont && /^[\w\s,'"._-]{1,250}$/.test(bodyFont) ? bodyFont : 'ui-sans-serif,system-ui,sans-serif'
+  const bannerCss = (mode: 'light' | 'dark') => {
+    const styles: Array<string> = []
+    for (const [property, raw] of banners[mode]) {
+      const reference = /^var\((--[\w-]+)\)$/.exec(raw)?.[1]
+      const resolved = reference ? value(reference, mode) : raw
+      if (!resolved) continue
+      const hex = ['background-color', 'color'].includes(property) ? cssColorToHex(resolved) : undefined
+      if (hex) styles.push(`${property}:${hex}`)
+      else if (property === 'font-family' && /^[\w\s,'"._-]{1,250}$/.test(resolved)
+        || ['font-size', 'padding'].includes(property) && /^(?:\d*\.?\d+(?:px|rem)?\s*){1,4}$/.test(resolved)
+        || property === 'font-weight' && /^(?:[1-9]00|bold|normal)$/.test(resolved)) styles.push(`${property}:${resolved}`)
+    }
+    return styles.join(';')
+  }
+  let tokens = ''
+  const prismStart = propertyStart(config, 'prism')
+  const prism = prismStart < 0 ? null : matchingObjectLiteral(config, prismStart)
+  const themeStart = prism ? propertyStart(prism, 'theme') : -1
+  const themeExpression = themeStart < 0 ? '' : prism!.slice(themeStart)
+  const identifier = /^([\w$]+)/.exec(themeExpression)?.[1]
+  const binding = identifier && config.match(new RegExp(`(?:const|let|var)\\s+${identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*(require\\([^\\n]+)`))?.[1]
+  const themePath = (themeExpression || '').match(/^require\(\s*['"]([^'"]+)['"]/)?.[1]
+    ?? binding?.match(/^require\(\s*['"]([^'"]+)['"]/)?.[1]
+  if (themePath) try {
+    const base = resolveWithin(repositoryRoot, themePath)
+    const path = [base, `${base}.js`, `${base}/index.js`, `${base}/index.cjs.js`].find((candidate) => existsSync(candidate) && lstatSync(candidate).isFile())
+    if (path) {
+      const source = readBoundedText(withinRealRoot(path, repositoryRoot))
+      const start = source.search(/(?:module\.exports|(?:const|let|var)\s+\w+)\s*=/)
+      const literal = start < 0 ? null : matchingObjectLiteral(source, source.indexOf('=', start) + 1)
+      const theme = literal ? JSON5.parse(literal) as { plain?: { color?: string; backgroundColor?: string }; styles?: Array<{ types?: Array<string>; style?: { color?: string } }> } : null
+      const tokenNames: Record<string, string> = { keyword: 'keyword', string: 'string', comment: 'comment', function: 'function', property: 'property', constant: 'constant', punctuation: 'punctuation', parameter: 'parameter' }
+      const colors = new Map<string, string>()
+      for (const [target, raw] of [['--shiki-color-text', theme?.plain?.color], ['--docs-code-bg', theme?.plain?.backgroundColor]]) { const hex = typeof raw === 'string' ? cssColorToHex(raw) : undefined; if (hex && target) colors.set(target, hex) }
+      for (const style of theme?.styles ?? []) for (const type of Array.isArray(style.types) ? style.types : []) {
+        const hex = typeof style.style?.color === 'string' ? cssColorToHex(style.style.color) : undefined
+        if (tokenNames[type] && hex) colors.set(`--shiki-token-${tokenNames[type]}`, hex)
+      }
+      tokens = [...colors].map(([name, hex]) => `${name}:${hex}`).join(';')
+    }
+  } catch { /* Executable or malformed themes cannot become styling. */ }
+  const lightAccent = color('--ifm-color-primary', 'light')
+  const darkAccent = color('--ifm-color-primary', 'dark')
+  return { headingFont, colors: lightAccent || darkAccent ? { dark: lightAccent, light: darkAccent } : undefined, unresolved: /\btheme\(/.test(css), css: `
+:root{${declarations('light')}}
+:root.dark{${declarations('dark')}}
+body{font-family:${safeBodyFont}}
+.thally-docs-root,.thally-docs-sidebar{background:var(--docs-bg);color:var(--docs-ink)}
+.thally-docs-topbar{background:var(--docs-bg);backdrop-filter:none}
+.thally-docs-topbar-inner{height:${dimension('--ifm-navbar-height', '60px')};max-width:none;padding-inline:24px}
+.thally-docs-collection-row{display:none}
+.thally-docs-actions{flex:1}.thally-docs-navlinks{order:-1;margin-left:auto;margin-right:12px}
+.thally-docs-topbar-link svg{display:none}
+.thally-docs-search,.thally-docs-search>button:first-of-type{width:180px}
+.thally-docs-search>button:first-of-type{border:1px solid var(--docs-line);border-radius:24px;background:var(--docs-bg)}
+.thally-ink-banner{${bannerCss('light')}}
+.dark .thally-ink-banner{${bannerCss('dark')}}
+.thally-ink-banner-content{color:inherit;font-size:inherit;font-weight:inherit}
+.thally-ink-banner-content a{color:var(--docs-accent)}
+.thally-ink-banner-dot{display:none}
+.thally-docs-eyebrow{display:none}
+.thally-docs-header h1{font-size:${dimension('--ifm-h1-font-size', '2.5rem')};line-height:1.25;color:var(--docs-ink)}
+.thally-docs-prose{line-height:1.5;color:var(--docs-ink)}
+.thally-docs-prose p{margin-block:0 1rem}
+.thally-docs-prose a{color:var(--docs-accent)}
+.thally-docs-code{${tokens};background:var(--docs-code-bg)}
+@media(min-width:1024px){
+.thally-docs-shell{max-width:none;padding-inline:0}
+.thally-docs-sidebar,.thally-docs-sidebar>div{width:300px}
+.thally-docs-sidebar{border-right:1px solid var(--docs-line)}
+.thally-docs-main{padding-top:50px}
+.thally-docs-main>div{padding-inline:26px}
+.thally-docs-article nav[aria-label=Breadcrumb]{display:none}
+.thally-docs-sidebar nav{padding-inline:16px}
+.thally-docs-sidebar a[aria-current=page]{background:transparent!important;text-shadow:none}
+}
+` }
 }

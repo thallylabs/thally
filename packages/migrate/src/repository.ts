@@ -44,6 +44,7 @@ import {
   readDocusaurusSiteSettings,
   readDocusaurusSidebars,
   readDocusaurusThemeColor,
+  readDocusaurusPresentation,
   rewriteDocusaurusLinks,
   resolveDocusaurusPageIdentity,
   type DocusaurusPageDescriptor,
@@ -68,7 +69,7 @@ import {
   resolvePageAccess,
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
-import { resolvePageDisplayHeading, bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -2513,6 +2514,14 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
   for (const page of pages) {
     const fragments = requested.get(page.id)
     if (!fragments?.size) continue
+    const definitions = new Map<string, string>()
+    replaceOutsideCodeAndComments(page.body, (text) => {
+      for (const match of text.matchAll(/^ {0,3}\[([^\]\n]+)\]:[^\n]*$/gm)) {
+        const label = match[1].trim().replace(/\s+/g, ' ').toLowerCase()
+        if (!definitions.has(label)) definitions.set(label, match[0])
+      }
+      return text
+    })
     const lines = page.body.split('\n')
     let fence: string | undefined
     const tableCells: Array<{ index: number; text: string }> = []
@@ -2528,7 +2537,7 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
       const tableCell = line.match(/^ {0,3}\|\s*([^|]+?)\s*\|/)
       if (tableCell && !/^[:\s-]+$/.test(tableCell[1])) tableCells.push({ index, text: tableCell[1] })
       const match = line.match(/^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
-      return match ? { index, text: match[1].replace(/\s*\{\/\*\s*#\S+?\s*\*\/\}$/, '') } : null
+      return match ? { index, text: mdxVisibleText(match[1].replace(/\s*\{\/\*\s*#\S+?\s*\*\/\}$/, ''), definitions) } : null
     }).filter((entry): entry is { index: number; text: string } => entry !== null)
     const existing = new Set<string>()
     replaceOutsideCode(page.body, (text) => {
@@ -5382,7 +5391,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const docusaurusSettings = isTopLevelDocusaurus
     ? readDocusaurusSiteSettings(docusaurusProjectRoot!)
     : undefined
+  const presentation = docusaurusSettings ? readDocusaurusPresentation(docusaurusProjectRoot!) : undefined
   if (docusaurusSettings) {
+    if (presentation) {
+      assets.push({ path: '_thally/source-theme.css', content: Buffer.from(presentation.css) })
+      docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), '/_thally/source-theme.css'], ...(presentation.headingFont ? { fonts: { ...docsConfig.fonts, heading: { family: presentation.headingFont, weight: ['400', '500', '600', '700'] } } } : {}) }
+      if (presentation.unresolved) warnings.push({ code: 'unsupported-config', message: 'Docusaurus Sass/Tailwind theme values could not be resolved statically; provide compiled build/assets/css/styles.*.css to retain those colors.' })
+    }
+    if (docusaurusSettings.banner) docsConfig = { ...docsConfig, banner: docusaurusSettings.banner }
     const importedRoutes = new Set(pages.map((page) => page.navigationId))
     const sourceOrigin = readDocusaurusSiteOrigin(docusaurusProjectRoot!)
     const externalized = new Set<string>()
@@ -5470,8 +5486,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const themeColors = mintlifyConfig
     ? mintlifyThemeColors(mintlifyConfig.colors)
     : fernRawConfig
-      ? fernThemeColors(fernRawConfig.colors)
-      : isTopLevelDocusaurus ? readDocusaurusThemeColor(docusaurusProjectRoot!) : undefined
+      ? fernThemeColors(fernRawConfig.colors) ?? (fernRawConfig['global-theme'] === 'nvidia' ? { primary: '#76B900' } : undefined)
+      : isTopLevelDocusaurus ? presentation?.colors ?? readDocusaurusThemeColor(docusaurusProjectRoot!) : undefined
   // Brand assets are copied as ordinary public files. Wire only assets that
   // were actually imported; a missing source file must not create a broken
   // header image or favicon. Admin uploads still override these fallbacks.
@@ -5603,7 +5619,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         + 'Confirm nothing here was meant to stay private before deploying.',
     })
   }
-  if (fernRawConfig?.logo && !logoLight && !logo.light) warnings.push({
+  if (typeof fernRawConfig?.['global-theme'] === 'string') warnings.push({
+    code: 'unsupported-config',
+    message: `Fern global theme ${JSON.stringify(fernRawConfig['global-theme'])} could not be fetched during local migration; local overrides and Thally default styling tokens were applied.`,
+    source: 'global-theme',
+  })
+  if (fernRawConfig?.logo && !fernRawConfig['global-theme'] && !logoLight && !logo.light) warnings.push({
     code: 'unsupported-config',
     message: 'Fern supplied a logo through its global theme without a local asset; add a logo path to docs.json after import.',
   })

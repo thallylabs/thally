@@ -69,7 +69,7 @@ export function MobileNav({
                 ?? section.items.map((item) => ({ type: 'page' as const, item }))
               return (
                 <div key={section.id ?? `${section.title}-${index}`} className="space-y-2">
-                  <p className={typography.meta}>{section.title}</p>
+                  {section.defaultOpen === undefined ? <p className={typography.meta}>{section.title}</p> : null}
                   <div className="ml-1 border-l border-border/55 pl-1.5">
                     <NavigationTree
                       nodes={nodes}

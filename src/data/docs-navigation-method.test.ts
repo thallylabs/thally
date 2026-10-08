@@ -4,7 +4,11 @@ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/docs-json-config', () => ({
   getDocsJsonConfig: () => ({
-    tabs: [{ tab: 'API', groups: [{ group: 'Endpoints', pages: ['api/scrape', 'api/hook', 'api/errors'] }] }],
+    tabs: [{ tab: 'API', groups: [
+      { group: 'Endpoints', pages: ['api/scrape', 'api/hook', 'api/errors'] },
+      { group: 'Examples', defaultOpen: true, pages: ['api/errors'] },
+      { group: 'Archived', defaultOpen: false, pages: ['api/errors'] },
+    ] }],
   }),
   getDocsJsonConfigRevision: () => 1,
 }))
@@ -25,5 +29,11 @@ describe('sidebar method', () => {
   it('carries the upper-cased operation method, HOOK for webhooks, and nothing for plain pages', () => {
     const items = getSidebarCollections()[0].sections[0].items
     expect(items.map((item) => item.method)).toEqual(['DELETE', 'HOOK', undefined])
+  })
+  it('retains explicit expansion states on root groups without wrapping ordinary headings', () => {
+    const sections = getSidebarCollections()[0].sections
+    expect(sections[0].nodes?.[0].type).toBe('page')
+    expect(sections[1]).toMatchObject({ defaultOpen: true, nodes: [{ type: 'group', group: { defaultOpen: true } }] })
+    expect(sections[2]).toMatchObject({ defaultOpen: false, nodes: [{ type: 'group', group: { defaultOpen: false } }] })
   })
 })

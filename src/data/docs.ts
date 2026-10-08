@@ -79,6 +79,7 @@ export interface DocEntry {
 
 
 export interface NavigationSection {
+  defaultOpen?: boolean
   /** Stable structural identity; unlike a title, this remains unique when a group is split. */
   id?: string
   title: string
@@ -90,6 +91,7 @@ export interface NavigationSection {
 }
 
 export interface NavigationGroup {
+  defaultOpen?: boolean
   id: string
   title: string
   icon?: string
@@ -158,6 +160,7 @@ export interface SearchableDoc {
 // ---------------------------------------------------------------------------
 
 interface DocsJsonNavigationGroup {
+  defaultOpen?: boolean
   group: string
   icon?: string
   hidden?: boolean
@@ -1093,6 +1096,7 @@ function buildNavigationGroup(
     id: `nav-group-${indexPath.join('-')}-${slugifyId(group.group) || 'group'}`,
     title: group.group || 'General',
     icon: group.icon,
+    ...(typeof group.defaultOpen === 'boolean' ? { defaultOpen: group.defaultOpen } : {}),
     nodes,
   }
 }
@@ -1163,8 +1167,11 @@ export function getSidebarCollections(locale?: string, reader: ReaderContext = A
           id: tree.id,
           title: tree.title,
           icon: tree.icon,
+          defaultOpen: tree.defaultOpen,
           items: collectNavigationItems(tree.nodes),
-          nodes: tree.nodes,
+          nodes: typeof tree.defaultOpen === 'boolean'
+            ? [{ type: 'group' as const, group: tree }]
+            : tree.nodes,
         }]
       })
       const rootNodes = tab.pages

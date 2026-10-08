@@ -1353,3 +1353,83 @@ describe('public Docusaurus pages keep their static assets when a draft exists',
     expect(bundle.assets.map((entry) => entry.path)).not.toContain('img/unused.png')
   })
 })
+
+
+describe('decorated source heading anchors', () => {
+  it('matches visible JSX and Markdown text without consuming attributes or code examples', () => {
+    const root = docusaurusSite({
+      'docs/guide.mdx': '# Guide\n\n[Select](./target.mdx#Selecting-Elements)\n[Type](./target.mdx#url-String-Glob-RegExp)\n[Env](./target.mdx#2-cypressenvjson)\n[Response](./target.mdx#staticResponse-StaticResponse)\n',
+      'docs/target.mdx': '# Target\n\n## <Icon name="angle-right" title="ignored > text" /> **Selecting** Elements\n\n### url (`String`, `Glob`, `RegExp`)\n\n### 2. `cypress.env.json`\n\n#### <Icon /> staticResponse (<code>[StaticResponse][staticresponse]</code>)\n\n[staticresponse]: #response\n\n```mdx\n## <Icon /> Selecting Elements\n```\n',
+    })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+    const target = bundle.pages.find((page) => page.id === 'target')!
+    expect(target.body).toContain('<a id="Selecting-Elements"></a>')
+    expect(target.body).toContain('<a id="url-String-Glob-RegExp"></a>')
+    expect(target.body).toContain('<a id="2-cypressenvjson"></a>')
+    expect(target.body).toContain('<a id="staticResponse-StaticResponse"></a>')
+    expect(target.body.match(/id="Selecting-Elements"/g)).toHaveLength(1)
+  })
+})
+
+
+describe('Docusaurus preset comments', () => {
+  it('keeps root-mounted navbar links local despite apostrophes and brackets in comments', () => {
+    const root = docusaurusSite({
+      'docusaurus.config.js': `module.exports = { url: 'https://docs.example.com', presets: [['classic', { docs: { routeBasePath: '/',
+        // Docusaurus's defaults [must] remain excluded.
+        exclude: ['**/AGENTS.md'], /* closing ] belongs to this comment */
+      } }]], themeConfig: { navbar: { items: [{ label: 'Guide', to: '/guide' }] } } }`,
+      'docs/guide.mdx': '# Guide\n\nBody.',
+    })
+    expect(readDocusaurusSiteSettings(root).docsRouteBasePath).toBe('/')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+    expect(bundle.docsConfig.navbar?.links).toContainEqual({ label: 'Guide', href: '/guide' })
+  })
+})
+
+
+describe('Fern group expansion', () => {
+  it('retains authored expansion defaults', () => {
+    const bundle = fernSite('navigation:\n  - section: Guide\n    contents:\n      - section: Examples\n        collapsed: open-by-default\n        contents:\n          - page: Example\n            path: example.mdx\n', { 'example.mdx': '# Example\n\nBody.' })
+    expect(JSON.stringify(bundle.docsConfig)).toContain('"defaultOpen":true')
+  })
+})
+
+
+describe('Docusaurus native presentation', () => {
+  it('maps compiled Sass variables, heading font, Prism tokens and announcement into local assets', () => {
+    const root = docusaurusSite({
+      'docusaurus.config.js': `module.exports = { presets: [['classic', { theme: { customCss: './src/css/custom.scss' } }]], themeConfig: { announcementBar: { id: 'launch', content: 'See <a href="https://example.com/news">news</a>', isCloseable: false }, prism: { theme: require('./src/theme/prism') } } }`,
+      'src/css/custom.scss': ':root { --ifm-link-color: theme(colors.blue.500); }',
+      'build/assets/css/styles.test.css': ':root { --ifm-color-primary: #69d3a7; --ifm-color-white: #fff; } html[data-theme=light] { --ifm-background-color: var(--ifm-color-white); --ifm-font-color-base: #434861; --ifm-link-color: #4956e3; --ifm-heading-font-family: Poppins; } [data-theme="dark"] { --ifm-background-color: #1b1e2e; --ifm-font-color-base: #f3f4fa; } .theme-announcement-bar { background-color: rgb(238 242 255); color: var(--ifm-font-color-base); font-size: 1rem; padding: 0.65rem 0; }',
+      'src/theme/prism/index.js': `module.exports = { plain: { color: '#c3cee3', backgroundColor: '#282a36' }, styles: [{ types: ['keyword'], style: { color: '#c792ea' } }] }`,
+      'docs/guide.mdx': '# Guide\n\nBody.',
+    })
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+    expect(bundle.docsConfig.fonts?.heading?.family).toBe('Poppins')
+    expect(bundle.site?.colors?.dark).toBe('#69d3a7')
+    expect(bundle.docsConfig.stylesheets).toContain('/_thally/source-theme.css')
+    expect(bundle.docsConfig.banner).toMatchObject({ id: 'launch', dismissible: false, content: 'See [news](https://example.com/news)' })
+    const css = Buffer.from(bundle.assets.find((asset) => asset.path === '_thally/source-theme.css')!.content).toString()
+    expect(css).toContain('--docs-bg:#ffffff')
+    expect(css).toContain('--docs-accent:#4956e3')
+    expect(css).toContain('--shiki-token-keyword:#c792ea')
+    expect(css).toContain('.thally-ink-banner{background-color:#eef2ff;color:#434861;font-size:1rem;padding:0.65rem 0}')
+    expect(css).not.toContain('theme(colors')
+  })
+})
+
+
+describe('Fern remote global theme fallback', () => {
+  it('continues with static fallback tokens and warns without fetching remote assets', () => {
+    const bundle = fernSite('global-theme: nvidia\nlogo:\n  right-text: Guardrails\nnavigation:\n  - page: Guide\n    path: guide.mdx\n', { 'guide.mdx': '# Guide\n\nBody.' })
+    expect(bundle.pages).toHaveLength(1)
+    expect(bundle.site?.colors?.primary).toBe('#76B900')
+    expect(bundle.warnings).toContainEqual(expect.objectContaining({ code: 'unsupported-config', message: expect.stringMatching(/global theme.*could not be fetched.*default styling tokens/i) }))
+    expect(bundle.assets.every((asset) => !asset.path.startsWith('https:'))).toBe(true)
+  })
+  it('keeps authored colors above the static fallback', () => {
+    const bundle = fernSite('global-theme: nvidia\ncolors:\n  accent-primary: "#112233"\nnavigation:\n  - page: Guide\n    path: guide.mdx\n', { 'guide.mdx': '# Guide\n\nBody.' })
+    expect(bundle.site?.colors?.primary).toBe('#112233')
+  })
+})

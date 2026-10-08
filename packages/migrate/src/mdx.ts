@@ -40,13 +40,22 @@ interface DescriptionNode {
 
 const descriptionParser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
 
+function plainText(node: DescriptionNode): string {
+  if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
+  if (node.type === 'image') return node.alt ?? ''
+  if (node.type === 'break') return ' '
+  return (node.children ?? []).map(plainText).join('')
+}
+
+/** Read visible inline text without including JSX attributes or Markdown syntax. */
+export function mdxVisibleText(content: string, definitions?: ReadonlyMap<string, string>): string {
+  const references = [...content.matchAll(/\[([^\]\n]+)\]/g)]
+    .map((match) => definitions?.get(match[1].trim().replace(/\s+/g, ' ').toLowerCase()) ?? '').join('\n')
+  try { return plainText(descriptionParser.parse(`# ${content}\n\n${references}`) as DescriptionNode).trim() }
+  catch { return content }
+}
+
 function firstParagraph(content: string): string {
-  function plainText(node: DescriptionNode): string {
-    if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
-    if (node.type === 'image') return node.alt ?? ''
-    if (node.type === 'break') return ' '
-    return (node.children ?? []).map(plainText).join('')
-  }
   function findParagraph(node: DescriptionNode): string {
     if (node.type === 'paragraph') {
       const value = plainText(node).replace(/\s+/g, ' ').trim()

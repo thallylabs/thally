@@ -17,6 +17,7 @@ export type MigrationPlatform =
   | 'unknown'
 
 export interface MigrationNavigationGroup {
+  defaultOpen?: boolean
   group: string
   icon?: string
   hidden?: boolean

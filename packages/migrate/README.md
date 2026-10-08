@@ -426,6 +426,17 @@ Legacy `mint.json` `topbarLinks` and `topbarCtaButton` (including
 
 ## Branding
 
+Docusaurus custom CSS projects Infima palette, typography, header spacing,
+announcement styling, and local Prism colors into a portable stylesheet.
+For Sass or Tailwind expressions, provide locally compiled
+`build/assets/css/styles.*.css`; unresolved expressions produce a migration
+warning. Configuration and theme modules are read as static data.
+
+Remote Fern `global-theme` references fall back to local overrides and base
+Thally tokens with a structured warning. The NVIDIA theme uses `#76B900`
+when no local accent is configured. No remote theme assets are fetched.
+Authored section expansion defaults are retained on desktop and mobile.
+
 A source site's logo, favicon, and theme accent color(s) are extracted where
 each platform's config exposes them (Mintlify's `colors`, Fern's
 `colors.accent-primary`, Docusaurus's classic theme `customCss`). A valid

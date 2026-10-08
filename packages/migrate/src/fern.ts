@@ -22,7 +22,7 @@ import type {
 const MAX_CONFIG_BYTES = 20_000_000
 
 /** Retain safe Fern announcement links without emitting source-controlled HTML. */
-function announcementMarkdown(message: string): string {
+export function announcementMarkdown(message: string): string {
   const document = load(message)
   document('script, style, iframe, object, embed, svg, math').remove()
   const escapeText = (value: string): string => value
@@ -467,6 +467,8 @@ function convertNodeContents(
     if (object.hidden === true || context.hiddenInherited) return null
     return {
       group: label,
+      ...(['open-by-default', 'closed-by-default', true, false].includes(object.collapsed as string | boolean)
+        ? { defaultOpen: object.collapsed === 'open-by-default' || object.collapsed === false } : {}),
       ...(typeof object.icon === 'string' ? { icon: object.icon } : {}),
       ...(object.hidden === true ? { hidden: true } : {}),
       pages,
