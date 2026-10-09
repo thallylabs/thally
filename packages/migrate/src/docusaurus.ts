@@ -4,15 +4,19 @@
  * never imports, evaluates, or executes JavaScript/TypeScript configuration.
  */
 
-import { existsSync, lstatSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { extname, posix } from 'node:path'
 
+import postcss from 'postcss'
+import { cssColorToHex } from './css-colors.js'
+import { announcementMarkdown } from './fern.js'
 import JSON5 from 'json5'
+import ts from 'typescript'
 import { parse as parseYaml } from 'yaml'
 
 import type { MarkdownPageIdentity } from './mdx.js'
-import { isRedirectPathSafe } from './navigation.js'
-import { pageIdFromReference, resolveWithin, slugifySegment } from './path.js'
+import { isRedirectPathSafe, translateRedirectWildcards } from './navigation.js'
+import { pageIdFromReference, resolveWithin, slugifySegment, withinRealRoot } from './path.js'
 import type {
   MigrationDocsConfig,
   MigrationNavigationGroup,
@@ -35,6 +39,8 @@ export interface DocusaurusPageDescriptor {
   docId: string
   navigationId: string
   sidebarPosition?: number
+  /** Frontmatter `unlisted`: the page is served but never shown in a sidebar. */
+  unlisted?: boolean
   title: string
 }
 
@@ -69,6 +75,11 @@ interface CategoryMetadata {
   link?: unknown
 }
 
+/** Identifiers may contain `$`, which is an anchor in a regular expression. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -98,10 +109,12 @@ function docusaurusSlugifySegment(value: string): string {
   } catch {
     // Malformed escapes remain literal input and are normalized safely below.
   }
-  return decoded
+  const slug = decoded
     .replace(/\.(?:html?|mdx?)$/i, '')
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/(^-|-$)/g, '')
+  // A dot segment (also spelled `%2e%2e`) must never reach a page id or file path.
+  return slug === '.' || slug === '..' ? '' : slug
 }
 
 function docusaurusRouteId(value: string): string | null {
@@ -179,8 +192,15 @@ export function resolveDocusaurusPageIdentity(
       docId,
       navigationId,
       ...(position === undefined ? {} : { sidebarPosition: position }),
+      ...(isUnlisted(frontmatter.unlisted) ? { unlisted: true } : {}),
     },
   }
+}
+
+/** Anything but an explicit false counts as unlisted; hiding a page from navigation is the safe reading. */
+function isUnlisted(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== false
+    && !(typeof value === 'string' && ['', 'false'].includes(value.trim().toLowerCase()))
 }
 
 function sourceReferenceKey(value: string): string {
@@ -440,59 +460,54 @@ function readBoundedText(path: string): string {
   return readFileSync(path, 'utf8')
 }
 
-function matchingObjectLiteral(source: string, start: number): string | null {
-  let depth = 0
-  let quote: string | null = null
-  let isEscaped = false
-  let lineComment = false
-  let blockComment = false
-  let objectStart = -1
-
-  for (let index = start; index < source.length; index++) {
-    const char = source[index]
-    const next = source[index + 1]
-    if (lineComment) {
-      if (char === '\n') lineComment = false
-      continue
-    }
-    if (blockComment) {
-      if (char === '*' && next === '/') {
-        blockComment = false
-        index++
+/**
+ * Index object and block braces with TypeScript's parser, without evaluating
+ * source. Regex literals and template strings need JavaScript lexical context;
+ * a character scanner can mistake their quotes for an unterminated string.
+ * Parsing once and walking the syntax tree once keeps candidate lookups linear
+ * in total. Bare object fragments parse as blocks, so index those as well.
+ */
+function braceTable(source: string): Map<number, number> {
+  const table = new Map<number, number>()
+  try {
+    const tree = ts.createSourceFile('config.ts', source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS)
+    const pending: Array<ts.Node> = [tree]
+    while (pending.length > 0) {
+      const node = pending.pop()!
+      if (ts.isObjectLiteralExpression(node) || ts.isBlock(node)) {
+        const start = node.getStart(tree)
+        const end = node.end - 1
+        // Recovery nodes can have a synthetic closing brace; only real source
+        // delimiters may become configuration passed to JSON5.
+        if (source[start] === '{' && source[end] === '}') table.set(start, end)
       }
-      continue
+      ts.forEachChild(node, (child) => { pending.push(child) })
     }
-    if (quote) {
-      if (isEscaped) isEscaped = false
-      else if (char === '\\') isEscaped = true
-      else if (char === quote) quote = null
-      continue
-    }
-    if (char === '/' && next === '/') {
-      lineComment = true
-      index++
-      continue
-    }
-    if (char === '/' && next === '*') {
-      blockComment = true
-      index++
-      continue
-    }
-    if (char === '"' || char === "'" || char === '`') {
-      quote = char
-      continue
-    }
-    if (char === '{') {
-      if (objectStart < 0) objectStart = index
-      depth++
-    } else if (char === '}' && objectStart >= 0) {
-      depth--
-      if (depth === 0) return source.slice(objectStart, index + 1)
-    } else if (objectStart < 0 && !/\s/.test(char)) {
-      return null
-    }
+  } catch {
+    // Excessively nested or malformed syntax is unsupported configuration.
   }
-  return null
+  return table
+}
+
+let lastBraceSource: string | undefined
+let lastBraceTable = new Map<number, number>()
+
+/** The object literal starting at `start` (after whitespace and comments), or null when none starts there or it never closes. */
+function matchingObjectLiteral(source: string, start: number): string | null {
+  let index = start
+  while (index < source.length) {
+    if (/\s/.test(source[index])) index++
+    else if (source.startsWith('//', index)) { const end = source.indexOf('\n', index); index = end < 0 ? source.length : end + 1 }
+    else if (source.startsWith('/*', index)) { const end = source.indexOf('*/', index + 2); index = end < 0 ? source.length : end + 2 }
+    else break
+  }
+  if (source[index] !== '{') return null
+  if (lastBraceSource !== source) {
+    lastBraceSource = source
+    lastBraceTable = braceTable(source)
+  }
+  const end = lastBraceTable.get(index)
+  return end === undefined ? null : source.slice(index, end + 1)
 }
 
 function parseStaticSidebarModule(source: string): Record<string, unknown> {
@@ -502,7 +517,7 @@ function parseStaticSidebarModule(source: string): Record<string, unknown> {
   const assignmentPatterns = [
     /\bmodule\.exports\s*=\s*/g,
     /\bexport\s+default\s*/g,
-    /\b(?:const|let|var)\s+[A-Za-z_$][\w$]*(?:\s*:\s*[^=;]+)?\s*=\s*/g,
+    /\b(?:const|let|var)\s+[A-Za-z_$][\w$]*(?:\s*:\s*(?:(?!\b(?:const|let|var)\b)[^=;])+)?\s*=\s*/g,
   ]
   const candidates = assignmentPatterns.flatMap((pattern) => [...normalizedSource.matchAll(pattern)])
     .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))
@@ -513,7 +528,7 @@ function parseStaticSidebarModule(source: string): Record<string, unknown> {
     try {
       const substituted = [...bindings].reduce(
         (value, [name, binding]) => value.replace(
-          new RegExp(`(:\\s*)${name}\\b`, 'g'),
+          new RegExp(`(:\\s*)${escapeRegExp(name)}(?![\\w$])`, 'g'),
           (_match, prefix: string) => `${prefix}${JSON.stringify(binding)}`,
         ),
         literal,
@@ -543,21 +558,21 @@ function parseStaticSidebarModule(source: string): Record<string, unknown> {
 
 function replaceExternalFbContent(source: string): string {
   const marker = '...fbContent('
-  let result = source
+  let output = ''
+  let cursor = 0
   let searchFrom = 0
   while (true) {
-    const start = result.indexOf(marker, searchFrom)
-    if (start < 0) return result.replace(/,\s*,/g, ',')
-    const objectStart = result.indexOf('{', start + marker.length)
-    if (objectStart < 0) return result
-    const objectLiteral = matchingObjectLiteral(result, objectStart)
+    const start = source.indexOf(marker, searchFrom)
+    if (start < 0) return `${output}${source.slice(cursor)}`.replace(/,\s*,/g, ',')
+    const objectStart = source.indexOf('{', start + marker.length)
+    if (objectStart < 0) return `${output}${source.slice(cursor)}`
+    const objectLiteral = matchingObjectLiteral(source, objectStart)
     if (!objectLiteral) {
       searchFrom = start + marker.length
       continue
     }
-    const objectEnd = objectStart + objectLiteral.length
-    const close = result.indexOf(')', objectEnd)
-    if (close < 0) return result
+    const close = source.indexOf(')', objectStart + objectLiteral.length)
+    if (close < 0) return `${output}${source.slice(cursor)}`
     const externalMatch = /\bexternal\s*:\s*/g.exec(objectLiteral)
     let replacement = ''
     if (externalMatch) {
@@ -569,11 +584,14 @@ function replaceExternalFbContent(source: string): string {
     }
     let replaceEnd = close + 1
     if (!replacement) {
-      const trailingComma = result.slice(replaceEnd).match(/^\s*,/)
-      if (trailingComma) replaceEnd += trailingComma[0].length
+      const trailingComma = /\s*,/y
+      trailingComma.lastIndex = replaceEnd
+      const found = trailingComma.exec(source)
+      if (found) replaceEnd += found[0].length
     }
-    result = `${result.slice(0, start)}${replacement}${result.slice(replaceEnd)}`
-    searchFrom = start + replacement.length
+    output += `${source.slice(cursor, start)}${replacement}`
+    cursor = replaceEnd
+    searchFrom = replaceEnd
   }
 }
 
@@ -587,6 +605,18 @@ function matchingArrayLiteral(source: string, start: number): string | null {
       if (isEscaped) isEscaped = false
       else if (character === '\\') isEscaped = true
       else if (character === quote) quote = ''
+      continue
+    }
+    if (source.startsWith('//', index)) {
+      const end = source.indexOf('\n', index + 2)
+      if (end < 0) return null
+      index = end
+      continue
+    }
+    if (source.startsWith('/*', index)) {
+      const end = source.indexOf('*/', index + 2)
+      if (end < 0) return null
+      index = end + 1
       continue
     }
     if (character === '"' || character === "'" || character === '`') {
@@ -611,14 +641,14 @@ function configuredSidebarPath(repositoryRoot: string): string | null {
       const object = matchingObjectLiteral(source, (docs.index ?? 0) + docs[0].length)
       const candidate = object && staticStringField(object, 'sidebarPath')?.replace(/^\.\//, '')
       if (candidate) {
-        const resolved = resolveWithin(repositoryRoot, candidate)
+        const resolved = withinRealRoot(resolveWithin(repositoryRoot, candidate), repositoryRoot)
         if (existsSync(resolved) && lstatSync(resolved).isFile()) return candidate
       }
     }
     const match = source.match(/\bsidebarPath\s*:\s*(?:require\.resolve\(\s*)?(['"])([^'"]+)\1/)
     if (!match) continue
     const candidate = match[2].replace(/^\.\//, '')
-    const resolved = resolveWithin(repositoryRoot, candidate)
+    const resolved = withinRealRoot(resolveWithin(repositoryRoot, candidate), repositoryRoot)
     if (existsSync(resolved) && lstatSync(resolved).isFile()) return candidate
   }
   return null
@@ -632,11 +662,11 @@ export function readDocusaurusSidebars(repositoryRoot: string, versionedSidebarP
   const sourcePath = [configured, ...(versionedSidebarPath ? [] : SIDEBAR_FILENAMES)]
     .filter((value): value is string => Boolean(value))
     .find((candidate) => {
-      const path = resolveWithin(repositoryRoot, candidate)
+      const path = withinRealRoot(resolveWithin(repositoryRoot, candidate), repositoryRoot)
       return existsSync(path) && lstatSync(path).isFile()
     })
   if (!sourcePath) return null
-  const absolutePath = resolveWithin(repositoryRoot, sourcePath)
+  const absolutePath = withinRealRoot(resolveWithin(repositoryRoot, sourcePath), repositoryRoot)
   const source = readBoundedText(absolutePath)
   const parsed = extname(sourcePath).toLowerCase() === '.json'
     ? objectValue(JSON5.parse(source))
@@ -647,7 +677,7 @@ export function readDocusaurusSidebars(repositoryRoot: string, versionedSidebarP
 
 function namedExportObjectLiteralText(source: string, name: string): string | null {
   const normalizedSource = replaceExternalFbContent(source)
-  const match = new RegExp(`\\bexport\\s+(?:const|let|var)\\s+${name}\\b(?:\\s*:\\s*[^=;]+)?\\s*=\\s*`).exec(normalizedSource)
+  const match = new RegExp(`\\bexport\\s+(?:const|let|var)\\s+${escapeRegExp(name)}(?![\\w$])(?:\\s*:\\s*(?:(?!\\b(?:const|let|var)\\b)[^=;])+)?\\s*=\\s*`).exec(normalizedSource)
   if (!match) return null
   return matchingObjectLiteral(normalizedSource, match.index + match[0].length)
 }
@@ -659,7 +689,10 @@ function namedExportObjectLiteralText(source: string, name: string): string | nu
  * ... }` method in the same object literal, which is not valid JSON5 and
  * would otherwise fail the whole object and lose the `redirects` array too.
  */
-function redirectEntriesFromObjectLiteralText(objectLiteral: string): Array<{ source: string; destination: string }> {
+function redirectEntriesFromObjectLiteralText(
+  objectLiteral: string,
+  warnings: Array<MigrationWarning>,
+): Array<{ source: string; destination: string }> {
   const match = /\bredirects\s*:\s*/.exec(objectLiteral)
   if (!match) return []
   const arrayStart = objectLiteral.indexOf('[', match.index + match[0].length)
@@ -681,7 +714,12 @@ function redirectEntriesFromObjectLiteralText(objectLiteral: string): Array<{ so
     for (const from of froms) {
       if (typeof from !== 'string') continue
       if (!isRedirectPathSafe(from, entry.to)) continue
-      entries.push({ source: from, destination: entry.to })
+      const translated = translateRedirectWildcards(from, entry.to)
+      if (!translated) {
+        warnings.push({ code: 'unsupported-config', message: `Redirect from ${from} uses a wildcard Next.js cannot express and was dropped.` })
+        continue
+      }
+      entries.push(translated)
     }
   }
   return entries
@@ -717,18 +755,18 @@ export function readDocusaurusRedirects(
   warnAboutCreateRedirects(configSource)
   // Case 1: the plugin's options object is written inline.
   const inlineLiteral = matchingObjectLiteral(configSource, pluginMatch.index + pluginMatch[0].length)
-  if (inlineLiteral) return redirectEntriesFromObjectLiteralText(inlineLiteral)
+  if (inlineLiteral) return redirectEntriesFromObjectLiteralText(inlineLiteral, warnings)
   // Case 2: the options are an identifier imported from another module.
   const identifier = afterPlugin.match(/^([A-Za-z_$][\w$]*)/)?.[1]
   if (!identifier) return []
-  const importMatch = new RegExp(`import\\s*\\{[^}]*\\b${identifier}\\b[^}]*\\}\\s*from\\s*(['"])([^'"]+)\\1`).exec(configSource)
-    ?? new RegExp(`import\\s+${identifier}\\s+from\\s*(['"])([^'"]+)\\1`).exec(configSource)
+  const importMatch = new RegExp(`import\\s*\\{[^}]*(?<![\\w$])${escapeRegExp(identifier)}(?![\\w$])[^}]*\\}\\s*from\\s*(['"])([^'"]+)\\1`).exec(configSource)
+    ?? new RegExp(`import\\s+${escapeRegExp(identifier)}\\s+from\\s*(['"])([^'"]+)\\1`).exec(configSource)
   const modulePath = importMatch?.[2]
   if (!modulePath || !modulePath.startsWith('.')) return []
   let resolvedPath: string | undefined
   try {
     resolvedPath = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs']
-      .map((extension) => resolveWithin(repositoryRoot, `${modulePath.replace(/^\.\//, '')}${extension}`))
+      .map((extension) => withinRealRoot(resolveWithin(repositoryRoot, `${modulePath.replace(/^\.\//, '')}${extension}`), repositoryRoot))
       .find((candidate) => existsSync(candidate) && lstatSync(candidate).isFile())
   } catch {
     return []
@@ -737,12 +775,13 @@ export function readDocusaurusRedirects(
   const moduleSource = readBoundedText(resolvedPath)
   warnAboutCreateRedirects(moduleSource)
   const literal = namedExportObjectLiteralText(moduleSource, identifier)
-  return literal ? redirectEntriesFromObjectLiteralText(literal) : []
+  return literal ? redirectEntriesFromObjectLiteralText(literal, warnings) : []
 }
 
 function readCategoryMetadata(contentRoot: string, directory: string): CategoryMetadata {
   for (const filename of CATEGORY_FILENAMES) {
     const path = resolveWithin(contentRoot, posix.join(directory, filename))
+    try { withinRealRoot(path, contentRoot) } catch { continue }
     if (!existsSync(path) || !lstatSync(path).isFile()) continue
     try {
       const raw = readBoundedText(path)
@@ -857,7 +896,7 @@ export function readDocusaurusThemeColor(repositoryRoot: string): { light?: stri
   if (!cssRelativePath) return undefined
   let cssPath: string
   try {
-    cssPath = resolveWithin(repositoryRoot, cssRelativePath.replace(/^\.\//, ''))
+    cssPath = withinRealRoot(resolveWithin(repositoryRoot, cssRelativePath.replace(/^\.\//, '')), repositoryRoot)
   } catch {
     return undefined
   }
@@ -887,14 +926,21 @@ export interface DocusaurusSiteSettings {
   navbarLinks: Array<{ label: string; href?: string; docId?: string; sidebarId?: string; docsPluginId?: string }>
   footerLinks: NonNullable<MigrationDocsConfig['footer']>['links']
   copyright?: string
+  banner?: MigrationDocsConfig['banner']
 }
 
 function propertyStart(source: string, name: string): number {
   // Only property positions count. A bare word in a comment or a value must
   // never become executable configuration during repository migration.
-  const pattern = new RegExp(`(?:^|[,{\\n])\\s*["']?${name}["']?\\s*:\\s*`, 'm')
-  const match = pattern.exec(source)
-  return match ? match.index + match[0].length : -1
+  // The lead-in is checked by scanning back from each hit: a `\s*` right
+  // after a line-start alternation is quadratic on long runs of blank lines.
+  const pattern = new RegExp(`["']?${name}["']?\\s*:\\s*`, 'g')
+  for (let match = pattern.exec(source); match; match = pattern.exec(source)) {
+    let before = match.index - 1
+    while (before >= 0 && (source[before] === ' ' || source[before] === '\t')) before--
+    if (before < 0 || '\r\n,{'.includes(source[before])) return match.index + match[0].length
+  }
+  return -1
 }
 
 function staticStringBindings(source: string): Map<string, string> {
@@ -1029,7 +1075,13 @@ export function readDocusaurusSiteSettings(repositoryRoot: string): DocusaurusSi
       ?? footer.slice(propertyStart(footer, 'copyright')).match(/^`([^`]+)`/)?.[1]
         ?.replace(/\$\{new Date\(\)\.getFullYear\(\)\}/g, '{year}')
     : undefined
+  const announcementStart = theme ? propertyStart(theme, 'announcementBar') : -1
+  const announcement = announcementStart < 0 ? null : matchingObjectLiteral(theme!, announcementStart)
+  const announcementContent = announcement && staticStringField(announcement, 'content')
+    || announcement?.slice(propertyStart(announcement, 'content')).match(/^`([^`]+)`/)?.[1]
+  const bannerContent = announcementContent ? announcementMarkdown(announcementContent) : ''
   return {
+    ...(bannerContent ? { banner: { content: bannerContent, dismissible: !/isCloseable\s*:\s*false/.test(announcement!), ...(staticStringField(announcement!, 'id') ? { id: staticStringField(announcement!, 'id') } : {}) } } : {}),
     name: staticStringField(source, 'title'),
     description: staticStringField(source, 'tagline'),
     ...(navbar && staticStringField(navbar, 'title') ? { navbarTitle: staticStringField(navbar, 'title') } : {}),
@@ -1050,7 +1102,9 @@ export function readDocusaurusSiteSettings(repositoryRoot: string): DocusaurusSi
 }
 
 function autogeneratedItems(dirName: string, context: ProjectionContext): Array<string | MigrationNavigationGroup> {
-  const normalizedDir = dirName === '.' ? '' : normalizeDocId(dirName)
+  // `dirName` and descriptor source paths are on-disk paths: number prefixes
+  // (`02-guide/`) are only stripped from ids and routes, never from these.
+  const normalizedDir = dirName === '.' ? '' : dirName.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
   const inDirectory = context.descriptors.filter((descriptor) => {
     const source = descriptor.sourcePath.replace(/\.(?:mdx?)$/i, '')
     return !normalizedDir || source === normalizedDir || source.startsWith(`${normalizedDir}/`)
@@ -1070,7 +1124,8 @@ function autogeneratedItems(dirName: string, context: ProjectionContext): Array<
     // renders it as a child link, so put it before the category's other docs.
     position: descriptor.sidebarPosition ?? (/(?:^|\/)(?:index|readme)\.mdx?$/i.test(descriptor.sourcePath)
       ? -1 : Number.MAX_SAFE_INTEGER),
-    sortKey: descriptor.sourcePath,
+    // Siblings sort by file or directory name, like the category entries below.
+    sortKey: posix.basename(descriptor.sourcePath),
     item: descriptor.navigationId as string | MigrationNavigationGroup,
   }))
   const groups = [...childDirectories].map((segment) => {
@@ -1183,8 +1238,19 @@ export function projectDocusaurusNavigation(input: {
     }]
   })
 
+  // Unlisted pages stay routable, but no sidebar shows them, listed or not.
+  const unlisted = new Set(input.descriptors.filter((page) => page.unlisted).map((page) => page.navigationId))
+  const withoutUnlisted = (items: Array<string | MigrationNavigationGroup>): Array<string | MigrationNavigationGroup> =>
+    items.flatMap((item): Array<string | MigrationNavigationGroup> => {
+      if (typeof item === 'string') return unlisted.has(item) ? [] : [item]
+      const pages = withoutUnlisted(item.pages)
+      return pages.length > 0 ? [{ ...item, pages }] : []
+    })
+  if (unlisted.size > 0) {
+    for (const tab of tabs) tab.pages = withoutUnlisted(tab.pages)
+  }
   const unreferenced = input.descriptors
-    .filter((page) => !context.referencedNavigationIds.has(page.navigationId))
+    .filter((page) => !unlisted.has(page.navigationId) && !context.referencedNavigationIds.has(page.navigationId))
     .sort(descriptorSort)
     .map((page) => page.navigationId)
   if (unreferenced.length > 0) {
@@ -1197,4 +1263,147 @@ export function projectDocusaurusNavigation(input: {
     referencedNavigationIds: context.referencedNavigationIds,
     warnings,
   }
+}
+
+
+/** Project bounded native CSS tokens; compiled output resolves Sass/Tailwind values without executing source config. */
+export function readDocusaurusPresentation(repositoryRoot: string): { css: string; headingFont?: string; colors?: { light?: string; dark?: string }; unresolved: boolean } | undefined {
+  const configPath = findDocusaurusConfigPath(repositoryRoot)
+  if (!configPath) return undefined
+  const config = readBoundedText(configPath)
+  const relative = config.match(/\bcustomCss\s*:\s*(?:\[\s*)?(?:require\.resolve\(\s*)?(['"])([^'"]+)\1/)?.[2]
+  if (!relative) return undefined
+  let css: string
+  try {
+    const path = withinRealRoot(resolveWithin(repositoryRoot, relative), repositoryRoot)
+    if (!lstatSync(path).isFile()) return undefined
+    css = readBoundedText(path)
+    if (/\btheme\(/.test(css) || /\.s[ac]ss$/.test(relative)) {
+      const candidateDirectory = resolveWithin(repositoryRoot, 'build/assets/css')
+      if (existsSync(candidateDirectory)) {
+        const directory = withinRealRoot(candidateDirectory, repositoryRoot)
+        const compiled = readdirSync(directory).filter((name) => /^styles[.\w-]*\.css$/.test(name)).sort().slice(0, 8)
+        let totalBytes = 0
+        css = compiled.map((name) => {
+          const path = withinRealRoot(resolveWithin(directory, name), repositoryRoot)
+          const stat = lstatSync(path)
+          if (!stat.isFile()) return ''
+          totalBytes += stat.size
+          if (totalBytes > MAX_CONFIG_BYTES) throw new Error('Compiled theme exceeds the config size limit.')
+          return readBoundedText(path)
+        }).join('\n') || css
+      }
+    }
+  } catch { return undefined }
+  const modes = { light: new Map<string, string>(), dark: new Map<string, string>() }
+  const banners = { light: new Map<string, string>(), dark: new Map<string, string>() }
+  try {
+    postcss.parse(css).walkRules((rule) => {
+      if (rule.parent?.type !== 'root') return
+      for (const selector of rule.selector.split(',')) {
+        const key = selector.trim()
+        const target = key === ':root' || key === 'html' || /^(?:html)?\[data-theme=['"]?light['"]?\]$/.test(key) ? modes.light
+          : /^(?:html)?\[data-theme=['"]?dark['"]?\]$/.test(key) || key === '.dark' ? modes.dark : undefined
+        if (target) rule.walkDecls((decl) => { if (decl.prop.startsWith('--ifm-')) target.set(decl.prop, decl.value) })
+        const banner = key === '.theme-announcement-bar' ? banners.light
+          : /^(?:html)?\[data-theme=['"]?dark['"]?\] \.theme-announcement-bar$/.test(key) ? banners.dark : undefined
+        if (banner) rule.walkDecls((decl) => { banner.set(decl.prop, decl.value) })
+      }
+    })
+  } catch { return undefined }
+  const value = (name: string, mode: 'light' | 'dark', active = new Set<string>()): string | undefined => {
+    if (active.has(name) || active.size >= 16) return undefined
+    active.add(name)
+    const raw = modes[mode].get(name) ?? modes.light.get(name)
+    const reference = raw && /^var\((--[\w-]+)\)$/.exec(raw.trim())?.[1]
+    return reference ? value(reference, mode, active) : raw
+  }
+  const color = (name: string, mode: 'light' | 'dark') => {
+    const raw = value(name, mode)
+    return raw ? cssColorToHex(raw) : undefined
+  }
+  const mapped = { '--docs-bg': '--ifm-background-color', '--docs-ink': '--ifm-font-color-base', '--docs-ink-2': '--ifm-font-color-base', '--docs-accent': '--ifm-link-color' }
+  const declarations = (mode: 'light' | 'dark') => Object.entries(mapped).flatMap(([target, source]) => { const hex = color(source, mode); return hex ? [`${target}:${hex}`] : [] }).join(';')
+  const heading = value('--ifm-heading-font-family', 'light')?.trim()
+  const headingFont = heading && /^[\w -]{1,80}$/.test(heading) ? heading : undefined
+  const dimension = (name: string, fallback: string) => { const raw = value(name, 'light'); return raw && /^\d+(?:\.\d+)?(?:px|rem)$/.test(raw) ? raw : fallback }
+  const bodyFont = value('--ifm-font-family-base', 'light')
+  const safeBodyFont = bodyFont && /^[\w\s,'"._-]{1,250}$/.test(bodyFont) ? bodyFont : 'ui-sans-serif,system-ui,sans-serif'
+  const bannerCss = (mode: 'light' | 'dark') => {
+    const styles: Array<string> = []
+    for (const [property, raw] of banners[mode]) {
+      const reference = /^var\((--[\w-]+)\)$/.exec(raw)?.[1]
+      const resolved = reference ? value(reference, mode) : raw
+      if (!resolved) continue
+      const hex = ['background-color', 'color'].includes(property) ? cssColorToHex(resolved) : undefined
+      if (hex) styles.push(`${property}:${hex}`)
+      else if (property === 'font-family' && /^[\w\s,'"._-]{1,250}$/.test(resolved)
+        || ['font-size', 'padding'].includes(property) && /^(?:\d*\.?\d+(?:px|rem)?\s*){1,4}$/.test(resolved)
+        || property === 'font-weight' && /^(?:[1-9]00|bold|normal)$/.test(resolved)) styles.push(`${property}:${resolved}`)
+    }
+    return styles.join(';')
+  }
+  let tokens = ''
+  const prismStart = propertyStart(config, 'prism')
+  const prism = prismStart < 0 ? null : matchingObjectLiteral(config, prismStart)
+  const themeStart = prism ? propertyStart(prism, 'theme') : -1
+  const themeExpression = themeStart < 0 ? '' : prism!.slice(themeStart)
+  const identifier = /^([\w$]+)/.exec(themeExpression)?.[1]
+  const binding = identifier && config.match(new RegExp(`(?:const|let|var)\\s+${identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*(require\\([^\\n]+)`))?.[1]
+  const themePath = (themeExpression || '').match(/^require\(\s*['"]([^'"]+)['"]/)?.[1]
+    ?? binding?.match(/^require\(\s*['"]([^'"]+)['"]/)?.[1]
+  if (themePath) try {
+    const base = resolveWithin(repositoryRoot, themePath)
+    const path = [base, `${base}.js`, `${base}/index.js`, `${base}/index.cjs.js`].find((candidate) => existsSync(candidate) && lstatSync(candidate).isFile())
+    if (path) {
+      const source = readBoundedText(withinRealRoot(path, repositoryRoot))
+      const start = source.search(/(?:module\.exports|(?:const|let|var)\s+\w+)\s*=/)
+      const literal = start < 0 ? null : matchingObjectLiteral(source, source.indexOf('=', start) + 1)
+      const theme = literal ? JSON5.parse(literal) as { plain?: { color?: string; backgroundColor?: string }; styles?: Array<{ types?: Array<string>; style?: { color?: string } }> } : null
+      const tokenNames: Record<string, string> = { keyword: 'keyword', string: 'string', comment: 'comment', function: 'function', property: 'property', constant: 'constant', punctuation: 'punctuation', parameter: 'parameter' }
+      const colors = new Map<string, string>()
+      for (const [target, raw] of [['--shiki-color-text', theme?.plain?.color], ['--docs-code-bg', theme?.plain?.backgroundColor]]) { const hex = typeof raw === 'string' ? cssColorToHex(raw) : undefined; if (hex && target) colors.set(target, hex) }
+      for (const style of theme?.styles ?? []) for (const type of Array.isArray(style.types) ? style.types : []) {
+        const hex = typeof style.style?.color === 'string' ? cssColorToHex(style.style.color) : undefined
+        if (tokenNames[type] && hex) colors.set(`--shiki-token-${tokenNames[type]}`, hex)
+      }
+      tokens = [...colors].map(([name, hex]) => `${name}:${hex}`).join(';')
+    }
+  } catch { /* Executable or malformed themes cannot become styling. */ }
+  const lightAccent = color('--ifm-color-primary', 'light')
+  const darkAccent = color('--ifm-color-primary', 'dark')
+  return { headingFont, colors: lightAccent || darkAccent ? { dark: lightAccent, light: darkAccent } : undefined, unresolved: /\btheme\(/.test(css), css: `
+:root{${declarations('light')}}
+:root.dark{${declarations('dark')}}
+body{font-family:${safeBodyFont}}
+.thally-docs-root,.thally-docs-sidebar{background:var(--docs-bg);color:var(--docs-ink)}
+.thally-docs-topbar{background:var(--docs-bg);backdrop-filter:none}
+.thally-docs-topbar-inner{height:${dimension('--ifm-navbar-height', '60px')};max-width:none;padding-inline:24px}
+.thally-docs-collection-row{display:none}
+.thally-docs-actions{flex:1}.thally-docs-navlinks{order:-1;margin-left:auto;margin-right:12px}
+.thally-docs-topbar-link svg{display:none}
+.thally-docs-search,.thally-docs-search>button:first-of-type{width:180px}
+.thally-docs-search>button:first-of-type{border:1px solid var(--docs-line);border-radius:24px;background:var(--docs-bg)}
+.thally-ink-banner{${bannerCss('light')}}
+.dark .thally-ink-banner{${bannerCss('dark')}}
+.thally-ink-banner-content{color:inherit;font-size:inherit;font-weight:inherit}
+.thally-ink-banner-content a{color:var(--docs-accent)}
+.thally-ink-banner-dot{display:none}
+.thally-docs-eyebrow{display:none}
+.thally-docs-header h1{font-size:${dimension('--ifm-h1-font-size', '2.5rem')};line-height:1.25;color:var(--docs-ink)}
+.thally-docs-prose{line-height:1.5;color:var(--docs-ink)}
+.thally-docs-prose p{margin-block:0 1rem}
+.thally-docs-prose a{color:var(--docs-accent)}
+.thally-docs-code{${tokens};background:var(--docs-code-bg)}
+@media(min-width:1024px){
+.thally-docs-shell{max-width:none;padding-inline:0}
+.thally-docs-sidebar,.thally-docs-sidebar>div{width:300px}
+.thally-docs-sidebar{border-right:1px solid var(--docs-line)}
+.thally-docs-main{padding-top:50px}
+.thally-docs-main>div{padding-inline:26px}
+.thally-docs-article nav[aria-label=Breadcrumb]{display:none}
+.thally-docs-sidebar nav{padding-inline:16px}
+.thally-docs-sidebar a[aria-current=page]{background:transparent!important;text-shadow:none}
+}
+` }
 }

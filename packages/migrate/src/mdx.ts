@@ -40,13 +40,22 @@ interface DescriptionNode {
 
 const descriptionParser = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
 
+function plainText(node: DescriptionNode): string {
+  if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
+  if (node.type === 'image') return node.alt ?? ''
+  if (node.type === 'break') return ' '
+  return (node.children ?? []).map(plainText).join('')
+}
+
+/** Read visible inline text without including JSX attributes or Markdown syntax. */
+export function mdxVisibleText(content: string, definitions?: ReadonlyMap<string, string>): string {
+  const references = [...content.matchAll(/\[([^\]\n]+)\]/g)]
+    .map((match) => definitions?.get(match[1].trim().replace(/\s+/g, ' ').toLowerCase()) ?? '').join('\n')
+  try { return plainText(descriptionParser.parse(`# ${content}\n\n${references}`) as DescriptionNode).trim() }
+  catch { return content }
+}
+
 function firstParagraph(content: string): string {
-  function plainText(node: DescriptionNode): string {
-    if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
-    if (node.type === 'image') return node.alt ?? ''
-    if (node.type === 'break') return ' '
-    return (node.children ?? []).map(plainText).join('')
-  }
   function findParagraph(node: DescriptionNode): string {
     if (node.type === 'paragraph') {
       const value = plainText(node).replace(/\s+/g, ' ').trim()
@@ -75,6 +84,107 @@ function docusaurusAdmonitionTag(kind: string): 'Error' | 'Info' | 'Note' | 'War
   if (kind === 'info') return 'Info'
   if (kind === 'caution' || kind === 'warning') return 'Warning'
   return 'Note'
+}
+
+/**
+ * Scans the opening tag of `<name` at `start` to its closing `>`, skipping
+ * quoted values and `{expressions}` (strings and any brace depth) so a `>` inside
+ * them does not end the tag. The scan also stops at the next `<name` opener, so
+ * a run of unterminated openers is scanned once in total, not once per opener.
+ * `attributes` is what was scanned; `next` advances callers past that span.
+ */
+export function scanJsxOpeningTag(source: string, start: number, name: string): { attributes: string; end: number | null; next: number } {
+  const opener = `<${name}`
+  let quote: string | null = null
+  let depth = 0
+  let braceQuote: string | null = null
+  let lineComment = false
+  let blockComment = false
+  const attributesStart = start + opener.length
+  for (let index = attributesStart; index < source.length; index++) {
+    const char = source[index]
+    if (char === '<' && !quote && !braceQuote && depth === 0 && !lineComment && !blockComment
+      && source.startsWith(opener, index) && !/[\w$.-]/.test(source[index + opener.length] ?? '')) {
+      return { attributes: source.slice(attributesStart, index), end: null, next: index }
+    }
+    if (lineComment) {
+      if (char === '\n' || char === '\r') lineComment = false
+    } else if (blockComment) {
+      if (char === '*' && source[index + 1] === '/') { blockComment = false; index++ }
+    } else if (braceQuote) {
+      if (char === '\\') index++
+      else if (char === braceQuote) braceQuote = null
+    } else if (depth > 0) {
+      if (char === '/' && source[index + 1] === '/') { lineComment = true; index++ }
+      else if (char === '/' && source[index + 1] === '*') { blockComment = true; index++ }
+      else if (char === '"' || char === "'" || char === '`') braceQuote = char
+      else if (char === '{') depth++
+      else if (char === '}') depth--
+    } else if (quote) {
+      if (char === quote) quote = null
+    } else if (char === '"' || char === "'") quote = char
+    else if (char === '{') depth++
+    else if (char === '>') return { attributes: source.slice(attributesStart, index), end: index, next: index + 1 }
+  }
+  return { attributes: source.slice(attributesStart), end: null, next: source.length }
+}
+
+/**
+ * `<Admonition type="tip" title="X">` is the JSX spelling of a colon-fence
+ * admonition and maps to the same callouts.
+ */
+export function normalizeDocusaurusAdmonitionTags(segment: string): string {
+  const open: Array<string> = []
+  const marker = /<\/Admonition>|<Admonition(?![\w$.-])/g
+  let output = ''
+  let cursor = 0
+  for (let match = marker.exec(segment); match; match = marker.exec(segment)) {
+    if (match[0] === '</Admonition>') {
+      output += `${segment.slice(cursor, match.index)}\n</${open.pop() ?? 'Note'}>`
+      cursor = marker.lastIndex
+      continue
+    }
+    const tag = scanJsxOpeningTag(segment, match.index, 'Admonition')
+    marker.lastIndex = tag.next
+    if (tag.end === null) continue
+    const type = tag.attributes.match(/\btype=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)?.toLowerCase() ?? 'note'
+    const title = tag.attributes.match(/\btitle=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)?.trim()
+    const callout = docusaurusAdmonitionTag(type)
+    open.push(callout)
+    output += `${segment.slice(cursor, match.index)}${title ? `<${callout}>\n**${title}**\n` : `<${callout}>\n`}`
+    cursor = tag.end + 1
+    marker.lastIndex = cursor
+  }
+  return output + segment.slice(cursor)
+}
+
+/** `<Link to=...>` becomes `<a href=...>`; a tag that never closes is left as written. */
+export function normalizeDocusaurusLinkTags(segment: string): string {
+  const marker = /<Link(?![\w$.-])/g
+  let output = ''
+  let cursor = 0
+  for (let match = marker.exec(segment); match; match = marker.exec(segment)) {
+    const tag = scanJsxOpeningTag(segment, match.index, 'Link')
+    marker.lastIndex = tag.next
+    if (tag.end === null) continue
+    output += `${segment.slice(cursor, match.index)}<a${tag.attributes.replace(/(^|\s)to=/, '$1href=')}>`
+    cursor = tag.end + 1
+    marker.lastIndex = cursor
+  }
+  return (output + segment.slice(cursor)).replace(/<\/Link>/g, '</a>')
+}
+
+/**
+ * Thally has no light/dark image component, so `<ThemedImage sources={{ light, dark }}>`
+ * keeps its light image (a literal path, or `useBaseUrl('...')` of one).
+ */
+function normalizeDocusaurusThemedImages(segment: string): string {
+  return segment.replace(/<ThemedImage\b([^<]*?)\/>/g, (original: string, attributes: string) => {
+    const light = attributes.match(/\blight\s*:\s*(?:useBaseUrl\(\s*)?(?:"([^"]+)"|'([^']+)')/)?.slice(1).find(Boolean)
+    if (!light) return original
+    const alt = attributes.match(/\balt=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find((value) => value !== undefined)
+    return `<img src="${light.replace(/"/g, '&quot;')}"${alt === undefined ? '' : ` alt="${alt.replace(/"/g, '&quot;')}"`} />`
+  })
 }
 
 /**
@@ -363,11 +473,52 @@ interface MdxOffsetNode {
   position?: { start: { offset?: number }; end: { offset?: number } }
 }
 
+/** Bind static partial invocation props inside expressions, preserving literals and code examples. */
+export function bindSnippetProps(body: string, properties: ReadonlyMap<string, string>): string {
+  if (!body.includes('props') || properties.size === 0) return body
+  let tree: unknown
+  try { tree = descriptionParser.parse(body) } catch { return body }
+  const edits: Array<{ start: number; end: number; value: string }> = []
+  const inspectExpression = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    const node = value as acorn.AnyNode
+    if (node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression' || node.type === 'FunctionDeclaration') {
+      const names = new Set<string>()
+      node.params.forEach((param) => collectPatternNames(param, names))
+      if (names.has('props')) return
+    }
+    if (node.type === 'MemberExpression' && node.object.type === 'Identifier' && node.object.name === 'props') {
+      const key = !node.computed && node.property.type === 'Identifier' ? node.property.name
+        : node.computed && node.property.type === 'Literal' && typeof node.property.value === 'string' ? node.property.value : undefined
+      const replacement = key === undefined ? undefined : properties.get(key)
+      if (replacement !== undefined && body.slice(node.start, node.end).startsWith('props')) {
+        edits.push({ start: node.start, end: node.end, value: JSON.stringify(replacement) })
+        return
+      }
+    }
+    for (const child of Object.values(value)) {
+      if (Array.isArray(child)) child.forEach(inspectExpression)
+      else if (child && typeof child === 'object') inspectExpression(child)
+    }
+  }
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    const node = value as MdxOffsetNode & { attributes?: Array<{ value?: unknown }> }
+    if (node.data?.estree) inspectExpression(node.data.estree)
+    for (const attribute of node.attributes ?? []) visit(attribute.value)
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(tree)
+  return edits.sort((a, b) => b.start - a.start).reduce((text, edit) => text.slice(0, edit.start) + edit.value + text.slice(edit.end), body)
+}
+
 /** Use a page's leading H1 as its title without rendering it twice. */
 function leadingPageHeading(body: string): { title: string; start: number; end: number } | undefined {
+  if (!/^ {0,3}(?:#(?:[ \t]|$)|=+[ \t\r]*$)/m.test(body)) return undefined
   try {
     const root = descriptionParser.parse(body) as MdxOffsetNode
-    const first = root.children?.find((node) => node.type !== 'mdxjsEsm' && node.type !== 'html')
+    const first = root.children?.find((node) => node.type !== 'mdxjsEsm' && node.type !== 'html'
+      && !(node.type === 'mdxFlowExpression' && node.data?.estree?.body.length === 0))
     if (first?.type !== 'heading' || first.depth !== 1) return undefined
     const text = (node: MdxOffsetNode): string => node.type === 'mdxTextExpression' || node.type === 'mdxFlowExpression'
       ? ''
@@ -379,6 +530,14 @@ function leadingPageHeading(body: string): { title: string; start: number; end: 
   } catch {
     return undefined
   }
+}
+
+/** Recheck after component fallbacks, which can expose a page's leading H1. */
+export function resolvePageDisplayHeading(page: Pick<MigrationPage, 'title' | 'body' | 'headingTitle'>, platform?: MigrationPlatform): void {
+  const heading = leadingPageHeading(page.body)
+  if (!heading || (heading.title !== page.title && platform !== 'docusaurus')) return
+  if (heading.title !== page.title) page.headingTitle = heading.title
+  page.body = `${page.body.slice(0, heading.start)}${page.body.slice(heading.end)}`.trim()
 }
 
 /** Recursively collects every name a binding pattern introduces (`{a, b: {c}}`, `[p, ...rest]`, `x = 1`). */
@@ -2044,11 +2203,12 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   // `normalizeExplicitHeadingIds` also covers Docusaurus' `{/* #id */}`
   // comment form.
   const sourceBody = runDocusaurus && unwrapMdxCodeBlocks ? unwrapDocusaurusMdxCodeBlocks(body) : body
-  let rewritten = normalizeDocusaurusAdmonitions(normalizeExplicitHeadingIds(
+  let rewritten = normalizeExplicitHeadingIds(
     runFern ? normalizeFernFileTrees(normalizeFernCallouts(normalizeNestedCodeFences(sourceBody))) : normalizeNestedCodeFences(sourceBody),
     undefined,
     { headingMarkers: runMintlify },
-  ))
+  )
+  if (runDocusaurus) rewritten = normalizeDocusaurusAdmonitions(rewritten)
   if (runMintlify) rewritten = markMintlifyHeadings(rewritten)
   if (runDocusaurus) {
     // Docusaurus resolves GitHub emoji names in Markdown text. Leaving the
@@ -2069,6 +2229,7 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
         return `${attribute}="/${path.replace(/^\.\//, '').replace(/^\/+/, '')}"`
       },
     ))
+    rewritten = replaceOutsideCode(rewritten, (segment) => normalizeDocusaurusThemedImages(normalizeDocusaurusAdmonitionTags(segment)))
     // Docusaurus injects these theme components globally. Thally also
     // exposes its equivalents globally, so source-only imports must not survive.
     rewritten = normalizeDocusaurusTabBlocks(normalizeDocusaurusTabs(removeGlobalDocusaurusImports(rewritten)))
@@ -2103,20 +2264,17 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
         // A TabItem outside any <Tabs>...</Tabs> pair (malformed source)
         // never reaches normalizeDocusaurusTabs' block match above; fall
         // back to its own label/value so it still renders as a Tab.
-        .replace(/<TabItem\b([^>]*)>/g, (_match, attributes: string) => {
+        .replace(/<TabItem\b([^<>]*)>/g, (_match, attributes: string) => {
           const title = attributes.match(/\blabel=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
             ?? attributes.match(/\bvalue=(?:"([^"]*)"|'([^']*)')/)?.slice(1).find(Boolean)
             ?? 'Tab'
           return `<Tab title="${title.replace(/"/g, '&quot;')}">`
         })
         .replace(/<\/TabItem>/g, '</Tab>')
-        .replace(/<Link\b([^>]*)\bto=(?:"([^"]*)"|'([^']*)')([^>]*)>/g, (_match, before: string, doubleQuoted: string, singleQuoted: string, after: string) => (
-          `<a${before}href="${doubleQuoted ?? singleQuoted}"${after}>`
-        ))
-        .replace(/<\/Link>/g, '</a>')
+      result = normalizeDocusaurusLinkTags(result)
         // The repository adapter expands DocCardList from the resolved
         // sidebar after page discovery. Its source tag has no runtime peer.
-        .replace(/<(?:DocCardList|TOCInline)\b[^>]*\/>/g, '')
+        .replace(/<(?:DocCardList|TOCInline)\b[^<>]*\/>/g, '')
     }
     if (runMintlify) {
       result = normalizeMintlifyUpdateLabels(result)
@@ -2197,7 +2355,7 @@ export function parseMarkdownPage(input: {
     ...(input.locale ? { locale: input.locale } : {}),
   }
   const identity = input.resolveIdentity?.(parsed.data, fallbackIdentity) ?? fallbackIdentity
-  let body = removeUndefinedExpressions(injectReactHookImports(normalizeMdx(parsed.content, input.platform)), input.warn).trim()
+  const body = removeUndefinedExpressions(injectReactHookImports(normalizeMdx(parsed.content, input.platform)), input.warn).trim()
   const keywords = Array.isArray(parsed.data.keywords)
     ? parsed.data.keywords.filter((value): value is string => typeof value === 'string')
     : []
@@ -2205,16 +2363,15 @@ export function parseMarkdownPage(input: {
   const title = typeof parsed.data.title === 'string' && parsed.data.title.trim()
     ? parsed.data.title.trim()
     : heading?.title ?? titleFromId(identity.navigationId)
-  if (heading && heading.title === title) {
-    body = `${body.slice(0, heading.start)}${body.slice(heading.end)}`.trim()
-  }
-  const navTitle = typeof parsed.data.sidebarTitle === 'string' && parsed.data.sidebarTitle.trim()
-    ? parsed.data.sidebarTitle.trim()
+  const sidebarTitle = input.platform === 'docusaurus' ? parsed.data.sidebar_label : parsed.data.sidebarTitle
+  const navTitle = typeof sidebarTitle === 'string' && sidebarTitle.trim()
+    ? sidebarTitle.trim()
     : typeof parsed.data.navTitle === 'string' && parsed.data.navTitle.trim()
       ? parsed.data.navTitle.trim()
       : undefined
   const icon = typeof parsed.data.icon === 'string' && parsed.data.icon.trim() ? parsed.data.icon.trim() : undefined
-  const iconType = icon && ['regular', 'solid', 'outline', 'brands'].includes(String(parsed.data.iconType))
+  const iconType = icon && typeof parsed.data.iconType === 'string'
+    && ['regular', 'solid', 'outline', 'brands'].includes(parsed.data.iconType)
     ? parsed.data.iconType as MigrationPage['iconType']
     : undefined
   const meta: NonNullable<MigrationPage['meta']> = {}
@@ -2241,7 +2398,7 @@ export function parseMarkdownPage(input: {
     : typeof parsed.data.openapi === 'string' && parsed.data.openapi.trim()
       ? ''
       : firstParagraph(body)
-  return {
+  const page: MigrationPage = {
     id: identity.id,
     navigationId: identity.navigationId,
     locale: identity.locale,
@@ -2265,6 +2422,8 @@ export function parseMarkdownPage(input: {
     source: input.source,
     ...(parsed.error ? { frontmatterError: parsed.error } : {}),
   }
+  resolvePageDisplayHeading(page, input.platform)
+  return page
 }
 
 const PAGE_META_FIELDS = [
@@ -2295,7 +2454,7 @@ function apiFrontmatter(
   if (data.authMethod !== undefined && data.authMethod !== null) {
     const method = typeof data.authMethod === 'string' ? data.authMethod.trim().toLowerCase() : ''
     if (AUTH_METHODS.has(method)) result.authMethod = method
-    else warn?.(`The page's "authMethod" frontmatter ${JSON.stringify(data.authMethod)} is not one of bearer, basic, key, none and was dropped.`)
+    else warn?.('The page\'s "authMethod" frontmatter is not one of bearer, basic, key, none and was dropped.')
   }
   return result
 }

@@ -11,7 +11,7 @@ import { load } from 'cheerio'
 import { parse as parseYaml } from 'yaml'
 
 import { isRedirectPathSafe, translateRedirectWildcards } from './navigation.js'
-import { resolveWithin, resolveWithinRoot } from './path.js'
+import { isPathEscapeError, resolveWithin, resolveWithinRoot, withinRealRoot } from './path.js'
 import type {
   MigrationDocsConfig,
   MigrationNavigationGroup,
@@ -22,7 +22,7 @@ import type {
 const MAX_CONFIG_BYTES = 20_000_000
 
 /** Retain safe Fern announcement links without emitting source-controlled HTML. */
-function announcementMarkdown(message: string): string {
+export function announcementMarkdown(message: string): string {
   const document = load(message)
   document('script, style, iframe, object, embed, svg, math').remove()
   const escapeText = (value: string): string => value
@@ -56,6 +56,8 @@ export interface FernPageDescriptor {
   navTitle?: string
   /** Keep routable pages excluded by Fern's `hidden` navigation flag. */
   hidden?: boolean
+  /** Listed under a docs.yml node that sets `viewers` or `authed`: Fern shows it only to signed-in roles. */
+  restricted?: boolean
 }
 
 /** One `api:` navigation node, resolved to the name/tab Thally needs to bind its spec. */
@@ -78,11 +80,15 @@ export interface FernApiSection {
 }
 
 export interface FernNavigationResult {
+  /** A bounded walk skipped nodes whose access rules and API bindings are unknown. */
+  navigationIncomplete: boolean
   docsConfig: MigrationDocsConfig
   descriptors: Array<FernPageDescriptor>
   warnings: Array<MigrationWarning>
   /** Every `api:` node found in navigation, in document order. A repo can declare several (e.g. a REST and a WebSocket API in separate tabs). */
   apiSections: Array<FernApiSection>
+  /** `api:` nodes under a restricted node; their specs must not be published. */
+  restrictedApiSections: Array<FernApiSection>
   /** Fern changelog tabs render their entries as a feed at the bare route. */
   changelogIndexes: Array<{ route: string; entries: Array<string> }>
 }
@@ -121,12 +127,16 @@ export function readFernConfig(fernRoot: string): { config: Record<string, unkno
 }
 
 interface WalkContext {
+  /** Shared across scoped context copies; bound alias expansion and recursion. */
+  navigationWalk: { active: Set<Record<string, unknown>>; visits: number; incomplete: boolean }
   fernRoot: string
   repositoryRoot: string
   descriptors: Array<FernPageDescriptor>
   seenNavigationIds: Set<string>
   /** Every `api:` node seen so far, in document order; `tabLabel` is filled in once its owning tab finishes walking. */
   apiSections: Array<FernApiSection>
+  /** `api:` nodes under a node that sets `viewers`: never published, and their specs stay out of public/. */
+  restrictedApiSections: Array<FernApiSection>
   changelogIndexes: Array<{ route: string; entries: Array<string> }>
   warnings: Array<MigrationWarning>
   warningKeys: Set<string>
@@ -145,6 +155,8 @@ interface WalkContext {
    */
   pathPrefix: string
   hiddenInherited?: boolean
+  /** Set while resolving a default version whose entry sets `viewers`. */
+  versionRestricted?: boolean
   /**
    * The navigation id that actually owns a page's content, keyed by
    * `sourcePath` — the first nav location a file is registered at. A file
@@ -253,14 +265,14 @@ function uniqueNavigationId(base: string, context: WalkContext): string {
 function registerPageAt(rawPath: string, base: string, context: WalkContext, navTitle?: string, hidden = false): string {
   let sourcePath: string
   try {
-    const absolute = resolveWithinRoot(
+    const absolute = withinRealRoot(resolveWithinRoot(
       context.pathPrefix ? resolveWithinRoot(context.fernRoot, context.pathPrefix, context.repositoryRoot) : context.fernRoot,
       rawPath.trim(),
       context.repositoryRoot,
-    )
+    ), context.repositoryRoot)
     sourcePath = relative(context.fernRoot, absolute).replace(/\\/g, '/')
   } catch {
-    warnOnce(context, `fern-unsafe-page-${rawPath}`, `Fern page path "${rawPath}" escapes the repository and was skipped.`)
+    warnOnce(context, `fern-unsafe-page-${rawPath}`, `Skipped the Fern page "${rawPath}" because it points outside the repository (symlink or ..).`)
     return ''
   }
   const navigationId = uniqueNavigationId(base || 'introduction', context)
@@ -296,13 +308,13 @@ function registerFolder(
   const rawPath = String(object.folder).trim()
   let folder: string
   try {
-    folder = resolveWithinRoot(
+    folder = withinRealRoot(resolveWithinRoot(
       context.pathPrefix ? resolveWithinRoot(context.fernRoot, context.pathPrefix, context.repositoryRoot) : context.fernRoot,
       rawPath,
       context.repositoryRoot,
-    )
+    ), context.repositoryRoot)
   } catch {
-    warnOnce(context, `fern-unsafe-folder-${rawPath}`, `Fern folder "${rawPath}" escapes the repository and was skipped.`)
+    warnOnce(context, `fern-unsafe-folder-${rawPath}`, `Skipped the Fern folder "${rawPath}" because it points outside the repository (symlink or ..). None of its pages were imported.`)
     return null
   }
   if (!existsSync(folder) || !lstatSync(folder).isDirectory()) {
@@ -317,7 +329,11 @@ function registerFolder(
     : fernBasicSlug(basename(folder))
   const segments = segment ? [...parentSegments, segment] : parentSegments
   const visit = (directory: string, routeSegments: Array<string>, depth: number): Array<string | MigrationNavigationGroup> => {
-    if (depth > 12 || context.descriptors.length >= 5_000) return []
+    if (depth > 12 || context.descriptors.length >= 5_000) {
+      context.navigationWalk.incomplete = true
+      warnOnce(context, 'fern-folder-limit', 'Fern folder navigation exceeded its depth or page budget; remaining access rules could not be classified.')
+      return []
+    }
     const pages: Array<string | MigrationNavigationGroup> = []
     const entries = readdirSync(directory, { withFileTypes: true })
       .filter((entry) => !entry.name.startsWith('.') && !entry.isSymbolicLink())
@@ -359,6 +375,32 @@ function registerPage(
   return registerPageAt(object.path, base, context, label, object.hidden === true) || null
 }
 
+/** Fern role-based access: any non-empty `viewers`, or a truthy `authed`, on a navigation node. Ambiguity counts as restricted. */
+function isRestrictedNode(object: Record<string, unknown>): boolean {
+  const viewers = object.viewers
+  if (Array.isArray(viewers) ? viewers.length > 0
+    : typeof viewers === 'string' ? viewers.trim() !== ''
+      : viewers !== undefined && viewers !== null && viewers !== false) return true
+  const authed = object.authed
+  return authed !== undefined && authed !== null && authed !== false
+    && !(typeof authed === 'string' && ['', 'false'].includes(authed.trim().toLowerCase()))
+}
+
+interface RestrictionMark { descriptors: number; apis: number }
+
+function restrictionMark(context: WalkContext): RestrictionMark {
+  return { descriptors: context.descriptors.length, apis: context.apiSections.length }
+}
+
+/**
+ * Mark every page and `api:` node registered since `mark` as restricted; the
+ * caller leaves them out of navigation. Their specs are kept out of public/.
+ */
+function markRestricted(context: WalkContext, mark: RestrictionMark): void {
+  for (const descriptor of context.descriptors.slice(mark.descriptors)) descriptor.restricted = true
+  context.restrictedApiSections.push(...context.apiSections.splice(mark.apis))
+}
+
 /** A `section`/`page`/`link`/`api`/`changelog` node from `layout` or `contents`. */
 function convertNode(
   node: unknown,
@@ -367,6 +409,35 @@ function convertNode(
 ): string | MigrationNavigationGroup | null {
   const object = objectValue(node)
   if (!object) return null
+  const walk = context.navigationWalk
+  const reason = walk.active.has(object) ? 'cyclic section'
+    : walk.active.size >= 64 ? 'section depth exceeds 64'
+      : walk.visits >= 5_000 ? 'node budget exceeds 5000' : undefined
+  if (reason) {
+    walk.incomplete = true
+    warnOnce(context, `navigation-${reason}`, `Fern navigation was skipped: ${reason}.`)
+    return null
+  }
+  walk.visits++
+  walk.active.add(object)
+  try {
+    if (isRestrictedNode(object)) {
+      const before = restrictionMark(context)
+      convertNodeContents({ ...object, viewers: undefined, authed: undefined }, parentSegments, context)
+      markRestricted(context, before)
+      return null
+    }
+    return convertNodeContents(object, parentSegments, context)
+  } finally {
+    walk.active.delete(object)
+  }
+}
+
+function convertNodeContents(
+  object: Record<string, unknown>,
+  parentSegments: Array<string>,
+  context: WalkContext,
+): string | MigrationNavigationGroup | null {
 
   if (typeof object.page === 'string') {
     const page = registerPage(object, parentSegments, context)
@@ -403,6 +474,8 @@ function convertNode(
     if (object.hidden === true || context.hiddenInherited) return null
     return {
       group: label,
+      ...(['open-by-default', 'closed-by-default', true, false].includes(object.collapsed as string | boolean)
+        ? { defaultOpen: object.collapsed === 'open-by-default' || object.collapsed === false } : {}),
       ...(typeof object.icon === 'string' ? { icon: object.icon } : {}),
       ...(object.hidden === true ? { hidden: true } : {}),
       pages,
@@ -513,6 +586,7 @@ function resolveVersionedNavigation(
     return version ? [version] : []
   })
   const chosen = versions.find((version) => version.default === true) ?? versions[0]
+  if (chosen && isRestrictedNode(chosen)) context.versionRestricted = true
   const skipped = versions.filter((version) => version !== chosen)
     .map((version) => (typeof version.version === 'string' ? version.version : undefined))
     .filter((name): name is string => Boolean(name))
@@ -530,6 +604,7 @@ function resolveVersionedNavigation(
       warnOnce(context, 'fern-version-not-file', `Fern version file "${chosen.path}" is not a regular file and was skipped.`)
       return config
     }
+    withinRealRoot(versionPath, context.repositoryRoot)
     const versionConfig = objectValue(readBoundedYaml(versionPath))
     if (!versionConfig) return config
     context.pathPrefix = relative(fernRoot, dirname(versionPath)).replace(/\\/g, '/')
@@ -538,7 +613,9 @@ function resolveVersionedNavigation(
     warnOnce(
       context,
       'fern-version-read-failed',
-      `Fern version file "${chosen.path}" could not be read (${error instanceof Error ? error.message : String(error)}) and was skipped.`,
+      isPathEscapeError(error)
+        ? `Skipped the Fern version file "${chosen.path}" because it points outside the repository (symlink or ..).`
+        : `Fern version file "${chosen.path}" could not be read (${error instanceof Error ? error.message : String(error)}) and was skipped.`,
     )
     return config
   }
@@ -551,6 +628,28 @@ function resolveVersionedNavigation(
  * and version-resolution handling.
  */
 function buildTabsFromConfig(
+  rawConfig: Record<string, unknown>,
+  configDir: string,
+  fernRoot: string,
+  routePrefix: Array<string>,
+  fallbackTabLabel: string,
+  context: WalkContext,
+): Array<MigrationNavigationTab> {
+  const before = restrictionMark(context)
+  let tabs: Array<MigrationNavigationTab>
+  let restricted: boolean
+  try {
+    tabs = buildUnrestrictedTabs(rawConfig, configDir, fernRoot, routePrefix, fallbackTabLabel, context)
+    restricted = context.versionRestricted === true
+  } finally {
+    context.versionRestricted = false
+  }
+  if (!restricted) return tabs
+  markRestricted(context, before)
+  return []
+}
+
+function buildUnrestrictedTabs(
   rawConfig: Record<string, unknown>,
   configDir: string,
   fernRoot: string,
@@ -575,7 +674,12 @@ function buildTabsFromConfig(
       const segments = [...routePrefix, ...(tabSegment ? [tabSegment] : [])]
       const layout = Array.isArray(entry.layout) ? entry.layout : []
       const sectionsBefore = context.apiSections.length
+      const descriptorsBefore = restrictionMark(context)
       const groups = groupsFromConverted(convertNodes(layout, segments, context))
+      if (isRestrictedNode(entry) || isRestrictedNode(meta)) {
+        markRestricted(context, descriptorsBefore)
+        return []
+      }
       for (let index = sectionsBefore; index < context.apiSections.length; index += 1) {
         context.apiSections[index].tabLabel ??= label
       }
@@ -670,9 +774,9 @@ function projectFernProducts(
       : 'Product'
     let productPath: string
     try {
-      productPath = resolveWithin(fernRoot, rawPath)
+      productPath = withinRealRoot(resolveWithin(fernRoot, rawPath), context.repositoryRoot)
     } catch {
-      warnOnce(context, `fern-product-unsafe-${rawPath}`, `Fern product "${label}" path "${rawPath}" is unsafe and was skipped.`)
+      warnOnce(context, `fern-product-unsafe-${rawPath}`, `Skipped the Fern product "${label}" because "${rawPath}" points outside the repository (symlink or ..).`)
       return []
     }
     if (!existsSync(productPath) || !lstatSync(productPath).isFile()) {
@@ -695,8 +799,9 @@ function projectFernProducts(
     const routeSegment = segmentFor(product, label, context)
     const priorPrefix = context.pathPrefix
     context.pathPrefix = relative(fernRoot, productDir).replace(/\\/g, '/')
+    const before = restrictionMark(context)
     try {
-      return buildTabsFromConfig(
+      const tabs = buildTabsFromConfig(
         productConfig,
         productDir,
         fernRoot,
@@ -704,6 +809,9 @@ function projectFernProducts(
         label,
         context,
       )
+      if (!isRestrictedNode(product)) return tabs
+      markRestricted(context, before)
+      return []
     } finally {
       context.pathPrefix = priorPrefix
     }
@@ -724,11 +832,13 @@ export function projectFernNavigation(input: {
   repositoryRoot?: string
 }): FernNavigationResult {
   const context: WalkContext = {
+    navigationWalk: { active: new Set(), visits: 0, incomplete: false },
     fernRoot: input.fernRoot,
     repositoryRoot: input.repositoryRoot ?? input.fernRoot,
     descriptors: [],
     seenNavigationIds: new Set(),
     apiSections: [],
+    restrictedApiSections: [],
     changelogIndexes: [],
     warnings: [],
     warningKeys: new Set(),
@@ -890,6 +1000,7 @@ export function projectFernNavigation(input: {
   })
 
   return {
+    navigationIncomplete: context.navigationWalk.incomplete,
     docsConfig: {
       tabs,
       ...(bannerContent ? { banner: { content: bannerContent, dismissible: true } } : {}),
@@ -899,6 +1010,7 @@ export function projectFernNavigation(input: {
     descriptors: context.descriptors,
     warnings: context.warnings,
     apiSections: disambiguatedApiSections,
+    restrictedApiSections: context.restrictedApiSections,
     changelogIndexes: context.changelogIndexes,
   }
 }

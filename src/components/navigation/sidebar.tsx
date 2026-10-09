@@ -90,7 +90,7 @@ export function Sidebar({
             return (
               <div key={section.id ?? `${section.title}-${index}`} className="thally-docs-sidebar-group space-y-2.5">
                 {/* Keep distinct group headings, but avoid repeating the collection label. */}
-                {section.title !== title ? (
+                {section.defaultOpen === undefined && section.title !== title ? (
                   <p className={cn(typography.meta, 'flex items-center gap-2 px-2 text-sm font-semibold normal-case leading-6 tracking-normal text-foreground')}>
                     {showGroupIcons && section.icon ? (
                       <Icon icon={section.icon} className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

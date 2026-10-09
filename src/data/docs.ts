@@ -37,6 +37,8 @@ export type DocPageMode = 'default' | 'wide' | 'custom' | 'center' | 'home'
 export interface DocEntry {
   id: string
   title: string
+  /** Visible H1; title remains the metadata/search title. */
+  headingTitle?: string
   description: string
   descriptionPlacement?: 'body'
   slug: Array<string>
@@ -77,6 +79,7 @@ export interface DocEntry {
 
 
 export interface NavigationSection {
+  defaultOpen?: boolean
   /** Stable structural identity; unlike a title, this remains unique when a group is split. */
   id?: string
   title: string
@@ -88,6 +91,7 @@ export interface NavigationSection {
 }
 
 export interface NavigationGroup {
+  defaultOpen?: boolean
   id: string
   title: string
   icon?: string
@@ -156,6 +160,7 @@ export interface SearchableDoc {
 // ---------------------------------------------------------------------------
 
 interface DocsJsonNavigationGroup {
+  defaultOpen?: boolean
   group: string
   icon?: string
   hidden?: boolean
@@ -436,6 +441,7 @@ let observedDocsConfigRevision = -1
 
 interface FrontmatterData {
   title?: string
+  headingTitle?: string
   /** Optional compact label used only in sidebar and previous/next navigation. */
   navTitle?: string
   icon?: string
@@ -627,6 +633,7 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
   return {
     id: pageId,
     title,
+    headingTitle: typeof fm.headingTitle === 'string' && fm.headingTitle.trim() ? fm.headingTitle.trim() : undefined,
     description: fm.description ?? '',
     descriptionPlacement: fm.descriptionPlacement === 'body' ? 'body' : undefined,
     slug,
@@ -1089,6 +1096,7 @@ function buildNavigationGroup(
     id: `nav-group-${indexPath.join('-')}-${slugifyId(group.group) || 'group'}`,
     title: group.group || 'General',
     icon: group.icon,
+    ...(typeof group.defaultOpen === 'boolean' ? { defaultOpen: group.defaultOpen } : {}),
     nodes,
   }
 }
@@ -1159,8 +1167,11 @@ export function getSidebarCollections(locale?: string, reader: ReaderContext = A
           id: tree.id,
           title: tree.title,
           icon: tree.icon,
+          defaultOpen: tree.defaultOpen,
           items: collectNavigationItems(tree.nodes),
-          nodes: tree.nodes,
+          nodes: typeof tree.defaultOpen === 'boolean'
+            ? [{ type: 'group' as const, group: tree }]
+            : tree.nodes,
         }]
       })
       const rootNodes = tab.pages

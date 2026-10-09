@@ -62,7 +62,7 @@ function NavigationGroupBranch({
   showGroupIcons = true,
 }: NavigationTreeProps & { group: NavigationGroup; depth: number; path: string }) {
   const hasActivePath = groupContainsPath(group, pathname)
-  const [isManuallyOpen, setIsManuallyOpen] = useState(false)
+  const [isManuallyOpen, setIsManuallyOpen] = useState(group.defaultOpen === true)
   const [closedActivePath, setClosedActivePath] = useState<string | null>(null)
   // A newly active route opens its ancestors automatically. Remembering the
   // exact route a reader closed keeps the disclosure responsive without

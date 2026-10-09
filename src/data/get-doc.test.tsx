@@ -38,7 +38,7 @@ vi.mock('@/generated/runtime-docs', () => ({
   runtimeDocs: {
     'src/content/introduction.mdx': {
       component: () => null,
-      frontmatter: { title: 'Product documentation' },
+      frontmatter: { title: 'Product documentation', headingTitle: 'Display heading' },
     },
     'src/content/events.mdx': {
       component: () => null,
@@ -48,6 +48,11 @@ vi.mock('@/generated/runtime-docs', () => ({
 }))
 
 describe('document source identity', () => {
+  it('preserves a display heading from compiled metadata without changing the SEO title', async () => {
+    const doc = await getDocFromParams([])
+    expect(doc).toMatchObject({ title: 'Product documentation', headingTitle: 'Display heading' })
+  })
+
   it.each([{ slug: undefined }, { slug: [] }])('uses introduction for the root route $slug', async ({ slug }) => {
     const doc = await getDocFromParams(slug)
     expect(doc).toMatchObject({ id: 'introduction', title: 'Product documentation', href: '/', slug: [] })

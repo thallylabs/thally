@@ -115,6 +115,12 @@ Docusaurus `mdx-code-block` wrappers are opened as live MDX when the resulting
 page compiles and its special fences contain no module declarations. Pages
 whose fragments still need Docusaurus theme imports or remark plugins remain
 fenced and are retained.
+Directories and files whose names start with `_`, and `__tests__` directories,
+are skipped, as Docusaurus does not treat them as documents. Pages with `unlisted`
+set stay routable but are left out of navigation. Partial imports of `toc`,
+`frontMatter`, `metadata` and `assets` are bound to values the page can use
+instead of failing. `<Admonition>` becomes a callout like the colon fence, and
+`<ThemedImage>` keeps its light image.
 
 Fern repositories are located by their `fern/docs.yml` + `fern/fern.config.json`
 pair. `docs.yml` is parsed as bounded YAML—never executed—and preserves tabs,
@@ -129,6 +135,8 @@ Internal links are adjusted for the site's domain path, selected version, and
 source-file routes. Links to sections not imported into Thally stay on the
 published Fern site and produce a migration warning, so the generated site can
 build while the remaining content is moved separately.
+`<Markdown src="...">` includes are inlined from the referenced file when it is
+inside the repository.
 Every `api:` section's OpenAPI document is resolved from its own
 `generators.yml` (`api.specs[].openapi`, or the legacy `api:` string) and
 imported into its own tab — a docs.yml with several API sections (e.g. a REST
@@ -357,6 +365,34 @@ and its original is written unchanged to `migration-quarantine/<original path>`
 at the project root, which no runtime reader walks; `create-thally-docs` adds
 that folder to `.gitignore`. Each quarantined page gets a `gated-page` warning.
 
+Fern and Docusaurus have no runtime access mapping in Thally, so their restricted
+pages fail closed in the same way: they are quarantined (not written to
+`src/content`, removed from navigation, original saved under
+`migration-quarantine/`) and never inlined into other pages. Fern signals:
+frontmatter `viewers` (any non-empty value) or `authed`, `<If roles>` or
+`<If viewers>` content in a page, and `viewers` in `docs.yml` on pages, sections,
+tabs, products, versions and api nodes; the specs of a restricted api node are
+withheld too. Docusaurus: a `draft` page, where any value other than unset,
+`false` or `"false"` counts as a draft; the check is skipped for files under `_`
+directories and `__tests__`, which Docusaurus does not publish as documents. Links
+from other pages to a quarantined page are left as authored and will fail
+`thally check`.
+
+Fern migration stops with an explicit error if cyclic navigation, excessive
+nesting, or the node budget prevents complete access classification. It emits
+no pages, assets, or API specs, because an unvisited branch could restrict a
+file also listed under a public node. Simplify the source navigation and retry.
+
+Assets are copied to `public/` only when a published page, the site configuration,
+copied styles or a migrated component names them by their exact normalized path;
+a restricted page's text never makes an asset public. On a site that withholds
+anything, an asset nothing published names that way, one named only by a bare file
+name or in a different letter case, one built at runtime, and one that shares its
+public path with another file are saved under `migration-quarantine/assets/`
+instead, with a warning listing them so they can be copied back by hand. On every
+platform a page over 2 MB is not inlined, OpenAPI spec reads are capped at 50 MB,
+and a path that resolves outside the repository through a symlink is refused.
+
 What a restricted page uses must not leak through surfaces that are not access
 controlled: it is never inlined into another page (a `gated-page` warning names
 the importer), images and other assets used only by restricted pages are not
@@ -394,6 +430,17 @@ Legacy `mint.json` `topbarLinks` and `topbarCtaButton` (including
 `markdown.enabled: true`, matching Mintlify's default Markdown mirrors.
 
 ## Branding
+
+Docusaurus custom CSS projects Infima palette, typography, header spacing,
+announcement styling, and local Prism colors into a portable stylesheet.
+For Sass or Tailwind expressions, provide locally compiled
+`build/assets/css/styles.*.css`; unresolved expressions produce a migration
+warning. Configuration and theme modules are read as static data.
+
+Remote Fern `global-theme` references fall back to local overrides and base
+Thally tokens with a structured warning. The NVIDIA theme uses `#76B900`
+when no local accent is configured. No remote theme assets are fetched.
+Authored section expansion defaults are retained on desktop and mobile.
 
 A source site's logo, favicon, and theme accent color(s) are extracted where
 each platform's config exposes them (Mintlify's `colors`, Fern's

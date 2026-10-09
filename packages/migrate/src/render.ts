@@ -17,6 +17,7 @@ function renderPage(bundle: MigrationBundle, page: MigrationBundle['pages'][numb
   return [
     '---',
     `title: ${yamlString(page.title)}`,
+    page.headingTitle ? `headingTitle: ${yamlString(page.headingTitle)}` : null,
     page.navTitle ? `navTitle: ${yamlString(page.navTitle)}` : null,
     page.icon ? `icon: ${yamlString(page.icon)}` : null,
     page.iconType ? `iconType: ${yamlString(page.iconType)}` : null,

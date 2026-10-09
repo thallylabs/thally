@@ -30,7 +30,8 @@ import { basename, dirname, extname, isAbsolute, posix, relative, resolve as res
 import { parse as parseYaml } from 'yaml'
 import * as ts from 'typescript'
 
-import { isSelfContainedFunction } from './inline-extraction.js'
+import { isSelfContainedFunction, pageScopeNames } from './inline-extraction.js'
+import { isThallyBuiltinComponent } from './builtin-components.js'
 import { createComponentMigrator, declarationsReferenceBrowserGlobal, hasAnyFunctionValuedProp, normalizeIndentedFences, propsTargetExtractedClientComponent, unresolvedRelativeModuleSpecifiers } from './components.js'
 import { navbarLinkButtons, projectAuthoredStyles } from './source-styles.js'
 
@@ -43,6 +44,7 @@ import {
   readDocusaurusSiteSettings,
   readDocusaurusSidebars,
   readDocusaurusThemeColor,
+  readDocusaurusPresentation,
   rewriteDocusaurusLinks,
   resolveDocusaurusPageIdentity,
   type DocusaurusPageDescriptor,
@@ -67,7 +69,7 @@ import {
   resolvePageAccess,
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
-import { closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
+import { mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
 import {
   addMintlifyDirectoryRedirects,
   addMintlifyHomepageRedirects,
@@ -90,7 +92,9 @@ import {
   resolveWithin,
   resolveWithinRoot,
   trimEdgeSlashes,
+  isPathEscapeError,
   trimTrailingSlashes,
+  withinRealRoot,
 } from './path.js'
 import type {
   MigrationAsset,
@@ -163,6 +167,10 @@ const SNIPPET_DIRECTORIES = new Set(['snippets', '_snippets', 'partials', '_part
 // import (`import { default as Name } from '...'`), and a plain named import
 // (`import { Name } from '...'`) — Mintlify snippets can export either way.
 const SNIPPET_IMPORT_PATTERN = /\bimport\s+(?:\{\s*(?:default\s+as\s+)?([A-Z][A-Za-z0-9_]*)\s*\}|([A-Z][A-Za-z0-9_]*))\s+from\s+['"]([^'"]+\.mdx?)['"]\s*;?/g
+/** Empty stand-ins for the exports Docusaurus adds to every MDX document (its own TOC feeds are not used). */
+const DOCUSAURUS_GENERATED_EXPORTS: Record<string, string | undefined> = Object.assign(Object.create(null) as Record<string, string>, {
+  toc: '[]', frontMatter: '{}', metadata: '{}', assets: '{}', contentTitle: 'undefined',
+})
 const SNIPPET_VALUE_IMPORT_PATTERN = /\bimport\s*\{([^{}]+)\}\s*from\s+['"]([^'"]+\.mdx?)['"]\s*;?/g
 
 /**
@@ -175,6 +183,8 @@ const SNIPPET_VALUE_IMPORT_PATTERN = /\bimport\s*\{([^{}]+)\}\s*from\s+['"]([^'"
  * resolved snippet's real content, matching Mintlify's own renderer.
  */
 const SNIPPET_TAG_PATTERN = /<Snippet\s+file=(?:"([^"]+)"|'([^']+)')\s*(?:\/>|>[\s\S]*?<\/Snippet>)/g
+/** Fern's `<Markdown src="..." />` include. Only Fern treats it as a file include. */
+const FERN_MARKDOWN_TAG_PATTERN = /<Markdown\s+src=(?:"([^"]+)"|'([^']+)')\s*(?:\/>|>[\s\S]*?<\/Markdown>)/g
 const MINTIGNORE_FILENAME = '.mintignore'
 interface IgnoreMatcher {
   add(patterns: string): IgnoreMatcher
@@ -1328,7 +1338,10 @@ function publicAssetKey(repoRelative: string): string {
  * lowercased key of every exact one, for a letter-case mismatch) and never
  * makes anything public. Linear, no backtracking.
  */
-function addPathReferences(text: string, baseDir: string | undefined, exact: Set<string>, loose: Set<string>): void {
+/** Docusaurus: where a page's links resolve against the site root (`siteBase`) and where the docs folder sits in it. */
+interface DocusaurusPathContext { siteBase: string; docsPrefix: string }
+
+function addPathReferences(text: string, baseDir: string | undefined, exact: Set<string>, loose: Set<string>, docusaurus?: DocusaurusPathContext): void {
   for (const word of text.split(PATH_SEPARATORS)) {
     let token = word.replace(/\.+$/, '')
     if (!/\.[a-z0-9]{2,5}$/i.test(token) || token.startsWith('//')) continue
@@ -1339,12 +1352,43 @@ function addPathReferences(text: string, baseDir: string | undefined, exact: Set
       loose.add(token.toLowerCase())
       continue
     }
+    if (docusaurus && !token.startsWith('/')) {
+      // `@site/...` and `../../static/...` name files from the site root, not the docs folder.
+      const fromSite = normalizeAssetPath(posix.normalize(token.startsWith('@site/') ? token.slice('@site/'.length) : posix.join(docusaurus.siteBase, token)))
+      const docsFolder = docusaurus.docsPrefix ? `${docusaurus.docsPrefix}/` : ''
+      const siteKey = fromSite?.startsWith('static/') ? fromSite.slice('static/'.length)
+        : fromSite && docsFolder && fromSite.startsWith(docsFolder) ? fromSite.slice(docsFolder.length) : undefined
+      if (siteKey) {
+        exact.add(siteKey)
+        loose.add(siteKey.toLowerCase())
+      }
+      if (token.startsWith('@site/')) continue
+    }
     if (!token.startsWith('/') && baseDir === undefined) continue
     const resolved = normalizeAssetPath(posix.normalize(token.startsWith('/') ? token.slice(1) : posix.join(baseDir ?? '', token)))
     if (!resolved) continue
-    const key = publicAssetKey(resolved)
+    // Docusaurus serves `static/x` at `/x`, as `public/` is elsewhere.
+    const key = docusaurus && resolved.startsWith('static/') ? resolved.slice('static/'.length) : publicAssetKey(resolved)
     exact.add(key)
     loose.add(key.toLowerCase())
+  }
+}
+
+/** Inspect public Fern config strings without recursively expanding YAML aliases or skipped navigation. */
+function addFernConfigPathReferences(config: Record<string, unknown>, exact: Set<string>, loose: Set<string>): void {
+  const pending: Array<{ value: unknown; depth: number }> = [{ value: config, depth: 0 }]
+  const seen = new Set<object>()
+  let visits = 0
+  while (pending.length > 0 && visits < 5_000) {
+    const { value, depth } = pending.pop()!
+    visits++
+    if (typeof value === 'string') {
+      addPathReferences(value, '', exact, loose)
+    } else if (value && typeof value === 'object' && !seen.has(value) && depth < 64) {
+      seen.add(value)
+      if (!Array.isArray(value) && fernViewersReason(value as Record<string, unknown>)) continue
+      for (const child of Object.values(value)) pending.push({ value: child, depth: depth + 1 })
+    }
   }
 }
 
@@ -1387,6 +1431,22 @@ function classifyApiSpec(path: string): 'openapi' | 'asyncapi' | 'unknown' {
  * The renderer loads a relative `api.source` from the project root instead.
  */
 const SPEC_DIRECTORY = 'openapi'
+
+/** Real OpenAPI documents exceed the 2 MB page limit, so specs get their own, larger cap. */
+const MAX_SPEC_BYTES = 50_000_000
+
+/** Reads an OpenAPI spec for every platform; one over the cap is skipped with a warning. */
+function readSpecFile(absolutePath: string, relativePath: string, warnings: Array<MigrationWarning>): Buffer | undefined {
+  if (lstatSync(absolutePath).size > MAX_SPEC_BYTES) {
+    warnings.push({
+      code: 'skipped-file',
+      message: `The OpenAPI spec "${relativePath}" is larger than ${MAX_SPEC_BYTES / 1_000_000} MB and was not migrated; split it or reduce its size.`,
+      source: relativePath,
+    })
+    return undefined
+  }
+  return readFileSync(absolutePath)
+}
 
 function specAssetPath(filename: string): string {
   return `${SPEC_DIRECTORY}/${filename}`
@@ -1507,9 +1567,11 @@ function resolveMintlifyApiSpecs(
         message: `The OpenAPI spec "${reference.value}"${tabSuffix} was limited to pages under "${reference.directory}" in the source, but Thally's API reference always covers a whole tab, so it was migrated as the tab's full API reference. Links in page bodies and Mintlify endpoint URLs under "${reference.directory}/<tag>/<operation>" are redirected to the matching endpoints where one exists (a separate warning counts any endpoint redirects that were skipped); check any other links to "${reference.directory}/..." manually.`,
       })
     }
+    const content = readSpecFile(match.absolutePath, match.relativePath, warnings)
+    if (!content) continue
     specs.push({
       filename: basename(match.relativePath),
-      content: readFileSync(match.absolutePath),
+      content,
       tabLabel: reference.tabLabel,
       parentTab: reference.parentTab,
       icon: reference.icon,
@@ -1954,7 +2016,7 @@ function findFernConfiguredOpenApi(
       // `../../../cohere-openapi.yaml`). The security boundary is still the
       // whole repository checkout, never anything above it.
       try {
-        const absolute = resolveWithinRoot(dir, specPath, repositoryDir)
+        const absolute = withinRealRoot(resolveWithinRoot(dir, specPath, repositoryDir), repositoryDir)
         if (!existsSync(absolute) || !lstatSync(absolute).isFile()) continue
         const kind = classifyApiSpec(absolute)
         if (kind === 'asyncapi') {
@@ -1966,7 +2028,7 @@ function findFernConfiguredOpenApi(
       } catch {
         warnings.push({
           code: 'unsupported-config',
-          message: `The OpenAPI spec path "${specPath}" in ${relative(repositoryDir, generatorsPath).replace(/\\/g, '/')} is outside the repository and was skipped.`,
+          message: `Skipped the OpenAPI spec "${specPath}" listed in ${relative(repositoryDir, generatorsPath).replace(/\\/g, '/')} because it points outside the repository (symlink or ..).`,
         })
       }
     }
@@ -2013,7 +2075,7 @@ function readFrontmatterHead(path: string): string | undefined {
  * access rules Mintlify does not enforce on snippets, `oversized` and
  * `unreadable` are files that cannot be classified safely.
  */
-interface InlineVerdict { kind: 'gated' | 'snippet-gated' | 'oversized' | 'unreadable'; reason: string }
+interface InlineVerdict { kind: 'gated' | 'draft' | 'snippet-gated' | 'oversized' | 'unreadable'; reason: string }
 type InlineGate = (candidate: string) => InlineVerdict | undefined
 
 /**
@@ -2063,15 +2125,109 @@ function describeRestriction(access: ResolvedPageAccess): string {
   return access.groups?.length ? `restricted to groups ${access.groups.join(', ')}` : '`public: false`'
 }
 
+/**
+ * Fern and Docusaurus pages the runtime cannot gate: Thally has no mapping for
+ * Docusaurus `draft` or Fern `viewers` / `authed`, so these quarantine (fail closed).
+ */
+function pageHeadGateReason(raw: string, platform: MigrationPlatform): { reason?: string; openapi?: string } {
+  const parsed = parseFrontmatter(raw)
+  const gateKeys = platform === 'docusaurus' ? /^draft\s*:/m : /^(viewers|authed)\s*:/m
+  const unreadable = parsed.error && gateKeys.test(raw.slice(0, raw.length - parsed.content.length))
+    ? 'frontmatter could not be parsed and declares an access or draft setting'
+    : undefined
+  const openapi = typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined
+  const reason = platform === 'docusaurus' ? docusaurusDraftReason(parsed.data) : fernViewersReason(parsed.data)
+  return { reason: reason ?? unreadable, openapi }
+}
+
+/** Docusaurus leaves `draft: true` pages out of production builds. Anything but an explicit false is withheld. */
+const DOCUSAURUS_DRAFT_REASON = 'frontmatter `draft` marks it as a draft Docusaurus does not publish'
+
+function docusaurusDraftReason(data: Record<string, unknown>): string | undefined {
+  const draft = data.draft
+  if (draft === undefined || draft === false || (typeof draft === 'string' && draft.trim().toLowerCase() === 'false')) return undefined
+  return DOCUSAURUS_DRAFT_REASON
+}
+
+/** Blank out fenced code blocks (a backtick fence's info string cannot contain a backtick, as in CommonMark). */
+function withoutFencedCode(raw: string): string {
+  let fence: { char: string; length: number } | null = null
+  return raw.split('\n').map((line) => {
+    if (fence) {
+      const closing = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)
+      if (closing && closing[1][0] === fence.char && closing[1].length >= fence.length) fence = null
+      return ''
+    }
+    const opening = /^ {0,3}(`{3,}|~{3,})([^\r]*)$/.exec(line)
+    if (opening && !(opening[1][0] === '`' && opening[2].includes('`'))) {
+      fence = { char: opening[1][0], length: opening[1].length }
+      return ''
+    }
+    return line
+  }).join('\n')
+}
+
+/**
+ * `<If roles=...>` (or `viewers`) in a Fern page body, outside code: content Fern
+ * shows only to some roles. Each tag is scanned to its real end (quotes and
+ * braces respected); a tag that never closes is judged by what was scanned.
+ */
+export function fernIfRolesReason(raw: string): string | undefined {
+  const text = withoutFencedCode(raw).replace(/(`{1,3})[^`\n]*\1/g, '')
+  const marker = /<If(?![\w$.-])/g
+  for (let match = marker.exec(text); match; match = marker.exec(text)) {
+    const tag = scanJsxOpeningTag(text, match.index, 'If')
+    marker.lastIndex = tag.next
+    // Comments may precede a JSX spread; unresolved ellipses fail closed.
+    if (tag.attributes.includes('...')) {
+      return 'it contains `<If>` spread props whose access rules cannot be resolved safely'
+    }
+    // ponytail: the lexical scan cannot prove regex/template boundaries; use an expression parser before allowing these props.
+    if (tag.attributes.includes('{') && /[/`]/.test(tag.attributes)) {
+      return 'it contains `<If>` expression props whose access rules cannot be resolved safely'
+    }
+    if (/(?:^|[\s{}"'])(?:roles|viewers)\s*=/.test(tag.attributes)) {
+      return 'it contains `<If roles>` content that Fern shows only to some roles'
+    }
+  }
+  return undefined
+}
+
+/** Fern role-based access: frontmatter `viewers` (any non-empty value) or a truthy `authed`. */
+function fernViewersReason(data: Record<string, unknown>): string | undefined {
+  const viewers = data.viewers
+  const hasViewers = Array.isArray(viewers) ? viewers.length > 0
+    : typeof viewers === 'string' ? viewers.trim() !== ''
+      : viewers !== undefined && viewers !== null && viewers !== false
+  if (hasViewers) return 'frontmatter `viewers` restricts it to signed-in roles'
+  const authed = data.authed
+  if (authed !== undefined && authed !== null && authed !== false && !(typeof authed === 'string' && ['', 'false'].includes(authed.trim().toLowerCase()))) {
+    return 'frontmatter `authed` requires sign-in'
+  }
+  return undefined
+}
+
 function withoutFrontmatter(value: string): string {
   return value.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim()
 }
 
 function staticSnippetProperties(attributes: string): Map<string, string> {
   const properties = new Map<string, string>()
-  const matcher = /\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*"([^"]*)"\s*\}|\{\s*'([^']*)'\s*\})/g
-  for (const match of attributes.matchAll(matcher)) {
-    properties.set(match[1], match[2] ?? match[3] ?? match[4] ?? match[5] ?? '')
+  let tree: ts.SourceFile
+  try {
+    tree = ts.createSourceFile('snippet.tsx', `const snippet = <Snippet ${attributes.replace(/\/\s*$/, '')} />`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  } catch { return properties }
+  const statement = tree.statements[0]
+  if (!statement || !ts.isVariableStatement(statement)) return properties
+  const element = statement.declarationList.declarations[0]?.initializer
+  if (!element || !ts.isJsxSelfClosingElement(element)) return properties
+  for (const attribute of element.attributes.properties) {
+    if (!ts.isJsxAttribute(attribute) || !ts.isIdentifier(attribute.name)) continue
+    const value = attribute.initializer
+    if (value && ts.isStringLiteral(value)) properties.set(attribute.name.text, value.text)
+    else if (value && ts.isJsxExpression(value) && value.expression && ts.isStringLiteralLike(value.expression)) {
+      properties.set(attribute.name.text, value.expression.text)
+    }
   }
   return properties
 }
@@ -2080,6 +2236,7 @@ function interpolateSnippet(snippet: string, attributes: string, children?: stri
   const properties = staticSnippetProperties(attributes)
   if (children !== undefined) properties.set('children', children.trim())
   if (properties.size === 0) return snippet
+  snippet = bindSnippetProps(snippet, properties)
   const isJsxSnippet = /<[A-Za-z][A-Za-z0-9]*/.test(snippet)
   let fence = ''
   return snippet.split('\n').map((line) => {
@@ -2375,6 +2532,14 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
   for (const page of pages) {
     const fragments = requested.get(page.id)
     if (!fragments?.size) continue
+    const definitions = new Map<string, string>()
+    replaceOutsideCodeAndComments(page.body, (text) => {
+      for (const match of text.matchAll(/^ {0,3}\[([^\]\n]+)\]:[^\n]*$/gm)) {
+        const label = match[1].trim().replace(/\s+/g, ' ').toLowerCase()
+        if (!definitions.has(label)) definitions.set(label, match[0])
+      }
+      return text
+    })
     const lines = page.body.split('\n')
     let fence: string | undefined
     const tableCells: Array<{ index: number; text: string }> = []
@@ -2390,7 +2555,7 @@ function preserveLinkedAnchors(pages: Array<MigrationPage>): void {
       const tableCell = line.match(/^ {0,3}\|\s*([^|]+?)\s*\|/)
       if (tableCell && !/^[:\s-]+$/.test(tableCell[1])) tableCells.push({ index, text: tableCell[1] })
       const match = line.match(/^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
-      return match ? { index, text: match[1].replace(/\s*\{\/\*\s*#\S+?\s*\*\/\}$/, '') } : null
+      return match ? { index, text: mdxVisibleText(match[1].replace(/\s*\{\/\*\s*#\S+?\s*\*\/\}$/, ''), definitions) } : null
     }).filter((entry): entry is { index: number; text: string } => entry !== null)
     const existing = new Set<string>()
     replaceOutsideCode(page.body, (text) => {
@@ -2524,15 +2689,71 @@ function resolveSnippetPath(
   return withinRealRoot(candidate, repositoryRoot)
 }
 
-/** Throws when an existing path resolves, through a symlink, outside the repository; a path that does not exist is returned unchanged. */
-function withinRealRoot(candidate: string, repositoryRoot: string): string {
-  let real: string
-  try { real = realpathSync(candidate) } catch { return candidate }
-  const realRoot = realpathSync(repositoryRoot)
-  if (real !== realRoot && !real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) {
-    throw new Error(`Migration path escapes its root: ${candidate}`)
+/** Static Docusaurus registry entries become ordinary page imports; never evaluate the registry module. */
+function docusaurusGlobalImports(siteRoot: string, repositoryRoot: string, warnings: Array<MigrationWarning>): Map<string, string> {
+  const registrations = new Map<string, string>()
+  for (const filename of ['MDXComponents.js', 'MDXComponents.jsx', 'MDXComponents.ts', 'MDXComponents.tsx', 'MDXComponents/index.js', 'MDXComponents/index.tsx']) {
+    try {
+      const path = withinRealRoot(resolveWithin(siteRoot, `src/theme/${filename}`), repositoryRoot)
+      if (!existsSync(path) || !lstatSync(path).isFile()) continue
+      if (lstatSync(path).size > MAX_PAGE_BYTES) throw new Error('registry exceeds the 2 MB limit')
+      const tree = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+      const bindings = new Map<string, { source: string; imported: string }>()
+      for (const statement of tree.statements) {
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || statement.importClause?.isTypeOnly) continue
+        let source = statement.moduleSpecifier.text
+        if (source.startsWith('.')) source = `@site/${posix.normalize(posix.join('src/theme', posix.dirname(filename), source))}`
+        if (!source.startsWith('@site/') && !source.startsWith('/')) continue
+        const clause = statement.importClause
+        if (clause?.name) bindings.set(clause.name.text, { source, imported: 'default' })
+        if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+          for (const binding of clause.namedBindings.elements) {
+            if (!binding.isTypeOnly) bindings.set(binding.name.text, { source, imported: binding.propertyName?.text ?? binding.name.text })
+          }
+        }
+      }
+      for (const statement of tree.statements) {
+        if (!ts.isExportAssignment(statement) || statement.isExportEquals || !ts.isObjectLiteralExpression(statement.expression)) continue
+        for (const property of statement.expression.properties) {
+          if (!ts.isShorthandPropertyAssignment(property) && !ts.isPropertyAssignment(property)) continue
+          const name = property.name.getText(tree).replace(/^['"]|['"]$/g, '')
+          const local = ts.isShorthandPropertyAssignment(property) ? property.name : property.initializer
+          if (!/^[A-Z][\w$]*$/.test(name) || !ts.isIdentifier(local)) continue
+          const binding = bindings.get(local.text)
+          if (!binding) continue
+          // Implicit global aliases must not disable widgets already mapped
+          // by the platform adapter. Explicit page imports still take precedence.
+          if (isThallyBuiltinComponent(name)) {
+            warnings.push({ code: 'unsupported-config', message: `Global ${name} override uses the native widget mapping; review the source override for custom styling.`, source: `src/theme/${filename}` })
+            continue
+          }
+          registrations.set(name, binding.imported === 'default'
+            ? `import ${name} from ${JSON.stringify(binding.source)};`
+            : `import { ${binding.imported} as ${name} } from ${JSON.stringify(binding.source)};`)
+        }
+      }
+      return registrations
+    } catch (error) {
+      warnings.push({ code: 'unsupported-config', message: `Docusaurus MDX registry was not imported: ${error instanceof Error ? error.message : 'unreadable file'}.`, source: `src/theme/${filename}` })
+    }
   }
-  return candidate
+  return registrations
+}
+
+/** Page-local imports/declarations override globals; fenced examples never acquire imports. */
+function injectDocusaurusGlobalImports(raw: string, imports: ReadonlyMap<string, string>): string {
+  if (imports.size === 0) return raw
+  const parsed = parseFrontmatter(raw)
+  const declared = pageScopeNames([parsed.content])
+  const used = new Set<string>()
+  replaceOutsideCodeAndComments(parsed.content, (segment) => {
+    for (const match of segment.matchAll(/<([A-Z][\w$]*)(?=[\s/>])/g)) {
+      if (imports.has(match[1]) && !declared.has(match[1])) used.add(match[1])
+    }
+    return segment
+  })
+  const prefix = raw.slice(0, raw.length - parsed.content.length)
+  return used.size === 0 ? raw : `${prefix}${[...used].map((name) => imports.get(name)).join('\n')}\n\n${parsed.content}`
 }
 
 function globalSnippetAliases(
@@ -2795,6 +3016,15 @@ function locallyDeclaredNames(raw: string): Set<string> {
   return names
 }
 
+/**
+ * The `export` lines that replace a value import. They end at a blank line, so when
+ * the import was followed by a line break, one is kept: the next line must not join the block.
+ */
+function exportBlock(declarations: Array<string>, statement: string, sourcePath: string): string {
+  const code = declarations.join('\n')
+  return code && statement.slice(statement.lastIndexOf(sourcePath)).includes('\n') ? `${code}\n\n` : code
+}
+
 function inlineMdxSnippets(
   raw: string,
   currentFile: string,
@@ -2803,8 +3033,10 @@ function inlineMdxSnippets(
   depth = 0,
   siteRoot = repositoryRoot,
   globalAliases: Map<string, string> = new Map(),
-  /** Mintlify only: refuses access-restricted, oversized or unclassifiable files. Fern and Docusaurus pass none. */
+  /** Refuses access-restricted (Mintlify only), oversized or unclassifiable files. */
   gate?: InlineGate,
+  /** Platform-specific import handling: Docusaurus generated exports, Fern `<Markdown src>` includes. */
+  platform?: MigrationPlatform,
 ): string {
   if (depth >= 8) return raw
   // Hoisting page imports must see indented JSX code examples as fenced code.
@@ -2825,6 +3057,10 @@ function inlineMdxSnippets(
       warnings.push({ code: 'gated-page', message: `${label} is access-restricted and was NOT inlined; it was left as a comment.`, source })
       return `{/* Access-restricted content withheld: ${shown} */}`
     }
+    if (verdict.kind === 'draft') {
+      warnings.push({ code: 'gated-page', message: `${label} is a draft page that Docusaurus does not publish, so it was not inlined; it was left as a comment.`, source })
+      return `{/* Draft content not inlined: ${shown} */}`
+    }
     if (verdict.kind === 'snippet-gated') {
       warnings.push({
         code: 'gated-page',
@@ -2840,6 +3076,59 @@ function inlineMdxSnippets(
     })
     return `{/* ${verdict.kind === 'oversized' ? 'Oversized' : 'Unreadable'} content not inlined: ${shown} */}`
   }
+  // Fern renders file-backed Code tags as literal examples, not components.
+  // Resolve against the page, keep list indentation, and never parse the
+  // included source as MDX or let its backticks close the generated fence.
+  if (platform === 'fern') raw = replaceOutsideCodeAndComments(raw, (segment) => {
+    const marker = /<Code(?![\w$.-])/g
+    let output = ''
+    let cursor = 0
+    for (let match = marker.exec(segment); match; match = marker.exec(segment)) {
+      const opening = scanJsxOpeningTag(segment, match.index, 'Code')
+      marker.lastIndex = opening.next
+      if (opening.end === null) continue
+      if (segment[opening.end - 1] !== '/') continue
+      const properties = staticSnippetProperties(opening.attributes)
+      const attribute = (name: string): string | undefined => properties.get(name)
+      const filePath = attribute('src')
+      if (!filePath) continue
+      const end = opening.end + 1
+      let replacement: string
+      try {
+        const candidate = resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot)
+        if (!existsSync(candidate) || !lstatSync(candidate).isFile()) throw new Error('file not found')
+        if (lstatSync(candidate).size > MAX_PAGE_BYTES) throw new Error('file exceeds the 2 MB inline limit')
+        const blocked = blockInline(candidate, filePath, `Code source ${filePath}`)
+        if (blocked) replacement = blocked
+        else {
+          let code = readFileSync(candidate, 'utf8').replace(/\r\n/g, '\n')
+          const lines = attribute('lines')
+          if (lines !== undefined) {
+            const range = /^(\d+)(?:-(\d+))?$/.exec(lines)
+            const first = Number(range?.[1])
+            const last = Number(range?.[2] ?? range?.[1])
+            if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || first < 1 || last < first) throw new Error('invalid line range')
+            code = code.split('\n').slice(first - 1, last).join('\n')
+          }
+          const language = attribute('language') ?? 'text'
+          if (!/^[\w+-]+$/.test(language)) throw new Error('invalid language')
+          const title = attribute('title')?.replace(/[\r\n`]/g, ' ')
+          let fenceLength = 3
+          for (const run of code.matchAll(/`+/g)) fenceLength = Math.max(fenceLength, run[0].length + 1)
+          const fence = '`'.repeat(fenceLength)
+          const before = segment.slice(segment.lastIndexOf('\n', match.index - 1) + 1, match.index)
+          const indent = /^[ \t]*$/.test(before) ? before : ''
+          replacement = isolateFences(`${fence}${language}${title ? ` ${title}` : ''}\n${code.replace(/\n$/, '')}\n${fence}`.split('\n').join(`\n${indent}`), segment, match.index, end)
+        }
+      } catch (error) {
+        warnings.push({ code: 'skipped-file', message: `Code source ${filePath} was not inlined: ${error instanceof Error ? error.message : 'unreadable file'}.`, source })
+        replacement = mdxComment(` Code source not inlined: ${filePath} `)
+      }
+      output += segment.slice(cursor, match.index) + replacement
+      cursor = end
+    }
+    return output + segment.slice(cursor)
+  })
   let withoutImports = replaceOutsideCodeAndMdxComments(raw, (source) => source.replace(
     SNIPPET_IMPORT_PATTERN,
     (_statement, namedComponent: string | undefined, defaultComponent: string | undefined, sourcePath: string) => {
@@ -2864,6 +3153,7 @@ function inlineMdxSnippets(
           siteRoot,
           globalAliases,
           gate,
+          platform,
         )
         const declaration = statefulSnippetDeclaration(nested, componentName)
         if (declaration) preservedDeclarations.set(componentName, declaration)
@@ -2914,7 +3204,7 @@ function inlineMdxSnippets(
             if (/^[A-Z]/.test(binding!.exported)) snippets.set(binding!.local, blocked)
             else declarations.push(`export const ${binding!.local} = undefined;`)
           }
-          return declarations.join('\n')
+          return exportBlock(declarations, statement, sourcePath)
         }
         const snippetSource = readFileSync(candidate, 'utf8')
         const values = staticNamedSnippetValues(snippetSource)
@@ -2929,6 +3219,13 @@ function inlineMdxSnippets(
           }
           exportedNames ??= snippetExportedNames(snippetSource)
           const exported = exportedNames.has(binding!.exported)
+          // Docusaurus generates these on every MDX document. Thally has none, and
+          // pages spread or index them, so each gets an empty value of its own type.
+          const generated = exported || platform !== 'docusaurus' ? undefined : DOCUSAURUS_GENERATED_EXPORTS[binding!.exported]
+          if (generated) {
+            declarations.push(`export const ${binding!.local} = ${generated};`)
+            continue
+          }
           if (!exported && !(/^[A-Z]/.test(binding!.exported) && snippetComponentBody(snippetSource, binding!.exported) !== snippetSource)) {
             // Mintlify binds a name its snippet does not export to undefined, which renders as nothing.
             warnings.push({
@@ -2955,7 +3252,7 @@ function inlineMdxSnippets(
           components.push([binding!.local, body])
         }
         for (const [name, body] of components) snippets.set(name, body)
-        return declarations.join('\n')
+        return exportBlock(declarations, statement, sourcePath)
       } catch (error) {
         if (error instanceof Error && error.message.includes('escapes its root')) {
           warnings.push({
@@ -2995,6 +3292,7 @@ function inlineMdxSnippets(
       siteRoot,
       globalAliases,
       gate,
+      platform,
     )
     const declaration = statefulSnippetDeclaration(nested, componentName)
     if (declaration) preservedDeclarations.set(componentName, declaration)
@@ -3012,19 +3310,23 @@ function inlineMdxSnippets(
           return isolateFences(closeOpenCodeFence(interpolateSnippet(snippet, attributes, children)), source, offset, offset + tag.length)
         })
     }
-    return segment.replace(SNIPPET_TAG_PATTERN, (tag: string, doubleQuoted: string | undefined, singleQuoted: string | undefined, offset: number, source: string) => {
+    const tagLabel = (filePath: string): string => platform === 'fern' ? `Included file ${filePath}` : `Snippet file="${filePath}"`
+    return segment.replace(platform === 'fern' ? FERN_MARKDOWN_TAG_PATTERN : SNIPPET_TAG_PATTERN, (tag: string, doubleQuoted: string | undefined, singleQuoted: string | undefined, offset: number, source: string) => {
       const filePath = (doubleQuoted ?? singleQuoted)!
       try {
         // Mintlify's documented form is relative to `snippets/`; sites also write
         // the full `/snippets/x.mdx` (or a page-relative) path.
-        const candidate = [
+        const candidate = (platform === 'fern' ? [
+          // Fern's absolute include paths are rooted at fern/, never snippets/.
+          () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
+        ] : [
           () => withinRealRoot(resolveWithin(siteRoot, `snippets/${filePath}`), repositoryRoot),
           () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
-        ].map((resolveCandidate) => {
+        ]).map((resolveCandidate) => {
           try { return resolveCandidate() } catch { return undefined }
         }).find((path) => path !== undefined && existsSync(path) && lstatSync(path).isFile())
         if (!candidate) throw new Error('file not found')
-        const blocked = blockInline(candidate, filePath, `Snippet file="${filePath}"`)
+        const blocked = blockInline(candidate, filePath, tagLabel(filePath))
         if (blocked) return blocked
         return isolateFences(closeOpenCodeFence(inlineMdxSnippets(
           withoutFrontmatter(readFileSync(candidate, 'utf8')),
@@ -3035,11 +3337,14 @@ function inlineMdxSnippets(
           siteRoot,
           globalAliases,
           gate,
+          platform,
         )), source, offset, offset + tag.length)
       } catch {
         warnings.push({
           code: 'missing-page',
-          message: `Snippet file="${filePath}" could not be resolved and was left as a comment.`,
+          message: platform === 'fern'
+            ? `${tagLabel(filePath)} could not be found, so it was left out of the page.`
+            : `${tagLabel(filePath)} could not be resolved and was left as a comment.`,
           source: relative(repositoryRoot, currentFile).replace(/\\/g, '/'),
         })
         return mdxComment(` Missing snippet: ${filePath} `)
@@ -3171,6 +3476,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const componentMigrator = platform === 'mintlify' || platform === 'docusaurus' || platform === 'fern'
     ? createComponentMigrator(componentRoot, repositoryDir, warnings, componentSourceIdentity(options.sourceUrl, repositoryDir, componentRoot, options.componentNamespace))
     : undefined
+  const globalDocusaurusImports = platform === 'docusaurus'
+    ? docusaurusGlobalImports(componentRoot, repositoryDir, warnings) : new Map<string, string>()
   let docsConfig: MigrationDocsConfig = { tabs: [] }
   // Literal leading path segments (e.g. "v1.15.22") that identify a
   // Mintlify `versions` container's default version — see
@@ -3191,6 +3498,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let fernBasePath = ''
   let fernVersionPath = ''
   let fernApiSections: Array<FernApiSection> = []
+  let fernRestrictedApiSections: Array<FernApiSection> = []
+  let fernNavigationIncomplete = false
   // sourcePaths of Fern descriptors that resolve outside fern/ (from a
   // `versions:` file living in a sibling directory) — resolved directly,
   // below, since the ordinary fern/-rooted scan can't reach them.
@@ -3200,6 +3509,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const fernSourceLinkAliases = new Map<string, string>()
   const fernNavTitles = new Map<string, string>()
   const fernHiddenIds = new Set<string>()
+  const fernRestrictedPaths = new Set<string>()
 
   const activeSourceRefs: Array<SourceRefImport> = []
   const usedSourceRefs = new Set<SourceRefImport>()
@@ -3268,6 +3578,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         docsConfig = projected.docsConfig
         warnings.push(...projected.warnings)
         fernApiSections = projected.apiSections
+        fernRestrictedApiSections = projected.restrictedApiSections
+        fernNavigationIncomplete = projected.navigationIncomplete
         fernChangelogIndexes = projected.changelogIndexes
         for (const [index, descriptor] of projected.descriptors.entries()) {
           fernReferencedPaths.add(descriptor.sourcePath)
@@ -3275,6 +3587,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
             fernNavTitles.set(descriptor.navigationId, descriptor.navTitle)
           }
           if (descriptor.hidden) fernHiddenIds.add(descriptor.navigationId)
+          if (descriptor.restricted) fernRestrictedPaths.add(canonicalPath(resolvePath(fernProjectRoot, descriptor.sourcePath)))
           // Fern pages often link by their source directory while a section
           // title changes the published route (for example tts-vendors to
           // tts-vendor-settings). Resolve only unambiguous, tab-prefixed
@@ -3304,6 +3617,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
 
+  // A skipped branch could add a restricted appearance to any otherwise-public
+  // file. No partial result can prove access safety, including API fallbacks.
+  if (fernNavigationIncomplete) {
+    throw new Error(`Fern navigation could not be fully classified, so no pages, assets or API specs were migrated. Fix cyclic references or reduce the navigation's nesting or node count before retrying.\n${warnings.map((warning) => `- ${warning.message}`).join('\n')}`)
+  }
+
   if (platform === 'docusaurus') {
     try {
       docusaurusSidebars = options.docusaurusSkipSidebar || !docusaurusProjectRoot
@@ -3312,7 +3631,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     } catch (error) {
       warnings.push({
         code: 'unsupported-config',
-        message: `Docusaurus sidebar could not be read safely: ${error instanceof Error ? error.message : String(error)} Generated navigation will be used.`,
+        message: isPathEscapeError(error)
+          ? 'Skipped the sidebar file because it points outside the repository (symlink or ..). Navigation was generated from the docs folder instead.'
+          : `Docusaurus sidebar could not be read safely: ${error instanceof Error ? error.message : String(error)} Generated navigation will be used.`,
       })
     }
   }
@@ -3401,7 +3722,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     for (const sourcePath of fernExternalSourcePaths) {
       if (discovered.has(sourcePath)) continue
       try {
-        const absolutePath = resolveWithinRoot(fernProjectRoot, sourcePath, repositoryDir)
+        const absolutePath = withinRealRoot(resolveWithinRoot(fernProjectRoot, sourcePath, repositoryDir), repositoryDir)
         if (existsSync(absolutePath) && lstatSync(absolutePath).isFile()) {
           files.push({ absolutePath, relativePath: sourcePath })
           discovered.add(sourcePath)
@@ -3463,7 +3784,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const navigationAccessFor = (relativePath: string): NavigationAccess =>
     mergeNavigationAppearances(mintlifyNavigationAccess.get(normalizedReferenceKey(relativePath).toLowerCase()) ?? [])
   const classifyPageGate = (file: ScannedFile): PageGate => {
-    let head: { access: MintlifyAccess; openapi?: string }
+    let head: { access: MintlifyAccess; openapi?: string } | { reason?: string; openapi?: string }
     try {
       // Pages above the size cap are never imported, but another page can
       // still inline them, so they are classified from their frontmatter.
@@ -3472,10 +3793,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const size = lstatSync(file.absolutePath).size
       const raw = readFrontmatterHead(file.absolutePath) ?? (size > MAX_PAGE_BYTES ? undefined : readFileSync(file.absolutePath, 'utf8'))
       if (raw === undefined) throw new Error('frontmatter is not terminated within the bounded read')
-      head = pageHeadAccess(raw)
+      head = platform === 'mintlify' ? pageHeadAccess(raw) : pageHeadGateReason(raw, platform)
     } catch {
-      head = { access: { problem: 'frontmatter could not be read' } }
+      head = platform === 'mintlify' ? { access: { problem: 'frontmatter could not be read' } } : { reason: 'frontmatter could not be read' }
     }
+    // Fern and Docusaurus rules have no runtime mapping: a hit is quarantined, never migrated.
+    if (!('access' in head)) return head.reason ? { reason: head.reason, quarantineReason: head.reason, openapi: head.openapi } : { openapi: head.openapi }
     const verdict = resolvePageAccess(head.access, navigationAccessFor(file.relativePath))
     if (verdict.problem) return { reason: verdict.problem, quarantineReason: verdict.problem, openapi: head.openapi }
     const access = verdict.access ?? {}
@@ -3543,9 +3866,51 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // Pages that were never classified (dropped by the budget, or beyond the walk
   // cap) could be restricted: assets no published page names by exact path stay
   // out of public/ on such a site, as on one with known restricted pages.
-  const pagesNotClassified = droppedPageCount > 0 || (platform === 'mintlify' && scanTruncated)
+  // Pages over the page cap are never published, so only smaller ones are read for role-restricted content.
+  const fernBodyReason = (file: ScannedFile): string | undefined => {
+    if (platform !== 'fern') return undefined
+    try {
+      return lstatSync(file.absolutePath).size > MAX_PAGE_BYTES ? undefined : fernIfRolesReason(readFileSync(file.absolutePath, 'utf8'))
+    } catch {
+      return 'it could not be read to check for role-restricted content'
+    }
+  }
+  // Fern and Docusaurus: why a document must not be published or inlined, or undefined. Cached per real path.
+  const gateReasonCache = new Map<string, string | null>()
+  const nonMintlifyGateReason = (file: ScannedFile): string | undefined => {
+    if (!isDocFile(file)) return undefined
+    const key = canonicalPath(file.absolutePath)
+    let reason = gateReasonCache.get(key)
+    if (reason === undefined) {
+      // Docusaurus never treats `_` files and directories as documents, so a `draft` there means nothing.
+      reason = platform === 'docusaurus' && file.relativePath.split('/').some((segment) => segment.startsWith('_'))
+        ? null
+        : (fernRestrictedPaths.has(key)
+          ? 'docs.yml `viewers` restricts it to signed-in roles'
+          : classifyPageGate(file).reason ?? fernBodyReason(file)) ?? null
+      gateReasonCache.set(key, reason)
+    }
+    return reason ?? undefined
+  }
+  if (platform === 'docusaurus' || platform === 'fern') {
+    // Fail closed here too: a draft (Docusaurus) or role-restricted (Fern) page is quarantined, never published.
+    // `files` can hold pages the scan never saw (a Fern versions file outside fern/), so both lists are classified.
+    for (const file of new Set([...scannedFiles, ...files])) {
+      const reason = nonMintlifyGateReason(file)
+      if (!reason) continue
+      gateByPath.set(file.absolutePath, { reason, quarantineReason: reason })
+      withheldPaths.add(file.absolutePath)
+    }
+  }
+  // Oversized bodies can contain access rules that the bounded classifier never reads.
+  const pagesNotClassified = droppedPageCount > 0 || scanTruncated
+    || files.some((file) => isDocFile(file) && lstatSync(file.absolutePath).size > MAX_PAGE_BYTES)
   const hasWithheldContent = withheldPaths.size > 0 || withheldDocFiles.length > 0
-  const trackPublishedRefs = platform === 'mintlify' && (hasWithheldContent || pagesNotClassified)
+  const trackPublishedRefs = hasWithheldContent || pagesNotClassified
+  // Docusaurus: the docs folder's place in the site, so `@site/...` and `../../static/...` links resolve from the site root.
+  const docusaurusDocsPrefix = platform === 'docusaurus' ? relative(docusaurusProjectRoot ?? repositoryDir, contentRoot).replace(/\\/g, '/') : ''
+  const docusaurusPaths = (siteBase: string): DocusaurusPathContext | undefined => (
+    platform === 'docusaurus' ? { siteBase: posix.normalize(siteBase).replace(/^\.$/, ''), docsPrefix: docusaurusDocsPrefix } : undefined)
   // Mintlify only. The pre-pass covers only files inside the file budget, so a
   // candidate it never saw (dropped by the budget, in a snippet directory, under
   // a case-variant path) is classified on demand: frontmatter gates, navigation
@@ -3579,7 +3944,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         }
         return verdict ?? undefined
       }
-    : undefined
+    // Fern and Docusaurus have no access rules to enforce, but an inlined file still has the page size cap.
+    : (candidate) => {
+        // A file the pre-pass never saw is classified now; a miss is never treated as public.
+        const reason = nonMintlifyGateReason({ absolutePath: candidate, relativePath: relative(contentRoot, candidate).replace(/\\/g, '/') })
+        if (reason) return { kind: reason === DOCUSAURUS_DRAFT_REASON ? 'draft' : 'gated', reason }
+        return lstatSync(candidate).size > MAX_PAGE_BYTES ? { kind: 'oversized', reason: 'over 2 MB' } : undefined
+      }
   /** docs.yml-derived navigationId -> final id, when a page's frontmatter `slug` overrides it. */
   const fernIdRenames = new Map<string, string>()
   let skipped = 0
@@ -3661,7 +4032,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     const sourceSegments = file.relativePath.split('/')
     if (sourceSegments.some((segment) => SNIPPET_DIRECTORIES.has(segment.toLowerCase()))
-      || (platform === 'docusaurus' && basename(file.relativePath).startsWith('_'))) {
+      || (platform === 'docusaurus' && sourceSegments.some((segment) => segment.startsWith('_')))) {
       skipped++
       continue
     }
@@ -3702,11 +4073,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       continue
     }
     const key = normalizedReferenceKey(file.relativePath)
-    // Restricted pages migrate with `groups` / `public: false` frontmatter the
-    // runtime enforces, but what they use must not leak through surfaces that
-    // are not access controlled (public/, specs, other pages).
+    // Restricted Mintlify pages migrate with `groups` / `public: false`
+    // frontmatter the runtime enforces, but what they use must not leak through
+    // surfaces that are not access controlled (public/, specs, other pages).
+    // Fern and Docusaurus have no runtime mapping, so their gated pages are
+    // quarantined outright (the gate sets quarantineReason).
     let pageGate: PageGate | undefined
-    if (platform === 'mintlify') {
+    {
       pageGate = gateByPath.get(file.absolutePath)
       if (pageGate?.access?.isPublic === true) sawPublicTrue = true
       // Rules that cannot be carried over safely (malformed values, group
@@ -3740,7 +4113,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         }
         warnings.push({
           code: 'gated-page',
-          message: `Access-restricted on the source site, but its access rules could not be migrated safely (${gateReason}), so it was NOT published. Fix the rules in the original, saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}, and move it into src/content/; until then links from other pages to it will break.`,
+          message: gateReason === DOCUSAURUS_DRAFT_REASON
+            ? `This is a draft page that Docusaurus does not publish, so it was NOT published. The original is saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}; links from other pages to it will break.`
+            : platform === 'mintlify'
+              ? `Access-restricted on the source site, but its access rules could not be migrated safely (${gateReason}), so it was NOT published. Fix the rules in the original, saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}, and move it into src/content/; until then links from other pages to it will break.`
+              : `Access-restricted on the source site (${gateReason}), so it was NOT published. The original is saved at ${QUARANTINE_DIRECTORY}/${file.relativePath}; links from other pages to it will break.`,
           source: file.relativePath,
         })
         continue
@@ -3784,7 +4161,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     let raw = inlineMdxSnippets(
       mintlifyProjectRoot
         ? importUndeclaredSnippetComponents(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, mintlifyProjectRoot, snippetExports, snippetAliases, inlineGate, warnings)
-        : readFileSync(file.absolutePath, 'utf8'),
+        : injectDocusaurusGlobalImports(readFileSync(file.absolutePath, 'utf8'), globalDocusaurusImports),
       file.absolutePath,
       repositoryDir,
       warnings,
@@ -3792,6 +4169,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       mintlifyProjectRoot ?? docusaurusProjectRoot ?? fernProjectRoot ?? repositoryDir,
       snippetAliases,
       inlineGate,
+      platform,
     )
     // Counted as published only once the page is certain to be (below). A
     // restricted page's text never makes an asset public.
@@ -3969,6 +4347,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         })
       })
     }
+    if (platform === 'docusaurus') resolvePageDisplayHeading(page, platform)
     let mdxError = invalidMdxReason(page.body)
     if (mdxError) {
       // Fail closed: only keep a repair that actually compiles.
@@ -4053,7 +4432,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     pages.push(page)
     if (isRestrictedPage) restrictedPages.add(page)
     for (const assetPath of pageAssetReferences) addAssetReference(assetPath, file.relativePath)
-    if (publishedText !== undefined) addPathReferences(publishedText, posix.dirname(file.relativePath).replace(/^\.$/, ''), publishedExact, publishedLoose)
+    if (publishedText !== undefined) addPathReferences(publishedText, posix.dirname(file.relativePath).replace(/^\.$/, ''), publishedExact, publishedLoose, docusaurusPaths(posix.join(docusaurusDocsPrefix, posix.dirname(file.relativePath))))
     // MDX normalization removes DocCardList because Thally has no matching
     // component. Remember its authored route so the resolved sidebar can
     // supply the cards once every page and category has been discovered.
@@ -4082,6 +4461,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }
     }
     if (docusaurusDescriptor) {
+      if (docusaurusDescriptor.unlisted) page.hidden = true
       docusaurusDescriptors.push({ ...docusaurusDescriptor, title: page.title })
     }
   }
@@ -4148,6 +4528,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     : []
   interface AssetCandidate { file: ScannedFile; assetPath: string; size: number }
   const assetCandidates: Array<AssetCandidate> = []
+  const seenAssetSources = new Map<string, Set<string>>()
   // Mintlify serves every `.css`/`.js` file in its content directory
   // site-wide, plus any font file named by docs.json `fonts.source`.
   const mintlifyFonts = platform === 'mintlify' ? mintlifyFontSources(mintlifyConfig) : []
@@ -4217,6 +4598,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         ? file.relativePath.slice('static/'.length)
         : file.relativePath)
     if (!assetPath) continue
+    const sourceKey = canonicalPath(file.absolutePath)
+    const destinations = seenAssetSources.get(sourceKey) ?? new Set<string>()
+    if (destinations.has(assetPath)) continue
+    destinations.add(assetPath)
+    seenAssetSources.set(sourceKey, destinations)
     if (siteKind) {
       siteAssetPaths.set(assetPath, siteKind)
       if (siteKind === 'font') fontAssetByRelative.set(file.relativePath, assetPath)
@@ -4252,9 +4638,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // concatenation) and references from remote content.
   // A restricted navigation container (and everything under it) publishes nothing.
   if (trackPublishedRefs) {
-    const publishedConfig = JSON.stringify(mintlifyConfig ?? {}, (_key, value: unknown) => (
-      value && typeof value === 'object' && !Array.isArray(value) && navigationGateReason(value as Record<string, unknown>) ? undefined : value))
-    addPathReferences(publishedConfig, '', publishedExact, publishedLoose)
+    const publishedConfig = platform === 'mintlify'
+      ? JSON.stringify(mintlifyConfig ?? {}, (_key, value: unknown) => (
+        value && typeof value === 'object' && !Array.isArray(value) && navigationGateReason(value as Record<string, unknown>) ? undefined : value))
+      // Branding the migrated config will name: Fern's docs.yml (logo, favicon, ...) and Docusaurus' static site settings.
+      : JSON.stringify([docsConfig, docusaurusProjectRoot ? readDocusaurusSiteSettings(docusaurusProjectRoot) : null])
+    addPathReferences(publishedConfig, '', publishedExact, publishedLoose, docusaurusPaths(''))
+    if (fernRawConfig) addFernConfigPathReferences(fernRawConfig, publishedExact, publishedLoose)
   }
   for (const file of componentMigrator?.files() ?? []) {
     if (!trackPublishedRefs || typeof file.content !== 'string') continue
@@ -4265,7 +4655,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const failClosedAssets = trackPublishedRefs
   const isPublicReachable = (assetPath: string): boolean => referencedAssetPaths.has(assetPath) || publishedExact.has(assetPath)
   const isQuarantinedAsset = (assetPath: string): boolean => (withheldAssetPaths.has(assetPath) || (failClosedAssets && !siteAssetPaths.has(assetPath)))
-    && platform === 'mintlify'
     && !(isPublicReachable(assetPath) && !(failClosedAssets && (destinationCounts.get(assetPath) ?? 0) > 1))
   let withheldAssetCount = 0
   let unreferencedAssetCount = 0
@@ -4530,7 +4919,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // whatever tab `injectOpenApiSpecs` picks for an unbound spec.
     const sections: Array<{ name?: string; nameExplicit: boolean; tabLabel?: string; routeSegments?: Array<string> }> = fernApiSections.length > 0
       ? fernApiSections
-      : [{ nameExplicit: false }]
+      // Every `api:` node is restricted: none may fall back to a repository-wide spec scan.
+      : fernRestrictedApiSections.length > 0 ? [] : [{ nameExplicit: false }]
     const resolvedSpecs: Array<{ filename: string; tabLabel?: string; content: Buffer; routeSegments: Array<string> }> = []
     // Two different multi-API specs commonly share a basename (Paradex's
     // prod_rest and testnet_rest both resolve to their own
@@ -4550,7 +4940,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           filename = `${prefix}${filename}`
         }
         specFilenameSources.set(filename, spec.absolutePath)
-        const specContent = readFileSync(spec.absolutePath)
+        const specContent = readSpecFile(spec.absolutePath, spec.relativePath, warnings)
+        if (!specContent) continue
         if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
           assets.push(specAsset(filename, specContent))
         }
@@ -4586,6 +4977,22 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         message: checked.length
           ? `No OpenAPI/AsyncAPI spec could be found for the "${section.name}" API. Checked: ${checked.join(', ')}. Point generators.yml at a spec file that exists.`
           : `No OpenAPI/AsyncAPI spec could be found for the "${section.name}" API, because its api-name is not a valid folder name. Add the spec manually.`,
+      })
+    }
+    // An `api:` node under a restricted node publishes nothing. Its spec is saved
+    // under the quarantine folder instead, unless a public node uses the same file.
+    const publicSpecFiles = new Set(specFilenameSources.values())
+    for (const section of fernRestrictedApiSections) {
+      const spec = findFernConfiguredOpenApi(fernProjectRoot, repositoryDir, section.name, section.nameExplicit, warnings).spec
+        ?? (!section.nameExplicit ? findOpenApi(files) : null)
+      if (!spec || publicSpecFiles.has(spec.absolutePath)) continue
+      const content = readSpecFile(spec.absolutePath, spec.relativePath, warnings)
+      if (!content) continue
+      quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(basename(spec.relativePath))}`, content })
+      warnings.push({
+        code: 'gated-page',
+        message: `The "${section.name ?? 'API'}" API reference is limited to signed-in roles in Fern, so it was NOT published. Its spec was saved at ${QUARANTINE_DIRECTORY}/assets/${specAssetPath(basename(spec.relativePath))}.`,
+        source: spec.relativePath,
       })
     }
     if (resolvedSpecs.length > 0) {
@@ -4668,15 +5075,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // No docs.json-configured spec at all: fall back to a naive repo scan,
       // matching every other platform's baseline behavior.
       const fallback = findOpenApi(files)
-      if (fallback) {
+      const fallbackContent = fallback ? readSpecFile(fallback.absolutePath, fallback.relativePath, warnings) : undefined
+      if (fallback && fallbackContent) {
         const filename = basename(fallback.relativePath)
         const matches = (ref: string): boolean => specRefMatches(ref, fallback.relativePath, filename, true)
         if (withheldSpecRefs.some(matches) && !publishedSpecRefs.some(matches)) {
           // Only restricted pages name this spec, and docs.json does not list it.
-          quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(filename)}`, content: readFileSync(fallback.absolutePath) })
+          quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(filename)}`, content: fallbackContent })
           withheldAssetCount++
         } else {
-          const pruned = excludeWithheldOperations({ sourcePath: fallback.relativePath, filename, content: readFileSync(fallback.absolutePath) }, withheldSpecRefs, keptSpecRefs)
+          const pruned = excludeWithheldOperations({ sourcePath: fallback.relativePath, filename, content: fallbackContent }, withheldSpecRefs, keptSpecRefs)
           if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
             assets.push(specAsset(filename, pruned.content))
           }
@@ -5011,7 +5419,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const docusaurusSettings = isTopLevelDocusaurus
     ? readDocusaurusSiteSettings(docusaurusProjectRoot!)
     : undefined
+  const presentation = docusaurusSettings ? readDocusaurusPresentation(docusaurusProjectRoot!) : undefined
   if (docusaurusSettings) {
+    if (presentation) {
+      assets.push({ path: '_thally/source-theme.css', content: Buffer.from(presentation.css) })
+      docsConfig = { ...docsConfig, stylesheets: [...(docsConfig.stylesheets ?? []), '/_thally/source-theme.css'], ...(presentation.headingFont ? { fonts: { ...docsConfig.fonts, heading: { family: presentation.headingFont, weight: ['400', '500', '600', '700'] } } } : {}) }
+      if (presentation.unresolved) warnings.push({ code: 'unsupported-config', message: 'Docusaurus Sass/Tailwind theme values could not be resolved statically; provide compiled build/assets/css/styles.*.css to retain those colors.' })
+    }
+    if (docusaurusSettings.banner) docsConfig = { ...docsConfig, banner: docusaurusSettings.banner }
     const importedRoutes = new Set(pages.map((page) => page.navigationId))
     const sourceOrigin = readDocusaurusSiteOrigin(docusaurusProjectRoot!)
     const externalized = new Set<string>()
@@ -5099,8 +5514,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const themeColors = mintlifyConfig
     ? mintlifyThemeColors(mintlifyConfig.colors)
     : fernRawConfig
-      ? fernThemeColors(fernRawConfig.colors)
-      : isTopLevelDocusaurus ? readDocusaurusThemeColor(docusaurusProjectRoot!) : undefined
+      ? fernThemeColors(fernRawConfig.colors) ?? (fernRawConfig['global-theme'] === 'nvidia' ? { primary: '#76B900' } : undefined)
+      : isTopLevelDocusaurus ? presentation?.colors ?? readDocusaurusThemeColor(docusaurusProjectRoot!) : undefined
   // Brand assets are copied as ordinary public files. Wire only assets that
   // were actually imported; a missing source file must not create a broken
   // header image or favicon. Admin uploads still override these fallbacks.
@@ -5232,7 +5647,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         + 'Confirm nothing here was meant to stay private before deploying.',
     })
   }
-  if (fernRawConfig?.logo && !logoLight && !logo.light) warnings.push({
+  if (typeof fernRawConfig?.['global-theme'] === 'string') warnings.push({
+    code: 'unsupported-config',
+    message: `Fern global theme ${JSON.stringify(fernRawConfig['global-theme'])} could not be fetched during local migration; local overrides and Thally default styling tokens were applied.`,
+    source: 'global-theme',
+  })
+  if (fernRawConfig?.logo && !fernRawConfig['global-theme'] && !logoLight && !logo.light) warnings.push({
     code: 'unsupported-config',
     message: 'Fern supplied a logo through its global theme without a local asset; add a logo path to docs.json after import.',
   })

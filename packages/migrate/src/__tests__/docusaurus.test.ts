@@ -10,6 +10,7 @@ import {
   addDocusaurusTranslatedHeadingAliases,
   projectDocusaurusNavigation,
   readDocusaurusSiteSettings,
+  readDocusaurusSidebars,
   rewriteDocusaurusLinks,
   type DocusaurusPageDescriptor,
 } from '../docusaurus.js'
@@ -27,6 +28,27 @@ afterEach(() => {
 })
 
 describe('Docusaurus projection', () => {
+  it.each(["/'/", '/"/', '/`/', '/[{}]/', String.raw`/[/\\"']/`, '8 / 2'])('reads static exports after %s without evaluating source', (expression) => {
+    const root = fixture()
+    const preamble = `const pattern = ${expression};\nthrow new Error('Source must never run');\n`
+    writeFileSync(join(root, 'sidebars.ts'), `${preamble}export default { docs: ['guide'] };`)
+    writeFileSync(join(root, 'docusaurus.config.ts'), `${preamble}export default {
+      themeConfig: { navbar: { title: 'Docs' }, colorMode: { defaultMode: 'dark' } },
+    };`)
+    expect(readDocusaurusSidebars(root)?.config).toEqual({ docs: ['guide'] })
+    expect(readDocusaurusSiteSettings(root)).toMatchObject({ navbarTitle: 'Docs', defaultColorMode: 'dark' })
+  })
+
+  it('reads static exports after template interpolation and a regex in a function', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'sidebars.ts'), [
+      'const template = `prefix ${`nested ${/"/.source}`} suffix`;',
+      "function unused(value) { return /'/g.test(value) }",
+      "export default { docs: ['guide'] };",
+    ].join('\n'))
+    expect(readDocusaurusSidebars(root)?.config).toEqual({ docs: ['guide'] })
+  })
+
   it('resolves a category metadata link to a local document id', () => {
     const root = fixture()
     mkdirSync(join(root, 'api/themes'), { recursive: true })

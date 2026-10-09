@@ -55,3 +55,11 @@ describe('sidebar API method pills', () => {
     expect(html.match(/font-mono/g)).toHaveLength(2)
   })
 })
+
+
+it('renders an authored open group even when no descendant is active', () => {
+  const nodes = [{ type: 'group', group: { id: 'examples', title: 'Examples', defaultOpen: true, nodes: [{ type: 'page', item: { id: 'example', title: 'Example', href: '/example' } }] } }] as Array<NavigationNode>
+  const html = renderToStaticMarkup(<NavigationTree nodes={nodes} pathname="/other" />)
+  expect(html).toContain('aria-expanded="true"')
+  expect(html).toContain('href="/example"')
+})

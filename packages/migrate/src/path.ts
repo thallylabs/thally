@@ -1,5 +1,6 @@
 /** Safe path normalization used before reading or writing migrated content. */
 
+import { realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 
 const SAFE_SEGMENT = /[^a-z0-9._-]+/gi
@@ -33,10 +34,12 @@ export function slugifySegment(value: string, preserveCase = false): string {
     // literal slug input instead of letting one file abort the whole import.
   }
   const normalized = preserveCase ? decoded : decoded.toLowerCase()
-  return normalized
+  const slug = normalized
     .replace(/\.(?:html?|mdx?)$/i, '')
     .replace(SAFE_SEGMENT, '-')
     .replace(/(^-|-$)/g, '')
+  // A dot segment (also spelled `%2e%2e`) must never reach a page id or file path.
+  return slug === '.' || slug === '..' ? '' : slug
 }
 
 /**
@@ -129,4 +132,20 @@ export function normalizeAssetPath(value: string): string | null {
   const segments = normalized.split('/').filter(Boolean)
   if (segments.some((segment) => segment === '.' || segment === '..')) return null
   return segments.join('/')
+}
+
+/** Throws when an existing path resolves, through a symlink, outside the repository; a path that does not exist is returned unchanged. */
+export function withinRealRoot(candidate: string, repositoryRoot: string): string {
+  let real: string
+  try { real = realpathSync(candidate) } catch { return candidate }
+  const realRoot = realpathSync(repositoryRoot)
+  if (real !== realRoot && !real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) {
+    throw new Error(`Migration path escapes its root: ${candidate}`)
+  }
+  return candidate
+}
+
+/** Whether `error` came from a path that leaves its root or is absolute, as thrown by the helpers above. */
+export function isPathEscapeError(error: unknown): boolean {
+  return error instanceof Error && /escapes its root|Unsafe migration path/.test(error.message)
 }

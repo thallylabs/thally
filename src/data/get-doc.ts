@@ -21,6 +21,7 @@ import { MALFORMED_PAGE_ACCESS, mergePageAccess, parsePageAccess, type PageAcces
 
 interface DocFrontmatter {
   title?: string
+  headingTitle?: string
   description?: string
   descriptionPlacement?: 'body'
   group?: string
@@ -236,6 +237,7 @@ async function compileDocEntry(
     // not source identifiers used by navigation, feedback, and GitHub edit links.
     id: slugPath || 'introduction',
     title,
+    headingTitle: typeof frontmatter?.headingTitle === 'string' && frontmatter.headingTitle.trim() ? frontmatter.headingTitle.trim() : undefined,
     description: frontmatter?.description ?? '',
     descriptionPlacement: frontmatter?.descriptionPlacement === 'body' ? 'body' : undefined,
     slug: slugSegments,
