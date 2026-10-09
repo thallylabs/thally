@@ -80,6 +80,8 @@ export interface FernApiSection {
 }
 
 export interface FernNavigationResult {
+  /** A bounded walk skipped nodes whose access rules and API bindings are unknown. */
+  navigationIncomplete: boolean
   docsConfig: MigrationDocsConfig
   descriptors: Array<FernPageDescriptor>
   warnings: Array<MigrationWarning>
@@ -126,7 +128,7 @@ export function readFernConfig(fernRoot: string): { config: Record<string, unkno
 
 interface WalkContext {
   /** Shared across scoped context copies; bound alias expansion and recursion. */
-  navigationWalk: { active: Set<Record<string, unknown>>; visits: number }
+  navigationWalk: { active: Set<Record<string, unknown>>; visits: number; incomplete: boolean }
   fernRoot: string
   repositoryRoot: string
   descriptors: Array<FernPageDescriptor>
@@ -327,7 +329,11 @@ function registerFolder(
     : fernBasicSlug(basename(folder))
   const segments = segment ? [...parentSegments, segment] : parentSegments
   const visit = (directory: string, routeSegments: Array<string>, depth: number): Array<string | MigrationNavigationGroup> => {
-    if (depth > 12 || context.descriptors.length >= 5_000) return []
+    if (depth > 12 || context.descriptors.length >= 5_000) {
+      context.navigationWalk.incomplete = true
+      warnOnce(context, 'fern-folder-limit', 'Fern folder navigation exceeded its depth or page budget; remaining access rules could not be classified.')
+      return []
+    }
     const pages: Array<string | MigrationNavigationGroup> = []
     const entries = readdirSync(directory, { withFileTypes: true })
       .filter((entry) => !entry.name.startsWith('.') && !entry.isSymbolicLink())
@@ -408,6 +414,7 @@ function convertNode(
     : walk.active.size >= 64 ? 'section depth exceeds 64'
       : walk.visits >= 5_000 ? 'node budget exceeds 5000' : undefined
   if (reason) {
+    walk.incomplete = true
     warnOnce(context, `navigation-${reason}`, `Fern navigation was skipped: ${reason}.`)
     return null
   }
@@ -825,7 +832,7 @@ export function projectFernNavigation(input: {
   repositoryRoot?: string
 }): FernNavigationResult {
   const context: WalkContext = {
-    navigationWalk: { active: new Set(), visits: 0 },
+    navigationWalk: { active: new Set(), visits: 0, incomplete: false },
     fernRoot: input.fernRoot,
     repositoryRoot: input.repositoryRoot ?? input.fernRoot,
     descriptors: [],
@@ -993,6 +1000,7 @@ export function projectFernNavigation(input: {
   })
 
   return {
+    navigationIncomplete: context.navigationWalk.incomplete,
     docsConfig: {
       tabs,
       ...(bannerContent ? { banner: { content: bannerContent, dismissible: true } } : {}),

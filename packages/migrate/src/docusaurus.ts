@@ -11,6 +11,7 @@ import postcss from 'postcss'
 import { cssColorToHex } from './css-colors.js'
 import { announcementMarkdown } from './fern.js'
 import JSON5 from 'json5'
+import ts from 'typescript'
 import { parse as parseYaml } from 'yaml'
 
 import type { MarkdownPageIdentity } from './mdx.js'
@@ -460,37 +461,30 @@ function readBoundedText(path: string): string {
 }
 
 /**
- * Index of the `}` closing each `{`, found in one pass over `source` that
- * skips strings and comments. Looking a literal up is then constant time, so
- * trying many candidates in one file stays linear.
+ * Index object and block braces with TypeScript's parser, without evaluating
+ * source. Regex literals and template strings need JavaScript lexical context;
+ * a character scanner can mistake their quotes for an unterminated string.
+ * Parsing once and walking the syntax tree once keeps candidate lookups linear
+ * in total. Bare object fragments parse as blocks, so index those as well.
  */
 function braceTable(source: string): Map<number, number> {
   const table = new Map<number, number>()
-  const open: Array<number> = []
-  let quote: string | null = null
-  let lineComment = false
-  let blockComment = false
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index]
-    const next = source[index + 1]
-    if (lineComment) {
-      if (char === '\n') lineComment = false
-      continue
+  try {
+    const tree = ts.createSourceFile('config.ts', source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS)
+    const pending: Array<ts.Node> = [tree]
+    while (pending.length > 0) {
+      const node = pending.pop()!
+      if (ts.isObjectLiteralExpression(node) || ts.isBlock(node)) {
+        const start = node.getStart(tree)
+        const end = node.end - 1
+        // Recovery nodes can have a synthetic closing brace; only real source
+        // delimiters may become configuration passed to JSON5.
+        if (source[start] === '{' && source[end] === '}') table.set(start, end)
+      }
+      ts.forEachChild(node, (child) => { pending.push(child) })
     }
-    if (blockComment) {
-      if (char === '*' && next === '/') { blockComment = false; index++ }
-      continue
-    }
-    if (quote) {
-      if (char === '\\') index++
-      else if (char === quote) quote = null
-      continue
-    }
-    if (char === '/' && next === '/') { lineComment = true; index++; continue }
-    if (char === '/' && next === '*') { blockComment = true; index++; continue }
-    if (char === '"' || char === "'" || char === '`') { quote = char; continue }
-    if (char === '{') open.push(index)
-    else if (char === '}' && open.length > 0) table.set(open.pop()!, index)
+  } catch {
+    // Excessively nested or malformed syntax is unsupported configuration.
   }
   return table
 }

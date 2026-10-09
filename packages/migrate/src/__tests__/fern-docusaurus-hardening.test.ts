@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
+import { stringify as stringifyYaml } from 'yaml'
 import * as mdx from '../mdx.js'
 import { compileSync } from '@mdx-js/mdx'
 
@@ -78,6 +79,35 @@ describe('overlapping parser limits and page isolation', () => {
 })
 
 describe('Fern navigation recursion', () => {
+  it('retains a public page without serializing cyclic source metadata', () => {
+    const bundle = fernSite('theme-data: &loop\n  contents: [*loop]\n  image: /assets/open.png\nprivate-theme:\n  viewers: [admin]\n  image: /assets/secret.png\nnavigation:\n  - page: Safe\n    path: safe.mdx\n  - page: Secret\n    viewers: [admin]\n    path: secret.mdx\n', {
+      'safe.mdx': '# Safe\n',
+      'secret.mdx': '# Secret\n',
+      'assets/open.png': 'PUBLIC-ASSET',
+      'assets/secret.png': 'PRIVATE-ASSET',
+    })
+    expect(bundle.pages.map((page) => page.title)).toEqual(['Safe'])
+    expect(bundle.assets.map((asset) => asset.path)).toEqual(['assets/open.png'])
+  })
+
+  it.each(['secret.mdx', 'safe.mdx'])('refuses incomplete navigation with a restricted appearance of %s beyond the limit', (restrictedPath) => {
+    let nested: Record<string, unknown> = { section: 'Leaf', contents: [{ api: 'Secret API' }, { page: 'Secret', path: restrictedPath }] }
+    for (let index = 0; index < 65; index++) nested = { section: 'Nested', contents: [nested] }
+    nested.viewers = ['admin']
+    expect(() => fernSite(stringifyYaml({ navigation: [{ page: 'Safe', path: 'safe.mdx' }, nested] }), {
+      'safe.mdx': '# Safe\n\n<Markdown src="/secret.mdx" />\n',
+      'secret.mdx': '# Secret\n\nPRIVATE-PAGE\n',
+      'generators.yml': 'api: openapi.yml\n',
+      'openapi.yml': 'openapi: 3.0.0\ninfo: {title: Secret, version: "1"}\npaths:\n  /secret:\n    get:\n      responses: {"200": {description: ok}}\n',
+      'assets/secret.png': 'PRIVATE-ASSET',
+    })).toThrow(/could not be fully classified.*no pages, assets or API specs were migrated/)
+  })
+
+  it('refuses cyclic navigation without a circular-serialization exception', () => {
+    expect(() => fernSite('navigation:\n  - &loop\n    section: Loop\n    contents: [*loop]\n  - page: Safe\n    path: safe.mdx\n', { 'safe.mdx': '# Safe\n' }))
+      .toThrow(/could not be fully classified/)
+  })
+
   it('skips cyclic sections and retains public siblings', () => {
     const loop: Record<string, unknown> = { section: 'Loop' }
     loop.contents = [loop]
@@ -517,6 +547,16 @@ describe('Fern files reached through a symlink', () => {
 })
 
 describe('Fern Markdown snippets', () => {
+  it('resolves an absolute include from fern rather than a same-named snippets file', () => {
+    const bundle = fernSite('navigation:\n  - page: In\n    path: in.mdx\n', {
+      'in.mdx': '# In\n\n<Markdown src="/note.mdx" />\n',
+      'note.mdx': 'ROOT-INCLUDE\n',
+      'snippets/note.mdx': 'WRONG-INCLUDE\n',
+    })
+    expect(bundle.pages[0].body).toContain('ROOT-INCLUDE')
+    expect(bundle.pages[0].body).not.toContain('WRONG-INCLUDE')
+  })
+
   it('inlines <Markdown src> and applies the size cap', () => {
     const nav = 'navigation:\n  - page: In\n    path: in.mdx\n'
     const bundle = fernSite(nav, {

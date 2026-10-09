@@ -1374,6 +1374,24 @@ function addPathReferences(text: string, baseDir: string | undefined, exact: Set
   }
 }
 
+/** Inspect public Fern config strings without recursively expanding YAML aliases or skipped navigation. */
+function addFernConfigPathReferences(config: Record<string, unknown>, exact: Set<string>, loose: Set<string>): void {
+  const pending: Array<{ value: unknown; depth: number }> = [{ value: config, depth: 0 }]
+  const seen = new Set<object>()
+  let visits = 0
+  while (pending.length > 0 && visits < 5_000) {
+    const { value, depth } = pending.pop()!
+    visits++
+    if (typeof value === 'string') {
+      addPathReferences(value, '', exact, loose)
+    } else if (value && typeof value === 'object' && !seen.has(value) && depth < 64) {
+      seen.add(value)
+      if (!Array.isArray(value) && fernViewersReason(value as Record<string, unknown>)) continue
+      for (const child of Object.values(value)) pending.push({ value: child, depth: depth + 1 })
+    }
+  }
+}
+
 /** Whether a bare file name (or the last word of a name with spaces) or a letter-case variant of this destination was spelled by published text. */
 function looselyNamed(assetPath: string, loose: ReadonlySet<string>): boolean {
   const lower = assetPath.toLowerCase()
@@ -3298,10 +3316,13 @@ function inlineMdxSnippets(
       try {
         // Mintlify's documented form is relative to `snippets/`; sites also write
         // the full `/snippets/x.mdx` (or a page-relative) path.
-        const candidate = [
+        const candidate = (platform === 'fern' ? [
+          // Fern's absolute include paths are rooted at fern/, never snippets/.
+          () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
+        ] : [
           () => withinRealRoot(resolveWithin(siteRoot, `snippets/${filePath}`), repositoryRoot),
           () => resolveSnippetPath(filePath, currentFile, repositoryRoot, siteRoot),
-        ].map((resolveCandidate) => {
+        ]).map((resolveCandidate) => {
           try { return resolveCandidate() } catch { return undefined }
         }).find((path) => path !== undefined && existsSync(path) && lstatSync(path).isFile())
         if (!candidate) throw new Error('file not found')
@@ -3478,6 +3499,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   let fernVersionPath = ''
   let fernApiSections: Array<FernApiSection> = []
   let fernRestrictedApiSections: Array<FernApiSection> = []
+  let fernNavigationIncomplete = false
   // sourcePaths of Fern descriptors that resolve outside fern/ (from a
   // `versions:` file living in a sibling directory) — resolved directly,
   // below, since the ordinary fern/-rooted scan can't reach them.
@@ -3557,6 +3579,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         warnings.push(...projected.warnings)
         fernApiSections = projected.apiSections
         fernRestrictedApiSections = projected.restrictedApiSections
+        fernNavigationIncomplete = projected.navigationIncomplete
         fernChangelogIndexes = projected.changelogIndexes
         for (const [index, descriptor] of projected.descriptors.entries()) {
           fernReferencedPaths.add(descriptor.sourcePath)
@@ -3592,6 +3615,12 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         message: `Fern config could not be read: ${error instanceof Error ? error.message : String(error)}`,
       })
     }
+  }
+
+  // A skipped branch could add a restricted appearance to any otherwise-public
+  // file. No partial result can prove access safety, including API fallbacks.
+  if (fernNavigationIncomplete) {
+    throw new Error(`Fern navigation could not be fully classified, so no pages, assets or API specs were migrated. Fix cyclic references or reduce the navigation's nesting or node count before retrying.\n${warnings.map((warning) => `- ${warning.message}`).join('\n')}`)
   }
 
   if (platform === 'docusaurus') {
@@ -4613,10 +4642,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       ? JSON.stringify(mintlifyConfig ?? {}, (_key, value: unknown) => (
         value && typeof value === 'object' && !Array.isArray(value) && navigationGateReason(value as Record<string, unknown>) ? undefined : value))
       // Branding the migrated config will name: Fern's docs.yml (logo, favicon, ...) and Docusaurus' static site settings.
-      : JSON.stringify([docsConfig, fernRawConfig ?? null, docusaurusProjectRoot ? readDocusaurusSiteSettings(docusaurusProjectRoot) : null], (_key, value: unknown) => (
-        platform === 'fern' && value && typeof value === 'object' && !Array.isArray(value)
-          && fernViewersReason(value as Record<string, unknown>) ? undefined : value))
+      : JSON.stringify([docsConfig, docusaurusProjectRoot ? readDocusaurusSiteSettings(docusaurusProjectRoot) : null])
     addPathReferences(publishedConfig, '', publishedExact, publishedLoose, docusaurusPaths(''))
+    if (fernRawConfig) addFernConfigPathReferences(fernRawConfig, publishedExact, publishedLoose)
   }
   for (const file of componentMigrator?.files() ?? []) {
     if (!trackPublishedRefs || typeof file.content !== 'string') continue

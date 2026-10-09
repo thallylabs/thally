@@ -378,6 +378,11 @@ directories and `__tests__`, which Docusaurus does not publish as documents. Lin
 from other pages to a quarantined page are left as authored and will fail
 `thally check`.
 
+Fern migration stops with an explicit error if cyclic navigation, excessive
+nesting, or the node budget prevents complete access classification. It emits
+no pages, assets, or API specs, because an unvisited branch could restrict a
+file also listed under a public node. Simplify the source navigation and retry.
+
 Assets are copied to `public/` only when a published page, the site configuration,
 copied styles or a migrated component names them by their exact normalized path;
 a restricted page's text never makes an asset public. On a site that withholds
