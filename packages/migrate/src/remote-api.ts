@@ -137,12 +137,19 @@ interface OpenApiOperation {
   summary: string
 }
 
-function parseOpenApi(content: Buffer, extension: string): Array<OpenApiOperation> {
+/**
+ * The format the body is actually in. A remote endpoint may serve YAML from a
+ * path without a .yaml suffix (or JSON from one with it), so the URL says
+ * nothing reliable; the saved extension must match this, or the install step
+ * drops a YAML spec saved as `.json` as invalid JSON.
+ */
+function specFormat(content: Buffer): 'json' | 'yaml' {
+  return content.toString('utf8').trimStart().startsWith('{') ? 'json' : 'yaml'
+}
+
+function parseOpenApi(content: Buffer, format: 'json' | 'yaml'): Array<OpenApiOperation> {
   const text = content.toString('utf8')
-  // A remote endpoint may serve YAML from a path without a .yaml suffix.
-  const parsed = extension === 'yaml' || !text.trimStart().startsWith('{')
-    ? parseYaml(text) as unknown
-    : JSON.parse(text) as unknown
+  const parsed = format === 'yaml' ? parseYaml(text) as unknown : JSON.parse(text) as unknown
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('OpenAPI spec is not an object.')
   const document = parsed as Record<string, unknown>
   if (typeof document.openapi !== 'string' || !/^3\./.test(document.openapi)) {
@@ -210,13 +217,12 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       if (warnings[index].source === reference.url && warnings[index].message.includes('requires a network download')) warnings.splice(index, 1)
     }
     try {
-      const url = validatedSpecUrl(reference.url)
-      const extension = /\.ya?ml$/i.test(url.pathname) ? 'yaml' : 'json'
       const downloaded = await downloadSpec(reference.url, fetcher)
       // Fail closed: operations only access-restricted pages document are not published.
       const pruned = markExcluded(downloaded, reference.withheldOperations ?? [], reference.keptOperations)
       const body = pruned.content
       if (reference.withheldOperations?.length) warnings.push({ code: 'gated-page', message: sharedSpecMessage(reference.url, pruned.excluded), source: reference.url })
+      const extension = specFormat(body)
       const operations = parseOpenApi(body, extension)
       const filename = `openapi-${createHash('sha256').update(reference.url).digest('hex').slice(0, 12)}.${extension}`
       assets.push({ path: `openapi/${filename}`, content: body, projectRelative: true })
