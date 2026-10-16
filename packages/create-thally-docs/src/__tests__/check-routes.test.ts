@@ -161,6 +161,16 @@ describe('thally check reader routes', () => {
     expect(result.output).not.toContain('"#after"')
   })
 
+  it.each([
+    ['an element holding an object', '<Step title="Deep" icon={<Icon style={{ color: "red" }} />}>x</Step>'],
+    ['objects nested three deep', '<Step title="Deep" data={{ a: { b: { c: 1 } } }}>x</Step>'],
+    ['several lines and three levels', '<Step\n  title="Deep"\n  data={{\n    a: { b: 1 },\n  }}\n>x</Step>'],
+    ['a ">" in an expression and in a string', '<Step title="Deep" onClick={() => go({ a: 1 })} note="a > b">x</Step>'],
+  ])('reads a step title from a tag with %s', async (_name, step) => {
+    const result = await checkLinks(`<Steps titleSize="h3">\n${step}\n</Steps>\n\n[Deep](#deep)`)
+    expect(result.output).not.toContain('"#deep"')
+  })
+
   it('takes the size from the Step over its Steps', async () => {
     const result = await checkLinks('<Steps titleSize="p">\n<Step title="One" titleSize="h4">x</Step>\n<Step title="Two">x</Step>\n</Steps>\n\n[One](#one) [Two](#two)')
     expect(result.output).not.toContain('"#one"')

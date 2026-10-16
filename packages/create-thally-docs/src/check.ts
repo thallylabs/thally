@@ -191,6 +191,27 @@ function renderedHeadingText(source: string): string {
   return visible
 }
 
+/** The index of the `>` that ends a tag whose attributes start at `from`: one outside quoted values and `{...}` expressions, at any depth. -1 when the tag never ends. */
+function tagEnd(text: string, from: number): number {
+  let depth = 0
+  let quote = ''
+  for (let index = from; index < text.length; index++) {
+    const character = text[index]
+    if (quote) {
+      if (character === quote) quote = ''
+    } else if (depth === 0 && (character === '"' || character === "'")) {
+      quote = character
+    } else if (character === '{') {
+      depth++
+    } else if (character === '}') {
+      depth = Math.max(0, depth - 1)
+    } else if (character === '>' && depth === 0) {
+      return index
+    }
+  }
+  return -1
+}
+
 /**
  * Titles of the `<Step>`s that render as headings: `titleSize` h2, h3 or h4 on
  * the step or, failing that, on the `<Steps>` around it. Only literal strings
@@ -204,8 +225,15 @@ function extractStepHeadings(content: string): Array<{ line: number; base: strin
   const steps: Array<{ line: number; base: string }> = []
   let line = 1
   let counted = 0
-  for (const tag of text.matchAll(/<(\/?)(Steps?)\b((?:[^>"'{}]|"[^"]*"|'[^']*'|\{(?:[^{}]|\{[^{}]*\})*\})*)>/g)) {
-    const [, closing, name, attributes] = tag
+  let resumeAt = 0
+  for (const tag of text.matchAll(/<(\/?)(Steps?)\b/g)) {
+    if (tag.index < resumeAt) continue
+    const [opening, closing, name] = tag
+    const attributesFrom = tag.index + opening.length
+    const end = tagEnd(text, attributesFrom)
+    if (end < 0) continue
+    resumeAt = end + 1
+    const attributes = text.slice(attributesFrom, end)
     for (; counted < tag.index; counted++) if (text[counted] === '\n') line++
     const attribute = (key: string): string | null | undefined => {
       const match = new RegExp(`\\s${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|(\\{))`).exec(attributes)
