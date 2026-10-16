@@ -204,7 +204,7 @@ function extractStepHeadings(content: string): Array<{ line: number; base: strin
   const steps: Array<{ line: number; base: string }> = []
   let line = 1
   let counted = 0
-  for (const tag of text.matchAll(/<(\/?)(Steps?)\b((?:[^>"'{}]|"[^"]*"|'[^']*'|\{[^}]*\})*)>/g)) {
+  for (const tag of text.matchAll(/<(\/?)(Steps?)\b((?:[^>"'{}]|"[^"]*"|'[^']*'|\{(?:[^{}]|\{[^{}]*\})*\})*)>/g)) {
     const [, closing, name, attributes] = tag
     for (; counted < tag.index; counted++) if (text[counted] === '\n') line++
     const attribute = (key: string): string | null | undefined => {

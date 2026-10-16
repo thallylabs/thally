@@ -155,6 +155,12 @@ describe('thally check reader routes', () => {
     expect(result.output).toContain('"#one"')
   })
 
+  it('reads a step title from a tag whose other props hold an object', async () => {
+    const result = await checkLinks('<Steps titleSize="h3">\n<Step title="Styled" style={{ color: "red" }}>x</Step>\n<Step title="After">x</Step>\n</Steps>\n\n[One](#styled) [Two](#after)')
+    expect(result.output).not.toContain('"#styled"')
+    expect(result.output).not.toContain('"#after"')
+  })
+
   it('takes the size from the Step over its Steps', async () => {
     const result = await checkLinks('<Steps titleSize="p">\n<Step title="One" titleSize="h4">x</Step>\n<Step title="Two">x</Step>\n</Steps>\n\n[One](#one) [Two](#two)')
     expect(result.output).not.toContain('"#one"')
