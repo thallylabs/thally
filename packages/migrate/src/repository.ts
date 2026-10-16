@@ -1531,8 +1531,17 @@ function resolveMintlifyApiSpecs(
   const remoteByKey = new Map<string, RemoteApiSpec>()
   const mountDirectory = (remote: RemoteApiSpec | undefined, reference: MintlifyApiSpecReference): void => {
     const directory = reference.directory?.replace(/^\/+|\/+$/g, '')
-    if (!remote || !directory || remote.directories?.some((mount) => mount.directory === directory)) return
-    remote.directories = [...(remote.directories ?? []), { directory, ...(reference.operations ? { operations: reference.operations } : {}) }]
+    if (!remote || !directory) return
+    const mount = remote.directories?.find((existing) => existing.directory === directory)
+    if (!mount) {
+      remote.directories = [...(remote.directories ?? []), { directory, ...(reference.operations ? { operations: reference.operations } : {}) }]
+    } else if (mount.operations && reference.operations) {
+      // One directory served the operations of every container that mounted it.
+      mount.operations = [...new Set([...mount.operations, ...reference.operations])]
+    } else {
+      // A container that lists nothing had every operation generated under the directory.
+      delete mount.operations
+    }
   }
   const specs: Array<ResolvedApiSpec> = []
   for (const reference of references) {
@@ -1776,6 +1785,8 @@ interface ApiOperationLinkSource {
   prefix?: string
   /** `METHOD /path` operations the source served under this prefix, in navigation order (it served only these); every operation when absent. */
   operations?: ReadonlyArray<string>
+  /** The one tab this prefix belongs to, when several tabs are bound to the spec; every tab bound to it when absent. */
+  tab?: string
 }
 
 export interface ApiOperationLinkMaps {
@@ -1818,7 +1829,7 @@ export function apiOperationLinkMap(
   const apiTabs = docsConfig.tabs.filter((tab) => !tab.hidden && tab.api)
   // A spec can be mounted under several prefixes (one per product), so a tab may match more than one source.
   const bound = apiTabs.flatMap((tab, index) => sources
-    .filter((entry) => tab.api?.source === specAssetPath(entry.filename))
+    .filter((entry) => tab.api?.source === specAssetPath(entry.filename) && (!entry.tab || entry.tab === tab.tab))
     .map((source) => ({ source, specId: index === 0 ? 'default' : slugifyApiSpecId(tab.tab) })))
   bound.forEach(({ source, specId }) => {
     if (!source.prefix) return

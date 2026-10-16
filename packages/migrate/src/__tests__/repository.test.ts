@@ -1450,6 +1450,30 @@ describe('Mintlify repository migration', () => {
     }])
   })
 
+  it('keeps every operation listed under a directory that two API tabs of one name share', () => {
+    const source = 'https://specs.example.com/openapi.json'
+    const migrate = (second: Record<string, unknown>) => {
+      const root = fixture()
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({
+        navigation: {
+          products: [
+            { product: 'One', tabs: [{ tab: 'API reference', openapi: { source, directory: 'api-reference' }, groups: [{ group: 'Keys', pages: ['POST /v2/keys.create', 'POST /v2/keys.get'] }] }] },
+            { product: 'Two', tabs: [{ tab: 'API reference', openapi: { source, directory: 'api-reference' }, ...second }] },
+          ],
+        },
+      }))
+      return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).remoteApiSpecs
+    }
+
+    expect(migrate({ groups: [{ group: 'Keys', pages: ['POST /v2/keys.get', 'POST /v2/keys.delete'] }] })).toEqual([{
+      url: source,
+      tabLabel: 'API reference',
+      directories: [{ directory: 'api-reference', operations: ['POST /v2/keys.create', 'POST /v2/keys.get', 'POST /v2/keys.delete'] }],
+    }])
+    // A tab that lists no operation had every operation generated, so the union is every operation.
+    expect(migrate({})?.[0].directories).toEqual([{ directory: 'api-reference' }])
+  })
+
   it("warns by name instead of silently dropping docs.json's api.asyncapi", () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

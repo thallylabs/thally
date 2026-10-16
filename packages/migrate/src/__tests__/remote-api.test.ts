@@ -265,3 +265,21 @@ describe('remote OpenAPI spec bodies', () => {
     expect((result.docsConfig.redirects ?? []).map((redirect) => redirect.source)).toContain('/ref/things/make-a')
   })
 })
+
+describe('one remote OpenAPI spec bound to several tabs', () => {
+  it('mounts each tab\'s directory once, with no warning and one copy of the spec', async () => {
+    const input = mountedBundle()
+    input.docsConfig = { tabs: input.docsConfig.tabs }
+    input.remoteApiSpecs = [
+      { url: MOUNTED_URL, tabLabel: 'Compute API', directories: [{ directory: 'compute/api-reference', operations: ['POST /v2/projects.createProject'] }] },
+      { url: MOUNTED_URL, tabLabel: 'Platform API', directories: [{ directory: 'platform/api-reference', operations: ['POST /v2/projects.createProject'] }] },
+    ]
+    const result = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: mountedSpec, contentType: 'application/json' }))
+    const sources = (result.docsConfig.redirects ?? []).map((redirect) => redirect.source)
+    expect(sources).toContain('/compute/api-reference/projects/create-project')
+    expect(sources).toContain('/platform/api-reference/projects/create-project')
+    expect(result.warnings).toEqual([])
+    expect(result.assets).toHaveLength(1)
+    expect(result.docsConfig.tabs.filter((tab) => tab.api).map((tab) => tab.tab)).toEqual(['Compute API', 'Platform API'])
+  })
+})

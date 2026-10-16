@@ -238,7 +238,8 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       const extension = specFormat(body)
       const operations = parseOpenApi(body, extension)
       const filename = `openapi-${createHash('sha256').update(reference.url).digest('hex').slice(0, 12)}.${extension}`
-      assets.push({ path: `openapi/${filename}`, content: body, projectRelative: true })
+      // Several tabs may bind one spec: it is saved once.
+      if (!assets.some((asset) => asset.path === `openapi/${filename}`)) assets.push({ path: `openapi/${filename}`, content: body, projectRelative: true })
       // Pages that name this spec by URL now resolve to the downloaded copy.
       for (const page of pages) {
         const ref = page.openapi ? splitOpenApiRef(page.openapi) : null
@@ -252,7 +253,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
 
       if (reference.directories?.length) {
         const maps = apiOperationLinkMap(
-          reference.directories.map(({ directory, operations: listed }) => ({ filename, content: body, prefix: directory, ...(listed ? { operations: listed } : {}) })),
+          reference.directories.map(({ directory, operations: listed }) => ({ filename, content: body, prefix: directory, tab: tab?.tab ?? reference.tabLabel ?? 'API Reference', ...(listed ? { operations: listed } : {}) })),
           { ...bundle.docsConfig, tabs },
         )
         rewriteApiLinksInPages(pages, maps.operationLinks, maps.prefixLandings, warnings)
