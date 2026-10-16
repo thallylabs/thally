@@ -15,6 +15,7 @@ import { projectMintlifyIntegrations } from './analytics.js'
 import { parseMarkdownPage } from './mdx.js'
 import { addMintlifyDirectoryRedirects, buildNavigationFromPages, projectMintlifyNavigation } from './navigation.js'
 import { pageIdFromReference } from './path.js'
+import { dropConflictingRedirects } from './redirects.js'
 import type {
   MigrationBundle,
   MigrationFetcher,
@@ -1886,6 +1887,7 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
     }
   }
   if (platform === 'mintlify') docsConfig = addMintlifyDirectoryRedirects(docsConfig, pages)
+  docsConfig = dropConflictingRedirects(docsConfig, pages, warnings)
   return {
     sourceUrl: source.toString(),
     sourceKind: 'url',

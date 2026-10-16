@@ -100,6 +100,14 @@ describe('remote OpenAPI hydration', () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 
+  it('does not redirect a linked URL that is a page of the site, and says so', async () => {
+    const input = bundle()
+    input.pages.push({ id: 'api-reference/scim/list-users', navigationId: 'api-reference/scim/list-users', title: 'List users', description: '', keywords: [], body: '', source: 'list-users.mdx' })
+    const result = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: spec, contentType: 'application/json' }))
+    expect(result.docsConfig.redirects).toBeUndefined()
+    expect(result.warnings.map((warning) => warning.message).join('\n')).toContain('/api-reference/scim/list-users')
+  })
+
   it('does not guess a redirect when operation labels collide', async () => {
     const duplicate = JSON.stringify({
       openapi: '3.0.0', info: { title: 'Example', version: '1' },

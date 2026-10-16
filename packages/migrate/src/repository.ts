@@ -96,6 +96,7 @@ import {
   trimTrailingSlashes,
   withinRealRoot,
 } from './path.js'
+import { dropConflictingRedirects, literalRoute } from './redirects.js'
 import type {
   MigrationAsset,
   MigrationBundle,
@@ -5380,10 +5381,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         // A redirect back to the same literal route loops before the page can
         // render. Treat a trailing slash as the same route, while retaining
         // destinations with a query or fragment because they carry intent.
-        const literalRoute = (route: string): string | null =>
-          route.startsWith('/') && !/[?:*#()[\]{}]/.test(route)
-            ? route.replace(/\/+$/, '') || '/'
-            : null
         const sourceRoute = literalRoute(redirect.source)
         if (sourceRoute && sourceRoute === literalRoute(redirect.destination)) {
           warnings.push({
@@ -5403,6 +5400,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         return false
       }),
     }
+    // Every platform's redirects meet here: none may hide a page or loop.
+    docsConfig = dropConflictingRedirects(docsConfig, [...pages, ...sourceRefPages], warnings)
   }
 
   if (pages.length === 0) {

@@ -12,6 +12,7 @@ import { parse as parseYaml } from 'yaml'
 
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { insertApiTab } from './navigation.js'
+import { dropConflictingRedirects } from './redirects.js'
 import { markExcluded, sharedSpecMessage } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher } from './types.js'
 
@@ -264,7 +265,8 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
     ...bundle,
     pages,
     assets,
-    docsConfig: { ...bundle.docsConfig, tabs, ...(redirects.length > 0 ? { redirects } : {}) },
+    // Links in page bodies became redirects above; none may hide a page that exists.
+    docsConfig: dropConflictingRedirects({ ...bundle.docsConfig, tabs, ...(redirects.length > 0 ? { redirects } : {}) }, pages, warnings),
     warnings,
   }
 }
