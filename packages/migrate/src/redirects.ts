@@ -42,7 +42,18 @@ export function dropConflictingRedirects(
   const hidden: Array<string> = []
   const looping: Array<string> = []
   // Redirects kept so far by literal source; Next uses the first match, so a later duplicate never fires.
+  // A kept source points at the end of its chain, so a walk is short however the redirects are ordered.
   const kept = new Map<string, string>()
+  const chainEnd = (route: string): string => {
+    let end = route
+    while (kept.has(end)) end = kept.get(end)!
+    for (let step = route; step !== end;) {
+      const next = kept.get(step)!
+      kept.set(step, end)
+      step = next
+    }
+    return end
+  }
   const redirects = config.redirects.filter((redirect) => {
     const source = literalRoute(redirect.source)
     if (!source) return true
@@ -52,12 +63,10 @@ export function dropConflictingRedirects(
     }
     const destination = literalRoute(redirect.destination)
     if (!destination || kept.has(source)) return true
-    // `kept` has no cycle, so this walk ends; reaching `source` means this redirect would close one.
-    for (let route: string | undefined = destination; route; route = kept.get(route)) {
-      if (route === source) {
-        looping.push(`${redirect.source} -> ${redirect.destination}`)
-        return false
-      }
+    // `source` has no redirect of its own yet, so it can only end the chain from `destination`: this redirect would close a cycle.
+    if (chainEnd(destination) === source) {
+      looping.push(`${redirect.source} -> ${redirect.destination}`)
+      return false
     }
     kept.set(source, destination)
     return true

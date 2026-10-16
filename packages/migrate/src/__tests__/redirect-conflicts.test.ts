@@ -172,6 +172,16 @@ describe('dropConflictingRedirects', () => {
     expect(warnings[0].message).toContain('/c')
   })
 
+  it('walks a long chain of redirects once, however they are ordered', () => {
+    const size = 20_000
+    // Each redirect points at the source of the one listed before it, so every walk would reach the end of the chain.
+    const chain: Redirects = Array.from({ length: size }, (_, index) => ({ source: `/p${size - index}`, destination: `/p${size - index + 1}` }))
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    const result = dropConflictingRedirects(config([...chain, { source: `/p${size + 1}`, destination: '/p1' }]), pages, warnings)
+    expect(result.redirects).toEqual(chain)
+    expect(warnings).toHaveLength(1)
+  })
+
   it('returns a config without redirects unchanged', () => {
     const bare: MigrationDocsConfig = { tabs: [] }
     expect(dropConflictingRedirects(bare, pages, [])).toBe(bare)
