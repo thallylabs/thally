@@ -1327,7 +1327,7 @@ describe('Mintlify repository migration', () => {
     expect(bundle.pages.map((page) => page.body).join('\n')).toContain('(/api/default/byok/get)')
   })
 
-  it('counts endpoint redirects skipped because a page already owns the URL', () => {
+  it('leaves a Mintlify endpoint URL that a page already serves to that page, without a warning', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
       navigation: { tabs: [{ tab: 'API', openapi: { source: 'o.yaml', directory: 'api' } }, { tab: 'Docs', pages: ['api/t/get-one'] }] },
@@ -1339,8 +1339,11 @@ describe('Mintlify repository migration', () => {
       '  /a:', '    get:', '      summary: Get one', '      tags: [T]', '      responses: { "200": { description: ok } }',
       '  /b:', '    get:', '      summary: Get two', '      tags: [T]', '      responses: { "200": { description: ok } }',
     ].join('\n'))
-    const messages = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' }).warnings.map((warning) => warning.message).join('\n')
-    expect(messages).toContain('Created 2 of 3 Mintlify endpoint redirects; skipped 1: 1 because the URL already has a page or redirect')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+    const sources = bundle.docsConfig.redirects?.map((redirect) => redirect.source) ?? []
+    expect(sources).toContain('/api/t/get-two')
+    expect(sources).not.toContain('/api/t/get-one')
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).not.toMatch(/Created \d+ of \d+ Mintlify endpoint redirects/)
   })
 
   it('caps generated Mintlify endpoint redirects and warns how many were not created', () => {

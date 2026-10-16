@@ -17,6 +17,11 @@ export function literalRoute(route: string): string | null {
     : null
 }
 
+/** The literal routes a site's pages are served at; a directory page (`section/index`) is served at its parent route too. */
+export function servedRoutes(pages: ReadonlyArray<Pick<MigrationPage, 'id'>>): Set<string> {
+  return new Set(pages.flatMap((page) => [`/${page.id}`, `/${page.id.replace(/\/index$/, '')}`]))
+}
+
 function list(sources: Array<string>): string {
   return `${sources.slice(0, LISTED).join(', ')}${sources.length > LISTED ? ', ...' : ''}`
 }
@@ -33,8 +38,7 @@ export function dropConflictingRedirects(
   warnings: Array<MigrationWarning>,
 ): MigrationDocsConfig {
   if (!config.redirects?.length) return config
-  // A directory page (`section/index`) is served at its parent route too.
-  const served = new Set(pages.flatMap((page) => [`/${page.id}`, `/${page.id.replace(/\/index$/, '')}`]))
+  const served = servedRoutes(pages)
   const hidden: Array<string> = []
   const looping: Array<string> = []
   // Redirects kept so far by literal source; Next uses the first match, so a later duplicate never fires.

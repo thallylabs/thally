@@ -12,7 +12,7 @@ import { parse as parseYaml } from 'yaml'
 
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { insertApiTab } from './navigation.js'
-import { dropConflictingRedirects } from './redirects.js'
+import { dropConflictingRedirects, servedRoutes } from './redirects.js'
 import { markExcluded, sharedSpecMessage } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher } from './types.js'
 
@@ -203,6 +203,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   const warnings = [...bundle.warnings]
   const pages = bundle.pages.map((page) => ({ ...page }))
   const authoredLinks = new Set<string>()
+  const served = servedRoutes(pages)
   for (const page of bundle.pages) {
     // Scan path-shaped tokens once, then inspect segments without nested
     // regex quantifiers. Authored pages may be arbitrarily long or hostile.
@@ -249,7 +250,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
         const parts = source.split('/').filter(Boolean)
         const key = parts.slice(-2).join('/')
         const destination = routes.get(key)
-        if (!destination || existingSources.has(source)) continue
+        if (!destination || existingSources.has(source) || served.has(source)) continue
         redirects.push({ source, destination, permanent: false })
         existingSources.add(source)
       }

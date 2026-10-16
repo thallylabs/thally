@@ -96,7 +96,7 @@ import {
   trimTrailingSlashes,
   withinRealRoot,
 } from './path.js'
-import { dropConflictingRedirects, literalRoute } from './redirects.js'
+import { dropConflictingRedirects, literalRoute, servedRoutes } from './redirects.js'
 import type {
   MigrationAsset,
   MigrationBundle,
@@ -1851,6 +1851,40 @@ function apiOperationLinkMap(
     }
   })
   return { operationLinks: map, prefixLandings, mintlifyPages, duplicatePages }
+}
+
+/**
+ * Redirects from Mintlify's generated endpoint URLs to the matching Thally
+ * endpoint pages. A URL that already has a page, or a redirect of its own,
+ * keeps it: that URL still serves, so nothing is lost and nothing is said.
+ */
+function mintlifyEndpointRedirects(
+  maps: Pick<ApiOperationLinkMaps, 'mintlifyPages' | 'duplicatePages'>,
+  pages: ReadonlyArray<Pick<MigrationPage, 'id'>>,
+  existing: ReadonlyArray<{ source: string }>,
+  warnings: Array<MigrationWarning>,
+): Array<{ source: string; destination: string }> {
+  const { mintlifyPages, duplicatePages } = maps
+  if (duplicatePages.length > 0) {
+    const listed = duplicatePages.slice(0, 10).map((url) => `/${url}`).join(', ')
+    warnings.push({
+      code: 'unsupported-config',
+      message: `${duplicatePages.length} Mintlify endpoint URL${duplicatePages.length === 1 ? ' is' : 's are'} shared by more than one operation (same tag and summary), so only the first operation is redirected from each: ${listed}${duplicatePages.length > 10 ? ', ...' : ''}.`,
+    })
+  }
+  const taken = servedRoutes(pages)
+  for (const redirect of existing) taken.add(literalRoute(redirect.source) ?? redirect.source)
+  const candidates = [...mintlifyPages].filter(([source]) => !taken.has(`/${source}`))
+  const redirects = candidates.slice(0, MAX_ENDPOINT_REDIRECTS)
+    .map(([source, destination]) => ({ source: `/${source}`, destination }))
+  const capped = candidates.length - redirects.length
+  if (capped > 0) {
+    warnings.push({
+      code: 'unsupported-config',
+      message: `Created ${redirects.length} of ${candidates.length} Mintlify endpoint redirects; skipped ${capped}: ${capped} because a site is limited to ${MAX_ENDPOINT_REDIRECTS} generated endpoint redirects. Old links to skipped endpoint URLs will not redirect.`,
+    })
+  }
+  return redirects
 }
 
 /** Rewrite API operation links in every page body, with one capped warning for links that matched no operation. */
@@ -5060,30 +5094,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         docsConfig,
       )
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
-      if (duplicatePages.length > 0) {
-        const listed = duplicatePages.slice(0, 10).map((url) => `/${url}`).join(', ')
-        warnings.push({
-          code: 'unsupported-config',
-          message: `${duplicatePages.length} Mintlify endpoint URL${duplicatePages.length === 1 ? ' is' : 's are'} shared by more than one operation (same tag and summary), so only the first operation is redirected from each: ${listed}${duplicatePages.length > 10 ? ', ...' : ''}.`,
-        })
-      }
       // Mintlify's own endpoint URLs keep working: they have no page of their own here.
-      const taken = new Set([...pages.map((page) => page.id), ...(docsConfig.redirects ?? []).map((redirect) => redirect.source.replace(/^\//, ''))])
-      const candidates = [...mintlifyPages].filter(([source]) => !taken.has(source))
-      const endpointRedirects = candidates.slice(0, MAX_ENDPOINT_REDIRECTS)
-        .map(([source, destination]) => ({ source: `/${source}`, destination }))
-      const alreadyTaken = mintlifyPages.size - candidates.length
-      const capped = candidates.length - endpointRedirects.length
-      if (alreadyTaken + capped > 0) {
-        const reasons = [
-          alreadyTaken > 0 ? `${alreadyTaken} because the URL already has a page or redirect` : '',
-          capped > 0 ? `${capped} because a site is limited to ${MAX_ENDPOINT_REDIRECTS} generated endpoint redirects` : '',
-        ].filter(Boolean).join(' and ')
-        warnings.push({
-          code: 'unsupported-config',
-          message: `Created ${endpointRedirects.length} of ${mintlifyPages.size} Mintlify endpoint redirects; skipped ${alreadyTaken + capped}: ${reasons}. Old links to skipped endpoint URLs will not redirect.`,
-        })
-      }
+      const endpointRedirects = mintlifyEndpointRedirects({ mintlifyPages, duplicatePages }, pages, docsConfig.redirects ?? [], warnings)
       if (endpointRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...endpointRedirects] }
     } else {
       // No docs.json-configured spec at all: fall back to a naive repo scan,
