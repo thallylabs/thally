@@ -78,6 +78,24 @@ describe('Mintlify redirects that would loop or hide a page', () => {
   })
 })
 
+describe('Mintlify default version redirects', () => {
+  it('leaves the page a version alias would hide alone, and says nothing about the alias', () => {
+    const bundle = mintlify({
+      navigation: { versions: [
+        { version: 'v2', default: true, groups: [{ group: 'Start', pages: ['v2/guide'] }] },
+        { version: 'v1', groups: [{ group: 'Start', pages: ['v1/guide'] }] },
+      ] },
+    }, {
+      'v2/guide': '# Guide v2\n\nBody.',
+      'v1/guide': '# Guide v1\n\nBody.',
+      guide: '# Guide\n\nBody.',
+    })
+    expect(bundle.pages.map((page) => page.id)).toContain('guide')
+    expect((bundle.docsConfig.redirects ?? []).map((redirect) => redirect.source)).not.toContain('/guide')
+    expect(messages(bundle)).not.toMatch(/\/guide/)
+  })
+})
+
 describe('Fern and Docusaurus redirects that hide a page', () => {
   it('drops a Fern redirect whose source is a page of the site', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-redirect-conflicts-fern-'))

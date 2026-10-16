@@ -5182,7 +5182,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
   if (platform === 'mintlify') {
     const sources = new Set((docsConfig.redirects ?? []).map((redirect) => redirect.source))
-    const aliases = routeAliases.filter((redirect) => !sources.has(redirect.source))
+    // An alias for a path the site serves as a page of its own (the version-less form of a page under the default version, say) would hide that page.
+    const served = servedRoutes(pages)
+    const aliases = routeAliases.filter((redirect) => !sources.has(redirect.source) && !served.has(literalRoute(redirect.source) ?? redirect.source))
     if (aliases.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...aliases] }
     docsConfig = addMintlifyHomepageRedirects(addMintlifyDirectoryRedirects(docsConfig, pages), pages)
     // `index.mdx` pages often publish at their parent route while source
