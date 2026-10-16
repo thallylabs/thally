@@ -53,13 +53,14 @@ In-content links to auto-generated API operation pages are rewritten to the
 matching Thally `/api/...` route. A link under a known API section that matches
 no operation points to that section's overview page instead, and one warning
 lists the affected links (up to ten). A spec that Mintlify mounted under a
-`directory` (local or remote, in one tab or several) also gets a redirect from
-each endpoint URL that directory served, to the matching endpoint page: only
-the operations the navigation listed under it when it listed any, and never an
-operation the published spec withholds with `x-hidden` or `x-excluded`. A
-Mintlify default version's pages also
-get a redirect from their address without the version segment, since the
-original site serves them both ways.
+`directory` also gets a redirect from each endpoint URL that directory served,
+to the matching endpoint page, and never to an operation the published spec
+withholds with `x-hidden` or `x-excluded`. A remote spec gets every directory
+each of its tabs mounted it under, limited to the operations the navigation
+listed under a directory when it listed any. A local spec gets one directory
+per tab (the first) and every operation of the spec. A Mintlify default
+version's pages also get a redirect from their address without the version
+segment, since the original site serves them both ways.
 
 Redirects are checked once, after every platform and step has added its own.
 Next.js applies a redirect before it looks for a page and compares a source
