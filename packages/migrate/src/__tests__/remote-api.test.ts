@@ -218,3 +218,31 @@ describe('remote OpenAPI spec mounted under Mintlify directories', () => {
     expect(withPage.warnings).toEqual([])
   })
 })
+
+describe('remote OpenAPI spec endpoint redirects only reach published endpoints', () => {
+  const hiddenSpec = JSON.stringify({
+    openapi: '3.1.0',
+    info: { title: 'Example', version: '1' },
+    paths: {
+      '/v2/keys.create': { post: { summary: 'Create key', tags: ['keys'], operationId: 'keys.create' } },
+      '/v2/keys.hide': { post: { summary: 'Hide key', tags: ['keys'], 'x-hidden': true } },
+      '/v2/keys.exclude': { post: { summary: 'Exclude key', tags: ['keys'], 'x-excluded': true } },
+      '/v2/keys.internal': { 'x-hidden': true, post: { summary: 'Internal key', tags: ['keys'] } },
+    },
+  })
+  const listed = ['POST /v2/keys.create', 'POST /v2/keys.hide', 'POST /v2/keys.exclude', 'POST /v2/keys.internal']
+
+  it.each([
+    ['listed in docs.json', listed],
+    ['generated for every operation', undefined],
+  ])('creates no redirect to an operation the published spec withholds: %s', async (_name, operations) => {
+    const input = mountedBundle()
+    input.pages = [input.pages[0]]
+    input.docsConfig = { tabs: input.docsConfig.tabs }
+    input.remoteApiSpecs = [{ url: MOUNTED_URL, tabLabel: 'API reference', directories: [{ directory: 'ref', ...(operations ? { operations } : {}) }] }]
+    const result = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: hiddenSpec, contentType: 'application/json' }))
+    const sources = (result.docsConfig.redirects ?? []).map((redirect) => redirect.source)
+    expect(sources).toContain('/ref/keys/create-key')
+    expect(sources.filter((source) => /hide|exclude|internal/.test(source))).toEqual([])
+  })
+})

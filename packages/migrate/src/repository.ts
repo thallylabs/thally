@@ -1712,7 +1712,15 @@ interface OpenApiOperationForLinking {
   operationId?: string
 }
 
-/** Read just enough of an OpenAPI document to match Mintlify's auto-generated operation pages. Malformed input yields no operations rather than throwing. */
+/** `x-hidden: true` and `x-excluded: true` (or the string `"true"`), as the renderer reads them. */
+const flagged = (value: unknown): boolean => value === true || value === 'true'
+
+/**
+ * Read just enough of an OpenAPI document to match Mintlify's auto-generated
+ * operation pages. An operation the renderer withholds (`x-hidden`,
+ * `x-excluded`, on it or on its path item) has no endpoint page to link or
+ * redirect to. Malformed input yields no operations rather than throwing.
+ */
 function parseOpenApiOperationsForLinking(content: Buffer): Array<OpenApiOperationForLinking> {
   let document: unknown
   try {
@@ -1725,10 +1733,13 @@ function parseOpenApiOperationsForLinking(content: Buffer): Array<OpenApiOperati
   const operations: Array<OpenApiOperationForLinking> = []
   for (const [path, pathItem] of Object.entries(paths as Record<string, unknown>)) {
     if (!pathItem || typeof pathItem !== 'object') continue
+    const item = pathItem as Record<string, unknown>
+    if (flagged(item['x-hidden']) || flagged(item['x-excluded'])) continue
     for (const method of OPENAPI_HTTP_METHODS) {
-      const operation = (pathItem as Record<string, unknown>)[method]
+      const operation = item[method]
       if (!operation || typeof operation !== 'object') continue
       const op = operation as Record<string, unknown>
+      if (flagged(op['x-hidden']) || flagged(op['x-excluded'])) continue
       const tags = Array.isArray(op.tags) ? op.tags.filter((tag): tag is string => typeof tag === 'string') : []
       operations.push({
         method,
