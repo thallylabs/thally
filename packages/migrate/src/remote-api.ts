@@ -139,6 +139,11 @@ interface OpenApiOperation {
   summary: string
 }
 
+/** A UTF-8 byte order mark ahead of the document: `JSON.parse` rejects it, so a spec saved with one would not load as JSON. */
+function withoutByteOrderMark(content: Buffer): Buffer {
+  return content.length >= 3 && content[0] === 0xef && content[1] === 0xbb && content[2] === 0xbf ? content.subarray(3) : content
+}
+
 /**
  * The format the body is actually in. A remote endpoint may serve YAML from a
  * path without a .yaml suffix (or JSON from one with it), so the URL says
@@ -225,7 +230,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       if (warnings[index].source === reference.url && warnings[index].message.includes('requires a network download')) warnings.splice(index, 1)
     }
     try {
-      const downloaded = await downloadSpec(reference.url, fetcher)
+      const downloaded = withoutByteOrderMark(await downloadSpec(reference.url, fetcher))
       // Fail closed: operations only access-restricted pages document are not published.
       const pruned = markExcluded(downloaded, reference.withheldOperations ?? [], reference.keptOperations)
       const body = pruned.content

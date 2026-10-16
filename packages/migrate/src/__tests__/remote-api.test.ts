@@ -246,3 +246,22 @@ describe('remote OpenAPI spec endpoint redirects only reach published endpoints'
     expect(sources.filter((source) => /hide|exclude|internal/.test(source))).toEqual([])
   })
 })
+
+describe('remote OpenAPI spec bodies', () => {
+  const body = JSON.stringify({ openapi: '3.1.0', info: { title: 'Example', version: '1' }, paths: { '/v2/a': { post: { summary: 'Make a', tags: ['things'] } } } })
+  const hydrate = (content: string | Buffer) => {
+    const input = mountedBundle()
+    input.docsConfig = { tabs: input.docsConfig.tabs }
+    input.remoteApiSpecs = [{ url: MOUNTED_URL, tabLabel: 'API reference', directories: [{ directory: 'ref' }] }]
+    return hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: content as never, contentType: 'application/json' }))
+  }
+
+  it('imports a JSON spec that starts with a byte order mark, saved without it', async () => {
+    const result = await hydrate(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(body)]))
+    expect(result.warnings).toEqual([])
+    expect(result.assets).toHaveLength(1)
+    expect(result.assets[0].path).toMatch(/\.json$/)
+    expect(() => JSON.parse(Buffer.from(result.assets[0].content).toString('utf8'))).not.toThrow()
+    expect((result.docsConfig.redirects ?? []).map((redirect) => redirect.source)).toContain('/ref/things/make-a')
+  })
+})
