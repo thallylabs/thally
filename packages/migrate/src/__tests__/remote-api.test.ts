@@ -283,6 +283,20 @@ describe('remote OpenAPI spec links in page bodies only reach published endpoint
   })
 })
 
+describe('one remote OpenAPI spec bound to several tabs, with operations withheld from it', () => {
+  it('says once that the shared spec was pruned', async () => {
+    const input = mountedBundle()
+    input.docsConfig = { tabs: input.docsConfig.tabs }
+    input.remoteApiSpecs = ['Compute API', 'Platform API'].map((tabLabel) => ({
+      url: MOUNTED_URL, tabLabel, directories: [{ directory: `${tabLabel.split(' ')[0].toLowerCase()}/api-reference` }],
+      withheldOperations: ['post /v2/workspace.getUsage'], keptOperations: [],
+    }))
+    const result = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: mountedSpec, contentType: 'application/json' }))
+    expect(result.warnings.filter((warning) => warning.code === 'gated-page')).toHaveLength(1)
+    expect(result.warnings.filter((warning) => warning.code === 'gated-page')[0].message).toContain('POST /v2/workspace.getUsage')
+  })
+})
+
 describe('remote OpenAPI spec bodies', () => {
   const body = JSON.stringify({ openapi: '3.1.0', info: { title: 'Example', version: '1' }, paths: { '/v2/a': { post: { summary: 'Make a', tags: ['things'] } } } })
   const hydrate = (content: string | Buffer) => {

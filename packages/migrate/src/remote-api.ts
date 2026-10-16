@@ -237,7 +237,10 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       // Fail closed: operations only access-restricted pages document are not published.
       const pruned = markExcluded(downloaded, reference.withheldOperations ?? [], reference.keptOperations)
       const body = pruned.content
-      if (reference.withheldOperations?.length) warnings.push({ code: 'gated-page', message: sharedSpecMessage(reference.url, pruned.excluded), source: reference.url })
+      // A spec bound to several tabs is pruned the same way for each: say so once.
+      if (reference.withheldOperations?.length && !warnings.some((warning) => warning.code === 'gated-page' && warning.source === reference.url)) {
+        warnings.push({ code: 'gated-page', message: sharedSpecMessage(reference.url, pruned.excluded), source: reference.url })
+      }
       const extension = specFormat(body)
       const operations = parseOpenApi(body, extension)
       const filename = `openapi-${createHash('sha256').update(reference.url).digest('hex').slice(0, 12)}.${extension}`
