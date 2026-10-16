@@ -10,16 +10,20 @@ import type { MigrationDocsConfig, MigrationPage, MigrationWarning } from './typ
 
 const LISTED = 10
 
-/** A fully literal site path, without a trailing slash; null for patterns, queries and fragments. */
+/**
+ * A fully literal site path, without a trailing slash and in lower case; null
+ * for patterns, queries and fragments. Next matches a redirect source without
+ * regard to case, so `/Guide` redirects a visit to `/guide` too.
+ */
 export function literalRoute(route: string): string | null {
   return route.startsWith('/') && !/[?:*#()[\]{}]/.test(route)
-    ? route.replace(/\/+$/, '') || '/'
+    ? route.replace(/\/+$/, '').toLowerCase() || '/'
     : null
 }
 
-/** The literal routes a site's pages are served at; a directory page (`section/index`) is served at its parent route too. */
+/** The literal routes a site's pages are served at, as `literalRoute` writes them; a directory page (`section/index`) is served at its parent route too. */
 export function servedRoutes(pages: ReadonlyArray<Pick<MigrationPage, 'id'>>): Set<string> {
-  return new Set(pages.flatMap((page) => [`/${page.id}`, `/${page.id.replace(/\/index$/, '')}`]))
+  return new Set(pages.flatMap((page) => [`/${page.id}`, `/${page.id.replace(/\/index$/, '')}`]).map((route) => route.toLowerCase()))
 }
 
 function list(sources: Array<string>): string {

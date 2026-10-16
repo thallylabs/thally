@@ -1912,7 +1912,7 @@ export function mintlifyEndpointRedirects(
   }
   const taken = servedRoutes(pages)
   for (const redirect of existing) taken.add(literalRoute(redirect.source) ?? redirect.source)
-  const candidates = [...mintlifyPages].filter(([source]) => !taken.has(`/${source}`))
+  const candidates = [...mintlifyPages].filter(([source]) => !taken.has(literalRoute(`/${source}`) ?? `/${source}`))
   const redirects = candidates.slice(0, MAX_ENDPOINT_REDIRECTS)
     .map(([source, destination]) => ({ source: `/${source}`, destination }))
   const capped = candidates.length - redirects.length

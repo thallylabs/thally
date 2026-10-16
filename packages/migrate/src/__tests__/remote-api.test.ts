@@ -217,6 +217,17 @@ describe('remote OpenAPI spec mounted under Mintlify directories', () => {
     expect((withPage.docsConfig.redirects ?? []).map((redirect) => redirect.source)).not.toContain('/compute/api-reference/projects/create-project')
     expect(withPage.warnings).toEqual([])
   })
+
+  it('treats a directory that differs from a page only in case as that page', async () => {
+    const input = mountedBundle()
+    input.remoteApiSpecs = [{ url: MOUNTED_URL, tabLabel: 'API reference', directories: [{ directory: 'Compute/API-Reference' }] }]
+    input.pages.push({ id: 'compute/api-reference/projects/create-project', navigationId: 'compute/api-reference/projects/create-project', title: 'Own page', description: '', keywords: [], body: '', source: 'own.mdx' })
+    const result = await hydrateRemoteApiSpecs(input, fetcher)
+    const sources = (result.docsConfig.redirects ?? []).map((redirect) => redirect.source)
+    expect(sources).toContain('/Compute/API-Reference/projects/get-project')
+    expect(sources).not.toContain('/Compute/API-Reference/projects/create-project')
+    expect(result.warnings).toEqual([])
+  })
 })
 
 describe('remote OpenAPI spec endpoint redirects only reach published endpoints', () => {

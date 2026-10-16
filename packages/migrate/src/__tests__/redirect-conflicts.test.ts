@@ -172,6 +172,19 @@ describe('dropConflictingRedirects', () => {
     expect(warnings[0].message).toContain('/c')
   })
 
+  it('compares routes without regard to case, as Next matches a redirect source', () => {
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    const result = dropConflictingRedirects(config([
+      { source: '/Guide', destination: '/x' },
+      { source: '/FR/guide', destination: '/x' },
+      { source: '/a', destination: '/B' },
+      { source: '/b', destination: '/A' },
+      { source: '/Quickstart', destination: '/quickstart' },
+    ]), pages, warnings)
+    expect(result.redirects).toEqual([{ source: '/a', destination: '/B' }])
+    expect(warnings.map((warning) => warning.message).join('\n')).toMatch(/\/Guide, \/FR\/guide.*\/b -> \/A, \/Quickstart -> \/quickstart/s)
+  })
+
   it('walks a long chain of redirects once, however they are ordered', () => {
     const size = 20_000
     // Each redirect points at the source of the one listed before it, so every walk would reach the end of the chain.

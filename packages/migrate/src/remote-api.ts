@@ -260,7 +260,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
         rewriteApiLinksInPages(pages, maps.operationLinks, maps.prefixLandings, warnings)
         for (const redirect of mintlifyEndpointRedirects(maps, pages, redirects, warnings)) {
           redirects.push(redirect)
-          endpointUrls.set(redirect.source, redirect.destination)
+          endpointUrls.set(literalRoute(redirect.source) ?? redirect.source, redirect.destination)
         }
       }
       const routes = new Map<string, string | null>()
@@ -274,7 +274,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
         const parts = source.split('/').filter(Boolean)
         const key = parts.slice(-2).join('/')
         const destination = routes.get(key)
-        if (!destination || existingSources.has(source) || served.has(source)) continue
+        if (!destination || existingSources.has(source) || served.has(literalRoute(source) ?? source)) continue
         redirects.push({ source, destination, permanent: false })
         existingSources.add(source)
       }
