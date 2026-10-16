@@ -1724,6 +1724,9 @@ interface OpenApiOperationForLinking {
 /** `x-hidden: true` and `x-excluded: true` (or the string `"true"`), as the renderer reads them. */
 const flagged = (value: unknown): boolean => value === true || value === 'true'
 
+/** Whether the renderer withholds a path item or an operation, so that it has no endpoint page to link or redirect to. */
+export const isWithheld = (node: Record<string, unknown>): boolean => flagged(node['x-hidden']) || flagged(node['x-excluded'])
+
 /**
  * Read just enough of an OpenAPI document to match Mintlify's auto-generated
  * operation pages. An operation the renderer withholds (`x-hidden`,
@@ -1743,12 +1746,12 @@ function parseOpenApiOperationsForLinking(content: Buffer): Array<OpenApiOperati
   for (const [path, pathItem] of Object.entries(paths as Record<string, unknown>)) {
     if (!pathItem || typeof pathItem !== 'object') continue
     const item = pathItem as Record<string, unknown>
-    if (flagged(item['x-hidden']) || flagged(item['x-excluded'])) continue
+    if (isWithheld(item)) continue
     for (const method of OPENAPI_HTTP_METHODS) {
       const operation = item[method]
       if (!operation || typeof operation !== 'object') continue
       const op = operation as Record<string, unknown>
-      if (flagged(op['x-hidden']) || flagged(op['x-excluded'])) continue
+      if (isWithheld(op)) continue
       const tags = Array.isArray(op.tags) ? op.tags.filter((tag): tag is string => typeof tag === 'string') : []
       operations.push({
         method,

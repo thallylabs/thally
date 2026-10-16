@@ -13,7 +13,7 @@ import { parse as parseYaml } from 'yaml'
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { insertApiTab } from './navigation.js'
 import { dropConflictingRedirects, literalRoute, servedRoutes } from './redirects.js'
-import { apiOperationLinkMap, mintlifyEndpointRedirects, rewriteApiLinksInPages } from './repository.js'
+import { apiOperationLinkMap, isWithheld, mintlifyEndpointRedirects, rewriteApiLinksInPages } from './repository.js'
 import { markExcluded, sharedSpecMessage } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher } from './types.js'
 
@@ -169,11 +169,13 @@ function parseOpenApi(content: Buffer, format: 'json' | 'yaml'): Array<OpenApiOp
   if (paths.length > 5_000) throw new Error('Remote OpenAPI spec has too many paths to import.')
   const operations: Array<OpenApiOperation> = []
   for (const [path, value] of paths) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    if (!value || typeof value !== 'object' || Array.isArray(value) || isWithheld(value as Record<string, unknown>)) continue
     for (const [method, raw] of Object.entries(value as Record<string, unknown>)) {
       if (!/^(get|post|put|patch|delete|head|options|trace)$/i.test(method)
         || !raw || typeof raw !== 'object' || Array.isArray(raw)) continue
       const operation = raw as Record<string, unknown>
+      // The published spec does not carry a withheld operation, so no endpoint page exists to redirect to.
+      if (isWithheld(operation)) continue
       const tags = Array.isArray(operation.tags) ? operation.tags : []
       operations.push({
         method: method.toLowerCase(),

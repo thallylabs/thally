@@ -258,6 +258,31 @@ describe('remote OpenAPI spec endpoint redirects only reach published endpoints'
   })
 })
 
+describe('remote OpenAPI spec links in page bodies only reach published endpoints', () => {
+  const linked = JSON.stringify({
+    openapi: '3.0.0',
+    info: { title: 'Example', version: '1' },
+    paths: {
+      '/users': { get: { summary: 'List users', tags: ['SCIM'] } },
+      '/hidden': { get: { summary: 'List hidden', tags: ['SCIM'], 'x-hidden': true } },
+      '/excluded': { get: { summary: 'List excluded', tags: ['SCIM'], 'x-excluded': 'true' } },
+      '/internal': { 'x-hidden': true, get: { summary: 'List internal', tags: ['SCIM'] } },
+      // Same tag and summary as the hidden operation above: only this one is published.
+      '/visible': { get: { summary: 'List hidden', tags: ['SCIM'] } },
+    },
+  })
+
+  it('creates no redirect to an operation the published spec withholds, and does not count it as a label collision', async () => {
+    const input = bundle()
+    input.pages[0].body = ['[a](/api-reference/scim/list-users)', '[b](/api-reference/scim/list-excluded)', '[c](/api-reference/scim/list-internal)', '[d](/api-reference/scim/list-hidden)'].join('\n')
+    const result = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: linked, contentType: 'application/json' }))
+    expect(result.docsConfig.redirects).toEqual([
+      { source: '/api-reference/scim/list-users', destination: '/api/default/users/get', permanent: false },
+      { source: '/api-reference/scim/list-hidden', destination: '/api/default/visible/get', permanent: false },
+    ])
+  })
+})
+
 describe('remote OpenAPI spec bodies', () => {
   const body = JSON.stringify({ openapi: '3.1.0', info: { title: 'Example', version: '1' }, paths: { '/v2/a': { post: { summary: 'Make a', tags: ['things'] } } } })
   const hydrate = (content: string | Buffer) => {
