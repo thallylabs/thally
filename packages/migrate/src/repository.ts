@@ -1763,9 +1763,11 @@ interface ApiOperationLinkSource {
   content: Buffer
   /** Prefix path segment(s) the source platform served its auto-generated operation pages under (no leading/trailing slash); absent or empty means "no known auto-generated prefix for this spec" and it's skipped. */
   prefix?: string
+  /** `METHOD /path` operations the source served under this prefix, in navigation order (it served only these); every operation when absent. */
+  operations?: ReadonlyArray<string>
 }
 
-interface ApiOperationLinkMaps {
+export interface ApiOperationLinkMaps {
   /** Exact source-platform operation-page path (lowercased) -> Thally operation route. */
   operationLinks: Map<string, string>
   /**
@@ -1782,7 +1784,19 @@ interface ApiOperationLinkMaps {
   duplicatePages: Array<string>
 }
 
-function apiOperationLinkMap(
+/** The operations a source served under its prefix: the listed ones in listed order, else every operation of the spec. */
+function servedOperations(source: ApiOperationLinkSource): Array<OpenApiOperationForLinking> {
+  const operations = parseOpenApiOperationsForLinking(source.content)
+  if (!source.operations) return operations
+  const byKey = new Map(operations.map((operation) => [`${operation.method} ${operation.path}`, operation]))
+  return source.operations.flatMap((reference) => {
+    const [method, ...path] = reference.trim().split(/\s+/)
+    const operation = byKey.get(`${method.toLowerCase()} ${path.join(' ')}`)
+    return operation ? [operation] : []
+  })
+}
+
+export function apiOperationLinkMap(
   sources: Array<ApiOperationLinkSource>,
   docsConfig: MigrationDocsConfig,
 ): ApiOperationLinkMaps {
@@ -1791,13 +1805,15 @@ function apiOperationLinkMap(
   const mintlifyPages = new Map<string, string>()
   const duplicatePages: Array<string> = []
   const apiTabs = docsConfig.tabs.filter((tab) => !tab.hidden && tab.api)
-  apiTabs.forEach((tab, index) => {
-    const source = sources.find((entry) => tab.api?.source === specAssetPath(entry.filename))
-    if (!source || !source.prefix) return
-    const specId = index === 0 ? 'default' : slugifyApiSpecId(tab.tab)
+  // A spec can be mounted under several prefixes (one per product), so a tab may match more than one source.
+  const bound = apiTabs.flatMap((tab, index) => sources
+    .filter((entry) => tab.api?.source === specAssetPath(entry.filename))
+    .map((source) => ({ source, specId: index === 0 ? 'default' : slugifyApiSpecId(tab.tab) })))
+  bound.forEach(({ source, specId }) => {
+    if (!source.prefix) return
     const prefix = source.prefix.replace(/^\/+|\/+$/g, '').toLowerCase()
     if (prefix) prefixLandings.set(prefix, specId === 'default' ? '/api' : `/api/${specId}`)
-    for (const operation of parseOpenApiOperationsForLinking(source.content)) {
+    for (const operation of servedOperations(source)) {
       const thallyHref = `/api/${specId}/${thallyOperationSlugSegments(operation.path, operation.method).join('/')}`
       // Leaf candidates, tried in order of how likely a source generator is
       // to have used them: Mintlify slugs from the summary; Fern instead
@@ -1858,7 +1874,7 @@ function apiOperationLinkMap(
  * endpoint pages. A URL that already has a page, or a redirect of its own,
  * keeps it: that URL still serves, so nothing is lost and nothing is said.
  */
-function mintlifyEndpointRedirects(
+export function mintlifyEndpointRedirects(
   maps: Pick<ApiOperationLinkMaps, 'mintlifyPages' | 'duplicatePages'>,
   pages: ReadonlyArray<Pick<MigrationPage, 'id'>>,
   existing: ReadonlyArray<{ source: string }>,
@@ -1888,7 +1904,7 @@ function mintlifyEndpointRedirects(
 }
 
 /** Rewrite API operation links in every page body, with one capped warning for links that matched no operation. */
-function rewriteApiLinksInPages(
+export function rewriteApiLinksInPages(
   pages: Array<MigrationPage>,
   operationLinks: Map<string, string>,
   prefixLandings: Map<string, string>,

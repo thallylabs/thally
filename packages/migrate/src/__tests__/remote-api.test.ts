@@ -121,3 +121,100 @@ describe('remote OpenAPI hydration', () => {
     expect(result.docsConfig.redirects).toBeUndefined()
   })
 })
+
+const MOUNTED_URL = 'https://specs.example.com/mounted.json'
+
+/** Two products serving one spec: operations are listed under each directory, as Mintlify's explicit navigation does. */
+const mountedSpec = JSON.stringify({
+  openapi: '3.1.0',
+  info: { title: 'Example', version: '1' },
+  paths: {
+    '/v2/projects.createProject': { post: { summary: 'Create project', tags: ['projects'], operationId: 'projects.createProject' } },
+    '/v2/projects.getProject': { post: { summary: 'Get project', tags: ['projects'], operationId: 'projects.getProject' } },
+    '/v2/workspace.getUsage': { post: { summary: 'Get workspace usage', tags: ['workspace'], operationId: 'workspace.getUsage' } },
+    '/v2/identities.createIdentity': { post: { summary: 'Create Identity', tags: ['identities'], operationId: 'identities.createIdentity' } },
+  },
+})
+
+function mountedBundle(): MigrationBundle {
+  const page = (id: string, body = ''): MigrationBundle['pages'][number] => ({ id, navigationId: id, title: id, description: '', keywords: [], body, source: `${id}.mdx` })
+  return {
+    sourceUrl: 'https://github.com/example/docs',
+    sourceKind: 'repository',
+    platform: 'mintlify',
+    pages: [
+      page('guide', [
+        '[create](/compute/api-reference/projects/create-project)',
+        '[old](/api-reference/projects/create-project)',
+        '[cli](/api-management/cli/identities/create-identity)',
+      ].join('\n')),
+      page('api-management/cli/identities/create-identity'),
+    ],
+    assets: [],
+    remoteApiSpecs: [{
+      url: MOUNTED_URL,
+      tabLabel: 'API reference',
+      directories: [
+        { directory: 'compute/api-reference', operations: ['POST /v2/projects.getProject', 'POST /v2/projects.createProject'] },
+        { directory: 'platform/api-reference', operations: ['POST /v2/projects.createProject', 'POST /v2/identities.createIdentity'] },
+      ],
+    }],
+    docsConfig: {
+      tabs: [{ tab: 'Guides', pages: ['guide'] }],
+      redirects: [{ source: '/api-reference/projects/create-project', destination: '/compute/api-reference/projects/create-project' }],
+    },
+    warnings: [{ code: 'unsupported-config', source: MOUNTED_URL, message: `The remote OpenAPI spec "${MOUNTED_URL}" (tab "API reference") requires a network download before this import is complete.` }],
+    stats: { discovered: 2, imported: 2, skipped: 0 },
+  }
+}
+
+describe('remote OpenAPI spec mounted under Mintlify directories', () => {
+  const fetcher: MigrationFetcher = async (url) => ({ finalUrl: url, body: mountedSpec, contentType: 'application/json' })
+
+  it('redirects every listed endpoint URL under each directory to its endpoint page', async () => {
+    const result = await hydrateRemoteApiSpecs(mountedBundle(), fetcher)
+    const redirects = new Map((result.docsConfig.redirects ?? []).map((redirect) => [redirect.source, redirect.destination]))
+    expect(redirects.get('/compute/api-reference/projects/create-project')).toBe('/api/default/v2/projects-createproject/post')
+    expect(redirects.get('/compute/api-reference/projects/get-project')).toBe('/api/default/v2/projects-getproject/post')
+    expect(redirects.get('/platform/api-reference/projects/create-project')).toBe('/api/default/v2/projects-createproject/post')
+    expect(redirects.get('/platform/api-reference/identities/create-identity')).toBe('/api/default/v2/identities-createidentity/post')
+  })
+
+  it('redirects only the operations a directory lists', async () => {
+    const result = await hydrateRemoteApiSpecs(mountedBundle(), fetcher)
+    const sources = (result.docsConfig.redirects ?? []).map((redirect) => redirect.source)
+    expect(sources.filter((source) => source.includes('workspace'))).toEqual([])
+    expect(sources).not.toContain('/compute/api-reference/identities/create-identity')
+  })
+
+  it('sends a bare tag URL to the first operation that directory lists for the tag', async () => {
+    const result = await hydrateRemoteApiSpecs(mountedBundle(), fetcher)
+    const redirects = new Map((result.docsConfig.redirects ?? []).map((redirect) => [redirect.source, redirect.destination]))
+    expect(redirects.get('/compute/api-reference/projects')).toBe('/api/default/v2/projects-getproject/post')
+    expect(redirects.get('/platform/api-reference/projects')).toBe('/api/default/v2/projects-createproject/post')
+  })
+
+  it('points an authored redirect that targets an endpoint URL straight at the endpoint page', async () => {
+    const result = await hydrateRemoteApiSpecs(mountedBundle(), fetcher)
+    expect(result.docsConfig.redirects).toContainEqual({ source: '/api-reference/projects/create-project', destination: '/api/default/v2/projects-createproject/post' })
+  })
+
+  it('rewrites body links to endpoint URLs', async () => {
+    const result = await hydrateRemoteApiSpecs(mountedBundle(), fetcher)
+    expect(result.pages[0].body).toContain('[create](/api/default/v2/projects-createproject/post)')
+  })
+
+  it('creates no redirect over a page of the site and says nothing about it', async () => {
+    const input = mountedBundle()
+    const result = await hydrateRemoteApiSpecs(input, fetcher)
+    const sources = (result.docsConfig.redirects ?? []).map((redirect) => redirect.source)
+    // The CLI page shares its last two segments with the identities endpoint, but it is not that endpoint.
+    expect(sources).not.toContain('/api-management/cli/identities/create-identity')
+    expect(result.warnings).toEqual([])
+
+    input.pages.push({ id: 'compute/api-reference/projects/create-project', navigationId: 'compute/api-reference/projects/create-project', title: 'Own page', description: '', keywords: [], body: '', source: 'own.mdx' })
+    const withPage = await hydrateRemoteApiSpecs(input, fetcher)
+    expect((withPage.docsConfig.redirects ?? []).map((redirect) => redirect.source)).not.toContain('/compute/api-reference/projects/create-project')
+    expect(withPage.warnings).toEqual([])
+  })
+})

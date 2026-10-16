@@ -12,7 +12,8 @@ import { parse as parseYaml } from 'yaml'
 
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { insertApiTab } from './navigation.js'
-import { dropConflictingRedirects, servedRoutes } from './redirects.js'
+import { dropConflictingRedirects, literalRoute, servedRoutes } from './redirects.js'
+import { apiOperationLinkMap, mintlifyEndpointRedirects, rewriteApiLinksInPages } from './repository.js'
 import { markExcluded, sharedSpecMessage } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher } from './types.js'
 
@@ -191,9 +192,12 @@ function operationTarget(operation: OpenApiOperation): string {
 }
 
 /**
- * Attach safely downloaded specs to the exact authored API tabs. Source links
- * to Mintlify's tag/summary routes receive redirects only when an operation
- * can be identified uniquely; guessing would silently route to wrong APIs.
+ * Attach safely downloaded specs to the exact authored API tabs. A spec
+ * mounted under Mintlify `directory` folders gets a redirect from each
+ * endpoint URL those folders served; for any other spec, source links to
+ * Mintlify's tag/summary routes receive redirects only when an operation can
+ * be identified uniquely, since guessing would silently route to wrong APIs.
+ * A redirect never takes the place of a page the site serves.
  */
 export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: MigrationFetcher): Promise<MigrationBundle> {
   if (!bundle.remoteApiSpecs?.length) return bundle
@@ -204,6 +208,8 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   const pages = bundle.pages.map((page) => ({ ...page }))
   const authoredLinks = new Set<string>()
   const served = servedRoutes(pages)
+  // Mintlify endpoint URL -> Thally endpoint page, for every redirect generated below.
+  const endpointUrls = new Map<string, string>()
   for (const page of bundle.pages) {
     // Scan path-shaped tokens once, then inspect segments without nested
     // regex quantifiers. Authored pages may be arbitrarily long or hostile.
@@ -239,6 +245,17 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       if (tab) tab.api = { source: `openapi/${filename}` }
       else insertApiTab(tabs, { tab: reference.tabLabel ?? 'API Reference', ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}), api: { source: `openapi/${filename}` } }, reference.parentTab)
 
+      if (reference.directories?.length) {
+        const maps = apiOperationLinkMap(
+          reference.directories.map(({ directory, operations: listed }) => ({ filename, content: body, prefix: directory, ...(listed ? { operations: listed } : {}) })),
+          { ...bundle.docsConfig, tabs },
+        )
+        rewriteApiLinksInPages(pages, maps.operationLinks, maps.prefixLandings, warnings)
+        for (const redirect of mintlifyEndpointRedirects(maps, pages, redirects, warnings)) {
+          redirects.push(redirect)
+          endpointUrls.set(redirect.source, redirect.destination)
+        }
+      }
       const routes = new Map<string, string | null>()
       for (const operation of operations) {
         const key = `${slug(operation.tag)}/${slug(operation.summary)}`
@@ -262,12 +279,17 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       })
     }
   }
+  // A redirect that targets an endpoint URL goes straight to the endpoint page, not through a second redirect.
+  const direct = redirects.map((redirect) => {
+    const endpoint = endpointUrls.get(literalRoute(redirect.destination) ?? '')
+    return endpoint ? { ...redirect, destination: endpoint } : redirect
+  })
   return {
     ...bundle,
     pages,
     assets,
     // Links in page bodies became redirects above; none may hide a page that exists.
-    docsConfig: dropConflictingRedirects({ ...bundle.docsConfig, tabs, ...(redirects.length > 0 ? { redirects } : {}) }, pages, warnings),
+    docsConfig: dropConflictingRedirects({ ...bundle.docsConfig, tabs, ...(direct.length > 0 ? { redirects: direct } : {}) }, pages, warnings),
     warnings,
   }
 }
