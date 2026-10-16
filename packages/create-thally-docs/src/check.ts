@@ -191,17 +191,51 @@ function renderedHeadingText(source: string): string {
   return visible
 }
 
+/**
+ * Titles of the `<Step>`s that render as headings: `titleSize` h2, h3 or h4 on
+ * the step or, failing that, on the `<Steps>` around it. Only literal strings
+ * count, as in the runtime. Each carries the line its tag starts on.
+ */
+function extractStepHeadings(content: string): Array<{ line: number; base: string }> {
+  const kept = content.split('\n').map(() => '')
+  forEachNonFencedLine(content, (line, lineNumber) => { kept[lineNumber - 1] = line })
+  const text = kept.join('\n')
+  const sizes: Array<string | undefined> = []
+  const steps: Array<{ line: number; base: string }> = []
+  let line = 1
+  let counted = 0
+  for (const tag of text.matchAll(/<(\/?)(Steps?)\b((?:[^>"'{}]|"[^"]*"|'[^']*'|\{[^}]*\})*)>/g)) {
+    const [, closing, name, attributes] = tag
+    for (; counted < tag.index; counted++) if (text[counted] === '\n') line++
+    const attribute = (key: string): string | null | undefined => {
+      const match = new RegExp(`\\s${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|(\\{))`).exec(attributes)
+      return match ? (match[1] ?? match[2] ?? null) : undefined
+    }
+    if (name === 'Steps') {
+      if (closing) sizes.pop()
+      else if (!attributes.endsWith('/')) sizes.push(attribute('titleSize') ?? undefined)
+      continue
+    }
+    const own = attribute('titleSize')
+    const size = own === undefined ? sizes[sizes.length - 1] : own
+    const title = attribute('title')?.trim()
+    if (closing || !title || !size || !['h2', 'h3', 'h4'].includes(size)) continue
+    steps.push({ line, base: slugify(title) })
+  }
+  return steps
+}
+
 function extractHeadingAnchors(content: string): Set<string> {
   const anchors = new Set<string>()
-  const headings: Array<{ base: string; explicit: boolean }> = []
-  forEachNonFencedLine(content, (line) => {
+  const headings: Array<{ base: string; explicit: boolean; line: number }> = []
+  forEachNonFencedLine(content, (line, lineNumber) => {
     const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line)
     if (heading) {
       // The runtime hashes rendered heading text. JSX badges and inline
       // anchors contribute their visible children, never their tag/props.
       // A trailing `{/* #id */}` is the id the runtime uses instead of the text's slug.
       const explicit = /\{\/\*\s*#(\S+?)\s*\*\/\}$/.exec(heading[1])
-      headings.push({ base: explicit?.[1] ?? slugify(renderedHeadingText(heading[1])), explicit: !!explicit })
+      headings.push({ base: explicit?.[1] ?? slugify(renderedHeadingText(heading[1])), explicit: !!explicit, line: lineNumber })
     }
     for (const idMatch of line.matchAll(EXPLICIT_ID_ATTRIBUTE)) {
       const id = idMatch[1] ?? idMatch[2] ?? idMatch[3]
@@ -216,6 +250,8 @@ function extractHeadingAnchors(content: string): Set<string> {
   })
   // Same numbering as the runtime and the content parser: `foo`, `foo-2`, `foo-3`;
   // an explicit id reserves its id, so generated ids skip it.
+  headings.push(...extractStepHeadings(content).map((step) => ({ ...step, explicit: false })))
+  headings.sort((left, right) => left.line - right.line)
   const reserved = new Set(headings.filter((heading) => heading.explicit).map((heading) => heading.base))
   const used = new Set<string>()
   const occurrences = new Map<string, number>()
