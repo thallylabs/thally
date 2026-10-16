@@ -1410,6 +1410,43 @@ describe('Mintlify repository migration', () => {
     expect(execFileCalls.calls).toEqual([])
   })
 
+  it('mounts one remote spec under every directory the API tabs of several products give it', () => {
+    const root = fixture()
+    const source = 'https://specs.example.com/openapi.json'
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        products: [
+          {
+            product: 'Compute',
+            tabs: [
+              { tab: 'Guides', groups: [{ group: 'Start', pages: ['guide'] }] },
+              { tab: 'API reference', openapi: { source, directory: 'compute/api-reference' }, groups: [{ group: 'Projects', pages: ['POST /v2/projects.createProject'] }] },
+            ],
+          },
+          {
+            product: 'Platform',
+            tabs: [
+              { tab: 'Guides', groups: [{ group: 'Start', pages: ['guide'] }] },
+              { tab: 'API reference', openapi: { source, directory: 'platform/api-reference' }, groups: [{ group: 'Compute', pages: [{ group: 'Projects', pages: ['POST /v2/projects.createProject'] }] }] },
+            ],
+          },
+        ],
+      },
+    }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.remoteApiSpecs).toEqual([{
+      url: source,
+      tabLabel: 'API reference',
+      directories: [
+        { directory: 'compute/api-reference', operations: ['POST /v2/projects.createProject'] },
+        { directory: 'platform/api-reference', operations: ['POST /v2/projects.createProject'] },
+      ],
+    }])
+  })
+
   it("warns by name instead of silently dropping docs.json's api.asyncapi", () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

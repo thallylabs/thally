@@ -347,12 +347,36 @@ export interface MintlifyApiSpecReference {
   hidden?: boolean
   /** Mintlify's `{ source, directory }` output folder, which Thally does not use (endpoints live under `/api/`). */
   directory?: string
+  /** `METHOD /path` operations the navigation under this reference lists, in authored order; absent when it lists none. */
+  operations?: Array<string>
 }
 
 /** `openapi`/`asyncapi` is a path/URL string, or Mintlify's `{ source, directory }` object. */
 function specSource(value: unknown): string | undefined {
   const source = typeof value === 'string' ? value : objectValue(value)?.source
   return typeof source === 'string' && source.trim() ? source.trim() : undefined
+}
+
+/**
+ * The operations a navigation container lists by name ("POST /users"), in
+ * authored order. A nested container that binds a spec of its own lists that
+ * spec's operations, not this one's.
+ */
+function listedOperations(container: Record<string, unknown>): Array<string> {
+  const operations: Array<string> = []
+  const visit = (entry: unknown, root: boolean): void => {
+    if (typeof entry === 'string') {
+      if (OPENAPI_OPERATION_REF.test(entry)) operations.push(entry.trim())
+      return
+    }
+    const object = objectValue(entry)
+    if (!object || (!root && (specSource(object.openapi) || specSource(object.asyncapi)))) return
+    for (const key of ['groups', 'pages'] as const) {
+      if (Array.isArray(object[key])) (object[key] as Array<unknown>).forEach((child) => visit(child, false))
+    }
+  }
+  visit(container, true)
+  return operations
 }
 
 const hasNavigationChildren = (node: Record<string, unknown>): boolean =>
@@ -384,9 +408,11 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
       const value = specSource(node[kind])
       const directory = objectValue(node[kind])?.directory
       if (value) {
+        const operations = typeof directory === 'string' && directory.trim() ? listedOperations(node) : []
         references.push({
           value, kind, tabLabel, ...sibling,
           ...(typeof directory === 'string' && directory.trim() ? { directory: directory.trim() } : {}),
+          ...(operations.length > 0 ? { operations } : {}),
         })
       }
     }

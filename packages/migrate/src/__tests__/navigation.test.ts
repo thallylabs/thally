@@ -673,6 +673,57 @@ describe('Mintlify openapi object-form reference', () => {
   })
 })
 
+describe('Mintlify directory reference with an explicit operation list', () => {
+  it('reports the operations listed under each directory, nested groups included, in authored order', () => {
+    const source = 'https://specs.example.com/openapi.json'
+    const references = mintlifyNavigationApiReferences({
+      navigation: {
+        products: [
+          {
+            product: 'Compute',
+            tabs: [{
+              tab: 'API reference',
+              openapi: { source, directory: 'compute/api-reference' },
+              groups: [{ group: 'Projects', pages: ['POST /v2/projects.createProject', 'POST /v2/projects.getProject'] }],
+            }],
+          },
+          {
+            product: 'Platform',
+            tabs: [{
+              tab: 'API reference',
+              openapi: { source, directory: 'platform/api-reference' },
+              groups: [{ group: 'Compute', pages: [{ group: 'Apps', pages: ['POST /v2/apps.getApp', 'POST /v2/apps.createApp'] }] }],
+            }],
+          },
+        ],
+      },
+    })
+    expect(references).toEqual([
+      { value: source, kind: 'openapi', tabLabel: 'API reference', directory: 'compute/api-reference', operations: ['POST /v2/projects.createProject', 'POST /v2/projects.getProject'] },
+      { value: source, kind: 'openapi', tabLabel: 'API reference', directory: 'platform/api-reference', operations: ['POST /v2/apps.getApp', 'POST /v2/apps.createApp'] },
+    ])
+  })
+
+  it('leaves a nested spec its own operations and reports none for a tab that lists no operation', () => {
+    const references = mintlifyNavigationApiReferences({
+      navigation: {
+        tabs: [{
+          tab: 'API',
+          openapi: { source: 'a.yaml', directory: 'api' },
+          groups: [
+            { group: 'Guides', pages: ['guide'] },
+            { group: 'Admin', openapi: 'admin.yaml', pages: ['GET /admin/users'] },
+          ],
+        }],
+      },
+    })
+    expect(references).toEqual([
+      { value: 'a.yaml', kind: 'openapi', tabLabel: 'API', directory: 'api' },
+      { value: 'admin.yaml', kind: 'openapi', tabLabel: 'API' },
+    ])
+  })
+})
+
 describe('Mintlify manual OpenAPI operation listing', () => {
   it('drops "METHOD /path" navigation entries with one warning instead of a missing-page warning each', () => {
     const config = {

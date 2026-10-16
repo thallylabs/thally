@@ -193,12 +193,22 @@ export interface MigrationWarning {
 }
 
 /** A repository-configured remote OpenAPI spec, downloaded after the bundle is built. */
+/** A route prefix Mintlify served one spec's generated endpoint pages under (`openapi: { source, directory }`). */
+export interface RemoteApiSpecDirectory {
+  /** The authored `directory`, without leading or trailing slashes. */
+  directory: string
+  /** `METHOD /path` operations docs.json lists under that reference, in authored order; absent when Mintlify generates every operation. */
+  operations?: Array<string>
+}
+
 export interface RemoteApiSpec {
   url: string
   tabLabel?: string
   parentTab?: string
   icon?: string
   hidden?: boolean
+  /** Every `directory` docs.json mounts this spec under: several API tabs may share one spec URL. */
+  directories?: Array<RemoteApiSpecDirectory>
   /** Operation keys (`get /x`) only access-restricted pages document; marked `x-excluded` after download. */
   withheldOperations?: Array<string>
   /** Operation keys published pages or docs.json also name; keeps a shared `$ref` path item public. */

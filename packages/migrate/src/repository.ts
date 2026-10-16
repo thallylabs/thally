@@ -1527,10 +1527,20 @@ function resolveMintlifyApiSpecs(
     references.push({ value: key, kind: 'openapi', tabLabel: `OpenAPI: ${key}`, hidden: true, pageOnly: true })
   }
   const seen = new Set<string>()
+  // Several tabs (one per product, say) can bind one remote spec to the same label, each under its own directory.
+  const remoteByKey = new Map<string, RemoteApiSpec>()
+  const mountDirectory = (remote: RemoteApiSpec | undefined, reference: MintlifyApiSpecReference): void => {
+    const directory = reference.directory?.replace(/^\/+|\/+$/g, '')
+    if (!remote || !directory || remote.directories?.some((mount) => mount.directory === directory)) return
+    remote.directories = [...(remote.directories ?? []), { directory, ...(reference.operations ? { operations: reference.operations } : {}) }]
+  }
   const specs: Array<ResolvedApiSpec> = []
   for (const reference of references) {
     const dedupeKey = `${reference.kind}:${reference.value}:${reference.tabLabel ?? ''}`
-    if (seen.has(dedupeKey)) continue
+    if (seen.has(dedupeKey)) {
+      mountDirectory(remoteByKey.get(dedupeKey), reference)
+      continue
+    }
     seen.add(dedupeKey)
     const tabSuffix = reference.tabLabel ? ` (tab "${reference.tabLabel}")` : ''
     if (reference.kind === 'asyncapi') {
@@ -1541,7 +1551,10 @@ function resolveMintlifyApiSpecs(
       continue
     }
     if (/^https:\/\//i.test(reference.value)) {
-      remoteSpecs.push({ url: reference.value, ...(reference.tabLabel ? { tabLabel: reference.tabLabel } : {}), ...(reference.parentTab ? { parentTab: reference.parentTab } : {}), ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}) })
+      const remote: RemoteApiSpec = { url: reference.value, ...(reference.tabLabel ? { tabLabel: reference.tabLabel } : {}), ...(reference.parentTab ? { parentTab: reference.parentTab } : {}), ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}) }
+      mountDirectory(remote, reference)
+      remoteSpecs.push(remote)
+      remoteByKey.set(dedupeKey, remote)
       warnings.push({
         code: 'unsupported-config',
         message: `The remote OpenAPI spec "${reference.value}"${tabSuffix} requires a network download before this import is complete.`,
