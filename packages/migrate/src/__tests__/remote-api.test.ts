@@ -283,3 +283,18 @@ describe('one remote OpenAPI spec bound to several tabs', () => {
     expect(result.docsConfig.tabs.filter((tab) => tab.api).map((tab) => tab.tab)).toEqual(['Compute API', 'Platform API'])
   })
 })
+
+describe('remote OpenAPI spec links in page bodies', () => {
+  it('treats a link with a trailing slash as the page it names, without a warning', async () => {
+    const input = bundle()
+    input.pages[0].body = '[List users](/api-reference/scim/list-users/)'
+    input.pages.push({ id: 'api-reference/scim/list-users', navigationId: 'api-reference/scim/list-users', title: 'List users', description: '', keywords: [], body: '', source: 'list-users.mdx' })
+    const withPage = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: spec, contentType: 'application/json' }))
+    expect(withPage.docsConfig.redirects).toBeUndefined()
+    expect(withPage.warnings).toEqual([])
+
+    input.pages.pop()
+    const withoutPage = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: spec, contentType: 'application/json' }))
+    expect(withoutPage.docsConfig.redirects).toEqual([{ source: '/api-reference/scim/list-users', destination: '/api/default/api/v1/scim/v2/users/get', permanent: false }])
+  })
+})

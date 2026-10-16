@@ -222,7 +222,8 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       const segments = match[0].split('/').filter(Boolean)
       if (segments.length < 3) continue
       const section = segments[0].toLowerCase()
-      if (section.includes('api') || section.includes('reference')) authoredLinks.add(match[0])
+      // `/x/y/` and `/x/y` are one URL.
+      if (section.includes('api') || section.includes('reference')) authoredLinks.add(match[0].replace(/\/+$/, ''))
     }
   }
   for (const reference of bundle.remoteApiSpecs) {
