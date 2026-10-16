@@ -1450,6 +1450,29 @@ describe('Mintlify repository migration', () => {
     }])
   })
 
+  it('redirects the endpoint URLs of one local spec that two API tabs mount under different directories, each to its own tab', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [
+        { tab: 'Alpha', openapi: { source: 'o.yaml', directory: 'alpha' } },
+        { tab: 'Beta', openapi: { source: 'o.yaml', directory: 'beta' } },
+        { tab: 'Docs', pages: ['guide'] },
+      ] },
+    }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    writeFileSync(join(root, 'o.yaml'), [
+      'openapi: 3.0.0', 'info: { title: T, version: "1" }', 'paths:',
+      '  /a: { post: { summary: Create A, tags: [things], responses: { "200": { description: ok } } } }',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const redirects = new Map((bundle.docsConfig.redirects ?? []).map((redirect) => [redirect.source, redirect.destination]))
+    expect(redirects.get('/alpha/things/create-a')).toBe('/api/default/a/post')
+    expect(redirects.get('/beta/things/create-a')).toBe('/api/beta/a/post')
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).not.toContain('shared by more than one operation')
+  })
+
   it('keeps every operation listed under a directory that two API tabs of one name share', () => {
     const source = 'https://specs.example.com/openapi.json'
     const migrate = (second: Record<string, unknown>) => {

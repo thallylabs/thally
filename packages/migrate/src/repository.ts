@@ -5088,7 +5088,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // — the same shape Mintlify's `directory` scoping produces, so the
       // same rewrite applies, keyed by the section's route instead.
       const { operationLinks, prefixLandings } = apiOperationLinkMap(
-        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.routeSegments.join('/') })),
+        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.routeSegments.join('/'), ...(spec.tabLabel ? { tab: spec.tabLabel } : {}) })),
         docsConfig,
       )
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
@@ -5128,7 +5128,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
       const { operationLinks, prefixLandings, mintlifyPages, duplicatePages } = apiOperationLinkMap(
-        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.directory })),
+        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.directory, ...(spec.tabLabel ? { tab: spec.tabLabel } : {}) })),
         docsConfig,
       )
       rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
