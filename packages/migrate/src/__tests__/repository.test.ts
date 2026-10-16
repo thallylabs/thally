@@ -1355,7 +1355,7 @@ describe('Mintlify repository migration', () => {
     writeFileSync(join(root, 'big.yaml'), ['openapi: 3.1.0', 'info: { title: Big, version: "1.0" }', 'paths:', ...paths].join('\n'))
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
     expect(bundle.docsConfig.redirects?.filter((redirect) => redirect.source.startsWith('/api/t'))).toHaveLength(2_000)
-    expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('Created 2000 of 2051 Mintlify endpoint redirects; skipped 51: 51 because a site is limited to 2000')
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('Created 2000 of 2051 Mintlify endpoint redirects; skipped 51 because a site is limited to 2000')
   })
 
   it('drops a manual OpenAPI operation listing ("GET /path") with one warning instead of one missing-page warning per operation', () => {

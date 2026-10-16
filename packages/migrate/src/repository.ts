@@ -1919,7 +1919,7 @@ export function mintlifyEndpointRedirects(
   if (capped > 0) {
     warnings.push({
       code: 'unsupported-config',
-      message: `Created ${redirects.length} of ${candidates.length} Mintlify endpoint redirects; skipped ${capped}: ${capped} because a site is limited to ${MAX_ENDPOINT_REDIRECTS} generated endpoint redirects. Old links to skipped endpoint URLs will not redirect.`,
+      message: `Created ${redirects.length} of ${candidates.length} Mintlify endpoint redirects; skipped ${capped} because a site is limited to ${MAX_ENDPOINT_REDIRECTS} generated endpoint redirects. Old links to skipped endpoint URLs will not redirect.`,
     })
   }
   return redirects
