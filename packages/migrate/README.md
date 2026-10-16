@@ -31,11 +31,13 @@ only content it binds to the tab itself. The item's `icon` and `hidden` carry
 onto that tab, and a `directory` output folder is not used (a warning says so:
 endpoint pages are generated under `/api/`). An item Thally cannot represent
 produces a warning naming it. Specs that share a file name across folders are
-kept as separate files in `openapi/`. Remote `http://` and
-`https://` specs are not downloaded during migration. The report names each
-remote URL and tells you to add its spec to a project-root folder such as
-`openapi/`, then set the API source in `docs.json` to that path. Missing local
-specs also produce warnings
+kept as separate files in `openapi/`. A remote `https://` spec is not
+downloaded by `migrateRepository`; the bundle lists it and warns, and
+`hydrateRemoteApiSpecs` (which `create-thally-docs migrate` runs after the
+conversion) downloads it from a public host, up to 25 MB, saves it as `.json`
+or `.yaml` by its content rather than its URL, and binds it to its tab. A
+download that fails leaves a warning naming the URL. An `http://` spec is never
+imported. Missing local specs also produce warnings
 instead of silently dropping that API tab's reference. AsyncAPI has no Thally
 renderer, so it always produces a clear warning naming the spec instead of
 disappearing.
@@ -50,9 +52,24 @@ into `docs.json`; invalid values are dropped with a warning.
 In-content links to auto-generated API operation pages are rewritten to the
 matching Thally `/api/...` route. A link under a known API section that matches
 no operation points to that section's overview page instead, and one warning
-lists the affected links (up to ten). A Mintlify default version's pages also
+lists the affected links (up to ten). A spec that Mintlify mounted under a
+`directory` (local or remote, in one tab or several) also gets a redirect from
+each endpoint URL that directory served, to the matching endpoint page: only
+the operations the navigation listed under it when it listed any, and never an
+operation the published spec withholds with `x-hidden` or `x-excluded`. A
+Mintlify default version's pages also
 get a redirect from their address without the version segment, since the
 original site serves them both ways.
+
+Redirects are checked once, after every platform and step has added its own.
+Next.js applies a redirect before it looks for a page and compares a source
+without regard to case or a trailing slash, so a redirect whose source is a page
+of the migrated site would hide that page, and two redirects that send a visit
+back to each other never settle. Each such redirect is left out, and a warning
+lists the first ten of each kind; the earlier redirect of a loop is kept. A
+generated redirect (a version alias, an endpoint URL) for an address that
+already serves a page is left out without a warning, since the page is still
+reachable there.
 
 A repository is limited to 5,000 documentation files and, separately, 5,000
 asset files. Past that, files are kept in navigation order with the default
