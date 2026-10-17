@@ -17,7 +17,7 @@ import { unified } from 'unified'
 import { parseFrontmatter } from './frontmatter.js'
 import { functionDeclaredNames, isFunctionInitializer, mdxComment, normalizeHtmlComments, normalizeExplicitHeadingIds, replaceOutsideCodeAndComments } from './mdx.js'
 import { resolveWithin } from './path.js'
-import { hoistedVarNames, pageScopeNames, planInlineExtraction, unboundBuiltinTags, unboundTags } from './inline-extraction.js'
+import { hoistedVarNames, planInlineExtraction, scriptKindFor, unboundBuiltinTags, unboundTags } from './inline-extraction.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
 
 interface MdxNode {
@@ -377,8 +377,7 @@ function sanitizeCssModuleSelectors(css: string): { css: string; omitted: number
 }
 
 function sourceFile(source: string, filename: string): ts.SourceFile {
-  return ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true,
-    /\.[cm]?ts$/.test(filename) ? ts.ScriptKind.TS : ts.ScriptKind.TSX)
+  return ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, scriptKindFor(filename))
 }
 
 function walk(node: MdxNode, visitor: (node: MdxNode) => void): void {
@@ -441,6 +440,8 @@ function implicitReactImports(source: ts.SourceFile, onShadowed?: (names: Array<
     }
     if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) bind(declaration.name)
     if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) bindings.add(statement.name.text)
+    // TypeScript-only declarations bind a value name too: `enum`, `namespace`, `import A = B`.
+    if ((ts.isEnumDeclaration(statement) || ts.isModuleDeclaration(statement) || ts.isImportEqualsDeclaration(statement)) && ts.isIdentifier(statement.name)) bindings.add(statement.name.text)
   }
   // A `var` in a block, loop, `try` or `switch` at module level is a module binding too.
   hoistedVarNames(source, bindings)
@@ -469,10 +470,9 @@ function implicitReactImports(source: ts.SourceFile, onShadowed?: (names: Array<
   // Built-ins with no leaf module of their own (`Warning`, `Info`, ... render
   // through Note with a preset `type`) resolve from the registry, which is
   // scope-aware: a name the module declares, imports or takes as a parameter
-  // is never rebound. A `.ts` file has no JSX.
-  const { bind: builtinTags, shadowed } = /\.[cm]?ts$/.test(source.fileName)
-    ? { bind: [], shadowed: [] }
-    : unboundBuiltinTags(source.text, pageScopeNames([source.text]))
+  // is never rebound. Read in the file's own mode: a `.ts` module has no JSX but
+  // can still pass a built-in as a value (`createElement(Note)`).
+  const { bind: builtinTags, shadowed } = unboundBuiltinTags(source.text, bindings, source.fileName)
   const registryNames = builtinTags.filter((name) => !leafBound.has(name))
   if (shadowed.length) onShadowed?.(shadowed)
   return [

@@ -93,8 +93,13 @@ const JS_GLOBALS = new Set([
 ])
 const IMPLICIT_MODULE_NAMES = new Set(['React', 'MintlifyComponents'])
 
-function parse(source: string): ts.SourceFile {
-  return ts.createSourceFile('inline.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+/** How a file is read: `.ts` is TypeScript without JSX (`<T>x` is an assertion there), anything else may hold JSX. */
+export function scriptKindFor(fileName: string): ts.ScriptKind {
+  return /\.[cm]?ts$/.test(fileName) ? ts.ScriptKind.TS : ts.ScriptKind.TSX
+}
+
+function parse(source: string, fileName = 'inline.tsx'): ts.SourceFile {
+  return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, scriptKindFor(fileName))
 }
 
 function bindingNames(name: ts.BindingName, into: Set<string>): void {
@@ -632,10 +637,10 @@ export function unboundTags(moduleSource: string, boundNames: ReadonlySet<string
  * it as a tag and never reads the global: a binding would replace the global, so
  * a module that uses both is left alone and the name comes back in `shadowed`.
  */
-export function unboundBuiltinTags(moduleSource: string, boundNames: ReadonlySet<string>): { bind: Array<string>; shadowed: Array<string> } {
+export function unboundBuiltinTags(moduleSource: string, boundNames: ReadonlySet<string>, fileName?: string): { bind: Array<string>; shadowed: Array<string> } {
   const tags = new Set<string>()
   const values = new Set<string>()
-  for (const statement of parse(moduleSource).statements) {
+  for (const statement of parse(moduleSource, fileName).statements) {
     if (ts.isImportDeclaration(statement)) continue
     for (const { name, kind } of collectRefs(statement).refs) {
       if (boundNames.has(name)) continue

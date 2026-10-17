@@ -445,12 +445,12 @@ describe('repository component migration', () => {
   describe('Mintlify global components in preserved modules', () => {
     const REGISTRY_IMPORT = "import { builtinMdxComponents } from '@/components/mdx/builtin-components';"
 
-    /** Copy `snippet.jsx` (imported by a page) and return the module the renderer will execute. */
-    function copied(source: string, extra: Record<string, string> = {}, warnings: Array<MigrationWarning> = []): string {
-      const root = fixture({ 'snippet.jsx': source, ...extra })
+    /** Copy `snippet.jsx` (or `file`), imported by a page, and return the module the renderer will execute. */
+    function copied(source: string, extra: Record<string, string> = {}, warnings: Array<MigrationWarning> = [], file = 'snippet.jsx'): string {
+      const root = fixture({ [file]: source, ...extra })
       const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
-      migrator.transform("import { Probe } from './snippet.jsx'\n\n<Probe />", join(root, 'index.mdx'))
-      return String(migrator.files().find((file) => file.path.endsWith('/snippet.jsx'))!.content)
+      migrator.transform(`import { Probe } from './${file}'\n\n<Probe />`, join(root, 'index.mdx'))
+      return String(migrator.files().find((copy) => copy.path.endsWith(`/${file}`))!.content)
     }
 
     it('binds the callout family a snippet renders without declaring (Trigger.dev feature-status.jsx)', () => {
@@ -522,8 +522,9 @@ describe('repository component migration', () => {
     /** Execute a migrated module with React and the built-in registry stubbed; each built-in is a marker function named after its tag. */
     type Rendered = { type: { displayName?: string } }
     type Marker = { displayName?: string }
-    function evaluate<T>(moduleSource: string): T {
+    function evaluate<T>(moduleSource: string, fileName = 'module.tsx'): T {
       const { outputText } = ts.transpileModule(moduleSource, {
+        fileName,
         compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 },
       })
       const element = (type: unknown, props: unknown) => ({ type, props })
@@ -668,6 +669,43 @@ describe('repository component migration', () => {
       it('leaves a JavaScript or browser global that shares a built-in name alone when it is only read as a value', () => {
         const content = copied('export const Probe = () => { const f = new File(["a"], "a.txt"); throw new Error(String(f)) }')
         expect(content).not.toContain('builtinMdxComponents')
+      })
+
+      describe('in every module file type', () => {
+        const createElementProbe = "import { createElement } from 'react';\nexport const Probe = () => createElement(Note, null, 'Hello');"
+
+        it.each(['banner.ts', 'banner.tsx', 'banner.jsx', 'banner.js', 'banner.mjs'])('binds a built-in a %s module passes to createElement, so it runs', (file) => {
+          const content = copied(createElementProbe, {}, [], file)
+          expect(content).toMatch(/const \{ Note \} = builtinMdxComponents;/)
+          expect(evaluate<{ Probe: () => Rendered }>(content, file.endsWith('.ts') ? file : undefined).Probe().type.displayName).toBe('Note')
+        })
+
+        it('reads a .ts module the way TypeScript does: angle-bracket assertions and generic arrows are not JSX', () => {
+          const content = copied([
+            "import { createElement } from 'react';",
+            'const id = <T>(value: T): T => value;',
+            "export const Probe = () => createElement(Note, null, <string>id('x'));",
+          ].join('\n'), {}, [], 'banner.ts')
+          expect(content).toMatch(/const \{ Note \} = builtinMdxComponents;/)
+          expect(evaluate<{ Probe: () => Rendered }>(content, 'banner.ts').Probe().type.displayName).toBe('Note')
+        })
+
+        it('never rebinds a name a .ts module declares as an enum, a namespace or an import alias', () => {
+          const content = copied([
+            "import { createElement } from 'react';",
+            "export enum Color { Red = 'red' }",
+            'export namespace Tip { export const kind = 1 }',
+            'import Danger = Tip;',
+            'export const Probe = () => createElement(Note, null, Color.Red, Tip.kind, Danger.kind, Check);',
+          ].join('\n'), {}, [], 'banner.ts')
+          expect(content.match(/const \{ ([^}]+) \} = builtinMdxComponents;/)![1]).toBe('Check, Note')
+          // A second declaration of any of those names would be a SyntaxError here.
+          expect(evaluate<{ Probe: () => Rendered }>(content, 'banner.ts').Probe().type.displayName).toBe('Note')
+        })
+
+        it('leaves a .ts module that never reads a built-in alone', () => {
+          expect(copied("export const label = (kind: string): string => kind.toUpperCase();", {}, [], 'labels.ts')).not.toContain('builtinMdxComponents')
+        })
       })
 
       it('keeps the <Error> rule: a tag alone binds, a tag beside the global is left unbound with a warning', () => {
