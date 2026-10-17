@@ -1194,6 +1194,24 @@ describe('OpenAPI specs named only by page frontmatter', () => {
     expect(codes(bundle, 'unsupported-config').some((item) => /not referenced from docs.json/.test(item.message))).toBe(false)
   })
 
+  it('saves two specs that share a file name under distinct names even when docs.json binds both to one tab', () => {
+    const only = (path: string): string => JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { [path]: { get: { summary: path } } } })
+    const bundle = site({
+      'docs.json': JSON.stringify({ api: { openapi: ['a/spec.json', 'b/spec.json'] }, navigation: { pages: ['pa', 'pb'] } }),
+      'a/spec.json': only('/a'),
+      'b/spec.json': only('/b'),
+      'pa.mdx': page('A', 'openapi: "a/spec.json GET /a"\n'),
+      'pb.mdx': page('B', 'openapi: "b/spec.json GET /b"\n'),
+    })
+    const paths = (path: string): Array<string> => Object.keys(JSON.parse(String(bundle.assets.find((asset) => asset.path === path)!.content)).paths)
+    expect(bundle.assets.map((asset) => asset.path).filter((path) => path.startsWith('openapi/')).sort()).toEqual(['openapi/b-spec.json', 'openapi/spec.json'])
+    expect(paths('openapi/spec.json')).toEqual(['/a'])
+    expect(paths('openapi/b-spec.json')).toEqual(['/b'])
+    expect(bundle.pages.find((entry) => entry.id === 'pa')?.openapi).toBe('openapi/spec.json GET /a')
+    expect(bundle.pages.find((entry) => entry.id === 'pb')?.openapi).toBe('openapi/b-spec.json GET /b')
+    expect(bundle.docsConfig.tabs.flatMap((tab) => tab.api ? [tab.api.source] : []).sort()).toEqual(['openapi/b-spec.json', 'openapi/spec.json'])
+  })
+
   it('keeps a spec out of the published output when only a withheld page names it', () => {
     const bundle = site(files({
       'pub.mdx': page('Pub'),

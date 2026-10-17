@@ -1654,29 +1654,27 @@ function resolveMintlifyApiSpecs(
       directory: reference.directory,
     })
   }
-  // Two specs bound to *different* tabs can share a basename (e.g.
-  // "qstash/openapi.yaml" and "workflow/openapi.yaml" both resolve to
-  // "openapi.yaml") — without disambiguation the second spec's asset
-  // write collides with the first's, silently discarding its content
-  // even though both tabs believe they have a working spec bound. Specs
-  // that land on the *same* tab are left alone: only one of them ever
-  // gets bound (see injectOpenApiSpecs's "already has an OpenAPI spec"
-  // warning), so renaming there would produce an asset nothing points to.
-  const filenameOwners = new Map<string, string>()
-  const filenameSources = new Map<string, string>()
+  // Two different specs can share a basename (e.g. "qstash/openapi.yaml" and
+  // "workflow/openapi.yaml" both resolve to "openapi.yaml"), whichever tabs bind
+  // them: without a distinct filename the second spec's asset write collides
+  // with the first's and is silently discarded, and a page naming it would be
+  // pointed at the first spec's bytes. Each source gets one filename, used for
+  // its asset, its tab binding and the pages that name it; the same file bound
+  // to several tabs stays one asset.
+  const filenameBySource = new Map<string, string>()
+  const sourceByFilename = new Map<string, string>()
   for (const spec of specs) {
-    const groupKey = spec.tabLabel ?? '\0default'
-    const owner = filenameOwners.get(spec.filename)
-    // The same file bound to several tabs is one asset, not a collision.
-    if (owner !== undefined && owner !== groupKey && filenameSources.get(spec.filename) !== spec.sourcePath) {
-      let disambiguated = spec.sourcePath.replace(/\//g, '-')
-      while (filenameOwners.has(disambiguated) && filenameOwners.get(disambiguated) !== groupKey) {
-        disambiguated = `${groupKey.replace(/\W+/g, '-')}-${disambiguated}`
+    let filename = filenameBySource.get(spec.sourcePath)
+    if (filename === undefined) {
+      filename = spec.filename
+      if (sourceByFilename.has(filename)) {
+        filename = spec.sourcePath.replace(/\//g, '-')
+        while (sourceByFilename.has(filename)) filename = `${(spec.tabLabel ?? 'default').replace(/\W+/g, '-')}-${filename}`
       }
-      spec.filename = disambiguated
+      filenameBySource.set(spec.sourcePath, filename)
+      sourceByFilename.set(filename, spec.sourcePath)
     }
-    filenameOwners.set(spec.filename, groupKey)
-    filenameSources.set(spec.filename, spec.sourcePath)
+    spec.filename = filename
   }
   return specs
 }
