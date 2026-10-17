@@ -13,7 +13,7 @@ import { parse as parseYaml } from 'yaml'
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { insertApiTab } from './navigation.js'
 import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, servedRoutes } from './redirects.js'
-import { apiOperationLinkMap, apiTabSpecIds, isWithheld, mintlifyEndpointRedirects, mountPrefix, rewriteApiLinksInPages, thallyOperationSlugSegments } from './repository.js'
+import { apiTabSpecIds, isWithheld, linkApiMounts, mountPrefix, thallyOperationSlugSegments } from './repository.js'
 import { markExcluded, sharedSpecMessage } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher, RemoteApiSpec } from './types.js'
 
@@ -216,7 +216,8 @@ interface BoundSpec {
  * silently route to the wrong API. A redirect never takes the place of a page
  * the site serves. Every spec is bound before any link is read, so mounts
  * nested in one another (`reference` and `reference/v2`) are told apart by
- * their longest prefix.
+ * their longest prefix, and the repository's own mounts are linked here too:
+ * a tab's position decides the id its spec is served under.
  */
 export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: MigrationFetcher): Promise<MigrationBundle> {
   if (!bundle.remoteApiSpecs?.length) return bundle
@@ -279,23 +280,35 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
     }
   }
 
-  // Endpoint URLs of every mount, mapped once: links are rewritten once, and
-  // the redirects below exist before any guess from a link's last two segments.
-  const maps = apiOperationLinkMap(
-    bound.flatMap(({ reference, filename, content, tabName }) => (reference.directories ?? [])
-      .map(({ directory, operations: listed }) => ({ filename, content, prefix: directory, tab: tabName, ...(listed ? { operations: listed } : {}) }))),
-    { ...bundle.docsConfig, tabs },
-    bundle.localApiMounts,
+  // Every spec is bound, so every mount is linked once, local and remote together: each target carries the id its spec is served under,
+  // and the redirects below exist before any guess from a link's last two segments.
+  const directories = [
+    ...(bundle.localApiMounts ?? []).map(({ directory }) => directory),
+    ...bound.flatMap(({ reference }) => (reference.directories ?? []).map(({ directory }) => directory)),
+  ]
+  const endpointRedirects = linkApiMounts(
+    [
+      ...(bundle.localApiMounts ?? []).map(({ filename, directory, tab }) => ({
+        filename,
+        content: Buffer.from(assets.find((asset) => asset.path === `openapi/${filename}`)?.content ?? []),
+        prefix: directory,
+        ...(tab ? { tab } : {}),
+      })),
+      ...bound.flatMap(({ reference, filename, content, tabName }) => (reference.directories ?? [])
+        .map(({ directory, operations: listed }) => ({ filename, content, prefix: directory, tab: tabName, ...(listed ? { operations: listed } : {}) }))),
+    ],
+    { ...bundle.docsConfig, tabs, redirects },
+    pages,
+    warnings,
+    directories,
   )
-  rewriteApiLinksInPages(pages, maps.operationLinks, maps.prefixLandings, warnings, { mounts: bundle.localApiMounts, redirects })
-  for (const redirect of mintlifyEndpointRedirects(maps, pages, redirects, warnings)) {
+  for (const redirect of endpointRedirects) {
     redirects.push(redirect)
     endpointUrls.set(literalRoute(redirect.source) ?? redirect.source, redirect.destination)
   }
 
   const existingSources = new Set(redirects.map((redirect) => redirect.source))
-  const mounts = [...(bundle.localApiMounts ?? []), ...bound.flatMap(({ reference }) => (reference.directories ?? []).map(({ directory }) => directory))]
-    .map(mountPrefix).filter(Boolean)
+  const mounts = directories.map(mountPrefix).filter(Boolean)
   const underMount = (source: string): boolean => mounts.some((prefix) => source.toLowerCase() === `/${prefix}` || source.toLowerCase().startsWith(`/${prefix}/`))
   // Label of an operation -> its endpoint page; null when more than one carries it, or its spec serves no endpoint pages.
   const guesses = new Map<string, string | null>()

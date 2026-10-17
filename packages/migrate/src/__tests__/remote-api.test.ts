@@ -517,11 +517,40 @@ describe('a local spec and a remote spec mounted under nested directories', () =
     expect((result.docsConfig.redirects ?? []).map((redirect) => redirect.source)).not.toContain('/reference/v2/users')
   })
 
-  it('leaves a link under the remote mount as authored until that spec is bound', () => {
-    const bundle = migrate('[v2](/reference/v2/users/list-users) [tag](/reference/v2/users) [home](/reference/v2)')
-    const guide = bundle.pages.find((page) => page.id === 'guide')
-    expect(guide?.body).toContain('[v2](/reference/v2/users/list-users) [tag](/reference/v2/users) [home](/reference/v2)')
-    expect(bundle.localApiMounts).toEqual(['reference'])
+  describe('with the remote tab ahead of the local one', () => {
+    const tabs = [
+      { tab: 'Remote reference', pages: ['intro'], openapi: { source: V2_URL, directory: 'remote-ref' } },
+      { tab: 'Local reference', openapi: { source: 'o.yaml', directory: 'local-ref' } },
+    ]
+    const intro = { 'intro.mdx': '---\ntitle: Intro\n---\n\nWelcome.\n' }
+    const body = '[remote](/remote-ref/users/list-users)\n[local](/local-ref/things/create-a)'
+    const redirectsOf = (result: MigrationBundle) => new Map((result.docsConfig.redirects ?? []).map((redirect) => [redirect.source, redirect.destination]))
+
+    it('links and redirects each mount to the id its spec is served under once the remote spec is bound', async () => {
+      const result = await hydrate(migrate(body, tabs, intro))
+      // The remote tab binds first and takes `default`; the local one is served as `local-reference`.
+      expect(result.pages.find((page) => page.id === 'guide')?.body).toContain('[remote](/api/default/users/get)\n[local](/api/local-reference/a/post)')
+      const redirects = redirectsOf(result)
+      expect(redirects.get('/remote-ref/users/list-users')).toBe('/api/default/users/get')
+      expect(redirects.get('/local-ref/things/create-a')).toBe('/api/local-reference/a/post')
+      expect([...redirects.values()].filter((destination) => destination.startsWith('/api/default/a/'))).toEqual([])
+    })
+
+    it('serves the local spec as the default when the remote download fails, since a tab without a spec takes no id', async () => {
+      const result = await hydrateRemoteApiSpecs(migrate(body, tabs, intro), async () => { throw new Error('offline') })
+      expect(result.pages.find((page) => page.id === 'guide')?.body).toContain('[remote](/remote-ref/users/list-users)\n[local](/api/default/a/post)')
+      expect(redirectsOf(result).get('/local-ref/things/create-a')).toBe('/api/default/a/post')
+      expect(result.docsConfig.tabs.filter((tab) => tab.api).map((tab) => tab.tab)).toEqual(['Local reference'])
+      expect(result.warnings.some((warning) => warning.code === 'fetch-failed')).toBe(true)
+    })
+  })
+
+  it('leaves every link under a mount as authored until the remote spec is bound, and carries the local mount for that pass', () => {
+    const body = '[v2](/reference/v2/users/list-users) [tag](/reference/v2/users) [home](/reference/v2) [v1](/reference/things/create-a)'
+    const bundle = migrate(body)
+    expect(bundle.pages.find((page) => page.id === 'guide')?.body).toContain(body)
+    expect((bundle.docsConfig.redirects ?? []).filter((redirect) => redirect.source.startsWith('/reference'))).toEqual([])
+    expect(bundle.localApiMounts).toEqual([{ filename: 'o.yaml', directory: 'reference', tab: 'Reference' }])
   })
 })
 

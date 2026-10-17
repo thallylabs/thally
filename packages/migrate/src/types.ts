@@ -223,8 +223,12 @@ export interface MigrationBundle {
   assets: Array<MigrationAsset>
   /** Repository-configured remote specs awaiting a bounded network fetch by the host. */
   remoteApiSpecs?: Array<RemoteApiSpec>
-  /** `directory` prefixes (no surrounding slashes) docs.json mounts repository OpenAPI specs under; the remote ones are in `remoteApiSpecs[].directories`. Hydration reads both to tell nested mounts apart. */
-  localApiMounts?: Array<string>
+  /**
+   * Repository OpenAPI specs docs.json mounts under a `directory` (no surrounding slashes), with the tab each is bound to; the remote ones are in
+   * `remoteApiSpecs[].directories`. Present only alongside remote specs: a spec's id depends on which remote tabs bind ahead of it, so
+   * hydration links the local and remote mounts together once every download has settled, and the links stay as authored until then.
+   */
+  localApiMounts?: Array<{ filename: string; directory: string; tab?: string }>
   /** Customer-owned component source and registry; paths are repository-relative. */
   componentFiles?: Array<RenderedMigrationFile>
   /**

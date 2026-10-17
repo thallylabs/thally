@@ -1836,7 +1836,7 @@ export const mountPrefix = (directory: string): string => directory.replace(/^\/
 export function apiOperationLinkMap(
   sources: Array<ApiOperationLinkSource>,
   docsConfig: MigrationDocsConfig,
-  /** Directories specs mount under that these sources do not cover (a remote spec not yet downloaded, or a local one already linked): an address under a deeper one is theirs. */
+  /** Directories of mounts these sources do not cover (a remote spec that could not be downloaded): an address under a deeper one is theirs. */
   otherMounts: ReadonlyArray<string> = [],
 ): ApiOperationLinkMaps {
   const map = new Map<string, string>()
@@ -1948,6 +1948,26 @@ export function mintlifyEndpointRedirects(
     })
   }
   return redirects
+}
+
+/**
+ * Link every API mount of a site in one pass: rewrite the body links under them
+ * and return the redirects from the endpoint URLs they served. Every spec must
+ * be bound in `docsConfig` first, because the id a spec is served under
+ * depends on the tabs ahead of it. `reservedMounts` are directories of mounts
+ * without a source here (a remote spec that could not be downloaded): the
+ * addresses under them are theirs and stay as authored.
+ */
+export function linkApiMounts(
+  sources: Array<ApiOperationLinkSource>,
+  docsConfig: MigrationDocsConfig,
+  pages: Array<MigrationPage>,
+  warnings: Array<MigrationWarning>,
+  reservedMounts: ReadonlyArray<string> = [],
+): Array<{ source: string; destination: string }> {
+  const maps = apiOperationLinkMap(sources, docsConfig, reservedMounts)
+  rewriteApiLinksInPages(pages, maps.operationLinks, maps.prefixLandings, warnings, { mounts: reservedMounts, redirects: docsConfig.redirects })
+  return mintlifyEndpointRedirects(maps, pages, docsConfig.redirects ?? [], warnings)
 }
 
 /** Rewrite API operation links in every page body, with one capped warning for links that matched no operation. */
@@ -3874,7 +3894,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const sourceRefPages: Array<MigrationPage> = []
   const sourceRefAssets: Array<MigrationAsset> = []
   const remoteApiSpecs: Array<RemoteApiSpec> = []
-  const localApiMounts: Array<string> = []
+  const localApiMounts: NonNullable<MigrationBundle['localApiMounts']> = []
   // Which pages reference which asset (by its normalized copy-destination
   // path), so the final asset-copy pass can prioritize referenced assets
   // over unreferenced ones when the budget is tight, and name the
@@ -5177,18 +5197,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           && !publishedSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))
       }
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
-      // A remote spec is bound once downloaded: until then its mount owns the links under it, so this pass leaves them as authored.
-      const remoteMounts = remoteApiSpecs.flatMap((remote) => remote.directories?.map(({ directory }) => directory) ?? [])
-      localApiMounts.push(...resolvedSpecs.flatMap((spec) => spec.directory ? [spec.directory] : []))
-      const { operationLinks, prefixLandings, mintlifyPages, duplicatePages } = apiOperationLinkMap(
-        resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.directory, ...(spec.tabLabel ? { tab: spec.tabLabel } : {}) })),
-        docsConfig,
-        remoteMounts,
-      )
-      rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings, { mounts: remoteMounts, redirects: docsConfig.redirects })
-      // Mintlify's own endpoint URLs keep working: they have no page of their own here.
-      const endpointRedirects = mintlifyEndpointRedirects({ mintlifyPages, duplicatePages }, pages, docsConfig.redirects ?? [], warnings)
-      if (endpointRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...endpointRedirects] }
+      if (remoteApiSpecs.length > 0) {
+        // A remote tab that binds ahead of these shifts their ids, so hydration links every mount, local and remote, once the downloads have settled.
+        localApiMounts.push(...resolvedSpecs.flatMap((spec) => spec.directory ? [{ filename: spec.filename, directory: spec.directory, ...(spec.tabLabel ? { tab: spec.tabLabel } : {}) }] : []))
+      } else {
+        // Mintlify's own endpoint URLs keep working: they have no page of their own here.
+        const endpointRedirects = linkApiMounts(
+          resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.directory, ...(spec.tabLabel ? { tab: spec.tabLabel } : {}) })),
+          docsConfig,
+          pages,
+          warnings,
+        )
+        if (endpointRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...endpointRedirects] }
+      }
     } else {
       // No docs.json-configured spec at all: fall back to a naive repo scan,
       // matching every other platform's baseline behavior.
