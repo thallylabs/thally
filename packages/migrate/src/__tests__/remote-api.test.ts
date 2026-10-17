@@ -524,3 +524,79 @@ describe('a local spec and a remote spec mounted under nested directories', () =
     expect(bundle.localApiMounts).toEqual(['reference'])
   })
 })
+
+describe('remote OpenAPI spec redirects guessed from the last two segments of a link', () => {
+  const ONE_URL = 'https://specs.example.com/one.json'
+  const TWO_URL = 'https://specs.example.com/two.json'
+  const specWith = (paths: Record<string, unknown>) => JSON.stringify({ openapi: '3.0.0', info: { title: 'Example', version: '1' }, paths })
+  const op = (summary: string, tag: string) => ({ get: { summary, tags: [tag] } })
+  const bodies = new Map<string, string>()
+  const hydrate = (links: Array<string>, references: MigrationBundle['remoteApiSpecs'], specs: Record<string, string>) => {
+    const input = mountedBundle()
+    input.pages = [{ ...input.pages[0], body: links.map((link) => `[l](${link})`).join('\n') }]
+    input.docsConfig = { tabs: input.docsConfig.tabs }
+    input.remoteApiSpecs = references
+    bodies.clear()
+    for (const [url, body] of Object.entries(specs)) bodies.set(url, body)
+    return hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: bodies.get(url.toString()) as string, contentType: 'application/json' }))
+  }
+  const redirectsOf = (result: MigrationBundle) => new Map((result.docsConfig.redirects ?? []).map((redirect) => [redirect.source, redirect.destination]))
+
+  it('never guesses under a mount: a link there reaches only what the mount lists', async () => {
+    const result = await hydrate(['/reference/v2/team/list-users', '/reference/v2/misc/other'], [
+      { url: ONE_URL, tabLabel: 'One' },
+      { url: TWO_URL, tabLabel: 'Two', directories: [{ directory: 'reference/v2', operations: ['GET /other'] }] },
+    ], {
+      [ONE_URL]: specWith({ '/things': op('List things', 'things') }),
+      [TWO_URL]: specWith({ '/other': op('Other', 'misc'), '/users': op('List users', 'team') }),
+    })
+    const redirects = redirectsOf(result)
+    // `/users` is a Two operation, but this mount does not list it: Mintlify served no such page.
+    expect(redirects.has('/reference/v2/team/list-users')).toBe(false)
+    expect(redirects.get('/reference/v2/misc/other')).toBe('/api/two/other/get')
+  })
+
+  it('sends a link no mount covers to the spec that has the operation, under that spec\'s own id', async () => {
+    const result = await hydrate(['/api-reference/alpha/make-a', '/api-reference/beta/make-b', '/api-reference/misc/ping'], [
+      { url: ONE_URL, tabLabel: 'One' },
+      { url: TWO_URL, tabLabel: 'Two' },
+    ], {
+      [ONE_URL]: specWith({ '/a': op('Make A', 'alpha') }),
+      [TWO_URL]: specWith({ '/b': op('Make B', 'beta'), '/': op('Ping', 'misc') }),
+    })
+    const redirects = redirectsOf(result)
+    expect(redirects.get('/api-reference/alpha/make-a')).toBe('/api/default/a/get')
+    expect(redirects.get('/api-reference/beta/make-b')).toBe('/api/two/b/get')
+    // The renderer serves an operation on the root path under `root`.
+    expect(redirects.get('/api-reference/misc/ping')).toBe('/api/two/root/get')
+  })
+
+  it('does not guess when two specs both have an operation with that label', async () => {
+    const result = await hydrate(['/api-reference/team/list-users'], [
+      { url: ONE_URL, tabLabel: 'One' },
+      { url: TWO_URL, tabLabel: 'Two' },
+    ], {
+      [ONE_URL]: specWith({ '/users': op('List users', 'team') }),
+      [TWO_URL]: specWith({ '/people': op('List users', 'team') }),
+    })
+    expect(redirectsOf(result).has('/api-reference/team/list-users')).toBe(false)
+  })
+
+  it('does not guess an operation that every mount of its spec leaves out', async () => {
+    const result = await hydrate(['/api-reference/team/list-users', '/api-reference/misc/other'], [
+      { url: ONE_URL, tabLabel: 'One', directories: [{ directory: 'reference/v2', operations: ['GET /other'] }] },
+    ], {
+      [ONE_URL]: specWith({ '/other': op('Other', 'misc'), '/users': op('List users', 'team') }),
+    })
+    const redirects = redirectsOf(result)
+    expect(redirects.has('/api-reference/team/list-users')).toBe(false)
+    expect(redirects.get('/api-reference/misc/other')).toBe('/api/default/other/get')
+  })
+
+  it('does not guess a target on a hidden tab, which serves no endpoint pages', async () => {
+    const result = await hydrate(['/api-reference/alpha/make-a'], [{ url: ONE_URL, tabLabel: 'One', hidden: true }], {
+      [ONE_URL]: specWith({ '/a': op('Make A', 'alpha') }),
+    })
+    expect(redirectsOf(result).has('/api-reference/alpha/make-a')).toBe(false)
+  })
+})

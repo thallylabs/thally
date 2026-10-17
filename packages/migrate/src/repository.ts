@@ -1713,6 +1713,15 @@ function slugifyApiSpecId(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9/]+/g, '-').replace(/(^-|-$)+/g, '').replace(/\//g, '-') || value.toLowerCase()
 }
 
+/**
+ * Each visible API tab with the id the renderer serves its spec under: the
+ * first is `default`, every other one takes its tab's slug (a hidden tab's spec
+ * serves no endpoint pages of its own).
+ */
+export function apiTabSpecIds<T extends { tab: string; hidden?: boolean; api?: object }>(tabs: ReadonlyArray<T>): Array<{ tab: T; specId: string }> {
+  return tabs.filter((tab) => !tab.hidden && tab.api).map((tab, index) => ({ tab, specId: index === 0 ? 'default' : slugifyApiSpecId(tab.tab) }))
+}
+
 interface OpenApiOperationForLinking {
   method: string
   path: string
@@ -1834,11 +1843,10 @@ export function apiOperationLinkMap(
   const prefixLandings = new Map<string, string>()
   const mintlifyPages = new Map<string, string>()
   const duplicatePages: Array<string> = []
-  const apiTabs = docsConfig.tabs.filter((tab) => !tab.hidden && tab.api)
   // A spec can be mounted under several prefixes (one per product), so a tab may match more than one source.
-  const bound = apiTabs.flatMap((tab, index) => sources
+  const bound = apiTabSpecIds(docsConfig.tabs).flatMap(({ tab, specId }) => sources
     .filter((entry) => tab.api?.source === specAssetPath(entry.filename) && (!entry.tab || entry.tab === tab.tab))
-    .map((source) => ({ source, specId: index === 0 ? 'default' : slugifyApiSpecId(tab.tab) })))
+    .map((source) => ({ source, specId })))
   // An address belongs to the most specific mount it lies under: one mounted at
   // `reference` never claims what a mount at `reference/v2` serves.
   const mounts = new Set([...bound.map(({ source }) => source.prefix ? mountPrefix(source.prefix) : ''), ...otherMounts.map(mountPrefix)].filter(Boolean))

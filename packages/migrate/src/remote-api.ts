@@ -13,7 +13,7 @@ import { parse as parseYaml } from 'yaml'
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { insertApiTab } from './navigation.js'
 import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, servedRoutes } from './redirects.js'
-import { apiOperationLinkMap, isWithheld, mintlifyEndpointRedirects, rewriteApiLinksInPages } from './repository.js'
+import { apiOperationLinkMap, apiTabSpecIds, isWithheld, mintlifyEndpointRedirects, mountPrefix, rewriteApiLinksInPages, thallyOperationSlugSegments } from './repository.js'
 import { markExcluded, sharedSpecMessage } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher, RemoteApiSpec } from './types.js'
 
@@ -192,10 +192,9 @@ function slug(value: string): string {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
-function operationTarget(operation: OpenApiOperation): string {
-  const path = operation.path.split('/').filter(Boolean)
-    .map((part) => part.replace(/[{}]/g, '').replace(/[^a-zA-Z0-9-]/g, '-').replace(/-+/g, '-').toLowerCase())
-  return `/api/default/${[...path, operation.method].join('/')}`
+/** The endpoint page of an operation of the spec the renderer serves under `specId`. */
+function operationTarget(specId: string, operation: OpenApiOperation): string {
+  return `/api/${specId}/${thallyOperationSlugSegments(operation.path, operation.method).join('/')}`
 }
 
 /** A downloaded spec bound to its tab: what the link and redirect passes read once every spec is bound. */
@@ -210,12 +209,14 @@ interface BoundSpec {
 /**
  * Attach safely downloaded specs to the exact authored API tabs. A spec
  * mounted under Mintlify `directory` folders gets a redirect from each
- * endpoint URL those folders served; for any other spec, source links to
- * Mintlify's tag/summary routes receive redirects only when an operation can
- * be identified uniquely, since guessing would silently route to wrong APIs.
- * A redirect never takes the place of a page the site serves. Every spec is
- * bound before any link is read, so mounts nested in one another (`reference`
- * and `reference/v2`) are told apart by their longest prefix.
+ * endpoint URL those folders served, and a link under a mount (this bundle's
+ * or any other's) reaches nothing else. A link no mount covers is redirected by
+ * its tag and summary only when exactly one published operation across every
+ * spec carries them, to the id its spec is served under: guessing would
+ * silently route to the wrong API. A redirect never takes the place of a page
+ * the site serves. Every spec is bound before any link is read, so mounts
+ * nested in one another (`reference` and `reference/v2`) are told apart by
+ * their longest prefix.
  */
 export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: MigrationFetcher): Promise<MigrationBundle> {
   if (!bundle.remoteApiSpecs?.length) return bundle
@@ -293,34 +294,31 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   }
 
   const existingSources = new Set(redirects.map((redirect) => redirect.source))
-  const mounts = bound.flatMap(({ reference }, index) => (reference.directories ?? [])
-    .map(({ directory }) => ({ prefix: `/${directory.replace(/^\/+|\/+$/g, '')}`.toLowerCase(), index }))
-    .filter(({ prefix }) => prefix !== '/'))
-  /** The specs mounted at the most specific directory an address lies under: only they may redirect it. */
-  const ownersOf = (source: string): Set<number> | null => {
-    const route = source.toLowerCase()
-    const under = mounts.filter(({ prefix }) => route === prefix || route.startsWith(`${prefix}/`))
-    if (under.length === 0) return null
-    const longest = Math.max(...under.map(({ prefix }) => prefix.length))
-    return new Set(under.filter(({ prefix }) => prefix.length === longest).map(({ index }) => index))
-  }
-  bound.forEach(({ operations }, index) => {
-    const routes = new Map<string, string | null>()
+  const mounts = [...(bundle.localApiMounts ?? []), ...bound.flatMap(({ reference }) => (reference.directories ?? []).map(({ directory }) => directory))]
+    .map(mountPrefix).filter(Boolean)
+  const underMount = (source: string): boolean => mounts.some((prefix) => source.toLowerCase() === `/${prefix}` || source.toLowerCase().startsWith(`/${prefix}/`))
+  // Label of an operation -> its endpoint page; null when more than one carries it, or its spec serves no endpoint pages.
+  const guesses = new Map<string, string | null>()
+  const specIds = apiTabSpecIds(tabs)
+  for (const { reference, filename, operations, tabName } of bound) {
+    const specId = specIds.find(({ tab }) => tab.tab === tabName && tab.api?.source === `openapi/${filename}`)?.specId
+    // A spec whose every mount lists operations published only those; any other spec published them all.
+    const listed = reference.directories?.length && reference.directories.every((directory) => directory.operations)
+      ? new Set(reference.directories.flatMap((directory) => directory.operations ?? []).map((name) => name.trim().split(/\s+/)).map(([method, ...path]) => `${method.toLowerCase()} ${path.join(' ')}`))
+      : null
     for (const operation of operations) {
+      if (listed && !listed.has(`${operation.method} ${operation.path}`)) continue
       const key = `${slug(operation.tag)}/${slug(operation.summary)}`
-      if (routes.has(key)) routes.set(key, null)
-      else routes.set(key, operationTarget(operation))
+      guesses.set(key, guesses.has(key) || !specId ? null : operationTarget(specId, operation))
     }
-    for (const source of authoredLinks) {
-      const parts = source.split('/').filter(Boolean)
-      const key = parts.slice(-2).join('/')
-      const destination = routes.get(key)
-      if (!destination || existingSources.has(source) || served.has(literalRoute(source) ?? source)) continue
-      if (ownersOf(source)?.has(index) === false) continue
-      redirects.push({ source, destination, permanent: false })
-      existingSources.add(source)
-    }
-  })
+  }
+  for (const source of authoredLinks) {
+    const destination = guesses.get(source.split('/').filter(Boolean).slice(-2).join('/'))
+    // Under a mount only the mount's own endpoint URLs (the redirects above) are known: anything else there is not a guess to make.
+    if (!destination || existingSources.has(source) || served.has(literalRoute(source) ?? source) || underMount(source)) continue
+    redirects.push({ source, destination, permanent: false })
+    existingSources.add(source)
+  }
   // A redirect that targets an endpoint URL goes straight to the endpoint page, not through a second redirect.
   const direct = redirects.map((redirect) => {
     const endpoint = endpointUrls.get(literalRoute(redirect.destination) ?? '')
