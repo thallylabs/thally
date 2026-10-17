@@ -13,10 +13,15 @@ import type { MigrationBundle, MigrationDocsConfig, MigrationWarning } from '../
 
 type Redirects = NonNullable<MigrationDocsConfig['redirects']>
 
-/** First literal redirect cycle, followed the way a browser would, or null. A request is matched on its path, so a destination's query and fragment are ignored. */
+/**
+ * First literal redirect cycle, followed the way a browser would, or null. The
+ * first redirect listed for a source is the one that fires; a request is
+ * matched on its path, so a destination's query and fragment are ignored; a
+ * destination off the site ends the walk.
+ */
 function redirectCycle(redirects: Redirects): Array<string> | null {
   const next = new Map<string, string>()
-  for (const { source, destination } of redirects) if (!next.has(source)) next.set(source, destination.split(/[?#]/, 1)[0])
+  for (const { source, destination } of redirects) if (!next.has(source)) next.set(source, /^(https?:)?\/\//.test(destination) ? '' : destination.split(/[?#]/, 1)[0])
   for (const start of next.keys()) {
     const path = [start]
     for (let current = next.get(start); current; current = next.get(current)) {
@@ -376,6 +381,30 @@ describe('dropConflictingRedirects', () => {
     expect(warnings).toEqual([])
   }, 2000)
 
+  it('keeps a later redirect from a source whose first redirect leaves the site, which never fires', () => {
+    const input: Redirects = [
+      { source: '/a', destination: 'https://example.com' },
+      { source: '/a', destination: '/b' },
+      { source: '/b', destination: '/a' },
+      { source: '/c', destination: '//example.com/c' },
+      { source: '/c', destination: '/d' },
+      { source: '/d', destination: '/c' },
+    ]
+    const { redirects, warnings } = dropWithin(input, pages)
+    expect(redirects).toEqual(input)
+    expect(warnings).toEqual([])
+  }, 2000)
+
+  it('still checks a case variant of a source that leaves the site, which a case-sensitive host serves', () => {
+    const { redirects, warnings } = dropWithin([
+      { source: '/e', destination: 'https://example.com' },
+      { source: '/E', destination: '/f' },
+      { source: '/f', destination: '/E' },
+    ], pages)
+    expect(redirects).toEqual([{ source: '/e', destination: 'https://example.com' }, { source: '/E', destination: '/f' }])
+    expect(warnings.map((warning) => warning.message)).toEqual(['Skipped 1 redirect that would send visitors in a circle: /f -> /E. Check these redirects in the source docs.'])
+  }, 2000)
+
   it('keeps no loop and no hidden page under either comparison, over seeded random mixed-case sets', () => {
     const random = seeded(20261017)
     const pick = <T>(items: ReadonlyArray<T>): T => items[Math.floor(random() * items.length)]
@@ -386,7 +415,8 @@ describe('dropConflictingRedirects', () => {
       const sitePages = ['a', 'B', 'c', 'end'].filter(() => random() < 0.1).map((id) => ({ id }))
       const served = new Set(sitePages.map((page) => `/${page.id.toLowerCase()}`))
       const suffix = (): string => (random() < 0.3 ? pick(['?q=1', '#x']) : '')
-      const input: Redirects = Array.from({ length: 1 + Math.floor(random() * 8) }, () => ({ source: pick(routes), destination: `${pick(routes)}${suffix()}` }))
+      const destination = (): string => (random() < 0.12 ? pick(['https://example.com/a', '//example.com/b']) : `${pick(routes)}${suffix()}`)
+      const input: Redirects = Array.from({ length: 1 + Math.floor(random() * 8) }, () => ({ source: pick(routes), destination: destination() }))
       const context = JSON.stringify({ run, pages: sitePages.map((page) => page.id), input })
       const { redirects: kept, warnings } = dropWithin(input, sitePages)
       // Safe: next start (case ignored) and OpenNext (case kept) each follow the first redirect listed for a source.

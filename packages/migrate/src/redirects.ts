@@ -95,12 +95,25 @@ export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: A
 /**
  * The redirects kept so far under one reading of letter case, by source. Next
  * uses the first match, so a later duplicate never fires and is not recorded.
- * The graph stays acyclic as long as each redirect is recorded only after
- * `closesLoop` has said it is safe. A walk points each source it passes at the
- * end of its chain, so later walks are short however the redirects are ordered.
+ * A redirect that leaves the site, or whose destination is not a literal path,
+ * claims its source all the same: it ends a chain there, with no internal
+ * edge. The graph stays acyclic as long as each redirect is recorded only
+ * after `closesLoop` has said it is safe. A walk points each source it passes
+ * at the end of its chain, so later walks are short however the redirects are
+ * ordered.
  */
-function redirectChains(): { kept: Map<string, string>; closesLoop: (source: string, destination: string) => boolean } {
+function redirectChains(): {
+  has: (source: string) => boolean
+  add: (source: string, destination: string | null) => void
+  closesLoop: (source: string, destination: string) => boolean
+} {
   const kept = new Map<string, string>()
+  const terminal = new Set<string>()
+  const has = (source: string): boolean => kept.has(source) || terminal.has(source)
+  const add = (source: string, destination: string | null): void => {
+    if (destination === null) terminal.add(source)
+    else kept.set(source, destination)
+  }
   const closesLoop = (source: string, destination: string): boolean => {
     let end = destination
     // A chain through `kept` passes each source once, so a longer walk means a cycle is already there; treat it as a loop instead of walking forever.
@@ -115,7 +128,7 @@ function redirectChains(): { kept: Map<string, string>; closesLoop: (source: str
     }
     return end === source
   }
-  return { kept, closesLoop }
+  return { has, add, closesLoop }
 }
 
 /**
@@ -153,21 +166,20 @@ export function dropConflictingRedirects(
       return false
     }
     const writtenDestination = destinationRoute(redirect.destination)
-    if (!writtenDestination) return true
-    const destination = writtenDestination.toLowerCase()
+    const destination = writtenDestination?.toLowerCase() ?? null
     // A source that already has a redirect under a reading never fires there (the first listed wins), so it cannot loop there and is not recorded there.
     // A case variant of a listed source is unreachable on `next start` but live on OpenNext, so it is still checked, and recorded, as written.
-    const firesFolded = !folded.kept.has(source)
-    const firesAsWritten = !asWritten.kept.has(writtenSource)
-    const loopsFolded = firesFolded && folded.closesLoop(source, destination)
-    const loopsAsWritten = firesAsWritten && asWritten.closesLoop(writtenSource, writtenDestination)
+    const firesFolded = !folded.has(source)
+    const firesAsWritten = !asWritten.has(writtenSource)
+    const loopsFolded = firesFolded && destination !== null && folded.closesLoop(source, destination)
+    const loopsAsWritten = firesAsWritten && writtenDestination !== null && asWritten.closesLoop(writtenSource, writtenDestination)
     if (loopsFolded || loopsAsWritten) {
       const loops = loopsAsWritten ? looping : loopingByCase
       loops.push(`${redirect.source} -> ${redirect.destination}`)
       return false
     }
-    if (firesFolded) folded.kept.set(source, destination)
-    if (firesAsWritten) asWritten.kept.set(writtenSource, writtenDestination)
+    if (firesFolded) folded.add(source, destination)
+    if (firesAsWritten) asWritten.add(writtenSource, writtenDestination)
     return true
   })
   if (hidden.length > 0) {
