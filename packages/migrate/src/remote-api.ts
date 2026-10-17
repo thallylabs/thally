@@ -8,13 +8,12 @@ import { lookup } from 'node:dns/promises'
 import { request } from 'node:https'
 import { isIP } from 'node:net'
 
-import { parse as parseYaml } from 'yaml'
 
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { insertApiTab } from './navigation.js'
 import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, servedRoutes } from './redirects.js'
 import { apiTabSpecIds, isWithheld, linkApiMounts, mountPrefix, thallyOperationSlugSegments } from './repository.js'
-import { markExcluded, sharedSpecMessage } from './spec-exclude.js'
+import { markExcluded, parseSpecDocument, sharedSpecMessage } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher, RemoteApiSpec } from './types.js'
 
 const MAX_SPEC_BYTES = 25_000_000
@@ -144,19 +143,7 @@ function withoutByteOrderMark(content: Buffer): Buffer {
   return content.length >= 3 && content[0] === 0xef && content[1] === 0xbb && content[2] === 0xbf ? content.subarray(3) : content
 }
 
-/**
- * The format the body is actually in. A remote endpoint may serve YAML from a
- * path without a .yaml suffix (or JSON from one with it), so the URL says
- * nothing reliable; the saved extension must match this, or the install step
- * drops a YAML spec saved as `.json` as invalid JSON.
- */
-function specFormat(content: Buffer): 'json' | 'yaml' {
-  return content.toString('utf8').trimStart().startsWith('{') ? 'json' : 'yaml'
-}
-
-function parseOpenApi(content: Buffer, format: 'json' | 'yaml'): Array<OpenApiOperation> {
-  const text = content.toString('utf8')
-  const parsed = format === 'yaml' ? parseYaml(text) as unknown : JSON.parse(text) as unknown
+function parseOpenApi(parsed: unknown): Array<OpenApiOperation> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('OpenAPI spec is not an object.')
   const document = parsed as Record<string, unknown>
   if (typeof document.openapi !== 'string' || !/^3\./.test(document.openapi)) {
@@ -255,8 +242,9 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       if (reference.withheldOperations?.length && !warnings.some((warning) => warning.code === 'gated-page' && warning.source === reference.url)) {
         warnings.push({ code: 'gated-page', message: sharedSpecMessage(reference.url, pruned.excluded), source: reference.url })
       }
-      const extension = specFormat(body)
-      const operations = parseOpenApi(body, extension)
+      // The format the body is in, not what its URL says: the saved extension must match it, or the install step drops a YAML spec saved as `.json` as invalid JSON.
+      const { format: extension, document } = parseSpecDocument(body.toString('utf8'))
+      const operations = parseOpenApi(document)
       const filename = `openapi-${createHash('sha256').update(reference.url).digest('hex').slice(0, 12)}.${extension}`
       // Several tabs may bind one spec: it is saved once.
       if (!assets.some((asset) => asset.path === `openapi/${filename}`)) assets.push({ path: `openapi/${filename}`, content: body, projectRelative: true })

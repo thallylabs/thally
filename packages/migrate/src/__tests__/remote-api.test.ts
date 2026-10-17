@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
+import { parse as parseYaml } from 'yaml'
 
 import { migrateRepository } from '../index.js'
 import { hydrateRemoteApiSpecs } from '../remote-api.js'
@@ -476,12 +477,15 @@ describe('one remote OpenAPI spec bound to several tabs, with operations withhel
 
 describe('remote OpenAPI spec bodies', () => {
   const body = JSON.stringify({ openapi: '3.1.0', info: { title: 'Example', version: '1' }, paths: { '/v2/a': { post: { summary: 'Make a', tags: ['things'] } } } })
-  const hydrate = (content: string | Buffer) => {
+  const hydrate = (content: string | Buffer, specUrl = MOUNTED_URL, reference: Partial<MigrationBundle['remoteApiSpecs'][number]> = {}) => {
     const input = mountedBundle()
     input.docsConfig = { tabs: input.docsConfig.tabs }
-    input.remoteApiSpecs = [{ url: MOUNTED_URL, tabLabel: 'API reference', directories: [{ directory: 'ref' }] }]
+    input.warnings = []
+    input.remoteApiSpecs = [{ url: specUrl, tabLabel: 'API reference', directories: [{ directory: 'ref' }], ...reference }]
     return hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: content as never, contentType: 'application/json' }))
   }
+  // A YAML flow mapping opens with a brace, but is not JSON: its keys and strings are unquoted.
+  const flowYaml = "{openapi: 3.1.0, info: {title: Example, version: '1'}, paths: {/v2/a: {post: {summary: Make a, tags: [things]}}, /v2/b: {post: {summary: Make b, tags: [things]}}}}"
 
   it('imports a JSON spec that starts with a byte order mark, saved without it', async () => {
     const result = await hydrate(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(body)]))
@@ -490,6 +494,42 @@ describe('remote OpenAPI spec bodies', () => {
     expect(result.assets[0].path).toMatch(/\.json$/)
     expect(() => JSON.parse(Buffer.from(result.assets[0].content).toString('utf8'))).not.toThrow()
     expect((result.docsConfig.redirects ?? []).map((redirect) => redirect.source)).toContain('/ref/things/make-a')
+  })
+
+  it('saves strict JSON as .json whatever its URL says', async () => {
+    const result = await hydrate(body, 'https://specs.example.com/openapi.yaml')
+    expect(result.warnings).toEqual([])
+    expect(result.assets[0].path).toMatch(/\.json$/)
+  })
+
+  it.each([
+    ['an extensionless URL', 'https://specs.example.com/unkey/openapi-with-code-samples'],
+    ['a .yaml URL', 'https://specs.example.com/openapi.yaml'],
+    ['a .json URL', 'https://specs.example.com/openapi.json'],
+  ])('imports flow-style YAML served from %s, saved as YAML', async (_name, specUrl) => {
+    const result = await hydrate(flowYaml, specUrl)
+    expect(result.warnings).toEqual([])
+    expect(result.assets).toHaveLength(1)
+    expect(result.assets[0].path).toMatch(/^openapi\/openapi-[0-9a-f]{12}\.yaml$/)
+    expect(result.docsConfig.tabs.find((tab) => tab.api)?.api).toEqual({ source: result.assets[0].path })
+    expect((result.docsConfig.redirects ?? []).map((redirect) => redirect.source)).toContain('/ref/things/make-a')
+  })
+
+  it('keeps flow-style YAML as YAML when it withholds an operation, so its extension and its content agree', async () => {
+    const result = await hydrate(flowYaml, MOUNTED_URL, { withheldOperations: ['post /v2/a'], keptOperations: [] })
+    const text = Buffer.from(result.assets[0].content).toString('utf8')
+    expect(result.assets[0].path).toMatch(/\.yaml$/)
+    expect(() => JSON.parse(text)).toThrow()
+    const paths = (parseYaml(text) as { paths: Record<string, { post: Record<string, unknown> }> }).paths
+    expect(paths['/v2/a'].post['x-excluded']).toBe(true)
+    expect(paths['/v2/b'].post['x-excluded']).toBeUndefined()
+  })
+
+  it('says why a body that is neither JSON nor YAML could not be imported', async () => {
+    const result = await hydrate('{openapi: [')
+    expect(result.assets).toEqual([])
+    expect(result.warnings.filter((warning) => warning.code === 'fetch-failed')).toHaveLength(1)
+    expect(result.warnings[0].message).toMatch(/^Remote OpenAPI spec could not be imported: /)
   })
 })
 
