@@ -102,19 +102,25 @@ into `docs.json`; invalid values are dropped with a warning.
 In-content links to auto-generated API operation pages are rewritten to the
 matching Thally `/api/...` route. A link under a known API section that matches
 no operation points to that section's overview page instead, and one warning
-lists the affected links (up to ten). A link to a page of the site (a guide
-authored inside an API directory) is never rewritten, trailing slash or
-`/index` or not. A spec that Mintlify mounted under a
-`directory` also gets a redirect from each endpoint URL that directory served,
+lists the affected links (up to ten). A link to an address the site answers
+itself (a guide authored inside an API directory, trailing slash or `/index` or
+not, or the source of an authored redirect) is never rewritten. A spec that
+Mintlify mounted under a `directory` also gets a redirect from each endpoint URL that directory served,
 to the matching endpoint page, and never to an operation the published spec
 withholds with `x-hidden` or `x-excluded`. A remote spec gets every directory
 each of its tabs mounted it under, limited to the operations the navigation
 listed under a directory when it listed any. A local spec gets one directory
 per tab (the first) and every operation of the spec. When directories nest
 (`reference` and `reference/v2`), an address belongs to the longest directory it
-lies under: the shorter one never rewrites a link to it or redirects it. A
-Mintlify default version's pages also get a redirect from their address without
-the version segment, since the original site serves them both ways.
+lies under, whether the specs are local or remote: the shorter one never
+rewrites a link to it or redirects it, and a link under a remote spec's
+directory stays as authored until that spec is downloaded. A link under any
+directory reaches only that directory's own endpoint URLs; a link under none is
+redirected by its last two segments (tag and summary) only when exactly one
+published operation across every spec carries them, to the id its spec is
+served under. A Mintlify default version's pages also get a redirect from their
+address without the version segment, since the original site serves them both
+ways.
 
 Redirects are checked once, after every platform and step has added its own.
 Next.js applies a redirect before it looks for a page and compares a source
