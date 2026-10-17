@@ -496,13 +496,16 @@ interface ApiGroupsTab {
   api?: { source?: string; navigation?: boolean; groups?: unknown }
 }
 
-function checkTabApiGroups(projectDir: string, tab: ApiGroupsTab, locale: string | undefined, versions: Array<{ label?: string }> | undefined, issues: LintIssue[]): void {
+function checkTabApiGroups(projectDir: string, tab: ApiGroupsTab, locale: string | undefined, versions: unknown, issues: LintIssue[]): void {
   const name = `API tab "${tab.tab}"${locale ? ` (locale ${locale})` : ''}`
   // The sidebar renders a hidden tab when its `version` is a `navigation.versions` label
   // (getSidebarCollections in src/data/docs.ts); every other hidden tab has no sidebar to check.
-  const rendered = !tab.hidden || Boolean(tab.version && versions?.some((version) => version.label === tab.version))
-  if (!rendered || typeof tab.api?.source !== 'string') return
-  if (tab.api.groups !== undefined && !Array.isArray(tab.api.groups) && tab.api.navigation !== false) {
+  // Malformed `navigation.versions` (not a list, null entries) registers no version.
+  const rendered = !tab.hidden || Boolean(tab.version && Array.isArray(versions)
+    && versions.some((version) => version !== null && typeof version === 'object' && version.label === tab.version))
+  // `navigation: false` turns the generated sidebar off, so `api.groups` is unused there.
+  if (!rendered || typeof tab.api?.source !== 'string' || tab.api.navigation === false) return
+  if (tab.api.groups !== undefined && !Array.isArray(tab.api.groups)) {
     issues.push({
       severity: 'warning',
       file: 'docs.json',

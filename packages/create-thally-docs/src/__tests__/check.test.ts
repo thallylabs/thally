@@ -515,6 +515,20 @@ describe('thally check api.groups keys', () => {
     expect(await run(undefined, [hiddenTab('v1')])).not.toContain('api.groups')
   })
 
+  it('does not crash on malformed navigation.versions: a malformed list registers no version', async () => {
+    const hiddenTab = { tab: 'API v1', hidden: true, version: 'v1', api: { source: 'openapi/api.json', groups: [{ group: 'A', pages: ['GET /typo'] }] } }
+    for (const versions of [[null], {}, 'v1', [null, { label: 'v1' }]]) {
+      const output = await run(undefined, [hiddenTab], 'openapi/api.json', undefined, { navigation: { versions } })
+      expect(output).toContain('thally check:')
+      expect(output.includes('API tab "API v1"')).toBe(Array.isArray(versions) && versions.length === 2)
+    }
+  })
+
+  it('reports nothing about api.groups on a tab with navigation: false, which leaves the groups unused', async () => {
+    const off = { tab: 'Off', api: { source: 'openapi/api.json', navigation: false, groups: [{ group: 'A', icon: { bad: true }, pages: ['GET /typo', null] }] } }
+    expect(await run(undefined, [off])).not.toContain('API tab "Off"')
+  })
+
   it('warns once per tab when a group icon is not text: the group stays, only the icon is dropped', async () => {
     const output = await run([{ group: 'A', icon: { bad: true }, pages: ['GET /visible', { group: 'Nested', icon: 5, pages: ['POST /visible'] }] }, { group: 'B', icon: 'paw', pages: ['WEBHOOK POST shipped'] }])
     expect(output).toContain('API tab "API reference": api.groups has 2 groups whose "icon" is not text. The icon is dropped and the group is still listed.')
