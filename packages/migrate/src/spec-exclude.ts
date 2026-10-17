@@ -1,12 +1,15 @@
 /** Fail-closed pruning of OpenAPI operations that only access-restricted pages document; shared by local and remote specs. */
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
-import { splitOpenApiRef } from './openapi-ref.js'
+import { splitOpenApiRef, withoutSpecExtension } from './openapi-ref.js'
 
 /**
  * Whether a frontmatter `openapi:` value ("GET /x", "specs/api.json GET /x")
  * names this spec. A bare operation resolves to the default spec; a prefixed
- * one to the spec whose path ends with the prefix, on a segment boundary.
+ * one to the spec whose path ends with the prefix, on a segment boundary; the
+ * extension may be left out (`openapi` names `docs/openapi.yml`). Each spec is
+ * asked on its own, so a prefix that fits several specs names every one of
+ * them: callers withholding an operation fail closed on an ambiguous prefix.
  */
 export function specRefMatches(ref: string, specPath: string, specFilename: string, isDefault: boolean): boolean {
   const prefix = /^(?:(\S+)\s+)?(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|WEBHOOK)\s/i.exec(`${ref} `)?.[1]
@@ -15,6 +18,7 @@ export function specRefMatches(ref: string, specPath: string, specFilename: stri
   // Whole path segments only: `pi/openapi.json` does not name `api/openapi.json`.
   const lowerPath = specPath.toLowerCase()
   return lowerPath === wanted || lowerPath.endsWith(`/${wanted}`) || specFilename.toLowerCase() === wanted
+    || [lowerPath, specFilename.toLowerCase()].map(withoutSpecExtension).some((stem) => stem === wanted || stem.endsWith(`/${wanted}`))
 }
 
 /** `GET /x` / `webhook name` normalised so two spellings of one operation compare equal. */

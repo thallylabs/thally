@@ -1128,6 +1128,60 @@ describe('operations documented only on access-restricted pages', () => {
     expect(out.paths['/x'].get['x-excluded']).toBeUndefined()
   })
 
+  describe('spec named by file stem', () => {
+    const excluded = (bundle: MigrationBundle, path: string, operation: string): unknown =>
+      JSON.parse(String(bundle.assets.find((asset) => asset.path === path)!.content)).paths[operation].get['x-excluded']
+    const twoSpecs = {
+      'a/spec.json': spec,
+      'b/spec.yaml': spec,
+    }
+
+    it('withholds an operation a restricted page names through the spec file stem', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ api: { openapi: 'spec.json' }, navigation: { pages: ['pub', 's'] } }),
+        'spec.json': spec,
+        'pub.mdx': page('Pub', 'openapi: "/spec.json GET /x"\n'),
+        's.mdx': page('S', 'groups: [admin]\nopenapi: "spec GET /internal"\n'),
+      })
+      expect(excluded(bundle, 'openapi/spec.json', '/internal')).toBe(true)
+      expect(excluded(bundle, 'openapi/spec.json', '/x')).toBeUndefined()
+    })
+
+    it('withholds the operation from every spec a restricted stem could name', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ api: { openapi: ['a/spec.json', 'b/spec.yaml'] }, navigation: { pages: ['pub', 's'] } }),
+        ...twoSpecs,
+        'pub.mdx': page('Pub', 'openapi: "a/spec.json GET /x"\n'),
+        's.mdx': page('S', 'groups: [admin]\nopenapi: "spec GET /internal"\n'),
+      })
+      for (const path of ['openapi/spec.json', 'openapi/spec.yaml']) {
+        expect(excluded(bundle, path, '/internal')).toBe(true)
+        expect(excluded(bundle, path, '/x')).toBeUndefined()
+      }
+    })
+
+    it('does not let a public page that names several specs keep a restricted operation public', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ api: { openapi: ['a/spec.json', 'b/spec.yaml'] }, navigation: { pages: ['pub', 's'] } }),
+        ...twoSpecs,
+        'pub.mdx': page('Pub', 'openapi: "spec GET /internal"\n'),
+        's.mdx': page('S', 'groups: [admin]\nopenapi: "a/spec.json GET /internal"\n'),
+      })
+      expect(excluded(bundle, 'openapi/spec.json', '/internal')).toBe(true)
+      expect(excluded(bundle, 'openapi/spec.yaml', '/internal')).toBeUndefined()
+    })
+
+    it('keeps an operation a public page names through the spec file stem', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ api: { openapi: 'spec.json' }, navigation: { pages: ['pub', 's'] } }),
+        'spec.json': spec,
+        'pub.mdx': page('Pub', 'openapi: "spec GET /internal"\n'),
+        's.mdx': page('S', 'groups: [admin]\nopenapi: "/spec.json GET /internal"\n'),
+      })
+      expect(excluded(bundle, 'openapi/spec.json', '/internal')).toBeUndefined()
+    })
+  })
+
   it('applies to a spec listed in docs.json and to YAML specs', () => {
     const yaml = 'openapi: 3.0.0\ninfo: {title: T, version: "1"}\npaths:\n  /x:\n    get: {summary: A}\n  /internal:\n    get: {summary: B}\n'
     const bundle = site({

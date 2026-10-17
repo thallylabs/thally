@@ -52,6 +52,7 @@ import {
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
+import { namesSeveralSpecs, resolveSpecRef, specNamedByPage, type SpecCandidate, type SpecRefResolution } from './openapi-ref.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
@@ -1467,6 +1468,8 @@ interface ResolvedApiSpec {
   hidden?: boolean
   /** Named only by published pages' `openapi:` frontmatter, never by docs.json: bound to a hidden tab so no navigation is generated. */
   pageOnly?: boolean
+  /** A published page's `openapi:` frontmatter names this spec, so it must be bound to some tab even when its own tab already has a spec. */
+  pageReferenced?: boolean
   /** Repository-relative path the spec was read from, used only to disambiguate a basename collision across tabs. */
   sourcePath: string
   /** Mintlify's object-form `{ source, directory }` scoping directory, if any — the prefix its auto-generated operation pages live under. */
@@ -1489,6 +1492,12 @@ function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): 
     for (const entry of values) references.push({ value: entry, kind })
   }
   return references
+}
+
+/** The files a page's `openapi:` prefix can name: OpenAPI documents by extension, never pages or images that share a stem. */
+function specFileCandidates(files: ReadonlyArray<ScannedFile>): Array<Required<SpecCandidate>> {
+  return files.filter((file) => /\.(?:json|ya?ml)$/i.test(file.relativePath))
+    .map((file) => ({ sourcePath: file.relativePath, filename: specRefBaseName(file.relativePath) }))
 }
 
 /**
@@ -1516,12 +1525,17 @@ function resolveMintlifyApiSpecs(
   ]
   const specKey = (value: string): string => value.split(/[?#]/, 1)[0].replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/^\/+/, '')
   const known = new Set(references.map((reference) => specKey(reference.value)))
+  const specFiles = specFileCandidates(files)
+  // Pages repeat a few spec prefixes: look each one up once.
+  const namedFiles = new Map<string, SpecRefResolution<Required<SpecCandidate>>>()
   for (const page of pages) {
     const specRef = page.openapi ? splitOpenApiRef(page.openapi)?.specRef : undefined
-    // Remote refs are reported by rewriteMintlifyPageSpecRefs; a missing file is warned about there too.
+    // Remote refs, a missing file and a name that fits several files are reported by rewriteMintlifyPageSpecRefs.
     if (!specRef || /^[a-z][a-z0-9+.-]*:/i.test(specRef)) continue
-    const key = specKey(specRef)
-    if (known.has(key) || !files.some((file) => file.relativePath === key)) continue
+    const named = namedFiles.get(specRef) ?? resolveSpecRef(specRef, specFiles, false)
+    namedFiles.set(specRef, named)
+    const key = named.kind === 'match' ? named.spec.sourcePath : ''
+    if (!key || known.has(key)) continue
     known.add(key)
     references.push({ value: key, kind: 'openapi', tabLabel: `OpenAPI: ${key}`, hidden: true, pageOnly: true })
   }
@@ -1632,11 +1646,12 @@ function rewriteMintlifyPageSpecRefs(
       continue
     }
     const key = ref.specRef.split(/[?#]/, 1)[0].replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/^\/+/, '')
-    const byPath = specs.find((spec) => spec.sourcePath === key)
-    const byName = specs.filter((spec) => spec.filename.toLowerCase() === specRefBaseName(key))
-    const match = byPath ?? (byName.length === 1 ? byName[0] : undefined)
-    if (match) {
-      page.openapi = withSpecRef(ref, specAssetPath(match.filename))
+    const resolved = resolveSpecRef(ref.specRef, specs)
+    if (resolved.kind === 'match') {
+      page.openapi = withSpecRef(ref, specAssetPath(resolved.spec.filename))
+    } else if (resolved.kind === 'ambiguous') {
+      const candidates = resolved.candidates.map((spec) => spec.sourcePath ?? spec.filename).join(', ')
+      warnings.push({ code: 'unsupported-config', message: `Page "${page.id}" references the OpenAPI spec "${ref.specRef}", which fits more than one spec (${candidates}), so it was left as written and the page will not render an endpoint. Write the full path of the spec in the page's openapi frontmatter.`, source: page.source })
     } else {
       warnings.push({ code: 'unsupported-config', message: `Page "${page.id}" references the OpenAPI spec "${ref.specRef}", which was not migrated (${explainMissing(key)}); the page will not render an endpoint.`, source: page.source })
     }
@@ -3371,7 +3386,7 @@ function inlineMdxSnippets(
  */
 function injectOpenApiSpecs(
   config: MigrationDocsConfig,
-  specs: Array<{ filename: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean; generatedNavigation?: boolean }>,
+  specs: Array<{ filename: string; sourcePath?: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean; generatedNavigation?: boolean; pageReferenced?: boolean }>,
   warnings?: Array<MigrationWarning>,
 ): MigrationDocsConfig {
   const tabs = config.tabs.map((tab) => ({ ...tab }))
@@ -3384,9 +3399,15 @@ function injectOpenApiSpecs(
       // the same tab would otherwise silently replace the first one's
       // binding with no trace of it ever having existed.
       if (apiTab.api && warnings) {
+        const source = specAssetPath(spec.filename)
+        // Pages that name this spec still resolve it from a hidden tab, which lists no navigation of its own.
+        const pageBound = spec.pageReferenced && !tabs.some((tab) => tab.api?.source === source)
+        if (pageBound) insertApiTab(tabs, { tab: `OpenAPI: ${spec.sourcePath ?? spec.filename}`, hidden: true, api: { source } })
         warnings.push({
           code: 'unsupported-config',
-          message: `Tab "${apiTab.tab}" already uses another OpenAPI spec, and Thally supports one API spec per tab, so "${specAssetPath(spec.filename)}" was not added. Put it in its own tab to include it.`,
+          message: `Tab "${apiTab.tab}" already uses another OpenAPI spec, and Thally supports one API spec per tab, so "${source}" ${pageBound
+            ? 'gets no endpoint list of its own; the pages that name it still show their endpoint. Put it in its own tab to list all its endpoints.'
+            : 'was not added. Put it in its own tab to include it.'}`,
         })
         continue
       }
@@ -5011,10 +5032,11 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const warnSharedSpec = (path: string, excluded: Array<string> = []): void => {
       warnings.push({ code: 'gated-page', message: sharedSpecMessage(path, excluded), source: path })
     }
-    // Operations docs.json lists explicitly stay public like those on published pages.
-    const keptSpecRefs = [...publishedSpecRefs, ...navigationOperationRefs(mintlifyConfig)]
     // A spec only restricted pages name is not migrated (the spec is public).
     const allSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs, pages.filter((page) => !restrictedPages.has(page)))
+    // Operations docs.json lists explicitly stay public like those on published pages. A prefix that fits several specs
+    // documents none of them, so it keeps nothing public: a restricted operation is never exposed by an ambiguous page.
+    const keptSpecRefs = [...publishedSpecRefs, ...navigationOperationRefs(mintlifyConfig)].filter((ref) => !namesSeveralSpecs(ref, allSpecs))
     // Remote specs are downloaded later: carry the operations to withhold from them.
     for (const remote of remoteApiSpecs) {
       const { withheld, kept } = withheldOperationKeys({ sourcePath: remote.url, filename: remote.url }, withheldSpecRefs, keptSpecRefs)
@@ -5036,7 +5058,9 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     let pageSpecs: Array<{ filename: string; sourcePath?: string }> = resolvedSpecs
     if (resolvedSpecs.length > 0) {
+      const namedByPages = new Set(pages.filter((page) => !restrictedPages.has(page)).map((page) => specNamedByPage(page.openapi, resolvedSpecs)))
       for (const spec of resolvedSpecs) {
+        spec.pageReferenced = namedByPages.has(spec)
         spec.generatedNavigation = Boolean(spec.directory)
           && !publishedSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))
       }
@@ -5106,6 +5130,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       pageSpecs = [...pageSpecs, ...pageOnlySpecs]
     }
     const explainMissingSpec = (key: string): string => {
+      const fits = resolveSpecRef(key, specFileCandidates(files), false)
+      if (fits.kind === 'ambiguous') return `several spec files fit that name (${fits.candidates.map((spec) => spec.sourcePath).join(', ')}); write the full path in the page's openapi frontmatter`
       const sameName = scannedFiles.find((file) => file.relativePath.toLowerCase() === key.toLowerCase())
       if (sameName && sameName.relativePath !== key) return `paths are case-sensitive; the file is at "${sameName.relativePath}"`
       if (sameName && mintignoreMatcher?.ignores(sameName.relativePath)) return 'the file is excluded by .mintignore'
