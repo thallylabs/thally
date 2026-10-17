@@ -24,6 +24,13 @@ export interface MigrationNavigationGroup {
   pages: Array<string | MigrationNavigationGroup>
 }
 
+/** A group of an API tab's authored sidebar: `METHOD /path` operation keys and nested groups. */
+export interface MigrationApiGroup {
+  group: string
+  icon?: string
+  pages: Array<string | MigrationApiGroup>
+}
+
 export interface MigrationNavigationTab {
   tab: string
   /** Reader-facing label when `tab` includes a version for unique identity. */
@@ -36,7 +43,7 @@ export interface MigrationNavigationTab {
   /** Root page/group nodes used when the source has no synthetic section heading. */
   pages?: Array<string | MigrationNavigationGroup>
   groups?: Array<MigrationNavigationGroup>
-  api?: { source: string; navigation?: boolean }
+  api?: { source: string; navigation?: boolean; groups?: Array<MigrationApiGroup> }
 }
 
 export interface MigrationBannerConfig {
@@ -73,6 +80,8 @@ export interface MigrationDocsConfig {
   stylesheets?: Array<string>
   /** `false` hides the breadcrumb trail; Mintlify pages show only a group eyebrow. */
   breadcrumbs?: boolean
+  /** `path` shows the full group path above the title (Mintlify `styling.eyebrows: "breadcrumbs"`); the default shows the nearest group. */
+  eyebrow?: 'group' | 'path'
   tabs: Array<MigrationNavigationTab>
   navigation?: {
     /** How sibling documentation collections are presented to readers. */
@@ -193,12 +202,26 @@ export interface MigrationWarning {
 }
 
 /** A repository-configured remote OpenAPI spec, downloaded after the bundle is built. */
+/** A route prefix Mintlify served one spec's generated endpoint pages under (`openapi: { source, directory }`). */
+export interface RemoteApiSpecDirectory {
+  /** The authored `directory`, without leading or trailing slashes. */
+  directory: string
+  /** `METHOD /path` operations docs.json lists under that reference, in authored order; absent when Mintlify generates every operation. */
+  operations?: Array<string>
+}
+
 export interface RemoteApiSpec {
   url: string
   tabLabel?: string
   parentTab?: string
   icon?: string
   hidden?: boolean
+  /** Every `directory` docs.json mounts this spec under: several API tabs may share one spec URL. */
+  directories?: Array<RemoteApiSpecDirectory>
+  /** The operation groups docs.json authors for the tab this spec binds to, merged across every reference that shares it. */
+  groups?: Array<MigrationApiGroup>
+  /** Every reference sharing the tab lists operations and none survives (all hidden or restricted): no endpoint navigation is generated for it. */
+  navigation?: false
   /** Operation keys (`get /x`) only access-restricted pages document; marked `x-excluded` after download. */
   withheldOperations?: Array<string>
   /** Operation keys published pages or docs.json also name; keeps a shared `$ref` path item public. */
@@ -213,6 +236,12 @@ export interface MigrationBundle {
   assets: Array<MigrationAsset>
   /** Repository-configured remote specs awaiting a bounded network fetch by the host. */
   remoteApiSpecs?: Array<RemoteApiSpec>
+  /**
+   * Repository OpenAPI specs docs.json mounts under a `directory` (no surrounding slashes), with the tab each is bound to; the remote ones are in
+   * `remoteApiSpecs[].directories`. Present only alongside remote specs: a spec's id depends on which remote tabs bind ahead of it, so
+   * hydration links the local and remote mounts together once every download has settled, and the links stay as authored until then.
+   */
+  localApiMounts?: Array<{ filename: string; directory: string; tab?: string }>
   /** Customer-owned component source and registry; paths are repository-relative. */
   componentFiles?: Array<RenderedMigrationFile>
   /**
