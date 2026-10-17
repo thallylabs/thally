@@ -1821,9 +1821,14 @@ function servedOperations(source: ApiOperationLinkSource): Array<OpenApiOperatio
   })
 }
 
+/** A mount's directory as route prefixes compare it: lower-cased, without surrounding slashes. */
+export const mountPrefix = (directory: string): string => directory.replace(/^\/+|\/+$/g, '').toLowerCase()
+
 export function apiOperationLinkMap(
   sources: Array<ApiOperationLinkSource>,
   docsConfig: MigrationDocsConfig,
+  /** Directories specs mount under that these sources do not cover (a remote spec not yet downloaded, or a local one already linked): an address under a deeper one is theirs. */
+  otherMounts: ReadonlyArray<string> = [],
 ): ApiOperationLinkMaps {
   const map = new Map<string, string>()
   const prefixLandings = new Map<string, string>()
@@ -1836,14 +1841,14 @@ export function apiOperationLinkMap(
     .map((source) => ({ source, specId: index === 0 ? 'default' : slugifyApiSpecId(tab.tab) })))
   // An address belongs to the most specific mount it lies under: one mounted at
   // `reference` never claims what a mount at `reference/v2` serves.
-  const mounts = new Set(bound.map(({ source }) => source.prefix?.replace(/^\/+|\/+$/g, '').toLowerCase()).filter(Boolean) as Array<string>)
+  const mounts = new Set([...bound.map(({ source }) => source.prefix ? mountPrefix(source.prefix) : ''), ...otherMounts.map(mountPrefix)].filter(Boolean))
   const underDeeperMount = (route: string, own: string): boolean => {
     const lower = route.toLowerCase()
     return [...mounts].some((mount) => mount.length > own.length && (lower === mount || lower.startsWith(`${mount}/`)))
   }
   bound.forEach(({ source, specId }) => {
     if (!source.prefix) return
-    const prefix = source.prefix.replace(/^\/+|\/+$/g, '').toLowerCase()
+    const prefix = mountPrefix(source.prefix)
     if (prefix) prefixLandings.set(prefix, specId === 'default' ? '/api' : `/api/${specId}`)
     for (const operation of servedOperations(source)) {
       const thallyHref = `/api/${specId}/${thallyOperationSlugSegments(operation.path, operation.method).join('/')}`
@@ -1943,12 +1948,15 @@ export function rewriteApiLinksInPages(
   operationLinks: Map<string, string>,
   prefixLandings: Map<string, string>,
   warnings: Array<MigrationWarning>,
+  /** Directories of mounts these maps do not cover; a link under one deeper than the mount it would map to is left for that mount's own pass. */
+  otherMounts: ReadonlyArray<string> = [],
 ): void {
   if (operationLinks.size === 0 && prefixLandings.size === 0) return
   const unmatched = new Set<string>()
   const served = servedRoutes(pages)
+  const others = otherMounts.map(mountPrefix).filter(Boolean)
   for (const page of pages) {
-    page.body = rewriteApiOperationLinks(page.body, operationLinks, prefixLandings, served, unmatched)
+    page.body = rewriteApiOperationLinks(page.body, operationLinks, prefixLandings, served, unmatched, others)
   }
   if (unmatched.size === 0) return
   const sorted = [...unmatched].sort()
@@ -1979,6 +1987,7 @@ function rewriteApiOperationLinks(
   prefixLandings: Map<string, string>,
   served: ReadonlySet<string>,
   unmatched: Set<string>,
+  otherMounts: ReadonlyArray<string>,
 ): string {
   if (linkMap.size === 0 && prefixLandings.size === 0) return body
   // Longest prefix first, so a more specific API section (e.g.
@@ -2000,6 +2009,11 @@ function rewriteApiOperationLinks(
       if (served.has(literalRoute(literal) ?? literal)) return target
       const path = literal.replace(/^\/+/, '').toLowerCase()
       const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
+      // The most specific mount the link lies under owns it: another pass handles it when that mount is not one of these.
+      const owner = [...prefixLandings.keys(), ...otherMounts]
+        .filter((mount) => path === mount || path.startsWith(`${mount}/`))
+        .reduce<string | null>((longest, mount) => (longest === null || mount.length > longest.length ? mount : longest), null)
+      if (owner !== null && !prefixLandings.has(owner)) return target
       const mapped = linkMap.get(path)
       if (mapped) return `${mapped}${suffix}`
       for (const [prefix, landing] of orderedPrefixes) {
@@ -3842,6 +3856,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const sourceRefPages: Array<MigrationPage> = []
   const sourceRefAssets: Array<MigrationAsset> = []
   const remoteApiSpecs: Array<RemoteApiSpec> = []
+  const localApiMounts: Array<string> = []
   // Which pages reference which asset (by its normalized copy-destination
   // path), so the final asset-copy pass can prioritize referenced assets
   // over unreferenced ones when the budget is tight, and name the
@@ -5144,11 +5159,15 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           && !publishedSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))
       }
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
+      // A remote spec is bound once downloaded: until then its mount owns the links under it, so this pass leaves them as authored.
+      const remoteMounts = remoteApiSpecs.flatMap((remote) => remote.directories?.map(({ directory }) => directory) ?? [])
+      localApiMounts.push(...resolvedSpecs.flatMap((spec) => spec.directory ? [spec.directory] : []))
       const { operationLinks, prefixLandings, mintlifyPages, duplicatePages } = apiOperationLinkMap(
         resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.directory, ...(spec.tabLabel ? { tab: spec.tabLabel } : {}) })),
         docsConfig,
+        remoteMounts,
       )
-      rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
+      rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings, remoteMounts)
       // Mintlify's own endpoint URLs keep working: they have no page of their own here.
       const endpointRedirects = mintlifyEndpointRedirects({ mintlifyPages, duplicatePages }, pages, docsConfig.redirects ?? [], warnings)
       if (endpointRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...endpointRedirects] }
@@ -5722,6 +5741,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     assets,
     ...(importedSourceRefs.length > 0 ? { sourceRefs: importedSourceRefs } : {}),
     ...(remoteApiSpecs.length > 0 ? { remoteApiSpecs } : {}),
+    ...(remoteApiSpecs.length > 0 && localApiMounts.length > 0 ? { localApiMounts } : {}),
     ...(componentMigrator ? { componentFiles: componentMigrator.files() } : {}),
     ...(quarantinedFiles.length > 0 ? { quarantinedFiles } : {}),
     ...(droppedGatedFiles.length > 0 ? { droppedGatedPages: droppedGatedFiles.length } : {}),

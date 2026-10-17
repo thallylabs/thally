@@ -1,6 +1,11 @@
 /** Remote repository OpenAPI hydration preserves routes without trusting source URLs. */
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it, vi } from 'vitest'
 
+import { migrateRepository } from '../index.js'
 import { hydrateRemoteApiSpecs } from '../remote-api.js'
 import type { MigrationBundle, MigrationFetcher } from '../types.js'
 
@@ -461,5 +466,61 @@ describe('remote OpenAPI spec links in page bodies', () => {
     input.pages.pop()
     const withoutPage = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: spec, contentType: 'application/json' }))
     expect(withoutPage.docsConfig.redirects).toEqual([{ source: '/api-reference/scim/list-users', destination: '/api/default/api/v1/scim/v2/users/get', permanent: false }])
+  })
+})
+
+describe('a local spec and a remote spec mounted under nested directories', () => {
+  const V2_URL = 'https://specs.example.com/v2.json'
+  const v2Spec = JSON.stringify({ openapi: '3.0.0', info: { title: 'V2', version: '2' }, paths: { '/users': { get: { summary: 'List users', tags: ['users'] } } } })
+  const v1Yaml = [
+    'openapi: 3.0.0', 'info: { title: V1, version: "1" }', 'paths:',
+    '  /a: { post: { summary: Create A, tags: [things], responses: { "200": { description: ok } } } }',
+  ].join('\n')
+
+  /** `reference` is a local spec, `reference/v2` a remote one: a repository migration followed by hydration. */
+  function migrate(body: string, tabs: Array<Record<string, unknown>> = [
+    { tab: 'Reference', openapi: { source: 'o.yaml', directory: 'reference' } },
+    { tab: 'Reference v2', openapi: { source: V2_URL, directory: 'reference/v2' } },
+  ], extra: Record<string, string> = {}): MigrationBundle {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mixed-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { tabs: [...tabs, { tab: 'Docs', pages: ['guide'] }] } }))
+    writeFileSync(join(root, 'guide.mdx'), `---\ntitle: Guide\n---\n\n${body}\n`)
+    writeFileSync(join(root, 'o.yaml'), v1Yaml)
+    for (const [name, content] of Object.entries(extra)) writeFileSync(join(root, name), content)
+    return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+  }
+  const hydrate = (input: MigrationBundle) => hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: v2Spec, contentType: 'application/json' }))
+
+  it('sends a body link under the remote mount to the remote spec, not to the local spec\'s overview', async () => {
+    const result = await hydrate(migrate('[v2](/reference/v2/users/list-users)\n[v1](/reference/things/create-a)'))
+    const guide = result.pages.find((page) => page.id === 'guide')
+    expect(guide?.body).toContain('[v2](/api/reference-v2/users/get)\n[v1](/api/default/a/post)')
+    expect(result.warnings.filter((warning) => warning.message.includes('overview'))).toEqual([])
+  })
+
+  it('keeps a body link under a local mount nested inside a remote one with the local spec', async () => {
+    const result = await hydrate(migrate('[inner](/reference/v2/things/create-a)\n[outer](/reference/users/list-users)', [
+      { tab: 'Reference v2', openapi: { source: 'o.yaml', directory: 'reference/v2' } },
+      { tab: 'Reference', openapi: { source: V2_URL, directory: 'reference' } },
+    ]))
+    expect(result.pages.find((page) => page.id === 'guide')?.body).toContain('[inner](/api/default/a/post)\n[outer](/api/reference/users/get)')
+  })
+
+  it('never lets a remote mount claim an endpoint address under a local mount nested inside it', async () => {
+    const outerSpec = JSON.stringify({ openapi: '3.0.0', info: { title: 'Outer', version: '1' }, paths: { '/x': { get: { summary: 'Users', tags: ['v2'] } } } })
+    const input = migrate('[claimed](/reference/v2/users)', [
+      { tab: 'Reference v2', openapi: { source: 'o.yaml', directory: 'reference/v2' } },
+      { tab: 'Reference', openapi: { source: V2_URL, directory: 'reference' } },
+    ])
+    const result = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: outerSpec, contentType: 'application/json' }))
+    // Tag `v2`, summary `users` is `reference/v2/users` under the outer mount, but that address belongs to the inner (local) one.
+    expect((result.docsConfig.redirects ?? []).map((redirect) => redirect.source)).not.toContain('/reference/v2/users')
+  })
+
+  it('leaves a link under the remote mount as authored until that spec is bound', () => {
+    const bundle = migrate('[v2](/reference/v2/users/list-users) [tag](/reference/v2/users) [home](/reference/v2)')
+    const guide = bundle.pages.find((page) => page.id === 'guide')
+    expect(guide?.body).toContain('[v2](/reference/v2/users/list-users) [tag](/reference/v2/users) [home](/reference/v2)')
+    expect(bundle.localApiMounts).toEqual(['reference'])
   })
 })
