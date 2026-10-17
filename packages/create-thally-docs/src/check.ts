@@ -9,6 +9,9 @@ import { join, extname, relative } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
+import remarkMdx from 'remark-mdx'
+import remarkParse from 'remark-parse'
+import { unified } from 'unified'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
 import { pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
 import { manualApiProblems } from './manual-api-check.js'
@@ -212,6 +215,25 @@ function tagEnd(text: string, from: number): number {
   return -1
 }
 
+const mdxParser = unified().use(remarkParse).use(remarkMdx)
+
+/**
+ * A quoted JSX attribute value as MDX reads it: character references
+ * (`&amp;`, `&#38;`, `&#x26;`) are decoded, which is the text the renderer and
+ * the content parser slug. MDX itself reads the value, so the two agree on
+ * every reference it supports; a value it cannot read is kept as written.
+ */
+function decodeJsxAttribute(raw: string, quote: string): string {
+  if (!raw.includes('&')) return raw
+  try {
+    const tree = mdxParser.parse(`<X a=${quote}${raw}${quote} />`) as { children: Array<{ attributes?: Array<{ value?: unknown }> }> }
+    const value = tree.children[0]?.attributes?.[0]?.value
+    return typeof value === 'string' ? value : raw
+  } catch {
+    return raw
+  }
+}
+
 /**
  * Titles of the `<Step>`s that render as headings: `titleSize` h2, h3 or h4 on
  * the step or, failing that, on the `<Steps>` around it. Only literal strings
@@ -237,7 +259,9 @@ function extractStepHeadings(content: string): Array<{ line: number; base: strin
     for (; counted < tag.index; counted++) if (text[counted] === '\n') line++
     const attribute = (key: string): string | null | undefined => {
       const match = new RegExp(`\\s${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|(\\{))`).exec(attributes)
-      return match ? (match[1] ?? match[2] ?? null) : undefined
+      if (!match) return undefined
+      if (match[1] !== undefined) return decodeJsxAttribute(match[1], '"')
+      return match[2] !== undefined ? decodeJsxAttribute(match[2], "'") : null
     }
     if (name === 'Steps') {
       if (closing) sizes.pop()
