@@ -217,3 +217,156 @@ describe('migrate withheld operations parity', () => {
     })
   })
 })
+
+/** The document an asset of a migrated bundle holds. */
+function documentAt(bundle: ReturnType<typeof migrate>, path: string): OpenAPIDocument {
+  return JSON.parse(Buffer.from(bundle.assets.find((asset) => asset.path === path)!.content).toString('utf8')) as OpenAPIDocument
+}
+
+/** The document a migrated page's `openapi` frontmatter points at: the bytes the page renders. */
+function documentBoundTo(bundle: ReturnType<typeof migrate>, id: string): OpenAPIDocument {
+  return documentAt(bundle, parseOpenApiFrontmatter(bundle.pages.find((entry) => entry.id === id)?.openapi)!.specRef!)
+}
+
+const titleOf = (document: OpenAPIDocument): string => (document.info as { title: string }).title
+
+/** The paths each published spec still lists after the renderer's sanitiser ran, by the title of the spec. */
+function publishedPathsByTitle(bundle: ReturnType<typeof migrate>): Record<string, Array<string>> {
+  return Object.fromEntries(bundle.assets.filter((asset) => asset.path.startsWith('openapi/')).map((asset) => {
+    const document = documentAt(bundle, asset.path)
+    return [titleOf(document), Object.keys(sanitizeSpecForPublication(document).paths ?? {}).sort()]
+  }))
+}
+
+/** Every page id the navigation lists, in any tab or group. */
+function listedPageIds(bundle: ReturnType<typeof migrate>): Array<string> {
+  const ids: Array<string> = []
+  const visit = (nodes: ReadonlyArray<unknown> = []): void => {
+    for (const node of nodes) {
+      if (typeof node === 'string') ids.push(node)
+      else if (node && typeof node === 'object') visit((node as { pages?: Array<unknown> }).pages)
+    }
+  }
+  for (const tab of bundle.docsConfig.tabs) { visit(tab.pages); visit(tab.groups) }
+  return ids
+}
+
+const titled = (title: string): string => JSON.stringify({
+  openapi: '3.0.0',
+  info: { title, version: '1' },
+  paths: { '/x': { get: { summary: 'X' } }, '/y': { get: { summary: 'Y' } }, '/internal': { get: { summary: 'SECRET' } } },
+})
+/** The repository scan only picks a spec that opens with its `openapi` version, so one that does not is never the scan's choice, whatever order the folder lists its files in. */
+const unscanned = (title: string): string => {
+  const { openapi, ...rest } = JSON.parse(titled(title)) as Record<string, unknown>
+  return JSON.stringify({ ...rest, openapi })
+}
+
+describe('every spec asset name comes from one allocator', () => {
+  for (const spelling of ['b/openapi.json', '/b/openapi.json', './b/openapi.json']) {
+    it(`binds a page-only spec to its own bytes when the repository scan chose another spec with the same file name (${spelling})`, () => {
+      const bundle = migrate({
+        'docs.json': JSON.stringify({ navigation: { pages: ['pub', 'secret'] } }),
+        'a/openapi.json': titled('DEFAULT-A'),
+        'b/openapi.json': unscanned('PAGE-B'),
+        'pub.mdx': page(`openapi: "${spelling} GET /x"\n`),
+        'secret.mdx': page(`groups: [admin]\nopenapi: "${spelling} GET /internal"\n`),
+      })
+      expect(titleOf(documentBoundTo(bundle, 'pub'))).toBe('PAGE-B')
+      expect(titleOf(documentAt(bundle, bundle.docsConfig.tabs.find((tab) => tab.api && !tab.hidden)!.api!.source))).toBe('DEFAULT-A')
+      expect(publishedPathsByTitle(bundle)).toEqual({ 'DEFAULT-A': ['/internal', '/x', '/y'], 'PAGE-B': ['/x', '/y'] })
+      expect(renderedPageState(bundle, 'pub')).toBe('published')
+    })
+  }
+})
+
+describe('a bare public reference belongs to the page its file publishes as', () => {
+  const tabs = (...entries: Array<Record<string, unknown>>): string => JSON.stringify({ navigation: { tabs: entries } })
+
+  // `guide/readme` and `guide/index` are two pages, however navigation spells them; each keeps its own tab's spec.
+  for (const [readmeEntry, indexEntry] of [
+    ['guide/readme.mdx', 'guide/index.mdx'], ['/guide/readme', '/guide/index'], ['guide/readme', 'guide/index'], ['guide/readme', 'guide/index.md'],
+  ]) {
+    for (const [readmeSpec, indexSpec] of [['a.json', 'b.json'], ['b.json', 'a.json']]) {
+      it(`keeps ${readmeEntry} (${readmeSpec}) and ${indexEntry} (${indexSpec}) apart`, () => {
+        const bundle = migrate({
+          'docs.json': tabs(
+            { tab: 'A', openapi: readmeSpec, pages: [readmeEntry] },
+            { tab: 'B', openapi: indexSpec, pages: [indexEntry] },
+          ),
+          'a.json': titled('A'),
+          'b.json': titled('B'),
+          'guide/readme.mdx': page('openapi: "GET /y"\n'),
+          'guide/index.mdx': page('openapi: "GET /x"\n'),
+          // Restricted pages name each operation in each spec.
+          'r1.mdx': page('groups: [admin]\nopenapi: "a.json GET /x"\n'),
+          'r2.mdx': page('groups: [admin]\nopenapi: "a.json GET /y"\n'),
+          'r3.mdx': page('groups: [admin]\nopenapi: "b.json GET /x"\n'),
+          'r4.mdx': page('groups: [admin]\nopenapi: "b.json GET /y"\n'),
+        })
+        expect(bundle.pages.filter((entry) => entry.source.includes('#guide/')).map((entry) => entry.id).sort()).toEqual(['guide', 'guide/readme'])
+        // Each public operation is published in its own tab's spec and withheld from the other.
+        expect(publishedPathsByTitle(bundle)).toEqual({
+          [readmeSpec === 'a.json' ? 'A' : 'B']: ['/internal', '/y'],
+          [indexSpec === 'a.json' ? 'A' : 'B']: ['/internal', '/x'],
+        })
+        expect(renderedPageState(bundle, 'guide')).toBe('published')
+        expect(renderedPageState(bundle, 'guide/readme')).toBe('published')
+      })
+    }
+  }
+})
+
+describe('page and spec spellings resolve through one page identity and one asset allocator', () => {
+  /** [how the navigation lists the page, the file that publishes as it]. */
+  const pageSpellings: Array<[string, string]> = [
+    ['x', 'x.mdx'], ['x', 'x/index.mdx'], ['x/index', 'x.mdx'], ['x/Index', 'x/index.mdx'],
+    ['x/readme', 'x/readme.mdx'], ['/x', 'x.mdx'], ['x.mdx', 'x.mdx'],
+  ]
+  /** How docs.json and pages spell a spec file, which always has a namesake at `a/openapi.json`. */
+  const specSpellings = ['openapi.json', '/openapi.json', './openapi.json', 'dir/openapi.json', '/dir/openapi.json', './dir/openapi.json']
+  /** How the spec the page names is bound: by its own tab, by no tab (named only by pages), or beside the spec the repository scan picked. */
+  const bindings = ['tab', 'page-only', 'scan'] as const
+  const namesake = 'a/openapi.json'
+
+  for (const binding of bindings) {
+    for (const spelling of specSpellings) {
+      it(`${binding}: ${spelling} binds its own bytes and a bare operation stays public only in its owner's spec, for every page spelling`, () => {
+        const file = spelling.replace(/^(?:\.?\/+)+/, '')
+        // A restricted ref spelled by the file name alone names every spec with that name.
+        const namesBoth = file === 'openapi.json'
+        for (const [listed, pageFile] of pageSpellings) {
+          const tab = { tab: 'B', openapi: spelling, pages: [listed, 'pub'] }
+          const navigation = binding === 'tab'
+            ? { tabs: [{ tab: 'A', openapi: namesake }, tab] }
+            : binding === 'page-only' ? { tabs: [{ tab: 'A', openapi: namesake, pages: [listed, 'pub'] }] } : { pages: [listed, 'pub'] }
+          const bundle = migrate({
+            'docs.json': JSON.stringify({ navigation }),
+            [namesake]: titled('NAMESAKE'),
+            [file]: unscanned('TARGET'),
+            'pub.mdx': page(`openapi: "${spelling} GET /x"\n`),
+            [pageFile]: page('openapi: "GET /y"\n'),
+            // Restricted pages name the same operations in each spec.
+            'r1.mdx': page(`groups: [admin]\nopenapi: "${spelling} GET /y"\n`),
+            'r2.mdx': page(`groups: [admin]\nopenapi: "${namesake} GET /y"\n`),
+            'r3.mdx': page(`groups: [admin]\nopenapi: "${spelling} GET /internal"\n`),
+          })
+          const label = `${binding} ${spelling} listed as ${listed} (${pageFile})`
+          // The page is the one the navigation lists, whatever the spelling.
+          const barePage = bundle.pages.find((entry) => entry.source.endsWith(`#${pageFile}`))!
+          expect(listedPageIds(bundle), label).toContain(barePage.id)
+          // A page's bound spec is the file it names, even when its namesake was bound first.
+          expect(titleOf(documentBoundTo(bundle, 'pub')), label).toBe('TARGET')
+          // The bare operation is public in the spec it belongs to: that of the tab it is listed under, else the scan's.
+          const owner = binding === 'tab' ? 'TARGET' : 'NAMESAKE'
+          expect(publishedPathsByTitle(bundle), label).toEqual({
+            TARGET: owner === 'TARGET' ? ['/x', '/y'] : ['/x'],
+            NAMESAKE: [...owner === 'NAMESAKE' ? ['/y'] : [], ...namesBoth ? [] : ['/internal'], '/x'].sort(),
+          })
+          expect(renderedPageState(bundle, barePage.id), label).toBe('published')
+          expect(renderedPageState(bundle, 'pub'), label).toBe('published')
+        }
+      })
+    }
+  }
+})

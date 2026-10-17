@@ -58,6 +58,7 @@ import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
 import { mainSiteLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
+import { canonicalSpecRef } from './openapi-ref.js'
 import { type BrandVars, brandColorsFromVars, cssBrandVars, cssColorToHex } from './css-colors.js'
 import {
   frontmatterAccess,
@@ -1295,8 +1296,10 @@ function exactReferenceKey(value: string): string {
  */
 interface NavigationSpecContext {
   operations: Array<{ ref: string; owner: string | null | undefined }>
-  /** Page references (`normalizedReferenceKey`, lower case: `reference` and `reference/index` are one page) with the owner of each place they are listed. */
+  /** The owner of each place a page is listed, by the page id it publishes as (`pageIdentity`). */
   pageOwners: Map<string, Set<string | null | undefined>>
+  /** Which page a source path or a navigation entry means: the rule the page loop publishes by, for entries and files alike. */
+  pageIdentity: (path: string) => string | null
 }
 
 function containerSpec(node: Record<string, unknown>): string | null | undefined {
@@ -1307,14 +1310,14 @@ function containerSpec(node: Record<string, unknown>): string | null | undefined
 }
 
 /** Operation and page references in navigation that is visible without source-side access, each with the spec it sits under. */
-function navigationSpecContext(config: Record<string, unknown> | null): NavigationSpecContext {
-  const context: NavigationSpecContext = { operations: [], pageOwners: new Map() }
+function navigationSpecContext(config: Record<string, unknown> | null, pageIdentity: NavigationSpecContext['pageIdentity']): NavigationSpecContext {
+  const context: NavigationSpecContext = { operations: [], pageOwners: new Map(), pageIdentity }
   const visit = (node: unknown, owner: string | null | undefined, listed: boolean): void => {
     if (typeof node === 'string') {
       if (splitOpenApiRef(node)) context.operations.push({ ref: node, owner })
       else if (listed) {
-        const key = normalizedReferenceKey(node).toLowerCase()
-        context.pageOwners.set(key, (context.pageOwners.get(key) ?? new Set()).add(owner))
+        const page = pageIdentity(node)
+        if (page !== null) context.pageOwners.set(page, (context.pageOwners.get(page) ?? new Set()).add(owner))
       }
     }
     else if (Array.isArray(node)) node.forEach((child) => visit(child, owner, true))
@@ -1361,7 +1364,8 @@ function keptOperationRefs(
   }
   for (const { ref, file } of published) {
     // A page listed under several containers belongs to none of them alone.
-    const owners = new Set([...navigation.pageOwners.get(normalizedReferenceKey(file).toLowerCase()) ?? [undefined]].map((owner) => source(owner === undefined ? defaultSpec : owner)))
+    const page = navigation.pageIdentity(file)
+    const owners = new Set([...(page === null ? undefined : navigation.pageOwners.get(page)) ?? [undefined]].map((owner) => source(owner === undefined ? defaultSpec : owner)))
     add(ref, owners.size === 1 ? [...owners][0] : null)
   }
   for (const { ref, owner } of navigation.operations) add(ref, source(owner === undefined ? defaultSpec : owner))
@@ -1525,6 +1529,35 @@ function specAsset(filename: string, content: Uint8Array): MigrationAsset {
   return { path: specAssetPath(filename), content, projectRelative: true }
 }
 
+/**
+ * The one allocator of the file names migrated specs are written under, shared
+ * by everything that binds a spec: a tab, a hidden page-only tab and the spec the
+ * repository scan finds when docs.json names none. A source is named once, the
+ * first to ask keeps its file name, and a different source that wants a taken
+ * name is renamed from its path; the same file bound twice stays one asset. Its
+ * asset, its tab binding and every page reference to it read that name, so no
+ * two sources share an asset and no page is pointed at another source's bytes.
+ * Names are compared without letter case: the assets are written to disks that
+ * fold it.
+ */
+function createSpecAssetNamer(): (spec: { sourcePath: string; filename: string; tabLabel?: string }) => string {
+  const nameBySource = new Map<string, string>()
+  const sourceByName = new Map<string, string>()
+  return ({ sourcePath, filename, tabLabel }) => {
+    let name = nameBySource.get(sourcePath)
+    if (name === undefined) {
+      name = filename
+      if (sourceByName.has(name.toLowerCase())) {
+        name = sourcePath.replace(/\//g, '-')
+        while (sourceByName.has(name.toLowerCase())) name = `${(tabLabel ?? 'default').replace(/\W+/g, '-')}-${name}`
+      }
+      nameBySource.set(sourcePath, name)
+      sourceByName.set(name.toLowerCase(), sourcePath)
+    }
+    return name
+  }
+}
+
 /** An OpenAPI/AsyncAPI spec resolved and ready to copy into `public/`, optionally bound to one tab. */
 interface ResolvedApiSpec {
   filename: string
@@ -1583,6 +1616,8 @@ function resolveMintlifyApiSpecs(
   files: Array<ScannedFile>,
   warnings: Array<MigrationWarning>,
   remoteSpecs: Array<RemoteApiSpec>,
+  /** Names every spec asset of the site, so a spec bound later (the repository scan's) cannot reuse a name taken here. */
+  nameSpec: ReturnType<typeof createSpecAssetNamer>,
   /** Published pages' `openapi:` frontmatter: Mintlify renders a spec named only here, so it is migrated too. */
   pages: ReadonlyArray<{ openapi?: string }> = [],
 ): Array<ResolvedApiSpec> {
@@ -1591,8 +1626,7 @@ function resolveMintlifyApiSpecs(
     ...mintlifyTopLevelApiReferences(mintlifyConfig),
     ...mintlifyNavigationApiReferences(mintlifyConfig),
   ]
-  const specKey = (value: string): string => value.split(/[?#]/, 1)[0].replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/^\/+/, '')
-  const known = new Set(references.map((reference) => specKey(reference.value)))
+  const known = new Set(references.map((reference) => canonicalSpecRef(reference.value)))
   const specFiles = specFileCandidates(files)
   // Pages repeat a few spec prefixes: look each one up once.
   const namedFiles = new Map<string, SpecRefResolution<Required<SpecCandidate>>>()
@@ -1634,7 +1668,7 @@ function resolveMintlifyApiSpecs(
       warnings.push({ code: 'unsupported-config', message: `The OpenAPI spec "${reference.value}"${tabSuffix} uses insecure HTTP and was not imported.`, source: reference.value })
       continue
     }
-    const key = reference.value.split(/[?#]/, 1)[0].replace(/^\/+/, '').replace(/\\/g, '/')
+    const key = canonicalSpecRef(reference.value)
     const match = files.find((file) => file.relativePath === key)
     if (!match) {
       warnings.push({
@@ -1663,28 +1697,7 @@ function resolveMintlifyApiSpecs(
       directory: reference.directory,
     })
   }
-  // Two different specs can share a basename (e.g. "qstash/openapi.yaml" and
-  // "workflow/openapi.yaml" both resolve to "openapi.yaml"), whichever tabs bind
-  // them: without a distinct filename the second spec's asset write collides
-  // with the first's and is silently discarded, and a page naming it would be
-  // pointed at the first spec's bytes. Each source gets one filename, used for
-  // its asset, its tab binding and the pages that name it; the same file bound
-  // to several tabs stays one asset.
-  const filenameBySource = new Map<string, string>()
-  const sourceByFilename = new Map<string, string>()
-  for (const spec of specs) {
-    let filename = filenameBySource.get(spec.sourcePath)
-    if (filename === undefined) {
-      filename = spec.filename
-      if (sourceByFilename.has(filename)) {
-        filename = spec.sourcePath.replace(/\//g, '-')
-        while (sourceByFilename.has(filename)) filename = `${(spec.tabLabel ?? 'default').replace(/\W+/g, '-')}-${filename}`
-      }
-      filenameBySource.set(spec.sourcePath, filename)
-      sourceByFilename.set(filename, spec.sourcePath)
-    }
-    spec.filename = filename
-  }
+  for (const spec of specs) spec.filename = nameSpec(spec)
   return specs
 }
 
@@ -1711,7 +1724,7 @@ function rewriteMintlifyPageSpecRefs(
       }
       continue
     }
-    const key = ref.specRef.split(/[?#]/, 1)[0].replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/^\/+/, '')
+    const key = canonicalSpecRef(ref.specRef)
     const resolved = resolveSpecRef(ref.specRef, specs)
     if (resolved.kind === 'match') {
       page.openapi = withSpecRef(ref, specAssetPath(resolved.spec.filename))
@@ -4049,6 +4062,32 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const defaultPageIds = new Set([...referenceMap.values()]
     .filter((reference) => !reference.locale || reference.locale === localeConfig?.defaultLocale)
     .map((reference) => reference.navigationId))
+  /**
+   * The one rule that decides which page a source path publishes as: the
+   * navigation entry that names it (exactly, else by its name with `index`
+   * and a nested `readme` folded into the folder), else its own path, in the
+   * locale its folder belongs to. The page loop publishes by this, and OpenAPI
+   * ownership is keyed by it for navigation entries and files alike, so a page
+   * and the places that list it cannot disagree about which page they mean.
+   * Null when the path cannot be normalized safely.
+   */
+  const resolvePageIdentity = (path: string): { locale?: string; navigationId: string; id: string } | null => {
+    const referenced = exactReferenceMap.get(exactReferenceKey(path)) ?? referenceMap.get(normalizedReferenceKey(path))
+    let locale = referenced?.locale
+    let navigationId = referenced?.navigationId ?? pageIdFromReference(path, platform === 'mintlify')
+    if (!referenced && localeConfig) {
+      for (const entry of localeConfig.locales) {
+        const localized = mintlifyLocalizedReference(path, entry.code, defaultPageIds)
+        if (localized === path) continue
+        locale = entry.code
+        navigationId = pageIdFromReference(localized, platform === 'mintlify')
+        break
+      }
+    }
+    if (!navigationId) return null
+    const isDefaultLocale = !locale || locale === localeConfig?.defaultLocale
+    return { locale, navigationId, id: isDefaultLocale ? navigationId : `${locale}/${navigationId}` }
+  }
   const routeAliases: NonNullable<MigrationDocsConfig['redirects']> = []
   const pageFiles = [...files].sort((left, right) => {
     const leftOrder = referenceOrder.get(normalizedReferenceKey(left.relativePath)) ?? Number.MAX_SAFE_INTEGER
@@ -4161,7 +4200,6 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }
       continue
     }
-    const key = normalizedReferenceKey(file.relativePath)
     // Restricted Mintlify pages migrate with `groups` / `public: false`
     // frontmatter the runtime enforces, but what they use must not leak through
     // surfaces that are not access controlled (public/, specs, other pages).
@@ -4228,25 +4266,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       }
     }
     const isRestrictedPage = Boolean(pageGate?.reason)
-    const referenced = exactReferenceMap.get(exactReferenceKey(file.relativePath)) ?? referenceMap.get(key)
-    let locale = referenced?.locale
-    let navigationId = referenced?.navigationId ?? pageIdFromReference(file.relativePath, platform === 'mintlify')
-    if (!referenced && localeConfig) {
-      for (const entry of localeConfig.locales) {
-        const localized = mintlifyLocalizedReference(file.relativePath, entry.code, defaultPageIds)
-        if (localized === file.relativePath) continue
-        locale = entry.code
-        navigationId = pageIdFromReference(localized, platform === 'mintlify')
-        break
-      }
-    }
-    if (!navigationId) {
+    const identity = resolvePageIdentity(file.relativePath)
+    if (!identity) {
       skipped++
       warnings.push({ code: 'invalid-page', message: 'Page path could not be normalized safely.', source: file.relativePath })
       continue
     }
-    const isDefaultLocale = !locale || locale === localeConfig?.defaultLocale
-    const id = isDefaultLocale ? navigationId : `${locale}/${navigationId}`
+    const { locale, navigationId, id } = identity
     let raw = inlineMdxSnippets(
       mintlifyProjectRoot
         ? importUndeclaredSnippetComponents(readFileSync(file.absolutePath, 'utf8'), file.absolutePath, repositoryDir, mintlifyProjectRoot, snippetExports, snippetAliases, inlineGate, warnings)
@@ -5101,11 +5127,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       warnings.push({ code: 'gated-page', message: sharedSpecMessage(path, excluded), source: path })
     }
     // A spec only restricted pages name is not migrated (the spec is public).
-    const allSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs, pages.filter((page) => !restrictedPages.has(page)))
+    // Every spec asset of the site is named here, whichever binding asks: a tab, a hidden page-only tab, the repository scan's spec.
+    const nameSpec = createSpecAssetNamer()
+    const allSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs, nameSpec, pages.filter((page) => !restrictedPages.has(page)))
     // Operations docs.json lists explicitly stay public like those on published pages. A prefix that fits several specs
     // documents none of them, so it keeps nothing public: a restricted operation is never exposed by an ambiguous page.
     // A bare operation keeps one public only in the spec it belongs to: its navigation container's, or the site's default.
-    const navigation = navigationSpecContext(mintlifyConfig)
+    const navigation = navigationSpecContext(mintlifyConfig, (path) => resolvePageIdentity(path)?.id ?? null)
     const defaultSources = new Set([
       ...allSpecs.filter((spec) => !spec.pageOnly && spec.tabLabel === undefined).map((spec) => spec.sourcePath),
       ...remoteApiSpecs.filter((spec) => spec.tabLabel === undefined).map((spec) => spec.url),
@@ -5183,13 +5211,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const fallback = findOpenApi(files)
       const fallbackContent = fallback ? readSpecFile(fallback.absolutePath, fallback.relativePath, warnings) : undefined
       if (fallback && fallbackContent) {
-        const filename = basename(fallback.relativePath)
         const matches = (ref: string): boolean => specRefMatches(ref, fallback.relativePath, true)
         if (withheldSpecRefs.some(matches) && !publishedSpecRefs.some(matches)) {
           // Only restricted pages name this spec, and docs.json does not list it.
-          quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(filename)}`, content: fallbackContent })
+          quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(basename(fallback.relativePath))}`, content: fallbackContent })
           withheldAssetCount++
         } else {
+          const filename = nameSpec({ sourcePath: fallback.relativePath, filename: basename(fallback.relativePath) })
           const fallbackSpec = { sourcePath: fallback.relativePath, filename, content: fallbackContent }
           // The spec found by the scan is the site's default: bare operations belong to it.
           ;({ kept: keptSpecRefs, unowned: unownedOperations } = keptOperations(fallback.relativePath))

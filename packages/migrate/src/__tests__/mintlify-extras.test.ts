@@ -1212,6 +1212,35 @@ describe('OpenAPI specs named only by page frontmatter', () => {
     expect(bundle.docsConfig.tabs.flatMap((tab) => tab.api ? [tab.api.source] : []).sort()).toEqual(['openapi/b-spec.json', 'openapi/spec.json'])
   })
 
+  it('names the spec the repository scan picks and a page-only spec of the same file name from one allocator', () => {
+    const only = (title: string, scanned: boolean): string => scanned
+      ? JSON.stringify({ openapi: '3.0.0', info: { title, version: '1' }, paths: { '/x': { get: { summary: 'X' } } } })
+      : JSON.stringify({ info: { title, version: '1' }, paths: { '/x': { get: { summary: 'X' } } }, openapi: '3.0.0' })
+    const bundle = site({
+      'docs.json': JSON.stringify({ navigation: { pages: ['pub'] } }),
+      'a/openapi.json': only('DEFAULT-A', true),
+      'b/openapi.json': only('PAGE-B', false),
+      'pub.mdx': page('Pub', 'openapi: "./b/openapi.json GET /x"\n'),
+    })
+    const titleAt = (path: string): string => JSON.parse(String(bundle.assets.find((asset) => asset.path === path)!.content)).info.title
+    const bound = bundle.pages.find((entry) => entry.id === 'pub')!.openapi!.split(' ')[0]
+    expect(titleAt(bound)).toBe('PAGE-B')
+    expect(bundle.docsConfig.tabs.filter((tab) => tab.api).map((tab) => [tab.hidden === true, titleAt(tab.api!.source)])).toEqual([[false, 'DEFAULT-A'], [true, 'PAGE-B']])
+  })
+
+  it('treats names that differ only in letter case as one name when saving specs', () => {
+    const only = (path: string): string => JSON.stringify({ openapi: '3.0.0', info: { title: 'T', version: '1' }, paths: { [path]: { get: { summary: path } } } })
+    const bundle = site({
+      'docs.json': JSON.stringify({ api: { openapi: ['a/Spec.json', 'b/spec.json'] }, navigation: { pages: ['pa'] } }),
+      'a/Spec.json': only('/a'),
+      'b/spec.json': only('/b'),
+      'pa.mdx': page('A', 'openapi: "a/Spec.json GET /a"\n'),
+    })
+    const names = bundle.assets.map((asset) => asset.path).filter((path) => path.startsWith('openapi/'))
+    expect(new Set(names.map((path) => path.toLowerCase())).size).toBe(2)
+    expect(bundle.pages.find((entry) => entry.id === 'pa')?.openapi).toBe('openapi/Spec.json GET /a')
+  })
+
   it('keeps a spec out of the published output when only a withheld page names it', () => {
     const bundle = site(files({
       'pub.mdx': page('Pub'),
