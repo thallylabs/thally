@@ -1550,6 +1550,9 @@ function resolveMintlifyApiSpecs(
   }
   // References sharing a spec and tab (one per product, say) are one binding: their operation groups are one list, unless
   // one of them lists none (Mintlify generated every operation there), which leaves the generated navigation to list them all.
+  // A reference that lists operations but hides or restricts every one adds no groups and lists something all the same, and so
+  // does one under a non-default language (the default language's navigation owns the tab): neither leaves the tab unlisted.
+  const listsNothing = (reference: MintlifyApiSpecReference): boolean => !reference.groups && !reference.operationsWithheld && !reference.otherLanguage
   const groupTargets = new Map<string, { target: { groups?: Array<MigrationApiGroup> }; unlisted: boolean }>()
   const specs: Array<ResolvedApiSpec> = []
   for (const reference of references) {
@@ -1561,7 +1564,7 @@ function resolveMintlifyApiSpecs(
         if (reference.groups) {
           const merged = mergeApiGroups(shared.target.groups, reference.groups)
           if (merged) shared.target.groups = merged
-        } else {
+        } else if (listsNothing(reference)) {
           shared.unlisted = true
           delete shared.target.groups
         }
@@ -1583,7 +1586,7 @@ function resolveMintlifyApiSpecs(
       mountDirectory(remote, reference)
       remoteSpecs.push(remote)
       remoteByKey.set(dedupeKey, remote)
-      groupTargets.set(dedupeKey, { target: remote, unlisted: !groups })
+      groupTargets.set(dedupeKey, { target: remote, unlisted: listsNothing(reference) })
       warnings.push({
         code: 'unsupported-config',
         message: `The remote OpenAPI spec "${reference.value}"${tabSuffix} requires a network download before this import is complete.`,
@@ -1625,7 +1628,7 @@ function resolveMintlifyApiSpecs(
       ...(groups ? { groups } : {}),
     }
     specs.push(spec)
-    groupTargets.set(dedupeKey, { target: spec, unlisted: !groups })
+    groupTargets.set(dedupeKey, { target: spec, unlisted: listsNothing(reference) })
   }
   // Two specs bound to *different* tabs can share a basename (e.g.
   // "qstash/openapi.yaml" and "workflow/openapi.yaml" both resolve to

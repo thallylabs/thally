@@ -31,6 +31,7 @@ vi.mock('@/lib/openapi/fetch', () => ({
 }))
 
 import { getAllApiOperationNodes, getApiOperationBySlug, withApiNavigation } from '@/data/api-reference'
+import { API_GROUPS_MAX_DEPTH } from '@/lib/openapi/operation-keys'
 
 const tab = (api: Partial<NonNullable<SidebarCollection['api']>>, prefix = ''): Promise<SidebarCollection> =>
   withApiNavigation([{ id: 'docs-api', label: 'API', sections: [], api: { source: 'openapi.json', ...api } }], prefix).then(([entry]) => entry)
@@ -110,6 +111,34 @@ describe('api.groups', () => {
     const { sections } = await tab({ groups: [{ group: 'Events', pages: ['WEBHOOK POST petAdopted', 'webhook post petAdopted', 'POST petAdopted', 'WEBHOOK GET petAdopted'] }] })
     expect(sections[0].items).toHaveLength(1)
     expect(sections[0].items[0]).toMatchObject({ title: 'Pet adopted', method: 'HOOK', description: 'POST petAdopted', groupPath: ['Events'] })
+  })
+
+  it('never throws on malformed entries: skips them and keeps the valid ones', async () => {
+    for (const groups of [[null], [{ group: 'X', pages: 'GET /pets' }], [{ group: 'X', pages: [null] }], [{ group: 'X' }], [{ group: 5, pages: ['GET /pets'] }], ['GET /pets']]) {
+      expect((await tab({ groups: groups as never })).sections).toEqual([])
+    }
+    const { sections } = await tab({ groups: [
+      null,
+      { group: 'NoPages' },
+      { group: 'Text', pages: 'GET /pets' },
+      { group: 'Mixed', pages: [null, 7, ['GET /stores'], { group: 'Bad', pages: {} }, { group: 'Pets', pages: ['GET /pets'] }, 'GET /stores'] },
+    ] as never })
+    expect(sections.map((section) => section.title)).toEqual(['Mixed'])
+    expect(titles(sections[0].nodes)).toEqual([{ Pets: ['List pets'] }, 'List stores'])
+  })
+
+  it('stops at the shared depth limit: deeper groups are skipped and nothing overflows the stack', async () => {
+    const nest = (levels: number, leaf: DocsJsonApiGroup['pages']): DocsJsonApiGroup => {
+      let pages = leaf
+      for (let level = levels; level >= 1; level--) pages = [{ group: `G${level}`, pages }]
+      return pages[0] as DocsJsonApiGroup
+    }
+    const atLimit = await tab({ groups: [nest(API_GROUPS_MAX_DEPTH, ['GET /pets'])] })
+    expect(atLimit.sections[0].items.map((item) => item.title)).toEqual(['List pets'])
+    expect((await tab({ groups: [nest(API_GROUPS_MAX_DEPTH + 1, ['GET /pets'])] })).sections).toEqual([])
+    const { sections } = await tab({ groups: [{ group: 'Pets', pages: ['GET /pets', nest(API_GROUPS_MAX_DEPTH, ['GET /stores'])] }] })
+    expect(sections[0].items.map((item) => item.title)).toEqual(['List pets'])
+    expect((await tab({ groups: [nest(3001, ['GET /pets'])] })).sections).toEqual([])
   })
 
   it('does not use an empty list, and navigation: false wins over a list', async () => {

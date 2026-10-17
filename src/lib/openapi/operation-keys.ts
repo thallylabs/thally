@@ -17,6 +17,15 @@ export function operationKeyFromRef(ref: string) {
   return match ? buildOperationKey(match[2], match[3], Boolean(match[1])) : null
 }
 
+/**
+ * How many levels of nested groups an API tab's `api.groups` may have; a group deeper than
+ * this is skipped. `thally check` mirrors the value as `API_GROUPS_MAX_DEPTH` in
+ * packages/create-thally-docs/src/openapi-publication.ts (a parity test keeps them equal):
+ * it cannot import from here, and `@thallylabs/core` is a published dist the pinned check
+ * would not have the new export in.
+ */
+export const API_GROUPS_MAX_DEPTH = 32
+
 export function isExtensionSet(value: unknown) {
   return value === true || value === 'true'
 }

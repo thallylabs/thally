@@ -228,6 +228,48 @@ describe('remote OpenAPI spec shared by references that do and do not list opera
   })
 })
 
+describe('remote OpenAPI spec with hidden, restricted or localized operation lists', () => {
+  const fetcher: MigrationFetcher = async (url) => ({ finalUrl: url, body: spec, contentType: 'application/json' })
+  const visible = [{ group: 'Visible', pages: ['GET /api/v1/scim/v2/Users'] }]
+  const other = (group: string) => [{ group, pages: ['GET /api/v1/scim/v2/Groups'] }]
+
+  async function hydrated(navigation: Record<string, unknown>) {
+    const root = mkdtempSync(join(tmpdir(), 'thally-remote-lists-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    const migrated = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    expect(migrated.remoteApiSpecs).toHaveLength(1)
+    const result = await hydrateRemoteApiSpecs(migrated, fetcher)
+    return { migrated, api: result.docsConfig.tabs.find((tab) => tab.api)?.api, assetPath: result.assets[0].path }
+  }
+
+  it('keeps the groups of the products that list operations when another lists its own only in hidden or restricted groups', async () => {
+    const hidden = [{ group: 'Hidden', hidden: true, pages: ['GET /api/v1/scim/v2/Groups'] }]
+    const restricted = [{ group: 'Internal', public: false, pages: ['GET /api/v1/scim/v2/Groups'] }]
+    for (const second of [{ groups: hidden }, { groups: restricted }, { public: false, groups: other('Internal') }]) {
+      for (const order of [[0, 1], [1, 0]]) {
+        const products = [{ groups: visible }, second]
+        const { migrated, api, assetPath } = await hydrated({
+          products: order.map((index) => ({ product: `P${index}`, tabs: [{ tab: 'API reference', openapi: { source: SPEC_URL, directory: `p${index}/api` }, ...products[index] }] })),
+        })
+        expect(migrated.remoteApiSpecs?.[0].groups).toEqual(visible)
+        expect(api).toEqual({ source: assetPath, groups: visible })
+      }
+    }
+  })
+
+  it('binds only the default language\'s groups, whatever order the languages are authored in', async () => {
+    const english = { language: 'en', default: true, tabs: [{ tab: 'API', openapi: SPEC_URL, groups: visible }] }
+    const french = { language: 'fr', tabs: [{ tab: 'API', openapi: SPEC_URL, groups: other('French') }] }
+    const frenchUnlisted = { language: 'fr', tabs: [{ tab: 'API', openapi: SPEC_URL, groups: [{ group: 'Francais', pages: ['guide'] }] }] }
+    for (const languages of [[english, french], [french, english], [english, frenchUnlisted], [frenchUnlisted, english]]) {
+      const { migrated, api, assetPath } = await hydrated({ languages })
+      expect(migrated.remoteApiSpecs?.[0].groups).toEqual(visible)
+      expect(api).toEqual({ source: assetPath, groups: visible })
+    }
+  })
+})
+
 describe('remote OpenAPI spec mounted under Mintlify directories', () => {
   const fetcher: MigrationFetcher = async (url) => ({ finalUrl: url, body: mountedSpec, contentType: 'application/json' })
 

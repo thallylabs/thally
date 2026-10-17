@@ -97,14 +97,19 @@ binds an `openapi` spec become `api.groups` on the tab that spec binds to:
 nested groups, icons and authored order are kept, and page entries stay in the
 tab's own groups (a group that mixes pages and operations is split, so the
 sidebar lists the API groups after the page groups). Operations written
-straight under a tab share one group named after the tab. Hidden groups,
-groups under access-restricted containers, and groups left empty are left out.
+straight under a tab form a group named after the tab, at their place among the
+tab's own groups (each uninterrupted run is its own group, so authored order is
+kept). Hidden groups, groups under access-restricted containers, and groups left
+empty are left out. With `navigation.languages`, only the default language's
+containers contribute groups; operation entries under another language are
+reported, since its API tab is the default language's.
 When several containers bind one spec to the same tab (one API tab per product,
 say), their groups are concatenated in order and an operation already listed
 earlier in that tab is dropped (the method is compared without case, the path
 exactly), unless one of those containers lists no operation (Mintlify generated
 every operation there), in which case the tab gets no `api.groups` and keeps the
-generated, tag-grouped navigation; groups with the same title are not folded together. With `api.groups`
+generated, tag-grouped navigation. A container whose operations are all hidden or
+access-restricted adds no groups but still counts as listing operations. Groups with the same title are not folded together. With `api.groups`
 the authored list is the tab's navigation, so `navigation: false` is not
 written. Operation entries with no `openapi` container above them, and every one in a
 site imported by URL, cannot be placed: one warning says they were not added to the API navigation, and the

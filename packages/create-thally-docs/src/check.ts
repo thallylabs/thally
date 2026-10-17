@@ -13,7 +13,7 @@ import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
-import { groupKeyState, listedOperationKeys, pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
+import { API_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
 import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
@@ -469,17 +469,37 @@ function loadCheckSpec(projectDir: string, source: string, overrides: unknown): 
 
 /**
  * A key in an API tab's `api.groups` that matches no published operation of its
- * spec is skipped by the sidebar (a typo, or a hidden or excluded operation).
+ * spec is skipped by the sidebar (a typo, or a hidden or excluded operation), and
+ * so is an entry that is not a group or a key, or a group nested too deep.
  * Remote and unreadable specs cannot be judged here.
  */
 function checkApiGroupKeys(
   projectDir: string,
-  tabs: Array<{ tab: string; hidden?: boolean; api?: { source?: string; groups?: unknown } }>,
+  tabs: Array<{ tab: string; hidden?: boolean; version?: string; api?: { source?: string; groups?: unknown } }>,
+  versions: Array<{ label?: string }> | undefined,
   issues: LintIssue[],
 ): void {
   for (const tab of tabs) {
-    if (tab.hidden || typeof tab.api?.source !== 'string') continue
-    const keys = listedOperationKeys(tab.api.groups)
+    // The sidebar renders a hidden tab when its `version` is a `navigation.versions` label
+    // (getSidebarCollections in src/data/docs.ts); every other hidden tab has no sidebar to check.
+    const rendered = !tab.hidden || Boolean(tab.version && versions?.some((version) => version.label === tab.version))
+    if (!rendered || typeof tab.api?.source !== 'string') continue
+    const skipped = { malformed: 0, tooDeep: false }
+    const keys = listedOperationKeys(tab.api.groups, skipped)
+    if (skipped.malformed > 0) {
+      issues.push({
+        severity: 'warning',
+        file: 'docs.json',
+        message: `API tab "${tab.tab}": api.groups has ${skipped.malformed} ${skipped.malformed === 1 ? 'entry that is' : 'entries that are'} not a group with a "pages" list or an operation key. ${skipped.malformed === 1 ? 'It is' : 'They are'} left out of the sidebar. A group looks like { "group": "Name", "pages": ["GET /path"] }`,
+      })
+    }
+    if (skipped.tooDeep) {
+      issues.push({
+        severity: 'warning',
+        file: 'docs.json',
+        message: `API tab "${tab.tab}": api.groups nests groups deeper than ${API_GROUPS_MAX_DEPTH} levels. Groups beyond that level are left out of the sidebar`,
+      })
+    }
     if (keys.length === 0) continue
     const spec = loadCheckSpec(projectDir, tab.api.source, (tab.api as { overrides?: unknown }).overrides)
     if (!spec.document || typeof spec.document !== 'object') continue // remote, unreadable or empty: validateOpenApi reports it
@@ -783,7 +803,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
   checkPublicSpecs(projectDir, config.tabs, issues)
   checkUnpublishedOperationPages(projectDir, config.tabs, operationPages, issues)
-  checkApiGroupKeys(projectDir, config.tabs, issues)
+  checkApiGroupKeys(projectDir, config.tabs, config.navigation?.versions, issues)
 
   if (options.external && externalLinks.length > 0) {
     issues.push(...await checkExternalLinks(externalLinks, options.externalLinkOptions))

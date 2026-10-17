@@ -155,12 +155,37 @@ export function webhookState(document: unknown, name: string, overrides?: unknow
   return states.includes('visible') ? 'published' : states[0] as 'hidden' | 'excluded'
 }
 
-/** Every string of an API tab's `groups`, in authored order, however deeply nested. */
-export function listedOperationKeys(groups: unknown): Array<string> {
+/**
+ * How many levels of nested groups an API tab's `api.groups` may have; a group deeper than
+ * this is skipped. Mirrors `API_GROUPS_MAX_DEPTH` in src/lib/openapi/operation-keys.ts (a
+ * parity test keeps them equal): this package cannot import from src/.
+ */
+export const API_GROUPS_MAX_DEPTH = 32
+
+/** What `listedOperationKeys` skipped: entries that are not a group or a key, and whether any group was too deep. */
+export interface ApiGroupsSkipped {
+  malformed: number
+  tooDeep: boolean
+}
+
+/**
+ * Every string of an API tab's `groups`, in authored order, down to `API_GROUPS_MAX_DEPTH` levels.
+ * Mirrors the sidebar (`buildAuthoredSections`): a group is an object with a `pages` list and a text
+ * or absent `group`; anything else, and any group deeper than the limit, is left out and counted in `skipped`.
+ */
+export function listedOperationKeys(groups: unknown, skipped?: ApiGroupsSkipped, depth = 1): Array<string> {
   if (!Array.isArray(groups)) return []
-  return groups.flatMap((group) => isObj(group) && Array.isArray(group.pages)
-    ? group.pages.flatMap((page) => typeof page === 'string' ? [page] : listedOperationKeys([page]))
-    : [])
+  return groups.flatMap((group) => {
+    if (!isObj(group) || !Array.isArray(group.pages) || (group.group !== undefined && typeof group.group !== 'string')) {
+      if (skipped) skipped.malformed++
+      return []
+    }
+    if (depth > API_GROUPS_MAX_DEPTH) {
+      if (skipped) skipped.tooDeep = true
+      return []
+    }
+    return group.pages.flatMap((page) => typeof page === 'string' ? [page] : listedOperationKeys([page], skipped, depth + 1))
+  })
 }
 
 /**

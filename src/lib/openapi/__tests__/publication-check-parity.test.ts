@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 // Monorepo-only: `thally check` ships in packages/create-thally-docs, which the
 // standalone starter does not have (see SOURCE_ONLY_PATHS in
 // .github/scripts/starter-runtime-contract.mjs).
-import { groupKeyState, listedOperationKeys, operationState, pageState, parseDocReference } from '../../../../packages/create-thally-docs/src/openapi-publication'
+import { API_GROUPS_MAX_DEPTH as CHECK_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, operationState, pageState, parseDocReference } from '../../../../packages/create-thally-docs/src/openapi-publication'
 import { mdxServers, paramFieldPathNames, parseManualApi } from '../../../../packages/create-thally-docs/src/manual-api-check'
 import { extractParamFields, parseApiFrontmatter, sanitizeApiMdxConfig } from '../manual-operation'
 import { normalizeSpec } from '../normalize'
-import { operationKeyFromRef } from '../operation-keys'
+import { API_GROUPS_MAX_DEPTH, operationKeyFromRef } from '../operation-keys'
 import { parseOpenApiFrontmatter } from '../page-frontmatter'
 import { operationPublicationState, pageReferenceState, type RoutedSpec } from '../publication'
 import type { ResolvedSpec } from '../types'
@@ -233,5 +233,9 @@ describe('thally check api.groups parity', () => {
     ])).toEqual(['GET /a', 'POST /a', 'PUT /a', 'DELETE /a'])
     expect(listedOperationKeys(undefined)).toEqual([])
     expect(listedOperationKeys({ group: 'A', pages: ['GET /a'] })).toEqual([])
+  })
+
+  it('stops at the same group depth as the site', () => {
+    expect(CHECK_GROUPS_MAX_DEPTH).toBe(API_GROUPS_MAX_DEPTH)
   })
 })

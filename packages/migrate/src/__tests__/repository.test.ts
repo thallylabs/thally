@@ -1598,6 +1598,67 @@ describe('Mintlify repository migration', () => {
     expect(migrate([{ groups: listed }, { groups: listed }])[0].api?.groups).toEqual(listed)
   })
 
+  it('keeps the groups of the products that list operations when another product lists its own only in hidden or restricted groups', () => {
+    const visible = { groups: [{ group: 'Visible', pages: ['GET /a'] }] }
+    const migrate = (references: Array<Record<string, unknown>>) => {
+      const root = fixture()
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({
+        navigation: { products: references.map((reference, index) => ({ product: `P${index}`, tabs: [{ tab: 'API reference', openapi: 'o.yaml', ...reference }] })) },
+      }))
+      writeFileSync(join(root, 'o.yaml'), 'openapi: 3.1.0\ninfo: { title: O, version: "1.0" }\npaths: {}')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      const tabs = bundle.docsConfig.tabs.filter((tab) => tab.api)
+      expect(tabs.map((tab) => tab.tab)).toEqual(['API reference'])
+      return { api: tabs[0].api, warnings: bundle.warnings.filter((warning) => /individual OpenAPI operations/.test(warning.message)) }
+    }
+    const authored = { source: 'openapi/o.yaml', groups: visible.groups }
+
+    // Hidden operations stay out of the sidebar by staying out of api.groups: they are migrated as hidden, so nothing is reported.
+    for (const references of [[visible, { groups: [{ group: 'Hidden', hidden: true, pages: ['GET /b'] }] }], [{ groups: [{ group: 'Hidden', hidden: true, pages: ['GET /b'] }] }, visible]]) {
+      const { api, warnings } = migrate(references)
+      expect(api).toEqual(authored)
+      expect(warnings).toEqual([])
+    }
+    // Restricted operations are not migrated and one warning says so.
+    for (const restricted of [{ groups: [{ group: 'Internal', public: false, pages: ['GET /b'] }] }, { public: false, groups: [{ group: 'Internal', pages: ['GET /b'] }] }]) {
+      for (const references of [[visible, restricted], [restricted, visible]]) {
+        const { api, warnings } = migrate(references)
+        expect(api).toEqual(authored)
+        expect(warnings).toHaveLength(1)
+        expect(warnings[0].message).toMatch(/access-restricted/)
+      }
+    }
+  })
+
+  it('binds only the default language\'s groups to the API tab, and warns once about the other languages\' operation lists', () => {
+    const migrate = (languages: Array<Record<string, unknown>>) => {
+      const root = fixture()
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { languages } }))
+      writeFileSync(join(root, 'o.yaml'), 'openapi: 3.1.0\ninfo: { title: O, version: "1.0" }\npaths: {}')
+      writeFileSync(join(root, 'intro.mdx'), '---\ntitle: Intro\n---\n\nHello.')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      return { api: bundle.docsConfig.tabs.find((tab) => tab.api)?.api, warnings: bundle.warnings.filter((warning) => /individual OpenAPI operations/.test(warning.message)) }
+    }
+    const english = { language: 'en', default: true, tabs: [{ tab: 'API', openapi: 'o.yaml', groups: [{ group: 'English', pages: ['intro', 'GET /a'] }] }] }
+    const french = { language: 'fr', tabs: [{ tab: 'API', openapi: 'o.yaml', groups: [{ group: 'French', pages: ['intro', 'GET /b'] }] }] }
+    const frenchUnlisted = { language: 'fr', tabs: [{ tab: 'API', openapi: 'o.yaml', groups: [{ group: 'Francais', pages: ['intro'] }] }] }
+    const authored = { source: 'openapi/o.yaml', groups: [{ group: 'English', pages: ['GET /a'] }] }
+
+    // The authored order of the language picker does not matter: the default language's groups are the tab's.
+    for (const languages of [[english, french], [french, english]]) {
+      const { api, warnings } = migrate(languages)
+      expect(api).toEqual(authored)
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0].message).toMatch(/language other than the default/)
+    }
+    // A language that lists no operation does not turn the tab's generated navigation back on.
+    for (const languages of [[english, frenchUnlisted], [frenchUnlisted, english]]) {
+      const { api, warnings } = migrate(languages)
+      expect(api).toEqual(authored)
+      expect(warnings).toEqual([])
+    }
+  })
+
   it('carries the merged groups of one remote spec shared by several products', () => {
     const root = fixture()
     const source = 'https://specs.example.com/openapi.json'

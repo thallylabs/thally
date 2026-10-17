@@ -825,6 +825,23 @@ describe('Mintlify manual OpenAPI operation listing', () => {
     expect(warnings[0].message).toMatch(/access-restricted/)
   })
 
+  it('warns once about operation entries under a language other than the default, whose API tab follows the default language', () => {
+    const language = (code: string, extra: Record<string, unknown>, operation: string) => ({
+      language: code,
+      ...extra,
+      tabs: [{ tab: 'API', openapi: 'spec.yml', groups: [{ group: code, pages: [operation] }] }],
+    })
+    const result = projectMintlifyNavigation(
+      { navigation: { languages: [language('en', { default: true }, 'GET /a'), language('fr', {}, 'GET /b'), language('de', {}, 'GET /c')] } },
+      { operationGroups: true },
+    )
+    const warnings = operationWarnings(result.warnings)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toMatch(/language other than the default.*not added to the API navigation.*still have pages/)
+    // The default language alone raises none.
+    expect(operationWarnings(projectMintlifyNavigation({ navigation: { languages: [language('en', { default: true }, 'GET /a')] } }, { operationGroups: true }).warnings)).toEqual([])
+  })
+
   it('reports every operation entry when the caller does not bind operation lists (the URL import)', () => {
     const config = { navigation: { tabs: [{ tab: 'API', openapi: 'spec.yml', groups: [{ group: 'Users', pages: ['GET /users'] }] }] } }
     expect(operationWarnings(projectMintlifyNavigation(config).warnings)).toHaveLength(1)
@@ -919,6 +936,64 @@ describe('Mintlify authored API groups', () => {
       navigation: { tabs: [{ tab: 'API', openapi: source, groups: [{ group: 'Guides', pages: ['guides/start'] }] }] },
     })
     expect(reference).toEqual({ value: source, kind: 'openapi', tabLabel: 'API' })
+  })
+
+  it('reports a binding whose listed operations are all hidden or access-restricted as withheld, not as listing nothing', () => {
+    const referencesOf = (container: Record<string, unknown>) => mintlifyNavigationApiReferences({ navigation: { tabs: [{ tab: 'API', openapi: source, ...container }] } })
+    for (const container of [
+      { groups: [{ group: 'Secret', hidden: true, pages: ['GET /b', { group: 'Deeper', pages: ['GET /c'] }] }] },
+      { groups: [{ group: 'Internal', public: false, pages: ['GET /b'] }] },
+      { public: false, groups: [{ group: 'Anything', pages: ['GET /b'] }] },
+    ]) {
+      expect(referencesOf(container)).toEqual([{ value: source, kind: 'openapi', tabLabel: 'API', operationsWithheld: true }])
+    }
+    // One visible operation among them: the binding lists it, so there is nothing to withhold.
+    expect(referencesOf({ groups: [{ group: 'Visible', pages: ['GET /a'] }, { group: 'Secret', hidden: true, pages: ['GET /b'] }] })).toEqual([
+      { value: source, kind: 'openapi', tabLabel: 'API', groups: [{ group: 'Visible', pages: ['GET /a'] }] },
+    ])
+  })
+
+  describe('under navigation languages', () => {
+    const language = (code: string, extra: Record<string, unknown>, operation: string) => ({
+      language: code,
+      ...extra,
+      tabs: [{ tab: 'API', openapi: source, groups: [{ group: code, pages: [operation] }] }],
+    })
+    const referencesOf = (languages: Array<Record<string, unknown>>) => mintlifyNavigationApiReferences({ navigation: { languages } })
+
+    it('lets only the default language contribute groups; another language lists nothing and withholds nothing', () => {
+      const references = referencesOf([language('en', { default: true }, 'GET /a'), language('fr', {}, 'GET /b')])
+      expect(references).toEqual([
+        { value: source, kind: 'openapi', tabLabel: 'API', groups: [{ group: 'en', pages: ['GET /a'] }] },
+        { value: source, kind: 'openapi', tabLabel: 'API', otherLanguage: true },
+      ])
+    })
+
+    it('picks the default the way the projection does: the entry marked default, else the first valid one', () => {
+      const flags = (languages: Array<Record<string, unknown>>) => referencesOf(languages).map((reference) => ({ groups: reference.groups?.[0].group, otherLanguage: reference.otherLanguage }))
+      expect(flags([language('fr', {}, 'GET /b'), language('en', { default: true }, 'GET /a')])).toEqual([{ groups: undefined, otherLanguage: true }, { groups: 'en', otherLanguage: undefined }])
+      expect(flags([language('fr', {}, 'GET /b'), language('en', {}, 'GET /a')])).toEqual([{ groups: 'fr', otherLanguage: undefined }, { groups: undefined, otherLanguage: true }])
+      // An entry the projection skips for its invalid locale code is never the default.
+      expect(flags([language('not a locale!', {}, 'GET /x'), language('en', {}, 'GET /a')])).toEqual([{ groups: undefined, otherLanguage: true }, { groups: 'en', otherLanguage: undefined }])
+    })
+  })
+
+  it('keeps authored order: each run of loose operations is its own group at the run\'s position', () => {
+    const [reference] = mintlifyNavigationApiReferences({
+      navigation: {
+        tabs: [{
+          tab: 'API',
+          openapi: source,
+          pages: [{ group: 'First', pages: ['GET /a'] }, 'GET /b', 'POST /b2', 'guides/skip', { group: 'Last', pages: ['GET /c'] }, 'GET /d'],
+        }],
+      },
+    })
+    expect(reference.groups).toEqual([
+      { group: 'First', pages: ['GET /a'] },
+      { group: 'API', pages: ['GET /b', 'POST /b2'] },
+      { group: 'Last', pages: ['GET /c'] },
+      { group: 'API', pages: ['GET /d'] },
+    ])
   })
 
   it('stops following the tree past the depth limit instead of recursing without bound', () => {

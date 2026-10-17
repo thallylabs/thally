@@ -2,7 +2,7 @@ import { cache } from 'react'
 import { apiReferenceConfig } from '@/config/api-reference'
 import { getSpecConfig, loadAuthoredSpecDocument, loadSpec } from '@/lib/openapi/fetch'
 import { buildOperationKey, normalizeSpec } from '@/lib/openapi/normalize'
-import { operationKeyFromRef } from '@/lib/openapi/operation-keys'
+import { API_GROUPS_MAX_DEPTH, operationKeyFromRef } from '@/lib/openapi/operation-keys'
 import type { DocsJsonApiGroup, NavigationGroup, NavigationItem, NavigationNode, NavigationSection, SidebarCollection } from '@/data/docs'
 import type { NormalizedOperation, NormalizedSpec } from '@/lib/openapi/types'
 import { findSpecForRef, type OpenApiFrontmatterRef } from '@/lib/openapi/page-frontmatter'
@@ -250,6 +250,13 @@ function toSidebarItem(item: ApiNavigationItem, hrefPrefix: string, groupPath?: 
   }
 }
 
+/** A group of `api.groups` as the sidebar can use it. Anything else (a null, a text `pages`, a non-text `group`) is skipped. */
+function isApiGroup(value: unknown): value is DocsJsonApiGroup {
+  if (typeof value !== 'object' || value === null) return false
+  const { group, pages } = value as { group?: unknown; pages?: unknown }
+  return Array.isArray(pages) && (group === undefined || typeof group === 'string')
+}
+
 const collectItems = (nodes: Array<NavigationNode>): Array<NavigationItem> =>
   nodes.flatMap((node) => node.type === 'page' ? [node.item] : collectItems(node.group.nodes))
 
@@ -257,6 +264,8 @@ const collectItems = (nodes: Array<NavigationNode>): Array<NavigationItem> =>
  * Sidebar sections from a tab's authored `api.groups`: authored order, nested
  * groups kept. A key matching no published operation is skipped, a group left
  * empty disappears, and an operation listed twice shows at its first position.
+ * An entry that is not a group or a key, and a group nested deeper than
+ * `API_GROUPS_MAX_DEPTH`, is skipped too (`thally check` reports both).
  */
 async function buildAuthoredSections(
   groups: Array<DocsJsonApiGroup>,
@@ -270,7 +279,7 @@ async function buildAuthoredSections(
   const buildNodes = (pages: DocsJsonApiGroup['pages'], indexPath: Array<number>, ancestors: Array<string>): Array<NavigationNode> =>
     pages.flatMap<NavigationNode>((page, index) => {
       if (typeof page !== 'string') {
-        const group = buildGroup(page, [...indexPath, index], ancestors)
+        const group = isApiGroup(page) ? buildGroup(page, [...indexPath, index], ancestors) : null
         return group ? [{ type: 'group', group }] : []
       }
       const key = operationKeyFromRef(page)
@@ -281,12 +290,13 @@ async function buildAuthoredSections(
     })
 
   const buildGroup = (group: DocsJsonApiGroup, indexPath: Array<number>, ancestors: Array<string>): NavigationGroup | null => {
+    if (indexPath.length > API_GROUPS_MAX_DEPTH) return null
     const nodes = buildNodes(group.pages, indexPath, [...ancestors, group.group].filter(Boolean))
     return nodes.length === 0 ? null : { id: `openapi-group-${indexPath.join('-')}`, title: group.group || 'General', icon: group.icon, nodes }
   }
 
   return groups.flatMap((group, index) => {
-    const built = buildGroup(group, [index], [])
+    const built = isApiGroup(group) ? buildGroup(group, [index], []) : null
     return built ? [{ id: `openapi-${index}`, title: built.title, icon: built.icon, items: collectItems(built.nodes), nodes: built.nodes }] : []
   })
 }
