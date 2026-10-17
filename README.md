@@ -134,6 +134,14 @@ src/
 - **`api`** — auto-generates API reference from an OpenAPI spec
 - **`href`** — links to an internal route or external URL
 
+Large navigation trees load separately after the article appears, while small
+sidebars remain inline. Earlier/later controls replace windows of 100 visible
+entries across the collection, retaining authored groups and active-page context.
+Loading failures leave the article available and offer a navigation retry.
+Reader-restricted navigation remains private and is never publicly cached.
+If no introduction page exists, the homepage redirects to the first available
+internal document in navigation order, respecting the reader and current locale.
+
 ### Markdown page URLs
 
 Public `.md` versions of documentation pages are available as an opt-in
@@ -214,6 +222,12 @@ cp .env.example .env.local
 | `THALLY_DISABLE_BUILD_CACHE` | Optional — set to `1` to turn off Turbopack's persistent build cache (kept under `.next/cache` to speed up warm builds) if a production build misbehaves with it |
 
 Legacy `DOX_*` names are still read as a fallback for every `THALLY_*` variable, so existing deployments keep working without renaming anything.
+
+Managed builds prepare canonical search text in protected content assets.
+Search still applies current reader access, locale, version, and listing metadata;
+each prepared record must match its current source SHA. Changed or legacy pages
+use the ordinary canonical parser until the next full build. Transfers and
+decoded shard caches are bounded; this does not change the Worker's CPU or memory limits.
 
 ## Production
 
