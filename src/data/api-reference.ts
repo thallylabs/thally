@@ -2,7 +2,8 @@ import { cache } from 'react'
 import { apiReferenceConfig } from '@/config/api-reference'
 import { getSpecConfig, loadAuthoredSpecDocument, loadSpec } from '@/lib/openapi/fetch'
 import { buildOperationKey, normalizeSpec } from '@/lib/openapi/normalize'
-import type { NavigationSection, SidebarCollection } from '@/data/docs'
+import { operationKeyFromRef } from '@/lib/openapi/operation-keys'
+import type { DocsJsonApiGroup, NavigationGroup, NavigationItem, NavigationNode, NavigationSection, SidebarCollection } from '@/data/docs'
 import type { NormalizedOperation, NormalizedSpec } from '@/lib/openapi/types'
 import { findSpecForRef, type OpenApiFrontmatterRef } from '@/lib/openapi/page-frontmatter'
 import { pageReferenceState } from '@/lib/openapi/publication'
@@ -15,6 +16,7 @@ export interface ApiNavigationItem {
   slug: Array<string>
   method: string
   path: string
+  isWebhook: boolean
   badge?: string
 }
 
@@ -201,6 +203,19 @@ export async function servedSpecPathForFrontmatter(ref: OpenApiFrontmatterRef): 
   }
 }
 
+function toNavigationItem({ operation, slug, href }: ApiOperationNode): ApiNavigationItem {
+  return {
+    id: operation.id,
+    title: operation.title,
+    href,
+    slug,
+    method: operation.method,
+    path: operation.path,
+    isWebhook: operation.isWebhook,
+    badge: operation.badge,
+  }
+}
+
 export async function buildApiNavigation(specId?: string): Promise<Array<ApiNavigationGroup>> {
   if (apiReferenceConfig.specs.length === 0) return []
   const spec = await getNormalizedSpec(specId)
@@ -210,15 +225,7 @@ export async function buildApiNavigation(specId?: string): Promise<Array<ApiNavi
   nodes.forEach((node) => {
     const title = node.operation.group
     const items = groupMap.get(title) ?? []
-    items.push({
-      id: node.operation.id,
-      title: node.operation.title,
-      href: node.href,
-      slug: node.slug,
-      method: node.operation.method,
-      path: node.operation.path,
-      badge: node.operation.badge,
-    })
+    items.push(toNavigationItem(node))
     groupMap.set(title, items)
   })
 
@@ -228,6 +235,60 @@ export async function buildApiNavigation(specId?: string): Promise<Array<ApiNavi
   }))
 
   return sortNavigationGroups(groups, spec)
+}
+
+/** The sidebar entry of an operation; `groupPath` is its authored group ancestry, when it has one. */
+function toSidebarItem(item: ApiNavigationItem, hrefPrefix: string, groupPath?: Array<string>): NavigationItem {
+  return {
+    id: item.id,
+    title: item.title,
+    href: `${hrefPrefix}${item.href}`,
+    badge: item.badge,
+    method: item.isWebhook ? 'HOOK' : item.method.toUpperCase(),
+    description: `${item.method} ${item.path}`,
+    ...(groupPath?.length ? { groupPath } : {}),
+  }
+}
+
+const collectItems = (nodes: Array<NavigationNode>): Array<NavigationItem> =>
+  nodes.flatMap((node) => node.type === 'page' ? [node.item] : collectItems(node.group.nodes))
+
+/**
+ * Sidebar sections from a tab's authored `api.groups`: authored order, nested
+ * groups kept. A key matching no published operation is skipped, a group left
+ * empty disappears, and an operation listed twice shows at its first position.
+ */
+async function buildAuthoredSections(
+  groups: Array<DocsJsonApiGroup>,
+  specId: string,
+  hrefPrefix: string,
+): Promise<Array<NavigationSection>> {
+  const operations = new Map((await getApiOperationNodes(specId)).map((node) =>
+    [buildOperationKey(node.operation.method, node.operation.path, node.operation.isWebhook), node] as const))
+  const listed = new Set<string>()
+
+  const buildNodes = (pages: DocsJsonApiGroup['pages'], indexPath: Array<number>, ancestors: Array<string>): Array<NavigationNode> =>
+    pages.flatMap<NavigationNode>((page, index) => {
+      if (typeof page !== 'string') {
+        const group = buildGroup(page, [...indexPath, index], ancestors)
+        return group ? [{ type: 'group', group }] : []
+      }
+      const key = operationKeyFromRef(page)
+      const node = key ? operations.get(key) : undefined
+      if (!key || !node || listed.has(key)) return []
+      listed.add(key)
+      return [{ type: 'page', item: toSidebarItem(toNavigationItem(node), hrefPrefix, ancestors) }]
+    })
+
+  const buildGroup = (group: DocsJsonApiGroup, indexPath: Array<number>, ancestors: Array<string>): NavigationGroup | null => {
+    const nodes = buildNodes(group.pages, indexPath, [...ancestors, group.group].filter(Boolean))
+    return nodes.length === 0 ? null : { id: `openapi-group-${indexPath.join('-')}`, title: group.group || 'General', icon: group.icon, nodes }
+  }
+
+  return groups.flatMap((group, index) => {
+    const built = buildGroup(group, [index], [])
+    return built ? [{ id: `openapi-${index}`, title: built.title, icon: built.icon, items: collectItems(built.nodes), nodes: built.nodes }] : []
+  })
 }
 
 /**
@@ -243,18 +304,14 @@ export async function withApiNavigation(
   return Promise.all(
     collections.map(async (collection) => {
       if (!collection.api || collection.api.navigation === false) return collection
-      const groups = await buildApiNavigation(collection.id)
-      const apiSections: Array<NavigationSection> = groups.map((group, index) => ({
-        id: `openapi-${index}`,
-        title: group.title,
-        items: group.items.map((item) => ({
-          id: item.id,
-          title: item.title,
-          href: `${hrefPrefix}${item.href}`,
-          badge: item.badge,
-          description: `${item.method} ${item.path}`,
-        })),
-      }))
+      const authored = collection.api.groups
+      const apiSections: Array<NavigationSection> = Array.isArray(authored) && authored.length > 0
+        ? await buildAuthoredSections(authored, collection.id, hrefPrefix)
+        : (await buildApiNavigation(collection.id)).map((group, index) => ({
+          id: `openapi-${index}`,
+          title: group.title,
+          items: group.items.map((item) => toSidebarItem(item, hrefPrefix)),
+        }))
       return { ...collection, sections: [...(collection.sections ?? []), ...apiSections] }
     }),
   )

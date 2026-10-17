@@ -420,6 +420,66 @@ describe('thally check pages bound to unpublished operations', () => {
   })
 })
 
+describe('thally check api.groups keys', () => {
+  const ok = { responses: { 200: { description: 'ok' } } }
+  async function run(groups: unknown, extraTabs: Array<unknown> = [], source = 'openapi/api.json', overrides?: Record<string, unknown>) {
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-groups-'))
+    mkdirSync(join(projectDir, 'openapi'), { recursive: true })
+    mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+    writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'API reference', api: { source, ...(groups ? { groups } : {}), ...(overrides ? { overrides } : {}) } }, ...extraTabs] }))
+    writeFileSync(join(projectDir, 'openapi/api.json'), JSON.stringify({
+      openapi: '3.1.0', info: { title: 'T', version: '1' },
+      paths: {
+        '/hidden': { get: { 'x-hidden': true, ...ok } },
+        '/excluded': { get: { 'x-excluded': true, ...ok } },
+        '/visible': { get: ok, post: ok },
+      },
+      webhooks: { orderUpdated: { post: { 'x-hidden': true, ...ok } }, shipped: { post: ok } },
+    }))
+    const output: Array<string> = []
+    const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+    try {
+      await runCheck(projectDir, { fix: false, ci: true })
+    } finally {
+      log.mockRestore()
+    }
+    return output.join('\n')
+  }
+  const warning = (key: string, state = '') =>
+    `API tab "API reference": api.groups lists "${key}", which matches no published operation in openapi/api.json${state}. It is left out of the sidebar.`
+
+  it('warns for each key that matches no published operation, naming the tab and the key', async () => {
+    const output = await run([
+      { group: 'A', pages: ['GET /visible', 'GET /typo', { group: 'Nested', pages: ['GET /hidden', 'GET /excluded', 'DELETE /visible'] }] },
+      { group: 'B', pages: ['WEBHOOK POST orderUpdated', 'WEBHOOK POST nope', 'WEBHOOK GET shipped', 'FETCH /visible', 'visible'] },
+    ])
+    expect(output).toContain(warning('GET /typo'))
+    expect(output).toContain(warning('GET /hidden', ' (it is hidden)'))
+    expect(output).toContain(warning('GET /excluded', ' (it is excluded)'))
+    expect(output).toContain(warning('DELETE /visible'))
+    expect(output).toContain(warning('WEBHOOK POST orderUpdated', ' (it is hidden)'))
+    expect(output).toContain(warning('WEBHOOK POST nope'))
+    expect(output).toContain(warning('WEBHOOK GET shipped'))
+    expect(output).toContain(warning('FETCH /visible'))
+    expect(output).toContain(warning('visible'))
+    expect(output).toContain('0 error(s), 9 warning(s)')
+  })
+
+  it('accepts published operations and webhooks, whatever the method case and spacing', async () => {
+    const output = await run([{ group: 'A', pages: ['GET /visible', ' post   /visible ', 'WEBHOOK POST shipped', 'webhook post shipped', { group: 'Nested', pages: ['get /visible'] }] }])
+    expect(output).not.toContain('api.groups')
+    expect(output).toContain('0 error(s), 0 warning(s)')
+  })
+
+  it('honours overrides, and judges nothing for a remote spec, no groups or a hidden tab', async () => {
+    expect(await run([{ group: 'A', pages: ['GET /hidden'] }], [], 'openapi/api.json', { 'GET /hidden': { hidden: false } })).not.toContain('api.groups')
+    expect(await run([{ group: 'A', pages: ['GET /typo'] }], [], 'https://example.com/spec.json')).not.toContain('api.groups')
+    expect(await run(undefined)).not.toContain('api.groups')
+    const hiddenTab = { tab: 'Spec only', hidden: true, api: { source: 'openapi/api.json', groups: [{ group: 'A', pages: ['GET /typo'] }] } }
+    expect(await run(undefined, [hiddenTab])).not.toContain('api.groups')
+  })
+})
+
 describe('thally check manual api pages', () => {
   async function run(frontmatter: string, body = '', docsExtra: Record<string, unknown> = {}) {
     const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-manual-'))

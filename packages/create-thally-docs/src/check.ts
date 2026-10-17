@@ -13,7 +13,7 @@ import remarkMdx from 'remark-mdx'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 import { readDocsJson, writeDocsJson } from './docs-json.js'
-import { pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
+import { groupKeyState, listedOperationKeys, pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
 import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
@@ -455,6 +455,46 @@ function checkPublicSpecs(projectDir: string, tabs: Array<{ api?: { source?: str
   }
 }
 
+/** A tab's spec as the docs route serves it; no document when it is remote or cannot be read here. */
+function loadCheckSpec(projectDir: string, source: string, overrides: unknown): CheckSpec {
+  if (/^https?:/i.test(source)) return { source, overrides }
+  const specPath = source.startsWith('/') ? join(projectDir, 'public', source.slice(1)) : join(projectDir, source)
+  try {
+    const raw = readFileSync(specPath, 'utf8')
+    return { source, overrides, document: /\.json$/i.test(source) ? JSON.parse(raw) : parseYaml(raw) }
+  } catch {
+    return { source, overrides } // validateOpenApi reports a missing or invalid spec
+  }
+}
+
+/**
+ * A key in an API tab's `api.groups` that matches no published operation of its
+ * spec is skipped by the sidebar (a typo, or a hidden or excluded operation).
+ * Remote and unreadable specs cannot be judged here.
+ */
+function checkApiGroupKeys(
+  projectDir: string,
+  tabs: Array<{ tab: string; hidden?: boolean; api?: { source?: string; groups?: unknown } }>,
+  issues: LintIssue[],
+): void {
+  for (const tab of tabs) {
+    if (tab.hidden || typeof tab.api?.source !== 'string') continue
+    const keys = listedOperationKeys(tab.api.groups)
+    if (keys.length === 0) continue
+    const spec = loadCheckSpec(projectDir, tab.api.source, (tab.api as { overrides?: unknown }).overrides)
+    if (!spec.document || typeof spec.document !== 'object') continue // remote, unreadable or empty: validateOpenApi reports it
+    for (const key of keys) {
+      const state = groupKeyState(spec.document, key, spec.overrides)
+      if (state === 'published') continue
+      issues.push({
+        severity: 'warning',
+        file: 'docs.json',
+        message: `API tab "${tab.tab}": api.groups lists "${key}", which matches no published operation in ${spec.source}${state === 'unknown' ? '' : ` (it is ${state})`}. It is left out of the sidebar. Check the method and path, or publish the operation`,
+      })
+    }
+  }
+}
+
 /**
  * A page whose `openapi:` frontmatter names a hidden or excluded operation of
  * the site's default spec (the first visible API tab's, which is what the
@@ -471,18 +511,7 @@ function checkUnpublishedOperationPages(
   // The specs the docs route serves, in its order: visible API tabs, the first being the default.
   const specs: Array<CheckSpec> = tabs
     .filter((tab) => !tab.hidden && typeof tab.api?.source === 'string')
-    .map((tab) => {
-      const source = tab.api!.source as string
-      const overrides = (tab.api as { overrides?: unknown }).overrides
-      if (/^https?:/i.test(source)) return { source, overrides }
-      const specPath = source.startsWith('/') ? join(projectDir, 'public', source.slice(1)) : join(projectDir, source)
-      try {
-        const raw = readFileSync(specPath, 'utf8')
-        return { source, overrides, document: /\.json$/i.test(source) ? JSON.parse(raw) : parseYaml(raw) }
-      } catch {
-        return { source, overrides } // validateOpenApi reports a missing or invalid spec
-      }
-    })
+    .map((tab) => loadCheckSpec(projectDir, tab.api!.source as string, (tab.api as { overrides?: unknown }).overrides))
   if (specs.length === 0) return
   for (const { file, reference } of pages) {
     const state = pageState(reference, specs)
@@ -754,6 +783,7 @@ export async function runCheck(projectDir: string, options: CheckOptions): Promi
 
   checkPublicSpecs(projectDir, config.tabs, issues)
   checkUnpublishedOperationPages(projectDir, config.tabs, operationPages, issues)
+  checkApiGroupKeys(projectDir, config.tabs, issues)
 
   if (options.external && externalLinks.length > 0) {
     issues.push(...await checkExternalLinks(externalLinks, options.externalLinkOptions))

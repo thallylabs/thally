@@ -140,14 +140,37 @@ export function operationState(
   return result === 'visible' ? 'published' : result
 }
 
-/** A webhook page renders when any method of the `webhooks` entry is visible; `x-webhooks` never renders one. */
-export function webhookState(document: unknown, name: string, overrides?: unknown): State {
+/**
+ * A webhook page renders when any method of the `webhooks` entry is visible; `x-webhooks` never renders one.
+ * With `method`, only that method is judged (a sidebar key names one).
+ */
+export function webhookState(document: unknown, name: string, overrides?: unknown, method?: string): State {
   if (!isObj(document) || !isObj(document.webhooks) || !Object.hasOwn(document.webhooks, name)) return 'unknown'
   const entry = document.webhooks[name]
   if (!isObj(entry)) return 'unknown'
   const { chain, item } = viewEntry(document, entry)
-  const states = METHODS.filter((verb) => isObj(item[verb])).map((verb) =>
+  const states = METHODS.filter((verb) => isObj(item[verb]) && (!method || verb === method.toLowerCase())).map((verb) =>
     visibility(chain, item[verb] as Obj, isObj(overrides) ? overrides[`WEBHOOK ${verb.toUpperCase()} ${name}`] : undefined))
   if (states.length === 0) return 'unknown'
   return states.includes('visible') ? 'published' : states[0] as 'hidden' | 'excluded'
+}
+
+/** Every string of an API tab's `groups`, in authored order, however deeply nested. */
+export function listedOperationKeys(groups: unknown): Array<string> {
+  if (!Array.isArray(groups)) return []
+  return groups.flatMap((group) => isObj(group) && Array.isArray(group.pages)
+    ? group.pages.flatMap((page) => typeof page === 'string' ? [page] : listedOperationKeys([page]))
+    : [])
+}
+
+/**
+ * Whether the sidebar lists the operation an `api.groups` key names (`METHOD /path` or
+ * `WEBHOOK METHOD name`; method case and inner whitespace forgiven, path exact).
+ * Mirrors `operationKeyFromRef` in src/lib/openapi/operation-keys.ts.
+ */
+export function groupKeyState(document: unknown, key: string, overrides?: unknown): State {
+  const match = /^(WEBHOOK )?(\S+) (.+)$/i.exec(key.trim().replace(/\s+/g, ' '))
+  if (!match) return 'unknown'
+  const [, webhook, method, path] = match
+  return webhook ? webhookState(document, path, overrides, method) : operationState(document, method, path, overrides)
 }
