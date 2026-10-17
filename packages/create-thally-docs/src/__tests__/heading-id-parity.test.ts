@@ -44,14 +44,14 @@ describe('heading id parity between the migrator and thally check', () => {
   })
 })
 
-describe('step title ids with character references', () => {
-  /** Every `id` the renderer gives the compiled page, in document order. */
-  async function renderedIds(source: string): Promise<Array<string>> {
-    const { compile } = await import('@mdx-js/mdx')
-    const compiled = String(await compile(source, { rehypePlugins: [rehypePlugins[2]] }))
-    return [...compiled.matchAll(/\bid: "([^"]+)"/g)].map((match) => match[1])
-  }
+/** Every `id` the renderer gives the compiled page, in document order. */
+async function renderedIds(source: string): Promise<Array<string>> {
+  const { compile } = await import('@mdx-js/mdx')
+  const compiled = String(await compile(source, { rehypePlugins: [rehypePlugins[2]] }))
+  return [...compiled.matchAll(/\bid: "([^"]+)"/g)].map((match) => match[1])
+}
 
+describe('step title ids with character references', () => {
   it.each(['A &amp; B', 'A &#x26; B', 'A &#38; B', '&lt;tag&gt;', 'Caf&eacute;'])('gives the title %s one id in thally check, the renderer and the content parser', async (title) => {
     const source = `<Steps titleSize="h3">\n<Step title="${title}">\nBody.\n</Step>\n</Steps>`
     const [id] = await renderedIds(source)
@@ -65,5 +65,33 @@ describe('step title ids with character references', () => {
     const source = '<Steps titleSize="h&#51;">\n<Step title="Deploy">\nBody.\n</Step>\n</Steps>'
     expect(await renderedIds(source)).toEqual(['deploy'])
     expect(await brokenAnchorOutput(source, 'deploy')).not.toContain('Broken anchor')
+  })
+})
+
+describe('step tags that are not elements of the page', () => {
+  const inlineCode = 'Write `<Steps titleSize="h3"><Step title="Deploy">` in the file.'
+  const comment = '{/* <Steps titleSize="h3"><Step title="Deploy"></Step></Steps> */}'
+  const fence = '```mdx\n<Steps titleSize="h3">\n<Step title="Deploy">x</Step>\n</Steps>\n```'
+  const real = '## Deploy\n\n<Steps titleSize="h3">\n<Step title="Deploy">\nBody.\n</Step>\n</Steps>'
+
+  it.each([
+    ['inline code', inlineCode],
+    ['an MDX comment', comment],
+    ['a code fence', fence],
+    ['all three', [inlineCode, comment, fence].join('\n\n')],
+  ])('numbers the headings after %s as the renderer and the content parser do', async (_name, before) => {
+    const source = `${before}\n\n${real}`
+    const ids = await renderedIds(source)
+    expect(ids).toEqual(['deploy', 'deploy-2'])
+    expect(parseMdxContent(source).headings.map((heading) => heading.id)).toEqual(ids)
+    for (const id of ids) expect(await brokenAnchorOutput(source, id)).not.toContain('Broken anchor')
+    // A phantom step ahead of the heading would have pushed it to `deploy-3`.
+    expect(await brokenAnchorOutput(source, 'deploy-3')).toContain('Broken anchor')
+  })
+
+  it('finds no step in a page MDX cannot read, as the content parser does, and does not fail', async () => {
+    const source = '<Steps titleSize="h3">\n<Step title="One">x</Step>\n</Steps>\n\n{unclosed'
+    expect(parseMdxContent(source).headings).toEqual([])
+    expect(await brokenAnchorOutput(source, 'one')).toContain('Broken anchor')
   })
 })

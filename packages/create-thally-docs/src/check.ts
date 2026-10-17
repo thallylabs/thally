@@ -194,86 +194,54 @@ function renderedHeadingText(source: string): string {
   return visible
 }
 
-/** The index of the `>` that ends a tag whose attributes start at `from`: one outside quoted values and `{...}` expressions, at any depth. -1 when the tag never ends. */
-function tagEnd(text: string, from: number): number {
-  let depth = 0
-  let quote = ''
-  for (let index = from; index < text.length; index++) {
-    const character = text[index]
-    if (quote) {
-      if (character === quote) quote = ''
-    } else if (depth === 0 && (character === '"' || character === "'")) {
-      quote = character
-    } else if (character === '{') {
-      depth++
-    } else if (character === '}') {
-      depth = Math.max(0, depth - 1)
-    } else if (character === '>' && depth === 0) {
-      return index
-    }
-  }
-  return -1
-}
-
 const mdxParser = unified().use(remarkParse).use(remarkMdx)
 
-/**
- * A quoted JSX attribute value as MDX reads it: character references
- * (`&amp;`, `&#38;`, `&#x26;`) are decoded, which is the text the renderer and
- * the content parser slug. MDX itself reads the value, so the two agree on
- * every reference it supports; a value it cannot read is kept as written.
- */
-function decodeJsxAttribute(raw: string, quote: string): string {
-  if (!raw.includes('&')) return raw
-  try {
-    const tree = mdxParser.parse(`<X a=${quote}${raw}${quote} />`) as { children: Array<{ attributes?: Array<{ value?: unknown }> }> }
-    const value = tree.children[0]?.attributes?.[0]?.value
-    return typeof value === 'string' ? value : raw
-  } catch {
-    return raw
-  }
+/** A node of the MDX syntax tree, the one the renderer and the content parser read; JSX elements carry their tag name and attributes. */
+interface MdxNode {
+  type: string
+  name?: string | null
+  attributes?: Array<{ type: string; name?: string; value?: unknown }>
+  children?: Array<MdxNode>
+  position?: { start: { line: number } }
+}
+
+/** A literal string attribute, as MDX decodes it; `null` for an expression, `undefined` when the attribute is absent. */
+function stringAttribute(node: MdxNode, name: string): string | null | undefined {
+  const attribute = node.attributes?.find((item) => item.type === 'mdxJsxAttribute' && item.name === name)
+  if (!attribute) return undefined
+  return typeof attribute.value === 'string' ? attribute.value : null
 }
 
 /**
  * Titles of the `<Step>`s that render as headings: `titleSize` h2, h3 or h4 on
  * the step or, failing that, on the `<Steps>` around it. Only literal strings
- * count, as in the runtime. Each carries the line its tag starts on.
+ * count, as in the runtime. Each carries the line its tag starts on. The steps
+ * are read from the MDX syntax tree, so a tag written inside inline code or a
+ * comment is not one; a page MDX cannot read has none, as for the content parser.
  */
 function extractStepHeadings(content: string): Array<{ line: number; base: string }> {
-  const kept = content.split('\n').map(() => '')
-  forEachNonFencedLine(content, (line, lineNumber) => { kept[lineNumber - 1] = line })
-  const text = kept.join('\n')
-  const sizes: Array<string | undefined> = []
-  const steps: Array<{ line: number; base: string }> = []
-  let line = 1
-  let counted = 0
-  let resumeAt = 0
-  for (const tag of text.matchAll(/<(\/?)(Steps?)\b/g)) {
-    if (tag.index < resumeAt) continue
-    const [opening, closing, name] = tag
-    const attributesFrom = tag.index + opening.length
-    const end = tagEnd(text, attributesFrom)
-    if (end < 0) continue
-    resumeAt = end + 1
-    const attributes = text.slice(attributesFrom, end)
-    for (; counted < tag.index; counted++) if (text[counted] === '\n') line++
-    const attribute = (key: string): string | null | undefined => {
-      const match = new RegExp(`\\s${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|(\\{))`).exec(attributes)
-      if (!match) return undefined
-      if (match[1] !== undefined) return decodeJsxAttribute(match[1], '"')
-      return match[2] !== undefined ? decodeJsxAttribute(match[2], "'") : null
-    }
-    if (name === 'Steps') {
-      if (closing) sizes.pop()
-      else if (!attributes.endsWith('/')) sizes.push(attribute('titleSize') ?? undefined)
-      continue
-    }
-    const own = attribute('titleSize')
-    const size = own === undefined ? sizes[sizes.length - 1] : own
-    const title = attribute('title')?.trim()
-    if (closing || !title || !size || !['h2', 'h3', 'h4'].includes(size)) continue
-    steps.push({ line, base: slugify(title) })
+  let tree: MdxNode
+  try {
+    tree = mdxParser.parse(content) as unknown as MdxNode
+  } catch {
+    return []
   }
+  const steps: Array<{ line: number; base: string }> = []
+  const visit = (node: MdxNode, stepSize: string | undefined): void => {
+    let childSize = stepSize
+    if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
+      // `<Steps>` hands its size to every step below it, set or not (a React context).
+      if (node.name === 'Steps') childSize = stringAttribute(node, 'titleSize') ?? undefined
+      if (node.name === 'Step') {
+        const own = stringAttribute(node, 'titleSize')
+        const size = own === undefined ? stepSize : own
+        const title = stringAttribute(node, 'title')?.trim()
+        if (title && size && ['h2', 'h3', 'h4'].includes(size)) steps.push({ line: node.position?.start.line ?? 0, base: slugify(title) })
+      }
+    }
+    for (const child of node.children ?? []) visit(child, childSize)
+  }
+  visit(tree, undefined)
   return steps
 }
 
