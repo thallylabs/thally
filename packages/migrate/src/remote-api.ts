@@ -282,9 +282,10 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
 
   // Every spec is bound, so every mount is linked once, local and remote together: each target carries the id its spec is served under,
   // and the redirects below exist before any guess from a link's last two segments.
+  // A mount whose download failed is reserved all the same: it still owns the addresses under it, which stay as authored.
   const directories = [
     ...(bundle.localApiMounts ?? []).map(({ directory }) => directory),
-    ...bound.flatMap(({ reference }) => (reference.directories ?? []).map(({ directory }) => directory)),
+    ...bundle.remoteApiSpecs.flatMap((reference) => (reference.directories ?? []).map(({ directory }) => directory)),
   ]
   const endpointRedirects = linkApiMounts(
     [

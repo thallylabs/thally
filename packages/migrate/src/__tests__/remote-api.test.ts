@@ -650,3 +650,58 @@ describe('body links to an address an authored redirect answers, inside an API d
     expect(result.warnings.filter((warning) => warning.message.includes('matched no endpoint'))[0]?.message).toMatch(/1 link\(s\).*\/reference\/nothing\./)
   })
 })
+
+describe('a configured remote mount whose download fails', () => {
+  const specWith = (paths: Record<string, unknown>) => JSON.stringify({ openapi: '3.0.0', info: { title: 'Example', version: '1' }, paths })
+  const OUTER_URL = 'https://specs.example.com/outer.json'
+  const INNER_URL = 'https://specs.example.com/inner.json'
+  // Tag `v2` with summary `List users` is `reference/v2/list-users` under the outer mount: an address of the inner one.
+  const outerSpec = specWith({ '/a': { get: { summary: 'List users', tags: ['v2'] } } })
+  const innerSpec = specWith({ '/things': { get: { summary: 'List things', tags: ['things'] } } })
+  const redirectsOf = (result: MigrationBundle) => new Map((result.docsConfig.redirects ?? []).map((redirect) => [redirect.source, redirect.destination]))
+
+  const run = (body: string, failing: Array<string>) => {
+    const input = mountedBundle()
+    input.pages = [{ ...input.pages[0], body }]
+    input.docsConfig = { tabs: input.docsConfig.tabs }
+    input.remoteApiSpecs = [
+      { url: OUTER_URL, tabLabel: 'One', directories: [{ directory: 'reference' }] },
+      { url: INNER_URL, tabLabel: 'Two', directories: [{ directory: 'reference/v2' }] },
+    ]
+    return hydrateRemoteApiSpecs(input, async (url) => {
+      if (failing.includes(url.toString())) throw new Error('offline')
+      return { finalUrl: url, body: url.toString() === OUTER_URL ? outerSpec : innerSpec, contentType: 'application/json' }
+    })
+  }
+  const failures = (result: MigrationBundle) => result.warnings.filter((warning) => warning.code === 'fetch-failed').map((warning) => warning.source)
+
+  it('keeps the addresses under a failed child mount as authored, though the parent mount would claim them', async () => {
+    const result = await run('[child](/reference/v2/list-users)\n[tag](/reference/v2/v2)', [INNER_URL])
+    expect(result.pages[0].body).toBe('[child](/reference/v2/list-users)\n[tag](/reference/v2/v2)')
+    const redirects = redirectsOf(result)
+    expect(redirects.has('/reference/v2/list-users')).toBe(false)
+    expect(redirects.has('/reference/v2/v2')).toBe(false)
+    expect(redirects.has('/reference/v2')).toBe(false)
+    expect(failures(result)).toEqual([INNER_URL])
+  })
+
+  it('keeps the addresses under a failed parent mount as authored while the child mount still links', async () => {
+    // `things/list-things` is a last-two-segments label of the child spec, which no mount may guess from.
+    const result = await run('[child](/reference/v2/things/list-things)\n[parent](/reference/things/list-things)\n[other](/reference/team/list-users)', [OUTER_URL])
+    // The failed tab binds no spec, so the child is the first one served: `default`.
+    expect(result.pages[0].body).toBe('[child](/api/default/things/get)\n[parent](/reference/things/list-things)\n[other](/reference/team/list-users)')
+    const redirects = redirectsOf(result)
+    expect(redirects.get('/reference/v2/things/list-things')).toBe('/api/default/things/get')
+    expect(redirects.has('/reference/things/list-things')).toBe(false)
+    expect([...redirects.keys()].filter((source) => source.startsWith('/reference/') && !source.startsWith('/reference/v2/'))).toEqual([])
+    expect(failures(result)).toEqual([OUTER_URL])
+  })
+
+  it('rewrites and redirects nothing under either mount when both downloads fail', async () => {
+    const body = '[a](/reference/v2/list-users)\n[b](/reference/v2/things/list-things)\n[c](/reference/things/list-things)\n[d](/reference/v2)'
+    const result = await run(body, [OUTER_URL, INNER_URL])
+    expect(result.pages[0].body).toBe(body)
+    expect([...redirectsOf(result).keys()].filter((source) => source.startsWith('/reference'))).toEqual([])
+    expect(failures(result).sort()).toEqual([INNER_URL, OUTER_URL])
+  })
+})
