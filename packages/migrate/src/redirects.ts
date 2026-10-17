@@ -80,33 +80,41 @@ export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: A
 }
 
 /**
- * The redirects kept so far, by source. Next uses the first match, so a later
- * duplicate never fires. A kept source points at the end of its chain, so a
- * walk is short however the redirects are ordered.
+ * The redirects kept so far under one reading of letter case, by source. Next
+ * uses the first match, so a later duplicate never fires and is not recorded.
+ * The graph stays acyclic as long as each redirect is recorded only after
+ * `closesLoop` has said it is safe. A walk points each source it passes at the
+ * end of its chain, so later walks are short however the redirects are ordered.
  */
-function redirectChains(): { kept: Map<string, string>; chainEnd: (route: string) => string } {
+function redirectChains(): { kept: Map<string, string>; closesLoop: (source: string, destination: string) => boolean } {
   const kept = new Map<string, string>()
-  const chainEnd = (route: string): string => {
-    let end = route
-    while (kept.has(end)) end = kept.get(end)!
-    for (let step = route; step !== end;) {
+  const closesLoop = (source: string, destination: string): boolean => {
+    let end = destination
+    // A chain through `kept` passes each source once, so a longer walk means a cycle is already there; treat it as a loop instead of walking forever.
+    for (let steps = 0; kept.has(end); steps++) {
+      if (steps >= kept.size) return true
+      end = kept.get(end)!
+    }
+    for (let step = destination; step !== end;) {
       const next = kept.get(step)!
       kept.set(step, end)
       step = next
     }
-    return end
+    return end === source
   }
-  return { kept, chainEnd }
+  return { kept, closesLoop }
 }
 
 /**
  * Drop each literal redirect that hides a page of the site, and each one that
  * closes a loop with the redirects before it (so an authored redirect, listed
- * first, wins over a generated one). Routes are compared without regard to
- * letter case; a conflict that exists only because of that gets its own
- * warning, which says the redirect can come back on a case-sensitive host.
- * Patterns are left to the callers that translate them: they cannot be
- * compared with a page path.
+ * first, wins over a generated one). Every redirect is judged under both
+ * readings of letter case, before it is recorded under either: ignoring case
+ * (`next start`) and as written (OpenNext). It is dropped if it hides a page or
+ * closes a loop under either one. A conflict that exists only because case is
+ * ignored gets its own warning, which says the redirect can come back on a
+ * case-sensitive host. Patterns are left to the callers that translate them:
+ * they cannot be compared with a page path.
  */
 export function dropConflictingRedirects(
   config: MigrationDocsConfig,
@@ -120,7 +128,6 @@ export function dropConflictingRedirects(
   const hiddenByCase: Array<string> = []
   const looping: Array<string> = []
   const loopingByCase: Array<string> = []
-  // The same walk twice: with case ignored it decides what is dropped, as written it tells whether case alone made the conflict.
   const folded = redirectChains()
   const asWritten = redirectChains()
   const redirects = config.redirects.filter((redirect) => {
@@ -135,17 +142,19 @@ export function dropConflictingRedirects(
     }
     if (!destination) return true
     const writtenDestination = exactRoute(redirect.destination)!
-    if (!folded.kept.has(source)) {
-      // `source` has no redirect of its own yet, so it can only end the chain from `destination`: this redirect would close a cycle.
-      if (folded.chainEnd(destination) === source) {
-        const loopsAsWritten = !asWritten.kept.has(writtenSource) && asWritten.chainEnd(writtenDestination) === writtenSource
-        const loops = loopsAsWritten ? looping : loopingByCase
-        loops.push(`${redirect.source} -> ${redirect.destination}`)
-        return false
-      }
-      folded.kept.set(source, destination)
+    // A source that already has a redirect under a reading never fires there (the first listed wins), so it cannot loop there and is not recorded there.
+    // A case variant of a listed source is unreachable on `next start` but live on OpenNext, so it is still checked, and recorded, as written.
+    const firesFolded = !folded.kept.has(source)
+    const firesAsWritten = !asWritten.kept.has(writtenSource)
+    const loopsFolded = firesFolded && folded.closesLoop(source, destination)
+    const loopsAsWritten = firesAsWritten && asWritten.closesLoop(writtenSource, writtenDestination)
+    if (loopsFolded || loopsAsWritten) {
+      const loops = loopsAsWritten ? looping : loopingByCase
+      loops.push(`${redirect.source} -> ${redirect.destination}`)
+      return false
     }
-    if (!asWritten.kept.has(writtenSource)) asWritten.kept.set(writtenSource, writtenDestination)
+    if (firesFolded) folded.kept.set(source, destination)
+    if (firesAsWritten) asWritten.kept.set(writtenSource, writtenDestination)
     return true
   })
   if (hidden.length > 0) {

@@ -3,12 +3,13 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { createContext, Script } from 'node:vm'
 
 import { describe, expect, it } from 'vitest'
 
 import { migrateRepository } from '../index.js'
 import { dropConflictingRedirects, dropUnroutableRedirects } from '../redirects.js'
-import type { MigrationBundle, MigrationDocsConfig } from '../types.js'
+import type { MigrationBundle, MigrationDocsConfig, MigrationWarning } from '../types.js'
 
 type Redirects = NonNullable<MigrationDocsConfig['redirects']>
 
@@ -24,6 +25,31 @@ function redirectCycle(redirects: Redirects): Array<string> | null {
     }
   }
   return null
+}
+
+/**
+ * `dropConflictingRedirects` under a watchdog. A test timeout cannot interrupt a
+ * synchronous loop, but a `vm` timeout can, so a hang is reported as a failure
+ * instead of freezing the run.
+ */
+const watchdog = { script: new Script('result = drop({ tabs: [], redirects }, pages, warnings)'), context: createContext({ drop: dropConflictingRedirects }) }
+
+function dropWithin(redirects: Redirects, pages: ReadonlyArray<{ id: string }>, limitMs = 1000): { redirects: Redirects; warnings: Array<MigrationWarning> } {
+  const warnings: Array<MigrationWarning> = []
+  Object.assign(watchdog.context, { redirects, pages, warnings })
+  watchdog.script.runInContext(watchdog.context, { timeout: limitMs })
+  return { redirects: (watchdog.context as { result: MigrationDocsConfig }).result.redirects ?? [], warnings }
+}
+
+/** Deterministic generator (mulberry32), so a failing redirect set can be rebuilt from its seed. */
+function seeded(seed: number): () => number {
+  let state = seed
+  return () => {
+    state = (state + 0x6d2b79f5) | 0
+    let mixed = Math.imul(state ^ (state >>> 15), 1 | state)
+    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296
+  }
 }
 
 const messages = (bundle: MigrationBundle): string => bundle.warnings.map((warning) => warning.message).join('\n')
@@ -277,6 +303,60 @@ describe('dropConflictingRedirects', () => {
     expect(result.redirects).toEqual(chain)
     expect(warnings).toHaveLength(1)
   })
+
+  it('does not hang on redirects that loop only when letter case is respected', () => {
+    const { redirects, warnings } = dropWithin([
+      { source: '/a', destination: '/end' },
+      { source: '/A', destination: '/b' },
+      { source: '/b', destination: '/A' },
+      { source: '/end', destination: '/A' },
+    ], pages)
+    expect(redirects).toEqual([{ source: '/a', destination: '/end' }, { source: '/A', destination: '/b' }])
+    expect(warnings.map((warning) => warning.message)).toEqual([
+      'Skipped 1 redirect that would send visitors in a circle: /b -> /A. Check these redirects in the source docs.',
+      'Skipped 1 redirect that would send visitors in a circle on a server that ignores letter case, since the addresses involved differ only in letter case: /end -> /A. If your host matches URLs case-sensitively, add it back to docs.json.',
+    ])
+  }, 2000)
+
+  it('checks a case variant of a listed source, which only a case-sensitive host serves, for a loop of its own', () => {
+    const { redirects, warnings } = dropWithin([
+      { source: '/a', destination: '/b' },
+      { source: '/A', destination: '/C' },
+      { source: '/C', destination: '/A' },
+    ], pages)
+    expect(redirects).toEqual([{ source: '/a', destination: '/b' }, { source: '/A', destination: '/C' }])
+    expect(warnings.map((warning) => warning.message)).toEqual(['Skipped 1 redirect that would send visitors in a circle: /C -> /A. Check these redirects in the source docs.'])
+  }, 2000)
+
+  it('keeps no loop and no hidden page under either comparison, over seeded random mixed-case sets', () => {
+    const random = seeded(20261017)
+    const pick = <T>(items: ReadonlyArray<T>): T => items[Math.floor(random() * items.length)]
+    const routes = ['/a', '/A', '/b', '/B', '/c', '/C', '/end']
+    const foldAll = (list: Redirects): Redirects => list.map(({ source, destination }) => ({ source: source.toLowerCase(), destination: destination.toLowerCase() }))
+    let dropped = 0
+    for (let run = 0; run < 2000; run++) {
+      const sitePages = ['a', 'B', 'c', 'end'].filter(() => random() < 0.1).map((id) => ({ id }))
+      const served = new Set(sitePages.map((page) => `/${page.id.toLowerCase()}`))
+      const input: Redirects = Array.from({ length: 1 + Math.floor(random() * 8) }, () => ({ source: pick(routes), destination: pick(routes) }))
+      const context = JSON.stringify({ run, pages: sitePages.map((page) => page.id), input })
+      const { redirects: kept, warnings } = dropWithin(input, sitePages)
+      // Safe: next start (case ignored) and OpenNext (case kept) each follow the first redirect listed for a source.
+      expect(redirectCycle(kept), context).toBeNull()
+      expect(redirectCycle(foldAll(kept)), context).toBeNull()
+      expect(kept.filter((redirect) => served.has(redirect.source.toLowerCase())), context).toEqual([])
+      // Not over-eager: each dropped redirect hid a page or closed a loop with the redirects kept before it.
+      const text = warnings.map((warning) => warning.message).join('\n')
+      input.forEach((redirect, index) => {
+        if (kept.includes(redirect)) return
+        dropped++
+        const earlier = [...kept.filter((other) => input.indexOf(other) < index), redirect]
+        const unsafe = served.has(redirect.source.toLowerCase()) || redirectCycle(earlier) !== null || redirectCycle(foldAll(earlier)) !== null
+        expect(unsafe, context).toBe(true)
+        expect(text, context).toContain(redirect.source)
+      })
+    }
+    expect(dropped).toBeGreaterThan(1000)
+  }, 10_000)
 
   it('returns a config without redirects unchanged', () => {
     const bare: MigrationDocsConfig = { tabs: [] }
