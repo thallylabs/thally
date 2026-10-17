@@ -1475,7 +1475,7 @@ describe('Mintlify repository migration', () => {
     expect(bundle.warnings.map((warning) => warning.message).join('\n')).toContain('Created 2000 of 2051 Mintlify endpoint redirects; skipped 51 because a site is limited to 2000')
   })
 
-  it('drops a manual OpenAPI operation listing ("GET /path") with one warning instead of one missing-page warning per operation', () => {
+  it('lists a manual OpenAPI operation listing ("GET /path") under a bound tab as the tab\'s api.groups, without a warning', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({
       navigation: {
@@ -1492,7 +1492,132 @@ describe('Mintlify repository migration', () => {
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
 
     expect(bundle.warnings.filter((warning) => warning.code === 'missing-page')).toHaveLength(0)
-    expect(bundle.warnings.filter((warning) => /hand-pick or reorder individual OpenAPI operations/.test(warning.message))).toHaveLength(1)
+    expect(bundle.warnings.filter((warning) => /individual OpenAPI operations/.test(warning.message))).toEqual([])
+    const tab = bundle.docsConfig.tabs.find((entry) => entry.tab === 'API Reference')
+    expect(tab?.pages).toEqual(['landing'])
+    // The authored list is the navigation: generated navigation stays on.
+    expect(tab?.api).toEqual({ source: 'openapi/service.yml', groups: [{ group: 'API Reference', pages: ['GET /users', 'POST /users'] }] })
+  })
+
+  it('still warns once about operation entries under a tab that names no spec, and keeps generated navigation off there', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      api: { openapi: 'service.yml' },
+      navigation: { tabs: [{ tab: 'API Reference', pages: ['GET /users', 'POST /users', 'landing'] }] },
+    }))
+    writeFileSync(join(root, 'service.yml'), 'openapi: 3.1.0\ninfo: { title: Service, version: "1.0" }\npaths: {}')
+    writeFileSync(join(root, 'landing.mdx'), '---\ntitle: Landing\n---\n\nLanding.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.warnings.filter((warning) => warning.code === 'missing-page')).toHaveLength(0)
+    const warnings = bundle.warnings.filter((warning) => /individual OpenAPI operations/.test(warning.message))
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toMatch(/not added to the API navigation/)
+    expect(bundle.docsConfig.tabs.find((entry) => entry.tab === 'API Reference')?.api).toEqual({ source: 'openapi/service.yml', navigation: false })
+  })
+
+  it('splits a group that mixes pages and operations: pages stay in the tab, operations go to api.groups', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [{
+          tab: 'Docs',
+          groups: [
+            { group: 'Start', pages: ['guide'] },
+            { group: 'Users', openapi: 'service.yml', pages: ['users-overview', 'GET /users', { group: 'Admin', pages: ['DELETE /users/{id}'] }] },
+          ],
+        }],
+      },
+    }))
+    writeFileSync(join(root, 'service.yml'), 'openapi: 3.1.0\ninfo: { title: Service, version: "1.0" }\npaths: {}')
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide.')
+    writeFileSync(join(root, 'users-overview.mdx'), '---\ntitle: Users\n---\n\nUsers.')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const tab = bundle.docsConfig.tabs.find((entry) => entry.tab === 'Docs')
+    expect(tab?.groups).toEqual([{ group: 'Start', pages: ['guide'] }, { group: 'Users', pages: ['users-overview'] }])
+    expect(tab?.api).toEqual({ source: 'openapi/service.yml', groups: [{ group: 'Users', pages: ['GET /users', { group: 'Admin', pages: ['DELETE /users/{id}'] }] }] })
+    expect(bundle.warnings.filter((warning) => /individual OpenAPI operations/.test(warning.message))).toEqual([])
+  })
+
+  it('binds the groups of every product\'s API tab that shares one local spec to one tab, merged in order', () => {
+    const root = fixture()
+    const platform = [
+      { group: 'Compute', pages: [{ group: 'Projects', pages: ['POST /v2/projects.createProject', 'POST /v2/projects.getProject'] }, { group: 'Apps', pages: ['POST /v2/apps.createApp'] }] },
+      { group: 'API management', pages: [{ group: 'Keys', pages: ['POST /v2/keys.createKey'] }] },
+    ]
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        products: [
+          { product: 'Platform', tabs: [{ tab: 'Guides', groups: [{ group: 'Start', pages: ['guide'] }] }, { tab: 'API reference', openapi: { source: 'o.yaml', directory: 'platform/api-reference' }, groups: platform }] },
+          { product: 'Compute', tabs: [{ tab: 'API reference', openapi: { source: 'o.yaml', directory: 'compute/api-reference' }, groups: [{ group: 'Projects', pages: ['POST /v2/projects.createProject'] }, { group: 'Apps', pages: ['POST /v2/apps.createApp', 'POST /v2/apps.listApps'] }] }] },
+          { product: 'API management', tabs: [{ tab: 'API reference', openapi: { source: 'o.yaml', directory: 'api-management/api-reference' }, groups: [{ group: 'Keys', pages: ['POST /v2/keys.createKey'] }] }] },
+        ],
+      },
+    }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    writeFileSync(join(root, 'o.yaml'), 'openapi: 3.1.0\ninfo: { title: O, version: "1.0" }\npaths: {}')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const tabs = bundle.docsConfig.tabs.filter((tab) => tab.api)
+    expect(tabs.map((tab) => tab.tab)).toEqual(['API reference'])
+    // Platform's tree comes first; Compute adds only the operation Platform did not list; API management adds nothing.
+    expect(tabs[0].api).toEqual({
+      source: 'openapi/o.yaml',
+      groups: [
+        platform[0],
+        platform[1],
+        { group: 'Apps', pages: ['POST /v2/apps.listApps'] },
+      ],
+    })
+    expect(bundle.warnings.filter((warning) => /individual OpenAPI operations/.test(warning.message))).toEqual([])
+  })
+
+  it('leaves a local API tab without api.groups when any reference binding the spec to it lists no operation', () => {
+    const listed = [{ group: 'Projects', pages: ['POST /v2/projects.createProject'] }]
+    const migrate = (references: Array<Record<string, unknown>>) => {
+      const root = fixture()
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({
+        navigation: { products: references.map((reference, index) => ({ product: `P${index}`, tabs: [{ tab: 'API reference', openapi: { source: 'o.yaml', directory: `p${index}/api-reference` }, ...reference }] })) },
+      }))
+      writeFileSync(join(root, 'o.yaml'), 'openapi: 3.1.0\ninfo: { title: O, version: "1.0" }\npaths: {}')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      return bundle.docsConfig.tabs.filter((tab) => tab.api)
+    }
+
+    // Mintlify generated every operation's navigation for the unlisted reference: the tab keeps the generated, tag-grouped navigation.
+    for (const references of [[{ groups: listed }, {}], [{}, { groups: listed }], [{ groups: listed }, {}, { groups: listed }]]) {
+      const tabs = migrate(references)
+      expect(tabs.map((tab) => tab.tab)).toEqual(['API reference'])
+      expect(tabs[0].api).toEqual({ source: 'openapi/o.yaml' })
+    }
+    // Every reference lists operations: the lists are merged.
+    expect(migrate([{ groups: listed }, { groups: listed }])[0].api?.groups).toEqual(listed)
+  })
+
+  it('carries the merged groups of one remote spec shared by several products', () => {
+    const root = fixture()
+    const source = 'https://specs.example.com/openapi.json'
+    const platform = [{ group: 'Compute', pages: [{ group: 'Projects', pages: ['POST /v2/projects.createProject'] }] }, { group: 'API management', pages: [{ group: 'APIs', pages: ['POST /v2/apis.createApi'] }] }]
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        products: [
+          { product: 'Platform', tabs: [{ tab: 'API reference', openapi: { source, directory: 'platform/api-reference' }, groups: platform }] },
+          { product: 'Compute', tabs: [{ tab: 'API reference', openapi: { source, directory: 'compute/api-reference' }, groups: [{ group: 'Projects', pages: ['POST /v2/projects.createProject'] }] }] },
+          { product: 'API management', tabs: [{ tab: 'API reference', openapi: { source, directory: 'api-management/api-reference' }, groups: [{ group: 'APIs', pages: ['POST /v2/apis.createApi'] }] }] },
+        ],
+      },
+    }))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.remoteApiSpecs).toHaveLength(1)
+    expect(bundle.remoteApiSpecs?.[0].groups).toEqual(platform)
+    expect(bundle.remoteApiSpecs?.[0].directories?.map((entry) => entry.directory)).toEqual(['platform/api-reference', 'compute/api-reference', 'api-management/api-reference'])
+    expect(bundle.warnings.filter((warning) => /individual OpenAPI operations/.test(warning.message))).toEqual([])
   })
 
   it('defers remote OpenAPI downloads and keeps other content', () => {
@@ -1564,6 +1689,8 @@ describe('Mintlify repository migration', () => {
         { directory: 'compute/api-reference', operations: ['POST /v2/projects.createProject'] },
         { directory: 'platform/api-reference', operations: ['POST /v2/projects.createProject'] },
       ],
+      // Platform lists the same operation, so it adds nothing to Compute's group.
+      groups: [{ group: 'Projects', pages: ['POST /v2/projects.createProject'] }],
     }])
   })
 
@@ -1646,6 +1773,11 @@ describe('Mintlify repository migration', () => {
       url: source,
       tabLabel: 'API reference',
       directories: [{ directory: 'api-reference', operations: ['POST /v2/keys.create', 'POST /v2/keys.get', 'POST /v2/keys.delete'] }],
+      // The sidebar groups follow the same union, without repeating an operation; same-titled groups are not folded together.
+      groups: [
+        { group: 'Keys', pages: ['POST /v2/keys.create', 'POST /v2/keys.get'] },
+        { group: 'Keys', pages: ['POST /v2/keys.delete'] },
+      ],
     }])
     // A tab that lists no operation had every operation generated, so the union is every operation.
     expect(migrate({})?.[0].directories).toEqual([{ directory: 'api-reference' }])

@@ -11,6 +11,7 @@ import { descendNavigationAccess, hasNavigationRules, isNavigationRestricted, na
 import type { NavigationAccess } from './mintlify-extras.js'
 import { mintlifyLocalizedReference, pageIdFromReference, resolveWithin, trimEdgeSlashes } from './path.js'
 import type {
+  MigrationApiGroup,
   MigrationDocsConfig,
   MigrationNavigationGroup,
   MigrationNavigationTab,
@@ -59,6 +60,11 @@ export interface MintlifyProjectionOptions {
    * when the repository was not mapped with `--source-ref`.
    */
   resolveSourceRef?: (repo: string) => Array<string | MigrationNavigationGroup> | null
+  /**
+   * Set by a caller that binds the authored operation lists (`mintlifyNavigationApiReferences`
+   * `groups`) to their API tabs. Without it every "METHOD /path" entry is reported as not carried over.
+   */
+  operationGroups?: boolean
 }
 
 /** Preserve Mintlify's implicit `/section` route for section landing pages. */
@@ -351,6 +357,8 @@ export interface MintlifyApiSpecReference {
   directory?: string
   /** `METHOD /path` operations the navigation under this reference lists, in authored order; absent when it lists none. */
   operations?: Array<string>
+  /** The authored group tree of those operations (nesting and order kept); absent when it lists none or access rules withhold them. */
+  groups?: Array<MigrationApiGroup>
 }
 
 /** `openapi`/`asyncapi` is a path/URL string, or Mintlify's `{ source, directory }` object. */
@@ -381,6 +389,75 @@ function listedOperations(container: Record<string, unknown>): Array<string> {
   return operations
 }
 
+/** Whether a navigation container binds an OpenAPI/AsyncAPI spec of its own. */
+const bindsSpec = (node: Record<string, unknown>): boolean => Boolean(specSource(node.openapi) || specSource(node.asyncapi))
+
+/** An operation entry as the renderer matches it: trimmed, one space after the method. */
+const operationKey = (entry: string): string => entry.trim().replace(/^(\S+)\s+/, '$1 ')
+
+/**
+ * The group tree of the operations a binding container lists, in authored
+ * order. A container that is itself a group is the tree's only root; any other
+ * container contributes its `groups` and `pages` (operations listed straight
+ * under it share one group named after the container, since an API group
+ * needs a title). Page entries are not part of the tree, and neither are
+ * groups that end up empty, hidden groups (Mintlify keeps them out of the
+ * sidebar), access-restricted groups, or a nested container that binds a spec
+ * of its own (it lists that spec's operations).
+ */
+function operationGroups(container: Record<string, unknown>): Array<MigrationApiGroup> {
+  const entries = (node: Record<string, unknown>, depth: number): Array<string | MigrationApiGroup> =>
+    (['groups', 'pages'] as const).flatMap((key) => (Array.isArray(node[key]) ? node[key] as Array<unknown> : []).flatMap<string | MigrationApiGroup>((entry) => {
+      if (typeof entry === 'string') return OPENAPI_OPERATION_REF.test(entry) ? [operationKey(entry)] : []
+      const object = objectValue(entry)
+      const group = object && !bindsSpec(object) ? groupOf(object, depth + 1) : undefined
+      return group ? [group] : []
+    }))
+  const groupOf = (node: Record<string, unknown>, depth: number): MigrationApiGroup | undefined => {
+    if (depth > SWEEP_DEPTH_LIMIT || node.hidden === true || navigationGateReason(node)) return undefined
+    if (!('group' in node) && !Array.isArray(node.pages)) return undefined
+    const pages = entries(node, depth)
+    const icon = iconName(node.icon)
+    return pages.length > 0 ? { group: labelFor(node, 'Documentation'), ...(icon ? { icon } : {}), pages } : undefined
+  }
+  if (typeof container.group === 'string') {
+    const group = groupOf(container, 0)
+    return group ? [group] : []
+  }
+  const top = entries(container, 0)
+  const loose = top.filter((entry): entry is string => typeof entry === 'string')
+  const groups = top.filter((entry): entry is MigrationApiGroup => typeof entry !== 'string')
+  return loose.length > 0 ? [{ group: labelFor(container, 'API reference'), pages: loose }, ...groups] : groups
+}
+
+/** Every operation key of a group tree, nested groups included. */
+const groupOperationKeys = (groups: ReadonlyArray<MigrationApiGroup>): Array<string> =>
+  groups.flatMap(({ pages }) => pages.flatMap((page) => typeof page === 'string' ? [page] : groupOperationKeys([page])))
+
+/**
+ * Append the groups of another reference bound to the same tab: authored order
+ * is kept, an operation already listed earlier (method case-insensitive, path
+ * exact) is dropped, and a group left empty disappears.
+ */
+export function mergeApiGroups(
+  existing: ReadonlyArray<MigrationApiGroup> | undefined,
+  incoming: ReadonlyArray<MigrationApiGroup> | undefined,
+): Array<MigrationApiGroup> | undefined {
+  const identity = (key: string): string => key.replace(/^(\S+)/, (method) => method.toLowerCase())
+  const seen = new Set(groupOperationKeys(existing ?? []).map(identity))
+  const unseen = (groups: ReadonlyArray<MigrationApiGroup>): Array<MigrationApiGroup> => groups.flatMap((group) => {
+    const pages = group.pages.flatMap<string | MigrationApiGroup>((page) => {
+      if (typeof page !== 'string') return unseen([page])
+      if (seen.has(identity(page))) return []
+      seen.add(identity(page))
+      return [page]
+    })
+    return pages.length > 0 ? [{ ...group, pages }] : []
+  })
+  const merged = [...(existing ?? []), ...unseen(incoming ?? [])]
+  return merged.length > 0 ? merged : undefined
+}
+
 const hasNavigationChildren = (node: Record<string, unknown>): boolean =>
   ['groups', 'pages'].some((key) => Array.isArray(node[key]) && (node[key] as Array<unknown>).length > 0)
 
@@ -405,16 +482,19 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
   const containerKeys = ['tabs', 'anchors', 'products', 'dropdowns', 'versions', 'menus', 'languages'] as const
   const nestedKeys = ['groups', 'pages'] as const
 
-  function collect(node: Record<string, unknown>, tabLabel: string | undefined, sibling?: Pick<MintlifyApiSpecReference, 'parentTab' | 'icon' | 'hidden'>): void {
+  // `gated` is set under a container with access rules: its operations stay out of the authored API groups, as they stay out of the kept operations.
+  function collect(node: Record<string, unknown>, tabLabel: string | undefined, gated: boolean, sibling?: Pick<MintlifyApiSpecReference, 'parentTab' | 'icon' | 'hidden'>): void {
     for (const kind of ['openapi', 'asyncapi'] as const) {
       const value = specSource(node[kind])
       const directory = objectValue(node[kind])?.directory
       if (value) {
         const operations = typeof directory === 'string' && directory.trim() ? listedOperations(node) : []
+        const groups = gated ? [] : operationGroups(node)
         references.push({
           value, kind, tabLabel, ...sibling,
           ...(typeof directory === 'string' && directory.trim() ? { directory: directory.trim() } : {}),
           ...(operations.length > 0 ? { operations } : {}),
+          ...(groups.length > 0 ? { groups } : {}),
         })
       }
     }
@@ -430,7 +510,7 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
     return candidate
   }
 
-  function visitChildren(rawNode: Record<string, unknown>, tabLabel: string | undefined): void {
+  function visitChildren(rawNode: Record<string, unknown>, tabLabel: string | undefined, gated: boolean): void {
     const node = withFlattenedProductGroups(rawNode)
     for (const key of containerKeys) {
       const entries = node[key]
@@ -442,7 +522,7 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
         // level (Mintlify tabs aren't themselves nested inside other tabs in
         // practice, but anchors/dropdowns can sit inside a tab) — reuse the
         // enclosing tab's label unless this container names its own.
-        visit(object, labelFor(object, tabLabel ?? 'Documentation'))
+        visit(object, labelFor(object, tabLabel ?? 'Documentation'), gated)
       }
     }
     for (const key of nestedKeys) {
@@ -451,7 +531,7 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
       for (const entry of entries) {
         if (typeof entry === 'string') continue
         const object = objectValue(entry)
-        if (object) visit(object, tabLabel)
+        if (object) visit(object, tabLabel, gated)
       }
     }
     if (Array.isArray(node.menu)) {
@@ -463,25 +543,27 @@ export function mintlifyNavigationApiReferences(config: Record<string, unknown>)
       const apiItems = items.filter((item) => specSource(item.openapi) || specSource(item.asyncapi))
       const soleContent = apiItems.length === 1 && !hasNavigationChildren(node) && !items.some(hasNavigationChildren)
       items.forEach((item, index) => {
-        if (soleContent && apiItems[0] === item) collect(item, tab)
+        const itemGated = gated || Boolean(navigationGateReason(item))
+        if (soleContent && apiItems[0] === item) collect(item, tab, itemGated)
         else if (apiItems.includes(item)) {
           const label = uniqueSiblingLabel(
             `${tab}: ${labelFor(item, `Menu item ${index + 1}`)}`,
             `${specSource(item.openapi) ?? ''}|${specSource(item.asyncapi) ?? ''}`,
           )
           const icon = iconName(item.icon)
-          collect(item, label, { parentTab: tab, ...(icon ? { icon } : {}), ...(item.hidden === true ? { hidden: true } : {}) })
+          collect(item, label, itemGated, { parentTab: tab, ...(icon ? { icon } : {}), ...(item.hidden === true ? { hidden: true } : {}) })
         }
-        visitChildren(item, tabLabel)
+        visitChildren(item, tabLabel, itemGated)
       })
     }
   }
 
-  function visit(node: Record<string, unknown>, tabLabel: string | undefined): void {
-    collect(node, tabLabel)
-    visitChildren(node, tabLabel)
+  function visit(node: Record<string, unknown>, tabLabel: string | undefined, outerGated: boolean): void {
+    const gated = outerGated || Boolean(navigationGateReason(node))
+    collect(node, tabLabel, gated)
+    visitChildren(node, tabLabel, gated)
   }
-  visit(navigation, undefined)
+  visit(navigation, undefined, false)
   return references
 }
 
@@ -523,6 +605,10 @@ interface ProjectionContext {
   appearances: Array<MintlifyReferenceAccess>
   /** Access accumulated from the containers above the node being walked. */
   access: NavigationAccess
+  /** Where an operation entry ("GET /users") under the node being walked goes. */
+  operations: OperationScope
+  /** The caller binds authored operation lists, so the entries under a bound container are migrated, not reported. */
+  operationGroups: boolean
   gatedSourceRefs: Array<string>
   /** `sourceRef` nodes found under any restricted container, whichever container kind holds them. */
   gatedNodes: Map<object, string>
@@ -530,6 +616,23 @@ interface ProjectionContext {
   limits: { tooDeep: boolean }
   /** Label of the nearest enclosing navigation group, for warnings. */
   groupLabel?: string
+}
+
+/**
+ * Where operation entries under a navigation node go: `bound` when a container
+ * above them (reached through `groups`/`pages` only, as the reference collector
+ * walks) binds a spec, so `mintlifyNavigationApiReferences` lists them in that
+ * tab's API groups, unless `gated` access rules withhold them. Both walks use
+ * these rules, so an entry is either migrated or warned about, never both or neither.
+ */
+interface OperationScope {
+  bound: boolean
+  gated: boolean
+}
+
+/** A container reached through a container key (`tabs`, `menu`, ...) starts over; a group or page inherits its parent's binding. */
+function descendOperationScope(scope: OperationScope, node: Record<string, unknown>, nested: boolean): OperationScope {
+  return { bound: (!nested && scope.bound) || bindsSpec(node), gated: scope.gated || Boolean(navigationGateReason(node)) }
 }
 
 /** How deep the access sweeps follow the navigation; anything deeper is withheld rather than guessed at. */
@@ -589,13 +692,24 @@ function collectReferenceAccess(
 }
 
 /** Walk `walk` one container deeper, restoring the outer access afterwards. */
-function withContainerAccess<T>(object: Record<string, unknown>, context: ProjectionContext, walk: () => T): T {
+function withContainerAccess<T>(object: Record<string, unknown>, context: ProjectionContext, walk: () => T, nested = false): T {
   const outer = context.access
   context.access = descendNavigationAccess(outer, navigationAccess(object))
   try {
-    return walk()
+    return withOperationScope(object, context, nested, walk)
   } finally {
     context.access = outer
+  }
+}
+
+/** Walk `walk` with the operation scope of `object`, restoring the outer scope afterwards. */
+function withOperationScope<T>(object: Record<string, unknown>, context: ProjectionContext, nested: boolean, walk: () => T): T {
+  const outer = context.operations
+  context.operations = descendOperationScope(outer, object, nested)
+  try {
+    return walk()
+  } finally {
+    context.operations = outer
   }
 }
 
@@ -651,10 +765,10 @@ function registerReference(value: string, context: ProjectionContext): string | 
  * Mintlify lets a `pages` entry name a single OpenAPI operation directly
  * (`"GET /users"`) to hand-pick or reorder which operations of an
  * already-`openapi`-scoped ancestor appear, instead of a page file
- * reference. Thally always renders every operation of a bound spec and
- * has no manual-selection equivalent, so these are not migratable pages —
- * treating them as one is what produced a "did not resolve to a source
- * page" warning per operation instead of one explanation for the group.
+ * reference. These are not pages: under a container that binds a spec they
+ * become that tab's `api.groups` (see `operationGroups`); anywhere else they
+ * are dropped with one warning, not a "did not resolve to a source page"
+ * warning per operation.
  */
 const OPENAPI_OPERATION_REF = /^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S/
 
@@ -664,13 +778,23 @@ function convertPage(
 ): string | MigrationNavigationGroup | null {
   if (typeof value === 'string') {
     if (OPENAPI_OPERATION_REF.test(value)) {
-      warnOnce(
-        context,
-        'openapi-operation-list',
-        'One or more navigation groups hand-pick or reorder individual OpenAPI operations (e.g. "GET /users"); '
-          + "Thally always renders every operation of a bound spec and has no manual-selection equivalent, so that "
-          + 'list was dropped. The operations themselves are still available through the bound API reference.',
-      )
+      const { bound, gated } = context.operations
+      if (!context.operationGroups || !bound) {
+        warnOnce(
+          context,
+          'openapi-operation-list',
+          'Navigation lists individual OpenAPI operations (e.g. "GET /users") that were not added to the API navigation: '
+            + 'an operation list is carried over only from a tab or group that names an openapi spec in a migrated docs.json. '
+            + 'The operations themselves still have pages in the API reference.',
+        )
+      } else if (gated) {
+        warnOnce(
+          context,
+          'openapi-operation-list-gated',
+          'Navigation lists individual OpenAPI operations (e.g. "GET /users") under access-restricted groups, '
+            + 'so they were not added to the API navigation. The operations themselves still have pages in the API reference.',
+        )
+      }
       return null
     }
     return registerReference(value, context)
@@ -792,10 +916,10 @@ function convertMenuItems(
         `Mintlify menu item "${label}" has an openapi/asyncapi value without a "source", so its API reference was not migrated.`,
       )
     }
-    const children = convertNavigationValues([
+    const children = withOperationScope(item, context, true, () => convertNavigationValues([
       ...(Array.isArray(item.groups) ? item.groups : []),
       ...(Array.isArray(item.pages) ? item.pages : []),
-    ], context)
+    ], context))
     if (typeof item.href === 'string' && item.href) {
       warnOnce(
         context,
@@ -870,7 +994,7 @@ function convertContainerToTabs(
           ...(object.hidden === true ? { hidden: true } : {}),
         }]
       }
-      const nested = withContainerAccess(object, context, () => convertContainerToTabs(object, context, tab, trace, depth + 1))
+      const nested = withContainerAccess(object, context, () => convertContainerToTabs(object, context, tab, trace, depth + 1), true)
       if (nested.length > 0) {
         if (nested.length === 1) {
           return [{
@@ -1157,6 +1281,8 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
   return {
     // Mintlify pages show a group eyebrow above the title and no breadcrumb trail.
     breadcrumbs: false,
+    // `styling.eyebrows: "breadcrumbs"` shows the whole group path; "section" (the default) shows the nearest group.
+    ...(objectValue(config.styling)?.eyebrows === 'breadcrumbs' ? { eyebrow: 'path' as const } : {}),
     ...(projectedTheme(config.theme) ? { theme: projectedTheme(config.theme) } : {}),
     ...(projectedContextual.length > 0 ? { contextual: { options: projectedContextual } } : {}),
     ...(projectedColorsValue ? { colors: projectedColorsValue } : {}),
@@ -1390,6 +1516,8 @@ export function projectMintlifyNavigation(
   // Rules on the navigation root itself (and on a language, below) cover
   // every page under it, as the container-agnostic sweep sees them too.
   const rootAccess = descendNavigationAccess(OPEN_NAVIGATION_ACCESS, navigationAccess(navigation))
+  const rootOperations = descendOperationScope({ bound: false, gated: false }, navigation, true)
+  const operationGroups = options.operationGroups === true
   const limits = { tooDeep: false }
   collectGatedSourceRefs(navigation, undefined, gatedNodes, limits)
   if (limits.tooDeep) {
@@ -1446,6 +1574,8 @@ export function projectMintlifyNavigation(
         warningKeys,
         appearances,
         access: descendNavigationAccess(rootAccess, navigationAccess(language)),
+        operations: descendOperationScope(rootOperations, language, true),
+        operationGroups,
         gatedSourceRefs,
         gatedNodes,
         limits,
@@ -1465,9 +1595,11 @@ export function projectMintlifyNavigation(
     }
     if (Object.keys(localizedNavigation).length > 0) i18n.navigation = localizedNavigation
   } else {
-    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, appearances, access: rootAccess, gatedSourceRefs, gatedNodes, limits, pathPrefix: options.pathPrefix, resolveSourceRef: options.resolveSourceRef }
+    const context: ProjectionContext = { references, seenReferences, warnings, warningKeys, appearances, access: rootAccess, operations: rootOperations, operationGroups, gatedSourceRefs, gatedNodes, limits, pathPrefix: options.pathPrefix, resolveSourceRef: options.resolveSourceRef }
     tabs = convertContainerToTabs(navigation, context, 'Documentation', projectionTrace)
     if (tabs.length === 0 && Array.isArray(config.navigation)) {
+      // A bare list of groups (mint.json): the reference collector does not walk it, so no container binds the operations in it.
+      context.operations = { bound: false, gated: false }
       const children = convertNavigationValues(config.navigation, context)
       if (children.length > 0) {
         const hasRootPages = children.some((page) => typeof page === 'string')

@@ -78,6 +78,7 @@ import {
   insertApiTab,
   mintlifyAllVersionPrefixes,
   mintlifyDefaultVersionPrefixes,
+  mergeApiGroups,
   mintlifyNavigationApiReferences,
   projectMintlifyNavigation,
   pruneMissingNavigationPages,
@@ -98,6 +99,7 @@ import {
 } from './path.js'
 import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, servedRoutes } from './redirects.js'
 import type {
+  MigrationApiGroup,
   MigrationAsset,
   MigrationBundle,
   MigrationDocsConfig,
@@ -1475,6 +1477,8 @@ interface ResolvedApiSpec {
   directory?: string
   /** Mintlify generates this spec's endpoint pages (no published page names its operations itself), so Thally should list them in the sidebar too. */
   generatedNavigation?: boolean
+  /** The operation groups docs.json authors for the tab this spec binds to, merged across every reference that shares it. */
+  groups?: Array<MigrationApiGroup>
 }
 
 function mintlifyTopLevelApiReferences(config: Record<string, unknown> | null): Array<MintlifyApiSpecReference> {
@@ -1544,14 +1548,28 @@ function resolveMintlifyApiSpecs(
       delete mount.operations
     }
   }
+  // References sharing a spec and tab (one per product, say) are one binding: their operation groups are one list, unless
+  // one of them lists none (Mintlify generated every operation there), which leaves the generated navigation to list them all.
+  const groupTargets = new Map<string, { target: { groups?: Array<MigrationApiGroup> }; unlisted: boolean }>()
   const specs: Array<ResolvedApiSpec> = []
   for (const reference of references) {
     const dedupeKey = `${reference.kind}:${reference.value}:${reference.tabLabel ?? ''}`
     if (seen.has(dedupeKey)) {
       mountDirectory(remoteByKey.get(dedupeKey), reference)
+      const shared = groupTargets.get(dedupeKey)
+      if (shared && !shared.unlisted) {
+        if (reference.groups) {
+          const merged = mergeApiGroups(shared.target.groups, reference.groups)
+          if (merged) shared.target.groups = merged
+        } else {
+          shared.unlisted = true
+          delete shared.target.groups
+        }
+      }
       continue
     }
     seen.add(dedupeKey)
+    const groups = mergeApiGroups(undefined, reference.groups)
     const tabSuffix = reference.tabLabel ? ` (tab "${reference.tabLabel}")` : ''
     if (reference.kind === 'asyncapi') {
       warnings.push({
@@ -1561,10 +1579,11 @@ function resolveMintlifyApiSpecs(
       continue
     }
     if (/^https:\/\//i.test(reference.value)) {
-      const remote: RemoteApiSpec = { url: reference.value, ...(reference.tabLabel ? { tabLabel: reference.tabLabel } : {}), ...(reference.parentTab ? { parentTab: reference.parentTab } : {}), ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}) }
+      const remote: RemoteApiSpec = { url: reference.value, ...(reference.tabLabel ? { tabLabel: reference.tabLabel } : {}), ...(reference.parentTab ? { parentTab: reference.parentTab } : {}), ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}), ...(groups ? { groups } : {}) }
       mountDirectory(remote, reference)
       remoteSpecs.push(remote)
       remoteByKey.set(dedupeKey, remote)
+      groupTargets.set(dedupeKey, { target: remote, unlisted: !groups })
       warnings.push({
         code: 'unsupported-config',
         message: `The remote OpenAPI spec "${reference.value}"${tabSuffix} requires a network download before this import is complete.`,
@@ -1593,7 +1612,7 @@ function resolveMintlifyApiSpecs(
     }
     const content = readSpecFile(match.absolutePath, match.relativePath, warnings)
     if (!content) continue
-    specs.push({
+    const spec: ResolvedApiSpec = {
       filename: basename(match.relativePath),
       content,
       tabLabel: reference.tabLabel,
@@ -1603,7 +1622,10 @@ function resolveMintlifyApiSpecs(
       ...(reference.pageOnly ? { pageOnly: true } : {}),
       sourcePath: match.relativePath,
       directory: reference.directory,
-    })
+      ...(groups ? { groups } : {}),
+    }
+    specs.push(spec)
+    groupTargets.set(dedupeKey, { target: spec, unlisted: !groups })
   }
   // Two specs bound to *different* tabs can share a basename (e.g.
   // "qstash/openapi.yaml" and "workflow/openapi.yaml" both resolve to
@@ -3536,7 +3558,7 @@ function inlineMdxSnippets(
  */
 function injectOpenApiSpecs(
   config: MigrationDocsConfig,
-  specs: Array<{ filename: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean; generatedNavigation?: boolean }>,
+  specs: Array<{ filename: string; tabLabel?: string; parentTab?: string; icon?: string; hidden?: boolean; generatedNavigation?: boolean; groups?: Array<MigrationApiGroup> }>,
   warnings?: Array<MigrationWarning>,
 ): MigrationDocsConfig {
   const tabs = config.tabs.map((tab) => ({ ...tab }))
@@ -3560,15 +3582,17 @@ function injectOpenApiSpecs(
         // An API-only tab needs generated endpoint navigation; an authored
         // page tab keeps its own groups alongside the bound spec, unless
         // Mintlify generated the endpoint pages (the renderer appends the
-        // endpoint groups after the authored ones).
-        ...((apiTab.groups?.length || apiTab.pages?.length) && !spec.generatedNavigation ? { navigation: false } : {}),
+        // endpoint groups after the authored ones) or docs.json lists the
+        // operations itself (those authored groups are the API navigation).
+        ...((apiTab.groups?.length || apiTab.pages?.length) && !spec.generatedNavigation && !spec.groups ? { navigation: false } : {}),
+        ...(spec.groups ? { groups: spec.groups } : {}),
       }
     } else {
       insertApiTab(tabs, {
         tab: spec.tabLabel ?? 'API Reference',
         ...(spec.icon ? { icon: spec.icon } : {}),
         ...(spec.hidden ? { hidden: true } : {}),
-        api: { source: specAssetPath(spec.filename) },
+        api: { source: specAssetPath(spec.filename), ...(spec.groups ? { groups: spec.groups } : {}) },
       }, spec.parentTab)
     }
   }
@@ -3697,6 +3721,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         defaultVersionPrefixes = mintlifyDefaultVersionPrefixes(config)
         allVersionPrefixes = mintlifyAllVersionPrefixes(config)
         const projected = projectMintlifyNavigation(config, {
+          // injectOpenApiSpecs / hydrateRemoteApiSpecs bind the authored operation lists to their API tabs.
+          operationGroups: true,
           resolveSourceRef: (repo) => {
             const ref = activeSourceRefs.find((candidate) => candidate.repo.toLowerCase() === repo.toLowerCase())
             if (!ref) return null

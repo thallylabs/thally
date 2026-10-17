@@ -92,6 +92,28 @@ instead of silently dropping that API tab's reference. AsyncAPI has no Thally
 renderer, so it always produces a clear warning naming the spec instead of
 disappearing.
 
+`METHOD /path` entries (`"POST /v2/keys.createKey"`) under a container that
+binds an `openapi` spec become `api.groups` on the tab that spec binds to:
+nested groups, icons and authored order are kept, and page entries stay in the
+tab's own groups (a group that mixes pages and operations is split, so the
+sidebar lists the API groups after the page groups). Operations written
+straight under a tab share one group named after the tab. Hidden groups,
+groups under access-restricted containers, and groups left empty are left out.
+When several containers bind one spec to the same tab (one API tab per product,
+say), their groups are concatenated in order and an operation already listed
+earlier in that tab is dropped (the method is compared without case, the path
+exactly), unless one of those containers lists no operation (Mintlify generated
+every operation there), in which case the tab gets no `api.groups` and keeps the
+generated, tag-grouped navigation; groups with the same title are not folded together. With `api.groups`
+the authored list is the tab's navigation, so `navigation: false` is not
+written. Operation entries with no `openapi` container above them, and every one in a
+site imported by URL, cannot be placed: one warning says they were not added to the API navigation, and the
+operations still have their pages. This is separate from a `directory`'s flat
+operation list, which still only drives the endpoint redirects.
+
+Mintlify `styling.eyebrows: "breadcrumbs"` becomes `eyebrow: "path"` (the full
+group path above the page title); `"section"` or no setting writes nothing.
+
 Page `openapi:` frontmatter with a spec prefix
 (`openapi: "specs/openapi-b.yaml GET /widgets/{id}"`) is rewritten to where the
 spec lands in the output (`/openapi-b.yaml GET /widgets/{id}`). A prefix naming
