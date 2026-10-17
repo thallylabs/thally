@@ -41,6 +41,11 @@ export function withheldOperationKeys(
   return { withheld: keysFor(spec, withheldRefs).filter((key) => !kept.includes(key)), kept }
 }
 
+/** A UTF-8 byte order mark ahead of the document: `JSON.parse` rejects it, so a spec saved with one would not load as JSON. */
+export function withoutByteOrderMark(content: Buffer): Buffer {
+  return content.length >= 3 && content[0] === 0xef && content[1] === 0xbb && content[2] === 0xbf ? content.subarray(3) : content
+}
+
 /**
  * Reads a spec by what it is, not by its URL, file name or first character:
  * JSON when it is strict JSON, YAML when the YAML parser accepts it (flow-style

@@ -1378,6 +1378,23 @@ describe('Mintlify repository migration', () => {
     expect(bundle.docsConfig.redirects).toContainEqual({ source: '/reference/users/list-users', destination: '/api/default/users/get' })
   })
 
+  it('saves a local JSON spec without its byte order mark, which the renderer cannot parse', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API Reference', groups: [{ group: 'API Guides', pages: ['guide'] }], openapi: { source: 'openapi/openapi.json', directory: 'reference' } }] },
+    }))
+    mkdirSync(join(root, 'openapi'), { recursive: true })
+    const spec = '{"openapi":"3.1.0","info":{"title":"Svc","version":"1.0"},"paths":{"/users":{"get":{"summary":"List users","tags":["Users"],"responses":{"200":{"description":"ok"}}}}}}'
+    writeFileSync(join(root, 'openapi', 'openapi.json'), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(spec)]))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\n[a](/reference/users/list-users)')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const saved = Buffer.from(bundle.assets.find((asset) => asset.path === 'openapi/openapi.json')?.content ?? [])
+    expect(saved.toString('utf8')).toBe(spec)
+    expect(bundle.pages.find((page) => page.id === 'guide')?.body).toContain('[a](/api/default/users/get)')
+  })
+
   it('falls back to operationId, then method and path, when an operation summary is empty', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

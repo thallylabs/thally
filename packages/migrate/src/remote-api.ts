@@ -13,7 +13,7 @@ import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { insertApiTab } from './navigation.js'
 import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, servedRoutes } from './redirects.js'
 import { apiTabSpecIds, isWithheld, linkApiMounts, mountPrefix, thallyOperationSlugSegments } from './repository.js'
-import { markExcluded, parseSpecDocument, sharedSpecMessage } from './spec-exclude.js'
+import { markExcluded, parseSpecDocument, sharedSpecMessage, withoutByteOrderMark } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher, RemoteApiSpec } from './types.js'
 
 const MAX_SPEC_BYTES = 25_000_000
@@ -136,11 +136,6 @@ interface OpenApiOperation {
   path: string
   tag: string
   summary: string
-}
-
-/** A UTF-8 byte order mark ahead of the document: `JSON.parse` rejects it, so a spec saved with one would not load as JSON. */
-function withoutByteOrderMark(content: Buffer): Buffer {
-  return content.length >= 3 && content[0] === 0xef && content[1] === 0xbb && content[2] === 0xbf ? content.subarray(3) : content
 }
 
 function parseOpenApi(parsed: unknown): Array<OpenApiOperation> {

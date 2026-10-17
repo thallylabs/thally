@@ -53,7 +53,7 @@ import {
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
-import { markExcluded, parseSpecDocument, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
+import { markExcluded, parseSpecDocument, sharedSpecMessage, specRefMatches, withheldOperationKeys, withoutByteOrderMark } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
 import { mainSiteLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
 import { type BrandVars, brandColorsFromVars, cssBrandVars } from './css-colors.js'
@@ -1446,7 +1446,8 @@ function readSpecFile(absolutePath: string, relativePath: string, warnings: Arra
     })
     return undefined
   }
-  return readFileSync(absolutePath)
+  // Saved without a byte order mark, which the renderer's JSON reader rejects.
+  return withoutByteOrderMark(readFileSync(absolutePath))
 }
 
 function specAssetPath(filename: string): string {
