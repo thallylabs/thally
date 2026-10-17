@@ -444,7 +444,7 @@ describe('documentation visual system', () => {
   it('moves legacy navbar GitHub destinations into the footer', async () => {
     const { readFile } = await import('node:fs/promises')
     const topBar = await readFile('src/components/layout/top-bar.tsx', 'utf8')
-    expect(topBar).toContain("filter((link) => link.type !== 'github')")
+    expect(topBar).toContain("filter((link) => !isRepositoryLinkType(link.type))")
 
     const markup = renderToStaticMarkup(createElement(Footer, {
       footerConfig: null,
@@ -455,6 +455,19 @@ describe('documentation visual system', () => {
 
     expect(markup).toContain('href="https://github.com/example/docs"')
     expect(markup).toContain('href="/support"')
+  })
+
+  it('moves legacy navbar GitLab destinations into the footer with the GitLab icon', () => {
+    const markup = renderToStaticMarkup(createElement(Footer, {
+      footerConfig: null,
+      repositoryHref: 'https://gitlab.com/example/docs',
+      repositoryProvider: 'gitlab',
+      siteName: 'Example',
+      siteLinks: [],
+    }))
+
+    expect(markup).toContain('href="https://gitlab.com/example/docs"')
+    expect(markup).toContain('aria-label="gitlab"')
   })
 
   it('docks chat below the top bar with the fixed Thally identity', async () => {

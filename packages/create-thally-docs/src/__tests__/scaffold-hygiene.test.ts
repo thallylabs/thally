@@ -610,6 +610,31 @@ export const siteConfig = {
   })
 })
 
+describe('GitLab repository personalization', () => {
+  it('writes GitLab navbar, repository, and support links', () => {
+    const directory = temporaryDirectory('thally-gitlab-personalize-')
+    writeStarterFixture(directory)
+
+    personalizeStarter(directory, {
+      projectName: 'Acme Docs',
+      packageName: 'acme-docs',
+      description: 'Documentation for Acme.',
+      brandPreset: 'primary',
+      repoUrl: 'https://gitlab.com/acme/platform/docs',
+      enableAiChat: true,
+    })
+
+    const docs = JSON.parse(readFileSync(join(directory, 'docs.json'), 'utf8'))
+    expect(docs.navbar.links).toEqual([
+      { label: 'Support', href: 'https://support.example.com' },
+      { label: 'GitLab', href: 'https://gitlab.com/acme/platform/docs', type: 'gitlab' },
+    ])
+    const site = readFileSync(join(directory, 'src', 'data', 'site.ts'), 'utf8')
+    expect(site).toContain("{ label: 'GitLab', href: 'https://gitlab.com/acme/platform/docs' }")
+    expect(site).toContain("{ label: 'Support', href: 'https://gitlab.com/acme/platform/docs/-/issues/new' }")
+  })
+})
+
 describe('Thally Track remains owner opt-in', () => {
   it('removes starter tracking and writes only explicitly selected repositories', () => {
     const directory = temporaryDirectory('thally-starter-track-')

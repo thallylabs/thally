@@ -37,9 +37,9 @@ A link may also set `button` to render as a filled button instead of plain text:
 
 External links open in a new tab automatically.
 
-GitHub belongs in `footer.socials`. Existing sites that still declare a
-`navbar.links` item with `type: "github"` keep the destination, but Thally moves
-that icon to the footer when the site is upgraded.
+GitHub and GitLab belong in `footer.socials`. Existing sites that still declare
+a `navbar.links` item with `type: "github"` or `type: "gitlab"` keep the
+destination, but Thally moves that icon to the footer when the site is upgraded.
 
 ### `navbar.primary`
 
@@ -49,7 +49,19 @@ The primary CTA button — rendered as a filled accent pill in the top bar. When
 "primary": { "label": "Get started", "href": "/quickstart" }
 ```
 
-Set `"type": "github"` on `primary` to show the repository name and its star count instead of a labelled button. The star count is fetched from `api.github.com` in each reader's browser, so GitHub sees the reader's IP address.
+Set `"type": "github"` or `"type": "gitlab"` on `primary` to show the repository name and its star count instead of a labelled button. The star count is fetched from the provider's public API (`api.github.com`, or `/api/v4` on gitlab.com or your GitLab instance) in each reader's browser, so that provider sees the reader's IP address. A self-hosted GitLab URL works with `"type": "gitlab"` and needs no other configuration here.
+
+### Self-hosted repository hosts
+
+"Edit this page", "Report an issue", and code-sample reports follow your repository host: GitLab repositories get GitLab's `/-/edit` and `/-/issues/new` pages. github.com and gitlab.com are recognised automatically. Declare a self-hosted GitLab (or GitHub Enterprise) host in `docs.json`:
+
+```json
+"repository": {
+  "hosts": [{ "host": "gitlab.example.com", "provider": "gitlab" }]
+}
+```
+
+The `THALLY_GIT_HOSTS` environment variable (`gitlab.example.com=gitlab`) does the same and takes precedence. Unrecognised hosts keep GitHub-style links.
 
 <Note title="Fallback">
 When `navbar` is not defined in `docs.json`, Thally falls back to auto-detecting a support link and CTA from `siteConfig.links` in `src/data/site.ts`. Define `navbar` in `docs.json` when you want explicit control.
@@ -98,6 +110,7 @@ A map of social platform keys to URLs. Supported keys with icons:
 | Key | Icon |
 | --- | --- |
 | `github` | GitHub mark |
+| `gitlab` | GitLab mark |
 | `twitter` or `x` | X (Twitter) mark |
 | `discord` | Discord logo |
 | `linkedin` | LinkedIn logo |

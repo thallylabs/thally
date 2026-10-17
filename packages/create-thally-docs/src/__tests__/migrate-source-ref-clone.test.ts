@@ -16,7 +16,7 @@ vi.mock('../migrate/validate.js', () => ({ validateMigration: vi.fn().mockResolv
 vi.mock('@thallylabs/migrate', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@thallylabs/migrate')>()),
   sourceRefOversizeReason: async () => oversize.reason,
-  cloneGitHubRepository: async (source: { repo: string }, directory: string, _warnings: unknown, options: unknown) => {
+  cloneRepository: async (source: { repo: string }, directory: string, _warnings: unknown, options: unknown) => {
     cloneCalls.push({ repo: source.repo, options })
     mkdirSync(directory, { recursive: true })
     const main = source.repo === 'docs'

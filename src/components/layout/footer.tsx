@@ -3,6 +3,7 @@
 import type { SiteLink } from '@/data/site'
 import type { DocsJsonFooter } from '@/data/docs'
 import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
+import { GitlabIcon } from '@/components/layout/gitlab-icon'
 
 // Social icon SVGs (inline, no extra dep needed)
 function GithubIcon({ className }: { className?: string }) {
@@ -39,6 +40,7 @@ function LinkedInIcon({ className }: { className?: string }) {
 
 const SOCIAL_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   github: GithubIcon,
+  gitlab: GitlabIcon,
   twitter: TwitterXIcon,
   x: TwitterXIcon,
   discord: DiscordIcon,
@@ -50,7 +52,11 @@ interface FooterProps {
   siteName: string
   siteLinks: Array<SiteLink>
   showPoweredBy?: boolean
-  /** Legacy navbar GitHub links move here so upgrades preserve the destination. */
+  /** Legacy navbar repository links move here so upgrades preserve the destination. */
+  repositoryHref?: string
+  /** Social key for {@link repositoryHref}: `github` (default) or `gitlab`. */
+  repositoryProvider?: 'github' | 'gitlab'
+  /** @deprecated Use {@link repositoryHref}. */
   githubHref?: string
 }
 
@@ -72,13 +78,23 @@ function PoweredByThally() {
 }
 
 /** Render configured and default footers with the same server-decided policy. */
-export function Footer({ footerConfig, siteName, siteLinks, showPoweredBy = true, githubHref }: FooterProps) {
+export function Footer({
+  footerConfig,
+  siteName,
+  siteLinks,
+  showPoweredBy = true,
+  repositoryHref,
+  repositoryProvider = 'github',
+  githubHref,
+}: FooterProps) {
   const copyright = footerConfig?.copyright
     ? footerConfig.copyright.replace(/\{year\}/g, String(new Date().getFullYear()))
     : `© ${new Date().getFullYear()} ${siteName}. All rights reserved.`
+  const relocatedHref = repositoryHref ?? githubHref
+  const relocatedKey = repositoryHref ? repositoryProvider : 'github'
   const socials: Record<string, string> = {
     ...footerConfig?.socials,
-    ...(githubHref && !footerConfig?.socials?.github ? { github: githubHref } : {}),
+    ...(relocatedHref && !footerConfig?.socials?.[relocatedKey] ? { [relocatedKey]: relocatedHref } : {}),
   }
   const hasSocials = Object.keys(socials).length > 0
   const hasConfiguredSocials = Boolean(

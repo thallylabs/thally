@@ -21,7 +21,7 @@ export const THALLY_BUILTIN_COMPONENTS: ReadonlySet<string> = new Set([
   'PromptAssistant', 'Terminal', 'TerminalInput', 'TerminalOutput',
   'AgentPrompt', 'Color', 'Tree', 'Folder', 'File', 'ResponseField',
   'ParamField', 'Expandable', 'Mermaid', 'View', 'Embed', 'LegacyView',
-  'GitHub', 'Github', 'Visibility', 'Human', 'Agent', 'BannerPreview', 'Banner',
+  'GitHub', 'Github', 'GitLab', 'Gitlab', 'Visibility', 'Human', 'Agent', 'BannerPreview', 'Banner',
   'CodeBlock', 'Column', 'FileTree', 'LiteYouTubeEmbed', 'MDX', 'Video', 'YouTube',
 ])
 

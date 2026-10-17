@@ -1,5 +1,15 @@
 import type { DocsTask, TrackedRepoStatus } from '@/lib/cloud-bridge/types'
 
+/**
+ * Web URL for a tracked repository. Older Cloud builds send no `url` or
+ * `provider`, which means github.com.
+ */
+function trackedRepoWebUrl(repo: TrackedRepoStatus): string {
+  if (repo.url && /^https:\/\//i.test(repo.url)) return repo.url
+  const host = repo.host ?? (repo.provider === 'gitlab' ? 'gitlab.com' : 'github.com')
+  return `https://${host}/${repo.owner}/${repo.repo}`
+}
+
 export type { TrackedRepoStatus }
 
 const STATE_TONE: Record<DocsTask['state'], string> = {
@@ -42,8 +52,8 @@ export function TasksView({
         </div>
         {trackedRepos.length === 0 ? (
           <p style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-text-muted)' }}>
-            No product repos tracked yet. Run <code className="font-mono">thally track add &lt;owner/repo&gt;</code> to have
-            merged PRs there become docs PRs automatically.
+            No product repos tracked yet. Run <code className="font-mono">thally track add &lt;owner/repo | group/project | url&gt;</code> to have
+            merged PRs or MRs there become docs updates automatically.
           </p>
         ) : (
           <table className="ds-table">
@@ -56,10 +66,10 @@ export function TasksView({
             </thead>
             <tbody>
               {trackedRepos.map((r) => (
-                <tr key={`${r.owner}/${r.repo}@${r.branch}`}>
+                <tr key={`${r.provider ?? 'github'}:${r.host ?? ''}:${r.owner}/${r.repo}@${r.branch}`}>
                   <td className="max-w-0">
                     <a
-                      href={`https://github.com/${r.owner}/${r.repo}`}
+                      href={trackedRepoWebUrl(r)}
                       target="_blank"
                       rel="noreferrer"
                       className="block truncate hover:underline"

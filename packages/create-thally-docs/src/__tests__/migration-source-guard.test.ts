@@ -35,9 +35,29 @@ describe('auto-detected live-site migration guard', () => {
     expect(promptMocks.confirm).not.toHaveBeenCalled()
   })
 
+  it('leaves GitLab repository sources, including nested groups, unchanged', async () => {
+    const sourceUrl = 'https://gitlab.com/acme/platform/docs/-/tree/main/content'
+
+    await expect(resolveAutoDetectedMigrationSource(sourceUrl, true)).resolves.toBe(sourceUrl)
+    expect(promptMocks.select).not.toHaveBeenCalled()
+  })
+
+  it('accepts a GitLab repository in place of a live URL', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    promptMocks.select.mockResolvedValue('repository')
+    promptMocks.input.mockResolvedValue('https://gitlab.com/acme/docs')
+
+    await expect(resolveAutoDetectedMigrationSource('https://docs.acme.com', true)).resolves.toBe(
+      'https://gitlab.com/acme/docs',
+    )
+    const { validate } = promptMocks.input.mock.calls[0][0] as { validate: (value: string) => true | string }
+    expect(validate('https://gitlab.com/acme/platform/docs')).toBe(true)
+    expect(validate('https://docs.acme.com')).toMatch(/github\.com, gitlab\.com/)
+  })
+
   it('lets an interactive user replace a live URL with its source repository', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    promptMocks.select.mockResolvedValue('github')
+    promptMocks.select.mockResolvedValue('repository')
     promptMocks.input.mockResolvedValue('https://github.com/acme/docs')
 
     await expect(
@@ -45,7 +65,7 @@ describe('auto-detected live-site migration guard', () => {
     ).resolves.toBe('https://github.com/acme/docs')
     expect(promptMocks.input).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: expect.stringContaining('GitHub repository URL'),
+        message: expect.stringContaining('Repository URL (GitHub or GitLab)'),
         validate: expect.any(Function),
       }),
     )
@@ -86,7 +106,7 @@ describe('auto-detected live-site migration guard', () => {
     ).resolves.toBe('https://docs.acme.com')
     expect(promptMocks.select).not.toHaveBeenCalled()
     expect(promptMocks.confirm).not.toHaveBeenCalled()
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('source GitHub repository'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('source repository (GitHub or GitLab)'))
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Thally MCP'))
   })
 })

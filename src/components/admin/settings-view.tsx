@@ -6,6 +6,7 @@ import { getAiConfig, isAnalyticsEnabled } from '@/data/docs'
 import { AdminSettingsControls } from '@/components/admin/admin-settings-controls'
 import { SiteIdentityEditor } from '@/components/admin/site-identity-editor'
 import { GithubConnectPanel } from '@/components/admin/github-connect-panel'
+import { GitlabConnectPanel } from '@/components/admin/gitlab-connect-panel'
 import { getEntitlements } from '@/lib/cloud-bridge'
 import type { Role } from '@/lib/auth/types'
 import {
@@ -166,17 +167,20 @@ export async function SettingsView({ role = 'viewer' }: { role?: Role }) {
         <div className="ds-setting-group-head">
           <h2 className="ds-setting-group-title">Integrations</h2>
           <p className="ds-setting-group-desc">
-            Connect GitHub so <Link href="/guides/ai-features" style={{ color: 'var(--ds-accent-mid)', fontWeight: 'var(--ds-fw-semibold)' }}>Thally Track</Link>{' '}
-            can watch your product repos and draft docs PRs.
+            Connect GitHub or GitLab so <Link href="/guides/ai-features" style={{ color: 'var(--ds-accent-mid)', fontWeight: 'var(--ds-fw-semibold)' }}>Thally Track</Link>{' '}
+            can watch your product repos and draft docs PRs or MRs.
           </p>
         </div>
         <div className="ds-settings-panel">
           <div className="ds-settings-section">
             {entitlements.features.track ? (
-              <GithubConnectPanel canEdit={role === 'owner'} />
+              <>
+                <GithubConnectPanel canEdit={role === 'owner'} />
+                <GitlabConnectPanel canEdit={role === 'owner'} />
+              </>
             ) : (
               <p style={{ fontSize: 'var(--ds-text-sm)', color: 'var(--ds-text-muted)' }}>
-                Thally Track is available on Thally Cloud — connect this site to activate the one-click GitHub App.{' '}
+                Thally Track is available on Thally Cloud — connect this site to activate the one-click GitHub App or a GitLab connection.{' '}
                 <a href="https://thally.io/pricing" target="_blank" rel="noreferrer" style={{ color: 'var(--ds-accent-mid)', fontWeight: 'var(--ds-fw-semibold)' }}>
                   Learn more
                 </a>

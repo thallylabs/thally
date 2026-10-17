@@ -1,3 +1,5 @@
+import type { GitHostConfig } from '@thallylabs/core/repository'
+import { readTrackingConfig, type TrackedRepoConfig, type TrackingConfig as SharedTrackingConfig } from '@thallylabs/core/tracking'
 import type { ComponentType } from 'react'
 import type { NormalizedOperation } from '@/lib/openapi/types'
 import { sanitizeApiMdxConfig, type ApiMdxConfig } from '@/lib/openapi/manual-operation'
@@ -224,15 +226,16 @@ export interface DocsJsonBanner {
 export interface DocsJsonNavLink {
   label: string
   href: string
-  type?: 'github'
+  /** Repository link: shown in the footer socials with the provider's icon. */
+  type?: 'github' | 'gitlab'
   /** Render the link as a filled button, for a source site that styled it that way. */
   button?: { background: string; color?: string }
 }
 
 export interface DocsJsonNavbar {
   links?: Array<DocsJsonNavLink>
-  /** `type: 'github'` shows the repository name and its star count instead of a labelled button. */
-  primary?: { label: string; href: string; type?: 'github' } | null
+  /** `type: 'github'` or `'gitlab'` shows the repository name and its star count instead of a labelled button. */
+  primary?: { label: string; href: string; type?: 'github' | 'gitlab' } | null
   /** Public assets for a portable, source-owned logo fallback. */
   /** Explicit null keeps a source site's text-only wordmark. */
   logo?: { light: string; dark?: string; showTitle?: boolean; rightText?: string } | null
@@ -408,6 +411,13 @@ interface DocsJsonConfig {
   tracking?: {
     repos?: Array<TrackingRepoConfig>
   }
+  /**
+   * Self-hosted repository hosts (GitLab or GitHub Enterprise) used for edit,
+   * issue, and Track links. github.com and gitlab.com need no entry.
+   */
+  repository?: {
+    hosts?: Array<GitHostConfig>
+  }
 }
 
 export interface TeamConfig {
@@ -415,22 +425,14 @@ export interface TeamConfig {
   domains: Array<{ domain: string; role: 'owner' | 'editor' | 'viewer' }>
 }
 
-export interface TrackingRepoConfig {
-  owner: string
-  repo: string
-  /** Base branch PRs must merge into to trigger. Defaults to "main". */
-  branch?: string
-  /** Path globs — only PRs touching these trigger docs tasks. Absent = all. */
-  paths?: Array<string>
-  /** Sidebar tab generated pages should land in. */
-  outputTab?: string
-  /** Group heading within that tab. */
-  outputGroup?: string
-}
+/**
+ * One tracked product repository (docs.json `tracking.repos[]`). The shared
+ * definition lives in `@thallylabs/core/tracking`; entries without `provider`
+ * are github.com repositories.
+ */
+export type TrackingRepoConfig = TrackedRepoConfig
 
-export interface TrackingConfig {
-  repos: Array<TrackingRepoConfig>
-}
+export type TrackingConfig = SharedTrackingConfig
 
 // ---------------------------------------------------------------------------
 // Content root & frontmatter cache
@@ -1454,7 +1456,7 @@ export function getTeamConfig(): TeamConfig {
 
 /** The git-committed Thally Track roster. Always returns an array. */
 export function getTrackingConfig(): TrackingConfig {
-  return { repos: docsConfig().tracking?.repos ?? [] }
+  return readTrackingConfig(docsConfig())
 }
 
 export function getBannerConfig(): DocsJsonBanner | null {

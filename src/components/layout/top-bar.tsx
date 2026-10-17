@@ -24,24 +24,41 @@ import { Logo } from '@/components/layout/logo'
 import { displaySiteName, useSiteName } from '@/components/layout/use-site-name'
 import { IntentPrefetchLink } from '@/components/navigation/intent-prefetch-link'
 import { useDocsCodeActions } from '@/components/docs/code-actions-provider'
-import { fetchGithubStars } from '@/components/layout/github-stars'
+import { fetchRepositoryStars } from '@/components/layout/repository-stars'
+import { GitlabIcon } from '@/components/layout/gitlab-icon'
+import {
+  isRepositoryLinkType,
+  parseRepositoryReference,
+  type GitProvider,
+} from '@thallylabs/core/repository'
 
-const GITHUB_REPO = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/?$/i
-
-/** Repository link with a live star count, like Mintlify's `navbar.primary` of type github. */
-function GithubRepoLink({ href, label }: { href: string; label: string }) {
-  const repo = GITHUB_REPO.exec(href)?.[1]
+/**
+ * Repository link with a live star count, like Mintlify's `navbar.primary` of
+ * type github (or gitlab). The declared `type` decides the provider for hosts
+ * the parser does not recognise, so a self-hosted GitLab needs no extra config.
+ * Only a bare repository URL shows the owner/repo name and stars.
+ */
+function RepositoryLink({ href, label, provider }: { href: string; label: string; provider: GitProvider }) {
+  const parsed = /^https:\/\//i.test(href)
+    ? parseRepositoryReference(href, provider === 'gitlab' ? { fallbackProvider: 'gitlab' } : {})
+    : null
+  const repository = parsed && parsed.ref === undefined && parsed.number === undefined && parsed.provider === provider
+    ? parsed
+    : null
   const [stars, setStars] = useState<number | null>(null)
   useEffect(() => {
-    if (!repo) return
+    if (!repository) return
     let active = true
-    void fetchGithubStars(repo).then((count) => { if (active) setStars(count) })
+    void fetchRepositoryStars(repository).then((count) => { if (active) setStars(count) })
     return () => { active = false }
-  }, [repo])
+    // The derived reference is stable for a given href/provider.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repository?.apiBaseUrl, repository?.fullPath, repository?.provider])
+  const Icon = provider === 'gitlab' ? GitlabIcon : Github
   return (
     <a href={href} target="_blank" rel="noreferrer" data-topbar-link className="thally-docs-topbar-link inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-[10px] px-2 text-[0.86rem] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground">
-      <Github className="h-4 w-4 shrink-0" aria-hidden="true" />
-      <span>{repo ?? label}</span>
+      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <span>{repository?.fullPath ?? label}</span>
       {stars === null ? null : <span className="inline-flex items-center gap-0.5 text-foreground/50"><Star className="h-3.5 w-3.5" aria-hidden="true" />{stars.toLocaleString('en-US')}</span>}
     </a>
   )
@@ -110,15 +127,15 @@ export function TopBar({
 
   // navbarConfig.primary overrides the siteConfig CTA when present
   const primaryCta = navbarConfig && Object.hasOwn(navbarConfig, 'primary')
-    ? navbarConfig.primary && navbarConfig.primary.type !== 'github'
+    ? navbarConfig.primary && !isRepositoryLinkType(navbarConfig.primary.type)
       ? { label: navbarConfig.primary.label, href: navbarConfig.primary.href }
       : undefined
     : siteConfigCta
-  const githubPrimary = navbarConfig?.primary?.type === 'github' ? navbarConfig.primary : undefined
-  // GitHub is part of the footer's social cluster in the default docs shell.
-  // SiteShell carries legacy navbar-only GitHub links into the footer so an
-  // existing site does not lose its repository destination during upgrade.
-  const navbarLinks = navbarConfig?.links?.filter((link) => link.type !== 'github') ?? []
+  const repositoryPrimary = isRepositoryLinkType(navbarConfig?.primary?.type) ? navbarConfig?.primary ?? undefined : undefined
+  // Repository links are part of the footer's social cluster in the default
+  // docs shell. SiteShell carries legacy navbar-only GitHub/GitLab links into
+  // the footer so an existing site does not lose its repository destination.
+  const navbarLinks = navbarConfig?.links?.filter((link) => !isRepositoryLinkType(link.type)) ?? []
   const visibleLinkCount = navbarConfig?.links ? navbarLinks.length : (supportLink ? 1 : 0)
   // Preserve the generous default search affordance for typical documentation
   // sites. Only dense, highly customized navbars opt into the compact layout.
@@ -180,7 +197,7 @@ export function TopBar({
           {hasAssistantEntryPoint ? (
             <span className="thally-docs-action-divider h-5 w-px bg-border" aria-hidden="true" />
           ) : null}
-          {githubPrimary ? <GithubRepoLink href={githubPrimary.href} label={githubPrimary.label} /> : null}
+          {repositoryPrimary && isRepositoryLinkType(repositoryPrimary.type) ? <RepositoryLink href={repositoryPrimary.href} label={repositoryPrimary.label} provider={repositoryPrimary.type} /> : null}
           {navbarConfig?.links
             ? <div className="thally-docs-navlinks flex min-w-0 items-center gap-2 overflow-hidden">{navbarLinks.map((link) => {
                 const isExternal = /^https?:\/\//.test(link.href)

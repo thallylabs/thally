@@ -35,14 +35,37 @@ export interface ContentGap {
   count: number
 }
 
+/** Source-control providers a Track connection can use. */
+export type ScmProvider = 'github' | 'gitlab'
+
 export interface TrackedRepoStatus {
+  /** GitHub owner or full GitLab namespace (`group/subgroup`). */
   owner: string
   repo: string
   branch: string
   paths: Array<string>
   outputTab?: string
-  /** Last PR relayed by the Track webhook (e.g. "#42"), or null before the first merge. */
+  /** Last request relayed by the Track webhook ("#42" on GitHub, "!42" on GitLab), or null before the first merge. */
   lastSyncedPr: string | null
+  /** Absent from older Cloud builds, meaning GitHub. */
+  provider?: ScmProvider
+  /** Self-hosted hostname; absent means github.com or gitlab.com. */
+  host?: string
+  /** Canonical web URL of the repository, when the service knows it. */
+  url?: string
+}
+
+/** Redacted connection state for one provider, rendered by the admin Integrations panel. */
+export interface ScmConnectionStatus {
+  provider: ScmProvider
+  connected: boolean
+  /** GitHub: the app is installed. GitLab: the stored token was verified. */
+  installed: boolean
+  /** Display identity, such as an app slug or token owner. */
+  label: string | null
+  manageUrl: string | null
+  /** Self-hosted hostname, when not the provider default. */
+  host: string | null
 }
 
 /** Tenant scope resolved from a signed runtime grant by the control plane. */
@@ -58,7 +81,12 @@ export interface CloudSiteServiceScope {
 // ---------------------------------------------------------------------------
 
 export interface TrackService {
-  /** POST /api/track/webhook — merged-PR events from tracked product repos. */
+  /**
+   * POST /api/track/webhook — merged-PR events from tracked product repos.
+   * GitHub deliveries carry `X-Hub-Signature-256`; GitLab deliveries carry
+   * `X-Gitlab-Event` and `X-Gitlab-Token`. Both are checked against
+   * `THALLY_TRACK_WEBHOOK_SECRET` by the implementation.
+   */
   handleWebhook(request: Request): Promise<Response>
   /** GET /api/admin/github-app — redacted connection status. */
   githubAppStatus(): Promise<Response>
@@ -74,6 +102,16 @@ export interface TrackService {
   getDocsTasks(repoUrl: string | undefined, limit?: number): Promise<Array<DocsTask>>
   /** Track roster + last relayed PR per tracked repo (for the admin Tasks page). */
   getTrackedRepoStatuses(): Promise<Array<TrackedRepoStatus>>
+  /**
+   * Provider-keyed connection management behind /api/admin/scm/[provider].
+   * Optional so Cloud builds without GitLab support still satisfy this
+   * contract; the route shell answers 404 `scm_unavailable` when absent.
+   * GET returns {@link ScmConnectionStatus}; POST begins or stores a
+   * connection; DELETE disconnects.
+   */
+  scmConnectionStatus?(provider: ScmProvider): Promise<Response>
+  scmConnectionBegin?(provider: ScmProvider, request: NextRequest): Promise<Response>
+  scmConnectionDisconnect?(provider: ScmProvider): Promise<Response>
 }
 
 export interface AiService {

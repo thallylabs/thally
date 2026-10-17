@@ -14,10 +14,14 @@ import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { MutedPanel, Panel } from '@/components/layout/sections'
+import { repositoryNewIssueUrl, type GitHostConfig } from '@thallylabs/core/repository'
+import { resolveRepository } from '@/lib/repository-links'
 
 interface FeedbackProps {
   endpoint?: string
   repoUrl?: string
+  /** Declared self-hosted hosts, so a self-hosted GitLab gets GitLab issue URLs. */
+  gitHosts?: ReadonlyArray<GitHostConfig>
   thumbsRating?: boolean
   pageFeedback?: boolean
   /** Show a pre-titled "Report an issue" link; only for layouts without a rail. */
@@ -40,6 +44,7 @@ export function shouldShowFeedbackMessage(
 export function Feedback({
   endpoint = '/api/feedback',
   repoUrl,
+  gitHosts,
   thumbsRating = true,
   pageFeedback = false,
   issueReporting = false,
@@ -97,9 +102,9 @@ export function Feedback({
     }
   }
 
-  const normalizedRepo = repoUrl?.replace(/\/$/, '')
-  const issueUrl = issueReporting && normalizedRepo
-    ? `${normalizedRepo}/issues/new?title=${encodeURIComponent(`Docs feedback: ${pathname}`)}`
+  const repository = issueReporting ? resolveRepository(repoUrl, gitHosts) : null
+  const issueUrl = repository
+    ? repositoryNewIssueUrl(repository, { title: `Docs feedback: ${pathname}` })
     : null
   const isMessageVisible = shouldShowFeedbackMessage(voteValue, pageFeedback, messageState)
 

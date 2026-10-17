@@ -5,7 +5,7 @@ import { getBreadcrumbs, getBreadcrumbsEnabled, getNavCategory, getPrevNextLinks
 import { DocBreadcrumbs } from '@/components/docs/doc-breadcrumbs'
 import { DocHeader } from '@/components/docs/doc-header'
 import { DocPagination } from '@/components/docs/doc-pagination'
-import { EditOnGithub } from '@/components/docs/edit-on-github'
+import { EditOnRepository } from '@/components/docs/edit-on-github'
 import { Feedback } from '@/components/docs/feedback'
 import { ReportAnIssue } from '@/components/docs/report-an-issue'
 import { TableOfContents } from '@/components/docs/table-of-contents'
@@ -14,6 +14,8 @@ import { Prose } from '@/components/mdx/prose'
 import { getManagedSiteConfigSnapshot } from '@/lib/cloud-link/client'
 import { getBuildContentControls } from '@/lib/cloud-link/content-controls'
 import { resolveBuildSiteConfig } from '@/lib/site-config'
+import { getGitHosts } from '@/lib/git-hosts'
+import { isPlaceholderRepositoryUrl } from '@thallylabs/core/repository'
 import { localeDirection } from '@/lib/i18n/config'
 import { InlineUpdateFilters, PagePanelSlot, PageSlotsProvider } from '@/components/mdx/page-slots'
 
@@ -54,16 +56,15 @@ function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayou
     />
   ) : null
   // Placeholder repo URLs from a fresh scaffold must not produce dead links.
-  const repoUrl =
-    effectiveSite.repoUrl && !effectiveSite.repoUrl.includes('your-org')
-      ? effectiveSite.repoUrl
-      : null
+  const repoUrl = isPlaceholderRepositoryUrl(effectiveSite.repoUrl) ? null : effectiveSite.repoUrl
+  const gitHosts = repoUrl ? getGitHosts() : undefined
   const pageSourceActions = repoUrl && (hasEditSuggestions || hasIssueReporting) ? (
     <div className="flex flex-col items-start gap-1.5">
       {hasEditSuggestions ? (
-        <EditOnGithub
+        <EditOnRepository
           pageId={doc.id}
           repoUrl={repoUrl}
+          gitHosts={gitHosts}
           label="Edit this page"
           className="text-sm leading-6 text-foreground/55"
         />
@@ -72,6 +73,7 @@ function DocLayoutContent({ doc, locale = 'en', navigation, children }: DocLayou
         <ReportAnIssue
           pagePath={doc.href}
           repoUrl={repoUrl}
+          gitHosts={gitHosts}
           className="text-sm leading-6 text-foreground/55"
         />
       ) : null}

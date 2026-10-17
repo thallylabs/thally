@@ -70,6 +70,12 @@ describe('mdxToMarkdown', () => {
     expect(out).toContain('<Human>Example remains literal.</Human>')
   })
 
+  it('projects GitLab cards, including nested groups, and drops unsafe paths', () => {
+    expect(mdxToMarkdown('<GitLab repo="acme/platform/api" title="API" />')).toContain('[API](https://gitlab.com/acme/platform/api)')
+    expect(mdxToMarkdown('<GitLab.Repo repo="acme/api" />')).toContain('[acme/api](https://gitlab.com/acme/api)')
+    expect(mdxToMarkdown('<GitLab repo="acme/../x" />')).not.toContain('gitlab.com')
+  })
+
   it('projects compound components and GitHub cards into clean Markdown', () => {
     const out = mdxToMarkdown('<Color><Color.Item name="Leaf" value="#b8ec36" /></Color>\n<GitHub repo="thallylabs/thally" />')
     expect(out).not.toContain('<Color')

@@ -10,7 +10,7 @@ import {
   resolveAutoDetectedMigrationSource,
 } from './prompts.js'
 import { scaffold } from './scaffold.js'
-import { parseGitHubRepositoryUrl, parseSourceRefFlags, type SourceRefMapping } from '@thallylabs/migrate'
+import { isRepositoryUrl, parseRepositoryUrl, parseSourceRefFlags, type SourceRefMapping } from '@thallylabs/migrate'
 import { migrateDocs } from './migrate/index.js'
 import { runCheck } from './check.js'
 import { runTranslateCommand } from './translate.js'
@@ -93,7 +93,7 @@ Run create-thally-docs <command> --help for command-specific options.
 const commandHelp = {
   migrate: `
 Usage:
-  create-thally-docs migrate <github-or-docs-url> [output-dir] [options]
+  create-thally-docs migrate <repo-or-docs-url> [output-dir] [options]
 
 Options:
   --into <dir>         Migrate into an existing Thally project
@@ -182,7 +182,7 @@ async function runMigrateCommand(): Promise<void> {
   let sourceUrl = positional[1]
   if (!sourceUrl) {
     console.error('\n  ❌ Source URL is required.')
-    console.error('     Usage: create-thally-docs migrate <github-or-docs-url> [output-dir] [options]')
+    console.error('     Usage: create-thally-docs migrate <repo-or-docs-url> [output-dir] [options]')
     console.error('     Example: create-thally-docs migrate https://docs.example.com my-docs')
     process.exit(1)
   }
@@ -191,7 +191,7 @@ async function runMigrateCommand(): Promise<void> {
   try {
     source = new URL(sourceUrl)
     if (!['http:', 'https:'].includes(source.protocol)) throw new Error('Only HTTP and HTTPS sources are supported.')
-    if (source.hostname.toLowerCase() === 'github.com') parseGitHubRepositoryUrl(sourceUrl)
+    if (isRepositoryUrl(sourceUrl)) parseRepositoryUrl(sourceUrl)
   } catch (err) {
     console.error(`\n  ❌ ${err instanceof Error ? err.message : err}`)
     process.exit(1)
@@ -224,8 +224,8 @@ async function runMigrateCommand(): Promise<void> {
   } else if (positional[2]) {
     projectDir = resolve(positional[2])
   } else {
-    const sourceName = source.hostname.toLowerCase() === 'github.com'
-      ? parseGitHubRepositoryUrl(sourceUrl).repo
+    const sourceName = isRepositoryUrl(sourceUrl)
+      ? parseRepositoryUrl(sourceUrl).repo
       : source.pathname.split('/').filter(Boolean).at(-1) ?? source.hostname.split('.')[0]
     projectDir = resolve(`${slugify(sourceName)}-docs`)
   }

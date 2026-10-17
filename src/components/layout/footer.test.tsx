@@ -48,3 +48,13 @@ describe('imported footer attribution', () => {
     expect(html).toContain('href="/installation"')
   })
 })
+
+describe('repository socials', () => {
+  it('renders a gitlab social with its own icon label', () => {
+    const html = renderToStaticMarkup(
+      <Footer siteName="Example" siteLinks={[]} footerConfig={{ socials: { gitlab: 'https://gitlab.com/example' } }} />,
+    )
+    expect(html).toContain('href="https://gitlab.com/example"')
+    expect(html).toContain('aria-label="gitlab"')
+  })
+})

@@ -24,7 +24,7 @@ vi.mock('@thallylabs/migrate', async (importOriginal) => {
     const bundle = original.migrateRepository(options)
     return fixture.droppedGated > 0 ? { ...bundle, droppedGatedPages: fixture.droppedGated } : bundle
   },
-  cloneGitHubRepository: async (_source: unknown, directory: string) => {
+  cloneRepository: async (_source: unknown, directory: string) => {
     mkdirSync(directory, { recursive: true })
     writeFileSync(join(directory, 'docs.json'), JSON.stringify({ navigation: { pages: ['intro', 'private'] } }))
     writeFileSync(join(directory, 'intro.mdx'), '---\ntitle: Intro\n---\n\nHello\n')

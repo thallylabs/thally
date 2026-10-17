@@ -36,6 +36,11 @@ export interface AgentOptions {
   maximumRequestBytes?: number;
   /** Per-turn model-output budget; managed Track uses a larger bounded result profile. */
   maximumOutputTokens?: number;
+  /**
+   * Host of the docs repository for `pr` mode. Detected from the `origin`
+   * remote when omitted; GitHub opens PRs with `gh`, GitLab with its API.
+   */
+  provider?: "github" | "gitlab";
 }
 
 export type DocumentationAbstentionReason =

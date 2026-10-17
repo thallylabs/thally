@@ -1,3 +1,6 @@
+import { providerLabel } from '@thallylabs/core/repository'
+import { getGitHosts } from '@/lib/git-hosts'
+import { resolveRepository } from '@/lib/repository-links'
 import { loadSidebarCollections, loadDocEntries } from '@/data/docs'
 import { siteUrlMismatch } from '@/lib/site-url'
 import { resolveSiteConfig } from '@/lib/site-config'
@@ -29,8 +32,9 @@ export async function GET(request: Request) {
 
   // Links
   lines.push(`- Documentation: ${baseUrl}`)
-  if (effectiveSite.repoUrl && !effectiveSite.repoUrl.includes('your-org')) {
-    lines.push(`- GitHub: ${effectiveSite.repoUrl}`)
+  const repository = resolveRepository(effectiveSite.repoUrl, getGitHosts())
+  if (repository) {
+    lines.push(`- ${providerLabel(repository.provider)}: ${effectiveSite.repoUrl}`)
   }
   lines.push(`- Full docs for LLMs: ${baseUrl}/llms-full.txt`)
   lines.push(`- Agent discovery (ai.txt): ${baseUrl}/ai.txt`)

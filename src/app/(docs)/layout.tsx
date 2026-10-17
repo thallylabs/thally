@@ -9,6 +9,7 @@ import { DocsCodeActionsProvider } from '@/components/docs/code-actions-provider
 import { getEffectiveI18nConfig } from '@/lib/i18n/request'
 import { resolveBuildSiteConfig, siteIdentity } from '@/lib/site-config'
 import { loadNavigationSnapshot } from '@/lib/navigation-snapshot-server'
+import { getGitHosts } from '@/lib/git-hosts'
 
 interface DocsLayoutProps {
   children: React.ReactNode
@@ -31,14 +32,16 @@ export default async function DocsLayout({ children }: DocsLayoutProps) {
   const effectiveSite = resolveBuildSiteConfig()
   const codeReportRepositoryUrl =
     effectiveSite.repoUrl ||
-    effectiveSite.links.find((link) => link.label.toLowerCase() === 'github')?.href ||
+    effectiveSite.links.find((link) => ['github', 'gitlab'].includes(link.label.toLowerCase()))?.href ||
     ''
+  const gitHosts = getGitHosts()
 
   return (
     <>
       <SidebarCollectionsHydrator collections={collections} snapshot={navigationSnapshot} />
       <DocsCodeActionsProvider
         initialRepositoryUrl={codeReportRepositoryUrl}
+        gitHosts={gitHosts}
         label={aiConfig.label}
         icon={aiConfig.icon}
       >

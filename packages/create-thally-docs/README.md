@@ -32,7 +32,7 @@ npx create-thally-docs my-docs --yes
 Dependencies are installed by default, so the preview command works right
 away. Pass `--no-install` to skip installation (for example in CI or when you
 use another package manager). The interactive setup asks only for the project
-directory, name, an optional GitHub repository, Thally Track, installation,
+directory, name, an optional GitHub or GitLab repository, Thally Track, installation,
 and extra languages; the description and brand palette are one-line edits in
 `src/data/site.ts`. The generated `.env.local` never pins a `localhost` site
 URL, so a build from this checkout cannot bake local links into `llms.txt` or
@@ -90,7 +90,7 @@ npx create-thally-docs migrate https://docs.example.com my-docs --max-pages 1500
 
 Interactive migrations ask whether the source is Mintlify, Docusaurus, Fern, or
 another auto-detected platform. When automatic detection receives a live
-website URL, the CLI recommends its source GitHub repository and requires
+website URL, the CLI recommends its source repository on GitHub or GitLab and requires
 confirmation before continuing with the less precise website crawl. For
 scripts and CI, pass
 `--platform mintlify`, `--platform docusaurus`, `--platform fern`, or

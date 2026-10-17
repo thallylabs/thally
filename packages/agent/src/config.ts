@@ -33,7 +33,7 @@ function readAgentsGuidanceFile(filePath: string): string | null {
  * loaded for automated or sealed execution. Empty string when absent.
  */
 export function loadAgentsGuidance(projectDir: string): string {
-  for (const name of ["AGENTS.md", ".github/AGENTS.md"]) {
+  for (const name of ["AGENTS.md", ".github/AGENTS.md", ".gitlab/AGENTS.md"]) {
     const filePath = path.join(projectDir, name);
     const guidance = readAgentsGuidanceFile(filePath);
     if (guidance !== null) return guidance;

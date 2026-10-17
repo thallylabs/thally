@@ -73,7 +73,7 @@ customer-owned paths during upgrades.
 | `thally check [dir] [--agents] [--fix] [--ci] [--drift] [--external]` | Check content and agent readiness; `--external` also checks links to public hosts (warnings only) |
 | `thally starter update [--apply] [--require-complete]` | Review or apply a complete framework and dependency update |
 | `thally agent "<instruction>"` | Draft updates from product changes for review |
-| `thally track <add\|list\|test\|setup>` | Turn merged product PRs into docs PRs |
+| `thally track <add\|list\|test\|setup>` | Turn merged product PRs (GitHub) or MRs (GitLab) into docs PRs or MRs |
 | `thally mcp` | Start the Model Context Protocol server (stdio) |
 
 `thally migrate` writes a `migration-report.json` with content and production

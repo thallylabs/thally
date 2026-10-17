@@ -3,6 +3,7 @@
 'use client'
 
 import { Footer } from '@/components/layout/footer'
+import { isRepositoryLinkType } from '@thallylabs/core/repository'
 import { TopBar } from '@/components/layout/top-bar'
 import { getHeaderNavigationLayout } from '@/components/navigation/header-layout'
 import { Sidebar } from '@/components/navigation/sidebar'
@@ -180,7 +181,7 @@ export function SiteShell({
         !/^https?:\/\//.test(collection.href) &&
         (matchesPath(collection.href, pathname, localeRoot) || matchesPath(collection.href, currentPath)),
     )?.id ?? activeCollection.id
-  const relocatedGithubHref = navbarConfig?.links?.find((link) => link.type === 'github')?.href
+  const relocatedRepositoryLink = navbarConfig?.links?.find((link) => isRepositoryLinkType(link.type))
 
   // `clip` contains horizontal spill without creating a scroll container,
   // which lets the banner-aware desktop sidebar remain sticky.
@@ -231,7 +232,8 @@ export function SiteShell({
             </main>
             <Footer
               footerConfig={footerConfig ?? null}
-              githubHref={relocatedGithubHref}
+              repositoryHref={relocatedRepositoryLink?.href}
+              repositoryProvider={relocatedRepositoryLink?.type === 'gitlab' ? 'gitlab' : 'github'}
               showPoweredBy={showPoweredBy}
               siteName={identity.name}
               siteLinks={identity.links}

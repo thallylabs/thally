@@ -36,7 +36,7 @@ Or in a `mcp.json` / client config:
 - **Quality** — `lint_project`, `agent_readiness` (the Agent Readiness Score of a deployed site)
 - **Migration** — `migrate_docs`, `import_docs`, `translate_docs`
 - **API specifications** — `read_api_spec`, `update_api_spec`
-- **Product changes** — `sync_from_repo`
+- **Product changes** — `sync_from_repo` (GitHub pull requests via `repository_dispatch`; GitLab merge requests via the docs project's pipeline trigger, using `THALLY_GITLAB_TOKEN` and `THALLY_GITLAB_TRIGGER_TOKEN`)
 
 `search_docs`, `read_page`, and `get_context` work against a local project on
 disk; `semantic_search` and `agent_readiness` run against any **deployed** Thally

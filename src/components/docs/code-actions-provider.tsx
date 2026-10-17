@@ -21,6 +21,7 @@ import {
 } from 'react'
 
 import { buildCodeReportUrl, createCodeAssistantPrompt } from '@/lib/code-actions'
+import type { GitHostConfig } from '@thallylabs/core/repository'
 
 const LazyDocsChat = dynamic(
   () => import('./docs-chat').then((module) => module.DocsChat),
@@ -60,6 +61,8 @@ interface ChatStatus {
 interface DocsCodeActionsProviderProps {
   children: ReactNode
   initialRepositoryUrl: string
+  /** Declared self-hosted repository hosts (server-resolved, plain JSON). */
+  gitHosts?: ReadonlyArray<GitHostConfig>
   label?: string
   icon?: string
 }
@@ -73,6 +76,7 @@ interface DocsCodeActionsProviderProps {
 export function DocsCodeActionsProvider({
   children,
   initialRepositoryUrl,
+  gitHosts,
   label,
   icon,
 }: DocsCodeActionsProviderProps) {
@@ -108,9 +112,10 @@ export function DocsCodeActionsProvider({
       repositoryUrl,
       pageUrl: window.location.href,
       code,
+      gitHosts,
     })
     if (url) window.open(url, '_blank', 'noopener,noreferrer')
-  }, [repositoryUrl])
+  }, [repositoryUrl, gitHosts])
 
   const requestAssistant = useCallback((prompt: string | null) => {
     if (!chatStatus.show) return
@@ -145,6 +150,7 @@ export function DocsCodeActionsProvider({
       repositoryUrl,
       pageUrl: 'https://docs.example.com',
       code: '',
+      gitHosts,
     })),
     // Pending, failed, and unavailable status checks all keep reader entry
     // points hidden; configuration instructions belong in the owner's admin.
@@ -153,7 +159,7 @@ export function DocsCodeActionsProvider({
     reportCode,
     askAssistant,
     openAssistant,
-  }), [askAssistant, chatStatus, label, openAssistant, reportCode, repositoryUrl])
+  }), [askAssistant, chatStatus, gitHosts, label, openAssistant, reportCode, repositoryUrl])
 
   return (
     <CodeActionsContext.Provider value={actions}>

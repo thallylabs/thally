@@ -101,3 +101,18 @@ export type {
   EmbeddingVector,
   RetrievalResult,
 } from './embeddings/index.js'
+
+// Repository hosts (GitHub, GitLab, self-hosted) — also `@thallylabs/core/repository`.
+export * from './repository/index.js'
+
+// Thally Track configuration — also `@thallylabs/core/tracking`.
+export {
+  describeTrackedRepo,
+  isTrackedRepoConfig,
+  normalizeTrackedRepo,
+  readTrackingConfig,
+  trackedRepoEntry,
+  trackedRepoKey,
+  trackedRepoRef,
+} from './tracking.js'
+export type { ResolvedTrackedRepo, TrackedRepoConfig, TrackingConfig } from './tracking.js'

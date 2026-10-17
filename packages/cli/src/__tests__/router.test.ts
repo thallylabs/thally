@@ -98,6 +98,18 @@ describe('resolveInvocation', () => {
     expect(run(['track', 'setup', '--repo', 'acme/docs', '--write']).hasFlag('--write')).toBe(true)
   })
 
+  it('accepts GitLab provider and host options', () => {
+    const add = run(['track', 'add', 'acme/api', '--provider', 'gitlab', '--host', 'git.example.com'])
+    expect(add.getFlag('--provider')).toBe('gitlab')
+    expect(add.getFlag('--host')).toBe('git.example.com')
+    expect(add.positionals).toEqual(['add', 'acme/api'])
+    const init = run(['agent', 'init', '--provider', 'gitlab', '--repo', 'acme/platform/docs'])
+    expect(init.getFlag('--provider')).toBe('gitlab')
+    expect(init.getFlag('--repo')).toBe('acme/platform/docs')
+    const fromMr = run(['agent', 'Document MR', '--from-pr', 'https://gitlab.com/a/b/-/merge_requests/1', '--pr'])
+    expect(fromMr.getFlag('--from-pr')).toBe('https://gitlab.com/a/b/-/merge_requests/1')
+  })
+
   it('accepts the check invocations used by CI and the managed builder', () => {
     expect(run(['check', '--ci', '.']).positionals).toEqual(['.'])
     expect(run(['check', '--drift', '--ci']).hasFlag('--drift')).toBe(true)

@@ -242,7 +242,11 @@ create-thally-docs migrate https://github.com/OpenRouterTeam/docs my-docs \
 
 Without a mapping the node is skipped with a warning that names the flag.
 
-- The repository must be on github.com. Its docs root is the directory holding a
+- A bare `owner/repo` is a github.com repository. A repository URL on the left of
+  `=` may name a gitlab.com project (nested groups allowed) or a host declared in
+  `THALLY_GIT_HOSTS`, for example
+  `--source-ref https://gitlab.com/acme/sdks/typescript=client-sdks/typescript`.
+  Its docs root is the directory holding a
   Mintlify `docs.json` (`docs/` first, then the repository root); without one the
   mapping is skipped with a warning.
 - Every `.md`/`.mdx` file under that root is imported (orphans included) through the
@@ -265,10 +269,10 @@ Without a mapping the node is skipped with a warning that names the flag.
 - Safety limits per referenced repository, fixed constants: 5,000 files and 50 MB under
   the docs root. Over a limit the whole repository is refused, never imported
   partially. Symlinks and dot-directories are removed before import, and a docs
-  directory that resolves outside the clone is refused. A repository GitHub reports as
-  larger than 200 MB is refused before cloning (if the GitHub API is unreachable the
+  directory that resolves outside the clone is refused. A repository GitHub or GitLab
+  reports as larger than 200 MB is refused before cloning (if the API is unreachable the
   clone proceeds and the limits above still apply), its submodules are not fetched,
-  and a `docs.json` over 1 MB is ignored. `repo` must match `owner/repo`; the mount
+  and a `docs.json` over 1 MB is ignored. `repo` must match `owner/repo` or be a repository URL; the mount
   path must be a relative lowercase slug path (no `..`, no leading slash), must not
   start with a name the site itself uses (`api`, `admin`, `_next`, `public`,
   `llms.txt`, `sitemap.xml`, ...), must not collide with an existing page or directory
@@ -502,9 +506,16 @@ field for them — branding is managed from the admin dashboard at runtime —
 so each site gets one warning naming the copied files and pointing at the
 dashboard's branding settings instead of leaving the loss silent.
 
-## Cloning a GitHub repository
+## Cloning a repository
 
-`cloneGitHubRepository` retries a transient network-class failure with
+`parseRepositoryUrl` accepts https URLs on github.com, gitlab.com (including
+nested groups and `/-/tree/<branch>/<dir>` URLs), and hosts declared in
+`THALLY_GIT_HOSTS` (`gitlab.example.com=gitlab`); `isRepositoryUrl` tells a
+repository from a live website. `parseGitHubRepositoryUrl`,
+`cloneGitHubRepository`, and `GitHubRepositorySource` remain as deprecated
+aliases.
+
+`cloneRepository` retries a transient network-class failure with
 backoff, and each underlying git process (the clone, and any submodule
 fetch) is killed and treated as a retryable failure if it stalls, meaning
 git prints no progress for 2 minutes (a large repository that is still

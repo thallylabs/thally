@@ -3,6 +3,7 @@
  * wraps each operation without changing the starter contents or owner fields.
  */
 
+import { describeTrackedRepo, type TrackedRepoConfig } from '@thallylabs/core/tracking'
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { downloadStarter } from './download.js'
@@ -38,7 +39,7 @@ export interface ScaffoldOptions {
   enableAiChat?: boolean
   i18nLocales?: Array<{ code: string; label: string }>
   /** Repos to pre-register for Thally Track (opt-in). Empty/undefined = Track off. */
-  trackRepos?: Array<{ owner: string; repo: string }>
+  trackRepos?: Array<TrackedRepoConfig>
   /** Source theme accent color(s) to apply over the chosen brand preset. */
   colors?: { primary?: string; light?: string; dark?: string }
 }
@@ -105,7 +106,7 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
   }, 'Project configured')
 
   if (trackRepos?.length) {
-    const list = trackRepos.map((r) => `${r.owner}/${r.repo}`).join(', ')
+    const list = trackRepos.map((r) => describeTrackedRepo(r)).join(', ')
     terminal.info(`Thally Track enabled — watching ${list} (branch main, all files; refine in docs.json).`)
     terminal.info('To finish wiring it: `thally track setup` (pick a trigger) + `thally agent init`,')
     terminal.info('then add your ANTHROPIC_API_KEY. See /guides/thally-track.')

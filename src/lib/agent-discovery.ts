@@ -1,3 +1,4 @@
+import { isPlaceholderRepositoryUrl } from '@thallylabs/core/repository'
 import { getI18nConfig } from '@/data/docs'
 import { getSiteUrl } from '@/lib/site-url'
 import type { SiteIdentity } from '@/lib/site-config'
@@ -46,7 +47,7 @@ export function buildAiTxtBody(
     lines.push(`Docs-Locale-Page: ${siteUrl}/api/docs/{locale}/{slug}`)
   }
 
-  if (identity.repoUrl && !identity.repoUrl.includes('your-org')) {
+  if (!isPlaceholderRepositoryUrl(identity.repoUrl)) {
     lines.push(`Docs-Repository: ${identity.repoUrl}`)
   }
 

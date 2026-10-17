@@ -1,6 +1,6 @@
 ---
-title: "GitHub"
-description: "Link to a public GitHub repository with a branded repository card."
+title: "GitHub and GitLab"
+description: "Link to a public GitHub repository or gitlab.com project with a branded repository card."
 ---
 
 `<GitHub>` renders a deterministic repository card without making the page
@@ -27,3 +27,19 @@ and extra path segments are rejected rather than converted into links.
 | `repo` | `string` | Required public repository in `owner/name` form |
 | `description` | `string` | Optional authored repository summary |
 
+## GitLab
+
+`<GitLab>` renders the same card for a gitlab.com project. Nested groups are
+allowed, so `repo` takes `group/project` or `group/subgroup/project`.
+
+<GitLab repo="gitlab-org/gitlab" description="The GitLab project itself." />
+
+```mdx
+<GitLab
+  repo="gitlab-org/gitlab"
+  description="The GitLab project itself."
+/>
+```
+
+`<GitLab.Repo>` and `<Gitlab>` are accepted spellings. The Markdown
+projection renders either card as a plain link.
