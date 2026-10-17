@@ -586,6 +586,84 @@ describe('repository component migration', () => {
       })
     })
 
+    describe('parameter initialisers', () => {
+      type Probed = { Probe: (...args: Array<unknown>) => Rendered }
+
+      // Defaults run in the parameter scope, before the body's declarations exist: the
+      // body's `Note` is a different binding, so the default still reads the built-in.
+      it.each([
+        ['a function declaration', 'export function Probe(Component = Note) { var Note = () => null; return React.createElement(Component) }'],
+        ['a function expression', 'export const Probe = function (Component = Note) { var Note = () => null; return React.createElement(Component) }'],
+        ['an arrow function', 'export const Probe = (Component = Note) => { var Note = () => null; return React.createElement(Component) }'],
+        ['a method', 'export const Probe = { render(Component = Note) { var Note = () => null; return React.createElement(Component) } }.render'],
+        ['an object destructuring default', 'export function Probe({ C = Note } = {}) { var Note = () => null; return React.createElement(C) }'],
+        ['an array destructuring default', 'export const Probe = ([C = Note] = []) => { var Note = () => null; return React.createElement(C) }'],
+        ['a nested destructuring default', 'export function Probe({ a: [{ C = Note }] } = { a: [{}] }) { var Note = () => null; return React.createElement(C) }'],
+        ['a computed destructuring key', 'export function Probe({ [Note.displayName]: C = Note } = {}) { var Note = () => null; return React.createElement(C) }'],
+        ['a closure in a default', 'export function Probe(get = () => Note) { var Note = () => null; return React.createElement(get()) }'],
+      ])('binds a built-in read by %s, although the body declares a `var` of that name', (_label, source) => {
+        const content = copied(source)
+        expect(content).toMatch(/const \{ Note \} = builtinMdxComponents;/)
+        // Unbound, the default would throw `ReferenceError: Note is not defined`.
+        expect(evaluate<Probed>(content).Probe().type.displayName).toBe('Note')
+      })
+
+      it('binds a built-in a class constructor default reads, although the constructor body declares a `var` of that name', () => {
+        const content = copied('export class Probe { constructor(Component = Note) { var Note = () => null; this.type = Component } }')
+        expect(content).toMatch(/const \{ Note \} = builtinMdxComponents;/)
+        const { Probe } = evaluate<{ Probe: new () => Rendered }>(content)
+        expect(new Probe().type.displayName).toBe('Note')
+      })
+
+      it.each([
+        ['a var', 'var Note = () => null'],
+        ['a function declaration', 'function Note() { return null }'],
+        ['a const', 'const Note = () => null'],
+        ['a let', 'let Note = () => null'],
+        ['a class', 'class Note {}'],
+      ])('binds a built-in a default reads, although the body declares %s of that name', (_label, declaration) => {
+        const content = copied(`export function Probe(Component = Note) { ${declaration}; void Note; return React.createElement(Component) }`)
+        expect(content).toMatch(/const \{ Note \} = builtinMdxComponents;/)
+        expect(evaluate<Probed>(content).Probe().type.displayName).toBe('Note')
+      })
+
+      const marker = Object.assign(() => null, { displayName: 'mine' })
+      it.each([
+        ['an earlier parameter', 'export function Probe(Note, Component = Note) { return React.createElement(Component) }', [marker]],
+        ['an earlier arrow parameter', 'export const Probe = (Note, Component = Note) => React.createElement(Component)', [marker]],
+        ['an earlier destructured parameter', 'export const Probe = ({ Note }, Component = Note) => React.createElement(Component)', [{ Note: marker }]],
+        ['an earlier element of the same pattern', 'export function Probe({ Note, C = Note }) { return React.createElement(C) }', [{ Note: marker }]],
+      ])('leaves a name alone when a default reads %s of that name', (_label, source, args) => {
+        const content = copied(source)
+        expect(content).not.toContain('builtinMdxComponents')
+        expect(evaluate<Probed>(content).Probe(...args).type).toBe(marker)
+      })
+
+      it('leaves a function expression\'s own name alone when a default reads it', () => {
+        const content = copied('export const Probe = function Note(Component = Note) { return React.createElement(Component) }')
+        expect(content).not.toContain('builtinMdxComponents')
+        const { Probe } = evaluate<Probed>(content)
+        expect(Probe().type).toBe(Probe)
+      })
+
+      it.each([
+        ['a var', 'var Note = () => null'],
+        ['a function declaration', 'function Note() { return null }'],
+        ['a const', 'const Note = () => null'],
+        ['a class', 'class Note {}'],
+      ])('leaves a name alone when only the body uses it and the body declares %s of it', (_label, declaration) => {
+        const content = copied(`export function Probe(Component = null) { ${declaration}; return React.createElement(Component ?? Note) }`)
+        expect(content).not.toContain('builtinMdxComponents')
+        expect(evaluate<Probed>(content).Probe().type.displayName).toBeUndefined()
+      })
+
+      it('leaves a name alone when only an arrow body uses it and the body declares a `var` of it', () => {
+        const content = copied('export const Probe = (Component = null) => { var Note = () => null; return React.createElement(Component ?? Note) }')
+        expect(content).not.toContain('builtinMdxComponents')
+        expect(evaluate<Probed>(content).Probe().type.displayName).toBeUndefined()
+      })
+    })
+
     describe('module-level `var`', () => {
       const probe = (declaration: string, tag = 'Warning'): string => `${declaration}\nexport const Probe = () => <${tag} />;`
 

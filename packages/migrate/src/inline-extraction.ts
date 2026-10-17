@@ -129,12 +129,16 @@ export function hoistedVarNames(root: ts.Node, into: Set<string>): void {
   collect(root)
 }
 
-/** Every name a function scope binds: parameters, its own name, and the `var`s of its body (`hoistedVarNames`). */
+/**
+ * The names the parameter list binds: the function's own name and its parameters.
+ * Parameter initialisers run in this scope alone: the body's `var`s, functions and
+ * lexical declarations live in scopes of their own that those initialisers cannot see
+ * (`function f(C = Note) { var Note }` reads the outer `Note`).
+ */
 function functionScope(fn: ts.FunctionLikeDeclaration): Set<string> {
   const scope = new Set<string>()
   if ((ts.isFunctionExpression(fn) || ts.isFunctionDeclaration(fn)) && fn.name) scope.add(fn.name.text)
   for (const parameter of fn.parameters) bindingNames(parameter.name, scope)
-  if (fn.body) hoistedVarNames(fn.body, scope)
   return scope
 }
 
@@ -185,13 +189,18 @@ function collectRefs(root: ts.Node): { refs: Array<Ref>; assigned: Array<string>
   function walkNode(node: ts.Node, scopes: Array<Set<string>>, inAsync: boolean): void {
     if (ts.isTypeNode(node)) return
     if (isFunctionLike(node)) {
-      const nextScopes = [...scopes, functionScope(node)]
+      const parameterScopes = [...scopes, functionScope(node)]
       const async = !!node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)
       for (const parameter of node.parameters) {
-        if (!ts.isIdentifier(parameter.name)) walkNode(parameter.name, nextScopes, async)
-        if (parameter.initializer) walkNode(parameter.initializer, nextScopes, async)
+        if (!ts.isIdentifier(parameter.name)) walkNode(parameter.name, parameterScopes, async)
+        if (parameter.initializer) walkNode(parameter.initializer, parameterScopes, async)
       }
-      if (node.body) walkNode(node.body, nextScopes, async)
+      if (node.body) {
+        // Only the body sees its own `var`s; its other declarations join through `ownScope`.
+        const hoisted = new Set<string>()
+        hoistedVarNames(node.body, hoisted)
+        walkNode(node.body, [...parameterScopes, hoisted], async)
+      }
       return
     }
     const own = ownScope(node)
