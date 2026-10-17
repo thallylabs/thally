@@ -520,7 +520,9 @@ describe('repository component migration', () => {
     })
 
     /** Execute a migrated module with React and the built-in registry stubbed; each built-in is a marker function named after its tag. */
-    function evaluate(moduleSource: string): Record<string, any> {
+    type Rendered = { type: { displayName?: string } }
+    type Marker = { displayName?: string }
+    function evaluate<T>(moduleSource: string): T {
       const { outputText } = ts.transpileModule(moduleSource, {
         compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 },
       })
@@ -531,19 +533,19 @@ describe('repository component migration', () => {
         react: { createElement: (type: unknown, props: unknown) => element(type, props) },
         '@/components/mdx/builtin-components': { builtinMdxComponents: registry },
       }
-      const exports: Record<string, any> = {}
+      const exports: Record<string, unknown> = {}
       new Function('require', 'exports', outputText)((id: string) => {
         if (!(id in stubs)) throw new Error(`unexpected import ${id}`)
         return stubs[id]
       }, exports)
-      return exports
+      return exports as T
     }
 
     describe('block scope', () => {
       it.each(['Note', 'Warning'])('binds <%s> used outside the block that declares a component of that name', (name) => {
         const content = copied(`export function Probe({ enabled }) { if (enabled) { const ${name} = () => <aside />; return <${name} />; } return <${name}>global</${name}>; }`)
         expect(content).toMatch(new RegExp(`const \\{ ${name} \\} = builtinMdxComponents;`))
-        const { Probe } = evaluate(content)
+        const { Probe } = evaluate<{ Probe: (props: { enabled: boolean }) => Rendered }>(content)
         // The block's own component wins inside the block; the global one is the built-in.
         expect(Probe({ enabled: true }).type.displayName).toBeUndefined()
         expect(Probe({ enabled: false }).type.displayName).toBe(name)
@@ -591,7 +593,7 @@ describe('repository component migration', () => {
           'export const Table = { info: Info, tip: Tip };',
         ].join('\n'))
         expect(content.match(/const \{ ([^}]+) \} = builtinMdxComponents;/)![1].split(', ')).toEqual(['Info', 'Note', 'Tip', 'Warning'])
-        const { Probe, Alias, Table } = evaluate(content)
+        const { Probe, Alias, Table } = evaluate<{ Probe: () => Rendered; Alias: Marker; Table: { info: Marker } }>(content)
         expect(Probe().type.displayName).toBe('Note')
         expect(Alias.displayName).toBe('Warning')
         expect(Table.info.displayName).toBe('Info')
