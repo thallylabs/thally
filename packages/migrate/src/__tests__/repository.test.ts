@@ -146,7 +146,7 @@ vi.mock('node:child_process', () => {
 })
 
 describe('repository redirect finalization', () => {
-  it('omits literal self redirects across trailing slashes and keeps distinct destinations', () => {
+  it('omits self redirects across trailing slashes and with only a query added, and keeps distinct destinations', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-self-redirects-'))
     writeFileSync(join(root, 'introduction.mdx'), '# Introduction\n\n[Models](/docs/models)')
     writeFileSync(join(root, 'models.mdx'), '# Models')
@@ -162,13 +162,12 @@ describe('repository redirect finalization', () => {
     }))
 
     const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
-    expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([
-      { source: '/docs/models', destination: '/docs/models?view=all' },
-      { source: '/docs/old-models', destination: '/docs/models' },
-    ]))
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/docs/old-models', destination: '/docs/models' })
     expect(bundle.docsConfig.redirects).not.toContainEqual({ source: '/docs/models', destination: '/docs/models' })
     expect(bundle.docsConfig.redirects).not.toContainEqual({ source: '/docs/models/', destination: '/docs/models' })
+    expect(bundle.docsConfig.redirects).not.toContainEqual({ source: '/docs/models', destination: '/docs/models?view=all' })
     expect(bundle.warnings.filter((warning) => warning.message.startsWith('Self-redirect'))).toHaveLength(2)
+    expect(bundle.warnings.map((warning) => warning.message)).toContain('Skipped 1 redirect that would send visitors in a circle: /docs/models -> /docs/models?view=all. Check these redirects in the source docs.')
   })
 })
 

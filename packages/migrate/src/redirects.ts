@@ -59,10 +59,12 @@ const ROUTE_PATTERN_OPERATORS = /[+?()[\]{}]/
 
 /**
  * Drop each redirect Next.js cannot serve as written: one back to its own
- * route (a trailing slash is the same route; a query or fragment carries
- * intent, so it is kept) and one whose source has route-pattern operators,
- * which would fail the build. An omitted address with operators is named in one
- * warning; a self-redirect gets its own.
+ * route (a trailing slash is the same route) and one whose source has
+ * route-pattern operators, which would fail the build. An omitted address with
+ * operators is named in one warning; a self-redirect gets its own. A redirect
+ * to its own route with a query or fragment added is left to
+ * `dropConflictingRedirects`: sources match the request path alone, so it loops
+ * all the same, and that check says so.
  */
 export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: Array<MigrationWarning>): MigrationDocsConfig {
   if (!config.redirects?.length) return config
@@ -153,8 +155,6 @@ export function dropConflictingRedirects(
     const writtenDestination = destinationRoute(redirect.destination)
     if (!writtenDestination) return true
     const destination = writtenDestination.toLowerCase()
-    // A redirect back to its own address with a query or fragment is kept on purpose (`dropUnroutableRedirects`), so it takes no part in the loop check.
-    if (writtenSource === writtenDestination && exactRoute(redirect.destination) === null) return true
     // A source that already has a redirect under a reading never fires there (the first listed wins), so it cannot loop there and is not recorded there.
     // A case variant of a listed source is unreachable on `next start` but live on OpenNext, so it is still checked, and recorded, as written.
     const firesFolded = !folded.kept.has(source)
