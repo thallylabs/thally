@@ -1630,6 +1630,104 @@ describe('Mintlify repository migration', () => {
     }
   })
 
+  describe('when no operation docs.json lists for a tab survives', () => {
+    const operationWarnings = (bundle: ReturnType<typeof migrateRepository>) => bundle.warnings.filter((warning) => /individual OpenAPI operations/.test(warning.message))
+    const visible = { group: 'Visible', pages: ['GET /a'] }
+    const hidden = { group: 'Hidden', hidden: true, pages: ['GET /b'] }
+    const restricted = { group: 'Internal', public: false, pages: ['GET /b'] }
+    // Groups nested `levels` deep, the innermost holding `pages`.
+    const tree = (levels: number, ...pages: Array<unknown>): Record<string, unknown> => {
+      let node: Record<string, unknown> = { group: `Level ${levels}`, pages }
+      for (let level = levels - 1; level >= 1; level--) node = { group: `Level ${level}`, pages: [node] }
+      return node
+    }
+    const migrate = (navigation: Record<string, unknown>) => {
+      const root = fixture()
+      writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation }))
+      writeFileSync(join(root, 'o.yaml'), 'openapi: 3.1.0\ninfo: { title: O, version: "1.0" }\npaths: {}')
+      writeFileSync(join(root, 'intro.mdx'), '---\ntitle: Intro\n---\n\nHello.')
+      const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+      return { bundle, api: bundle.docsConfig.tabs.find((tab) => tab.api)?.api }
+    }
+    const products = (...references: Array<Record<string, unknown>>) => ({
+      products: references.map((reference, index) => ({ product: `P${index}`, tabs: [{ tab: 'API reference', openapi: 'o.yaml', ...reference }] })),
+    })
+    const generated = { source: 'openapi/o.yaml' }
+    const off = { source: 'openapi/o.yaml', navigation: false }
+
+    it('turns generated navigation off when every operation the only reference lists is hidden or restricted', () => {
+      const binding = { openapi: 'o.yaml' }
+      for (const apiTab of [
+        { ...binding, groups: [hidden] },
+        { ...binding, groups: [restricted] },
+        { ...binding, public: false, groups: [{ group: 'Any', pages: ['GET /b'] }] },
+        { ...binding, groups: [{ ...tree(33, 'GET /b'), hidden: true }] },
+        { ...binding, groups: [tree(33, 'GET /b'), hidden] },
+        // The tab binds nothing itself: the only binding is a container under a hidden group.
+        { groups: [{ group: 'Hidden', hidden: true, pages: [{ group: 'Nested bound', ...binding, pages: ['GET /b'] }] }] },
+      ]) {
+        expect(migrate({ tabs: [{ tab: 'Docs', pages: ['intro'] }, { tab: 'API', ...apiTab }] }).api).toEqual(off)
+      }
+    })
+
+    it('turns it off for every reference of a shared tab that lists operations none of which survives', () => {
+      expect(migrate(products({ groups: [hidden] }, { groups: [restricted] })).api).toEqual(off)
+    })
+
+    it('keeps generated navigation for operations dropped only for nesting too deep, and warns', () => {
+      // The limit is Thally's, not the author's choice: the tab lists nothing of its own, so every operation is listed.
+      const { bundle, api } = migrate({ tabs: [{ tab: 'Docs', pages: ['intro'] }, { tab: 'API', openapi: 'o.yaml', groups: [tree(33, 'GET /b')] }] })
+      expect(api).toEqual(generated)
+      expect(operationWarnings(bundle)).toHaveLength(1)
+      expect(operationWarnings(bundle)[0].message).toMatch(/more than 32 levels deep/)
+      // Beside another reference that lists none, nothing changes either.
+      expect(migrate(products({ groups: [tree(33, 'GET /b')] }, {})).api).toEqual(generated)
+    })
+
+    it('keeps the current navigation in the mixed cases', () => {
+      // A reference that lists nothing leaves every operation to the generated navigation.
+      for (const references of [[{ groups: [hidden] }, {}], [{}, { groups: [hidden] }]]) expect(migrate(products(...references)).api).toEqual(generated)
+      // A reference that lists a visible operation is the navigation.
+      for (const references of [[{ groups: [hidden] }, { groups: [visible] }], [{ groups: [visible] }, { groups: [hidden] }]]) {
+        expect(migrate(products(...references)).api).toEqual({ ...generated, groups: [visible] })
+      }
+    })
+
+    it('lets only the default language decide', () => {
+      const language = (code: string, extra: Record<string, unknown>, apiTab: Record<string, unknown>) => ({
+        language: code, ...extra, tabs: [{ tab: 'Docs', pages: ['intro'] }, { tab: 'API', openapi: 'o.yaml', ...apiTab }],
+      })
+      const english = (apiTab: Record<string, unknown>) => language('en', { default: true }, apiTab)
+      const french = language('fr', {}, { groups: [{ group: 'French', pages: ['GET /b'] }] })
+      for (const languages of [[english({ groups: [hidden] }), french], [french, english({ groups: [hidden] })]]) expect(migrate({ languages }).api).toEqual(off)
+      // The default language lists nothing: the tab keeps the generated navigation, whatever the other one lists.
+      expect(migrate({ languages: [english({}), french] }).api).toEqual(generated)
+    })
+
+    it('reports an operation nested deeper than the renderer follows, and migrates the ones above it', () => {
+      const { bundle, api } = migrate({ tabs: [{ tab: 'API', openapi: 'o.yaml', pages: ['intro'], groups: [visible, tree(33, 'GET /deep')] }] })
+      expect(api).toEqual({ source: 'openapi/o.yaml', groups: [visible] })
+      const warnings = operationWarnings(bundle)
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0].message).toMatch(/more than 32 levels deep/)
+      // Level 32 is still migrated, and nothing is reported.
+      const kept = migrate({ tabs: [{ tab: 'API', openapi: 'o.yaml', pages: ['intro'], groups: [tree(32, 'GET /ok')] }] })
+      expect(kept.api?.groups).toEqual([tree(32, 'GET /ok')])
+      expect(operationWarnings(kept.bundle)).toEqual([])
+    })
+
+    it('keeps the operations of a container under a hidden group out of the visible binding\'s groups, without a warning', () => {
+      const { bundle, api } = migrate({
+        tabs: [{
+          tab: 'API', openapi: 'o.yaml', pages: ['intro'],
+          groups: [visible, { group: 'Hidden', hidden: true, pages: [{ group: 'Nested bound', openapi: 'o.yaml', pages: ['GET /b'] }] }],
+        }],
+      })
+      expect(api).toEqual({ source: 'openapi/o.yaml', groups: [visible] })
+      expect(operationWarnings(bundle)).toEqual([])
+    })
+  })
+
   it('binds only the default language\'s groups to the API tab, and warns once about the other languages\' operation lists', () => {
     const migrate = (languages: Array<Record<string, unknown>>) => {
       const root = fixture()

@@ -514,6 +514,54 @@ describe('thally check api.groups keys', () => {
     expect(await run(undefined, [hiddenTab()], 'openapi/api.json', undefined, versions)).not.toContain('api.groups')
     expect(await run(undefined, [hiddenTab('v1')])).not.toContain('api.groups')
   })
+
+  it('warns once per tab when a group icon is not text: the group stays, only the icon is dropped', async () => {
+    const output = await run([{ group: 'A', icon: { bad: true }, pages: ['GET /visible', { group: 'Nested', icon: 5, pages: ['POST /visible'] }] }, { group: 'B', icon: 'paw', pages: ['WEBHOOK POST shipped'] }])
+    expect(output).toContain('API tab "API reference": api.groups has 2 groups whose "icon" is not text. The icon is dropped and the group is still listed.')
+    expect(output.split('whose "icon"').length - 1).toBe(1)
+    expect(output).toContain('0 error(s), 1 warning(s)')
+    expect(await run([{ group: 'A', icon: null, pages: ['GET /visible'] }])).toContain('api.groups has 1 group whose "icon" is not text')
+    expect(await run([{ group: 'A', icon: '', pages: ['GET /visible'] }, { group: 'B', icon: 'paw', pages: ['POST /visible'] }])).not.toContain('"icon"')
+  })
+
+  it('judges the tabs of every i18n.navigation locale, naming the locale, with the same hidden-tab rule', async () => {
+    const apiTab = (name: string, extra: Record<string, unknown> = {}) => ({ tab: name, ...extra, api: { source: 'openapi/api.json', groups: [{ group: 'A', pages: ['GET /typo', 7] }] } })
+    const i18n = (navigation: Record<string, Array<unknown>>) => ({
+      navigation: { versions: [{ label: 'v1' }] },
+      i18n: { defaultLocale: 'en', locales: [{ code: 'en', label: 'English' }, { code: 'fr', label: 'French' }, { code: 'de', label: 'German' }], navigation },
+    })
+    const output = await run(undefined, [], 'openapi/api.json', undefined, i18n({
+      fr: [apiTab('API fr', { hidden: true, version: 'v1' }), apiTab('Spec only', { hidden: true })],
+      de: [apiTab('API de')],
+    }))
+    expect(output).toContain('API tab "API fr" (locale fr): api.groups lists "GET /typo", which matches no published operation in openapi/api.json. It is left out of the sidebar.')
+    expect(output).toContain('API tab "API fr" (locale fr): api.groups has 1 entry that is not a group')
+    expect(output).toContain('API tab "API de" (locale de): api.groups lists "GET /typo"')
+    expect(output).not.toContain('Spec only')
+    expect(output).not.toContain('API tab "API reference"')
+    expect(await run(undefined, [], 'openapi/api.json', undefined, i18n({ fr: [{ tab: 'Docs', href: 'https://example.com' }] }))).not.toContain('api.groups')
+  })
+
+  it('does not repeat a warning for the same tab shared by two locales', async () => {
+    const { checkApiGroupKeys } = await import('../check.js')
+    const shared = { tab: 'API', api: { source: 'openapi/api.json', groups: [{ group: 'A', pages: ['GET /typo'] }] } }
+    const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-shared-'))
+    mkdirSync(join(projectDir, 'openapi'), { recursive: true })
+    writeFileSync(join(projectDir, 'openapi/api.json'), JSON.stringify({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths: { '/visible': { get: ok } } }))
+    const issues: Array<unknown> = []
+    checkApiGroupKeys(projectDir, { tabs: [shared], i18n: { defaultLocale: 'en', locales: [], navigation: { fr: [shared], de: [shared] } } }, issues as never)
+    expect(issues).toHaveLength(1)
+  })
+
+  it('warns when api.groups is not a list: the renderer then shows the generated navigation', async () => {
+    const message = 'API tab "API reference": api.groups must be a list of groups, so the tab shows the generated navigation.'
+    expect(await run({ group: 'A', pages: ['GET /visible'] })).toContain(message)
+    for (const raw of ['null', '5', '"GET /visible"', 'true', '{}']) expect(await run(raw)).toContain(message)
+    expect(await run([])).not.toContain('api.groups')
+    expect(await run(undefined)).not.toContain('api.groups')
+    const off = { tab: 'Off', api: { source: 'openapi/api.json', navigation: false, groups: { group: 'A', pages: [] } } }
+    expect(await run(undefined, [off])).not.toContain('must be a list')
+  })
 })
 
 describe('thally check manual api pages', () => {

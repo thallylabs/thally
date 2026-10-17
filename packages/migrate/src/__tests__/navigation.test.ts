@@ -1,6 +1,6 @@
 /** Mintlify navigation projection invariants shared by every migration entrypoint. */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -11,7 +11,7 @@ import {
   pruneMissingNavigationPages,
 } from '../index.js'
 import { projectFernNavigation } from '../fern.js'
-import { mergeApiGroups, mintlifyNavigationApiReferences, readMintlifyConfig } from '../navigation.js'
+import { API_GROUPS_MAX_DEPTH, mergeApiGroups, mintlifyNavigationApiReferences, readMintlifyConfig } from '../navigation.js'
 import type { MigrationApiGroup, MigrationDocsConfig, MigrationPage } from '../types.js'
 
 function page(id: string, navigationId = id, locale?: string): MigrationPage {
@@ -739,6 +739,13 @@ describe('Mintlify directory reference with an explicit operation list', () => {
   })
 })
 
+/** Groups nested `levels` deep (the innermost is level `levels`), the innermost holding `pages`. */
+function groupTree(levels: number, ...pages: Array<unknown>): Record<string, unknown> {
+  let tree: Record<string, unknown> = { group: `Level ${levels}`, pages }
+  for (let level = levels - 1; level >= 1; level--) tree = { group: `Level ${level}`, pages: [tree] }
+  return tree
+}
+
 describe('Mintlify manual OpenAPI operation listing', () => {
   const operationWarnings = (warnings: Array<{ message: string }>) => warnings.filter((warning) => /individual OpenAPI operations/.test(warning.message))
 
@@ -840,6 +847,30 @@ describe('Mintlify manual OpenAPI operation listing', () => {
     expect(warnings[0].message).toMatch(/language other than the default.*not added to the API navigation.*still have pages/)
     // The default language alone raises none.
     expect(operationWarnings(projectMintlifyNavigation({ navigation: { languages: [language('en', { default: true }, 'GET /a')] } }, { operationGroups: true }).warnings)).toEqual([])
+  })
+
+  it('warns once, in plain words, about operation entries nested deeper than the API groups go', () => {
+    const projected = (container: Record<string, unknown>) => operationWarnings(projectMintlifyNavigation(
+      { navigation: { tabs: [{ tab: 'Docs', openapi: 'spec.yml', ...container }] } },
+      { operationGroups: true },
+    ).warnings)
+    // The renderer follows 32 levels of nested groups: every entry down to there is migrated.
+    expect(projected({ groups: [groupTree(32, 'GET /a')] })).toEqual([])
+    const warnings = projected({ groups: [groupTree(33, 'GET /a'), groupTree(34, 'GET /b')] })
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toMatch(/more than 32 levels deep.*not added to the API navigation.*still have pages/)
+    // A group that binds the spec is the first level of its own tree.
+    const bound = (levels: number) => operationWarnings(projectMintlifyNavigation(
+      { navigation: { tabs: [{ tab: 'Docs', groups: [{ ...groupTree(levels, 'GET /a'), openapi: 'spec.yml' }] }] } },
+      { operationGroups: true },
+    ).warnings)
+    expect(bound(32)).toEqual([])
+    expect(bound(33)).toHaveLength(1)
+    // Hidden entries are the author's intent, and restricted ones keep their own warning.
+    expect(projected({ groups: [{ ...groupTree(33, 'GET /a'), hidden: true }] })).toEqual([])
+    const restricted = projected({ groups: [{ ...groupTree(33, 'GET /a'), public: false }] })
+    expect(restricted).toHaveLength(1)
+    expect(restricted[0].message).toMatch(/access-restricted/)
   })
 
   it('reports every operation entry when the caller does not bind operation lists (the URL import)', () => {
@@ -994,6 +1025,70 @@ describe('Mintlify authored API groups', () => {
       { group: 'Last', pages: ['GET /c'] },
       { group: 'API', pages: ['GET /d'] },
     ])
+  })
+
+  describe('past the groups the renderer follows (32 levels)', () => {
+    const referenceOf = (container: Record<string, unknown>) => mintlifyNavigationApiReferences({ navigation: { tabs: [{ tab: 'Docs', openapi: source, ...container }] } })[0]
+
+    it('mirrors the renderer\'s limit', () => {
+      // The renderer's own copy, read from the repository: this package cannot import it.
+      const declared = /export const API_GROUPS_MAX_DEPTH = (\d+)/.exec(readFileSync(new URL('../../../../src/lib/openapi/operation-keys.ts', import.meta.url), 'utf8'))
+      expect(declared).not.toBeNull()
+      expect(API_GROUPS_MAX_DEPTH).toBe(Number(declared?.[1]))
+    })
+
+    it('keeps groups down to level 32 and leaves out deeper ones, as a binding that lists nothing when nothing else is listed', () => {
+      expect(referenceOf({ groups: [groupTree(32, 'GET /a')] }).groups).toEqual([groupTree(32, 'GET /a')])
+      // Thally\'s limit, not the author\'s choice: not withheld, so the tab keeps its generated navigation.
+      expect(referenceOf({ groups: [groupTree(33, 'GET /a')] })).toEqual({ value: source, kind: 'openapi', tabLabel: 'Docs' })
+      // A hidden or restricted entry beside it keeps the binding withheld.
+      for (const withheld of [{ group: 'Secret', hidden: true, pages: ['GET /b'] }, { group: 'Internal', public: false, pages: ['GET /b'] }]) {
+        expect(referenceOf({ groups: [groupTree(33, 'GET /a'), withheld] })).toEqual({ value: source, kind: 'openapi', tabLabel: 'Docs', operationsWithheld: true })
+      }
+      expect(referenceOf({ groups: [{ ...groupTree(33, 'GET /a'), hidden: true }] })).toEqual({ value: source, kind: 'openapi', tabLabel: 'Docs', operationsWithheld: true })
+      // Only the level-33 group goes: the operation beside it in level 32 stays.
+      expect(referenceOf({ groups: [groupTree(32, 'GET /keep', { group: 'Level 33', pages: ['GET /drop'] })] }).groups).toEqual([groupTree(32, 'GET /keep')])
+      expect(referenceOf({ groups: [{ group: 'Shallow', pages: ['GET /s'] }, groupTree(33, 'GET /deep')] })).toMatchObject({ groups: [{ group: 'Shallow', pages: ['GET /s'] }] })
+    })
+
+    it('counts a group that binds the spec as level 1 of its own tree', () => {
+      const bound = (levels: number) => mintlifyNavigationApiReferences({ navigation: { tabs: [{ tab: 'Docs', groups: [{ ...groupTree(levels, 'GET /a'), openapi: source }] }] } })[0]
+      expect(bound(32).groups).toEqual([groupTree(32, 'GET /a')])
+      expect(bound(33)).toEqual({ value: source, kind: 'openapi', tabLabel: 'Docs' })
+    })
+  })
+
+  describe('under a hidden group', () => {
+    const nestedBinding = (extra: Record<string, unknown> = {}) => ({
+      navigation: {
+        tabs: [{
+          tab: 'API',
+          openapi: source,
+          groups: [
+            { group: 'Visible', pages: ['GET /a'] },
+            { group: 'Hidden', hidden: true, pages: [{ group: 'Middle', pages: [{ group: 'Nested bound', openapi: source, pages: ['GET /b'], ...extra }] }] },
+          ],
+        }],
+      },
+    })
+
+    it('gives a container that binds a spec no groups and counts it as withheld, however deep and whatever it lists', () => {
+      const visible = { value: source, kind: 'openapi', tabLabel: 'API', groups: [{ group: 'Visible', pages: ['GET /a'] }] }
+      const withheld = { value: source, kind: 'openapi', tabLabel: 'API', operationsWithheld: true }
+      expect(mintlifyNavigationApiReferences(nestedBinding())).toEqual([visible, withheld])
+      expect(mintlifyNavigationApiReferences(nestedBinding({ pages: ['guides/start'] }))).toEqual([visible, withheld])
+    })
+
+    it('keeps the groups of a hidden tab, which only hides it from the tab bar', () => {
+      expect(mintlifyNavigationApiReferences({ navigation: { tabs: [{ tab: 'API', hidden: true, openapi: source, pages: ['GET /a'] }] } })).toEqual([
+        { value: source, kind: 'openapi', tabLabel: 'API', groups: [{ group: 'API', pages: ['GET /a'] }] },
+      ])
+    })
+
+    it('migrates its entries as hidden, without a warning', () => {
+      const result = projectMintlifyNavigation(nestedBinding(), { operationGroups: true })
+      expect(result.warnings.filter((warning) => /individual OpenAPI operations/.test(warning.message))).toEqual([])
+    })
   })
 
   it('stops following the tree past the depth limit instead of recursing without bound', () => {

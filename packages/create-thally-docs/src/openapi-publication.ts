@@ -162,10 +162,11 @@ export function webhookState(document: unknown, name: string, overrides?: unknow
  */
 export const API_GROUPS_MAX_DEPTH = 32
 
-/** What `listedOperationKeys` skipped: entries that are not a group or a key, and whether any group was too deep. */
+/** What `listedOperationKeys` skipped: entries that are not a group or a key, whether any group was too deep, and how many groups carry an `icon` that is not text (dropped, the group stays). */
 export interface ApiGroupsSkipped {
   malformed: number
   tooDeep: boolean
+  badIcon: number
 }
 
 /**
@@ -184,6 +185,7 @@ export function listedOperationKeys(groups: unknown, skipped?: ApiGroupsSkipped,
       if (skipped) skipped.tooDeep = true
       return []
     }
+    if (skipped && group.icon !== undefined && typeof group.icon !== 'string') skipped.badIcon++
     return group.pages.flatMap((page) => typeof page === 'string' ? [page] : listedOperationKeys([page], skipped, depth + 1))
   })
 }

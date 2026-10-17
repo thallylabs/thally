@@ -220,6 +220,8 @@ export interface RemoteApiSpec {
   directories?: Array<RemoteApiSpecDirectory>
   /** The operation groups docs.json authors for the tab this spec binds to, merged across every reference that shares it. */
   groups?: Array<MigrationApiGroup>
+  /** Every reference sharing the tab lists operations and none survives (all hidden or restricted): no endpoint navigation is generated for it. */
+  navigation?: false
   /** Operation keys (`get /x`) only access-restricted pages document; marked `x-excluded` after download. */
   withheldOperations?: Array<string>
   /** Operation keys published pages or docs.json also name; keeps a shared `$ref` path item public. */

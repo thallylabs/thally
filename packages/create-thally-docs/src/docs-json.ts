@@ -22,6 +22,8 @@ export interface DocsJsonConfig {
   i18n?: {
     defaultLocale: string
     locales: Array<{ code: string; label: string }>
+    /** Per-locale tab trees, used instead of the root `tabs` for that locale. */
+    navigation?: Record<string, Array<DocsJsonTab>>
   }
   /** Admin-dashboard team roster — git-committed, no database. */
   team?: {

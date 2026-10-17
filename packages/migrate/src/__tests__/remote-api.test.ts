@@ -243,6 +243,26 @@ describe('remote OpenAPI spec with hidden, restricted or localized operation lis
     return { migrated, api: result.docsConfig.tabs.find((tab) => tab.api)?.api, assetPath: result.assets[0].path }
   }
 
+  it('turns generated navigation off when every operation the references list is hidden or restricted', async () => {
+    const hidden = [{ group: 'Hidden', hidden: true, pages: ['GET /api/v1/scim/v2/Groups'] }]
+    const restricted = [{ group: 'Internal', public: false, pages: ['GET /api/v1/scim/v2/Groups'] }]
+    const withheld = [[{ groups: hidden }], [{ groups: restricted }], [{ groups: hidden }, { groups: restricted }]]
+    for (const references of withheld) {
+      const { migrated, api, assetPath } = await hydrated({
+        products: references.map((reference, index) => ({ product: `P${index}`, tabs: [{ tab: 'API reference', openapi: { source: SPEC_URL, directory: `p${index}/api` }, ...reference }] })),
+      })
+      expect(migrated.remoteApiSpecs?.[0]).toMatchObject({ navigation: false })
+      expect(migrated.remoteApiSpecs?.[0]).not.toHaveProperty('groups')
+      expect(api).toEqual({ source: assetPath, navigation: false })
+    }
+    // A reference that lists nothing leaves the generated navigation on.
+    const { migrated, api, assetPath } = await hydrated({
+      products: [{ groups: hidden }, {}].map((reference, index) => ({ product: `P${index}`, tabs: [{ tab: 'API reference', openapi: { source: SPEC_URL, directory: `p${index}/api` }, ...reference }] })),
+    })
+    expect(migrated.remoteApiSpecs?.[0]).not.toHaveProperty('navigation')
+    expect(api).toEqual({ source: assetPath })
+  })
+
   it('keeps the groups of the products that list operations when another lists its own only in hidden or restricted groups', async () => {
     const hidden = [{ group: 'Hidden', hidden: true, pages: ['GET /api/v1/scim/v2/Groups'] }]
     const restricted = [{ group: 'Internal', public: false, pages: ['GET /api/v1/scim/v2/Groups'] }]

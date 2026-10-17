@@ -127,6 +127,17 @@ describe('api.groups', () => {
     expect(titles(sections[0].nodes)).toEqual([{ Pets: ['List pets'] }, 'List stores'])
   })
 
+  it('keeps a group icon only when it is a non-empty string, and still renders the group', async () => {
+    const { sections } = await tab({ groups: [
+      { group: 'Object', icon: { bad: true }, pages: ['GET /pets'] },
+      { group: 'Number', icon: 5, pages: [{ group: 'Nested', icon: ['x'], pages: ['GET /stores'] }] },
+      { group: 'Empty', icon: '', pages: ['POST /pets'] },
+      { group: 'Named', icon: 'paw', pages: ['DELETE /pets/{id}'] },
+    ] as never })
+    expect(sections.map((section) => [section.title, section.icon])).toEqual([['Object', undefined], ['Number', undefined], ['Empty', undefined], ['Named', 'paw']])
+    expect(sections[1].nodes?.[0]).toMatchObject({ type: 'group', group: { title: 'Nested', icon: undefined } })
+  })
+
   it('stops at the shared depth limit: deeper groups are skipped and nothing overflows the stack', async () => {
     const nest = (levels: number, leaf: DocsJsonApiGroup['pages']): DocsJsonApiGroup => {
       let pages = leaf

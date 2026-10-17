@@ -265,7 +265,8 @@ const collectItems = (nodes: Array<NavigationNode>): Array<NavigationItem> =>
  * groups kept. A key matching no published operation is skipped, a group left
  * empty disappears, and an operation listed twice shows at its first position.
  * An entry that is not a group or a key, and a group nested deeper than
- * `API_GROUPS_MAX_DEPTH`, is skipped too (`thally check` reports both).
+ * `API_GROUPS_MAX_DEPTH`, is skipped too, and a group `icon` that is not a
+ * non-empty string is dropped (`thally check` reports all three).
  */
 async function buildAuthoredSections(
   groups: Array<DocsJsonApiGroup>,
@@ -292,7 +293,9 @@ async function buildAuthoredSections(
   const buildGroup = (group: DocsJsonApiGroup, indexPath: Array<number>, ancestors: Array<string>): NavigationGroup | null => {
     if (indexPath.length > API_GROUPS_MAX_DEPTH) return null
     const nodes = buildNodes(group.pages, indexPath, [...ancestors, group.group].filter(Boolean))
-    return nodes.length === 0 ? null : { id: `openapi-group-${indexPath.join('-')}`, title: group.group || 'General', icon: group.icon, nodes }
+    // An icon that is not a non-empty string would crash the sidebar's icon renderer: drop it, keep the group.
+    const icon = typeof group.icon === 'string' && group.icon ? group.icon : undefined
+    return nodes.length === 0 ? null : { id: `openapi-group-${indexPath.join('-')}`, title: group.group || 'General', icon, nodes }
   }
 
   return groups.flatMap((group, index) => {
