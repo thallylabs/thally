@@ -52,7 +52,7 @@ import {
 } from './docusaurus.js'
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
-import { namesSeveralSpecs, resolveSpecRef, specNamedByPage, type SpecCandidate, type SpecRefResolution } from './openapi-ref.js'
+import { isRemoteSpecRef, namesSeveralSpecs, resolveSpecRef, specNamedByPage, type SpecCandidate, type SpecRefResolution } from './openapi-ref.js'
 import { operationKey } from './spec-exclude.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
@@ -1295,7 +1295,7 @@ function exactReferenceKey(value: string): string {
  */
 interface NavigationSpecContext {
   operations: Array<{ ref: string; owner: string | null | undefined }>
-  /** Page references (`exactReferenceKey`, lower case) with the owner of each place they are listed. */
+  /** Page references (`normalizedReferenceKey`, lower case: `reference` and `reference/index` are one page) with the owner of each place they are listed. */
   pageOwners: Map<string, Set<string | null | undefined>>
 }
 
@@ -1313,7 +1313,7 @@ function navigationSpecContext(config: Record<string, unknown> | null): Navigati
     if (typeof node === 'string') {
       if (splitOpenApiRef(node)) context.operations.push({ ref: node, owner })
       else if (listed) {
-        const key = exactReferenceKey(node).toLowerCase()
+        const key = normalizedReferenceKey(node).toLowerCase()
         context.pageOwners.set(key, (context.pageOwners.get(key) ?? new Set()).add(owner))
       }
     }
@@ -1335,14 +1335,23 @@ function navigationSpecContext(config: Record<string, unknown> | null): Navigati
  * listed under (for a page, the container that lists the page) or else to the
  * site's default spec. A bare one whose spec cannot be told keeps nothing public
  * (fail closed) and is returned in `unowned` so the loss can be reported.
+ * `specs` are the specs a spec reference can name: owners are compared by the
+ * source they resolve to, so `b.json` and `/b.json` are one owner.
  */
 function keptOperationRefs(
   published: ReadonlyArray<{ ref: string; file: string }>,
   navigation: NavigationSpecContext,
   defaultSpec: string | undefined,
+  specs: ReadonlyArray<SpecCandidate>,
 ): { kept: Array<string>; unowned: Array<string> } {
   const kept: Array<string> = []
   const unowned: Array<string> = []
+  // An owner that resolves to one local spec is known by that spec's source; any other stays as authored (never merged).
+  const source = (owner: string | null | undefined): string | null | undefined => {
+    if (!owner || isRemoteSpecRef(owner)) return owner
+    const resolved = resolveSpecRef(owner, specs)
+    return resolved.kind === 'match' ? resolved.spec.sourcePath ?? resolved.spec.filename : owner
+  }
   const add = (raw: string, owner: string | null | undefined): void => {
     const ref = splitOpenApiRef(raw)
     if (!ref) return
@@ -1352,10 +1361,10 @@ function keptOperationRefs(
   }
   for (const { ref, file } of published) {
     // A page listed under several containers belongs to none of them alone.
-    const owners = new Set([...navigation.pageOwners.get(exactReferenceKey(file).toLowerCase()) ?? [undefined]].map((owner) => owner === undefined ? defaultSpec : owner))
+    const owners = new Set([...navigation.pageOwners.get(normalizedReferenceKey(file).toLowerCase()) ?? [undefined]].map((owner) => source(owner === undefined ? defaultSpec : owner)))
     add(ref, owners.size === 1 ? [...owners][0] : null)
   }
-  for (const { ref, owner } of navigation.operations) add(ref, owner === undefined ? defaultSpec : owner)
+  for (const { ref, owner } of navigation.operations) add(ref, source(owner === undefined ? defaultSpec : owner))
   return { kept, unowned }
 }
 
@@ -5103,7 +5112,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ])
     const keptOperations = (fallbackSource?: string): ReturnType<typeof keptOperationRefs> => {
       const defaultSpec = defaultSources.size === 0 ? fallbackSource : defaultSources.size === 1 ? [...defaultSources][0] : undefined
-      const { kept, unowned } = keptOperationRefs(publishedSpecPages, navigation, defaultSpec)
+      const candidates = fallbackSource ? [{ sourcePath: fallbackSource, filename: basename(fallbackSource) }, ...allSpecs] : allSpecs
+      const { kept, unowned } = keptOperationRefs(publishedSpecPages, navigation, defaultSpec, candidates)
       return { kept: kept.filter((ref) => !namesSeveralSpecs(ref, allSpecs)), unowned }
     }
     let { kept: keptSpecRefs, unowned: unownedOperations } = keptOperations()

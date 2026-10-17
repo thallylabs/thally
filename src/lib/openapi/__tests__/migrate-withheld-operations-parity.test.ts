@@ -9,6 +9,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { migrateRepository } from '../../../../packages/migrate/src/repository'
+import { parseOpenApiFrontmatter } from '@/lib/openapi/page-frontmatter'
+import { pageReferenceState, type OperationPublicationState } from '@/lib/openapi/publication'
 import { sanitizeSpecForPublication } from '@/lib/openapi/sanitize'
 import type { OpenAPIDocument } from '@/lib/openapi/types'
 
@@ -19,18 +21,37 @@ const spec = JSON.stringify({
 })
 const page = (extra = ''): string => `---\ntitle: P\n${extra}---\n\nBody.\n`
 
-/** Migrates a Mintlify repository and returns the paths each published spec still lists after the renderer's sanitiser ran. */
-function publishedPaths(files: Record<string, string>): Record<string, Array<string>> {
+/** Migrates a Mintlify repository written to a temporary folder. */
+function migrate(files: Record<string, string>): ReturnType<typeof migrateRepository> {
   const root = mkdtempSync(join(tmpdir(), 'thally-withheld-parity-'))
   for (const [name, content] of Object.entries(files)) {
     mkdirSync(dirname(join(root, name)), { recursive: true })
     writeFileSync(join(root, name), content)
   }
-  const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+  return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'mintlify' })
+}
+
+/** The paths each published spec still lists after the renderer's sanitiser ran. */
+function publishedPathsOf(bundle: ReturnType<typeof migrate>): Record<string, Array<string>> {
   return Object.fromEntries(bundle.assets.filter((asset) => asset.path.startsWith('openapi/')).map((asset) => {
     const published = sanitizeSpecForPublication(JSON.parse(Buffer.from(asset.content).toString('utf8')) as OpenAPIDocument)
     return [asset.path, Object.keys(published.paths ?? {}).sort()]
   }))
+}
+
+/** Migrates a Mintlify repository and returns the paths each published spec still lists after the renderer's sanitiser ran. */
+function publishedPaths(files: Record<string, string>): Record<string, Array<string>> {
+  return publishedPathsOf(migrate(files))
+}
+
+/** What the renderer's page-reference state says about a migrated page: `excluded` is a page that 404s. */
+function renderedPageState(bundle: ReturnType<typeof migrate>, id: string): OperationPublicationState {
+  const openapi = bundle.pages.find((page) => page.id === id)?.openapi
+  const sources = [...new Set(bundle.docsConfig.tabs.flatMap((tab) => tab.api ? [tab.api.source] : []))]
+  return pageReferenceState(parseOpenApiFrontmatter(openapi)!, sources.map((path) => ({
+    config: { id: path, label: '', source: { type: 'file' as const, path } },
+    document: JSON.parse(Buffer.from(bundle.assets.find((asset) => asset.path === path)!.content).toString('utf8')) as unknown,
+  })))
 }
 
 describe('migrate withheld operations parity', () => {
@@ -129,6 +150,70 @@ describe('migrate withheld operations parity', () => {
         'bare.mdx': page('openapi: "GET /x"\n'),
         's.mdx': page('groups: [admin]\nopenapi: "public.json GET /x"\n'),
       })['openapi/public.json']).toEqual(['/x'])
+    })
+  })
+
+  describe('a bare public reference keeps its operation public wherever its page is listed', () => {
+    const secret = page('groups: [admin]\nopenapi: "b.json GET /internal"\n')
+    const tabs = (...entries: Array<Record<string, unknown>>): string => JSON.stringify({ navigation: { tabs: entries } })
+
+    for (const [listed, file] of [['reference', 'reference/index.mdx'], ['reference/index', 'reference.mdx'], ['/reference.md', 'reference/index.mdx']]) {
+      it(`resolves a page listed as ${listed} to its file ${file}`, () => {
+        const bundle = migrate({
+          'docs.json': tabs({ tab: 'B', openapi: 'b.json', pages: [listed, 'secret'] }),
+          'b.json': spec,
+          [file]: page('openapi: "GET /internal"\n'),
+          'secret.mdx': secret,
+        })
+        expect(publishedPathsOf(bundle)['openapi/b.json']).toEqual(['/internal', '/x'])
+        expect(renderedPageState(bundle, 'reference')).toBe('published')
+      })
+    }
+
+    for (const spelling of ['/b.json', './b.json']) {
+      it(`counts ${spelling} and b.json as one owner when two tabs list the page`, () => {
+        const bundle = migrate({
+          'docs.json': tabs({ tab: 'A', openapi: 'b.json', pages: ['pub', 'secret'] }, { tab: 'C', openapi: spelling, pages: ['pub'] }),
+          'b.json': spec,
+          'pub.mdx': page('openapi: "GET /internal"\n'),
+          'secret.mdx': secret,
+        })
+        expect(publishedPathsOf(bundle)['openapi/b.json']).toEqual(['/internal', '/x'])
+        expect(renderedPageState(bundle, 'pub')).toBe('published')
+      })
+    }
+
+    it('counts a spec named by its folder path and by its file name as one owner', () => {
+      const bundle = migrate({
+        'docs.json': tabs({ tab: 'A', openapi: 'specs/b.json', pages: ['pub', 'secret'] }, { tab: 'C', openapi: 'b.json', pages: ['pub'] }),
+        'specs/b.json': spec,
+        'pub.mdx': page('openapi: "GET /internal"\n'),
+        'secret.mdx': secret,
+      })
+      expect(Object.values(publishedPathsOf(bundle))).toEqual([['/internal', '/x']])
+      expect(renderedPageState(bundle, 'pub')).toBe('published')
+    })
+
+    it('still withholds the operation from a spec the page is not listed under', () => {
+      const bundle = migrate({
+        'docs.json': tabs({ tab: 'B', openapi: 'b.json', pages: ['reference'] }, { tab: 'C', openapi: 'c.json', pages: ['secret'] }),
+        'b.json': spec,
+        'c.json': spec,
+        'reference/index.mdx': page('openapi: "GET /internal"\n'),
+        'secret.mdx': page('groups: [admin]\nopenapi: "c.json GET /internal"\n'),
+      })
+      expect(publishedPathsOf(bundle)).toEqual({ 'openapi/b.json': ['/internal', '/x'], 'openapi/c.json': ['/x'] })
+    })
+
+    it('still withholds the operation when the page is listed under tabs bound to different specs', () => {
+      const bundle = migrate({
+        'docs.json': tabs({ tab: 'A', openapi: 'a.json', pages: ['pub', 'secret'] }, { tab: 'B', openapi: 'b.json', pages: ['pub'] }),
+        'a.json': spec,
+        'b.json': spec,
+        'pub.mdx': page('openapi: "GET /internal"\n'),
+        'secret.mdx': secret,
+      })
+      expect(publishedPathsOf(bundle)['openapi/b.json']).toEqual(['/x'])
     })
   })
 })
