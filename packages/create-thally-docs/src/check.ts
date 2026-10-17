@@ -220,6 +220,8 @@ function stringAttribute(node: MdxNode, name: string): string | null | undefined
  * comment is not one; a page MDX cannot read has none, as for the content parser.
  */
 function extractStepHeadings(content: string): Array<{ line: number; base: string }> {
+  // Parsing costs milliseconds per page; skip it on the many pages with no step.
+  if (!content.includes('<Step')) return []
   let tree: MdxNode
   try {
     tree = mdxParser.parse(content) as unknown as MdxNode
