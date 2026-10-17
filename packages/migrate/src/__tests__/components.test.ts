@@ -519,6 +519,118 @@ describe('repository component migration', () => {
       expect(copied('export const Probe = () => <Error>nope</Error>')).toMatch(/const \{ Error \} = builtinMdxComponents;/)
     })
 
+    /** Execute a migrated module with React and the built-in registry stubbed; each built-in is a marker function named after its tag. */
+    function evaluate(moduleSource: string): Record<string, any> {
+      const { outputText } = ts.transpileModule(moduleSource, {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 },
+      })
+      const element = (type: unknown, props: unknown) => ({ type, props })
+      const registry = new Proxy({}, { get: (_target, name) => (typeof name === 'string' ? Object.assign(() => null, { displayName: name }) : undefined) })
+      const stubs: Record<string, unknown> = {
+        'react/jsx-runtime': { jsx: element, jsxs: element, Fragment: 'fragment' },
+        react: { createElement: (type: unknown, props: unknown) => element(type, props) },
+        '@/components/mdx/builtin-components': { builtinMdxComponents: registry },
+      }
+      const exports: Record<string, any> = {}
+      new Function('require', 'exports', outputText)((id: string) => {
+        if (!(id in stubs)) throw new Error(`unexpected import ${id}`)
+        return stubs[id]
+      }, exports)
+      return exports
+    }
+
+    describe('block scope', () => {
+      it.each(['Note', 'Warning'])('binds <%s> used outside the block that declares a component of that name', (name) => {
+        const content = copied(`export function Probe({ enabled }) { if (enabled) { const ${name} = () => <aside />; return <${name} />; } return <${name}>global</${name}>; }`)
+        expect(content).toMatch(new RegExp(`const \\{ ${name} \\} = builtinMdxComponents;`))
+        const { Probe } = evaluate(content)
+        // The block's own component wins inside the block; the global one is the built-in.
+        expect(Probe({ enabled: true }).type.displayName).toBeUndefined()
+        expect(Probe({ enabled: false }).type.displayName).toBe(name)
+      })
+
+      it.each([
+        ['a for-of binding', 'for (const Warning of list) { return <Warning /> } return <Warning>x</Warning>'],
+        ['a for binding', 'for (let Warning = () => null; ; ) { return <Warning /> } return <Warning>x</Warning>'],
+        ['a switch case', 'switch (k) { case 1: { const Warning = () => null; return <Warning /> } default: return <Warning>x</Warning> }'],
+        ['a switch case without braces', 'switch (k) { case 1: const Warning = () => null; return <Warning /> } return <Warning>x</Warning>'],
+        ['a catch parameter', 'try { list() } catch (Warning) { return <Warning /> } return <Warning>x</Warning>'],
+        ['a block-level function', 'if (k) { function Warning() { return null } return <Warning /> } return <Warning>x</Warning>'],
+        ['a block-level class', 'if (k) { class Warning { render() { return null } } return <Warning /> } return <Warning>x</Warning>'],
+        ['a nested block', 'if (k) { if (list) { let Warning = () => null; void Warning } } return <Warning>x</Warning>'],
+      ])('binds <Warning> outside the scope of %s', (_label, body) => {
+        expect(copied(`export function Probe({ k, list }) { ${body} }`)).toMatch(/const \{ Warning \} = builtinMdxComponents;/)
+      })
+
+      it('leaves a name alone wherever the block that declares it is the only place it is used', () => {
+        const content = copied([
+          'export function Probe({ on, list }) {',
+          '  if (on) { const Tip = () => <i />; return <Tip /> }',
+          '  for (const Warning of list) { void <Warning /> }',
+          '  try { list() } catch (Info) { return <Info /> }',
+          '  return null',
+          '}',
+        ].join('\n'))
+        expect(content).not.toContain('builtinMdxComponents')
+      })
+
+      it('keeps a `var` in a block visible to the whole function, as the language does', () => {
+        expect(copied('export function Probe({ on }) { if (on) { var Info = () => <i /> } return <Info /> }')).not.toContain('builtinMdxComponents')
+      })
+
+      it('keeps a name bound by a function parameter or a body-level declaration', () => {
+        expect(copied('export function Probe({ Check }) { const Danger = () => null; return <><Check /><Danger /></> }')).not.toContain('builtinMdxComponents')
+      })
+    })
+
+    describe('value references', () => {
+      it('binds a built-in a module passes to createElement or aliases, like one it renders as a tag', () => {
+        const content = copied([
+          "export const Probe = () => React.createElement(Note, null, 'x');",
+          'export const Alias = Warning;',
+          'export const Table = { info: Info, tip: Tip };',
+        ].join('\n'))
+        expect(content.match(/const \{ ([^}]+) \} = builtinMdxComponents;/)![1].split(', ')).toEqual(['Info', 'Note', 'Tip', 'Warning'])
+        const { Probe, Alias, Table } = evaluate(content)
+        expect(Probe().type.displayName).toBe('Note')
+        expect(Alias.displayName).toBe('Warning')
+        expect(Table.info.displayName).toBe('Info')
+      })
+
+      it('binds a built-in read as a value inside a function, a default parameter and a JSX prop', () => {
+        const content = copied('export const Probe = ({ as = Callout }) => <Wrapper as={Note} fallback={as} />')
+        expect(content).toMatch(/const \{ Callout, Note \} = builtinMdxComponents;/)
+      })
+
+      it('never rebinds a value name the module declares, imports or receives as a parameter', () => {
+        const content = copied([
+          "import Info from './info.jsx';",
+          'const Warning = () => null;',
+          'export const Probe = ({ Check }) => {',
+          '  const Danger = () => null;',
+          '  return [Warning, Info, Check, Danger, Tip].map((Component) => React.createElement(Component));',
+          '};',
+        ].join('\n'), { 'info.jsx': 'export default function Info() { return <i /> }' })
+        expect(content.match(/const \{ ([^}]+) \} = builtinMdxComponents;/)![1]).toBe('Tip')
+      })
+
+      it('does not bind a name only a block-level declaration of the module uses', () => {
+        expect(copied('export const Probe = ({ on }) => { if (on) { const Note = () => null; return React.createElement(Note) } return null }')).not.toContain('builtinMdxComponents')
+      })
+
+      it('leaves a JavaScript or browser global that shares a built-in name alone when it is only read as a value', () => {
+        const content = copied('export const Probe = () => { const f = new File(["a"], "a.txt"); throw new Error(String(f)) }')
+        expect(content).not.toContain('builtinMdxComponents')
+      })
+
+      it('keeps the <Error> rule: a tag alone binds, a tag beside the global is left unbound with a warning', () => {
+        const warnings: Array<MigrationWarning> = []
+        expect(copied('export const Probe = () => React.createElement(Error)')).not.toContain('builtinMdxComponents')
+        expect(copied('export const Probe = () => { if (!ok) throw new Error("bad"); return <Error>nope</Error> }', {}, warnings)).not.toContain('builtinMdxComponents')
+        expect(warnings).toHaveLength(1)
+      })
+    })
+
     it('binds callouts used by a page-level component that travels with an interactive root', () => {
       const root = fixture({})
       const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')

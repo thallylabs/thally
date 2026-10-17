@@ -108,20 +108,56 @@ function isFunctionLike(node: ts.Node): node is ts.FunctionLikeDeclaration {
     || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node)
 }
 
-/** Every name a function scope binds: parameters, and any declaration in its body outside nested functions. */
+/**
+ * Every name a function scope binds: parameters, its own name, and each `var`
+ * in its body outside nested functions (`var` is function-scoped wherever it
+ * sits). `let`, `const`, `class` and `function` declarations belong to the
+ * block that holds them: see `lexicalNames`.
+ */
 function functionScope(fn: ts.FunctionLikeDeclaration): Set<string> {
   const scope = new Set<string>()
   if ((ts.isFunctionExpression(fn) || ts.isFunctionDeclaration(fn)) && fn.name) scope.add(fn.name.text)
   for (const parameter of fn.parameters) bindingNames(parameter.name, scope)
   function collect(node: ts.Node): void {
-    if (ts.isVariableDeclaration(node)) bindingNames(node.name, scope)
-    if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name) scope.add(node.name.text)
+    if (ts.isVariableDeclaration(node) && !ts.isCatchClause(node.parent) && !(ts.getCombinedNodeFlags(node) & ts.NodeFlags.BlockScoped)) bindingNames(node.name, scope)
     if (isFunctionLike(node)) return
     ts.forEachChild(node, collect)
   }
   if (fn.body) ts.forEachChild(fn.body, collect)
   if (fn.body && !ts.isBlock(fn.body)) collect(fn.body)
   return scope
+}
+
+/**
+ * Names a statement list declares for itself: `let`, `const`, `class` and
+ * `function` (module code is strict, so a function in a block stays in it).
+ * They are visible from the start of the list to its end, and nowhere else.
+ */
+function lexicalNames(statements: ReadonlyArray<ts.Statement>): Set<string> {
+  const names = new Set<string>()
+  for (const statement of statements) {
+    if (ts.isVariableStatement(statement)) {
+      if (statement.declarationList.flags & ts.NodeFlags.BlockScoped) for (const declaration of statement.declarationList.declarations) bindingNames(declaration.name, names)
+    } else if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) names.add(statement.name.text)
+  }
+  return names
+}
+
+/** The scope a statement opens around its own children, when it opens one: a block, a `switch` body, a `for` loop's declarations, a `catch` parameter. */
+function ownScope(node: ts.Node): Set<string> | undefined {
+  if (ts.isBlock(node)) return lexicalNames(node.statements)
+  if (ts.isCaseBlock(node)) return lexicalNames(node.clauses.flatMap((clause) => [...clause.statements]))
+  if ((ts.isForStatement(node) || ts.isForInStatement(node) || ts.isForOfStatement(node)) && node.initializer && ts.isVariableDeclarationList(node.initializer)) {
+    const names = new Set<string>()
+    if (node.initializer.flags & ts.NodeFlags.BlockScoped) for (const declaration of node.initializer.declarations) bindingNames(declaration.name, names)
+    return names
+  }
+  if (ts.isCatchClause(node) && node.variableDeclaration) {
+    const names = new Set<string>()
+    bindingNames(node.variableDeclaration.name, names)
+    return names
+  }
+  return undefined
 }
 
 /** Free (unbound) identifier references in one declaration, with how each is used. */
@@ -146,6 +182,11 @@ function collectRefs(root: ts.Node): { refs: Array<Ref>; assigned: Array<string>
         if (parameter.initializer) walkNode(parameter.initializer, nextScopes, async)
       }
       if (node.body) walkNode(node.body, nextScopes, async)
+      return
+    }
+    const own = ownScope(node)
+    if (own) {
+      ts.forEachChild(node, (child) => walkNode(child, [...scopes, own], inAsync))
       return
     }
     if (ts.isAwaitExpression(node) && !inAsync) awaitOutsideAsync = true
@@ -578,12 +619,13 @@ export function unboundTags(moduleSource: string, boundNames: ReadonlySet<string
 }
 
 /**
- * Thally built-ins a module renders as JSX tags without declaring or importing
- * the name. Mintlify resolves such a bare tag from its global component scope;
- * a copied module has none, so it needs a binding. `shadowed` holds the
- * built-ins whose name is also a JS global the module reads as a plain value
- * (`<Error>` beside `new Error()`): a binding would replace that global, so
- * they are left out of `bind`.
+ * Thally built-ins a module uses without declaring or importing the name: as a
+ * JSX tag, or as a plain value (`React.createElement(Note)`, `const Box =
+ * Note`). Mintlify resolves such a bare name from its global component scope;
+ * a copied module has none, so it needs a binding. A name that is also a JS,
+ * browser or Node global (`Error`, `File`) is bound only when the module renders
+ * it as a tag and never reads the global: a binding would replace the global, so
+ * a module that uses both is left alone and the name comes back in `shadowed`.
  */
 export function unboundBuiltinTags(moduleSource: string, boundNames: ReadonlySet<string>): { bind: Array<string>; shadowed: Array<string> } {
   const tags = new Set<string>()
@@ -596,9 +638,11 @@ export function unboundBuiltinTags(moduleSource: string, boundNames: ReadonlySet
       else values.add(name)
     }
   }
-  const builtin = [...tags].filter(isThallyBuiltinComponent).sort()
-  const shadowed = builtin.filter((name) => JS_GLOBALS.has(name) && values.has(name))
-  return { bind: builtin.filter((name) => !shadowed.includes(name)), shadowed }
+  const isGlobal = (name: string): boolean => JS_GLOBALS.has(name) || BROWSER_IDENTIFIERS.has(name) || SERVER_ONLY_IDENTIFIERS.has(name)
+  const builtinTags = [...tags].filter(isThallyBuiltinComponent)
+  const shadowed = builtinTags.filter((name) => JS_GLOBALS.has(name) && values.has(name)).sort()
+  const builtinValues = [...values].filter((name) => isThallyBuiltinComponent(name) && !isGlobal(name))
+  return { bind: [...new Set([...builtinTags.filter((name) => !shadowed.includes(name)), ...builtinValues])].sort(), shadowed }
 }
 
 /**
