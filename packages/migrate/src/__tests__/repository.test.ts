@@ -1473,6 +1473,25 @@ describe('Mintlify repository migration', () => {
     expect(bundle.warnings.map((warning) => warning.message).join('\n')).not.toContain('shared by more than one operation')
   })
 
+  it('keeps a body link to an authored page under a local spec directory, and still rewrites a link to an endpoint', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API', openapi: { source: 'o.yaml', directory: 'ref' } }, { tab: 'Docs', pages: ['index', 'ref/guide'] }] },
+    }))
+    mkdirSync(join(root, 'ref'))
+    writeFileSync(join(root, 'index.mdx'), '---\ntitle: Home\n---\n\n[Guide](/ref/guide) and [Thing](/ref/things/create-a).')
+    writeFileSync(join(root, 'ref', 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    writeFileSync(join(root, 'o.yaml'), [
+      'openapi: 3.0.0', 'info: { title: T, version: "1" }', 'paths:',
+      '  /a: { post: { summary: Create A, tags: [things], responses: { "200": { description: ok } } } }',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.body).join('\n')).toContain('[Guide](/ref/guide) and [Thing](/api/default/a/post).')
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).not.toContain('matched no endpoint')
+  })
+
   it('keeps every operation listed under a directory that two API tabs of one name share', () => {
     const source = 'https://specs.example.com/openapi.json'
     const migrate = (second: Record<string, unknown>) => {

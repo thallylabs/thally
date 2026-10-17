@@ -1946,8 +1946,9 @@ export function rewriteApiLinksInPages(
 ): void {
   if (operationLinks.size === 0 && prefixLandings.size === 0) return
   const unmatched = new Set<string>()
+  const served = servedRoutes(pages)
   for (const page of pages) {
-    page.body = rewriteApiOperationLinks(page.body, operationLinks, prefixLandings, unmatched)
+    page.body = rewriteApiOperationLinks(page.body, operationLinks, prefixLandings, served, unmatched)
   }
   if (unmatched.size === 0) return
   const sorted = [...unmatched].sort()
@@ -1969,12 +1970,14 @@ export function rewriteApiLinksInPages(
  * original target is recorded into `unmatched` so the caller can emit one
  * aggregated warning instead of one per link. Links outside every known
  * prefix are left untouched — still broken, but no worse than before this
- * rewrite existed.
+ * rewrite existed. A link to a page of the site (an authored guide inside an
+ * API directory, say) is never rewritten: that page still serves the address.
  */
 function rewriteApiOperationLinks(
   body: string,
   linkMap: Map<string, string>,
   prefixLandings: Map<string, string>,
+  served: ReadonlySet<string>,
   unmatched: Set<string>,
 ): string {
   if (linkMap.size === 0 && prefixLandings.size === 0) return body
@@ -1993,7 +1996,9 @@ function rewriteApiOperationLinks(
     if (codeFence) return line
     const rewriteTarget = (target: string): string => {
       const suffixIndex = target.search(/[?#]/)
-      const path = (suffixIndex >= 0 ? target.slice(0, suffixIndex) : target).replace(/^\/+/, '').toLowerCase()
+      const literal = suffixIndex >= 0 ? target.slice(0, suffixIndex) : target
+      if (served.has(literalRoute(literal) ?? literal)) return target
+      const path = literal.replace(/^\/+/, '').toLowerCase()
       const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
       const mapped = linkMap.get(path)
       if (mapped) return `${mapped}${suffix}`

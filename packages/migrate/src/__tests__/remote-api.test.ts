@@ -320,6 +320,31 @@ describe('two remote OpenAPI specs mounted under nested directories', () => {
   })
 })
 
+describe('remote OpenAPI spec body links to pages of the site under an API directory', () => {
+  const linkedPages = [
+    '[guide](/ref/guide)', '[slash](/ref/guide/)', '[section](/ref/section)', '[index](/ref/section/index)',
+    '[own](/ref/users/list-users)', '[endpoint](/ref/users/list-users-2)', '[overview](/ref)',
+  ].join('\n')
+
+  it('keeps a link to an authored page and still rewrites a link to an endpoint', async () => {
+    const input = mountedBundle()
+    const page = (id: string, body = ''): MigrationBundle['pages'][number] => ({ id, navigationId: id, title: id, description: '', keywords: [], body, source: `${id}.mdx` })
+    input.pages = [page('home', linkedPages), page('ref/guide'), page('ref/section/index'), page('ref/users/list-users')]
+    input.docsConfig = { tabs: input.docsConfig.tabs }
+    input.remoteApiSpecs = [{ url: MOUNTED_URL, tabLabel: 'API reference', directories: [{ directory: 'ref' }] }]
+    const listed = JSON.stringify({
+      openapi: '3.0.0', info: { title: 'Example', version: '1' },
+      paths: { '/users': { get: { summary: 'List users', tags: ['users'] } }, '/users2': { get: { summary: 'List users 2', tags: ['users'] } } },
+    })
+    const result = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: listed, contentType: 'application/json' }))
+    expect(result.pages[0].body).toBe([
+      '[guide](/ref/guide)', '[slash](/ref/guide/)', '[section](/ref/section)', '[index](/ref/section/index)',
+      '[own](/ref/users/list-users)', '[endpoint](/api/default/users2/get)', '[overview](/api)',
+    ].join('\n'))
+    expect(result.warnings).toEqual([])
+  })
+})
+
 describe('remote OpenAPI spec endpoint redirects only reach published endpoints', () => {
   const hiddenSpec = JSON.stringify({
     openapi: '3.1.0',

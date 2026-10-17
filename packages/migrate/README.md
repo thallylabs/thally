@@ -102,7 +102,9 @@ into `docs.json`; invalid values are dropped with a warning.
 In-content links to auto-generated API operation pages are rewritten to the
 matching Thally `/api/...` route. A link under a known API section that matches
 no operation points to that section's overview page instead, and one warning
-lists the affected links (up to ten). A spec that Mintlify mounted under a
+lists the affected links (up to ten). A link to a page of the site (a guide
+authored inside an API directory) is never rewritten, trailing slash or
+`/index` or not. A spec that Mintlify mounted under a
 `directory` also gets a redirect from each endpoint URL that directory served,
 to the matching endpoint page, and never to an operation the published spec
 withholds with `x-hidden` or `x-excluded`. A remote spec gets every directory
