@@ -350,6 +350,63 @@ describe('remote OpenAPI spec body links to pages of the site under an API direc
   })
 })
 
+describe('remote OpenAPI spec body links written with a trailing slash, a query or a fragment', () => {
+  const usersSpec = JSON.stringify({
+    openapi: '3.0.0',
+    info: { title: 'Example', version: '1' },
+    paths: { '/users': { get: { summary: 'List users', tags: ['Users'] } } },
+  })
+  const page = (id: string, body = ''): MigrationBundle['pages'][number] => ({ id, navigationId: id, title: id, description: '', keywords: [], body, source: `${id}.mdx` })
+  const hydrate = (pages: MigrationBundle['pages'], redirects?: Array<{ source: string; destination: string }>) => {
+    const input = mountedBundle()
+    input.pages = pages
+    input.docsConfig = { tabs: input.docsConfig.tabs, ...(redirects ? { redirects } : {}) }
+    input.remoteApiSpecs = [{ url: MOUNTED_URL, tabLabel: 'API reference', directories: [{ directory: 'reference' }] }]
+    return hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: usersSpec, contentType: 'application/json' }))
+  }
+
+  it('sends each form of a link to an endpoint to that endpoint, keeping its query and fragment', async () => {
+    const result = await hydrate([page('guide', [
+      '[a](/reference/users/list-users)',
+      '[b](/reference/users/list-users/)',
+      '[c](/reference/users/list-users/#response)',
+      '[d](/reference/users/list-users/?lang=go)',
+      '[e](/reference/users/list-users?lang=go#response)',
+      '[f](/reference/users/list-users/?lang=go#response)',
+      '[g](/reference/)',
+      '[h](/reference/#intro)',
+    ].join('\n'))])
+    expect(result.pages[0].body).toBe([
+      '[a](/api/default/users/get)',
+      '[b](/api/default/users/get)',
+      '[c](/api/default/users/get#response)',
+      '[d](/api/default/users/get?lang=go)',
+      '[e](/api/default/users/get?lang=go#response)',
+      '[f](/api/default/users/get?lang=go#response)',
+      '[g](/api)',
+      '[h](/api#intro)',
+    ].join('\n'))
+    expect(result.warnings).toEqual([])
+  })
+
+  it('guesses no second redirect for an address an authored redirect with a trailing slash already answers', async () => {
+    const input = bundle()
+    input.docsConfig = { ...input.docsConfig, redirects: [{ source: '/api-reference/scim/list-users/', destination: '/guide' }] }
+    const scimSpec = JSON.stringify({ openapi: '3.0.0', info: { title: 'Example', version: '1' }, paths: { '/users': { get: { summary: 'List users', tags: ['SCIM'] } } } })
+    const result = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: scimSpec, contentType: 'application/json' }))
+    expect(result.docsConfig.redirects).toEqual([{ source: '/api-reference/scim/list-users/', destination: '/guide' }])
+    expect(result.pages[0].body).toBe('[List users](/api-reference/scim/list-users)')
+  })
+
+  it('leaves a link to an authored page, or to an address an authored redirect answers, alone in every form', async () => {
+    const forms = (path: string): Array<string> => [path, `${path}/`, `${path}/#top`, `${path}/?x=1`, `${path}?x=1#top`].map((link) => `[l](${link})`)
+    const body = [...forms('/reference/guide'), ...forms('/reference/old')].join('\n')
+    const result = await hydrate([page('home', body), page('reference/guide')], [{ source: '/reference/old/', destination: '/guide' }])
+    expect(result.pages[0].body).toBe(body)
+    expect(result.warnings).toEqual([])
+  })
+})
+
 describe('remote OpenAPI spec endpoint redirects only reach published endpoints', () => {
   const hiddenSpec = JSON.stringify({
     openapi: '3.1.0',

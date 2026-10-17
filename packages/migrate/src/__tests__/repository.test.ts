@@ -1277,6 +1277,66 @@ describe('Mintlify repository migration', () => {
     ]))
   })
 
+  it('sends a link to a local `directory` spec endpoint to that endpoint however it is written, and leaves authored pages and redirects alone', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: {
+        tabs: [{
+          tab: 'API Reference',
+          groups: [{ group: 'API Guides', pages: ['guide', 'reference/own'] }],
+          openapi: { source: 'openapi/openapi.yaml', directory: 'reference' },
+        }],
+      },
+      redirects: [{ source: '/reference/old/', destination: '/guide' }],
+    }))
+    mkdirSync(join(root, 'openapi'), { recursive: true })
+    writeFileSync(join(root, 'openapi', 'openapi.yaml'), [
+      'openapi: 3.1.0',
+      'info: { title: Svc, version: "1.0" }',
+      'paths:',
+      '  /users:',
+      '    get:',
+      '      summary: List users',
+      '      tags: [Users]',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    mkdirSync(join(root, 'reference'), { recursive: true })
+    writeFileSync(join(root, 'reference', 'own.mdx'), '---\ntitle: Own\n---\n\nBody.')
+    writeFileSync(join(root, 'guide.mdx'), [
+      '---',
+      'title: Guide',
+      '---',
+      '',
+      '[a](/reference/users/list-users)',
+      '',
+      '[b](/reference/users/list-users/)',
+      '',
+      '[c](/reference/users/list-users/#response)',
+      '',
+      '[d](/reference/users/list-users/?lang=go)',
+      '',
+      '[e](/reference/users/list-users?lang=go#response)',
+      '',
+      '[own](/reference/own/#top)',
+      '',
+      '[old](/reference/old/#top)',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    const body = bundle.pages.find((page) => page.id === 'guide')?.body ?? ''
+    for (const link of [
+      '[a](/api/default/users/get)',
+      '[b](/api/default/users/get)',
+      '[c](/api/default/users/get#response)',
+      '[d](/api/default/users/get?lang=go)',
+      '[e](/api/default/users/get?lang=go#response)',
+      '[own](/reference/own/#top)',
+      '[old](/reference/old/#top)',
+    ]) expect(body).toContain(link)
+    expect(bundle.warnings.map((warning) => warning.message).join('\n')).not.toMatch(/matched no endpoint/)
+  })
+
   it('falls back to operationId, then method and path, when an operation summary is empty', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

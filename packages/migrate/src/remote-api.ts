@@ -308,8 +308,8 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
     endpointUrls.set(literalRoute(redirect.source) ?? redirect.source, redirect.destination)
   }
 
-  // Lower case: a redirect that differs from a guessed one only in letter case wins on a server that ignores it, so none is guessed for that address.
-  const existingSources = new Set(redirects.map((redirect) => redirect.source.toLowerCase()))
+  // Lower case, and without a trailing slash: a redirect that differs from a guessed one only in letter case or a trailing slash wins on a server that ignores them, so none is guessed for that address.
+  const existingSources = new Set(redirects.map((redirect) => literalRoute(redirect.source) ?? redirect.source.toLowerCase()))
   const mounts = directories.map(mountPrefix).filter(Boolean)
   const underMount = (source: string): boolean => mounts.some((prefix) => source.toLowerCase() === `/${prefix}` || source.toLowerCase().startsWith(`/${prefix}/`))
   // Label of an operation -> its endpoint page; null when more than one carries it, or its spec serves no endpoint pages.
@@ -330,9 +330,9 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   for (const source of authoredLinks) {
     const destination = guesses.get(source.split('/').filter(Boolean).slice(-2).join('/'))
     // Under a mount only the mount's own endpoint URLs (the redirects above) are known: anything else there is not a guess to make.
-    if (!destination || existingSources.has(source.toLowerCase()) || served.has(literalRoute(source) ?? source) || underMount(source)) continue
+    if (!destination || existingSources.has(literalRoute(source) ?? source.toLowerCase()) || served.has(literalRoute(source) ?? source) || underMount(source)) continue
     redirects.push({ source, destination, permanent: false })
-    existingSources.add(source.toLowerCase())
+    existingSources.add(literalRoute(source) ?? source.toLowerCase())
   }
   // A redirect that targets an endpoint URL goes straight to the endpoint page, not through a second redirect.
   const direct = redirects.map((redirect) => {

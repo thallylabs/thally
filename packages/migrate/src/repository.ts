@@ -2045,7 +2045,8 @@ function rewriteApiOperationLinks(
       const suffixIndex = target.search(/[?#]/)
       const literal = suffixIndex >= 0 ? target.slice(0, suffixIndex) : target
       if (served.has(literalRoute(literal) ?? literal)) return target
-      const path = literal.replace(/^\/+/, '').toLowerCase()
+      // A trailing slash names the same address, as `literalRoute` reads it above and the endpoint maps are keyed.
+      const path = literal.replace(/^\/+|\/+$/g, '').toLowerCase()
       const suffix = suffixIndex >= 0 ? target.slice(suffixIndex) : ''
       // The most specific mount the link lies under owns it: another pass handles it when that mount is not one of these.
       const owner = [...prefixLandings.keys(), ...otherMounts]
