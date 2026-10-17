@@ -5162,7 +5162,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         resolvedSpecs.map((spec) => ({ filename: spec.filename, content: spec.content, prefix: spec.routeSegments.join('/') })),
         docsConfig,
       )
-      rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings)
+      rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings, { redirects: docsConfig.redirects })
     }
   } else if (platform === 'mintlify') {
     const warnSharedSpec = (path: string, excluded: Array<string> = []): void => {

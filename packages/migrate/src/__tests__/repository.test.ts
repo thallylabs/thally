@@ -3748,6 +3748,43 @@ navigation:
     expect(guide?.body).not.toContain('/api-reference/publish-a-message')
   })
 
+  it('leaves a link to the source of an authored Fern redirect for that redirect', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-fern-api-link-redirect-'))
+    const fernRoot = join(root, 'fern')
+    mkdirSync(join(fernRoot, 'apis', 'rest'), { recursive: true })
+    writeFileSync(join(fernRoot, 'fern.config.json'), JSON.stringify({ organization: 'acme' }))
+    writeFileSync(join(fernRoot, 'docs.yml'), [
+      'navigation:',
+      '  - page: Guide',
+      '    path: guide.mdx',
+      '  - section: API Reference',
+      '    contents:',
+      '      - api: REST API',
+      '        api-name: rest',
+      '        skip-slug: true',
+      'redirects:',
+      '  - source: /api-reference/publish-a-message',
+      '    destination: /guide',
+      '',
+    ].join('\n'))
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'generators.yml'), 'api:\n  specs:\n    - openapi: openapi.yml\n')
+    writeFileSync(join(fernRoot, 'apis', 'rest', 'openapi.yml'), [
+      'openapi: 3.1.0',
+      'info: { title: REST, version: "1.0" }',
+      'paths:',
+      '  /v2/publish/{destination}:',
+      '    post:',
+      '      summary: Publish a Message',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    writeFileSync(join(fernRoot, 'guide.mdx'), '---\ntitle: Guide\n---\n\nSee [publish](/api-reference/publish-a-message) and [other](/api-reference/other-operation).')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/fern-docs' })
+    const body = bundle.pages.find((page) => page.id === 'guide')?.body ?? ''
+    expect(body).toContain('[publish](/api-reference/publish-a-message)')
+    expect(body).toContain('[other](/api)')
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/api-reference/publish-a-message', destination: '/guide' })
+  })
+
   it('matches Fern operation pages by their route (own node slug included) and by operationId method name, not just the summary', () => {
     // Confirmed against a live Fern site (VapiAI): an `api:` node without
     // `skip-slug` adds its own slug to the route ("api-reference/webhooks/
