@@ -53,7 +53,7 @@ import {
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
-import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
+import { markExcluded, parseSpecDocument, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
 import { mainSiteLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
 import { type BrandVars, brandColorsFromVars, cssBrandVars } from './css-colors.js'
@@ -1745,7 +1745,7 @@ export const isWithheld = (node: Record<string, unknown>): boolean => flagged(no
 function parseOpenApiOperationsForLinking(content: Buffer): Array<OpenApiOperationForLinking> {
   let document: unknown
   try {
-    document = parseYaml(content.toString('utf8'))
+    document = parseSpecDocument(content.toString('utf8')).document
   } catch {
     return []
   }
@@ -1819,8 +1819,13 @@ export interface ApiOperationLinkMaps {
 }
 
 /** The operations a source served under its prefix: the listed ones in listed order, else every operation of the spec. */
-function servedOperations(source: ApiOperationLinkSource): Array<OpenApiOperationForLinking> {
-  const operations = parseOpenApiOperationsForLinking(source.content)
+function servedOperations(source: ApiOperationLinkSource, parsed: Map<string, Array<OpenApiOperationForLinking>>): Array<OpenApiOperationForLinking> {
+  // A spec mounted under several directories is read once, not once per mount.
+  let operations = parsed.get(source.filename)
+  if (!operations) {
+    operations = parseOpenApiOperationsForLinking(source.content)
+    parsed.set(source.filename, operations)
+  }
   if (!source.operations) return operations
   const byKey = new Map(operations.map((operation) => [`${operation.method} ${operation.path}`, operation]))
   return source.operations.flatMap((reference) => {
@@ -1843,6 +1848,7 @@ export function apiOperationLinkMap(
   const prefixLandings = new Map<string, string>()
   const mintlifyPages = new Map<string, string>()
   const duplicatePages: Array<string> = []
+  const parsedByFile = new Map<string, Array<OpenApiOperationForLinking>>()
   // A spec can be mounted under several prefixes (one per product), so a tab may match more than one source.
   const bound = apiTabSpecIds(docsConfig.tabs).flatMap(({ tab, specId }) => sources
     .filter((entry) => tab.api?.source === specAssetPath(entry.filename) && (!entry.tab || entry.tab === tab.tab))
@@ -1860,7 +1866,7 @@ export function apiOperationLinkMap(
     const base = source.prefix.replace(/^\/+|\/+$/g, '')
     const prefix = mountPrefix(source.prefix)
     if (prefix) prefixLandings.set(prefix, specId === 'default' ? '/api' : `/api/${specId}`)
-    for (const operation of servedOperations(source)) {
+    for (const operation of servedOperations(source, parsedByFile)) {
       const thallyHref = `/api/${specId}/${thallyOperationSlugSegments(operation.path, operation.method).join('/')}`
       // Leaf candidates, tried in order of how likely a source generator is
       // to have used them: Mintlify slugs from the summary; Fern instead
