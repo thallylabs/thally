@@ -230,6 +230,29 @@ describe('remote OpenAPI spec mounted under Mintlify directories', () => {
   })
 })
 
+describe('remote OpenAPI spec redirects the deployed route table can match', () => {
+  const usersSpec = JSON.stringify({
+    openapi: '3.0.0',
+    info: { title: 'Example', version: '1' },
+    paths: { '/users': { get: { summary: 'List users', tags: ['users'] } } },
+  })
+
+  it('leaves out an endpoint redirect whose address has route-pattern syntax, with one warning', async () => {
+    const input = mountedBundle()
+    input.pages = [input.pages[0]]
+    input.docsConfig = { tabs: input.docsConfig.tabs }
+    input.remoteApiSpecs = [{ url: MOUNTED_URL, tabLabel: 'API reference', directories: [{ directory: 'sdk/c++' }, { directory: 'sdk/go' }] }]
+    const result = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: usersSpec, contentType: 'application/json' }))
+    const sources = (result.docsConfig.redirects ?? []).map((redirect) => redirect.source)
+    // Next's route parser rejects `+` as a modifier, which fails the whole build.
+    expect(sources.filter((source) => /[+?()[\]{}]/.test(source))).toEqual([])
+    expect(sources).toContain('/sdk/go/users/list-users')
+    const omitted = result.warnings.filter((warning) => warning.message.includes('/sdk/c++/users'))
+    expect(omitted).toHaveLength(1)
+    expect(omitted[0].message).toContain('/sdk/c++/users/list-users')
+  })
+})
+
 describe('remote OpenAPI spec endpoint redirects only reach published endpoints', () => {
   const hiddenSpec = JSON.stringify({
     openapi: '3.1.0',

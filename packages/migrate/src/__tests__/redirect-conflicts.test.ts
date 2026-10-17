@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { migrateRepository } from '../index.js'
-import { dropConflictingRedirects } from '../redirects.js'
+import { dropConflictingRedirects, dropUnroutableRedirects } from '../redirects.js'
 import type { MigrationBundle, MigrationDocsConfig } from '../types.js'
 
 type Redirects = NonNullable<MigrationDocsConfig['redirects']>
@@ -247,5 +247,36 @@ describe('dropConflictingRedirects', () => {
   it('returns a config without redirects unchanged', () => {
     const bare: MigrationDocsConfig = { tabs: [] }
     expect(dropConflictingRedirects(bare, pages, [])).toBe(bare)
+  })
+})
+
+describe('dropUnroutableRedirects', () => {
+  const config = (redirects: Redirects): MigrationDocsConfig => ({ tabs: [], redirects })
+
+  it('omits self-redirects and sources with route-pattern operators, naming the operator sources in one warning', () => {
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    const result = dropUnroutableRedirects(config([
+      { source: '/docs/models/', destination: '/docs/models' },
+      { source: '/docs/models', destination: '/docs/models?view=all' },
+      { source: '/sdk/c++/users', destination: '/api/users' },
+      { source: '/sdk/c++/groups', destination: '/api/groups' },
+      { source: '/docs/:slug*', destination: '/guide' },
+      { source: '/keep', destination: '/guide' },
+    ]), warnings)
+    expect(result.redirects).toEqual([
+      { source: '/docs/models', destination: '/docs/models?view=all' },
+      { source: '/docs/:slug*', destination: '/guide' },
+      { source: '/keep', destination: '/guide' },
+    ])
+    expect(warnings).toHaveLength(2)
+    expect(warnings[0].message).toBe('Self-redirect from /docs/models/ to /docs/models was omitted.')
+    expect(warnings[1].message).toContain('Skipped 2 redirects from /sdk/c++/users, /sdk/c++/groups')
+  })
+
+  it('returns the same config, and says nothing, when every redirect is routable', () => {
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    const input = config([{ source: '/a', destination: '/b' }])
+    expect(dropUnroutableRedirects(input, warnings)).toBe(input)
+    expect(warnings).toEqual([])
   })
 })

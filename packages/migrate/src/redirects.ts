@@ -1,9 +1,11 @@
 /**
  * Final pass over a migrated redirect set. Next.js applies a redirect before it
  * looks for a page, so a redirect whose source is a served page hides that page,
- * and two redirects that point at each other never settle. Every platform and
- * every step that adds redirects (source config, generated aliases, remote API
- * specs) is checked here once, instead of each caller guarding its own additions.
+ * and two redirects that point at each other never settle. Next also parses a
+ * redirect source as a route pattern, so one with pattern operators fails the
+ * whole build. Every platform and every step that adds redirects (source
+ * config, generated aliases, remote API specs) is checked here once, instead of
+ * each caller guarding its own additions.
  */
 
 import type { MigrationDocsConfig, MigrationPage, MigrationWarning } from './types.js'
@@ -28,6 +30,41 @@ export function servedRoutes(pages: ReadonlyArray<Pick<MigrationPage, 'id'>>): S
 
 function list(sources: Array<string>): string {
   return `${sources.slice(0, LISTED).join(', ')}${sources.length > LISTED ? ', ...' : ''}`
+}
+
+/** Characters Next's route-pattern parser reads as operators, so a source holding one (Mintlify's literal `/client/c++`) is rejected. */
+const ROUTE_PATTERN_OPERATORS = /[+?()[\]{}]/
+
+/**
+ * Drop each redirect Next.js cannot serve as written: one back to its own
+ * route (a trailing slash is the same route; a query or fragment carries
+ * intent, so it is kept) and one whose source has route-pattern operators,
+ * which would fail the build. An omitted address with operators is named in one
+ * warning; a self-redirect gets its own.
+ */
+export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: Array<MigrationWarning>): MigrationDocsConfig {
+  if (!config.redirects?.length) return config
+  const unmatchable: Array<string> = []
+  const redirects = config.redirects.filter((redirect) => {
+    const source = literalRoute(redirect.source)
+    if (source && source === literalRoute(redirect.destination)) {
+      warnings.push({ code: 'unsupported-config', message: `Self-redirect from ${redirect.source} to ${redirect.destination} was omitted.` })
+      return false
+    }
+    if (!ROUTE_PATTERN_OPERATORS.test(redirect.source)) return true
+    unmatchable.push(redirect.source)
+    return false
+  })
+  if (unmatchable.length > 0) {
+    warnings.push({
+      code: 'unsupported-config',
+      message: `Skipped ${unmatchable.length} redirect${unmatchable.length === 1 ? '' : 's'} from ${list(unmatchable)}: ${unmatchable.length === 1 ? 'that address has' : 'those addresses have'} a character (+ ? ( ) [ ] { }) that Next.js reads as route syntax and cannot match literally, so visits to ${unmatchable.length === 1 ? 'it' : 'them'} will not redirect.`,
+    })
+  }
+  if (redirects.length === config.redirects.length) return config
+  const result: MigrationDocsConfig = { ...config, redirects }
+  if (redirects.length === 0) delete result.redirects
+  return result
 }
 
 /**

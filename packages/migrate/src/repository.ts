@@ -96,7 +96,7 @@ import {
   trimTrailingSlashes,
   withinRealRoot,
 } from './path.js'
-import { dropConflictingRedirects, literalRoute, servedRoutes } from './redirects.js'
+import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, servedRoutes } from './redirects.js'
 import type {
   MigrationAsset,
   MigrationBundle,
@@ -5443,33 +5443,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
   }
   if (docsConfig.redirects) {
-    docsConfig = {
-      ...docsConfig,
-      redirects: docsConfig.redirects.filter((redirect) => {
-        // A redirect back to the same literal route loops before the page can
-        // render. Treat a trailing slash as the same route, while retaining
-        // destinations with a query or fragment because they carry intent.
-        const sourceRoute = literalRoute(redirect.source)
-        if (sourceRoute && sourceRoute === literalRoute(redirect.destination)) {
-          warnings.push({
-            code: 'unsupported-config',
-            message: `Self-redirect from ${redirect.source} to ${redirect.destination} was omitted.`,
-          })
-          return false
-        }
-        // Next's route-pattern parser treats these as operators. Source
-        // paths such as Mintlify's literal `/client/c++` must not make the
-        // entire generated project fail to build.
-        if (!/[+?()[\]{}]/.test(redirect.source)) return true
-        warnings.push({
-          code: 'unsupported-config',
-          message: `Redirect from ${redirect.source} contains route-pattern syntax Next.js cannot express literally and was omitted.`,
-        })
-        return false
-      }),
-    }
-    // Every platform's redirects meet here: none may hide a page or loop.
-    docsConfig = dropConflictingRedirects(docsConfig, [...pages, ...sourceRefPages], warnings)
+    // Every platform's redirects meet here: none may fail the build, hide a page or loop.
+    docsConfig = dropConflictingRedirects(dropUnroutableRedirects(docsConfig, warnings), [...pages, ...sourceRefPages], warnings)
   }
 
   if (pages.length === 0) {

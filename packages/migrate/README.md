@@ -121,7 +121,11 @@ back to each other never settle. Each such redirect is left out, and a warning
 lists the first ten of each kind; the earlier redirect of a loop is kept. A
 generated redirect (a version alias, an endpoint URL) for an address that
 already serves a page is left out without a warning, since the page is still
-reachable there.
+reachable there. Next.js reads a redirect source as a route pattern, so one
+whose address has a `+ ? ( ) [ ] { }` character (a `directory` such as
+`sdk/c++`) would fail the build; every redirect from authored config, a local
+spec or a downloaded spec is left out instead, and one warning lists the first
+ten of them.
 
 A repository is limited to 5,000 documentation files and, separately, 5,000
 asset files. Past that, files are kept in navigation order with the default
