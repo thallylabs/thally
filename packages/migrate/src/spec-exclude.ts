@@ -38,9 +38,14 @@ function resolvedSources(ref: string, specs: ReadonlyArray<SpecIdentity>): { uni
   return { unique: false, sources: resolved.kind === 'ambiguous' ? resolved.candidates.map((candidate) => candidate.sourcePath) : [] }
 }
 
-/** A ref that withholds names the spec if the wide test says so or a page would resolve it there (fail closed: either suffices). */
+/**
+ * A ref that withholds names the one spec a page would resolve it to; only a ref
+ * that resolves to none or to several (fail closed) falls back to the wide test
+ * and every candidate, so a unique `a.json` never reaches `b/a.json` as well.
+ */
 function refWithholdsFrom(ref: string, spec: SpecIdentity, specs: ReadonlyArray<SpecIdentity>): boolean {
-  return specRefMatches(ref, spec.sourcePath, true) || resolvedSources(ref, specs).sources.includes(spec.sourcePath)
+  const { unique, sources } = resolvedSources(ref, specs)
+  return unique ? sources[0] === spec.sourcePath : specRefMatches(ref, spec.sourcePath, true) || sources.includes(spec.sourcePath)
 }
 
 /**

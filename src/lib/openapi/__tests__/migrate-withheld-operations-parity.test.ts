@@ -333,8 +333,6 @@ describe('page and spec spellings resolve through one page identity and one asse
     for (const spelling of specSpellings) {
       it(`${binding}: ${spelling} binds its own bytes and a bare operation stays public only in its owner's spec, for every page spelling`, () => {
         const file = spelling.replace(/^(?:\.?\/+)+/, '')
-        // A restricted ref spelled by the file name alone names every spec with that name.
-        const namesBoth = file === 'openapi.json'
         for (const [listed, pageFile] of pageSpellings) {
           const tab = { tab: 'B', openapi: spelling, pages: [listed, 'pub'] }
           const navigation = binding === 'tab'
@@ -346,7 +344,7 @@ describe('page and spec spellings resolve through one page identity and one asse
             [file]: unscanned('TARGET'),
             'pub.mdx': page(`openapi: "${spelling} GET /x"\n`),
             [pageFile]: page('openapi: "GET /y"\n'),
-            // Restricted pages name the same operations in each spec.
+            // Restricted pages name the same operations in each spec; each spelling resolves to exactly one of them (`openapi.json` is the root file, exactly), so /internal is withheld there alone.
             'r1.mdx': page(`groups: [admin]\nopenapi: "${spelling} GET /y"\n`),
             'r2.mdx': page(`groups: [admin]\nopenapi: "${namesake} GET /y"\n`),
             'r3.mdx': page(`groups: [admin]\nopenapi: "${spelling} GET /internal"\n`),
@@ -361,7 +359,7 @@ describe('page and spec spellings resolve through one page identity and one asse
           const owner = binding === 'tab' ? 'TARGET' : 'NAMESAKE'
           expect(publishedPathsByTitle(bundle), label).toEqual({
             TARGET: owner === 'TARGET' ? ['/x', '/y'] : ['/x'],
-            NAMESAKE: [...owner === 'NAMESAKE' ? ['/y'] : [], ...namesBoth ? [] : ['/internal'], '/x'].sort(),
+            NAMESAKE: [...owner === 'NAMESAKE' ? ['/y'] : [], '/internal', '/x'].sort(),
           })
           expect(renderedPageState(bundle, barePage.id), label).toBe('published')
           expect(renderedPageState(bundle, 'pub'), label).toBe('published')
@@ -369,4 +367,68 @@ describe('page and spec spellings resolve through one page identity and one asse
       })
     }
   }
+})
+
+describe('a restricted spec reference withholds only from the spec a page would resolve it to', () => {
+  const tabs = (...entries: Array<Record<string, unknown>>): string => JSON.stringify({ navigation: { tabs: entries } })
+  const guides = { tab: 'Guides', pages: ['pub', 'secret'] }
+  const twoSpecs = (...bound: Array<string>): string => tabs(guides, ...bound.map((source, index) => ({ tab: `T${index}`, openapi: source })))
+  /** What the renderer publishes, keyed by the title of each spec. */
+  const published = (bundle: ReturnType<typeof migrate>): Record<string, Array<string>> => publishedPathsByTitle(bundle)
+
+  // `a.json` names the root file exactly, so it is not ambiguous with `b/a.json`; a ref names its spec in any spelling.
+  for (const spelling of ['a.json', '/a.json', './a.json', 'a.json#section', 'a.json?v=3']) {
+    it(`leaves b/a.json public when the public and the restricted page both name ${spelling} GET /x`, () => {
+      const bundle = migrate({
+        'docs.json': twoSpecs('a.json', 'b/a.json'),
+        'a.json': titled('ROOT'),
+        'b/a.json': titled('NESTED'),
+        'pub.mdx': page(`openapi: "${spelling} GET /x"\n`),
+        'secret.mdx': page(`groups: [admin]\nopenapi: "${spelling} GET /x"\n`),
+      })
+      // The operation is public where the public page names it; nothing names it in the other spec, so it stays public there.
+      expect(published(bundle)).toEqual({ ROOT: ['/internal', '/x', '/y'], NESTED: ['/internal', '/x', '/y'] })
+      expect(renderedPageState(bundle, 'pub')).toBe('published')
+    })
+  }
+
+  for (const [restricted, other] of [['a.json', 'b/a.json'], ['b/a.json', 'a.json']]) {
+    it(`withholds from ${restricted} only, and keeps the page naming ${other} published, when only the restricted page names ${restricted}`, () => {
+      const bundle = migrate({
+        'docs.json': twoSpecs('a.json', 'b/a.json'),
+        'a.json': titled('ROOT'),
+        'b/a.json': titled('NESTED'),
+        'pub.mdx': page(`openapi: "${other} GET /x"\n`),
+        'secret.mdx': page(`groups: [admin]\nopenapi: "${restricted} GET /x"\n`),
+      })
+      const [withheldTitle, keptTitle] = restricted === 'a.json' ? ['ROOT', 'NESTED'] : ['NESTED', 'ROOT']
+      expect(published(bundle)).toEqual({ [withheldTitle]: ['/internal', '/y'], [keptTitle]: ['/internal', '/x', '/y'] })
+      expect(renderedPageState(bundle, 'pub')).toBe('published')
+    })
+  }
+
+  // A name that fits several specs names none of them alone: the restricted ref still withholds from every candidate.
+  for (const spelling of ['a.json', 'a', 'A.JSON']) {
+    it(`still withholds from every candidate when the restricted ref ${spelling} names several specs`, () => {
+      const bundle = migrate({
+        'docs.json': twoSpecs('x/a.json', 'y/a.json'),
+        'x/a.json': titled('X'),
+        'y/a.json': titled('Y'),
+        'pub.mdx': page('openapi: "x/a.json GET /y"\n'),
+        'secret.mdx': page(`groups: [admin]\nopenapi: "${spelling} GET /x"\n`),
+      })
+      expect(published(bundle)).toEqual({ X: ['/internal', '/y'], Y: ['/internal', '/y'] })
+    })
+  }
+
+  it('still withholds a bare restricted operation from every spec', () => {
+    const bundle = migrate({
+      'docs.json': twoSpecs('a.json', 'b/a.json'),
+      'a.json': titled('ROOT'),
+      'b/a.json': titled('NESTED'),
+      'pub.mdx': page('openapi: "a.json GET /y"\n'),
+      'secret.mdx': page('groups: [admin]\nopenapi: "GET /x"\n'),
+    })
+    expect(published(bundle)).toEqual({ ROOT: ['/internal', '/y'], NESTED: ['/internal', '/y'] })
+  })
 })
