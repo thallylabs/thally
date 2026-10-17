@@ -1,24 +1,60 @@
 /** Fail-closed pruning of OpenAPI operations that only access-restricted pages document; shared by local and remote specs. */
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
-import { splitOpenApiRef, withoutSpecExtension } from './openapi-ref.js'
+import { canonicalSpecRef, isRemoteSpecRef, resolveSpecRef, splitOpenApiRef, withoutSpecExtension } from './openapi-ref.js'
+
+/** A spec as exclusion sees it: where it was read from (what pages name), and the name it is saved under (which they never do). */
+interface SpecIdentity {
+  sourcePath: string
+  filename: string
+}
 
 /**
  * Whether a frontmatter `openapi:` value ("GET /x", "specs/api.json GET /x")
- * names this spec. A bare operation resolves to the default spec; a prefixed
- * one to the spec whose path ends with the prefix, on a segment boundary; the
- * extension may be left out (`openapi` names `docs/openapi.yml`). Each spec is
+ * can name the spec read from `specPath`: a deliberately wide test, for refs
+ * that withhold. A bare operation resolves to the default spec; a prefixed one
+ * to the spec whose path ends with the prefix, on a segment boundary; the
+ * extension may be left out (`openapi` names `docs/openapi.yml`). The prefix is
+ * read like a page's own (`canonicalSpecRef`), in any letter case. Each spec is
  * asked on its own, so a prefix that fits several specs names every one of
  * them: callers withholding an operation fail closed on an ambiguous prefix.
  */
-export function specRefMatches(ref: string, specPath: string, specFilename: string, isDefault: boolean): boolean {
-  const prefix = /^(?:(\S+)\s+)?(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|WEBHOOK)\s/i.exec(`${ref} `)?.[1]
+export function specRefMatches(ref: string, specPath: string, isDefault: boolean): boolean {
+  const prefix = splitOpenApiRef(ref)?.specRef
   if (!prefix) return isDefault
-  const wanted = prefix.replace(/^\/+/, '').toLowerCase()
+  const wanted = (isRemoteSpecRef(prefix) ? prefix.trim() : canonicalSpecRef(prefix)).toLowerCase()
   // Whole path segments only: `pi/openapi.json` does not name `api/openapi.json`.
   const lowerPath = specPath.toLowerCase()
-  return lowerPath === wanted || lowerPath.endsWith(`/${wanted}`) || specFilename.toLowerCase() === wanted
-    || [lowerPath, specFilename.toLowerCase()].map(withoutSpecExtension).some((stem) => stem === wanted || stem.endsWith(`/${wanted}`))
+  const stem = withoutSpecExtension(lowerPath)
+  return lowerPath === wanted || lowerPath.endsWith(`/${wanted}`) || stem === wanted || stem.endsWith(`/${wanted}`)
+}
+
+/** The sources `ref` resolves to among `specs`, the way a page's spec prefix does: one match, or every candidate of an ambiguous name. */
+function resolvedSources(ref: string, specs: ReadonlyArray<SpecIdentity>): { unique: boolean; sources: Array<string> } {
+  const specRef = splitOpenApiRef(ref)?.specRef
+  if (!specRef || isRemoteSpecRef(specRef)) return { unique: false, sources: [] }
+  const resolved = resolveSpecRef(specRef, specs)
+  if (resolved.kind === 'match') return { unique: true, sources: [resolved.spec.sourcePath] }
+  return { unique: false, sources: resolved.kind === 'ambiguous' ? resolved.candidates.map((candidate) => candidate.sourcePath) : [] }
+}
+
+/** A ref that withholds names the spec if the wide test says so or a page would resolve it there (fail closed: either suffices). */
+function refWithholdsFrom(ref: string, spec: SpecIdentity, specs: ReadonlyArray<SpecIdentity>): boolean {
+  return specRefMatches(ref, spec.sourcePath, true) || resolvedSources(ref, specs).sources.includes(spec.sourcePath)
+}
+
+/**
+ * A ref that keeps an operation public keeps it in one spec only: the one a
+ * page would resolve it to. A prefix that fits several specs, or none, keeps
+ * nothing public; a remote address keeps it in that spec; a bare operation
+ * cannot say which spec it means and keeps it in each.
+ */
+function refKeepsIn(ref: string, spec: SpecIdentity, specs: ReadonlyArray<SpecIdentity>): boolean {
+  const specRef = splitOpenApiRef(ref)?.specRef
+  if (!specRef) return true
+  if (isRemoteSpecRef(specRef)) return specRefMatches(ref, spec.sourcePath, false)
+  const { unique, sources } = resolvedSources(ref, specs)
+  return unique && sources[0] === spec.sourcePath
 }
 
 /** `GET /x` / `webhook name` normalised so two spellings of one operation compare equal. */
@@ -27,22 +63,26 @@ function operationKey(operation: string): string {
   return `${first.toLowerCase()} ${rest.join(' ')}`
 }
 
-/** Operation keys of the refs that name this spec. */
-function keysFor(spec: { sourcePath: string; filename: string }, refs: ReadonlyArray<string>): Array<string> {
+/** Operation keys of the refs `names` accepts. */
+function keysFor(refs: ReadonlyArray<string>, names: (ref: string) => boolean): Array<string> {
   return [...new Set(
-    refs.filter((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))
-      .map((ref) => splitOpenApiRef(ref)?.operation).filter((op): op is string => !!op).map(operationKey),
+    refs.filter(names).map((ref) => splitOpenApiRef(ref)?.operation).filter((op): op is string => !!op).map(operationKey),
   )]
 }
 
-/** Operations only withheld refs name (`withheld`) and those a kept ref names (`kept`), for one spec. */
+/**
+ * Operations only withheld refs name (`withheld`) and those a kept ref names
+ * (`kept`), for one spec. `specs` are all the specs pages can name, so a ref is
+ * resolved among them as a page's would be; without it the spec stands alone.
+ */
 export function withheldOperationKeys(
-  spec: { sourcePath: string; filename: string },
+  spec: SpecIdentity,
   withheldRefs: ReadonlyArray<string>,
   keptRefs: ReadonlyArray<string>,
+  specs: ReadonlyArray<SpecIdentity> = [spec],
 ): { withheld: Array<string>; kept: Array<string> } {
-  const kept = keysFor(spec, keptRefs)
-  return { withheld: keysFor(spec, withheldRefs).filter((key) => !kept.includes(key)), kept }
+  const kept = keysFor(keptRefs, (ref) => refKeepsIn(ref, spec, specs))
+  return { withheld: keysFor(withheldRefs, (ref) => refWithholdsFrom(ref, spec, specs)).filter((key) => !kept.includes(key)), kept }
 }
 
 /**

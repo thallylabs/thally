@@ -1313,8 +1313,10 @@ function excludeWithheldOperations(
   spec: { sourcePath: string; filename: string; content: Buffer },
   withheldRefs: ReadonlyArray<string>,
   keptRefs: ReadonlyArray<string>,
+  /** Every spec a page's prefix can name, so a ref is resolved among them as the page's own is. */
+  specs?: ReadonlyArray<{ sourcePath: string; filename: string }>,
 ): { content: Buffer; excluded: Array<string> } {
-  const { withheld, kept } = withheldOperationKeys(spec, withheldRefs, keptRefs)
+  const { withheld, kept } = withheldOperationKeys(spec, withheldRefs, keptRefs, specs)
   return markExcluded(spec.content, withheld, kept)
 }
 
@@ -5044,7 +5046,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     }
     const withheldOperations = new Map<ResolvedApiSpec, Array<string>>()
     for (const spec of allSpecs) {
-      const result = excludeWithheldOperations(spec, withheldSpecRefs, keptSpecRefs)
+      const result = excludeWithheldOperations(spec, withheldSpecRefs, keptSpecRefs, allSpecs)
       spec.content = result.content
       withheldOperations.set(spec, result.excluded)
     }
@@ -5054,7 +5056,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) {
         assets.push(specAsset(spec.filename, spec.content))
       }
-      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
+      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
     }
     let pageSpecs: Array<{ filename: string; sourcePath?: string }> = resolvedSpecs
     if (resolvedSpecs.length > 0) {
@@ -5062,7 +5064,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       for (const spec of resolvedSpecs) {
         spec.pageReferenced = namedByPages.has(spec)
         spec.generatedNavigation = Boolean(spec.directory)
-          && !publishedSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))
+          && !publishedSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, true))
       }
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs, warnings)
       const { operationLinks, prefixLandings, mintlifyPages, duplicatePages } = apiOperationLinkMap(
@@ -5102,13 +5104,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const fallbackContent = fallback ? readSpecFile(fallback.absolutePath, fallback.relativePath, warnings) : undefined
       if (fallback && fallbackContent) {
         const filename = basename(fallback.relativePath)
-        const matches = (ref: string): boolean => specRefMatches(ref, fallback.relativePath, filename, true)
+        const matches = (ref: string): boolean => specRefMatches(ref, fallback.relativePath, true)
         if (withheldSpecRefs.some(matches) && !publishedSpecRefs.some(matches)) {
           // Only restricted pages name this spec, and docs.json does not list it.
           quarantinedFiles.push({ path: `${QUARANTINE_DIRECTORY}/assets/${specAssetPath(filename)}`, content: fallbackContent })
           withheldAssetCount++
         } else {
-          const pruned = excludeWithheldOperations({ sourcePath: fallback.relativePath, filename, content: fallbackContent }, withheldSpecRefs, keptSpecRefs)
+          const fallbackSpec = { sourcePath: fallback.relativePath, filename, content: fallbackContent }
+          const pruned = excludeWithheldOperations(fallbackSpec, withheldSpecRefs, keptSpecRefs, [fallbackSpec, ...allSpecs])
           if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
             assets.push(specAsset(filename, pruned.content))
           }
@@ -5123,7 +5126,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // here, because restricted pages were left out of `allSpecs` above.
     for (const spec of pageOnlySpecs) {
       if (!assets.some((asset) => asset.path === specAssetPath(spec.filename))) assets.push(specAsset(spec.filename, spec.content))
-      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, spec.filename, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
+      if (withheldSpecRefs.some((ref) => specRefMatches(ref, spec.sourcePath, true))) warnSharedSpec(spec.sourcePath, withheldOperations.get(spec))
     }
     if (pageOnlySpecs.length > 0) {
       docsConfig = injectOpenApiSpecs(docsConfig, pageOnlySpecs, warnings)

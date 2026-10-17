@@ -1304,6 +1304,104 @@ describe('operations documented only on access-restricted pages', () => {
     })
   })
 
+  describe('refs are compared by source identity and one canonical spelling', () => {
+    const published = (bundle: MigrationBundle, path: string): { paths: Record<string, { get: Record<string, unknown> }> } =>
+      JSON.parse(String(bundle.assets.find((asset) => asset.path === path)!.content))
+    const excluded = (bundle: MigrationBundle, path: string, operation: string): unknown => published(bundle, path).paths[operation].get['x-excluded']
+    const tabs = (specs: Array<string>) => JSON.stringify({ navigation: { tabs: [
+      { tab: 'Guides', pages: ['pub', 's'] },
+      ...specs.map((source, index) => ({ tab: `API ${index}`, openapi: source })),
+    ] } })
+
+    it('keeps a restricted operation out of a spec whose file was renamed to avoid a collision', () => {
+      // `b/spec.json` is published as `b-spec.json`, but pages name it by what they wrote in the source.
+      const bundle = site({
+        'docs.json': tabs(['a/spec.json', 'b/spec.json']),
+        'a/spec.json': spec,
+        'b/spec.json': spec,
+        'pub.mdx': page('Pub', 'openapi: "spec GET /internal"\n'),
+        's.mdx': page('S', 'groups: [admin]\nopenapi: "b/spec.json GET /internal"\n'),
+      })
+      expect(excluded(bundle, 'openapi/b-spec.json', '/internal')).toBe(true)
+      expect(excluded(bundle, 'openapi/b-spec.json', '/x')).toBeUndefined()
+      // A restricted page names only B, so the other spec still publishes its operation.
+      expect(excluded(bundle, 'openapi/spec.json', '/internal')).toBeUndefined()
+    })
+
+    it('keeps the operation public in the one spec a public page names by its full path', () => {
+      const bundle = site({
+        'docs.json': tabs(['a/spec.json', 'b/spec.json']),
+        'a/spec.json': spec,
+        'b/spec.json': spec,
+        'pub.mdx': page('Pub', 'openapi: "a/spec.json GET /internal"\n'),
+        's.mdx': page('S', 'groups: [admin]\nopenapi: "spec GET /internal"\n'),
+      })
+      expect(excluded(bundle, 'openapi/spec.json', '/internal')).toBeUndefined()
+      expect(excluded(bundle, 'openapi/b-spec.json', '/internal')).toBe(true)
+    })
+
+    it('does not let a public path that merely ends like another spec path keep that spec\'s operation public', () => {
+      const bundle = site({
+        'docs.json': tabs(['a/spec.json', 'x/a/spec.json']),
+        'a/spec.json': spec,
+        'x/a/spec.json': spec,
+        'pub.mdx': page('Pub', 'openapi: "a/spec.json GET /internal"\n'),
+        's.mdx': page('S', 'groups: [admin]\nopenapi: "x/a/spec.json GET /internal"\n'),
+      })
+      expect(excluded(bundle, 'openapi/spec.json', '/internal')).toBeUndefined()
+      expect(excluded(bundle, 'openapi/x-a-spec.json', '/internal')).toBe(true)
+    })
+
+    it('withholds from the spec a restricted page reaches through a folder that does not exist', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ navigation: { pages: ['pub', 's'] } }),
+        'bar/spec.json': spec,
+        'pub.mdx': page('Pub', 'openapi: "bar/spec.json GET /x"\n'),
+        's.mdx': page('S', 'groups: [admin]\nopenapi: "foo/spec.json GET /internal"\n'),
+      })
+      expect(excluded(bundle, 'openapi/spec.json', '/internal')).toBe(true)
+      expect(excluded(bundle, 'openapi/spec.json', '/x')).toBeUndefined()
+    })
+
+    it('does not let a public page naming a spec whose path contains a space keep another spec\'s operation public', () => {
+      const bundle = site({
+        'docs.json': tabs(['my spec.json', 'other.json']),
+        'my spec.json': spec,
+        'other.json': spec,
+        'pub.mdx': page('Pub', 'openapi: "my spec.json GET /internal"\n'),
+        's.mdx': page('S', 'groups: [admin]\nopenapi: "other.json GET /internal"\n'),
+      })
+      expect(excluded(bundle, 'openapi/other.json', '/internal')).toBe(true)
+      expect(excluded(bundle, 'openapi/my spec.json', '/internal')).toBeUndefined()
+    })
+
+    const spellings = ['./spec', './/spec.json', '/./spec', 'spec#section', 'spec?version=3', '.\\spec.json', './SPEC', 'spec.json?v=1#top']
+    for (const config of ['docs.json', 'mint.json'] as const) {
+      for (const spelling of spellings) {
+        it(`withholds an operation a restricted page names as "${spelling}" in ${config}`, () => {
+          const bundle = site({
+            [config]: JSON.stringify(config === 'docs.json' ? { navigation: { pages: ['pub', 's'] } } : { navigation: [{ group: 'G', pages: ['pub', 's'] }] }),
+            'spec.json': spec,
+            'pub.mdx': page('Pub', 'openapi: "spec GET /x"\n'),
+            's.mdx': page('S', `groups: [admin]\nopenapi: "${spelling.replace(/\\/g, '\\\\')} GET /internal"\n`),
+          })
+          expect(excluded(bundle, 'openapi/spec.json', '/internal')).toBe(true)
+          expect(excluded(bundle, 'openapi/spec.json', '/x')).toBeUndefined()
+        })
+      }
+    }
+
+    it('keeps an operation public when a public page names it with the same non-canonical spelling', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ navigation: { pages: ['pub', 's'] } }),
+        'spec.json': spec,
+        'pub.mdx': page('Pub', 'openapi: "./spec#section GET /internal"\n'),
+        's.mdx': page('S', 'groups: [admin]\nopenapi: "spec.json GET /internal"\n'),
+      })
+      expect(excluded(bundle, 'openapi/spec.json', '/internal')).toBeUndefined()
+    })
+  })
+
   it('applies to a spec listed in docs.json and to YAML specs', () => {
     const yaml = 'openapi: 3.0.0\ninfo: {title: T, version: "1"}\npaths:\n  /x:\n    get: {summary: A}\n  /internal:\n    get: {summary: B}\n'
     const bundle = site({

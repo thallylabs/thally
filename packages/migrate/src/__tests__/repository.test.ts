@@ -1167,6 +1167,32 @@ describe('Mintlify repository migration', () => {
         expect(ambiguous[0]).not.toMatch(/not migrated/)
       })
 
+      it('resolves a name against the source file names, not the names the specs were saved under', () => {
+        const json = (path: string) => JSON.stringify({ openapi: '3.1.0', info: { title: 'T', version: '1' }, paths: { [path]: { post: { responses: { 200: { description: 'ok' } } } } } })
+        const bundle = build({
+          'a/spec.json': json('/one'),
+          'b/spec.json': json('/two'),
+          'both.mdx': apiPage('spec POST /one'),
+          'exact.mdx': apiPage('b/spec.json POST /two'),
+          'renamed.mdx': apiPage('b-spec POST /two'),
+        }, { navigation: { tabs: [
+          { tab: 'Guides', pages: ['both', 'exact', 'renamed'] },
+          { tab: 'API A', openapi: 'a/spec.json' },
+          { tab: 'API B', openapi: 'b/spec.json' },
+        ] } })
+        // `b/spec.json` is saved as `b-spec.json` to avoid a collision; the name `spec` still fits both sources.
+        expect(boundSources(bundle).sort()).toEqual(['openapi/b-spec.json', 'openapi/spec.json'])
+        expect(openapiOf(bundle, 'both')).toBe('spec POST /one')
+        expect(openapiOf(bundle, 'exact')).toBe('openapi/b-spec.json POST /two')
+        // The saved name is not a name the source ever had.
+        expect(openapiOf(bundle, 'renamed')).toBe('b-spec POST /two')
+        const ambiguous = messages(bundle).filter((message) => message.includes('"both"'))
+        expect(ambiguous).toHaveLength(1)
+        expect(ambiguous[0]).toContain('a/spec.json')
+        expect(ambiguous[0]).toContain('b/spec.json')
+        expect(messages(bundle).some((message) => message.includes('"renamed"') && /not migrated/.test(message))).toBe(true)
+      })
+
       it('says several files match, not that none exists, when no declared spec resolves the stem', () => {
         const bundle = build({
           'a/openapi.yml': spec('/one'),
