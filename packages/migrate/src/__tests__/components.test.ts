@@ -442,6 +442,136 @@ describe('repository component migration', () => {
     expect(picker.content).toContain("import { Steps, Step } from '@/components/mdx/steps';")
   })
 
+  describe('Mintlify global components in preserved modules', () => {
+    const REGISTRY_IMPORT = "import { builtinMdxComponents } from '@/components/mdx/builtin-components';"
+
+    /** Copy `snippet.jsx` (imported by a page) and return the module the renderer will execute. */
+    function copied(source: string, extra: Record<string, string> = {}, warnings: Array<MigrationWarning> = []): string {
+      const root = fixture({ 'snippet.jsx': source, ...extra })
+      const migrator = createComponentMigrator(root, root, warnings, 'https://github.com/example/docs')
+      migrator.transform("import { Probe } from './snippet.jsx'\n\n<Probe />", join(root, 'index.mdx'))
+      return String(migrator.files().find((file) => file.path.endsWith('/snippet.jsx'))!.content)
+    }
+
+    it('binds the callout family a snippet renders without declaring (Trigger.dev feature-status.jsx)', () => {
+      const warnings: Array<MigrationWarning> = []
+      const content = copied([
+        'export const RollingOut = ({ children }) => (',
+        '  <Warning>',
+        '    <strong>Rolling out.</strong> This feature is being enabled gradually.',
+        '    {children}',
+        '  </Warning>',
+        ');',
+        'export const PrivateBeta = ({ children }) => (',
+        '  <Warning>',
+        '    <strong>Private beta.</strong> {children}',
+        '  </Warning>',
+        ');',
+        'export const Probe = () => <Info><Tip>Both bind</Tip></Info>;',
+      ].join('\n'), {}, warnings)
+      expect(content).toContain(REGISTRY_IMPORT)
+      expect(content.match(/const \{ ([^}]+) \} = builtinMdxComponents;/)![1].split(', ')).toEqual(['Info', 'Tip', 'Warning'])
+      expect(content.match(/builtinMdxComponents \}/g)).toHaveLength(1)
+      expect(content).toContain('<strong>Rolling out.</strong>')
+      expect(warnings).toEqual([])
+    })
+
+    it('binds every callout name to the built-in registry, not the untyped leaf component', () => {
+      const content = copied('export const Probe = () => <><Note>n</Note><Check>c</Check><Danger>d</Danger><Callout type="info">i</Callout></>')
+      expect(content).toMatch(/const \{ Callout, Check, Danger, Note \} = builtinMdxComponents;/)
+      expect(content).not.toContain('@/components/mdx/note')
+    })
+
+    it('binds registry names next to leaf-module imports without declaring any name twice', () => {
+      const content = copied('export const Probe = () => <Steps><Step title="a"><Warning>w</Warning></Step></Steps>')
+      expect(content).toContain("import { Steps, Step } from '@/components/mdx/steps';")
+      expect(content).toMatch(/const \{ Warning \} = builtinMdxComponents;/)
+    })
+
+    it('does not shadow names the module declares, imports or receives as parameters', () => {
+      const content = copied([
+        "import Info from './info.jsx';",
+        'const Warning = ({ children }) => <aside>{children}</aside>;',
+        'function Tip() { return <p>own</p> }',
+        'export const Probe = ({ Check }) => {',
+        '  const Danger = () => <b>local</b>;',
+        '  return <div><Warning>w</Warning><Info /><Tip /><Check /><Danger /></div>;',
+        '};',
+      ].join('\n'), { 'info.jsx': 'export default function Info() { return <i>info</i> }' })
+      expect(content).not.toContain('builtinMdxComponents')
+    })
+
+    it('leaves HTML elements, unknown components and non-global member roots alone', () => {
+      const content = copied('export const Probe = () => <div><span>x</span><Widget /><Foo.Bar /><Warning.Title>t</Warning.Title></div>')
+      expect(content).toMatch(/const \{ Warning \} = builtinMdxComponents;/)
+      expect(content).not.toMatch(/\b(?:div|span|Widget|Foo)\b[^<>]*\} = builtinMdxComponents/)
+    })
+
+    it('keeps a module that renders <Error> and also constructs one, and warns instead of shadowing the global', () => {
+      const warnings: Array<MigrationWarning> = []
+      const content = copied('export const Probe = () => { if (!ok) throw new Error("bad"); return <Error>nope</Error> }', {}, warnings)
+      expect(content).not.toContain('builtinMdxComponents')
+      expect(content).toContain('throw new Error("bad")')
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0].message).toContain('snippet.jsx')
+      expect(warnings[0].message).toContain('<Error>')
+      expect(warnings[0].source).toBe('snippet.jsx')
+      expect(copied('export const Probe = () => <Error>nope</Error>')).toMatch(/const \{ Error \} = builtinMdxComponents;/)
+    })
+
+    it('binds callouts used by a page-level component that travels with an interactive root', () => {
+      const root = fixture({})
+      const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+      migrator.transform('export const Notice = () => <Warning>Heads up</Warning>\n\n<div onClick={() => {}}>Click</div>', join(root, 'index.mdx'))
+      const inline = String(migrator.files().find((file) => file.path.includes('/inline-'))!.content)
+      expect(inline).toContain(REGISTRY_IMPORT)
+      expect(inline).toMatch(/const \{ Warning \} = builtinMdxComponents;/)
+    })
+
+    it('binds callouts in a hook component extracted into its own module', () => {
+      const root = fixture({})
+      const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+      migrator.transform('export const Gate = () => {\n  const [n] = useState(0)\n  return <Warning>{n}</Warning>\n}\n\n<Gate />', join(root, 'index.mdx'))
+      const inline = String(migrator.files().find((file) => file.path.includes('/inline-'))!.content)
+      expect(inline.match(/builtinMdxComponents \}/g)).toHaveLength(1)
+      expect(inline).toMatch(/const \{ Warning \} = builtinMdxComponents;/)
+    })
+
+    it('binds the same names for Mintlify, Docusaurus and Fern repositories (one shared copy path)', () => {
+      const snippet = 'export const Probe = () => <Warning>shared</Warning>'
+      const bound = (bundle: ReturnType<typeof migrateRepository>) => String(bundle.componentFiles!.find((file) => file.path.endsWith('/snippet.jsx'))!.content)
+      const mintlify = migrateRepository({
+        repositoryDir: fixture({
+          'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),
+          'index.mdx': "---\ntitle: Home\n---\nimport { Probe } from '/snippets/snippet.jsx'\n\n<Probe />",
+          'snippets/snippet.jsx': snippet,
+        }),
+        sourceUrl: 'https://example.com/docs', platform: 'mintlify',
+      })
+      expect(bound(mintlify)).toMatch(/const \{ Warning \} = builtinMdxComponents;/)
+      expect(withoutDashboardWarning(mintlify.warnings)).toEqual([])
+      const docusaurus = migrateRepository({
+        repositoryDir: fixture({
+          'docusaurus.config.js': 'module.exports = {}',
+          'docs/index.mdx': "import { Probe } from '@site/src/snippet.jsx'\n\n<Probe />",
+          'src/snippet.jsx': snippet,
+        }),
+        sourceUrl: 'https://github.com/example/docs', platform: 'docusaurus',
+      })
+      expect(bound(docusaurus)).toMatch(/const \{ Warning \} = builtinMdxComponents;/)
+      const fern = migrateRepository({
+        repositoryDir: fixture({
+          'fern/fern.config.json': '{}',
+          'fern/docs.yml': 'navigation:\n  - page: Guide\n    path: guide.mdx\n',
+          'fern/guide.mdx': "import { Probe } from './snippet.jsx'\n\n# Guide\n\n<Probe />",
+          'fern/snippet.jsx': snippet,
+        }),
+        sourceUrl: 'https://github.com/acme/docs', platform: 'fern',
+      })
+      expect(bound(fern)).toMatch(/const \{ Warning \} = builtinMdxComponents;/)
+    })
+  })
+
   it('registers multiline named/default imports and copies their dependency graph once', () => {
     const root = fixture({
       'docs.json': JSON.stringify({ navigation: { pages: ['index'] } }),

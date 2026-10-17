@@ -578,6 +578,30 @@ export function unboundTags(moduleSource: string, boundNames: ReadonlySet<string
 }
 
 /**
+ * Thally built-ins a module renders as JSX tags without declaring or importing
+ * the name. Mintlify resolves such a bare tag from its global component scope;
+ * a copied module has none, so it needs a binding. `shadowed` holds the
+ * built-ins whose name is also a JS global the module reads as a plain value
+ * (`<Error>` beside `new Error()`): a binding would replace that global, so
+ * they are left out of `bind`.
+ */
+export function unboundBuiltinTags(moduleSource: string, boundNames: ReadonlySet<string>): { bind: Array<string>; shadowed: Array<string> } {
+  const tags = new Set<string>()
+  const values = new Set<string>()
+  for (const statement of parse(moduleSource).statements) {
+    if (ts.isImportDeclaration(statement)) continue
+    for (const { name, kind } of collectRefs(statement).refs) {
+      if (boundNames.has(name)) continue
+      if (kind === 'tag' || kind === 'member') tags.add(name)
+      else values.add(name)
+    }
+  }
+  const builtin = [...tags].filter(isThallyBuiltinComponent).sort()
+  const shadowed = builtin.filter((name) => JS_GLOBALS.has(name) && values.has(name))
+  return { bind: builtin.filter((name) => !shadowed.includes(name)), shadowed }
+}
+
+/**
  * Globals a function may use when its source is copied into another module.
  * Deliberately narrower than JS_GLOBALS: `Function`, `globalThis`, `Reflect`,
  * `Proxy`, `fetch`, `console` and timers reach code execution or the network.
