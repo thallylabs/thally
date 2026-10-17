@@ -13,10 +13,10 @@ import type { MigrationBundle, MigrationDocsConfig, MigrationWarning } from '../
 
 type Redirects = NonNullable<MigrationDocsConfig['redirects']>
 
-/** First literal redirect cycle, followed the way a browser would, or null. */
+/** First literal redirect cycle, followed the way a browser would, or null. A request is matched on its path, so a destination's query and fragment are ignored. */
 function redirectCycle(redirects: Redirects): Array<string> | null {
   const next = new Map<string, string>()
-  for (const { source, destination } of redirects) if (!next.has(source)) next.set(source, destination)
+  for (const { source, destination } of redirects) if (!next.has(source)) next.set(source, destination.split(/[?#]/, 1)[0])
   for (const start of next.keys()) {
     const path = [start]
     for (let current = next.get(start); current; current = next.get(current)) {
@@ -328,28 +328,70 @@ describe('dropConflictingRedirects', () => {
     expect(warnings.map((warning) => warning.message)).toEqual(['Skipped 1 redirect that would send visitors in a circle: /C -> /A. Check these redirects in the source docs.'])
   }, 2000)
 
+  it('follows a destination with a query by its path, since Next matches a redirect source on the path alone', () => {
+    const { redirects, warnings } = dropWithin([
+      { source: '/a', destination: '/b?x=1' },
+      { source: '/b', destination: '/a' },
+    ], pages)
+    expect(redirects).toEqual([{ source: '/a', destination: '/b?x=1' }])
+    expect(warnings.map((warning) => warning.message)).toEqual(['Skipped 1 redirect that would send visitors in a circle: /b -> /a. Check these redirects in the source docs.'])
+  }, 2000)
+
+  it('follows a destination with a fragment by its path, under both readings of letter case', () => {
+    const { redirects, warnings } = dropWithin([
+      { source: '/a', destination: '/b/#top' },
+      { source: '/b', destination: '/a' },
+      { source: '/c', destination: '/D?x=1' },
+      { source: '/d', destination: '/C#top' },
+      { source: '/e', destination: '/E#top' },
+    ], pages)
+    expect(redirects).toEqual([{ source: '/a', destination: '/b/#top' }, { source: '/c', destination: '/D?x=1' }])
+    expect(warnings.map((warning) => warning.message)).toEqual([
+      'Skipped 1 redirect that would send visitors in a circle: /b -> /a. Check these redirects in the source docs.',
+      'Skipped 2 redirects that would send visitors in a circle on a server that ignores letter case, since the addresses involved differ only in letter case: /d -> /C#top, /e -> /E#top. If your host matches URLs case-sensitively, add them back to docs.json.',
+    ])
+  }, 2000)
+
+  it('keeps a destination with a query or fragment that does not lead back, a redirect to its own address with a query, and an address off the site', () => {
+    const input: Redirects = [
+      { source: '/a', destination: '/b?x=1' },
+      { source: '/b', destination: '/c#top' },
+      { source: '/d', destination: '/a?y=2' },
+      { source: '/e', destination: '//example.com/e' },
+      { source: '/example.com/e', destination: '/e' },
+      { source: '/f', destination: 'https://example.com/f?z=1' },
+      { source: '/g', destination: '/g?view=all' },
+    ]
+    const { redirects, warnings } = dropWithin(input, pages)
+    expect(redirects).toEqual(input)
+    expect(warnings).toEqual([])
+  }, 2000)
+
   it('keeps no loop and no hidden page under either comparison, over seeded random mixed-case sets', () => {
     const random = seeded(20261017)
     const pick = <T>(items: ReadonlyArray<T>): T => items[Math.floor(random() * items.length)]
     const routes = ['/a', '/A', '/b', '/B', '/c', '/C', '/end']
     const foldAll = (list: Redirects): Redirects => list.map(({ source, destination }) => ({ source: source.toLowerCase(), destination: destination.toLowerCase() }))
+    // A redirect back to its own address with a query or fragment is kept on purpose, so it is no edge of the graph.
+    const edges = (list: Redirects): Redirects => list.filter(({ source, destination }) => !(destination !== source && destination.split(/[?#]/, 1)[0] === source))
     let dropped = 0
     for (let run = 0; run < 2000; run++) {
       const sitePages = ['a', 'B', 'c', 'end'].filter(() => random() < 0.1).map((id) => ({ id }))
       const served = new Set(sitePages.map((page) => `/${page.id.toLowerCase()}`))
-      const input: Redirects = Array.from({ length: 1 + Math.floor(random() * 8) }, () => ({ source: pick(routes), destination: pick(routes) }))
+      const suffix = (): string => (random() < 0.3 ? pick(['?q=1', '#x']) : '')
+      const input: Redirects = Array.from({ length: 1 + Math.floor(random() * 8) }, () => ({ source: pick(routes), destination: `${pick(routes)}${suffix()}` }))
       const context = JSON.stringify({ run, pages: sitePages.map((page) => page.id), input })
       const { redirects: kept, warnings } = dropWithin(input, sitePages)
       // Safe: next start (case ignored) and OpenNext (case kept) each follow the first redirect listed for a source.
-      expect(redirectCycle(kept), context).toBeNull()
-      expect(redirectCycle(foldAll(kept)), context).toBeNull()
+      expect(redirectCycle(edges(kept)), context).toBeNull()
+      expect(redirectCycle(foldAll(edges(kept))), context).toBeNull()
       expect(kept.filter((redirect) => served.has(redirect.source.toLowerCase())), context).toEqual([])
       // Not over-eager: each dropped redirect hid a page or closed a loop with the redirects kept before it.
       const text = warnings.map((warning) => warning.message).join('\n')
       input.forEach((redirect, index) => {
         if (kept.includes(redirect)) return
         dropped++
-        const earlier = [...kept.filter((other) => input.indexOf(other) < index), redirect]
+        const earlier = edges([...kept.filter((other) => input.indexOf(other) < index), redirect])
         const unsafe = served.has(redirect.source.toLowerCase()) || redirectCycle(earlier) !== null || redirectCycle(foldAll(earlier)) !== null
         expect(unsafe, context).toBe(true)
         expect(text, context).toContain(redirect.source)

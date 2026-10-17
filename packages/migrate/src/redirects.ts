@@ -29,6 +29,17 @@ export function literalRoute(route: string): string | null {
   return exactRoute(route)?.toLowerCase() ?? null
 }
 
+/**
+ * The site path a redirect destination sends visitors to, as `exactRoute` reads
+ * a source. Next matches a source against the request path alone, so a query or
+ * fragment on the destination does not stop the redirect for that path from
+ * firing next. Null for a pattern and for an address off the site (`//host/x`;
+ * `https://host/x` already fails `exactRoute`'s leading slash).
+ */
+function destinationRoute(destination: string): string | null {
+  return destination.startsWith('//') ? null : exactRoute(destination.split(/[?#]/, 1)[0])
+}
+
 /** The routes a site's pages are served at, in the case they are written; a directory page (`section/index`) is served at its parent route too. */
 function pageRoutes(pages: ReadonlyArray<Pick<MigrationPage, 'id'>>): Array<string> {
   return pages.flatMap((page) => [`/${page.id}`, `/${page.id.replace(/\/index$/, '')}`])
@@ -132,7 +143,6 @@ export function dropConflictingRedirects(
   const asWritten = redirectChains()
   const redirects = config.redirects.filter((redirect) => {
     const source = literalRoute(redirect.source)
-    const destination = literalRoute(redirect.destination)
     if (!source) return true
     const writtenSource = exactRoute(redirect.source)!
     if (served.has(source)) {
@@ -140,8 +150,11 @@ export function dropConflictingRedirects(
       hides.push(redirect.source)
       return false
     }
-    if (!destination) return true
-    const writtenDestination = exactRoute(redirect.destination)!
+    const writtenDestination = destinationRoute(redirect.destination)
+    if (!writtenDestination) return true
+    const destination = writtenDestination.toLowerCase()
+    // A redirect back to its own address with a query or fragment is kept on purpose (`dropUnroutableRedirects`), so it takes no part in the loop check.
+    if (writtenSource === writtenDestination && exactRoute(redirect.destination) === null) return true
     // A source that already has a redirect under a reading never fires there (the first listed wins), so it cannot loop there and is not recorded there.
     // A case variant of a listed source is unreachable on `next start` but live on OpenNext, so it is still checked, and recorded, as written.
     const firesFolded = !folded.kept.has(source)
