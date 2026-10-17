@@ -1337,6 +1337,31 @@ describe('Mintlify repository migration', () => {
     expect(bundle.warnings.map((warning) => warning.message).join('\n')).not.toMatch(/matched no endpoint/)
   })
 
+  it('reads a `directory` written with surrounding slashes as the folder it names', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API Reference', groups: [{ group: 'API Guides', pages: ['guide'] }], openapi: { source: 'openapi/openapi.yaml', directory: '/reference/' } }] },
+    }))
+    mkdirSync(join(root, 'openapi'), { recursive: true })
+    writeFileSync(join(root, 'openapi', 'openapi.yaml'), [
+      'openapi: 3.1.0',
+      'info: { title: Svc, version: "1.0" }',
+      'paths:',
+      '  /users:',
+      '    get:',
+      '      summary: List users',
+      '      tags: [Users]',
+      '      responses: { "200": { description: ok } }',
+    ].join('\n'))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\n[a](/reference/users/list-users)')
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.find((page) => page.id === 'guide')?.body).toContain('[a](/api/default/users/get)')
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/reference/users/list-users', destination: '/api/default/users/get' })
+    expect((bundle.docsConfig.redirects ?? []).some((redirect) => redirect.source.includes('//'))).toBe(false)
+  })
+
   it('falls back to operationId, then method and path, when an operation summary is empty', () => {
     const root = fixture()
     writeFileSync(join(root, 'docs.json'), JSON.stringify({

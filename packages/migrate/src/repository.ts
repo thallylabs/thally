@@ -1856,6 +1856,8 @@ export function apiOperationLinkMap(
   }
   bound.forEach(({ source, specId }) => {
     if (!source.prefix) return
+    // The directory as written minus surrounding slashes: `reference/` and `/reference` name the folder `reference`.
+    const base = source.prefix.replace(/^\/+|\/+$/g, '')
     const prefix = mountPrefix(source.prefix)
     if (prefix) prefixLandings.set(prefix, specId === 'default' ? '/api' : `/api/${specId}`)
     for (const operation of servedOperations(source)) {
@@ -1892,22 +1894,22 @@ export function apiOperationLinkMap(
       const tagSegment = mintlifyOperationSlugSegment(operation.tag ?? 'default')
       const mintlifyTag = mintlifyUrlSlug(operation.tag ?? 'default')
       const mintlifyLeaf = mintlifyUrlSlug(operation.summary?.trim() || operation.operationId?.trim() || `${operation.method} ${operation.path}`)
-      const canonical = `${source.prefix}/${mintlifyTag}/${mintlifyLeaf}`.replace(/^\/+|\/+$/g, '')
+      const canonical = `${base}/${mintlifyTag}/${mintlifyLeaf}`.replace(/^\/+|\/+$/g, '')
       if (mintlifyTag && mintlifyLeaf && !underDeeperMount(canonical, prefix)) {
         if (!mintlifyPages.has(canonical)) mintlifyPages.set(canonical, thallyHref)
         else if (mintlifyPages.get(canonical) !== thallyHref && !duplicatePages.includes(canonical)) duplicatePages.push(canonical)
         if (!map.has(canonical.toLowerCase())) map.set(canonical.toLowerCase(), thallyHref)
       }
       // Mintlify redirects a bare tag URL to that tag's first operation.
-      const tagRoot = `${source.prefix}/${mintlifyTag}`.replace(/^\/+|\/+$/g, '')
+      const tagRoot = `${base}/${mintlifyTag}`.replace(/^\/+|\/+$/g, '')
       if (mintlifyTag && !underDeeperMount(tagRoot, prefix)) {
         if (!mintlifyPages.has(tagRoot)) mintlifyPages.set(tagRoot, thallyHref)
         if (!map.has(tagRoot.toLowerCase())) map.set(tagRoot.toLowerCase(), thallyHref)
       }
       for (const leaf of leafCandidates) {
         if (!leaf) continue
-        const tagged = `${source.prefix}/${tagSegment}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
-        const flat = `${source.prefix}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
+        const tagged = `${base}/${tagSegment}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
+        const flat = `${base}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
         if (!map.has(tagged) && !underDeeperMount(tagged, prefix)) map.set(tagged, thallyHref)
         if (!map.has(flat) && !underDeeperMount(flat, prefix)) map.set(flat, thallyHref)
       }
