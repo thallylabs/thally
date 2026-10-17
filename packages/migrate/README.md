@@ -128,14 +128,23 @@ ways.
 
 Redirects are checked once, after every platform and step has added its own.
 Next.js applies a redirect before it looks for a page and compares a source
-without regard to a trailing slash, but not to case (`/Guide` and `/guide` are
-different addresses), so a redirect whose source is a page of the migrated site
-would hide that page, and two redirects that send a visit back to each other
-never settle. Each such redirect is left out, and a warning
+without regard to a trailing slash, so a redirect whose source is a page of the
+migrated site would hide that page, and two redirects that send a visit back to
+each other never settle. Each such redirect is left out, and a warning
 lists the first ten of each kind; the earlier redirect of a loop is kept. A
 generated redirect (a version alias, an endpoint URL) for an address that
 already serves a page is left out without a warning, since the page is still
-reachable there. Next.js reads a redirect source as a route pattern, so one
+reachable there. These checks ignore letter case, because a site can run on
+`next start`, which matches a redirect source without regard to case, or on the
+Cloudflare build, which matches it exactly, and a redirect must be safe on
+both. So `/Guide` to `/guide` is left out when `guide` is a page (it would loop
+and hide the page where case is ignored), `/a` to `/B` together with `/b` to
+`/A` is a loop whose second redirect is left out, and a generated redirect
+whose address differs from a page only in case is never created. When letter
+case alone is the conflict, the warning names each redirect left out (the
+first ten), says that its address differs only in letter case from a page or
+another redirect, and says to add it back to `docs.json` if your host matches
+URLs case-sensitively. Next.js reads a redirect source as a route pattern, so one
 whose address has a `+ ? ( ) [ ] { }` character (a `directory` such as
 `sdk/c++`) would fail the build; every redirect from authored config, a local
 spec or a downloaded spec is left out instead, and one warning lists the first

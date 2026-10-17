@@ -56,16 +56,19 @@ describe('Mintlify redirects that would loop or hide a page', () => {
     expect(messages(bundle)).toContain('/introduction')
   })
 
-  it('keeps a redirect from a differently cased address to a page', () => {
+  it('drops a redirect from a differently cased address to a page, and says it can come back on a case-sensitive host', () => {
     const bundle = mintlify({
-      redirects: [{ source: '/Guide', destination: '/guide' }],
+      redirects: [{ source: '/Guide', destination: '/guide' }, { source: '/old', destination: '/guide' }],
       navigation: { groups: [{ group: 'Start', pages: ['index', 'guide'] }] },
     }, {
       index: '---\ntitle: Home\n---\n\nWelcome.',
       guide: '---\ntitle: Guide\n---\n\nBody.',
     })
-    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/Guide', destination: '/guide' })
-    expect(messages(bundle)).not.toContain('/Guide')
+    const redirects = bundle.docsConfig.redirects ?? []
+    expect(redirects.map((redirect) => redirect.source)).not.toContain('/Guide')
+    expect(redirects).toContainEqual({ source: '/old', destination: '/guide' })
+    expect(messages(bundle)).toContain('Skipped 1 redirect from /Guide: that URL differs only in letter case from a page in this site, so on a server that ignores letter case it would hide that page. If your host matches URLs case-sensitively, add it back to docs.json.')
+    expect(messages(bundle)).not.toMatch(/Self-redirect|also a page/)
   })
 
   it('keeps a redirect that does not touch a page', () => {
@@ -202,7 +205,7 @@ describe('dropConflictingRedirects', () => {
     expect(warnings[0].message).toContain('/c')
   })
 
-  it('compares routes exactly, since the deployed route table is case-sensitive', () => {
+  it('compares routes without regard to letter case, since a server may ignore it', () => {
     const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
     const result = dropConflictingRedirects(config([
       { source: '/Guide', destination: '/guide' },
@@ -212,15 +215,26 @@ describe('dropConflictingRedirects', () => {
       { source: '/Quickstart', destination: '/quickstart' },
       { source: '/guide/', destination: '/x' },
     ]), pages, warnings)
-    expect(result.redirects).toEqual([
-      { source: '/Guide', destination: '/guide' },
-      { source: '/FR/guide', destination: '/x' },
+    expect(result.redirects).toEqual([{ source: '/a', destination: '/B' }])
+    expect(warnings.map((warning) => warning.message)).toEqual([
+      'Skipped 1 redirect from /guide/: that URL is also a page in this site, and a redirect would hide it. To redirect instead, delete the page and add the redirect to docs.json.',
+      'Skipped 2 redirects from /Guide, /FR/guide: those URLs differ only in letter case from pages in this site, so on a server that ignores letter case they would hide those pages. If your host matches URLs case-sensitively, add them back to docs.json.',
+      'Skipped 2 redirects that would send visitors in a circle on a server that ignores letter case, since the addresses involved differ only in letter case: /b -> /A, /Quickstart -> /quickstart. If your host matches URLs case-sensitively, add them back to docs.json.',
+    ])
+  })
+
+  it('breaks a cycle whose routes differ in case, keeping the redirect listed first', () => {
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    const result = dropConflictingRedirects(config([
       { source: '/a', destination: '/B' },
       { source: '/b', destination: '/A' },
-      { source: '/Quickstart', destination: '/quickstart' },
-    ])
+      { source: '/c', destination: '/d' },
+      { source: '/D', destination: '/C' },
+    ]), pages, warnings)
+    expect(result.redirects).toEqual([{ source: '/a', destination: '/B' }, { source: '/c', destination: '/d' }])
     expect(warnings).toHaveLength(1)
-    expect(warnings[0].message).toContain('/guide/')
+    expect(warnings[0].message).toContain('/b -> /A, /D -> /C')
+    expect(warnings[0].message).toContain('letter case')
   })
 
   it('still breaks a loop between routes of the same case', () => {
@@ -230,8 +244,28 @@ describe('dropConflictingRedirects', () => {
       { source: '/New', destination: '/Old' },
     ]), pages, warnings)
     expect(result.redirects).toEqual([{ source: '/Old', destination: '/New' }])
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0].message).toContain('/New -> /Old')
+    expect(warnings.map((warning) => warning.message)).toEqual(['Skipped 1 redirect that would send visitors in a circle: /New -> /Old. Check these redirects in the source docs.'])
+  })
+
+  it('words a conflict as a letter-case one only when letter case alone causes it', () => {
+    const exact: Array<{ code: 'unsupported-config'; message: string }> = []
+    dropConflictingRedirects(config([
+      { source: '/guide', destination: '/x' },
+      { source: '/Old', destination: '/New' },
+      { source: '/New', destination: '/Old' },
+    ]), pages, exact)
+    expect(exact).toHaveLength(2)
+    expect(exact.map((warning) => warning.message).join('\n')).not.toMatch(/letter case|case-sensitive/)
+
+    const onlyCase: Array<{ code: 'unsupported-config'; message: string }> = []
+    dropConflictingRedirects(config([
+      { source: '/Guide', destination: '/x' },
+      { source: '/a', destination: '/B' },
+      { source: '/b', destination: '/A' },
+    ]), pages, onlyCase)
+    expect(onlyCase).toHaveLength(2)
+    for (const warning of onlyCase) expect(warning.message).toMatch(/only in letter case/)
+    expect(onlyCase.map((warning) => warning.message).join('\n')).not.toMatch(/also a page|Check these redirects/)
   })
 
   it('walks a long chain of redirects once, however they are ordered', () => {
@@ -271,6 +305,13 @@ describe('dropUnroutableRedirects', () => {
     expect(warnings).toHaveLength(2)
     expect(warnings[0].message).toBe('Self-redirect from /docs/models/ to /docs/models was omitted.')
     expect(warnings[1].message).toContain('Skipped 2 redirects from /sdk/c++/users, /sdk/c++/groups')
+  })
+
+  it('leaves a redirect between two cases of one address to the conflict check, which says why', () => {
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    const input = config([{ source: '/Guide', destination: '/guide' }])
+    expect(dropUnroutableRedirects(input, warnings)).toBe(input)
+    expect(warnings).toEqual([])
   })
 
   it('returns the same config, and says nothing, when every redirect is routable', () => {

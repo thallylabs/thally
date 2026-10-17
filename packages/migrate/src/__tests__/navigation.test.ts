@@ -67,6 +67,13 @@ describe('Mintlify referenced directory landings', () => {
     }
   })
 
+  it('adds no landing for an address that differs from a page or an authored redirect only in letter case', () => {
+    const cased: MigrationDocsConfig['tabs'] = [{ tab: 'Guides', pages: ['Guides/Examples/webhook'] }]
+    const authored = { source: '/guides/examples', destination: '/chosen' }
+    const result = addMintlifyDirectoryRedirects({ tabs: cased, redirects: [authored] }, [page('Guides/Examples/webhook'), page('guides')])
+    expect(result.redirects).toEqual([authored])
+  })
+
   it('retains a conventional overview landing ahead of a first-descendant fallback', () => {
     const incoming = { source: '/examples', destination: '/guides/examples' }
     const result = addMintlifyDirectoryRedirects({ tabs, redirects: [incoming] }, [
