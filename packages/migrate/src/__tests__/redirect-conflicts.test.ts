@@ -16,12 +16,12 @@ type Redirects = NonNullable<MigrationDocsConfig['redirects']>
 /**
  * First literal redirect cycle, followed the way a browser would, or null. The
  * first redirect listed for a source is the one that fires; a request is
- * matched on its path, so a destination's query and fragment are ignored; a
- * destination off the site ends the walk.
+ * matched on its path, so a destination's query and fragment are ignored and
+ * its dot segments are resolved; a destination off the site ends the walk.
  */
 function redirectCycle(redirects: Redirects): Array<string> | null {
   const next = new Map<string, string>()
-  for (const { source, destination } of redirects) if (!next.has(source)) next.set(source, /^(https?:)?\/\//.test(destination) ? '' : destination.split(/[?#]/, 1)[0])
+  for (const { source, destination } of redirects) if (!next.has(source)) next.set(source, /^(https?:)?\/\//.test(destination) ? '' : new URL(destination.split(/[?#]/, 1)[0], 'http://x').pathname)
   for (const start of next.keys()) {
     const path = [start]
     for (let current = next.get(start); current; current = next.get(current)) {
@@ -405,6 +405,19 @@ describe('dropConflictingRedirects', () => {
     expect(warnings.map((warning) => warning.message)).toEqual(['Skipped 1 redirect that would send visitors in a circle: /f -> /E. Check these redirects in the source docs.'])
   }, 2000)
 
+  it('resolves dot segments in a destination, written plainly or percent-encoded, before looking for a loop', () => {
+    const { redirects, warnings } = dropWithin([
+      { source: '/a', destination: '/x/../a' },
+      { source: '/b', destination: '/x/%2e%2e/b' },
+      { source: '/c', destination: '/x/%2E%2e/./c' },
+      { source: '/d', destination: '/x/../e' },
+      { source: '/e', destination: '/d' },
+      { source: '/f', destination: '/x/../g' },
+    ], pages)
+    expect(redirects).toEqual([{ source: '/d', destination: '/x/../e' }, { source: '/f', destination: '/x/../g' }])
+    expect(warnings.map((warning) => warning.message)).toEqual(['Skipped 4 redirects that would send visitors in a circle: /a -> /x/../a, /b -> /x/%2e%2e/b, /c -> /x/%2E%2e/./c, /e -> /d. Check these redirects in the source docs.'])
+  }, 2000)
+
   it('keeps no loop and no hidden page under either comparison, over seeded random mixed-case sets', () => {
     const random = seeded(20261017)
     const pick = <T>(items: ReadonlyArray<T>): T => items[Math.floor(random() * items.length)]
@@ -415,7 +428,8 @@ describe('dropConflictingRedirects', () => {
       const sitePages = ['a', 'B', 'c', 'end'].filter(() => random() < 0.1).map((id) => ({ id }))
       const served = new Set(sitePages.map((page) => `/${page.id.toLowerCase()}`))
       const suffix = (): string => (random() < 0.3 ? pick(['?q=1', '#x']) : '')
-      const destination = (): string => (random() < 0.12 ? pick(['https://example.com/a', '//example.com/b']) : `${pick(routes)}${suffix()}`)
+      const prefix = (): string => (random() < 0.15 ? pick(['/x/..', '/x/%2e%2E', '/x/.%2e/y/..']) : '')
+      const destination = (): string => (random() < 0.12 ? pick(['https://example.com/a', '//example.com/b']) : `${prefix()}${pick(routes)}${suffix()}`)
       const input: Redirects = Array.from({ length: 1 + Math.floor(random() * 8) }, () => ({ source: pick(routes), destination: destination() }))
       const context = JSON.stringify({ run, pages: sitePages.map((page) => page.id), input })
       const { redirects: kept, warnings } = dropWithin(input, sitePages)

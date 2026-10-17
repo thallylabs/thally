@@ -29,15 +29,28 @@ export function literalRoute(route: string): string | null {
   return exactRoute(route)?.toLowerCase() ?? null
 }
 
+/** A literal path with its `.` and `..` segments resolved, as a browser does; a segment is one whether it is written `..` or `%2e%2e` in either case. Nothing else is decoded. */
+function resolveDotSegments(route: string): string {
+  const segments: Array<string> = []
+  for (const segment of route.split('/').slice(1)) {
+    const dots = segment.replace(/%2e/gi, '.')
+    if (dots === '..') segments.pop()
+    else if (dots !== '.') segments.push(segment)
+  }
+  return `/${segments.join('/')}`
+}
+
 /**
  * The site path a redirect destination sends visitors to, as `exactRoute` reads
- * a source. Next matches a source against the request path alone, so a query or
- * fragment on the destination does not stop the redirect for that path from
- * firing next. Null for a pattern and for an address off the site (`//host/x`;
- * `https://host/x` already fails `exactRoute`'s leading slash).
+ * a source, with dot segments resolved (`/x/../a` is `/a`). Next matches a
+ * source against the request path alone, so a query or fragment on the
+ * destination does not stop the redirect for that path from firing next. Null
+ * for a pattern and for an address off the site (`//host/x`; `https://host/x`
+ * already fails `exactRoute`'s leading slash).
  */
 function destinationRoute(destination: string): string | null {
-  return destination.startsWith('//') ? null : exactRoute(destination.split(/[?#]/, 1)[0])
+  const route = destination.startsWith('//') ? null : exactRoute(destination.split(/[?#]/, 1)[0])
+  return route === null ? null : resolveDotSegments(route)
 }
 
 /** The routes a site's pages are served at, in the case they are written; a directory page (`section/index`) is served at its parent route too. */
