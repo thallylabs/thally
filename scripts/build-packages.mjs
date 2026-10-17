@@ -1,10 +1,10 @@
 /**
- * Build the workspace packages in dependency order, parallelizing where the
- * dependency graph allows.
+ * Build the workspace packages in dependency order.
  *
  * The graph (from each package's tsup config and dependencies):
- * - core and migrate have no @thallylabs/* build-time dependencies and build
- *   concurrently.
+ * - core has no @thallylabs/* build-time dependencies and builds first.
+ * - migrate imports @thallylabs/core/repository (GitHub/GitLab URL parsing),
+ *   so its declaration build needs core's generated types.
  * - create-thally-docs imports @thallylabs/migrate and its declaration build
  *   needs migrate's generated types, so it builds next.
  * - mcp consumes the canonical create-thally-docs scaffold and release
@@ -14,9 +14,7 @@
  * - cli sets `noExternal: ['@thallylabs/agent']`, bundling agent's dist into
  *   the CLI at build time — it must build last.
  *
- * The previous fully-serial `npm run build -w … && …` chain paid all five
- * builds back to back on every engine build; the fan-out keeps the ordering
- * constraints while letting the independent half run at once.
+ * Every package now depends on the one before it, so the builds run in order.
  */
 
 import { spawn } from 'node:child_process'
@@ -48,9 +46,8 @@ const context = proofContext()
 if (hasCurrentWorkspaceBuild(context)) {
   process.stdout.write('Workspace package inputs and outputs match this CI job; reusing compilation.\n')
 } else {
-  await Promise.all(
-    ['packages/core', 'packages/migrate'].map(buildWorkspace),
-  )
+  await buildWorkspace('packages/core')
+  await buildWorkspace('packages/migrate')
   await buildWorkspace('packages/create-thally-docs')
   await buildWorkspace('packages/mcp')
   await buildWorkspace('packages/agent')

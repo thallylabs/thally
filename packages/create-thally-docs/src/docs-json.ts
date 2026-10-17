@@ -1,3 +1,5 @@
+import type { GitHostConfig } from '@thallylabs/core/repository'
+import type { TrackedRepoConfig } from '@thallylabs/core/tracking'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -29,14 +31,11 @@ export interface DocsJsonConfig {
   }
   /** Thally Track — product repos whose merged PRs trigger docs-agent PRs (typed for `thally track add`). */
   tracking?: {
-    repos?: Array<{
-      owner: string
-      repo: string
-      branch?: string
-      paths?: Array<string>
-      outputTab?: string
-      outputGroup?: string
-    }>
+    repos?: Array<TrackedRepoConfig>
+  }
+  /** Self-hosted repository hosts (GitLab or GitHub Enterprise). */
+  repository?: {
+    hosts?: Array<GitHostConfig>
   }
 }
 
@@ -79,10 +78,19 @@ export function resetTrackingConfig(projectDir: string): void {
  */
 export function writeTrackingConfig(
   projectDir: string,
-  repos: Array<{ owner: string; repo: string }>,
+  repos: Array<Pick<TrackedRepoConfig, 'owner' | 'repo' | 'provider' | 'host'>>,
 ): void {
   if (repos.length === 0) return
   const config = readDocsJson(projectDir)
-  config.tracking = { repos: repos.map((r) => ({ owner: r.owner, repo: r.repo, branch: 'main' })) }
+  // provider/host are written only when set, so GitHub entries keep their shape.
+  config.tracking = {
+    repos: repos.map((r) => ({
+      owner: r.owner,
+      repo: r.repo,
+      ...(r.provider ? { provider: r.provider } : {}),
+      ...(r.host ? { host: r.host } : {}),
+      branch: 'main',
+    })),
+  }
   writeDocsJson(projectDir, config)
 }

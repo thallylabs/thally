@@ -1,3 +1,5 @@
+import type { GitHostConfig } from '@thallylabs/core/repository'
+import type { TrackedRepoConfig } from '@thallylabs/core/tracking'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -42,14 +44,11 @@ export interface DocsJsonConfig {
   }
   /** Thally Track — product repos whose commits trigger docs-agent PRs (typed for `sync_from_repo`). */
   tracking?: {
-    repos?: Array<{
-      owner: string
-      repo: string
-      branch?: string
-      paths?: Array<string>
-      outputTab?: string
-      outputGroup?: string
-    }>
+    repos?: Array<TrackedRepoConfig>
+  }
+  /** Self-hosted repository hosts (GitLab or GitHub Enterprise). */
+  repository?: {
+    hosts?: Array<GitHostConfig>
   }
 }
 

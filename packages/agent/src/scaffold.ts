@@ -4,8 +4,28 @@ import {
   DOCS_PREVIEW_LABEL,
   TRACK_OWNED_BRANCH_PREFIXES,
   buildTrackInstruction,
+  parseRepositoryReference,
+  resolveGitHosts,
+  type GitProvider,
+  type TrackedRepoConfig,
 } from "@thallylabs/mcp/track";
 import { DEFAULT_AGENT_MODEL } from "./model.js";
+import {
+  DOCS_AGENT_GITLAB_PIPELINE,
+  DOCS_AGENT_GITLAB_PIPELINE_PATH,
+  GITLAB_CI_INCLUDE_FILE,
+  trackSenderGitlabJobs,
+} from "./scaffold-gitlab.js";
+
+export {
+  buildDocsAgentGitlabPipeline,
+  DOCS_AGENT_GITLAB_PIPELINE,
+  DOCS_AGENT_GITLAB_PIPELINE_PATH,
+  GITLAB_AGENT_COMMITTER_EMAIL,
+  GITLAB_CI_INCLUDE_FILE,
+  trackSenderGitlabJobs,
+} from "./scaffold-gitlab.js";
+export type { DocsAgentGitlabPipelineOptions } from "./scaffold-gitlab.js";
 
 /** Version marker used by Cloud Track to offer reviewable workflow upgrades. */
 export const DOCS_AGENT_WORKFLOW_CONTRACT = "thally-track/v4";
@@ -292,14 +312,8 @@ jobs:
 `;
 }
 
-export interface TrackSenderRepo {
-  owner: string;
-  repo: string;
-  branch?: string;
-  paths?: Array<string>;
-  outputTab?: string;
-  outputGroup?: string;
-}
+/** A tracked product repository as the sender templates consume it. */
+export type TrackSenderRepo = TrackedRepoConfig;
 
 /**
  * Product-repo sender for Thally Track: dispatch a `from_pr` docs task to the docs
@@ -405,14 +419,67 @@ export function codeownersFor(team = "@your-org/docs-admins"): string {
 export interface ScaffoldResult {
   written: Array<string>;
   senderSnippet: string;
+  /** Provider the files were written for. */
+  provider: GitProvider;
+  /** Manual steps the caller should print (GitLab: add the include line). */
+  notes: Array<string>;
 }
 
-/** Write the docs-repo agent workflow + a CODEOWNERS roster gate; return the sender snippet. */
+/** Options for {@link scaffoldAgentWorkflow}. */
+export interface ScaffoldAgentWorkflowOptions {
+  /** Source-control provider of the docs repository (default github). */
+  provider?: GitProvider;
+}
+
+function writeIfAbsent(file: string, content: string): boolean {
+  if (fs.existsSync(file)) return false;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content);
+  return true;
+}
+
+/**
+ * Write the docs-repo agent pipeline plus a CODEOWNERS roster gate and return
+ * the product-side sender snippet.
+ *
+ * GitHub writes `.github/workflows/thally-agent.yml`. GitLab writes
+ * `.gitlab/ci/thally-agent.gitlab-ci.yml` and `.gitlab/CODEOWNERS`, and only
+ * creates `.gitlab-ci.yml` when the project has none — an existing pipeline
+ * file is never rewritten; the caller prints the include line instead.
+ */
 export function scaffoldAgentWorkflow(
   projectDir: string,
   docsRepo = "<owner>/<docs-repo>",
+  options: ScaffoldAgentWorkflowOptions = {},
 ): ScaffoldResult {
   const written: Array<string> = [];
+  const notes: Array<string> = [];
+
+  if (options.provider === "gitlab") {
+    const pipeline = path.join(projectDir, DOCS_AGENT_GITLAB_PIPELINE_PATH);
+    fs.mkdirSync(path.dirname(pipeline), { recursive: true });
+    fs.writeFileSync(pipeline, DOCS_AGENT_GITLAB_PIPELINE);
+    written.push(path.relative(projectDir, pipeline));
+
+    const rootPipeline = path.join(projectDir, ".gitlab-ci.yml");
+    if (writeIfAbsent(rootPipeline, GITLAB_CI_INCLUDE_FILE)) {
+      written.push(path.relative(projectDir, rootPipeline));
+    } else if (!fs.readFileSync(rootPipeline, "utf8").includes(DOCS_AGENT_GITLAB_PIPELINE_PATH)) {
+      notes.push(`Add to .gitlab-ci.yml:\n\ninclude:\n  - local: ${DOCS_AGENT_GITLAB_PIPELINE_PATH}`);
+    }
+
+    const codeowners = path.join(projectDir, ".gitlab", "CODEOWNERS");
+    if (writeIfAbsent(codeowners, codeownersFor())) written.push(path.relative(projectDir, codeowners));
+
+    const docsRef = parseRepositoryReference(docsRepo, {
+      provider: "gitlab",
+      hosts: resolveGitHosts(),
+    }) ?? parseRepositoryReference("your-group/docs", { provider: "gitlab" });
+    const senderSnippet = docsRef
+      ? trackSenderGitlabJobs(docsRef, { owner: "<group>", repo: "<product>", provider: "gitlab" })
+      : "";
+    return { written, senderSnippet, provider: "gitlab", notes };
+  }
 
   const wfDir = path.join(projectDir, ".github", "workflows");
   fs.mkdirSync(wfDir, { recursive: true });
@@ -426,5 +493,5 @@ export function scaffoldAgentWorkflow(
     written.push(path.relative(projectDir, co));
   }
 
-  return { written, senderSnippet: mentionSenderWorkflow(docsRepo) };
+  return { written, senderSnippet: mentionSenderWorkflow(docsRepo), provider: "github", notes };
 }

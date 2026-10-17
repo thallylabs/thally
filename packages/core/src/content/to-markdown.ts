@@ -78,6 +78,13 @@ export function mdxToMarkdown(body: string, audience: ContentAudience = 'agents'
     const title = getAttr(tag, 'title') || repo
     return `\n#### [${title}](https://github.com/${repo})\n`
   })
+  // GitLab project paths may nest subgroups: group/subgroup/project.
+  out = out.replace(/<(?:GitLab|Gitlab)\b[^>]*\/?\s*>/g, (tag) => {
+    const repo = getAttr(tag, 'repo')
+    if (!repo || !/^[A-Za-z0-9_.][A-Za-z0-9_.-]{0,254}(?:\/[A-Za-z0-9_.][A-Za-z0-9_.-]{0,254}){1,20}$/.test(repo) || repo.split('/').some((segment) => segment === '.' || segment === '..')) return ''
+    const title = getAttr(tag, 'title') || repo
+    return `\n#### [${title}](https://gitlab.com/${repo})\n`
+  })
 
   // 3. Callouts → a labelled blockquote line; the body follows as prose.
   out = out.replace(new RegExp(`<(${CALLOUTS.join('|')})\\b[^>]*>`, 'g'), (tag, name) => `\n> **${calloutLabel(tag, name)}:** `)

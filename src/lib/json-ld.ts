@@ -1,3 +1,4 @@
+import { isPlaceholderRepositoryUrl } from '@thallylabs/core/repository'
 import { siteConfig } from '@/data/site'
 
 const SCHEMA_CONTEXT = 'https://schema.org'
@@ -89,7 +90,7 @@ export function buildSiteJsonLd({
     url: siteUrl,
   }
 
-  if (repoUrl && !repoUrl.includes('your-org')) {
+  if (repoUrl && !isPlaceholderRepositoryUrl(repoUrl)) {
     organization.sameAs = [repoUrl]
   }
 

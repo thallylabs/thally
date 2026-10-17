@@ -10,12 +10,13 @@ import { setImmediate } from 'node:timers/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import {
-  cloneGitHubRepository,
+  cloneRepository,
   importSourceRef,
   hydrateRemoteApiSpecs,
+  isRepositoryUrl,
   migrateUrl,
   runUrlMigration,
-  parseGitHubRepositoryUrl,
+  parseRepositoryUrl,
   sourceRefOversizeReason,
   type MigrationBundle,
   type MigrationDocsConfig,
@@ -116,17 +117,25 @@ function resetFreshMigrationContent(projectDir: string): void {
   }
 }
 
-/** Clone each mapped sourceRef repository (github.com only) and prepare it as a sub-site; a failed clone is a warning, not a crash. */
+/**
+ * Clone each mapped sourceRef repository and prepare it as a sub-site; a failed
+ * clone is a warning, not a crash. `owner/repo` mappings are github.com; URL
+ * mappings may name GitLab or a declared self-hosted host.
+ */
 async function fetchSourceRefs(mappings: ReadonlyArray<SourceRefMapping>, warnings: Array<MigrationWarning>): Promise<Array<SourceRefImport>> {
   const imports: Array<SourceRefImport> = []
   for (const mapping of mappings) {
     const root = mkdtempSync(join(tmpdir(), 'thally-source-ref-'))
     try {
-      const source = parseGitHubRepositoryUrl(`https://github.com/${mapping.repo}`)
-      const tooLarge = await sourceRefOversizeReason(mapping.repo)
+      const source = parseRepositoryUrl(
+        mapping.repository
+          ? `${mapping.repository.origin}/${mapping.repository.fullPath}`
+          : `https://github.com/${mapping.repo}`,
+      )
+      const tooLarge = await sourceRefOversizeReason(mapping.repository ?? mapping.repo)
       if (tooLarge) throw new Error(tooLarge)
       const cloneDir = join(root, 'repository')
-      await cloneGitHubRepository(source, cloneDir, warnings, { skipSubmodules: true })
+      await cloneRepository(source, cloneDir, warnings, { skipSubmodules: true })
       imports.push(importSourceRef(mapping, cloneDir))
     } catch (error) {
       warnings.push({ code: 'fetch-failed', message: `sourceRef ${mapping.repo} was not imported: ${error instanceof Error ? error.message : String(error)}` })
@@ -138,9 +147,8 @@ async function fetchSourceRefs(mappings: ReadonlyArray<SourceRefMapping>, warnin
 }
 
 async function discoverMigration(options: MigrateOptions): Promise<MigrationBundle> {
-  const url = new URL(options.sourceUrl)
-  if (url.hostname.toLowerCase() !== 'github.com') {
-    if (options.sourceRefs?.length) terminal.warn('--source-ref applies only to GitHub repository sources and was ignored.')
+  if (!isRepositoryUrl(options.sourceUrl)) {
+    if (options.sourceRefs?.length) terminal.warn('--source-ref applies only to repository sources (GitHub or GitLab) and was ignored.')
     return terminal.step('Discovering public documentation', () => {
       const discovery = {
         sourceUrl: options.sourceUrl,
@@ -156,13 +164,13 @@ async function discoverMigration(options: MigrateOptions): Promise<MigrationBund
     }, 'Public documentation discovered')
   }
 
-  const source = parseGitHubRepositoryUrl(options.sourceUrl)
+  const source = parseRepositoryUrl(options.sourceUrl)
   if (options.branch) source.branch = options.branch
   const temporaryRoot = mkdtempSync(join(tmpdir(), 'thally-migrate-'))
   const cloneDir = join(temporaryRoot, 'repository')
   try {
     const cloneWarnings: Array<MigrationWarning> = []
-    await terminal.step(`Cloning ${source.owner}/${source.repo}`, () => cloneGitHubRepository(source, cloneDir, cloneWarnings), 'Source repository cloned')
+    await terminal.step(`Cloning ${source.fullPath ?? `${source.owner}/${source.repo}`}`, () => cloneRepository(source, cloneDir, cloneWarnings), 'Source repository cloned')
     const sourceRefs = options.sourceRefs?.length
       ? await terminal.step('Importing sourceRef repositories', () => fetchSourceRefs(options.sourceRefs ?? [], cloneWarnings), 'sourceRef repositories imported')
       : []

@@ -17,6 +17,8 @@ import {
   resolvePrContext,
   readAgentWritePolicyFile,
   scaffoldAgentWorkflow,
+  originRemoteUrl,
+  TrackOwnedChangeError,
   TRACK_AGENT_CONTEXT_MAX_BYTES,
   TRACK_AGENT_MAX_OUTPUT_TOKENS,
   TRACK_AGENT_REQUEST_MAX_BYTES,
@@ -26,6 +28,12 @@ import {
   type OutputMode,
   type TaskSource,
 } from "@thallylabs/agent";
+import {
+  envGitHosts,
+  parseRepositoryReference,
+  resolveGitHosts,
+  type GitProvider,
+} from "@thallylabs/mcp/track";
 
 export const TRACK_CONTEXT_MAX_BYTES = TRACK_AGENT_CONTEXT_MAX_BYTES;
 const TRACK_CONTEXT_INVALID = "track_context_invalid";
@@ -176,15 +184,74 @@ export function serializeTrackAgentResult(decision: unknown): string {
   return serialized;
 }
 
-/** `thally agent init` — scaffold the docs-repo workflow + print the product-repo sender. */
-function runAgentInit(args: ParsedArgs): number {
-  const docsRepo = args.getFlag("--repo") ?? "<owner>/<docs-repo>";
-  const { written, senderSnippet } = scaffoldAgentWorkflow(
-    process.cwd(),
-    docsRepo,
+/** Read `--provider`, rejecting anything other than github or gitlab. */
+export function parseProviderFlag(value: string | undefined): GitProvider | undefined | null {
+  if (value === undefined) return undefined;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "github" || normalized === "gitlab" ? normalized : null;
+}
+
+/**
+ * Provider of the current repository: an explicit flag, else the `origin`
+ * remote (known hosts, `THALLY_GIT_HOSTS`, and the GitLab CI server), else GitHub.
+ */
+export function detectRepositoryProvider(cwd: string, explicit?: GitProvider): GitProvider {
+  if (explicit) return explicit;
+  const remote = originRemoteUrl(cwd);
+  if (!remote) return "github";
+  return parseRepositoryReference(remote, { hosts: resolveGitHosts(envGitHosts()) })?.provider ?? "github";
+}
+
+function printIndented(text: string): void {
+  process.stdout.write(
+    text
+      .split("\n")
+      .map((l) => `    ${l}`)
+      .join("\n"),
   );
+}
+
+/** `thally agent init` — scaffold the docs-repo pipeline + print the product-repo sender. */
+function runAgentInit(args: ParsedArgs): number {
+  const explicit = parseProviderFlag(args.getFlag("--provider"));
+  if (explicit === null) {
+    process.stderr.write("\n  ❌ --provider must be github or gitlab.\n\n");
+    return 1;
+  }
+  const provider = detectRepositoryProvider(process.cwd(), explicit);
+  const docsRepo =
+    args.getFlag("--repo") ?? (provider === "gitlab" ? "<group>/<docs-project>" : "<owner>/<docs-repo>");
+  const { written, senderSnippet, notes } = scaffoldAgentWorkflow(process.cwd(), docsRepo, { provider });
   for (const file of written) process.stdout.write(`\n  ✓ Wrote ${file}`);
   process.stdout.write("\n");
+  for (const note of notes) {
+    process.stdout.write("\n");
+    printIndented(note);
+    process.stdout.write("\n");
+  }
+
+  if (provider === "gitlab") {
+    process.stdout.write("\n  In THIS docs project → Settings → CI/CD → Variables (masked):\n");
+    process.stdout.write("    - ANTHROPIC_API_KEY    (runs the agent)\n");
+    process.stdout.write(
+      "    - THALLY_AGENT_TOKEN   (project access token: api + write_repository here, read_api on product projects)\n",
+    );
+    process.stdout.write(
+      "\n  Then create a pipeline trigger token (Settings → CI/CD → Pipeline trigger tokens)\n  and store it as THALLY_DISPATCH_TOKEN in each product project.\n",
+    );
+    process.stdout.write(
+      "\n  Optional: a weekly pipeline schedule with variable THALLY_DRIFT_SWEEP=true runs the drift sweep.\n",
+    );
+    process.stdout.write(
+      "\n  Product projects send merged and docs-preview merge requests with jobs like these\n  (\"thally track setup\" prints them for each tracked project):\n\n",
+    );
+    printIndented(senderSnippet);
+    process.stdout.write(
+      "\n  @thally comment mentions need the Thally Cloud webhook on GitLab (Comments events);\n  locally, run: thally agent \"<instruction>\" --from-pr <merge-request-url>\n\n",
+    );
+    return 0;
+  }
+
   process.stdout.write("\n  Add two secrets to THIS docs repo:\n");
   process.stdout.write("    - ANTHROPIC_API_KEY   (runs the agent)\n");
   process.stdout.write(
@@ -193,12 +260,7 @@ function runAgentInit(args: ParsedArgs): number {
   process.stdout.write(
     "\n  Then in each PRODUCT repo, add .github/workflows/thally-mention.yml:\n\n",
   );
-  process.stdout.write(
-    senderSnippet
-      .split("\n")
-      .map((l) => `    ${l}`)
-      .join("\n"),
-  );
+  printIndented(senderSnippet);
   process.stdout.write(
     "\n  …and a THALLY_DISPATCH_TOKEN secret there (dispatch access to this docs repo).\n\n",
   );
@@ -210,8 +272,9 @@ function runAgentInit(args: ParsedArgs): number {
  *
  * Turns a task into documentation edits on a git sandbox branch. Default leaves
  * the edits on the branch for review; --dry-run previews and discards; --pr opens
- * a pull request. --from-pr reads a product PR's title/body/diff via the gh CLI
- * (the path Thally Track dispatches for a merged PR).
+ * a pull request (GitHub) or merge request (GitLab). --from-pr reads a product
+ * change's title/body/diff: GitHub PRs via the gh CLI, GitLab merge requests
+ * and merge commits via the GitLab API (the path Thally Track dispatches).
  */
 export async function runAgentCommand(args: ParsedArgs): Promise<number> {
   if (args.positionals[0] === "init") return runAgentInit(args);
@@ -223,6 +286,11 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
   const requester = args.getFlag("--requester")?.trim();
   const resultFile = args.getFlag("--result-file")?.trim();
   const writePolicyFile = args.getFlag("--write-policy-file")?.trim();
+  const provider = parseProviderFlag(args.getFlag("--provider"));
+  if (provider === null) {
+    process.stderr.write("\n  ❌ --provider must be github or gitlab.\n\n");
+    return 1;
+  }
 
   if (!instruction && !fromPr && !contextFile) {
     process.stderr.write(
@@ -246,11 +314,16 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
     // App before dispatch. Prefer that bounded context file so the docs-repo
     // Action never needs a cross-repository PAT merely to read the source PR.
     if (contextFile) context = readTrackContextFile(contextFile);
-    else if (fromPr) context = resolvePrContext(fromPr);
+    else if (fromPr) context = await resolvePrContext(fromPr);
     else if (diffRef) context = resolveDiff(process.cwd(), diffRef);
     if (writePolicyFile)
       writePolicy = readAgentWritePolicyFile(writePolicyFile);
   } catch (err) {
+    if (err instanceof TrackOwnedChangeError) {
+      // GitLab merge-commit dispatches apply the Track loop guard here.
+      process.stdout.write(`\n  ${err.message}\n\n`);
+      return 0;
+    }
     process.stderr.write(
       `\n  ${err instanceof Error ? err.message : String(err)}\n\n`,
     );
@@ -286,6 +359,7 @@ export async function runAgentCommand(args: ParsedArgs): Promise<number> {
       mode,
       requireChanges: args.hasFlag("--require-changes"),
       writePolicy,
+      provider,
       maximumRequestBytes: contextFile
         ? TRACK_AGENT_REQUEST_MAX_BYTES
         : undefined,

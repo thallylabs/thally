@@ -10,9 +10,13 @@ import { confirm, input, select } from './interactive-prompts.js'
 import { basename, resolve } from 'node:path'
 
 import {
-  parseGitHubRepositoryUrl,
+  isRepositoryUrl,
+  migrationGitHosts,
+  parseRepositoryUrl,
   type MigrationPlatform,
 } from '@thallylabs/migrate'
+import { parseRepositoryReference } from '@thallylabs/core/repository'
+import { trackedRepoEntry, type TrackedRepoConfig } from '@thallylabs/core/tracking'
 
 export type SelectableMigrationPlatform = Extract<MigrationPlatform, 'mintlify' | 'docusaurus' | 'fern'>
 
@@ -63,15 +67,15 @@ export async function gatherMigrationPlatform(
 
 export const LIVE_URL_MIGRATION_WARNING =
   'Live website migration reconstructs documentation from public output and may need manual alignment. ' +
-  'A source GitHub repository produces a more accurate migration. ' +
+  'A source repository (GitHub or GitLab) produces a more accurate migration. ' +
   'Use the Thally MCP afterward if the generated project needs refinement.'
 
-function validateGitHubRepositorySource(value: string): true | string {
+function validateRepositorySource(value: string): true | string {
   try {
-    parseGitHubRepositoryUrl(value)
+    parseRepositoryUrl(value)
     return true
   } catch (error) {
-    return error instanceof Error ? error.message : 'Enter a valid public GitHub repository URL.'
+    return error instanceof Error ? error.message : 'Enter a valid public GitHub or GitLab repository URL.'
   }
 }
 
@@ -84,8 +88,7 @@ export async function resolveAutoDetectedMigrationSource(
   sourceUrl: string,
   shouldPrompt: boolean,
 ): Promise<string> {
-  const source = new URL(sourceUrl)
-  if (source.hostname.toLowerCase() === 'github.com') return sourceUrl
+  if (isRepositoryUrl(sourceUrl)) return sourceUrl
 
   console.warn(`\n  ⚠ ${LIVE_URL_MIGRATION_WARNING}`)
 
@@ -95,23 +98,23 @@ export async function resolveAutoDetectedMigrationSource(
     message: '  Which source should Thally migrate?',
     choices: [
       {
-        name: 'Source GitHub repository (recommended)',
-        value: 'github' as const,
+        name: 'Source repository on GitHub or GitLab (recommended)',
+        value: 'repository' as const,
       },
       {
         name: 'Continue with the live website URL',
         value: 'website' as const,
       },
     ],
-    default: 'github',
+    default: 'repository',
   })
 
-  if (sourcePreference === 'github') {
+  if (sourcePreference === 'repository') {
     const repositoryUrl = await input({
-      message: '  GitHub repository URL:',
-      validate: validateGitHubRepositorySource,
+      message: '  Repository URL (GitHub or GitLab):',
+      validate: validateRepositorySource,
     })
-    parseGitHubRepositoryUrl(repositoryUrl)
+    parseRepositoryUrl(repositoryUrl)
     return repositoryUrl
   }
 
@@ -122,7 +125,7 @@ export async function resolveAutoDetectedMigrationSource(
   })
   if (!hasAcceptedAlignment) {
     throw new Error(
-      'Migration cancelled. Re-run with the source GitHub repository for the most accurate result.',
+      'Migration cancelled. Re-run with the source repository (GitHub or GitLab) for the most accurate result.',
     )
   }
 
@@ -138,19 +141,17 @@ export interface ScaffoldAnswers {
   doInstall: boolean
   i18nLocales?: Array<{ code: string; label: string }>
   /** Repos to pre-register for Thally Track (opt-in during setup); undefined = off. */
-  trackRepos?: Array<{ owner: string; repo: string }>
+  trackRepos?: Array<TrackedRepoConfig>
 }
 
-/** Accepts `owner/repo`, an https GitHub URL (with or without `.git` / extra path), or an ssh remote. */
-function parseRepoSpec(spec: string): { owner: string; repo: string } | null {
-  const trimmed = spec.trim()
-  const url = trimmed.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+?)(?:\.git)?(?:[/#?].*)?$/i)
-  if (url) return { owner: url[1], repo: url[2] }
-  const ssh = trimmed.match(/^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i)
-  if (ssh) return { owner: ssh[1], repo: ssh[2] }
-  const plain = trimmed.match(/^([A-Za-z0-9-_.]+)\/([A-Za-z0-9-_.]+)$/)
-  if (plain) return { owner: plain[1], repo: plain[2] }
-  return null
+/**
+ * Accepts `owner/repo` (GitHub), `group/subgroup/project` (GitLab), and
+ * GitHub or GitLab https URLs and ssh remotes, including self-hosted hosts
+ * declared in `THALLY_GIT_HOSTS`. Returns the minimal docs.json entry.
+ */
+export function parseRepoSpec(spec: string): TrackedRepoConfig | null {
+  const ref = parseRepositoryReference(spec, { hosts: migrationGitHosts() })
+  return ref ? trackedRepoEntry(ref) : null
 }
 
 /**
@@ -198,32 +199,32 @@ export async function gatherAnswers(
   const description = `Documentation for ${projectName}.`
   const brandPreset = 'primary'
 
-  // 5. GitHub repo (optional)
+  // 5. Source repository (optional)
   const repoUrl = useDefaults
     ? ''
     : await input({
-        message: '  GitHub repo URL (optional):',
+        message: '  Repository URL, GitHub or GitLab (optional):',
         default: '',
       })
 
   // 6. Thally Track (opt-in) — keep docs in sync with code automatically.
-  let trackRepos: Array<{ owner: string; repo: string }> | undefined
+  let trackRepos: Array<TrackedRepoConfig> | undefined
   if (!useDefaults) {
     const enableTrack = await input({
       message:
-        '  Keep your docs in sync automatically with Thally Track? When a PR merges in a repo you list,\n  the docs agent drafts the doc updates as a PR for you to review. (y/N):',
+        '  Keep your docs in sync automatically with Thally Track? When a PR or MR merges in a repo you list,\n  the docs agent drafts the doc updates for you to review. (y/N):',
       default: 'N',
     })
     if (enableTrack.trim().toLowerCase() === 'y') {
       const reposInput = await input({
         message:
-          '  Which repo(s) should Thally watch? (comma-separated owner/repo or GitHub URLs, e.g. acme/api,acme/web):',
+          '  Which repo(s) should Thally watch? (comma-separated owner/repo, GitHub or GitLab URLs, e.g. acme/api,https://gitlab.com/acme/web):',
         default: '',
       })
       const parsed = reposInput
         .split(',')
         .map(parseRepoSpec)
-        .filter((r): r is { owner: string; repo: string } => r !== null)
+        .filter((r): r is TrackedRepoConfig => r !== null)
       if (parsed.length > 0) trackRepos = parsed
       else console.log('  ⚠ No valid owner/repo entries — skipping Track (add it later with `thally track add`).')
     }

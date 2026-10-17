@@ -49,7 +49,7 @@ import { Tree, Folder, File } from '@/components/mdx/file-tree'
 import { ResponseField, ParamField, Expandable } from '@/components/mdx/api-fields'
 import { Mermaid } from '@/components/mdx/mermaid'
 import { Embed, LegacyView, View } from '@/components/mdx/view'
-import { GitHub } from '@/components/mdx/github-card'
+import { GitHub, GitLab } from '@/components/mdx/github-card'
 import { Agent, Human, Visibility } from '@/components/mdx/visibility'
 import { BannerPreview } from '@/components/layout/site-banner'
 import { Steps, Step } from '@/components/mdx/steps'
@@ -182,6 +182,9 @@ export const builtinMdxComponents: MDXComponents = {
   GitHub,
   Github: GitHub,
   'GitHub.Repo': (props) => <GitHub.Repo {...props} />,
+  GitLab,
+  Gitlab: GitLab,
+  'GitLab.Repo': (props) => <GitLab.Repo {...props} />,
   Visibility: (props) => <Visibility {...props} />,
   Human: (props) => <Human {...props} />,
   Agent: (props) => <Agent {...props} />,

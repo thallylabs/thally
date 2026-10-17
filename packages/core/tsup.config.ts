@@ -11,6 +11,8 @@ import { defineConfig } from 'tsup'
  *  - `navigation` — pure route expectations shared by runtime and tools.
  *  - `slugify` — dependency-free IDs for server routes that do not need the barrel.
  *  - `theme`   — pure brand-token helpers, client-safe (no Node/MDX/search deps).
+ *  - `repository` — GitHub/GitLab host parsing and URL builders, client-safe.
+ *  - `tracking` — the shared Thally Track `tracking.repos` shape, client-safe.
  *
  * Entries share code via tsup's ESM chunk splitting, so `content` and the
  * barrel resolve to the same modules rather than duplicated copies.
@@ -29,6 +31,8 @@ export default defineConfig({
     search: 'src/search/index.ts',
     slugify: 'src/slugify.ts',
     theme: 'src/theme/index.ts',
+    repository: 'src/repository/index.ts',
+    tracking: 'src/tracking.ts',
   },
   format: ['esm'],
   platform: 'node',

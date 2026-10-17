@@ -8,6 +8,15 @@
  * source-controlled branch names can never become shell commands.
  */
 
+import {
+  findGitHost,
+  parseGitHostsEnv,
+  parseRepositoryReference,
+  repositoryCloneUrl,
+  resolveGitHosts,
+  type GitProvider,
+  type GitProviderHost,
+} from '@thallylabs/core/repository'
 import { compileSync } from '@mdx-js/mdx'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
@@ -205,13 +214,25 @@ const OPENAPI_FILENAMES = new Set([
   'swagger.json', 'swagger.yaml', 'swagger.yml',
 ])
 
-export interface GitHubRepositorySource {
+/** A repository to clone for a migration, on GitHub, GitLab, or a declared self-hosted host. */
+export interface RepositorySource {
+  /** GitHub owner or full GitLab namespace (`group/subgroup`). */
   owner: string
   repo: string
+  /** Branch to clone; `HEAD` means the repository default branch. */
   branch: string
+  /** Subdirectory named by a tree URL, or '' for the repository root. */
   docsDir: string
   cloneUrl: string
+  /** Absent on sources built by older callers; treated as GitHub. */
+  provider?: GitProvider
+  host?: string
+  /** `${owner}/${repo}`. */
+  fullPath?: string
 }
+
+/** @deprecated Use {@link RepositorySource}; kept for existing importers. */
+export type GitHubRepositorySource = RepositorySource
 
 export interface RepositoryMigrationOptions {
   repositoryDir: string
@@ -653,40 +674,71 @@ function additionalDocusaurusPluginRoots(
   return plugins
 }
 
-/** Parse and validate a public GitHub repository URL. */
-export function parseGitHubRepositoryUrl(rawUrl: string): GitHubRepositorySource {
+/**
+ * Hosts a repository migration may clone from: github.com, gitlab.com, and
+ * self-hosted instances declared in `THALLY_GIT_HOSTS` (legacy `DOX_GIT_HOSTS`).
+ */
+export function migrationGitHosts(env: NodeJS.ProcessEnv = process.env): ReadonlyArray<GitProviderHost> {
+  return resolveGitHosts(parseGitHostsEnv(env.THALLY_GIT_HOSTS || env.DOX_GIT_HOSTS))
+}
+
+/** True when a URL names a repository on a supported host (and should be cloned rather than crawled). */
+export function isRepositoryUrl(rawUrl: string, hosts: ReadonlyArray<GitProviderHost> = migrationGitHosts()): boolean {
+  try {
+    const url = new URL(rawUrl)
+    return (url.protocol === 'https:' || url.protocol === 'http:') && findGitHost(url.hostname, hosts) !== null
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Parse and validate a public repository URL on GitHub, GitLab, or a declared
+ * self-hosted host. Tree URLs (`/tree/<branch>/<dir>`, GitLab `/-/tree/...`)
+ * select a branch and docs directory; GitLab branch names containing `/` are
+ * ambiguous in a URL, so the first segment wins and `--branch` overrides it.
+ */
+export function parseRepositoryUrl(
+  rawUrl: string,
+  options: { hosts?: ReadonlyArray<GitProviderHost> } = {},
+): RepositorySource {
   let url: URL
   try {
     url = new URL(rawUrl)
   } catch {
-    throw new Error(`Invalid GitHub URL: ${rawUrl}`)
+    throw new Error(`Invalid repository URL: ${rawUrl}`)
   }
-  if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com') {
-    throw new Error('Repository migrations require an https://github.com URL.')
+  const hosts = options.hosts ?? migrationGitHosts()
+  if (url.protocol !== 'https:' || !findGitHost(url.hostname, hosts)) {
+    throw new Error(
+      'Repository migrations require an https URL on github.com, gitlab.com, or a host declared in THALLY_GIT_HOSTS.',
+    )
   }
   if (url.username || url.password || url.port) {
-    throw new Error('GitHub repository URLs cannot include credentials or custom ports.')
+    throw new Error('Repository URLs cannot include credentials or custom ports.')
   }
-  const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
-  const [owner, rawRepo] = segments
-  const repo = rawRepo?.replace(/\.git$/i, '')
-  const safeName = /^[A-Za-z0-9_.-]+$/
-  if (!owner || !repo || !safeName.test(owner) || !safeName.test(repo)) {
-    throw new Error('GitHub URL must include a valid owner and repository name.')
-  }
-  let branch = 'HEAD'
-  let docsDir = ''
-  if (segments[2] === 'tree' && segments[3]) {
-    branch = segments[3]
-    docsDir = segments.slice(4).join('/')
+  const ref = parseRepositoryReference(url.toString(), { hosts })
+  if (!ref) {
+    throw new Error('Repository URL must include a valid owner (or group) and repository name.')
   }
   return {
-    owner,
-    repo,
-    branch,
-    docsDir,
-    cloneUrl: `https://github.com/${owner}/${repo}.git`,
+    owner: ref.owner,
+    repo: ref.repo,
+    branch: ref.ref ?? 'HEAD',
+    docsDir: ref.ref ? ref.path ?? '' : '',
+    cloneUrl: repositoryCloneUrl(ref),
+    provider: ref.provider,
+    host: ref.host,
+    fullPath: ref.fullPath,
   }
+}
+
+/**
+ * Parse and validate a public GitHub repository URL.
+ * @deprecated Use {@link parseRepositoryUrl}, which also accepts GitLab.
+ */
+export function parseGitHubRepositoryUrl(rawUrl: string): RepositorySource {
+  return parseRepositoryUrl(rawUrl)
 }
 
 const CLONE_RETRY_ATTEMPTS = 3
@@ -838,7 +890,7 @@ const LFS_FILTER_OVERRIDE_ENV: Record<string, string> = {
   GIT_CONFIG_VALUE_3: 'false',
 }
 
-function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<void> {
+function cloneOnce(source: RepositorySource, targetDir: string): Promise<void> {
   // Submodules are deliberately not recursed here: `--recurse-submodules`
   // fails the *entire* clone if any one submodule can't be fetched (a
   // private or since-deleted submodule shouldn't take the whole migration
@@ -849,7 +901,7 @@ function cloneOnce(source: GitHubRepositorySource, targetDir: string): Promise<v
   if (source.branch !== 'HEAD') args.push('--branch', source.branch)
   args.push('--', source.cloneUrl, targetDir)
   return runGit(args, {
-    label: `Failed to clone ${source.owner}/${source.repo}`,
+    label: `Failed to clone ${source.fullPath ?? `${source.owner}/${source.repo}`}`,
     env: LFS_FILTER_OVERRIDE_ENV,
   })
 }
@@ -940,8 +992,8 @@ async function initSubmodules(targetDir: string, warnings: Array<MigrationWarnin
  * submodule-fetch-failure warning (this function otherwise returns exactly
  * as before, so existing callers are unaffected).
  */
-export async function cloneGitHubRepository(
-  source: GitHubRepositorySource,
+export async function cloneRepository(
+  source: RepositorySource,
   targetDir: string,
   warnings?: Array<MigrationWarning>,
   /** Untrusted referenced repositories: never follow their `.gitmodules` to further remotes. */
@@ -959,6 +1011,19 @@ export async function cloneGitHubRepository(
       await delay(CLONE_RETRY_DELAY_MS * attempt)
     }
   }
+}
+
+/**
+ * Clone a repository for migration.
+ * @deprecated Use {@link cloneRepository}; kept for existing importers.
+ */
+export function cloneGitHubRepository(
+  source: RepositorySource,
+  targetDir: string,
+  warnings?: Array<MigrationWarning>,
+  options: { skipSubmodules?: boolean } = {},
+): Promise<void> {
+  return cloneRepository(source, targetDir, warnings, options)
 }
 
 /** Detect a supported repository docs platform from unambiguous config files. */
@@ -3418,8 +3483,13 @@ function componentSourceIdentity(sourceUrl: string, repositoryDir: string, siteR
   // retain independent namespaces even if their snippet filenames coincide.
   // Credentials, queries and fragments are not source identity and never feed
   // generated names; only the canonical origin/path and docs root participate.
-  const repository = url.hostname.toLowerCase() === 'github.com'
-    ? `https://github.com/${url.pathname.split('/').filter(Boolean).slice(0, 2).join('/').replace(/\.git$/i, '').toLowerCase()}`
+  // GitHub keeps its historical owner/repo-only identity so existing
+  // namespaces never change; GitLab tree URLs collapse to the project path.
+  const known = parseRepositoryReference(sourceUrl, { hosts: migrationGitHosts() })
+  const repository = known
+    ? known.provider === 'github' && known.host === 'github.com'
+      ? `https://github.com/${known.fullPath.toLowerCase()}`
+      : `${known.origin}/${known.fullPath.toLowerCase()}`
     : `${url.origin}${trimTrailingSlashes(url.pathname)}`
   const docsRoot = relative(repositoryDir, siteRoot).replace(/\\/g, '/')
   return JSON.stringify(namespace ? [repository, docsRoot, namespace] : [repository, docsRoot])

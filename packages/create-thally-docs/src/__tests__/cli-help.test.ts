@@ -83,7 +83,7 @@ describe('create-thally-docs help', () => {
   })
 
   it.each([
-    ['migrate', '<github-or-docs-url>', '--max-pages <count>'],
+    ['migrate', '<repo-or-docs-url>', '--max-pages <count>'],
     ['check', '[project-dir]', '--external'],
     ['translate', '--locale <code>', '--pages <ids>'],
   ])('prints scoped %s help without prompting', (command, usage, option) => {

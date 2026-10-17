@@ -1,7 +1,8 @@
 /**
  * Mintlify `sourceRef` navigation nodes mount the docs of another repository
  * (`{"sourceRef": "owner/repo"}`). The mount path is not derivable from any
- * docs.json, so the caller supplies it with `--source-ref owner/repo=<path>`.
+ * docs.json, so the caller supplies it with `--source-ref owner/repo=<path>`
+ * (or `--source-ref https://gitlab.com/group/project=<path>`).
  * The referenced repository is untrusted remote content: it is validated,
  * size-capped, stripped of symlinks and dot-directories, then run through the
  * same repository pipeline as the main site and prefixed with its mount path.
@@ -10,15 +11,22 @@
 import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync, unlinkSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
+import {
+  parseRepositoryReference,
+  repositoryApiProjectUrl,
+  repositoryWebUrl,
+  type RepositoryRef,
+} from '@thallylabs/core/repository'
+
 import { replaceOutsideCodeAndComments } from './mdx.js'
-import { migrateRepository } from './repository.js'
+import { migrateRepository, migrationGitHosts } from './repository.js'
 import type { MigrationAsset, MigrationDocsConfig, MigrationFetcher, MigrationNavigationGroup, MigrationPage, MigrationWarning, RenderedMigrationFile } from './types.js'
 import { defaultMigrationFetcher } from './url.js'
 
 /** Per referenced repository: files and bytes under its docs root. Constants on purpose, not configurable. */
 export const SOURCE_REF_MAX_FILES = 5_000
 export const SOURCE_REF_MAX_BYTES = 50_000_000
-/** GitHub reports repository size in KB; a larger repository is refused before it is cloned. */
+/** Repository size cap in KB (GitHub reports KB; GitLab bytes are converted). A larger repository is refused before it is cloned. */
 export const SOURCE_REF_MAX_REPOSITORY_KB = 200_000
 const DOCS_JSON_MAX_BYTES = 1_000_000
 const MAX_FORWARDED_WARNINGS = 50
@@ -38,8 +46,13 @@ const RESERVED_MOUNT_SEGMENTS: ReadonlySet<string> = new Set([
 ])
 
 export interface SourceRefMapping {
-  /** `owner/repo`, exactly as written in the source navigation. */
+  /**
+   * `owner/repo`, exactly as written in the source navigation. For a mapping
+   * given as a repository URL this is the repository's full path.
+   */
   repo: string
+  /** Set when the mapping was given as a URL (GitLab or a declared self-hosted host). */
+  repository?: RepositoryRef
   /** Relative slug path the referenced docs are mounted at, e.g. `client-sdks/typescript`. */
   mountPath: string
 }
@@ -59,11 +72,20 @@ export interface SourceRefImport extends SourceRefMapping {
 export function parseSourceRefFlags(values: ReadonlyArray<string>): Array<SourceRefMapping> {
   const mappings: Array<SourceRefMapping> = []
   for (const value of values) {
-    const separator = value.indexOf('=')
-    const repo = separator < 0 ? value : value.slice(0, separator)
+    // Mount paths never contain "=", so the last one separates a URL repository from its mount.
+    const separator = value.lastIndexOf('=')
+    let repo = separator < 0 ? value : value.slice(0, separator)
     const mountPath = separator < 0 ? '' : value.slice(separator + 1)
-    if (!REPO_PATTERN.test(repo) || repo.includes('..') || repo.split('/')[1] === '.' || repo.endsWith('.git')) {
-      throw new Error(`--source-ref "${value}": the repository must look like owner/repo.`)
+    let repository: RepositoryRef | undefined
+    if (/^https:\/\//i.test(repo)) {
+      const ref = parseRepositoryReference(repo, { hosts: migrationGitHosts() })
+      if (!ref || ref.number !== undefined || ref.ref !== undefined || new URL(repo).search || new URL(repo).hash) {
+        throw new Error(`--source-ref "${value}": the repository URL must name a repository on github.com, gitlab.com, or a host declared in THALLY_GIT_HOSTS.`)
+      }
+      repository = ref
+      repo = ref.fullPath
+    } else if (!REPO_PATTERN.test(repo) || repo.includes('..') || repo.split('/')[1] === '.' || repo.endsWith('.git')) {
+      throw new Error(`--source-ref "${value}": the repository must look like owner/repo or be a repository URL.`)
     }
     if (!MOUNT_PATTERN.test(mountPath) || mountPath.split('/').some((segment) => segment === '.' || segment === '..' || segment.startsWith('.'))) {
       throw new Error(`--source-ref "${value}": the mount path must be a relative lowercase slug path such as client-sdks/typescript (no leading slash, no "..").`)
@@ -78,19 +100,32 @@ export function parseSourceRefFlags(values: ReadonlyArray<string>): Array<Source
         throw new Error(`--source-ref: mount paths "${earlier.mountPath}" and "${mountPath}" overlap.`)
       }
     }
-    mappings.push({ repo, mountPath })
+    mappings.push(repository ? { repo, mountPath, repository } : { repo, mountPath })
   }
   return mappings
 }
 
 /**
  * Why a referenced repository is too large to clone, or null when it is small
- * enough or its size is unknown (GitHub API unreachable, rate-limited or
- * private): an unknown size proceeds, and the post-clone caps still apply.
+ * enough or its size is unknown (API unreachable, rate-limited or private):
+ * an unknown size proceeds, and the post-clone caps still apply. A bare
+ * `owner/repo` is a github.com repository.
  */
-export async function sourceRefOversizeReason(repo: string, fetcher: MigrationFetcher = defaultMigrationFetcher): Promise<string | null> {
+export async function sourceRefOversizeReason(
+  repo: string | RepositoryRef,
+  fetcher: MigrationFetcher = defaultMigrationFetcher,
+): Promise<string | null> {
   try {
-    const response = await fetcher(new URL(`https://api.github.com/repos/${repo}`), { accept: 'application/vnd.github+json' })
+    if (typeof repo !== 'string' && repo.provider === 'gitlab') {
+      const response = await fetcher(new URL(`${repositoryApiProjectUrl(repo)}?statistics=true`), { accept: 'application/json' })
+      const bytes: unknown = (JSON.parse(response.body) as { statistics?: { repository_size?: unknown } }).statistics?.repository_size
+      if (typeof bytes === 'number' && bytes / 1024 > SOURCE_REF_MAX_REPOSITORY_KB) {
+        return `GitLab reports it as ${Math.round(bytes / 1_000_000)} MB, over the ${SOURCE_REF_MAX_REPOSITORY_KB / 1000} MB limit for a referenced repository.`
+      }
+      return null
+    }
+    const url = typeof repo === 'string' ? `https://api.github.com/repos/${repo}` : repositoryApiProjectUrl(repo)
+    const response = await fetcher(new URL(url), { accept: 'application/vnd.github+json' })
     const size: unknown = (JSON.parse(response.body) as { size?: unknown }).size
     if (typeof size === 'number' && size > SOURCE_REF_MAX_REPOSITORY_KB) {
       return `GitHub reports it as ${Math.round(size / 1000)} MB, over the ${SOURCE_REF_MAX_REPOSITORY_KB / 1000} MB limit for a referenced repository.`
@@ -255,7 +290,7 @@ export function importSourceRef(mapping: SourceRefMapping, repositoryDir: string
 
   const bundle = migrateRepository({
     repositoryDir: realRoot,
-    sourceUrl: `https://github.com/${mapping.repo}`,
+    sourceUrl: mapping.repository ? repositoryWebUrl(mapping.repository) : `https://github.com/${mapping.repo}`,
     docsDir: '',
     platform: 'mintlify',
     componentNamespace: mapping.mountPath,

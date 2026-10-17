@@ -9,8 +9,18 @@ import {
   hardReset,
   commitAll,
   push,
+  pushWithToken,
+  originRemoteUrl,
   hasChanges,
 } from "./git.js";
+import {
+  createTrackClient,
+  envGitHosts,
+  parseRepositoryReference,
+  resolveGitHosts,
+  resolveGitlabToken,
+  type RepositoryRef,
+} from "@thallylabs/mcp/track";
 import { buildToolBridge } from "./tools.js";
 import { runDocsCheck } from "./validate.js";
 import {
@@ -169,6 +179,65 @@ export function buildPullRequestCreateArgs(
     "--base",
     baseBranch,
   ];
+}
+
+/** Opens the documentation PR/MR for a pushed-or-pushable agent branch. */
+export interface PullRequestOpener {
+  readonly provider: "github" | "gitlab";
+  /** Push `branch` and open a request into `baseBranch`; returns its URL. */
+  open(input: { title: string; body: string; branch: string; baseBranch: string }): Promise<string>;
+}
+
+/**
+ * Choose how to publish the agent branch. An explicit provider wins;
+ * otherwise the `origin` remote decides (GitLab hosts include those in
+ * `THALLY_GIT_HOSTS` and the current GitLab CI server). GitHub is the default
+ * and keeps the long-standing `git push` + `gh pr create` path.
+ */
+export function resolvePullRequestOpener(
+  projectDir: string,
+  options: { provider?: "github" | "gitlab"; fetchImpl?: typeof fetch } = {},
+): PullRequestOpener {
+  const remote = originRemoteUrl(projectDir);
+  const hosts = resolveGitHosts(envGitHosts());
+  const detected: RepositoryRef | null = remote
+    ? parseRepositoryReference(remote, { hosts, ...(options.provider ? { fallbackProvider: options.provider } : {}) })
+    : null;
+  const provider = options.provider ?? detected?.provider ?? "github";
+
+  if (provider === "gitlab") {
+    return {
+      provider,
+      async open({ title, body, branch, baseBranch }) {
+        if (!remote || !detected) {
+          throw new Error("Cannot open a merge request: the origin remote is not a recognizable GitLab project.");
+        }
+        const token = resolveGitlabToken();
+        if (!token || token.kind !== "bearer") {
+          throw new Error("Set THALLY_GITLAB_TOKEN (api + write_repository scopes) to push and open the merge request.");
+        }
+        pushWithToken(projectDir, branch, remote, { username: "oauth2", token: token.value });
+        const created = await createTrackClient(detected, { fetchImpl: options.fetchImpl }).createPullRequest({
+          sourceBranch: branch,
+          targetBranch: baseBranch,
+          title,
+          body,
+        });
+        return created.url;
+      },
+    };
+  }
+
+  return {
+    provider,
+    async open({ title, body, branch, baseBranch }) {
+      push(projectDir, branch);
+      return execFileSync("gh", buildPullRequestCreateArgs(title, body, branch, baseBranch), {
+        cwd: projectDir,
+        encoding: "utf8",
+      }).trim();
+    },
+  };
 }
 
 /** Build a single-line conventional title that stays within GitHub's readable subject length. */
@@ -366,20 +435,15 @@ export async function runAgent(
       // parseOrigin) — keep it, and keep "Thally docs agent" (the queue's filter).
       const body = `${summary}\n\n---\n${task.requester ? `Requested by ${task.requester}. ` : ""}Drafted by the Thally docs agent (origin: ${task.source}) — please review.`;
       commitAll(projectDir, title);
-      push(projectDir, branch);
+      const opener = resolvePullRequestOpener(projectDir, { provider: options.provider });
       let prUrl: string;
       try {
-        prUrl = execFileSync(
-          "gh",
-          buildPullRequestCreateArgs(title, body, branch, original),
-          {
-            cwd: projectDir,
-            encoding: "utf8",
-          },
-        ).trim();
+        prUrl = await opener.open({ title, body, branch, baseBranch: original });
       } catch (err) {
+        const request = opener.provider === "gitlab" ? "merge request" : "PR";
+        const hint = opener.provider === "gitlab" ? "is THALLY_GITLAB_TOKEN set with api scope?" : "is gh authenticated?";
         throw new Error(
-          `Changes committed and pushed to "${branch}", but opening the PR failed (is gh authenticated?): ${err instanceof Error ? err.message : String(err)}`,
+          `Changes committed to "${branch}", but pushing or opening the ${request} failed (${hint}): ${err instanceof Error ? err.message : String(err)}`,
         );
       }
       return {

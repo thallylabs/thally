@@ -5,6 +5,7 @@ import { Feedback } from '@/components/docs/feedback'
 import { getFeedbackConfig } from '@/data/docs'
 import { getRequestCloudSiteConfig, getRequestOrigin } from '@/lib/cloud-link/request'
 import { resolveSiteConfig } from '@/lib/site-config'
+import { getGitHosts } from '@/lib/git-hosts'
 
 interface ApiLayoutProps {
   children: React.ReactNode
@@ -30,6 +31,7 @@ export async function ApiLayout({ children }: ApiLayoutProps) {
           <Feedback
             endpoint={feedbackConfig.endpoint ?? '/api/feedback'}
             repoUrl={effectiveSite.repoUrl}
+            gitHosts={getGitHosts()}
             thumbsRating={hasThumbsRating}
             pageFeedback={hasThumbsRating && Boolean(settings?.pageFeedback)}
             issueReporting={Boolean(settings?.issueReporting)}

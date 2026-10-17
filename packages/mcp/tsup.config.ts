@@ -23,12 +23,14 @@ export default defineConfig([
     dts: true,
   },
   // Track distiller — shared by the agent, the CLI, and the Next.js webhook
-  // receiver (`@thallylabs/mcp/track`). Dependency-free, typed.
+  // receiver (`@thallylabs/mcp/track`). Typed and dependency-free at runtime:
+  // the pure repository/tracking helpers from @thallylabs/core are inlined.
   {
     entry: { track: 'src/lib/track.ts' },
     format: ['esm'],
     platform: 'node',
     target: 'node18',
+    noExternal: [/^@thallylabs\/core\/(repository|tracking)$/],
     dts: true,
   },
   // Project creation is a library surface as well as an MCP tool. Keeping a

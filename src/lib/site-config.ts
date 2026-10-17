@@ -23,6 +23,9 @@
  *    them. Both are intentionally left as-is.
  * These are deliberate exclusions, not oversights.
  */
+import { repositoryIssuesNewUrl } from '@thallylabs/core/repository'
+import { getGitHosts } from '@/lib/git-hosts'
+import { resolveRepository } from '@/lib/repository-links'
 import { siteConfig, type SiteConfig } from '@/data/site'
 import { getAdminSettings } from '@/lib/admin/settings'
 import { getCloudSiteConfig, getManagedSiteConfigSnapshot } from '@/lib/cloud-link/client'
@@ -37,10 +40,14 @@ export interface SiteIdentity {
 
 function managedRepositoryLinks(repoUrl: string): SiteConfig['links'] {
   const normalized = repoUrl.replace(/\/+$/, '')
+  // Only gitlab.com and declared GitLab hosts change shape; every other URL
+  // keeps the historical GitHub-style links appended to the configured URL.
+  const repository = resolveRepository(normalized, getGitHosts())
+  const isGitlab = repository?.provider === 'gitlab'
   return [
     { label: 'Get started', href: '/quickstart' },
-    { label: 'Support', href: `${normalized}/issues/new` },
-    { label: 'GitHub', href: normalized },
+    { label: 'Support', href: isGitlab && repository ? repositoryIssuesNewUrl(repository) : `${normalized}/issues/new` },
+    { label: isGitlab ? 'GitLab' : 'GitHub', href: normalized },
     { label: 'Changelog', href: '/changelog' },
   ]
 }

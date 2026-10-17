@@ -2,11 +2,15 @@
 
 export {
   cloneGitHubRepository,
+  cloneRepository,
   detectRepositoryDocsDir,
   detectRepositoryPlatform,
   gitmodulePaths,
+  isRepositoryUrl,
   migrateRepository,
+  migrationGitHosts,
   parseGitHubRepositoryUrl,
+  parseRepositoryUrl,
 } from './repository.js'
 export { addMintlifyDirectoryRedirects, buildNavigationFromPages, projectMintlifyNavigation, pruneMissingNavigationPages, readMintlifyConfig } from './navigation.js'
 export { importSourceRef, parseSourceRefFlags, SOURCE_REF_MAX_BYTES, SOURCE_REF_MAX_FILES, SOURCE_REF_MAX_REPOSITORY_KB, sourceRefOversizeReason } from './source-refs.js'
@@ -28,6 +32,7 @@ export { hydrateRemoteApiSpecs } from './remote-api.js'
 export type {
   GitHubRepositorySource,
   RepositoryMigrationOptions,
+  RepositorySource,
 } from './repository.js'
 export type { UrlMigrationOptions } from './url.js'
 export type {

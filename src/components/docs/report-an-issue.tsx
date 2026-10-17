@@ -1,24 +1,26 @@
 /** Repository issue link for reader-reported documentation problems. */
 
 import { PanelTop } from 'lucide-react'
+import { repositoryNewIssueUrl, type GitHostConfig } from '@thallylabs/core/repository'
+import { resolveRepository } from '@/lib/repository-links'
 import { cn } from '@/lib/utils'
 
 interface ReportAnIssueProps {
   pagePath: string
   repoUrl: string
+  /** Declared self-hosted hosts, so a self-hosted GitLab gets GitLab issue URLs. */
+  gitHosts?: ReadonlyArray<GitHostConfig>
   className?: string
 }
 
 /** Link readers to a pre-titled repository issue for the current docs page. */
-export function ReportAnIssue({ pagePath, repoUrl, className }: ReportAnIssueProps) {
-  if (!repoUrl || repoUrl.includes('your-org')) return null
-
-  const normalizedRepo = repoUrl.replace(/\/$/, '')
-  const issueTitle = encodeURIComponent(`Docs feedback: ${pagePath}`)
+export function ReportAnIssue({ pagePath, repoUrl, gitHosts, className }: ReportAnIssueProps) {
+  const repository = resolveRepository(repoUrl, gitHosts)
+  if (!repository) return null
 
   return (
     <a
-      href={`${normalizedRepo}/issues/new?title=${issueTitle}`}
+      href={repositoryNewIssueUrl(repository, { title: `Docs feedback: ${pagePath}` })}
       target="_blank"
       rel="noreferrer"
       className={cn(

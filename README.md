@@ -53,7 +53,8 @@ no-change result is valid. Nothing publishes without human approval.
 - **Native WebMCP** — supported browsers expose all eight deployed-site tools plus `get_current_page` and `navigate_to_page` through `document.modelContext`; reader sessions and MCP rate limits apply automatically
 - **HTML tool discovery**: the server-rendered `<head>` includes an inert `<script type="application/webmcp+json">` with all ten tools' names, descriptions, and input schemas from the same registry. This versioned Thally discovery extension is not a standardized WebMCP registration mechanism. Native execution still requires JavaScript and a compatible browser. The metadata identifies the eight HTTP-callable tools at `/api/mcp` and links to `/.well-known/mcp.json`; the two browser-session tools cannot be called over HTTP.
 - **Remote MCP server** — every deployed site is an MCP endpoint at `/api/mcp` with read-only tools (`search_docs`, `search_sections`, `read_page`, `list_pages`, `list_api_operations`, `get_api_operation`, `list_changes`, `agent_readiness`) and pages as resources; attach with `claude mcp add --transport http <site>/api/mcp`
-- **Docs agent** — `thally agent "…"` (or `@thally` on a product PR) drafts docs as a **reviewed pull request**, self-checked with `thally check`; it never merges
+- **Docs agent** — `thally agent "…"` (or `@thally` on a product PR) drafts docs as a **reviewed pull request** on GitHub or **merge request** on GitLab, self-checked with `thally check`; it never merges
+- **GitHub and GitLab** — edit and issue links, repository migration, Thally Track, and the docs agent work with github.com, gitlab.com, and self-hosted GitLab (declare the host in docs.json `repository.hosts` or `THALLY_GIT_HOSTS`)
 - **Provenance & drift** — machine-legible `lastVerified` dates + `thally check --drift` to catch pages stale against the code they document
 - **Team accounts & roles** — Google/Microsoft OIDC sign-in + Owner/Editor/Viewer from a git-committed roster in `docs.json` (no database, no per-seat)
 - **Unified `thally` CLI + `@thallylabs/mcp`** — one toolchain to scaffold, develop, deploy, check, and drive your docs from any MCP client
@@ -219,6 +220,9 @@ cp .env.example .env.local
 | `THALLY_TRACK_WEBHOOK_SECRET` | Optional — enables the manual Thally Track webhook (`/api/track/webhook`); merged/preview PRs in tracked repos become docs-agent PRs. Not needed when you Connect a GitHub App |
 | `THALLY_GITHUB_TOKEN` | Optional — fine-grained PAT that reads tracked product-repo PRs, relays Track dispatches, and authenticates the admin Docs-tasks queue |
 | `THALLY_GITHUB_APP_ID` / `THALLY_GITHUB_APP_INSTALLATION_ID` / `THALLY_GITHUB_APP_PRIVATE_KEY` | Optional — wire a GitHub App by hand instead of the admin "Connect GitHub" button (which stores these encrypted). Grants org-wide access to selected repos |
+| `THALLY_GITLAB_TOKEN` | Optional — GitLab project or group access token for Thally Track and the docs agent: `read_api` reads tracked merge requests, `api` opens documentation merge requests |
+| `THALLY_GITLAB_TRIGGER_TOKEN` | Optional — the docs project's pipeline trigger token; Track and `sync_from_repo` use it to start the docs agent job on GitLab |
+| `THALLY_GIT_HOSTS` | Optional — self-hosted repository hosts as `host=provider` pairs (for example `gitlab.example.com=gitlab`). github.com and gitlab.com are recognised automatically. docs.json `repository.hosts` is equivalent |
 | `THALLY_DISABLE_BUILD_CACHE` | Optional — set to `1` to turn off Turbopack's persistent build cache (kept under `.next/cache` to speed up warm builds) if a production build misbehaves with it |
 
 Legacy `DOX_*` names are still read as a fallback for every `THALLY_*` variable, so existing deployments keep working without renaming anything.

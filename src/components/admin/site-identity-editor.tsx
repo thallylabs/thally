@@ -91,7 +91,7 @@ export function SiteIdentityEditor({
       <div className="ds-setting-row">
         <div className="min-w-0">
           <div className="ds-setting-row-label">Repository</div>
-          <div className="ds-setting-row-desc">GitHub repo for the docs agent + tasks queue.</div>
+          <div className="ds-setting-row-desc">GitHub or GitLab repository for the docs agent + tasks queue.</div>
         </div>
         <input
           className="ds-input ds-focusable"

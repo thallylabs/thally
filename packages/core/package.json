@@ -1,6 +1,6 @@
 {
   "name": "@thallylabs/core",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "Framework-agnostic content engine for publishing Thally docs to people, search engines, and AI tools.",
   "type": "module",
   "sideEffects": false,
@@ -55,6 +55,16 @@
       "types": "./dist/theme.d.ts",
       "import": "./dist/theme.js",
       "default": "./dist/theme.js"
+    },
+    "./repository": {
+      "types": "./dist/repository.d.ts",
+      "import": "./dist/repository.js",
+      "default": "./dist/repository.js"
+    },
+    "./tracking": {
+      "types": "./dist/tracking.d.ts",
+      "import": "./dist/tracking.js",
+      "default": "./dist/tracking.js"
     },
     "./package.json": "./package.json"
   },

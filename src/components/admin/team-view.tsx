@@ -24,17 +24,23 @@ export function TeamView({
   viewerRole,
   viewerEmail,
   repoUrl,
+  docsJsonEditUrl,
+  repositoryLabel = 'GitHub',
 }: {
   members: Array<Member>
   domains: Array<Domain>
   viewerRole: Role
   viewerEmail: string
   repoUrl: string
+  /** Server-built editor URL for docs.json (GitHub or GitLab); preferred over `repoUrl`. */
+  docsJsonEditUrl?: string
+  /** Repository host name shown on the edit button. */
+  repositoryLabel?: 'GitHub' | 'GitLab'
 }) {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Role>('viewer')
   const canManage = viewerRole === 'owner'
-  const editUrl = repoUrl ? `${repoUrl.replace(/\/$/, '')}/edit/main/docs.json` : ''
+  const editUrl = docsJsonEditUrl ?? (repoUrl ? `${repoUrl.replace(/\/$/, '')}/edit/main/docs.json` : '')
   const snippet = `{ "email": "${email || 'name@company.com'}", "role": "${role}" }`
 
   return (
@@ -116,7 +122,7 @@ export function TeamView({
             </pre>
             {editUrl ? (
               <a href={editUrl} target="_blank" rel="noreferrer" className="ds-btn ds-btn--primary ds-btn--sm ds-focusable mt-3">
-                Edit docs.json on GitHub <ArrowUpRight className="h-3.5 w-3.5" />
+                Edit docs.json on {repositoryLabel} <ArrowUpRight className="h-3.5 w-3.5" />
               </a>
             ) : null}
           </>

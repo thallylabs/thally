@@ -6,7 +6,7 @@ export const createProjectSchema = z.object({
   projectName: z.string().optional().describe('Display name of the project (defaults to directory name)'),
   description: z.string().optional().describe('Short description of the project'),
   brandPreset: z.enum(['primary', 'secondary']).optional().default('primary').describe('Brand color preset'),
-  repoUrl: z.string().optional().describe('GitHub repository URL (optional)'),
+  repoUrl: z.string().optional().describe('Repository URL on GitHub or GitLab (optional)'),
   install: z.boolean().optional().default(true).describe('Whether to run npm install after scaffolding'),
   enableAiChat: z.boolean().optional().default(true).describe('Enable AI chat in docs.json (default true)'),
   i18nLocales: z.array(z.object({ code: z.string(), label: z.string() })).optional().describe('Additional documentation locales to include alongside English (e.g. [{code:"fr",label:"Français"}])'),

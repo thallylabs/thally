@@ -112,6 +112,25 @@ describe('resolveSiteConfig', () => {
     expect(JSON.stringify(resolved)).not.toContain('baseline-sentinel')
   })
 
+  it('builds GitLab support and repository links for a GitLab fork', async () => {
+    mocks.getCloudSiteConfig.mockResolvedValue(
+      cloudDetails({
+        name: 'Customer Docs',
+        description: 'Customer description',
+        repoUrl: 'https://gitlab.com/acme/platform/customer-docs',
+      }),
+    )
+
+    const resolved = await resolveSiteConfig('https://customer.thally.app')
+
+    expect(siteIdentity(resolved).links).toEqual([
+      { label: 'Get started', href: '/quickstart' },
+      { label: 'Support', href: 'https://gitlab.com/acme/platform/customer-docs/-/issues/new' },
+      { label: 'GitLab', href: 'https://gitlab.com/acme/platform/customer-docs' },
+      { label: 'Changelog', href: '/changelog' },
+    ])
+  })
+
   it('preserves repository-authored links when the runtime repo matches', async () => {
     mocks.getCloudSiteConfig.mockResolvedValue(
       cloudDetails({

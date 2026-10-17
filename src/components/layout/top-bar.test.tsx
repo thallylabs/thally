@@ -85,6 +85,38 @@ describe('automatic header navigation rows', () => {
     expect(html.indexOf('acme/widgets')).toBeLessThan(html.indexOf('Sign Up'))
   })
 
+  it('renders a gitlab primary with its nested project path', () => {
+    const html = renderToStaticMarkup(<TopBar
+      collections={[]}
+      activeCollectionId="0"
+      onCollectionChange={() => {}}
+      activeSections={[]}
+      navigationPresentation={{ display: 'tabs' }}
+      navbarConfig={{
+        primary: { label: 'GitLab', href: 'https://git.example.com/acme/platform/widgets', type: 'gitlab' },
+        links: [{ label: 'Repo', href: 'https://gitlab.com/acme/widgets', type: 'gitlab' }],
+      }}
+      siteLinks={[]}
+    />)
+    expect(html).toContain('acme/platform/widgets')
+    expect(html).not.toContain('thally-docs-primary')
+    // Repository links move to the footer socials, so the navbar omits them.
+    expect(html).not.toContain('>Repo<')
+  })
+
+  it('keeps unknown-host GitHub primaries as a plain label', () => {
+    const html = renderToStaticMarkup(<TopBar
+      collections={[]}
+      activeCollectionId="0"
+      onCollectionChange={() => {}}
+      activeSections={[]}
+      navigationPresentation={{ display: 'tabs' }}
+      navbarConfig={{ primary: { label: 'Source', href: 'https://code.corp.test/acme/widgets', type: 'github' } }}
+      siteLinks={[]}
+    />)
+    expect(html).toContain('<span>Source</span>')
+  })
+
   it('never lets a navbar button colour add declarations to the inline style', () => {
     const html = renderToStaticMarkup(<TopBar
       collections={[]}

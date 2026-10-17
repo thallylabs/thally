@@ -6,6 +6,13 @@
  * only the small set of fields an owner answers during creation.
  */
 
+import {
+  isRepositoryLinkType,
+  parseRepositoryReference,
+  providerLabel,
+  type GitProvider,
+} from '@thallylabs/core/repository'
+import { migrationGitHosts } from '@thallylabs/migrate'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -24,6 +31,12 @@ export interface StarterPersonalizationOptions {
   i18nLocales?: Array<StarterLocale>
   /** Source theme accent color(s) to apply over the chosen brand preset. */
   colors?: { primary?: string; light?: string; dark?: string }
+}
+
+
+/** Provider of a configured repository URL; unknown hosts keep GitHub-style links. */
+function repositoryProviderFor(repoUrl: string): GitProvider {
+  return parseRepositoryReference(repoUrl, { hosts: migrationGitHosts(), fallbackProvider: 'github' })?.provider ?? 'github'
 }
 
 function readJsonObject(filePath: string, label: string): Record<string, unknown> {
@@ -89,10 +102,13 @@ export function updateStarterDocsConfig(
   const links = existingLinks.filter(
     (link) =>
       !isRecord(link) ||
-      (link.type !== 'github' && link.label !== 'GitHub'),
+      (!isRepositoryLinkType(typeof link.type === 'string' ? link.type : undefined) &&
+        link.label !== 'GitHub' &&
+        link.label !== 'GitLab'),
   )
   if (repoUrl) {
-    links.push({ label: 'GitHub', href: repoUrl, type: 'github' })
+    const provider = repositoryProviderFor(repoUrl)
+    links.push({ label: providerLabel(provider), href: repoUrl, type: provider })
   }
   if (links.length > 0) navbar.links = links
   else delete navbar.links
@@ -234,17 +250,18 @@ export function updateSiteConfig(
     'site.repoUrl',
   )
 
+  const provider = repositoryProviderFor(repoUrl)
   source = source.replace(
-    /\{[ \t]*label:[ \t]*'GitHub',[ \t]*href:[ \t]*'(?:\\.|[^'\\\r\n])*'[ \t]*\}/,
-    `{ label: 'GitHub', href: '${escapedRepoUrl}' }`,
+    /\{[ \t]*label:[ \t]*'Git(?:Hub|Lab)',[ \t]*href:[ \t]*'(?:\\.|[^'\\\r\n])*'[ \t]*\}/,
+    `{ label: '${providerLabel(provider)}', href: '${escapedRepoUrl}' }`,
   )
   source = source.replace(
     /\{[ \t]*label:[ \t]*'Support',[ \t]*href:[ \t]*'(?:\\.|[^'\\\r\n])*'[ \t]*\}/,
-    `{ label: 'Support', href: '${escapedRepoUrl ? `${escapedRepoUrl}/issues/new` : ''}' }`,
+    `{ label: 'Support', href: '${escapedRepoUrl ? `${escapedRepoUrl}${provider === 'gitlab' ? '/-' : ''}/issues/new` : ''}' }`,
   )
   if (!repoUrl) {
     source = source.replace(
-      /\r?\n[ \t]*\{[ \t]*label:[ \t]*'(?:GitHub|Support)',[ \t]*href:[ \t]*''[ \t]*\},?/g,
+      /\r?\n[ \t]*\{[ \t]*label:[ \t]*'(?:GitHub|GitLab|Support)',[ \t]*href:[ \t]*''[ \t]*\},?/g,
       '',
     )
   }
