@@ -253,6 +253,73 @@ describe('remote OpenAPI spec redirects the deployed route table can match', () 
   })
 })
 
+describe('one remote OpenAPI spec mounted under nested directories of different tabs', () => {
+  const nestedSpec = JSON.stringify({
+    openapi: '3.0.0',
+    info: { title: 'Example', version: '1' },
+    paths: {
+      '/users': { get: { summary: 'List users', tags: ['users'] } },
+      // Tag `v2` with summary `users` is `ref/v2/users` under the outer mount: an address of the inner mount.
+      '/a': { get: { summary: 'Users', tags: ['v2'] } },
+    },
+  })
+  const nested = (body: string, outer = 'reference', inner = 'reference/v2'): MigrationBundle => {
+    const input = mountedBundle()
+    input.pages = [{ ...input.pages[0], body }]
+    input.docsConfig = { tabs: input.docsConfig.tabs }
+    input.remoteApiSpecs = [
+      { url: MOUNTED_URL, tabLabel: 'One', directories: [{ directory: outer }] },
+      { url: MOUNTED_URL, tabLabel: 'Two', directories: [{ directory: inner }] },
+    ]
+    return input
+  }
+  const hydrate = (input: MigrationBundle) => hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: nestedSpec, contentType: 'application/json' }))
+
+  it('sends a body link under the inner mount to the inner tab, not to the outer tab\'s overview', async () => {
+    const result = await hydrate(nested('[inner](/reference/v2/users/list-users)\n[outer](/reference/users/list-users)'))
+    expect(result.pages[0].body).toBe('[inner](/api/two/users/get)\n[outer](/api/default/users/get)')
+    expect(result.warnings).toEqual([])
+  })
+
+  it('redirects an endpoint URL of each mount to its own tab', async () => {
+    const result = await hydrate(nested('[inner](/reference/v2/users/list-users)'))
+    const redirects = new Map((result.docsConfig.redirects ?? []).map((redirect) => [redirect.source, redirect.destination]))
+    expect(redirects.get('/reference/v2/users/list-users')).toBe('/api/two/users/get')
+    expect(redirects.get('/reference/users/list-users')).toBe('/api/default/users/get')
+  })
+
+  it('never lets the outer mount claim an address under the inner mount', async () => {
+    const result = await hydrate(nested('[tag](/reference/v2/users)'))
+    const redirects = new Map((result.docsConfig.redirects ?? []).map((redirect) => [redirect.source, redirect.destination]))
+    expect(redirects.get('/reference/v2/users')).toBe('/api/two/users/get')
+    expect(redirects.has('/reference/v2')).toBe(false)
+    expect(result.pages[0].body).toBe('[tag](/api/two/users/get)')
+  })
+})
+
+describe('two remote OpenAPI specs mounted under nested directories', () => {
+  const specWith = (paths: Record<string, unknown>) => JSON.stringify({ openapi: '3.0.0', info: { title: 'Example', version: '1' }, paths })
+  const outerSpec = specWith({ '/users': { get: { summary: 'List users', tags: ['users'] } } })
+  const innerSpec = specWith({ '/things': { get: { summary: 'List things', tags: ['things'] } } })
+  const OUTER_URL = 'https://specs.example.com/outer.json'
+  const INNER_URL = 'https://specs.example.com/inner.json'
+
+  it('never matches a link under the inner mount against the outer spec', async () => {
+    const input = mountedBundle()
+    input.pages = [{ ...input.pages[0], body: '[inner](/reference/v2/users/list-users)' }]
+    input.docsConfig = { tabs: input.docsConfig.tabs }
+    input.remoteApiSpecs = [
+      { url: OUTER_URL, tabLabel: 'One', directories: [{ directory: 'reference' }] },
+      { url: INNER_URL, tabLabel: 'Two', directories: [{ directory: 'reference/v2' }] },
+    ]
+    const result = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: url.toString() === OUTER_URL ? outerSpec : innerSpec, contentType: 'application/json' }))
+    const sources = (result.docsConfig.redirects ?? []).map((redirect) => redirect.source)
+    expect(sources).not.toContain('/reference/v2/users/list-users')
+    expect(sources).toContain('/reference/users/list-users')
+    expect(sources).toContain('/reference/v2/things/list-things')
+  })
+})
+
 describe('remote OpenAPI spec endpoint redirects only reach published endpoints', () => {
   const hiddenSpec = JSON.stringify({
     openapi: '3.1.0',

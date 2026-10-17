@@ -108,16 +108,18 @@ to the matching endpoint page, and never to an operation the published spec
 withholds with `x-hidden` or `x-excluded`. A remote spec gets every directory
 each of its tabs mounted it under, limited to the operations the navigation
 listed under a directory when it listed any. A local spec gets one directory
-per tab (the first) and every operation of the spec. A Mintlify default
-version's pages also get a redirect from their address without the version
-segment, since the original site serves them both ways.
+per tab (the first) and every operation of the spec. When directories nest
+(`reference` and `reference/v2`), an address belongs to the longest directory it
+lies under: the shorter one never rewrites a link to it or redirects it. A
+Mintlify default version's pages also get a redirect from their address without
+the version segment, since the original site serves them both ways.
 
 Redirects are checked once, after every platform and step has added its own.
 Next.js applies a redirect before it looks for a page and compares a source
 without regard to a trailing slash, but not to case (`/Guide` and `/guide` are
 different addresses), so a redirect whose source is a page of the migrated site
-would hide that page, and two redirects that send a visit
-back to each other never settle. Each such redirect is left out, and a warning
+would hide that page, and two redirects that send a visit back to each other
+never settle. Each such redirect is left out, and a warning
 lists the first ten of each kind; the earlier redirect of a loop is kept. A
 generated redirect (a version alias, an endpoint URL) for an address that
 already serves a page is left out without a warning, since the page is still

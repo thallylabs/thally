@@ -1834,6 +1834,13 @@ export function apiOperationLinkMap(
   const bound = apiTabs.flatMap((tab, index) => sources
     .filter((entry) => tab.api?.source === specAssetPath(entry.filename) && (!entry.tab || entry.tab === tab.tab))
     .map((source) => ({ source, specId: index === 0 ? 'default' : slugifyApiSpecId(tab.tab) })))
+  // An address belongs to the most specific mount it lies under: one mounted at
+  // `reference` never claims what a mount at `reference/v2` serves.
+  const mounts = new Set(bound.map(({ source }) => source.prefix?.replace(/^\/+|\/+$/g, '').toLowerCase()).filter(Boolean) as Array<string>)
+  const underDeeperMount = (route: string, own: string): boolean => {
+    const lower = route.toLowerCase()
+    return [...mounts].some((mount) => mount.length > own.length && (lower === mount || lower.startsWith(`${mount}/`)))
+  }
   bound.forEach(({ source, specId }) => {
     if (!source.prefix) return
     const prefix = source.prefix.replace(/^\/+|\/+$/g, '').toLowerCase()
@@ -1873,21 +1880,23 @@ export function apiOperationLinkMap(
       const mintlifyTag = mintlifyUrlSlug(operation.tag ?? 'default')
       const mintlifyLeaf = mintlifyUrlSlug(operation.summary?.trim() || operation.operationId?.trim() || `${operation.method} ${operation.path}`)
       const canonical = `${source.prefix}/${mintlifyTag}/${mintlifyLeaf}`.replace(/^\/+|\/+$/g, '')
-      if (mintlifyTag && mintlifyLeaf) {
+      if (mintlifyTag && mintlifyLeaf && !underDeeperMount(canonical, prefix)) {
         if (!mintlifyPages.has(canonical)) mintlifyPages.set(canonical, thallyHref)
         else if (mintlifyPages.get(canonical) !== thallyHref && !duplicatePages.includes(canonical)) duplicatePages.push(canonical)
+        if (!map.has(canonical.toLowerCase())) map.set(canonical.toLowerCase(), thallyHref)
       }
-      if (mintlifyTag && mintlifyLeaf && !map.has(canonical.toLowerCase())) map.set(canonical.toLowerCase(), thallyHref)
       // Mintlify redirects a bare tag URL to that tag's first operation.
       const tagRoot = `${source.prefix}/${mintlifyTag}`.replace(/^\/+|\/+$/g, '')
-      if (mintlifyTag && !mintlifyPages.has(tagRoot)) mintlifyPages.set(tagRoot, thallyHref)
-      if (mintlifyTag && !map.has(tagRoot.toLowerCase())) map.set(tagRoot.toLowerCase(), thallyHref)
+      if (mintlifyTag && !underDeeperMount(tagRoot, prefix)) {
+        if (!mintlifyPages.has(tagRoot)) mintlifyPages.set(tagRoot, thallyHref)
+        if (!map.has(tagRoot.toLowerCase())) map.set(tagRoot.toLowerCase(), thallyHref)
+      }
       for (const leaf of leafCandidates) {
         if (!leaf) continue
         const tagged = `${source.prefix}/${tagSegment}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
         const flat = `${source.prefix}/${leaf}`.replace(/^\/+|\/+$/g, '').toLowerCase()
-        if (!map.has(tagged)) map.set(tagged, thallyHref)
-        if (!map.has(flat)) map.set(flat, thallyHref)
+        if (!map.has(tagged) && !underDeeperMount(tagged, prefix)) map.set(tagged, thallyHref)
+        if (!map.has(flat) && !underDeeperMount(flat, prefix)) map.set(flat, thallyHref)
       }
     }
   })

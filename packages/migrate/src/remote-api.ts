@@ -15,7 +15,7 @@ import { insertApiTab } from './navigation.js'
 import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, servedRoutes } from './redirects.js'
 import { apiOperationLinkMap, isWithheld, mintlifyEndpointRedirects, rewriteApiLinksInPages } from './repository.js'
 import { markExcluded, sharedSpecMessage } from './spec-exclude.js'
-import type { MigrationBundle, MigrationFetcher } from './types.js'
+import type { MigrationBundle, MigrationFetcher, RemoteApiSpec } from './types.js'
 
 const MAX_SPEC_BYTES = 25_000_000
 const MAX_REDIRECTS = 3
@@ -198,13 +198,24 @@ function operationTarget(operation: OpenApiOperation): string {
   return `/api/default/${[...path, operation.method].join('/')}`
 }
 
+/** A downloaded spec bound to its tab: what the link and redirect passes read once every spec is bound. */
+interface BoundSpec {
+  reference: RemoteApiSpec
+  filename: string
+  content: Buffer
+  operations: Array<OpenApiOperation>
+  tabName: string
+}
+
 /**
  * Attach safely downloaded specs to the exact authored API tabs. A spec
  * mounted under Mintlify `directory` folders gets a redirect from each
  * endpoint URL those folders served; for any other spec, source links to
  * Mintlify's tag/summary routes receive redirects only when an operation can
  * be identified uniquely, since guessing would silently route to wrong APIs.
- * A redirect never takes the place of a page the site serves.
+ * A redirect never takes the place of a page the site serves. Every spec is
+ * bound before any link is read, so mounts nested in one another (`reference`
+ * and `reference/v2`) are told apart by their longest prefix.
  */
 export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: MigrationFetcher): Promise<MigrationBundle> {
   if (!bundle.remoteApiSpecs?.length) return bundle
@@ -228,6 +239,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       if (section.includes('api') || section.includes('reference')) authoredLinks.add(match[0].replace(/\/+$/, ''))
     }
   }
+  const bound: Array<BoundSpec> = []
   for (const reference of bundle.remoteApiSpecs) {
     for (let index = warnings.length - 1; index >= 0; index--) {
       if (warnings[index].source === reference.url && warnings[index].message.includes('requires a network download')) warnings.splice(index, 1)
@@ -256,33 +268,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
         : tabs.find((candidate) => candidate.tab.toLowerCase().includes('api'))
       if (tab) tab.api = { source: `openapi/${filename}` }
       else insertApiTab(tabs, { tab: reference.tabLabel ?? 'API Reference', ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}), api: { source: `openapi/${filename}` } }, reference.parentTab)
-
-      if (reference.directories?.length) {
-        const maps = apiOperationLinkMap(
-          reference.directories.map(({ directory, operations: listed }) => ({ filename, content: body, prefix: directory, tab: tab?.tab ?? reference.tabLabel ?? 'API Reference', ...(listed ? { operations: listed } : {}) })),
-          { ...bundle.docsConfig, tabs },
-        )
-        rewriteApiLinksInPages(pages, maps.operationLinks, maps.prefixLandings, warnings)
-        for (const redirect of mintlifyEndpointRedirects(maps, pages, redirects, warnings)) {
-          redirects.push(redirect)
-          endpointUrls.set(literalRoute(redirect.source) ?? redirect.source, redirect.destination)
-        }
-      }
-      const routes = new Map<string, string | null>()
-      for (const operation of operations) {
-        const key = `${slug(operation.tag)}/${slug(operation.summary)}`
-        if (routes.has(key)) routes.set(key, null)
-        else routes.set(key, operationTarget(operation))
-      }
-      const existingSources = new Set(redirects.map((redirect) => redirect.source))
-      for (const source of authoredLinks) {
-        const parts = source.split('/').filter(Boolean)
-        const key = parts.slice(-2).join('/')
-        const destination = routes.get(key)
-        if (!destination || existingSources.has(source) || served.has(literalRoute(source) ?? source)) continue
-        redirects.push({ source, destination, permanent: false })
-        existingSources.add(source)
-      }
+      bound.push({ reference, filename, content: body, operations, tabName: tab?.tab ?? reference.tabLabel ?? 'API Reference' })
     } catch (error) {
       warnings.push({
         code: 'fetch-failed',
@@ -291,6 +277,49 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
       })
     }
   }
+
+  // Endpoint URLs of every mount, mapped once: links are rewritten once, and
+  // the redirects below exist before any guess from a link's last two segments.
+  const maps = apiOperationLinkMap(
+    bound.flatMap(({ reference, filename, content, tabName }) => (reference.directories ?? [])
+      .map(({ directory, operations: listed }) => ({ filename, content, prefix: directory, tab: tabName, ...(listed ? { operations: listed } : {}) }))),
+    { ...bundle.docsConfig, tabs },
+  )
+  rewriteApiLinksInPages(pages, maps.operationLinks, maps.prefixLandings, warnings)
+  for (const redirect of mintlifyEndpointRedirects(maps, pages, redirects, warnings)) {
+    redirects.push(redirect)
+    endpointUrls.set(literalRoute(redirect.source) ?? redirect.source, redirect.destination)
+  }
+
+  const existingSources = new Set(redirects.map((redirect) => redirect.source))
+  const mounts = bound.flatMap(({ reference }, index) => (reference.directories ?? [])
+    .map(({ directory }) => ({ prefix: `/${directory.replace(/^\/+|\/+$/g, '')}`.toLowerCase(), index }))
+    .filter(({ prefix }) => prefix !== '/'))
+  /** The specs mounted at the most specific directory an address lies under: only they may redirect it. */
+  const ownersOf = (source: string): Set<number> | null => {
+    const route = source.toLowerCase()
+    const under = mounts.filter(({ prefix }) => route === prefix || route.startsWith(`${prefix}/`))
+    if (under.length === 0) return null
+    const longest = Math.max(...under.map(({ prefix }) => prefix.length))
+    return new Set(under.filter(({ prefix }) => prefix.length === longest).map(({ index }) => index))
+  }
+  bound.forEach(({ operations }, index) => {
+    const routes = new Map<string, string | null>()
+    for (const operation of operations) {
+      const key = `${slug(operation.tag)}/${slug(operation.summary)}`
+      if (routes.has(key)) routes.set(key, null)
+      else routes.set(key, operationTarget(operation))
+    }
+    for (const source of authoredLinks) {
+      const parts = source.split('/').filter(Boolean)
+      const key = parts.slice(-2).join('/')
+      const destination = routes.get(key)
+      if (!destination || existingSources.has(source) || served.has(literalRoute(source) ?? source)) continue
+      if (ownersOf(source)?.has(index) === false) continue
+      redirects.push({ source, destination, permanent: false })
+      existingSources.add(source)
+    }
+  })
   // A redirect that targets an endpoint URL goes straight to the endpoint page, not through a second redirect.
   const direct = redirects.map((redirect) => {
     const endpoint = endpointUrls.get(literalRoute(redirect.destination) ?? '')
