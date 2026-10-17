@@ -212,10 +212,10 @@ describe('assets source', () => {
     expect(warn).toHaveBeenCalled()
   })
 
-  it('falls back to embedded content when the manifest cannot be fetched', async () => {
+  it('falls back to embedded content when the deployment manifest is missing', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const fallback = stubFallback()
-    const source = createAssetsContentSource(fallback, () => async () => new Response('boom', { status: 500 }))
+    const source = createAssetsContentSource(fallback, () => async () => new Response('missing', { status: 404 }))
 
     expect((await source.read('src/content/introduction.mdx'))?.content).toBe('embedded fallback')
     expect(await source.read('AGENTS.md')).toBeNull()
@@ -238,13 +238,12 @@ describe('assets source', () => {
       return assets.fetcher(assetPath)
     })
 
-    // First read hits the transient failure and reports the file missing…
-    expect(await source.read('src/content/introduction.mdx')).toBeNull()
-    // …but the failure is not cached: the next read fetches again and wins.
+    // A temporary network failure retries within this read; it must not be
+    // projected as a missing document into a successfully cached index.
     expect((await source.read('src/content/introduction.mdx'))?.content).toBe(
       files['src/content/introduction.mdx'],
     )
-    expect(warn).toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalled()
   })
 
   it('retries the manifest after a transient fetch failure', async () => {
@@ -260,11 +259,11 @@ describe('assets source', () => {
       return assets.fetcher(assetPath)
     })
 
-    // First read falls back to embedded content, second reaches the assets.
-    expect((await source.read('src/content/introduction.mdx'))?.content).toBe('embedded fallback')
+    // A transient manifest error retries before any embedded fallback leaks.
     expect((await source.read('src/content/introduction.mdx'))?.content).toBe(
       files['src/content/introduction.mdx'],
     )
+    expect(fallback.reads).toEqual([])
   })
 
   it('falls back when no fetcher is available, then recovers once one appears', async () => {
@@ -316,5 +315,63 @@ describe('loadContentDocument', () => {
     setContentAssetFetcher(assets.fetcher)
 
     expect(await loadContentDocument('no/such/page')).toBeNull()
+  })
+})
+
+// These exercise the real providers, not a cache-shaped mock: evicted values
+// must be reconstructed with identical content and the release's mtime.
+describe('bounded managed content retention', () => {
+  it('evicts old raw files by entry count while preserving recent identity and source bytes', async () => {
+    const paths = Array.from({ length: 130 }, (_, i) => `src/content/raw-budget-${i}.mdx`)
+    const content = Object.fromEntries(paths.map((path) => [path, `# ${path}\n\nExact {payload}.`]))
+    const assets = fakeAssets({ version: 1, files: Object.fromEntries(paths.map((path) => [path, { modifiedAtMs: 42 }])) }, content)
+    const source = createAssetsContentSource(stubFallback(), () => assets.fetcher)
+    const first = await source.read(paths[0])
+    for (const path of paths.slice(1)) await source.read(path)
+    const recent = await source.read(paths.at(-1)!)
+    expect(await source.read(paths.at(-1)!)).toBe(recent)
+    expect(await source.read(paths[0])).toEqual(first)
+    expect(assets.calls.filter((path) => path.endsWith('raw-budget-0.mdx'))).toHaveLength(2)
+    expect(assets.calls.filter((path) => path.endsWith('raw-budget-129.mdx'))).toHaveLength(1)
+  })
+
+  it('evicts by raw payload bytes and returns oversized files without retaining them', async () => {
+    const paths = ['src/content/large-one.mdx', 'src/content/large-two.mdx', 'src/content/too-large.mdx']
+    const body = 'x'.repeat(1_100_000)
+    const assets = fakeAssets({ version: 1, files: Object.fromEntries(paths.map((path) => [path, {}])) }, {
+      [paths[0]]: body, [paths[1]]: body, [paths[2]]: body.repeat(2),
+    })
+    const source = createAssetsContentSource(stubFallback(), () => assets.fetcher)
+    await source.read(paths[0]); await source.read(paths[1]); await source.read(paths[0])
+    expect(assets.calls.filter((path) => path.endsWith('large-one.mdx'))).toHaveLength(2)
+    expect((await source.read(paths[2]))?.content).toBe(body.repeat(2))
+    await source.read(paths[2])
+    expect(assets.calls.filter((path) => path.endsWith('too-large.mdx'))).toHaveLength(2)
+  })
+
+  it('reparses evicted structured documents without changing their canonical graph', async () => {
+    process.env.THALLY_CONTENT_SOURCE = 'assets'
+    const paths = Array.from({ length: 130 }, (_, i) => `src/content/graph-budget-${i}.mdx`)
+    const assets = fakeAssets({ version: 1, files: Object.fromEntries(paths.map((path) => [path, { modifiedAtMs: 84 }])) },
+      Object.fromEntries(paths.map((path) => [path, `---\ntitle: ${path}\n---\n\n## Stable anchor\n\nExact **technical** payload.\n\n\`\`\`sh\nprintf '%s' '{code}'\n\`\`\``])))
+    setContentAssetFetcher(assets.fetcher)
+    const first = await loadContentDocument('graph-budget-0')
+    expect(await loadContentDocument('graph-budget-0')).toBe(first)
+    for (let i = 1; i < paths.length; i++) await loadContentDocument(`graph-budget-${i}`)
+    const reloaded = await loadContentDocument('graph-budget-0')
+    expect(reloaded).not.toBe(first)
+    expect(reloaded).toEqual(first)
+    expect(await loadContentDocument('graph-budget-0')).toBe(reloaded)
+  })
+
+  it('does not retain an oversized parsed document', async () => {
+    process.env.THALLY_CONTENT_SOURCE = 'assets'
+    const path = 'src/content/graph-oversized.mdx'
+    const assets = fakeAssets({ version: 1, files: { [path]: { modifiedAtMs: 8 } } }, { [path]: 'z'.repeat(1_100_000) })
+    setContentAssetFetcher(assets.fetcher)
+    const first = await loadContentDocument('graph-oversized')
+    const second = await loadContentDocument('graph-oversized')
+    expect(second).not.toBe(first)
+    expect(second).toEqual(first)
   })
 })

@@ -32,7 +32,7 @@ export interface SearchHit {
 }
 
 interface IndexedRecord extends SearchRecord {
-  embedding: EmbeddingVector
+  embedding?: EmbeddingVector
 }
 
 interface SearchEngine {
@@ -127,7 +127,9 @@ async function buildEngine(locale?: string, includeEmbeddings = true): Promise<S
       keywords: 'string',
       href: 'string',
       type: 'string',
-      embedding: `vector[${dimensions}]`,
+      // Full-text ranking never uses vectors. Even zero vectors retain
+      // dimensions × pages backing stores, exceeding Worker memory at scale.
+      ...(includeEmbeddings ? { embedding: `vector[${dimensions}]` as const } : {}),
     },
   }) as AnyOrama
 
@@ -136,7 +138,7 @@ async function buildEngine(locale?: string, includeEmbeddings = true): Promise<S
   const indexed: Array<IndexedRecord> = records.map((record) => ({
     ...record,
     type: record.type ?? 'page',
-    embedding: embeddings.get(record.pageId) ?? new Array<number>(dimensions).fill(0),
+    ...(includeEmbeddings ? { embedding: embeddings.get(record.pageId) ?? new Array<number>(dimensions).fill(0) } : {}),
   }))
 
   await insertMultiple(db, indexed as never)
@@ -149,6 +151,11 @@ export function getSearchEngine(locale?: string, includeEmbeddings = true): Prom
   if (cached) return cached
   const pending = buildEngine(locale, includeEmbeddings)
   enginePromises.set(key, pending)
+  // Share in-flight work, but allow the next request to retry a rejected
+  // build. An older rejection cannot evict a newer cache generation.
+  void pending.catch(() => {
+    if (enginePromises.get(key) === pending) enginePromises.delete(key)
+  })
   return pending
 }
 
