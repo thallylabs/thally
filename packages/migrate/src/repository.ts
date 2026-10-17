@@ -57,7 +57,7 @@ import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
 import { mainSiteLinkTarget, prefixRootLinks, sourceRefMountCollides, stripControlCharacters, type RootLinkIndex, type SourceRefImport } from './source-refs.js'
-import { type BrandVars, brandColorsFromVars, cssBrandVars } from './css-colors.js'
+import { type BrandVars, brandColorsFromVars, cssBrandVars, cssColorToHex } from './css-colors.js'
 import {
   frontmatterAccess,
   isMintlifyServedScriptOrStyle,
@@ -5567,10 +5567,14 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   const sourceFavicon = mintlifyConfig?.favicon ?? fernRawConfig?.favicon ?? docusaurusSettings?.favicon
   const logo = brandVariants(sourceLogo)
   const favicon = brandVariants(sourceFavicon)
-  const logoLight = publicBrandPath(logo.light)
+  // A source can name one asset per colour mode yet ship only one of them. The
+  // imported variant then serves both modes (the renderer already falls back
+  // dark to light, so only the light slot needs filling); a path that was not
+  // imported is never emitted.
   const logoDark = publicBrandPath(logo.dark)
-  const faviconLight = publicBrandPath(favicon.light)
+  const logoLight = publicBrandPath(logo.light) ?? logoDark
   const faviconDark = publicBrandPath(favicon.dark)
+  const faviconLight = publicBrandPath(favicon.light) ?? faviconDark
   if (logoLight) docsConfig = {
     ...docsConfig,
     navbar: {
@@ -5604,14 +5608,31 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const decoration = background.decoration
       const image = publicBrandPath(background.image)
       const imageDark = publicBrandPath(background.imageDark)
-      docsConfig = {
-        ...docsConfig,
-        background: {
-          ...docsConfig.background,
-          ...(decoration === 'none' || decoration === 'grid' || decoration === 'gradient' ? { decoration } : {}),
-          ...(image ? { image } : {}),
-          ...(imageDark ? { imageDark } : {}),
-        },
+      const mapped: NonNullable<MigrationDocsConfig['background']> = {
+        ...docsConfig.background,
+        ...(decoration === 'none' || decoration === 'grid' || decoration === 'gradient' ? { decoration } : {}),
+        ...(image ? { image } : {}),
+        ...(imageDark ? { imageDark } : {}),
+      }
+      if (Object.keys(mapped).length > 0) docsConfig = { ...docsConfig, background: mapped }
+      // Solid canvas colours ride on the per-mode brand colours (six-digit hex).
+      const canvas = background.color && typeof background.color === 'object'
+        ? background.color as Record<string, unknown> : {}
+      for (const mode of ['light', 'dark'] as const) {
+        if (canvas[mode] === undefined) continue
+        const hex = typeof canvas[mode] === 'string' ? cssColorToHex(canvas[mode]) : undefined
+        if (!hex) {
+          warnings.push({
+            code: 'unsupported-config',
+            message: `background.color.${mode} ${JSON.stringify(canvas[mode])?.slice(0, 40)} is not a hex or rgb() colour (for example #121317) and was dropped, so that mode keeps Thally's default canvas. Use a hex value in docs.json to set it.`,
+            source: 'docs.json',
+          })
+          continue
+        }
+        docsConfig = {
+          ...docsConfig,
+          colors: { ...docsConfig.colors, [mode]: { ...docsConfig.colors?.[mode], background: hex } },
+        }
       }
     }
   }
@@ -5622,13 +5643,25 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     ...docsConfig,
     favicon: { light: faviconLight, ...(faviconDark ? { dark: faviconDark } : {}) },
   }
-  const missingBrand = [
-    ...[logo.light, logo.dark].filter((value): value is string => typeof value === 'string' && !publicBrandPath(value)),
-    ...[favicon.light, favicon.dark].filter((value): value is string => typeof value === 'string' && !publicBrandPath(value)),
-  ]
+  const notImported = (variants: { light?: string; dark?: string }) =>
+    [variants.light, variants.dark].filter((value): value is string => typeof value === 'string' && !publicBrandPath(value))
+  const missingLogo = notImported(logo)
+  const missingFavicon = notImported(favicon)
+  const missingBrand = [...missingLogo, ...missingFavicon]
+  // An imported variant exists next to a missing one only when it was substituted for it.
+  const substituted = [
+    ...(missingLogo.length > 0 && logoLight ? [`logo (${logoLight})`] : []),
+    ...(missingFavicon.length > 0 && faviconLight ? [`favicon (${faviconLight})`] : []),
+  ].map((asset) => ` The imported ${asset} is used for both light and dark mode.`).join('')
   if (missingBrand.length > 0) warnings.push({
     code: 'unsupported-config',
-    message: `Brand asset(s) were referenced but not imported: ${[...new Set(missingBrand)].join(', ')}. Add these files under public/ or update docs.json.`,
+    message: `Brand asset(s) were referenced but not imported: ${[...new Set(missingBrand)].join(', ')}. Add these files under public/ or update docs.json.${substituted}`,
+  })
+  const logoHref = sourceLogo && typeof sourceLogo === 'object' ? (sourceLogo as Record<string, unknown>).href : undefined
+  if (typeof logoHref === 'string' && logoHref.trim() && logoHref.trim() !== '/') warnings.push({
+    code: 'unsupported-config',
+    message: `logo.href ${JSON.stringify(logoHref.trim().slice(0, 120))} was dropped: the header logo always links to the docs home page. Add it as a navbar link in docs.json if readers need it.`,
+    source: mintlifyConfig ? 'docs.json' : 'docs.yml',
   })
   if (platform === 'mintlify') {
     // Mintlify serves a Markdown mirror of every page by default. The mirror
@@ -5678,7 +5711,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     message: `Fern global theme ${JSON.stringify(fernRawConfig['global-theme'])} could not be fetched during local migration; local overrides and Thally default styling tokens were applied.`,
     source: 'global-theme',
   })
-  if (fernRawConfig?.logo && !fernRawConfig['global-theme'] && !logoLight && !logo.light) warnings.push({
+  if (fernRawConfig?.logo && !fernRawConfig['global-theme'] && !logoLight && !logo.light && !logo.dark) warnings.push({
     code: 'unsupported-config',
     message: 'Fern supplied a logo through its global theme without a local asset; add a logo path to docs.json after import.',
   })

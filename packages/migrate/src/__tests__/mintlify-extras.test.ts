@@ -281,6 +281,128 @@ describe('config mapping', () => {
     expect(site({ 'docs.json': JSON.stringify({ ...nav, colors: { primary: 'red' } }), ...intro }).docsConfig.colors).toBeUndefined()
   })
 
+  describe('brand logo, favicon and background', () => {
+    const png = Buffer.from('PNGDATA')
+    const brandWarning = (bundle: MigrationBundle) => bundle.warnings.filter((warning) => /Brand asset/.test(warning.message))
+
+    it('uses a dark-only imported logo for both modes and says so', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ ...nav, logo: { light: '/logo/light.png', dark: '/logo/dark.png' } }),
+        'logo/dark.png': png,
+        ...intro,
+      })
+      expect(bundle.docsConfig.navbar?.logo).toEqual({ light: '/logo/dark.png', dark: '/logo/dark.png', showTitle: false })
+      const [warning] = brandWarning(bundle)
+      expect(warning.code).toBe('unsupported-config')
+      expect(warning.message).toContain('/logo/light.png')
+      expect(warning.message).not.toContain('/logo/dark.png.')
+      expect(warning.message).toMatch(/imported logo \(\/logo\/dark\.png\) is used for both light and dark mode/)
+    })
+
+    it('keeps a light-only imported logo for both modes and names the missing dark file', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ ...nav, logo: { light: '/logo/light.png', dark: '/logo/dark.png' } }),
+        'logo/light.png': png,
+        ...intro,
+      })
+      expect(bundle.docsConfig.navbar?.logo).toEqual({ light: '/logo/light.png', showTitle: false })
+      expect(brandWarning(bundle)[0].message).toMatch(/not imported: \/logo\/dark\.png\..*imported logo \(\/logo\/light\.png\) is used for both/)
+    })
+
+    it('leaves a logo with both variants imported unchanged and silent', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ ...nav, logo: { light: '/logo/light.png', dark: '/logo/dark.png' } }),
+        'logo/light.png': png,
+        'logo/dark.png': png,
+        ...intro,
+      })
+      expect(bundle.docsConfig.navbar?.logo).toEqual({ light: '/logo/light.png', dark: '/logo/dark.png', showTitle: false })
+      expect(brandWarning(bundle)).toEqual([])
+    })
+
+    it('never points the logo at a file that was not imported', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ ...nav, logo: { light: '/logo/light.png', dark: '/logo/dark.png' } }),
+        ...intro,
+      })
+      expect(bundle.docsConfig.navbar?.logo).toBeUndefined()
+      expect(brandWarning(bundle)[0].message).not.toContain('used for both')
+    })
+
+    it('uses a dark-only logo from a legacy mint.json', () => {
+      const bundle = site({
+        'mint.json': JSON.stringify({ ...nav, logo: { light: '/logo/light.png', dark: '/logo/dark.png' } }),
+        'logo/dark.png': png,
+        ...intro,
+      })
+      expect(bundle.docsConfig.navbar?.logo).toMatchObject({ light: '/logo/dark.png', dark: '/logo/dark.png' })
+    })
+
+    it('uses a single imported favicon variant for both modes', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ ...nav, favicon: { light: '/icons/light.png', dark: '/icons/dark.png' } }),
+        'icons/dark.png': png,
+        ...intro,
+      })
+      expect(bundle.docsConfig.favicon).toEqual({ light: '/icons/dark.png', dark: '/icons/dark.png' })
+      expect(brandWarning(bundle)[0].message).toMatch(/imported favicon \(\/icons\/dark\.png\) is used for both/)
+    })
+
+    it('warns that logo.href is dropped because the header logo always links home', () => {
+      const withHref = (href: string) => site({
+        'docs.json': JSON.stringify({ ...nav, logo: { light: '/logo/light.png', href } }),
+        'logo/light.png': png,
+        ...intro,
+      })
+      const warning = withHref('https://trigger.dev').warnings.find((entry) => /logo\.href/.test(entry.message))
+      expect(warning?.code).toBe('unsupported-config')
+      expect(warning?.message).toContain('https://trigger.dev')
+      expect(warning?.message).toMatch(/navbar link/)
+      expect(withHref('/').warnings.some((entry) => /logo\.href/.test(entry.message))).toBe(false)
+    })
+
+    it('maps background.color to per-mode canvas colours, expanding three-digit hex', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ ...nav, background: { color: { light: '#fff', dark: '#121317' } } }),
+        ...intro,
+      })
+      expect(bundle.docsConfig.colors).toEqual({ light: { background: '#ffffff' }, dark: { background: '#121317' } })
+      expect(bundle.docsConfig.background).toBeUndefined()
+      expect(bundle.warnings.filter((warning) => /background/.test(warning.message))).toEqual([])
+    })
+
+    it('merges background colours into the brand colours instead of replacing them', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ ...nav, colors: { primary: '#F60' }, background: { color: { dark: '#121317' } } }),
+        ...intro,
+      })
+      expect(bundle.docsConfig.colors).toEqual({
+        light: { accent: '#ff6600', primary: '#ff6600' },
+        dark: { accent: '#ff6600', primary: '#ff6600', background: '#121317' },
+      })
+    })
+
+    it('keeps the valid background colour and warns about the invalid one', () => {
+      const bundle = site({
+        'docs.json': JSON.stringify({ ...nav, background: { color: { light: 'hotpink', dark: '#121317' } } }),
+        ...intro,
+      })
+      expect(bundle.docsConfig.colors).toEqual({ dark: { background: '#121317' } })
+      const warning = bundle.warnings.find((entry) => /background\.color\.light/.test(entry.message))
+      expect(warning?.code).toBe('unsupported-config')
+      expect(warning?.message).toContain('hotpink')
+    })
+
+    it('does not emit an empty background object', () => {
+      for (const background of [{}, { color: {} }, { color: { light: 'nope' } }, { decoration: 'sparkles' }]) {
+        const bundle = site({ 'docs.json': JSON.stringify({ ...nav, background }), ...intro })
+        expect(bundle.docsConfig.background).toBeUndefined()
+        expect(bundle.docsConfig.colors).toBeUndefined()
+      }
+      expect(site({ 'docs.json': JSON.stringify({ ...nav, background: { decoration: 'grid' } }), ...intro }).docsConfig.background).toEqual({ decoration: 'grid' })
+    })
+  })
+
   it('hides the breadcrumb trail because Mintlify pages show only a group eyebrow', () => {
     expect(site({ 'docs.json': JSON.stringify(nav), ...intro }).docsConfig.breadcrumbs).toBe(false)
   })
