@@ -56,6 +56,18 @@ describe('Mintlify redirects that would loop or hide a page', () => {
     expect(messages(bundle)).toContain('/introduction')
   })
 
+  it('keeps a redirect from a differently cased address to a page', () => {
+    const bundle = mintlify({
+      redirects: [{ source: '/Guide', destination: '/guide' }],
+      navigation: { groups: [{ group: 'Start', pages: ['index', 'guide'] }] },
+    }, {
+      index: '---\ntitle: Home\n---\n\nWelcome.',
+      guide: '---\ntitle: Guide\n---\n\nBody.',
+    })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/Guide', destination: '/guide' })
+    expect(messages(bundle)).not.toContain('/Guide')
+  })
+
   it('keeps a redirect that does not touch a page', () => {
     const bundle = mintlify({
       redirects: [{ source: '/old', destination: '/guide' }],
@@ -190,17 +202,36 @@ describe('dropConflictingRedirects', () => {
     expect(warnings[0].message).toContain('/c')
   })
 
-  it('compares routes without regard to case, as Next matches a redirect source', () => {
+  it('compares routes exactly, since the deployed route table is case-sensitive', () => {
     const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
     const result = dropConflictingRedirects(config([
-      { source: '/Guide', destination: '/x' },
+      { source: '/Guide', destination: '/guide' },
       { source: '/FR/guide', destination: '/x' },
       { source: '/a', destination: '/B' },
       { source: '/b', destination: '/A' },
       { source: '/Quickstart', destination: '/quickstart' },
+      { source: '/guide/', destination: '/x' },
     ]), pages, warnings)
-    expect(result.redirects).toEqual([{ source: '/a', destination: '/B' }])
-    expect(warnings.map((warning) => warning.message).join('\n')).toMatch(/\/Guide, \/FR\/guide.*\/b -> \/A, \/Quickstart -> \/quickstart/s)
+    expect(result.redirects).toEqual([
+      { source: '/Guide', destination: '/guide' },
+      { source: '/FR/guide', destination: '/x' },
+      { source: '/a', destination: '/B' },
+      { source: '/b', destination: '/A' },
+      { source: '/Quickstart', destination: '/quickstart' },
+    ])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toContain('/guide/')
+  })
+
+  it('still breaks a loop between routes of the same case', () => {
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    const result = dropConflictingRedirects(config([
+      { source: '/Old', destination: '/New' },
+      { source: '/New', destination: '/Old' },
+    ]), pages, warnings)
+    expect(result.redirects).toEqual([{ source: '/Old', destination: '/New' }])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toContain('/New -> /Old')
   })
 
   it('walks a long chain of redirects once, however they are ordered', () => {

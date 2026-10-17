@@ -114,8 +114,9 @@ segment, since the original site serves them both ways.
 
 Redirects are checked once, after every platform and step has added its own.
 Next.js applies a redirect before it looks for a page and compares a source
-without regard to case or a trailing slash, so a redirect whose source is a page
-of the migrated site would hide that page, and two redirects that send a visit
+without regard to a trailing slash, but not to case (`/Guide` and `/guide` are
+different addresses), so a redirect whose source is a page of the migrated site
+would hide that page, and two redirects that send a visit
 back to each other never settle. Each such redirect is left out, and a warning
 lists the first ten of each kind; the earlier redirect of a loop is kept. A
 generated redirect (a version alias, an endpoint URL) for an address that
