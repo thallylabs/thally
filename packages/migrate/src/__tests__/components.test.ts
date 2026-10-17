@@ -585,6 +585,51 @@ describe('repository component migration', () => {
       })
     })
 
+    describe('module-level `var`', () => {
+      const probe = (declaration: string, tag = 'Warning'): string => `${declaration}\nexport const Probe = () => <${tag} />;`
+
+      it.each([
+        ['a block', 'if (true) { var Warning = () => null }'],
+        ['a destructuring pattern', 'if (true) { var { Warning } = { Warning: () => null } }'],
+        ['an array pattern', 'if (true) { var [Warning] = [() => null] }'],
+        ['a nested pattern with a default and a rest element', 'if (true) { var { a: [{ Warning = () => null }], ...rest } = { a: [{}] } }'],
+        ['a for loop head', 'for (var Warning = () => null, i = 0; i < 1; i++) {}'],
+        ['a for-of head', 'for (var Warning of [() => null]) {}'],
+        ['a for-in head', 'for (var Warning in { a: 1 }) {}'],
+        ['a loop body', 'while (true) { var Warning = () => null; break }'],
+        ['a try block', 'try { var Warning = () => null } catch (e) {}'],
+        ['a catch block', 'try { throw 1 } catch (e) { var Warning = () => null }'],
+        ['a finally block', 'try {} finally { var Warning = () => null }'],
+        ['a switch case', 'switch (1) { case 1: var Warning = () => null }'],
+        ['a labeled block', 'outer: { var Warning = () => null }'],
+      ])('does not bind <Warning> over a `var` declared in %s', (_label, declaration) => {
+        const content = copied(probe(declaration))
+        // The migrated module must parse and run: a second declaration of the name is a SyntaxError.
+        expect(evaluate<{ Probe: () => Rendered }>(content).Probe().type.displayName).toBeUndefined()
+        expect(content).not.toContain('builtinMdxComponents')
+      })
+
+      it('does not import a leaf component, a hook or React over a `var` of the same name', () => {
+        const content = copied('if (true) { var Card = () => null; var useState = () => [0]; var React = { createElement: () => null } }\nexport const Probe = () => { const [n] = useState(); return <Card>{n}</Card> }')
+        expect(content).not.toContain("from 'react'")
+        expect(content).not.toContain('@/components/mdx/card')
+        expect(() => evaluate<{ Probe: () => Rendered }>(content).Probe()).not.toThrow()
+      })
+
+      it.each([
+        ['a function', 'const f = () => { var Warning = 1; return Warning }'],
+        ['a method', 'class A { m() { var Warning = 1; return Warning } }'],
+        ['a class static block', 'class A { static { var Warning = 1; void Warning } }'],
+        ['a block-level function', 'if (true) { function Warning() { return null } }'],
+        ['a block-level class', 'if (true) { class Warning {} }'],
+        ['a block-level let', 'if (true) { let Warning = () => null; void Warning }'],
+      ])('still binds <Warning> when only %s declares that name', (_label, declaration) => {
+        const content = copied(probe(declaration))
+        expect(content).toMatch(/const \{ Warning \} = builtinMdxComponents;/)
+        expect(evaluate<{ Probe: () => Rendered }>(content).Probe().type.displayName).toBe('Warning')
+      })
+    })
+
     describe('value references', () => {
       it('binds a built-in a module passes to createElement or aliases, like one it renders as a tag', () => {
         const content = copied([

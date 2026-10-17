@@ -109,22 +109,27 @@ function isFunctionLike(node: ts.Node): node is ts.FunctionLikeDeclaration {
 }
 
 /**
- * Every name a function scope binds: parameters, its own name, and each `var`
- * in its body outside nested functions (`var` is function-scoped wherever it
- * sits). `let`, `const`, `class` and `function` declarations belong to the
+ * Adds each `var` a scope declares to `into`: `var` is function-scoped wherever
+ * it sits (any block, loop, `try`, `switch` or label, destructured or not) and is
+ * not visible past a nested function, class (its methods and static blocks) or
+ * namespace. `let`, `const`, `class` and `function` declarations belong to the
  * block that holds them: see `lexicalNames`.
  */
+export function hoistedVarNames(root: ts.Node, into: Set<string>): void {
+  const collect = (node: ts.Node): void => {
+    if (isFunctionLike(node) || ts.isClassLike(node) || ts.isModuleDeclaration(node)) return
+    if (ts.isVariableDeclaration(node) && !ts.isCatchClause(node.parent) && !(ts.getCombinedNodeFlags(node) & ts.NodeFlags.BlockScoped)) bindingNames(node.name, into)
+    ts.forEachChild(node, collect)
+  }
+  collect(root)
+}
+
+/** Every name a function scope binds: parameters, its own name, and the `var`s of its body (`hoistedVarNames`). */
 function functionScope(fn: ts.FunctionLikeDeclaration): Set<string> {
   const scope = new Set<string>()
   if ((ts.isFunctionExpression(fn) || ts.isFunctionDeclaration(fn)) && fn.name) scope.add(fn.name.text)
   for (const parameter of fn.parameters) bindingNames(parameter.name, scope)
-  function collect(node: ts.Node): void {
-    if (ts.isVariableDeclaration(node) && !ts.isCatchClause(node.parent) && !(ts.getCombinedNodeFlags(node) & ts.NodeFlags.BlockScoped)) bindingNames(node.name, scope)
-    if (isFunctionLike(node)) return
-    ts.forEachChild(node, collect)
-  }
-  if (fn.body) ts.forEachChild(fn.body, collect)
-  if (fn.body && !ts.isBlock(fn.body)) collect(fn.body)
+  if (fn.body) hoistedVarNames(fn.body, scope)
   return scope
 }
 
@@ -714,16 +719,18 @@ export function isSelfContainedFunction(node: ts.Node): boolean {
     && hasOnlySafeMemberAccess(node)
 }
 
-/** Names a page's own ESM source (imports and top-level declarations) makes available to its expressions. */
+/** Names a page's own ESM source (imports, top-level declarations and hoisted `var`s) makes available to its expressions. */
 export function pageScopeNames(esmSources: ReadonlyArray<string>): Set<string> {
   const names = new Set<string>()
   for (const source of esmSources) {
-    for (const statement of parse(source).statements) {
+    const sf = parse(source)
+    for (const statement of sf.statements) {
       for (const local of importLocals(statement.getText())) names.add(local)
       if (ts.isImportDeclaration(statement)) continue
       const target = ts.isExportDeclaration(statement) || ts.isExportAssignment(statement) ? undefined : statement
       if (target) for (const name of declaredNames(target).names) names.add(name)
     }
+    hoistedVarNames(sf, names)
   }
   return names
 }

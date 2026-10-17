@@ -17,7 +17,7 @@ import { unified } from 'unified'
 import { parseFrontmatter } from './frontmatter.js'
 import { functionDeclaredNames, isFunctionInitializer, mdxComment, normalizeHtmlComments, normalizeExplicitHeadingIds, replaceOutsideCodeAndComments } from './mdx.js'
 import { resolveWithin } from './path.js'
-import { pageScopeNames, planInlineExtraction, unboundBuiltinTags, unboundTags } from './inline-extraction.js'
+import { hoistedVarNames, pageScopeNames, planInlineExtraction, unboundBuiltinTags, unboundTags } from './inline-extraction.js'
 import type { MigrationWarning, RenderedMigrationFile } from './types.js'
 
 interface MdxNode {
@@ -442,6 +442,8 @@ function implicitReactImports(source: ts.SourceFile, onShadowed?: (names: Array<
     if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) bind(declaration.name)
     if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) bindings.add(statement.name.text)
   }
+  // A `var` in a block, loop, `try` or `switch` at module level is a module binding too.
+  hoistedVarNames(source, bindings)
   function visit(node: ts.Node): void {
     if (ts.isIdentifier(node) && !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)
       && !(ts.isPropertyAssignment(node.parent) && node.parent.name === node)) references.add(node.text)
