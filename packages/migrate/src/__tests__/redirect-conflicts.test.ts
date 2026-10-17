@@ -7,7 +7,7 @@ import { createContext, Script } from 'node:vm'
 
 import { describe, expect, it } from 'vitest'
 
-import { migrateRepository } from '../index.js'
+import { migrateRepository, migrateUrl, type MigrationFetcher } from '../index.js'
 import { dropConflictingRedirects, dropUnroutableRedirects } from '../redirects.js'
 import type { MigrationBundle, MigrationDocsConfig, MigrationWarning } from '../types.js'
 
@@ -188,6 +188,37 @@ describe('Fern and Docusaurus redirects that hide a page', () => {
     expect(sources).toContain('/old')
     expect(sources).not.toContain('/guide')
     expect(messages(bundle)).toContain('/guide')
+  })
+})
+
+
+describe('URL migration redirects', () => {
+  it('leaves out a redirect Next.js cannot match literally, as a repository migration does', async () => {
+    const sourceUrl = 'https://product.test/docs/introduction'
+    const navigation = { global: null, dropdowns: [{ dropdown: 'Documentation', groups: [{ group: 'Start', pages: [{ title: 'Welcome', href: '/introduction' }] }] }] }
+    const docsConfig = {
+      $schema: 'https://mintlify.com/docs.json',
+      navigation: { pages: [] },
+      redirects: [{ source: '/client/c++/intro', destination: '/introduction' }, { source: '/old', destination: '/introduction' }],
+    }
+    const flight = [
+      `18:["$","$Provider",null,{"value":{"docsConfig":${JSON.stringify(docsConfig)}}}]`,
+      `19:["$","$Scoped",null,{"scopedNav":${JSON.stringify(navigation)}}]`,
+    ].join('\n')
+    const html = `<html><head><link href="/docs/_mintlify/site.css"></head><body><script>self.__next_f.push([1,${JSON.stringify(flight)}])</script></body></html>`
+    const markdown = '# Welcome\n\nWelcome to the product.'
+    const respond = (url: string, body: string, contentType: string) => ({ finalUrl: new URL(url), body, contentType })
+    const fetcher: MigrationFetcher = async (url, request) => {
+      if (url.toString() === sourceUrl && request.accept.startsWith('text/html')) return respond(sourceUrl, html, 'text/html')
+      if (url.toString() === sourceUrl) return { ...respond(sourceUrl, markdown, 'text/markdown'), headers: { 'x-llms-txt': '/docs/llms.txt' } }
+      if (url.pathname === '/docs/llms.txt') return respond(url.toString(), '- [Page](/docs/introduction)', 'text/plain')
+      if (url.pathname.replace(/\.md$/, '') === '/docs/introduction') return respond(url.toString(), markdown, 'text/markdown')
+      throw new Error(`missing fixture: ${url}`)
+    }
+    const bundle = await migrateUrl({ sourceUrl, platform: 'mintlify', fetcher })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old', destination: '/introduction' })
+    expect((bundle.docsConfig.redirects ?? []).map((redirect) => redirect.source)).not.toContain('/client/c++/intro')
+    expect(messages(bundle)).toContain('Skipped 1 redirect from /client/c++/intro')
   })
 })
 
