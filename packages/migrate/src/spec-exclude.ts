@@ -46,19 +46,21 @@ function refWithholdsFrom(ref: string, spec: SpecIdentity, specs: ReadonlyArray<
 /**
  * A ref that keeps an operation public keeps it in one spec only: the one a
  * page would resolve it to. A prefix that fits several specs, or none, keeps
- * nothing public; a remote address keeps it in that spec; a bare operation
- * cannot say which spec it means and keeps it in each.
+ * nothing public; a remote address keeps it in that spec. A bare operation
+ * names no spec, so it keeps nothing: callers name the spec it belongs to (its
+ * tab's, or the site's default) before passing it, and leave it out when that
+ * cannot be established.
  */
 function refKeepsIn(ref: string, spec: SpecIdentity, specs: ReadonlyArray<SpecIdentity>): boolean {
   const specRef = splitOpenApiRef(ref)?.specRef
-  if (!specRef) return true
+  if (!specRef) return false
   if (isRemoteSpecRef(specRef)) return specRefMatches(ref, spec.sourcePath, false)
   const { unique, sources } = resolvedSources(ref, specs)
   return unique && sources[0] === spec.sourcePath
 }
 
 /** `GET /x` / `webhook name` normalised so two spellings of one operation compare equal. */
-function operationKey(operation: string): string {
+export function operationKey(operation: string): string {
   const [first, ...rest] = operation.trim().split(/\s+/)
   return `${first.toLowerCase()} ${rest.join(' ')}`
 }
@@ -74,6 +76,7 @@ function keysFor(refs: ReadonlyArray<string>, names: (ref: string) => boolean): 
  * Operations only withheld refs name (`withheld`) and those a kept ref names
  * (`kept`), for one spec. `specs` are all the specs pages can name, so a ref is
  * resolved among them as a page's would be; without it the spec stands alone.
+ * Kept refs must name their spec: a bare one never keeps an operation public.
  */
 export function withheldOperationKeys(
   spec: SpecIdentity,

@@ -60,4 +60,75 @@ describe('migrate withheld operations parity', () => {
       's.mdx': page('groups: [admin]\nopenapi: "b/spec.json GET /internal"\n'),
     })).toEqual({ 'openapi/spec.json': ['/internal', '/x'], 'openapi/b-spec.json': ['/x'] })
   })
+
+  describe('bare operation references keep an operation public only in the spec they belong to', () => {
+    const specWith = (...paths: Array<string>): string => JSON.stringify({
+      openapi: '3.0.0',
+      info: { title: 'T', version: '1' },
+      paths: Object.fromEntries(paths.map((path) => [path, { get: { summary: path } }])),
+    })
+    const specs = {
+      'first.json': specWith('/ping'),
+      'second.json': specWith('/health', '/x'),
+      'public.json': specWith('/x'),
+    }
+    const withSpecs = (files: Record<string, string>): Record<string, Array<string>> => publishedPaths({ ...specs, ...files })
+    /** Two top-level specs, plus another API area bound to `public.json` whose navigation lists a bare `GET /x`. */
+    const twoDefaults = (config: string, pages: Array<string>): string => JSON.stringify(
+      config === 'docs.json'
+        ? { api: { openapi: ['first.json', 'second.json'] }, navigation: { tabs: [{ tab: 'Guides', pages }, { tab: 'Public API', openapi: 'public.json', pages: ['GET /x'] }] } }
+        : { api: { openapi: ['first.json', 'second.json'] }, tabs: [{ name: 'Public API', url: 'public', openapi: 'public.json' }], navigation: [{ group: 'Guides', pages }, { group: 'Public API', pages: ['GET /x'] }] },
+    )
+
+    for (const config of ['docs.json', 'mint.json']) {
+      it(`does not let a bare navigation entry of another API area keep a restricted operation public (${config})`, () => {
+        const result = withSpecs({
+          [config]: twoDefaults(config, ['pub', 's']),
+          'pub.mdx': page('openapi: "second.json GET /health"\n'),
+          's.mdx': page('groups: [admin]\nopenapi: "second.json GET /x"\n'),
+        })
+        expect(result['openapi/second.json']).toEqual(['/health'])
+        expect(result['openapi/first.json']).toEqual(['/ping'])
+      })
+
+      it(`does not let a bare page reference that belongs to no single spec keep a restricted operation public (${config})`, () => {
+        expect(withSpecs({
+          [config]: twoDefaults(config, ['pub', 's', 'bare']),
+          'pub.mdx': page('openapi: "second.json GET /health"\n'),
+          'bare.mdx': page('openapi: "GET /x"\n'),
+          's.mdx': page('groups: [admin]\nopenapi: "second.json GET /x"\n'),
+        })['openapi/second.json']).toEqual(['/health'])
+      })
+
+      it(`keeps an operation public in the site's default spec when a bare navigation entry names it (${config})`, () => {
+        expect(withSpecs({
+          [config]: JSON.stringify(config === 'docs.json'
+            ? { api: { openapi: 'public.json' }, navigation: { pages: ['pub', 's', 'GET /x'] } }
+            : { api: { openapi: 'public.json' }, navigation: [{ group: 'G', pages: ['pub', 's', 'GET /x'] }] }),
+          'pub.mdx': page(),
+          's.mdx': page('groups: [admin]\nopenapi: "public.json GET /x"\n'),
+        })['openapi/public.json']).toEqual(['/x'])
+      })
+    }
+
+    it('keeps an operation public in the spec the tab of a bare navigation entry binds', () => {
+      const result = withSpecs({
+        'docs.json': twoDefaults('docs.json', ['pub', 's']),
+        'pub.mdx': page(),
+        's.mdx': page('groups: [admin]\nopenapi: "public.json GET /x"\n'),
+      })
+      expect(result['openapi/public.json']).toEqual(['/x'])
+    })
+
+    it('keeps an operation public in the spec the tab listing a bare page reference binds', () => {
+      expect(withSpecs({
+        'docs.json': JSON.stringify({ navigation: { tabs: [
+          { tab: 'Guides', pages: ['s'] },
+          { tab: 'Public API', openapi: 'public.json', pages: ['bare'] },
+        ] } }),
+        'bare.mdx': page('openapi: "GET /x"\n'),
+        's.mdx': page('groups: [admin]\nopenapi: "public.json GET /x"\n'),
+      })['openapi/public.json']).toEqual(['/x'])
+    })
+  })
 })

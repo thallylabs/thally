@@ -1250,6 +1250,19 @@ describe('operations documented only on access-restricted pages', () => {
     expect(out.paths['/x'].get['x-excluded']).toBeUndefined()
   })
 
+  it('withholds an operation a public page names without a spec when the site has several, and says so', () => {
+    const bundle = site({
+      'docs.json': JSON.stringify({ api: { openapi: ['first.json', 'second.json'] }, navigation: { pages: ['pub', 's'] } }),
+      'first.json': spec,
+      'second.json': spec,
+      'pub.mdx': page('Pub', 'openapi: "GET /internal"\n'),
+      's.mdx': page('S', 'groups: [admin]\nopenapi: "second.json GET /internal"\n'),
+    })
+    const out = JSON.parse(String(bundle.assets.find((asset) => asset.path === 'openapi/second.json')!.content))
+    expect(out.paths['/internal'].get['x-excluded']).toBe(true)
+    expect(codes(bundle, 'gated-page').some((item) => /GET \/internal\) are also named by a published page or navigation entry that does not say which spec/.test(item.message))).toBe(true)
+  })
+
   describe('spec named by file stem', () => {
     const excluded = (bundle: MigrationBundle, path: string, operation: string): unknown =>
       JSON.parse(String(bundle.assets.find((asset) => asset.path === path)!.content)).paths[operation].get['x-excluded']

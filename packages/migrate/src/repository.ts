@@ -53,6 +53,7 @@ import {
 import type { FernApiSection } from './fern.js'
 import { projectFernNavigation, readFernConfig } from './fern.js'
 import { namesSeveralSpecs, resolveSpecRef, specNamedByPage, type SpecCandidate, type SpecRefResolution } from './openapi-ref.js'
+import { operationKey } from './spec-exclude.js'
 import { splitOpenApiRef, specRefBaseName, withSpecRef } from './openapi-ref.js'
 import { markExcluded, sharedSpecMessage, specRefMatches, withheldOperationKeys } from './spec-exclude.js'
 import { parseFrontmatter } from './frontmatter.js'
@@ -1286,20 +1287,76 @@ function exactReferenceKey(value: string): string {
     .replace(/\.(?:mdx?|rst|txt)$/i, '')
 }
 
-/** Operation references in navigation that is visible without source-side access. */
-function navigationOperationRefs(config: Record<string, unknown> | null): Array<string> {
-  const refs: Array<string> = []
-  const visit = (node: unknown): void => {
-    if (typeof node === 'string') { if (splitOpenApiRef(node)) refs.push(node) }
-    else if (Array.isArray(node)) node.forEach(visit)
+/**
+ * What visible navigation says about OpenAPI specs. An `openapi` on a container
+ * is the spec every operation and page under it belongs to (the nearest one
+ * wins); `undefined` means no container names one, `null` that one does but not
+ * as a single source.
+ */
+interface NavigationSpecContext {
+  operations: Array<{ ref: string; owner: string | null | undefined }>
+  /** Page references (`exactReferenceKey`, lower case) with the owner of each place they are listed. */
+  pageOwners: Map<string, Set<string | null | undefined>>
+}
+
+function containerSpec(node: Record<string, unknown>): string | null | undefined {
+  const value = node.openapi
+  if (value === undefined) return undefined
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>).source : value
+  return typeof source === 'string' && source.trim() && !splitOpenApiRef(source) ? source.trim() : null
+}
+
+/** Operation and page references in navigation that is visible without source-side access, each with the spec it sits under. */
+function navigationSpecContext(config: Record<string, unknown> | null): NavigationSpecContext {
+  const context: NavigationSpecContext = { operations: [], pageOwners: new Map() }
+  const visit = (node: unknown, owner: string | null | undefined, listed: boolean): void => {
+    if (typeof node === 'string') {
+      if (splitOpenApiRef(node)) context.operations.push({ ref: node, owner })
+      else if (listed) {
+        const key = exactReferenceKey(node).toLowerCase()
+        context.pageOwners.set(key, (context.pageOwners.get(key) ?? new Set()).add(owner))
+      }
+    }
+    else if (Array.isArray(node)) node.forEach((child) => visit(child, owner, true))
     else if (node && typeof node === 'object') {
       // A restricted container does not make any descendant operation public.
       if (navigationGateReason(node as Record<string, unknown>)) return
-      Object.values(node).forEach(visit)
+      const own = containerSpec(node as Record<string, unknown>)
+      Object.values(node).forEach((child) => visit(child, own === undefined ? owner : own, false))
     }
   }
-  visit(config?.navigation)
-  return refs
+  visit(config?.navigation, undefined, false)
+  return context
+}
+
+/**
+ * The references that keep an operation public, each naming the spec it is read
+ * in: a bare operation belongs to the spec of the navigation container it is
+ * listed under (for a page, the container that lists the page) or else to the
+ * site's default spec. A bare one whose spec cannot be told keeps nothing public
+ * (fail closed) and is returned in `unowned` so the loss can be reported.
+ */
+function keptOperationRefs(
+  published: ReadonlyArray<{ ref: string; file: string }>,
+  navigation: NavigationSpecContext,
+  defaultSpec: string | undefined,
+): { kept: Array<string>; unowned: Array<string> } {
+  const kept: Array<string> = []
+  const unowned: Array<string> = []
+  const add = (raw: string, owner: string | null | undefined): void => {
+    const ref = splitOpenApiRef(raw)
+    if (!ref) return
+    if (ref.specRef) kept.push(raw)
+    else if (owner) kept.push(withSpecRef(ref, owner))
+    else unowned.push(ref.operation)
+  }
+  for (const { ref, file } of published) {
+    // A page listed under several containers belongs to none of them alone.
+    const owners = new Set([...navigation.pageOwners.get(exactReferenceKey(file).toLowerCase()) ?? [undefined]].map((owner) => owner === undefined ? defaultSpec : owner))
+    add(ref, owners.size === 1 ? [...owners][0] : null)
+  }
+  for (const { ref, owner } of navigation.operations) add(ref, owner === undefined ? defaultSpec : owner)
+  return { kept, unowned }
 }
 
 /**
@@ -3797,6 +3854,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // Frontmatter `openapi:` references, split by whether the page is withheld.
   const withheldSpecRefs: Array<string> = []
   const publishedSpecRefs: Array<string> = []
+  const publishedSpecPages: Array<{ ref: string; file: string }> = []
   const withheldPaths = new Set<string>()
   // The access verdict of one Mintlify page: a bounded read of its frontmatter
   // head, combined with every navigation container listing it. Unreadable
@@ -3850,6 +3908,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const verdict = classifyPageGate(file)
       gateByPath.set(file.absolutePath, verdict)
       if (verdict.openapi) (verdict.reason ? withheldSpecRefs : publishedSpecRefs).push(verdict.openapi)
+      if (verdict.openapi && !verdict.reason) publishedSpecPages.push({ ref: verdict.openapi, file: file.relativePath })
       if (verdict.reason) withheldPaths.add(file.absolutePath)
     }
     for (const file of mintignoreFilteredFiles) {
@@ -5038,7 +5097,19 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     const allSpecs = resolveMintlifyApiSpecs(mintlifyConfig, files, warnings, remoteApiSpecs, pages.filter((page) => !restrictedPages.has(page)))
     // Operations docs.json lists explicitly stay public like those on published pages. A prefix that fits several specs
     // documents none of them, so it keeps nothing public: a restricted operation is never exposed by an ambiguous page.
-    const keptSpecRefs = [...publishedSpecRefs, ...navigationOperationRefs(mintlifyConfig)].filter((ref) => !namesSeveralSpecs(ref, allSpecs))
+    // A bare operation keeps one public only in the spec it belongs to: its navigation container's, or the site's default.
+    const navigation = navigationSpecContext(mintlifyConfig)
+    const defaultSources = new Set([
+      ...allSpecs.filter((spec) => !spec.pageOnly && spec.tabLabel === undefined).map((spec) => spec.sourcePath),
+      ...remoteApiSpecs.filter((spec) => spec.tabLabel === undefined).map((spec) => spec.url),
+    ])
+    const keptOperations = (fallbackSource?: string): ReturnType<typeof keptOperationRefs> => {
+      const defaultSpec = defaultSources.size === 0 ? fallbackSource : defaultSources.size === 1 ? [...defaultSources][0] : undefined
+      const { kept, unowned } = keptOperationRefs(publishedSpecPages, navigation, defaultSpec)
+      return { kept: kept.filter((ref) => !namesSeveralSpecs(ref, allSpecs)), unowned }
+    }
+    let { kept: keptSpecRefs, unowned: unownedOperations } = keptOperations()
+    const withheldKeys = new Set<string>()
     // Remote specs are downloaded later: carry the operations to withhold from them.
     for (const remote of remoteApiSpecs) {
       const { withheld, kept } = withheldOperationKeys({ sourcePath: remote.url, filename: remote.url }, withheldSpecRefs, keptSpecRefs)
@@ -5049,6 +5120,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const result = excludeWithheldOperations(spec, withheldSpecRefs, keptSpecRefs, allSpecs)
       spec.content = result.content
       withheldOperations.set(spec, result.excluded)
+      result.excluded.forEach((operation) => withheldKeys.add(operationKey(operation)))
     }
     const resolvedSpecs = allSpecs.filter((spec) => !spec.pageOnly)
     const pageOnlySpecs = allSpecs.filter((spec) => spec.pageOnly)
@@ -5111,7 +5183,10 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
           withheldAssetCount++
         } else {
           const fallbackSpec = { sourcePath: fallback.relativePath, filename, content: fallbackContent }
+          // The spec found by the scan is the site's default: bare operations belong to it.
+          ;({ kept: keptSpecRefs, unowned: unownedOperations } = keptOperations(fallback.relativePath))
           const pruned = excludeWithheldOperations(fallbackSpec, withheldSpecRefs, keptSpecRefs, [fallbackSpec, ...allSpecs])
+          pruned.excluded.forEach((operation) => withheldKeys.add(operationKey(operation)))
           if (!assets.some((asset) => asset.path === specAssetPath(filename))) {
             assets.push(specAsset(filename, pruned.content))
           }
@@ -5131,6 +5206,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     if (pageOnlySpecs.length > 0) {
       docsConfig = injectOpenApiSpecs(docsConfig, pageOnlySpecs, warnings)
       pageSpecs = [...pageSpecs, ...pageOnlySpecs]
+    }
+    const notKeptPublic = [...new Set(unownedOperations.filter((operation) => withheldKeys.has(operationKey(operation))))]
+    if (notKeptPublic.length > 0) {
+      warnings.push({
+        code: 'gated-page',
+        message: `${notKeptPublic.length} operation(s) withheld from a published OpenAPI spec (${notKeptPublic.join(', ')}) are also named by a published page or navigation entry that does not say which spec it means, so that reference did not keep them public. Write the spec in its openapi value (for example "openapi.json GET /x") to publish the operation.`,
+      })
     }
     const explainMissingSpec = (key: string): string => {
       const fits = resolveSpecRef(key, specFileCandidates(files), false)
