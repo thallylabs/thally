@@ -479,7 +479,7 @@ function implicitReactImports(source: ts.SourceFile, onShadowed?: (names: Array<
     references.has('React') && !bindings.has('React') ? "import * as React from 'react';" : '',
     hooks.length ? `import { ${hooks.join(', ')} } from 'react';` : '',
     ...implicitComponents,
-    registryNames.length ? builtinRegistryBindings(registryNames) : '',
+    registryNames.length ? builtinRegistryBindings(registryNames, identifierNames(source)) : '',
     usesMintlifyComponents ? mintlifyComponentsShim() : '',
   ].filter(Boolean).join('\n')
 }
@@ -499,14 +499,33 @@ function implicitReactImports(source: ts.SourceFile, onShadowed?: (names: Array<
 function resolveInlineBuiltinReferences(source: string, moduleNames: ReadonlySet<string>): string {
   const unresolved = unboundTags(source, moduleNames)
   if (unresolved.length === 0) return source
-  return [builtinRegistryBindings(unresolved), source].join('\n')
+  return [builtinRegistryBindings(unresolved, identifierNames(sourceFile(source, 'inline.jsx'))), source].join('\n')
 }
 
-/** Bind built-in components by name from the registry, the same way for every module the migration writes. */
-function builtinRegistryBindings(names: ReadonlyArray<string>): string {
+/** Every identifier a module spells anywhere, so a name it declares, imports or reads as a global is among them. */
+function identifierNames(root: ts.Node): Set<string> {
+  const names = new Set<string>()
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) names.add(node.text)
+    ts.forEachChild(node, visit)
+  }
+  visit(root)
+  return names
+}
+
+/**
+ * Bind built-in components by name from the registry, the same way for every module the migration writes.
+ * The registry is imported as `builtinMdxComponents` unless the module (`used`) already spells that name,
+ * as its own declaration, an import or a global it reads: it then takes the first free numeric suffix, so
+ * the import can neither redeclare the module's name nor capture a global it reads.
+ */
+function builtinRegistryBindings(names: ReadonlyArray<string>, used: ReadonlySet<string>): string {
+  const registry = 'builtinMdxComponents'
+  let alias = registry
+  for (let suffix = 2; used.has(alias); suffix++) alias = `${registry}${suffix}`
   return [
-    "import { builtinMdxComponents } from '@/components/mdx/builtin-components';",
-    `const { ${names.join(', ')} } = builtinMdxComponents;`,
+    `import { ${alias === registry ? registry : `${registry} as ${alias}`} } from '@/components/mdx/builtin-components';`,
+    `const { ${names.join(', ')} } = ${alias};`,
   ].join('\n')
 }
 

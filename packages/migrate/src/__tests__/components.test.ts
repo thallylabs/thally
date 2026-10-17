@@ -1,6 +1,7 @@
 /** Component migration preserves executable source without running source code. */
 
 import { compileSync } from '@mdx-js/mdx'
+import { transformSync } from 'esbuild'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
@@ -522,7 +523,7 @@ describe('repository component migration', () => {
     /** Execute a migrated module with React and the built-in registry stubbed; each built-in is a marker function named after its tag. */
     type Rendered = { type: { displayName?: string } }
     type Marker = { displayName?: string }
-    function evaluate<T>(moduleSource: string, fileName = 'module.tsx'): T {
+    function evaluate<T>(moduleSource: string, fileName = 'module.tsx', extraModules: Record<string, unknown> = {}): T {
       const { outputText } = ts.transpileModule(moduleSource, {
         fileName,
         compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 },
@@ -531,8 +532,9 @@ describe('repository component migration', () => {
       const registry = new Proxy({}, { get: (_target, name) => (typeof name === 'string' ? Object.assign(() => null, { displayName: name }) : undefined) })
       const stubs: Record<string, unknown> = {
         'react/jsx-runtime': { jsx: element, jsxs: element, Fragment: 'fragment' },
-        react: { createElement: (type: unknown, props: unknown) => element(type, props) },
+        react: { createElement: (type: unknown, props: unknown) => element(type, props), useState: (value: unknown) => [value, () => undefined] },
         '@/components/mdx/builtin-components': { builtinMdxComponents: registry },
+        ...extraModules,
       }
       const exports: Record<string, unknown> = {}
       new Function('require', 'exports', outputText)((id: string) => {
@@ -791,6 +793,97 @@ describe('repository component migration', () => {
         expect(copied('export const Probe = () => React.createElement(Error)')).not.toContain('builtinMdxComponents')
         expect(copied('export const Probe = () => { if (!ok) throw new Error("bad"); return <Error>nope</Error> }', {}, warnings)).not.toContain('builtinMdxComponents')
         expect(warnings).toHaveLength(1)
+      })
+    })
+
+    describe('registry import name', () => {
+      type Probed = { type: { displayName?: string }; props: { children?: unknown } }
+
+      /** Execute a migrated module, first requiring that a bundler accepts it: esbuild rejects a name declared twice ("has already been declared"). */
+      function run<T>(content: string, extraModules: Record<string, unknown> = {}): T {
+        expect(() => transformSync(content, { loader: 'jsx' })).not.toThrow()
+        return evaluate<T>(content, 'module.tsx', extraModules)
+      }
+
+      it('imports the registry under a free name when the module declares builtinMdxComponents itself', () => {
+        const content = copied('const builtinMdxComponents = { label: "local data" };\nexport const Probe = () => <Note>{builtinMdxComponents.label}</Note>;')
+        expect(content).toContain("import { builtinMdxComponents as builtinMdxComponents2 } from '@/components/mdx/builtin-components';")
+        expect(content).toContain('const { Note } = builtinMdxComponents2;')
+        const probe = run<{ Probe: () => Probed }>(content).Probe()
+        expect(probe.type.displayName).toBe('Note')
+        expect(probe.props.children).toBe('local data')
+      })
+
+      it('skips suffixes the module already uses', () => {
+        const content = copied('const builtinMdxComponents = 1, builtinMdxComponents2 = 2;\nexport const Probe = () => <Note>{builtinMdxComponents + builtinMdxComponents2}</Note>;')
+        expect(content).toContain('const { Note } = builtinMdxComponents3;')
+        expect(run<{ Probe: () => Probed }>(content).Probe().props.children).toBe(3)
+      })
+
+      it('imports the registry under a free name when the module imports builtinMdxComponents from elsewhere', () => {
+        const content = copied(
+          "import { builtinMdxComponents } from './data.js';\nexport const Probe = () => <Note>{builtinMdxComponents.label}</Note>;",
+          { 'data.js': "export const builtinMdxComponents = { label: 'imported data' };" },
+        )
+        expect(content).toContain('const { Note } = builtinMdxComponents2;')
+        const dataModule = content.match(/from "(\.\/[^"]+)"/)![1]
+        const probe = run<{ Probe: () => Probed }>(content, { [dataModule]: { builtinMdxComponents: { label: 'imported data' } } }).Probe()
+        expect(probe.type.displayName).toBe('Note')
+        expect(probe.props.children).toBe('imported data')
+      })
+
+      it('imports the registry under a free name when the module reads builtinMdxComponents as a global', () => {
+        const content = copied('export const Probe = () => <Note>{builtinMdxComponents.label}</Note>;')
+        expect(content).toContain('const { Note } = builtinMdxComponents2;')
+        const host = globalThis as Record<string, unknown>
+        host.builtinMdxComponents = { label: 'global data' }
+        try {
+          expect(run<{ Probe: () => Probed }>(content).Probe().props.children).toBe('global data')
+        } finally {
+          delete host.builtinMdxComponents
+        }
+      })
+
+      it('imports the registry under a free name in a hook component extracted into its own module', () => {
+        const root = fixture({})
+        const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+        migrator.transform([
+          "export const builtinMdxComponents = { label: 'page data' }",
+          'export const Gate = () => {',
+          '  const [n] = useState(0)',
+          '  return <Warning>{builtinMdxComponents.label}{n}</Warning>',
+          '}',
+          '',
+          '<Gate />',
+        ].join('\n'), join(root, 'index.mdx'))
+        const inline = String(migrator.files().find((file) => file.path.includes('/inline-'))!.content)
+        expect(inline).toContain('const { Warning } = builtinMdxComponents2;')
+        const probe = run<{ Gate: () => Probed }>(inline).Gate()
+        expect(probe.type.displayName).toBe('Warning')
+        expect(probe.props.children).toEqual(['page data', 0])
+      })
+
+      it('imports the registry under a free name in a page-level component that travels with an interactive root', () => {
+        const root = fixture({})
+        const migrator = createComponentMigrator(root, root, [], 'https://github.com/example/docs')
+        migrator.transform([
+          "export const builtinMdxComponents = { label: 'page data' }",
+          'export const Notice = () => <Warning>{builtinMdxComponents.label}</Warning>',
+          '',
+          '<div onClick={() => {}}>Click</div>',
+        ].join('\n'), join(root, 'index.mdx'))
+        const inline = String(migrator.files().find((file) => file.path.includes('/inline-'))!.content)
+        expect(inline).toContain('const { Warning } = builtinMdxComponents2;')
+        const probe = run<{ Notice: () => Probed }>(inline).Notice()
+        expect(probe.type.displayName).toBe('Warning')
+        expect(probe.props.children).toBe('page data')
+      })
+
+      it('keeps the plain name when nothing in the module uses it', () => {
+        const content = copied('export const Probe = () => <Note>x</Note>;')
+        expect(content).toContain("import { builtinMdxComponents } from '@/components/mdx/builtin-components';\nconst { Note } = builtinMdxComponents;")
+        expect(content).not.toContain(' as builtinMdxComponents')
+        expect(run<{ Probe: () => Probed }>(content).Probe().type.displayName).toBe('Note')
       })
     })
 
