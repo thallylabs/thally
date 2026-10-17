@@ -287,7 +287,7 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
     { ...bundle.docsConfig, tabs },
     bundle.localApiMounts,
   )
-  rewriteApiLinksInPages(pages, maps.operationLinks, maps.prefixLandings, warnings, bundle.localApiMounts)
+  rewriteApiLinksInPages(pages, maps.operationLinks, maps.prefixLandings, warnings, { mounts: bundle.localApiMounts, redirects })
   for (const redirect of mintlifyEndpointRedirects(maps, pages, redirects, warnings)) {
     redirects.push(redirect)
     endpointUrls.set(literalRoute(redirect.source) ?? redirect.source, redirect.destination)

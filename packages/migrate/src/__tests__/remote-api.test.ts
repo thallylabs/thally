@@ -600,3 +600,24 @@ describe('remote OpenAPI spec redirects guessed from the last two segments of a 
     expect(redirectsOf(result).has('/api-reference/alpha/make-a')).toBe(false)
   })
 })
+
+describe('body links to an address an authored redirect answers, inside an API directory', () => {
+  const usersSpec = JSON.stringify({ openapi: '3.0.0', info: { title: 'Example', version: '1' }, paths: { '/users': { get: { summary: 'List users', tags: ['users'] } } } })
+  const redirects = [
+    { source: '/reference/old-users', destination: '/reference/users/list-users' },
+    { source: '/reference/old-users-slash/', destination: '/reference/users/list-users' },
+    { source: '/reference/gone', destination: '/somewhere-else' },
+  ]
+
+  it('leaves the link to the authored redirect instead of sending it to the overview', async () => {
+    const input = mountedBundle()
+    input.pages = [{ ...input.pages[0], body: ['[a](/reference/old-users)', '[b](/reference/old-users-slash)', '[c](/reference/gone#part)', '[d](/reference/users/list-users)', '[e](/reference/nothing)'].join('\n') }]
+    input.docsConfig = { tabs: input.docsConfig.tabs, redirects }
+    input.remoteApiSpecs = [{ url: MOUNTED_URL, tabLabel: 'API reference', directories: [{ directory: 'reference' }] }]
+    const result = await hydrateRemoteApiSpecs(input, async (url) => ({ finalUrl: url, body: usersSpec, contentType: 'application/json' }))
+    expect(result.pages[0].body).toBe(['[a](/reference/old-users)', '[b](/reference/old-users-slash)', '[c](/reference/gone#part)', '[d](/api/default/users/get)', '[e](/api)'].join('\n'))
+    // The authored redirect still ends at the endpoint page, in one hop.
+    expect(result.docsConfig.redirects).toContainEqual({ source: '/reference/old-users', destination: '/api/default/users/get' })
+    expect(result.warnings.filter((warning) => warning.message.includes('matched no endpoint'))[0]?.message).toMatch(/1 link\(s\).*\/reference\/nothing\./)
+  })
+})

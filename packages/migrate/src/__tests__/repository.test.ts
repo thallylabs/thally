@@ -1492,6 +1492,24 @@ describe('Mintlify repository migration', () => {
     expect(bundle.warnings.map((warning) => warning.message).join('\n')).not.toContain('matched no endpoint')
   })
 
+  it('leaves a body link to an authored redirect source under a local spec directory to that redirect, not the overview', () => {
+    const root = fixture()
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [{ tab: 'API', openapi: { source: 'o.yaml', directory: 'ref' } }, { tab: 'Docs', pages: ['index'] }] },
+      redirects: [{ source: '/ref/old-thing', destination: '/ref/things/create-a' }],
+    }))
+    writeFileSync(join(root, 'index.mdx'), '---\ntitle: Home\n---\n\n[Old](/ref/old-thing) and [Thing](/ref/things/create-a) and [Lost](/ref/lost).')
+    writeFileSync(join(root, 'o.yaml'), [
+      'openapi: 3.0.0', 'info: { title: T, version: "1" }', 'paths:',
+      '  /a: { post: { summary: Create A, tags: [things], responses: { "200": { description: ok } } } }',
+    ].join('\n'))
+
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+
+    expect(bundle.pages.map((page) => page.body).join('\n')).toContain('[Old](/ref/old-thing) and [Thing](/api/default/a/post) and [Lost](/api).')
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/ref/old-thing', destination: '/ref/things/create-a' })
+  })
+
   it('keeps every operation listed under a directory that two API tabs of one name share', () => {
     const source = 'https://specs.example.com/openapi.json'
     const migrate = (second: Record<string, unknown>) => {

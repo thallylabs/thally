@@ -1956,13 +1956,22 @@ export function rewriteApiLinksInPages(
   operationLinks: Map<string, string>,
   prefixLandings: Map<string, string>,
   warnings: Array<MigrationWarning>,
-  /** Directories of mounts these maps do not cover; a link under one deeper than the mount it would map to is left for that mount's own pass. */
-  otherMounts: ReadonlyArray<string> = [],
+  /**
+   * What answers an address other than these maps. `mounts`: directories of
+   * mounts they do not cover; a link under one deeper than the mount it would
+   * map to is left for that mount's own pass. `redirects`: an address one of
+   * them redirects is answered by it.
+   */
+  answered: { mounts?: ReadonlyArray<string>; redirects?: ReadonlyArray<{ source: string }> } = {},
 ): void {
   if (operationLinks.size === 0 && prefixLandings.size === 0) return
   const unmatched = new Set<string>()
   const served = servedRoutes(pages)
-  const others = otherMounts.map(mountPrefix).filter(Boolean)
+  for (const { source } of answered.redirects ?? []) {
+    const route = literalRoute(source)
+    if (route) served.add(route)
+  }
+  const others = (answered.mounts ?? []).map(mountPrefix).filter(Boolean)
   for (const page of pages) {
     page.body = rewriteApiOperationLinks(page.body, operationLinks, prefixLandings, served, unmatched, others)
   }
@@ -1986,8 +1995,9 @@ export function rewriteApiLinksInPages(
  * original target is recorded into `unmatched` so the caller can emit one
  * aggregated warning instead of one per link. Links outside every known
  * prefix are left untouched — still broken, but no worse than before this
- * rewrite existed. A link to a page of the site (an authored guide inside an
- * API directory, say) is never rewritten: that page still serves the address.
+ * rewrite existed. A link to an address the site answers itself (an authored
+ * guide inside an API directory, say, or a redirect from an old URL) is never
+ * rewritten: that page or redirect still serves the address.
  */
 function rewriteApiOperationLinks(
   body: string,
@@ -5175,7 +5185,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         docsConfig,
         remoteMounts,
       )
-      rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings, remoteMounts)
+      rewriteApiLinksInPages(pages, operationLinks, prefixLandings, warnings, { mounts: remoteMounts, redirects: docsConfig.redirects })
       // Mintlify's own endpoint URLs keep working: they have no page of their own here.
       const endpointRedirects = mintlifyEndpointRedirects({ mintlifyPages, duplicatePages }, pages, docsConfig.redirects ?? [], warnings)
       if (endpointRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...endpointRedirects] }
