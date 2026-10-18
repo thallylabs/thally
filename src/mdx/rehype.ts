@@ -46,7 +46,10 @@ import langTypescript from 'shiki/langs/typescript.mjs'
 import langVue from 'shiki/langs/vue.mjs'
 import langYaml from 'shiki/langs/yaml.mjs'
 import { visit } from 'unist-util-visit'
+import { getDocsJsonConfig } from '../lib/docs-json-config'
 import { slugify } from '../lib/utils'
+import type { DocsJsonConfig } from '../data/docs'
+import { smartenTree } from './smart-quotes'
 
 /**
  * A theme whose colors are CSS variables, so code blocks stay theme-aware via
@@ -792,4 +795,17 @@ function rehypeUniqueHeadingIds() {
   }
 }
 
-export const rehypePlugins = [rehypeParseCodeBlocks, rehypeShiki, rehypeUniqueHeadingIds]
+/**
+ * Typographic quotes in rendered prose, when docs.json sets `smartQuotes: true`.
+ * It runs last so heading ids and step ids, which read the text before this step,
+ * keep their straight-quote slugs. The setting is read per page rather than when
+ * the plugin is created, so a release configuration binding applies to pages
+ * that are compiled at request time.
+ */
+function rehypeSmartQuotes() {
+  return (tree: Root) => {
+    if (getDocsJsonConfig<Pick<DocsJsonConfig, 'smartQuotes'>>().smartQuotes === true) smartenTree(tree)
+  }
+}
+
+export const rehypePlugins = [rehypeParseCodeBlocks, rehypeShiki, rehypeUniqueHeadingIds, rehypeSmartQuotes]

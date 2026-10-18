@@ -299,7 +299,7 @@ export interface DocsJsonFeedback {
 export type StructuralTheme = 'default' | 'maple' | 'sharp' | 'minimal'
 export type ContentIconTone = 'neutral' | 'accent'
 
-interface DocsJsonConfig {
+export interface DocsJsonConfig {
   tabs: Array<DocsJsonTab>
   /** Local, customer-owned stylesheets served from public/. */
   stylesheets?: Array<string>
@@ -307,6 +307,12 @@ interface DocsJsonConfig {
   breadcrumbs?: boolean
   /** Text above each page title: its nearest group (default) or its full group path. */
   eyebrow?: 'group' | 'path'
+  /**
+   * Typographic quotes in rendered prose: straight quotes become curly ones, as in Mintlify.
+   * Defaults to false. Code, heading ids, Markdown, `llms.txt` and search text keep straight quotes.
+   * Applied by the MDX pipeline (`src/mdx/rehype.ts`), which reads it from docs.json itself.
+   */
+  smartQuotes?: boolean
   /** Manual API pages (`api:` frontmatter): default server(s) and auth for the playground. */
   api?: {
     mdx?: {
