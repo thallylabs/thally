@@ -28,7 +28,7 @@ export function ZoomableContent({ children }: ZoomableContentProps) {
 
       {open ? (
         <div
-          className="fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center bg-background/80 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center bg-background/80 backdrop-blur-xs"
           onClick={() => setOpen(false)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') setOpen(false)

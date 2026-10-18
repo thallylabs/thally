@@ -1,7 +1,6 @@
+@import 'tailwindcss';
 @import '../styles/brand.css';
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@config '../../tailwind.config.ts';
 
 /* ============================================================================
    Structural theme CSS variables
@@ -103,14 +102,16 @@
   --tw-prose-headings: hsl(var(--thally-foreground));
 }
 
-* {
-  @apply border-border;
-}
+@layer base {
+  * {
+    @apply border-border;
+  }
 
-body {
-  @apply bg-background text-foreground antialiased;
-  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
-  letter-spacing: normal;
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    letter-spacing: normal;
+  }
 }
 
 /* Text selection — an olive-family wash in light (the leaf's own green),

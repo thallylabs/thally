@@ -43,7 +43,7 @@ export function MobileNav({
         </button>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" />
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-xs" />
         <Dialog.Content className="fixed inset-y-0 left-0 z-50 flex w-full max-w-[min(85vw,320px)] flex-col border-r border-border bg-background shadow-2xl">
           <Dialog.Title className="sr-only">Primary navigation</Dialog.Title>
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/50 px-4 py-4">

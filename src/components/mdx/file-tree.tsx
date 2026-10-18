@@ -37,7 +37,7 @@ export function Folder({ name, defaultOpen = false, children }: FolderProps) {
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="flex items-center gap-1.5 rounded py-1 hover:text-foreground text-foreground/80 transition"
+        className="flex items-center gap-1.5 rounded-sm py-1 hover:text-foreground text-foreground/80 transition"
       >
         <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-foreground/40 transition-transform', open && 'rotate-90')} />
         {open ? (

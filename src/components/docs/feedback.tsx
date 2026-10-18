@@ -125,7 +125,7 @@ export function Feedback({
               maxLength={500}
               disabled={messageState === 'submitting'}
               placeholder="Tell us what could be clearer"
-              className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             />
             <Button
               type="submit"

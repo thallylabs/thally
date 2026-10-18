@@ -52,7 +52,7 @@ export function Prompt({ description, children, actions = ['copy'], icon, iconTy
         {uniqueActions.includes('copy') ? (
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:border-foreground/25 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:border-foreground/25 hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent"
             onClick={() => void copyText(copyValue).then(() => {
               setCopyStatus('copied')
               window.setTimeout(() => setCopyStatus('idle'), 1200)
@@ -66,7 +66,7 @@ export function Prompt({ description, children, actions = ['copy'], icon, iconTy
           </button>
         ) : null}
         {uniqueActions.includes('cursor') ? (
-          <a href={cursorHref} className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:border-foreground/25 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">Open in Cursor</a>
+          <a href={cursorHref} className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:border-foreground/25 hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent">Open in Cursor</a>
         ) : null}
       </div>
     </section>

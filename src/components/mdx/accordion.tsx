@@ -72,7 +72,7 @@ export function Accordion({ title, description, id, icon, iconType, defaultOpen,
       <summary
         data-accordion-trigger
         aria-controls={`${value}-accordion-children`}
-        className="group flex w-full cursor-pointer list-none items-start justify-between gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent [&::-webkit-details-marker]:hidden"
+        className="group flex w-full cursor-pointer list-none items-start justify-between gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/35 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent [&::-webkit-details-marker]:hidden"
       >
         <span className="flex min-w-0 gap-3">
           {icon ? (

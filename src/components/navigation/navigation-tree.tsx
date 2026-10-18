@@ -23,7 +23,7 @@ interface NavigationTreeProps {
 function MethodPill({ method }: { method: string }) {
   const token = getMethodToken(method)
   return (
-    <span className={cn('shrink-0 rounded px-1 py-px font-mono text-[10px] font-semibold uppercase leading-4', token.bg, token.text)}>
+    <span className={cn('shrink-0 rounded-sm px-1 py-px font-mono text-[10px] font-semibold uppercase leading-4', token.bg, token.text)}>
       {method === 'DELETE' ? 'DEL' : method}
     </span>
   )
@@ -38,7 +38,7 @@ function NavigationPage({ node, pathname, onNavigate, mobile, showGroupIcons }: 
         aria-current={active ? 'page' : undefined}
         onClick={onNavigate}
         className={cn(
-          'group relative block rounded-lg px-2.5 text-left transition-colors duration-150 focus:outline-none',
+          'group relative block rounded-lg px-2.5 text-left transition-colors duration-150 focus:outline-hidden',
           mobile ? 'py-1.5 text-sm' : 'py-1.5 text-sm leading-6',
           active
             ? 'bg-accent/10 font-normal text-accent'
@@ -54,7 +54,7 @@ function NavigationPage({ node, pathname, onNavigate, mobile, showGroupIcons }: 
             />
           ) : null}
           {node.item.method ? <MethodPill method={node.item.method} /> : null}
-          <span className="line-clamp-2 break-words">{node.item.title}</span>
+          <span className="line-clamp-2 wrap-break-word">{node.item.title}</span>
           {node.item.badge ? <Badge className="shrink-0 text-[10px] uppercase">{node.item.badge}</Badge> : null}
         </span>
         {mobile && node.item.description ? (
@@ -136,8 +136,8 @@ export function NavigationSections({ sections, title, pathname, onNavigate, mobi
   return (
     <div className="space-y-3" data-navigation-window="true">
       {hasWindow ? <div className="flex items-center justify-between gap-2">
-        <button type="button" disabled={projection.start === 0} onClick={event => page('earlier', event.detail === 0)} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-40">Show earlier entries</button>
-        <button type="button" disabled={projection.end === projection.total} onClick={event => page('later', event.detail === 0)} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-40">Show later entries</button>
+        <button type="button" disabled={projection.start === 0} onClick={event => page('earlier', event.detail === 0)} className="rounded-sm px-2 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-40">Show earlier entries</button>
+        <button type="button" disabled={projection.end === projection.total} onClick={event => page('later', event.detail === 0)} className="rounded-sm px-2 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-40">Show later entries</button>
       </div> : null}
       {hasWindow ? <p role="status" aria-live="polite" className="px-2 text-xs text-muted-foreground">Navigation entries {projection.start + 1}–{projection.end} of {projection.total}</p> : null}
       <div ref={content} className="space-y-6">{renderRows(projection.roots)}</div>

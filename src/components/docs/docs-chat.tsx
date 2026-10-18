@@ -519,13 +519,13 @@ export function DocsChat({
                         <AnswerSources sources={msg.sources ?? []} />
                         {msg.content ? (
                           <>
-                          <div className="prose prose-sm dark:prose-invert max-w-none break-words
-                            [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_:not(pre)>code]:break-words
-                            prose-p:leading-relaxed prose-p:my-2 first:prose-p:mt-0
+                          <div className="prose prose-sm dark:prose-invert max-w-none wrap-break-word
+                            [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_:not(pre)>code]:wrap-break-word
+                            prose-p:leading-relaxed prose-p:my-2 prose-p:first:mt-0
                             prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-1
                             prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5
-                            prose-code:rounded prose-code:bg-zinc-100 prose-code:dark:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
-                            prose-pre:rounded-xl prose-pre:bg-zinc-100 prose-pre:dark:bg-zinc-800 prose-pre:text-zinc-800 prose-pre:dark:text-zinc-100 prose-pre:text-xs prose-pre:p-4
+                            prose-code:rounded-sm prose-code:bg-zinc-100 dark:prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:text-xs prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
+                            prose-pre:rounded-xl prose-pre:bg-zinc-100 dark:prose-pre:bg-zinc-800 prose-pre:text-zinc-800 dark:prose-pre:text-zinc-100 prose-pre:text-xs prose-pre:p-4
                             [&_pre]:border-0 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:border-0 [&_pre_code]:text-inherit [&_pre_code]:rounded-none [&_pre_*]:!no-underline [&_pre_*]:!border-0 [&_pre_*]:!decoration-transparent [&_pre_*]:!shadow-none
                             prose-blockquote:border-l-accent/40 prose-blockquote:text-muted-foreground
                             [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
@@ -585,7 +585,7 @@ export function DocsChat({
                           type="button"
                           onClick={() => removeScreenshot(image.id)}
                           aria-label={`Remove ${image.name}`}
-                          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/90 text-foreground opacity-80 shadow-sm backdrop-blur transition-opacity hover:opacity-100 focus-visible:opacity-100"
+                          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/90 text-foreground opacity-80 shadow-xs backdrop-blur-sm transition-opacity hover:opacity-100 focus-visible:opacity-100"
                         >
                           <X className="h-3 w-3" aria-hidden="true" />
                         </button>
@@ -637,7 +637,7 @@ export function DocsChat({
                   }}
                   placeholder={enabled ? 'Ask a question…' : 'AI chat is unavailable.'}
                   disabled={loading || !enabled}
-                  className="block w-full resize-none bg-transparent px-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
+                  className="block w-full resize-none bg-transparent px-1 text-sm leading-relaxed outline-hidden placeholder:text-muted-foreground disabled:opacity-50"
                   style={{ maxHeight: '160px' }}
                 />
               <div className="mt-2 flex items-center justify-between">

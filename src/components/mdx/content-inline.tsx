@@ -52,7 +52,7 @@ const badgeSizeStyles: Record<BadgeSize, string> = { xs: 'px-1.5 py-0 text-[0.62
 /** Render a semantic inline status or category label. */
 export function Badge({ variant = 'default', color, size = 'md', rounded = true, shape, icon, iconType, stroke = false, disabled = false, className, children }: BadgeProps) {
   const iconNode = typeof icon === 'string' ? <Icon icon={icon} iconType={iconType} className="h-[1em] w-[1em]" /> : icon
-  const shapeClass = shape === 'pill' ? 'rounded-full' : shape === 'rounded' || rounded ? 'rounded-[var(--theme-badge-radius)]' : 'rounded-sm'
+  const shapeClass = shape === 'pill' ? 'rounded-full' : shape === 'rounded' || rounded ? 'rounded-[var(--theme-badge-radius)]' : 'rounded-xs'
   return (
     <span
       aria-disabled={disabled || undefined}
@@ -133,7 +133,7 @@ export function Tooltip({ tip, headline, cta, href, children }: TooltipProps) {
 
   return (
     <span className="group/tooltip relative inline-flex align-baseline" onPointerEnter={updatePosition} onFocus={updatePosition}>
-      <button ref={triggerRef} type="button" aria-describedby={tooltipId} className="cursor-pointer border-0 bg-transparent p-0 font-inherit text-inherit underline decoration-dotted underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+      <button ref={triggerRef} type="button" aria-describedby={tooltipId} className="cursor-pointer border-0 bg-transparent p-0 font-inherit text-inherit underline decoration-dotted underline-offset-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent">
         {children}
       </button>
       <span

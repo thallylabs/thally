@@ -4,7 +4,7 @@ import type { ButtonHTMLAttributes } from 'react'
 import { cn } from '@/lib/utils'
 
 const VARIANTS: Record<string, string> = {
-  solid: 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 active:scale-[0.98]',
+  solid: 'bg-primary text-primary-foreground shadow-xs hover:bg-primary/90 active:scale-[0.98]',
   outline: 'border border-border text-foreground hover:bg-muted',
   ghost: 'text-foreground hover:bg-muted',
 }
@@ -37,7 +37,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     <Component
       ref={ref as never}
       className={cn(
-        'inline-flex items-center justify-center rounded-[var(--theme-control-radius)] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50',
+        'inline-flex items-center justify-center rounded-[var(--theme-control-radius)] font-medium transition focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50',
         VARIANTS[variant],
         SIZES[size],
         className,

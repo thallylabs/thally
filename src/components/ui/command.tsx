@@ -26,7 +26,7 @@ export function CommandInput(props: React.ComponentProps<typeof CommandPrimitive
   return (
     <div className="flex items-center border-b border-border px-3">
       <CommandPrimitive.Input
-        className="flex-1 bg-transparent py-4 text-sm outline-none placeholder:text-foreground/50"
+        className="flex-1 bg-transparent py-4 text-sm outline-hidden placeholder:text-foreground/50"
         {...props}
       />
     </div>
@@ -78,8 +78,8 @@ export function CommandDialog({ children, ...props }: CommandDialogProps) {
   return (
     <Dialog.Root {...props}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
-        <Dialog.Content className="fixed inset-x-0 top-24 z-50 mx-auto w-full max-w-xl px-4 outline-none">
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs" />
+        <Dialog.Content className="fixed inset-x-0 top-24 z-50 mx-auto w-full max-w-xl px-4 outline-hidden">
           <Dialog.Title className="sr-only">Command menu</Dialog.Title>
           {children}
           <Dialog.Close className="absolute right-6 top-4 text-foreground/50 transition hover:text-foreground">

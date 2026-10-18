@@ -212,7 +212,7 @@ export function UpdateFilterControls({
       <div className="flex items-center justify-between">
         <span className="font-medium text-foreground/80">Filters</span>
         {selectedTags.length ? (
-          <button type="button" onClick={onClear} className="rounded-full px-3 text-sm font-medium text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          <button type="button" onClick={onClear} className="rounded-full px-3 text-sm font-medium text-foreground/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent">
             Clear
           </button>
         ) : null}
@@ -227,7 +227,7 @@ export function UpdateFilterControls({
               type="button"
               aria-pressed={pressed}
               onClick={() => onToggle(tag)}
-              className={`rounded-full px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${pressed ? 'bg-accent text-accent-foreground' : 'bg-muted text-foreground/70 hover:bg-muted/70'}`}
+              className={`rounded-full px-3 py-1 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent ${pressed ? 'bg-accent text-accent-foreground' : 'bg-muted text-foreground/70 hover:bg-muted/70'}`}
             >
               {tag}
             </button>
