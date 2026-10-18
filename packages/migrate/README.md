@@ -125,6 +125,9 @@ operation list, which still only drives the endpoint redirects.
 
 Mintlify `styling.eyebrows: "breadcrumbs"` becomes `eyebrow: "path"` (the full
 group path above the page title); `"section"` or no setting writes nothing.
+Mintlify sources also get `smartQuotes: true`, because Mintlify renders straight
+quotes in prose as curly ones; the setting leaves code, heading ids, Markdown and
+`llms.txt` as written.
 
 Page `openapi:` frontmatter with a spec prefix
 (`openapi: "specs/openapi-b.yaml GET /widgets/{id}"`) is rewritten to where the

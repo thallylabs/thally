@@ -1363,6 +1363,8 @@ function projectedCompatibleConfig(config: Record<string, unknown>, warnings: Ar
   return {
     // Mintlify pages show a group eyebrow above the title and no breadcrumb trail.
     breadcrumbs: false,
+    // Mintlify typesets straight quotes in prose as curly ones.
+    smartQuotes: true,
     // `styling.eyebrows: "breadcrumbs"` shows the whole group path; "section" (the default) shows the nearest group.
     ...(objectValue(config.styling)?.eyebrows === 'breadcrumbs' ? { eyebrow: 'path' as const } : {}),
     ...(projectedTheme(config.theme) ? { theme: projectedTheme(config.theme) } : {}),

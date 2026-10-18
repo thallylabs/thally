@@ -82,6 +82,8 @@ export interface MigrationDocsConfig {
   breadcrumbs?: boolean
   /** `path` shows the full group path above the title (Mintlify `styling.eyebrows: "breadcrumbs"`); the default shows the nearest group. */
   eyebrow?: 'group' | 'path'
+  /** `true` renders straight quotes in prose as curly ones, as Mintlify does. */
+  smartQuotes?: boolean
   tabs: Array<MigrationNavigationTab>
   navigation?: {
     /** How sibling documentation collections are presented to readers. */

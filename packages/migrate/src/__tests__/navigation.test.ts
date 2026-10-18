@@ -1149,6 +1149,18 @@ describe('Mintlify styling.eyebrows', () => {
   })
 })
 
+describe('Mintlify smart quotes', () => {
+  const docsConfigOf = (config: Record<string, unknown> = {}) => projectMintlifyNavigation({
+    ...config,
+    navigation: { pages: ['index'] },
+  }).docsConfig
+
+  it('turns on typographic quotes, which Mintlify applies to prose', () => {
+    expect(docsConfigOf().smartQuotes).toBe(true)
+    expect(docsConfigOf({ styling: { eyebrows: 'breadcrumbs' } }).smartQuotes).toBe(true)
+  })
+})
+
 describe('Mintlify config size limit', () => {
   it('reads a docs.json larger than the old 2 MB page limit, up to the 20 MB config limit', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-config-'))
