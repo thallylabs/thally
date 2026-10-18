@@ -19,6 +19,18 @@ visible during review.
 | Duplicate object-key warnings during the OpenNext bundle | `shiki@4.3.0` -> `@shikijs/engine-javascript@4.3.0` -> `oniguruma-to-es@4.3.6` | `oniguruma-to-es@4.3.6` is the newest compatible release. The warnings are produced only after the upstream source's option spreads are transformed by the build pipeline; the source object does not contain duplicate authored keys. |
 | Low-severity `esbuild` development-server advisory in workspace tooling | `tsup@8.5.1` -> `esbuild@0.27.7` | `tsup@8.5.1` is current and constrains esbuild to `^0.27.0`; the patched esbuild release is outside that range. The affected development server is not shipped in the generated application. |
 
+## Tailwind CSS 4 warnings
+
+- `MODULE_TYPELESS_PACKAGE_JSON` can appear when `@tailwindcss/postcss@4.3.3`
+  loads `tailwind.config.ts` from the existing CommonJS root package. Node
+  reparses that configuration as ESM. The build succeeds. Keep the warning
+  visible; changing the root module format affects more than styling.
+- Prose that includes a wildcard placeholder such as
+  `text-[length:var(--text-*)]` can produce an optimizer warning. Tailwind 4.3.3
+  drops the invalid declaration and completes the production build. Valid
+  arbitrary-value classes still compile. The v3 JavaScript content transform
+  is no longer part of the runtime.
+
 ## Review policy
 
 Do not add warning-text filters or broad dependency overrides to silence this

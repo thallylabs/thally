@@ -241,7 +241,7 @@ Deploy anywhere that supports Next.js — Vercel, Netlify, Cloudflare, Docker, e
 ## Stack
 
 - Next.js 16 / TypeScript / App Router
-- Tailwind CSS 3.4 + `@tailwindcss/typography`
+- Tailwind CSS 4.3 + `@tailwindcss/typography`
 - Radix UI (dialog, scroll-area, accordion, slot)
 - MDX via `next-mdx-remote` + Shiki syntax highlighting
 - `next-themes` for dark mode, `nuqs` for URL state, `zustand` for sidebar state
@@ -267,3 +267,5 @@ Known warnings that are pinned to upstream toolchains are tracked in
 ## License
 
 MIT
+
+Existing sites can follow the [Tailwind CSS 4 update guide](docs/tailwind-v4-upgrade.md).

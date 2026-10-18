@@ -115,6 +115,17 @@ Use this command, or the template's **Update Thally framework** workflow, for
 customer sites. **Sync Thally runtime** is the canonical starter maintainer
 workflow and cannot run against a customer repository.
 
+## Update a Tailwind 3 site
+
+After a Tailwind 4 scaffold is promoted and its CLI is published, review
+`thally starter update` before applying the framework update. Then run
+`npm ci` and review utilities in your own MDX and custom components. The
+updater preserves those files; it does not rename their classes.
+
+Follow the [Tailwind CSS 4 update guide](../../docs/tailwind-v4-upgrade.md) for
+class changes, browser requirements, conflict handling, and verification.
+Keep your existing release and lockfile if you still need Tailwind 3.
+
 ## How it works
 
 - **Framework commands** (`dev`, `build`, `start`, `deploy`) prefer the
