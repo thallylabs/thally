@@ -68,7 +68,7 @@ export function OperationPanel({ operation, children, showDescription = true, sh
         {/* Header */}
         <header className="space-y-6">
           {showTitle ? (
-            <h1 className="wrap-break-word font-heading text-4xl font-semibold leading-10 tracking-[-0.025em] text-foreground">
+            <h1 className="break-words font-heading text-4xl font-semibold leading-10 tracking-[-0.025em] text-foreground">
               {operation.title}
             </h1>
           ) : null}

@@ -403,7 +403,7 @@ function CodePanel({
             resolvedLines && resolvedWrap && 'thally-code-hang',
             collapsed && 'thally-code-collapsed overflow-hidden',
             'px-[18px] py-4 font-mono text-[0.84rem] leading-[1.7] text-foreground',
-            resolvedWrap ? 'whitespace-pre-wrap wrap-break-word' : 'overflow-x-auto',
+            resolvedWrap ? 'whitespace-pre-wrap break-words' : 'overflow-x-auto',
             languageClass,
           )}
           suppressHydrationWarning

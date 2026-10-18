@@ -519,8 +519,8 @@ export function DocsChat({
                         <AnswerSources sources={msg.sources ?? []} />
                         {msg.content ? (
                           <>
-                          <div className="prose prose-sm dark:prose-invert max-w-none wrap-break-word
-                            [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_:not(pre)>code]:wrap-break-word
+                          <div className="prose prose-sm dark:prose-invert max-w-none break-words
+                            [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_:not(pre)>code]:break-words
                             prose-p:leading-relaxed prose-p:my-2 prose-p:first:mt-0
                             prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-1
                             prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5

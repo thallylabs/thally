@@ -54,7 +54,7 @@ function NavigationPage({ node, pathname, onNavigate, mobile, showGroupIcons }: 
             />
           ) : null}
           {node.item.method ? <MethodPill method={node.item.method} /> : null}
-          <span className="line-clamp-2 wrap-break-word">{node.item.title}</span>
+          <span className="line-clamp-2 break-words">{node.item.title}</span>
           {node.item.badge ? <Badge className="shrink-0 text-[10px] uppercase">{node.item.badge}</Badge> : null}
         </span>
         {mobile && node.item.description ? (
