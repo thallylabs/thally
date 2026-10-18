@@ -343,22 +343,46 @@ function headingIdMarker(id: string): string {
   return `{/* #${id} */}`
 }
 
+/** Characters Mintlify keeps in an id besides letters, marks and digits; the ones around which it also places a dash. */
+const HEADING_ID_WORD = /[\p{L}\p{M}\p{N}_+&/@\u2019\u201c\u201d\u2014\u2013\u2192]/u
+
 /**
- * The id Mintlify gives a heading with no explicit `{#id}`. Derived from the
- * live ids of a Mintlify site: whitespace and `.` become `-`, and `+ & / _`,
- * typographic quotes and dashes and arrows are kept, other punctuation and
- * emoji are dropped. Repeats are numbered `-2`, `-3`, ... by the renderer.
+ * The id Mintlify gives a heading with no explicit `{#id}`, from its rendered
+ * text. Derived from the live ids of two Mintlify sites: whitespace and `-`
+ * become one dash, as does a `.` before a word, a `(` between a word and a
+ * word or `{` (`start(body`), and a `)` glued to what follows it (`()`+`:`).
+ * `{`, `:` and `"` drop out but end a run of dashes, so `(`, `{`, space gives
+ * two. `+ & / _ @`, typographic quotes and dashes and arrows are kept, other
+ * punctuation and emoji are dropped, and repeats are numbered `-2`, `-3`, ...
+ * by the renderer.
  */
 export function mintlifyHeadingSlug(text: string): string {
-  return text
-    .replace(/\u200b/g, '')
-    .normalize('NFC')
-    .trim()
-    .toLowerCase()
-    .replace(/[.\s]+/g, '-')
-    .replace(/-{2,}/g, '-')
-    .replace(/^-|-$/g, '')
-    .replace(/[^\p{L}\p{M}\p{N}_\-+&/\u2019\u201c\u201d\u2014\u2013\u2192]/gu, '')
+  const chars = [...text.replace(/[\u200b*]/g, '').normalize('NFC').trim().toLowerCase()]
+  const isWord = (char: string | undefined): boolean => char !== undefined && HEADING_ID_WORD.test(char)
+  let id = ''
+  let afterDash = false
+  let endsWithDash = false
+  chars.forEach((char, index) => {
+    const before = chars[index - 1]
+    const after = chars[index + 1]
+    endsWithDash = false
+    if (isWord(char)) {
+      id += char
+      afterDash = false
+    } else if (
+      /[\s-]/.test(char)
+      || (char === '.' && isWord(after))
+      || (char === '(' && isWord(before) && (isWord(after) || after === '{'))
+      || (char === ')' && after !== undefined && !/\s/.test(after))
+    ) {
+      if (id && !afterDash) id += '-'
+      afterDash = true
+      endsWithDash = true
+    } else if (char === '{' || char === ':' || char === '"') {
+      afterDash = false
+    }
+  })
+  return endsWithDash ? id.replace(/-$/, '') : id
 }
 
 /** Thally's own heading slug (`slugify` in `@thallylabs/core`), used to tell which headings already match. */
@@ -384,7 +408,7 @@ function plainHeadingText(source: string): string {
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/<\/?[A-Za-z][^>]*>/g, '')
     .replace(/`([^`]*)`/g, '$1')
-    .replace(/(\*\*|__|~~|\*)/g, '')
+    .replace(/(?<!\\)(\*\*|__|~~|\*)/g, '')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
     .replace(/\\([\\`*_{}[\]()#+.!&<>|~-])/g, '$1')
 }

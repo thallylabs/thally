@@ -727,6 +727,60 @@ describe('Mintlify heading ids', () => {
   })
 })
 
+describe('Mintlify heading ids from the live Trigger.dev docs', () => {
+  /** The id a heading line ends up with: the marker the migrator writes, or the slug Thally gives the rendered text. */
+  function effectiveId(line: string): string {
+    const output = normalizeMdx(line, 'mintlify')
+    const marker = /\{\/\* #(\S+) \*\/\}$/.exec(output)
+    if (marker) return marker[1]
+    return output.replace(/^#+ /, '').replace(/[`*\\]/g, '').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '-').replace(/(^-|-$)/g, '')
+  }
+
+  // [heading as authored upstream, id docs trigger.dev serves]
+  it.each([
+    ['### @trigger.dev/sdk/v3', '@trigger-dev/sdk/v3'],
+    ['### @effect/schema', '@effect/schema'],
+    ['### `sessions.start(body, requestOptions?)`', 'sessions-start-body-requestoptions'],
+    ['### `sessions.retrieve(idOrExternalId, requestOptions?)`', 'sessions-retrieve-idorexternalid-requestoptions'],
+    ['### `sessions.update(idOrExternalId, body, requestOptions?)`', 'sessions-update-idorexternalid-body-requestoptions'],
+    ['### `sessions.close(idOrExternalId, body?, requestOptions?)`', 'sessions-close-idorexternalid-body-requestoptions'],
+    ['### `sessions.list(options?, requestOptions?)`', 'sessions-list-options-requestoptions'],
+    ['### `sessions.open(idOrExternalId)`', 'sessions-open-idorexternalid'],
+    ['### `out.append(value, options?)`', 'out-append-value-options'],
+    ['### `out.pipe(stream, options?)`', 'out-pipe-stream-options'],
+    ['### `out.writer({ execute, ... })`', 'out-writer--execute-'],
+    ['### `out.read(options?)`', 'out-read-options'],
+    ['### `out.writeControl(subtype, extraHeaders?)`', 'out-writecontrol-subtype-extraheaders'],
+    ['### `out.trimTo(earliestSeqNum)`', 'out-trimto-earliestseqnum'],
+    ['### `in.send(value, requestOptions?)`', 'in-send-value-requestoptions'],
+    ['### `in.on(handler)`', 'in-on-handler'],
+    ['### `in.once(options?)`', 'in-once-options'],
+    ['### `in.wait(options?)`', 'in-wait-options'],
+    ['### `in.waitWithIdleTimeout({ idleTimeoutInSeconds, timeout, ... })`', 'in-waitwithidletimeout--idletimeoutinseconds-timeout-'],
+    ['### Backend: `chat.withUIMessage(...).agent(...)`', 'backend-chat-withuimessage-agent'],
+    ['### `loadSkill({ name })`', 'loadskill--name-'],
+    ['### `readFile({ skill, path })`', 'readfile--skill-path-'],
+    ['### `bash({ skill, command })`', 'bash--skill-command-'],
+    ['### mockChatAgent(agent, options?)', 'mockchatagent-agent-options'],
+    ['## `chat.requestUpgrade()`: same call, faster handoff', 'chat-requestupgrade--same-call-faster-handoff'],
+    ['## `transport.stopGeneration(chatId)`', 'transport-stopgeneration-chatid'],
+    ['### "Module not found: @prisma/client/sql"', '\u201cmodule-not-found-@prisma/client/sql\u201d'],
+    ['### Using \\*', 'using'],
+    ['### `Error: @prisma/client did not initialize yet.`', 'error-@prisma/client-did-not-initialize-yet'],
+    ['### Database package (`@repo/db`)', 'database-package-@repo/db'],
+    ['### `No loader is configured for ".node" files`', 'no-loader-is-configured-for--node-files'],
+    ['### `Failed to index deployment` with `Column must be greater than or equal to 0, got -1`', 'failed-to-index-deployment-with-column-must-be-greater-than-or-equal-to-0-got-1'],
+  ])('gives %s the id %s', (line, id) => {
+    expect(effectiveId(line)).toBe(id)
+  })
+
+  it('reads the ids Mintlify serves from the rendered heading text', () => {
+    expect(mintlifyHeadingSlug('@trigger.dev/sdk/v3')).toBe('@trigger-dev/sdk/v3')
+    expect(mintlifyHeadingSlug('sessions.start(body, requestOptions?)')).toBe('sessions-start-body-requestoptions')
+    expect(mintlifyHeadingSlug('out.writer({ execute, ... })')).toBe('out-writer--execute-')
+  })
+})
+
 describe('Mintlify explicit heading ids stay on the heading', () => {
   it('keeps a translated heading\'s English id as the heading id, not as a separate anchor', () => {
     const output = normalizeMdx('## Primeros pasos {#get-started}\n\nTexto.', 'mintlify')
