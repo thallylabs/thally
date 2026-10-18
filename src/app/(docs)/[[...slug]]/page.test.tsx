@@ -2,7 +2,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const fixtures = vi.hoisted(() => ({ eyebrowMode: 'group', lookup: { node: null, reason: 'unresolved' } as unknown, missing: false, privateIntro: false, privateDefault: false, root: vi.fn() }))
+const fixtures = vi.hoisted(() => ({ eyebrowMode: 'group', lookup: { node: null, reason: 'unresolved' } as unknown, missing: false, privateIntro: false, privateDefault: false, root: vi.fn(), description: '', og: vi.fn<(input: unknown) => string>(() => ''), jsonLd: vi.fn<(input: unknown) => object>(() => ({})) }))
 
 vi.mock('next/navigation', () => ({
   redirect: (path: string) => { throw new Error(`NEXT_REDIRECT:${path}`) },
@@ -14,7 +14,7 @@ vi.mock('@/data/get-doc', () => ({
   getDocFromParams: async () => fixtures.missing ? null : ({
     id: 'api-reference/endpoint/scrape',
     title: 'Scrape',
-    description: '',
+    description: fixtures.description,
     slug: ['api-reference', 'endpoint', 'scrape'],
     keywords: [],
     lastUpdated: '2026-01-01',
@@ -32,6 +32,7 @@ vi.mock('@/data/docs', () => ({
   getApiPlaygroundDisplay: () => undefined,
   getDocEntries: async () => [],
   getEyebrowMode: () => fixtures.eyebrowMode,
+  getSeoConfig: () => ({ titleSeparator: ' - ' }),
   isDocPublished: () => true,
   canReaderViewPage: async () => true,
   loadNavContext: async () => ({ group: 'Capacity', groupPath: ['Errors', 'Capacity'], breadcrumb: [], prev: { title: 'Previous page', href: '/prev' }, next: null }),
@@ -55,13 +56,13 @@ vi.mock('@/lib/site-url', () => ({ getSiteUrl: () => 'https://docs.example.test'
 vi.mock('@/lib/site-config', () => ({ resolveBuildSiteConfig: () => ({ name: 'Docs' }) }))
 vi.mock('@/lib/content-source', () => ({ isRemoteContentSource: () => false }))
 vi.mock('@/lib/agent-discovery', () => ({ buildAgentAlternateLinks: () => ({}) }))
-vi.mock('@/lib/og', () => ({ buildOgImageUrl: () => '', formatOgBreadcrumb: () => '', formatOgDisplayUrl: () => '' }))
+vi.mock('@/lib/og', () => ({ buildOgImageUrl: (input: unknown) => fixtures.og(input), formatOgBreadcrumb: () => '', formatOgDisplayUrl: () => '' }))
 vi.mock('@/lib/i18n/metadata', () => ({ buildLocaleAlternates: () => ({}) }))
-vi.mock('@/lib/json-ld', () => ({ buildDocPageJsonLd: () => ({}) }))
+vi.mock('@/lib/json-ld', () => ({ buildDocPageJsonLd: (input: unknown) => fixtures.jsonLd(input) }))
 
-import DocsPage from './page'
+import DocsPage, { generateMetadata } from './page'
 
-beforeEach(() => { fixtures.eyebrowMode = 'group'; fixtures.missing = false; fixtures.privateIntro = false; fixtures.privateDefault = false; fixtures.lookup = { node: null, reason: 'unresolved' }; fixtures.root.mockReset().mockResolvedValue('/docs') })
+beforeEach(() => { fixtures.description = ''; fixtures.eyebrowMode = 'group'; fixtures.missing = false; fixtures.privateIntro = false; fixtures.privateDefault = false; fixtures.lookup = { node: null, reason: 'unresolved' }; fixtures.root.mockReset().mockResolvedValue('/docs') })
 
 const render = async () => renderToStaticMarkup(await DocsPage({ params: Promise.resolve({ slug: ['api-reference', 'endpoint', 'scrape'] }) }))
 
@@ -122,4 +123,27 @@ it('retains no-visible-document 404 and private-by-default login behavior', asyn
   await expect(DocsPage({ params: Promise.resolve({ slug: [] }) })).rejects.toThrow('NEXT_NOT_FOUND')
   fixtures.privateDefault = true
   await expect(DocsPage({ params: Promise.resolve({ slug: [] }) })).rejects.toThrow('NEXT_REDIRECT:/api/reader/login?redirect=%2F')
+})
+
+describe('a description with inline code', () => {
+  const description = 'The `trigger.dev dev` command is used to run your tasks locally.'
+  const plain = 'The trigger.dev dev command is used to run your tasks locally.'
+  const params = Promise.resolve({ slug: ['api-reference', 'endpoint', 'scrape'] })
+
+  it('is plain text in the meta, social and preview image tags', async () => {
+    fixtures.description = description
+    const metadata = await generateMetadata({ params })
+    expect(metadata.description).toBe(plain)
+    expect(metadata.openGraph?.description).toBe(plain)
+    expect(metadata.twitter?.description).toBe(plain)
+    expect(fixtures.og).toHaveBeenCalledWith(expect.objectContaining({ description: plain }))
+  })
+
+  it('is plain text in the structured data', async () => {
+    fixtures.description = description
+    fixtures.lookup = { node: { operation: {} } }
+    await render()
+    expect(fixtures.jsonLd).toHaveBeenCalledWith(expect.objectContaining({ description: plain }))
+  })
+
 })

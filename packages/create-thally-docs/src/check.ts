@@ -17,7 +17,7 @@ import { API_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, pageState, pa
 import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
-import { slugify } from '@thallylabs/core/slugify'
+import { plainInlineText, slugify } from '@thallylabs/core/slugify'
 import { validateIntegrations } from '@thallylabs/migrate'
 import { checkExternalLinks, type ExternalLinkCheckOptions, type ExternalLinkReference } from './external-links.js'
 
@@ -240,7 +240,7 @@ function extractStepHeadings(content: string): Array<{ line: number; base: strin
         const title = stringAttribute(node, 'title')?.trim()
         if (title && size && ['h2', 'h3', 'h4'].includes(size)) {
           const id = stringAttribute(node, 'id')?.trim()
-          steps.push({ line: node.position?.start.line ?? 0, base: id || slugify(title), explicit: !!id })
+          steps.push({ line: node.position?.start.line ?? 0, base: id || slugify(plainInlineText(title)), explicit: !!id })
         }
       }
     }

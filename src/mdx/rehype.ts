@@ -46,6 +46,7 @@ import langTypescript from 'shiki/langs/typescript.mjs'
 import langVue from 'shiki/langs/vue.mjs'
 import langYaml from 'shiki/langs/yaml.mjs'
 import { visit } from 'unist-util-visit'
+import { plainInlineText } from '../lib/inline-code'
 import { slugify } from '../lib/utils'
 
 /**
@@ -757,7 +758,7 @@ function rehypeUniqueHeadingIds() {
           const title = jsxStringAttribute(jsx, 'title')?.trim()
           if (title && size && STEP_HEADING_SIZES.has(size)) {
             targets.push({
-              text: title,
+              text: plainInlineText(title),
               given: jsxStringAttribute(jsx, 'id')?.trim() || undefined,
               assign: (id) => {
                 const attributes = (jsx.attributes ??= [])

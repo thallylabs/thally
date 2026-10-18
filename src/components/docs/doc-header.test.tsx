@@ -13,6 +13,10 @@ describe('DocHeader', () => {
     expect(html).toContain('Display title</h1>')
     expect(html).not.toContain('Long SEO title')
   })
+  it('renders a code span in the description as code', () => {
+    const html = renderToStaticMarkup(<DocHeader doc={{ title: 'dev', description: 'The `trigger.dev dev` command is used to run your tasks locally.' } as never} showCopyPage={false} />)
+    expect(html).toContain('The <code>trigger.dev dev</code> command is used to run your tasks locally.</p>')
+  })
   it('lets a long title break', () => {
     const html = renderToStaticMarkup(<DocHeader doc={{ title: 'Supercalifragilisticexpialidocious'.repeat(3) } as never} showCopyPage={false} />)
     expect(html).toMatch(/<h1 class="[^"]*break-words/)

@@ -34,6 +34,7 @@ import {
   getEffectiveI18nConfig,
   getRepositoryI18nConfig,
 } from '@/lib/i18n/request'
+import { plainInlineText } from '@/lib/inline-code'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
 import { pageFullTitle } from '@/lib/page-meta'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
@@ -107,9 +108,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const canonicalHref = hasTranslation ? requestedHref : primaryHref
   const availableI18n = await getContentI18nConfig(route.docSlug, buildI18n)
   const nav = await loadNavContext(doc.id, route.isLocaleRoute ? route.locale : undefined, reader)
+  // The page header renders a code span in the description as code; tags and previews read its text.
+  const description = plainInlineText(doc.description)
   const ogImageUrl = buildOgImageUrl({
     title: doc.title,
-    description: doc.description,
+    description,
     crumb: formatOgBreadcrumb(nav.breadcrumb, doc.title, doc.group),
     url: formatOgDisplayUrl(canonicalHref, siteUrl),
   })
@@ -122,11 +125,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     separator: getSeoConfig().titleSeparator,
   })
   const socialTitle = fullTitle ?? doc.title
-  const socialDescription = doc.ogDescription ?? doc.description
+  const socialDescription = doc.ogDescription ?? description
 
   return {
     title: fullTitle ? { absolute: fullTitle } : doc.title,
-    description: doc.description,
+    description,
     ...(isNoindex
       ? { robots: { index: false, follow: !doc.noindex && !doc.hidden } }
       : {}),
@@ -209,7 +212,7 @@ export default async function DocsPage({ params }: PageProps) {
     pageUrl: `${siteUrl}${canonicalHref}`,
     id: doc.id,
     title: doc.title,
-    description: doc.description,
+    description: plainInlineText(doc.description),
     keywords: doc.keywords,
     lastUpdated: doc.lastUpdated,
     locale: contentLocale,
