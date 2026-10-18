@@ -1,7 +1,8 @@
 export const layout = {
   pagePadding: 'px-5 sm:px-8 lg:px-12',
   pageWidth: 'max-w-none',
-  pageGap: 'space-y-10',
+  // keep v3 sibling spacing for stacks that contain nonvisual script elements.
+  pageGap: '[&>:not([hidden])~:not([hidden])]:mt-10',
   contentGap: 'space-y-8',
   columnGap: 'gap-12',
   shellPadding: 'px-5 sm:px-[26px]',

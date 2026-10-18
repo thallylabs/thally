@@ -28,8 +28,10 @@ visible during review.
 - Prose that includes a wildcard placeholder such as
   `text-[length:var(--text-*)]` can produce an optimizer warning. Tailwind 4.3.3
   drops the invalid declaration and completes the production build. Valid
-  arbitrary-value classes still compile. The v3 JavaScript content transform
-  is no longer part of the runtime.
+  arbitrary-value classes still compile. PostCSS also enables optimization
+  in development, with minification disabled, so invalid prose candidates do
+  not reach the Next.js CSS parser. The v3 JavaScript content transform is
+  no longer part of the runtime.
 
 ## Review policy
 

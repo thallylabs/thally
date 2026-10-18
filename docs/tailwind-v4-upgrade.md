@@ -56,7 +56,9 @@ arbitrary values.
 
 The runtime retains `tailwind.config.ts` through an explicit `@config` in
 `src/app/globals.css`. PostCSS uses `@tailwindcss/postcss`; the separate
-`autoprefixer` dependency is no longer needed. Keep the generated runtime files
+`autoprefixer` dependency is no longer needed. Keep the PostCSS optimization
+setting: it removes invalid prose candidates in development as well as in
+production. Development CSS stays readable. Keep the generated runtime files
 together with the matching package and PostCSS changes.
 
 ## Limits of the Tailwind upgrade tool
