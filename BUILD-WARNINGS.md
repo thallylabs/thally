@@ -25,8 +25,8 @@ visible during review.
   loads `tailwind.config.ts` from the existing CommonJS root package. Node
   reparses that configuration as ESM. The build succeeds. Keep the warning
   visible; changing the root module format affects more than styling.
-- Prose that includes a wildcard placeholder such as
-  `text-[length:var(--text-*)]` can produce an optimizer warning. Tailwind 4.3.3
+- Prose examples with an asterisk inside a CSS variable name can produce an
+  optimizer warning. Tailwind 4.3.3
   drops the invalid declaration and completes the production build. Valid
   arbitrary-value classes still compile. PostCSS also enables optimization
   in development, with minification disabled, so invalid prose candidates do
