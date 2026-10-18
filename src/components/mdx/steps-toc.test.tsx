@@ -80,3 +80,16 @@ describe('step titles in the table of contents', () => {
     expect(entries.slice(0, 2).map((entry) => entry.id)).toEqual(['create-a-key', 'verify-the-key'])
   })
 })
+
+
+it('renders authored step anchors on both compilation paths and reserves them for the outline', async () => {
+  const source = '## Install\n\n<Steps titleSize="h3">\n<Step title="Deploy" id="install">Body.</Step>\n</Steps>'
+  const expected = [
+    { id: 'install-2', text: 'Install', level: 2 },
+    { id: 'install', text: 'Deploy', level: 3 },
+  ]
+  expect(await toc(source)).toEqual(expected)
+  const { content } = await interpretMDX({ source, components: builtinMdxComponents })
+  expect(headings(page(content))).toEqual(expected)
+  expect(parseMdxContent(source).headings.map(({ id, text, depth }) => ({ id, text, level: depth }))).toEqual(expected)
+})

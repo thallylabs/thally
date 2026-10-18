@@ -758,6 +758,7 @@ function rehypeUniqueHeadingIds() {
           if (title && size && STEP_HEADING_SIZES.has(size)) {
             targets.push({
               text: title,
+              given: jsxStringAttribute(jsx, 'id')?.trim() || undefined,
               assign: (id) => {
                 const attributes = (jsx.attributes ??= [])
                 const existing = attributes.find((attribute) => attribute.type === 'mdxJsxAttribute' && attribute.name === 'id')
