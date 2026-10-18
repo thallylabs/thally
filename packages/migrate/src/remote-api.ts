@@ -12,9 +12,9 @@ import { isIP } from 'node:net'
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { addMintlifyDirectoryRedirects, insertApiTab } from './navigation.js'
 import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, servedRoutes } from './redirects.js'
-import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, isWithheld, linkApiMounts, mountPrefix, reportEndpointPages, thallyOperationSlugSegments } from './repository.js'
+import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, defaultSpecSource, isWithheld, linkApiMounts, mountPrefix, qualifyDisplacedBareRefs, reportEndpointPages, thallyOperationSlugSegments } from './repository.js'
 import { markExcluded, parseSpecDocument, sharedSpecMessage, withoutByteOrderMark } from './spec-exclude.js'
-import type { MigrationBundle, MigrationFetcher, RemoteApiSpec } from './types.js'
+import type { MigrationBundle, MigrationFetcher, MigrationNavigationTab, RemoteApiSpec } from './types.js'
 
 const MAX_SPEC_BYTES = 25_000_000
 const MAX_REDIRECTS = 3
@@ -190,6 +190,20 @@ interface BoundSpec {
   endpointOperations?: Array<string>
 }
 
+/** Bind a spec to the tab its reference names, or to a new API tab beside it; returns that tab's label. How every spec was bound before operations could become pages. */
+function bindApiTab(
+  tabs: Array<MigrationNavigationTab>,
+  reference: Pick<RemoteApiSpec, 'tabLabel' | 'parentTab' | 'icon' | 'hidden'>,
+  api: NonNullable<MigrationNavigationTab['api']>,
+): string {
+  const tab = reference.tabLabel
+    ? tabs.find((candidate) => candidate.tab === reference.tabLabel)
+    : tabs.find((candidate) => candidate.tab.toLowerCase().includes('api'))
+  if (tab) tab.api = api
+  else insertApiTab(tabs, { tab: reference.tabLabel ?? 'API Reference', ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}), api }, reference.parentTab)
+  return tab?.tab ?? reference.tabLabel ?? 'API Reference'
+}
+
 /**
  * Attach safely downloaded specs to the exact authored API tabs. A spec
  * mounted under Mintlify `directory` folders gets a redirect from each
@@ -228,6 +242,11 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
     }
   }
   const bound: Array<BoundSpec> = []
+  // The tabs as they would be if every spec, converted or not, were bound as an API tab: the local specs whose operations became pages first.
+  const apiTabs = bundle.docsConfig.tabs.map((tab) => ({ ...tab }))
+  for (const mount of bundle.localApiMounts ?? []) {
+    if (mount.endpointOperations) bindApiTab(apiTabs, { tabLabel: mount.tab }, { source: `openapi/${mount.filename}` })
+  }
   for (const reference of bundle.remoteApiSpecs) {
     for (let index = warnings.length - 1; index >= 0; index--) {
       if (warnings[index].source === reference.url && warnings[index].message.includes('requires a network download')) warnings.splice(index, 1)
@@ -252,6 +271,8 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
         const ref = page.openapi ? splitOpenApiRef(page.openapi) : null
         if (ref?.specRef === reference.url) page.openapi = withSpecRef(ref, `openapi/${filename}`)
       }
+      // Where the spec would be bound were it an API tab, whatever happens next: it decides which spec a bare `openapi:` reference reached first.
+      bindApiTab(apiTabs, reference, { source: `openapi/${filename}` })
       // The operations the tab listed become its pages, and the spec is bound only in a hidden tab that lists nothing.
       const endpoint = reference.groups && reference.endpointPages
         ? addEndpointPages({
@@ -275,13 +296,8 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
         bound.push({ reference, filename, content: body, operations, tabName: reference.tabLabel ?? 'API Reference', endpointOperations: endpoint.operations })
         continue
       }
-      const tab = reference.tabLabel
-        ? tabs.find((candidate) => candidate.tab === reference.tabLabel)
-        : tabs.find((candidate) => candidate.tab.toLowerCase().includes('api'))
       const api = { source: `openapi/${filename}`, ...(reference.navigation === false ? { navigation: false } : {}), ...(reference.groups ? { groups: reference.groups } : {}) }
-      if (tab) tab.api = api
-      else insertApiTab(tabs, { tab: reference.tabLabel ?? 'API Reference', ...(reference.icon ? { icon: reference.icon } : {}), ...(reference.hidden ? { hidden: true } : {}), api }, reference.parentTab)
-      bound.push({ reference, filename, content: body, operations, tabName: tab?.tab ?? reference.tabLabel ?? 'API Reference' })
+      bound.push({ reference, filename, content: body, operations, tabName: bindApiTab(tabs, reference, api) })
     } catch (error) {
       warnings.push({
         code: 'fetch-failed',
@@ -326,6 +342,19 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   }
 
   reportEndpointPages(ledger, warnings)
+  // A bare `openapi:` reference keeps the spec it reached when that spec's tab became pages and another spec is now tried first.
+  const asset = (filename: string): string => `openapi/${filename}`
+  qualifyDisplacedBareRefs({
+    pages,
+    before: defaultSpecSource(apiTabs),
+    after: defaultSpecSource(tabs),
+    converted: [
+      ...(bundle.localApiMounts ?? []).flatMap(({ filename, endpointOperations }) => endpointOperations
+        ? [{ assetPath: asset(filename), content: Buffer.from(assets.find((entry) => entry.path === asset(filename))?.content ?? []), qualifier: asset(filename) }]
+        : []),
+      ...bound.flatMap(({ filename, content, endpointOperations }) => endpointOperations ? [{ assetPath: asset(filename), content, qualifier: asset(filename) }] : []),
+    ],
+  })
   // The pages the operations became are routes of the site too, which no redirect may take.
   const served = servedRoutes(pages)
   // Lower case, and without a trailing slash: a redirect that differs from a guessed one only in letter case or a trailing slash wins on a server that ignores them, so none is guessed for that address.

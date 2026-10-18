@@ -9,7 +9,7 @@ import { parse as parseYaml } from 'yaml'
 import { migrateRepository } from '../index.js'
 import { hydrateRemoteApiSpecs } from '../remote-api.js'
 import type { MigrationBundle, MigrationFetcher } from '../types.js'
-import { endpointPageId, endpointSpec, productsNavigation } from './endpoint-spec.js'
+import { emptyTabsWithoutHiddenExemption, endpointPageId, endpointSpec, productsNavigation } from './endpoint-spec.js'
 
 const SPEC_URL = 'https://specs.example.com/openapi.json'
 
@@ -277,7 +277,7 @@ describe('remote OpenAPI spec with hidden, restricted or localized operation lis
         expect(migrated.remoteApiSpecs?.[0].groups).toEqual(visible)
         // Only the visible product lists operations, so its directory is the pages' whichever product comes first; the spec is bound apart.
         expect(result.docsConfig.tabs.find((tab) => tab.tab === 'API reference')?.groups).toEqual([{ group: 'Visible', pages: ['p0/api/scim/list-users'] }])
-        expect(api).toEqual({ source: assetPath, navigation: false })
+        expect(api).toEqual({ source: assetPath })
       }
     }
   })
@@ -291,7 +291,7 @@ describe('remote OpenAPI spec with hidden, restricted or localized operation lis
       expect(migrated.remoteApiSpecs?.[0].groups).toEqual(visible)
       // The default language's operations are the pages of its API tab; the spec is bound apart, where the pages find it.
       expect(result.docsConfig.tabs.find((tab) => tab.tab === 'API')).toEqual({ tab: 'API', groups: [{ group: 'Visible', pages: ['api-reference/scim/list-users'] }] })
-      expect(api).toEqual({ source: assetPath, navigation: false })
+      expect(api).toEqual({ source: assetPath })
       expect(result.pages.map((page) => page.id)).toContain('api-reference/scim/list-users')
     }
   })
@@ -955,7 +955,9 @@ describe('remote OpenAPI spec whose listed operations Mintlify served as pages',
     ])
     // One spec file, one binding: hidden, listing nothing.
     expect(result.assets.filter((entry) => entry.path === asset)).toHaveLength(1)
-    expect(result.docsConfig.tabs.filter((tab) => tab.api)).toEqual([{ tab: 'OpenAPI: https://specs.example.com/unkey/openapi.json', hidden: true, api: { source: asset, navigation: false } }])
+    expect(result.docsConfig.tabs.filter((tab) => tab.api)).toEqual([{ tab: 'OpenAPI: https://specs.example.com/unkey/openapi.json', hidden: true, api: { source: asset } }])
+    // A publish validator that does not exempt hidden tabs from its empty-tab rule accepts it: an API tab that lists navigation is not empty.
+    expect(emptyTabsWithoutHiddenExemption(result.docsConfig.tabs)).toEqual([])
     const tab = result.docsConfig.tabs.find((entry) => entry.tab === 'API management: API reference')
     expect(tab).toEqual({
       tab: 'API management: API reference',
@@ -1011,6 +1013,38 @@ describe('remote OpenAPI spec whose listed operations Mintlify served as pages',
     expect(result.assets).toEqual([])
     expect(result.warnings.filter((warning) => warning.code === 'fetch-failed')).toHaveLength(3)
     expect(result.warnings.every((warning) => warning.source === undefined || warning.source === UNKEY_URL)).toBe(true)
+  })
+
+  it('keeps a bare openapi reference on the downloaded spec it reached once that spec\'s tab became pages', async () => {
+    const urlA = 'https://specs.example.com/a.json'
+    const urlB = 'https://specs.example.com/b.json'
+    const document = (summary: string, extra: Record<string, unknown>) => JSON.stringify({
+      openapi: '3.0.0', info: { title: summary, version: '1' }, paths: { '/shared': { post: { summary, tags: ['Shared'] } }, ...extra },
+    })
+    const bodies: Record<string, string> = {
+      [urlA]: document('From A', { '/only-a': { post: { summary: 'Only A', tags: ['A'] } } }),
+      [urlB]: document('From B', { '/only-b': { post: { summary: 'Only B', tags: ['B'] } } }),
+    }
+    const root = mkdtempSync(join(tmpdir(), 'thally-remote-bare-ref-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [
+        { tab: 'Guides', pages: ['guide'] },
+        { tab: 'A API', openapi: { source: urlA, directory: 'a' }, groups: [{ group: 'Shared', pages: ['POST /shared'] }] },
+        { tab: 'B API', openapi: { source: urlB, directory: 'b' } },
+      ] },
+    }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    writeFileSync(join(root, 'shared.mdx'), '---\ntitle: Shared\nopenapi: "POST /shared"\n---\n\nText.')
+    writeFileSync(join(root, 'only-b.mdx'), '---\ntitle: Only B\nopenapi: "POST /only-b"\n---\n\nText.')
+    const migrated = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+
+    const result = await hydrateRemoteApiSpecs(migrated, async (url) => ({ finalUrl: url, body: bodies[url.toString()], contentType: 'application/json' }))
+
+    // A is the first API tab, so a bare reference reached it first; B's visible tab is tried first now, and A's spec is bound apart behind it.
+    const assetA = result.docsConfig.tabs.find((tab) => tab.hidden && tab.api)?.api?.source
+    expect(assetA).toMatch(/^openapi\/openapi-[0-9a-f]{12}\.json$/)
+    expect(result.pages.find((page) => page.id === 'shared')?.openapi).toBe(`${assetA} POST /shared`)
+    expect(result.pages.find((page) => page.id === 'only-b')?.openapi).toBe('POST /only-b')
   })
 
   it('binds a spec entry that does not ask for pages as an API tab, beside one that does', async () => {

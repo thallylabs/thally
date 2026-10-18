@@ -191,8 +191,9 @@ operations is an ordinary page tab, kept where it was among its siblings and
 labelled as they are (`Product: API reference`), whose groups are the authored
 ones, nesting and order kept, each operation replaced by its page. Tabs that were
 separate in the source are never merged, even when they share a spec. The spec
-is bound once per spec file in a hidden tab with `navigation: false`, which is
-what the pages' `openapi:` frontmatter resolves against. A remote spec's pages
+is bound once per spec file in a hidden tab (`OpenAPI: <spec>`, the same as for a
+spec only a page names), which is what the pages' `openapi:` frontmatter resolves
+against; the renderer serves no `/api/` page, sitemap entry or search record for it. A remote spec's pages
 and tab are made by `hydrateRemoteApiSpecs` once it is downloaded; a download
 that fails leaves no tab and no page, as before. An operation the spec withholds
 (`x-hidden`, `x-excluded`) gets no page, nor does one listed only under a
@@ -207,7 +208,12 @@ fall back to `api.groups` on an API tab, as described above, when the containers
 that share a tab disagree on the directory, the directory cannot be a folder name,
 the spec has none of the listed operations, or the tab is bound to another spec.
 A reference that lists no operation (Mintlify generated every endpoint) is not
-affected.
+affected. Operations whose path item is a local `$ref` are read as the renderer
+reads them (hidden or excluded on any level of the reference withholds them).
+The renderer tries the first visible API tab's spec first for a bare
+`openapi: "METHOD /path"` page; when converting a tab to pages stops its spec being
+that one, each bare reference to an operation the converted spec defines is
+written with that spec's path in front, so it still renders the same operation.
 
 Mintlify `styling.eyebrows: "breadcrumbs"` becomes `eyebrow: "path"` (the full
 group path above the page title); `"section"` or no setting writes nothing.
