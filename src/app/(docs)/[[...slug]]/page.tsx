@@ -35,7 +35,7 @@ import {
   getRepositoryI18nConfig,
 } from '@/lib/i18n/request'
 import { plainInlineText } from '@/lib/inline-code'
-import { markdownLine } from '@/lib/markdown-line'
+import { markdownToPlainText } from '@thallylabs/core/content'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
 import { pageFullTitle } from '@/lib/page-meta'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
@@ -95,7 +95,7 @@ async function tagDescription(doc: { description: string; openapi?: Parameters<t
   if (doc.description) return plainInlineText(doc.description)
   if (!doc.openapi) return ''
   const { node } = await lookupApiOperationForFrontmatter(doc.openapi)
-  return markdownLine(node?.operation.description ?? '')
+  return markdownToPlainText(node?.operation.description ?? '')
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
