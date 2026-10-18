@@ -217,6 +217,35 @@ describe('Mintlify pages that link elsewhere', () => {
   })
 })
 
+describe('Mintlify group named after its dropdown', () => {
+  function bundleFor(navigation: Record<string, unknown>, pages: Array<string>) {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-group-heading-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', navigation }))
+    for (const name of pages) writeFileSync(join(root, `${name}.mdx`), `---\ntitle: ${name}\n---\n\nBody.`)
+    return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+  }
+
+  it('keeps the group and asks the sidebar to show its heading', () => {
+    const bundle = bundleFor({ dropdowns: [
+      { dropdown: 'Documentation', groups: [{ group: 'Start', pages: ['start'] }] },
+      { dropdown: 'API reference', groups: [{ group: 'API reference', pages: ['overview', 'authentication'] }] },
+    ] }, ['start', 'overview', 'authentication'])
+    expect(bundle.docsConfig.tabs[1]?.groups).toEqual([{ group: 'API reference', pages: ['overview', 'authentication'] }])
+    expect(bundle.docsConfig.navigation).toEqual({ display: 'dropdown', groupHeadings: 'all' })
+  })
+
+  it('still asks for it when seven tabs switch the menu to a dropdown', () => {
+    const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    const bundle = bundleFor({ tabs: names.map((name) => ({ tab: name.toUpperCase(), groups: [{ group: name === 'g' ? 'G' : 'Start', pages: [name] }] })) }, names)
+    expect(bundle.docsConfig.navigation).toEqual({ display: 'dropdown', groupHeadings: 'all' })
+  })
+
+  it('leaves the navigation as it was when no group is named after its tab', () => {
+    const bundle = bundleFor({ dropdowns: [{ dropdown: 'API reference', groups: [{ group: 'Overview', pages: ['overview'] }] }] }, ['overview'])
+    expect(bundle.docsConfig.navigation).toEqual({ display: 'dropdown' })
+  })
+})
+
 describe('linked source anchors', () => {
   it('preserves uniquely matching Mintlify fragments across pages', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-anchors-'))

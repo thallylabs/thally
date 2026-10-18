@@ -126,6 +126,11 @@ operation list, which still only drives the endpoint redirects.
 Mintlify `styling.eyebrows: "breadcrumbs"` becomes `eyebrow: "path"` (the full
 group path above the page title); `"section"` or no setting writes nothing.
 
+Thally leaves out the sidebar heading of a group named after its tab or dropdown, because
+the collection already names it. Mintlify keeps that heading, so a source with such a group
+(an `API reference` dropdown whose first group is also `API reference`) gets
+`navigation.groupHeadings: "all"`. A source without one gets nothing.
+
 Page `openapi:` frontmatter with a spec prefix
 (`openapi: "specs/openapi-b.yaml GET /widgets/{id}"`) is rewritten to where the
 spec lands in the output (`/openapi-b.yaml GET /widgets/{id}`). As in Mintlify,

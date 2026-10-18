@@ -5825,7 +5825,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   // Docusaurus releases otherwise turn the collection tabs into a tall wall
   // above every document.
   if (!docsConfig.navigation?.display && docsConfig.tabs.filter((tab) => !tab.hidden).length > 6) {
-    docsConfig = { ...docsConfig, navigation: { display: 'dropdown' } }
+    docsConfig = { ...docsConfig, navigation: { display: 'dropdown', ...(docsConfig.navigation?.groupHeadings ? { groupHeadings: docsConfig.navigation.groupHeadings } : {}) } }
   }
   const themeColors = mintlifyConfig
     ? mintlifyThemeColors(mintlifyConfig.colors)

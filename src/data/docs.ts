@@ -104,6 +104,8 @@ export type NavigationNode =
 
 export interface NavigationPresentation {
   display: 'tabs' | 'dropdown'
+  /** `all` keeps the heading of a group that is named after its collection; by default it is left out. */
+  groupHeadings?: 'all'
 }
 
 export interface DocsNavigationVersion {
@@ -320,6 +322,8 @@ interface DocsJsonConfig {
   }
   navigation?: {
     display?: 'tabs' | 'dropdown'
+    /** `all` keeps the heading of a sidebar group named after its collection; `distinct` (default) leaves it out. */
+    groupHeadings?: 'distinct' | 'all'
     versions?: Array<DocsNavigationVersion>
     shortcuts?: Array<DocsNavigationShortcut>
   }
@@ -1519,8 +1523,10 @@ export function getNavbarConfig(): DocsJsonNavbar | null {
 
 /** Resolve how sibling navigation collections are exposed in the docs chrome. */
 export function getNavigationPresentation(): NavigationPresentation {
+  const navigation = docsConfig().navigation
   return {
-    display: docsConfig().navigation?.display === 'dropdown' ? 'dropdown' : 'tabs',
+    display: navigation?.display === 'dropdown' ? 'dropdown' : 'tabs',
+    ...(navigation?.groupHeadings === 'all' ? { groupHeadings: 'all' as const } : {}),
   }
 }
 

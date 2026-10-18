@@ -86,6 +86,8 @@ export interface MigrationDocsConfig {
   navigation?: {
     /** How sibling documentation collections are presented to readers. */
     display?: 'tabs' | 'dropdown'
+    /** `all` keeps the heading of a sidebar group named after its tab, as Mintlify does. */
+    groupHeadings?: 'all'
     versions?: Array<{ label: string; prefix: string; href: string; default?: boolean; hidden?: boolean }>
     shortcuts?: Array<{ label: string; href: string; icon?: string }>
   }

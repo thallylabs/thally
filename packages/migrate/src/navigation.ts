@@ -1789,12 +1789,16 @@ export function projectMintlifyNavigation(
       })
     : []
   collectReferenceAccess(navigation, OPEN_NAVIGATION_ACCESS, options.pathPrefix, appearances)
+  // Mintlify titles every sidebar group, including one named after its tab or dropdown; Thally leaves that heading out unless asked.
+  const keepsCollectionNamedGroup = [tabs, ...Object.values(localizedNavigation)]
+    .some((items) => items.some((item) => item.groups?.some((group) => group.group === (item.displayLabel ?? item.tab))))
   return {
     docsConfig: {
       tabs,
-      ...(projectionTrace.rootContainerKind === 'dropdowns' || versions.length > 1 || shortcuts.length > 0
+      ...(projectionTrace.rootContainerKind === 'dropdowns' || versions.length > 1 || shortcuts.length > 0 || keepsCollectionNamedGroup
         ? { navigation: {
           ...(projectionTrace.rootContainerKind === 'dropdowns' ? { display: 'dropdown' as const } : {}),
+          ...(keepsCollectionNamedGroup ? { groupHeadings: 'all' as const } : {}),
           ...(versions.length > 1 ? { versions } : {}),
           ...(shortcuts.length > 0 ? { shortcuts } : {}),
         } }
