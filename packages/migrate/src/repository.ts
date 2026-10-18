@@ -1898,11 +1898,46 @@ const flagged = (value: unknown): boolean => value === true || value === 'true'
 /** Whether the renderer withholds a path item or an operation, so that it has no endpoint page to link or redirect to. */
 export const isWithheld = (node: Record<string, unknown>): boolean => flagged(node['x-hidden']) || flagged(node['x-excluded'])
 
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+/** A local `#/...` JSON pointer in a spec document, as the renderer reads it (`resolveLocalRef`); undefined when it is not local or leads nowhere. */
+function resolveLocalSpecRef(document: unknown, ref: string): unknown {
+  if (ref !== '#' && !ref.startsWith('#/')) return undefined
+  let node: unknown = document
+  for (const segment of ref.slice(2).split('/').filter(Boolean)) {
+    if (!isRecord(node) && !Array.isArray(node)) return undefined
+    let decoded = segment
+    try { decoded = decodeURIComponent(segment) } catch { /* keep the raw segment */ }
+    node = (node as Record<string, unknown>)[decoded.replace(/~1/g, '/').replace(/~0/g, '~')]
+  }
+  return node
+}
+
+/**
+ * A `paths` entry as the renderer views it (`viewPathEntry`): the entry and each local `$ref` target it leads to, merged with the nearest level
+ * winning, and withheld when `x-hidden` or `x-excluded` is set on any of those levels. A reference that cannot be followed (external, missing,
+ * circular) ends the chain there: the levels reached still count, and nothing beyond them can be read.
+ */
+function viewSpecPathItem(document: unknown, entry: Record<string, unknown>): { item: Record<string, unknown>; withheld: boolean } {
+  const chain = [entry]
+  let current = entry
+  while (typeof current.$ref === 'string') {
+    const target = resolveLocalSpecRef(document, current.$ref)
+    if (!isRecord(target) || chain.includes(target)) break
+    chain.push(target)
+    current = target
+  }
+  const item: Record<string, unknown> = Object.assign({}, ...[...chain].reverse())
+  delete item.$ref
+  return { item, withheld: chain.some(isWithheld) }
+}
+
 /**
  * Read just enough of an OpenAPI document to match Mintlify's auto-generated
  * operation pages. An operation the renderer withholds (`x-hidden`,
- * `x-excluded`, on it or on its path item) has no endpoint page to link or
- * redirect to. Malformed input yields no operations rather than throwing.
+ * `x-excluded`, on it or on its path item, whether the path item is inline or a
+ * local `$ref`) has no endpoint page to link or redirect to. Malformed input
+ * yields no operations rather than throwing.
  */
 function parseOpenApiOperationsForLinking(content: Buffer): Array<OpenApiOperationForLinking> {
   let document: unknown
@@ -1915,9 +1950,9 @@ function parseOpenApiOperationsForLinking(content: Buffer): Array<OpenApiOperati
   if (!paths || typeof paths !== 'object') return []
   const operations: Array<OpenApiOperationForLinking> = []
   for (const [path, pathItem] of Object.entries(paths as Record<string, unknown>)) {
-    if (!pathItem || typeof pathItem !== 'object') continue
-    const item = pathItem as Record<string, unknown>
-    if (isWithheld(item)) continue
+    if (!isRecord(pathItem)) continue
+    const { item, withheld } = viewSpecPathItem(document, pathItem)
+    if (withheld) continue
     for (const method of OPENAPI_HTTP_METHODS) {
       const operation = item[method]
       if (!operation || typeof operation !== 'object') continue
@@ -2347,9 +2382,55 @@ export function addEndpointPages(options: {
     else insertApiTab(tabs, tab, spec.parentTab)
   }
   if (!tabs.some((tab) => tab.api?.source === spec.assetPath)) {
-    insertApiTab(tabs, { tab: `OpenAPI: ${spec.source}`, hidden: true, api: { source: spec.assetPath, navigation: false } })
+    // The shape every hidden page-only binding has: a hidden tab lists no navigation and its spec serves no `/api/` pages, and a validator
+    // that does not exempt hidden tabs from the empty-tab rule accepts an API tab unless it sets `navigation: false`.
+    insertApiTab(tabs, { tab: `OpenAPI: ${spec.source}`, hidden: true, api: { source: spec.assetPath } })
   }
   return { operations: listed }
+}
+
+/** The spec the renderer tries first for a bare `openapi:` reference (its `default`): that of the first visible API tab, else of the first hidden one. */
+export function defaultSpecSource(tabs: ReadonlyArray<Pick<MigrationNavigationTab, 'hidden' | 'api'>>): string | undefined {
+  return (tabs.find((tab) => !tab.hidden && tab.api) ?? tabs.find((tab) => tab.api))?.api?.source
+}
+
+/** The `METHOD /path` and `webhook name` keys of the operations of a spec that a page's `openapi:` can name: the ones the renderer publishes. */
+function specOperationKeys(content: Buffer): Set<string> {
+  const keys = new Set(parseOpenApiOperationsForLinking(content).map((operation) => `${operation.method} ${operation.path}`))
+  try {
+    const document = parseSpecDocument(content.toString('utf8')).document
+    for (const field of ['webhooks', 'x-webhooks']) {
+      const hooks = isRecord(document) ? document[field] : undefined
+      for (const [name, entry] of Object.entries(isRecord(hooks) ? hooks : {})) if (isRecord(entry) && !isWithheld(entry)) keys.add(`webhook ${name}`)
+    }
+  } catch { /* an unreadable spec names no webhook */ }
+  return keys
+}
+
+/**
+ * Keep a bare `openapi: "METHOD /path"` reference on the spec it reached. The renderer tries the first visible API tab's spec (`default`)
+ * first, then the others in order. When a spec's tab became pages its spec is bound apart, behind the visible ones, so it may no longer be
+ * tried first: `before` is the spec that was tried first when every spec was an API tab, `after` the one tried first now. If those differ and
+ * `before` is a converted spec, each bare reference to an operation it defines is written with that spec in front (`qualifier`, which the
+ * caller's own prefix rewrite or an asset path), as a prefix an author wrote would be; references to anything else stay as authored.
+ */
+export function qualifyDisplacedBareRefs(options: {
+  pages: Array<Pick<MigrationPage, 'openapi'>>
+  before: string | undefined
+  after: string | undefined
+  converted: ReadonlyArray<{ assetPath: string; content: Buffer; qualifier: string }>
+}): void {
+  const { pages, before, after, converted } = options
+  const spec = before === after ? undefined : converted.find((entry) => entry.assetPath === before)
+  if (!spec) return
+  let keys: Set<string> | undefined
+  for (const page of pages) {
+    const ref = page.openapi ? splitOpenApiRef(page.openapi) : null
+    if (!ref || ref.specRef) continue
+    keys ??= specOperationKeys(spec.content)
+    const [method, ...rest] = ref.operation.trim().split(/\s+/)
+    if (keys.has(`${method.toLowerCase()} ${rest.join(' ')}`)) page.openapi = withSpecRef(ref, spec.qualifier)
+  }
 }
 
 /** Rewrite API operation links in every page body, with one capped warning for links that matched no operation. */
@@ -5631,6 +5712,7 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // The operations docs.json lists become pages of the tab that listed them; every other spec is bound as an API tab. The API tabs come
       // first, so a spec one of them binds needs no hidden binding for the pages that name it.
       const listingSpecs = resolvedSpecs.filter((spec) => spec.groups && spec.endpointPages)
+      const unbound = docsConfig
       docsConfig = injectOpenApiSpecs(docsConfig, resolvedSpecs.filter((spec) => !listingSpecs.includes(spec)), warnings)
       const ledger = createEndpointPageLedger(pages)
       const tabs = docsConfig.tabs.map((tab) => ({ ...tab }))
@@ -5664,6 +5746,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       for (const page of pages.slice(pagesBefore)) generatedEndpointPages.add(page)
       // A spec whose operations could not become pages is bound as an API tab after all.
       docsConfig = injectOpenApiSpecs({ ...docsConfig, tabs }, listingSpecs.filter((spec) => !endpointSpecs.has(spec)), warnings)
+      // A converted spec may no longer be the one the renderer tries first for a bare `openapi:` reference. With remote specs still to bind, hydration decides.
+      // The prefix is the source path: the rewrite of authored prefixes below points it at the saved spec.
+      if (remoteApiSpecs.length === 0 && endpointSpecs.size > 0) {
+        qualifyDisplacedBareRefs({
+          pages,
+          before: defaultSpecSource(injectOpenApiSpecs(unbound, resolvedSpecs).tabs),
+          after: defaultSpecSource(docsConfig.tabs),
+          converted: [...endpointSpecs].map((spec) => ({ assetPath: specAssetPath(spec.filename), content: spec.content, qualifier: spec.sourcePath })),
+        })
+      }
       // A mount whose operations are pages is served by them: only its links need a map, never a redirect.
       const mountOf = (spec: ResolvedApiSpec): { prefix?: string; operations?: Array<string> } => endpointSpecs.has(spec)
         ? { prefix: spec.endpointPages?.directory, operations: spec.endpointOperations }

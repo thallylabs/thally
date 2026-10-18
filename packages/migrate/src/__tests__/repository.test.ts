@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cloneGitHubRepository, gitmodulePaths, migrateRepository, projectFernNavigation, readMintlifyConfig, renderMigrationFiles } from '../index.js'
 import { hydrateRemoteApiSpecs } from '../remote-api.js'
 import { withoutDashboardWarning } from './dashboard-warning.js'
-import { endpointPageId, endpointSpec, productsNavigation } from './endpoint-spec.js'
+import { emptyTabsWithoutHiddenExemption, endpointPageId, endpointSpec, productsNavigation } from './endpoint-spec.js'
 
 describe('Mintlify root styles', () => {
   it('copies the implicit stylesheet and wires it into the generated config', () => {
@@ -373,9 +373,11 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
   it('binds the spec once per spec file, in a hidden tab that lists no navigation, where the pages\' openapi frontmatter finds it', () => {
     const bundle = migrate(productsNavigation('openapi.json'))
 
-    // Three tabs list operations of one spec file; it is bound once, and no visible tab is an API tab.
-    expect(bundle.docsConfig.tabs.filter((tab) => tab.api)).toEqual([{ tab: 'OpenAPI: openapi.json', hidden: true, api: { source: specAsset, navigation: false } }])
+    // Three tabs list operations of one spec file; it is bound once, in the shape of every hidden page-only binding, and no visible tab is an API tab.
+    expect(bundle.docsConfig.tabs.filter((tab) => tab.api)).toEqual([{ tab: 'OpenAPI: openapi.json', hidden: true, api: { source: specAsset } }])
     expect(bundle.docsConfig.tabs.filter((tab) => !tab.hidden && tab.api)).toEqual([])
+    // A publish validator that does not exempt hidden tabs from its empty-tab rule accepts it: an API tab that lists navigation is not empty.
+    expect(emptyTabsWithoutHiddenExemption(bundle.docsConfig.tabs)).toEqual([])
     expect(bundle.assets.filter((asset) => asset.path === specAsset)).toHaveLength(1)
     // Every page names the spec the binding holds.
     const refs = bundle.pages.flatMap((page) => page.openapi ? [page.openapi.split(' ')[0]] : [])
@@ -517,6 +519,76 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
     const warning = bundle.warnings.find((entry) => entry.message.includes('no usable page name'))
     expect(warning?.message).toContain('POST /odd')
     expect(warning?.message).toContain('POST /long')
+  })
+
+  it('gives a page to a listed operation whose path item is a local $ref, as the renderer resolves it, and none to one hidden through the reference', () => {
+    const spec = {
+      openapi: '3.1.0',
+      info: { title: 'T', version: '1' },
+      paths: {
+        '/inline': { post: { summary: 'Inline op', tags: ['Ops'] } },
+        '/by-ref': { $ref: '#/components/pathItems/Shared' },
+        '/by-chain': { $ref: '#/components/pathItems/Alias' },
+        '/hidden-target': { $ref: '#/components/pathItems/Hidden' },
+        '/excluded-entry': { $ref: '#/components/pathItems/Shared', 'x-excluded': true },
+        '/missing': { $ref: '#/components/pathItems/Nope' },
+      },
+      components: {
+        pathItems: {
+          Shared: { post: { summary: 'Referenced op', tags: ['Ops'], description: 'Reached through a reference.' } },
+          Hidden: { 'x-hidden': true, post: { summary: 'Hidden through its target', tags: ['Ops'] } },
+          Alias: { $ref: '#/components/pathItems/Deep' },
+          Deep: { post: { summary: 'Chained op', tags: ['Ops'] } },
+        },
+      },
+    }
+    const bundle = migrate({
+      tabs: [{ tab: 'Guides', pages: ['guide'] }, apiTab([{ group: 'Ops', pages: ['POST /inline', 'POST /by-ref', 'POST /by-chain', 'POST /hidden-target', 'POST /excluded-entry', 'POST /missing'] }])],
+    }, {}, spec)
+
+    // Inline and referenced operations are pages alike; hidden or excluded on any level of a reference, or a reference that leads nowhere, is none.
+    const pages = bundle.pages.filter((page) => page.openapi)
+    expect(pages.map((page) => [page.id, page.openapi])).toEqual([
+      ['api-reference/ops/inline-op', `${specAsset} POST /inline`],
+      ['api-reference/ops/referenced-op', `${specAsset} POST /by-ref`],
+      ['api-reference/ops/chained-op', `${specAsset} POST /by-chain`],
+    ])
+    expect(pages[1].description).toBe('Reached through a reference.')
+    expect(tabOf(bundle, 'API reference')?.groups).toEqual([{ group: 'Ops', pages: ['api-reference/ops/inline-op', 'api-reference/ops/referenced-op', 'api-reference/ops/chained-op'] }])
+  })
+
+  it('qualifies a bare openapi reference with the spec it resolved to when converting that spec stops it being the default one', () => {
+    const operations = (summary: string, extra: Record<string, unknown> = {}) => ({
+      openapi: '3.0.0',
+      info: { title: summary, version: '1' },
+      paths: { '/shared': { post: { summary, tags: ['Shared'] } }, ...extra },
+    })
+    const files = {
+      'a.json': JSON.stringify(operations('From A', { '/only-a': { post: { summary: 'Only A', tags: ['A'] } } })),
+      'b.json': JSON.stringify(operations('From B', { '/only-b': { post: { summary: 'Only B', tags: ['B'] } } })),
+      'shared.mdx': '---\ntitle: Shared\nopenapi: "POST /shared"\n---\n\nText.',
+      'only-a.mdx': '---\ntitle: Only A\nopenapi: "POST /only-a"\n---\n\nText.',
+      'only-b.mdx': '---\ntitle: Only B\nopenapi: "POST /only-b"\n---\n\nText.',
+      'named.mdx': '---\ntitle: Named\nopenapi: "b.json POST /shared"\n---\n\nText.',
+    }
+    const listed = { tab: 'A API', openapi: { source: 'a.json', directory: 'a' }, groups: [{ group: 'Shared', pages: ['POST /shared'] }] }
+    const generated = { tab: 'B API', openapi: { source: 'b.json', directory: 'b' } }
+    const refs = (bundle: ReturnType<typeof migrateRepository>) => Object.fromEntries(['shared', 'only-a', 'only-b', 'named'].map((id) => [id, bundle.pages.find((page) => page.id === id)?.openapi]))
+
+    // A is the first API tab, so a bare reference reached A first. Its tab is now pages and its spec a hidden binding behind B's visible one,
+    // which the renderer would try first: the references A defines name A, so they keep resolving to it.
+    const converted = refs(migrate({ tabs: [{ tab: 'Guides', pages: ['guide'] }, listed, generated] }, files))
+    expect(converted).toEqual({
+      shared: 'openapi/a.json POST /shared',
+      'only-a': 'openapi/a.json POST /only-a',
+      'only-b': 'POST /only-b',
+      named: 'openapi/b.json POST /shared',
+    })
+    // A reference to an operation only the other spec has, and one that names its spec, are as authored.
+    // Nothing changes while the converted spec is still tried first: B's tab comes before it, or it is the only spec.
+    const unchanged = { shared: 'POST /shared', 'only-a': 'POST /only-a', 'only-b': 'POST /only-b', named: 'openapi/b.json POST /shared' }
+    expect(refs(migrate({ tabs: [{ tab: 'Guides', pages: ['guide'] }, generated, listed] }, files))).toEqual(unchanged)
+    expect(refs(migrate({ tabs: [{ tab: 'Guides', pages: ['guide'] }, listed] }, files))).toEqual(unchanged)
   })
 
   it('puts API tabs that list operations back among their siblings in the order the source had them, first or last included', () => {
@@ -2004,7 +2076,7 @@ describe('Mintlify repository migration', () => {
       const page = selectedPath === '/public' ? 'api-reference/default/public-operation' : 'api-reference/default/restricted-operation'
       expect(tab?.api).toBeUndefined()
       expect(tab?.groups).toEqual([{ group: 'Selected', pages: [page] }])
-      expect(bundle.docsConfig.tabs.find((entry) => entry.api)).toEqual({ tab: 'OpenAPI: service.json', hidden: true, api: { source: 'openapi/service.json', navigation: false } })
+      expect(bundle.docsConfig.tabs.find((entry) => entry.api)).toEqual({ tab: 'OpenAPI: service.json', hidden: true, api: { source: 'openapi/service.json' } })
       const asset = bundle.assets.find((entry) => entry.path === 'openapi/service.json')
       expect(asset).toBeDefined()
       const spec = JSON.parse(Buffer.from(asset!.content).toString('utf8'))

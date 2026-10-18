@@ -18,6 +18,16 @@ export const endpointSpec = {
   },
 }
 
+/**
+ * The tabs a navigation validator reports as empty ("has no groups and no href") when it has no exemption for hidden tabs, as an older Cloud's
+ * does: no pages, no groups, no href, and not an API tab that lists navigation (`api.navigation !== false`).
+ */
+export function emptyTabsWithoutHiddenExemption(tabs: ReadonlyArray<{ tab: string; href?: string; pages?: ReadonlyArray<unknown>; groups?: ReadonlyArray<unknown>; api?: { navigation?: boolean } }>): Array<string> {
+  return tabs
+    .filter((tab) => !(tab.pages?.length || tab.groups?.length) && !tab.href && !(tab.api && tab.api.navigation !== false))
+    .map((tab) => tab.tab)
+}
+
 /** Page ids the operations above get under a directory: `<directory>/<first tag>/<summary>`, slugged as Mintlify slugs them. */
 export const endpointPageId = (directory: string, operation: 'createKey' | 'getKey' | 'deleteKey' | 'limit' | 'createApi' | 'createDomain' | 'listDomains'): string => {
   const names = {
