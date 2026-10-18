@@ -74,8 +74,6 @@ export function ResponseField({
 // ParamField
 // ---------------------------------------------------------------------------
 
-type ParamLocation = 'body' | 'query' | 'path' | 'header'
-
 interface ParamFieldProps {
   body?: boolean | string
   query?: boolean | string
@@ -90,25 +88,19 @@ interface ParamFieldProps {
   children?: ReactNode
 }
 
-const locationStyles: Record<ParamLocation, string> = {
-  body: 'text-violet-700 dark:text-violet-300',
-  query: 'text-sky-700 dark:text-sky-300',
-  path: 'text-amber-700 dark:text-amber-300',
-  header: 'text-green-700 dark:text-green-300',
-}
-
 export function ParamField({ name, type, required, deprecated, body, query, path, header, default: defaultValue, placeholder, children }: ParamFieldProps) {
   const t = useApiLabels()
-  const location: ParamLocation = path ? 'path' : query ? 'query' : header ? 'header' : 'body'
+  // As on Mintlify, only a header names its location; body, query and path fields show name, type and required.
+  const isHeader = !path && !query && Boolean(header)
   const locatedName = [path, query, header, body].find((value): value is string => typeof value === 'string' && value.length > 0)
   const fieldName = locatedName ?? name ?? 'parameter'
   return (
     <section className="not-prose border-b border-border/70 py-5 last:border-0">
       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5">
         <code className={cn('text-sm font-semibold text-foreground', deprecated && 'line-through opacity-65')}>{fieldName}</code>
-        <span className={cn('font-mono text-[0.7rem] font-medium', locationStyles[location])}>
-          {location}
-        </span>
+        {isHeader && (
+          <span className="font-mono text-[0.7rem] font-medium text-green-700 dark:text-green-300">header</span>
+        )}
         {type && (
           <span className="rounded border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground/70">
             {type}
