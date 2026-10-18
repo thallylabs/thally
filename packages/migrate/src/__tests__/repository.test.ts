@@ -209,6 +209,50 @@ describe('Mintlify pages that link elsewhere', () => {
     expect(bundle.pages.find((page) => page.id === 'roadmap')?.noindex).toBeUndefined()
   })
 
+  describe('on the home page', () => {
+    const rootSources = (bundle: ReturnType<typeof bundleFor>) => (bundle.docsConfig.redirects ?? []).filter((redirect) => redirect.source === '/')
+    const external = { destination: 'https://example.com/welcome', permanent: false }
+
+    it.each(['index.mdx', 'introduction.mdx'])('sends both the site root and /introduction to the address when %s has a url', (file) => {
+      const bundle = bundleFor(
+        { navigation: { pages: ['getting-started', file.replace(/\.mdx$/, '')] } },
+        { [file]: '---\ntitle: Home\nurl: https://example.com/welcome\n---\n\nHome.', 'getting-started.mdx': '---\ntitle: Start\n---\n\nStart.' },
+      )
+      expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([
+        { source: '/', ...external },
+        { source: '/introduction', ...external },
+      ]))
+      // No second redirect for the root (the one to the first page would win and hide the link).
+      expect(rootSources(bundle)).toHaveLength(1)
+      expect(bundle.docsConfig.redirects?.filter((redirect) => redirect.source === '/introduction')).toHaveLength(1)
+      expect(bundle.pages.find((page) => page.id === 'introduction')).toMatchObject({ noindex: true })
+    })
+
+    it('keeps the root redirect to the home page out of the way when the home page is first and links elsewhere', () => {
+      const bundle = bundleFor(navigation, { ...linkPages, 'introduction.mdx': '---\ntitle: Intro\nurl: https://example.com/welcome\n---\n\nHello.' })
+      expect(rootSources(bundle)).toEqual([{ source: '/', ...external }])
+    })
+
+    it('leaves the root redirect and the other pages alone when the home page has no url', () => {
+      const bundle = bundleFor(navigation, linkPages)
+      expect(rootSources(bundle)).toEqual([{ source: '/', destination: '/introduction', permanent: true }])
+      expect(bundle.docsConfig.redirects?.filter((redirect) => redirect.source === '/github-repo')).toEqual([
+        { source: '/github-repo', destination: 'https://github.com/acme/docs', permanent: false },
+      ])
+      expect(bundle.docsConfig.redirects?.map((redirect) => redirect.source)).not.toContain('/introduction')
+    })
+
+    it('keeps a redirect for the root that the source site wrote, still redirects /introduction, and says so', () => {
+      const bundle = bundleFor(
+        { navigation: { pages: ['index', 'getting-started'] }, redirects: [{ source: '/', destination: '/getting-started' }] },
+        { 'index.mdx': '---\ntitle: Home\nurl: https://example.com/welcome\n---\n\nHome.', 'getting-started.mdx': '---\ntitle: Start\n---\n\nStart.' },
+      )
+      expect(rootSources(bundle)).toEqual([{ source: '/', destination: '/getting-started' }])
+      expect(bundle.docsConfig.redirects).toContainEqual({ source: '/introduction', ...external })
+      expect(bundle.warnings.filter((warning) => /"introduction".*https:\/\/example\.com\/welcome.*"\/".*\/getting-started/.test(warning.message))).toHaveLength(1)
+    })
+  })
+
   it('does not treat a url on another platform as a link', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-link-pages-'))
     writeFileSync(join(root, 'introduction.mdx'), '---\ntitle: Intro\nurl: "https://example.com"\n---\n\nHello.')

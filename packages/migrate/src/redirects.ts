@@ -58,6 +58,17 @@ function pageRoutes(pages: ReadonlyArray<Pick<MigrationPage, 'id'>>): Array<stri
   return pages.flatMap((page) => [`/${page.id}`, `/${page.id.replace(/\/index$/, '')}`])
 }
 
+/**
+ * Every address that opens a page. That is `pageRoutes`, plus the site root for
+ * the home document: the runtime serves `introduction` at `/` (`navigationPagePath`
+ * in `@thallylabs/core`, which is also what its sidebar links to) and still accepts
+ * `/introduction` as an alias (`matchesNavigationPath`). A redirect that has to take
+ * a page over must cover all of them.
+ */
+export function pageEntryRoutes(page: Pick<MigrationPage, 'id'>): Array<string> {
+  return [...new Set([...pageRoutes([page]), ...(page.id === 'introduction' ? ['/'] : [])])]
+}
+
 /** The literal routes a site's pages are served at, as `literalRoute` writes them. */
 export function servedRoutes(pages: ReadonlyArray<Pick<MigrationPage, 'id'>>): Set<string> {
   return new Set(pageRoutes(pages).map((route) => route.toLowerCase()))

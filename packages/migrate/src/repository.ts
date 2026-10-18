@@ -100,7 +100,7 @@ import {
   trimTrailingSlashes,
   withinRealRoot,
 } from './path.js'
-import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, servedRoutes } from './redirects.js'
+import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, pageEntryRoutes, servedRoutes } from './redirects.js'
 import type {
   MigrationApiGroup,
   MigrationAsset,
@@ -5714,11 +5714,27 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     docsConfig = dropConflictingRedirects(dropUnroutableRedirects(docsConfig, warnings), [...pages, ...sourceRefPages], warnings)
   }
   // A Mintlify page whose frontmatter `url` is another address is a link in the sidebar. Its entry stays in
-  // the navigation and its path redirects there; the redirect hides the page on purpose, so it skips the
-  // pass above. A sourceRef page redirects from its mounted path.
-  const linkRedirects = [...pages, ...sourceRefPages].flatMap((page) => page.externalUrl
-    ? [{ source: `/${page.id.replace(/\/index$/, '')}`, destination: page.externalUrl, permanent: false }]
-    : [])
+  // the navigation and every address that opens it redirects there (the home page is served at `/` as well as
+  // `/introduction`); the redirect hides the page on purpose, so it skips the pass above. A sourceRef page
+  // redirects from its mounted path. A redirect the source site already has for one of those addresses (only
+  // `/` can: the pass above drops any other) keeps its place, and a warning says so.
+  const redirectSources = new Map((docsConfig.redirects ?? []).map((redirect) => [(redirect.source.replace(/\/+$/, '') || '/').toLowerCase(), redirect.destination]))
+  const linkRedirects: Array<{ source: string; destination: string; permanent: false }> = []
+  for (const page of [...pages, ...sourceRefPages]) {
+    if (!page.externalUrl) continue
+    for (const source of pageEntryRoutes(page)) {
+      const existing = redirectSources.get(source.toLowerCase())
+      if (existing !== undefined) {
+        warnings.push({
+          code: 'unsupported-config',
+          message: `Page "${page.id}" links to ${stripControlCharacters(page.externalUrl)}, but "${source}" already redirects to ${stripControlCharacters(existing)}; that redirect was kept, so "${source}" does not open the link.`,
+        })
+        continue
+      }
+      redirectSources.set(source.toLowerCase(), page.externalUrl)
+      linkRedirects.push({ source, destination: page.externalUrl, permanent: false })
+    }
+  }
   if (linkRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...linkRedirects] }
 
   if (pages.length === 0) {

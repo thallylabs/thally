@@ -179,7 +179,11 @@ export function addMintlifyHomepageRedirects(
     .filter((locale) => locale.code !== config.i18n?.defaultLocale)
     .filter((locale) => homepage !== 'introduction' || pages.some((page) => page.locale === locale.code && page.navigationId === homepage))
     .map((locale) => locale.code)]
+  // A home document with its own `url` takes over the root (the link step redirects `/` to that address),
+  // so a root redirect to the first page would hide the link.
+  const homeLinksElsewhere = pages.some((page) => page.id === 'introduction' && page.externalUrl)
   for (const locale of roots) {
+    if (!locale && homeLinksElsewhere) continue
     const source = locale ? `/${locale}` : '/'
     if (sources.has(source.toLowerCase())) continue
     redirects.push({ source, destination: `${locale ? `/${locale}` : ''}/${homepage}`, permanent: true })
