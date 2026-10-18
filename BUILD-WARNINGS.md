@@ -21,17 +21,13 @@ visible during review.
 
 ## Tailwind CSS 4 warnings
 
-- `MODULE_TYPELESS_PACKAGE_JSON` can appear when `@tailwindcss/postcss@4.3.3`
-  loads `tailwind.config.ts` from the existing CommonJS root package. Node
-  reparses that configuration as ESM. The build succeeds. Keep the warning
-  visible; changing the root module format affects more than styling.
-- Prose examples with an asterisk inside a CSS variable name can produce an
-  optimizer warning. Tailwind 4.3.3
-  drops the invalid declaration and completes the production build. Valid
-  arbitrary-value classes still compile. PostCSS also enables optimization
-  in development, with minification disabled, so invalid prose candidates do
-  not reach the Next.js CSS parser. The v3 JavaScript content transform is
-  no longer part of the runtime.
+- `MODULE_TYPELESS_PACKAGE_JSON` can appear when `@tailwindcss/postcss` loads
+  `tailwind.config.ts`. Node reads the configuration as an ES module. This warning
+  does not stop the build and does not require a change to your package format.
+- Prose examples that contain an asterisk in a CSS variable name can produce an
+  optimizer warning. Tailwind drops the invalid declaration. Valid utility
+  classes still compile. Keep PostCSS optimization enabled in development so
+  these invalid declarations do not reach the CSS parser.
 
 ## Review policy
 

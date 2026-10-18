@@ -26,6 +26,17 @@ npx thally check
 Use `build` when the project is ready for production and `deploy` when you want
 the CLI to publish it through a supported provider.
 
+## Choose a Tailwind version
+
+New sites use Tailwind CSS 4. If you need Tailwind CSS 3, add the version flag:
+
+```bash
+npx create-thally-docs@latest my-docs --tailwind-version 3
+```
+
+`thally init` accepts the same flag. It applies to new sites. For an existing
+site, follow the [Tailwind CSS 4 upgrade guide](https://github.com/thallylabs/thally/blob/main/docs/tailwind-v4-upgrade.md).
+
 ## Choose a command by goal
 
 | Goal | Command | Result |

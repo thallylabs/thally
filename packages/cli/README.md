@@ -17,6 +17,20 @@ project's own CLI. Once the preview is ready, `thally dev` prints the local
 `llms.txt` and `/api/mcp` endpoints and a `claude mcp add --transport http`
 command for connecting Claude Code.
 
+## Create a Tailwind 3 site
+
+New sites use Tailwind CSS 4 by default. Pass `--tailwind-version 3` to create a
+site with Tailwind CSS 3:
+
+```sh
+npx @thallylabs/cli@latest init my-docs
+npx @thallylabs/cli@latest init my-docs-3 --tailwind-version 3
+```
+
+You can also pass `--tailwind-version 4` explicitly. Version `3` uses a fixed
+starter snapshot with its matching framework, configuration, and lockfile.
+The flag applies to new sites; it does not change an existing site's version.
+
 ## Terminal output
 
 Interactive terminals show the THALLY wordmark, task headings, and live progress.
@@ -117,12 +131,12 @@ workflow and cannot run against a customer repository.
 
 ## Update a Tailwind 3 site
 
-After a Tailwind 4 scaffold is promoted and its CLI is published, review
-`thally starter update` before applying the framework update. Then run
-`npm ci` and review utilities in your own MDX and custom components. The
-updater preserves those files; it does not rename their classes.
+Run `npx @thallylabs/cli@latest starter update` from your project to review the
+framework update. Resolve conflicts before you add `--apply`. Then run `npm ci`
+and review utility classes in your own MDX and custom components. The updater
+preserves those files; you must update their classes yourself.
 
-Follow the [Tailwind CSS 4 update guide](../../docs/tailwind-v4-upgrade.md) for
+Follow the [Tailwind CSS 4 upgrade guide](https://github.com/thallylabs/thally/blob/main/docs/tailwind-v4-upgrade.md) for
 class changes, browser requirements, conflict handling, and verification.
 Keep your existing release and lockfile if you still need Tailwind 3.
 
@@ -137,16 +151,3 @@ Keep your existing release and lockfile if you still need Tailwind 3.
   capabilities are reachable through the single `thally` binary.
 - **`check --agents`** runs content lint plus the Agent Readiness Score, with a
   CI-friendly non-zero exit code when the score is below the threshold.
-
-## Create a Tailwind 3 site
-
-After the Tailwind 4 scaffold and CLI are released, the default creates a Tailwind
-4 site. Use the creation flag to select the frozen Tailwind 3 starter:
-
-```sh
-npx @thallylabs/cli@latest init my-docs
-npx @thallylabs/cli@latest init my-docs-3 --tailwind-version 3
-```
-
-The flag selects a complete starter snapshot. It does not downgrade an existing
-site. The Tailwind 3 snapshot remains fixed when the default starter changes.

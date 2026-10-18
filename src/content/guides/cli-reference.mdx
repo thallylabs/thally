@@ -16,7 +16,7 @@ npx thally
 
 | Command | What it does |
 | --- | --- |
-| `thally init [dir]` | Create a project with `create-thally-docs`. |
+| `thally init [dir] [--tailwind-version 3]` | Create a site with Tailwind CSS 4 by default, or select Tailwind CSS 3. |
 | `thally dev [-- OPTIONS]` | Start the local documentation server and print its agent endpoints. |
 | `thally build` | Build the production site. |
 | `thally start` | Serve a completed production build. |
@@ -25,6 +25,7 @@ npx thally
 | `thally new PAGE_ID` | Create an MDX page and register it in `docs.json`. |
 | `thally migrate SOURCE [dir] [--platform mintlify\|docusaurus\|fern\|auto]` | Import a documentation repository or public site. |
 | `thally translate --locale LOCALE` | Generate or refresh a translated content tree. |
+| `thally starter update [--apply]` | Review or apply a framework update. |
 | `thally mcp` | Start the local MCP server over standard input/output. |
 | `thally agent "INSTRUCTION"` | Draft a documentation change for review. |
 | `thally track add`, `list`, `test`, or `setup` | Connect product-repository changes to documentation work. |
@@ -116,6 +117,16 @@ Skip all prompts and accept defaults with `--yes`:
 npx create-thally-docs my-docs --yes
 ```
 
+New sites use Tailwind CSS 4. To use Tailwind CSS 3, run:
+
+```bash
+npx create-thally-docs@latest my-docs --tailwind-version 3
+```
+
+`thally init` accepts the same flag. The flag selects a complete starter with
+its matching dependencies and configuration. It does not change an existing
+site. Follow the [Tailwind CSS 4 upgrade guide](https://github.com/thallylabs/thally/blob/main/docs/tailwind-v4-upgrade.md) to update an existing site.
+
 ### Options
 
 | Flag | Description |
@@ -123,6 +134,8 @@ npx create-thally-docs my-docs --yes
 | `--yes`, `-y` | Accept all defaults, skip interactive prompts |
 | `--install` | Install project dependencies (the default) |
 | `--no-install` | Skip dependency installation |
+| `--tailwind-version 3` | Create a site from the fixed Tailwind CSS 3 starter |
+| `--tailwind-version 4` | Create a Tailwind CSS 4 site (the default) |
 
 ---
 

@@ -10,18 +10,18 @@ own utility classes after the update to preserve their appearance.
 - Check your browser requirements. Tailwind CSS 4 requires Safari 16.4+,
   Chrome 111+, or Firefox 128+. Keep your current Tailwind 3 release if you need
   older browsers.
-- Wait for a promoted Tailwind 4 scaffold and its published CLI. A runtime
-  commit, a starter sync, and a package release are separate steps. A local
-  dependency update does not change the archive that `create-thally-docs`
-  downloads. Use a CLI release that includes the promoted scaffold record.
+- Run these commands from your project root. Use `@thallylabs/cli@latest`
+  to get the current update command, even if your project has an older CLI.
 
-## Update the framework first
+## Update your site
 
-1. Run `npx thally starter update` to review the proposed changes.
+1. Run `npx @thallylabs/cli@latest starter update` to review the proposed changes.
+   This command is a dry run. Check that the plan includes the Tailwind 4
+   dependencies and configuration before you apply it.
 2. Resolve any conflicts in framework files, `package.json`, or
    `postcss.config.mjs`. An edited `tailwind.config.ts` also needs review.
    The updater stops before writing files when conflicts remain.
-3. Run `npx thally starter update --apply` after the plan has no conflicts.
+3. Run `npx @thallylabs/cli@latest starter update --apply` after the plan has no conflicts.
 4. Run `npm ci` to install the updated lockfile.
 5. Review utility classes in `src/content/`, `src/mdx/custom-components.tsx`,
    `snippets/`, and any other code you own. The framework updater preserves
@@ -54,31 +54,32 @@ arbitrary values.
    components in light and dark themes. Repeat at a mobile width.
 5. Commit the reviewed update. Publish through your normal release process.
 
-The runtime retains `tailwind.config.ts` through an explicit `@config` in
-`src/app/globals.css`. PostCSS uses `@tailwindcss/postcss`; the separate
-`autoprefixer` dependency is no longer needed. Keep the PostCSS optimization
-setting: it removes invalid prose candidates in development as well as in
-production. Development CSS stays readable. Keep the generated runtime files
-together with the matching package and PostCSS changes.
+## Configuration changes
 
-## Limits of the Tailwind upgrade tool
+The update keeps `tailwind.config.ts` and loads it through `@config` in
+`src/app/globals.css`. PostCSS uses `@tailwindcss/postcss`, which handles vendor
+prefixes without the separate `autoprefixer` package.
 
-Do not use `npx @tailwindcss/upgrade` as an automatic Thally update step.
-With the original Tailwind 3 configuration, version 4.3.3 fails while reading a
-custom typography font size. After the framework update, the tool can rewrite
-framework files while leaving MDX content classes unchanged. Its broad string
-migration can also change component variant names.
+Keep the PostCSS optimization setting. It prevents invalid CSS candidates from
+prose examples from reaching the development server. Development CSS remains
+readable because minification is disabled there.
 
-If you use the tool for a separate custom project, use Node.js 20 or later and
-a clean Git branch. `--force` skips its clean-tree check; it does not resolve
-migration errors. Review every changed file and test the site before keeping
-the result.
+Use the Thally updater for the framework files and dependencies. If you also use
+`@tailwindcss/upgrade` on custom code, run it on a separate branch and review
+every change. Check MDX classes and component props by hand before you keep the
+result.
 
 ## Keep an existing Tailwind 3 site
 
-You can keep the current site and its lockfile without running the framework
-update. The `--tailwind-version 3` creation flag also selects a frozen Tailwind 3
-starter. It does not apply to `starter update`. Retained scaffold records let the
-updater identify that site's original base when you update later. Do not edit `starter-release.json` to change its
-release identity. Maintainers must retain previous scaffold records during
-promotion; replacing only a manifest is not an upgrade or a rollback.
+Keep your current site and lockfile if you still need Tailwind 3. You do not
+need to run the framework update.
+
+To create another Tailwind 3 site, run:
+
+```bash
+npx create-thally-docs@latest my-docs --tailwind-version 3
+```
+
+This flag applies to creation. It does not downgrade an existing site. Keep
+`starter-release.json` unchanged so the updater can identify your current
+framework when you choose to update later.

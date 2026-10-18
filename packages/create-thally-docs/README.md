@@ -40,21 +40,19 @@ the sitemap.
 
 ## Choose a Tailwind version
 
-After the Tailwind 4 starter is promoted and this CLI is published, new sites use
-Tailwind 4 by default:
+New sites use Tailwind CSS 4 by default. Use `--tailwind-version 3` if you need
+Tailwind CSS 3:
 
 ```sh
 npx create-thally-docs@latest my-docs
 npx create-thally-docs@latest my-docs-3 --tailwind-version 3
 ```
 
-`--tailwind-version 4` explicitly selects the current starter. Version `3` selects
-the complete frozen starter release `2026-10-18.30d852d3.fb0a562c`, including its
-matching runtime, configuration, and lockfile. Later promotions do not move this
-pin. The flag applies to new sites. It does not change an existing site's version.
+You can also pass `--tailwind-version 4` explicitly. Version `3` uses a fixed
+starter snapshot with its matching framework, configuration, and lockfile.
 
-Merging these changes does not promote the starter or publish the CLI. Complete
-the scaffold release process before announcing Tailwind 4 as the public default.
+The flag applies to new sites. To update an existing Tailwind 3 site, follow the
+[Tailwind CSS 4 upgrade guide](https://github.com/thallylabs/thally/blob/main/docs/tailwind-v4-upgrade.md).
 
 ## Terminal output
 
