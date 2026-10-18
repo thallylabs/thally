@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 // standalone starter does not have (see SOURCE_ONLY_PATHS in
 // .github/scripts/starter-runtime-contract.mjs).
 import { API_GROUPS_MAX_DEPTH as CHECK_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, operationState, pageState, parseDocReference } from '../../../../packages/create-thally-docs/src/openapi-publication'
+import { API_GROUPS_MAX_DEPTH as MIGRATE_GROUPS_MAX_DEPTH } from '../../../../packages/migrate/src/navigation'
 import { mdxServers, paramFieldPathNames, parseManualApi } from '../../../../packages/create-thally-docs/src/manual-api-check'
 import { extractParamFields, parseApiFrontmatter, sanitizeApiMdxConfig } from '../manual-operation'
 import { normalizeSpec } from '../normalize'
@@ -237,5 +238,8 @@ describe('thally check api.groups parity', () => {
 
   it('stops at the same group depth as the site', () => {
     expect(CHECK_GROUPS_MAX_DEPTH).toBe(API_GROUPS_MAX_DEPTH)
+    // Renderer parity belongs to the public application, since the migration
+    // package also runs in hosts that do not ship this renderer.
+    expect(MIGRATE_GROUPS_MAX_DEPTH).toBe(API_GROUPS_MAX_DEPTH)
   })
 })

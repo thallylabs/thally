@@ -1,6 +1,6 @@
 /** Mintlify navigation projection invariants shared by every migration entrypoint. */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -11,7 +11,7 @@ import {
   pruneMissingNavigationPages,
 } from '../index.js'
 import { projectFernNavigation } from '../fern.js'
-import { API_GROUPS_MAX_DEPTH, mergeApiGroups, mintlifyNavigationApiReferences, readMintlifyConfig } from '../navigation.js'
+import { mergeApiGroups, mintlifyNavigationApiReferences, readMintlifyConfig } from '../navigation.js'
 import type { MigrationApiGroup, MigrationDocsConfig, MigrationPage } from '../types.js'
 
 function page(id: string, navigationId = id, locale?: string): MigrationPage {
@@ -1029,13 +1029,6 @@ describe('Mintlify authored API groups', () => {
 
   describe('past the groups the renderer follows (32 levels)', () => {
     const referenceOf = (container: Record<string, unknown>) => mintlifyNavigationApiReferences({ navigation: { tabs: [{ tab: 'Docs', openapi: source, ...container }] } })[0]
-
-    it('mirrors the renderer\'s limit', () => {
-      // The renderer's own copy, read from the repository: this package cannot import it.
-      const declared = /export const API_GROUPS_MAX_DEPTH = (\d+)/.exec(readFileSync(new URL('../../../../src/lib/openapi/operation-keys.ts', import.meta.url), 'utf8'))
-      expect(declared).not.toBeNull()
-      expect(API_GROUPS_MAX_DEPTH).toBe(Number(declared?.[1]))
-    })
 
     it('keeps groups down to level 32 and leaves out deeper ones, as a binding that lists nothing when nothing else is listed', () => {
       expect(referenceOf({ groups: [groupTree(32, 'GET /a')] }).groups).toEqual([groupTree(32, 'GET /a')])
