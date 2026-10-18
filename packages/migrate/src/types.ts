@@ -31,6 +31,27 @@ export interface MigrationApiGroup {
   pages: Array<string | MigrationApiGroup>
 }
 
+/**
+ * Where an API tab sat in the source navigation, kept for the tab that lists its operations as pages: the tab as the projection
+ * built it (label, icon, presentation; no content) and the labels of the tabs before it, nearest first. Its API tab is not in
+ * `docsConfig.tabs` until the spec is bound (a remote spec only after its download), so the tab is put back after the first
+ * of those that is still there, or first when it had none.
+ */
+export interface EndpointTabSlot {
+  tab: MigrationNavigationTab
+  preceding: Array<string>
+}
+
+/**
+ * A spec whose `METHOD /path` operations docs.json lists, served by Mintlify as one generated page each at
+ * `/<directory>/<first tag>/<summary>`: they become pages of that tab rather than an API-bound tab's operations.
+ */
+export interface EndpointPagesTarget {
+  /** Mintlify's output folder for the generated pages (no surrounding slashes); `api-reference`, Mintlify's default, when docs.json names none. */
+  directory: string
+  slot?: EndpointTabSlot
+}
+
 export interface MigrationNavigationTab {
   tab: string
   /** Reader-facing label when `tab` includes a version for unique identity. */
@@ -222,6 +243,8 @@ export interface RemoteApiSpec {
   groups?: Array<MigrationApiGroup>
   /** Every reference sharing the tab lists operations and none survives (all hidden or restricted): no endpoint navigation is generated for it. */
   navigation?: false
+  /** With `groups`: the listed operations become pages under this directory, in the tab's place, once the spec is downloaded. */
+  endpointPages?: EndpointPagesTarget
   /** Operation keys (`get /x`) only access-restricted pages document; marked `x-excluded` after download. */
   withheldOperations?: Array<string>
   /** Operation keys published pages or docs.json also name; keeps a shared `$ref` path item public. */
@@ -240,8 +263,10 @@ export interface MigrationBundle {
    * Repository OpenAPI specs docs.json mounts under a `directory` (no surrounding slashes), with the tab each is bound to; the remote ones are in
    * `remoteApiSpecs[].directories`. Present only alongside remote specs: a spec's id depends on which remote tabs bind ahead of it, so
    * hydration links the local and remote mounts together once every download has settled, and the links stay as authored until then.
+   * `endpointOperations` marks a mount whose listed operations are already pages of the site (those operations, in listed order): its endpoint
+   * URLs are those pages, so nothing is redirected from them.
    */
-  localApiMounts?: Array<{ filename: string; directory: string; tab?: string }>
+  localApiMounts?: Array<{ filename: string; directory: string; tab?: string; endpointOperations?: Array<string> }>
   /** Customer-owned component source and registry; paths are repository-relative. */
   componentFiles?: Array<RenderedMigrationFile>
   /**
