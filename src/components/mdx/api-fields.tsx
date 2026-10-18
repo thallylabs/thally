@@ -14,6 +14,15 @@ import { useApiLabels } from '@/components/api/api-locale'
 import { cn } from '@/lib/utils'
 import type { ReactNode } from 'react'
 
+/**
+ * Typography for a field's description. Tailwind's `not-prose` opt-out reaches every descendant,
+ * so no ancestor of this block may carry it, or paragraphs, inline code and fenced code lose
+ * their prose styles. The trailing rules drop the first and last block's outer margin inside
+ * rendered Markdown, so a one-paragraph description keeps the row height it has without prose.
+ */
+const descriptionClass =
+  'prose prose-sm mt-2.5 max-w-none text-foreground/75 dark:prose-invert [&_div>:first-child]:mt-0 [&_div>:last-child]:mb-0'
+
 // ---------------------------------------------------------------------------
 // ResponseField
 // ---------------------------------------------------------------------------
@@ -41,8 +50,8 @@ export function ResponseField({
 }: ResponseFieldProps) {
   const t = useApiLabels()
   return (
-    <section className="not-prose border-b border-border/70 py-5 last:border-0">
-      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5">
+    <section className="border-b border-border/70 py-5 last:border-0">
+      <div className="not-prose flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5">
         {pre.map((label) => <span key={`pre-${label}`} className="rounded bg-muted px-1.5 py-0.5 text-[0.68rem] font-medium text-foreground/60">{label}</span>)}
         <code className={cn('text-sm font-semibold text-foreground', deprecated && 'line-through opacity-65')}>{name}</code>
         {post.map((label) => <span key={`post-${label}`} className="rounded bg-muted px-1.5 py-0.5 text-[0.68rem] font-medium text-foreground/60">{label}</span>)}
@@ -64,7 +73,7 @@ export function ResponseField({
         )}
       </div>
       {children && (
-        <div className="prose prose-sm mt-2.5 max-w-none text-foreground/75 dark:prose-invert">{children}</div>
+        <div className={descriptionClass}>{children}</div>
       )}
     </section>
   )
@@ -95,8 +104,8 @@ export function ParamField({ name, type, required, deprecated, body, query, path
   const locatedName = [path, query, header, body].find((value): value is string => typeof value === 'string' && value.length > 0)
   const fieldName = locatedName ?? name ?? 'parameter'
   return (
-    <section className="not-prose border-b border-border/70 py-5 last:border-0">
-      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5">
+    <section className="border-b border-border/70 py-5 last:border-0">
+      <div className="not-prose flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5">
         <code className={cn('text-sm font-semibold text-foreground', deprecated && 'line-through opacity-65')}>{fieldName}</code>
         {isHeader && (
           <span className="font-mono text-[0.7rem] font-medium text-green-700 dark:text-green-300">header</span>
@@ -120,7 +129,7 @@ export function ParamField({ name, type, required, deprecated, body, query, path
         {placeholder ? <span className="text-xs text-foreground/50">placeholder <code className="font-mono text-foreground/70">{placeholder}</code></span> : null}
       </div>
       {children && (
-        <div className="prose prose-sm mt-2.5 max-w-none text-foreground/75 dark:prose-invert">{children}</div>
+        <div className={descriptionClass}>{children}</div>
       )}
     </section>
   )
@@ -141,7 +150,7 @@ export function Expandable({ title, defaultOpen = false, children }: ExpandableP
   const [open, setOpen] = useState(defaultOpen)
   const contentId = useId()
   return (
-    <div className="not-prose my-3">
+    <div className="my-3">
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
