@@ -11,7 +11,7 @@ import { runCheck } from '../check.js'
 const MISSING = 'Missing "description" in frontmatter'
 
 /** The `thally check` output for a project with one API page bound to `GET /status` of the given operation body. */
-async function check(options: { operation: string; pageDescription?: string; overrides?: unknown; spec?: boolean; reference?: string; hiddenTab?: boolean }): Promise<string> {
+async function check(options: { operation: string; pageDescription?: string; overrides?: unknown; spec?: boolean; reference?: string; hiddenTab?: boolean; other?: string }): Promise<string> {
   const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-operation-description-'))
   mkdirSync(join(projectDir, 'src/content/api'), { recursive: true })
   mkdirSync(join(projectDir, 'openapi'), { recursive: true })
@@ -25,7 +25,7 @@ async function check(options: { operation: string; pageDescription?: string; ove
         ]
       : [{ tab: 'API', ...(options.spec === false ? {} : specTab), groups: [{ group: 'Status', pages: ['api/status'] }] }],
   }))
-  writeFileSync(join(projectDir, 'openapi/other.yaml'), 'openapi: 3.0.0\ninfo:\n  title: Other\n  version: 1.0.0\npaths: {}\n')
+  writeFileSync(join(projectDir, 'openapi/other.yaml'), `openapi: 3.0.0\ninfo:\n  title: Other\n  version: 1.0.0\npaths:${options.other ? `\n${options.other}` : ' {}'}\n`)
   writeFileSync(join(projectDir, 'src/content/api/status.mdx'), [
     '---',
     'title: Get status',
@@ -90,6 +90,15 @@ describe('thally check Missing description on OpenAPI pages', () => {
   it('reads the operation from a spec that only a hidden tab binds, as the site does', async () => {
     expect(await check({ operation: 'description: Returns the service status.', hiddenTab: true })).not.toContain(MISSING)
     expect(await check({ operation: 'operationId: getStatus', hiddenTab: true })).toContain(MISSING)
+  })
+
+  it('reads the first spec that lists the operation, not a later spec that describes it', async () => {
+    const undescribed = '  /status:\n    get:\n      operationId: otherStatus\n      responses:\n        \'200\':\n          description: Available'
+    const operation = 'description: Returns the service status.'
+    // The visible tab's spec is the default; the hidden tab's spec comes after it.
+    expect(await check({ operation, hiddenTab: true, other: undescribed, reference: 'GET /status' })).toContain(MISSING)
+    expect(await check({ operation, hiddenTab: true, reference: 'GET /status' })).not.toContain(MISSING)
+    expect(await check({ operation, hiddenTab: true, other: undescribed, reference: 'openapi/api.yaml GET /status' })).not.toContain(MISSING)
   })
 
   it('leaves a page with its own description alone', async () => {

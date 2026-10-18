@@ -574,7 +574,10 @@ function checkOperationPages(
   if (pages.length === 0) return
   const load = (hidden: boolean): Array<CheckSpec> => tabs
     .filter((tab) => Boolean(tab.hidden) === hidden && typeof tab.api?.source === 'string')
-    .map((tab) => loadCheckSpec(projectDir, tab.api!.source as string, (tab.api as { overrides?: unknown }).overrides))
+    .map((tab) => {
+      const api = tab.api as { source: string; overrides?: unknown; webhookGroup?: unknown }
+      return { ...loadCheckSpec(projectDir, api.source, api.overrides), ...(typeof api.webhookGroup === 'string' ? { webhookGroup: api.webhookGroup } : {}) }
+    })
   // The specs the docs route serves, in its order: visible API tabs, the first being the default.
   const specs = load(false)
   const described = pages.some((page) => !page.hasDescription) ? [...specs, ...load(true)] : specs

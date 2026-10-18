@@ -81,6 +81,7 @@ const SOURCE_ONLY_PATHS = new Set([
   "src/lib/openapi/__tests__/migrate-operation-slug-parity.test.ts",
   "src/lib/openapi/__tests__/migrate-withheld-operations-parity.test.ts",
   "src/lib/openapi/__tests__/publication-check-parity.test.ts",
+  "src/lib/openapi/__tests__/description-check-parity.test.ts",
   // Drives /api/mcp with @modelcontextprotocol/sdk, a packages/mcp dependency.
   "src/app/api/mcp/sdk-client.test.ts",
 ]);
