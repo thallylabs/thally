@@ -191,6 +191,23 @@ Every `h2` and `h3` heading is a permalink. Selecting the heading copies the
 section URL without adding a visible marker beside it, so you can share a
 specific answer while keeping the page visually clean.
 
+## Typographic quotes
+
+Straight quotes in prose render as written. Set `smartQuotes` at the top level
+of `docs.json` to show them as curly quotes, the way Mintlify does:
+
+```json
+{
+  "smartQuotes": true
+}
+```
+
+With it on, `"quoted"` shows as “quoted” and `doesn't` as doesn’t. Only
+rendered prose changes. Inline code, code blocks, math, link addresses, JSX
+attributes (such as a `title`), heading anchors, the Markdown copy, `llms.txt`
+and search results keep the straight quotes you wrote. Dashes and ellipses are
+not changed. Migrated Mintlify sites turn it on.
+
 ## Tables
 
 Standard Markdown tables render with proper styling:
