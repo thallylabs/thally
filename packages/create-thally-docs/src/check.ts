@@ -219,7 +219,7 @@ function stringAttribute(node: MdxNode, name: string): string | null | undefined
  * are read from the MDX syntax tree, so a tag written inside inline code or a
  * comment is not one; a page MDX cannot read has none, as for the content parser.
  */
-function extractStepHeadings(content: string): Array<{ line: number; base: string }> {
+function extractStepHeadings(content: string): Array<{ line: number; base: string; explicit: boolean }> {
   // Parsing costs milliseconds per page; skip it on the many pages with no step.
   if (!content.includes('<Step')) return []
   let tree: MdxNode
@@ -228,7 +228,7 @@ function extractStepHeadings(content: string): Array<{ line: number; base: strin
   } catch {
     return []
   }
-  const steps: Array<{ line: number; base: string }> = []
+  const steps: Array<{ line: number; base: string; explicit: boolean }> = []
   const visit = (node: MdxNode, stepSize: string | undefined): void => {
     let childSize = stepSize
     if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
@@ -238,7 +238,10 @@ function extractStepHeadings(content: string): Array<{ line: number; base: strin
         const own = stringAttribute(node, 'titleSize')
         const size = own === undefined ? stepSize : own
         const title = stringAttribute(node, 'title')?.trim()
-        if (title && size && ['h2', 'h3', 'h4'].includes(size)) steps.push({ line: node.position?.start.line ?? 0, base: slugify(title) })
+        if (title && size && ['h2', 'h3', 'h4'].includes(size)) {
+          const id = stringAttribute(node, 'id')?.trim()
+          steps.push({ line: node.position?.start.line ?? 0, base: id || slugify(title), explicit: !!id })
+        }
       }
     }
     for (const child of node.children ?? []) visit(child, childSize)
@@ -272,7 +275,7 @@ function extractHeadingAnchors(content: string): Set<string> {
   })
   // Same numbering as the runtime and the content parser: `foo`, `foo-2`, `foo-3`;
   // an explicit id reserves its id, so generated ids skip it.
-  headings.push(...extractStepHeadings(content).map((step) => ({ ...step, explicit: false })))
+  headings.push(...extractStepHeadings(content))
   headings.sort((left, right) => left.line - right.line)
   const reserved = new Set(headings.filter((heading) => heading.explicit).map((heading) => heading.base))
   const used = new Set<string>()

@@ -57,13 +57,24 @@ function ensureUniqueId(base: string, explicit: boolean, ids: HeadingIds): strin
   return id
 }
 
-function collectExplicitIds(nodes: ReadonlyArray<RootContent>, into: Set<string>) {
+function collectExplicitIds(nodes: ReadonlyArray<RootContent>, into: Set<string>, stepSize?: string) {
   for (const node of nodes) {
     if (node.type === 'heading') {
       const { explicitId } = headingTextAndId(node)
       if (explicitId) into.add(explicitId)
     }
-    if ('children' in node) collectExplicitIds(node.children as Array<RootContent>, into)
+    let childSize = stepSize
+    if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
+      if (node.name === 'Steps') childSize = titleSizeOf(node) ?? undefined
+      if (node.name === 'Step') {
+        const own = titleSizeOf(node)
+        const depth = STEP_HEADING_DEPTH.get((own === undefined ? stepSize : own) ?? '')
+        const id = stringAttribute(node, 'id')?.trim() || undefined
+        // Reserve only titles the heading pass will number, so plain steps cannot shift anchors.
+        if (depth && stringAttribute(node, 'title')?.trim() && id) into.add(id)
+      }
+    }
+    if ('children' in node) collectExplicitIds(node.children as Array<RootContent>, into, childSize)
   }
 }
 
@@ -267,7 +278,7 @@ function walk(state: WalkState, nodes: Array<RootContent>, stepSize?: string) {
         const title = stringAttribute(node, 'title')
         const depth = STEP_HEADING_DEPTH.get((own === undefined ? stepSize : own) ?? '')
         // fall through after: the title still reads as prose, and the body belongs to the new section
-        if (title && depth) startSection(state, depth, title)
+        if (title && depth) startSection(state, depth, title, stringAttribute(node, 'id')?.trim() || undefined)
       }
     }
     if (node.type === 'heading') {

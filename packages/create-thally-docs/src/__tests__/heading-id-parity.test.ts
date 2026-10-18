@@ -95,3 +95,36 @@ describe('step tags that are not elements of the page', () => {
     expect(await brokenAnchorOutput(source, 'one')).toContain('Broken anchor')
   })
 })
+
+
+describe('authored step heading ids', () => {
+  it.each([
+    ['  install  ', 'install'],
+    ['   ', 'deploy'],
+    ['', 'deploy'],
+  ])('normalizes the explicit id %j across all heading paths', async (authored, expected) => {
+    const source = `<Steps titleSize="h3">\n<Step title="Deploy" id="${authored}">Body.</Step>\n</Steps>\n\n## ${expected}`
+    const ids = await renderedIds(source)
+    expect(ids).toEqual([expected, `${expected}-2`])
+    expect(parseMdxContent(source).headings.map((heading) => heading.id)).toEqual(ids)
+    for (const id of ids) expect(await brokenAnchorOutput(source, id)).not.toContain('Broken anchor')
+  })
+
+  it('preserves and reserves explicit ids across steps and Markdown headings', async () => {
+    const source = [
+      '## Install', '',
+      '<Steps titleSize="h3">',
+      '<Step title="Deploy" id="install">Body.</Step>',
+      '<Step title="Repeat" id="install">Body.</Step>',
+      '</Steps>', '',
+      '## Install',
+    ].join('\n')
+    const ids = await renderedIds(source)
+    expect(ids).toEqual(['install-2', 'install', 'install-3', 'install-4'])
+    expect(parseMdxContent(source).headings.map((heading) => heading.id)).toEqual(ids)
+    for (const id of ids) expect(await brokenAnchorOutput(source, id)).not.toContain('Broken anchor')
+    for (const absent of ['deploy', 'repeat', 'install-5']) {
+      expect(await brokenAnchorOutput(source, absent)).toContain('Broken anchor')
+    }
+  })
+})
