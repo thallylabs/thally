@@ -10,9 +10,9 @@ import { isIP } from 'node:net'
 
 
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
-import { insertApiTab } from './navigation.js'
+import { addMintlifyDirectoryRedirects, insertApiTab } from './navigation.js'
 import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, servedRoutes } from './redirects.js'
-import { apiTabSpecIds, isWithheld, linkApiMounts, mountPrefix, thallyOperationSlugSegments } from './repository.js'
+import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, isWithheld, linkApiMounts, mountPrefix, reportEndpointPages, thallyOperationSlugSegments } from './repository.js'
 import { markExcluded, parseSpecDocument, sharedSpecMessage, withoutByteOrderMark } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher, RemoteApiSpec } from './types.js'
 
@@ -186,6 +186,8 @@ interface BoundSpec {
   content: Buffer
   operations: Array<OpenApiOperation>
   tabName: string
+  /** Set when the operations the tab listed became pages (`addEndpointPages`): those operations, in listed order, and the spec has no API tab of its own. */
+  endpointOperations?: Array<string>
 }
 
 /**
@@ -209,7 +211,9 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   const warnings = [...bundle.warnings]
   const pages = bundle.pages.map((page) => ({ ...page }))
   const authoredLinks = new Set<string>()
-  const served = servedRoutes(pages)
+  // The operations a tab lists become pages: URLs two of them share, and what an authored page already owns, are settled once for the site.
+  const ledger = createEndpointPageLedger(pages)
+  const pagesBefore = pages.length
   // Mintlify endpoint URL -> Thally endpoint page, for every redirect generated below.
   const endpointUrls = new Map<string, string>()
   for (const page of bundle.pages) {
@@ -248,6 +252,29 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
         const ref = page.openapi ? splitOpenApiRef(page.openapi) : null
         if (ref?.specRef === reference.url) page.openapi = withSpecRef(ref, `openapi/${filename}`)
       }
+      // The operations the tab listed become its pages, and the spec is bound only in a hidden tab that lists nothing.
+      const endpoint = reference.groups && reference.endpointPages
+        ? addEndpointPages({
+            tabs,
+            pages,
+            ledger,
+            spec: {
+              assetPath: `openapi/${filename}`,
+              source: reference.url,
+              content: body,
+              groups: reference.groups,
+              target: reference.endpointPages,
+              tabLabel: reference.tabLabel,
+              parentTab: reference.parentTab,
+              icon: reference.icon,
+              hidden: reference.hidden,
+            },
+          })
+        : null
+      if (endpoint) {
+        bound.push({ reference, filename, content: body, operations, tabName: reference.tabLabel ?? 'API Reference', endpointOperations: endpoint.operations })
+        continue
+      }
       const tab = reference.tabLabel
         ? tabs.find((candidate) => candidate.tab === reference.tabLabel)
         : tabs.find((candidate) => candidate.tab.toLowerCase().includes('api'))
@@ -267,20 +294,26 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   // Every spec is bound, so every mount is linked once, local and remote together: each target carries the id its spec is served under,
   // and the redirects below exist before any guess from a link's last two segments.
   // A mount whose download failed is reserved all the same: it still owns the addresses under it, which stay as authored.
+  // The operations of a tab that became pages are served by those pages, from the directory the pages are under: nothing is redirected there.
+  const pageMounts = bound.flatMap(({ reference, endpointOperations }) => endpointOperations && reference.endpointPages ? [reference.endpointPages.directory] : [])
   const directories = [
     ...(bundle.localApiMounts ?? []).map(({ directory }) => directory),
     ...bundle.remoteApiSpecs.flatMap((reference) => (reference.directories ?? []).map(({ directory }) => directory)),
+    ...pageMounts,
   ]
   const endpointRedirects = linkApiMounts(
     [
-      ...(bundle.localApiMounts ?? []).map(({ filename, directory, tab }) => ({
+      ...(bundle.localApiMounts ?? []).map(({ filename, directory, tab, endpointOperations }) => ({
         filename,
         content: Buffer.from(assets.find((asset) => asset.path === `openapi/${filename}`)?.content ?? []),
         prefix: directory,
+        ...(endpointOperations ? { endpointPages: true, operations: endpointOperations } : {}),
         ...(tab ? { tab } : {}),
       })),
-      ...bound.flatMap(({ reference, filename, content, tabName }) => (reference.directories ?? [])
-        .map(({ directory, operations: listed }) => ({ filename, content, prefix: directory, tab: tabName, ...(listed ? { operations: listed } : {}) }))),
+      ...bound.flatMap(({ reference, filename, content, tabName, endpointOperations }) => endpointOperations && reference.endpointPages
+        ? [{ filename, content, prefix: reference.endpointPages.directory, tab: tabName, endpointPages: true, operations: endpointOperations }]
+        : (reference.directories ?? [])
+          .map(({ directory, operations: listed }) => ({ filename, content, prefix: directory, tab: tabName, ...(listed ? { operations: listed } : {}) }))),
     ],
     { ...bundle.docsConfig, tabs, redirects },
     pages,
@@ -292,6 +325,9 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
     endpointUrls.set(literalRoute(redirect.source) ?? redirect.source, redirect.destination)
   }
 
+  reportEndpointPages(ledger, warnings)
+  // The pages the operations became are routes of the site too, which no redirect may take.
+  const served = servedRoutes(pages)
   // Lower case, and without a trailing slash: a redirect that differs from a guessed one only in letter case or a trailing slash wins on a server that ignores them, so none is guessed for that address.
   const existingSources = new Set(redirects.map((redirect) => literalRoute(redirect.source) ?? redirect.source.toLowerCase()))
   const mounts = directories.map(mountPrefix).filter(Boolean)
@@ -323,12 +359,16 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
     const endpoint = endpointUrls.get(literalRoute(redirect.destination) ?? '')
     return endpoint ? { ...redirect, destination: endpoint } : redirect
   })
+  const boundConfig = { ...bundle.docsConfig, tabs, ...(direct.length > 0 ? { redirects: direct } : {}) }
+  // As for any page the navigation lists, a directory the new pages sit in (a tag, a product's API folder) opens on its first page.
+  const newPages = pages.slice(pagesBefore)
+  const withDirectories = bundle.platform === 'mintlify' && newPages.length > 0 ? addMintlifyDirectoryRedirects(boundConfig, newPages) : boundConfig
   return {
     ...bundle,
     pages,
     assets,
     // Redirects added above meet the same checks as any other: none may fail the build, hide a page that exists, or loop.
-    docsConfig: dropConflictingRedirects(dropUnroutableRedirects({ ...bundle.docsConfig, tabs, ...(direct.length > 0 ? { redirects: direct } : {}) }, warnings), pages, warnings),
+    docsConfig: dropConflictingRedirects(dropUnroutableRedirects(withDirectories, warnings), pages, warnings),
     warnings,
   }
 }
