@@ -35,6 +35,7 @@ import {
   getRepositoryI18nConfig,
 } from '@/lib/i18n/request'
 import { plainInlineText } from '@/lib/inline-code'
+import { markdownLine } from '@/lib/markdown-line'
 import { buildDocPageJsonLd } from '@/lib/json-ld'
 import { pageFullTitle } from '@/lib/page-meta'
 import { buildOgImageUrl, formatOgBreadcrumb, formatOgDisplayUrl } from '@/lib/og'
@@ -83,6 +84,20 @@ export async function generateStaticParams() {
   ]
 }
 
+/**
+ * The description a page's tags and structured data carry, as plain text. The
+ * header renders a code span in the page's own description as code; tags read
+ * its text. A page bound to an OpenAPI operation with no description of its own
+ * shows the operation's description on the page, so its tags carry that, as one
+ * plain line (the description is Markdown).
+ */
+async function tagDescription(doc: { description: string; openapi?: Parameters<typeof lookupApiOperationForFrontmatter>[0] }): Promise<string> {
+  if (doc.description) return plainInlineText(doc.description)
+  if (!doc.openapi) return ''
+  const { node } = await lookupApiOperationForFrontmatter(doc.openapi)
+  return markdownLine(node?.operation.description ?? '')
+}
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const routeParams = await params
   const buildI18n = await getEffectiveI18nConfig()
@@ -108,8 +123,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const canonicalHref = hasTranslation ? requestedHref : primaryHref
   const availableI18n = await getContentI18nConfig(route.docSlug, buildI18n)
   const nav = await loadNavContext(doc.id, route.isLocaleRoute ? route.locale : undefined, reader)
-  // The page header renders a code span in the description as code; tags and previews read its text.
-  const description = plainInlineText(doc.description)
+  const description = await tagDescription(doc)
   const ogImageUrl = buildOgImageUrl({
     title: doc.title,
     description,
@@ -212,7 +226,7 @@ export default async function DocsPage({ params }: PageProps) {
     pageUrl: `${siteUrl}${canonicalHref}`,
     id: doc.id,
     title: doc.title,
-    description: plainInlineText(doc.description),
+    description: await tagDescription(doc),
     keywords: doc.keywords,
     lastUpdated: doc.lastUpdated,
     locale: contentLocale,

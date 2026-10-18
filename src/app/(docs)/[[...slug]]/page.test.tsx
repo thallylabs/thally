@@ -147,3 +147,31 @@ describe('a description with inline code', () => {
   })
 
 })
+
+describe('an API page with no description of its own', () => {
+  const params = Promise.resolve({ slug: ['api-reference', 'endpoint', 'scrape'] })
+  const operation = (description?: string) => ({ node: { operation: { description } } })
+
+  it('is described by its operation, as one plain line, in the meta, social and structured-data tags', async () => {
+    fixtures.lookup = operation('Phase 1 of the batch API.\nCreates a **batch** record with `runCount`.\n\nStream [items](/items) next.')
+    const expected = 'Phase 1 of the batch API. Creates a batch record with runCount. Stream items next.'
+    const metadata = await generateMetadata({ params })
+    expect(metadata.description).toBe(expected)
+    expect(metadata.openGraph?.description).toBe(expected)
+    expect(metadata.twitter?.description).toBe(expected)
+    expect(fixtures.og).toHaveBeenCalledWith(expect.objectContaining({ description: expected }))
+    await render()
+    expect(fixtures.jsonLd).toHaveBeenCalledWith(expect.objectContaining({ description: expected }))
+  })
+
+  it('keeps the description it has, and has none when the operation has none or cannot be loaded', async () => {
+    fixtures.lookup = operation('From the operation.')
+    fixtures.description = 'Authored.'
+    expect((await generateMetadata({ params })).description).toBe('Authored.')
+    fixtures.description = ''
+    fixtures.lookup = operation(undefined)
+    expect((await generateMetadata({ params })).description).toBe('')
+    fixtures.lookup = { node: null, reason: 'unresolved' }
+    expect((await generateMetadata({ params })).description).toBe('')
+  })
+})

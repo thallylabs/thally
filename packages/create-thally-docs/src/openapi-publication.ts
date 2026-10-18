@@ -55,6 +55,17 @@ export interface CheckSpec {
   document?: unknown
 }
 
+/** The spec a reference's prefix pins: the full path, else the file name; exact case before case-insensitive. */
+function pinnedSpec(specRef: string, specs: ReadonlyArray<CheckSpec>): CheckSpec | undefined {
+  const wanted = canonicalRef(specRef)
+  if (!wanted) return undefined
+  const wantedBase = baseName(specRef)
+  return specs.find((entry) => canonicalRef(entry.source) === wanted)
+    ?? specs.find((entry) => canonicalRef(entry.source).toLowerCase() === wanted.toLowerCase())
+    ?? (wantedBase ? specs.find((entry) => baseName(entry.source) === wantedBase) : undefined)
+    ?? (wantedBase ? specs.find((entry) => baseName(entry.source).toLowerCase() === wantedBase.toLowerCase()) : undefined)
+}
+
 /**
  * Whether the docs route renders the operation a page names: a spec prefix
  * pins that spec (full path, else file name; exact case before case-insensitive); a bare reference renders when
@@ -66,19 +77,43 @@ export function pageState(ref: DocReference, specs: ReadonlyArray<CheckSpec>): '
     ? 'unknown'
     : ref.webhook ? webhookState(spec.document, ref.path, spec.overrides) : operationState(spec.document, ref.method, ref.path, spec.overrides)
   if (ref.specRef) {
-    const wanted = canonicalRef(ref.specRef)
-    if (!wanted) return 'unknown'
-    const wantedBase = baseName(ref.specRef)
-    const spec = specs.find((entry) => canonicalRef(entry.source) === wanted)
-      ?? specs.find((entry) => canonicalRef(entry.source).toLowerCase() === wanted.toLowerCase())
-      ?? (wantedBase ? specs.find((entry) => baseName(entry.source) === wantedBase) : undefined)
-      ?? (wantedBase ? specs.find((entry) => baseName(entry.source).toLowerCase() === wantedBase.toLowerCase()) : undefined)
+    const spec = pinnedSpec(ref.specRef, specs)
     return spec ? judge(spec) : 'unknown'
   }
   const states = specs.map(judge)
   if (states.includes('published')) return 'published'
   if (specs.some((spec) => spec.document === undefined)) return 'unknown'
   return states.find((state) => state === 'hidden' || state === 'excluded') ?? 'unknown'
+}
+
+/**
+ * The description the site shows for the operation a page documents, which is
+ * the page's own description when it has none: the spec's override, else the
+ * operation's `description`, else its `summary`; a present but empty description
+ * wins over the summary. Mirrors `normalizeOperation` in
+ * src/lib/openapi/normalize.ts (a parity test keeps the two in step). A webhook
+ * entry with several methods gives its first described method. Undefined when the
+ * operation cannot be read here or has no description.
+ */
+export function operationDescription(ref: DocReference, specs: ReadonlyArray<CheckSpec>): string | undefined {
+  const candidates = ref.specRef ? [pinnedSpec(ref.specRef, specs)] : specs
+  for (const spec of candidates) {
+    const document = spec?.document
+    if (!isObj(document)) continue
+    const entries = ref.webhook ? document.webhooks : document.paths
+    const entry = isObj(entries) && Object.hasOwn(entries, ref.path) ? entries[ref.path] : undefined
+    if (!isObj(entry)) continue
+    const { item } = viewEntry(document, entry)
+    const verbs = ref.webhook ? METHODS : [ref.method.toLowerCase()]
+    for (const verb of verbs) {
+      const operation = item[verb]
+      if (!isObj(operation)) continue
+      const override = isObj(spec?.overrides) ? spec.overrides[ref.webhook ? `WEBHOOK ${verb.toUpperCase()} ${ref.path}` : `${verb.toUpperCase()} ${ref.path}`] : undefined
+      const description = [isObj(override) ? override.description : undefined, operation.description, operation.summary].find((value) => value !== undefined && value !== null)
+      if (typeof description === 'string' && description.trim()) return description
+    }
+  }
+  return undefined
 }
 
 function resolveLocalRef(document: unknown, ref: string): unknown {
