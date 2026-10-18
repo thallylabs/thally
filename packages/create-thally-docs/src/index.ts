@@ -36,10 +36,11 @@ const valueFlags = new Set([
   '--pages',
   '--platform',
   '--source-ref',
+  '--tailwind-version',
 ])
 
 const commandFlags = {
-  scaffold: new Set(['--help', '-h', '--yes', '-y', '--install', '--no-install', '--verbose']),
+  scaffold: new Set(['--tailwind-version', '--help', '-h', '--yes', '-y', '--install', '--no-install', '--verbose']),
   migrate: new Set([
     '--help',
     '-h',
@@ -82,6 +83,7 @@ Commands:
 Scaffold options:
   -y, --yes       Accept defaults and skip interactive prompts
   --install       Install project dependencies (the default)
+  --tailwind-version <3|4>  Select Tailwind (default: 4; 3 uses the legacy starter)
   --no-install    Skip dependency installation
   --verbose       Show detailed installation and Git output
   -h, --help      Show this help
@@ -283,6 +285,12 @@ async function runMigrateCommand(): Promise<void> {
 }
 
 async function runScaffoldCommand(): Promise<void> {
+  const selections = args.filter((arg) => arg === '--tailwind-version')
+  const version = getFlagValue('--tailwind-version')
+  if (selections.length > 1 || (selections.length === 1 && version !== '3' && version !== '4')) {
+    throw new Error('--tailwind-version must be specified once with a value of 3 or 4.')
+  }
+  const tailwindVersion = version === '3' ? 3 : version === '4' ? 4 : undefined
   const useDefaults = flags.includes('--yes') || flags.includes('-y') || !process.stdin.isTTY
   const installPreference = flags.includes('--install')
     ? true
@@ -304,6 +312,7 @@ async function runScaffoldCommand(): Promise<void> {
 
   const result = await scaffold({
     projectDir: answers.projectDir,
+    tailwindVersion,
     projectName: answers.projectName,
     description: answers.description,
     brandPreset: answers.brandPreset,
