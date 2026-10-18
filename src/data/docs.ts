@@ -1246,33 +1246,38 @@ function navigationLocaleForHref(href: string): string | undefined {
     : undefined
 }
 
-/** Adjacent readable pages in first-seen navigation order, deduplicated by exact href. */
+/**
+ * Adjacent readable pages in first-seen navigation order, deduplicated by exact
+ * href. Pagination stays inside the page's own tab: the first collection that
+ * lists the exact href (the rule `getNavContext` uses), so a tab's first and
+ * last pages never borrow neighbours from the tabs around it.
+ */
 export function getPrevNextLinks(currentHref: string, reader: ReaderContext = ANONYMOUS_READER): {
   prev: PrevNextLink | null
   next: PrevNextLink | null
 } {
-  const collections = getSidebarCollections(navigationLocaleForHref(currentHref), reader)
+  const collection = getSidebarCollections(navigationLocaleForHref(currentHref), reader).find((candidate) =>
+    candidate.sections.some((section) => section.items.some((item) => item.href === currentHref)))
+  if (!collection) {
+    return { prev: null, next: null }
+  }
+
   const flatPages: Array<{ title: string; href: string }> = []
   // Pages may occur in several groups. Exact href membership preserves the
   // first title/order without rescanning every earlier page on large sites.
   const seenHrefs = new Set<string>()
 
-  for (const collection of collections) {
-    for (const section of collection.sections) {
-      for (const item of section.items) {
-        const href = item.href
-        if (!seenHrefs.has(href)) {
-          seenHrefs.add(href)
-          flatPages.push({ title: item.title, href })
-        }
+  for (const section of collection.sections) {
+    for (const item of section.items) {
+      const href = item.href
+      if (!seenHrefs.has(href)) {
+        seenHrefs.add(href)
+        flatPages.push({ title: item.title, href })
       }
     }
   }
 
   const index = flatPages.findIndex((p) => p.href === currentHref)
-  if (index === -1) {
-    return { prev: null, next: null }
-  }
 
   return {
     prev: index > 0 ? flatPages[index - 1] : null,
