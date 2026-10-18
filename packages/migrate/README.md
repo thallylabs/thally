@@ -189,6 +189,12 @@ whose address has a `+ ? ( ) [ ] { }` character (a `directory` such as
 spec or a downloaded spec is left out instead, and one warning lists the first
 ten of them.
 
+A Mintlify page whose frontmatter `url` is a web address is a link in the
+source sidebar. It is imported as a page that is kept out of the sitemap, stays
+in the navigation, and has a redirect from its path to that address. That
+redirect is added after the checks above, because hiding the page is its
+purpose; a `url` that is not an `http(s)` address is ignored.
+
 A repository is limited to 5,000 documentation files and, separately, 5,000
 asset files. Past that, files are kept in navigation order with the default
 version first, then pages not listed in navigation, and one warning counts and

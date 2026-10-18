@@ -2357,6 +2357,18 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
   return normalizeFlowParagraphContainers(normalized)
 }
 
+/** A Mintlify page whose frontmatter `url` is a web address is a link in the sidebar: visiting its path leaves for that address. */
+function externalPageUrl(value: unknown): string | undefined {
+  const url = typeof value === 'string' ? value.trim() : ''
+  if (!/^https?:\/\/[^\s]+$/i.test(url)) return undefined
+  try {
+    new URL(url)
+    return url
+  } catch {
+    return undefined
+  }
+}
+
 /** Parse source Markdown or MDX into the canonical page representation. */
 export function parseMarkdownPage(input: {
   id: string
@@ -2418,6 +2430,7 @@ export function parseMarkdownPage(input: {
     : ['default', 'wide', 'custom', 'center', 'home'].includes(sourceMode ?? '')
       ? sourceMode as MigrationPage['mode']
       : undefined
+  const externalUrl = input.platform === 'mintlify' ? externalPageUrl(parsed.data.url) : undefined
   const description = typeof parsed.data.description === 'string' && parsed.data.description.trim()
     ? parsed.data.description.trim()
     // An API reference page is described by its operation, not by its prose.
@@ -2440,7 +2453,9 @@ export function parseMarkdownPage(input: {
     keywords,
     mode,
     hidden: parsed.data.hidden === true ? true : undefined,
-    noindex: parsed.data.noindex === true || parsed.data.noindex === 'true' ? true : undefined,
+    // The path of a page that links elsewhere redirects, so it has no business in a sitemap.
+    noindex: parsed.data.noindex === true || parsed.data.noindex === 'true' || externalUrl ? true : undefined,
+    ...(externalUrl ? { externalUrl } : {}),
     ...(Object.keys(meta).length > 0 ? { meta } : {}),
     openapi: typeof parsed.data.openapi === 'string' ? parsed.data.openapi.trim() : undefined,
     ...apiFrontmatter(parsed.data, input.warn),

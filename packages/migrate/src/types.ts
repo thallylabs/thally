@@ -155,6 +155,8 @@ export interface MigrationPage {
   mode?: 'default' | 'wide' | 'custom' | 'center' | 'home'
   hidden?: boolean
   noindex?: boolean
+  /** Mintlify frontmatter `url`: a web address the page's sidebar entry leaves for, which the page's own path redirects to. */
+  externalUrl?: string
   /**
    * Reader access groups (frontmatter `groups`): trimmed, non-empty names the
    * runtime matches exactly. The page needs a signed-in reader in one of them.

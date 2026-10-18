@@ -171,6 +171,52 @@ describe('repository redirect finalization', () => {
   })
 })
 
+describe('Mintlify pages that link elsewhere', () => {
+  function bundleFor(docsJson: Record<string, unknown>, pages: Record<string, string>) {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-link-pages-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ $schema: 'https://mintlify.com/docs.json', ...docsJson }))
+    for (const [name, content] of Object.entries(pages)) writeFileSync(join(root, name), content)
+    return migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs' })
+  }
+  const navigation = { navigation: { groups: [{ group: 'Community', pages: ['introduction', 'github-repo', 'roadmap'] }] } }
+  const linkPages = {
+    'introduction.mdx': '---\ntitle: Intro\n---\n\nSee the [repository](/github-repo).',
+    'github-repo.mdx': '---\ntitle: GitHub repo\nurl: "https://github.com/acme/docs"\n---\n\nWe are on GitHub.',
+    'roadmap.mdx': '---\ntitle: Roadmap\nurl: https://feedback.example.com/roadmap\n---\n\nWhat is next.',
+  }
+
+  it('keeps the sidebar entry and sends the page path to the address, as Mintlify does', () => {
+    const bundle = bundleFor(navigation, linkPages)
+    expect(bundle.docsConfig.redirects).toEqual(expect.arrayContaining([
+      { source: '/github-repo', destination: 'https://github.com/acme/docs', permanent: false },
+      { source: '/roadmap', destination: 'https://feedback.example.com/roadmap', permanent: false },
+    ]))
+    expect(bundle.pages.map((page) => page.id).sort()).toEqual(['github-repo', 'introduction', 'roadmap'])
+    expect(JSON.stringify(bundle.docsConfig.tabs)).toContain('"github-repo"')
+    expect(bundle.warnings.filter((warning) => /hide/.test(warning.message))).toEqual([])
+  })
+
+  it('keeps the page out of the sitemap and does not write the url as page frontmatter', () => {
+    const bundle = bundleFor(navigation, linkPages)
+    const rendered = renderMigrationFiles(bundle).find((file) => file.path === 'src/content/github-repo.mdx')?.content.toString() ?? ''
+    expect(rendered).toContain('noindex: true')
+    expect(rendered).not.toContain('url:')
+  })
+
+  it('ignores a url that is not a web address', () => {
+    const bundle = bundleFor(navigation, { ...linkPages, 'roadmap.mdx': '---\ntitle: Roadmap\nurl: "javascript:alert(1)"\n---\n\nWhat is next.' })
+    expect(bundle.docsConfig.redirects?.map((redirect) => redirect.source)).not.toContain('/roadmap')
+    expect(bundle.pages.find((page) => page.id === 'roadmap')?.noindex).toBeUndefined()
+  })
+
+  it('does not treat a url on another platform as a link', () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-migrate-link-pages-'))
+    writeFileSync(join(root, 'introduction.mdx'), '---\ntitle: Intro\nurl: "https://example.com"\n---\n\nHello.')
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/acme/docs', platform: 'docusaurus' })
+    expect(bundle.docsConfig.redirects).toBeUndefined()
+  })
+})
+
 describe('linked source anchors', () => {
   it('preserves uniquely matching Mintlify fragments across pages', () => {
     const root = mkdtempSync(join(tmpdir(), 'thally-migrate-mintlify-anchors-'))

@@ -5713,6 +5713,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
     // Every platform's redirects meet here: none may fail the build, hide a page or loop.
     docsConfig = dropConflictingRedirects(dropUnroutableRedirects(docsConfig, warnings), [...pages, ...sourceRefPages], warnings)
   }
+  // A Mintlify page whose frontmatter `url` is another address is a link in the sidebar. Its entry stays in
+  // the navigation and its path redirects there; the redirect hides the page on purpose, so it skips the
+  // pass above.
+  const linkRedirects = pages.flatMap((page) => page.externalUrl
+    ? [{ source: `/${page.id.replace(/\/index$/, '')}`, destination: page.externalUrl, permanent: false }]
+    : [])
+  if (linkRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...linkRedirects] }
 
   if (pages.length === 0) {
     const reasons = warnings.map((warning) => warning.message)
