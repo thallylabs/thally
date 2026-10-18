@@ -174,7 +174,8 @@ export function addMintlifyHomepageRedirects(
   // renderer's root alias for it is not served and links, canonicals and the sitemap agree on one URL.
   if (!homepage) return config
   const redirects = [...(config.redirects ?? [])]
-  const sources = new Set(redirects.map((redirect) => (redirect.source.replace(/\/$/, '') || '/').toLowerCase()))
+  const routeKey = (route: string) => (route.split(/[?#]/, 1)[0].replace(/\/$/, '') || '/').toLowerCase()
+  const sources = new Set(redirects.map((redirect) => routeKey(redirect.source)))
   const roots = ['', ...(config.i18n?.locales ?? [])
     .filter((locale) => locale.code !== config.i18n?.defaultLocale)
     .filter((locale) => homepage !== 'introduction' || pages.some((page) => page.locale === locale.code && page.navigationId === homepage))
@@ -186,7 +187,11 @@ export function addMintlifyHomepageRedirects(
     if (!locale && homeLinksElsewhere) continue
     const source = locale ? `/${locale}` : '/'
     if (sources.has(source.toLowerCase())) continue
-    redirects.push({ source, destination: `${locale ? `/${locale}` : ''}/${homepage}`, permanent: true })
+    const destination = `${locale ? `/${locale}` : ''}/${homepage}`
+    // An authored redirect from the homepage back to its root says Mintlify
+    // served the homepage at the root (a root `index.mdx`), so the root keeps it.
+    if (redirects.some((redirect) => routeKey(redirect.source) === destination.toLowerCase() && routeKey(redirect.destination) === source.toLowerCase())) continue
+    redirects.push({ source, destination, permanent: true })
   }
   return { ...config, redirects }
 }
