@@ -169,11 +169,15 @@ export function dropConflictingRedirects(
   const loopingByCase: Array<string> = []
   const folded = redirectChains()
   const asWritten = redirectChains()
+  // The introduction page is also served at `/`, so `/introduction` -> `/` only
+  // retires an alias of it, unless `/` itself redirects somewhere.
+  const rootRedirected = config.redirects.some((redirect) => literalRoute(redirect.source) === '/')
   const redirects = config.redirects.filter((redirect) => {
     const source = literalRoute(redirect.source)
     if (!source) return true
     const writtenSource = exactRoute(redirect.source)!
-    if (served.has(source)) {
+    const retiresRootAlias = source === '/introduction' && !rootRedirected && destinationRoute(redirect.destination) === '/'
+    if (served.has(source) && !retiresRootAlias) {
       const hides = servedAsWritten.has(writtenSource) ? hidden : hiddenByCase
       hides.push(redirect.source)
       return false
