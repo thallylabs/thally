@@ -2400,9 +2400,17 @@ export function addEndpointPages(options: {
   return { operations: listed }
 }
 
-/** The specs the renderer tries, in order, for a bare `openapi:` reference: those of the visible API tabs, then those of the hidden ones (the first is its `default`). */
-export function specLookupOrder(tabs: ReadonlyArray<Pick<MigrationNavigationTab, 'hidden' | 'api'>>): Array<string> {
-  const sources = [...tabs.filter((tab) => !tab.hidden), ...tabs.filter((tab) => tab.hidden)].flatMap((tab) => tab.api ? [tab.api.source] : [])
+/**
+ * The specs the renderer tries, in order, for a bare `openapi:` reference (the first is its `default`). As `getSidebarCollections` and
+ * `buildApiReferenceConfig` build them: the API specs of the tabs it keeps as collections, in tab order, then those of the other hidden tabs.
+ * It keeps every visible tab, and a hidden one only when its `version` is one `versions` (docs.json `navigation.versions`) declares.
+ */
+export function specLookupOrder(
+  tabs: ReadonlyArray<Pick<MigrationNavigationTab, 'hidden' | 'api' | 'version'>>,
+  versions: ReadonlyArray<{ label: string }> = [],
+): Array<string> {
+  const collected = (tab: Pick<MigrationNavigationTab, 'hidden' | 'version'>): boolean => !tab.hidden || Boolean(tab.version && versions.some((version) => version.label === tab.version))
+  const sources = [...tabs.filter(collected), ...tabs.filter((tab) => !collected(tab))].flatMap((tab) => tab.api ? [tab.api.source] : [])
   return [...new Set(sources)]
 }
 
@@ -5769,8 +5777,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
         const bySource = new Map(resolvedSpecs.map((spec) => [specAssetPath(spec.filename), spec]))
         qualifyDisplacedBareRefs({
           pages,
-          before: specLookupOrder(injectOpenApiSpecs(unbound, resolvedSpecs).tabs),
-          after: specLookupOrder(docsConfig.tabs),
+          before: specLookupOrder(injectOpenApiSpecs(unbound, resolvedSpecs).tabs, docsConfig.navigation?.versions),
+          after: specLookupOrder(docsConfig.tabs, docsConfig.navigation?.versions),
           content: (source) => bySource.get(source)?.content,
           qualifier: (source) => bySource.get(source)?.sourcePath ?? source,
         })

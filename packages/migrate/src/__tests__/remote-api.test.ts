@@ -1074,6 +1074,38 @@ describe('remote OpenAPI spec whose listed operations Mintlify served as pages',
     expect(result.pages.find((page) => page.id === 'shared')?.openapi).toBe(`${assetB} POST /shared`)
   })
 
+  it('keeps a hidden version tab in place in the order of downloaded specs a bare reference can reach', async () => {
+    const url = (name: string) => `https://specs.example.com/${name}.json`
+    const document = (name: string, shared: boolean) => JSON.stringify({
+      openapi: '3.0.0', info: { title: name, version: '1' }, paths: shared ? { '/shared': { post: { summary: name, tags: ['Shared'] } } } : { '/other': { get: { summary: name, tags: ['Other'] } } },
+    })
+    const bodies: Record<string, string> = { [url('a')]: document('A', false), [url('v')]: document('V', true), [url('b')]: document('B', true) }
+    const root = mkdtempSync(join(tmpdir(), 'thally-remote-version-order-'))
+    // V binds to the first tab whose label says "api": the hidden tab of version v1, which the renderer keeps in place. A and B follow it.
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      api: { openapi: url('v') },
+      navigation: { versions: [
+        { version: 'v2', default: true, tabs: [
+          { tab: 'Guides', pages: ['guide'] },
+          { tab: 'Learn', pages: ['learn'] },
+          { tab: 'A', openapi: { source: url('a'), directory: 'a' } },
+          { tab: 'B', openapi: { source: url('b'), directory: 'b' }, groups: [{ group: 'Shared', pages: ['POST /shared'] }] },
+        ] },
+        { version: 'v1', hidden: true, tabs: [{ tab: 'Guides', pages: ['guide-v1'] }, { tab: 'Reference API', pages: ['ref-v1'] }] },
+      ] },
+    }))
+    for (const id of ['guide', 'learn', 'guide-v1', 'ref-v1']) writeFileSync(join(root, `${id}.mdx`), `---\ntitle: ${id}\n---\n\nText.`)
+    writeFileSync(join(root, 'shared.mdx'), '---\ntitle: Shared\nopenapi: "POST /shared"\n---\n\nText.')
+    const migrated = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+
+    const result = await hydrateRemoteApiSpecs(migrated, async (requested) => ({ finalUrl: requested, body: bodies[requested.toString()], contentType: 'application/json' }))
+
+    expect(result.docsConfig.tabs.find((tab) => tab.hidden && tab.api && tab.version === 'v1')?.tab).toBe('v1: Reference API')
+    expect(result.pages.some((page) => page.id.startsWith('b/') && page.openapi?.endsWith('POST /shared'))).toBe(true)
+    // V, in place, publishes /shared before B, whichever tab B is, so the reference is as authored.
+    expect(result.pages.find((page) => page.id === 'shared')?.openapi).toBe('POST /shared')
+  })
+
   it('binds a spec entry that does not ask for pages as an API tab, beside one that does', async () => {
     const input = bundle()
     const groups = [{ group: 'Users', pages: ['GET /api/v1/scim/v2/Users'] }]

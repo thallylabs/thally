@@ -345,8 +345,8 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   // A bare `openapi:` reference keeps the spec it reached when a spec's tab became pages and the lookup order changed.
   qualifyDisplacedBareRefs({
     pages,
-    before: specLookupOrder(apiTabs),
-    after: specLookupOrder(tabs),
+    before: specLookupOrder(apiTabs, bundle.docsConfig.navigation?.versions),
+    after: specLookupOrder(tabs, bundle.docsConfig.navigation?.versions),
     content: (source) => {
       const asset = assets.find((entry) => entry.path === source)
       return asset ? Buffer.from(asset.content) : undefined

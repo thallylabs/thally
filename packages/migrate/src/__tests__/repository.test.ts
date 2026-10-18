@@ -1,7 +1,7 @@
 /** End-to-end repository fixtures for platform-specific navigation and assets. */
 
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -780,6 +780,38 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
       refHidden: 'webhook refHidden',
       legacyHook: 'webhook legacyHook',
     })
+  })
+
+  it('keeps a hidden version tab where the renderer keeps it when it orders the specs a bare openapi reference can reach', () => {
+    const document = (name: string, shared: boolean) => ({
+      openapi: '3.0.0',
+      info: { title: name, version: '1' },
+      paths: { ...(shared ? { '/shared': { post: { summary: name, tags: ['Shared'] } } } : {}), [`/only-${name.toLowerCase()}`]: { get: { summary: `Only ${name}`, tags: [name] } } },
+    })
+    const page = (id: string, openapi?: string) => [`${id}.mdx`, `---\ntitle: ${id}\n${openapi ? `openapi: "${openapi}"\n` : ''}---\n\nText.`] as const
+    const files = Object.fromEntries([
+      ['a.json', JSON.stringify(document('A', false))],
+      ['v.json', JSON.stringify(document('V', true))],
+      ['b.json', JSON.stringify(document('B', true))],
+      page('learn'), page('guide-v1'), page('ref-v1'), page('shared', 'POST /shared'),
+    ])
+    // V binds to the first tab whose label says "api": the hidden version tab. A and B are API tabs appended after it, B listing its operations.
+    // The renderer keeps a hidden tab of a declared version in place, so it tries V, A, B whether or not B is a page tab: V publishes /shared first.
+    const root = site({
+      versions: [
+        { version: 'v2', default: true, tabs: [{ tab: 'Guides', pages: ['guide'] }, { tab: 'Learn', pages: ['learn'] }, { tab: 'A', openapi: { source: 'a.json', directory: 'a' } }, { tab: 'B', openapi: { source: 'b.json', directory: 'b' }, groups: [{ group: 'Shared', pages: ['POST /shared'] }] }] },
+        { version: 'v1', hidden: true, tabs: [{ tab: 'Guides', pages: ['guide-v1'] }, { tab: 'Reference API', pages: ['ref-v1'] }] },
+      ],
+    }, files)
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ api: { openapi: 'v.json' }, navigation: JSON.parse(readFileSync(join(root, 'docs.json'), 'utf8')).navigation }))
+    const bundle = migrateRepository({ repositoryDir: root, sourceUrl })
+
+    const hidden = bundle.docsConfig.tabs.find((tab) => tab.hidden && tab.api)
+    expect(hidden).toMatchObject({ tab: 'v1: Reference API', version: 'v1', api: { source: 'openapi/v.json' } })
+    expect(bundle.docsConfig.navigation?.versions?.map((version) => version.label)).toContain('v1')
+    expect(bundle.pages.find((entry) => entry.openapi?.endsWith('POST /shared') && entry.id.startsWith('b/'))).toBeDefined()
+    // V stays the first spec that publishes /shared, so the reference is as authored.
+    expect(bundle.pages.find((entry) => entry.id === 'shared')?.openapi).toBe('POST /shared')
   })
 
   it('puts API tabs that list operations back among their siblings in the order the source had them, first or last included', () => {
