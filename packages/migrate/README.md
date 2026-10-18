@@ -180,6 +180,9 @@ operation list, which still only drives the endpoint redirects.
 
 Mintlify `styling.eyebrows: "breadcrumbs"` becomes `eyebrow: "path"` (the full
 group path above the page title); `"section"` or no setting writes nothing.
+Mintlify sources also get `smartQuotes: true`, because Mintlify renders straight
+quotes in prose as curly ones; the setting leaves code, heading ids, Markdown and
+`llms.txt` as written.
 
 Thally leaves out the sidebar heading of a group named after its tab or dropdown, because
 the collection already names it. Mintlify keeps that heading, so a source with such a group
