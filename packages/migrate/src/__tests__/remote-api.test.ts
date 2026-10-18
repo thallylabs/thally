@@ -1047,6 +1047,33 @@ describe('remote OpenAPI spec whose listed operations Mintlify served as pages',
     expect(result.pages.find((page) => page.id === 'only-b')?.openapi).toBe('POST /only-b')
   })
 
+  it('pins a bare reference to the downloaded spec that published it first when the default spec is unchanged', async () => {
+    const url = (name: string) => `https://specs.example.com/${name}.json`
+    const document = (name: string, shared: boolean) => JSON.stringify({
+      openapi: '3.0.0', info: { title: name, version: '1' }, paths: shared ? { '/shared': { post: { summary: name, tags: ['Shared'] } } } : { '/other': { get: { summary: name, tags: ['Other'] } } },
+    })
+    const bodies: Record<string, string> = { [url('a')]: document('A', false), [url('b')]: document('B', true), [url('c')]: document('C', true) }
+    const root = mkdtempSync(join(tmpdir(), 'thally-remote-three-specs-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({
+      navigation: { tabs: [
+        { tab: 'Guides', pages: ['guide'] },
+        { tab: 'A API', openapi: { source: url('a'), directory: 'a' } },
+        { tab: 'B API', openapi: { source: url('b'), directory: 'b' }, groups: [{ group: 'Shared', pages: ['POST /shared'] }] },
+        { tab: 'C API', openapi: { source: url('c'), directory: 'c' } },
+      ] },
+    }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    writeFileSync(join(root, 'shared.mdx'), '---\ntitle: Shared\nopenapi: "POST /shared"\n---\n\nText.')
+    const migrated = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+
+    const result = await hydrateRemoteApiSpecs(migrated, async (requested) => ({ finalUrl: requested, body: bodies[requested.toString()], contentType: 'application/json' }))
+
+    // A stays the default, but B was the first of the specs that publish /shared and is now bound behind the visible C.
+    const assetB = result.docsConfig.tabs.find((tab) => tab.hidden && tab.api)?.api?.source
+    expect(result.docsConfig.tabs.filter((tab) => !tab.hidden && tab.api).map((tab) => tab.tab)).toEqual(['A API', 'C API'])
+    expect(result.pages.find((page) => page.id === 'shared')?.openapi).toBe(`${assetB} POST /shared`)
+  })
+
   it('binds a spec entry that does not ask for pages as an API tab, beside one that does', async () => {
     const input = bundle()
     const groups = [{ group: 'Users', pages: ['GET /api/v1/scim/v2/Users'] }]
