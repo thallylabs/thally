@@ -2277,8 +2277,6 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
       .replace(/<\/Danger>/g, '</Error>')
       .replace(/<Warn(\s[^>]*)?>/g, '<Warning$1>')
       .replace(/<\/Warn>/g, '</Warning>')
-      .replace(/<Check(\s[^>]*)?>/g, '<Note$1>')
-      .replace(/<\/Check>/g, '</Note>')
       .replace(/<Tree\.Folder/g, '<Folder')
       .replace(/<\/Tree\.Folder>/g, '</Folder>')
       .replace(/<Tree\.File/g, '<File')
@@ -2310,6 +2308,10 @@ export function normalizeMdx(body: string, platform?: MigrationPlatform, unwrapM
         // card Thally already registers as `<GitHub repo="owner/name" />`.
         .replace(/<GitHub\.Repo/g, '<GitHub')
         .replace(/<\/GitHub\.Repo>/g, '</GitHub>')
+        // Mintlify's `<Callout>` has no tone: it ignores a `type` prop and renders
+        // a neutral box, which is Thally's info callout (an untyped one would take
+        // a tone from its wording).
+        .replace(/<Callout(\s[^<>]*)?>/g, (tag: string) => tag.replace(/(\s)type=(?:"[^"]*"|'[^']*'|\{[^{}]*\})/, '$1type="info"'))
         // `<Column>` is an unstyled wrapper for arbitrary content inside
         // `<Columns>`; Thally's grid already treats any direct child as a
         // column, so a plain `<div>` (built into MDX, no registry entry

@@ -781,6 +781,37 @@ describe('Mintlify heading ids from the live Trigger.dev docs', () => {
   })
 })
 
+describe('Mintlify callouts', () => {
+  it('keeps <Check> as its own callout instead of turning it into a <Note>', () => {
+    const source = '<Check>\n  All set.\n</Check>\n\n<Check title="Done">Finished.</Check>'
+    for (const platform of ['mintlify', 'fern', 'docusaurus', undefined] as const) {
+      expect(normalizeMdx(source, platform)).toBe(source)
+    }
+  })
+
+  // Mintlify's <Callout> has no tone: a `type` prop is ignored and the box renders neutral.
+  it.each([
+    ['<Callout type="warning">\n  Not available.\n</Callout>', '<Callout type="info">\n  Not available.\n</Callout>'],
+    ['<Callout type={"danger"} icon="key">Careful</Callout>', '<Callout type="info" icon="key">Careful</Callout>'],
+    ['<Callout icon="key" type=\'tip\' />', '<Callout icon="key" type="info" />'],
+  ])('renders a Mintlify <Callout> that sets a type as the neutral info callout: %s', (source, expected) => {
+    expect(normalizeMdx(source, 'mintlify')).toBe(expected)
+  })
+
+  it('leaves a Mintlify <Callout> without a type, a coloured one and other platforms alone', () => {
+    const plain = '<Callout icon="key" color="#C77DFF">Custom</Callout>'
+    expect(normalizeMdx(plain, 'mintlify')).toBe(plain)
+    expect(normalizeMdx('<Callout>Plain</Callout>', 'mintlify')).toBe('<Callout>Plain</Callout>')
+    const typed = '<Callout type="warning">Docusaurus-style</Callout>'
+    expect(normalizeMdx(typed, 'docusaurus')).toBe(typed)
+  })
+
+  it('does not rewrite a <Callout> shown in a code fence', () => {
+    const fenced = '```mdx\n<Callout type="warning">x</Callout>\n```'
+    expect(normalizeMdx(fenced, 'mintlify')).toBe(fenced)
+  })
+})
+
 describe('Mintlify explicit heading ids stay on the heading', () => {
   it('keeps a translated heading\'s English id as the heading id, not as a separate anchor', () => {
     const output = normalizeMdx('## Primeros pasos {#get-started}\n\nTexto.', 'mintlify')
