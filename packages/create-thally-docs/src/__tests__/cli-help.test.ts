@@ -119,3 +119,34 @@ describe('create-thally-docs help', () => {
     expect(result.stderr).toContain('create-thally-docs check --help')
   })
 })
+
+describe('scaffold --tailwind-version', () => {
+  it('documents the version selector', () => {
+    expect(runCli('--help').stdout).toContain('--tailwind-version <3|4>')
+  })
+
+  it.each([
+    ['--tailwind-version'],
+    ['--tailwind-version', '--yes'],
+    ['--tailwind-version', '2'],
+    ['--tailwind-version', '3', '--tailwind-version', '4'],
+  ])('rejects invalid selection %j before creation', (...selection) => {
+    const result = runCli(...selection)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('--tailwind-version')
+    expect(result.stdout).not.toContain('Downloading starter')
+  })
+
+  it.each(['3', '4'])('accepts version %s before the directory', (version) => {
+    const result = runCli('--tailwind-version', version, process.cwd(), '--yes')
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('already exists and is not empty')
+    expect(result.stderr).not.toContain('Unknown option')
+  })
+
+  it('rejects the creation option on check', () => {
+    const result = runCli('check', '--tailwind-version', '3')
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('Unknown option')
+  })
+})
