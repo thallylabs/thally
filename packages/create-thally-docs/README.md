@@ -38,6 +38,24 @@ and extra languages; the description and brand palette are one-line edits in
 URL, so a build from this checkout cannot bake local links into `llms.txt` or
 the sitemap.
 
+## Choose a Tailwind version
+
+After the Tailwind 4 starter is promoted and this CLI is published, new sites use
+Tailwind 4 by default:
+
+```sh
+npx create-thally-docs@latest my-docs
+npx create-thally-docs@latest my-docs-3 --tailwind-version 3
+```
+
+`--tailwind-version 4` explicitly selects the current starter. Version `3` selects
+the complete frozen starter release `2026-10-18.30d852d3.fb0a562c`, including its
+matching runtime, configuration, and lockfile. Later promotions do not move this
+pin. The flag applies to new sites. It does not change an existing site's version.
+
+Merging these changes does not promote the starter or publish the CLI. Complete
+the scaffold release process before announcing Tailwind 4 as the public default.
+
 ## Terminal output
 
 Interactive terminals show the THALLY wordmark, task headings, and live progress.

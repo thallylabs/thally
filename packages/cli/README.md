@@ -62,7 +62,7 @@ customer-owned paths during upgrades.
 
 | Command | What it does |
 | --- | --- |
-| `thally init [dir] [--yes] [--no-install] [--verbose]` | Create a new documentation site |
+| `thally init [dir] [--tailwind-version <3\|4>] [--yes] [--no-install] [--verbose]` | Create a new documentation site |
 | `thally new <page-id> [--title "..."]` | Create a page and add it to navigation |
 | `thally migrate <github-or-docs-url> [dir] [--platform <mintlify\|docusaurus\|fern\|auto>] [--verbose]` | Import an existing documentation site |
 | `thally translate --locale <code>` | Translate content into a locale |
@@ -137,3 +137,16 @@ Keep your existing release and lockfile if you still need Tailwind 3.
   capabilities are reachable through the single `thally` binary.
 - **`check --agents`** runs content lint plus the Agent Readiness Score, with a
   CI-friendly non-zero exit code when the score is below the threshold.
+
+## Create a Tailwind 3 site
+
+After the Tailwind 4 scaffold and CLI are released, the default creates a Tailwind
+4 site. Use the creation flag to select the frozen Tailwind 3 starter:
+
+```sh
+npx @thallylabs/cli@latest init my-docs
+npx @thallylabs/cli@latest init my-docs-3 --tailwind-version 3
+```
+
+The flag selects a complete starter snapshot. It does not downgrade an existing
+site. The Tailwind 3 snapshot remains fixed when the default starter changes.

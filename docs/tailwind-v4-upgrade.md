@@ -77,7 +77,8 @@ the result.
 ## Keep an existing Tailwind 3 site
 
 You can keep the current site and its lockfile without running the framework
-update. Retained scaffold records let the updater identify that site's original
-base when you update later. Do not edit `starter-release.json` to change its
+update. The `--tailwind-version 3` creation flag also selects a frozen Tailwind 3
+starter. It does not apply to `starter update`. Retained scaffold records let the
+updater identify that site's original base when you update later. Do not edit `starter-release.json` to change its
 release identity. Maintainers must retain previous scaffold records during
 promotion; replacing only a manifest is not an upgrade or a rollback.
