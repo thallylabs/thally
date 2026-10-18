@@ -5715,8 +5715,8 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
   }
   // A Mintlify page whose frontmatter `url` is another address is a link in the sidebar. Its entry stays in
   // the navigation and its path redirects there; the redirect hides the page on purpose, so it skips the
-  // pass above.
-  const linkRedirects = pages.flatMap((page) => page.externalUrl
+  // pass above. A sourceRef page redirects from its mounted path.
+  const linkRedirects = [...pages, ...sourceRefPages].flatMap((page) => page.externalUrl
     ? [{ source: `/${page.id.replace(/\/index$/, '')}`, destination: page.externalUrl, permanent: false }]
     : [])
   if (linkRedirects.length > 0) docsConfig = { ...docsConfig, redirects: [...(docsConfig.redirects ?? []), ...linkRedirects] }
