@@ -576,11 +576,11 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
     const refs = (bundle: ReturnType<typeof migrateRepository>) => Object.fromEntries(['shared', 'only-a', 'only-b', 'named'].map((id) => [id, bundle.pages.find((page) => page.id === id)?.openapi]))
 
     // A is the first API tab, so a bare reference reached A first. Its tab is now pages and its spec a hidden binding behind B's visible one,
-    // which the renderer would try first: the references A defines name A, so they keep resolving to it.
+    // which the renderer tries first: a reference that reached A and would now reach B names A. One only A publishes still reaches A.
     const converted = refs(migrate({ tabs: [{ tab: 'Guides', pages: ['guide'] }, listed, generated] }, files))
     expect(converted).toEqual({
       shared: 'openapi/a.json POST /shared',
-      'only-a': 'openapi/a.json POST /only-a',
+      'only-a': 'POST /only-a',
       'only-b': 'POST /only-b',
       named: 'openapi/b.json POST /shared',
     })
@@ -589,6 +589,78 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
     const unchanged = { shared: 'POST /shared', 'only-a': 'POST /only-a', 'only-b': 'POST /only-b', named: 'openapi/b.json POST /shared' }
     expect(refs(migrate({ tabs: [{ tab: 'Guides', pages: ['guide'] }, generated, listed] }, files))).toEqual(unchanged)
     expect(refs(migrate({ tabs: [{ tab: 'Guides', pages: ['guide'] }, listed] }, files))).toEqual(unchanged)
+  })
+
+  it('pins a bare openapi reference to the first spec that published it before the conversion even when the default spec is unchanged', () => {
+    // A is the default and does not publish /shared; B and C both do. B was tried first, but converting B moves it behind the visible C.
+    const spec = (summary: string, shared: boolean) => ({
+      openapi: '3.0.0',
+      info: { title: summary, version: '1' },
+      paths: { ...(shared ? { '/shared': { post: { summary, tags: ['Shared'] } } } : {}), [`/only-${summary.toLowerCase()}`]: { post: { summary: `Only ${summary}`, tags: [summary] } } },
+    })
+    const files = {
+      'a.json': JSON.stringify(spec('A', false)),
+      'b.json': JSON.stringify(spec('B', true)),
+      'c.json': JSON.stringify(spec('C', true)),
+      'shared.mdx': '---\ntitle: Shared\nopenapi: "POST /shared"\n---\n\nText.',
+      'only-c.mdx': '---\ntitle: Only C\nopenapi: "POST /only-c"\n---\n\nText.',
+    }
+    const generated = (name: string) => ({ tab: `${name} API`, openapi: { source: `${name.toLowerCase()}.json`, directory: name.toLowerCase() } })
+    const listedB = { ...generated('B'), groups: [{ group: 'Shared', pages: ['POST /shared'] }] }
+    const refs = (bundle: ReturnType<typeof migrateRepository>) => Object.fromEntries(['shared', 'only-c'].map((id) => [id, bundle.pages.find((page) => page.id === id)?.openapi]))
+
+    // Before: A, B, C in that order, so B was the first to publish /shared. After: A, C, then B bound apart, so it would be C.
+    expect(refs(migrate({ tabs: [{ tab: 'Guides', pages: ['guide'] }, generated('A'), listedB, generated('C')] }, files))).toEqual({
+      shared: 'openapi/b.json POST /shared',
+      'only-c': 'POST /only-c',
+    })
+    // Converting a spec nothing before it in the order publishes the same operation as changes nothing for that operation.
+    expect(refs(migrate({ tabs: [{ tab: 'Guides', pages: ['guide'] }, generated('A'), generated('C'), listedB] }, files))).toEqual({ shared: 'POST /shared', 'only-c': 'POST /only-c' })
+  })
+
+  it('pins a bare webhook reference only when the converted spec publishes the webhook as the renderer reads it', () => {
+    const hook = (extra: Record<string, unknown> = {}) => ({ post: { summary: 'Hook', ...extra } })
+    const webhooksB = {
+      hiddenHook: hook(), visibleHook: hook(), mixedHook: hook(), refHidden: hook(), legacyHook: hook(),
+    }
+    const spec = (webhooks: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+      openapi: '3.1.0',
+      info: { title: 'T', version: '1' },
+      paths: { '/shared': { post: { summary: 'Shared', tags: ['Shared'] } } },
+      webhooks,
+      ...extra,
+    })
+    const specA = spec({
+      // Hidden on its only method: A does not publish it.
+      hiddenHook: { post: { summary: 'Hook', 'x-hidden': true } },
+      // A `$ref` entry is read through its target, as for a path.
+      visibleHook: { $ref: '#/components/pathItems/Hook' },
+      // One visible method is enough.
+      mixedHook: { post: { summary: 'Hook', 'x-hidden': true }, get: { summary: 'Hook' } },
+      // Hidden by the referenced item.
+      refHidden: { $ref: '#/components/pathItems/HiddenHook' },
+    }, {
+      // The renderer ignores `x-webhooks`.
+      'x-webhooks': { legacyHook: { post: { summary: 'Hook' } } },
+      components: { pathItems: { Hook: { post: { summary: 'Hook' } }, HiddenHook: { 'x-hidden': true, post: { summary: 'Hook' } } } },
+    })
+    const files: Record<string, string> = {
+      'a.json': JSON.stringify(specA),
+      'b.json': JSON.stringify(spec(webhooksB)),
+      ...Object.fromEntries(Object.keys(webhooksB).map((name) => [`${name}.mdx`, `---\ntitle: ${name}\nopenapi: "webhook ${name}"\n---\n\nText.`])),
+    }
+    const listed = { tab: 'A API', openapi: { source: 'a.json', directory: 'a' }, groups: [{ group: 'Shared', pages: ['POST /shared'] }] }
+    const bundle = migrate({ tabs: [{ tab: 'Guides', pages: ['guide'] }, listed, { tab: 'B API', openapi: { source: 'b.json', directory: 'b' } }] }, files)
+
+    // A is converted and B's visible tab is tried first now. A reference A published is pinned to A; one A does not publish already reached B.
+    const refs = Object.fromEntries(Object.keys(webhooksB).map((name) => [name, bundle.pages.find((page) => page.id === name)?.openapi]))
+    expect(refs).toEqual({
+      hiddenHook: 'webhook hiddenHook',
+      visibleHook: 'openapi/a.json webhook visibleHook',
+      mixedHook: 'openapi/a.json webhook mixedHook',
+      refHidden: 'webhook refHidden',
+      legacyHook: 'webhook legacyHook',
+    })
   })
 
   it('puts API tabs that list operations back among their siblings in the order the source had them, first or last included', () => {

@@ -1940,16 +1940,27 @@ function viewSpecPathItem(document: unknown, entry: Record<string, unknown>): { 
  * yields no operations rather than throwing.
  */
 function parseOpenApiOperationsForLinking(content: Buffer): Array<OpenApiOperationForLinking> {
-  let document: unknown
+  const document = readSpecDocument(content)
+  return visibleOperations(document, isRecord(document) ? document.paths : undefined)
+}
+
+/** The parsed document of a spec, or undefined when it cannot be read. */
+function readSpecDocument(content: Buffer): unknown {
   try {
-    document = parseSpecDocument(content.toString('utf8')).document
+    return parseSpecDocument(content.toString('utf8')).document
   } catch {
-    return []
+    return undefined
   }
-  const paths = document && typeof document === 'object' ? (document as Record<string, unknown>).paths : null
-  if (!paths || typeof paths !== 'object') return []
+}
+
+/**
+ * The operations the renderer publishes from one `paths` or `webhooks` table of a document: each entry resolved as `viewSpecPathItem` does,
+ * and each operation not withheld on any level. One rule for both tables, so a path operation and a webhook are judged alike.
+ */
+function visibleOperations(document: unknown, entries: unknown): Array<OpenApiOperationForLinking> {
+  if (!isRecord(entries)) return []
   const operations: Array<OpenApiOperationForLinking> = []
-  for (const [path, pathItem] of Object.entries(paths as Record<string, unknown>)) {
+  for (const [path, pathItem] of Object.entries(entries)) {
     if (!isRecord(pathItem)) continue
     const { item, withheld } = viewSpecPathItem(document, pathItem)
     if (withheld) continue
@@ -2389,47 +2400,53 @@ export function addEndpointPages(options: {
   return { operations: listed }
 }
 
-/** The spec the renderer tries first for a bare `openapi:` reference (its `default`): that of the first visible API tab, else of the first hidden one. */
-export function defaultSpecSource(tabs: ReadonlyArray<Pick<MigrationNavigationTab, 'hidden' | 'api'>>): string | undefined {
-  return (tabs.find((tab) => !tab.hidden && tab.api) ?? tabs.find((tab) => tab.api))?.api?.source
-}
-
-/** The `METHOD /path` and `webhook name` keys of the operations of a spec that a page's `openapi:` can name: the ones the renderer publishes. */
-function specOperationKeys(content: Buffer): Set<string> {
-  const keys = new Set(parseOpenApiOperationsForLinking(content).map((operation) => `${operation.method} ${operation.path}`))
-  try {
-    const document = parseSpecDocument(content.toString('utf8')).document
-    for (const field of ['webhooks', 'x-webhooks']) {
-      const hooks = isRecord(document) ? document[field] : undefined
-      for (const [name, entry] of Object.entries(isRecord(hooks) ? hooks : {})) if (isRecord(entry) && !isWithheld(entry)) keys.add(`webhook ${name}`)
-    }
-  } catch { /* an unreadable spec names no webhook */ }
-  return keys
+/** The specs the renderer tries, in order, for a bare `openapi:` reference: those of the visible API tabs, then those of the hidden ones (the first is its `default`). */
+export function specLookupOrder(tabs: ReadonlyArray<Pick<MigrationNavigationTab, 'hidden' | 'api'>>): Array<string> {
+  const sources = [...tabs.filter((tab) => !tab.hidden), ...tabs.filter((tab) => tab.hidden)].flatMap((tab) => tab.api ? [tab.api.source] : [])
+  return [...new Set(sources)]
 }
 
 /**
- * Keep a bare `openapi: "METHOD /path"` reference on the spec it reached. The renderer tries the first visible API tab's spec (`default`)
- * first, then the others in order. When a spec's tab became pages its spec is bound apart, behind the visible ones, so it may no longer be
- * tried first: `before` is the spec that was tried first when every spec was an API tab, `after` the one tried first now. If those differ and
- * `before` is a converted spec, each bare reference to an operation it defines is written with that spec in front (`qualifier`, which the
- * caller's own prefix rewrite or an asset path), as a prefix an author wrote would be; references to anything else stay as authored.
+ * The `METHOD /path` and `webhook name` keys a page's `openapi:` can name in a spec: the operations of `paths` and `webhooks` (not
+ * `x-webhooks`, which the renderer ignores) that are published. A webhook is named by its key once any of its methods is published.
+ */
+function publishedOperationKeys(content: Buffer): Set<string> {
+  const document = readSpecDocument(content)
+  const table = (field: string): Array<OpenApiOperationForLinking> => visibleOperations(document, isRecord(document) ? document[field] : undefined)
+  return new Set([
+    ...table('paths').map((operation) => `${operation.method} ${operation.path}`),
+    ...table('webhooks').map((operation) => `webhook ${operation.path}`),
+  ])
+}
+
+/**
+ * Keep a bare `openapi: "METHOD /path"` reference on the spec it reached. The renderer tries the specs in `specLookupOrder` and takes the
+ * first that publishes the operation. Converting a spec's tab to pages binds its spec apart, behind the visible ones, which can change which
+ * spec that is. `before` is the lookup order when every spec was an API tab and `after` the order now: a bare reference whose first publishing
+ * spec differs between the two is written with the `before` spec in front (`qualifier`, a path the caller's own prefix rewrite resolves, or
+ * the saved spec's path), as a prefix an author wrote would be. `content` reads a spec by the source the tabs name it by.
  */
 export function qualifyDisplacedBareRefs(options: {
   pages: Array<Pick<MigrationPage, 'openapi'>>
-  before: string | undefined
-  after: string | undefined
-  converted: ReadonlyArray<{ assetPath: string; content: Buffer; qualifier: string }>
+  before: ReadonlyArray<string>
+  after: ReadonlyArray<string>
+  content: (source: string) => Buffer | undefined
+  qualifier: (source: string) => string
 }): void {
-  const { pages, before, after, converted } = options
-  const spec = before === after ? undefined : converted.find((entry) => entry.assetPath === before)
-  if (!spec) return
-  let keys: Set<string> | undefined
+  const { pages, before, after, content, qualifier } = options
+  if (before.join('\n') === after.join('\n')) return
+  const published = new Map<string, Set<string>>()
+  const firstPublishing = (order: ReadonlyArray<string>, key: string): string | undefined => order.find((source) => {
+    if (!published.has(source)) published.set(source, publishedOperationKeys(content(source) ?? Buffer.alloc(0)))
+    return published.get(source)!.has(key)
+  })
   for (const page of pages) {
     const ref = page.openapi ? splitOpenApiRef(page.openapi) : null
     if (!ref || ref.specRef) continue
-    keys ??= specOperationKeys(spec.content)
     const [method, ...rest] = ref.operation.trim().split(/\s+/)
-    if (keys.has(`${method.toLowerCase()} ${rest.join(' ')}`)) page.openapi = withSpecRef(ref, spec.qualifier)
+    const key = `${method.toLowerCase()} ${rest.join(' ')}`
+    const reached = firstPublishing(before, key)
+    if (reached !== undefined && reached !== firstPublishing(after, key)) page.openapi = withSpecRef(ref, qualifier(reached))
   }
 }
 
@@ -5749,11 +5766,13 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       // A converted spec may no longer be the one the renderer tries first for a bare `openapi:` reference. With remote specs still to bind, hydration decides.
       // The prefix is the source path: the rewrite of authored prefixes below points it at the saved spec.
       if (remoteApiSpecs.length === 0 && endpointSpecs.size > 0) {
+        const bySource = new Map(resolvedSpecs.map((spec) => [specAssetPath(spec.filename), spec]))
         qualifyDisplacedBareRefs({
           pages,
-          before: defaultSpecSource(injectOpenApiSpecs(unbound, resolvedSpecs).tabs),
-          after: defaultSpecSource(docsConfig.tabs),
-          converted: [...endpointSpecs].map((spec) => ({ assetPath: specAssetPath(spec.filename), content: spec.content, qualifier: spec.sourcePath })),
+          before: specLookupOrder(injectOpenApiSpecs(unbound, resolvedSpecs).tabs),
+          after: specLookupOrder(docsConfig.tabs),
+          content: (source) => bySource.get(source)?.content,
+          qualifier: (source) => bySource.get(source)?.sourcePath ?? source,
         })
       }
       // A mount whose operations are pages is served by them: only its links need a map, never a redirect.

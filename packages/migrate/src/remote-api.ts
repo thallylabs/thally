@@ -12,7 +12,7 @@ import { isIP } from 'node:net'
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { addMintlifyDirectoryRedirects, insertApiTab } from './navigation.js'
 import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, servedRoutes } from './redirects.js'
-import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, defaultSpecSource, isWithheld, linkApiMounts, mountPrefix, qualifyDisplacedBareRefs, reportEndpointPages, thallyOperationSlugSegments } from './repository.js'
+import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, isWithheld, linkApiMounts, mountPrefix, qualifyDisplacedBareRefs, reportEndpointPages, specLookupOrder, thallyOperationSlugSegments } from './repository.js'
 import { markExcluded, parseSpecDocument, sharedSpecMessage, withoutByteOrderMark } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher, MigrationNavigationTab, RemoteApiSpec } from './types.js'
 
@@ -342,18 +342,16 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   }
 
   reportEndpointPages(ledger, warnings)
-  // A bare `openapi:` reference keeps the spec it reached when that spec's tab became pages and another spec is now tried first.
-  const asset = (filename: string): string => `openapi/${filename}`
+  // A bare `openapi:` reference keeps the spec it reached when a spec's tab became pages and the lookup order changed.
   qualifyDisplacedBareRefs({
     pages,
-    before: defaultSpecSource(apiTabs),
-    after: defaultSpecSource(tabs),
-    converted: [
-      ...(bundle.localApiMounts ?? []).flatMap(({ filename, endpointOperations }) => endpointOperations
-        ? [{ assetPath: asset(filename), content: Buffer.from(assets.find((entry) => entry.path === asset(filename))?.content ?? []), qualifier: asset(filename) }]
-        : []),
-      ...bound.flatMap(({ filename, content, endpointOperations }) => endpointOperations ? [{ assetPath: asset(filename), content, qualifier: asset(filename) }] : []),
-    ],
+    before: specLookupOrder(apiTabs),
+    after: specLookupOrder(tabs),
+    content: (source) => {
+      const asset = assets.find((entry) => entry.path === source)
+      return asset ? Buffer.from(asset.content) : undefined
+    },
+    qualifier: (source) => source,
   })
   // The pages the operations became are routes of the site too, which no redirect may take.
   const served = servedRoutes(pages)
