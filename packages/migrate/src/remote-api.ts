@@ -11,7 +11,7 @@ import { isIP } from 'node:net'
 
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { addMintlifyDirectoryRedirects, insertApiTab } from './navigation.js'
-import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, servedRoutes } from './redirects.js'
+import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, pageEntryRoutes, servedRoutes } from './redirects.js'
 import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, isWithheld, linkApiMounts, mountPrefix, qualifyDisplacedBareRefs, reportEndpointPages, specLookupOrder, thallyOperationSlugSegments } from './repository.js'
 import { markExcluded, parseSpecDocument, sharedSpecMessage, withoutByteOrderMark } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher, MigrationNavigationTab, RemoteApiSpec } from './types.js'
@@ -390,12 +390,19 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
   // As for any page the navigation lists, a directory the new pages sit in (a tag, a product's API folder) opens on its first page.
   const newPages = pages.slice(pagesBefore)
   const withDirectories = bundle.platform === 'mintlify' && newPages.length > 0 ? addMintlifyDirectoryRedirects(boundConfig, newPages) : boundConfig
+  // A page whose frontmatter `url` links to another address is reached through redirects that hide it on purpose; the
+  // repository migration adds them after its own checks, so they skip these checks too and keep their place.
+  const linkRedirects = new Set(pages.flatMap((page) => page.externalUrl ? pageEntryRoutes(page).map((source) => `${source} ${page.externalUrl}`) : []))
+  const isLinkRedirect = (redirect: { source: string; destination: string }) => linkRedirects.has(`${redirect.source} ${redirect.destination}`)
+  const links = (withDirectories.redirects ?? []).filter(isLinkRedirect)
+  const unchecked = links.length > 0 ? { ...withDirectories, redirects: withDirectories.redirects!.filter((redirect) => !isLinkRedirect(redirect)) } : withDirectories
+  // Redirects added above meet the same checks as any other: none may fail the build, hide a page that exists, or loop.
+  const checked = dropConflictingRedirects(dropUnroutableRedirects(unchecked, warnings), pages, warnings)
   return {
     ...bundle,
     pages,
     assets,
-    // Redirects added above meet the same checks as any other: none may fail the build, hide a page that exists, or loop.
-    docsConfig: dropConflictingRedirects(dropUnroutableRedirects(withDirectories, warnings), pages, warnings),
+    docsConfig: links.length > 0 ? { ...checked, redirects: [...(checked.redirects ?? []), ...links] } : checked,
     warnings,
   }
 }

@@ -939,6 +939,26 @@ describe('remote OpenAPI spec whose listed operations Mintlify served as pages',
   }
   const download: MigrationFetcher = async (url) => ({ finalUrl: url, body: JSON.stringify(endpointSpec), contentType: 'application/json' })
 
+  it('keeps the redirect of a page whose frontmatter url links to another address after the download', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'thally-remote-endpoint-links-'))
+    writeFileSync(join(root, 'docs.json'), JSON.stringify({ navigation: { tabs: [
+      { tab: 'Guides', pages: ['guide', 'github'] },
+      { tab: 'API reference', openapi: UNKEY_URL, groups: [{ group: 'Keys', pages: ['POST /v2/keys.createKey'] }] },
+    ] } }))
+    writeFileSync(join(root, 'guide.mdx'), '---\ntitle: Guide\n---\n\nGuide content.')
+    writeFileSync(join(root, 'github.mdx'), '---\ntitle: GitHub\nurl: https://github.com/example/docs\n---\n')
+    const link = { source: '/github', destination: 'https://github.com/example/docs', permanent: false }
+    const migrated = migrateRepository({ repositoryDir: root, sourceUrl: 'https://github.com/example/docs' })
+    expect(migrated.docsConfig.redirects).toContainEqual(link)
+
+    const result = await hydrateRemoteApiSpecs(migrated, download)
+
+    // The redirect hides the page on purpose, so the download's own redirect checks leave it as the repository migration wrote it.
+    expect(result.pages.some((page) => page.openapi === `${specAsset(result)} POST /v2/keys.createKey`)).toBe(true)
+    expect(result.docsConfig.redirects).toContainEqual(link)
+    expect(result.warnings.filter((warning) => warning.message.includes('/github'))).toEqual([])
+  })
+
   it('puts each product\'s API tab back in its place with a page per operation, and binds the spec once in a hidden tab', async () => {
     const migrated = unkey()
     // Before the download only the tabs with pages of their own exist: nothing is listed that cannot be a page yet.
