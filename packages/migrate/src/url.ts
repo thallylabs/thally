@@ -16,9 +16,13 @@ import { parseMarkdownPage } from './mdx.js'
 import { addMintlifyDirectoryRedirects, buildNavigationFromPages, projectMintlifyNavigation } from './navigation.js'
 import { pageIdFromReference } from './path.js'
 import { migrationImageAttribute, migrationImageCandidates, migrationImageUrl, renderMigrationSrcset } from './url-images.js'
+import { projectMigrationMedia } from './url-media.js'
+import { projectCapturedDisclosures, projectCapturedTabs, projectMigrationSvg, projectProtectedEmails } from './url-static-content.js'
+import { recoverFlightArticleCode } from './url-flight-content.js'
 import { dropConflictingRedirects, dropUnroutableRedirects } from './redirects.js'
 import type {
   MigrationBundle,
+  MigrationAsset,
   MigrationFetcher,
   MigrationFetchResponse,
   MigrationNavigationGroup,
@@ -30,7 +34,10 @@ import type {
 const DEFAULT_MAX_PAGES = 1_000
 const DEFAULT_MAX_TOTAL_BYTES = 100_000_000
 const MAX_DISCOVERED_URLS = 100_000
-const MAX_LOCAL_RESPONSE_BYTES = 2_000_000
+const MAX_LOCAL_RESPONSE_BYTES = 8_000_000
+// Larger rendered pages do not expand the budget for parsing embedded YAML,
+// resolving aliases, or serializing an operation's recovered schema graph.
+const MAX_EMBEDDED_SCHEMA_BYTES = 2_000_000
 const MAX_SITEMAP_DOCUMENTS = 25
 const PORTABLE_MDX_COMPONENTS = new Set([
   'Accordion', 'AccordionGroup', 'Badge', 'Callout', 'Card', 'CardGroup',
@@ -42,14 +49,14 @@ const PORTABLE_MDX_COMPONENTS = new Set([
   'RequestExample', 'ResponseExample', 'ResponseField', 'Step', 'Steps',
   'Tab', 'Tabs', 'Terminal', 'TerminalInput', 'TerminalOutput', 'Tile', 'TileGroup',
   'Tip', 'Tooltip', 'Tree', 'Update', 'Video', 'View', 'Visibility', 'Warning', 'YouTube',
-  'picture', 'source',
+  'picture', 'source', 'video',
 ])
 const LOCALE_CODES = new Set([
   'ar', 'cs', 'da', 'de', 'el', 'es', 'fi', 'fr', 'he', 'hi', 'hu', 'id',
   'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sv',
   'th', 'tr', 'uk', 'vi', 'zh', 'pt-br', 'zh-hans', 'zh-hant',
 ])
-const PORTABLE_URL_PROPS = 'href|src|img|primaryHref|secondaryHref'
+const PORTABLE_URL_PROPS = 'href|src|poster|img|primaryHref|secondaryHref'
 const PORTABLE_URL_PROP_NAMES = new Set(PORTABLE_URL_PROPS.split('|'))
 // Recognize observed theme controls by exact labels; unknown/local custom
 // controls remain available for explicit review instead of being guessed away.
@@ -125,7 +132,7 @@ export function validateMigrationUrl(value: string): URL {
 
 async function readResponseBody(response: Response): Promise<string> {
   const contentLength = Number(response.headers.get('content-length') ?? 0)
-  if (contentLength > MAX_LOCAL_RESPONSE_BYTES) throw new Error('A documentation response exceeded the 2 MB import limit.')
+  if (contentLength > MAX_LOCAL_RESPONSE_BYTES) throw new Error('A documentation response exceeded the 8 MB import limit.')
   if (!response.body) return ''
   const reader = response.body.getReader()
   const chunks: Array<Uint8Array> = []
@@ -136,7 +143,7 @@ async function readResponseBody(response: Response): Promise<string> {
     size += value.byteLength
     if (size > MAX_LOCAL_RESPONSE_BYTES) {
       await reader.cancel()
-      throw new Error('A documentation response exceeded the 2 MB import limit.')
+      throw new Error('A documentation response exceeded the 8 MB import limit.')
     }
     chunks.push(value)
   }
@@ -605,6 +612,10 @@ function sanitizeMarkdownUrls(value: string): string | null {
         hasUnsafeMdxSyntax = true
         return
       }
+      if (node.name === 'video' && node.children?.length) {
+        hasUnsafeMdxSyntax = true
+        return
+      }
       for (const attribute of node.attributes ?? []) {
         if (attribute.type !== 'mdxJsxAttribute' || !attribute.name
           || /^on[A-Z]/.test(attribute.name)) {
@@ -640,6 +651,19 @@ function sanitizeMarkdownUrls(value: string): string | null {
             if (/^srcset$/i.test(attribute.name)) migrationImageCandidates(decodeHtmlAttribute(attribute.value), new URL('https://migration.invalid'))
             if (attribute.name === 'src') migrationImageUrl(decodeHtmlAttribute(attribute.value), new URL('https://migration.invalid'))
           } catch { hasUnsafeMdxSyntax = true; return }
+        }
+        if (node.name === 'video') {
+          const isBoolean = ['controls', 'muted', 'autoPlay', 'loop', 'playsInline'].includes(attribute.name)
+          const isText = ['src', 'poster', 'title'].includes(attribute.name)
+          if ((isBoolean && typeof staticValue !== 'boolean')
+            || (isText && typeof attribute.value !== 'string') || (!isBoolean && !isText)) {
+            hasUnsafeMdxSyntax = true
+            return
+          }
+          if (attribute.name === 'src' || attribute.name === 'poster') {
+            try { migrationImageUrl(decodeHtmlAttribute(attribute.value as string), new URL('https://migration.invalid')) }
+            catch { hasUnsafeMdxSyntax = true; return }
+          }
         }
       }
     }
@@ -785,7 +809,10 @@ export function sanitizeRemoteMarkdown(body: string): string | null {
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
     .replace(/<(?:https?:\/\/|mailto:)[^>]+>/gi, '')
     .replace(/(`+)[\s\S]*?\1/g, '')
-  if (/^\s*(?:import|export)\s/m.test(executable)) return null
+  // Match ESM-shaped lines without consuming paragraph separators. API paths
+  // can contain the standalone segment "import" or "export" as ordinary copy;
+  // actual ESM nodes have already been rejected by the parsed syntax gate.
+  if (/^[\t ]*(?:import|export)[\t ]/m.test(executable)) return null
   // A public Markdown endpoint is still attacker-controlled MDX. Preserve
   // known documentation primitives and JSON-literal props, but never compile
   // executable expressions, raw HTML, event handlers, or local components.
@@ -924,20 +951,20 @@ function stripMintlifyDocumentationIndex(body: string): string {
 
 /**
  * Extract one unambiguous publisher-declared operation from a bounded literal
- * code fence. Optional source filenames are metadata only: callers choose local
- * asset names and never fetch or write the publisher's filename.
+ * code fence. Optional source filenames and bounded spec aliases are metadata
+ * only: callers choose local asset names and never fetch or write these hints.
  */
 export function extractEmbeddedOpenApi(content: string): {
   content: string
   openapi?: string
   fragment?: EmbeddedOpenApiFragment
 } {
-  if (Buffer.byteLength(content, 'utf8') > MAX_LOCAL_RESPONSE_BYTES) return { content }
+  if (Buffer.byteLength(content, 'utf8') > MAX_EMBEDDED_SCHEMA_BYTES) return { content }
   try {
     const root = embeddedOpenApiParser.parse(content) as RemoteMarkdownNode
     const candidates = (root.children ?? []).flatMap((node) => {
       if (node.type !== 'code' || !/^(?:yaml|yml|json)$/i.test(node.lang ?? '')) return []
-      const metadata = node.meta?.match(/^(?:(\S+\.(?:yaml|yml|json))\s+)?(delete|get|head|options|patch|post|put|trace)\s+(\/\S+)\s*$/i)
+      const metadata = node.meta?.match(/^(?:((?:\S+\.(?:yaml|yml|json)|[A-Za-z][A-Za-z0-9_-]{0,127}))\s+)?(delete|get|head|options|patch|post|put|trace)\s+(\/\S+)\s*$/i)
       return metadata ? [{ node, method: metadata[2].toUpperCase(), path: metadata[3] }] : []
     })
     if (candidates.length !== 1) return { content }
@@ -969,11 +996,11 @@ export function extractEmbeddedOpenApi(content: string): {
     const serialized = JSON.stringify(document, (_key, value: unknown) => {
       values += 1
       if (typeof value === 'string') textLength += value.length
-      if (values > 100_000 || textLength > MAX_LOCAL_RESPONSE_BYTES
+      if (values > 100_000 || textLength > MAX_EMBEDDED_SCHEMA_BYTES
         || (typeof value === 'number' && !Number.isFinite(value))) throw new Error('OpenAPI document exceeds portable data limits.')
       return value
     })
-    if (Buffer.byteLength(serialized, 'utf8') > MAX_LOCAL_RESPONSE_BYTES) return { content }
+    if (Buffer.byteLength(serialized, 'utf8') > MAX_EMBEDDED_SCHEMA_BYTES) return { content }
     const before = content.slice(0, start).replace(/(?:^|\n)##\s+OpenAPI\s*\n\s*$/i, '\n')
     const after = content.slice(end)
     return {
@@ -1107,11 +1134,24 @@ export function migrationHtmlArticle(body: string) {
   const root = ['main article', 'article', 'main', '[role="main"]', 'body']
     .map((selector) => $(selector).first())
     .find((candidate) => candidate.length)!
+  projectProtectedEmails($, root)
+  recoverFlightArticleCode($, root)
+  const assets: Array<MigrationAsset> = []
+  // Validate original bytes before script/style cleanup. A rejected SVG must
+  // never become an accepted asset after those children have been removed.
+  const svgProjections = new Map(root.find('svg').toArray().map(element => [element, projectMigrationSvg($.html(element))]))
   root.find([
     'script', 'style', 'noscript', 'nav', 'footer', 'aside',
     '.theme-doc-version-badge', '.theme-doc-breadcrumbs', '.theme-doc-toc-mobile', '.table-of-contents',
     '.chat-assistant-floating-input', '.chat-assistant-sheet', '#chat-assistant-sheet', '#chat-assistant-textarea',
   ].join(',')).remove()
+  root.find('div[data-component-part="code-group-tab-content"]').each((_index, element) => {
+    // API example pickers can render their literal payload in a div instead
+    // of a pre. Normalize only this explicit code marker, before both source
+    // evidence and conversion read it, so whitespace and executable-looking
+    // examples remain code. Existing pre blocks must never become nested.
+    if ($(element).parents('pre').length === 0 && $(element).find('pre').length === 0) element.name = 'pre'
+  })
   const permalinkSelectors = MINTLIFY_ARTICLE_LABELS.map((labels) => `a[aria-label="${labels.permalink}"]`)
   root.find([...permalinkSelectors, 'h1 .hash-link', 'h2 .hash-link', 'h3 .hash-link', 'h4 .hash-link', 'h5 .hash-link', 'h6 .hash-link'].join(',')).each((_index, link) => {
     const parent = $(link).parent()
@@ -1157,7 +1197,22 @@ export function migrationHtmlArticle(body: string) {
     projection.append(list)
     select.replaceWith(projection)
   })
-  return { $, root }
+  projectCapturedDisclosures($, root)
+  root.find('svg').each((_index, element) => {
+    const svg = $(element)
+    if (svg.parents('svg,button,nav,footer,aside').length) return
+    const projection = svgProjections.get(element)
+    if (!projection) return
+    const image = $('<img>').attr('src', `/${projection.asset.path}`).attr('alt', projection.alternative)
+    for (const attribute of ['id', 'width', 'height']) {
+      const value = svg.attr(attribute)
+      if (value !== undefined) image.attr(attribute, value)
+    }
+    assets.push(projection.asset)
+    svg.replaceWith(image)
+  })
+  projectCapturedTabs($, root)
+  return { $, root, assets }
 }
 
 /** Project rendered article HTML into inert content using shared conversion rules. */
@@ -1165,8 +1220,8 @@ export function htmlPage(
   document: MigrationFetchResponse,
   id: string,
   options: { preserveAnchors?: boolean; preserveResponsiveImages?: boolean; omitDocumentHeading?: boolean } = {},
-): { page: MigrationPage | null; links: Array<string> } {
-  const { $, root } = migrationHtmlArticle(document.body)
+): { page: MigrationPage | null; links: Array<string>; assets: Array<MigrationAsset> } {
+  const { $, root, assets } = migrationHtmlArticle(document.body)
   const links = root.find('a[href]')
     .map((_index, element) => $(element).attr('href') ?? '')
     .get()
@@ -1181,8 +1236,8 @@ export function htmlPage(
     || $('meta[property="og:description"]').attr('content')?.trim()
   let documentHeadingAnchor = ''
   const excludedElements = options.omitDocumentHeading
-    ? 'script,style,noscript,nav,footer,aside,form,button,svg,iframe,object,embed,link,meta'
-    : 'script,style,noscript,nav,header,footer,aside,form,button,svg,iframe,object,embed,link,meta'
+    ? 'script,style,noscript,nav,footer,aside,form,button,svg,object,embed,link,meta'
+    : 'script,style,noscript,nav,header,footer,aside,form,button,svg,object,embed,link,meta'
   root.find(excludedElements).remove()
   root.find('.theme-doc-version-badge,.theme-doc-breadcrumbs,.theme-doc-toc-mobile,.table-of-contents,.hash-link').remove()
   if (options.omitDocumentHeading) {
@@ -1216,6 +1271,7 @@ export function htmlPage(
   root.find('img[src]').each((_index, element) => {
     const src = $(element).attr('src')
     if (!src) return
+    if (assets.some(asset => src === `/${asset.path}`)) return
     try {
       const resolved = new URL(src, document.finalUrl)
       if (['http:', 'https:'].includes(resolved.protocol)) {
@@ -1227,7 +1283,12 @@ export function htmlPage(
       $(element).removeAttr('src')
     }
   })
-  const turndown = new TurndownService({ codeBlockStyle: 'fenced', emDelimiter: '_', headingStyle: 'atx', preformattedCode: true })
+  const turndown = new TurndownService({
+    codeBlockStyle: 'fenced', emDelimiter: '_', headingStyle: 'atx', preformattedCode: true,
+    // Turndown chooses its blank rule before custom rules. Empty source anchor
+    // leaves still carry navigation identity, including captured tab controls.
+    blankReplacement: (_content, node) => options.preserveAnchors ? anchor(node as HTMLElement) : '',
+  })
   let isConvertingTableCell = false
   turndown.remove(['script', 'style', 'noscript'])
   turndown.addRule('migration-literal-table-code', {
@@ -1243,6 +1304,14 @@ export function htmlPage(
     // Emit literal task-list syntax rather than escaping its brackets as copy.
     replacement: (_content, node) => (node as HTMLElement).getAttribute('data-thally-static-task-checkbox') === 'checked' ? '[x] ' : '[ ] ',
   })
+  turndown.addRule('migration-authored-paragraph', {
+    filter: (node) => node.nodeName === 'SPAN' && (node as HTMLElement).getAttribute('data-as') === 'p',
+    // Some publishers render authored paragraphs as spans. Their explicit
+    // semantic hint must retain a block boundary: otherwise following copy
+    // joins a picture's closing tag or an accordion's source anchor and can
+    // change the resulting MDX grammar. Ordinary spans remain inline.
+    replacement: (content) => `\n\n${content}\n\n`,
+  })
   const anchor = (element: HTMLElement): string => {
     const value = element.getAttribute('id')
     return options.preserveAnchors && value
@@ -1255,6 +1324,29 @@ export function htmlPage(
       const element = node as HTMLElement
       const heading = element.nodeName.match(/^H([1-6])$/)
       return `\n\n${anchor(element)}${heading ? `${'#'.repeat(Number(heading[1]))} ${content.trim()}` : content}\n\n`
+    },
+  })
+  turndown.addRule('migration-flow-link', {
+    filter: (node) => node.nodeName === 'A' && (node as HTMLElement).hasAttribute('href')
+      && Boolean((node as HTMLElement).querySelector('div,p,picture,figure,blockquote,pre,table,ul,ol,h1,h2,h3,h4,h5,h6')),
+    replacement: (content, node) => {
+      const element = node as HTMLElement
+      // Markdown links cannot contain block boundaries. Preserve a card's
+      // complete child content inside the existing portable Card primitive so
+      // the shared link walker can still rewrite and verify its destination.
+      // Copy no scripts, event handlers, style or arbitrary source attributes.
+      const href = migrationImageAttribute(element.getAttribute('href') ?? '')
+      return `\n\n${anchor(element)}<Card href="${href}">\n\n${content.trim()}\n\n</Card>\n\n`
+    },
+  })
+  turndown.addRule('migration-static-media', {
+    filter: (node) => node.nodeName === 'VIDEO' || node.nodeName === 'IFRAME',
+    replacement: (_content, node) => {
+      const element = node as HTMLElement
+      const projected = projectMigrationMedia(element.outerHTML, document.finalUrl)
+      // Capture validation retains an explicit unsupported-content issue for
+      // unknown media. Only a complete projection may become an inert embed.
+      return projected ? `\n\n${anchor(element)}${projected}\n\n` : ''
     },
   })
   if (options.preserveResponsiveImages) {
@@ -1314,12 +1406,34 @@ export function htmlPage(
       const panels = container.find('[role="tabpanel"]').toArray()
         .filter((panel) => fragment(panel).closest('.tabs-container')[0] === container[0])
       if (panels.length === 0) return _content
+      const residual = container.clone()
+      residual.children('ul.tabs').remove()
+      residual.find('[role="tabpanel"]').remove()
+      if (residual.text().trim() || residual.find('a[href],pre,img,svg,table,video,iframe,input,select,textarea').length) return _content
       const tabs = panels.map((panel, index) => {
         const panelId = fragment(panel).attr('id')
         const tab = panelId ? container.find('[role="tab"]').toArray().find((item) => fragment(item).attr('aria-controls') === panelId) : undefined
         const title = migrationImageAttribute((tab ? fragment(tab).text().trim() : labels[index]) || `Tab ${index + 1}`)
         const panelAnchor = options.preserveAnchors && panelId ? `<a id="${migrationImageAttribute(panelId)}" />\n\n` : ''
         return `<Tab title="${title}">\n${panelAnchor}${turndown.turndown(fragment(panel).html() ?? '').trim()}\n</Tab>`
+      })
+      return `\n\n${anchor(element)}<Tabs>\n${tabs.join('\n\n')}\n</Tabs>\n\n`
+    },
+  })
+  turndown.addRule('migration-complete-captured-tabs', {
+    filter: (node) => (node as HTMLElement).hasAttribute('data-thally-static-tabs'),
+    replacement: (_content, node) => {
+      const element = node as HTMLElement
+      const fragment = load(element.outerHTML)
+      const container = fragment('[data-thally-static-tabs]').first()
+      const panels = container.find('[data-thally-static-tab]').toArray()
+        .filter(panel => fragment(panel).closest('[data-thally-static-tabs]')[0] === container[0])
+      const tabs = panels.map(panel => {
+        const selection = fragment(panel)
+        const title = migrationImageAttribute(selection.attr('data-thally-static-tab')!)
+        const id = selection.attr('id')
+        const panelAnchor = options.preserveAnchors && id ? `<a id="${migrationImageAttribute(id)}" />\n\n` : ''
+        return `<Tab title="${title}">\n${panelAnchor}${turndown.turndown(selection.html() ?? '').trim()}\n</Tab>`
       })
       return `\n\n${anchor(element)}<Tabs>\n${tabs.join('\n\n')}\n</Tabs>\n\n`
     },
@@ -1357,7 +1471,18 @@ export function htmlPage(
       const code = (tokenLines.length > 0
         ? tokenLines.map((line) => fragment(line).text()).join('\n')
         : fragment('pre').text()).replace(/\n$/, '')
-      const language = fragment('code').attr('class')?.match(/(?:language-|lang-)([A-Za-z0-9_+-]+)/)?.[1] ?? ''
+      // Publishers using Shiki can put the language on an attribute rather
+      // than a CSS class. Prefer the code element's explicit metadata, then
+      // its enclosing pre; never guess from the payload (including curl).
+      // A bounded single token keeps remote metadata out of fence syntax.
+      const language = ['code', 'pre'].flatMap((selector) => {
+        const block = fragment(selector).first()
+        return [
+          block.attr('language'),
+          block.attr('data-language'),
+          block.attr('class')?.match(/(?:^|\s)(?:language-|lang-)([A-Za-z0-9_+-]+)(?=\s|$)/)?.[1],
+        ]
+      }).find((value) => value !== undefined && /^[A-Za-z0-9_+-]{1,64}$/.test(value)) ?? ''
       const longestFence = Math.max(0, ...[...code.matchAll(/`+/g)].map((match) => match[0].length))
       const fence = '`'.repeat(Math.max(3, longestFence + 1))
       return `\n\n${anchor(element)}${fence}${language}\n${code}\n${fence}\n\n`
@@ -1373,7 +1498,7 @@ export function htmlPage(
   // Docusaurus can intentionally publish title-only reference/partial pages.
   // Keep those real article routes while still rejecting empty search/app
   // shells that happen to expose a document title.
-  if (!title || (body.length < 40 && $('article').length === 0)) return { page: null, links }
+  if (!title || (body.length < 40 && $('article').length === 0)) return { page: null, links, assets }
   return {
     page: {
       id,
@@ -1385,6 +1510,7 @@ export function htmlPage(
       source: document.finalUrl.toString(),
     },
     links,
+    assets,
   }
 }
 
@@ -1836,6 +1962,7 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
   const queue: Array<URL> = [source]
   const queued = new Set([candidateIdentity(source)])
   const warnings: Array<MigrationWarning> = []
+  const importedAssets = new Map<string, MigrationAsset>()
   const fetchedSitemaps = new Set<string>()
   const docusaurusSidebars: Array<DocusaurusSidebarSnapshot> = docusaurusDiscovery?.sidebar
     ? [docusaurusDiscovery.sidebar]
@@ -2037,7 +2164,7 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
       const extracted = htmlPage(document, id)
       if (extracted.page) extracted.page.navigationId = navigationId
       const sidebar = platform === 'docusaurus' ? readDocusaurusSidebar(document) : null
-      return { candidate, page: extracted.page, links: extracted.links, base: document.finalUrl, sidebar, failure: false }
+      return { candidate, page: extracted.page, links: extracted.links, assets: extracted.assets, base: document.finalUrl, sidebar, failure: false }
     }))
     for (const result of results) {
       if (result.failure) {
@@ -2055,6 +2182,9 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
       if (result.page && sourceIdentity && !seenSources.has(sourceIdentity)
         && !seenIds.has(result.page.id) && pages.length < maxPages) {
         pages.push(result.page)
+        if ('assets' in result && result.assets) {
+          for (const asset of result.assets) importedAssets.set(asset.path, asset)
+        }
         if ('pageWarnings' in result && result.pageWarnings) {
           for (const message of result.pageWarnings) warnings.push({ code: 'unsupported-config', message, source: result.page.source })
         }
@@ -2162,7 +2292,7 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
     sourceKind: 'url',
     platform,
     pages,
-    assets: openApiAsset ? [{ path: 'openapi.yaml', content: openApiAsset }] : [],
+    assets: [...importedAssets.values(), ...(openApiAsset ? [{ path: 'openapi.yaml', content: openApiAsset }] : [])],
     docsConfig,
     ...(sourceMintlifyConfig ? {
       site: {

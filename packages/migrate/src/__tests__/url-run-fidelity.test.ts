@@ -90,10 +90,10 @@ describe('URL import fidelity regressions', () => {
   })
   it.each([false, true])('recovers deferred API fields only from a complete local operation (external ref: %s)', async (externalRef) => {
     const fetched: string[] = []
-    const markdown = '# API\n\n```yaml get /status\nopenapi: 3.0.3\ninfo: {title: Example, version: "1"}\npaths:\n  /status:\n    get:\n      responses:\n        "200":\n          description: Status\n          content:\n            application/json:\n              schema:\n                $ref: "' + (externalRef ? 'https://private.invalid/schema' : '#/components/schemas/Status') + '"\ncomponents:\n  schemas:\n    Status:\n      type: object\n      properties:\n        ready: {type: boolean, description: Complete nested field}\n```'
+    const markdown = '# API\n\n```yaml get /status\nopenapi: 3.0.3\ninfo: {title: Example, version: "1"}\npaths:\n  /status:\n    get:\n      responses:\n        "200":\n          description: Status\n          content:\n            application/json:\n              schema:\n                $ref: "' + (externalRef ? 'https://private.invalid/schema' : '#/components/schemas/Status') + '"\ncomponents:\n  schemas:\n    Status:\n      type: object\n      properties:\n        ready: {type: object, description: Complete nested field, properties: {value: {type: boolean}}}\n```'
     const result = await runUrlMigration({ sourceUrl: 'https://docs.test/api', captureProvider: { capture: async ({ url }) => {
       fetched.push(url.href)
-      if (url.pathname === '/api') return response('/api', html('API', '<pre><code>GET /status</code></pre><details class="expandable"><summary data-component-part="expandable-button">Attributes</summary></details>', '<link rel="alternate" type="text/markdown" href="/api.md">'))
+      if (url.pathname === '/api') return response('/api', html('API', '<pre><code>GET /status</code></pre><div id="api-playground-2-operation-page"><div class="method-pill">GET</div><div data-component-part="scroll-area-content">/status</div><section class="api-section"><div class="api-section-heading"><button aria-haspopup="menu">200</button><span>application/json</span></div><div class="object-param-field"><p data-component-part="field-name">ready</p><details class="expandable" data-component-part="expandable"><summary data-component-part="expandable-button" aria-controls="ready-panel" aria-expanded="false"><p>Attributes</p></summary><div id="ready-panel" data-component-part="expandable-content"></div></details></div></section></div>', '<link rel="alternate" type="text/markdown" href="/api.md">'))
       if (url.pathname === '/api.md') return response('/api.md', markdown, 'text/markdown')
       throw new Error('Missing source')
     } } })
@@ -124,15 +124,33 @@ describe('URL import fidelity regressions', () => {
     expect(recaptured.validation.issues).toContainEqual(expect.objectContaining({ code: 'unsupported-component' }))
     expect(recaptured.bundle.assets.some(asset => asset.path.startsWith('openapi/'))).toBe(false)
   })
-  it('reports inherited broken anchors separately while blocking anchors lost during conversion', async () => {
+  it.each([false, true])('does not cover unrelated empty article details with a registered API operation (ARIA: %s)', async aria => {
+    const schema = { openapi: '3.0.3', info: { title: 'Example', version: '1' }, paths: { '/status': { get: { responses: { '200': { description: 'Status', content: { 'application/json': { schema: { type: 'object', properties: { ready: { type: 'object', properties: { value: { type: 'boolean' } } } } } } } } } } } } }
+    const result = await runUrlMigration({ sourceUrl: 'https://docs.test/api', captureProvider: { capture: async ({ url }) => {
+      if (url.pathname === '/api.md') return response('/api.md', '# API\n\n```json GET /status\n' + JSON.stringify(schema) + '\n```', 'text/markdown')
+      if (url.pathname === '/api') return response('/api', html('API', '<pre><code>GET /status</code></pre><details class="expandable" data-component-part="expandable"><summary data-component-part="expandable-button"' + (aria ? ' aria-expanded="false" aria-controls="unknown-panel"' : '') + '><p>Unrelated authored alternative</p></summary><div id="unknown-panel" data-component-part="expandable-content"></div></details>', '<link rel="alternate" type="text/markdown" href="/api.md">'))
+      throw new Error('Missing source')
+    } } })
+    expect(result.bundle.pages[0].openapi).toBeTruthy()
+    expect(result.validation.status).toBe('partial')
+    expect(result.validation.issues).toContainEqual(expect.objectContaining({ code: 'unsupported-component' }))
+  })
+  it('falls back to the page for proven source defects while blocking anchors lost during conversion', async () => {
     const run = await runUrlMigration({ sourceUrl: 'https://docs.test/guide', captureProvider: { capture: async ({ url }) => {
       if (url.pathname !== '/guide') throw new Error('Missing source')
-      return response('/guide', html('Guide', '<h2 id="present">Present</h2><a href="#present">Valid</a><a href="#already-broken">Source defect</a>'))
+      return response('/guide', html('Guide', '<h2 id="present">Present</h2><a href="#present">Valid</a><a href="#pre%73ent">Encoded valid</a><a href="#already-broken">Source defect</a><a href="##present">Malformed source fragment</a><pre><code>link = &quot;#already-broken&quot;</code></pre>'))
     } } })
     expect(run.validation.status).toBe('passed')
     expect(run.validation.issues).toEqual([])
-    expect(run.validation.warnings).toEqual([expect.objectContaining({ code: 'source-link-warning', message: expect.stringContaining('#already-broken') })])
-    expect(run.bundle.warnings).toEqual([expect.objectContaining({ message: expect.stringContaining('#already-broken') })])
+    expect(run.validation.warnings).toEqual([expect.objectContaining({ code: 'source-link-warning', message: expect.stringContaining('#already-broken') }), expect.objectContaining({ code: 'source-link-warning', message: expect.stringContaining('##present') })])
+    expect(run.bundle.warnings).toEqual([expect.objectContaining({ message: expect.stringContaining('#already-broken') }), expect.objectContaining({ message: expect.stringContaining('##present') })])
+    expect(run.bundle.pages[0].body).toContain('[Valid](/guide#present)')
+    expect(run.bundle.pages[0].body).toContain('[Encoded valid](/guide#pre%73ent)')
+    expect(run.bundle.pages[0].body).toContain('[Source defect](/guide)')
+    expect(run.bundle.pages[0].body).toContain('[Malformed source fragment](/guide)')
+    expect(run.bundle.pages[0].body).toContain('link = "#already-broken"')
+    const replay = await runUrlMigration({ sourceUrl: 'https://docs.test/guide', checkpoint: structuredClone(run.checkpoint), captureProvider: { capture: async () => { throw new Error('No recapture') } } })
+    expect(replay).toEqual(run)
     const damaged = structuredClone(run.checkpoint)
     const page = damaged.records.find(record => record.page)!.page!
     page.body = page.body.replace('<a id="present" />', '').replace('## Present', '## Changed')

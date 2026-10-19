@@ -8,6 +8,8 @@ export interface MigrationNavigationOccurrence {
   label: string
   /** Structured source roles retain top-level tabs separately from sidebar groups. */
   kind?: 'tab' | 'group' | 'page'
+  /** Authored collection switchers retain their dropdown presentation. */
+  presentation?: 'dropdown'
   /** A localized collection never merges with a same-named collection in another language. */
   locale?: string
   url?: string
@@ -25,6 +27,10 @@ export interface MigrationCapturedAsset {
   url: string
   contentType: string
   content: Uint8Array
+  /** A trusted fetch boundary proved the original asset is already absent. */
+  unavailable?: { status: 404 | 410 }
+  /** Original SVG digest when a trusted host supplied an inert PNG rendering. */
+  derivedFromSha256?: string
 }
 
 export interface MigrationCapture extends MigrationFetchResponse {
@@ -53,6 +59,8 @@ export interface MigrationEvidence {
   code: Array<string>
   anchors: Array<string>
   links: Array<string>
+  /** Exact observed canonical/article equality proof; never inferred from query names. */
+  articleIdentity?: { canonicalUrl: string; articleSha256: string; sectionAnchor?: string }
 }
 
 export interface MigrationJournalAsset {
@@ -62,6 +70,8 @@ export interface MigrationJournalAsset {
   sha256: string
   /** Base64 keeps checkpoints portable through JSON persistence. */
   base64: string
+  /** Binds an optional trusted SVG rasterization to the original source bytes. */
+  derivedFromSha256?: string
 }
 
 export interface UrlMigrationRecord {
@@ -70,6 +80,10 @@ export interface UrlMigrationRecord {
   outcome: 'pending' | 'imported' | 'excluded' | 'failed' | 'alias'
   reason?: string
   aliasOf?: string
+  /** A proven query section is projected to its captured article anchor. */
+  aliasAnchor?: string
+  /** Observed redirect destination; external pages are links, never captured articles. */
+  redirectTo?: string
   /** Publisher-declared Markdown representation of this exact same-origin article. */
   representationOf?: string
   /** Complete inert API schema observed at a declared same-route Markdown representation. */
@@ -78,6 +92,8 @@ export interface UrlMigrationRecord {
   page?: MigrationPage
   pageSha256?: string
   assets?: Array<MigrationJournalAsset>
+  /** Proven source defects are retained for review without hiding import failures. */
+  warnings?: Array<UrlMigrationIssue>
   version?: string
   issues?: Array<UrlMigrationIssue>
 }
@@ -104,7 +120,7 @@ export interface UrlMigrationCheckpointDelta {
 }
 
 export interface UrlMigrationIssue {
-  code: 'missing-page' | 'missing-anchor' | 'source-link-warning' | 'code-mismatch' | 'asset-failed' | 'unsafe-content' | 'unsupported-component' | 'navigation-missing' | 'collision'
+  code: 'missing-page' | 'missing-anchor' | 'source-link-warning' | 'source-asset-warning' | 'code-mismatch' | 'asset-failed' | 'unsafe-content' | 'unsupported-component' | 'navigation-missing' | 'collision'
   source: string
   message: string
 }
@@ -137,6 +153,8 @@ export interface UrlMigrationRunOptions {
   fetcher?: MigrationFetcher
   /** Hosts that inject text fetching must also inject their safe binary boundary. */
   assetFetcher?: (url: URL, signal?: AbortSignal) => Promise<MigrationCapturedAsset>
+  /** Optional trusted, offline SVG renderer. Unsupported SVG stays rejected by default. */
+  rasterizeSvg?: (asset: MigrationCapturedAsset, signal?: AbortSignal) => Promise<MigrationCapturedAsset>
   captureProvider?: MigrationCaptureProvider
   /** Change this when browser/extraction policy changes; prevents stale reuse. */
   captureVersion?: string
