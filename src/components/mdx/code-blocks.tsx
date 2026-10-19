@@ -153,7 +153,7 @@ function CopyButton({ code }: { code: string }) {
       type="button"
       aria-label={copied ? 'Copied' : 'Copy code'}
       title={copied ? 'Copied' : 'Copy'}
-      className="group/button relative inline-flex h-[30px] w-[30px] items-center justify-center rounded-[7px] text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="group/button relative inline-flex h-[30px] w-[30px] items-center justify-center rounded-[7px] text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
       onClick={() => {
         void writeClipboardText(code).then((wasCopied) => {
           if (wasCopied) setCopyCount((count) => count + 1)
@@ -417,7 +417,7 @@ function CodePanel({
           aria-expanded={isExpanded}
           aria-controls={preId}
           onClick={() => setExpanded(!isExpanded)}
-          className="thally-code-toggle w-full border-t border-border py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+          className="thally-code-toggle w-full border-t border-border py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
         >
           {isExpanded ? 'Collapse' : 'Expand'}
         </button>
@@ -453,7 +453,7 @@ function CodeGroupHeader({
           {Children.map(children, (child, childIndex) => (
             <Tab
               className={clsx(
-                'border-b py-3 transition focus-visible:outline-none',
+                'border-b py-3 transition focus-visible:outline-hidden',
                 childIndex === selectedIndex
                   ? 'border-accent text-accent'
                   : 'border-transparent text-muted-foreground hover:text-foreground',

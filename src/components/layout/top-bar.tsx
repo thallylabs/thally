@@ -170,7 +170,7 @@ export function TopBar({
               type="button"
               aria-label={assistantActionLabel}
               aria-keyshortcuts="Meta+I Control+I"
-              className="thally-docs-assistant-trigger inline-flex h-9 shrink-0 items-center gap-2 rounded-[10px] px-3 text-[0.84rem] font-semibold text-foreground/80 transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="thally-docs-assistant-trigger inline-flex h-9 shrink-0 items-center gap-2 rounded-[10px] px-3 text-[0.84rem] font-semibold text-foreground/80 transition hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               onClick={openAssistant}
             >
               <Sparkles className="h-4 w-4 shrink-0" aria-hidden="true" />

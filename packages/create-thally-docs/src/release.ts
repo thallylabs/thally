@@ -8,6 +8,7 @@
  */
 
 import stableScaffoldRelease from './stable-scaffold-release.json' with { type: 'json' }
+import tailwind3ScaffoldRelease from './tailwind3-scaffold-release.json' with { type: 'json' }
 import previousScaffoldReleases from './previous-scaffold-releases.json' with { type: 'json' }
 
 export interface ScaffoldSourceRelease {
@@ -62,6 +63,8 @@ export interface ScaffoldRelease {
  */
 export const STABLE_SCAFFOLD_RELEASE = stableScaffoldRelease as ScaffoldRelease
 
+export const TAILWIND3_SCAFFOLD_RELEASE = tailwind3ScaffoldRelease as ScaffoldRelease
+
 /**
  * Immutable releases this toolchain can use as a three-way update base.
  *
@@ -72,7 +75,10 @@ export const STABLE_SCAFFOLD_RELEASE = stableScaffoldRelease as ScaffoldRelease
 export const SUPPORTED_SCAFFOLD_RELEASES: readonly ScaffoldRelease[] = [
   STABLE_SCAFFOLD_RELEASE,
   ...(previousScaffoldReleases as ScaffoldRelease[]),
-]
+  TAILWIND3_SCAFFOLD_RELEASE,
+].filter((release, index, releases) =>
+  releases.findIndex((candidate) => candidate.source.commitSha === release.source.commitSha) === index,
+)
 
 /** True only when an unknown record is the currently supported release. */
 export function isStableScaffoldRelease(value: unknown): value is ScaffoldRelease {

@@ -42,7 +42,7 @@ export function DocsAccessForm() {
     <div className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
       <form
         onSubmit={(e) => void handleSubmit(e)}
-        className="w-full max-w-sm rounded-xl border border-border bg-background p-8 shadow-sm"
+        className="w-full max-w-sm rounded-xl border border-border bg-background p-8 shadow-xs"
       >
         <h1 className="text-2xl font-semibold tracking-tight">Protected documentation</h1>
         <p className="mt-2 text-sm text-muted-foreground">This site requires a password to view.</p>
@@ -55,7 +55,7 @@ export function DocsAccessForm() {
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring"
+          className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-hidden ring-offset-background focus:ring-2 focus:ring-ring"
           aria-invalid={Boolean(error)}
           aria-describedby={error ? 'access-error' : undefined}
           required

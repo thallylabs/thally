@@ -177,7 +177,7 @@ function ObjectFields({ schema, value, onChange, depth, top, onFile }: FormProps
       <>
         <span className="font-mono text-xs font-semibold text-foreground">{key}</span>
         <span className="ml-2 text-[11px] text-foreground/50">{typeof flat.type === 'string' ? flat.type : ''}</span>
-        {required.has(key) ? <span className="ml-2 rounded bg-rose-500/10 px-1.5 py-0.5 text-[10px] text-rose-400">{t('required')}</span> : null}
+        {required.has(key) ? <span className="ml-2 rounded-sm bg-rose-500/10 px-1.5 py-0.5 text-[10px] text-rose-400">{t('required')}</span> : null}
       </>
     )
     const control = (

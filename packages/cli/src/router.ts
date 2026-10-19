@@ -61,7 +61,7 @@ export const COMMANDS: Array<CommandInfo> = [
   {
     name: 'init',
     summary: 'Create a new documentation site',
-    usage: 'thally init [dir] [--yes] [--no-install] [--verbose]',
+    usage: 'thally init [dir] [--tailwind-version <3|4>] [--yes] [--no-install] [--verbose]',
     delegate: true,
   },
   {

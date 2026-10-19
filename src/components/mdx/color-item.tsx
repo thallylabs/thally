@@ -44,8 +44,8 @@ export function ColorItemClient({ hex, color, name, value, light, dark, copy = t
     <div className={cn('not-prose group/color min-w-0 overflow-hidden rounded-lg border border-border bg-background', className)}>
       {themedValue ? (
         <div className="grid h-16 grid-cols-2 border-b border-border/50" aria-label={`${name ? `${name}, ` : ''}light ${themedValue.light}, dark ${themedValue.dark}`}>
-          <span className="relative" style={{ backgroundColor: themedValue.light }}><span className="absolute bottom-1 left-1 rounded bg-white/75 px-1 text-[0.55rem] font-semibold uppercase text-black/70">light</span></span>
-          <span className="relative" style={{ backgroundColor: themedValue.dark }}><span className="absolute bottom-1 left-1 rounded bg-black/55 px-1 text-[0.55rem] font-semibold uppercase text-white/80">dark</span></span>
+          <span className="relative" style={{ backgroundColor: themedValue.light }}><span className="absolute bottom-1 left-1 rounded-sm bg-white/75 px-1 text-[0.55rem] font-semibold uppercase text-black/70">light</span></span>
+          <span className="relative" style={{ backgroundColor: themedValue.dark }}><span className="absolute bottom-1 left-1 rounded-sm bg-black/55 px-1 text-[0.55rem] font-semibold uppercase text-white/80">dark</span></span>
         </div>
       ) : (
         <div className="h-16 w-full border-b border-border/50" style={{ backgroundColor: resolvedColor }} aria-label={`${name ? `${name}, ` : ''}${copyValue || resolvedColor}`} />
@@ -56,7 +56,7 @@ export function ColorItemClient({ hex, color, name, value, light, dark, copy = t
           {copyValue ? <code className="block truncate text-xs text-foreground/55">{copyValue}</code> : null}
         </span>
         {copy && copyValue ? (
-          <button type="button" onClick={copyColor} className="rounded p-1.5 text-foreground/45 transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent" aria-label={`Copy ${name ?? copyValue} color`}>
+          <button type="button" onClick={copyColor} className="rounded-sm p-1.5 text-foreground/45 transition hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent" aria-label={`Copy ${name ?? copyValue} color`}>
             {hasCopied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
           </button>
         ) : null}

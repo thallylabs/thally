@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { downloadStarter } from './download.js'
+import { STABLE_SCAFFOLD_RELEASE, TAILWIND3_SCAFFOLD_RELEASE } from './release.js'
 import { resetTrackingConfig, writeTrackingConfig } from './docs-json.js'
 import {
   personalizeStarter,
@@ -29,6 +30,7 @@ export interface ScaffoldOptions {
   brandPreset: string
   repoUrl: string
   doInstall: boolean
+  tailwindVersion?: 3 | 4
   /**
    * Report a failed install and still finish the project (Git setup included)
    * instead of throwing. Interactive creation opts in; library callers keep
@@ -65,6 +67,12 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
     colors,
   } = options
 
+  if (options.tailwindVersion !== undefined && options.tailwindVersion !== 3 && options.tailwindVersion !== 4) {
+    throw new Error('--tailwind-version must be 3 or 4.')
+  }
+  const release = options.tailwindVersion === 3
+    ? TAILWIND3_SCAFFOLD_RELEASE
+    : STABLE_SCAFFOLD_RELEASE
   const targetDir = resolve(projectDir)
 
   // Validate target directory
@@ -77,9 +85,9 @@ export async function scaffold(options: ScaffoldOptions): Promise<ScaffoldResult
 
   const slug = slugify(projectName)
 
-  // 1. Extract the complete tree from the exact promoted starter commit.
+  // extract the complete tree from the selected immutable starter commit.
   await terminal.step('Downloading starter', () =>
-    downloadStarter(targetDir, projectName, undefined, { announce: false }),
+    downloadStarter(targetDir, projectName, release, { announce: false }),
     'Starter downloaded',
   )
 

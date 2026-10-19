@@ -38,6 +38,22 @@ and extra languages; the description and brand palette are one-line edits in
 URL, so a build from this checkout cannot bake local links into `llms.txt` or
 the sitemap.
 
+## Choose a Tailwind version
+
+New sites use Tailwind CSS 4 by default. Use `--tailwind-version 3` if you need
+Tailwind CSS 3:
+
+```sh
+npx create-thally-docs@latest my-docs
+npx create-thally-docs@latest my-docs-3 --tailwind-version 3
+```
+
+You can also pass `--tailwind-version 4` explicitly. Version `3` uses a fixed
+starter snapshot with its matching framework, configuration, and lockfile.
+
+The flag applies to new sites. To update an existing Tailwind 3 site, follow the
+[Tailwind CSS 4 upgrade guide](https://github.com/thallylabs/thally/blob/main/docs/tailwind-v4-upgrade.md).
+
 ## Terminal output
 
 Interactive terminals show the THALLY wordmark, task headings, and live progress.

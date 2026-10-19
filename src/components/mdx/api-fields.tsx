@@ -43,11 +43,11 @@ export function ResponseField({
   return (
     <section className="not-prose border-b border-border/70 py-5 last:border-0">
       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5">
-        {pre.map((label) => <span key={`pre-${label}`} className="rounded bg-muted px-1.5 py-0.5 text-[0.68rem] font-medium text-foreground/60">{label}</span>)}
+        {pre.map((label) => <span key={`pre-${label}`} className="rounded-sm bg-muted px-1.5 py-0.5 text-[0.68rem] font-medium text-foreground/60">{label}</span>)}
         <code className={cn('text-sm font-semibold text-foreground', deprecated && 'line-through opacity-65')}>{name}</code>
-        {post.map((label) => <span key={`post-${label}`} className="rounded bg-muted px-1.5 py-0.5 text-[0.68rem] font-medium text-foreground/60">{label}</span>)}
+        {post.map((label) => <span key={`post-${label}`} className="rounded-sm bg-muted px-1.5 py-0.5 text-[0.68rem] font-medium text-foreground/60">{label}</span>)}
         {type && (
-          <span className="rounded border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground/70">
+          <span className="rounded-sm border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground/70">
             {type}
           </span>
         )}
@@ -110,7 +110,7 @@ export function ParamField({ name, type, required, deprecated, body, query, path
           {location}
         </span>
         {type && (
-          <span className="rounded border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground/70">
+          <span className="rounded-sm border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground/70">
             {type}
           </span>
         )}
@@ -155,7 +155,7 @@ export function Expandable({ title, defaultOpen = false, children }: ExpandableP
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
         aria-controls={contentId}
-        className="group flex items-center gap-1.5 rounded-md py-1 text-xs font-medium text-accent transition-colors hover:text-accent/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        className="group flex items-center gap-1.5 rounded-md py-1 text-xs font-medium text-accent transition-colors hover:text-accent/75 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         <ChevronRight className={cn('h-3.5 w-3.5 transition-transform duration-200', open && 'rotate-90')} aria-hidden="true" />
         {title ?? t('showChildAttributes')}

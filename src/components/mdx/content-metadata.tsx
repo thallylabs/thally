@@ -35,7 +35,7 @@ export function Update({ label, date, id, title, description, tags, children, cl
           {label ? <span className="text-xs font-semibold text-accent">{label}</span> : null}
           {date ? <time dateTime={/^\d{4}-\d{2}-\d{2}/.test(date) ? date : undefined} className="text-sm text-foreground/50">{date}</time> : null}
           {normalizedTags.map((tag) => <Badge key={tag} variant="outline" size="sm">{tag}</Badge>)}
-          {anchorId ? <a href={`#${anchorId}`} aria-label={`Link to ${label ?? 'update'}`} className="ml-auto rounded p-1 text-foreground/0 transition group-hover/update:text-foreground/40 focus:text-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><LinkIcon className="h-3.5 w-3.5" aria-hidden="true" /></a> : null}
+          {anchorId ? <a href={`#${anchorId}`} aria-label={`Link to ${label ?? 'update'}`} className="ml-auto rounded-sm p-1 text-foreground/0 transition group-hover/update:text-foreground/40 focus:text-foreground/60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent"><LinkIcon className="h-3.5 w-3.5" aria-hidden="true" /></a> : null}
           {description ? <p className="m-0 w-full text-sm leading-6 text-foreground/65">{description}</p> : null}
         </header>
       ) : null}

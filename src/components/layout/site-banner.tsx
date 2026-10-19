@@ -124,7 +124,7 @@ export function BannerPreview({ content, type = 'info', color, dismissible = fal
   const banner: DocsJsonBanner = { content, type, color, dismissible }
 
   return (
-    <figure className="not-prose my-6 overflow-hidden rounded-xl border border-border bg-background shadow-sm">
+    <figure className="not-prose my-6 overflow-hidden rounded-xl border border-border bg-background shadow-xs">
       <figcaption className="flex min-h-10 items-center justify-between border-b border-border px-4 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-foreground/45">
         <span>Site banner preview</span>
         {!isVisible ? (

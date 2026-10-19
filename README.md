@@ -8,7 +8,7 @@ endpoint. Self-host it or connect the site to Thally Cloud.
 ## Start a docs site
 
 ```bash
-npx create-thally-docs my-docs
+npx create-thally-docs@latest my-docs
 cd my-docs
 npm run dev
 ```
@@ -18,6 +18,15 @@ skip) and prints the exact preview command. Sites that include the `thally`
 CLI as a dev dependency can also run `npx thally dev`, which prints the local
 `llms.txt` and MCP endpoints plus a `claude mcp add` command once the server is
 ready.
+
+New sites use Tailwind CSS 4. To create a Tailwind CSS 3 site, run:
+
+```bash
+npx create-thally-docs@latest my-docs --tailwind-version 3
+```
+
+For an existing Tailwind 3 site, follow the
+[Tailwind CSS 4 upgrade guide](docs/tailwind-v4-upgrade.md).
 
 Or clone the dedicated starter directly:
 
@@ -241,7 +250,7 @@ Deploy anywhere that supports Next.js — Vercel, Netlify, Cloudflare, Docker, e
 ## Stack
 
 - Next.js 16 / TypeScript / App Router
-- Tailwind CSS 3.4 + `@tailwindcss/typography`
+- Tailwind CSS 4.3 + `@tailwindcss/typography`
 - Radix UI (dialog, scroll-area, accordion, slot)
 - MDX via `next-mdx-remote` + Shiki syntax highlighting
 - `next-themes` for dark mode, `nuqs` for URL state, `zustand` for sidebar state

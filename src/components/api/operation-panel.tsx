@@ -153,7 +153,7 @@ export function OperationPanel({ operation, children, showDescription = true, sh
             {operation.requestBody.contents.map((content) => (
               <div key={content.mediaType}>
                 <div className="mb-2 flex items-center gap-2">
-                  <span className="rounded border border-border/40 bg-muted px-2 py-0.5 font-mono text-xs text-foreground/70">{content.mediaType}</span>
+                  <span className="rounded-sm border border-border/40 bg-muted px-2 py-0.5 font-mono text-xs text-foreground/70">{content.mediaType}</span>
                   <span className="text-xs text-foreground/50">{operation.requestBody?.required ? t('requiredCap') : t('optional')}</span>
                 </div>
                 <div className="border-y border-border">
