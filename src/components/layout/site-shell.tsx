@@ -202,14 +202,16 @@ export function SiteShell({
       ? navigableCollections[selectedIndex]
       : matchedCollection) ?? { id: 'navigation-empty', label: identity.name, sections: [] }
 
-  // The tab to highlight. A standalone href tab (e.g. Changelog) that owns no
-  // sidebar sections still wins the highlight when its href matches the current
-  // path — otherwise the section-derived collection (Overview/API/…) does. The
-  // most specific href wins, so a nested tab beats its parent's href.
-  const activeTabId =
-    visibleCollections[strongestClaimIndex(visibleCollections.map(
-      (collection) => collection.href ? hrefClaim(collection.href, pathname, currentPath, localeRoot) : 0,
-    ))]?.id ?? activeCollection.id
+  // The header follows the sidebar's exact page ownership, including a manual
+  // selection tied for that page. A standalone link (e.g. Changelog) can still
+  // own the highlight, but a broad prefix must never displace an exact page.
+  const standaloneClaims = visibleCollections.map((collection) =>
+    collection.sections.length === 0 && collection.href ? hrefClaim(collection.href, pathname, currentPath, localeRoot) : 0)
+  const standaloneIndex = strongestClaimIndex(standaloneClaims)
+  const activeTabId = standaloneIndex >= 0
+    && standaloneClaims[standaloneIndex] >= collectionClaim(activeCollection, pathname, currentPath, localeRoot)
+    ? visibleCollections[standaloneIndex].id
+    : activeCollection.id
   const relocatedGithubHref = navbarConfig?.links?.find((link) => link.type === 'github')?.href
 
   // `clip` contains horizontal spill without creating a scroll container,

@@ -173,8 +173,8 @@ export interface MigrationPage {
   icon?: string
   iconType?: 'regular' | 'solid' | 'outline' | 'brands'
   description: string
-  /** Keep SEO/search description without repeating it above Docusaurus body copy. */
-  descriptionPlacement?: 'body'
+  /** Keep the SEO/search summary while prose is already in the body, or comes from the bound operation. */
+  descriptionPlacement?: 'body' | 'operation'
   badge?: string
   keywords: Array<string>
   mode?: 'default' | 'wide' | 'custom' | 'center' | 'home'

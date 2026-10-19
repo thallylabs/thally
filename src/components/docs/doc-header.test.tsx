@@ -49,3 +49,10 @@ describe('DocHeader', () => {
     })
   })
 })
+
+
+it('can keep a metadata summary out of the header when the operation provides its full prose', () => {
+  const html = renderToStaticMarkup(<DocHeader doc={{ title: 'Create a key', description: 'Short search summary.' } as never} showDescription={false} showCopyPage={false} />)
+  expect(html).toContain('Create a key</h1>')
+  expect(html).not.toContain('Short search summary.')
+})

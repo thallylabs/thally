@@ -2359,6 +2359,9 @@ export function addEndpointPages(options: {
         navigationId: endpoint.url,
         title: endpoint.title,
         description: endpointDescription(operation.description, endpoint.title),
+        // The summary belongs to metadata; keep full spec prose in the safe
+        // operation Markdown renderer rather than copying it into executable MDX.
+        descriptionPlacement: 'operation',
         keywords: [],
         body: '',
         source: 'docs.json',

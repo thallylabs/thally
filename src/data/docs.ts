@@ -40,7 +40,8 @@ export interface DocEntry {
   /** Visible H1; title remains the metadata/search title. */
   headingTitle?: string
   description: string
-  descriptionPlacement?: 'body'
+  /** `operation` keeps a generated summary in metadata and renders the bound spec's full description. */
+  descriptionPlacement?: 'body' | 'operation'
   slug: Array<string>
   href: string
   group: string
@@ -468,7 +469,7 @@ interface FrontmatterData {
   icon?: string
   iconType?: IconStyle
   description?: string
-  descriptionPlacement?: 'body'
+  descriptionPlacement?: DocEntry['descriptionPlacement']
   badge?: string
   keywords?: Array<string>
   timeEstimate?: string
@@ -656,7 +657,7 @@ function buildDocEntryFromPageId(pageId: string, indexedFrontmatter?: Frontmatte
     title,
     headingTitle: typeof fm.headingTitle === 'string' && fm.headingTitle.trim() ? fm.headingTitle.trim() : undefined,
     description: fm.description ?? '',
-    descriptionPlacement: fm.descriptionPlacement === 'body' ? 'body' : undefined,
+    descriptionPlacement: fm.descriptionPlacement === 'body' || fm.descriptionPlacement === 'operation' ? fm.descriptionPlacement : undefined,
     slug,
     href,
     group: '',

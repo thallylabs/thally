@@ -186,7 +186,10 @@ Each such operation becomes an MDX page at that path under `src/content`, so it
 keeps its URL, sidebar entry, eyebrow and previous/next links. Its frontmatter is
 the summary as `title` (else the operation id, else `METHOD /path`), the first
 sentence of the description as `description` (the title when there is none), and
-`openapi: "<spec file> METHOD /path"`; the body is empty. The tab that listed the
+`openapi: "<spec file> METHOD /path"`; the body is empty. `descriptionPlacement: operation`
+keeps that short summary for search and metadata while the runtime renders the
+full operation description as Markdown, including every paragraph and warning.
+The tab that listed the
 operations is an ordinary page tab, kept where it was among its siblings and
 labelled as they are (`Product: API reference`), whose groups are the authored
 ones, nesting and order kept, each operation replaced by its page. Tabs that were

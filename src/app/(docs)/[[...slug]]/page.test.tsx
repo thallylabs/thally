@@ -2,7 +2,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const fixtures = vi.hoisted(() => ({ eyebrowMode: 'group', lookup: { node: null, reason: 'unresolved' } as unknown, missing: false, privateIntro: false, privateDefault: false, root: vi.fn(), description: '', og: vi.fn<(input: unknown) => string>(() => ''), jsonLd: vi.fn<(input: unknown) => object>(() => ({})) }))
+const fixtures = vi.hoisted(() => ({ eyebrowMode: 'group', lookup: { node: null, reason: 'unresolved' } as unknown, missing: false, privateIntro: false, privateDefault: false, root: vi.fn(), description: '', descriptionPlacement: undefined as 'body' | 'operation' | undefined, header: vi.fn(), og: vi.fn<(input: unknown) => string>(() => ''), jsonLd: vi.fn<(input: unknown) => object>(() => ({})) }))
 
 vi.mock('next/navigation', () => ({
   redirect: (path: string) => { throw new Error(`NEXT_REDIRECT:${path}`) },
@@ -15,6 +15,7 @@ vi.mock('@/data/get-doc', () => ({
     id: 'api-reference/endpoint/scrape',
     title: 'Scrape',
     description: fixtures.description,
+    descriptionPlacement: fixtures.descriptionPlacement,
     slug: ['api-reference', 'endpoint', 'scrape'],
     keywords: [],
     lastUpdated: '2026-01-01',
@@ -39,9 +40,14 @@ vi.mock('@/data/docs', () => ({
 }))
 vi.mock('@/components/docs/doc-layout', () => ({ DocLayout: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }))
 vi.mock('@/components/docs/doc-pagination', () => ({ DocPagination: ({ prev }: { prev: { title: string } | null }) => <nav>{prev?.title}</nav> }))
-vi.mock('@/components/docs/doc-header', () => ({ DocHeader: ({ eyebrow }: { eyebrow?: unknown }) => <i data-eyebrow={JSON.stringify(eyebrow)} /> }))
+vi.mock('@/components/docs/doc-header', () => ({ DocHeader: ({ eyebrow, showDescription }: { eyebrow?: unknown; showDescription?: boolean }) => { fixtures.header({ showDescription }); return <i data-eyebrow={JSON.stringify(eyebrow)} /> } }))
 vi.mock('@/components/api/api-layout', () => ({ ApiLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }))
-vi.mock('@/components/api/operation-panel', () => ({ OperationPanel: ({ children }: { children: React.ReactNode }) => <section>{children}</section> }))
+vi.mock('@/components/api/operation-panel', async () => {
+  const { Markdown } = await import('@/components/mdx/markdown')
+  return { OperationPanel: ({ children, operation, showDescription = true }: { children: React.ReactNode; operation: { description?: string }; showDescription?: boolean }) => (
+    <section>{showDescription && operation.description ? <Markdown>{operation.description}</Markdown> : null}{children}</section>
+  ) }
+})
 vi.mock('@/components/api/manual-api-endpoint', () => ({ ManualApiEndpoint: () => null }))
 vi.mock('@/components/seo/json-ld-script', () => ({ JsonLdScript: () => null }))
 vi.mock('@/components/layout/localized-sidebar-hydrator', () => ({ LocalizedSidebarHydrator: () => null }))
@@ -62,7 +68,7 @@ vi.mock('@/lib/json-ld', () => ({ buildDocPageJsonLd: (input: unknown) => fixtur
 
 import DocsPage, { generateMetadata } from './page'
 
-beforeEach(() => { fixtures.description = ''; fixtures.eyebrowMode = 'group'; fixtures.missing = false; fixtures.privateIntro = false; fixtures.privateDefault = false; fixtures.lookup = { node: null, reason: 'unresolved' }; fixtures.root.mockReset().mockResolvedValue('/docs') })
+beforeEach(() => { fixtures.header.mockClear(); fixtures.descriptionPlacement = undefined; fixtures.description = ''; fixtures.eyebrowMode = 'group'; fixtures.missing = false; fixtures.privateIntro = false; fixtures.privateDefault = false; fixtures.lookup = { node: null, reason: 'unresolved' }; fixtures.root.mockReset().mockResolvedValue('/docs') })
 
 const render = async () => renderToStaticMarkup(await DocsPage({ params: Promise.resolve({ slug: ['api-reference', 'endpoint', 'scrape'] }) }))
 
@@ -173,5 +179,32 @@ describe('an API page with no description of its own', () => {
     expect((await generateMetadata({ params })).description).toBe('')
     fixtures.lookup = { node: null, reason: 'unresolved' }
     expect((await generateMetadata({ params })).description).toBe('')
+  })
+})
+
+
+describe('a generated endpoint summary', () => {
+  const description = 'Creates a key. The key is shown only once.\n\n**Warning:** Store it before closing this page. Use `{secret}` literally.'
+
+  it('keeps the metadata summary while rendering every paragraph through Markdown', async () => {
+    fixtures.description = 'Creates a key.'
+    fixtures.descriptionPlacement = 'operation'
+    fixtures.lookup = { node: { operation: { description } } }
+    const html = await render()
+    expect(html).toContain('The key is shown only once.')
+    expect(html).toContain('<strong>Warning:</strong> Store it before closing this page.')
+    expect(html).toContain('<code>{secret}</code>')
+    expect(html.match(/Creates a key\./g)).toHaveLength(1)
+    expect(fixtures.header).toHaveBeenCalledWith({ showDescription: false })
+    const metadata = await generateMetadata({ params: Promise.resolve({ slug: ['api-reference', 'endpoint', 'scrape'] }) })
+    expect(metadata.description).toBe('Creates a key.')
+  })
+
+  it('keeps authored description overrides and existing body-placement semantics', async () => {
+    fixtures.description = 'Authored explanation.'
+    fixtures.lookup = { node: { operation: { description } } }
+    expect(await render()).not.toContain('Store it before closing this page.')
+    fixtures.descriptionPlacement = 'body'
+    expect(await render()).not.toContain('Store it before closing this page.')
   })
 })

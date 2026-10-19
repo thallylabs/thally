@@ -102,6 +102,24 @@ describe('most specific collection ownership', () => {
     expect(owners('/compute/overview', tabs)).toMatchObject({ tab: 'guides', sidebar: 'guides' })
   })
 
+  it('keeps an exact page owner highlighted over another tab\'s longer href prefix', () => {
+    const tabs = [
+      { ...tab('guides', '/compute/cli/special'), href: '/compute' },
+      { ...tab('cli', '/compute/cli/overview'), href: '/compute/cli' },
+    ]
+    expect(owners('/compute/cli/special', tabs)).toMatchObject({ tab: 'guides', sidebar: 'guides' })
+  })
+
+  it('highlights a standalone href tab without letting a broad href steal an exact page', () => {
+    const tabs = [
+      { id: 'compute', label: 'Compute', href: '/compute', sections: [] },
+      { id: 'changelog', label: 'Changelog', href: '/changelog', sections: [] },
+      tab('cli', '/compute/cli/overview'),
+    ]
+    expect(owners('/changelog', tabs)).toMatchObject({ tab: 'changelog', sidebar: 'cli' })
+    expect(owners('/compute/cli/overview', tabs)).toMatchObject({ tab: 'cli', sidebar: 'cli' })
+  })
+
   it('assigns a page to the version whose tab claims it most specifically', () => {
     const versions: Versions = [{ label: 'v2', prefix: '', href: '/introduction', default: true }, { label: 'v1', prefix: 'v1', href: '/v1/introduction' }]
     const collections: Array<SidebarCollection> = [

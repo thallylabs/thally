@@ -293,6 +293,7 @@ describe('remote OpenAPI spec with hidden, restricted or localized operation lis
       expect(result.docsConfig.tabs.find((tab) => tab.tab === 'API')).toEqual({ tab: 'API', groups: [{ group: 'Visible', pages: ['api-reference/scim/list-users'] }] })
       expect(api).toEqual({ source: assetPath })
       expect(result.pages.map((page) => page.id)).toContain('api-reference/scim/list-users')
+      expect(result.pages.find((page) => page.id === 'api-reference/scim/list-users')?.descriptionPlacement).toBe('operation')
     }
   })
 })

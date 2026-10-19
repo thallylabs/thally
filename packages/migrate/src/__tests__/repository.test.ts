@@ -391,6 +391,7 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
       navigationId: 'api-reference/keys/create-api-key',
       title: 'Create API key',
       description: 'Creates a key for a user.',
+      descriptionPlacement: 'operation',
       openapi: `${specAsset} POST /v2/keys.createKey`,
       body: '',
     })
@@ -401,6 +402,7 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
       '---',
       'title: "Create API key"',
       'description: "Creates a key for a user."',
+      'descriptionPlacement: operation',
       'openapi: "openapi/openapi.json POST /v2/keys.createKey"',
       '---',
       '',
@@ -409,6 +411,9 @@ describe('Mintlify endpoint pages for operations docs.json lists', () => {
     ].join('\n'))
     // The spec is saved where the pages name it.
     expect(files.some((file) => file.path === 'openapi/openapi.json')).toBe(true)
+    const spec = files.find((file) => file.path === 'openapi/openapi.json')!
+    expect(JSON.parse(spec.content.toString()).paths['/v2/keys.createKey'].post.description)
+      .toBe(endpointSpec.paths['/v2/keys.createKey'].post.description)
     // Operations the navigation does not list get no page.
     expect(bundle.pages.map((page) => page.id).filter((id) => id.startsWith('api-reference/'))).toEqual(['api-reference/keys/create-api-key', 'api-reference/keys/get-api-key'])
   })
