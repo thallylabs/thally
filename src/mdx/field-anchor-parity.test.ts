@@ -6,9 +6,9 @@ import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { fieldAnchorBase as coreBase, fieldAnchorName as coreName, uniqueFieldId as coreUnique } from '../../packages/core/src/slugify'
+import { fieldAnchorBase as coreBase, fieldAnchorName as coreName, numberFieldIds as coreNumber, uniqueFieldId as coreUnique } from '../../packages/core/src/slugify'
 import { runCheck } from '../../packages/create-thally-docs/src/check'
-import { fieldAnchorBase, fieldAnchorName, uniqueFieldId } from '../lib/field-anchor'
+import { fieldAnchorBase, fieldAnchorName, numberFieldIds, uniqueFieldId } from '../lib/field-anchor'
 import { rehypePlugins } from './rehype'
 
 async function brokenAnchorOutput(body: string, link: string): Promise<string> {
@@ -49,6 +49,12 @@ describe('the runtime helpers read a field as @thallylabs/core does', () => {
     const runtime = new Set(['param-b-1'])
     const core = new Set(['param-b-1'])
     expect(bases.map((base) => uniqueFieldId(base, runtime))).toEqual(bases.map((base) => coreUnique(base, core)))
+  })
+
+  it('reserves authored ids before it numbers the fields the same way', () => {
+    const bases = ['param-a', 'param-a', 'param-b', 'param-a']
+    const authored = ['param-a-1', 'param-b']
+    expect(numberFieldIds(bases, new Set(['param-a']), authored)).toEqual(coreNumber(bases, new Set(['param-a']), authored))
   })
 
   it('reads the same attribute of each tag', () => {
@@ -163,6 +169,36 @@ describe('thally check resolves the ids the renderer gives fields', () => {
     const ids = await renderedIds(source)
     expect(ids).toEqual(expect.arrayContaining(['param-expires-in-days', 'param-name', 'param-name-1', 'param-name-2', 'param-workspace-name', 'param-workspace-name-1', 'param-pagination-has-more']))
     for (const id of ids) expect(await brokenAnchorOutput(source, id), id).not.toContain('Broken anchor')
+  })
+
+  // The renderer reserves every id an author wrote before it numbers the fields; `thally check` must reach the same ids.
+  it('skips the id of a plain-text Step, which renders no heading', async () => {
+    const step = '<Steps titleSize="p">\n  <Step title="One" id="param-name">Text.</Step>\n</Steps>'
+    const page = `${step}\n\n<ParamField body="name" type="string">The name.</ParamField>`
+    const ids = await renderedIds(page)
+    expect(ids).toEqual(['param-name', 'param-name-1'])
+    for (const id of ids) expect(await brokenAnchorOutput(page, id), id).not.toContain('Broken anchor')
+    expect(await brokenAnchorOutput(page, 'param-name-2')).toContain('Broken anchor')
+  })
+
+  it('skips an id authored on any other element, whether it comes before or after the field', async () => {
+    const page = [
+      '<ParamField body="name" type="string">The name.</ParamField>',
+      '<Card title="Card" id="param-name">Text.</Card>',
+      '<div id="param-name-1">Text.</div>',
+    ].join('\n\n')
+    const ids = await renderedIds(page)
+    expect(ids).toEqual(['param-name-2', 'param-name', 'param-name-1'])
+    for (const id of ids) expect(await brokenAnchorOutput(page, id), id).not.toContain('Broken anchor')
+    expect(await brokenAnchorOutput(page, 'param-name-3')).toContain('Broken anchor')
+  })
+
+  it('does not reserve an id that only appears in prose', async () => {
+    const page = 'Write `<Card id="param-name" />` to link a card.\n\n<ParamField body="name" type="string">The name.</ParamField>'
+    const ids = await renderedIds(page)
+    expect(ids).toEqual(['param-name'])
+    expect(await brokenAnchorOutput(page, 'param-name')).not.toContain('Broken anchor')
+    expect(await brokenAnchorOutput(page, 'param-name-1')).toContain('Broken anchor')
   })
 
   it('still reports a fragment no heading or field has', async () => {

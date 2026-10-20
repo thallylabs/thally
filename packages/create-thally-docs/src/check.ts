@@ -17,7 +17,7 @@ import { API_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, operationDesc
 import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
-import { fieldAnchorBase, fieldAnchorName, plainInlineText, slugify, uniqueFieldId } from '@thallylabs/core/slugify'
+import { fieldAnchorBase, fieldAnchorName, numberFieldIds, plainInlineText, slugify } from '@thallylabs/core/slugify'
 import { validateIntegrations } from '@thallylabs/migrate'
 import { checkExternalLinks, type ExternalLinkCheckOptions, type ExternalLinkReference } from './external-links.js'
 
@@ -251,27 +251,30 @@ function extractStepHeadings(content: string): Array<{ line: number; base: strin
 }
 
 /**
- * The `<ParamField>` and `<ResponseField>` elements of a page, in document order,
- * read from the MDX syntax tree like the steps above. A field with an `id` of its
- * own carries it as `given`; any other carries the anchor base its name spells,
- * and a field with no literal name has none.
+ * The `<ParamField>` and `<ResponseField>` elements of a page, read from the MDX
+ * syntax tree like the steps above: the anchor base each one's name spells, in
+ * document order (a field with no literal name has none, and one with an `id` of
+ * its own keeps it), and every `id` an author wrote on any JSX element of the
+ * page, which the renderer reserves before it numbers the fields.
  */
-function extractFields(content: string): Array<{ given?: string; base?: string }> {
-  if (!content.includes('<ParamField') && !content.includes('<ResponseField')) return []
+function extractFields(content: string): { bases: Array<string>; authored: Set<string> } {
+  const fields = { bases: [] as Array<string>, authored: new Set<string>() }
+  if (!content.includes('<ParamField') && !content.includes('<ResponseField')) return fields
   let tree: MdxNode
   try {
     tree = mdxParser.parse(content) as unknown as MdxNode
   } catch {
-    return []
+    return fields
   }
-  const fields: Array<{ given?: string; base?: string }> = []
   const visit = (node: MdxNode): void => {
-    if ((node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') && (node.name === 'ParamField' || node.name === 'ResponseField')) {
-      const name = fieldAnchorName(node.name, (attribute) => stringAttribute(node, attribute))
+    if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
       const given = stringAttribute(node, 'id')?.trim()
-      const base = name === undefined ? undefined : fieldAnchorBase(name)
-      if (given) fields.push({ given })
-      else if (base) fields.push({ base })
+      if (given) fields.authored.add(given)
+      if (node.name === 'ParamField' || node.name === 'ResponseField') {
+        const name = fieldAnchorName(node.name, (attribute) => stringAttribute(node, attribute))
+        const base = name === undefined ? undefined : fieldAnchorBase(name)
+        if (!given && base) fields.bases.push(base)
+      }
     }
     for (const child of node.children ?? []) visit(child)
   }
@@ -324,9 +327,8 @@ function extractHeadingAnchors(content: string): Set<string> {
     used.add(id)
     anchors.add(id)
   }
-  // Fields are numbered after every heading, and skip the ids authors gave other fields.
-  for (const field of fields) if (field.given) used.add(field.given)
-  for (const field of fields) if (field.base) anchors.add(uniqueFieldId(field.base, used))
+  // Fields are numbered after every heading, and skip every id an author wrote on the page.
+  for (const id of numberFieldIds(fields.bases, used, fields.authored)) anchors.add(id)
   return anchors
 }
 

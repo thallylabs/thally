@@ -48,7 +48,7 @@ import langYaml from 'shiki/langs/yaml.mjs'
 import { visit } from 'unist-util-visit'
 import { getDocsJsonConfig } from '../lib/docs-json-config'
 import { plainInlineText } from '../lib/inline-code'
-import { fieldAnchorBase, fieldAnchorName, uniqueFieldId } from '../lib/field-anchor'
+import { fieldAnchorBase, fieldAnchorName, numberFieldIds } from '../lib/field-anchor'
 import { slugify } from '../lib/utils'
 import type { DocsJsonConfig } from '../data/docs'
 import { smartenTree } from './smart-quotes'
@@ -890,8 +890,8 @@ function rehypeUniqueHeadingIds() {
       target.assign(id)
     }
     // A field takes the id Mintlify gives it, numbered after the headings and skipping every id an author wrote.
-    for (const id of authoredIds) usedIds.add(id)
-    for (const field of fields) field.assign(uniqueFieldId(field.base, usedIds))
+    const ids = numberFieldIds(fields.map((field) => field.base), usedIds, authoredIds)
+    fields.forEach((field, index) => field.assign(ids[index]))
   }
 }
 

@@ -1,7 +1,7 @@
 /** `<ParamField>` and `<ResponseField>` anchors follow the ids Mintlify serves, checked against live pages. */
 
 import { describe, expect, it } from 'vitest'
-import { fieldAnchorBase, fieldAnchorName, uniqueFieldId } from '@thallylabs/core/slugify'
+import { fieldAnchorBase, fieldAnchorName, numberFieldIds, uniqueFieldId } from '@thallylabs/core/slugify'
 
 describe('fieldAnchorBase', () => {
   // Each name and id below was read from a live Mintlify page (dub.co, unkey.com, mintlify.com docs).
@@ -52,6 +52,18 @@ describe('uniqueFieldId', () => {
     const used = new Set(['param-name', 'param-name-1'])
     expect(uniqueFieldId('param-name', used)).toBe('param-name-2')
     expect(used.has('param-name-2')).toBe(true)
+  })
+})
+
+describe('numberFieldIds', () => {
+  it('skips every authored id and the ids headings took, and records the fields in `used`', () => {
+    const used = new Set(['param-name'])
+    expect(numberFieldIds(['param-name', 'param-name', 'param-id'], used, ['param-name-1', 'param-id'])).toEqual(['param-name-2', 'param-name-3', 'param-id-1'])
+    expect([...used]).toEqual(['param-name', 'param-name-1', 'param-id', 'param-name-2', 'param-name-3', 'param-id-1'])
+  })
+
+  it('gives nothing to a page with no field', () => {
+    expect(numberFieldIds([], new Set(), ['param-name'])).toEqual([])
   })
 })
 

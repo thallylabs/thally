@@ -3,9 +3,9 @@
  *
  * Kept here, dependency-free, because the MDX heading pass runs in the runtime
  * source generator, which cannot rely on `@thallylabs/core` being built. These
- * MUST stay identical to `fieldAnchorBase`, `fieldAnchorName` and
- * `uniqueFieldId` in `@thallylabs/core` (packages/core/src/slugify.ts): `thally
- * check` uses that copy, and a mismatch breaks links to a field.
+ * MUST stay identical to `fieldAnchorBase`, `fieldAnchorName`, `uniqueFieldId`
+ * and `numberFieldIds` in `@thallylabs/core` (packages/core/src/slugify.ts):
+ * `thally check` uses that copy, and a mismatch breaks links to a field.
  */
 
 /**
@@ -57,4 +57,17 @@ export function uniqueFieldId(base: string, used: Set<string>): string {
   for (let occurrence = 1; used.has(id); occurrence++) id = `${base}-${occurrence}`
   used.add(id)
   return id
+}
+
+/**
+ * The anchors of a page's fields, in document order. `bases` are the fields'
+ * anchor bases and `used` the ids the page's headings already took. `authored`
+ * holds every `id` an author wrote on the page (a field, a Step whose title is
+ * plain text, a Card, an HTML element); each is reserved here, after the
+ * headings are numbered, so a generated id never repeats one and no heading id
+ * moves. An authored id itself is kept as written by the caller.
+ */
+export function numberFieldIds(bases: Iterable<string>, used: Set<string>, authored: Iterable<string>): Array<string> {
+  for (const id of authored) used.add(id)
+  return [...bases].map((base) => uniqueFieldId(base, used))
 }

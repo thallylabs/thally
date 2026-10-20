@@ -66,6 +66,19 @@ export function uniqueFieldId(base: string, used: Set<string>): string {
   return id
 }
 
+/**
+ * The anchors of a page's fields, in document order. `bases` are the fields'
+ * anchor bases and `used` the ids the page's headings already took. `authored`
+ * holds every `id` an author wrote on the page (a field, a Step whose title is
+ * plain text, a Card, an HTML element); each is reserved here, after the
+ * headings are numbered, so a generated id never repeats one and no heading id
+ * moves. An authored id itself is kept as written by the caller.
+ */
+export function numberFieldIds(bases: Iterable<string>, used: Set<string>, authored: Iterable<string>): Array<string> {
+  for (const id of authored) used.add(id)
+  return [...bases].map((base) => uniqueFieldId(base, used))
+}
+
 /** One `code` span in a title string; the backticks are markup, the text between them is what renders. */
 const INLINE_CODE = /`([^`\n]+)`/g
 
