@@ -110,9 +110,12 @@ function list(sources: Array<string>): string {
 /** Characters Next's route-pattern parser reads as operators, so a source holding one (Mintlify's literal `/client/c++`) is rejected. */
 const ROUTE_PATTERN_OPERATORS = /[+?()[\]{}]/
 
-/** A source's final segment as a catch-all: `/:name*` also matches the path without it, `/:name+` needs one or more segments. */
-const TRAILING_ZERO_OR_MORE = /\/:[A-Za-z_][A-Za-z0-9_]*\*$/
-const TRAILING_ONE_OR_MORE = /\/:[A-Za-z_][A-Za-z0-9_]*\+$/
+/**
+ * A source's final segment as a catch-all: `/:name*` also matches the path without it, `/:name+` needs one or more segments.
+ * A slash written after the segment changes neither reading (Next matches `/` for `/:path*` with or without it), so it is allowed and kept.
+ */
+const TRAILING_ZERO_OR_MORE = /\/:[A-Za-z_][A-Za-z0-9_]*\*\/?$/
+const TRAILING_ONE_OR_MORE = /\/:[A-Za-z_][A-Za-z0-9_]*\+\/?$/
 
 /**
  * Drop each redirect Next.js cannot serve as written: one back to its own
@@ -233,7 +236,7 @@ export function dropConflictingRedirects(
     if (!prefix) return redirect
     const destination = destinationRoute(redirect.destination)?.toLowerCase() ?? null
     const hidesPage = (served.has(prefix) || (prefix === '/' && rootAnswers)) && !retiresRootAlias(prefix, destination)
-    return hidesPage || destination === prefix ? { ...redirect, source: redirect.source.replace(/\*$/, '+') } : redirect
+    return hidesPage || destination === prefix ? { ...redirect, source: redirect.source.replace(/\*(\/?)$/, '+$1') } : redirect
   }
   const narrowed = config.redirects.map(requiresSegment)
   const redirects = narrowed.filter((redirect) => {

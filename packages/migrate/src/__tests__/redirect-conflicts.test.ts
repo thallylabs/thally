@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { createContext, Script } from 'node:vm'
 
 import { checkCustomRoutes } from 'next/dist/lib/load-custom-routes'
+import { modifyRouteRegex } from 'next/dist/lib/redirect-status'
 import { getPathMatch } from 'next/dist/shared/lib/router/utils/path-match'
 import { prepareDestination } from 'next/dist/shared/lib/router/utils/prepare-destination'
 import { describe, expect, it } from 'vitest'
@@ -411,6 +412,54 @@ describe('dropConflictingRedirects', () => {
       { source: '/', destination: '/guide' },
       { source: '/:path+', destination: 'https://example.com/docs' },
     ])
+  })
+
+  describe('a catch-all that ends in a slash', () => {
+    /** The matcher `next start` builds for a redirect source: strict path-to-regexp plus Next's optional trailing slash. */
+    const served = (source: string) => getPathMatch(source, { strict: true, removeUnnamedParams: true, regexModifier: (regex) => modifyRouteRegex(regex, ['/_next']) })
+
+    it('reads the zero-segment path of /:path*/ as the root, like /:path*, and narrows it', () => {
+      expect(served('/:path*/')('/')).toEqual({})
+      const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+      const result = dropConflictingRedirects(config([{ source: '/:path*/', destination: 'https://example.com/docs', permanent: true }]), pages, warnings)
+      expect(result.redirects).toEqual([{ source: '/:path+/', destination: 'https://example.com/docs', permanent: true }])
+      expect(warnings).toEqual([])
+      expect(() => checkCustomRoutes([{ ...result.redirects![0], permanent: true }], 'redirect')).not.toThrow()
+      expect(served(result.redirects![0].source)('/')).toBe(false)
+      expect(served(result.redirects![0].source)('/old/deeper/')).toEqual({ path: ['old', 'deeper'] })
+    })
+
+    it('narrows /x/:path*/ in the same cases as /x/:path*: a page or its own destination at the prefix', () => {
+      const result = dropConflictingRedirects(config([
+        { source: '/guide/:path*/', destination: '/guide' },
+        { source: '/fr/guide/:rest*/', destination: '/x' },
+        { source: '/docs/:path*/', destination: '/docs?view=all' },
+        { source: '/Guide/:path*/', destination: '/x' },
+      ]), pages, [])
+      expect(result.redirects).toEqual([
+        { source: '/guide/:path+/', destination: '/guide' },
+        { source: '/fr/guide/:rest+/', destination: '/x' },
+        { source: '/docs/:path+/', destination: '/docs?view=all' },
+        { source: '/Guide/:path+/', destination: '/x' },
+      ])
+    })
+
+    it('leaves a slashed catch-all alone when its zero-segment reading is neither a page nor its destination, and when nothing answers at /', () => {
+      const input = config([
+        { source: '/old/:path*/', destination: '/new/:path*' },
+        { source: '/legacy/:path*/', destination: '/guide' },
+      ])
+      expect(dropConflictingRedirects(input, pages, [])).toBe(input)
+      const noHome = config([{ source: '/:path*/', destination: 'https://example.com/docs' }])
+      expect(dropConflictingRedirects(noHome, [{ id: 'guide' }], [])).toBe(noHome)
+    })
+
+    it('keeps the narrowed source through a second pass, which is how a remote spec and then the repository both see it', () => {
+      const once = dropConflictingRedirects(config([{ source: '/:path*/', destination: 'https://example.com/docs' }, { source: '/guide/:path*/', destination: '/guide' }]), pages, [])
+      const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+      expect(dropConflictingRedirects(dropUnroutableRedirects(once, warnings), pages, warnings)).toBe(once)
+      expect(warnings).toEqual([])
+    })
   })
 
   it('judges the zero-segment reading under both readings of letter case', () => {
