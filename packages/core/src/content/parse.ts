@@ -21,7 +21,14 @@ import { mdxToMarkdown } from './to-markdown.js'
 // every structured projection below is derived from the same tree.
 const processor = unified().use(remarkParse).use(remarkGfm).use(remarkMdx)
 
-function parseToTree(markdown: string): Root {
+/**
+ * The syntax tree of a page as the renderer reads it: MDX with GitHub-flavored
+ * Markdown (the renderer's `remarkPlugins`), so a tight `a~b~c` is a strikethrough
+ * and `[^1]` a footnote reference. A page MDX cannot read falls back to Markdown
+ * with GFM. Tools that need what the renderer sees in a page, such as the ids it
+ * gives headings, parse it with this.
+ */
+export function parseMdxTree(markdown: string): Root {
   try {
     return processor.parse(markdown) as Root
   } catch {
@@ -339,7 +346,7 @@ function buildToc(headings: Array<ContentHeading>): Array<ContentTocItem> {
  */
 export function parseMdxContent(markdown: string, audience: ContentAudience = 'all'): ParsedContent {
   const projectedMarkdown = projectMdxAudience(markdown, audience)
-  const tree = parseToTree(projectedMarkdown)
+  const tree = parseMdxTree(projectedMarkdown)
 
   const preamble: ContentSection = { id: '', title: '', depth: 0, headingPath: [], text: '', code: [] }
   const state: WalkState = {

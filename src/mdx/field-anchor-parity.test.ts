@@ -415,6 +415,10 @@ describe('thally check and the renderer give a page the same ids', () => {
     ['fields named in braces', '<ParamField body={"expiresInDays"} />\n\n<ResponseField name={`pagination.hasMore`} />\n\n<ParamField body={"expiresInDays"} />'],
     ['a field with an id in braces', '<ParamField body="x" id={"mine"} />\n\n<ParamField body="mine" />'],
     ['a field with an id that matches the next field', '<ParamField body="x" id={"param-y"} />\n\n<ParamField body="y" />'],
+    ['a tight strikethrough in a heading, then a field', '## Param a~b~c\n\n<ParamField body="abc" />'],
+    ['a strikethrough in a heading, then a field', '## Param ~~old~~ name\n\n## Param ~one~ two\n\n<ParamField body="param one two" />'],
+    ['a tight strikethrough in a component in a heading', '## <Badge>Param a~b~c</Badge>\n\n<ParamField body="abc" />'],
+    ['a tight strikethrough in an underlined heading', 'Param a~b~c\n-----------\n\n<ParamField body="abc" />'],
     ['strings in braces in a heading', '## {"Param name"}\n\n## <Badge>{`Param name`}</Badge>\n\n<ParamField body="name" />'],
   ]
 
@@ -424,9 +428,23 @@ describe('thally check and the renderer give a page the same ids', () => {
     expect([...extractHeadingAnchors(source)].sort()).toEqual(rendered)
   })
 
+  // The renderer adds the footnote list to the page (`footnote-label`, `user-content-fn-1`), which is no heading or field.
+  it.each([
+    ['a footnote reference in a heading', '## Param name[^1]\n\n<ParamField body="name1" />\n\n[^1]: The note.', ['param-name1', 'param-name1-1']],
+    ['footnotes numbered in the order they are referenced', 'Text[^b].\n\n## Alpha[^a]\n\n## Beta[^b]\n\n[^a]: A.\n\n[^b]: B.', ['alpha2', 'beta1']],
+    ['a footnote referenced twice', '## One[^a]\n\n## Two[^a]\n\n[^a]: A.', ['one1', 'two1']],
+    ['a footnote reference in a component in a heading', '## <Badge>Name[^a]</Badge>\n\n[^a]: A.', ['name1']],
+    ['a footnote reference with no note, which stays text', '## Param name[^1]\n\n<ParamField body="name-1" />', ['param-name-1', 'param-name-1-1']],
+  ])('agrees on %s', async (_name, source, expected) => {
+    const rendered = [...new Set(await renderedHtmlIds(source))].filter((id) => id !== 'footnote-label' && !id.startsWith('user-content-')).sort()
+    expect(rendered).toEqual([...expected].sort())
+    expect([...extractHeadingAnchors(source)].sort()).toEqual(rendered)
+  })
+
   it('gives the ids the reviewed cases name', async () => {
     expect(await renderedHtmlIds(pages[0][1])).toEqual(['param-name', 'param-name-1'])
     expect(await renderedHtmlIds(pages[1][1])).toEqual(['param-name'])
     expect(await renderedHtmlIds(pages[10][1])).toEqual(['initialize-instance'])
+    expect(await renderedHtmlIds('## Param a~b~c\n\n<ParamField body="abc" />')).toEqual(['param-abc', 'param-abc-1'])
   })
 })

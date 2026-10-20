@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseMdxContent } from '../parse'
+import { parseMdxContent, parseMdxTree } from '../parse'
 import { slugify } from '../../slugify'
 
 const sample = `## Getting Started
@@ -253,5 +253,21 @@ describe('code fence language tags', () => {
       ['text', false],
       ['text', true],
     ])
+  })
+})
+
+describe('parseMdxTree', () => {
+  type Node = { type: string; children?: Array<Node> }
+  const kinds = (node: Node): Array<string> => [node.type, ...(node.children ?? []).flatMap(kinds)]
+
+  it('reads GFM and MDX together, as the renderer does', () => {
+    const tree = parseMdxTree('## Param a~b~c[^1] <Badge>New</Badge>\n\n[^1]: The note.') as unknown as Node
+    expect(kinds(tree)).toEqual(expect.arrayContaining(['heading', 'delete', 'footnoteReference', 'footnoteDefinition', 'mdxJsxTextElement']))
+  })
+
+  it('reads a page MDX cannot as Markdown with GFM', () => {
+    const tree = parseMdxTree('## Param a~b~c\n\n<Broken') as unknown as Node
+    expect(kinds(tree)).toEqual(expect.arrayContaining(['heading', 'delete']))
+    expect(kinds(tree)).not.toContain('mdxJsxFlowElement')
   })
 })

@@ -82,3 +82,17 @@ describe('field ids when an attribute is a string written in braces', () => {
     expect(await brokenAnchorOutput(body, 'param-y')).toContain('Broken anchor')
   })
 })
+
+describe('field ids next to a heading that GitHub-flavored Markdown reads', () => {
+  it('numbers a field after a heading with a tight strikethrough, which renders as the text between the tildes', async () => {
+    const body = '## Param a~b~c\n\n<ParamField body="abc">Text.</ParamField>'
+    for (const id of ['param-abc', 'param-abc-1']) expect(await brokenAnchorOutput(body, id), id).not.toContain('Broken anchor')
+    expect(await brokenAnchorOutput(body, 'param-a-b-c')).toContain('Broken anchor')
+  })
+
+  it('adds the number of a footnote reference to the id of its heading', async () => {
+    const body = 'Text[^b].\n\n## Alpha[^a]\n\n[^a]: A.\n\n[^b]: B.'
+    expect(await brokenAnchorOutput(body, 'alpha2')).not.toContain('Broken anchor')
+    expect(await brokenAnchorOutput(body, 'alpha-a')).toContain('Broken anchor')
+  })
+})

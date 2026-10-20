@@ -9,13 +9,11 @@ import { join, extname, relative } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { parseFrontmatter } from './frontmatter.js'
 import { parse as parseYaml } from 'yaml'
-import remarkMdx from 'remark-mdx'
-import remarkParse from 'remark-parse'
-import { unified } from 'unified'
 import { readDocsJson, writeDocsJson, type DocsJsonConfig } from './docs-json.js'
 import { API_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, operationDescription, pageState, parseDocReference, type CheckSpec, type DocReference } from './openapi-publication.js'
 import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
+import { parseMdxTree } from '@thallylabs/core/markdown'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
 import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, plainInlineText, slugify } from '@thallylabs/core/slugify'
 import { validateIntegrations } from '@thallylabs/migrate'
@@ -164,16 +162,13 @@ function forEachNonFencedLine(content: string, visit: (line: string, lineNumber:
   }
 }
 
-const mdxParser = unified().use(remarkParse).use(remarkMdx)
-/** For a page MDX cannot read: the content parser falls back to plain Markdown too, and its headings still resolve. */
-const markdownParser = unified().use(remarkParse)
-
 /** A node of the MDX syntax tree, the one the renderer and the content parser read; JSX elements carry their tag name and attributes. */
 interface MdxNode {
   type: string
   name?: string | null
   depth?: number
   value?: string
+  identifier?: string
   attributes?: Array<{ type: string; name?: string; value?: unknown }>
   children?: Array<MdxNode>
 }
@@ -198,17 +193,19 @@ const HEADING_ID_MARKER = /^\s*\/\*\s*#(\S+?)\s*\*\/\s*$/
 /**
  * What the renderer's heading pass reads as a heading's text: plain text, inline
  * code and the text of inline markup, and nothing from a JSX element or a `{…}`
- * expression inside it (`## Deploy <Badge>New</Badge>` is `deploy`). With
- * `components`, the text the heading component renders instead, which it slugs
- * when the pass gave the heading no id: the children of a component and a string
- * in braces count too.
+ * expression inside it (`## Deploy <Badge>New</Badge>` is `deploy`). A footnote
+ * reference is the superscript number the renderer gives it. With `components`,
+ * the text the heading component renders instead, which it slugs when the pass
+ * gave the heading no id: the children of a component and a string in braces
+ * count too.
  */
-function headingText(node: MdxNode, components: boolean): string {
+function headingText(node: MdxNode, components: boolean, footnoteNumber: (identifier: string) => number): string {
   if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
   if (node.type === 'break') return '\n'
+  if (node.type === 'footnoteReference') return String(footnoteNumber(node.identifier ?? ''))
   if (node.type === 'mdxTextExpression') return components ? constantString(node) ?? '' : ''
   if (node.type === 'mdxJsxTextElement' && !components) return ''
-  return (node.children ?? []).map((child) => headingText(child, components)).join('')
+  return (node.children ?? []).map((child) => headingText(child, components, footnoteNumber)).join('')
 }
 
 /** Step title sizes that render a heading; `p` is plain text. */
@@ -233,27 +230,30 @@ interface PageIds {
  * too. A tag written inside inline code or a comment is not an element, so it counts
  * for nothing. Only literal strings count, as in the renderer, except where a
  * constant string in braces (`title={"x"}`) names a field or makes a component's
- * id: the renderer reads that as the string it is. The page is read
- * as MDX alone: the renderer also reads GFM, which turns a tight `a~b~c` or a
- * footnote reference in a heading into other text, and so another id.
+ * id: the renderer reads that as the string it is. The page is parsed as the
+ * renderer parses it, MDX with GFM (`parseMdxTree` in `@thallylabs/core`), since
+ * GFM turns a tight `a~b~c` in a heading into a strikethrough and a footnote
+ * reference into a number, and so into another id.
  */
 function readPageIds(content: string): PageIds {
-  let tree: MdxNode
-  try {
-    tree = mdxParser.parse(content) as unknown as MdxNode
-  } catch {
-    tree = markdownParser.parse(content) as unknown as MdxNode
+  const tree = parseMdxTree(content) as unknown as MdxNode
+  // A footnote reference renders as its number: the order the notes are first referenced in the page, outside the notes themselves.
+  const footnotes = new Map<string, number>()
+  const footnoteNumber = (identifier: string): number => {
+    if (!footnotes.has(identifier)) footnotes.set(identifier, footnotes.size + 1)
+    return footnotes.get(identifier)!
   }
   const page: PageIds = { headings: [], fieldBases: [], reserved: new Set() }
-  const visit = (node: MdxNode, stepSize: string | undefined): void => {
+  const visit = (node: MdxNode, stepSize: string | undefined, inNote: boolean): void => {
     let childSize = stepSize
+    if (node.type === 'footnoteReference' && !inNote) footnoteNumber(node.identifier ?? '')
     if (node.type === 'heading' && (node.depth ?? 0) >= 2) {
       const children = node.children ?? []
       const marker = children.findIndex((child) => child.type === 'mdxTextExpression' && HEADING_ID_MARKER.test(child.value ?? ''))
       const given = marker < 0 ? undefined : HEADING_ID_MARKER.exec(children[marker].value ?? '')![1]
       const heading = marker < 0 ? node : { ...node, children: children.filter((_, index) => index !== marker) }
       // A heading made only of components has no id of its own in the renderer's pass, but the heading component slugs the text it renders: that id is numbered with the rest.
-      const base = given ?? (slugify(headingText(heading, false)) || slugify(headingText(heading, true)))
+      const base = given ?? (slugify(headingText(heading, false, footnoteNumber)) || slugify(headingText(heading, true, footnoteNumber)))
       page.headings.push({ base, explicit: given !== undefined })
     } else if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
       const authored = constantAttribute(node, 'id')?.trim()
@@ -278,9 +278,9 @@ function readPageIds(content: string): PageIds {
         if (base && constantAttribute(node, 'id') === undefined) page.fieldBases.push(base)
       }
     }
-    for (const child of node.children ?? []) visit(child, childSize)
+    for (const child of node.children ?? []) visit(child, childSize, inNote || node.type === 'footnoteDefinition')
   }
-  visit(tree, undefined)
+  visit(tree, undefined, false)
   return page
 }
 
