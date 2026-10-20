@@ -3,7 +3,8 @@
  * looks for a page, so a redirect whose source is a served page hides that page,
  * and two redirects that point at each other never settle. Next also parses a
  * redirect source as a route pattern, so one with pattern operators fails the
- * whole build. Every platform and every step that adds redirects (source
+ * whole build, and it compiles a destination the same way, so one with route
+ * syntax in its path or host fails when a visitor follows it. Every platform and every step that adds redirects (source
  * config, generated aliases, remote API specs) is checked here once, instead of
  * each caller guarding its own additions.
  *
@@ -117,10 +118,44 @@ const ROUTE_PATTERN_OPERATORS = /[+?()[\]{}]/
 const TRAILING_ZERO_OR_MORE = /\/:[A-Za-z_][A-Za-z0-9_]*\*\/?$/
 const TRAILING_ONE_OR_MORE = /\/:[A-Za-z_][A-Za-z0-9_]*\+\/?$/
 
+/** A destination split into the scheme and host of an absolute address (empty for a site path), its path, and the query and fragment after it. */
+const DESTINATION_PARTS = /^((?:https?:\/\/[^/?#]*)?)([^?#]*)([\s\S]*)$/i
+
+/**
+ * Characters Next compiles as route syntax in a destination's path although a URL
+ * path holds them as plain characters: with a `+` or a `(` in the path,
+ * `prepareDestination` throws when a visitor follows the redirect (a destination
+ * on the site fails the build as well). A `[`, `]` or `)` compiles as written, and
+ * `{` and `}` are percent-encoded by the URL parser before Next compiles them.
+ */
+const DESTINATION_PATH_SYNTAX = /[+()]/g
+
+/** The same for a host, which cannot be percent-encoded, so a redirect to one is left out; `{` and `}` fail there too, since no URL parser escapes them. */
+const DESTINATION_HOST_SYNTAX = /[+*(){}]/
+
+/**
+ * A destination with its path made safe for Next to compile, which it does with
+ * path-to-regexp: `+`, `(` and `)` are written as `%2B`, `%28` and `%29`, which
+ * Next sends back unchanged and a server reads as the same path. A `:param`
+ * segment (a catch-all carried over from the source) and the query and fragment
+ * are left as written.
+ */
+function encodeDestinationPath(destination: string): string {
+  const [, origin, path, rest] = DESTINATION_PARTS.exec(destination)!
+  const encoded = path
+    .split('/')
+    .map((segment) => (segment.startsWith(':') ? segment : segment.replace(DESTINATION_PATH_SYNTAX, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)))
+    .join('/')
+  return `${origin}${encoded}${rest}`
+}
+
 /**
  * Drop each redirect Next.js cannot serve as written: one back to its own
- * route (a trailing slash is the same route) and one whose source has
- * route-pattern operators, which would fail the build. A final `/:name+`
+ * route (a trailing slash is the same route), one whose source has
+ * route-pattern operators, which would fail the build, and one whose destination
+ * host has route syntax. The path of every destination is made safe to compile
+ * (`encodeDestinationPath`) instead, so a `+` or `(` in it no longer fails when
+ * the redirect is followed. A final `/:name+`
  * segment is route syntax Next reads as intended: `dropConflictingRedirects`
  * writes it, and a set that passes through here again must keep it. An omitted
  * address with operators is named in one warning; a self-redirect gets its own. A redirect
@@ -131,16 +166,25 @@ const TRAILING_ONE_OR_MORE = /\/:[A-Za-z_][A-Za-z0-9_]*\+\/?$/
 export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: Array<MigrationWarning>): MigrationDocsConfig {
   if (!config.redirects?.length) return config
   const unmatchable: Array<string> = []
-  const redirects = config.redirects.filter((redirect) => {
+  const unreachable: Array<string> = []
+  const filtered = config.redirects.filter((redirect) => {
     // Exact on purpose: a redirect back to the same address in another case is a conflict for `dropConflictingRedirects`, which says why.
     const source = exactRoute(redirect.source)
     if (source && source === exactRoute(redirect.destination)) {
       warnings.push({ code: 'unsupported-config', message: `Self-redirect from ${redirect.source} to ${redirect.destination} was omitted.` })
       return false
     }
+    if (DESTINATION_HOST_SYNTAX.test(DESTINATION_PARTS.exec(redirect.destination)![1])) {
+      unreachable.push(redirect.source)
+      return false
+    }
     if (!ROUTE_PATTERN_OPERATORS.test(redirect.source.replace(TRAILING_ONE_OR_MORE, ''))) return true
     unmatchable.push(redirect.source)
     return false
+  })
+  const redirects = filtered.map((redirect) => {
+    const destination = encodeDestinationPath(redirect.destination)
+    return destination === redirect.destination ? redirect : { ...redirect, destination }
   })
   if (unmatchable.length > 0) {
     warnings.push({
@@ -148,7 +192,13 @@ export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: A
       message: `Skipped ${unmatchable.length} redirect${unmatchable.length === 1 ? '' : 's'} from ${list(unmatchable)}: ${unmatchable.length === 1 ? 'that address has' : 'those addresses have'} a character (+ ? ( ) [ ] { }) that Next.js reads as route syntax and cannot match literally, so visits to ${unmatchable.length === 1 ? 'it' : 'them'} will not redirect.`,
     })
   }
-  if (redirects.length === config.redirects.length) return config
+  if (unreachable.length > 0) {
+    warnings.push({
+      code: 'unsupported-config',
+      message: `Skipped ${unreachable.length} redirect${unreachable.length === 1 ? '' : 's'} from ${list(unreachable)}: the address ${unreachable.length === 1 ? 'it leads' : 'each leads'} to has a character (+ * ( ) { }) in its host name that Next.js reads as route syntax, so following ${unreachable.length === 1 ? 'it' : 'them'} would fail. Check ${unreachable.length === 1 ? 'it' : 'these redirects'} in the source docs.`,
+    })
+  }
+  if (redirects.length === config.redirects.length && redirects.every((redirect, index) => redirect === config.redirects![index])) return config
   const result: MigrationDocsConfig = { ...config, redirects }
   if (redirects.length === 0) delete result.redirects
   return result

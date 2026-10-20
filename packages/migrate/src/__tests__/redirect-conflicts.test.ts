@@ -811,6 +811,81 @@ describe('dropUnroutableRedirects', () => {
     expect(warnings[0].message).toContain('Skipped 2 redirects from /sdk/c++/:rest+, /docs/:path+/more')
   })
 
+  describe('route syntax in a destination', () => {
+    /** The path `next start` redirects to when this destination is followed, or the error it throws while compiling it. */
+    const followed = (destination: string, params: Record<string, string | Array<string>> = {}): string => prepareDestination({ appendParamsToQuery: false, destination, params, query: {} }).newUrl
+
+    it('percent-encodes + ( ) in the path, which Next cannot compile raw, for an address off the site and on it', () => {
+      const input: Redirects = [
+        { source: '/a', destination: 'https://example.com/a+b' },
+        { source: '/b', destination: 'https://example.com/(group)/x?y=1+2#top' },
+        { source: '/c', destination: '/c++(d)' },
+        { source: '/d/:path*', destination: '/new+x/:path*' },
+      ]
+      for (const { destination } of input.slice(0, 3)) expect(() => followed(destination), destination).toThrow()
+      const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+      const result = dropUnroutableRedirects(config(input), warnings)
+      expect(result.redirects).toEqual([
+        { source: '/a', destination: 'https://example.com/a%2Bb' },
+        { source: '/b', destination: 'https://example.com/%28group%29/x?y=1+2#top' },
+        { source: '/c', destination: '/c%2B%2B%28d%29' },
+        { source: '/d/:path*', destination: '/new%2Bx/:path*' },
+      ])
+      expect(warnings).toEqual([])
+      expect(() => checkCustomRoutes(result.redirects!.map((redirect) => ({ ...redirect, permanent: true })), 'redirect')).not.toThrow()
+      // Next sends the visitor to the same path the source docs named: %2B and %28 decode to the + and ( written there.
+      expect(decodeURIComponent(followed(result.redirects![0].destination))).toBe('/a+b')
+      expect(decodeURIComponent(followed(result.redirects![1].destination))).toBe('/(group)/x#top')
+      expect(decodeURIComponent(followed(result.redirects![2].destination))).toBe('/c++(d)')
+      expect(followed(result.redirects![3].destination, { path: ['x', 'y'] })).toBe('/new%2Bx/x/y')
+    })
+
+    it('leaves [ ] { }, a percent escape, the query, the fragment and a :param segment as written, since Next compiles them as they are', () => {
+      const input = config([
+        { source: '/a', destination: 'https://example.com/a[b]/{c}/x%2By' },
+        { source: '/b', destination: '/d[e]/%28f%29?q=a+(b)#h' },
+        { source: '/c/:path*', destination: '/new/:path*' },
+        { source: '/d', destination: 'https://example.com:8080/x' },
+      ])
+      expect(dropUnroutableRedirects(input, [])).toBe(input)
+      for (const { destination } of input.redirects!.filter((redirect) => !redirect.source.includes(':'))) expect(() => followed(destination), destination).not.toThrow()
+    })
+
+    it('omits a redirect whose host holds route syntax, which a host cannot escape, and says so once', () => {
+      const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+      expect(() => followed('https://a+b.example.com/x')).toThrow()
+      expect(() => followed('https://a(b).example.com/x')).toThrow()
+      const result = dropUnroutableRedirects(config([
+        { source: '/a', destination: 'https://a+b.example.com/x' },
+        { source: '/b', destination: 'https://a(b).example.com/x' },
+        { source: '/c', destination: 'https://example.com/x' },
+      ]), warnings)
+      expect(result.redirects).toEqual([{ source: '/c', destination: 'https://example.com/x' }])
+      expect(warnings.map((warning) => warning.message)).toEqual([
+        'Skipped 2 redirects from /a, /b: the address each leads to has a character (+ * ( ) { }) in its host name that Next.js reads as route syntax, so following them would fail. Check these redirects in the source docs.',
+      ])
+    })
+
+    it('does not encode again on a second pass, which is how a remote spec and then the repository both see a redirect', () => {
+      const once = dropUnroutableRedirects(config([{ source: '/a', destination: 'https://example.com/a+b' }]), [])
+      const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+      expect(dropUnroutableRedirects(once, warnings)).toBe(once)
+      expect(warnings).toEqual([])
+    })
+
+    it('carries a Mintlify redirect to an address with + or ( ) in its path through a migration in a form Next can follow', () => {
+      const bundle = mintlify({
+        redirects: [{ source: '/old', destination: 'https://example.com/a+b' }, { source: '/older', destination: '/guide(v2)' }],
+        navigation: { groups: [{ group: 'Start', pages: ['index', 'guide'] }] },
+      }, { index: '# Home\n\nWelcome.', guide: '# Guide\n\nBody.' })
+      const redirects = bundle.docsConfig.redirects ?? []
+      expect(redirects).toContainEqual({ source: '/old', destination: 'https://example.com/a%2Bb', permanent: true })
+      expect(redirects).toContainEqual({ source: '/older', destination: '/guide%28v2%29', permanent: true })
+      expect(() => checkCustomRoutes(redirects.map((redirect) => ({ ...redirect, permanent: true })), 'redirect')).not.toThrow()
+      for (const { destination } of redirects) expect(() => followed(destination), destination).not.toThrow()
+    })
+  })
+
   it('leaves a redirect between two cases of one address to the conflict check, which says why', () => {
     const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
     const input = config([{ source: '/Guide', destination: '/guide' }])
