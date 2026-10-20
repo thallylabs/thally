@@ -898,6 +898,124 @@ describe('dropUnroutableRedirects', () => {
       expect(warnings).toEqual([])
     })
 
+    // A destination may only use the parameters its source defines: Next throws `Expected "oops" to be a string` for any other,
+    // and a destination on the site is refused at build time (`destination has segments not in source or has`).
+    describe('a :name in the destination that the source does not define', () => {
+      const build = (redirects: Redirects) => checkCustomRoutes(redirects.map((redirect) => ({ ...redirect, permanent: true })), 'redirect')
+      const quiet = (run: () => unknown) => {
+        const error = console.error
+        console.error = () => {}
+        try {
+          return run()
+        } finally {
+          console.error = error
+        }
+      }
+
+      it('writes the colon as %3A in an address off the site, which Next then redirects to as written', () => {
+        expect(() => followed('https://example.com/docs/:oops')).toThrow('Expected "oops" to be a string')
+        const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+        const result = dropUnroutableRedirects(config([{ source: '/old', destination: 'https://example.com/docs/:oops?x=:oops#top' }]), warnings)
+        expect(result.redirects).toEqual([{ source: '/old', destination: 'https://example.com/docs/%3Aoops?x=:oops#top' }])
+        expect(warnings).toEqual([])
+        expect(followed(result.redirects![0].destination)).toBe('/docs/%3Aoops#top')
+        expect(decodeURIComponent(followed(result.redirects![0].destination))).toBe('/docs/:oops#top')
+      })
+
+      it('does the same for a path on the site, which also fails the build as written', () => {
+        quiet(() => expect(() => build([{ source: '/old', destination: '/docs/:oops' }])).toThrow())
+        const result = dropUnroutableRedirects(config([{ source: '/old', destination: '/docs/:oops' }]), [])
+        expect(result.redirects).toEqual([{ source: '/old', destination: '/docs/%3Aoops' }])
+        expect(() => build(result.redirects!)).not.toThrow()
+        expect(followed(result.redirects![0].destination)).toBe('/docs/%3Aoops')
+      })
+
+      it('writes a colon that is not the start of a name, or sits inside a segment, the same way', () => {
+        const input = [
+          { source: '/a', destination: 'https://example.com/times/10:30' },
+          { source: '/b', destination: '/ratio/:' },
+          { source: '/c', destination: '/x/a:b/c' },
+          { source: '/d', destination: '/y/:*/z/:+' },
+        ]
+        for (const { destination } of input) expect(() => followed(destination), destination).toThrow()
+        const result = dropUnroutableRedirects(config(input), [])
+        expect(result.redirects!.map((redirect) => redirect.destination)).toEqual(['https://example.com/times/10%3A30', '/ratio/%3A', '/x/a%3Ab/c', '/y/%3A%2A/z/%3A%2B'])
+        for (const { destination } of result.redirects!) expect(() => followed(destination), destination).not.toThrow()
+      })
+
+      it('keeps every parameter the source defines, whether the destination is on the site or off it', () => {
+        const input = config([
+          { source: '/a/:id', destination: '/b/:id' },
+          { source: '/c/:path*', destination: 'https://example.com/d/:path*' },
+          { source: '/e/:one/:two', destination: 'https://example.com/:two/:one/:one' },
+          { source: '/f/:rest+', destination: '/g/:rest+' },
+          { source: '/h/:section/:rest*', destination: '/i/:section/:rest*' },
+        ])
+        const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+        expect(dropUnroutableRedirects(input, warnings)).toBe(input)
+        expect(warnings).toEqual([])
+        expect(followed('https://example.com/:two/:one/:one', { one: '1', two: '2' })).toBe('/2/1/1')
+      })
+
+      it('encodes only the parameters the source lacks, in a destination that also uses its own', () => {
+        const result = dropUnroutableRedirects(config([{ source: '/a/:id', destination: '/b/:id/:other/:id' }]), [])
+        expect(result.redirects).toEqual([{ source: '/a/:id', destination: '/b/:id/%3Aother/:id' }])
+        expect(followed(result.redirects![0].destination, { id: '7' })).toBe('/b/7/%3Aother/7')
+      })
+
+      it('omits a wildcard the source does not have, and says why', () => {
+        // `:rest+` throws when it is followed, `:rest*` is left out of the address it sends visitors to, and a site path with either fails the build.
+        expect(() => followed('https://example.com/docs/:rest+')).toThrow('Expected "rest" to be an array')
+        expect(followed('https://example.com/docs/:rest*')).toBe('/docs')
+        quiet(() => expect(() => build([{ source: '/a', destination: '/docs/:rest*' }])).toThrow())
+        const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+        const result = dropUnroutableRedirects(config([
+          { source: '/a', destination: '/docs/:rest*' },
+          { source: '/b/:id', destination: 'https://example.com/docs/:rest+' },
+          { source: '/keep', destination: '/docs' },
+        ]), warnings)
+        expect(result.redirects).toEqual([{ source: '/keep', destination: '/docs' }])
+        expect(warnings.map((warning) => warning.message)).toEqual([
+          'Redirect from /a to /docs/:rest* was omitted: its destination has :rest*, a wildcard the source does not have, so there is nothing to fill it with.',
+          'Redirect from /b/:id to https://example.com/docs/:rest+ was omitted: its destination has :rest+, a wildcard the source does not have, so there is nothing to fill it with.',
+        ])
+      })
+
+      it('omits a destination that writes a wildcard of the source without its * or +, which Next cannot compile either', () => {
+        expect(() => followed('/b/:p', { p: ['x'] })).toThrow('multi-match')
+        const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+        const result = dropUnroutableRedirects(config([
+          { source: '/a/:p*', destination: '/b/:p' },
+          { source: '/c/:p+', destination: 'https://example.com/:p/x' },
+          { source: '/d/:p', destination: '/e/:p' },
+        ]), warnings)
+        expect(result.redirects).toEqual([{ source: '/d/:p', destination: '/e/:p' }])
+        expect(warnings.map((warning) => warning.message)).toEqual([
+          'Redirect from /a/:p* to /b/:p was omitted: :p matches several path segments in the source, so its destination has to write it :p* or :p+, and Next.js cannot follow it otherwise.',
+          'Redirect from /c/:p+ to https://example.com/:p/x was omitted: :p matches several path segments in the source, so its destination has to write it :p* or :p+, and Next.js cannot follow it otherwise.',
+        ])
+      })
+
+      it('carries the redirect through a Mintlify migration in a form Next follows', () => {
+        const bundle = mintlify({
+          redirects: [{ source: '/old', destination: 'https://example.com/:oops' }, { source: '/older', destination: '/guide/:oops' }],
+          navigation: { groups: [{ group: 'Start', pages: ['index', 'guide'] }] },
+        }, { index: '# Home\n\nWelcome.', guide: '# Guide\n\nBody.' })
+        const redirects = bundle.docsConfig.redirects ?? []
+        expect(redirects).toContainEqual({ source: '/old', destination: 'https://example.com/%3Aoops', permanent: true })
+        expect(redirects).toContainEqual({ source: '/older', destination: '/guide/%3Aoops', permanent: true })
+        expect(() => build(redirects)).not.toThrow()
+        for (const { destination } of redirects) expect(() => followed(destination), destination).not.toThrow()
+      })
+
+      it('does not change a destination again on a second pass', () => {
+        const once = dropUnroutableRedirects(config([{ source: '/a', destination: 'https://example.com/:oops' }, { source: '/b/:id', destination: '/c/:id/:x' }]), [])
+        const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+        expect(dropUnroutableRedirects(once, warnings)).toBe(once)
+        expect(warnings).toEqual([])
+      })
+    })
+
     it('does not encode again on a second pass, which is how a remote spec and then the repository both see a redirect', () => {
       const once = dropUnroutableRedirects(config([{ source: '/a', destination: 'https://example.com/a+b' }]), [])
       const warnings: Array<{ code: 'unsupported-config'; message: string }> = []

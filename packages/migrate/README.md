@@ -348,7 +348,11 @@ written (`https://example.com/?next=https://other.com`), and so is a fragment
 unless it holds a character Next.js reads as route syntax (`: * + ? ( ) { }`). An
 address whose host name, once its percent escapes are read, is not a valid one
 (letters, digits, hyphens, underscores and dots, then an optional port) is left out with a
-warning, since Next.js fails when it follows such a redirect. A
+warning, since Next.js fails when it follows such a redirect. A `:name` in a
+destination that the source does not define is kept as text (its colon is written
+`%3A`), because Next.js fails when it has no value for it; a wildcard
+(`:name*`, `:name+`) the source does not have, or a wildcard of the source that
+the destination writes without its `*` or `+`, is left out with a warning. A
 redirect that still cannot be carried (a `:` inside a path segment such as
 `Category:Foo`, a `*` anywhere but as the whole last segment, or such a fragment)
 is left out with a warning that names that reason.

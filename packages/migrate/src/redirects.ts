@@ -4,9 +4,10 @@
  * and two redirects that point at each other never settle. Next also parses a
  * redirect source as a route pattern, so one with pattern operators fails the
  * whole build, and it compiles a destination the same way, so one with route
- * syntax in its path or host fails when a visitor follows it. Every platform and every step that adds redirects (source
- * config, generated aliases, remote API specs) is checked here once, instead of
- * each caller guarding its own additions.
+ * syntax in its path or host, or with a `:name` its source does not define,
+ * fails when a visitor follows it. Every platform and every step that adds
+ * redirects (source config, generated aliases, remote API specs) is checked
+ * here once, instead of each caller guarding its own additions.
  *
  * A site runs on either of two servers: `next start` matches a redirect source
  * without regard to letter case, while the Cloudflare build matches it exactly.
@@ -122,13 +123,22 @@ const TRAILING_ONE_OR_MORE = /\/:[A-Za-z_][A-Za-z0-9_]*\+\/?$/
 const DESTINATION_PARTS = /^((?:https?:\/\/[^/?#]*)?)([^?#]*)([\s\S]*)$/i
 
 /**
- * Characters Next compiles as route syntax in a destination's path although a URL
- * path holds them as plain characters: with a `+` or a `(` in the path,
- * `prepareDestination` throws when a visitor follows the redirect (a destination
- * on the site fails the build as well). A `[`, `]` or `)` compiles as written, and
+ * What Next compiles in a destination's path (and a site path's whole text) with
+ * path-to-regexp, which reads these as route syntax although a URL holds them as
+ * plain characters. `+`, `(` and `)` fail at once. A `:` starts a parameter, so
+ * `:name` (with `*` or `+` for a catch-all) is kept when the source defines it,
+ * and any other colon fails when a visitor follows the redirect (a destination on
+ * the site fails the build as well). A `[`, `]` or `)` compiles as written, and
  * `{` and `}` are percent-encoded by the URL parser before Next compiles them.
  */
-const DESTINATION_PATH_SYNTAX = /[+()]/g
+const DESTINATION_PATH_SYNTAX = /:(\w*)([*+]?)|[+()]/g
+
+/** The parameters a source defines, each with whether it matches several segments (`:path*`, `:path+`). */
+function sourceParameters(source: string): Map<string, boolean> {
+  const parameters = new Map<string, boolean>()
+  for (const [, name, modifier] of source.matchAll(/:(\w+)([*+]?)/g)) parameters.set(name, modifier !== '')
+  return parameters
+}
 
 /** A host name Next can compile: letters, digits, hyphens and underscores in dot-separated labels, which a punycode `xn--` label is too. */
 const DNS_HOST = /^(?:[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?\.)*[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?\.?$/
@@ -154,30 +164,45 @@ function invalidHost(origin: string): string | null {
 
 /**
  * A destination with its path made safe for Next to compile, which it does with
- * path-to-regexp: `+`, `(` and `)` are written as `%2B`, `%28` and `%29`, which
- * Next sends back unchanged and a server reads as the same path. A `:param`
- * segment (a catch-all carried over from the source) and the query and fragment
- * are left as written.
+ * path-to-regexp. `+`, `(` and `)` are written as `%2B`, `%28` and `%29`, which
+ * Next sends back unchanged and a server reads as the same path. A `:name` the
+ * source defines (a catch-all carried over from it) is kept. Any other colon is
+ * written `%3A`: Next throws when it compiles a parameter nothing gave a value,
+ * so a `:oops` the source does not have can only be meant as text. The query
+ * and fragment are left as written. A catch-all the source does not have
+ * (`:rest*`) has nothing to fill it, and one of its own written without its `*`
+ * or `+` cannot be compiled: either comes back as the reason.
  */
-function encodeDestinationPath(destination: string): string {
+function encodeDestinationPath(destination: string, source: string): string | { reason: string } {
   const [, origin, path, rest] = DESTINATION_PARTS.exec(destination)!
-  const encoded = path
-    .split('/')
-    .map((segment) => (segment.startsWith(':') ? segment : segment.replace(DESTINATION_PATH_SYNTAX, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)))
-    .join('/')
-  return `${origin}${encoded}${rest}`
+  const parameters = sourceParameters(source)
+  let reason: string | undefined
+  const percent = (char: string): string => `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+  const encoded = path.replace(DESTINATION_PATH_SYNTAX, (match, name?: string, modifier = '') => {
+    if (name === undefined) return percent(match)
+    const repeats = parameters.get(name)
+    if (repeats === undefined) {
+      if (name && modifier) reason ??= `its destination has :${name}${modifier}, a wildcard the source does not have, so there is nothing to fill it with`
+      return `%3A${name}${[...modifier].map(percent).join('')}`
+    }
+    if (repeats && !modifier) reason ??= `:${name} matches several path segments in the source, so its destination has to write it :${name}* or :${name}+, and Next.js cannot follow it otherwise`
+    return match
+  })
+  return reason ? { reason } : `${origin}${encoded}${rest}`
 }
 
 /**
  * Drop each redirect Next.js cannot serve as written: one back to its own
  * route (a trailing slash is the same route), one whose source has
- * route-pattern operators, which would fail the build, and one whose destination
- * host is not a valid host name. The path of every destination is made safe to compile
- * (`encodeDestinationPath`) instead, so a `+` or `(` in it no longer fails when
- * the redirect is followed. A final `/:name+`
+ * route-pattern operators, which would fail the build, one whose destination
+ * host is not a valid host name, and one whose destination has a catch-all its
+ * source cannot give it. The path of every other destination is made safe to
+ * compile (`encodeDestinationPath`) instead, so a `+`, `(` or stray `:` in it no
+ * longer fails when the redirect is followed. A final `/:name+`
  * segment is route syntax Next reads as intended: `dropConflictingRedirects`
  * writes it, and a set that passes through here again must keep it. An omitted
- * address with operators is named in one warning; a self-redirect gets its own. A redirect
+ * address with operators is named in one warning; a self-redirect and a
+ * destination with a wildcard of its own each get a warning. A redirect
  * to its own route with a query or fragment added is left to
  * `dropConflictingRedirects`: sources match the request path alone, so it loops
  * all the same, and that check says so.
@@ -186,26 +211,30 @@ export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: A
   if (!config.redirects?.length) return config
   const unmatchable: Array<string> = []
   const unreachable: Array<string> = []
-  const filtered = config.redirects.filter((redirect) => {
+  const redirects: Array<NonNullable<MigrationDocsConfig['redirects']>[number]> = []
+  for (const redirect of config.redirects) {
     // Exact on purpose: a redirect back to the same address in another case is a conflict for `dropConflictingRedirects`, which says why.
     const source = exactRoute(redirect.source)
     if (source && source === exactRoute(redirect.destination)) {
       warnings.push({ code: 'unsupported-config', message: `Self-redirect from ${redirect.source} to ${redirect.destination} was omitted.` })
-      return false
+      continue
     }
     const host = invalidHost(DESTINATION_PARTS.exec(redirect.destination)![1])
     if (host !== null) {
       unreachable.push(`${redirect.source} (${host})`)
-      return false
+      continue
     }
-    if (!ROUTE_PATTERN_OPERATORS.test(redirect.source.replace(TRAILING_ONE_OR_MORE, ''))) return true
-    unmatchable.push(redirect.source)
-    return false
-  })
-  const redirects = filtered.map((redirect) => {
-    const destination = encodeDestinationPath(redirect.destination)
-    return destination === redirect.destination ? redirect : { ...redirect, destination }
-  })
+    if (ROUTE_PATTERN_OPERATORS.test(redirect.source.replace(TRAILING_ONE_OR_MORE, ''))) {
+      unmatchable.push(redirect.source)
+      continue
+    }
+    const destination = encodeDestinationPath(redirect.destination, redirect.source)
+    if (typeof destination !== 'string') {
+      warnings.push({ code: 'unsupported-config', message: `Redirect from ${redirect.source} to ${redirect.destination} was omitted: ${destination.reason}.` })
+      continue
+    }
+    redirects.push(destination === redirect.destination ? redirect : { ...redirect, destination })
+  }
   if (unmatchable.length > 0) {
     warnings.push({
       code: 'unsupported-config',
