@@ -100,14 +100,80 @@ describe('thally check reader routes', () => {
     expect(result.output).toContain('"#primeros-pasos"')
   })
 
-  it('uses visible text for headings containing JSX badges and anchors', async () => {
+  it('reads a heading as the renderer does, with no text from a JSX badge or anchor in it', async () => {
     const result = await checkLinks([
       '## Initialize instance <Badge title="1 > 0">Enterprise</Badge>',
       '### CLI <a id="-cli" />',
-      '[Enterprise](#initialize-instance-enterprise) [CLI](#cli)',
+      '[Instance](#initialize-instance) [Enterprise](#initialize-instance-enterprise) [CLI](#cli)',
     ].join('\n'))
-    expect(result.exit).toBe(0)
-    expect(result.output).not.toContain('Broken anchor')
+    expect(result.output).not.toContain('"#initialize-instance"')
+    expect(result.output).toContain('"#initialize-instance-enterprise"')
+    expect(result.output).not.toContain('"#cli"')
+  })
+
+  it('resolves an underlined heading, and only the h2 to h6 headings the renderer gives an id', async () => {
+    const result = await checkLinks([
+      'Param name',
+      '----------',
+      '',
+      'Title',
+      '=====',
+      '',
+      '# Intro',
+      '',
+      '###### Deep',
+      '[Setext](#param-name) [Level one](#title) [Atx level one](#intro) [Deep](#deep)',
+    ].join('\n'))
+    expect(result.output).not.toContain('"#param-name"')
+    expect(result.output).toContain('"#title"')
+    expect(result.output).toContain('"#intro"')
+    expect(result.output).not.toContain('"#deep"')
+  })
+
+  it('numbers a field after an h1 and an underlined heading as the renderer does', async () => {
+    const field = '<ParamField body="name" type="string">The name.</ParamField>'
+    const h1 = await checkLinks(`# Param name\n\n${field}\n\n[Field](#param-name) [Numbered](#param-name-1)`)
+    expect(h1.output).not.toContain('"#param-name"')
+    expect(h1.output).toContain('"#param-name-1"')
+    const setext = await checkLinks(`Param name\n----------\n\n${field}\n\n[Heading](#param-name) [Field](#param-name-1)`)
+    expect(setext.output).not.toContain('"#param-name"')
+    expect(setext.output).not.toContain('"#param-name-1"')
+  })
+
+  it('finds a heading inside a component, a quote and a list, and none in a code fence', async () => {
+    const result = await checkLinks([
+      '<Accordion title="Setup">',
+      '',
+      '## Inside',
+      '',
+      '</Accordion>',
+      '',
+      '> ## Quoted',
+      '',
+      '- ## Listed',
+      '',
+      '```md',
+      '## Fenced',
+      '```',
+      '',
+      '',
+      '[Inside](#inside) [Quoted](#quoted) [Listed](#listed) [Accordion](#setup) [Body](#setup-accordion-children)',
+      '',
+      '[Fenced](#fenced)',
+    ].join('\n'))
+    for (const found of ['inside', 'quoted', 'listed', 'setup', 'setup-accordion-children']) expect(result.output, found).not.toContain(`"#${found}"`)
+    expect(result.output).toContain('"#fenced"')
+  })
+
+  it('reads an indented heading as a heading, since MDX has no indented code', async () => {
+    const result = await checkLinks('Text.\n\n    ## Indented\n\n[Indented](#indented)')
+    expect(result.output).not.toContain('"#indented"')
+  })
+
+  it('takes the id of a {/* #id */} comment anywhere in the heading', async () => {
+    const result = await checkLinks('## Before {/* #mine */} after\n\n[Mine](#mine) [Slug](#before-after)')
+    expect(result.output).not.toContain('"#mine"')
+    expect(result.output).toContain('"#before-after"')
   })
 
   it('accepts the second occurrence of a repeated heading', async () => {

@@ -48,7 +48,7 @@ import langYaml from 'shiki/langs/yaml.mjs'
 import { visit } from 'unist-util-visit'
 import { getDocsJsonConfig } from '../lib/docs-json-config'
 import { plainInlineText } from '../lib/inline-code'
-import { componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds } from '../lib/field-anchor'
+import { componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds } from '../lib/field-anchor'
 import { slugify } from '../lib/utils'
 import type { DocsJsonConfig } from '../data/docs'
 import { smartenTree } from './smart-quotes'
@@ -823,8 +823,6 @@ interface HeadingTarget {
  */
 function rehypeUniqueHeadingIds() {
   return (tree: Root) => {
-    const occurrences = new Map<string, number>()
-    const usedIds = new Set<string>()
     const targets: Array<HeadingTarget> = []
     const fields: Array<{ base: string; assign: (id: string) => void }> = []
     const authoredIds = new Set<string>()
@@ -875,23 +873,11 @@ function rehypeUniqueHeadingIds() {
       for (const child of (node as JsxNode).children ?? []) collect(child, childSize)
     }
     collect(tree, undefined)
-    const reserved = new Set(targets.flatMap((target) => target.given ? [target.given] : []))
-    for (const target of targets) {
-      const base = target.given ?? slugify(target.text)
-      if (!base) continue
-      let id = base
-      let occurrence = 1
-      if (target.given) {
-        while (usedIds.has(id)) id = `${base}-${++occurrence}`
-      } else {
-        occurrence = occurrences.get(base) ?? 0
-        do id = ++occurrence === 1 ? base : `${base}-${occurrence}`
-        while (usedIds.has(id) || reserved.has(id))
-        occurrences.set(base, occurrence)
-      }
-      usedIds.add(id)
-      target.assign(id)
-    }
+    const { ids: headingIds, used: usedIds } = numberHeadingIds(targets.map((target) => ({ base: target.given ?? slugify(target.text), explicit: !!target.given })))
+    targets.forEach((target, index) => {
+      const id = headingIds[index]
+      if (id) target.assign(id)
+    })
     // A field takes the id Mintlify gives it, numbered after the headings and skipping every id an author wrote or a component makes.
     const ids = numberFieldIds(fields.map((field) => field.base), usedIds, [...authoredIds, ...componentGeneratedIds])
     fields.forEach((field, index) => field.assign(ids[index]))

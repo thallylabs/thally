@@ -16,6 +16,36 @@ export function slugify(value: string): string {
 }
 
 /**
+ * Ids for a page's headings, in document order: `foo`, `foo-2`, `foo-3`. Each
+ * target's `base` is the id its author fixed (`explicit`) or the slug of its
+ * text. An explicit id keeps its spelling and is reserved for the whole page, so
+ * a generated id never takes it, wherever it sits. A target with no base (text
+ * that slugifies to nothing) gets none. `used` holds every id given, which a
+ * page's fields are numbered against.
+ */
+export function numberHeadingIds(targets: ReadonlyArray<{ base: string; explicit: boolean }>): { ids: Array<string | undefined>; used: Set<string> } {
+  const reserved = new Set(targets.flatMap(({ base, explicit }) => (explicit && base ? [base] : [])))
+  const used = new Set<string>()
+  const occurrences = new Map<string, number>()
+  const ids = targets.map(({ base, explicit }) => {
+    if (!base) return undefined
+    let id = base
+    let occurrence = 1
+    if (explicit) {
+      while (used.has(id)) id = `${base}-${++occurrence}`
+    } else {
+      occurrence = occurrences.get(base) ?? 0
+      do id = ++occurrence === 1 ? base : `${base}-${occurrence}`
+      while (used.has(id) || reserved.has(id))
+      occurrences.set(base, occurrence)
+    }
+    used.add(id)
+    return id
+  })
+  return { ids, used }
+}
+
+/**
  * Anchor base of a `<ParamField>` or `<ResponseField>`, as Mintlify serves it:
  * `param-` and the field's name in kebab case, for both components. A camel-case
  * boundary starts a new word (`expiresInDays`, `GitHub`), any run of characters

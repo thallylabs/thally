@@ -12,9 +12,9 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { builtinMdxComponents } from '@/components/mdx/builtin-components'
 import { PageSlotsProvider } from '@/components/mdx/page-slots'
-import { componentIds as coreComponentIds, fieldAnchorBase as coreBase, fieldAnchorName as coreName, numberFieldIds as coreNumber, uniqueFieldId as coreUnique } from '../../packages/core/src/slugify'
-import { runCheck } from '../../packages/create-thally-docs/src/check'
-import { componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds, uniqueFieldId } from '../lib/field-anchor'
+import { componentIds as coreComponentIds, fieldAnchorBase as coreBase, fieldAnchorName as coreName, numberFieldIds as coreNumber, numberHeadingIds as coreNumberHeadings, uniqueFieldId as coreUnique } from '../../packages/core/src/slugify'
+import { extractHeadingAnchors, runCheck } from '../../packages/create-thally-docs/src/check'
+import { componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, uniqueFieldId } from '../lib/field-anchor'
 import { rehypePlugins } from './rehype'
 import { remarkPlugins } from './remark'
 
@@ -63,6 +63,14 @@ describe('the runtime helpers read a field as @thallylabs/core does', () => {
     const runtime = new Set(['param-b-1'])
     const core = new Set(['param-b-1'])
     expect(bases.map((base) => uniqueFieldId(base, runtime))).toEqual(bases.map((base) => coreUnique(base, core)))
+  })
+
+  it('numbers headings the same way', () => {
+    const targets = [
+      { base: 'a', explicit: false }, { base: 'a', explicit: false }, { base: 'a-2', explicit: true }, { base: '', explicit: false },
+      { base: 'b', explicit: true }, { base: 'b', explicit: true }, { base: 'a', explicit: false },
+    ]
+    expect(numberHeadingIds(targets)).toEqual(coreNumberHeadings(targets))
   })
 
   it('reserves authored ids before it numbers the fields the same way', () => {
@@ -282,5 +290,44 @@ describe('thally check resolves the ids the renderer gives fields', () => {
 
   it('still reports a fragment no heading or field has', async () => {
     for (const id of ['param-name-3', 'param-expiresindays', 'param-x']) expect(await brokenAnchorOutput(source, id), id).toContain('Broken anchor')
+  })
+})
+
+describe('thally check and the renderer give a page the same ids', () => {
+  const pages: Array<[string, string]> = [
+    ['an underlined heading, then a field', 'Param name\n----------\n\n<ParamField body="name" />'],
+    ['an h1, then a field', '# Param name\n\n<ParamField body="name" />'],
+    ['a field, then the heading', '<ParamField body="name" />\n\n## Param name\n\n<ResponseField name="name" />'],
+    ['every heading level', '# One\n\n## A\n\n### B\n\n#### C\n\n##### D\n\n###### E'],
+    ['an underlined h1 and h2', 'Title\n=====\n\nSub\n---'],
+    ['an id comment in the middle of a heading', '## Before {/* #mine */} after\n\n## Mine'],
+    ['an id comment that reserves its id', '## Foo\n\n## Foo\n\n## Foo {/* #foo-2 */}'],
+    ['headings in a component, a quote, a list and a note', '<Accordion title="Setup">\n\n## Inside\n\n</Accordion>\n\n> ## Quoted\n\n- ## Listed\n\n<Note>\n\n### In a note\n\n</Note>'],
+    ['headings in code fences', '```md\n## Fenced\n```\n\n~~~\n## Tilde\n~~~\n\n## Real'],
+    ['an indented heading, since MDX has no indented code', 'Text.\n\n    ## Indented'],
+    ['a JSX badge in a heading', '## Initialize instance <Badge title="1 > 0">Enterprise</Badge>'],
+    ['inline code, emphasis and a link in a heading', '## Run `init` with *care* and [docs](/x)'],
+    ['a heading with nothing to spell', '## ???\n\n## Next'],
+    ['character references, escapes and a JSX expression in a heading', '## A &amp; B \\*c\\* {1 + 1} d <br/> e'],
+    ['closing hashes and an empty heading', '## Foo ##\n\n##\n\n## After'],
+    ['a heading in a component inside a component', '<Accordion title="One">\n\n<Accordion title="Two">\n\n### Deep\n\n</Accordion>\n\n</Accordion>'],
+    ['repeated headings', '## Same\n\n## Same\n\n## Same'],
+    ['step titles that are headings, and a plain-text step', '## Deploy\n\n<Steps titleSize="h3">\n<Step title="Deploy">x</Step>\n<Step title="Plain" titleSize="p" id="plain-id">y</Step>\n</Steps>'],
+    ['plain-text steps', '<Steps titleSize="p">\n<Step title="One" id="one-id">x</Step>\n<Step title="Two">y</Step>\n</Steps>'],
+    ['an Accordion, then a field', '<Accordion title="Param name">\n\nText.\n\n</Accordion>\n\n<ParamField body="name" />'],
+    ['an Accordion with an id of its own', '<Accordion title="Other" id="mine">\n\nText.\n\n</Accordion>'],
+    ['an Update, then a field', '<Update label="Param name" date="2024-01-01">Text.</Update>\n\n<ParamField body="name" />'],
+  ]
+
+  it.each(pages)('agrees on %s', async (_name, source) => {
+    const rendered = [...new Set(await renderedHtmlIds(source))].sort()
+    expect(rendered.filter((id) => /_R_|:/.test(id))).toEqual([])
+    expect([...extractHeadingAnchors(source)].sort()).toEqual(rendered)
+  })
+
+  it('gives the ids the reviewed cases name', async () => {
+    expect(await renderedHtmlIds(pages[0][1])).toEqual(['param-name', 'param-name-1'])
+    expect(await renderedHtmlIds(pages[1][1])).toEqual(['param-name'])
+    expect(await renderedHtmlIds(pages[10][1])).toEqual(['initialize-instance'])
   })
 })

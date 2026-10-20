@@ -1,7 +1,7 @@
 /** `<ParamField>` and `<ResponseField>` anchors follow the ids Mintlify serves, checked against live pages. */
 
 import { describe, expect, it } from 'vitest'
-import { accordionAnchorId, componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds, uniqueFieldId } from '@thallylabs/core/slugify'
+import { accordionAnchorId, componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, uniqueFieldId } from '@thallylabs/core/slugify'
 
 describe('fieldAnchorBase', () => {
   // Each name and id below was read from a live Mintlify page (dub.co, unkey.com, mintlify.com docs).
@@ -110,5 +110,20 @@ describe('componentIds', () => {
     for (const tag of ['Card', 'Tabs', 'Tab', 'Expandable', 'Step', 'Tooltip', 'ParamField', '']) {
       expect(componentIds(tag, attributes({ title: 'Param name', id: 'mine', label: 'v1' }))).toEqual([])
     }
+  })
+})
+
+describe('numberHeadingIds', () => {
+  const generated = (base: string) => ({ base, explicit: false })
+  const explicit = (base: string) => ({ base, explicit: true })
+
+  it('numbers repeats foo, foo-2, foo-3, keeps every explicit id and reserves it for the whole page', () => {
+    const { ids, used } = numberHeadingIds([generated('a'), generated('a'), explicit('a-2'), generated(''), explicit('b'), explicit('b'), generated('a')])
+    expect(ids).toEqual(['a', 'a-3', 'a-2', undefined, 'b', 'b-2', 'a-4'])
+    expect([...used].sort()).toEqual(['a', 'a-2', 'a-3', 'a-4', 'b', 'b-2'])
+  })
+
+  it('gives nothing to a page with no heading', () => {
+    expect(numberHeadingIds([])).toEqual({ ids: [], used: new Set() })
   })
 })
