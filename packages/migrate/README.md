@@ -128,6 +128,11 @@ versions, languages, and reusable `$ref` navigation files; it also preserves
 dropdown presentation, collection descriptions and icons, explicit default
 versions, page route casing, redirects, local snippets, static assets,
 compatible page frontmatter, site identity, and OpenAPI configuration.
+A page with no `description` gets one from its first paragraph, which keeps it
+for search and metadata but marks it `descriptionPlacement: body`, so the runtime
+does not print the same sentence under the title and again in the body; an authored
+description is shown under the title as written. (Docusaurus and Fern pages are
+always marked `body`.)
 Analytics come across too: docs.json `integrations` and legacy mint.json
 `analytics` for GA4, Google Tag Manager, PostHog, and Plausible are validated
 and written to `docs.json` `integrations` (`integrations` wins per provider when

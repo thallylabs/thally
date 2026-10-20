@@ -1505,6 +1505,8 @@ export function htmlPage(
       navigationId: id,
       title,
       description: description || plainDescription(body) || `Documentation imported from ${document.finalUrl.hostname}.`,
+      // A description taken from the page text is already in the body; only one the site published is shown under the title.
+      ...(description ? {} : { descriptionPlacement: 'body' as const }),
       keywords: [],
       body,
       source: document.finalUrl.toString(),

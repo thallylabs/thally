@@ -2431,12 +2431,9 @@ export function parseMarkdownPage(input: {
       ? sourceMode as MigrationPage['mode']
       : undefined
   const externalUrl = input.platform === 'mintlify' ? externalPageUrl(parsed.data.url) : undefined
-  const description = typeof parsed.data.description === 'string' && parsed.data.description.trim()
-    ? parsed.data.description.trim()
-    // An API reference page is described by its operation, not by its prose.
-    : typeof parsed.data.openapi === 'string' && parsed.data.openapi.trim()
-      ? ''
-      : firstParagraph(body)
+  const authoredDescription = typeof parsed.data.description === 'string' && parsed.data.description.trim() ? parsed.data.description.trim() : undefined
+  // An API reference page is described by its operation, not by its prose.
+  const description = authoredDescription ?? (namesOperation ? '' : firstParagraph(body))
   const page: MigrationPage = {
     id: identity.id,
     navigationId: identity.navigationId,
@@ -2447,7 +2444,8 @@ export function parseMarkdownPage(input: {
     icon,
     iconType,
     description,
-    ...(input.platform === 'docusaurus' || input.platform === 'fern'
+    // A description taken from the body is the paragraph the body already shows, so it must not also appear under the title.
+    ...(input.platform === 'docusaurus' || input.platform === 'fern' || (authoredDescription === undefined && description !== '')
       ? { descriptionPlacement: 'body' as const }
       : {}),
     badge,

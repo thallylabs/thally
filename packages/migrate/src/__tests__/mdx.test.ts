@@ -58,6 +58,30 @@ describe('migration description fallback', () => {
     expect(page).toMatchObject({ description: 'Introductory prose.', descriptionPlacement: 'body' })
   })
 
+  it('keeps a description taken from the body out of the title area on every platform, since the body already shows it', () => {
+    for (const platform of [undefined, 'mintlify', 'docusaurus', 'fern'] as const) {
+      const page = parseMarkdownPage({ id: 'guide', platform, raw: '---\ntitle: Guide\n---\n\nFirst paragraph.\n\nSecond paragraph.', source: 'guide.mdx' })
+      expect(page, String(platform)).toMatchObject({ description: 'First paragraph.', descriptionPlacement: 'body' })
+    }
+  })
+
+  it('leaves an authored description in the title area, except where a platform already kept it in the body', () => {
+    const raw = '---\ntitle: Guide\ndescription: Authored.\n---\n\nFirst paragraph.'
+    for (const platform of [undefined, 'mintlify'] as const) {
+      expect(parseMarkdownPage({ id: 'guide', platform, raw, source: 'guide.mdx' })?.descriptionPlacement, String(platform)).toBeUndefined()
+    }
+    for (const platform of ['docusaurus', 'fern'] as const) {
+      expect(parseMarkdownPage({ id: 'guide', platform, raw, source: 'guide.mdx' })?.descriptionPlacement, platform).toBe('body')
+    }
+  })
+
+  it('marks no placement when there is no description to place, or when an operation describes the page', () => {
+    const code = parseMarkdownPage({ id: 'code', platform: 'mintlify', raw: '```jsx\n<Widget />\n```', source: 'code.mdx' })
+    const operation = parseMarkdownPage({ id: 'op', platform: 'mintlify', raw: '---\nopenapi: post /links\n---\n\nProse.', source: 'op.mdx' })
+    expect([code?.description, operation?.description]).toEqual(['', ''])
+    expect([code?.descriptionPlacement, operation?.descriptionPlacement]).toEqual([undefined, undefined])
+  })
+
   it('takes a leading Markdown H1 as the page title and removes its duplicate body heading', () => {
     const page = parseMarkdownPage({
       id: 'api/docusaurus-config',
