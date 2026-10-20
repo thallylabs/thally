@@ -48,6 +48,7 @@ import langYaml from 'shiki/langs/yaml.mjs'
 import { visit } from 'unist-util-visit'
 import { getDocsJsonConfig } from '../lib/docs-json-config'
 import { plainInlineText } from '../lib/inline-code'
+import { fieldAnchorBase, fieldAnchorName, uniqueFieldId } from '../lib/field-anchor'
 import { slugify } from '../lib/utils'
 import type { DocsJsonConfig } from '../data/docs'
 import { smartenTree } from './smart-quotes'
@@ -787,6 +788,14 @@ function jsxStringAttribute(node: JsxNode, name: string): string | null | undefi
   return typeof attribute.value === 'string' ? attribute.value : null
 }
 
+/** Give a JSX element an `id` attribute, replacing a literal one. */
+function setJsxId(jsx: JsxNode, id: string): void {
+  const attributes = (jsx.attributes ??= [])
+  const existing = attributes.find((attribute) => attribute.type === 'mdxJsxAttribute' && attribute.name === 'id')
+  if (existing) existing.value = id
+  else attributes.push({ type: 'mdxJsxAttribute', name: 'id', value: id })
+}
+
 interface HeadingTarget {
   text: string
   /** An id the author fixed (`id` attribute or `{/* #id *\/}` comment). */
@@ -803,12 +812,19 @@ interface HeadingTarget {
  * A `<Step>` whose title renders as a heading (`titleSize` h2, h3 or h4, on the
  * step or its `<Steps>`) is numbered with the rest and given the `id` its title
  * is rendered with, so the table of contents scrolls to it.
+ *
+ * A `<ParamField>` or `<ResponseField>` is given the anchor Mintlify serves for
+ * it (`param-expires-in-days`). Those are numbered once every heading has its id,
+ * so a field never takes a heading's id and never shifts one. A field with an
+ * `id` of its own keeps it, and the other fields skip it.
  */
 function rehypeUniqueHeadingIds() {
   return (tree: Root) => {
     const occurrences = new Map<string, number>()
     const usedIds = new Set<string>()
     const targets: Array<HeadingTarget> = []
+    const fields: Array<{ base: string; assign: (id: string) => void }> = []
+    const fieldIds = new Set<string>()
     const text = (node: Element): string => node.children.map((child) =>
       child.type === 'text' ? child.value
         : child.type === 'element' ? text(child)
@@ -838,14 +854,16 @@ function rehypeUniqueHeadingIds() {
             targets.push({
               text: plainInlineText(title),
               given: jsxStringAttribute(jsx, 'id')?.trim() || undefined,
-              assign: (id) => {
-                const attributes = (jsx.attributes ??= [])
-                const existing = attributes.find((attribute) => attribute.type === 'mdxJsxAttribute' && attribute.name === 'id')
-                if (existing) existing.value = id
-                else attributes.push({ type: 'mdxJsxAttribute', name: 'id', value: id })
-              },
+              assign: (id) => setJsxId(jsx, id),
             })
           }
+        }
+        if (jsx.name === 'ParamField' || jsx.name === 'ResponseField') {
+          const given = jsxStringAttribute(jsx, 'id')?.trim()
+          const name = fieldAnchorName(jsx.name, (attribute) => jsxStringAttribute(jsx, attribute))
+          const base = name === undefined ? undefined : fieldAnchorBase(name)
+          if (given) fieldIds.add(given)
+          else if (base) fields.push({ base, assign: (id) => setJsxId(jsx, id) })
         }
       }
       for (const child of (node as JsxNode).children ?? []) collect(child, childSize)
@@ -868,6 +886,9 @@ function rehypeUniqueHeadingIds() {
       usedIds.add(id)
       target.assign(id)
     }
+    // A field takes the id Mintlify gives it, numbered after the headings and the ids authors gave other fields.
+    for (const id of fieldIds) usedIds.add(id)
+    for (const field of fields) field.assign(uniqueFieldId(field.base, usedIds))
   }
 }
 

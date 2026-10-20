@@ -1,0 +1,75 @@
+/** `<ParamField>` and `<ResponseField>` anchors follow the ids Mintlify serves, checked against live pages. */
+
+import { describe, expect, it } from 'vitest'
+import { fieldAnchorBase, fieldAnchorName, uniqueFieldId } from '@thallylabs/core/slugify'
+
+describe('fieldAnchorBase', () => {
+  // Each name and id below was read from a live Mintlify page (dub.co, unkey.com, mintlify.com docs).
+  it.each([
+    ['expiresInDays', 'param-expires-in-days'],
+    ['data-attribution-model', 'param-data-attribution-model'],
+    ['domain', 'param-domain'],
+    ['GitHub', 'param-git-hub'],
+    ['autoApply', 'param-auto-apply'],
+    ['utm_campaign', 'param-utm-campaign'],
+    ['--root-key', 'param-root-key'],
+    ['Workspace name', 'param-workspace-name'],
+    ['API ID', 'param-api-id'],
+    ['IP allow list', 'param-ip-allow-list'],
+    ['HTTP', 'param-http'],
+    ['pagination.hasMore', 'param-pagination-has-more'],
+    ['ratelimits[].name', 'param-ratelimits-name'],
+    ['latency_p75', 'param-latency-p75'],
+    ['integrations.ga4', 'param-integrations-ga4'],
+    ['errors.404', 'param-errors-404'],
+    ['variables.[variableName]', 'param-variables-variable-name'],
+    ['<custom>', 'param-custom'],
+  ])('turns the name %s into %s', (name, id) => {
+    expect(fieldAnchorBase(name)).toBe(id)
+  })
+
+  // No live page has an acronym run before a capitalised word: these follow the usual camel-case split and are not verified.
+  it.each([
+    ['userID', 'param-user-id'],
+    ['APIKey', 'param-api-key'],
+  ])('splits the acronym in %s as %s', (name, id) => {
+    expect(fieldAnchorBase(name)).toBe(id)
+  })
+
+  it('has no anchor for a name with nothing to spell it', () => {
+    for (const name of ['', '  ', '---', '[]']) expect(fieldAnchorBase(name)).toBeUndefined()
+  })
+})
+
+describe('uniqueFieldId', () => {
+  it('numbers repeats from -1 in document order, as Mintlify does for app-id, app-id-1, app-id-2', () => {
+    const used = new Set<string>()
+    expect(['param-app-id', 'param-app-id', 'param-api-key', 'param-app-id'].map((base) => uniqueFieldId(base, used)))
+      .toEqual(['param-app-id', 'param-app-id-1', 'param-api-key', 'param-app-id-2'])
+  })
+
+  it('skips an id the page already uses, such as a heading', () => {
+    const used = new Set(['param-name', 'param-name-1'])
+    expect(uniqueFieldId('param-name', used)).toBe('param-name-2')
+    expect(used.has('param-name-2')).toBe(true)
+  })
+})
+
+describe('fieldAnchorName', () => {
+  const attributes = (values: Record<string, string | null>) => (name: string) => values[name]
+
+  it('reads a ParamField location before its name, in the order the component shows it', () => {
+    expect(fieldAnchorName('ParamField', attributes({ body: 'b', header: 'h', query: 'q', path: 'p', name: 'n' }))).toBe('p')
+    expect(fieldAnchorName('ParamField', attributes({ body: 'b', header: 'h', query: 'q' }))).toBe('q')
+    expect(fieldAnchorName('ParamField', attributes({ body: 'b', header: 'h' }))).toBe('h')
+    expect(fieldAnchorName('ParamField', attributes({ body: 'b', name: 'n' }))).toBe('b')
+    expect(fieldAnchorName('ParamField', attributes({ name: 'n' }))).toBe('n')
+  })
+
+  it('reads only a ResponseField name, and ignores empty and non-literal values', () => {
+    expect(fieldAnchorName('ResponseField', attributes({ name: 'status', body: 'x' }))).toBe('status')
+    expect(fieldAnchorName('ParamField', attributes({ body: '', name: null }))).toBeUndefined()
+    expect(fieldAnchorName('ParamField', attributes({ path: null, body: 'id' }))).toBe('id')
+    expect(fieldAnchorName('Other', attributes({ name: 'n' }))).toBeUndefined()
+  })
+})

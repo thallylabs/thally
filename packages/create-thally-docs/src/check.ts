@@ -17,7 +17,7 @@ import { API_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, operationDesc
 import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
-import { plainInlineText, slugify } from '@thallylabs/core/slugify'
+import { fieldAnchorBase, fieldAnchorName, plainInlineText, slugify, uniqueFieldId } from '@thallylabs/core/slugify'
 import { validateIntegrations } from '@thallylabs/migrate'
 import { checkExternalLinks, type ExternalLinkCheckOptions, type ExternalLinkReference } from './external-links.js'
 
@@ -250,6 +250,35 @@ function extractStepHeadings(content: string): Array<{ line: number; base: strin
   return steps
 }
 
+/**
+ * The `<ParamField>` and `<ResponseField>` elements of a page, in document order,
+ * read from the MDX syntax tree like the steps above. A field with an `id` of its
+ * own carries it as `given`; any other carries the anchor base its name spells,
+ * and a field with no literal name has none.
+ */
+function extractFields(content: string): Array<{ given?: string; base?: string }> {
+  if (!content.includes('<ParamField') && !content.includes('<ResponseField')) return []
+  let tree: MdxNode
+  try {
+    tree = mdxParser.parse(content) as unknown as MdxNode
+  } catch {
+    return []
+  }
+  const fields: Array<{ given?: string; base?: string }> = []
+  const visit = (node: MdxNode): void => {
+    if ((node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') && (node.name === 'ParamField' || node.name === 'ResponseField')) {
+      const name = fieldAnchorName(node.name, (attribute) => stringAttribute(node, attribute))
+      const given = stringAttribute(node, 'id')?.trim()
+      const base = name === undefined ? undefined : fieldAnchorBase(name)
+      if (given) fields.push({ given })
+      else if (base) fields.push({ base })
+    }
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(tree)
+  return fields
+}
+
 function extractHeadingAnchors(content: string): Set<string> {
   const anchors = new Set<string>()
   const headings: Array<{ base: string; explicit: boolean; line: number }> = []
@@ -276,6 +305,7 @@ function extractHeadingAnchors(content: string): Set<string> {
   // Same numbering as the runtime and the content parser: `foo`, `foo-2`, `foo-3`;
   // an explicit id reserves its id, so generated ids skip it.
   headings.push(...extractStepHeadings(content))
+  const fields = extractFields(content)
   headings.sort((left, right) => left.line - right.line)
   const reserved = new Set(headings.filter((heading) => heading.explicit).map((heading) => heading.base))
   const used = new Set<string>()
@@ -294,6 +324,9 @@ function extractHeadingAnchors(content: string): Set<string> {
     used.add(id)
     anchors.add(id)
   }
+  // Fields are numbered after every heading, and skip the ids authors gave other fields.
+  for (const field of fields) if (field.given) used.add(field.given)
+  for (const field of fields) if (field.base) anchors.add(uniqueFieldId(field.base, used))
   return anchors
 }
 

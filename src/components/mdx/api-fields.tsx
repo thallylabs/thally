@@ -8,7 +8,7 @@
 
 'use client'
 
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { useApiLabels } from '@/components/api/api-locale'
 import { cn } from '@/lib/utils'
@@ -28,6 +28,8 @@ const descriptionClass =
 // ---------------------------------------------------------------------------
 
 interface ResponseFieldProps {
+  /** Set by the page's heading pass, so a link to the field lands on it. */
+  id?: string
   name: string
   type?: string
   required?: boolean
@@ -39,6 +41,7 @@ interface ResponseFieldProps {
 }
 
 export function ResponseField({
+  id,
   name,
   type,
   required,
@@ -51,7 +54,7 @@ export function ResponseField({
   const t = useApiLabels()
   return (
     <section className="border-b border-border/70 py-5 last:border-0">
-      <div className="not-prose flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5">
+      <div id={id} className="not-prose flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5">
         {pre.map((label) => <span key={`pre-${label}`} className="rounded bg-muted px-1.5 py-0.5 text-[0.68rem] font-medium text-foreground/60">{label}</span>)}
         <code className={cn('text-sm font-semibold text-foreground', deprecated && 'line-through opacity-65')}>{name}</code>
         {post.map((label) => <span key={`post-${label}`} className="rounded bg-muted px-1.5 py-0.5 text-[0.68rem] font-medium text-foreground/60">{label}</span>)}
@@ -84,6 +87,8 @@ export function ResponseField({
 // ---------------------------------------------------------------------------
 
 interface ParamFieldProps {
+  /** Set by the page's heading pass, so a link to the field lands on it. */
+  id?: string
   body?: boolean | string
   query?: boolean | string
   path?: boolean | string
@@ -97,7 +102,7 @@ interface ParamFieldProps {
   children?: ReactNode
 }
 
-export function ParamField({ name, type, required, deprecated, body, query, path, header, default: defaultValue, placeholder, children }: ParamFieldProps) {
+export function ParamField({ id, name, type, required, deprecated, body, query, path, header, default: defaultValue, placeholder, children }: ParamFieldProps) {
   const t = useApiLabels()
   // As on Mintlify, only a header names its location; body, query and path fields show name, type and required.
   const isHeader = !path && !query && Boolean(header)
@@ -105,7 +110,7 @@ export function ParamField({ name, type, required, deprecated, body, query, path
   const fieldName = locatedName ?? name ?? 'parameter'
   return (
     <section className="border-b border-border/70 py-5 last:border-0">
-      <div className="not-prose flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5">
+      <div id={id} className="not-prose flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5">
         <code className={cn('text-sm font-semibold text-foreground', deprecated && 'line-through opacity-65')}>{fieldName}</code>
         {isHeader && (
           <span className="font-mono text-[0.7rem] font-medium text-green-700 dark:text-green-300">header</span>
@@ -149,6 +154,28 @@ export function Expandable({ title, defaultOpen = false, children }: ExpandableP
   const t = useApiLabels()
   const [open, setOpen] = useState(defaultOpen)
   const contentId = useId()
+  const content = useRef<HTMLDivElement>(null)
+  const target = useRef<HTMLElement | null>(null)
+  // A link to a field inside a collapsed Expandable opens it, as the <details> Mintlify renders does.
+  useEffect(() => {
+    const reveal = () => {
+      let id: string
+      try { id = decodeURIComponent(window.location.hash.slice(1)) } catch { return }
+      const element = id ? document.getElementById(id) : null
+      if (!element || !content.current?.hidden || !content.current.contains(element)) return
+      target.current = element
+      setOpen(true)
+    }
+    reveal()
+    window.addEventListener('hashchange', reveal)
+    return () => window.removeEventListener('hashchange', reveal)
+  }, [])
+  // The browser could not scroll to a hidden field when the page loaded; once it has a box, go there.
+  useEffect(() => {
+    if (!open || !target.current) return
+    target.current.scrollIntoView()
+    target.current = null
+  }, [open])
   return (
     <div className="my-3">
       <button
@@ -162,6 +189,7 @@ export function Expandable({ title, defaultOpen = false, children }: ExpandableP
         {title ?? t('showChildAttributes')}
       </button>
       <div
+        ref={content}
         id={contentId}
         hidden={!open}
         className="mt-3 border-l border-border pl-4"

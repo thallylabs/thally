@@ -1,0 +1,143 @@
+/** Public runtime integration: field anchors agree across the renderer, the core helper and the portable checker. */
+
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { describe, expect, it, vi } from 'vitest'
+
+import { fieldAnchorBase as coreBase, fieldAnchorName as coreName, uniqueFieldId as coreUnique } from '../../packages/core/src/slugify'
+import { runCheck } from '../../packages/create-thally-docs/src/check'
+import { fieldAnchorBase, fieldAnchorName, uniqueFieldId } from '../lib/field-anchor'
+import { rehypePlugins } from './rehype'
+
+async function brokenAnchorOutput(body: string, link: string): Promise<string> {
+  const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-field-ids-'))
+  mkdirSync(join(projectDir, 'src/content'), { recursive: true })
+  writeFileSync(join(projectDir, 'docs.json'), JSON.stringify({ tabs: [{ tab: 'Docs', pages: ['introduction'] }] }))
+  writeFileSync(
+    join(projectDir, 'src/content/introduction.mdx'),
+    `---\ntitle: Intro\ndescription: Introduction page.\n---\n\n${body}\n\nThis page has enough prose to avoid the short body notice. [Jump](#${link})`,
+  )
+  const output: Array<string> = []
+  const log = vi.spyOn(console, 'log').mockImplementation((value) => output.push(String(value)))
+  try {
+    await runCheck(projectDir, { fix: false, ci: true })
+  } finally {
+    log.mockRestore()
+  }
+  return output.join('\n')
+}
+
+/** Every `id` the renderer gives the compiled page, in document order. */
+async function renderedIds(source: string): Promise<Array<string>> {
+  const { compile } = await import('@mdx-js/mdx')
+  const compiled = String(await compile(source, { rehypePlugins: [rehypePlugins[2]] }))
+  return [...compiled.matchAll(/\bid: "([^"]+)"/g)].map((match) => match[1])
+}
+
+describe('the runtime helpers read a field as @thallylabs/core does', () => {
+  it.each([
+    'expiresInDays', 'data-attribution-model', 'GitHub', '--root-key', 'Workspace name', 'API ID', 'ratelimits[].name',
+    'latency_p75', 'integrations.ga4', 'variables.[variableName]', '<custom>', 'userID', 'APIKey', 'IDs', 'a1B', 'café', 'Überblick', '日本語 API', '---', '',
+  ])('names %j the same way', (name) => {
+    expect(fieldAnchorBase(name)).toBe(coreBase(name))
+  })
+
+  it('numbers repeats and skips used ids the same way', () => {
+    const bases = ['param-a', 'param-a', 'param-b', 'param-a', 'param-a-1', 'param-a']
+    const runtime = new Set(['param-b-1'])
+    const core = new Set(['param-b-1'])
+    expect(bases.map((base) => uniqueFieldId(base, runtime))).toEqual(bases.map((base) => coreUnique(base, core)))
+  })
+
+  it('reads the same attribute of each tag', () => {
+    const values: Record<string, string | null | undefined> = { name: 'n', body: 'b', path: null, query: '' }
+    for (const tag of ['ParamField', 'ResponseField', 'Other']) {
+      expect(fieldAnchorName(tag, (name) => values[name])).toBe(coreName(tag, (name) => values[name]))
+    }
+  })
+})
+
+describe('field ids on a rendered page', () => {
+  // Read from https://dub.co/docs/sdks/client-side/introduction: a field nested in an Expandable keeps its own id.
+  it('gives a nested field the id Mintlify serves for it', async () => {
+    const source = [
+      '<ParamField body="data-cookie-options" type="JSON-stringified object">',
+      '  Custom properties.',
+      '',
+      '  <Expandable title="properties">',
+      '    <ParamField body="domain" type="string">The domain.</ParamField>',
+      '    <ParamField body="expiresInDays" type="integer">Days.</ParamField>',
+      '  </Expandable>',
+      '</ParamField>',
+    ].join('\n')
+    expect(await renderedIds(source)).toEqual(['param-data-cookie-options', 'param-domain', 'param-expires-in-days'])
+  })
+
+  // Read from https://www.unkey.com/docs/api-management/keys/looking-up-keys: the repeat is `-1`, and a ResponseField shares the numbering.
+  it('numbers a repeated name -1, -2 across ParamField and ResponseField', async () => {
+    const source = [
+      '<ParamField body="keyId" type="string">One.</ParamField>',
+      '## Response fields',
+      '<ResponseField name="keyId" type="string">Two.</ResponseField>',
+      '<ResponseField name="key_id" type="string">Three.</ResponseField>',
+      '<ParamField path="Workspace name">Four.</ParamField>',
+      '<ResponseField name="pagination.hasMore">Five.</ResponseField>',
+    ].join('\n\n')
+    expect(await renderedIds(source)).toEqual([
+      'param-key-id', 'response-fields', 'param-key-id-1', 'param-key-id-2', 'param-workspace-name', 'param-pagination-has-more',
+    ])
+  })
+
+  it('leaves a heading its own id when a field would take the same one, wherever each sits on the page', async () => {
+    const heading = '## Param name\n\nText.'
+    const field = '<ParamField body="name" type="string">The name.</ParamField>'
+    expect(await renderedIds(`${heading}\n\n${field}`)).toEqual(['param-name', 'param-name-1'])
+    expect(await renderedIds(`${field}\n\n${heading}`)).toEqual(['param-name-1', 'param-name'])
+  })
+
+  it('keeps an id the author gave a field, which the other fields skip, and shifts no heading', async () => {
+    const source = [
+      '<ParamField body="x" id="param-y">One.</ParamField>',
+      '<ParamField body="y">Two.</ParamField>',
+      '## Mine',
+    ].join('\n\n')
+    expect(await renderedIds(source)).toEqual(['param-y', 'param-y-1', 'mine'])
+  })
+
+  it('gives none to a field with no literal name', async () => {
+    const source = [
+      '<ParamField type="string">No name.</ParamField>',
+      '<ParamField body={"computed"}>Expression.</ParamField>',
+      '<ResponseField name="">Empty.</ResponseField>',
+    ].join('\n\n')
+    expect(await renderedIds(source)).toEqual([])
+  })
+})
+
+describe('thally check resolves the ids the renderer gives fields', () => {
+  const source = [
+    '## Param name',
+    '<ParamField body="data-cookie-options" type="object">',
+    '  <Expandable title="properties">',
+    '    <ParamField body="expiresInDays" type="integer">Days.</ParamField>',
+    '  </Expandable>',
+    '</ParamField>',
+    '<ParamField body="name" type="string">Name.</ParamField>',
+    '<ResponseField name="name" type="string">Name.</ResponseField>',
+    '<ParamField path="Workspace name">Four.</ParamField>',
+    '<ResponseField name="pagination.hasMore">Five.</ResponseField>',
+    '<ParamField body="x" id="param-workspace-name">Own id.</ParamField>',
+  ].join('\n\n')
+
+  it('accepts every id the page renders', async () => {
+    const ids = await renderedIds(source)
+    expect(ids).toEqual(expect.arrayContaining(['param-expires-in-days', 'param-name', 'param-name-1', 'param-name-2', 'param-workspace-name', 'param-workspace-name-1', 'param-pagination-has-more']))
+    for (const id of ids) expect(await brokenAnchorOutput(source, id), id).not.toContain('Broken anchor')
+  })
+
+  it('still reports a fragment no heading or field has', async () => {
+    for (const id of ['param-name-3', 'param-expiresindays', 'param-x']) expect(await brokenAnchorOutput(source, id), id).toContain('Broken anchor')
+  })
+})
