@@ -230,10 +230,11 @@ A reference that lists no operation (Mintlify generated every endpoint) is not
 affected. Operations whose path item is a local `$ref` are read as the renderer
 reads them (hidden or excluded on any level of the reference withholds them).
 
-An authored page that names an operation (`openapi: post /links`) and sets neither
+An authored page that names an operation (`openapi: post /links`) or a webhook
+(`openapi: webhook link.created`, read from the spec's `webhooks`) and sets neither
 a `title` nor a leading heading is titled by that operation, as Mintlify titles it:
-the summary, else the operation id, else `METHOD /path`, where its file name would
-otherwise give it "Create" for `links/create.mdx`. A page that names its spec reads
+the summary, else the operation id, else `METHOD /path` (`POST link.created` for a
+webhook), where its file name would otherwise give it "Create" for `links/create.mdx`. A page that names its spec reads
 that spec; a bare reference reads the first spec that publishes the operation, so
 when a site has a remote spec, `hydrateRemoteApiSpecs` titles these pages once every
 spec is bound. A page whose operation no spec publishes (a remote spec that failed to

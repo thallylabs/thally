@@ -25,6 +25,16 @@ const spec = JSON.stringify({
       get: { summary: '  Retrieve a link  ', operationId: 'getLink', tags: ['Links'], ...response },
     },
   },
+  webhooks: {
+    'link.created': { post: { summary: 'Link created event', tags: ['Links'], ...response } },
+    'link.updated': { post: { operationId: 'linkUpdated', ...response } },
+    'link.deleted': { post: response },
+    'link.moved': { $ref: '#/x-items/moved' },
+    'link.both': { post: { summary: 'Zeta event', ...response }, put: { summary: 'Alpha event', ...response } },
+    'link.hidden': { post: { 'x-hidden': true, summary: 'Hidden event', ...response } },
+  },
+  'x-webhooks': { 'link.extension': { post: { summary: 'Extension event', ...response } } },
+  'x-items': { moved: { post: { summary: 'Link moved event', ...response } } },
 })
 
 const operationPage = (frontmatter: string[], body = ''): string => `---\n${frontmatter.join('\n')}\n---\n\n${body}`
@@ -37,6 +47,17 @@ const pages: Record<string, string> = {
   'api-reference/links/authored': operationPage(['title: Make one', 'openapi: post /links']),
   'api-reference/links/headed': operationPage(['openapi: post /links'], '# Our own heading\n\nBody.'),
   'api-reference/links/missing': operationPage(['openapi: patch /nowhere']),
+  'api-reference/webhooks/created': operationPage(['openapi: webhook link.created']),
+  'api-reference/webhooks/updated': operationPage(['openapi: "WEBHOOK   link.updated"']),
+  'api-reference/webhooks/deleted': operationPage(['openapi: webhook link.deleted']),
+  'api-reference/webhooks/moved': operationPage(['openapi: webhook link.moved']),
+  'api-reference/webhooks/both': operationPage(['openapi: webhook link.both']),
+  'api-reference/webhooks/named': operationPage(['openapi: "openapi.json webhook link.created"']),
+  'api-reference/webhooks/remote': operationPage([`openapi: "${SPEC_URL} webhook link.updated"`]),
+  'api-reference/webhooks/hidden': operationPage(['openapi: webhook link.hidden']),
+  'api-reference/webhooks/extension': operationPage(['openapi: webhook link.extension']),
+  'api-reference/webhooks/other-case': operationPage(['openapi: webhook Link.Created']),
+  'api-reference/webhooks/missing': operationPage(['openapi: webhook link.nowhere']),
   guide: operationPage(['description: A guide.'], 'Hello.'),
 }
 
@@ -71,6 +92,26 @@ describe('titles of Mintlify operation pages', () => {
     expect(bundle.pages.find((page) => page.id === 'api-reference/links/create')?.navTitle).toBe('Create link')
   })
 
+  it('titles a webhook page by the operation of the webhook a local spec binds, whichever way the page writes the reference', () => {
+    expect(titles(migrate('openapi.json'))).toMatchObject({
+      'api-reference/webhooks/created': 'Link created event',
+      'api-reference/webhooks/updated': 'linkUpdated',
+      'api-reference/webhooks/deleted': 'POST link.deleted',
+      'api-reference/webhooks/moved': 'Link moved event',
+      'api-reference/webhooks/both': 'Alpha event',
+      'api-reference/webhooks/named': 'Link created event',
+    })
+  })
+
+  it('keeps the file name title of a webhook page whose webhook the renderer does not serve', () => {
+    expect(titles(migrate('openapi.json'))).toMatchObject({
+      'api-reference/webhooks/hidden': 'Hidden',
+      'api-reference/webhooks/extension': 'Extension',
+      'api-reference/webhooks/other-case': 'Other Case',
+      'api-reference/webhooks/missing': 'Missing',
+    })
+  })
+
   it('keeps an authored title, a heading of the page, a page that names no operation, and a page whose operation is missing', () => {
     expect(titles(migrate('openapi.json'))).toMatchObject({
       'api-reference/links/authored': 'Make one',
@@ -91,6 +132,10 @@ describe('titles of Mintlify operation pages', () => {
       'api-reference/links/list': 'listLinks',
       'api-reference/links/delete': 'DELETE /links/{linkId}',
       'api-reference/links/retrieve': 'Retrieve a link',
+      'api-reference/webhooks/created': 'Link created event',
+      'api-reference/webhooks/updated': 'linkUpdated',
+      'api-reference/webhooks/remote': 'linkUpdated',
+      'api-reference/webhooks/hidden': 'Hidden',
       'api-reference/links/authored': 'Make one',
       'api-reference/links/headed': 'Our own heading',
       'api-reference/links/missing': 'Missing',

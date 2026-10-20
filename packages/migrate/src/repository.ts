@@ -2468,7 +2468,8 @@ export function qualifyDisplacedBareRefs(options: {
 }
 
 /**
- * Title each page that names an operation (`openapi: post /links`) and has no title or heading of its own, as Mintlify does: by the operation
+ * Title each page that names an operation (`openapi: post /links`) or a webhook (`openapi: webhook link.created`, read from the spec's `webhooks`)
+ * and has no title or heading of its own, as Mintlify does: by the operation
  * (`operationTitle`), where the file name would otherwise give it ("Create" for `links/create.mdx`). A page that names its spec reads that spec;
  * a bare reference reads the first spec of `specLookupOrder` that publishes the operation. A page whose operation no spec publishes keeps its
  * title. `content` reads a spec by the source the tabs name it by.
@@ -2486,8 +2487,15 @@ export function titleOperationPages(options: {
     if (!bySource.has(source)) {
       const spec = content(source)
       const document = spec ? readSpecDocument(spec) : undefined
-      const published = visibleOperations(document, isRecord(document) ? document.paths : undefined)
-      bySource.set(source, new Map(published.map((operation) => [`${operation.method} ${operation.path}`, operation])))
+      const operations = new Map<string, OpenApiOperationForLinking>()
+      for (const operation of visibleOperations(document, isRecord(document) ? document.paths : undefined)) operations.set(`${operation.method} ${operation.path}`, operation)
+      // A webhook is named by its key alone. When it has several operations the renderer serves the first once they are ordered by title.
+      for (const operation of visibleOperations(document, isRecord(document) ? document.webhooks : undefined)) {
+        const key = `webhook ${operation.path}`
+        const served = operations.get(key)
+        if (!served || operationTitle(operation).localeCompare(operationTitle(served)) < 0) operations.set(key, operation)
+      }
+      bySource.set(source, operations)
     }
     return bySource.get(source)!
   }
