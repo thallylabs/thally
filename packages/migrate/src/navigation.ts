@@ -7,7 +7,7 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, extname, relative } from 'node:path'
 
-import { descendNavigationAccess, hasNavigationRules, isNavigationRestricted, navigationAccess, navigationGateReason, OPEN_NAVIGATION_ACCESS, playgroundDisplay } from './mintlify-extras.js'
+import { descendNavigationAccess, hasNavigationRules, isNavigationRestricted, isSelfHostedFontSource, navigationAccess, navigationGateReason, OPEN_NAVIGATION_ACCESS, playgroundDisplay } from './mintlify-extras.js'
 import type { NavigationAccess } from './mintlify-extras.js'
 import { mintlifyLocalizedReference, pageIdFromReference, resolveWithin, trimEdgeSlashes } from './path.js'
 import { rootedRedirectsWarning, skippedRedirectsWarning } from './redirects.js'
@@ -1338,6 +1338,8 @@ function projectedFont(value: unknown): { family: string; weight?: Array<string>
   if (typeof value === 'string' && value) return { family: value }
   const font = objectValue(value)
   if (!font) return undefined
+  // Thally's fonts setting loads a Google font by family: a font with a file of its own would be requested from Google and fail.
+  if (isSelfHostedFontSource(font.source)) return undefined
   const family = typeof font.family === 'string'
     ? font.family
     : typeof font.name === 'string' ? font.name : undefined

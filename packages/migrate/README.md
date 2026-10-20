@@ -721,9 +721,15 @@ instead. Thally cannot
 load a stylesheet from `docs.json`, so each `.css` is preserved with a warning
 that it is not applied and likely targets Mintlify's DOM. Fonts named by
 `fonts.source` (top level, `heading`, `body`) that are local `.woff`, `.woff2`,
-`.ttf`, or `.otf` files are copied; Thally's `fonts` setting loads Google Fonts
-by family only, so a warning says the file is not applied. Remote font URLs
-are not downloaded, and unsafe or missing paths are warned about.
+`.ttf`, or `.otf` files are copied. Thally's `fonts` setting loads Google Fonts
+by family only, so a font with a `source` of its own is not written to it (the
+page would ask Google for a family it does not have, and fail): the site keeps its
+default font, and one warning per font says so and how to use the copied file (an
+`@font-face` rule in a stylesheet in `public/` that `docs.json` lists under
+`stylesheets`, then `--font-heading` or `--font-sans`). A `source` that is a
+Google Fonts address (`fonts.googleapis.com`, `fonts.gstatic.com`) still loads by
+family. Remote font URLs are not downloaded, and unsafe or missing paths are
+warned about.
 
 Legacy `mint.json` `topbarLinks` and `topbarCtaButton` (including
 `type: github`) map to `navbar.links` and `navbar.primary`; `docs.json`

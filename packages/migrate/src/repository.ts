@@ -70,6 +70,7 @@ import {
   mintlifyFontSources,
   navigationGateReason,
   resolvePageAccess,
+  selfHostedFontWarning,
 } from './mintlify-extras.js'
 import type { MintlifyAccess, NavigationAccess, ResolvedPageAccess } from './mintlify-extras.js'
 import { mdxVisibleText, resolvePageDisplayHeading, bindSnippetProps, closeOpenFence, escapeFernLiteralBraces, escapeUnmatchedClosingTags, functionDeclaredNames, mdxComment, parseMarkdownPage, normalizeExplicitHeadingIds, protectMathBlocks, replaceLinkWithAnchor, replaceOutsideCode, scanJsxOpeningTag, replaceOutsideCodeAndComments, replaceUnknownComponents, rewriteFernRelativePageLinks } from './mdx.js'
@@ -5438,19 +5439,16 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       const copiedPath = font.path ? fontAssetByRelative.get(font.path) : undefined
       const copied = copiedPath !== undefined && assets.some((asset) => asset.path === copiedPath)
       const detail = font.remote
-        ? `its source ${font.source} is a remote URL and was not downloaded`
+        ? `its source ${font.source} is a remote URL and was not downloaded, so put a copy in public/`
         : !font.path
-          ? `its source ${font.source} is not a safe local .woff/.woff2/.ttf/.otf path inside the docs directory and was not imported`
+          ? `its source ${font.source} is not a safe local .woff/.woff2/.ttf/.otf path inside the docs directory and was not imported, so put a copy in public/`
           : !copiedPath
-            ? `its source file ${font.source} was not found in the docs directory`
+            ? `its source file ${font.source} was not found in the docs directory, so put a copy in public/`
             : copied
               ? `its file was copied to public/${copiedPath}`
               : null
       if (detail === null) continue
-      warnings.push({
-        code: 'unsupported-config',
-        message: `Self-hosted font "${font.family}" is not applied: Thally's fonts setting loads Google Fonts by family only; ${detail}. The family name was still mapped, which loads a Google font of that name if one exists.`,
-      })
+      warnings.push(selfHostedFontWarning(font.family, detail))
     }
   }
   if (overBudgetAssets.length > 0) {

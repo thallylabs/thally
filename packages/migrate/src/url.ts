@@ -13,6 +13,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
 import { projectMintlifyIntegrations } from './analytics.js'
 import { parseMarkdownPage } from './mdx.js'
+import { mintlifyFontSources, selfHostedFontWarning } from './mintlify-extras.js'
 import { addMintlifyDirectoryRedirects, buildNavigationFromPages, projectMintlifyNavigation } from './navigation.js'
 import { pageIdFromReference } from './path.js'
 import { migrationImageAttribute, migrationImageCandidates, migrationImageUrl, renderMigrationSrcset } from './url-images.js'
@@ -2252,6 +2253,9 @@ export async function migrateUrl(options: UrlMigrationOptions): Promise<Migratio
     const analytics = projectMintlifyIntegrations(sourceMintlifyConfig)
     warnings.push(...analytics.warnings)
     if (analytics.integrations) docsConfig.integrations = analytics.integrations
+    for (const font of mintlifyFontSources(sourceMintlifyConfig)) {
+      warnings.push(selfHostedFontWarning(font.family, 'a site migrated from its URL does not copy font files, so put a copy in public/'))
+    }
   }
   if (docusaurusRedirects.length > 0) {
     docsConfig.redirects = [...new Map(docusaurusRedirects.map((redirect) => [
