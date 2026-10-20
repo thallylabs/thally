@@ -1509,43 +1509,66 @@ const EXTERNAL_ORIGIN = /^https?:\/\/[^/?#]+/i
  * catch-all (`/:path*`) here; a `*` anywhere else, or a syntax Next can't
  * express, is dropped rather than guessed at. Source text already written as
  * path-to-regexp (e.g. `:path*`) passes through unchanged: only a literal
- * `*` segment is rewritten, and the final `isValidNextRedirectPath` check
- * still accepts it.
+ * `*` segment is rewritten, and the final `invalidRedirectSegment` check
+ * still accepts it. Only the path of a destination is route syntax: its query
+ * and fragment are kept as written, apart from the characters Next reads as
+ * route syntax in a fragment (it compiles the fragment with the path).
+ * A redirect that cannot be carried comes back as the warning that says why.
  */
 function translateRedirectWildcards(
   source: string,
   destination: string,
-): { source: string; destination: string } | null {
+): { source: string; destination: string } | { warning: string } {
+  const dropped = (reason: string) => ({ warning: `Redirect from ${source} ${reason}. It was dropped, so add an equivalent to docs.json if it is still needed.` })
+  const wildcard = 'uses a wildcard Next.js cannot express (a * is only supported as the whole last segment of a path)'
   const sourceSegments = source.split('/')
   // An absolute destination keeps its scheme and host as written; only the path after them takes part.
   const origin = EXTERNAL_ORIGIN.exec(destination)?.[0] ?? ''
-  const destinationSegments = destination.slice(origin.length).split('/')
+  const afterOrigin = destination.slice(origin.length)
+  const pathEnd = afterOrigin.search(/[?#]/)
+  const destinationPath = pathEnd === -1 ? afterOrigin : afterOrigin.slice(0, pathEnd)
+  const queryAndFragment = pathEnd === -1 ? '' : afterOrigin.slice(pathEnd)
+  const fragmentStart = queryAndFragment.indexOf('#')
+  const fragment = fragmentStart === -1 ? undefined : queryAndFragment.slice(fragmentStart + 1)
+  if (fragment !== undefined && FRAGMENT_ROUTE_SYNTAX.test(fragment)) {
+    return dropped(`has a fragment, "#${fragment}", with a character Next.js reads as route syntax (one of : * + ? ( ) { }) so it cannot redirect there as written`)
+  }
+  const destinationSegments = destinationPath.split('/')
   const sourceWildcardIndex = sourceSegments.indexOf('*')
-  if (sourceWildcardIndex !== -1 && sourceWildcardIndex !== sourceSegments.length - 1) return null
-  if (sourceSegments.slice(0, -1).includes('*') || destinationSegments.slice(0, -1).includes('*')) return null
+  if (sourceWildcardIndex !== -1 && sourceWildcardIndex !== sourceSegments.length - 1) return dropped(wildcard)
+  if (sourceSegments.slice(0, -1).includes('*') || destinationSegments.slice(0, -1).includes('*')) return dropped(wildcard)
 
   const translatedSource = [...sourceSegments]
   if (sourceWildcardIndex !== -1) translatedSource[sourceWildcardIndex] = ':path*'
 
   const destinationHasWildcard = destinationSegments.at(-1) === '*'
-  if (destinationHasWildcard && sourceWildcardIndex === -1) return null
+  if (destinationHasWildcard && sourceWildcardIndex === -1) return dropped('has a wildcard (*) in its destination but none in its source, which Next.js cannot express')
   const translatedDestination = [...destinationSegments]
   if (destinationHasWildcard) translatedDestination[translatedDestination.length - 1] = ':path*'
 
   const finalSource = translatedSource.join('/')
   const finalDestinationPath = translatedDestination.join('/')
-  if (!isValidNextRedirectPath(finalSource) || !isValidNextRedirectPath(finalDestinationPath)) return null
-  return { source: finalSource, destination: `${origin}${finalDestinationPath}` }
+  for (const path of [finalSource, finalDestinationPath]) {
+    const segment = invalidRedirectSegment(path)
+    if (segment === null) continue
+    return dropped(segment.includes('*')
+      ? `uses a wildcard Next.js cannot express: "${segment}" has a * inside a segment, and a * is only supported as the whole last segment of a path`
+      : `has a path segment, "${segment}", with a ":" in it, which Next.js reads as the start of a route parameter, so it cannot match that path as written`)
+  }
+  return { source: finalSource, destination: `${origin}${finalDestinationPath}${queryAndFragment}` }
 }
 
-/** Conservative structural check for the path-to-regexp syntax Next.js redirects accept. */
-function isValidNextRedirectPath(path: string): boolean {
-  return path.split('/').every((segment) => {
-    if (segment === '' || segment === '*') return segment === ''
-    if (!segment.startsWith(':')) return !segment.includes('*') && !segment.includes(':')
+/** The characters Next compiles as route syntax: they would fail the build in a fragment, or make the redirect fail when it is followed. */
+const FRAGMENT_ROUTE_SYNTAX = /[:*+?(){}]/
+
+/** The first segment of a path that Next.js redirect syntax cannot express, or null when every segment is fine (a conservative structural check of path-to-regexp). */
+function invalidRedirectSegment(path: string): string | null {
+  return path.split('/').find((segment) => {
+    if (segment === '' || segment === '*') return segment !== ''
+    if (!segment.startsWith(':')) return segment.includes('*') || segment.includes(':')
     const name = segment.endsWith('*') ? segment.slice(1, -1) : segment.slice(1)
-    return NEXT_REDIRECT_PARAM_NAME.test(name)
-  })
+    return !NEXT_REDIRECT_PARAM_NAME.test(name)
+  }) ?? null
 }
 
 /**
@@ -1863,11 +1886,8 @@ export function projectMintlifyNavigation(
           return []
         }
         const translated = translateRedirectWildcards(rawSource, rawDestination)
-        if (!translated) {
-          warnings.push({
-            code: 'unsupported-config',
-            message: `Redirect from ${rawSource} uses a wildcard Next.js cannot express and was dropped.`,
-          })
+        if ('warning' in translated) {
+          warnings.push({ code: 'unsupported-config', message: translated.warning })
           return []
         }
         return [{

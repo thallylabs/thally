@@ -3,6 +3,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { checkCustomRoutes } from 'next/dist/lib/load-custom-routes'
+import { getPathMatch } from 'next/dist/shared/lib/router/utils/path-match'
+import { prepareDestination } from 'next/dist/shared/lib/router/utils/prepare-destination'
 import { describe, expect, it } from 'vitest'
 import {
   addMintlifyDirectoryRedirects,
@@ -429,6 +432,57 @@ describe('Mintlify redirects to an address outside the site', () => {
     ])
     expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: 'https://example.com/kept', permanent: true }])
     expect(result.warnings.map((warning) => warning.message).join('\n')).toContain('/colon')
+  })
+
+  /** What Next.js itself makes of a redirect for a request to `from`: whether the build accepts it, and where the visitor is sent. */
+  const nextRedirect = ({ source, destination }: { source: string; destination: string }, from: string) => {
+    expect(() => checkCustomRoutes([{ source, destination, permanent: false }], 'redirect')).not.toThrow()
+    const match = getPathMatch(source, { removeUnnamedParams: true, strict: true })
+    const { parsedDestination, newUrl } = prepareDestination({ appendParamsToQuery: false, destination, params: match(from) as Record<string, string>, query: {} })
+    return { host: parsedDestination.hostname, path: newUrl, query: parsedDestination.query }
+  }
+
+  it('keeps a destination whose query or fragment holds a colon, since only its path is route syntax', () => {
+    const redirects = [
+      { source: '/old', destination: 'https://example.com/?next=https://other.com' },
+      { source: '/old-page', destination: 'https://example.com/a/b?x=1&y=c:d#section' },
+      { source: '/local', destination: '/new?next=https://other.com' },
+    ]
+    const result = projected(redirects)
+    expect(result.docsConfig.redirects).toEqual(redirects.map((redirect) => ({ ...redirect, permanent: true })))
+    expect(result.warnings).toEqual([])
+    expect(nextRedirect(redirects[0], '/old')).toEqual({ host: 'example.com', path: '/', query: { next: 'https://other.com' } })
+    expect(nextRedirect(redirects[1], '/old-page')).toEqual({ host: 'example.com', path: '/a/b#section', query: { x: '1', y: 'c:d' } })
+    expect(nextRedirect(redirects[2], '/local')).toEqual({ host: null, path: '/new', query: { next: 'https://other.com' } })
+  })
+
+  it('translates a trailing wildcard in front of a query on the destination', () => {
+    const result = projected([{ source: '/old/*', destination: 'https://example.com/new/*?from=docs' }])
+    const [redirect] = result.docsConfig.redirects!
+    expect(redirect).toEqual({ source: '/old/:path*', destination: 'https://example.com/new/:path*?from=docs', permanent: true })
+    expect(result.warnings).toEqual([])
+    expect(nextRedirect(redirect, '/old/a/b')).toEqual({ host: 'example.com', path: '/new/a/b', query: { from: 'docs' } })
+  })
+
+  it('names the real reason for each redirect whose path or fragment Next.js cannot carry', () => {
+    const result = projected([
+      { source: '/frag', destination: 'https://example.com/p#a:b' },
+      { source: '/wiki/Category:Foo', destination: '/x' },
+      { source: '/to-wiki', destination: '/wiki/Category:Foo' },
+      { source: '/glob*', destination: '/x' },
+      { source: '/a/*/b', destination: '/c' },
+      { source: '/only-dest', destination: '/dest/*' },
+      { source: '/kept', destination: '/still-kept' },
+    ])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept', permanent: true }])
+    const [fragment, sourceColon, destinationColon, glob, middle, onlyDestination] = result.warnings.map((warning) => warning.message)
+    expect(fragment).toMatch(/^Redirect from \/frag .*fragment.*"#a:b".*dropped/)
+    expect(sourceColon).toMatch(/^Redirect from \/wiki\/Category:Foo .*"Category:Foo".*":"/)
+    expect(destinationColon).toMatch(/^Redirect from \/to-wiki .*"Category:Foo".*":"/)
+    for (const message of [fragment, sourceColon, destinationColon]) expect(message).not.toContain('wildcard')
+    for (const message of [glob, middle, onlyDestination]) expect(message).toContain('wildcard')
+    expect(glob).toContain('"glob*"')
+    expect(result.warnings).toHaveLength(6)
   })
 
   it.each([

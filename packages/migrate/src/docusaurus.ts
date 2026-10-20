@@ -720,8 +720,8 @@ function redirectEntriesFromObjectLiteralText(
         continue
       }
       const translated = translateRedirectWildcards(from, entry.to)
-      if (!translated) {
-        warnings.push({ code: 'unsupported-config', message: `Redirect from ${from} uses a wildcard Next.js cannot express and was dropped.` })
+      if ('warning' in translated) {
+        warnings.push({ code: 'unsupported-config', message: translated.warning })
         continue
       }
       entries.push(translated)

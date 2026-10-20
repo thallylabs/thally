@@ -899,12 +899,8 @@ export function projectFernNavigation(input: {
           return []
         }
         const translated = translateRedirectWildcards(rawSource, rawDestination)
-        if (!translated) {
-          warnOnce(
-            context,
-            `fern-redirect-wildcard-${rawSource}`,
-            `Redirect from ${rawSource} uses a wildcard Next.js cannot express and was dropped.`,
-          )
+        if ('warning' in translated) {
+          warnOnce(context, `fern-redirect-wildcard-${rawSource}`, translated.warning)
           return []
         }
         return [{
