@@ -81,11 +81,17 @@ function list(sources: Array<string>): string {
 /** Characters Next's route-pattern parser reads as operators, so a source holding one (Mintlify's literal `/client/c++`) is rejected. */
 const ROUTE_PATTERN_OPERATORS = /[+?()[\]{}]/
 
+/** A source's final segment as a catch-all: `/:name*` also matches the path without it, `/:name+` needs one or more segments. */
+const TRAILING_ZERO_OR_MORE = /\/:[A-Za-z_][A-Za-z0-9_]*\*$/
+const TRAILING_ONE_OR_MORE = /\/:[A-Za-z_][A-Za-z0-9_]*\+$/
+
 /**
  * Drop each redirect Next.js cannot serve as written: one back to its own
  * route (a trailing slash is the same route) and one whose source has
- * route-pattern operators, which would fail the build. An omitted address with
- * operators is named in one warning; a self-redirect gets its own. A redirect
+ * route-pattern operators, which would fail the build. A final `/:name+`
+ * segment is route syntax Next reads as intended: `dropConflictingRedirects`
+ * writes it, and a set that passes through here again must keep it. An omitted
+ * address with operators is named in one warning; a self-redirect gets its own. A redirect
  * to its own route with a query or fragment added is left to
  * `dropConflictingRedirects`: sources match the request path alone, so it loops
  * all the same, and that check says so.
@@ -100,7 +106,7 @@ export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: A
       warnings.push({ code: 'unsupported-config', message: `Self-redirect from ${redirect.source} to ${redirect.destination} was omitted.` })
       return false
     }
-    if (!ROUTE_PATTERN_OPERATORS.test(redirect.source)) return true
+    if (!ROUTE_PATTERN_OPERATORS.test(redirect.source.replace(TRAILING_ONE_OR_MORE, ''))) return true
     unmatchable.push(redirect.source)
     return false
   })
@@ -164,7 +170,11 @@ function redirectChains(): {
  * closes a loop under either one. A conflict that exists only because case is
  * ignored gets its own warning, which says the redirect can come back on a
  * case-sensitive host. Patterns are left to the callers that translate them:
- * they cannot be compared with a page path.
+ * they cannot be compared with a page path, with one exception. A source that
+ * ends in a catch-all `/:name*` also matches the path without that segment, so
+ * when that path is a page, or is where the redirect itself goes, the redirect
+ * would hide the page or send it to itself. It is rewritten to `/:name+`, which
+ * keeps redirecting every deeper path.
  */
 export function dropConflictingRedirects(
   config: MigrationDocsConfig,
@@ -183,12 +193,22 @@ export function dropConflictingRedirects(
   // The introduction page is also served at `/`, so `/introduction` -> `/` only
   // retires an alias of it, unless `/` itself redirects somewhere.
   const rootRedirected = config.redirects.some((redirect) => literalRoute(redirect.source) === '/')
-  const redirects = config.redirects.filter((redirect) => {
+  const retiresRootAlias = (route: string, destination: string | null): boolean => route === '/introduction' && !rootRedirected && destination === '/'
+  // `served` holds every page route in lower case, so one lookup judges both readings of letter case.
+  const requiresSegment = <T extends { source: string; destination: string }>(redirect: T): T => {
+    if (!TRAILING_ZERO_OR_MORE.test(redirect.source)) return redirect
+    const prefix = literalRoute(redirect.source.replace(TRAILING_ZERO_OR_MORE, '') || '/')
+    if (!prefix) return redirect
+    const destination = destinationRoute(redirect.destination)?.toLowerCase() ?? null
+    const hidesPage = served.has(prefix) && !retiresRootAlias(prefix, destination)
+    return hidesPage || destination === prefix ? { ...redirect, source: redirect.source.replace(/\*$/, '+') } : redirect
+  }
+  const narrowed = config.redirects.map(requiresSegment)
+  const redirects = narrowed.filter((redirect) => {
     const source = literalRoute(redirect.source)
     if (!source) return true
     const writtenSource = exactRoute(redirect.source)!
-    const retiresRootAlias = source === '/introduction' && !rootRedirected && destinationRoute(redirect.destination) === '/'
-    if (served.has(source) && !retiresRootAlias) {
+    if (served.has(source) && !retiresRootAlias(source, destinationRoute(redirect.destination))) {
       const hides = servedAsWritten.has(writtenSource) ? hidden : hiddenByCase
       hides.push(redirect.source)
       return false
@@ -236,7 +256,7 @@ export function dropConflictingRedirects(
       message: `Skipped ${loopingByCase.length} redirect${one ? '' : 's'} that would send visitors in a circle on a server that ignores letter case, since the addresses involved differ only in letter case: ${list(loopingByCase)}. If your host matches URLs case-sensitively, add ${one ? 'it' : 'them'} back to docs.json.`,
     })
   }
-  if (redirects.length === config.redirects.length) return config
+  if (redirects.length === config.redirects.length && narrowed.every((redirect, index) => redirect === config.redirects![index])) return config
   const result: MigrationDocsConfig = { ...config, redirects }
   if (redirects.length === 0) delete result.redirects
   return result

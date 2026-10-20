@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createContext, Script } from 'node:vm'
 
+import { checkCustomRoutes } from 'next/dist/lib/load-custom-routes'
+import { getPathMatch } from 'next/dist/shared/lib/router/utils/path-match'
+import { prepareDestination } from 'next/dist/shared/lib/router/utils/prepare-destination'
 import { describe, expect, it } from 'vitest'
 
 import { migrateRepository, migrateUrl, type MigrationFetcher } from '../index.js'
@@ -139,6 +142,27 @@ describe('Mintlify redirects that would loop or hide a page', () => {
   })
 })
 
+describe('Mintlify catch-all redirects whose prefix is a page', () => {
+  it('keeps a trailing :path* redirect for deeper paths, so the page it also matched at zero segments stays reachable', () => {
+    const bundle = mintlify({
+      redirects: [
+        { source: '/docs/sdks/typescript/:path*', destination: '/docs/sdks/typescript' },
+        { source: '/old', destination: '/docs/sdks/typescript' },
+      ],
+      navigation: { groups: [{ group: 'Start', pages: ['index', 'docs/sdks/typescript'] }] },
+    }, {
+      index: '---\ntitle: Home\n---\n\nWelcome.',
+      'docs/sdks/typescript': '---\ntitle: TypeScript\n---\n\nBody.',
+    })
+    const redirects = bundle.docsConfig.redirects ?? []
+    expect(bundle.pages.map((page) => page.id)).toContain('docs/sdks/typescript')
+    expect(redirects).toContainEqual({ source: '/docs/sdks/typescript/:path+', destination: '/docs/sdks/typescript' })
+    expect(redirects.map((redirect) => redirect.source)).not.toContain('/docs/sdks/typescript/:path*')
+    expect(redirects).toContainEqual({ source: '/old', destination: '/docs/sdks/typescript' })
+    expect(messages(bundle)).not.toMatch(/Skipped|circle|hide/)
+  })
+})
+
 describe('Mintlify default version redirects', () => {
   it('leaves the page a version alias would hide alone, and says nothing about the alias', () => {
     const bundle = mintlify({
@@ -249,6 +273,99 @@ describe('dropConflictingRedirects', () => {
     ]
     const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
     expect(dropConflictingRedirects(config(redirects), pages, warnings).redirects).toEqual(redirects)
+    expect(warnings).toEqual([])
+  })
+
+  it('rewrites a trailing :name* to :name+ when its zero-segment reading is a page, keeping the destination and flags', () => {
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    const result = dropConflictingRedirects(config([
+      { source: '/guide/:path*', destination: '/guide' },
+      { source: '/section/:path*', destination: '/docs/section/:path*', permanent: true },
+      { source: '/fr/guide/:rest*', destination: '/x?y=1' },
+    ]), pages, warnings)
+    expect(result.redirects).toEqual([
+      { source: '/guide/:path+', destination: '/guide' },
+      { source: '/section/:path+', destination: '/docs/section/:path*', permanent: true },
+      { source: '/fr/guide/:rest+', destination: '/x?y=1' },
+    ])
+    expect(warnings).toEqual([])
+  })
+
+  it('rewrites a trailing :name* whose zero-segment reading is its own destination, even when no page is there', () => {
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    const result = dropConflictingRedirects(config([
+      { source: '/docs/:path*', destination: '/docs' },
+      { source: '/api/:path*', destination: '/api/?view=all#top' },
+      { source: '/:path*', destination: '/' },
+    ]), pages, warnings)
+    expect(result.redirects).toEqual([
+      { source: '/docs/:path+', destination: '/docs' },
+      { source: '/api/:path+', destination: '/api/?view=all#top' },
+      { source: '/:path+', destination: '/' },
+    ])
+    expect(warnings).toEqual([])
+  })
+
+  it('judges the zero-segment reading under both readings of letter case', () => {
+    const result = dropConflictingRedirects(config([
+      { source: '/Guide/:path*', destination: '/x' },
+      { source: '/DOCS/api/:rest*', destination: '/docs/API' },
+    ]), pages, [])
+    expect(result.redirects).toEqual([
+      { source: '/Guide/:path+', destination: '/x' },
+      { source: '/DOCS/api/:rest+', destination: '/docs/API' },
+    ])
+  })
+
+  it('leaves a catch-all alone when its zero-segment reading is neither a page nor its destination', () => {
+    const input = config([
+      { source: '/old/:path*', destination: '/new/:path*' },
+      { source: '/legacy/:path*', destination: '/guide' },
+      { source: '/docs/:slug*', destination: '/docs/v2/:slug*' },
+    ])
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    expect(dropConflictingRedirects(input, pages, warnings)).toBe(input)
+    expect(warnings).toEqual([])
+  })
+
+  it('leaves a source alone unless its only pattern is a final :name* segment', () => {
+    const input = config([
+      { source: '/guide/*/:path*', destination: '/guide' },
+      { source: '/guide/*', destination: '/guide' },
+      { source: '/:lang/guide/:path*', destination: '/guide' },
+      { source: '/guide/:a*/:b*', destination: '/guide' },
+      { source: '/guide/:path+', destination: '/guide' },
+      { source: '/guide/:path', destination: '/guide' },
+    ])
+    expect(dropConflictingRedirects(input, pages, [])).toBe(input)
+  })
+
+  it('leaves /introduction/:path* -> / alone: like /introduction -> /, it only retires an alias of the root page', () => {
+    const input = config([{ source: '/introduction/:path*', destination: '/' }])
+    expect(dropConflictingRedirects(input, pages, [])).toBe(input)
+    const rootRedirected = config([{ source: '/', destination: '/guide' }, { source: '/introduction/:path*', destination: '/' }])
+    expect(dropConflictingRedirects(rootRedirected, pages, []).redirects).toEqual([{ source: '/', destination: '/guide' }, { source: '/introduction/:path+', destination: '/' }])
+  })
+
+  it('writes a redirect Next accepts, which no longer matches the page but still matches deeper paths', () => {
+    const [{ source, destination }, pair] = dropConflictingRedirects(config([
+      { source: '/guide/:path*', destination: '/guide' },
+      { source: '/section/:path*', destination: '/docs/section/:path*' },
+    ]), pages, []).redirects!
+    for (const redirect of [{ source, destination }, pair]) expect(() => checkCustomRoutes([{ ...redirect, permanent: false }], 'redirect')).not.toThrow()
+    const match = getPathMatch(source, { removeUnnamedParams: true, strict: true })
+    expect(match('/guide')).toBe(false)
+    expect(match('/guide/overview')).toEqual({ path: ['overview'] })
+    expect(prepareDestination({ appendParamsToQuery: false, destination, params: match('/guide/a/b') as Record<string, string | Array<string>>, query: {} }).newUrl).toBe('/guide')
+    const matchPair = getPathMatch(pair.source, { removeUnnamedParams: true, strict: true })
+    expect(matchPair('/section')).toBe(false)
+    expect(prepareDestination({ appendParamsToQuery: false, destination: pair.destination, params: matchPair('/section/a/b') as Record<string, string | Array<string>>, query: {} }).newUrl).toBe('/docs/section/a/b')
+  })
+
+  it('does not rewrite a source it already rewrote, so a second pass over a migrated set changes nothing', () => {
+    const once = dropConflictingRedirects(config([{ source: '/guide/:path*', destination: '/guide' }]), pages, [])
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    expect(dropConflictingRedirects(dropUnroutableRedirects(once, warnings), pages, warnings)).toBe(once)
     expect(warnings).toEqual([])
   })
 
@@ -524,6 +641,18 @@ describe('dropUnroutableRedirects', () => {
     expect(warnings).toHaveLength(2)
     expect(warnings[0].message).toBe('Self-redirect from /docs/models/ to /docs/models was omitted.')
     expect(warnings[1].message).toContain('Skipped 2 redirects from /sdk/c++/users, /sdk/c++/groups')
+  })
+
+  it('keeps a source that ends in a :name+ catch-all, and still omits a literal + before it', () => {
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    const result = dropUnroutableRedirects(config([
+      { source: '/docs/sdks/:path+', destination: '/docs/sdks' },
+      { source: '/sdk/c++/:rest+', destination: '/x' },
+      { source: '/docs/:path+/more', destination: '/x' },
+    ]), warnings)
+    expect(result.redirects).toEqual([{ source: '/docs/sdks/:path+', destination: '/docs/sdks' }])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].message).toContain('Skipped 2 redirects from /sdk/c++/:rest+, /docs/:path+/more')
   })
 
   it('leaves a redirect between two cases of one address to the conflict check, which says why', () => {

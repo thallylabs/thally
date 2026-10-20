@@ -302,7 +302,11 @@ URLs case-sensitively. Next.js reads a redirect source as a route pattern, so on
 whose address has a `+ ? ( ) [ ] { }` character (a `directory` such as
 `sdk/c++`) would fail the build; every redirect from authored config, a local
 spec or a downloaded spec is left out instead, and one warning lists the first
-ten of them.
+ten of them. A source that ends in a catch-all `/:name*` also matches the path
+without that segment, so when that path is a page of the site, or is where the
+redirect itself goes (`/docs/sdks/typescript/:path*` to `/docs/sdks/typescript`),
+the redirect would send the page to itself. Its source is rewritten to
+`/:name+`, which keeps redirecting every deeper path and leaves the page alone.
 
 A Mintlify page whose frontmatter `url` is a web address is a link in the
 source sidebar. It is imported as a page that is kept out of the sitemap, stays

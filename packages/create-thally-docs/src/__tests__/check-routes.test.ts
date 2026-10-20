@@ -241,6 +241,22 @@ describe('thally check reader routes', () => {
     expect(result.exit).toBe(0)
   })
 
+  it('reports a link to a page whose own trailing :param* redirect sends it to itself', async () => {
+    const result = await checkLinks('[Token](/api-reference/token)', [
+      { source: '/api-reference/token/:path*', destination: '/api-reference/token' },
+    ])
+    expect(result.exit).toBe(1)
+    expect(result.output).toContain('Broken link: "/api-reference/token"')
+  })
+
+  it('reaches the page itself, and follows deeper paths to it, through a trailing :param+ redirect', async () => {
+    const result = await checkLinks('[Token](/api-reference/token#response) [Deeper](/api-reference/token/overview#response)', [
+      { source: '/api-reference/token/:path+', destination: '/api-reference/token' },
+    ])
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken')
+  })
+
   it('substitutes params by exact name when one name prefixes another', async () => {
     const result = await checkLinks('[Old](/x/1/token)', [
       { source: '/x/:a/:abc', destination: '/api-reference/:abc' },
