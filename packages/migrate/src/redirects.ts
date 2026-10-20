@@ -189,7 +189,8 @@ function redirectChains(): {
  * ends in a catch-all `/:name*` also matches the path without that segment, so
  * when that path is a page, or is where the redirect itself goes, the redirect
  * would hide the page or send it to itself. It is rewritten to `/:name+`, which
- * keeps redirecting every deeper path.
+ * keeps redirecting every deeper path. For `/:name*` that path is the root,
+ * which answers with the home page or a redirect of its own.
  */
 export function dropConflictingRedirects(
   config: MigrationDocsConfig,
@@ -209,13 +210,15 @@ export function dropConflictingRedirects(
   // retires an alias of it, unless `/` itself redirects somewhere.
   const rootRedirected = config.redirects.some((redirect) => literalRoute(redirect.source) === '/')
   const retiresRootAlias = (route: string, destination: string | null): boolean => route === '/introduction' && !rootRedirected && destination === '/'
+  // The root answers with the home page the runtime serves there, or with a redirect of its own; a catch-all must not take it over.
+  const rootAnswers = rootRedirected || pages.some((page) => pageEntryRoutes(page).includes('/'))
   // `served` holds every page route in lower case, so one lookup judges both readings of letter case.
   const requiresSegment = <T extends { source: string; destination: string }>(redirect: T): T => {
     if (!TRAILING_ZERO_OR_MORE.test(redirect.source)) return redirect
     const prefix = literalRoute(redirect.source.replace(TRAILING_ZERO_OR_MORE, '') || '/')
     if (!prefix) return redirect
     const destination = destinationRoute(redirect.destination)?.toLowerCase() ?? null
-    const hidesPage = served.has(prefix) && !retiresRootAlias(prefix, destination)
+    const hidesPage = (served.has(prefix) || (prefix === '/' && rootAnswers)) && !retiresRootAlias(prefix, destination)
     return hidesPage || destination === prefix ? { ...redirect, source: redirect.source.replace(/\*$/, '+') } : redirect
   }
   const narrowed = config.redirects.map(requiresSegment)

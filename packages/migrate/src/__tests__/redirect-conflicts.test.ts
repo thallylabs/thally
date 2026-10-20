@@ -163,6 +163,22 @@ describe('Mintlify catch-all redirects whose prefix is a page', () => {
   })
 })
 
+describe('Mintlify root catch-all redirects', () => {
+  it('keeps the home page reachable at /, since /:path* also matches the root', () => {
+    const bundle = mintlify({
+      redirects: [{ source: '/:path*', destination: 'https://example.com/docs' }],
+      navigation: { groups: [{ group: 'Start', pages: ['index', 'guide'] }] },
+    }, {
+      index: '---\ntitle: Home\n---\n\nWelcome.',
+      guide: '---\ntitle: Guide\n---\n\nBody.',
+    })
+    expect(bundle.pages.map((page) => page.id)).toContain('introduction')
+    const redirects = bundle.docsConfig.redirects ?? []
+    expect(redirects).toContainEqual({ source: '/:path+', destination: 'https://example.com/docs', permanent: true })
+    expect(redirects.map((redirect) => redirect.source)).not.toContain('/:path*')
+  })
+})
+
 describe('Mintlify redirects to an address outside the site', () => {
   // docs.json of dub.co: live Mintlify answers both with a 308 to the external address.
   const external = [
@@ -365,6 +381,36 @@ describe('dropConflictingRedirects', () => {
       { source: '/:path+', destination: '/' },
     ])
     expect(warnings).toEqual([])
+  })
+
+  it('rewrites a root catch-all whose destination is elsewhere, because the home page is served at /', () => {
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    const result = dropConflictingRedirects(config([
+      { source: '/:path*', destination: 'https://example.com/docs', permanent: true },
+    ]), pages, warnings)
+    expect(result.redirects).toEqual([{ source: '/:path+', destination: 'https://example.com/docs', permanent: true }])
+    expect(warnings).toEqual([])
+    const match = getPathMatch('/:path+', { removeUnnamedParams: true, strict: true })
+    expect(match('/')).toBe(false)
+    expect(match('/anything/deeper')).toEqual({ path: ['anything', 'deeper'] })
+  })
+
+  it('leaves a root catch-all alone when nothing else answers at /', () => {
+    const noHome = config([{ source: '/:path*', destination: 'https://example.com/docs' }])
+    expect(dropConflictingRedirects(noHome, [{ id: 'guide' }], [])).toBe(noHome)
+  })
+
+  it('rewrites a root catch-all when / has a redirect of its own, in either order, so that redirect is the one that fires', () => {
+    const shadowing = config([{ source: '/:path*', destination: 'https://example.com/docs' }, { source: '/', destination: '/guide' }])
+    expect(dropConflictingRedirects(shadowing, [{ id: 'guide' }], []).redirects).toEqual([
+      { source: '/:path+', destination: 'https://example.com/docs' },
+      { source: '/', destination: '/guide' },
+    ])
+    const rootFirst = config([{ source: '/', destination: '/guide' }, { source: '/:path*', destination: 'https://example.com/docs' }])
+    expect(dropConflictingRedirects(rootFirst, pages, []).redirects).toEqual([
+      { source: '/', destination: '/guide' },
+      { source: '/:path+', destination: 'https://example.com/docs' },
+    ])
   })
 
   it('judges the zero-segment reading under both readings of letter case', () => {

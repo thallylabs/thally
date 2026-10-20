@@ -307,6 +307,9 @@ without that segment, so when that path is a page of the site, or is where the
 redirect itself goes (`/docs/sdks/typescript/:path*` to `/docs/sdks/typescript`),
 the redirect would send the page to itself. Its source is rewritten to
 `/:name+`, which keeps redirecting every deeper path and leaves the page alone.
+For `/:name*` that path is the root `/`, which the site answers with its
+introduction page or with a redirect of its own, so such a catch-all
+(`/:path*` to `https://example.com/docs`) becomes `/:path+` in either case.
 
 A Mintlify page whose frontmatter `url` is a web address is a link in the
 source sidebar. It is imported as a page that is kept out of the sitemap, stays
