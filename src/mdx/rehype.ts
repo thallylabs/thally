@@ -816,7 +816,9 @@ interface HeadingTarget {
  * A `<ParamField>` or `<ResponseField>` is given the anchor Mintlify serves for
  * it (`param-expires-in-days`). Those are numbered once every heading has its id,
  * so a field never takes a heading's id and never shifts one. A field with an
- * `id` of its own keeps it, and the other fields skip it.
+ * `id` of its own keeps it. Every `id` an author wrote anywhere on the page (a
+ * field, a Step whose title is plain text, a Card, an HTML element) is skipped,
+ * so a generated field id never repeats one.
  */
 function rehypeUniqueHeadingIds() {
   return (tree: Root) => {
@@ -824,7 +826,7 @@ function rehypeUniqueHeadingIds() {
     const usedIds = new Set<string>()
     const targets: Array<HeadingTarget> = []
     const fields: Array<{ base: string; assign: (id: string) => void }> = []
-    const fieldIds = new Set<string>()
+    const authoredIds = new Set<string>()
     const text = (node: Element): string => node.children.map((child) =>
       child.type === 'text' ? child.value
         : child.type === 'element' ? text(child)
@@ -833,6 +835,7 @@ function rehypeUniqueHeadingIds() {
       let childSize = stepSize
       if (node.type === 'element') {
         const element = node as Element
+        if (typeof element.properties?.id === 'string' && element.properties.id) authoredIds.add(element.properties.id)
         if (/^h[2-6]$/.test(element.tagName)) {
           const given = typeof element.properties?.id === 'string' && element.properties.id
             ? element.properties.id : takeHeadingIdMarker(element)
@@ -844,6 +847,8 @@ function rehypeUniqueHeadingIds() {
         }
       } else if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
         const jsx = node as JsxNode
+        const authored = jsxStringAttribute(jsx, 'id')?.trim()
+        if (authored) authoredIds.add(authored)
         // `<Steps>` hands its size to every step below it, set or not (a React context).
         if (jsx.name === 'Steps') childSize = jsxStringAttribute(jsx, 'titleSize') ?? undefined
         if (jsx.name === 'Step') {
@@ -859,11 +864,9 @@ function rehypeUniqueHeadingIds() {
           }
         }
         if (jsx.name === 'ParamField' || jsx.name === 'ResponseField') {
-          const given = jsxStringAttribute(jsx, 'id')?.trim()
           const name = fieldAnchorName(jsx.name, (attribute) => jsxStringAttribute(jsx, attribute))
           const base = name === undefined ? undefined : fieldAnchorBase(name)
-          if (given) fieldIds.add(given)
-          else if (base) fields.push({ base, assign: (id) => setJsxId(jsx, id) })
+          if (!authored && base) fields.push({ base, assign: (id) => setJsxId(jsx, id) })
         }
       }
       for (const child of (node as JsxNode).children ?? []) collect(child, childSize)
@@ -886,8 +889,8 @@ function rehypeUniqueHeadingIds() {
       usedIds.add(id)
       target.assign(id)
     }
-    // A field takes the id Mintlify gives it, numbered after the headings and the ids authors gave other fields.
-    for (const id of fieldIds) usedIds.add(id)
+    // A field takes the id Mintlify gives it, numbered after the headings and skipping every id an author wrote.
+    for (const id of authoredIds) usedIds.add(id)
     for (const field of fields) field.assign(uniqueFieldId(field.base, usedIds))
   }
 }

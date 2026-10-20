@@ -106,6 +106,34 @@ describe('field ids on a rendered page', () => {
     expect(await renderedIds(source)).toEqual(['param-y', 'param-y-1', 'mine'])
   })
 
+  it('keeps an id the author gave a field as written, even when a heading has it, and shifts no heading', async () => {
+    const source = '## Param name\n\n<ParamField body="x" id="param-name">One.</ParamField>\n\n<ParamField body="name">Two.</ParamField>'
+    expect(await renderedIds(source)).toEqual(['param-name', 'param-name', 'param-name-1'])
+  })
+
+  it('skips the id of a plain-text Step, which renders no heading', async () => {
+    const source = [
+      '<Steps titleSize="p">',
+      '  <Step title="One" id="param-name">Text.</Step>',
+      '</Steps>',
+      '',
+      '<ParamField body="name" type="string">The name.</ParamField>',
+    ].join('\n')
+    expect(await renderedIds(source)).toEqual(['param-name', 'param-name-1'])
+  })
+
+  it('skips an id authored on any other element, whether it comes before or after the field', async () => {
+    const card = '<Card title="Card" id="param-name">Text.</Card>'
+    const div = '<div id="param-name-1">Text.</div>'
+    const field = '<ParamField body="name" type="string">The name.</ParamField>'
+    expect(await renderedIds(`${field}\n\n${card}\n\n${div}`)).toEqual(['param-name-2', 'param-name', 'param-name-1'])
+  })
+
+  it('shifts no heading when an id is authored elsewhere on the page', async () => {
+    const source = '<Card title="Card" id="mine" />\n\n## Mine\n\n<ParamField body="mine">Own.</ParamField>'
+    expect(await renderedIds(source)).toEqual(['mine', 'mine', 'param-mine'])
+  })
+
   it('gives none to a field with no literal name', async () => {
     const source = [
       '<ParamField type="string">No name.</ParamField>',
