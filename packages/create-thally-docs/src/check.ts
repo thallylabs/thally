@@ -185,6 +185,13 @@ function stringAttribute(node: MdxNode, name: string): string | null | undefined
   return typeof attribute.value === 'string' ? attribute.value : null
 }
 
+/** A string attribute as the renderer's heading pass reads it: a literal, or a constant string in braces (`title={"Param name"}`); `null` for any other expression, `undefined` when absent. */
+function constantAttribute(node: MdxNode, name: string): string | null | undefined {
+  const attribute = node.attributes?.find((item) => item.type === 'mdxJsxAttribute' && item.name === name)
+  if (!attribute) return undefined
+  return typeof attribute.value === 'string' ? attribute.value : constantString(attribute.value)
+}
+
 /** A heading may hold a JSX comment with `#id` to keep an id its text would not slugify to; the same pattern as the renderer's heading pass. */
 const HEADING_ID_MARKER = /^\s*\/\*\s*#(\S+?)\s*\*\/\s*$/
 
@@ -224,7 +231,9 @@ interface PageIds {
  * comment in it if it has one; a `<Step>` whose title renders as a heading (`titleSize`
  * h2, h3 or h4, on the step or, failing that, on the `<Steps>` around it) is one
  * too. A tag written inside inline code or a comment is not an element, so it counts
- * for nothing. Only literal strings count, as in the renderer. The page is read
+ * for nothing. Only literal strings count, as in the renderer, except where a
+ * constant string in braces (`title={"x"}`) names a field or makes a component's
+ * id: the renderer reads that as the string it is. The page is read
  * as MDX alone: the renderer also reads GFM, which turns a tight `a~b~c` or a
  * footnote reference in a heading into other text, and so another id.
  */
@@ -247,9 +256,9 @@ function readPageIds(content: string): PageIds {
       const base = given ?? (slugify(headingText(heading, false)) || slugify(headingText(heading, true)))
       page.headings.push({ base, explicit: given !== undefined })
     } else if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
-      const authored = stringAttribute(node, 'id')?.trim()
+      const authored = constantAttribute(node, 'id')?.trim()
       if (authored) page.reserved.add(authored)
-      for (const id of componentIds(node.name ?? '', (attribute) => stringAttribute(node, attribute))) page.reserved.add(id)
+      for (const id of componentIds(node.name ?? '', (attribute) => constantAttribute(node, attribute))) page.reserved.add(id)
       // `<Steps>` hands its size to every step below it, set or not (a React context).
       if (node.name === 'Steps') childSize = stringAttribute(node, 'titleSize') ?? undefined
       if (node.name === 'Step') {
@@ -257,13 +266,16 @@ function readPageIds(content: string): PageIds {
         const size = own === undefined ? stepSize : own
         const title = stringAttribute(node, 'title')?.trim()
         if (title && size && STEP_HEADING_SIZES.includes(size)) {
-          page.headings.push({ base: authored || slugify(plainInlineText(title)), explicit: !!authored })
+          // A step's own id counts only as a literal, as in the renderer and the content parser.
+          const given = stringAttribute(node, 'id')?.trim()
+          page.headings.push({ base: given || slugify(plainInlineText(title)), explicit: !!given })
         }
       }
       if (node.name === 'ParamField' || node.name === 'ResponseField') {
-        const name = fieldAnchorName(node.name, (attribute) => stringAttribute(node, attribute))
+        const name = fieldAnchorName(node.name, (attribute) => constantAttribute(node, attribute))
         const base = name === undefined ? undefined : fieldAnchorBase(name)
-        if (!authored && base) page.fieldBases.push(base)
+        // A field with an `id` attribute of any kind keeps it: one that is an expression holds an id only the page knows.
+        if (base && constantAttribute(node, 'id') === undefined) page.fieldBases.push(base)
       }
     }
     for (const child of node.children ?? []) visit(child, childSize)

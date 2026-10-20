@@ -788,12 +788,23 @@ function jsxStringAttribute(node: JsxNode, name: string): string | null | undefi
   return typeof attribute.value === 'string' ? attribute.value : null
 }
 
-/** Give a JSX element an `id` attribute, replacing a literal one. */
+/**
+ * A string attribute: a literal, or a constant string in braces (`title={"Param name"}`),
+ * which hands a component the same string; `null` for any other expression, `undefined`
+ * when the attribute is absent.
+ */
+function jsxConstantAttribute(node: JsxNode, name: string): string | null | undefined {
+  const attribute = node.attributes?.find((item) => item.type === 'mdxJsxAttribute' && item.name === name)
+  if (!attribute) return undefined
+  return typeof attribute.value === 'string' ? attribute.value : constantString(attribute.value)
+}
+
+/** Give a JSX element an `id` attribute, replacing a literal one. An `id` written as an expression is the author's: it is kept. */
 function setJsxId(jsx: JsxNode, id: string): void {
   const attributes = (jsx.attributes ??= [])
   const existing = attributes.find((attribute) => attribute.type === 'mdxJsxAttribute' && attribute.name === 'id')
-  if (existing) existing.value = id
-  else attributes.push({ type: 'mdxJsxAttribute', name: 'id', value: id })
+  if (!existing) attributes.push({ type: 'mdxJsxAttribute', name: 'id', value: id })
+  else if (typeof existing.value === 'string') existing.value = id
 }
 
 /** A node as `renderedText` reads it: a hast element, text, or a JSX element or `{…}` expression MDX leaves in the tree. */
@@ -865,9 +876,9 @@ function rehypeUniqueHeadingIds() {
         }
       } else if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
         const jsx = node as JsxNode
-        const authored = jsxStringAttribute(jsx, 'id')?.trim()
+        const authored = jsxConstantAttribute(jsx, 'id')?.trim()
         if (authored) authoredIds.add(authored)
-        for (const id of componentIds(jsx.name ?? '', (attribute) => jsxStringAttribute(jsx, attribute))) componentGeneratedIds.add(id)
+        for (const id of componentIds(jsx.name ?? '', (attribute) => jsxConstantAttribute(jsx, attribute))) componentGeneratedIds.add(id)
         // `<Steps>` hands its size to every step below it, set or not (a React context).
         if (jsx.name === 'Steps') childSize = jsxStringAttribute(jsx, 'titleSize') ?? undefined
         if (jsx.name === 'Step') {
@@ -883,9 +894,10 @@ function rehypeUniqueHeadingIds() {
           }
         }
         if (jsx.name === 'ParamField' || jsx.name === 'ResponseField') {
-          const name = fieldAnchorName(jsx.name, (attribute) => jsxStringAttribute(jsx, attribute))
+          const name = fieldAnchorName(jsx.name, (attribute) => jsxConstantAttribute(jsx, attribute))
           const base = name === undefined ? undefined : fieldAnchorBase(name)
-          if (!authored && base) fields.push({ base, assign: (id) => setJsxId(jsx, id) })
+          // A field with an `id` attribute of any kind keeps it: one that is an expression holds an id only the page knows.
+          if (base && jsxConstantAttribute(jsx, 'id') === undefined) fields.push({ base, assign: (id) => setJsxId(jsx, id) })
         }
       }
       for (const child of (node as JsxNode).children ?? []) collect(child, childSize)

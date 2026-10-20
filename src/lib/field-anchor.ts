@@ -173,6 +173,8 @@ export function componentIds(tag: string, attribute: (name: string) => string | 
     const value = attribute(name)
     return typeof value === 'string' ? value : undefined
   }
+  // An `id` that is an expression holds something only the page knows, and it replaces the id the title or label would make.
+  if (attribute('id') === null) return []
   if (tag === 'Accordion') {
     const id = accordionAnchorId({ id: literal('id'), title: literal('title') })
     return id ? [id, accordionChildrenId(id)] : []

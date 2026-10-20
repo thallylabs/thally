@@ -192,10 +192,59 @@ describe('field ids on a rendered page', () => {
   it('gives none to a field with no literal name', async () => {
     const source = [
       '<ParamField type="string">No name.</ParamField>',
-      '<ParamField body={"computed"}>Expression.</ParamField>',
+      '<ParamField body={name}>Expression.</ParamField>',
       '<ResponseField name="">Empty.</ResponseField>',
     ].join('\n\n')
     expect(await renderedIds(source)).toEqual([])
+  })
+})
+
+describe('field ids when an attribute is a string written in braces', () => {
+  const field = '<ParamField body="name" type="string">The name.</ParamField>'
+
+  it('reads a field name written in braces as the string it is', async () => {
+    const source = [
+      '<ParamField body={"expiresInDays"}>One.</ParamField>',
+      '<ParamField query={`utm_source`}>Two.</ParamField>',
+      '<ResponseField name={"pagination.hasMore"}>Three.</ResponseField>',
+      '<ParamField path={"a"} body={name}>Four.</ParamField>',
+    ].join('\n\n')
+    expect(await renderedIds(source)).toEqual(['param-expires-in-days', 'param-utm-source', 'param-pagination-has-more', 'param-a'])
+  })
+
+  it('takes the id an Accordion or an Update made from a title or label written in braces', async () => {
+    const accordion = '<Accordion title={"Param name"}>\n\nText.\n\n</Accordion>'
+    expect(await renderedHtmlIds(`${accordion}\n\n${field}`)).toEqual(['param-name', 'param-name-accordion-children', 'param-name-1'])
+    const template = '<Accordion title={`Param name`}>\n\nText.\n\n</Accordion>'
+    expect(await renderedHtmlIds(`${field}\n\n${template}`)).toEqual(['param-name-1', 'param-name', 'param-name-accordion-children'])
+    const update = '<Update label={"Param name"} date={"2024-01-01"}>Text.</Update>'
+    expect(await renderedHtmlIds(`${update}\n\n${field}`)).toEqual(['param-name', 'param-name-1'])
+    const own = '<Accordion title="Other" id={"param-name"}>\n\nText.\n\n</Accordion>'
+    expect(await renderedHtmlIds(`${own}\n\n${field}`)).toEqual(['param-name', 'param-name-accordion-children', 'param-name-1'])
+  })
+
+  it('keeps an id written in braces as it is, and skips it for the other fields', async () => {
+    expect(await renderedHtmlIds('<ParamField body="x" id={"mine"} />')).toEqual(['mine'])
+    expect(await renderedHtmlIds('<ParamField body="x" id={`mine`} />\n\n<ParamField body="mine" />')).toEqual(['mine', 'param-mine'])
+    expect(await renderedHtmlIds('<ParamField body="x" id={"param-y"} />\n\n<ParamField body="y" />')).toEqual(['param-y', 'param-y-1'])
+    expect(await renderedHtmlIds('<ResponseField name="x" id={"mine"} />')).toEqual(['mine'])
+  })
+
+  it('keeps an id that is not a constant, and gives that field none of its own', async () => {
+    // The id is whatever the expression holds when the page renders, so the pass cannot know it: it leaves the attribute alone.
+    const { compile } = await import('@mdx-js/mdx')
+    for (const id of ['{someId}', '{"a" + b}', '{`p-${n}`}']) {
+      const compiled = String(await compile(`<ParamField body="x" id=${id} />\n\n<ParamField body="y" />`, { rehypePlugins: [rehypePlugins[2]] }))
+      expect(compiled, id).not.toContain('param-x')
+      expect(compiled, id).toContain('id: "param-y"')
+    }
+  })
+
+  it('does not overwrite an id on a Step either', async () => {
+    const { compile } = await import('@mdx-js/mdx')
+    const compiled = String(await compile('<Steps titleSize="h3">\n<Step title="Install" id={someId}>x</Step>\n</Steps>', { rehypePlugins: [rehypePlugins[2]] }))
+    expect(compiled).toContain('id: someId')
+    expect(compiled).not.toContain('id: "install"')
   })
 })
 
@@ -359,6 +408,13 @@ describe('thally check and the renderer give a page the same ids', () => {
     ['a component with markup in it, then a field', '## <Badge>Param *name*</Badge>\n\n<ParamField body="name" />'],
     ['punctuation and a component, then a field', '## ?? <Badge>Param name</Badge>\n\n<ParamField body="name" />'],
     ['repeated headings made of components', '## <Badge>Same</Badge>\n\n## <Badge>Same</Badge>\n\n## Same'],
+    ['an Accordion titled in braces, then a field', '<Accordion title={"Param name"}>\n\nText.\n\n</Accordion>\n\n<ParamField body="name" />'],
+    ['an Accordion titled with a template, then a field', '<Accordion title={`Param name`}>\n\nText.\n\n</Accordion>\n\n<ParamField body="name" />'],
+    ['an Update labelled in braces, then a field', '<Update label={"Param name"} date={"2024-01-01"}>Text.</Update>\n\n<ParamField body="name" />'],
+    ['an Accordion with an id in braces', '<Accordion title="Other" id={"mine"}>\n\nText.\n\n</Accordion>\n\n<ParamField body="mine" />'],
+    ['fields named in braces', '<ParamField body={"expiresInDays"} />\n\n<ResponseField name={`pagination.hasMore`} />\n\n<ParamField body={"expiresInDays"} />'],
+    ['a field with an id in braces', '<ParamField body="x" id={"mine"} />\n\n<ParamField body="mine" />'],
+    ['a field with an id that matches the next field', '<ParamField body="x" id={"param-y"} />\n\n<ParamField body="y" />'],
     ['strings in braces in a heading', '## {"Param name"}\n\n## <Badge>{`Param name`}</Badge>\n\n<ParamField body="name" />'],
   ]
 

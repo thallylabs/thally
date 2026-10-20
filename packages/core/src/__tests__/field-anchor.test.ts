@@ -95,6 +95,11 @@ describe('componentIds', () => {
     expect(accordionAnchorId({ title: "Don't use `Promise.all()`" })).toBe('don-t-use-promise-all')
   })
 
+  it('lists none when the id is an expression, which replaces the id the title or label would make', () => {
+    expect(componentIds('Accordion', attributes({ title: 'Param name', id: null }))).toEqual([])
+    expect(componentIds('Update', attributes({ label: 'v1.0', id: null }))).toEqual([])
+  })
+
   it('lists none for an Accordion with no literal id and no title that spells one, where the component takes a React id', () => {
     for (const values of [{ title: '日本語' }, { title: null, id: null }, {}]) expect(componentIds('Accordion', attributes(values))).toEqual([])
   })

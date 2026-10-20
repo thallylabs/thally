@@ -61,3 +61,24 @@ describe('field ids as Mintlify serves them', () => {
     for (const body of [inlineCode, comment, fence]) expect(await brokenAnchorOutput(body, 'param-shown'), body).toContain('Broken anchor')
   })
 })
+
+describe('field ids when an attribute is a string written in braces', () => {
+  it('resolves a field named in braces, as it does one named in quotes', async () => {
+    const body = '<ParamField body={"expiresInDays"}>Days.</ParamField>\n\n<ResponseField name={`pagination.hasMore`}>More.</ResponseField>'
+    expect(await brokenAnchorOutput(body, 'param-expires-in-days')).not.toContain('Broken anchor')
+    expect(await brokenAnchorOutput(body, 'param-pagination-has-more')).not.toContain('Broken anchor')
+  })
+
+  it('numbers a field after the id an Accordion made from a title written in braces', async () => {
+    const body = '<Accordion title={"Param name"}>\n\nText.\n\n</Accordion>\n\n<ParamField body="name">The name.</ParamField>'
+    for (const id of ['param-name', 'param-name-accordion-children', 'param-name-1']) expect(await brokenAnchorOutput(body, id), id).not.toContain('Broken anchor')
+    expect(await brokenAnchorOutput(body, 'param-name-2')).toContain('Broken anchor')
+  })
+
+  it('resolves the id written in braces on a field, and gives the field no other', async () => {
+    const body = '<ParamField body="x" id={"mine"}>One.</ParamField>\n\n<ParamField body="y" id={someId}>Two.</ParamField>'
+    expect(await brokenAnchorOutput(body, 'mine')).not.toContain('Broken anchor')
+    expect(await brokenAnchorOutput(body, 'param-x')).toContain('Broken anchor')
+    expect(await brokenAnchorOutput(body, 'param-y')).toContain('Broken anchor')
+  })
+})
