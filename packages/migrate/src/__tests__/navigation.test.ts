@@ -190,7 +190,7 @@ describe('Mintlify navigation projection', () => {
     })
 
     expect(result.docsConfig.redirects).toEqual([
-      { source: '/api-reference/:path*', destination: '/api/:path*' },
+      { source: '/api-reference/:path*', destination: '/api/:path*', permanent: true },
       { source: '/old/:path*', destination: '/new', permanent: true },
     ])
   })
@@ -321,9 +321,9 @@ describe('Mintlify navigation projection', () => {
     })
 
     expect(result.docsConfig.redirects).toEqual([
-      { source: '/api-reference/:path*', destination: '/api/:path*' },
-      { source: '/settings/auth/:path*', destination: '/deploy/auth-setup' },
-      { source: '/api-playground/mdx/:slug*', destination: '/api-playground/mdx-setup' },
+      { source: '/api-reference/:path*', destination: '/api/:path*', permanent: true },
+      { source: '/settings/auth/:path*', destination: '/deploy/auth-setup', permanent: true },
+      { source: '/api-playground/mdx/:slug*', destination: '/api-playground/mdx-setup', permanent: true },
     ])
   })
 
@@ -337,7 +337,7 @@ describe('Mintlify navigation projection', () => {
       ],
     })
 
-    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept', permanent: true }])
     expect(result.warnings.filter((warning) => warning.code === 'unsupported-config'
       && warning.message.includes('wildcard'))).toHaveLength(2)
   })
@@ -352,7 +352,7 @@ describe('Mintlify navigation projection', () => {
       ],
     })
 
-    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept', permanent: true }])
   })
 
   it('drops a redirect whose destination hides a browser-cross-origin `//` behind a stripped whitespace/control character', () => {
@@ -367,7 +367,31 @@ describe('Mintlify navigation projection', () => {
       ],
     })
 
-    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept', permanent: true }])
+  })
+})
+
+describe('Mintlify redirect status', () => {
+  const projected = (redirects: Array<Record<string, unknown>>) => projectMintlifyNavigation({ navigation: { pages: ['introduction'] }, redirects })
+
+  // Mintlify documents `permanent` as defaulting to true (308); dub.co answers all of its redirects, none of which set it, with 308.
+  it('makes a redirect permanent unless the source sets permanent: false', () => {
+    const result = projected([
+      { source: '/omitted', destination: '/a' },
+      { source: '/explicit-true', destination: '/b', permanent: true },
+      { source: '/explicit-false', destination: '/c', permanent: false },
+      { source: '/wildcard/*', destination: '/d/*' },
+      { source: '/external', destination: 'https://github.com/dubinc/examples' },
+      { source: '/not-a-boolean', destination: '/e', permanent: 'false' },
+    ])
+    expect(result.docsConfig.redirects).toEqual([
+      { source: '/omitted', destination: '/a', permanent: true },
+      { source: '/explicit-true', destination: '/b', permanent: true },
+      { source: '/explicit-false', destination: '/c', permanent: false },
+      { source: '/wildcard/:path*', destination: '/d/:path*', permanent: true },
+      { source: '/external', destination: 'https://github.com/dubinc/examples', permanent: true },
+      { source: '/not-a-boolean', destination: '/e', permanent: true },
+    ])
   })
 })
 
@@ -383,7 +407,7 @@ describe('Mintlify redirects to an address outside the site', () => {
       { source: '/with-query', destination: 'https://example.com:8080/a?b=c#d' },
     ]
     const result = projected(redirects)
-    expect(result.docsConfig.redirects).toEqual(redirects)
+    expect(result.docsConfig.redirects).toEqual(redirects.map((redirect) => ({ ...redirect, permanent: true })))
     expect(result.warnings).toEqual([])
   })
 
@@ -393,8 +417,8 @@ describe('Mintlify redirects to an address outside the site', () => {
       { source: '/host-only/*', destination: 'https://example.com' },
     ])
     expect(result.docsConfig.redirects).toEqual([
-      { source: '/old/:path*', destination: 'https://example.com/new/:path*' },
-      { source: '/host-only/:path*', destination: 'https://example.com' },
+      { source: '/old/:path*', destination: 'https://example.com/new/:path*', permanent: true },
+      { source: '/host-only/:path*', destination: 'https://example.com', permanent: true },
     ])
   })
 
@@ -403,7 +427,7 @@ describe('Mintlify redirects to an address outside the site', () => {
       { source: '/colon', destination: 'https://example.com/a:b' },
       { source: '/kept', destination: 'https://example.com/kept' },
     ])
-    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: 'https://example.com/kept' }])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: 'https://example.com/kept', permanent: true }])
     expect(result.warnings.map((warning) => warning.message).join('\n')).toContain('/colon')
   })
 
@@ -414,7 +438,7 @@ describe('Mintlify redirects to an address outside the site', () => {
     'https://user:pw@evil.example/', 'https://[::1]/x', 'https://evil.example/\tx', 'https://evil.example/ x', 'https://evil.example\\x',
   ])('still rejects the destination %j, with a warning that names its source', (destination) => {
     const result = projected([{ source: '/from', destination }, { source: '/kept', destination: '/still-kept' }])
-    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept', permanent: true }])
     expect(result.warnings.filter((warning) => warning.message.includes('/from'))).toHaveLength(1)
   })
 
@@ -426,7 +450,7 @@ describe('Mintlify redirects to an address outside the site', () => {
       { source: '/line\nbreak', destination: '/x' },
       { source: '/kept', destination: '/still-kept' },
     ])
-    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept', permanent: true }])
     expect(result.warnings.map((warning) => warning.message)).toEqual([
       'Skipped 4 redirects from /a, unrooted, //protocol-relative, /linebreak: a redirect must start at a path on this site (one beginning with a single /) and lead to a path on this site or to an http:// or https:// address. Check these redirects in the source docs and add any that are still needed to docs.json.',
     ])
@@ -460,7 +484,7 @@ describe('Fern redirect safety shares the Mintlify guard', () => {
       fernRoot: '/tmp/fern-root-unused',
     })
 
-    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept', permanent: true }])
   })
 
   it('keeps a destination that is an absolute http(s) address, which Fern documents', () => {
@@ -475,10 +499,32 @@ describe('Fern redirect safety shares the Mintlify guard', () => {
       fernRoot: '/tmp/fern-root-unused',
     })
     expect(result.docsConfig.redirects).toEqual([
-      { source: '/old-folder/path', destination: 'https://www.example.com/fern' },
-      { source: '/old/:path*', destination: 'https://www.example.com/new/:path*' },
+      { source: '/old-folder/path', destination: 'https://www.example.com/fern', permanent: true },
+      { source: '/old/:path*', destination: 'https://www.example.com/new/:path*', permanent: true },
     ])
     expect(result.warnings.filter((warning) => warning.message.includes('/old'))).toEqual([])
+  })
+
+  // Fern documents `permanent` as defaulting to true (308), and `permanent: false` as the way to get a 307.
+  it('makes a redirect permanent unless the source sets permanent: false', () => {
+    const result = projectFernNavigation({
+      config: {
+        navigation: [{ page: 'Introduction', path: 'introduction.mdx' }],
+        redirects: [
+          { source: '/omitted', destination: '/a' },
+          { source: '/explicit-true', destination: '/b', permanent: true },
+          { source: '/temporary-redirect', destination: '/new-location', permanent: false },
+          { source: '/old/*', destination: 'https://www.example.com/new/*' },
+        ],
+      },
+      fernRoot: '/tmp/fern-root-unused',
+    })
+    expect(result.docsConfig.redirects).toEqual([
+      { source: '/omitted', destination: '/a', permanent: true },
+      { source: '/explicit-true', destination: '/b', permanent: true },
+      { source: '/temporary-redirect', destination: '/new-location', permanent: false },
+      { source: '/old/:path*', destination: 'https://www.example.com/new/:path*', permanent: true },
+    ])
   })
 
   it('names every rejected redirect in one warning', () => {
@@ -493,7 +539,7 @@ describe('Fern redirect safety shares the Mintlify guard', () => {
       },
       fernRoot: '/tmp/fern-root-unused',
     })
-    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept', permanent: true }])
     expect(result.warnings.map((warning) => warning.message).filter((message) => message.includes('redirect'))).toEqual([
       'Skipped 2 redirects from /legit, /legit-2: a redirect must start at a path on this site (one beginning with a single /) and lead to a path on this site or to an http:// or https:// address. Check these redirects in the source docs and add any that are still needed to docs.json.',
     ])

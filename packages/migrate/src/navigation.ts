@@ -1873,7 +1873,8 @@ export function projectMintlifyNavigation(
         return [{
           source: translated.source,
           destination: translated.destination,
-          ...(typeof redirect.permanent === 'boolean' ? { permanent: redirect.permanent } : {}),
+          // Both platforms document `permanent` as defaulting to true (308); only an explicit `false` is temporary.
+          permanent: typeof redirect.permanent === 'boolean' ? redirect.permanent : true,
         }]
       })
     : []

@@ -324,6 +324,10 @@ path on it or at an absolute `http(s)` address, which is kept exactly as written
 starts with `//`, uses another scheme such as `javascript:` or `data:`, or holds
 a backslash, whitespace, a control character, credentials or a bracketed IPv6
 host is left out for safety, and one warning lists the first ten sources skipped.
+A Mintlify or Fern redirect that does not set `permanent` is permanent (308), the
+default both platforms document, so search engines move to the new address;
+`permanent: false` stays temporary (307), and so do the redirects the migrator
+adds itself (route aliases, endpoint URLs, page links).
 
 A repository is limited to 5,000 documentation files and, separately, 5,000
 asset files. Past that, files are kept in navigation order with the default

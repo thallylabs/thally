@@ -84,9 +84,9 @@ describe('Mintlify redirects that would loop or hide a page', () => {
     const redirects = bundle.docsConfig.redirects ?? []
     expect(bundle.pages.map((page) => page.id)).toContain('introduction')
     // Mintlify served the root index at `/`: the root stays the page and `/introduction` stays an alias of it.
-    expect(redirects).toContainEqual({ source: '/introduction', destination: '/' })
+    expect(redirects).toContainEqual({ source: '/introduction', destination: '/', permanent: true })
     expect(redirects.some((redirect) => redirect.source === '/')).toBe(false)
-    expect(redirects).toContainEqual({ source: '/old', destination: '/guide' })
+    expect(redirects).toContainEqual({ source: '/old', destination: '/guide', permanent: true })
     expect(redirectCycle(redirects)).toBeNull()
     expect(messages(bundle)).not.toContain('/introduction')
   })
@@ -100,7 +100,7 @@ describe('Mintlify redirects that would loop or hide a page', () => {
       guide: '---\ntitle: Guide\n---\n\nBody.',
     })
     const redirects = bundle.docsConfig.redirects ?? []
-    expect(redirects).toContainEqual({ source: '/', destination: '/guide' })
+    expect(redirects).toContainEqual({ source: '/', destination: '/guide', permanent: true })
     expect(redirects.some((redirect) => redirect.source === '/introduction')).toBe(false)
     expect(redirectCycle(redirects)).toBeNull()
   })
@@ -115,7 +115,7 @@ describe('Mintlify redirects that would loop or hide a page', () => {
     })
     const redirects = bundle.docsConfig.redirects ?? []
     expect(redirects.map((redirect) => redirect.source)).not.toContain('/Guide')
-    expect(redirects).toContainEqual({ source: '/old', destination: '/guide' })
+    expect(redirects).toContainEqual({ source: '/old', destination: '/guide', permanent: true })
     expect(messages(bundle)).toContain('Skipped 1 redirect from /Guide: that URL differs only in letter case from a page in this site, so on a server that ignores letter case it would hide that page. If your host matches URLs case-sensitively, add it back to docs.json.')
     expect(messages(bundle)).not.toMatch(/Self-redirect|also a page/)
   })
@@ -125,7 +125,7 @@ describe('Mintlify redirects that would loop or hide a page', () => {
       redirects: [{ source: '/old', destination: '/guide' }],
       navigation: { groups: [{ group: 'Start', pages: ['index', 'guide'] }] },
     }, { index: '# Home\n\nWelcome.', guide: '# Guide\n\nBody.' })
-    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old', destination: '/guide' })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old', destination: '/guide', permanent: true })
     expect(messages(bundle)).not.toMatch(/hide|circle/)
   })
 
@@ -135,7 +135,7 @@ describe('Mintlify redirects that would loop or hide a page', () => {
       navigation: { groups: [{ group: 'Start', pages: ['index'] }] },
     }, { index: '# Home\n\nWelcome.' })
     const redirects = bundle.docsConfig.redirects ?? []
-    expect(redirects).toContainEqual({ source: '/a', destination: '/b' })
+    expect(redirects).toContainEqual({ source: '/a', destination: '/b', permanent: true })
     expect(redirects.some((redirect) => redirect.source === '/b')).toBe(false)
     expect(redirectCycle(redirects)).toBeNull()
     expect(messages(bundle)).toContain('/b')
@@ -156,9 +156,9 @@ describe('Mintlify catch-all redirects whose prefix is a page', () => {
     })
     const redirects = bundle.docsConfig.redirects ?? []
     expect(bundle.pages.map((page) => page.id)).toContain('docs/sdks/typescript')
-    expect(redirects).toContainEqual({ source: '/docs/sdks/typescript/:path+', destination: '/docs/sdks/typescript' })
+    expect(redirects).toContainEqual({ source: '/docs/sdks/typescript/:path+', destination: '/docs/sdks/typescript', permanent: true })
     expect(redirects.map((redirect) => redirect.source)).not.toContain('/docs/sdks/typescript/:path*')
-    expect(redirects).toContainEqual({ source: '/old', destination: '/docs/sdks/typescript' })
+    expect(redirects).toContainEqual({ source: '/old', destination: '/docs/sdks/typescript', permanent: true })
     expect(messages(bundle)).not.toMatch(/Skipped|circle|hide/)
   })
 })
@@ -176,7 +176,7 @@ describe('Mintlify redirects to an address outside the site', () => {
       navigation: { groups: [{ group: 'Start', pages: ['index'] }] },
     }, { index: '---\ntitle: Home\n---\n\nWelcome.' })
     const redirects = bundle.docsConfig.redirects ?? []
-    for (const redirect of external) expect(redirects).toContainEqual(redirect)
+    for (const redirect of external) expect(redirects).toContainEqual({ ...redirect, permanent: true })
     expect(redirects.map((redirect) => redirect.source)).not.toContain('/evil')
     expect(redirects.map((redirect) => redirect.source)).not.toContain('/script')
     expect(bundle.warnings.filter((warning) => /docs\/examples|zapier/.test(warning.message))).toEqual([])
@@ -198,6 +198,29 @@ describe('Mintlify redirects to an address outside the site', () => {
       const { parsedDestination, newUrl } = prepareDestination({ appendParamsToQuery: false, destination, params: match(source) as Record<string, string>, query: {} })
       expect(`${parsedDestination.protocol}//${parsedDestination.hostname}${newUrl}`).toBe(destination)
     }
+  })
+})
+
+describe('Mintlify redirect status through a repository migration', () => {
+  it('makes an authored redirect permanent by default and leaves the redirects the migrator adds temporary', () => {
+    const bundle = mintlify({
+      redirects: [
+        { source: '/old', destination: '/guide' },
+        { source: '/kept-temporary', destination: '/guide', permanent: false },
+        { source: '/docs/examples', destination: 'https://github.com/dubinc/examples' },
+      ],
+      navigation: { groups: [{ group: 'Start', pages: ['index', 'section/overview'] }] },
+    }, {
+      index: '---\ntitle: Home\n---\n\nWelcome.',
+      guide: '---\ntitle: Guide\n---\n\nBody.',
+      'section/overview': '---\ntitle: Section\n---\n\nBody.',
+    })
+    const redirects = bundle.docsConfig.redirects ?? []
+    expect(redirects).toContainEqual({ source: '/old', destination: '/guide', permanent: true })
+    expect(redirects).toContainEqual({ source: '/kept-temporary', destination: '/guide', permanent: false })
+    expect(redirects).toContainEqual({ source: '/docs/examples', destination: 'https://github.com/dubinc/examples', permanent: true })
+    // The route aliases the migrator creates on its own keep the flag they were made with.
+    expect(redirects).toContainEqual({ source: '/section', destination: '/section/overview', permanent: false })
   })
 })
 
@@ -293,7 +316,7 @@ describe('URL migration redirects', () => {
       throw new Error(`missing fixture: ${url}`)
     }
     const bundle = await migrateUrl({ sourceUrl, platform: 'mintlify', fetcher })
-    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old', destination: '/introduction' })
+    expect(bundle.docsConfig.redirects).toContainEqual({ source: '/old', destination: '/introduction', permanent: true })
     expect((bundle.docsConfig.redirects ?? []).map((redirect) => redirect.source)).not.toContain('/client/c++/intro')
     expect(messages(bundle)).toContain('Skipped 1 redirect from /client/c++/intro')
   })
