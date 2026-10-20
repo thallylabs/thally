@@ -862,8 +862,40 @@ describe('dropUnroutableRedirects', () => {
       ]), warnings)
       expect(result.redirects).toEqual([{ source: '/c', destination: 'https://example.com/x' }])
       expect(warnings.map((warning) => warning.message)).toEqual([
-        'Skipped 2 redirects from /a, /b: the address each leads to has a character (+ * ( ) { }) in its host name that Next.js reads as route syntax, so following them would fail. Check these redirects in the source docs.',
+        'Skipped 2 redirects from /a (a+b.example.com), /b (a(b).example.com): the address each leads to has a host name that is not valid (a host name has only letters, digits, hyphens, underscores and dots, then an optional :port), so following them would fail. Check these redirects in the source docs.',
       ])
+    })
+
+    // Next compiles the host as the URL parser decodes it, so `exa%2Bmple.com` reaches path-to-regexp as `exa+mple.com`.
+    it('omits a redirect whose host, once decoded, is not a valid DNS name, and says why', () => {
+      const hosts = ['exa%2Bmple.com', 'exa%28mple.com', 'exa%7Bmple.com', 'a..example.com', '-bad.example.com']
+      for (const host of hosts.slice(0, 3)) expect(() => followed(`https://${host}/x`), host).toThrow()
+      const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+      const result = dropUnroutableRedirects(config([
+        ...hosts.map((host, index) => ({ source: `/r${index}`, destination: `https://${host}/x` })),
+        { source: '/keep', destination: 'https://example.com/x' },
+      ]), warnings)
+      expect(result.redirects).toEqual([{ source: '/keep', destination: 'https://example.com/x' }])
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0].message).toContain('from /r0 (exa+mple.com), /r1 (exa(mple.com), /r2 (exa{mple.com), /r3 (a..example.com)')
+      expect(warnings[0].message).toContain('has a host name that is not valid (a host name has only letters, digits, hyphens, underscores and dots')
+    })
+
+    it('keeps a host written with percent escapes, capitals, an underscore, an international name, an IP address or a port, which Next compiles as plain text', () => {
+      const input = config([
+        { source: '/a', destination: 'https://ex%61mple.com/x' },
+        { source: '/b', destination: 'https://EXAMPLE.com/x' },
+        { source: '/c', destination: 'https://münchen.de/x' },
+        { source: '/d', destination: 'https://xn--mnchen-3ya.de/x' },
+        { source: '/e', destination: 'http://127.0.0.1:3000/x' },
+        { source: '/f', destination: 'https://docs.example.com:8443/x?y=1' },
+        { source: '/g', destination: 'https://example.com./x' },
+        { source: '/h', destination: 'https://my_app.example.com/x' },
+      ])
+      for (const { destination } of input.redirects!) expect(() => followed(destination), destination).not.toThrow()
+      const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+      expect(dropUnroutableRedirects(input, warnings)).toBe(input)
+      expect(warnings).toEqual([])
     })
 
     it('does not encode again on a second pass, which is how a remote spec and then the repository both see a redirect', () => {

@@ -345,7 +345,10 @@ a backslash, whitespace, a control character, credentials or a bracketed IPv6
 host is left out for safety, and one warning lists the first ten sources skipped.
 Only the path of a destination is checked as route syntax: its query is kept as
 written (`https://example.com/?next=https://other.com`), and so is a fragment
-unless it holds a character Next.js reads as route syntax (`: * + ? ( ) { }`). A
+unless it holds a character Next.js reads as route syntax (`: * + ? ( ) { }`). An
+address whose host name, once its percent escapes are read, is not a valid one
+(letters, digits, hyphens, underscores and dots, then an optional port) is left out with a
+warning, since Next.js fails when it follows such a redirect. A
 redirect that still cannot be carried (a `:` inside a path segment such as
 `Category:Foo`, a `*` anywhere but as the whole last segment, or such a fragment)
 is left out with a warning that names that reason.

@@ -130,8 +130,27 @@ const DESTINATION_PARTS = /^((?:https?:\/\/[^/?#]*)?)([^?#]*)([\s\S]*)$/i
  */
 const DESTINATION_PATH_SYNTAX = /[+()]/g
 
-/** The same for a host, which cannot be percent-encoded, so a redirect to one is left out; `{` and `}` fail there too, since no URL parser escapes them. */
-const DESTINATION_HOST_SYNTAX = /[+*(){}]/
+/** A host name Next can compile: letters, digits, hyphens and underscores in dot-separated labels, which a punycode `xn--` label is too. */
+const DNS_HOST = /^(?:[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?\.)*[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?\.?$/
+
+/**
+ * The host Next compiles for an absolute destination is the one its URL parser
+ * reads: percent escapes decoded (`exa%2Bmple.com` is `exa+mple.com`), lower
+ * case, an international name in punycode. Next reads `+ * ( ) { }` in it as
+ * route syntax and cannot escape them, so anything but a valid host name would
+ * fail when a visitor follows the redirect. Null for a valid host and for a
+ * path on the site; otherwise the host as Next reads it.
+ */
+function invalidHost(origin: string): string | null {
+  if (!origin) return null
+  let host: string
+  try {
+    host = new URL(origin).hostname
+  } catch {
+    host = origin.replace(/^https?:\/\//i, '')
+  }
+  return DNS_HOST.test(host) ? null : host
+}
 
 /**
  * A destination with its path made safe for Next to compile, which it does with
@@ -153,7 +172,7 @@ function encodeDestinationPath(destination: string): string {
  * Drop each redirect Next.js cannot serve as written: one back to its own
  * route (a trailing slash is the same route), one whose source has
  * route-pattern operators, which would fail the build, and one whose destination
- * host has route syntax. The path of every destination is made safe to compile
+ * host is not a valid host name. The path of every destination is made safe to compile
  * (`encodeDestinationPath`) instead, so a `+` or `(` in it no longer fails when
  * the redirect is followed. A final `/:name+`
  * segment is route syntax Next reads as intended: `dropConflictingRedirects`
@@ -174,8 +193,9 @@ export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: A
       warnings.push({ code: 'unsupported-config', message: `Self-redirect from ${redirect.source} to ${redirect.destination} was omitted.` })
       return false
     }
-    if (DESTINATION_HOST_SYNTAX.test(DESTINATION_PARTS.exec(redirect.destination)![1])) {
-      unreachable.push(redirect.source)
+    const host = invalidHost(DESTINATION_PARTS.exec(redirect.destination)![1])
+    if (host !== null) {
+      unreachable.push(`${redirect.source} (${host})`)
       return false
     }
     if (!ROUTE_PATTERN_OPERATORS.test(redirect.source.replace(TRAILING_ONE_OR_MORE, ''))) return true
@@ -195,7 +215,7 @@ export function dropUnroutableRedirects(config: MigrationDocsConfig, warnings: A
   if (unreachable.length > 0) {
     warnings.push({
       code: 'unsupported-config',
-      message: `Skipped ${unreachable.length} redirect${unreachable.length === 1 ? '' : 's'} from ${list(unreachable)}: the address ${unreachable.length === 1 ? 'it leads' : 'each leads'} to has a character (+ * ( ) { }) in its host name that Next.js reads as route syntax, so following ${unreachable.length === 1 ? 'it' : 'them'} would fail. Check ${unreachable.length === 1 ? 'it' : 'these redirects'} in the source docs.`,
+      message: `Skipped ${unreachable.length} redirect${unreachable.length === 1 ? '' : 's'} from ${list(unreachable)}: the address ${unreachable.length === 1 ? 'it leads' : 'each leads'} to has a host name that is not valid (a host name has only letters, digits, hyphens, underscores and dots, then an optional :port), so following ${unreachable.length === 1 ? 'it' : 'them'} would fail. Check ${unreachable.length === 1 ? 'it' : 'these redirects'} in the source docs.`,
     })
   }
   if (redirects.length === config.redirects.length && redirects.every((redirect, index) => redirect === config.redirects![index])) return config
