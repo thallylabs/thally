@@ -333,6 +333,11 @@ unless it holds a character Next.js reads as route syntax (`: * + ? ( ) { }`). A
 redirect that still cannot be carried (a `:` inside a path segment such as
 `Category:Foo`, a `*` anywhere but as the whole last segment, or such a fragment)
 is left out with a warning that names that reason.
+A Mintlify source or destination written without its leading slash
+(`features/extract-beta`) is read as the path it names, as Mintlify's own site
+does, and one warning lists the first ten redirects given a slash; one starting
+with `./` or `../`, or with a scheme, is left out like any other unsafe value. Fern
+and Docusaurus ask for a rooted path, so theirs are not read that way.
 A Mintlify or Fern redirect that does not set `permanent` is permanent (308), the
 default both platforms document, so search engines move to the new address;
 `permanent: false` stays temporary (307), and so do the redirects the migrator

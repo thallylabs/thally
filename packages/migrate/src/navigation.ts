@@ -10,7 +10,7 @@ import { dirname, extname, relative } from 'node:path'
 import { descendNavigationAccess, hasNavigationRules, isNavigationRestricted, navigationAccess, navigationGateReason, OPEN_NAVIGATION_ACCESS, playgroundDisplay } from './mintlify-extras.js'
 import type { NavigationAccess } from './mintlify-extras.js'
 import { mintlifyLocalizedReference, pageIdFromReference, resolveWithin, trimEdgeSlashes } from './path.js'
-import { skippedRedirectsWarning } from './redirects.js'
+import { rootedRedirectsWarning, skippedRedirectsWarning } from './redirects.js'
 import type {
   EndpointTabSlot,
   MigrationApiGroup,
@@ -1584,6 +1584,22 @@ function invalidRedirectSegment(path: string): string | null {
 // U+2028/U+2029, along with tab, CR, LF, NBSP, etc).
 const UNSAFE_REDIRECT_CHARS = /[\s\x00-\x1f\x7f]/
 
+/**
+ * Mintlify reads a redirect source or destination written without its leading
+ * slash as the site path it names: with `"source": "features/extract-beta"` and
+ * `"destination": "features/extract"` in docs.json, docs.firecrawl.dev answers
+ * /features/extract-beta with a 308 to /features/extract. Its redirect docs only
+ * show rooted paths, so this goes no further than that observed case: a value
+ * that has a scheme (`javascript:`, `mailto:`), or does not start with a letter,
+ * digit, `_`, `%`, `~` or `-` (`./x`, `../x`, `\x`), is left as written for
+ * `isRedirectPathSafe` to judge, and a `//` or a control character still fails
+ * it once the slash is in place. Fern asks for a relative path and Docusaurus
+ * validates that `from` starts with a slash, so neither is read this way.
+ */
+function mintlifySitePath(value: string): string {
+  return /^[A-Za-z0-9_%~-]/.test(value) && !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value) ? `/${value}` : value
+}
+
 export function isRedirectPathSafe(rawSource: string, rawDestination: string): boolean {
   return isRootedPathSafe(rawSource) && (isRootedPathSafe(rawDestination) || isExternalHttpUrl(rawDestination))
 }
@@ -1875,21 +1891,25 @@ export function projectMintlifyNavigation(
     for (const [locale, items] of Object.entries(localizedNavigation)) localizedNavigation[locale] = annotateVersions(items)
   }
   const unsafeRedirects: Array<string> = []
+  const rootedRedirects: Array<string> = []
   const redirects = Array.isArray(config.redirects)
     ? config.redirects.flatMap((value) => {
         const redirect = objectValue(value)
         if (!redirect || typeof redirect.source !== 'string' || typeof redirect.destination !== 'string') return []
         const rawSource = redirect.source.trim()
         const rawDestination = redirect.destination.trim()
-        if (!isRedirectPathSafe(rawSource, rawDestination)) {
+        const rootedSource = mintlifySitePath(rawSource)
+        const rootedDestination = mintlifySitePath(rawDestination)
+        if (!isRedirectPathSafe(rootedSource, rootedDestination)) {
           unsafeRedirects.push(rawSource)
           return []
         }
-        const translated = translateRedirectWildcards(rawSource, rawDestination)
+        const translated = translateRedirectWildcards(rootedSource, rootedDestination)
         if ('warning' in translated) {
           warnings.push({ code: 'unsupported-config', message: translated.warning })
           return []
         }
+        if (rootedSource !== rawSource || rootedDestination !== rawDestination) rootedRedirects.push(rawSource)
         return [{
           source: translated.source,
           destination: translated.destination,
@@ -1900,6 +1920,8 @@ export function projectMintlifyNavigation(
     : []
   const unsafeRedirectWarning = skippedRedirectsWarning(unsafeRedirects)
   if (unsafeRedirectWarning) warnings.push(unsafeRedirectWarning)
+  const rootedRedirectWarning = rootedRedirectsWarning(rootedRedirects)
+  if (rootedRedirectWarning) warnings.push(rootedRedirectWarning)
   collectReferenceAccess(navigation, OPEN_NAVIGATION_ACCESS, options.pathPrefix, appearances)
   // Mintlify titles every sidebar group, including one named after its tab or dropdown; Thally leaves that heading out unless asked.
   const keepsCollectionNamedGroup = [tabs, ...Object.values(localizedNavigation)]

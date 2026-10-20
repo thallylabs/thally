@@ -398,6 +398,57 @@ describe('Mintlify redirect status', () => {
   })
 })
 
+describe('Mintlify redirects written without a leading slash', () => {
+  const projected = (redirects: Array<{ source: string; destination: string }>) => projectMintlifyNavigation({ navigation: { pages: ['introduction'] }, redirects })
+
+  // docs.json of Firecrawl: live Mintlify answers /features/extract-beta with a 308 to /features/extract.
+  it('reads a source and destination without the slash as paths on the site, and says it did', () => {
+    const result = projected([
+      { source: 'features/extract-beta', destination: 'features/extract' },
+      { source: 'old/*', destination: 'https://example.com/new/*' },
+      { source: '/rooted', destination: 'plain' },
+      { source: '/kept', destination: '/still-kept' },
+    ])
+    expect(result.docsConfig.redirects).toEqual([
+      { source: '/features/extract-beta', destination: '/features/extract', permanent: true },
+      { source: '/old/:path*', destination: 'https://example.com/new/:path*', permanent: true },
+      { source: '/rooted', destination: '/plain', permanent: true },
+      { source: '/kept', destination: '/still-kept', permanent: true },
+    ])
+    expect(result.warnings.map((warning) => warning.message)).toEqual([
+      'Added the leading / to 3 redirects written without one (from features/extract-beta, old/*, /rooted). Mintlify serves a redirect like that as a path on the site, so each was migrated with the / added. Check them against the live site if any was meant to be something else.',
+    ])
+    const [{ source, destination }] = result.docsConfig.redirects!
+    expect(() => checkCustomRoutes([{ source, destination, permanent: false }], 'redirect')).not.toThrow()
+    const match = getPathMatch(source, { removeUnnamedParams: true, strict: true })
+    expect(prepareDestination({ appendParamsToQuery: false, destination, params: match('/features/extract-beta') as Record<string, string>, query: {} }).newUrl).toBe('/features/extract')
+  })
+
+  it('names the one redirect in the singular, and a rooted redirect gets no such warning', () => {
+    expect(projected([{ source: 'a', destination: '/b' }]).warnings.map((warning) => warning.message)).toEqual([
+      'Added the leading / to 1 redirect written without one (from a). Mintlify serves a redirect like that as a path on the site, so it was migrated with the / added. Check it against the live site if it was meant to be something else.',
+    ])
+    expect(projected([{ source: '/a', destination: '/b' }]).warnings).toEqual([])
+  })
+
+  it.each([
+    './here', '../up', '.hidden/x', '\\evil.example', '%2f%2fevil.example', '%5cevil.example', 'x\t/evil.example', 'a\\b',
+    'javascript:alert(1)', 'data:text/html,x', 'mailto:a@b.example', 'ftp://example.com/x', 'a b',
+  ])('still rejects %j, in a source or a destination, and names it as skipped', (value) => {
+    for (const redirect of [{ source: value, destination: '/to' }, { source: '/from', destination: value }]) {
+      const result = projected([redirect, { source: '/kept', destination: '/still-kept' }])
+      expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept', permanent: true }])
+      expect(result.warnings.map((warning) => warning.message)).toEqual([expect.stringMatching(/^Skipped 1 redirect from /)])
+    }
+  })
+
+  it('leaves a Fern or Docusaurus redirect without the slash rejected, since their docs ask for a rooted path', () => {
+    const fern = projectFernNavigation({ fernRoot: tmpdir(), config: { navigation: [], redirects: [{ source: 'old', destination: '/new' }] } })
+    expect(fern.docsConfig.redirects ?? []).toEqual([])
+    expect(fern.warnings.map((warning) => warning.message)).toContainEqual(expect.stringMatching(/^Skipped 1 redirect from old:/))
+  })
+})
+
 describe('Mintlify redirects to an address outside the site', () => {
   const projected = (redirects: Array<{ source: string; destination: string }>) => projectMintlifyNavigation({ navigation: { pages: ['introduction'] }, redirects })
 
@@ -499,14 +550,14 @@ describe('Mintlify redirects to an address outside the site', () => {
   it('names every rejected redirect in one warning, without the control characters in a source', () => {
     const result = projected([
       { source: '/a', destination: '//evil.example' },
-      { source: 'unrooted', destination: '/x' },
+      { source: './unrooted', destination: '/x' },
       { source: '//protocol-relative', destination: '/x' },
       { source: '/line\nbreak', destination: '/x' },
       { source: '/kept', destination: '/still-kept' },
     ])
     expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept', permanent: true }])
     expect(result.warnings.map((warning) => warning.message)).toEqual([
-      'Skipped 4 redirects from /a, unrooted, //protocol-relative, /linebreak: a redirect must start at a path on this site (one beginning with a single /) and lead to a path on this site or to an http:// or https:// address. Check these redirects in the source docs and add any that are still needed to docs.json.',
+      'Skipped 4 redirects from /a, ./unrooted, //protocol-relative, /linebreak: a redirect must start at a path on this site (one beginning with a single /) and lead to a path on this site or to an http:// or https:// address. Check these redirects in the source docs and add any that are still needed to docs.json.',
     ])
   })
 

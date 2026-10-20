@@ -32,6 +32,20 @@ export function skippedRedirectsWarning(sources: ReadonlyArray<string>): Migrati
   }
 }
 
+/**
+ * One warning for the redirects whose source or destination was written without
+ * its leading slash and was read as the site path it names, listing their
+ * sources as written; null when there are none.
+ */
+export function rootedRedirectsWarning(sources: ReadonlyArray<string>): MigrationWarning | null {
+  if (sources.length === 0) return null
+  const one = sources.length === 1
+  return {
+    code: 'unsupported-config',
+    message: `Added the leading / to ${sources.length} redirect${one ? '' : 's'} written without one (from ${list([...sources])}). Mintlify serves a redirect like that as a path on the site, so ${one ? 'it was' : 'each was'} migrated with the / added. Check ${one ? 'it' : 'them'} against the live site if ${one ? 'it' : 'any'} was meant to be something else.`,
+  }
+}
+
 /** A fully literal site path, without a trailing slash and in the case it was written; null for patterns, queries and fragments. */
 function exactRoute(route: string): string | null {
   return route.startsWith('/') && !/[?:*#()[\]{}]/.test(route)
