@@ -166,6 +166,8 @@ export interface MigrationPage {
   navigationId: string
   locale?: string
   title: string
+  /** Set on a page that names an OpenAPI operation, whose title came from its file name because the source gave it none: the bound operation can title it instead. */
+  titleFromFileName?: true
   /** Authored display H1 when the source uses a different metadata title. */
   headingTitle?: string
   navTitle?: string

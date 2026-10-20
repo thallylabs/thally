@@ -2398,9 +2398,9 @@ export function parseMarkdownPage(input: {
     ? parsed.data.keywords.filter((value): value is string => typeof value === 'string')
     : []
   const heading = leadingPageHeading(body)
-  const title = typeof parsed.data.title === 'string' && parsed.data.title.trim()
-    ? parsed.data.title.trim()
-    : heading?.title ?? titleFromId(identity.navigationId)
+  const authoredTitle = typeof parsed.data.title === 'string' && parsed.data.title.trim() ? parsed.data.title.trim() : heading?.title
+  const title = authoredTitle ?? titleFromId(identity.navigationId)
+  const namesOperation = typeof parsed.data.openapi === 'string' && Boolean(parsed.data.openapi.trim())
   const sidebarTitle = input.platform === 'docusaurus' ? parsed.data.sidebar_label : parsed.data.sidebarTitle
   const navTitle = typeof sidebarTitle === 'string' && sidebarTitle.trim()
     ? sidebarTitle.trim()
@@ -2442,6 +2442,7 @@ export function parseMarkdownPage(input: {
     navigationId: identity.navigationId,
     locale: identity.locale,
     title,
+    ...(authoredTitle === undefined && namesOperation ? { titleFromFileName: true as const } : {}),
     navTitle,
     icon,
     iconType,

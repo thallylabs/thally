@@ -224,6 +224,15 @@ the spec has none of the listed operations, or the tab is bound to another spec.
 A reference that lists no operation (Mintlify generated every endpoint) is not
 affected. Operations whose path item is a local `$ref` are read as the renderer
 reads them (hidden or excluded on any level of the reference withholds them).
+
+An authored page that names an operation (`openapi: post /links`) and sets neither
+a `title` nor a leading heading is titled by that operation, as Mintlify titles it:
+the summary, else the operation id, else `METHOD /path`, where its file name would
+otherwise give it "Create" for `links/create.mdx`. A page that names its spec reads
+that spec; a bare reference reads the first spec that publishes the operation, so a
+remote spec's pages are titled by `hydrateRemoteApiSpecs` once it is downloaded
+(and keep the file name title if the download fails). `sidebarTitle` still becomes
+`navTitle`, and an authored title always wins.
 The renderer tries the first visible API tab's spec first for a bare
 `openapi: "METHOD /path"` page; when converting a tab to pages stops its spec being
 that one, each bare reference to an operation the converted spec defines is

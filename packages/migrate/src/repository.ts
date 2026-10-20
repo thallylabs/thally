@@ -2064,8 +2064,13 @@ function mintlifyEndpointUrl(directory: string, operation: OpenApiOperationForLi
     tag,
     leaf,
     url: `${directory}/${tag}/${leaf}`.replace(/^\/+|\/+$/g, ''),
-    title: operation.summary?.trim() || operation.operationId?.trim() || `${operation.method.toUpperCase()} ${operation.path}`,
+    title: operationTitle(operation),
   }
+}
+
+/** What Mintlify titles an operation's page: its summary, else its operation id, else "METHOD /path". */
+function operationTitle(operation: OpenApiOperationForLinking): string {
+  return operation.summary?.trim() || operation.operationId?.trim() || `${operation.method.toUpperCase()} ${operation.path}`
 }
 
 export function apiOperationLinkMap(
@@ -2458,6 +2463,44 @@ export function qualifyDisplacedBareRefs(options: {
     const key = `${method.toLowerCase()} ${rest.join(' ')}`
     const reached = firstPublishing(before, key)
     if (reached !== undefined && reached !== firstPublishing(after, key)) page.openapi = withSpecRef(ref, qualifier(reached))
+  }
+}
+
+/**
+ * Title each page that names an operation (`openapi: post /links`) and has no title or heading of its own, as Mintlify does: by the operation
+ * (`operationTitle`), where the file name would otherwise give it ("Create" for `links/create.mdx`). A page that names its spec reads that spec;
+ * a bare reference reads the first spec of `specLookupOrder` that publishes the operation. A page whose operation no spec publishes keeps its
+ * title. `content` reads a spec by the source the tabs name it by.
+ */
+export function titleOperationPages(options: {
+  pages: Array<Pick<MigrationPage, 'openapi' | 'title' | 'titleFromFileName'>>
+  tabs: ReadonlyArray<Pick<MigrationNavigationTab, 'hidden' | 'api' | 'version'>>
+  versions?: ReadonlyArray<{ label: string }>
+  content: (source: string) => Buffer | undefined
+}): void {
+  const { pages, tabs, versions, content } = options
+  const order = specLookupOrder(tabs, versions)
+  const bySource = new Map<string, Map<string, OpenApiOperationForLinking>>()
+  const operationsOf = (source: string): Map<string, OpenApiOperationForLinking> => {
+    if (!bySource.has(source)) {
+      const spec = content(source)
+      const document = spec ? readSpecDocument(spec) : undefined
+      const published = visibleOperations(document, isRecord(document) ? document.paths : undefined)
+      bySource.set(source, new Map(published.map((operation) => [`${operation.method} ${operation.path}`, operation])))
+    }
+    return bySource.get(source)!
+  }
+  for (const page of pages) {
+    const ref = page.titleFromFileName && page.openapi ? splitOpenApiRef(page.openapi) : null
+    if (!ref) continue
+    const [method, ...path] = ref.operation.trim().split(/\s+/)
+    const key = `${method.toLowerCase()} ${path.join(' ')}`
+    for (const source of ref.specRef ? [ref.specRef] : order) {
+      const operation = operationsOf(source).get(key)
+      if (!operation) continue
+      page.title = operationTitle(operation)
+      break
+    }
   }
 }
 
@@ -5864,6 +5907,18 @@ export function migrateRepository(options: RepositoryMigrationOptions): Migratio
       return sameName ? 'the file could not be read as an OpenAPI document' : `no file exists at "${key}"`
     }
     rewriteMintlifyPageSpecRefs(pages.filter((page) => !generatedEndpointPages.has(page)), pageSpecs, new Set(remoteApiSpecs.map((spec) => spec.url)), warnings, explainMissingSpec)
+    // With a remote spec still to download, hydration titles the pages once every spec is bound, since a bare reference may reach either kind.
+    if (remoteApiSpecs.length === 0) {
+      titleOperationPages({
+        pages,
+        tabs: docsConfig.tabs,
+        versions: docsConfig.navigation?.versions,
+        content: (source) => {
+          const asset = assets.find((entry) => entry.path === source)
+          return asset ? Buffer.from(asset.content) : undefined
+        },
+      })
+    }
     // Mintlify operation pages carry no "OpenAPI specification" line.
     if (docsConfig.tabs.some((tab) => tab.api)) docsConfig = { ...docsConfig, api: { ...docsConfig.api, specLink: false } }
   }

@@ -12,7 +12,7 @@ import { isIP } from 'node:net'
 import { splitOpenApiRef, withSpecRef } from './openapi-ref.js'
 import { addMintlifyDirectoryRedirects, insertApiTab } from './navigation.js'
 import { dropConflictingRedirects, dropUnroutableRedirects, literalRoute, pageEntryRoutes, servedRoutes } from './redirects.js'
-import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, isWithheld, linkApiMounts, mountPrefix, qualifyDisplacedBareRefs, reportEndpointPages, specLookupOrder, thallyOperationSlugSegments } from './repository.js'
+import { addEndpointPages, apiTabSpecIds, createEndpointPageLedger, isWithheld, linkApiMounts, mountPrefix, qualifyDisplacedBareRefs, reportEndpointPages, specLookupOrder, thallyOperationSlugSegments, titleOperationPages } from './repository.js'
 import { markExcluded, parseSpecDocument, sharedSpecMessage, withoutByteOrderMark } from './spec-exclude.js'
 import type { MigrationBundle, MigrationFetcher, MigrationNavigationTab, RemoteApiSpec } from './types.js'
 
@@ -353,6 +353,18 @@ export async function hydrateRemoteApiSpecs(bundle: MigrationBundle, fetcher?: M
     },
     qualifier: (source) => source,
   })
+  // With every spec bound, a page that names an operation and sets no title takes the operation's.
+  if (bundle.platform === 'mintlify') {
+    titleOperationPages({
+      pages,
+      tabs,
+      versions: bundle.docsConfig.navigation?.versions,
+      content: (source) => {
+        const asset = assets.find((entry) => entry.path === source)
+        return asset ? Buffer.from(asset.content) : undefined
+      },
+    })
+  }
   // The pages the operations became are routes of the site too, which no redirect may take.
   const served = servedRoutes(pages)
   // Lower case, and without a trailing slash: a redirect that differs from a guessed one only in letter case or a trailing slash wins on a server that ignores them, so none is guessed for that address.
