@@ -128,11 +128,11 @@ versions, languages, and reusable `$ref` navigation files; it also preserves
 dropdown presentation, collection descriptions and icons, explicit default
 versions, page route casing, redirects, local snippets, static assets,
 compatible page frontmatter, site identity, and OpenAPI configuration.
-A page with no `description` gets one from its first paragraph, which keeps it
-for search and metadata but marks it `descriptionPlacement: body`, so the runtime
-does not print the same sentence under the title and again in the body; an authored
-description is shown under the title as written. (Docusaurus and Fern pages are
-always marked `body`.)
+A page with no `description`, other than one that names an API operation, gets
+one from its first paragraph, which keeps it for search and metadata but marks it
+`descriptionPlacement: body`, so the runtime does not print the same sentence under
+the title and again in the body; an authored description is shown under the title as
+written. (Docusaurus and Fern pages are always marked `body`.)
 Analytics come across too: docs.json `integrations` and legacy mint.json
 `analytics` for GA4, Google Tag Manager, PostHog, and Plausible are validated
 and written to `docs.json` `integrations` (`integrations` wins per provider when
@@ -234,9 +234,10 @@ An authored page that names an operation (`openapi: post /links`) and sets neith
 a `title` nor a leading heading is titled by that operation, as Mintlify titles it:
 the summary, else the operation id, else `METHOD /path`, where its file name would
 otherwise give it "Create" for `links/create.mdx`. A page that names its spec reads
-that spec; a bare reference reads the first spec that publishes the operation, so a
-remote spec's pages are titled by `hydrateRemoteApiSpecs` once it is downloaded
-(and keep the file name title if the download fails). `sidebarTitle` still becomes
+that spec; a bare reference reads the first spec that publishes the operation, so
+when a site has a remote spec, `hydrateRemoteApiSpecs` titles these pages once every
+spec is bound. A page whose operation no spec publishes (a remote spec that failed to
+download, say) keeps its file name title. `sidebarTitle` still becomes
 `navTitle`, and an authored title always wins.
 The renderer tries the first visible API tab's spec first for a bare
 `openapi: "METHOD /path"` page; when converting a tab to pages stops its spec being
@@ -350,12 +351,13 @@ is left out with a warning that names that reason.
 A Mintlify source or destination written without its leading slash
 (`features/extract-beta`) is read as the path it names, as Mintlify's own site
 does, and one warning lists the first ten redirects given a slash; one starting
-with `./` or `../`, or with a scheme, is left out like any other unsafe value. Fern
+with `./` or `../`, a source with a scheme, or a destination with a scheme other
+than `http:` or `https:` is left out like any other unsafe value. Fern
 and Docusaurus ask for a rooted path, so theirs are not read that way.
 A Mintlify or Fern redirect that does not set `permanent` is permanent (308), the
 default both platforms document, so search engines move to the new address;
-`permanent: false` stays temporary (307), and so do the redirects the migrator
-adds itself (route aliases, endpoint URLs, page links).
+`permanent: false` stays temporary (307), and so do the route aliases, endpoint
+URLs and page links the migrator adds itself.
 
 A repository is limited to 5,000 documentation files and, separately, 5,000
 asset files. Past that, files are kept in navigation order with the default
@@ -717,9 +719,10 @@ page. Those files are copied to `public/` (tooling config such as
 output, dot-directories, and `node_modules` are not) under the normal asset
 size limits. Scripts are added to `docs.json` `customScripts` (URL-encoded),
 except modules that pages import as components, which are copied as components
-instead. Thally cannot
-load a stylesheet from `docs.json`, so each `.css` is preserved with a warning
-that it is not applied and likely targets Mintlify's DOM. Fonts named by
+instead. Thally loads a local stylesheet that `docs.json` lists under
+`stylesheets`, but the migrator does not list the `.css` files it copies, since
+their rules likely target Mintlify's DOM: each is preserved with a warning that it
+is not applied. Fonts named by
 `fonts.source` (top level, `heading`, `body`) that are local `.woff`, `.woff2`,
 `.ttf`, or `.otf` files are copied. Thally's `fonts` setting loads Google Fonts
 by family only, so a font with a `source` of its own is not written to it (the
