@@ -246,6 +246,25 @@ describe('field ids when an attribute is a string written in braces', () => {
     expect(compiled).toContain('id: someId')
     expect(compiled).not.toContain('id: "install"')
   })
+
+  it('reads a Step id in braces as the string it is, as it reads one in quotes', async () => {
+    for (const id of ['"install-cli"', '`install-cli`']) {
+      const source = `<Steps titleSize="h3">\n<Step title="Install" id={${id}}>Run npm install.</Step>\n</Steps>\n\n## Install`
+      expect(await renderedHtmlIds(source), id).toEqual(['install-cli', 'install'])
+      expect([...extractHeadingAnchors(source)].sort(), id).toEqual(['install', 'install-cli'])
+      expect(await brokenAnchorOutput(source, 'install'), id).not.toContain('Broken anchor')
+      expect(await brokenAnchorOutput(source, 'install-2'), id).toContain('Broken anchor')
+    }
+  })
+
+  it('gives a heading no id from a Step whose id is not a constant, and shifts nothing', async () => {
+    for (const id of ['{someId}', '{b + "-a"}', '{`p-${n}`}']) {
+      const source = `<Steps titleSize="h3">\n<Step title="Install" id=${id}>Run npm install.</Step>\n</Steps>\n\n## Install`
+      expect(await renderedIds(source), id).toEqual(['install'])
+      expect([...extractHeadingAnchors(source)], id).toEqual(['install'])
+      expect(await brokenAnchorOutput(source, 'install-2'), id).toContain('Broken anchor')
+    }
+  })
 })
 
 describe('field ids next to a heading that is made of components', () => {
@@ -413,6 +432,8 @@ describe('thally check and the renderer give a page the same ids', () => {
     ['an Update labelled in braces, then a field', '<Update label={"Param name"} date={"2024-01-01"}>Text.</Update>\n\n<ParamField body="name" />'],
     ['an Accordion with an id in braces', '<Accordion title="Other" id={"mine"}>\n\nText.\n\n</Accordion>\n\n<ParamField body="mine" />'],
     ['fields named in braces', '<ParamField body={"expiresInDays"} />\n\n<ResponseField name={`pagination.hasMore`} />\n\n<ParamField body={"expiresInDays"} />'],
+    ['a Step with an id in braces, then the heading', '<Steps titleSize="h3">\n<Step title="Install" id={"install-cli"}>Run npm install.</Step>\n</Steps>\n\n## Install'],
+    ['a Step with an id as a template, then the heading', '<Steps titleSize="h3">\n<Step title="Install" id={`install-cli`}>Run npm install.</Step>\n</Steps>\n\n## Install'],
     ['a field with an id in braces', '<ParamField body="x" id={"mine"} />\n\n<ParamField body="mine" />'],
     ['a field with an id that matches the next field', '<ParamField body="x" id={"param-y"} />\n\n<ParamField body="y" />'],
     ['a tight strikethrough in a heading, then a field', '## Param a~b~c\n\n<ParamField body="abc" />'],

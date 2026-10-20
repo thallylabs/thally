@@ -132,6 +132,24 @@ describe('parseMdxContent step titles', () => {
   it('keeps the step title in the page text', () => {
     expect(parseMdxContent(source).text).toContain('Create a project')
   })
+
+  it.each(['"install-cli"', '`install-cli`'])('reads a step id written as %s as the string it is', (id) => {
+    const parsed = parseMdxContent(`<Steps titleSize="h3">\n<Step title="Install" id={${id}}>Run npm install.</Step>\n</Steps>\n\n## Install`)
+    expect(parsed.headings).toEqual([
+      { depth: 3, text: 'Install', id: 'install-cli' },
+      { depth: 2, text: 'Install', id: 'install' },
+    ])
+    expect(parsed.sections.map((section) => section.id)).toEqual(['install-cli', 'install'])
+  })
+
+  it.each(['{someId}', '{"a" + b}', '{`p-${n}`}'])('gives a step whose id is %s no anchor, and takes no id from the heading', (id) => {
+    const parsed = parseMdxContent(`<Steps titleSize="h3">\n<Step title="Install" id=${id}>Run npm install.</Step>\n</Steps>\n\n## Install`)
+    expect(parsed.headings).toEqual([{ depth: 2, text: 'Install', id: 'install' }])
+    expect(parsed.toc.map((item) => item.id)).toEqual(['install'])
+    expect(parsed.sections.map((section) => section.id)).toEqual(['', 'install'])
+    // The step stays in the page's prose, under the section before it.
+    expect(parsed.sections[0].text).toContain('Run npm install.')
+  })
 })
 
 describe('parseMdxContent JSX attribute prose', () => {

@@ -799,12 +799,12 @@ function jsxConstantAttribute(node: JsxNode, name: string): string | null | unde
   return typeof attribute.value === 'string' ? attribute.value : constantString(attribute.value)
 }
 
-/** Give a JSX element an `id` attribute, replacing a literal one. An `id` written as an expression is the author's: it is kept. */
+/** Give a JSX element an `id` attribute, replacing a literal one or a constant string in braces, which the pass numbers as it does a literal. Any other expression is the author's: it is kept. */
 function setJsxId(jsx: JsxNode, id: string): void {
   const attributes = (jsx.attributes ??= [])
   const existing = attributes.find((attribute) => attribute.type === 'mdxJsxAttribute' && attribute.name === 'id')
   if (!existing) attributes.push({ type: 'mdxJsxAttribute', name: 'id', value: id })
-  else if (typeof existing.value === 'string') existing.value = id
+  else if (typeof existing.value === 'string' || constantString(existing.value) !== null) existing.value = id
 }
 
 /** A node as `renderedText` reads it: a hast element, text, or a JSX element or `{…}` expression MDX leaves in the tree. */
@@ -829,7 +829,9 @@ interface HeadingTarget {
  *
  * A `<Step>` whose title renders as a heading (`titleSize` h2, h3 or h4, on the
  * step or its `<Steps>`) is numbered with the rest and given the `id` its title
- * is rendered with, so the table of contents scrolls to it.
+ * is rendered with, so the table of contents scrolls to it. A step's own `id` is
+ * read as a literal or a constant string in braces; any other expression is kept
+ * as it is, and the step takes no id from the numbering.
  *
  * A heading made only of components (`## <Badge>Name</Badge>`) has no text of
  * its own here, so it is numbered under the text its children render as, the id
@@ -885,10 +887,12 @@ function rehypeUniqueHeadingIds() {
           const own = jsxStringAttribute(jsx, 'titleSize')
           const size = own === undefined ? stepSize : own
           const title = jsxStringAttribute(jsx, 'title')?.trim()
-          if (title && size && STEP_HEADING_SIZES.has(size)) {
+          // An id that is not a constant is whatever it holds when the page renders: the step keeps it and takes no id from the page's numbering.
+          const stepId = jsxConstantAttribute(jsx, 'id')
+          if (title && size && STEP_HEADING_SIZES.has(size) && stepId !== null) {
             targets.push({
               text: plainInlineText(title),
-              given: jsxStringAttribute(jsx, 'id')?.trim() || undefined,
+              given: stepId?.trim() || undefined,
               assign: (id) => setJsxId(jsx, id),
             })
           }

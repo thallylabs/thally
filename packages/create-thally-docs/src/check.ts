@@ -229,11 +229,11 @@ interface PageIds {
  * h2, h3 or h4, on the step or, failing that, on the `<Steps>` around it) is one
  * too. A tag written inside inline code or a comment is not an element, so it counts
  * for nothing. Only literal strings count, as in the renderer, except where a
- * constant string in braces (`title={"x"}`) names a field or makes a component's
- * id: the renderer reads that as the string it is. The page is parsed as the
- * renderer parses it, MDX with GFM (`parseMdxTree` in `@thallylabs/core`), since
- * GFM turns a tight `a~b~c` in a heading into a strikethrough and a footnote
- * reference into a number, and so into another id.
+ * constant string in braces (`title={"x"}`) names a field, makes a component's
+ * id or is a step's own id: the renderer reads that as the string it is. The page
+ * is parsed as the renderer parses it, MDX with GFM (`parseMdxTree` in
+ * `@thallylabs/core`), since GFM turns a tight `a~b~c` in a heading into a
+ * strikethrough and a footnote reference into a number, and so into another id.
  */
 function readPageIds(content: string): PageIds {
   const tree = parseMdxTree(content) as unknown as MdxNode
@@ -265,9 +265,10 @@ function readPageIds(content: string): PageIds {
         const own = stringAttribute(node, 'titleSize')
         const size = own === undefined ? stepSize : own
         const title = stringAttribute(node, 'title')?.trim()
-        if (title && size && STEP_HEADING_SIZES.includes(size)) {
-          // A step's own id counts only as a literal, as in the renderer and the content parser.
-          const given = stringAttribute(node, 'id')?.trim()
+        // A step's own id is a literal or a constant string in braces; any other expression is kept as it is and takes no id from the numbering, as in the renderer and the content parser.
+        const stepId = constantAttribute(node, 'id')
+        if (title && size && STEP_HEADING_SIZES.includes(size) && stepId !== null) {
+          const given = stepId?.trim()
           page.headings.push({ base: given || slugify(plainInlineText(title)), explicit: !!given })
         }
       }
