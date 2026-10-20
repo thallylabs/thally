@@ -10,6 +10,7 @@ import { dirname, extname, relative } from 'node:path'
 import { descendNavigationAccess, hasNavigationRules, isNavigationRestricted, navigationAccess, navigationGateReason, OPEN_NAVIGATION_ACCESS, playgroundDisplay } from './mintlify-extras.js'
 import type { NavigationAccess } from './mintlify-extras.js'
 import { mintlifyLocalizedReference, pageIdFromReference, resolveWithin, trimEdgeSlashes } from './path.js'
+import { skippedRedirectsWarning } from './redirects.js'
 import type {
   EndpointTabSlot,
   MigrationApiGroup,
@@ -1497,6 +1498,9 @@ function projectedApiMdx(config: Record<string, unknown>, warnings: Array<Migrat
 
 const NEXT_REDIRECT_PARAM_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 
+/** The scheme and host of an absolute `http(s)` destination, in the case it was written. */
+const EXTERNAL_ORIGIN = /^https?:\/\/[^/?#]+/i
+
 /**
  * Next.js redirects compile through path-to-regexp and reject a bare `*`
  * segment (Mintlify and Fern's trailing wildcard syntax) with "Invalid
@@ -1513,7 +1517,9 @@ function translateRedirectWildcards(
   destination: string,
 ): { source: string; destination: string } | null {
   const sourceSegments = source.split('/')
-  const destinationSegments = destination.split('/')
+  // An absolute destination keeps its scheme and host as written; only the path after them takes part.
+  const origin = EXTERNAL_ORIGIN.exec(destination)?.[0] ?? ''
+  const destinationSegments = destination.slice(origin.length).split('/')
   const sourceWildcardIndex = sourceSegments.indexOf('*')
   if (sourceWildcardIndex !== -1 && sourceWildcardIndex !== sourceSegments.length - 1) return null
   if (sourceSegments.slice(0, -1).includes('*') || destinationSegments.slice(0, -1).includes('*')) return null
@@ -1527,9 +1533,9 @@ function translateRedirectWildcards(
   if (destinationHasWildcard) translatedDestination[translatedDestination.length - 1] = ':path*'
 
   const finalSource = translatedSource.join('/')
-  const finalDestination = translatedDestination.join('/')
-  if (!isValidNextRedirectPath(finalSource) || !isValidNextRedirectPath(finalDestination)) return null
-  return { source: finalSource, destination: finalDestination }
+  const finalDestinationPath = translatedDestination.join('/')
+  if (!isValidNextRedirectPath(finalSource) || !isValidNextRedirectPath(finalDestinationPath)) return null
+  return { source: finalSource, destination: `${origin}${finalDestinationPath}` }
 }
 
 /** Conservative structural check for the path-to-regexp syntax Next.js redirects accept. */
@@ -1543,11 +1549,12 @@ function isValidNextRedirectPath(path: string): boolean {
 }
 
 /**
- * Shared redirect-safety check for Mintlify and Fern: both require a
- * site-relative, `/`-rooted source and destination (Mintlify's own redirect
- * docs give only rooted examples; neither documents an absolute-URL
- * destination), so a protocol-relative or absolute value (`//evil.example`
- * reads as same-scheme cross-origin to a browser and to Next.js) is rejected.
+ * Shared redirect-safety check for Mintlify, Fern and Docusaurus: the source
+ * must be a site-relative, `/`-rooted path. The destination must be one too,
+ * or an absolute `http:` or `https:` address (Mintlify and Fern both redirect
+ * to one). A protocol-relative value (`//evil.example` reads as same-scheme
+ * cross-origin to a browser and to Next.js) and any other scheme
+ * (`javascript:`, `data:`) are rejected.
  */
 // Matches every ASCII control character (incl. DEL, \x7f) and every Unicode
 // whitespace character (`\s` already covers the line/paragraph separators
@@ -1555,20 +1562,36 @@ function isValidNextRedirectPath(path: string): boolean {
 const UNSAFE_REDIRECT_CHARS = /[\s\x00-\x1f\x7f]/
 
 export function isRedirectPathSafe(rawSource: string, rawDestination: string): boolean {
-  for (const value of [rawSource, rawDestination]) {
-    if (!value.startsWith('/')) return false
-    if (value.startsWith('//') || value.startsWith('/\\')) return false
-    if (value.includes('\\')) return false
-    // A browser strips whitespace/control characters (tab, CR, LF, ...) from
-    // a URL before navigating, so a literal tab in `/\t/evil.example` passes
-    // every check above yet reaches the browser as `//evil.example`. Reject
-    // any such character anywhere in the raw value.
-    if (UNSAFE_REDIRECT_CHARS.test(value)) return false
-    // Browsers unescape a leading `%2f%2f`/`%5c` before treating it as `//`/`\`.
-    const lower = value.toLowerCase()
-    if (lower.startsWith('/%2f%2f') || lower.startsWith('/%5c')) return false
+  return isRootedPathSafe(rawSource) && (isRootedPathSafe(rawDestination) || isExternalHttpUrl(rawDestination))
+}
+
+function isRootedPathSafe(value: string): boolean {
+  if (!value.startsWith('/')) return false
+  if (value.startsWith('//') || value.startsWith('/\\')) return false
+  if (value.includes('\\')) return false
+  // A browser strips whitespace/control characters (tab, CR, LF, ...) from
+  // a URL before navigating, so a literal tab in `/\t/evil.example` passes
+  // every check above yet reaches the browser as `//evil.example`. Reject
+  // any such character anywhere in the raw value.
+  if (UNSAFE_REDIRECT_CHARS.test(value)) return false
+  // Browsers unescape a leading `%2f%2f`/`%5c` before treating it as `//`/`\`.
+  const lower = value.toLowerCase()
+  return !lower.startsWith('/%2f%2f') && !lower.startsWith('/%5c')
+}
+
+/**
+ * An absolute `http:` or `https:` address with a host. Credentials are refused
+ * (Next drops them, and `https://dub.co@evil.example` reads as a different site
+ * at a glance), and so is a bracketed IPv6 host, which Next cannot compile.
+ */
+function isExternalHttpUrl(value: string): boolean {
+  if (!EXTERNAL_ORIGIN.test(value) || UNSAFE_REDIRECT_CHARS.test(value) || value.includes('\\')) return false
+  try {
+    const { protocol, hostname, username, password } = new URL(value)
+    return (protocol === 'http:' || protocol === 'https:') && hostname !== '' && !hostname.startsWith('[') && !username && !password
+  } catch {
+    return false
   }
-  return true
 }
 
 /**
@@ -1828,13 +1851,17 @@ export function projectMintlifyNavigation(
     for (const entry of apiTabSlots) [entry.slot.tab] = annotateVersions([entry.slot.tab])
     for (const [locale, items] of Object.entries(localizedNavigation)) localizedNavigation[locale] = annotateVersions(items)
   }
+  const unsafeRedirects: Array<string> = []
   const redirects = Array.isArray(config.redirects)
     ? config.redirects.flatMap((value) => {
         const redirect = objectValue(value)
         if (!redirect || typeof redirect.source !== 'string' || typeof redirect.destination !== 'string') return []
         const rawSource = redirect.source.trim()
         const rawDestination = redirect.destination.trim()
-        if (!isRedirectPathSafe(rawSource, rawDestination)) return []
+        if (!isRedirectPathSafe(rawSource, rawDestination)) {
+          unsafeRedirects.push(rawSource)
+          return []
+        }
         const translated = translateRedirectWildcards(rawSource, rawDestination)
         if (!translated) {
           warnings.push({
@@ -1850,6 +1877,8 @@ export function projectMintlifyNavigation(
         }]
       })
     : []
+  const unsafeRedirectWarning = skippedRedirectsWarning(unsafeRedirects)
+  if (unsafeRedirectWarning) warnings.push(unsafeRedirectWarning)
   collectReferenceAccess(navigation, OPEN_NAVIGATION_ACCESS, options.pathPrefix, appearances)
   // Mintlify titles every sidebar group, including one named after its tab or dropdown; Thally leaves that heading out unless asked.
   const keepsCollectionNamedGroup = [tabs, ...Object.values(localizedNavigation)]

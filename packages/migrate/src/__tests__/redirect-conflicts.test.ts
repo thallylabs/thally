@@ -163,6 +163,44 @@ describe('Mintlify catch-all redirects whose prefix is a page', () => {
   })
 })
 
+describe('Mintlify redirects to an address outside the site', () => {
+  // docs.json of dub.co: live Mintlify answers both with a 308 to the external address.
+  const external = [
+    { source: '/docs/examples', destination: 'https://github.com/dubinc/examples' },
+    { source: '/docs/integrations/zapier', destination: 'https://dub.co/integrations/zapier' },
+  ]
+
+  it('carries them through a repository migration unchanged, with no warning about them', () => {
+    const bundle = mintlify({
+      redirects: [...external, { source: '/evil', destination: '//evil.example' }, { source: '/script', destination: 'javascript:alert(1)' }],
+      navigation: { groups: [{ group: 'Start', pages: ['index'] }] },
+    }, { index: '---\ntitle: Home\n---\n\nWelcome.' })
+    const redirects = bundle.docsConfig.redirects ?? []
+    for (const redirect of external) expect(redirects).toContainEqual(redirect)
+    expect(redirects.map((redirect) => redirect.source)).not.toContain('/evil')
+    expect(redirects.map((redirect) => redirect.source)).not.toContain('/script')
+    expect(bundle.warnings.filter((warning) => /docs\/examples|zapier/.test(warning.message))).toEqual([])
+    expect(messages(bundle)).toContain('Skipped 2 redirects from /evil, /script')
+  })
+
+  it('treats one as the end of a chain, so a page it also names is not mistaken for a loop', () => {
+    const warnings: Array<{ code: 'unsupported-config'; message: string }> = []
+    const input: MigrationDocsConfig = { tabs: [], redirects: [...external, { source: '/a', destination: '/docs/examples' }] }
+    expect(dropUnroutableRedirects(input, warnings)).toBe(input)
+    expect(dropConflictingRedirects(input, [{ id: 'introduction' }], warnings)).toBe(input)
+    expect(warnings).toEqual([])
+  })
+
+  it("is composed by Next's own matcher with the scheme and host intact", () => {
+    for (const { source, destination } of external) {
+      expect(() => checkCustomRoutes([{ source, destination, permanent: false }], 'redirect')).not.toThrow()
+      const match = getPathMatch(source, { removeUnnamedParams: true, strict: true })
+      const { parsedDestination, newUrl } = prepareDestination({ appendParamsToQuery: false, destination, params: match(source) as Record<string, string>, query: {} })
+      expect(`${parsedDestination.protocol}//${parsedDestination.hostname}${newUrl}`).toBe(destination)
+    }
+  })
+})
+
 describe('Mintlify default version redirects', () => {
   it('leaves the page a version alias would hide alone, and says nothing about the alias', () => {
     const bundle = mintlify({

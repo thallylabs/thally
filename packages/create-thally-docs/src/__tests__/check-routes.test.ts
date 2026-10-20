@@ -257,6 +257,23 @@ describe('thally check reader routes', () => {
     expect(result.output).not.toContain('Broken')
   })
 
+  it('accepts a link to a path that redirects to an address outside the site', async () => {
+    const result = await checkLinks('[Examples](/docs/examples) [Zapier](/docs/integrations/zapier#setup)', [
+      { source: '/docs/examples', destination: 'https://github.com/dubinc/examples' },
+      { source: '/docs/integrations/zapier', destination: 'https://dub.co/integrations/zapier' },
+    ])
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken')
+  })
+
+  it('follows a wildcard redirect to an address outside the site without reading its scheme as a parameter', async () => {
+    const result = await checkLinks('[Old](/old/a/b)', [
+      { source: '/old/:path*', destination: 'https://example.com:8080/new/:path*' },
+    ])
+    expect(result.exit).toBe(0)
+    expect(result.output).not.toContain('Broken')
+  })
+
   it('substitutes params by exact name when one name prefixes another', async () => {
     const result = await checkLinks('[Old](/x/1/token)', [
       { source: '/x/:a/:abc', destination: '/api-reference/:abc' },

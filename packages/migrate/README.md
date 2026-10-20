@@ -317,6 +317,14 @@ purpose; a `url` that is not an `http(s)` address is ignored. The home page
 both redirect, and the redirect from `/` replaces the generated one to the first
 page. A redirect for `/` that the source site wrote stays, and a warning says so.
 
+An authored redirect (Mintlify and Fern `redirects`, Docusaurus
+`plugin-client-redirects`) starts at a path on the site and ends at another
+path on it or at an absolute `http(s)` address, which is kept exactly as written
+(`/docs/examples` to `https://github.com/dubinc/examples`). A destination that
+starts with `//`, uses another scheme such as `javascript:` or `data:`, or holds
+a backslash, whitespace, a control character, credentials or a bracketed IPv6
+host is left out for safety, and one warning lists the first ten sources skipped.
+
 A repository is limited to 5,000 documentation files and, separately, 5,000
 asset files. Past that, files are kept in navigation order with the default
 version first, then pages not listed in navigation, and one warning counts and

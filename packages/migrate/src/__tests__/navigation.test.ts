@@ -371,6 +371,81 @@ describe('Mintlify navigation projection', () => {
   })
 })
 
+describe('Mintlify redirects to an address outside the site', () => {
+  const projected = (redirects: Array<{ source: string; destination: string }>) => projectMintlifyNavigation({ navigation: { pages: ['introduction'] }, redirects })
+
+  // docs.json of dub.co: live Mintlify answers each of these with a 308 to the external address.
+  it('keeps a redirect to an absolute http(s) address exactly as written', () => {
+    const redirects = [
+      { source: '/docs/examples', destination: 'https://github.com/dubinc/examples' },
+      { source: '/docs/integrations/zapier', destination: 'https://dub.co/integrations/zapier' },
+      { source: '/plain', destination: 'http://example.com' },
+      { source: '/with-query', destination: 'https://example.com:8080/a?b=c#d' },
+    ]
+    const result = projected(redirects)
+    expect(result.docsConfig.redirects).toEqual(redirects)
+    expect(result.warnings).toEqual([])
+  })
+
+  it('translates a trailing wildcard into the path of an absolute destination only', () => {
+    const result = projected([
+      { source: '/old/*', destination: 'https://example.com/new/*' },
+      { source: '/host-only/*', destination: 'https://example.com' },
+    ])
+    expect(result.docsConfig.redirects).toEqual([
+      { source: '/old/:path*', destination: 'https://example.com/new/:path*' },
+      { source: '/host-only/:path*', destination: 'https://example.com' },
+    ])
+  })
+
+  it('drops an absolute destination Next.js cannot carry, and says so', () => {
+    const result = projected([
+      { source: '/colon', destination: 'https://example.com/a:b' },
+      { source: '/kept', destination: 'https://example.com/kept' },
+    ])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: 'https://example.com/kept' }])
+    expect(result.warnings.map((warning) => warning.message).join('\n')).toContain('/colon')
+  })
+
+  it.each([
+    '//evil.example', '/\\evil.example', '/%2f%2fevil.example', '/%5cevil.example',
+    'javascript:alert(1)', 'data:text/html,x', 'ftp://example.com/x', 'file:///etc/passwd',
+    'https://', 'https:///evil.example', 'http:evil.example', 'https:/evil.example',
+    'https://user:pw@evil.example/', 'https://[::1]/x', 'https://evil.example/\tx', 'https://evil.example/ x', 'https://evil.example\\x',
+  ])('still rejects the destination %j, with a warning that names its source', (destination) => {
+    const result = projected([{ source: '/from', destination }, { source: '/kept', destination: '/still-kept' }])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+    expect(result.warnings.filter((warning) => warning.message.includes('/from'))).toHaveLength(1)
+  })
+
+  it('names every rejected redirect in one warning, without the control characters in a source', () => {
+    const result = projected([
+      { source: '/a', destination: '//evil.example' },
+      { source: 'unrooted', destination: '/x' },
+      { source: '//protocol-relative', destination: '/x' },
+      { source: '/line\nbreak', destination: '/x' },
+      { source: '/kept', destination: '/still-kept' },
+    ])
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+    expect(result.warnings.map((warning) => warning.message)).toEqual([
+      'Skipped 4 redirects from /a, unrooted, //protocol-relative, /linebreak: a redirect must start at a path on this site (one beginning with a single /) and lead to a path on this site or to an http:// or https:// address. Check these redirects in the source docs and add any that are still needed to docs.json.',
+    ])
+  })
+
+  it('words the warning for one redirect in the singular, and lists at most ten', () => {
+    expect(projected([{ source: '/a', destination: '//evil.example' }]).warnings.map((warning) => warning.message)).toEqual([
+      'Skipped 1 redirect from /a: a redirect must start at a path on this site (one beginning with a single /) and lead to a path on this site or to an http:// or https:// address. Check it in the source docs and add it to docs.json if it is still needed.',
+    ])
+    const many = Array.from({ length: 12 }, (_, index) => ({ source: `/r${index}`, destination: '//evil.example' }))
+    const [warning] = projected(many).warnings
+    expect(warning.message).toContain('Skipped 12 redirects from /r0, /r1, /r2, /r3, /r4, /r5, /r6, /r7, /r8, /r9, ...:')
+  })
+
+  it('says nothing when every redirect is carried over', () => {
+    expect(projected([{ source: '/a', destination: '/b' }]).warnings).toEqual([])
+  })
+})
+
 describe('Fern redirect safety shares the Mintlify guard', () => {
   it('drops a backslash-prefixed or percent-encoded browser-cross-origin redirect destination', () => {
     const result = projectFernNavigation({
@@ -386,6 +461,42 @@ describe('Fern redirect safety shares the Mintlify guard', () => {
     })
 
     expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+  })
+
+  it('keeps a destination that is an absolute http(s) address, which Fern documents', () => {
+    const result = projectFernNavigation({
+      config: {
+        navigation: [{ page: 'Introduction', path: 'introduction.mdx' }],
+        redirects: [
+          { source: '/old-folder/path', destination: 'https://www.example.com/fern' },
+          { source: '/old/*', destination: 'https://www.example.com/new/*' },
+        ],
+      },
+      fernRoot: '/tmp/fern-root-unused',
+    })
+    expect(result.docsConfig.redirects).toEqual([
+      { source: '/old-folder/path', destination: 'https://www.example.com/fern' },
+      { source: '/old/:path*', destination: 'https://www.example.com/new/:path*' },
+    ])
+    expect(result.warnings.filter((warning) => warning.message.includes('/old'))).toEqual([])
+  })
+
+  it('names every rejected redirect in one warning', () => {
+    const result = projectFernNavigation({
+      config: {
+        navigation: [{ page: 'Introduction', path: 'introduction.mdx' }],
+        redirects: [
+          { source: '/legit', destination: '//evil.example' },
+          { source: '/legit-2', destination: 'javascript:alert(1)' },
+          { source: '/kept', destination: '/still-kept' },
+        ],
+      },
+      fernRoot: '/tmp/fern-root-unused',
+    })
+    expect(result.docsConfig.redirects).toEqual([{ source: '/kept', destination: '/still-kept' }])
+    expect(result.warnings.map((warning) => warning.message).filter((message) => message.includes('redirect'))).toEqual([
+      'Skipped 2 redirects from /legit, /legit-2: a redirect must start at a path on this site (one beginning with a single /) and lead to a path on this site or to an http:// or https:// address. Check these redirects in the source docs and add any that are still needed to docs.json.',
+    ])
   })
 })
 

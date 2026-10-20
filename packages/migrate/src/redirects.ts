@@ -17,6 +17,21 @@ import type { MigrationDocsConfig, MigrationPage, MigrationWarning } from './typ
 
 const LISTED = 10
 
+/**
+ * One warning for the redirects an adapter left out because they are not safe
+ * to emit (`isRedirectPathSafe`), naming their sources; null when there are none.
+ * A source can hold control characters, which are dropped so it cannot rewrite
+ * the line it is printed in.
+ */
+export function skippedRedirectsWarning(sources: ReadonlyArray<string>): MigrationWarning | null {
+  if (sources.length === 0) return null
+  const one = sources.length === 1
+  return {
+    code: 'unsupported-config',
+    message: `Skipped ${sources.length} redirect${one ? '' : 's'} from ${list(sources.map((source) => source.replace(/[\x00-\x1f\x7f]/g, '')))}: a redirect must start at a path on this site (one beginning with a single /) and lead to a path on this site or to an http:// or https:// address. Check ${one ? 'it' : 'these redirects'} in the source docs and add ${one ? 'it' : 'any that are still needed'} to docs.json${one ? ' if it is still needed' : ''}.`,
+  }
+}
+
 /** A fully literal site path, without a trailing slash and in the case it was written; null for patterns, queries and fragments. */
 function exactRoute(route: string): string | null {
   return route.startsWith('/') && !/[?:*#()[\]{}]/.test(route)

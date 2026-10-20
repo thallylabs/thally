@@ -1476,7 +1476,8 @@ describe('Mintlify repository migration', () => {
       'images/setup.png',
       'openapi/service.openapi.yml',
     ]))
-    expect(withoutDashboardWarning(bundle.warnings)).toEqual([])
+    // The unsafe redirect is the only thing the migration reports, and it names its source.
+    expect(withoutDashboardWarning(bundle.warnings).map((warning) => warning.message)).toEqual([expect.stringContaining('Skipped 1 redirect from /unsafe:')])
 
     // Specs must never land under public/, which the host serves verbatim.
     const renderedPaths = renderMigrationFiles(bundle).map((file) => file.path)
