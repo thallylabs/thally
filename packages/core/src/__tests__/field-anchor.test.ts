@@ -1,7 +1,7 @@
 /** `<ParamField>` and `<ResponseField>` anchors follow the ids Mintlify serves, checked against live pages. */
 
 import { describe, expect, it } from 'vitest'
-import { fieldAnchorBase, fieldAnchorName, numberFieldIds, uniqueFieldId } from '@thallylabs/core/slugify'
+import { accordionAnchorId, componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds, uniqueFieldId } from '@thallylabs/core/slugify'
 
 describe('fieldAnchorBase', () => {
   // Each name and id below was read from a live Mintlify page (dub.co, unkey.com, mintlify.com docs).
@@ -83,5 +83,32 @@ describe('fieldAnchorName', () => {
     expect(fieldAnchorName('ParamField', attributes({ body: '', name: null }))).toBeUndefined()
     expect(fieldAnchorName('ParamField', attributes({ path: null, body: 'id' }))).toBe('id')
     expect(fieldAnchorName('Other', attributes({ name: 'n' }))).toBeUndefined()
+  })
+})
+
+describe('componentIds', () => {
+  const attributes = (values: Record<string, string | null>) => (name: string) => values[name]
+
+  it('lists the id of an Accordion and of its body, from its id or else its title as the component spells it', () => {
+    expect(componentIds('Accordion', attributes({ title: 'Param name' }))).toEqual(['param-name', 'param-name-accordion-children'])
+    expect(componentIds('Accordion', attributes({ title: 'Run `init` first!', id: 'mine' }))).toEqual(['mine', 'mine-accordion-children'])
+    expect(accordionAnchorId({ title: "Don't use `Promise.all()`" })).toBe('don-t-use-promise-all')
+  })
+
+  it('lists none for an Accordion with no literal id and no title that spells one, where the component takes a React id', () => {
+    for (const values of [{ title: '日本語' }, { title: null, id: null }, {}]) expect(componentIds('Accordion', attributes(values))).toEqual([])
+  })
+
+  it('lists the id of an Update from its id, else its label, else its date', () => {
+    expect(componentIds('Update', attributes({ label: 'v1.0', date: '2024-01-01' }))).toEqual(['v1-0'])
+    expect(componentIds('Update', attributes({ label: '日本語', date: '2024-01-01' }))).toEqual(['2024-01-01'])
+    expect(componentIds('Update', attributes({ label: 'v1.0', id: 'mine' }))).toEqual(['mine'])
+    expect(componentIds('Update', attributes({ label: null, date: null }))).toEqual([])
+  })
+
+  it('lists none for any other component, whose id is a React one or none', () => {
+    for (const tag of ['Card', 'Tabs', 'Tab', 'Expandable', 'Step', 'Tooltip', 'ParamField', '']) {
+      expect(componentIds(tag, attributes({ title: 'Param name', id: 'mine', label: 'v1' }))).toEqual([])
+    }
   })
 })

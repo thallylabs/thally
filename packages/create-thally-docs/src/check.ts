@@ -17,7 +17,7 @@ import { API_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, operationDesc
 import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
-import { fieldAnchorBase, fieldAnchorName, numberFieldIds, plainInlineText, slugify } from '@thallylabs/core/slugify'
+import { componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds, plainInlineText, slugify } from '@thallylabs/core/slugify'
 import { validateIntegrations } from '@thallylabs/migrate'
 import { checkExternalLinks, type ExternalLinkCheckOptions, type ExternalLinkReference } from './external-links.js'
 
@@ -254,11 +254,12 @@ function extractStepHeadings(content: string): Array<{ line: number; base: strin
  * The `<ParamField>` and `<ResponseField>` elements of a page, read from the MDX
  * syntax tree like the steps above: the anchor base each one's name spells, in
  * document order (a field with no literal name has none, and one with an `id` of
- * its own keeps it), and every `id` an author wrote on any JSX element of the
- * page, which the renderer reserves before it numbers the fields.
+ * its own keeps it), and every id the page reserves before it numbers the fields:
+ * each `id` an author wrote on any JSX element, and each one a component makes
+ * from its text (an Accordion, an Update).
  */
-function extractFields(content: string): { bases: Array<string>; authored: Set<string> } {
-  const fields = { bases: [] as Array<string>, authored: new Set<string>() }
+function extractFields(content: string): { bases: Array<string>; reserved: Set<string> } {
+  const fields = { bases: [] as Array<string>, reserved: new Set<string>() }
   if (!content.includes('<ParamField') && !content.includes('<ResponseField')) return fields
   let tree: MdxNode
   try {
@@ -269,7 +270,8 @@ function extractFields(content: string): { bases: Array<string>; authored: Set<s
   const visit = (node: MdxNode): void => {
     if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
       const given = stringAttribute(node, 'id')?.trim()
-      if (given) fields.authored.add(given)
+      if (given) fields.reserved.add(given)
+      for (const id of componentIds(node.name ?? '', (attribute) => stringAttribute(node, attribute))) fields.reserved.add(id)
       if (node.name === 'ParamField' || node.name === 'ResponseField') {
         const name = fieldAnchorName(node.name, (attribute) => stringAttribute(node, attribute))
         const base = name === undefined ? undefined : fieldAnchorBase(name)
@@ -327,8 +329,8 @@ function extractHeadingAnchors(content: string): Set<string> {
     used.add(id)
     anchors.add(id)
   }
-  // Fields are numbered after every heading, and skip every id an author wrote on the page.
-  for (const id of numberFieldIds(fields.bases, used, fields.authored)) anchors.add(id)
+  // Fields are numbered after every heading, and skip every id an author wrote on the page or a component makes.
+  for (const id of numberFieldIds(fields.bases, used, fields.reserved)) anchors.add(id)
   return anchors
 }
 

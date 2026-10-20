@@ -48,7 +48,7 @@ import langYaml from 'shiki/langs/yaml.mjs'
 import { visit } from 'unist-util-visit'
 import { getDocsJsonConfig } from '../lib/docs-json-config'
 import { plainInlineText } from '../lib/inline-code'
-import { fieldAnchorBase, fieldAnchorName, numberFieldIds } from '../lib/field-anchor'
+import { componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds } from '../lib/field-anchor'
 import { slugify } from '../lib/utils'
 import type { DocsJsonConfig } from '../data/docs'
 import { smartenTree } from './smart-quotes'
@@ -817,8 +817,9 @@ interface HeadingTarget {
  * it (`param-expires-in-days`). Those are numbered once every heading has its id,
  * so a field never takes a heading's id and never shifts one. A field with an
  * `id` of its own keeps it. Every `id` an author wrote anywhere on the page (a
- * field, a Step whose title is plain text, a Card, an HTML element) is skipped,
- * so a generated field id never repeats one.
+ * field, a Step whose title is plain text, a Card, an HTML element) and every one
+ * a component makes from its text (an Accordion, an Update: `componentIds`) is
+ * skipped, so a generated field id never repeats one.
  */
 function rehypeUniqueHeadingIds() {
   return (tree: Root) => {
@@ -827,6 +828,7 @@ function rehypeUniqueHeadingIds() {
     const targets: Array<HeadingTarget> = []
     const fields: Array<{ base: string; assign: (id: string) => void }> = []
     const authoredIds = new Set<string>()
+    const componentGeneratedIds = new Set<string>()
     const text = (node: Element): string => node.children.map((child) =>
       child.type === 'text' ? child.value
         : child.type === 'element' ? text(child)
@@ -849,6 +851,7 @@ function rehypeUniqueHeadingIds() {
         const jsx = node as JsxNode
         const authored = jsxStringAttribute(jsx, 'id')?.trim()
         if (authored) authoredIds.add(authored)
+        for (const id of componentIds(jsx.name ?? '', (attribute) => jsxStringAttribute(jsx, attribute))) componentGeneratedIds.add(id)
         // `<Steps>` hands its size to every step below it, set or not (a React context).
         if (jsx.name === 'Steps') childSize = jsxStringAttribute(jsx, 'titleSize') ?? undefined
         if (jsx.name === 'Step') {
@@ -889,8 +892,8 @@ function rehypeUniqueHeadingIds() {
       usedIds.add(id)
       target.assign(id)
     }
-    // A field takes the id Mintlify gives it, numbered after the headings and skipping every id an author wrote.
-    const ids = numberFieldIds(fields.map((field) => field.base), usedIds, authoredIds)
+    // A field takes the id Mintlify gives it, numbered after the headings and skipping every id an author wrote or a component makes.
+    const ids = numberFieldIds(fields.map((field) => field.base), usedIds, [...authoredIds, ...componentGeneratedIds])
     fields.forEach((field, index) => field.assign(ids[index]))
   }
 }

@@ -126,3 +126,42 @@ export function updateAnchorId(props: { id?: string; label?: string; date?: stri
   const fromDate = props.date ? normalizeUpdateId(props.date) : ''
   return fromDate || undefined
 }
+
+/**
+ * Id of an `<Accordion>`'s `<details>`: the `id` its author gave, else its
+ * title in the same ASCII kebab case. Undefined with neither (a title with no
+ * ASCII letters, say), where the component falls back to a React id.
+ */
+export function accordionAnchorId(props: { id?: string; title?: string }): string | undefined {
+  return props.id || normalizeUpdateId(plainInlineText(props.title ?? '')) || undefined
+}
+
+/** Id of the body of the `<Accordion>` whose own id is `accordionId`. */
+export function accordionChildrenId(accordionId: string): string {
+  return `${accordionId}-accordion-children`
+}
+
+/**
+ * The ids a component gives its own elements from its literal attributes, which a
+ * `<ParamField>` or `<ResponseField>` anchor must not repeat: an `<Accordion>`'s
+ * (`accordionAnchorId`) and its body's, and an `<Update>`'s (`updateAnchorId`).
+ * `attribute` reads one literal attribute as in `fieldAnchorName`; a value MDX
+ * computes is unknown here, so the id it would make is not listed.
+ * No other built-in component derives an id from text. The rest set none or take
+ * a React `useId()` (`:r1:`, `_R_0_`), which never reads like a field's `param-…`.
+ */
+export function componentIds(tag: string, attribute: (name: string) => string | null | undefined): Array<string> {
+  const literal = (name: string): string | undefined => {
+    const value = attribute(name)
+    return typeof value === 'string' ? value : undefined
+  }
+  if (tag === 'Accordion') {
+    const id = accordionAnchorId({ id: literal('id'), title: literal('title') })
+    return id ? [id, accordionChildrenId(id)] : []
+  }
+  if (tag === 'Update') {
+    const id = updateAnchorId({ id: literal('id'), label: literal('label'), date: literal('date') })
+    return id ? [id] : []
+  }
+  return []
+}

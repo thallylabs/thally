@@ -1,12 +1,16 @@
 /**
- * Anchors of `<ParamField>` and `<ResponseField>`, as Mintlify serves them.
+ * Anchors of `<ParamField>` and `<ResponseField>`, as Mintlify serves them, and
+ * the ids other components give themselves, which those anchors must not repeat.
  *
  * Kept here, dependency-free, because the MDX heading pass runs in the runtime
  * source generator, which cannot rely on `@thallylabs/core` being built. These
- * MUST stay identical to `fieldAnchorBase`, `fieldAnchorName`, `uniqueFieldId`
- * and `numberFieldIds` in `@thallylabs/core` (packages/core/src/slugify.ts):
- * `thally check` uses that copy, and a mismatch breaks links to a field.
+ * MUST stay identical to `fieldAnchorBase`, `fieldAnchorName`, `uniqueFieldId`,
+ * `numberFieldIds`, `accordionAnchorId`, `accordionChildrenId` and `componentIds`
+ * in `@thallylabs/core` (packages/core/src/slugify.ts): `thally check` uses that
+ * copy, and a mismatch breaks links to a field.
  */
+
+import { plainInlineText } from './inline-code'
 
 /**
  * Anchor base of a `<ParamField>` or `<ResponseField>`, as Mintlify serves it:
@@ -70,4 +74,53 @@ export function uniqueFieldId(base: string, used: Set<string>): string {
 export function numberFieldIds(bases: Iterable<string>, used: Set<string>, authored: Iterable<string>): Array<string> {
   for (const id of authored) used.add(id)
   return [...bases].map((base) => uniqueFieldId(base, used))
+}
+
+/** ASCII-only kebab case, how an `<Accordion>` spells an id from its title and an `<Update>` from its label. */
+function asciiAnchor(value: string): string {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
+/**
+ * Id of an `<Accordion>`'s `<details>`: the `id` its author gave, else its
+ * title in ASCII kebab case. Undefined with neither (a title with no ASCII
+ * letters, say), where the component falls back to a React id.
+ */
+export function accordionAnchorId(props: { id?: string; title?: string }): string | undefined {
+  return props.id || asciiAnchor(plainInlineText(props.title ?? '')) || undefined
+}
+
+/** Id of the body of the `<Accordion>` whose own id is `accordionId`. */
+export function accordionChildrenId(accordionId: string): string {
+  return `${accordionId}-accordion-children`
+}
+
+/** Id of an `<Update>` entry, as `updateAnchorId` in `@thallylabs/core` spells it: an explicit `id`, else its label, else its date. */
+function updateAnchorId(props: { id?: string; label?: string; date?: string }): string | undefined {
+  return props.id || (props.label ? asciiAnchor(props.label) : '') || (props.date ? asciiAnchor(props.date) : '') || undefined
+}
+
+/**
+ * The ids a component gives its own elements from its literal attributes, which a
+ * `<ParamField>` or `<ResponseField>` anchor must not repeat: an `<Accordion>`'s
+ * and its body's, and an `<Update>`'s. `attribute` reads one literal attribute as
+ * in `fieldAnchorName`; a value MDX computes is unknown here, so the id it would
+ * make is not listed. No other built-in component derives an id from text: the
+ * rest set none or take a React `useId()` (`:r1:`, `_R_0_`), which never reads
+ * like a field's `param-…`.
+ */
+export function componentIds(tag: string, attribute: (name: string) => string | null | undefined): Array<string> {
+  const literal = (name: string): string | undefined => {
+    const value = attribute(name)
+    return typeof value === 'string' ? value : undefined
+  }
+  if (tag === 'Accordion') {
+    const id = accordionAnchorId({ id: literal('id'), title: literal('title') })
+    return id ? [id, accordionChildrenId(id)] : []
+  }
+  if (tag === 'Update') {
+    const id = updateAnchorId({ id: literal('id'), label: literal('label'), date: literal('date') })
+    return id ? [id] : []
+  }
+  return []
 }

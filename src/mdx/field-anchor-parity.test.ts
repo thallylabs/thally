@@ -4,12 +4,19 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { evaluate } from '@mdx-js/mdx'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import * as jsxRuntime from 'react/jsx-runtime'
 import { describe, expect, it, vi } from 'vitest'
 
-import { fieldAnchorBase as coreBase, fieldAnchorName as coreName, numberFieldIds as coreNumber, uniqueFieldId as coreUnique } from '../../packages/core/src/slugify'
+import { builtinMdxComponents } from '@/components/mdx/builtin-components'
+import { PageSlotsProvider } from '@/components/mdx/page-slots'
+import { componentIds as coreComponentIds, fieldAnchorBase as coreBase, fieldAnchorName as coreName, numberFieldIds as coreNumber, uniqueFieldId as coreUnique } from '../../packages/core/src/slugify'
 import { runCheck } from '../../packages/create-thally-docs/src/check'
-import { fieldAnchorBase, fieldAnchorName, numberFieldIds, uniqueFieldId } from '../lib/field-anchor'
+import { componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds, uniqueFieldId } from '../lib/field-anchor'
 import { rehypePlugins } from './rehype'
+import { remarkPlugins } from './remark'
 
 async function brokenAnchorOutput(body: string, link: string): Promise<string> {
   const projectDir = mkdtempSync(join(tmpdir(), 'thally-check-field-ids-'))
@@ -36,6 +43,13 @@ async function renderedIds(source: string): Promise<Array<string>> {
   return [...compiled.matchAll(/\bid: "([^"]+)"/g)].map((match) => match[1])
 }
 
+/** Every `id` in the HTML the page renders with the built-in components, in document order (a React-generated one reads `_R_0_`). */
+async function renderedHtmlIds(source: string): Promise<Array<string>> {
+  const { default: Content } = await evaluate(source, { ...jsxRuntime, remarkPlugins, rehypePlugins } as never)
+  const html = renderToStaticMarkup(createElement(PageSlotsProvider, null, createElement(Content, { components: builtinMdxComponents })))
+  return [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1])
+}
+
 describe('the runtime helpers read a field as @thallylabs/core does', () => {
   it.each([
     'expiresInDays', 'data-attribution-model', 'GitHub', '--root-key', 'Workspace name', 'API ID', 'ratelimits[].name',
@@ -55,6 +69,21 @@ describe('the runtime helpers read a field as @thallylabs/core does', () => {
     const bases = ['param-a', 'param-a', 'param-b', 'param-a']
     const authored = ['param-a-1', 'param-b']
     expect(numberFieldIds(bases, new Set(['param-a']), authored)).toEqual(coreNumber(bases, new Set(['param-a']), authored))
+  })
+
+  it.each([
+    ['Accordion', { title: 'Param name' }],
+    ['Accordion', { title: 'Run `init` first', id: 'mine' }],
+    ['Accordion', { title: '日本語' }],
+    ['Accordion', { title: null, id: null }],
+    ['Accordion', {}],
+    ['Update', { label: 'v1.0', date: '2024-01-01' }],
+    ['Update', { label: '日本語', date: '2024-01-01' }],
+    ['Update', { label: 'Param name', id: 'mine' }],
+    ['Update', { label: null, date: null }],
+    ['Card', { title: 'Param name', id: 'mine' }],
+  ])('lists the ids %s %j renders the same way', (tag, values: Record<string, string | null>) => {
+    expect(componentIds(tag, (name) => values[name])).toEqual(coreComponentIds(tag, (name) => values[name]))
   })
 
   it('reads the same attribute of each tag', () => {
@@ -150,6 +179,44 @@ describe('field ids on a rendered page', () => {
   })
 })
 
+describe('field ids next to a component that gives itself an id', () => {
+  const field = '<ParamField body="name" type="string">The name.</ParamField>'
+  const paramIds = (ids: Array<string>) => ids.filter((id) => id.startsWith('param-'))
+
+  it('takes the id an Accordion made from its title, and the one of its body', async () => {
+    const accordion = '<Accordion title="Param name">\n\nText.\n\n</Accordion>'
+    const named = '<ParamField body="name accordion children">Field text.</ParamField>'
+    expect(await renderedHtmlIds(`${accordion}\n\n${field}\n\n${named}`)).toEqual([
+      'param-name', 'param-name-accordion-children', 'param-name-1', 'param-name-accordion-children-1',
+    ])
+    expect(await renderedHtmlIds(`${field}\n\n${accordion}`)).toEqual(['param-name-1', 'param-name', 'param-name-accordion-children'])
+  })
+
+  it('takes the body id of an Accordion that has an id of its own, whatever its title says', async () => {
+    const accordion = '<Accordion title="Other" id="param-name">\n\nText.\n\n</Accordion>'
+    const named = '<ParamField body="name accordion children">Field text.</ParamField>'
+    expect(await renderedHtmlIds(`${accordion}\n\n${field}\n\n${named}`)).toEqual([
+      'param-name', 'param-name-accordion-children', 'param-name-1', 'param-name-accordion-children-1',
+    ])
+  })
+
+  it('takes the id an Update made from its label', async () => {
+    const update = '<Update label="Param name" date="2024-01-01">Text.</Update>'
+    expect(await renderedHtmlIds(`${update}\n\n${field}`)).toEqual(['param-name', 'param-name-1'])
+  })
+
+  it('reserves no id for a component whose id is a React one or has no literal title', async () => {
+    const page = '<Accordion title="日本語">\n\nText.\n\n</Accordion>\n\n<Tabs><Tab title="Param name">x</Tab></Tabs>\n\n<Expandable title="Param name">x</Expandable>'
+    expect(paramIds(await renderedHtmlIds(`${page}\n\n${field}`))).toEqual(['param-name'])
+  })
+
+  it('leaves every heading id where it was', async () => {
+    const accordion = '<Accordion title="Param name">\n\nText.\n\n</Accordion>'
+    const source = `## Param name\n\n${accordion}\n\n## Param name\n\n${field}`
+    expect(await renderedHtmlIds(source)).toEqual(['param-name', 'param-name', 'param-name-accordion-children', 'param-name-2', 'param-name-1'])
+  })
+})
+
 describe('thally check resolves the ids the renderer gives fields', () => {
   const source = [
     '## Param name',
@@ -191,6 +258,18 @@ describe('thally check resolves the ids the renderer gives fields', () => {
     expect(ids).toEqual(['param-name-2', 'param-name', 'param-name-1'])
     for (const id of ids) expect(await brokenAnchorOutput(page, id), id).not.toContain('Broken anchor')
     expect(await brokenAnchorOutput(page, 'param-name-3')).toContain('Broken anchor')
+  })
+
+  it('skips the ids an Accordion and an Update make, which the renderer gives no field', async () => {
+    const accordion = '<Accordion title="Param name">\n\nText.\n\n</Accordion>'
+    const update = '<Update label="Param other" date="2024-01-01">Text.</Update>'
+    const named = '<ParamField body="name accordion children">Field text.</ParamField>'
+    const other = '<ParamField body="other">Field text.</ParamField>'
+    const page = `${accordion}\n\n${update}\n\n<ParamField body="name">Field text.</ParamField>\n\n${named}\n\n${other}`
+    const ids = (await renderedHtmlIds(page)).filter((id) => id.startsWith('param-'))
+    expect(ids).toEqual(['param-name', 'param-name-accordion-children', 'param-other', 'param-name-1', 'param-name-accordion-children-1', 'param-other-1'])
+    for (const id of ['param-name-1', 'param-name-accordion-children-1', 'param-other-1']) expect(await brokenAnchorOutput(page, id), id).not.toContain('Broken anchor')
+    expect(await brokenAnchorOutput(page, 'param-name-2')).toContain('Broken anchor')
   })
 
   it('does not reserve an id that only appears in prose', async () => {
