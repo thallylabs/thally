@@ -12,9 +12,9 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { builtinMdxComponents } from '@/components/mdx/builtin-components'
 import { PageSlotsProvider } from '@/components/mdx/page-slots'
-import { componentIds as coreComponentIds, fieldAnchorBase as coreBase, fieldAnchorName as coreName, numberFieldIds as coreNumber, numberHeadingIds as coreNumberHeadings, uniqueFieldId as coreUnique } from '../../packages/core/src/slugify'
+import { componentIds as coreComponentIds, constantString as coreConstantString, fieldAnchorBase as coreBase, fieldAnchorName as coreName, numberFieldIds as coreNumber, numberHeadingIds as coreNumberHeadings, uniqueFieldId as coreUnique } from '../../packages/core/src/slugify'
 import { extractHeadingAnchors, runCheck } from '../../packages/create-thally-docs/src/check'
-import { componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, uniqueFieldId } from '../lib/field-anchor'
+import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, uniqueFieldId } from '../lib/field-anchor'
 import { rehypePlugins } from './rehype'
 import { remarkPlugins } from './remark'
 
@@ -92,6 +92,18 @@ describe('the runtime helpers read a field as @thallylabs/core does', () => {
     ['Card', { title: 'Param name', id: 'mine' }],
   ])('lists the ids %s %j renders the same way', (tag, values: Record<string, string | null>) => {
     expect(componentIds(tag, (name) => values[name])).toEqual(coreComponentIds(tag, (name) => values[name]))
+  })
+
+  it.each([
+    ['a string literal', { data: { estree: { body: [{ type: 'ExpressionStatement', expression: { type: 'Literal', value: 'Param name' } }] } } }],
+    ['a template literal with no expression', { data: { estree: { body: [{ type: 'ExpressionStatement', expression: { type: 'TemplateLiteral', expressions: [], quasis: [{ value: { cooked: 'Param name' } }] } }] } } }],
+    ['a template literal with an expression', { data: { estree: { body: [{ type: 'ExpressionStatement', expression: { type: 'TemplateLiteral', expressions: [{ type: 'Identifier' }], quasis: [{ value: { cooked: 'a' } }, { value: { cooked: '' } }] } }] } } }],
+    ['a number', { data: { estree: { body: [{ type: 'ExpressionStatement', expression: { type: 'Literal', value: 1 } }] } } }],
+    ['a comment, which has no statement', { data: { estree: { body: [] } } }],
+    ['a node with no syntax tree', {}],
+    ['nothing', undefined],
+  ])('reads %s as a constant string the same way', (_name, node) => {
+    expect(constantString(node)).toBe(coreConstantString(node))
   })
 
   it('reads the same attribute of each tag', () => {
@@ -184,6 +196,32 @@ describe('field ids on a rendered page', () => {
       '<ResponseField name="">Empty.</ResponseField>',
     ].join('\n\n')
     expect(await renderedIds(source)).toEqual([])
+  })
+})
+
+describe('field ids next to a heading that is made of components', () => {
+  const field = '<ParamField body="name" type="string">The name.</ParamField>'
+
+  // The heading component slugs a heading the pass gave no id from its rendered text, so the pass has to reserve that id.
+  it('gives a heading with only a component its id, and the field the next one', async () => {
+    for (const heading of ['## <Badge>Param name</Badge>', '## <Badge><Badge>Param</Badge> name</Badge>', '## ?? <Badge>Param name</Badge>']) {
+      expect(await renderedHtmlIds(`${heading}\n\n${field}`), heading).toEqual(['param-name', 'param-name-1'])
+      expect(await renderedHtmlIds(`${field}\n\n${heading}`), heading).toEqual(['param-name-1', 'param-name'])
+      expect(await renderedIds(`${heading}\n\n${field}`), heading).toEqual(['param-name', 'param-name-1'])
+    }
+  })
+
+  it('numbers repeated headings made of components, as it does the others', async () => {
+    const source = '## <Badge>Same</Badge>\n\n## <Badge>Same</Badge>\n\n## Same\n\n<ParamField body="same" />'
+    expect(await renderedHtmlIds(source)).toEqual(['same', 'same-2', 'same-3', 'param-same'])
+  })
+
+  it('reads a string in braces as the text it renders', async () => {
+    expect(await renderedHtmlIds(`## {"Param name"}\n\n## <Badge>{\`Param name\`}</Badge>\n\n${field}`)).toEqual(['param-name', 'param-name-2', 'param-name-1'])
+  })
+
+  it('keeps the id of a heading that has text of its own, and of one with nothing to spell', async () => {
+    expect(await renderedHtmlIds('## Initialize instance <Badge>Enterprise</Badge>\n\n## <Badge>???</Badge>\n\n## ???')).toEqual(['initialize-instance'])
   })
 })
 
@@ -317,6 +355,11 @@ describe('thally check and the renderer give a page the same ids', () => {
     ['an Accordion, then a field', '<Accordion title="Param name">\n\nText.\n\n</Accordion>\n\n<ParamField body="name" />'],
     ['an Accordion with an id of its own', '<Accordion title="Other" id="mine">\n\nText.\n\n</Accordion>'],
     ['an Update, then a field', '<Update label="Param name" date="2024-01-01">Text.</Update>\n\n<ParamField body="name" />'],
+    ['a heading with only a component, then a field', '## <Badge>Param name</Badge>\n\n<ParamField body="name" />'],
+    ['a component with markup in it, then a field', '## <Badge>Param *name*</Badge>\n\n<ParamField body="name" />'],
+    ['punctuation and a component, then a field', '## ?? <Badge>Param name</Badge>\n\n<ParamField body="name" />'],
+    ['repeated headings made of components', '## <Badge>Same</Badge>\n\n## <Badge>Same</Badge>\n\n## Same'],
+    ['strings in braces in a heading', '## {"Param name"}\n\n## <Badge>{`Param name`}</Badge>\n\n<ParamField body="name" />'],
   ]
 
   it.each(pages)('agrees on %s', async (_name, source) => {

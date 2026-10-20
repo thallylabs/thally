@@ -64,6 +64,34 @@ export function fieldAnchorBase(name: string): string | undefined {
   return words ? `param-${words}` : undefined
 }
 
+/** The part of an MDX `{…}` node that `constantString` reads: MDX keeps the expression's syntax tree in `data.estree`. */
+interface ExpressionNode {
+  data?: {
+    estree?: {
+      body?: Array<{
+        type?: string
+        expression?: { type?: string; value?: unknown; expressions?: Array<unknown>; quasis?: Array<{ value?: { cooked?: string | null } }> }
+      }>
+    }
+  }
+}
+
+/**
+ * The string a `{…}` node always evaluates to, when its whole content is a string
+ * literal or a template literal with no `${}`: `title={"Param name"}` hands a
+ * component the same string as `title="Param name"`, and `{"Param name"}` in a
+ * heading renders the same text as `Param name`. Null for any other expression,
+ * a comment, a number, or a node that carries no syntax tree.
+ */
+export function constantString(node: unknown): string | null {
+  const body = (node as ExpressionNode | null | undefined)?.data?.estree?.body
+  if (body?.length !== 1 || body[0].type !== 'ExpressionStatement') return null
+  const expression = body[0].expression
+  if (expression?.type === 'Literal' && typeof expression.value === 'string') return expression.value
+  if (expression?.type === 'TemplateLiteral' && expression.expressions?.length === 0) return expression.quasis?.[0]?.value?.cooked ?? null
+  return null
+}
+
 /** Attributes that name a field, in the order the component shows them. */
 const FIELD_NAME_ATTRIBUTES = new Map([
   ['ParamField', ['path', 'query', 'header', 'body', 'name']],

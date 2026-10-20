@@ -48,7 +48,7 @@ import langYaml from 'shiki/langs/yaml.mjs'
 import { visit } from 'unist-util-visit'
 import { getDocsJsonConfig } from '../lib/docs-json-config'
 import { plainInlineText } from '../lib/inline-code'
-import { componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds } from '../lib/field-anchor'
+import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds } from '../lib/field-anchor'
 import { slugify } from '../lib/utils'
 import type { DocsJsonConfig } from '../data/docs'
 import { smartenTree } from './smart-quotes'
@@ -796,6 +796,13 @@ function setJsxId(jsx: JsxNode, id: string): void {
   else attributes.push({ type: 'mdxJsxAttribute', name: 'id', value: id })
 }
 
+/** A node as `renderedText` reads it: a hast element, text, or a JSX element or `{…}` expression MDX leaves in the tree. */
+interface TextNode {
+  type: string
+  value?: string
+  children?: Array<TextNode>
+}
+
 interface HeadingTarget {
   text: string
   /** An id the author fixed (`id` attribute or `{/* #id *\/}` comment). */
@@ -812,6 +819,10 @@ interface HeadingTarget {
  * A `<Step>` whose title renders as a heading (`titleSize` h2, h3 or h4, on the
  * step or its `<Steps>`) is numbered with the rest and given the `id` its title
  * is rendered with, so the table of contents scrolls to it.
+ *
+ * A heading made only of components (`## <Badge>Name</Badge>`) has no text of
+ * its own here, so it is numbered under the text its children render as, the id
+ * the heading component would otherwise slug for it (`renderedText`).
  *
  * A `<ParamField>` or `<ResponseField>` is given the anchor Mintlify serves for
  * it (`param-expires-in-days`). Those are numbered once every heading has its id,
@@ -831,6 +842,11 @@ function rehypeUniqueHeadingIds() {
       child.type === 'text' ? child.value
         : child.type === 'element' ? text(child)
           : '').join('')
+    // What the heading component renders as text, which it slugs for a heading this pass gave no id: it adds the children of a component and a string in braces.
+    const renderedText = (node: TextNode): string => (node.children ?? []).map((child) =>
+      child.type === 'text' ? child.value ?? ''
+        : child.type === 'mdxTextExpression' ? constantString(child) ?? ''
+          : renderedText(child)).join('')
     const collect = (node: Element | JsxNode | Root, stepSize: string | undefined): void => {
       let childSize = stepSize
       if (node.type === 'element') {
@@ -839,8 +855,10 @@ function rehypeUniqueHeadingIds() {
         if (/^h[2-6]$/.test(element.tagName)) {
           const given = typeof element.properties?.id === 'string' && element.properties.id
             ? element.properties.id : takeHeadingIdMarker(element)
+          // A heading made only of components has no id of its own here, but the component slugs the text it renders: number that id with the rest.
+          const plain = text(element)
           targets.push({
-            text: text(element),
+            text: (slugify(plain) || given) ? plain : renderedText(element as unknown as TextNode),
             given: given || undefined,
             assign: (id) => { element.properties = { ...element.properties, id } },
           })

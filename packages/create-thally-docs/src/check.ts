@@ -17,7 +17,7 @@ import { API_GROUPS_MAX_DEPTH, groupKeyState, listedOperationKeys, operationDesc
 import { manualApiProblems } from './manual-api-check.js'
 import { findPublicSpecs, shadowNote, specHasHiddenOperations } from './public-specs.js'
 import { projectNavigationContract } from '@thallylabs/core/navigation'
-import { componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, plainInlineText, slugify } from '@thallylabs/core/slugify'
+import { componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, plainInlineText, slugify } from '@thallylabs/core/slugify'
 import { validateIntegrations } from '@thallylabs/migrate'
 import { checkExternalLinks, type ExternalLinkCheckOptions, type ExternalLinkReference } from './external-links.js'
 
@@ -191,13 +191,17 @@ const HEADING_ID_MARKER = /^\s*\/\*\s*#(\S+?)\s*\*\/\s*$/
 /**
  * What the renderer's heading pass reads as a heading's text: plain text, inline
  * code and the text of inline markup, and nothing from a JSX element or a `{…}`
- * expression inside it (`## Deploy <Badge>New</Badge>` is `deploy`).
+ * expression inside it (`## Deploy <Badge>New</Badge>` is `deploy`). With
+ * `components`, the text the heading component renders instead, which it slugs
+ * when the pass gave the heading no id: the children of a component and a string
+ * in braces count too.
  */
-function headingText(node: MdxNode): string {
+function headingText(node: MdxNode, components: boolean): string {
   if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
   if (node.type === 'break') return '\n'
-  if (node.type === 'mdxJsxTextElement' || node.type === 'mdxTextExpression') return ''
-  return (node.children ?? []).map(headingText).join('')
+  if (node.type === 'mdxTextExpression') return components ? constantString(node) ?? '' : ''
+  if (node.type === 'mdxJsxTextElement' && !components) return ''
+  return (node.children ?? []).map((child) => headingText(child, components)).join('')
 }
 
 /** Step title sizes that render a heading; `p` is plain text. */
@@ -238,8 +242,10 @@ function readPageIds(content: string): PageIds {
       const children = node.children ?? []
       const marker = children.findIndex((child) => child.type === 'mdxTextExpression' && HEADING_ID_MARKER.test(child.value ?? ''))
       const given = marker < 0 ? undefined : HEADING_ID_MARKER.exec(children[marker].value ?? '')![1]
-      const text = headingText(marker < 0 ? node : { ...node, children: children.filter((_, index) => index !== marker) })
-      page.headings.push({ base: given ?? slugify(text), explicit: given !== undefined })
+      const heading = marker < 0 ? node : { ...node, children: children.filter((_, index) => index !== marker) }
+      // A heading made only of components has no id of its own in the renderer's pass, but the heading component slugs the text it renders: that id is numbered with the rest.
+      const base = given ?? (slugify(headingText(heading, false)) || slugify(headingText(heading, true)))
+      page.headings.push({ base, explicit: given !== undefined })
     } else if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
       const authored = stringAttribute(node, 'id')?.trim()
       if (authored) page.reserved.add(authored)

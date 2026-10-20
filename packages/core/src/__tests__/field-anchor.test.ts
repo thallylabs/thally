@@ -1,7 +1,7 @@
 /** `<ParamField>` and `<ResponseField>` anchors follow the ids Mintlify serves, checked against live pages. */
 
 import { describe, expect, it } from 'vitest'
-import { accordionAnchorId, componentIds, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, uniqueFieldId } from '@thallylabs/core/slugify'
+import { accordionAnchorId, componentIds, constantString, fieldAnchorBase, fieldAnchorName, numberFieldIds, numberHeadingIds, uniqueFieldId } from '@thallylabs/core/slugify'
 
 describe('fieldAnchorBase', () => {
   // Each name and id below was read from a live Mintlify page (dub.co, unkey.com, mintlify.com docs).
@@ -125,5 +125,23 @@ describe('numberHeadingIds', () => {
 
   it('gives nothing to a page with no heading', () => {
     expect(numberHeadingIds([])).toEqual({ ids: [], used: new Set() })
+  })
+})
+
+describe('constantString', () => {
+  const expression = (node: object) => ({ data: { estree: { body: [{ type: 'ExpressionStatement', expression: node }] } } })
+
+  it('reads a string literal and a template literal with no ${}', () => {
+    expect(constantString(expression({ type: 'Literal', value: 'Param name' }))).toBe('Param name')
+    expect(constantString(expression({ type: 'TemplateLiteral', expressions: [], quasis: [{ value: { cooked: 'Param name' } }] }))).toBe('Param name')
+  })
+
+  it('reads nothing else', () => {
+    expect(constantString(expression({ type: 'TemplateLiteral', expressions: [{ type: 'Identifier' }], quasis: [{ value: { cooked: 'a' } }, { value: { cooked: '' } }] }))).toBeNull()
+    expect(constantString(expression({ type: 'Literal', value: 1 }))).toBeNull()
+    expect(constantString(expression({ type: 'BinaryExpression' }))).toBeNull()
+    expect(constantString({ data: { estree: { body: [] } } })).toBeNull()
+    expect(constantString({})).toBeNull()
+    expect(constantString(undefined)).toBeNull()
   })
 })
